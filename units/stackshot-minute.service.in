@@ -1,6 +1,7 @@
 # stackshot-minute.service — `stackshot minute`: the minute set's runner as a process of its own, in place of the server's runner thread.
 # Install: ./install.sh units, and only with [runner] process = "unit" on a box that is not a read-only standby (at "inline", the default, the server runs the
-# runner itself, this file is not installed, and one installed by an earlier run is stopped, disabled and removed). Back to inline: set it, ./install.sh units, restart the server.
+# runner itself, this file is not installed, and one installed by an earlier run is stopped, disabled and removed; the same on a box that has become a standby, where a running
+# runner could not notice it). Back to inline: set it, ./install.sh units, restart the server. CPUWeight below is ignored where the cpu controller is not delegated to the user manager.
 [Unit]
 Description=stackshot — the minute set's runner (stackshot minute)
 # ordered after the server and never tied to it (no Requires=, Wants= or PartOf=): a restart of the server does not stop this process, and it does not start the server.

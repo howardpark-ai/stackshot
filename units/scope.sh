@@ -21,6 +21,20 @@ user_manager_ok() {   # 0 when systemctl --user reaches the user manager; otherw
 }
 UNIT_DIR="$HOME/.config/systemd/user"
 
+standby() {   # 0 on a read-only standby, which is STACKSHOT_READ_ONLY exactly 1: in this script's environment, or in the one the user manager gives stackshot.service (the drop-in docs/read-only-standby.md names).
+    # That is Environment= (a token of `systemctl show -p Environment`) and EnvironmentFile= (each file `-p EnvironmentFiles` lists as `<path> (ignore_errors=no)`, one per line; its last STACKSHOT_READ_ONLY= line decides,
+    # since systemd lets a file override Environment=). A file that cannot be read is skipped. install.sh and deploy.sh ask it only at [runner] process = "unit", where the minute unit is the question.
+    [ "${STACKSHOT_READ_ONLY:-}" = 1 ] && return 0
+    local v="" line f got
+    case " $(systemctl --user show stackshot.service -p Environment --value 2>/dev/null || true) " in *" STACKSHOT_READ_ONLY=1 "*) v=1 ;; esac
+    while IFS= read -r line; do
+        f="${line% (ignore_errors=*}"; [ -n "$f" ] && [ -r "$f" ] || continue
+        got="$(grep -E '^[[:space:]]*STACKSHOT_READ_ONLY=' "$f" 2>/dev/null | tail -n 1 || true)"; [ -n "$got" ] || continue
+        v="$(printf '%s' "${got#*STACKSHOT_READ_ONLY=}" | sed -E "s/^[[:space:]]*[\"']?//; s/[\"']?[[:space:]]*\$//")"
+    done < <(systemctl --user show stackshot.service -p EnvironmentFiles --value 2>/dev/null || true)
+    [ "$v" = 1 ]
+}
+
 server_ctl() {   # server_ctl <systemctl args…>: systemctl for the server's units — the user manager's
     systemctl --user "$@"
 }

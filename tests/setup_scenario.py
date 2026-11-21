@@ -284,6 +284,53 @@ r = ss("doctor", "--no-systemd")
 check("doctor says the origin remote is set", re.search(r"ok\s+data repository \S+: origin remote set", r.stdout) is not None, r.stdout[-800:])
 git("remote", "remove", "origin")
 
+# the minute runner's unit (stackshot-minute.service) in the server box's unit checks: listed only at [runner] process = "unit" (any other value reads as inline, where the server runs the runner and no unit exists), where a unit
+# that is failed or inactive is a missing line with exit 1. A systemctl stub answers is-active by unit: the minute unit's state is the file `minute-state` (active when it is absent)
+(T / "dbin").mkdir(); (T / "dbin/systemctl").write_text(f'#!/bin/sh\necho "$*" >> {tmp}/doctor-systemctl.log\n'
+                                                       f'case "$*" in *"show stackshot.service -p EnvironmentFiles"*) [ -e {tmp}/doc-envfiles ] && cat {tmp}/doc-envfiles; exit 0 ;; *"show stackshot.service"*) [ -e {tmp}/doc-env ] && cat {tmp}/doc-env; exit 0 ;; *show-environment*) exit 0 ;; *is-active*stackshot-minute*) s="$(cat {tmp}/minute-state 2>/dev/null || echo active)"; echo "$s"; [ "$s" = active ] ;; *is-active*) echo active ;; esac\nexit 0\n')
+(T / "dbin/systemctl").chmod(0o755)
+denv = {**ENV, "PATH": f"{tmp}/dbin:" + ENV["PATH"]}
+def doctor_runner(process, state="active", env=None, sd_env=None, sd_files=None):      # sd_env: what the user manager gives stackshot.service as Environment=; sd_files: the lines `-p EnvironmentFiles` lists
+    t, n = re.subn(r'(?m)^process = "[^"]*"', f'process = "{process}"', user_doc, count=1) if process is not None else (re.sub(r'(?m)^process = "[^"]*"\n', "", user_doc, count=1), 1)
+    assert n == 1, "the example config has a [runner] process line"
+    CFG.write_text(t, encoding="utf-8"); (T / "minute-state").write_text(state + "\n")
+    (T / "doctor-systemctl.log").unlink(missing_ok=True)
+    for nm, val in (("doc-env", sd_env), ("doc-envfiles", sd_files)):
+        (T / nm).unlink(missing_ok=True)
+        if val is not None: (T / nm).write_text(val + "\n")
+    r = ss("doctor", env={**denv, **(env or {})}); CFG.write_text(user_doc, encoding="utf-8")
+    return r, (T / "doctor-systemctl.log").read_text() if (T / "doctor-systemctl.log").exists() else ""
+r, calls = doctor_runner("unit", "active")
+check("doctor at [runner] process = unit, the minute unit active: an ok line for it, listed with the other units", re.search(r"(?m)^  ok\s+stackshot-minute\.service: active$", r.stdout) is not None
+      and re.search(r"(?m)^  ok\s+stackshot\.service: active$", r.stdout) is not None and "is-active stackshot-minute.service" in calls, r.stdout[-1500:])
+for st in ("failed", "inactive", "activating"):
+    r, calls = doctor_runner("unit", st)
+    check(f"doctor at unit, the minute unit {st}: a missing line that names the state and the command, and the exit is 1", r.returncode == 1
+          and re.search(rf"(?m)^  missing\s+stackshot-minute\.service: {st}\b", r.stdout) is not None and "./install.sh units --start" in r.stdout.split(f"stackshot-minute.service: {st}", 1)[1].splitlines()[0], r.stdout[-1500:])
+for what, proc in (("inline", "inline"), ('a value that reads as inline ("bogus")', "bogus"), ("an empty value", ""), ("the key left out", None)):
+    r, calls = doctor_runner(proc, "failed")
+    check(f"doctor with [runner] process {what}, whatever a unit by that name says: no line for the minute unit and no systemctl call about it (nothing observable at the default)", "stackshot-minute" not in r.stdout and "stackshot-minute" not in calls, (r.stdout[-800:], calls))
+# a read-only standby (STACKSHOT_READ_ONLY=1: in the environment of the doctor, or in the one the user manager gives stackshot.service, as Environment= or EnvironmentFile=) has no minute unit: install.sh removed it, so a config copied from the
+# live box at unit is no reason to list it, and its absence is not a missing line
+r0, _ = doctor_runner("unit", "active")
+for what, kw in (("in the environment of the doctor", dict(env={"STACKSHOT_READ_ONLY": "1"})), ("in the Environment= the user manager gives the server", dict(sd_env="PATH=/usr/bin STACKSHOT_READ_ONLY=1 LANG=C")),
+                 ("in an EnvironmentFile= of the server's unit", dict(sd_files=f"{T}/doc-envf (ignore_errors=no)")), ("in an EnvironmentFile=, quoted", dict(sd_files=f"{T}/doc-envf (ignore_errors=yes)")),
+                 ("in an EnvironmentFile= that overrides Environment=0", dict(sd_env="STACKSHOT_READ_ONLY=0", sd_files=f"{T}/doc-envf (ignore_errors=no)"))):
+    (T / "doc-envf").write_text('# a standby\nSTACKSHOT_READ_ONLY="1"\n' if "quoted" in what else "STACKSHOT_READ_ONLY=1\n")
+    r, calls = doctor_runner("unit", "inactive", **kw)
+    check(f"doctor at unit on a read-only standby set {what}, the minute unit inactive: no line for it, no is-active call about it, and the exit is what it is with the unit active",
+          "stackshot-minute" not in r.stdout and "is-active stackshot-minute" not in calls and r.returncode == r0.returncode, (r.returncode, r0.returncode, r.stdout[-600:]))
+for what, kw in (("STACKSHOT_READ_ONLY=0 in the environment", dict(env={"STACKSHOT_READ_ONLY": "0"})), ("=0 in Environment=", dict(sd_env="STACKSHOT_READ_ONLY=0")), ("an unrelated Environment=", dict(sd_env="PATH=/usr/bin")),
+                 ("an EnvironmentFile= that turns it off over Environment=1", dict(sd_env="STACKSHOT_READ_ONLY=1", sd_files=f"{T}/doc-envf0 (ignore_errors=no)")), ("an EnvironmentFile= that cannot be read", dict(sd_files=f"{T}/doc-nofile (ignore_errors=yes)"))):
+    (T / "doc-envf0").write_text("STACKSHOT_READ_ONLY=0\n")
+    r, calls = doctor_runner("unit", "inactive", **kw)
+    check(f"...control: {what}: not a standby, the inactive minute unit is a missing line, exit 1", r.returncode == 1 and re.search(r"(?m)^  missing\s+stackshot-minute\.service: inactive", r.stdout) is not None, (r.returncode, r.stdout[-600:]))
+r, calls = doctor_runner("inline", "inactive")
+check("...at inline no systemctl call asks for the server's environment (nothing observable at the default)", "show stackshot.service" not in calls, calls)
+r, calls = doctor_runner(" Unit ", "failed")
+check('doctor with process = " Unit " (case and blanks, as config.runner_process reads it): listed, failed is a missing line', re.search(r"(?m)^  missing\s+stackshot-minute\.service: failed", r.stdout) is not None, r.stdout[-800:])
+check("the lingering warning counts the minute unit among the user units once it is installed (USER_UNITS)", "stackshot-minute.service" in re.search(r"USER_UNITS = \((.*?)\)", pathlib.Path(STACK, "stackshot/cli.py").read_text(encoding="utf-8"), re.S).group(1))
+
 # ---- 5. client mint
 r = ss("client", "mint", "laptop")
 check("client mint prints only the token file's path", r.returncode == 0 and r.stdout.strip() == str(SEC / "client-tokens/laptop.token"), r.stdout + r.stderr)

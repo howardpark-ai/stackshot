@@ -43,10 +43,12 @@ NOT get enabled there, because each writes or acts outward:
 | `stackshot-puller.service` | fetches this machine's notices and messages from the server and delivers them to sessions |
 | `stackshot-audit.service` and `stackshot-audit.timer` | the daily board audit: runs a model and writes items |
 | `stackshot-portal-sync.service` and the drop-in `stackshot.service.d/portal-sync.conf` | re-syncs the MCP portal's copy of the tool list (an outward write) |
-| `stackshot-minute.service` | runs the minute set's runner, which writes the board; `./install.sh units` installs it only with `[runner] process = "unit"` and not on a standby (it says so), and `stackshot minute` exits 4 there |
+| `stackshot-minute.service` | runs the minute set's runner, which writes the board; `./install.sh units` installs it only with `[runner] process = "unit"` and not on a standby, and on a box that became a standby it stops, disables and removes the unit an earlier run installed (a running process reads the standby switch only at its start and would go on writing the board); `stackshot minute` exits 4 on a standby when it is started |
 | `stackshot-reload.path` and `stackshot-reload.service` | reload on a config change; the standby's config is a copy, and nothing there needs a reload |
 
 `./install.sh units --start` (and `deploy.sh`, which sources `units/scope.sh` as `install.sh` does) installs, enables and starts every unit the config calls for, the ones above included. On the standby do not run it as it is: install the two units, add the drop-ins first, and enable only those two (`systemctl --user enable --now stackshot.service anchor-hub.service`). `scope.sh` is only the shell library those scripts source; it starts nothing itself.
+
+Converting a box that already ran the minute unit (`[runner] process = "unit"`): the first `./install.sh units` after the standby switch is in place stops, disables and removes it, and says so; it needs the switch to be visible to the script, that is `STACKSHOT_READ_ONLY=1` in its environment, or in the `stackshot.service` environment (a drop-in's `Environment=` line, or an `EnvironmentFile=` file). By hand, the same: `systemctl --user disable --now stackshot-minute.service`, then remove `~/.config/systemd/user/stackshot-minute.service` and `systemctl --user daemon-reload` (or `./install.sh minute-off`, which does all three and exits 1, leaving the file, when the unit cannot be stopped). If the box has no minute unit, nothing is needed; `stackshot doctor` does not list the unit on a standby (it reads the same switch), so a config copied from the live box at `"unit"` is no reason for a missing line.
 
 ## What the copy job must touch
 

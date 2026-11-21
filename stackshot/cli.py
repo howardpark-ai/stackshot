@@ -166,7 +166,7 @@ def linger(user: str) -> str:
 
 
 USER_UNITS = ("stackshot.service", "stackshot-reload.path", "stackshot-reload.service", "stackshot-portal-sync.service",
-              "stackshot-puller.service", "anchor-hub.service")
+              "stackshot-puller.service", "anchor-hub.service", "stackshot-minute.service")
 
 
 def user_units_installed() -> list[str]:
@@ -509,6 +509,29 @@ def unit_active(name: str, user: bool) -> str:
     return subprocess.run(cmd, capture_output=True, text=True).stdout.strip() or "unknown"
 
 
+def read_only_standby() -> bool:
+    """True on a read-only standby: STACKSHOT_READ_ONLY exactly 1, in this process's environment or in the one the user manager gives stackshot.service (Environment= and, over it, the last
+    STACKSHOT_READ_ONLY= line of an EnvironmentFile=). The same answer as units/scope.sh standby(), which install.sh and deploy.sh ask: there the minute unit is removed, so the doctor must not miss it."""
+    if os.environ.get("STACKSHOT_READ_ONLY") == "1":
+        return True
+
+    def show(prop: str) -> str:
+        return subprocess.run(["systemctl", "--user", "show", "stackshot.service", "-p", prop, "--value"], capture_output=True, text=True).stdout
+
+    v = "1" if "STACKSHOT_READ_ONLY=1" in show("Environment").split() else ""
+    for entry in show("EnvironmentFiles").splitlines():
+        path = entry.rsplit(" (ignore_errors=", 1)[0] if " (ignore_errors=" in entry else entry
+        try:
+            text = Path(path).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for ln in text.splitlines():
+            m = re.match(r"\s*STACKSHOT_READ_ONLY=(.*)$", ln)
+            if m:
+                v = m.group(1).strip().strip("\"'").strip()
+    return v == "1"
+
+
 def http_ok(url: str, timeout: int = 10) -> bool:
     if shutil.which("curl"):
         return subprocess.run(["curl", "-sf", "-o", os.devnull, "-m", str(timeout), url], capture_output=True).returncode == 0
@@ -700,6 +723,8 @@ def cmd_doctor(a: argparse.Namespace) -> int:
         units = [("stackshot.service", True), ("stackshot-reload.path", True), ("stackshot-puller.service", True)]
         if hub:
             units.append(("anchor-hub.service", True))
+        if str((c.get("runner") if isinstance(c.get("runner"), dict) else {}).get("process") or "").strip().lower() == "unit" and not read_only_standby():     # as config.runner_process(): any other value is "inline", where the server runs the runner and there is no unit to check; a standby has none either (install.sh removes it)
+            units.append(("stackshot-minute.service", True))
         for name, user in units:
             st = unit_active(name, user)
             line(st == "active", f"{name}: {st}", "./install.sh units --start" if name != "stackshot-puller.service" else "./install.sh puller --start")

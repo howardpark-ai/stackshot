@@ -494,6 +494,12 @@ check("two releases: each deploy is pinned to the commit its own main run passed
 
 # ---- 12. deploy.sh's pin: the real deploy.sh in a throwaway checkout of a throwaway origin, four commits on main;
 # stackshot/core/config.py, units/scope.sh, install.sh and curl are stubs, and the commits change only text files, so nothing restarts
+def run_alarm(cmd, timeout, **kw):
+    """subprocess.run with an alarm of its own: a run that is not over in `timeout` seconds is stopped and answers rc -999 with what it printed, so a wait that does not end is a failed check, never a hung or crashed suite."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **kw); return r.returncode, r.stdout + r.stderr
+    except subprocess.TimeoutExpired as e:
+        return -999, "".join(x.decode() if isinstance(x, bytes) else (x or "") for x in (e.stdout, e.stderr)) + f"\n[the run did not end in {timeout} s]"
 dp = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-deploy-")); dirs.append(dp)
 g("init", "-q", "--bare", "-b", "main", str(dp / "origin.git")); g("clone", "-q", str(dp / "origin.git"), str(dp / "box"))
 bx = dp / "box"; cs = []
@@ -520,8 +526,8 @@ def deploy(to=None, fetch_fails=None):
     e = {**genv, "PATH": f"{dp}/bin:" + os.environ.get("PATH", "")}; e.pop("DEPLOY_TO", None)
     if to: e["DEPLOY_TO"] = to
     if fetch_fails: e["RT_FETCH_FAILS"] = str(fetch_fails); (dp / "fetches").unlink(missing_ok=True)
-    r = subprocess.run(["bash", str(bx / "deploy.sh")], cwd=bx, env=e, capture_output=True, text=True, timeout=60)
-    return r.returncode, r.stdout + r.stderr, g("rev-parse", "HEAD", cwd=bx)
+    rc_, text_ = run_alarm(["bash", str(bx / "deploy.sh")], 60, cwd=bx, env=e)
+    return rc_, text_, g("rev-parse", "HEAD", cwd=bx)
 rc, out, head = deploy(cs[2])
 check("deploy.sh DEPLOY_TO=<c3>, origin/main at c4: fast-forwards to c3 exactly, not to the tip", rc == 0 and head == cs[2] and f"deploying {cs[1][:7]}..{cs[2][:7]}" in out, (rc, out))
 rc, out, head = deploy(cs[1])
@@ -555,8 +561,8 @@ def rollback(to=None, locked=True, rb="1", extra=None):
     e = {**genv, "PATH": f"{dp}/bin:" + os.environ.get("PATH", ""), "DEPLOY_ROLLBACK": rb, "DEPLOY_LOCK_FILE": str(LOCKF), **(extra or {})}; e.pop("DEPLOY_TO", None)
     if to: e["DEPLOY_TO"] = to
     cmd = ["bash", str(bx / "deploy.sh")]
-    r = subprocess.run((["flock", str(LOCKF)] if locked else []) + cmd, cwd=bx, env=e, capture_output=True, text=True, timeout=60)
-    return r.returncode, r.stdout + r.stderr, g("rev-parse", "HEAD", cwd=bx)
+    rc_, text_ = run_alarm((["flock", str(LOCKF)] if locked else []) + cmd, 60, cwd=bx, env=e)
+    return rc_, text_, g("rev-parse", "HEAD", cwd=bx)
 rc, out, head = rollback(cs[2], locked=False)
 check("deploy.sh DEPLOY_ROLLBACK=1 without the deploy lock held: refused, HEAD unmoved, the by-hand command is in the answer",
       rc == 1 and head == c5 and "a rollback needs the deploy lock held; by hand: flock " in out and f"{LOCKF} env DEPLOY_ROLLBACK=1 DEPLOY_TO=<sha> ./deploy.sh" in out, (rc, out))
@@ -1286,24 +1292,34 @@ check("the step names main_green reads are tests.yml's own", all(f"- name: {n}\n
 pl = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-plan-")); dirs.append(pl)
 g("init", "-q", "--bare", "-b", "main", str(pl / "origin.git")); g("clone", "-q", str(pl / "origin.git"), str(pl / "box"))
 pbx = pl / "box"
-STUB_CONFIG = ('import os, sys\n'      # what deploy.sh asks config.py: the port (a script) and runner_process() (an import, read from RT_RUNNER, "unit" when unset)
-               'def runner_process(): return os.environ.get("RT_RUNNER") or "unit"\n'
+STUB_CONFIG = ('import os, sys\n'      # what deploy.sh asks config.py: the port (a script), runner_process() (an import, read from RT_RUNNER: "unit" when unset, an error for "boom" = a config that cannot be read) and state() (the runner's files, RT_STATE)
+               'from pathlib import Path\n'
+               'def runner_process():\n    v = os.environ.get("RT_RUNNER") or "unit"\n    if v == "boom": raise RuntimeError("the config cannot be read")\n    return v\n'
+               'def state(*parts): return Path(os.environ["RT_STATE"], *parts)\n'
                'if sys.argv[1:] == ["get", "server.port"]: print("1")\n')
-shutil.copy(os.path.join(STACK, "deploy.sh"), pbx / "deploy.sh"); (pbx / "units").mkdir()
-(pbx / "stackshot/core").mkdir(parents=True); (pbx / "stackshot/core/config.py").write_text(STUB_CONFIG)
-(pbx / "units/scope.sh").write_text('server_ctl() { :; }\nxdg_repair() { :; }\n')
-(pbx / "install.sh").write_text("#!/bin/sh\n"); (pbx / "install.sh").chmod(0o755)
+STUB_SCOPE = 'server_ctl() { echo "server_ctl $*" >> "${RT_LOG:-/dev/null}"; }\nxdg_repair() { :; }\nstandby() { [ "${RT_STANDBY:-}" = 1 ]; }\n'      # units/scope.sh without systemd: the server's control logs, and a standby is RT_STANDBY=1
+def stub_tree(b, template):
+    """The files of a throwaway checkout that deploy.sh reads: its own deploy.sh, a config.py stub, the runner's file module (the real one: the heartbeat check reads what the runner writes through it) and a scope.sh and install.sh stub.
+    `template`: the minute unit's template is in the tree (a commit from after the unit was added) or not (from before)."""
+    shutil.copy(os.path.join(STACK, "deploy.sh"), b / "deploy.sh"); (b / "units").mkdir(exist_ok=True); (b / "stackshot/core").mkdir(parents=True, exist_ok=True); (b / "stackshot/core/config.py").write_text(STUB_CONFIG)
+    for m in ("runner_files", "filecache", "readonly"): shutil.copy(os.path.join(STACK, f"stackshot/core/{m}.py"), b / f"stackshot/core/{m}.py")
+    (b / "units/scope.sh").write_text(STUB_SCOPE)
+    (b / "install.sh").write_text('#!/bin/sh\necho "install.sh $*" >> "${RT_LOG:-/dev/null}"\nif [ "$1" = minute-off ]; then [ -n "${RT_OFF_FAILS:-}" ] && exit 1; rm -f "$HOME/.config/systemd/user/stackshot-minute.service"; fi\nexit 0\n'); (b / "install.sh").chmod(0o755)
+    if template: (b / "units/stackshot-minute.service.in").write_text("[Unit]\n")
+stub_tree(pbx, template=False)
+g("add", "-A", cwd=pbx); g("commit", "-qm", "older base: before the minute unit", cwd=pbx); pold = g("rev-parse", "HEAD", cwd=pbx)
+(pbx / "units/stackshot-minute.service.in").write_text("[Unit]\n")
 g("add", "-A", cwd=pbx); g("commit", "-qm", "base", cwd=pbx); pbase = g("rev-parse", "HEAD", cwd=pbx)
 S_, H_, P_, M_ = "stackshot.service", "anchor-hub.service", "stackshot-puller.service", "stackshot-minute.service"
 HOME_NONE, HOME_MIN = pl / "home-none", pl / "home-minute"      # the plan looks at the home folder for the minute unit: one with no unit (the default: nothing of it in any plan) and one with it installed
 HOME_NONE.mkdir(); (HOME_MIN / ".config/systemd/user").mkdir(parents=True); (HOME_MIN / ".config/systemd/user" / M_).write_text("[Service]\n")
-def plan(*files, home=HOME_NONE, rollback=False, runner=""):
+def plan(*files, home=HOME_NONE, rollback=False, runner="", standby=False, old=False):
     g("reset", "-q", "--hard", pbase, cwd=pbx)
     for f in files:
         (pbx / f).parent.mkdir(parents=True, exist_ok=True); (pbx / f).write_text(f"{f} changed\n")
     g("add", "-A", cwd=pbx); g("commit", "-qm", "change " + " ".join(files), cwd=pbx); g("push", "-q", "-f", "origin", "HEAD:main", cwd=pbx)
-    env = {**genv, "PATH": os.environ.get("PATH", ""), "HOME": str(home), "RT_RUNNER": runner}
-    if rollback: env.update(DEPLOY_ROLLBACK="1", DEPLOY_TO=pbase)       # a dry run of the rollback's first step, from the changed commit back to the base: the same files differ, the other way round
+    env = {**genv, "PATH": os.environ.get("PATH", ""), "HOME": str(home), "RT_RUNNER": runner, "RT_STANDBY": "1" if standby else ""}
+    if rollback: env.update(DEPLOY_ROLLBACK="1", DEPLOY_TO=pold if old else pbase)       # a dry run of the rollback's first step, from the changed commit back to the base: the same files differ, the other way round
     else: g("reset", "-q", "--hard", pbase, cwd=pbx)
     r = subprocess.run(["bash", str(pbx / "deploy.sh"), "--dry-run"], cwd=pbx, env=env, capture_output=True, text=True, timeout=60)
     g("reset", "-q", "--hard", pbase, cwd=pbx)
@@ -1362,59 +1378,77 @@ check("deploy.sh --dry-run of a rollback, no minute unit: the server only", rc =
 rc, units_, got, out = plan_units("units/stackshot-minute.service.in", home=HOME_MIN, rollback=True)
 check("deploy.sh --dry-run of a rollback of the minute unit's own file: it alone", rc == 0 and units_ == [M_], (rc, got, out[-300:]))
 
-def real_deploy(files, home, rollback=False, tripped=False, runner=""):
-    """The real deploy.sh, run for real (not --dry-run) in a throwaway checkout, with systemctl, the server's control, install.sh, uv and curl stubs that log to one file → (rc, stdout, the log's lines)."""
+OLD_DEPLOY = '#!/bin/sh\n# a deploy.sh from before the minute unit: it knows the rollback hand-off (DEPLOY_ROLLED_BACK_FROM) and nothing of the unit\necho "old deploy.sh ran from=${DEPLOY_ROLLED_BACK_FROM:-none}" >> "$RT_LOG"\n[ -z "${RT_OLD_FAILS:-}" ] || exit 1\nexit 0\n'
+def real_deploy(files, home, rollback=False, tripped=False, runner="", standby=False, predates=False, active="active", beat="fresh", off_fails=False, wait=None, mainpid=4242, beatpid=None, old_fails=False, timeout=120):
+    """The real deploy.sh, run for real (not --dry-run) in a throwaway checkout, with systemctl, the server's control, install.sh, uv and curl stubs that log to one file → (rc, stdout, the log's lines).
+    The home is a copy (the stub install.sh removes the minute unit's file there, as the real one does). `predates`: the rollback's target has no template of the minute unit and an older deploy.sh (a stub that only logs).
+    The systemctl stub answers is-active for the minute unit with `active` ("active", "inactive", "failed"), its MainPID with `mainpid`, and writes its heartbeat (status.json under RT_STATE/minute) at its restart as `beat` says: "fresh", "none" or
+    "stale" (an hour old), as the process `beatpid` (the MainPID by default). `old_fails`: the older deploy.sh of a `predates` rollback exits 1. A run that is not over in `timeout` seconds is stopped and returns rc -999 (a failed check, not a hung suite)."""
     d = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-mdeploy-")); dirs.append(d)
     g("init", "-q", "--bare", "-b", "main", str(d / "origin.git")); g("clone", "-q", str(d / "origin.git"), str(d / "box")); b = d / "box"
-    shutil.copy(os.path.join(STACK, "deploy.sh"), b / "deploy.sh"); (b / "units").mkdir(); (b / "stackshot/core").mkdir(parents=True)
-    (b / "stackshot/core/config.py").write_text(STUB_CONFIG)
-    (b / "units/scope.sh").write_text('server_ctl() { echo "server_ctl $*" >> "$RT_LOG"; }\nxdg_repair() { :; }\n')
-    (b / "install.sh").write_text('#!/bin/sh\necho "install.sh $*" >> "$RT_LOG"\n'); (b / "install.sh").chmod(0o755)
+    stub_tree(b, template=not predates)
+    if predates: (b / "deploy.sh").write_text(OLD_DEPLOY); (b / "deploy.sh").chmod(0o755)
     g("add", "-A", cwd=b); g("commit", "-qm", "base", cwd=b); base = g("rev-parse", "HEAD", cwd=b)
+    if predates:      # the change adds the unit's template and the current deploy.sh: a rollback from it goes back to a tree without either
+        shutil.copy(os.path.join(STACK, "deploy.sh"), b / "deploy.sh"); (b / "units/stackshot-minute.service.in").write_text("[Unit]\n")
     for f in files:
         (b / f).parent.mkdir(parents=True, exist_ok=True); (b / f).write_text(f"{f} changed\n")
     g("add", "-A", cwd=b); g("commit", "-qm", "change", cwd=b); g("push", "-q", "origin", "HEAD:main", cwd=b)
     if not rollback: g("reset", "-q", "--hard", base, cwd=b)
-    (d / "bin").mkdir()
-    # the start limit, as systemd keeps it: after it tripped (RT_TRIP exists) a restart of the minute unit is refused until reset-failed has cleared it
-    systemctl = 'echo "systemctl $*" >> "$RT_LOG"\ncase "$*" in *reset-failed*stackshot-minute*) rm -f "$RT_TRIP" ;; *restart*stackshot-minute*) [ -e "$RT_TRIP" ] && { echo "Start request repeated too quickly." >&2; exit 1; } ;; esac\nexit 0'
+    (d / "bin").mkdir(); h = d / "home"; shutil.copytree(home, h)
+    # the start limit, as systemd keeps it: after it tripped (RT_TRIP exists) a restart of the minute unit is refused until reset-failed has cleared it, and reset-failed on a unit that is not failed exits 1, as the real one does
+    # ("Unit ... not loaded"); a restart of the minute unit starts a runner that writes its heartbeat as RT_BEAT says
+    systemctl = ('echo "systemctl $*" >> "$RT_LOG"\n'
+                 'case "$*" in\n'
+                 '  *reset-failed*stackshot-minute*) if [ -e "$RT_TRIP" ]; then rm -f "$RT_TRIP"; else echo "Unit stackshot-minute.service not loaded." >&2; exit 1; fi ;;\n'
+                 '  *restart*stackshot-minute*) [ -e "$RT_TRIP" ] && { echo "Start request repeated too quickly." >&2; exit 1; }\n'
+                 '     mkdir -p "$RT_STATE/minute"; case "$RT_BEAT" in\n'
+                 '       fresh) python3 -c \'import json, os, sys, time; open(sys.argv[1], "w").write(json.dumps({"pid": int(os.environ["RT_BEATPID"]), "heartbeat": time.time(), "ticks": []}))\' "$RT_STATE/minute/status.json" ;;\n'
+                 '       stale) python3 -c \'import json, os, sys, time; open(sys.argv[1], "w").write(json.dumps({"pid": int(os.environ["RT_BEATPID"]), "heartbeat": time.time() - 3600, "ticks": []}))\' "$RT_STATE/minute/status.json" ;;\n'
+                 '     esac ;;\n'
+                 '  *"show -p MainPID"*stackshot-minute*) echo "$RT_MAINPID" ;;\n'
+                 '  *is-active*stackshot-minute*) echo "$RT_ACTIVE"; [ "$RT_ACTIVE" = active ] || exit 3 ;;\n'
+                 'esac\nexit 0')
     if tripped: (d / "tripped").write_text("")
     for n, body in (("systemctl", systemctl), ("uv", 'echo "uv $*" >> "$RT_LOG"; echo published'), ("curl", "exit 0")):
         (d / "bin" / n).write_text("#!/bin/sh\n" + body + "\n"); (d / "bin" / n).chmod(0o755)
-    env = {**genv, "PATH": f"{d}/bin:" + os.environ.get("PATH", ""), "HOME": str(home), "RT_LOG": str(d / "log"), "RT_TRIP": str(d / "tripped"), "RT_RUNNER": runner}
+    env = {**genv, "PATH": f"{d}/bin:" + os.environ.get("PATH", ""), "HOME": str(h), "RT_LOG": str(d / "log"), "RT_TRIP": str(d / "tripped"), "RT_RUNNER": runner, "RT_STANDBY": "1" if standby else "",
+           "RT_STATE": str(d / "state"), "RT_ACTIVE": active, "RT_BEAT": beat, "RT_OFF_FAILS": "1" if off_fails else "", "DEPLOY_MINUTE_WAIT": str(wait if wait is not None else 20),
+           "RT_MAINPID": str(mainpid), "RT_BEATPID": str(mainpid if beatpid is None else beatpid), "RT_OLD_FAILS": "1" if old_fails else ""}
     cmd = ["bash", str(b / "deploy.sh")]
     if rollback: env.update(DEPLOY_ROLLBACK="1", DEPLOY_TO=base, DEPLOY_LOCK_FILE=str(d / "deploy.lock")); cmd = ["flock", str(d / "deploy.lock")] + cmd
-    r = subprocess.run(cmd, cwd=b, env=env, capture_output=True, text=True, timeout=90)
-    return r.returncode, r.stdout + r.stderr, (d / "log").read_text().splitlines() if (d / "log").exists() else []
+    rc_, text_ = run_alarm(cmd, timeout, cwd=b, env=env)
+    real_deploy.last = (b, base)
+    return rc_, text_, (d / "log").read_text().splitlines() if (d / "log").exists() else [], (h / ".config/systemd/user" / M_).exists()
 def at(log, line): return log.index(line) if line in log else -1
-rc, out, log = real_deploy(("stackshot/web/minute.py",), HOME_MIN)
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN)
 check("deploy.sh, minute unit installed, a code change: the server is restarted, then the minute unit through the user manager, and the health check and the republish follow",
       rc == 0 and 0 <= at(log, "server_ctl restart stackshot.service") < at(log, f"systemctl --user restart {M_}") and "healthz ok" in out, (rc, log, out[-300:]))
-check("...and says so in that order, after the units were reinstalled", out.index("restarted stackshot.service") < out.index(f"restarted {M_}") and out.count(f"restarted {M_}") == 1 and "healthz ok" in out
+check("...and says so in that order, after the units were reinstalled", 0 <= out.find("restarted stackshot.service") < out.find(f"restarted {M_}") and out.count(f"restarted {M_}") == 1 and "healthz ok" in out
       and at(log, "install.sh units") < at(log, "server_ctl restart stackshot.service"), (out, log))
-rc, out, log = real_deploy(("stackshot/web/minute.py",), HOME_NONE)
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_NONE)
 check("deploy.sh, no minute unit installed, the same change: the server restarted, nothing asked about the minute unit, nothing said about it", rc == 0 and "server_ctl restart stackshot.service" in log
       and not any("minute" in l for l in log) and "stackshot-minute" not in out, (rc, log, out[-300:]))
-rc, out, log = real_deploy(("units/stackshot-minute.service.in",), HOME_MIN)
+rc, out, log, gone = real_deploy(("units/stackshot-minute.service.in",), HOME_MIN)
 check("deploy.sh, minute unit installed, only its unit file changed: the minute unit restarted, the server not (no republish either)", rc == 0 and f"systemctl --user restart {M_}" in log
       and not any(l.startswith("server_ctl restart") or l.startswith("uv run") for l in log), (rc, log, out[-300:]))
-rc, out, log = real_deploy(("stackshot/web/minute.py",), HOME_MIN, rollback=True)
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, rollback=True)
 check("deploy.sh rollback (both steps), minute unit installed: the good tree's own deploy.sh restarts the server and then the minute unit, and checks health", rc == 0 and out.count("rolling back") == 2
       and 0 <= at(log, "server_ctl restart stackshot.service") < at(log, f"systemctl --user restart {M_}") and "healthz ok" in out, (rc, log, out[-400:]))
-rc, out, log = real_deploy(("stackshot/web/minute.py",), HOME_NONE, rollback=True)
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_NONE, rollback=True)
 check("deploy.sh rollback, no minute unit installed: the server only", rc == 0 and "server_ctl restart stackshot.service" in log and not any("minute" in l for l in log), (rc, log, out[-300:]))
 
 # the start limit: once it has tripped, systemd refuses a restart ("Start request repeated too quickly") until reset-failed has cleared the count, and the deploy runs under set -e
-rc, out, log = real_deploy(("stackshot/web/minute.py",), HOME_MIN, tripped=True)
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, tripped=True)
 check("deploy.sh, minute unit past its start limit: reset-failed comes right before the restart, so the restart works and the deploy runs on to the health check and the republish",
       rc == 0 and 0 <= at(log, "server_ctl restart stackshot.service") < at(log, f"systemctl --user reset-failed {M_}") < at(log, f"systemctl --user restart {M_}")
       and "restarted " + M_ in out and "healthz ok" in out and "republished" in out, (rc, log, out[-400:]))
-rc, out, log = real_deploy(("stackshot/web/minute.py",), HOME_MIN)
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN)
 check("deploy.sh, minute unit not tripped: reset-failed is run all the same (it does nothing to a unit that has not failed), once, before the restart", rc == 0 and log.count(f"systemctl --user reset-failed {M_}") == 1
       and at(log, f"systemctl --user reset-failed {M_}") < at(log, f"systemctl --user restart {M_}"), (rc, log))
-rc, out, log = real_deploy(("stackshot/web/minute.py",), HOME_MIN, rollback=True, tripped=True)
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, rollback=True, tripped=True)
 check("deploy.sh rollback, minute unit past its start limit: the same, reset-failed then restart, and the rollback finishes", rc == 0 and at(log, f"systemctl --user reset-failed {M_}") < at(log, f"systemctl --user restart {M_}") and "healthz ok" in out, (rc, log, out[-400:]))
-rc, out, log = real_deploy(("stackshot/web/minute.py",), HOME_NONE, tripped=True)
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_NONE, tripped=True)
 check("deploy.sh, no minute unit installed: no reset-failed either", rc == 0 and not any("reset-failed" in l for l in log), (rc, log))
 # [runner] process back at "inline" with the unit still installed (install.sh is about to remove it): not in the plan, not restarted, not reset
 rc, units_, got, out = plan_units("stackshot/web/minute.py", home=HOME_MIN, runner="inline")
@@ -1423,9 +1457,141 @@ rc, units_, got, out = plan_units("stackshot/web/minute.py", home=HOME_MIN, runn
 check("deploy.sh --dry-run, unit installed and [runner] process reads unit: the server and the minute unit", rc == 0 and units_ == [S_, M_], (rc, got, out[-300:]))
 rc, units_, got, out = plan_units("stackshot/web/minute.py", home=HOME_MIN, runner="inline", rollback=True)
 check("deploy.sh --dry-run of a rollback, unit installed but the setting reads inline: the server only", rc == 0 and units_ == [S_], (rc, got, out[-300:]))
-rc, out, log = real_deploy(("stackshot/web/minute.py",), HOME_MIN, runner="inline", tripped=True)
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, runner="inline", tripped=True)
 check("deploy.sh, unit installed but [runner] process reads inline: the server restarted, no reset-failed and no restart of the minute unit (it would be refused or pointless: install.sh removes it)",
-      rc == 0 and "server_ctl restart stackshot.service" in log and not any("minute" in l and ("reset-failed" in l or "restart" in l) for l in log) and "stackshot-minute" not in out.replace("install.sh units", ""), (rc, log, out[-300:]))
+      rc == 0 and "server_ctl restart stackshot.service" in log and not any("minute" in l and ("reset-failed" in l or "restart" in l) for l in log) and "stackshot-minute" not in out.replace("install.sh units", "").replace("note: stackshot-minute.service is installed", ""), (rc, log, out[-300:]))
+
+# a deploy that flips [runner] process back to inline with the unit installed (the setting is read at a start only): install.sh removes the unit, and a server started at "unit" runs no runner of its own. A docs-only change restarts
+# nothing by its files, and would leave the box with no runner: the server is restarted in this same deploy, in the plan and in the run alike (never left to a later deploy)
+rc, units_, got, out = plan_units("docs/notes.md", home=HOME_MIN, runner="inline")
+check("deploy.sh --dry-run, a docs-only change, unit installed, setting read as inline: the server is in the plan (the runner it started without must come back), with a note that says why", rc == 0 and units_ == [S_]
+      and "note: stackshot-minute.service is installed but [runner] process reads \"inline\": install.sh removes it, and the server restarts in this deploy" in out, (rc, got, out[-400:]))
+rc, units_, got, out = plan_units("docs/notes.md", home=HOME_MIN, runner="unit")
+check("...control: the same change at unit restarts nothing, no note", rc == 0 and units_ == [] and "note:" not in out, (rc, got, out[-300:]))
+rc, units_, got, out = plan_units("docs/notes.md", home=HOME_NONE, runner="inline")
+check("...control: no unit installed at inline restarts nothing, no note (nothing observable changes at the default)", rc == 0 and units_ == [] and "note:" not in out, (rc, got, out[-300:]))
+rc, units_, got, out = plan_units("docs/notes.md", home=HOME_MIN, runner="inline", rollback=True)
+check("...a rollback's plan too", rc == 0 and units_ == [S_] and "note: stackshot-minute.service is installed" in out, (rc, got, out[-300:]))
+rc, units_, got, out = plan_units("docs/notes.md", home=HOME_MIN, runner="inline", standby=True)
+check("...on a standby too (install.sh removes the unit at inline wherever the box stands)", rc == 0 and units_ == [S_], (rc, got, out[-300:]))
+dry_plan = plan_units("docs/notes.md", home=HOME_MIN, runner="inline")[2]
+rc, out, log, gone = real_deploy(("docs/notes.md",), HOME_MIN, runner="inline")
+check("deploy.sh, a docs-only change, unit installed, setting read as inline: the server IS restarted, after install.sh units (which removes the unit) and with the health check and the republish after it; the runner of the real run is the dry run's plan",
+      rc == 0 and 0 <= at(log, "install.sh units") < at(log, "server_ctl restart stackshot.service") and "healthz ok" in out and "republished" in out and [l for l in out.splitlines() if l.startswith("restarts:")] == dry_plan and log.count("server_ctl restart stackshot.service") == 1 and out.count("restarted stackshot.service") == 1
+      and not any("minute" in l and ("restart" in l or "reset-failed" in l or "is-active" in l) for l in log), (rc, log, out[-500:], dry_plan))
+rc, out, log, gone = real_deploy(("docs/notes.md",), HOME_MIN, runner="unit")
+check("...control, real: at unit the same change restarts no unit and says nothing of a swap", rc == 0 and not any(l.startswith("server_ctl restart") for l in log) and "note:" not in out, (rc, log, out[-300:]))
+rc, out, log, gone = real_deploy(("docs/notes.md",), HOME_NONE, runner="inline")
+check("...control, real: no unit at inline restarts nothing and asks systemctl nothing", rc == 0 and not any(l.startswith("server_ctl restart") for l in log) and not any(l.startswith("systemctl") for l in log) and "note:" not in out, (rc, log, out[-300:]))
+
+# a standby (STACKSHOT_READ_ONLY=1 in the environment of the server's unit): install.sh removes the minute unit there, so it is not in the plan and not restarted, whatever the files say
+rc, units_, got, out = plan_units("stackshot/web/minute.py", home=HOME_MIN, standby=True)
+check("deploy.sh --dry-run, unit installed, the box is a read-only standby: the server only (the unit is on its way out)", rc == 0 and units_ == [S_], (rc, got, out[-300:]))
+rc, units_, got, out = plan_units("docs/notes.md", home=HOME_MIN, standby=True)
+check("deploy.sh --dry-run, a docs-only change on a standby at unit: nothing restarts (the standby has no runner to replace)", rc == 0 and units_ == [] and "note:" not in out, (rc, got, out[-300:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, standby=True)
+check("deploy.sh, unit installed on a standby: the server restarted, the minute unit neither reset nor restarted nor looked at", rc == 0 and "server_ctl restart stackshot.service" in log and not any("minute" in l and l.startswith("systemctl") for l in log), (rc, log, out[-300:]))
+
+# a config that cannot be read counts as "unit": install.sh decides, and deploy.sh keeps the runner it has (a restart is harmless, a missing one is not)
+rc, units_, got, out = plan_units("stackshot/web/minute.py", home=HOME_MIN, runner="boom")
+check("deploy.sh --dry-run, unit installed, [runner] process cannot be read (a config that fails to load): read as unit, the server and the minute unit in the plan", rc == 0 and units_ == [S_, M_], (rc, got, out[-300:]))
+rc, units_, got, out = plan_units("docs/notes.md", home=HOME_MIN, runner="boom")
+check("...and no swap is planned for it (an unreadable config is not 'inline'): a docs-only change restarts nothing", rc == 0 and units_ == [] and "note:" not in out, (rc, got, out[-300:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, runner="boom")
+check("deploy.sh, [runner] process cannot be read: the minute unit is restarted after the server, as at unit", rc == 0 and 0 <= at(log, "server_ctl restart stackshot.service") < at(log, f"systemctl --user restart {M_}"), (rc, log, out[-300:]))
+
+# a rollback to a commit from before the unit: that commit's own deploy.sh (the second step) knows nothing of the unit and would never stop it, and the older server's inline runner comes up with its restart: so the first step
+# stops, disables and removes the unit (install.sh minute-off) BEFORE it hands over
+rc, units_, got, out = plan_units("stackshot/web/minute.py", home=HOME_MIN, rollback=True, old=True)
+check("deploy.sh --dry-run of a rollback to a commit from before the unit, unit installed: the server only (the unit is not restarted: it goes), with a note that names the removal and what then runs the runner",
+      rc == 0 and units_ == [S_] and "note: " in out and "predates stackshot-minute.service, whose removal this deploy runs first (install.sh minute-off)" in out and "the older server's runner starts with its restart" in out, (rc, got, out[-500:]))
+rc, units_, got, out = plan_units("stackshot/web/minute.py", home=HOME_NONE, rollback=True, old=True)
+check("...with no unit installed there is nothing to remove: the same plan as ever, no note", rc == 0 and units_ == [S_] and "predates" not in out, (rc, got, out[-300:]))
+rc, units_, got, out = plan_units("stackshot/web/minute.py", home=HOME_MIN, rollback=True)
+check("...control: a rollback to a commit that has the unit takes no such step and says no such thing", rc == 0 and units_ == [S_, M_] and "predates" not in out, (rc, got, out[-300:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, rollback=True, predates=True)
+check("deploy.sh rollback to a commit from before the unit, unit installed: install.sh minute-off runs FIRST, then the older commit's own deploy.sh (which restarts the server and knows no unit); the unit file is gone, and the new deploy.sh never restarts or looks at it",
+      rc == 0 and 0 <= at(log, "install.sh minute-off") < next((i for i, l in enumerate(log) if l.startswith("old deploy.sh ran from=")), -1) and not gone
+      and not any(l.startswith("systemctl") and "minute" in l for l in log) and "removal this deploy runs first" in out, (rc, log, out[-500:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, rollback=True, predates=True, off_fails=True)
+box, base_sha = real_deploy.last
+check("...a minute-off that fails stops the rollback with the checkout untouched: nonzero exit, the reason on stderr, the older deploy.sh never run, the unit file still there (a runner still exists), HEAD still the newer commit",
+      rc != 0 and "rollback stopped: stackshot-minute.service could not be stopped; the checkout is unchanged" in out and not any(l.startswith("old deploy.sh ran") for l in log) and gone
+      and g("rev-parse", "HEAD", cwd=box) != base_sha, (rc, log, out[-400:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_NONE, rollback=True, predates=True)
+check("...no unit installed: no minute-off, the older deploy.sh runs", rc == 0 and not any("minute-off" in l for l in log) and any(l.startswith("old deploy.sh ran") for l in log), (rc, log, out[-300:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, rollback=True)
+check("...control: a rollback to a commit that has the unit never calls minute-off", rc == 0 and not any("minute-off" in l for l in log), (rc, log))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN)
+check("...control: a plain deploy never calls minute-off", rc == 0 and not any("minute-off" in l for l in log), (rc, log))
+
+# the unit is Type=simple: a restart that succeeds and a /healthz that answers say nothing of the runner. After the health check (and the republish), for a unit this deploy restarted, deploy.sh waits a bounded time for the unit to
+# be active and for a heartbeat of the unit's own process that is newer than the restart. A runner that does not show is a WARNING line and the deploy still exits 0, like a failed republish: the server runs the new code by then, and a
+# nonzero exit reads to release.sh as "merged, not live" (it pauses its queue). Every run here has an alarm of its own (real_deploy's timeout): a wait that does not end is a failed check, never a hung suite
+WARN = "WARNING: stackshot-minute.service"
+def warned(out, state, seen, wait):      # the one WARNING line: the unit, its state, what was seen of the heartbeat, the wait, and the commands to run
+    return (out.count(WARN) == 1 and f"{WARN} is {state} and shows no runner heartbeat after the restart ({seen}; waited up to {wait} s)" in out
+            and "systemctl --user status stackshot-minute.service" in out and "journalctl --user -u stackshot-minute.service" in out and "stackshot doctor" in out and "running (heartbeat seen)" not in out)
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN)
+check("deploy.sh, minute unit restarted and its runner writes its heartbeat: the check passes and says so, after the health check and the republish; the deploy exits 0, no warning",
+      rc == 0 and 0 <= out.find("healthz ok") < out.find("republished") < out.find("stackshot-minute.service: running (heartbeat seen)") and at(log, f"systemctl --user restart {M_}") < at(log, f"systemctl --user is-active {M_}")
+      and WARN not in out, (rc, log, out[-400:]))
+t0 = time.monotonic()
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, beat="none", wait=3, timeout=45)
+check("deploy.sh, the unit is active but the runner never writes a heartbeat: after the bounded wait ONE warning line names the unit, its state, that no heartbeat was seen, the wait and where to look, AND THE DEPLOY EXITS 0 (the server's steps are done, "
+      "the republish before the warning)", rc == 0 and warned(out, "active", "no heartbeat record", 3) and 0 <= out.find("healthz ok") < out.find("republished") < out.find(WARN) and log.count(f"systemctl --user is-active {M_}") >= 2
+      and time.monotonic() - t0 < 40, (rc, log, out[-600:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, beat="stale", wait=3, timeout=45)
+check("deploy.sh, a heartbeat that is older than the restart (a runner of before it) does not count: the same warning, naming its age, exit 0", rc == 0 and out.count(WARN) == 1 and "the last heartbeat is " in out and " s old, from before the restart" in out
+      and "running (heartbeat seen)" not in out, (rc, log, out[-500:]))
+t0 = time.monotonic()
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, active="failed", beat="none", wait=60, timeout=45)
+check("deploy.sh, the unit is failed after the restart: the wait ends at once (not the full bound), the warning names the state, exit 0", rc == 0 and out.count(WARN) == 1 and f"{WARN} is failed and shows no runner heartbeat" in out
+      and time.monotonic() - t0 < 30 and log.count(f"systemctl --user is-active {M_}") == 1, (rc, log, out[-400:], time.monotonic() - t0))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, active="inactive", beat="fresh", wait=3, timeout=45)
+check("deploy.sh, a heartbeat but a unit that is not active (inactive): not running, the warning says the unit is not active, exit 0", rc == 0 and out.count(WARN) == 1 and f"{WARN} is inactive and shows no runner heartbeat" in out
+      and "the unit is not active" in out and "running (heartbeat seen)" not in out, (rc, log, out[-400:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, rollback=True, beat="none", wait=3, timeout=45)
+check("deploy.sh rollback (the second step restarts the unit): the same check, the same warning, and the rollback still exits 0", rc == 0 and warned(out, "active", "no heartbeat record", 3) and out.count("rolling back") == 2, (rc, log, out[-400:]))
+# a heartbeat has to be the unit's own: the pid of the record is the unit's MainPID or below it (`uv run` is the main process, the runner its child); a record of any other process (the old runner in its last seconds, the
+# inline runner of a server) is not this unit's, however fresh
+kids = []
+def kid(): kids.append(subprocess.Popen(["sleep", "300"])); return kids[-1].pid
+try:
+    other = kid()
+    rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, beat="fresh", beatpid=other, wait=3, timeout=45)
+    check("deploy.sh, a fresh heartbeat from another process than the unit's (its pid is not the MainPID and not below it): does not count, the warning names the pid, exit 0", rc == 0 and out.count(WARN) == 1
+          and f"is from pid {other}, not from this unit" in out and "running (heartbeat seen)" not in out, (rc, log, out[-500:]))
+    rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, beat="fresh", mainpid=os.getpid(), beatpid=other, wait=3, timeout=45)
+    check("...control: the same heartbeat counts when the pid is a child of the unit's MainPID (uv run keeps its own process as the parent of the runner)", rc == 0 and WARN not in out and "running (heartbeat seen)" in out, (rc, log, out[-500:]))
+    rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, beat="fresh", mainpid=0, wait=3, timeout=45)
+    check("...and a unit with no MainPID (0) has no runner to match: the warning, exit 0", rc == 0 and out.count(WARN) == 1 and "not from this unit" in out, (rc, log, out[-400:]))
+finally:
+    for k in kids: k.kill(); k.wait()
+# DEPLOY_MINUTE_WAIT=0 looks once and does not wait
+t0 = time.monotonic()
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, beat="none", wait=0, timeout=45)
+check("deploy.sh with DEPLOY_MINUTE_WAIT=0 and no heartbeat: one look (one is-active), no wait, the warning says 0 s, exit 0", rc == 0 and warned(out, "active", "no heartbeat record", 0) and log.count(f"systemctl --user is-active {M_}") == 1
+      and time.monotonic() - t0 < 30, (rc, log, out[-400:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, beat="fresh", wait=0, timeout=45)
+check("...and with a heartbeat already there, that one look passes", rc == 0 and WARN not in out and "running (heartbeat seen)" in out and log.count(f"systemctl --user is-active {M_}") == 1, (rc, log, out[-300:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, beat="fresh", wait="x y", timeout=45)
+check("...and a DEPLOY_MINUTE_WAIT that is not a number falls back to the default and never fails the deploy", rc == 0 and "running (heartbeat seen)" in out, (rc, log, out[-300:]))
+# at inline, and whenever the unit is not restarted here, there is no check and no wait
+for what, files, kw in (("[runner] process reads inline (the unit goes)", ("stackshot/web/minute.py",), dict(runner="inline")), ("no unit installed", ("stackshot/web/minute.py",), dict(home=HOME_NONE)),
+                        ("a change the unit does not restart for (the server's own unit file)", ("units/stackshot.service.in",), dict()), ("a standby", ("stackshot/web/minute.py",), dict(standby=True))):
+    kw = {"home": HOME_MIN, **kw}; t0 = time.monotonic()
+    rc, out, log, gone = real_deploy(files, beat="none", active="failed", wait=60, timeout=45, **kw)
+    check(f"deploy.sh, {what}: no is-active, no wait for a heartbeat, no warning, exit 0", rc == 0 and not any("is-active" in l for l in log) and "heartbeat" not in out and WARN not in out and time.monotonic() - t0 < 30, (rc, log, out[-300:]))
+# the rollback to a commit from before the unit: the unit is removed first and the older deploy.sh does the rest; if that fails the unit is gone with no runner in its place, and the step says so and what to run
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, rollback=True, predates=True, old_fails=True)
+check("deploy.sh rollback to a commit from before the unit, the unit removed, then the older deploy.sh fails: the exit is nonzero (its own), and ONE warning says the unit is gone, the server may have no runner, and what to run (./install.sh units, "
+      "systemctl --user restart stackshot.service)", rc == 1 and not gone and out.count("WARNING: the rollback to ") == 1 and "failed after stackshot-minute.service was removed, so the server may be running with no runner" in out and "./install.sh units" in out
+      and "systemctl --user restart stackshot.service" in out and any(l.startswith("old deploy.sh ran") for l in log), (rc, log, out[-600:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN, rollback=True, predates=True)
+check("...control: when the older deploy.sh succeeds there is no such warning and the exit is 0", rc == 0 and "WARNING: the rollback" not in out and not gone, (rc, log, out[-300:]))
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_NONE, rollback=True, predates=True, old_fails=True)
+check("...control: with no unit to remove, a failing older deploy.sh has no such warning (it was never this step's doing)", rc == 1 and "WARNING: the rollback" not in out, (rc, log, out[-300:]))
 
 # ---- 18. the Codex review trial: `salamander codex-review <repo> <pr>` is started, in a user unit of its own, for a PR that is still open, and nothing about the release depends on it
 CODEX_LINE = f"codex-review {R} 23"
