@@ -270,6 +270,11 @@ git = true                                          # false: render only, never 
 debounce_seconds = 5
 every_minutes = 10                                  # the server's own timer, on the dot
 
+[runner]                                            # where the minute set's runner runs; see docs/server-passes.md
+process = "inline"                                  # "inline": a thread of the server, as it always was. "unit": the server starts no runner and the process `stackshot minute` runs it. Exactly one process runs the runner
+                                                    # (a flock on <paths.state>/minute/runner.lock): a server with "inline" that finds it held starts none, says so, and tries the lock again every minute, and `stackshot minute` refuses while this is "inline". Restart-only,
+                                                    # read once at a start by the server and by `stackshot minute`; any other value reads as "inline"
+
 [locks]                                             # the locks around the whole-file stores (the item, the For you and Landed lists, the held hand-back lines, the page-debt ledger, the pending answers, the machine anchors, the wake pass, the stall record); see docs/server-passes.md
 cross_process = true                                # true: each is also a flock on <paths.state>/<name>.lock, so a second process that writes the same files takes turns with the server (about 10 microseconds a hold);
                                                     # false: a thread lock only, as before (the read-only standby never takes the flock either). Restart-only

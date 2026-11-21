@@ -995,6 +995,7 @@ PROGRAMS = {
     "router-live": ("stackshot.router.router_live", "the router that rules the notices"),
     "ghmigrate": ("stackshot.github.ghmigrate", "move a board store's open items onto GitHub Issues"),
     "server": ("stackshot.web.server", "the MCP connector and the board (needs the server extra: uv run --extra server stackshot server)"),
+    "minute": ("stackshot.web.minute", "the minute set's runner as a process of its own, when [runner] process = \"unit\" (needs the server extra: uv run --extra server stackshot minute)"),
     "publish": ("stackshot.web.publish", "the stackshot publisher"),
     "render": ("stackshot.web.render", "the board's text renderer"),
 }
