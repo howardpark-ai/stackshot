@@ -80,6 +80,7 @@ from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.model import option_labels as _ol  # noqa: E402  — the letter an option's label repeats from its badge, dropped on read
 from stackshot.core import readonly as _ro  # noqa: E402  — a warm standby copy makes no GitHub write
 from stackshot.core import ghbudget as _gb   # noqa: E402  — the hourly ledger of GitHub calls shared with the other readers of the host's token
+from stackshot.core import xlock as _xlock   # noqa: E402  — the item lock: one per name, so XLock("item") is the lock the service layer takes (this module is below it and does not import it)
 
 API_DEFAULT = "https://api.github.com"
 MAP_NAME = "github.json"            # in the store, committed with it by the publisher
@@ -1616,8 +1617,11 @@ def _move(store: Path, old: str, new: str, n: int, p: Path, it: dict[str, Any]) 
     any point leaves a state the next call completes: before the map is saved the old file is still the item (a write
     lands there and the copy is taken again); once saved, every id lookup resolves to the new file, and the old one, if
     still there, is only removed. When both files exist the newer one by `updated` wins, so a write that reached the old
-    file while the move was under way (the one race the worker cannot lock out of the server's threads) is kept, and a
-    stale old copy never overwrites the new file. The publisher's next commit records the rename."""
+    file while the move was under way (a writer that does not take the item lock: the move holds it, so a save through
+    writes.save waits for it) is kept, and a stale old copy never overwrites the new file. The file move and the map are
+    one step under the item lock, and each `after` list it rewrites is read again and rewritten under it (a write the item
+    lock covers is never lost to the re-key); the scan for the lists that name `old` is a read without it. The publisher's
+    next commit records the rename."""
     q = _item_file(store, new)
     def read(f: Path) -> dict[str, Any] | None:
         try:
@@ -1627,32 +1631,36 @@ def _move(store: Path, old: str, new: str, n: int, p: Path, it: dict[str, Any]) 
         return x if isinstance(x, dict) else None
     def take(cur: dict[str, Any]) -> None:
         cur = dict(cur); cur["id"] = str(n); _write_item(q, cur)
-    cur = read(p) if p.exists() else (dict(it) if it else None)   # as it is now: an earlier move may have rewritten its after list
-    have = read(q) if q.exists() else None
-    if cur is not None and (have is None or _updated(cur) > _updated(have)):
-        take(cur)
-    elif have is None:
-        raise GitHubError(0, f"{old}: nothing to move (no file under {old} or {new})")
-    record_issue(new, n, store, was=old)
-    for _ in range(3):                      # the old file: removed, after a last look (a write that reached it while the move ran is taken first)
-        late = read(p) if p.exists() else None
-        if late is not None and _updated(late) > _updated(read(q)):
-            take(late)
-        p.unlink(missing_ok=True)
-        if not p.exists():
-            break
+    with _xlock.XLock("item"):              # the item lock, as every writer of an item file takes it (writes.ITEM_LOCK is this lock): a save of the item, in this process or the minute passes', waits for the move and sees the new file, never the old one's last read
+        cur = read(p) if p.exists() else (dict(it) if it else None)   # as it is now: an earlier move may have rewritten its after list
+        have = read(q) if q.exists() else None
+        if cur is not None and (have is None or _updated(cur) > _updated(have)):
+            take(cur)
+        elif have is None:
+            raise GitHubError(0, f"{old}: nothing to move (no file under {old} or {new})")
+        record_issue(new, n, store, was=old)
+        for _ in range(3):                      # the old file: removed, after a last look (a write that reached it while the move ran is taken first)
+            late = read(p) if p.exists() else None
+            if late is not None and _updated(late) > _updated(read(q)):
+                take(late)
+            p.unlink(missing_ok=True)
+            if not p.exists():
+                break
+    def names_old(x: dict[str, Any] | None) -> bool:
+        meta = x.get("metadata") if x else None
+        return isinstance(meta, dict) and x.get("status") != "completed" and isinstance(meta.get("after"), list) and old in meta["after"]
     for d in store.iterdir():
         if not (d.is_dir() and len(d.name) == 1 and d.name.isalpha()):
             continue
         for f in d.glob("*.json"):
-            if f.name.startswith("."):
+            if f.name.startswith(".") or not names_old(read(f)):      # found without the lock (a read); the ones that name `old` are read again and rewritten under it, one at a time
                 continue
-            x = read(f)
-            meta = x.get("metadata") if x else None
-            if not isinstance(meta, dict) or x.get("status") == "completed" or not isinstance(meta.get("after"), list) or old not in meta["after"]:
-                continue
-            meta["after"] = [new if g == old else g for g in meta["after"]]
-            _write_item(f, x)
+            with _xlock.XLock("item"):
+                x = read(f)
+                if not names_old(x):
+                    continue
+                x["metadata"]["after"] = [new if g == old else g for g in x["metadata"]["after"]]
+                _write_item(f, x)
     _move_anchors(store, old, new)
 
 

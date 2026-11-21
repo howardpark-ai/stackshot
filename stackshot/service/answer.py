@@ -363,11 +363,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
         _writes.save(gid, item, note=_answers()._answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(NAME, "mail") if via == "mail" else (OWNER, "board"))
         if parked or until or (kind == "decision" and eff["do"] == "wait"):
             _runner.WAKE_EVENT.set()           # the minute loop takes the new wake in
-        if kind == "decision" and eff["do"] == "drop":
-            try:
-                _wakes.release_after(gid, "dropped", "", "")      # the items that waited on this one
-            except Exception as e:  # noqa: BLE001
-                print(f"answer: {gid} dropped but its after releases failed: {e}", file=sys.stderr, flush=True)
+        dropped = kind == "decision" and eff["do"] == "drop"      # the items that waited on this one are released after both locks are let go (below): a release tells the waiters
         item["gid"] = gid
         told = [t for t in (_mail_deliver(gid, item, rec, then) if via == "mail" else _answer_deliver(gid, item, rec, then if stepped else "", handed)) if t]
         if via != "mail" and kind in ("decision", "step-reply") and not parked and eff["do"] != "wait" and item.get("status") == "open":   # a park is acted on here, and so is a wait put back; any other decision waits for a session's write
@@ -375,6 +371,11 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             st[gid] = {"ts": now, "owner": _session_id(_telling.holder(item)), "project": str(meta.get("project") or ""),
                        "told": told, "words": _answers()._answer_words(rec, 300)}
             _answers()._answers_save(st)
+    if dropped:
+        try:
+            _wakes.release_after(gid, "dropped", "", "")      # the items that waited on this one (it takes the item lock itself and tells them once it is let go: here, no lock is held)
+        except Exception as e:  # noqa: BLE001
+            print(f"answer: {gid} dropped but its after releases failed: {e}", file=sys.stderr, flush=True)
     kind = ("stepreply" if kind == "step-reply" else "donenote" if text else "done") if stepped else kind      # Done with a note in the box says the note went along
     print(f"answer: {gid} {kind} from {'a sent mail' if via == 'mail' else 'the board'}" + (f", parked until {parked}" if parked else "") + f", told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
     _hooks().publish()
@@ -387,6 +388,7 @@ def _answer_tick(now: float | None = None) -> list[str]:
     or missing item drops it silently, and so does a keeper that is the mover itself. → the gids escalated."""
     now = time.time() if now is None else now
     out: list[str] = []
+    tells: list[tuple[str, str, str]] = []      # (gid, the keeper's session id, the notice): sent after the lock is let go (a send that fails records itself on the item, and the item lock is taken before the pending answers, never after)
     with _answers()._ANSWER_LOCK:
         st = _answers()._answers_load()
         due = [g for g, e in st.items() if now - float(e.get("ts") or 0) >= _answers()._ANSWER_ESCALATE_S]
@@ -409,11 +411,13 @@ def _answer_tick(now: float | None = None) -> list[str]:
                 continue
             at = _hooks().when_words(dt.datetime.fromtimestamp(float(e.get("ts") or now), _hooks().zone()))
             olabel = _sr._session_label(owner) if owner else "none"
-            _telling.tell_woken(gid, sid, f"[stackshot] {OWNER} answered {_gh.shown(gid)} on the board at {at} and its mover {olabel} has not written to the item "
+            tells.append((gid, sid, f"[stackshot] {OWNER} answered {_gh.shown(gid)} on the board at {at} and its mover {olabel} has not written to the item "
                                   f"in {_answers()._ANSWER_ESCALATE_S / 60:g} min: {e.get('words') or ''}. As {_telling.keeper_words(project, stew)}: see that his answer is acted on "
-                                  f"(by {olabel}, or the session named in its needs). → {_item_url(gid) or _telling.notice_link(gid)}", tag="answer")
+                                  f"(by {olabel}, or the session named in its needs). → {_item_url(gid) or _telling.notice_link(gid)}"))
             out.append(gid)
         _answers()._answers_save(st)
+    for gid, sid, text in tells:
+        _telling.tell_woken(gid, sid, text, tag="answer")
     for gid in out:
         print(f"answer: {gid} unacted after {_answers()._ANSWER_ESCALATE_S / 60:g} min, its keeper told", file=sys.stderr, flush=True)
     return out

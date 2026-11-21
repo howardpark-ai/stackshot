@@ -183,8 +183,8 @@ def wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
         epoch = end.timestamp() - 1
     woke = []
     out: dict[str, list[tuple[str, dict[str, Any], str, str, bool]]] = {}     # session → [(gid, item, what, why, reminder)]: one message each (wake_tell)
+    wout: dict[str, list[tuple[str, dict[str, Any], str]]] = {}     # what the watchers turned, by recipient; sent below, after the wake lock, with the wake rows of the same session
     with _WAKE_LOCK:
-        wout: dict[str, list[tuple[str, dict[str, Any], str]]] = {}     # what the watchers turned, by recipient; sent below with the wake rows of the same session
         woke += _watching.watch_pass(epoch, wout)         # the waits the watchers own
         for gid, _p, it, at in wake_rows():
             if _watch.watches(it) or not due(at) or _hooks().old_wait_off():       # a watched wait is the watchers', above; after the switchover (fallback off) the old pass stands down
@@ -227,10 +227,10 @@ def wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
                 wake_notify(gid, it, what, out=out, reminder=True)
             else:
                 wake_notify(gid, it, what, out=out)
-        for sid, rows in out.items():
-            wake_tell(sid, rows, extra=_watching.watch_text(sid, wout.pop(sid, [])))     # one message per session for the whole pass
-        for sid, rows in wout.items():
-            _watching.watch_tell(sid, rows)
+    for sid, rows in out.items():            # after the wake lock is let go (the item lock was never held here): what was collected under the locks is sent when none is held
+        wake_tell(sid, rows, extra=_watching.watch_text(sid, wout.pop(sid, [])))     # one message per session for the whole pass
+    for sid, rows in wout.items():
+        _watching.watch_tell(sid, rows)
     return woke
 
 
@@ -367,13 +367,16 @@ def wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], 
     _telling.tell_woken(", ".join([*gids, *xgids]), sid, (xmark + " " if xmark else "") + "\n".join(text) + (f"\n{xtext}" if xtext else ""))
 
 
-def release_after(gid: str, outcome: str, superseded_by: str, writer: str, reason: str = "") -> list[str]:
+def release_after(gid: str, outcome: str, superseded_by: str, writer: str, reason: str = "", defer: "list[Callable[[], Any]] | None" = None) -> list[str]:
     """`gid` just closed. Every open item that waits on it (after) drops it: a superseded one is followed to its
     replacement (the item then waits on that, when it is open), a done or dropped one simply goes. An item left with no open
     prerequisite wakes: after, hold and wake go, both clocks move, and the sessions its notices go to are told what closed
     and how (a dropped one says so). The server's own act: no page owed. Then every other open item whose next or description names the closed one, and that no `after` link just woke,
-    tells its mover once (tell_close_mentions). → the gids released."""
+    tells its mover once (tell_close_mentions). → the gids released. `defer`: a caller that holds the item lock round more than this (a pass over many items) gets the notices as functions appended to this list, to
+    run once it lets the lock go, instead of having them sent from here; the writes of the waiters are made here either way. A waiter whose save raises ends the loop with the error going on up, and the
+    notices of the waiters released before it are still sent (or handed to `defer`)."""
     released = []
+    notices: list[Callable[[], Any]] = []      # sent at the end (or handed to `defer`): never from inside a lock this function takes
     waiting_on: set[str] = set()        # the open items that had the closed one in `after`: the wake above is their notice
     rep = _hooks().follow_superseded(superseded_by) if outcome == "superseded" and superseded_by else ""
     try:
@@ -381,58 +384,78 @@ def release_after(gid: str, outcome: str, superseded_by: str, writer: str, reaso
     except ToolError:
         rep_open = False
     wout: dict[str, list[tuple[str, dict[str, Any], str]]] = {}       # the watched waits this close ended, by recipient (one message each, below)
-    for g, _p in _item_files():
-        with _writes.ITEM_LOCK:         # the item read, changed and saved under its lock (a write that landed meanwhile, here or in another process, is kept); its notice is sent after
-            try:
-                it = _load(g)
-            except Exception:
-                continue
-            meta = dict(it.get("metadata") or {})
-            if it.get("status") != "open" or (gid not in _after_of(meta) and not _wl.lines_for_item(meta, gid, open_only=False)):      # a wait on a list is found by any of its item lines
-                continue
-            waiting_on.add(g)
-            if _wl.valid(meta):             # a wait on a list is the watchers' alone, never today's release below (two mechanisms must not end the same item)
-                if _watch.watches(it) and _watching.watch_item_closed(g, it, gid, outcome, rep if rep_open else "", writer, wout, superseded_by):
-                    released.append(g)
-                continue
-            if _watch.watches(it) and not (_wt.stored_until(meta) and not _uw.kind_of(meta) and _after_of(meta)):         # a watched wait is the watchers', not today's release below (a date with an after link and no kind is a park on the closing, released below)
-                if _watching.watch_item_closed(g, it, gid, outcome, rep if rep_open else "", writer, wout, superseded_by):
-                    released.append(g)
-                continue
-            if _hooks().old_wait_off():            # the switchover without its fallback: only a watcher ends a wait
-                continue
-            after = [x for x in _after_of(meta) if x != gid]
-            if rep_open and rep not in after and rep != g:
-                after.append(rep)
-            meta["after"] = after
-            left = _hooks().after_open(meta)
-            if left:                  # another blocker is still open: the wait goes on, on the ones left (a dropped one is simply no longer waited on)
-                it["metadata"] = meta; it["updated"] = time.time()
-                _writes.save(g, it, note=f"{_gh.ref(gid)} closed as {outcome}" + (f", followed to {_gh.ref(rep)}" if rep_open else "")   # the History note: other items as #N
-                      + f"; still waits on {', '.join(_gh.ref(x) for x in left)}")
-                print(f"after: {g} now waits on {', '.join(left)} ({gid} closed as {outcome}" + (f", followed to {rep}" if rep_open else "") + ")", file=sys.stderr, flush=True)
-                continue
-            had_until = bool(_wt.stored_until(meta))
-            meta.pop("after", None); meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None)
-            if had_until and _watch.stored_kind(meta) == "item":
-                meta.pop("wait_kind", None)           # the wait it stood on is over: its date and its kind go together
-            _hooks().state_end(meta, "blocked", "parked")     # the item it waited on is closed: the wait is over
-            meta.pop("wait_failed", None); meta.pop("waiting", None)   # released: nothing is waited on, so no failed wait stays, and a `waiting` record an earlier version wrote goes too (the wake notice below is the one the keeper gets)
-            if "confirmed" not in it:
-                it["confirmed"] = _hooks().rmod_confirmed_at(it, _p)
-            it["metadata"] = meta; it["updated"] = time.time(); it["state_updated"] = it["updated"]
-            how = lambda sh: ("was dropped" if outcome == "dropped" else f"was superseded by {sh(rep or superseded_by)}, which is closed too" if outcome == "superseded"
-                              else "closed (done)")   # sh: ghsync.shown for the notice a session reads, ghsync.ref for a History note (#N), str for the stderr line
-            what = lambda sh: f"woke: {sh(gid)}, the last item it waited on, {how(sh)}" + (f" by {_session_label(writer)}" if writer else "")
-            _writes.save(g, it, note=f"{what(_gh.ref)}: {back_words(meta, _gh.ref)}"); released.append(g)   # phase 2 prep: the note is the History line, written by the server; other items as #N
-            print(f"after: {g} released, {gid} {how(str)} — {it.get('subject')}", file=sys.stderr, flush=True)
-        wake_notify(g, it, what(_gh.shown))
-    for sid, rows in wout.items():
-        _watching.watch_tell(sid, rows)
+    finished = False
     try:
-        _telling.tell_close_mentions(gid, outcome, reason, writer, waiting_on)
-    except Exception as e:  # noqa: BLE001  — the close is saved and published; a notice that fails is a stderr line, never a failed close
-        print(f"close: {gid} mentions not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        for g, _p in _item_files():
+            with _writes.ITEM_LOCK:         # the item read, changed and saved under its lock (a write that landed meanwhile, here or in another process, is kept); its notice is sent after
+                try:
+                    it = _load(g)
+                except Exception:
+                    continue
+                meta = dict(it.get("metadata") or {})
+                if it.get("status") != "open" or (gid not in _after_of(meta) and not _wl.lines_for_item(meta, gid, open_only=False)):      # a wait on a list is found by any of its item lines
+                    continue
+                waiting_on.add(g)
+                if _wl.valid(meta):             # a wait on a list is the watchers' alone, never today's release below (two mechanisms must not end the same item)
+                    if _watch.watches(it) and _watching.watch_item_closed(g, it, gid, outcome, rep if rep_open else "", writer, wout, superseded_by):
+                        released.append(g)
+                    continue
+                if _watch.watches(it) and not (_wt.stored_until(meta) and not _uw.kind_of(meta) and _after_of(meta)):         # a watched wait is the watchers', not today's release below (a date with an after link and no kind is a park on the closing, released below)
+                    if _watching.watch_item_closed(g, it, gid, outcome, rep if rep_open else "", writer, wout, superseded_by):
+                        released.append(g)
+                    continue
+                if _hooks().old_wait_off():            # the switchover without its fallback: only a watcher ends a wait
+                    continue
+                after = [x for x in _after_of(meta) if x != gid]
+                if rep_open and rep not in after and rep != g:
+                    after.append(rep)
+                meta["after"] = after
+                left = _hooks().after_open(meta)
+                if left:                  # another blocker is still open: the wait goes on, on the ones left (a dropped one is simply no longer waited on)
+                    it["metadata"] = meta; it["updated"] = time.time()
+                    _writes.save(g, it, note=f"{_gh.ref(gid)} closed as {outcome}" + (f", followed to {_gh.ref(rep)}" if rep_open else "")   # the History note: other items as #N
+                          + f"; still waits on {', '.join(_gh.ref(x) for x in left)}")
+                    print(f"after: {g} now waits on {', '.join(left)} ({gid} closed as {outcome}" + (f", followed to {rep}" if rep_open else "") + ")", file=sys.stderr, flush=True)
+                    continue
+                had_until = bool(_wt.stored_until(meta))
+                meta.pop("after", None); meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None)
+                if had_until and _watch.stored_kind(meta) == "item":
+                    meta.pop("wait_kind", None)           # the wait it stood on is over: its date and its kind go together
+                _hooks().state_end(meta, "blocked", "parked")     # the item it waited on is closed: the wait is over
+                meta.pop("wait_failed", None); meta.pop("waiting", None)   # released: nothing is waited on, so no failed wait stays, and a `waiting` record an earlier version wrote goes too (the wake notice below is the one the keeper gets)
+                if "confirmed" not in it:
+                    it["confirmed"] = _hooks().rmod_confirmed_at(it, _p)
+                it["metadata"] = meta; it["updated"] = time.time(); it["state_updated"] = it["updated"]
+                how = lambda sh: ("was dropped" if outcome == "dropped" else f"was superseded by {sh(rep or superseded_by)}, which is closed too" if outcome == "superseded"
+                                  else "closed (done)")   # sh: ghsync.shown for the notice a session reads, ghsync.ref for a History note (#N), str for the stderr line
+                what = lambda sh: f"woke: {sh(gid)}, the last item it waited on, {how(sh)}" + (f" by {_session_label(writer)}" if writer else "")
+                _writes.save(g, it, note=f"{what(_gh.ref)}: {back_words(meta, _gh.ref)}"); released.append(g)   # phase 2 prep: the note is the History line, written by the server; other items as #N
+                print(f"after: {g} released, {gid} {how(str)} — {it.get('subject')}", file=sys.stderr, flush=True)
+            notices.append(lambda g=g, it=it, what=what: wake_notify(g, it, what(_gh.shown)))
+        finished = True
+    finally:
+        # what was collected is sent (or handed to `defer`) on every way out: a waiter saved and released before a later waiter's save raised has its notice (an error goes on up; the mention notice
+        # of the close waits for a loop that ended)
+        for sid, rows in wout.items():
+            notices.append(lambda sid=sid, rows=rows: _watching.watch_tell(sid, rows))
+        if finished:
+            def mentions() -> None:
+                try:
+                    _telling.tell_close_mentions(gid, outcome, reason, writer, waiting_on)
+                except Exception as e:  # noqa: BLE001  — the close is saved and published; a notice that fails is a stderr line, never a failed close
+                    print(f"close: {gid} mentions not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+            notices.append(mentions)
+        if defer is not None:
+            defer.extend(notices)
+        else:
+            for fn in notices:
+                if finished:
+                    fn()
+                else:
+                    try:
+                        fn()
+                    except Exception as e:  # noqa: BLE001  — the error that is on its way up is the one the caller sees
+                        print(f"close: {gid} a notice was not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return released
 
 

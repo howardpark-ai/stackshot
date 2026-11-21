@@ -52,9 +52,9 @@ from stackshot.service.store import _load
 from stackshot.waits import event_waits as _ew
 
 
-def released_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: bool, now: float) -> dict[str, Any] | None:
-    """The release event of proof_item (release.sh's call and the sweep): pull request `key` (#`n`) is live."""
-    return _proofs.proof_item(gid, n, key, live, anchored, dry, now, _sp.PR_RELEASED)
+def released_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: bool, now: float, sends: "list[Any] | None" = None) -> dict[str, Any] | None:
+    """The release event of proof_item (release.sh's call and the sweep): pull request `key` (#`n`) is live. `sends`: where the notices are collected (see proof_item)."""
+    return _proofs.proof_item(gid, n, key, live, anchored, dry, now, _sp.PR_RELEASED, sends=sends)
 
 
 def released(pr: str, sha: str = "", dry: bool = False) -> dict[str, Any]:
@@ -98,15 +98,17 @@ def released(pr: str, sha: str = "", dry: bool = False) -> dict[str, Any]:
     when = f"merged at {msha[:7]} on {_stallsvc.stall_when(mct)}, " + (f"in the checkout at {head[:7]}" if foreign else f"in the last-good commit {good[:7]}")
     anchors = _live.released_anchors()
     rows = []
+    sends: list[Any] = []                 # the notices of the loop, sent when the item lock is let go
     with _writes.ITEM_LOCK:
         for gid, _p in _item_files():
             try:
-                r = released_item(gid, n, key, when, anchors.get(gid, set()), dry, now)
+                r = released_item(gid, n, key, when, anchors.get(gid, set()), dry, now, sends)
             except Exception as e:  # noqa: BLE001  — one item that cannot be read or written never stops the others
                 print(f"released: {gid} not settled for PR #{n}: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
                 continue
             if r:
                 rows.append(r)
+    _proofs.flush_sends(sends)
     if not dry and any(r.get("action") in ("closed", "ticked", "told") for r in rows):
         _hooks().publish()
     if not dry:                    # an event wait on this release (or on its merge) is over: its mover hears it live (once: a session the step notice above told about the item is not told again)
@@ -129,6 +131,7 @@ def sweep_released(dry: bool = False) -> dict[str, Any]:
     rx = re.compile(r"\brelease\s+(?:(?:PR|pull request)\s*)?#(\d+)(?!\d)|\brelease\s+(?:(?:PR|pull request)\s+)?(https?://github\.com/\S+)", re.I)
     now = time.time()
     rows = []
+    sends: list[Any] = []                 # the notices of the loop, sent when the item lock is let go
     with _writes.ITEM_LOCK:
         for gid, _p in _item_files():
             try:
@@ -146,13 +149,14 @@ def sweep_released(dry: bool = False) -> dict[str, Any]:
                 for n in sorted(x for x in named if x in merged):
                     sha, ct = merged[n]
                     live = f"merged at {sha[:7]} on {_stallsvc.stall_when(ct)}, in the last-good commit {good[:7]}"
-                    r = released_item(gid, n, f"{own}#{n}", live, anchors.get(gid, set()), dry, now)
+                    r = released_item(gid, n, f"{own}#{n}", live, anchors.get(gid, set()), dry, now, sends)
                     if r:
                         rows.append({**r, "pr": n})
                         if r.get("action") == "closed":
                             break
             except Exception as e:  # noqa: BLE001
                 print(f"sweep-released: {gid} not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    _proofs.flush_sends(sends)
     if not dry and any(r.get("action") in ("closed", "ticked", "told") for r in rows):
         _hooks().publish()
     if not dry:                    # the catch-up of the event waits on a release: the same reading of the checkout
