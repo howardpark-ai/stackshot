@@ -1246,6 +1246,7 @@ RESTART_ONLY: dict[str, str] = {
     "auth.base_url": "",                          #   redirect URIs, the portal token's identity
     "auth.allowed_client_redirect_uris": "",
     "auth.portal_identity": "",
+    "locks": "",                                  # the store locks are made at import and each holds or skips its flock for a whole hold
     "paths": "",                                  # the store, state and secrets dirs hold the running process's files, ids and locks,
                                                   #   and anchor-hub watches them; the others are tied to them (a path move is a restart)
     "ids.letter": "",                             # its store dir is made at import; named in the connector's instructions

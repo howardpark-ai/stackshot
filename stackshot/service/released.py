@@ -256,7 +256,8 @@ def _release_green(to: str, text: str, sender: str, machine: str, pr: str) -> st
     note = "released: " + _clip_line(re.sub(r"^\[release\]\s*", "", gist), 400)
     for g in dict.fromkeys(g for gs in _pr_items([pr]).values() for g in gs):
         try:
-            _writes.save(g, _svcstore._load(g), note=note)       # unchanged: the server's note in the History; no clock moves, no page owed
+            with _writes.ITEM_LOCK:         # read and saved under the item lock: a write that lands between is kept
+                _writes.save(g, _svcstore._load(g), note=note)       # unchanged: the server's note in the History; no clock moves, no page owed
             commented.append(g)
         except Exception as e:  # noqa: BLE001  — a comment that fails never fails the log line
             print(f"release: {g} not commented: {e}", file=sys.stderr, flush=True)

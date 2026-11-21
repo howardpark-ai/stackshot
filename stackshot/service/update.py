@@ -1508,11 +1508,12 @@ def confirm_item(item_id: str, sender: str = "") -> str:
     """Mark an item still true: sets its `confirmed` clock only (the confirm tool without its identity and sender checks). item_id: board#N (a bare number N is read as board#N)."""
     h = _hooks()
     gid = _norm_id(item_id, bare=True)
-    item = _load(gid)
-    item["confirmed"] = time.time()
-    # a bare confirm moves `confirmed` only, never `activity`
-    # a confirm changes nothing but its clock: no mover is settled and no hand-off record ended by it
-    _writes.save(gid, item, writer=h.session_id(sender) if sender.strip() else _telling.holder(item), activity=_activity.CONFIRM, ctx=_writes.QUIET)
+    with _writes.ITEM_LOCK:         # read, changed and saved under the item lock: a write that lands between (an update, a pass in another process) is kept
+        item = _load(gid)
+        item["confirmed"] = time.time()
+        # a bare confirm moves `confirmed` only, never `activity`
+        # a confirm changes nothing but its clock: no mover is settled and no hand-off record ended by it
+        _writes.save(gid, item, writer=h.session_id(sender) if sender.strip() else _telling.holder(item), activity=_activity.CONFIRM, ctx=_writes.QUIET)
     h.publish()
     item["gid"] = gid
     at = h.render_when_words(dt.datetime.fromtimestamp(item["confirmed"], h.zone()))

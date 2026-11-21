@@ -10,15 +10,15 @@ from __future__ import annotations
 import json
 import os
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Any
 
 from stackshot.core import config as _cfg
+from stackshot.core import xlock as _xlock
 from stackshot.notify import foryou as _fy
 
-_LOCK = threading.RLock()
+_LOCK = _xlock.XLock("for-you")
 
 
 def path() -> Path:

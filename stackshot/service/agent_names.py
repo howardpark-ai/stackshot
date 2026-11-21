@@ -127,6 +127,12 @@ def _one_mover_clash(item: dict[str, Any], agent: str) -> str:
 
 
 def _auto_name(gid: str, item: dict[str, Any], agent: str, writer: str, why: str, tail: str = "", nm: dict[str, str] | None = None, one_mover: bool = False) -> str:
+    """_auto_name_save, then the notice it owes. The caller holds the item lock (an update does) or has no one to keep out."""
+    head, tell = _auto_name_save(gid, item, agent, writer, why, tail, nm, one_mover)
+    return head + tell()
+
+
+def _auto_name_save(gid: str, item: dict[str, Any], agent: str, writer: str, why: str, tail: str = "", nm: dict[str, str] | None = None, one_mover: bool = False) -> tuple[str, Callable[[], str]]:
     """Name a background agent in an open item's needs as the server's own act: `why` is the record's line ("handover message from
     my-board", "update by my-engineer"), `tail` the mover's notice's words ("handed over", "after its
     update"; "" tells the mover nothing: a close's own notice names the closer), `writer` the session whose act it was (a mover
@@ -134,29 +140,30 @@ def _auto_name(gid: str, item: dict[str, Any], agent: str, writer: str, why: str
     and the mover hears once that the agent now works on it too. Nothing for an agent listed in [pilot] never_named. → the reply
     line, or ""."""
     if item.get("status") != "open" or not agent:
-        return ""
+        return "", lambda: ""
     nm = _anc.names() if nm is None else nm
     if _never_named(agent, nm):
-        return ""
+        return "", lambda: ""
     meta = item.get("metadata")
     if not isinstance(meta, dict):
         meta = item["metadata"] = {}
     me = _anc.canonical(agent, nm)
     if any(_anc.canonical(s, nm) == me for s in _needs_sessions(meta)):
-        return ""
+        return "", lambda: ""
     if one_mover:         # a handover message never leaves the item with a second mover: the next write of its mover would be refused
         clash = _one_mover_clash(item, agent)
         if clash:
-            return f"\n(did not name {agent} in {_gh.shown(gid)}'s needs: {clash}, and an item has one mover. To hand it to {agent}, write the item: update(mover={agent}))"
+            return f"\n(did not name {agent} in {_gh.shown(gid)}'s needs: {clash}, and an item has one mover. To hand it to {agent}, write the item: update(mover={agent}))", lambda: ""
     prev = _telling.holder(item)       # the session that held the item before the agent is named hears of it
     already = list(_needs_sessions(meta))
     _needs_store(meta, _canon_needs([*_needs_of(meta), _sr._store_ref(agent)], nm))
     _writes.save(gid, item, note=f"named {agent}: {why}")
     was = ", ".join(_sr._session_label(s) for s in already)
-    told = ""
-    if tail:
-        told = _telling.tell_owner(gid, item, f"now names {agent} in its needs" + (f" too ({was} {'was' if len(already) == 1 else 'were'} already named)" if already else "") + f", {tail}", writer, to=prev)
-    return f"\n(named {agent} in {_gh.shown(gid)}'s needs: {why}" + (f"; {was} {'stays' if len(already) == 1 else 'stay'} named" if already else "") + ")" + told
+    def tell() -> str:
+        if not tail:
+            return ""
+        return _telling.tell_owner(gid, item, f"now names {agent} in its needs" + (f" too ({was} {'was' if len(already) == 1 else 'were'} already named)" if already else "") + f", {tail}", writer, to=prev)
+    return f"\n(named {agent} in {_gh.shown(gid)}'s needs: {why}" + (f"; {was} {'stays' if len(already) == 1 else 'stay'} named" if already else "") + ")", tell
 
 
 def _name_on_handover(to: str, text: str, sender: str, idx: dict[str, dict[str, Any]] | None = None, via: str = "") -> str:
@@ -167,11 +174,13 @@ def _name_on_handover(to: str, text: str, sender: str, idx: dict[str, dict[str, 
         return ""
     out, nm = "", _anc.names()
     for g in _item_refs(text):
-        try:
-            it = _svcstore._load(g)
-        except ToolError:
-            continue
-        out += _auto_name(g, it, agent, sender, f"handover message from {_sr._session_label(sender)}" + (f" ({via})" if via else ""), "handed over", nm, one_mover=True)
+        with _writes.ITEM_LOCK:         # read, named and saved under the item lock; the mover is told after it is let go
+            try:
+                it = _svcstore._load(g)
+            except ToolError:
+                continue
+            head, tell = _auto_name_save(g, it, agent, sender, f"handover message from {_sr._session_label(sender)}" + (f" ({via})" if via else ""), "handed over", nm, one_mover=True)
+        out += head + tell()
     if out:
         _hooks().publish()
     return out
