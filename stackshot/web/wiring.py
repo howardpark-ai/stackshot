@@ -267,6 +267,7 @@ def install_late() -> None:
         answer_tick=_late_in(_answer_svc, "_answer_tick"),
         roles_sync_safe=_late_in(_project_registry, "_roles_sync_safe"),
         pilot_fallback_tick=_late_in(_pdsvc, "_pilot_fallback_tick"),
+        loop_tick=_late_in(_audit_ticks, "_loop_tick"),
         filing_tick=_late_in(_audit_ticks, "_filing_tick"),
         dates_tick=_late_in(_audit_ticks, "_dates_tick"),
         silence_tick=_late_in(_audit_ticks, "_silence_tick"),

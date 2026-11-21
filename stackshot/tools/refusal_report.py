@@ -4,7 +4,7 @@ Reads the call log the server keeps (call_log.py: one line per create, update, c
 `<paths.state>/calls/<YYYY-MM>.jsonl`) and reports, for one calendar week Monday to Sunday in the instance timezone: how many create and update calls
 were refused of how many, the share, the week before it, the kinds of refusal that make most of them, the sessions that were refused most, and what the
 server corrected instead of refusing (a bare item number, a wake with seconds or an offset, a subject with no scope prefix, a long description bullet split at its sentences,
-a step left out of next kept open, a subject or a status line cut at its last word that fits, an ask-by with a time of day cut to its day, a bare address in a description written as a link, the server's own fixes of a wait), and how many of those fixes the writer sent back (call_log.bounces), and the streaks: one writer refused STREAK_MIN (3) times or more on one call (the same tool and item) with each refusal within STREAK_WINDOW (15 minutes) of the one before, counted by kind and listed first, since a streak marks a gap in the tool text. Tokenless: no model call.
+a step left out of next kept open, a subject or a status line cut at its last word that fits, an ask-by with a time of day cut to its day, a bare address in a description written as a link, the server's own fixes of a wait), and how many of those fixes the writer sent back (call_log.bounces), and the streaks: one writer refused STREAK_MIN (3) times or more on one call (the same tool and item) with each refusal within STREAK_WINDOW (15 minutes) of the one before, counted by kind and listed first, since a streak marks a gap in the tool text. One more line, when the week or the one before it had any: the wait loops the minute walk found (audit/wait_loops.py: items that wait on each other), counted from its log. Tokenless: no model call.
 
     refusal_report.py run [--dry-run] [--force] [--week YYYY-MM-DD]
     audit.py refusals [--dry-run] [--force] [--week YYYY-MM-DD]       the same, from the audit's own entry point (the timer's unit runs it after the audit run)
@@ -182,6 +182,8 @@ def build(monday: dt.date, cur: dict[str, Any], prev: dict[str, Any], *, top: in
         before_back, before_made = sum(prev["bounces"].values()), sum(prev["fixes"].values())
         lines.append(f"- fixes the writer sent back: {sent_back:,} of {made:,} ({_share(sent_back, made)})" + (f"; the week before {before_back:,} of {before_made:,} ({_share(before_back, before_made)})" if before_made else "")
                      + (" (" + " · ".join(f"{k} {v:,}" + (f" of {cur['fixes'][k]:,}" if cur["fixes"].get(k) else "") for k, v in cur["bounces"].most_common()) + ")" if cur["bounces"] else ""))
+    if cur.get("loops") or prev.get("loops"):
+        lines.append(f"- wait loops found (items that wait on each other, told to their movers): {cur.get('loops', 0):,}; the week before {prev.get('loops', 0):,}")
     first = cur["first"]
     if first is not None and first > week_bounds(monday)[0] + 12 * 3600:
         lines.append(f"- the call log starts {shown(dt.datetime.fromtimestamp(first, z).date())}: the days before it are not counted")
@@ -191,7 +193,10 @@ def build(monday: dt.date, cur: dict[str, Any], prev: dict[str, Any], *, top: in
 def collect(monday: dt.date) -> tuple[dict[str, Any], dict[str, Any]]:
     a, b = week_bounds(monday)
     p, _ = week_bounds(monday - dt.timedelta(days=7))
-    return tally(list(_cl.read(a, b))), tally(list(_cl.read(p, a)))
+    cur, prev = tally(list(_cl.read(a, b))), tally(list(_cl.read(p, a)))
+    from stackshot.audit import wait_loops as _loops  # noqa: PLC0415
+    cur["loops"], prev["loops"] = _loops.log_count(a, b), _loops.log_count(p, a)      # rings of items that wait on each other, found by the minute walk
+    return cur, prev
 
 
 def _read_sent(p: Path) -> dict[str, Any]:

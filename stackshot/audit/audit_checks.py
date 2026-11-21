@@ -69,6 +69,7 @@ FIX = {
     "wait-end": ("say what ends the wait: after=[\"board#N\"]; wait_kind=event with wait_event=<pr_merged|pr_released owner/repo#n | box_online <machine> | recycle | fleet_op <verb>> and ask_by=YYYY-MM-DD; "
                  "wait_kind=anchor with wait_anchor=<link> (add the link with the anchors tool); wait_kind=relay with wait_event=<who> and ask_by (news only " + _cfg.owner() + " relays); step_proof for a step a pull request's merge or release finishes; "
                  "or rewrite the line as the action to take now"),
+    "wait-loop": "end the newest link of the loop: clear that item's `after`, or reword its step as the action to take now, and say what it does instead",
     "event-missing": "add an event type for it to event_waits.py, or tell the mover to wait on a time or a relay",
     "ask-options": f"rewrite the ask with options ({_render.OPTIONS_MIN} to {_render.OPTIONS_MAX} answers {_cfg.owner()} could pick, one recommended and named in the Recommend part), or reword the Decide part as a yes/no whose Recommend answers yes or no",
     "reads-as-wait": "set the wait itself (a park with its reason, an after item, an event wait), or write next as the action to take now",
@@ -79,11 +80,11 @@ FIX = {
 # (`audit_run.finding_route`). A category left out keeps the marked path to -main, and so does one named nowhere (a new check) until it is classified here.
 #   no need of him  ask-missing, ask-options (the ask's wording and options), next rules, board checks (arbitrary-hold, mislabeled-state), reads-as-wait, why-not-now, wait-end (how the wait is filed),
 #                   next-done, wrong-needs, unneeded-escalation, older-than-page, obsolete-wait, goal-unclear (the judgment checks: each says what the item's text should say),
-#                   step-handover (a session hands the item on), proof-wait (a session stages the event and closes the item)
+#                   step-handover (a session hands the item on), proof-wait (a session stages the event and closes the item), wait-loop (items that wait on each other: a session ends the newest link)
 #   needs him       stale (an item he moves is past its own wake: only he writes a date, a decision or a done; the dates pass leaves an item he moves alone today, so it is kept for a pass that does)
 #   its own `to`    stuck-elsewhere (the session whose step it is), event-missing (the builder): not the person's findings, unchanged
 NO_PERSON_NEED = frozenset({"ask-missing", "ask-options", "next rules", "board checks", "reads-as-wait", "why-not-now", "wait-end", "next-done", "wrong-needs", "unneeded-escalation",
-                            "older-than-page", "obsolete-wait", "goal-unclear", "step-handover", "proof-wait"})
+                            "older-than-page", "obsolete-wait", "goal-unclear", "step-handover", "proof-wait", "wait-loop"})
 
 
 def needs_person(category: Any) -> bool:
@@ -335,7 +336,7 @@ def field_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], no
 
 # ---------- the filing rules: is the item filed in the right state? ----------
 FILING_KINDS = ("arbitrary-hold", "mislabeled-state")      # the board report's kinds that are filing rules (all of them now)
-CHECKS_FILING = ("stuck-elsewhere", "board checks", "reads-as-wait", "step-handover", "ask-options", "why-not-now", "wait-end", "event-missing")      # the categories the filing pass can raise
+CHECKS_FILING = ("stuck-elsewhere", "board checks", "reads-as-wait", "step-handover", "ask-options", "why-not-now", "wait-end", "event-missing", "wait-loop")      # the categories the filing pass can raise (`wait-loop` is the minute walk's, audit/wait_loops.py, told through the same delivery)
 
 
 _YESNO_FIRST_RX = re.compile(r"\s*(?:yes|no|approve|decline)\b", re.I)      # a Recommend part that opens by answering a yes/no

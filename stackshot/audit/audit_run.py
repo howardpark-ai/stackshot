@@ -794,9 +794,9 @@ def chase_to(env: Env, project: str, mover: str, first_to: str = "") -> tuple[st
 
 
 def finding_key(f: dict[str, Any]) -> tuple[str, str, str]:
-    """What makes two findings the same finding: the item, the check and, for the two reports whose category holds several checks (`next rules`: the rule, `board checks`: the kind), which one."""
+    """What makes two findings the same finding: the item, the check and, for the reports whose category holds several checks (`next rules`: the rule, `board checks`: the kind, `wait-loop`: the ring), which one."""
     cat = str(f.get("category") or "")
-    sub = str(f.get("detail") or "").split(":", 1)[0].strip() if cat in ("next rules", "board checks") else ""
+    sub = str(f.get("detail") or "").split(":", 1)[0].strip() if cat in ("next rules", "board checks", "wait-loop") else ""      # a wait loop's detail opens `loop <fingerprint>:`, so a changed ring is another finding
     return str(f.get("id") or ""), cat, sub
 
 

@@ -2,7 +2,7 @@
 
 The audit decides in audit/ (the pure halves: audit_checks, audit_run, hourly, busy_tell, hand_idle, silence, subagent_tie) and the server writes and sends: this module is the writing half, run by the minute set
 (service/runner.py) through its table. The ten-minute filing pass (`_filing_tick`), the dates pass (`_dates_tick`, with the expected-time look `_dates_expected_tick` and the For you list's due-date look it opens),
-the archive sweep (`_archive_tick`) and the audit tick (`_silence_tick`: the hourly audit line `_hourly_tick`, the idle hand-over `_hand_idle_tick`, the long-busy message `_busy_tell_tick`) are here, and the
+the minute wait-loop walk (`_loop_tick`), the archive sweep (`_archive_tick`) and the audit tick (`_silence_tick`: the hourly audit line `_hourly_tick`, the idle hand-over `_hand_idle_tick`, the long-busy message `_busy_tell_tick`) are here, and the
 balancer (`_balance_tick`, its own minute tick) with the reads it shares: `_silence_env`, the environment every audit pass is built with; `_queue_map`, who is queued behind another item, kept `_QUEUE_TTL` seconds in
 `_QUEUE_CACHE`; `_mover_subagents`, the running subagents of a mover; and `_BALANCE_LOGGED`, the stderr lines the balancer throttles.
 
@@ -59,6 +59,15 @@ def _filing_tick() -> "dict[str, Any] | None":
         return None
     _ar = _hooks().audit_mod("audit_run")
     return _ar.filing_pass(env=_ar.Env(deliver=_wait_gates._filing_deliver, step_mark=_wait_gates._front_step_mark, step_move=_wait_gates._front_step_move, wake_park=_wait_fixes._wake_park, wait_end=_wait_fixes._wait_end_fix, wait_facts=_wait_fixes._wait_end_facts))
+
+
+def _loop_tick() -> "dict[str, Any] | None":
+    """The minute wait-loop walk (audit/wait_loops.py): every link of every open item is read for a ring of items that wait on each other, and the movers of the items of a ring found are told once (and again only on the audit's
+    re-tell cadence). Read only on the board; stands still when the audit is off or runs in agent mode (the rollback), like the filing pass, and while a daily run is in progress."""
+    if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
+        return None
+    _ar = _hooks().audit_mod("audit_run")
+    return _hooks().audit_mod("wait_loops").loop_pass(env=_ar.Env(deliver=_wait_gates._filing_deliver))
 
 
 def _dates_expected_tick() -> "dict[str, Any] | None":
