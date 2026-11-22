@@ -388,6 +388,12 @@ r = subprocess.run([sys.executable, RQ, "resume", "--source", "msg", "--sessions
 q = json.loads(r.stdout or "{}")
 check("reboot queue resume with no session registry rows: a key with no fleet row is kept held, none is reported retired",
       r.returncode == 0 and q.get("retired_sessions") == [] and (F / "held-resume-msg.txt").read_text() == "ghost-pane\nlocal-pane\nold-retired-pane\n", (r.stdout + r.stderr[-300:], (F / "held-resume-msg.txt").read_text()))
+(F / "held-resume-msg.txt").write_bytes(b"old-retired-pane\n\xff\xfe\n")      # a hold file that cannot be read (bad bytes): read as an empty file by the resume and by the readers, never a crash
+check("a hold file with bad bytes counts as empty for the readers: only the other tool's file holds", inbox.blocked("msg")[2] == {"fleet-tool-hold"}, inbox.blocked("msg"))
+r = subprocess.run([sys.executable, RQ, "resume", "--source", "msg", "--sessions", str(T / "listed.txt"), "--wait", "2"], capture_output=True, text=True, env=env)
+q = json.loads(r.stdout or "{}")
+check("reboot queue resume with an unreadable hold file: no crash, it is treated as empty (only the keys with a line queued now are held, the earlier hold is not kept) and the file is rewritten readable",
+      r.returncode == 0 and q.get("held_sessions") == ["ghost-pane", "local-pane"] and q.get("retired_sessions") == [] and (F / "held-resume-msg.txt").read_text() == "ghost-pane\nlocal-pane\n", (r.stdout + r.stderr[-300:], (F / "held-resume-msg.txt").read_bytes()))
 (F / "paused-msg.json").unlink(); (F / "held-msg.txt").write_text(""); (F / "held-hub.txt").write_text("")
 check("a key held in the resume's file keeps its line after the pause is lifted", inbox.take({U(40): "local-pane"}, now=time.time() + 60) == [])
 (F / "held-resume-msg.txt").write_text("")

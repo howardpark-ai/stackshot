@@ -115,9 +115,11 @@ def main():
     allowed = listed | {here.get(u) for u in listed if here.get(u)}
     here_keys = set(here) | {n for n in here.values() if n}
     delivered = held = failed = 0; to, held_keys, failed_keys = set(), [], []; held_by = {}
+    def deliverable(k):                          # the one test the push queue and the kept holds share: a key the reboot did not touch, or one a resume verified
+        return k in allowed or k.startswith("cse_") or (k in elsewhere and k not in here_keys)
     env = {**os.environ, "ANCHOR_PUSH_SOURCE": src, "ANCHOR_PUSH_FORCE": "1"}
     for key, n in q.items():                     # the push queue: cloud sessions, and panes on this box that were not live
-        go = key in allowed or key.startswith("cse_") or (key in elsewhere and key not in here_keys)
+        go = deliverable(key)
         if not go:
             held += n; held_keys.append(key); held_by[key] = n; continue
         r = subprocess.run([*_interp.resilient(PUSH), "--flush", key], capture_output=True, text=True, env=env, timeout=150)
@@ -128,9 +130,8 @@ def main():
     extra = {"waiting": ib["waiting"], "waiting_sessions": ib["waiting_sessions"]}
     # The resume's own hold file only (held-<src>.txt is the fleet tool's). It keeps a key an earlier resume held that this run neither
     # verified nor found queued, so a hold is never lost for want of a queued line; a key no session row names is retired and is not kept.
-    verified = lambda k: k in allowed or k.startswith("cse_") or (k in elsewhere and k not in here_keys)
     hf = os.path.join(A, f"held-resume-{src}.txt")
-    keep = set(held_keys) | {k for k in lines_of(hf) if not verified(k)}
+    keep = set(held_keys) | {k for k in lines_of(hf) if not deliverable(k)}
     retired = sorted(k for k in keep if not has_row(k, fl))
     dropped = set(retired)
     held_keys = [k for k in held_keys if k not in dropped]
