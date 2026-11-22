@@ -22,7 +22,8 @@ on no page answers 200 'not listed', a lost, ghost or refused write is an error 
 the form gate (a label AND a machine), bad names, an unknown project, a page gbrain does not give, over HTTP and client.py; and the retire lines an
 earlier release kept on the ledger are dropped; and the archiving that follows a retire (project_archive.py): the last agent retired with no open item archives the page (status line, two puts, a timeline line),
 open items (a sub-page's too) put the project on the wait list and the ten-minute sweep archives it once none is left (completed or handed away), a pending agent or an agent back keeps it staffed, a page already done
-or with no status line, a failed status write that does not fail the retire, and the dry-run tool tools/archive_empty_projects.py.
+or with no status line, a failed status write that does not fail the retire, and the dry-run tool tools/archive_empty_projects.py; and `get agent-name`: the register's name checks as a read
+(each code, case-folded clashes, the project's own state, first_free, a name asked twice, the limit of 20, no write and no lock, and a table that holds the register and the read to the same code and text for every name).
 
     tests/run-suite projects_picker        → exit 0 / 1"""
 import contextlib, io, json, os, re, socket, sys, pathlib, tempfile, logging, time, datetime
@@ -1536,6 +1537,122 @@ finally:
 
 if CFG_PA_6F is None: _cfg.CFG.pop("project_agent", None)
 else: _cfg.CFG["project_agent"] = CFG_PA_6F
+_psvc.PAGE_IO = gio
+
+
+# ---- 6g. get agent-name: would `post project-agent` take a name? The register's own name checks as a read: the same code and text for every name, nothing written, no lock
+CFG_PA_6G = _copy.deepcopy(_cfg.CFG.get("project_agent", None))      # put back at the end of the section
+_psvc.PAGE_IO = rio
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}
+ren_page("projects/nv-main", "type: project\ntitle: Nv main\norg: home\ndisplay-name: home-nv\nagents:\n  home-nv-main: talks\n  home-nv-engineer: builds it\nstatus: active")
+ren_page("projects/nv-docs", "type: project\ntitle: Nv docs\norg: home\ndisplay-name: home-nv-docs\nagents:\n  home-nv-docs-main: talks")          # a longer name that starts with nv-main's: its names are its own
+ren_page("projects/nv-other", "type: project\ntitle: Nv other\norg: home\ndisplay-name: home-nvo\nagents:\n  home-nvo-main: talks\n  home-nv-stray: lives on another project's page")
+ren_page("projects/nv-hidden", "type: project\ntitle: Nv hidden\norg: home\ndisplay-name: home-nvh")                                   # no agent, no item: not listed
+ren_page("projects/nv-retired", "type: project\ntitle: Nv retired\norg: home\ndisplay-name: home-nvr\nstatus: archived\nagents:\n  home-nvr-main: talks")
+ren_page("projects/nv-sub", "type: project\ntitle: Nv sub\nhub: projects/nv-main\ndisplay-name: home-nvs\nagents:\n  home-nvs-main: talks")     # a page with a hub: line keeps no agents map of its own
+ren_page("projects/nv-amb", "type: project\ntitle: Nv amb\norg: home\ndisplay-name: home-nva\nagents:\n  home-nva-main: talks")
+ren_page("ops/nv-amb", "type: project\ntitle: Nv amb infra\norg: home\ndisplay-name: home-nvai\nagents:\n  home-nvai-main: talks")
+p.cmd_registry(quiet=True); fresh()
+NV = rec("projects/nv-main")["id"]; NVO = rec("projects/nv-other")["id"]
+prj.add_pending(NV, "home-nv-held", {"front": False, "role": "held", "mandate_line": "held mandate"}, by="other-label", at="2026-03-13T00:00:00Z")          # a pending entry another sender holds
+prj.add_pending(NVO, "home-nv-owed", {"front": False, "role": "owed", "mandate_line": "m"}, by="other-label", at="2026-03-13T00:00:00Z")                   # a pending entry of another project
+fresh()
+def an(project, *names, **kw):
+    fresh(); st, ct, body = client_reads_svc._client_get("agent-name", {"key": project, "names": ",".join(names), **kw})
+    return st, (json.loads(body) if ct == "application/json" else body)
+def verdict(project, name):
+    st, d = an(project, name); return (d["results"][0]["code"], d["results"][0]["reason"]) if st == 200 else (st, d)
+def register(project, name, mandate="a helper for the form"): return fpa("box-a", project, name, "fleet-web", role="helper", front=False, mandate=mandate)
+check("agent-name: (setup) nv-main is listed and active, nv-hidden is hidden, nv-retired is retired, nv-sub has a hub",
+      rec("projects/nv-main")["listed"] and not rec("projects/nv-hidden")["listed"] and not rec("projects/nv-hidden")["retired"] and rec("projects/nv-retired")["retired"] and reg()["projects/nv-sub"].get("hub"), (rec("projects/nv-main"), rec("projects/nv-hidden")))
+LONG65 = "h" * 65
+# every case: (project, name, the code the read gives)
+NV_CASES = [
+    ("projects/nv-main", "home-nv-helper", "ok"), ("projects/nv-main", "home-nv-Helper2", "ok"), ("projects/nv-main", "home-nv-a.b_c", "ok"),
+    ("projects/nv-main", "-home-nv-x", "format"), ("projects/nv-main", LONG65, "format"), ("projects/nv-main", "home nv helper", "format"), ("projects/nv-main", "home-nv-café", "format"),
+    ("projects/nv-main", "unrelated-helper", "prefix"), ("projects/nv-main", "home-nv", "prefix"), ("projects/nv-main", "home-nv-", "prefix"), ("projects/nv-main", "HOME-NV-helper3", "prefix"),
+    ("projects/nv-main", "home-nv-stray", "clash"), ("projects/nv-main", "home-nv-STRAY", "clash"),               # an agent of another project's page, and the same case-folded
+    ("projects/nv-main", "home-nv-docs-main", "clash"), ("projects/nv-main", "home-nv-docs-scribe", "clash"), ("projects/nv-main", "home-nv-DOCS-scribe", "clash"),   # another project's longer prefix, and case-folded
+    ("projects/nv-main", "home-nv-owed", "clash"),                                                                  # a name a pending entry of another project holds
+    ("projects/nv-main", "home-nv-engineer", "listed"), ("projects/nv-main", "home-nv-ENGINEER", "listed"),          # already listed on this page, and case-folded
+    ("projects/nv-main", "home-nv-held", "pending"), ("projects/nv-main", "home-nv-HELD", "pending"),               # a pending entry another sender holds
+    ("projects/nv-docs", "home-nv-docs-scribe", "ok"),                                                              # the longer prefix's own project takes it
+    ("projects/nv-sub", "home-nvs-helper", "hub"), ("projects/nv-hidden", "home-nvh-helper", "hidden"), ("projects/nv-retired", "home-nvr-helper", "retired"),
+]
+NV_CODES = {}
+for proj, name, want in NV_CASES:
+    NV_CODES[(proj, name)] = verdict(proj, name)
+check("agent-name: each case gets its code (ok, format, prefix, clash with another project's agent or longer prefix or pending entry, case-folded too, listed, pending, hub, hidden, retired)",
+      all(NV_CODES[(proj, name)][0] == want for proj, name, want in NV_CASES), [(proj, name, want, NV_CODES[(proj, name)]) for proj, name, want in NV_CASES if NV_CODES[(proj, name)][0] != want])
+check("agent-name: every code is one of the nine, ok has an empty reason and every other code has a reason", all(c in pverbs.NAME_CODES for c, _ in NV_CODES.values()) and all((r == "") == (c == "ok") for c, r in NV_CODES.values()), NV_CODES)
+st, d = an("projects/nv-main", "home-nv-helper", "home-nv-engineer", LONG65)
+check("agent-name: the answer is {project, key, results, first_free, prefixes}: the id, the page key, one {name, valid, code, reason} per name in the order asked, the project's name prefixes",
+      st == 200 and set(d) == {"project", "key", "results", "first_free", "prefixes"} and d["project"] == NV and d["key"] == "projects/nv-main" and [r["name"] for r in d["results"]] == ["home-nv-helper", "home-nv-engineer", LONG65]
+      and [r["valid"] for r in d["results"]] == [True, False, False] and all(set(r) == {"name", "valid", "code", "reason"} for r in d["results"]) and d["prefixes"] == ["home-nv"], (st, d))
+# the project: an id, a page key, a bare slug; the refusals keep what the register says
+check("agent-name: the project by its id, its page key or its bare slug gives the same answer", an(NV, "home-nv-helper")[1] == an("nv-main", "home-nv-helper")[1] == an("projects/nv-main", "home-nv-helper")[1] and an(NV, "home-nv-helper")[1]["results"][0]["valid"] is True)
+st, d = an("projects/nv-none", "home-nv-helper"); st2, d2 = an("prj_00000000", "home-nv-helper")
+check("agent-name: an unknown project is a 404 with the register's text", st == st2 == 404 and d == pverbs.pick_project("projects/nv-none", [])[1][1]["error"] and d2.startswith("no project 'prj_00000000'"), (st, d, st2, d2))
+st, d = an("nv-amb", "home-nva-helper")
+check("agent-name: a bare slug that names two pages is a 400 with the register's text", st == 400 and "'nv-amb' is ambiguous: it names projects/nv-amb and ops/nv-amb" in d, (st, d))
+# hub, hidden and retired: that code for every name, even one that is bad in other ways
+for proj, code in (("projects/nv-sub", "hub"), ("projects/nv-hidden", "hidden"), ("projects/nv-retired", "retired")):
+    st, d = an(proj, "ok-name-here", LONG65, "-bad", "home-nv-helper")
+    check(f"agent-name: a {code} project answers 200 with the code {code} for every name, and no name is first_free", st == 200 and [r["code"] for r in d["results"]] == [code] * 4 and not any(r["valid"] for r in d["results"]) and d["first_free"] is None, (st, d))
+# first_free
+st, d = an("projects/nv-main", LONG65, "home-nv-engineer", "home-nv-second", "home-nv-first", "unrelated-x")
+check("agent-name: first_free is the first valid name in the order asked, not the last and not the shortest", d["first_free"] == "home-nv-second" and [r["valid"] for r in d["results"]] == [False, False, True, True, False], d)
+st, d = an("projects/nv-main", LONG65, "home-nv-engineer", "unrelated-x")
+check("agent-name: first_free is null when no name is valid", st == 200 and d["first_free"] is None, d)
+st, d = an("projects/nv-main", "home-nv-dup", "home-nv-dup", "home-nv-DUP")
+check("agent-name: a name asked twice is answered twice, each as it stands (the read reserves nothing), first_free the first", st == 200 and [r["code"] for r in d["results"]] == ["ok"] * 3 and d["first_free"] == "home-nv-dup", d)
+check("agent-name: names are stripped (spaces around, an empty one dropped) and a single name= is read too", an("projects/nv-main", " home-nv-a ", "", "home-nv-b")[1]["results"][0]["name"] == "home-nv-a"
+      and [r["name"] for r in an("projects/nv-main", "home-nv-a", name="home-nv-z")[1]["results"]] == ["home-nv-a", "home-nv-z"] and an("projects/nv-main", "", name="home-nv-only")[1]["results"][0]["name"] == "home-nv-only")
+check("agent-name: 20 names are answered, 21 or none are a 400, and so is a missing or over-long key", an("projects/nv-main", *[f"home-nv-n{i}" for i in range(20)])[0] == 200
+      and an("projects/nv-main", *[f"home-nv-n{i}" for i in range(21)])[0] == 400 and an("projects/nv-main")[0] == 400 and an("projects/nv-main", " ", ",")[0] == 400
+      and client_reads_svc._client_get("agent-name", {"names": "x"})[0] == 400 and an("k" * 201, "x")[0] == 400, (an("projects/nv-main", *[f"home-nv-n{i}" for i in range(21)]), an("projects/nv-main")))
+# nothing is written, no lock is taken, no page is read
+def tree(): return {str(f.relative_to(T)): f.read_bytes() for f in sorted(T.rglob("*")) if f.is_file()}
+rio.puts.clear(); rio.gets.clear(); before_tree = tree()
+_psvc._PROJECT_LOCK.acquire()
+try:
+    import threading as _thr
+    box_ = []; th_ = _thr.Thread(target=lambda: box_.append(an("projects/nv-main", *[n for pj_, n, _ in NV_CASES if pj_ == "projects/nv-main"][:20])), daemon=True); th_.start(); th_.join(10)
+    finished = not th_.is_alive()
+finally: _psvc._PROJECT_LOCK.release()
+for proj, name, _ in NV_CASES: an(proj, name)
+check("agent-name: a read takes no lock (it answers while the project lock is held)", finished and box_ and box_[0][0] == 200, (finished, box_))
+check("agent-name: …and writes nothing: every file under the instance (the record, the registry, the pages, the fleet) is byte for byte as it was, and the page store was not asked", tree() == before_tree and not rio.puts and not rio.gets,
+      [k for k in set(tree()) | set(before_tree) if tree().get(k) != before_tree.get(k)])
+# the register and the read agree: every name the read refuses is refused by the register with the read's own text, every name it takes is taken
+mism = []
+for proj, name, want in sorted(NV_CASES, key=lambda c: c[2] == "ok"):          # what the register refuses first: a refusal writes nothing, and the first listing folds a project's pending entries into its record
+    code, reason = verdict(proj, name)
+    st, out = register(proj, name, mandate="a different mandate")
+    if code == "ok":
+        if st != 200 or name not in rec(proj)["agents"]: mism.append((proj, name, code, st, out))
+    elif st not in (400, 403, 409) or out.get("error") != reason: mism.append((proj, name, code, reason, st, out))
+check("agent-name: the register and the read agree on every case: what the read refuses the register refuses with the same text (400, 403 or 409), what it takes the register lists", not mism, mism)
+check("agent-name: …the shape of a name is told alike by the two (format for each bad one, the register's own text)", all(NV_CODES[("projects/nv-main", n)][1] == pverbs._NAME_TEXT for n in ("-home-nv-x", LONG65, "home nv helper", "home-nv-café")), NV_CODES)
+check("agent-name: …a name the register listed now reads as listed, case-folded too", verdict("projects/nv-main", "home-nv-helper")[0] == "listed" and verdict("projects/nv-main", "home-nv-HELPER")[0] == "listed")
+st, out = fpa("box-a", "projects/nv-main", "home-nv-engineer", "fleet-web", role="engineer", front=True, mandate="builds it")
+check("agent-name: a name already listed is told listed although the register changes nothing for it when its side and mandate are the same (200, 'nothing changed'): the read is for a new agent", st == 200 and "nothing changed" in out["note"] and verdict("projects/nv-main", "home-nv-engineer")[0] == "listed", (st, out))
+# a pending entry its own sender holds is still told held: the read does not know who asks
+prj.add_pending(NV, "home-nv-mine", {"front": False, "role": "helper", "mandate_line": "a helper for the form"}, by="fleet-web", at="2026-03-13T00:00:00Z"); fresh()
+check("agent-name: a pending entry is told held whoever registered it (the read has no sender): the form's own identical entry is still taken by the register", verdict("projects/nv-main", "home-nv-mine")[0] == "pending" and register("projects/nv-main", "home-nv-mine")[0] == 200)
+# a project with no page
+st, out = _rt_client._client_post("box-a", "project", {"scope": "home", "name": "nvless", "sender": "fleet-web"}); fresh()
+NVL = out["project"]["id"] if st == 200 else ""          # a project with no page is named by its id
+st2, d = an(NVL, "nvless-helper", "nvless", "other-helper")
+check("agent-name: a project with no page answers too, by its id: its prefix is its keeper's name, and the register takes what the read takes", st == 200 and st2 == 200 and d["key"] == "" and d["prefixes"] == ["nvless"]
+      and [r["code"] for r in d["results"]] == ["ok", "prefix", "prefix"] and d["first_free"] == "nvless-helper", (st, st2, d))
+rg_ = register(NVL, "nvless-helper")
+check("agent-name: …and the register lists the name the read took, which then reads as listed", rg_[0] == 200 and verdict(NVL, "nvless-helper")[0] == "listed", (rg_, verdict(NVL, "nvless-helper")))
+check("agent-name: no reason names a machine or the session manager", not any(w in r.casefold() for _, r in NV_CODES.values() for w in ("sala", "session manager")), NV_CODES)
+with prj._Locked():
+    d_ = prj._read(); d_["pending_agents"].pop(NV, None); d_["pending_agents"].pop(NVO, None); prj._write(d_)
+if CFG_PA_6G is None: _cfg.CFG.pop("project_agent", None)
+else: _cfg.CFG["project_agent"] = CFG_PA_6G
 _psvc.PAGE_IO = gio
 
 

@@ -170,6 +170,28 @@ try: rc = client.main(["client.py", "holds"])
 finally: sys.stdout = _o; client.get = _cg
 check("client.py holds exits 1 when the server is not reached", rc == 1)
 
+# client.py get agent-name <project> <name>...: the server's JSON on stdout and exit 0 whenever the call answers (every name invalid included), 1 for a call that failed or was misused
+_asked = []
+def _fake_get(code, text):
+    def g(what, *a, **k): _asked.append((what, k)); return code, text
+    return g
+def _agent_name_cli(argv, code=200, text='{"results": []}'):
+    real = client.get; client.get = _fake_get(code, text); _o, _e = sys.stdout, sys.stderr; sys.stdout = __import__("io").StringIO(); sys.stderr = __import__("io").StringIO()
+    try: rc = client.main(["client.py", "get", "agent-name", *argv]); return rc, sys.stdout.getvalue(), sys.stderr.getvalue()
+    finally: sys.stdout, sys.stderr = _o, _e; client.get = real
+all_bad = json.dumps({"project": "prj_e1", "key": "projects/alpha", "results": [{"name": "x", "valid": False, "code": "prefix", "reason": "r"}], "first_free": None, "prefixes": ["a"]})
+rc, out_, err_ = _agent_name_cli(["projects/alpha", "a-one", "a-two"], 200, all_bad)
+check("client.py get agent-name: asks the read with the project as key and the names comma separated, prints the JSON, exits 0 (even with every name invalid)",
+      rc == 0 and json.loads(out_)["first_free"] is None and (_asked[-1][0], {k: v for k, v in _asked[-1][1].items() if k != "timeout"}) == ("agent-name", {"key": "projects/alpha", "names": "a-one,a-two"}) and err_ == "", (rc, out_, err_, _asked))
+rc, out_, err_ = _agent_name_cli(["projects/nope", "a-one"], 404, "no project 'projects/nope'")
+check("client.py get agent-name: an unknown project (404) exits 1 with the reason on stderr and nothing on stdout", rc == 1 and out_ == "" and "[404]" in err_ and "no project" in err_, (rc, out_, err_))
+rc, out_, err_ = _agent_name_cli(["projects/alpha", "a-one"], 0, "URLError")
+check("client.py get agent-name: a server not reached exits 1", rc == 1 and out_ == "", (rc, out_, err_))
+n_asked = len(_asked)
+bad_use = [_agent_name_cli(a) for a in ([], ["projects/alpha"], ["projects/alpha", "--x"], ["projects/alpha", "a,b"], ["projects/alpha", " "])]
+check("client.py get agent-name: no project, no name, a flag or a comma in a name prints the usage on stderr, exits 1 and asks nothing", all(rc == 1 and o == "" and e.startswith("usage: client.py get agent-name") for rc, o, e in bad_use) and len(_asked) == n_asked, bad_use)
+check("client.py get agent-name: its usage names neither a machine nor a session manager", "sala" not in client.AGENT_NAME_USAGE.casefold() and "agent-name" in client.READS)
+
 # a time that fromtimestamp cannot take (a milliseconds epoch, 1e300, a numeric string) is no record: nothing raises anywhere, the item reads as a hold from before the record
 BAD = {30: 1e12, 31: 1.76e12, 32: 1e300, 33: "1e12", 34: float("inf"), 35: -5, 36: 4102444801}
 for n, v in BAD.items(): mk(n, hold=True, wake=D(10), hold_set={"at": v, "by": "sparrow"})
@@ -235,6 +257,25 @@ with TestClient(app) as c:
     r = c.get("/client/holds", headers=H); check("http: holds → the report (nothing on hold without a reason here)", r.status_code == 200 and r.text == "no open item is parked without something holding it\n" and r.headers["cache-control"] == "no-store", r.text[:100])
     r = c.get("/client/holds"); check("http: holds without a token → 401", r.status_code == 401, r.status_code)
     r = c.get("/client/nothing", headers=H); check("http: unknown read → 404", r.status_code == 404, r.status_code)
+    # agent-name: the register's name checks as a read, behind the same token as the other reads
+    r = c.get("/client/agent-name", params={"key": "projects/alpha", "names": "a-b"}); check("http: agent-name without a token → 401", r.status_code == 401, r.status_code)
+    r = c.get("/client/agent-name", params={"key": "projects/alpha", "names": "a-b"}, headers={"Authorization": "Bearer " + "x" * 43}); check("http: agent-name with a wrong token → 401", r.status_code == 401, r.status_code)
+    r = c.get("/client/agent-name", params={"key": "projects/alpha", "names": "a-b, c-d"}, headers=H); an = r.json() if r.status_code == 200 else {}
+    check("http: agent-name with a valid token → 200 JSON: the project, its key, one result per name stripped and in order, first_free and the prefixes, nothing cached",
+          r.status_code == 200 and r.headers["cache-control"] == "no-store" and an.get("key") == "projects/alpha" and an["project"].startswith("prj_") and [x["name"] for x in an["results"]] == ["a-b", "c-d"]
+          and all(set(x) == {"name", "valid", "code", "reason"} for x in an["results"]) and isinstance(an["prefixes"], list) and an["prefixes"] and set(an) == {"project", "key", "results", "first_free", "prefixes"}, r.text[:400])
+    good_ = an["prefixes"][0] + "-helper"
+    r = c.get("/client/agent-name", params={"key": "projects/alpha", "name": good_}, headers=H); an = r.json() if r.status_code == 200 else {}
+    check("http: agent-name takes a single name= too; this project has no agent and no recent item, so it is hidden and every name says so (the register's own text), with no first_free",
+          r.status_code == 200 and [(x["name"], x["valid"], x["code"]) for x in an["results"]] == [(good_, False, "hidden")] and "is hidden, not listed" in an["results"][0]["reason"] and an["first_free"] is None, r.text[:300])
+    r = c.get("/client/agent-name", params={"key": "projects/no-such", "names": good_}, headers=H)
+    check("http: agent-name for an unknown project → 404 with the text the other project reads give", r.status_code == 404 and r.text.startswith("no project 'projects/no-such'"), (r.status_code, r.text[:200]))
+    r = c.get("/client/agent-name", params={"names": good_}, headers=H); check("http: agent-name with no key → 400", r.status_code == 400 and "key" in r.text, (r.status_code, r.text))
+    r = c.get("/client/agent-name", params={"key": "projects/alpha"}, headers=H); check("http: agent-name with no names → 400 with a plain line", r.status_code == 400 and r.text.startswith("names ="), (r.status_code, r.text))
+    r = c.get("/client/agent-name", params={"key": "projects/alpha", "names": " , ,"}, headers=H); check("http: agent-name with only empty names → 400", r.status_code == 400, (r.status_code, r.text))
+    r = c.get("/client/agent-name", params={"key": "projects/alpha", "names": ",".join(f"x-{i}" for i in range(20))}, headers=H); check("http: agent-name with 20 names → 200", r.status_code == 200 and len(r.json()["results"]) == 20, (r.status_code, r.text[:100]))
+    r = c.get("/client/agent-name", params={"key": "projects/alpha", "names": ",".join(f"x-{i}" for i in range(21))}, headers=H)
+    check("http: agent-name with 21 names → 400 with a plain line, nothing answered", r.status_code == 400 and r.text.startswith("names = at most 20") and not r.text.startswith("{"), (r.status_code, r.text[:100]))
     r = c.get("/client/config"); check("http: config without a token → 401", r.status_code == 401, r.status_code)
     r = c.get("/client/config", headers=H); cj = r.json() if r.status_code == 200 else {}
     check("http: config — the instance's non-secret settings a client's hooks need", r.status_code == 200 and r.headers["cache-control"] == "no-store"

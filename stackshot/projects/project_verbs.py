@@ -1530,14 +1530,22 @@ def agents_block_tail(m: dict[str, Any]) -> str:
 
 
 # post project-agent ---------------------------------------------------------
+def name_refusal(name: str) -> _Refusal | None:
+    """A name that is not letters, digits and . _ - (at most 64), starting with a letter or digit."""
+    if not NAME_RE.fullmatch(name):
+        return 400, {"error": _NAME_TEXT}
+    return None
+
+
 def agent_fields(body: dict[str, Any]) -> tuple[tuple[str, str, str, str, str, bool] | None, _Refusal | None]:
     """The body of `post project-agent` → ((project, name, role, mandate, sender, front), None), or (None, the 400)."""
     project, name, role, mandate, sender = (str(body.get(k) or "").strip() for k in ("project", "name", "role", "mandate", "sender"))
     front = body.get("front")
     if not (project and name and role and mandate and sender) or not isinstance(front, bool):
         return None, (400, {"error": "project, name, role, mandate and sender are required, and front is true (a front agent) or false (a background agent)"})
-    if not NAME_RE.fullmatch(name):
-        return None, (400, {"error": _NAME_TEXT})
+    bad = name_refusal(name)
+    if bad:
+        return None, bad
     if not AGENT_ROLE.fullmatch(role):
         return None, (400, {"error": "role = the name's suffix after the project's name (main, engineer, sessions): letters, digits, . _ - (at most 32)"})
     if "\n" in mandate or "\r" in mandate or len(mandate) > 600 or MANDATE_CONTROL.search(mandate):
@@ -1601,12 +1609,22 @@ def front_caller_refusal(sender: str, is_id: bool, names_get: Callable[[str, str
     return None
 
 
+def retired_refusal(rec: dict[str, Any], key: str) -> _Refusal:
+    """A retired project (its page status is one of the retired words) takes no agent from a label."""
+    return 403, {"error": f"{key} is retired (page status: {rec['status']}): change the page's status first"}
+
+
+def hidden_refusal(key: str) -> _Refusal:
+    """A hidden project (not listed) takes no agent from the New session form until it is listed again."""
+    return 403, {"error": f"refused: {key} is hidden, not listed. List it again first with `client.py post project-list --key {key}`, then add the agent"}
+
+
 def agent_caller_refusal(rec: dict[str, Any], key: str, form: bool, first: bool, more: bool, sender: str, is_id: bool, names_get: Callable[[str, str], str]) -> _Refusal | None:
     """Who may register an agent: a label on the first-agent or further-agents path, or the New session form (`form`), or the keeper or a front agent as a session id."""
     if (first or more or form) and rec["retired"]:        # a label is the form's word: a retired project takes no agent from it (the keeper's and a front agent's session ids still may)
-        return 403, {"error": f"{key} is retired (page status: {rec['status']}): change the page's status first"}
+        return retired_refusal(rec, key)
     if form and not rec["listed"]:
-        return 403, {"error": f"refused: {key} is hidden, not listed. List it again first with `client.py post project-list --key {key}`, then add the agent"}
+        return hidden_refusal(key)
     if first or more or form:
         if label_bad(sender):
             return 400, {"error": _SENDER_TEXT}
@@ -1614,18 +1632,28 @@ def agent_caller_refusal(rec: dict[str, Any], key: str, form: bool, first: bool,
     return front_caller_refusal(sender, is_id, names_get, rec, key, "lists a new agent")
 
 
+def listed_name_of(rec: dict[str, Any], name: str) -> str | None:
+    """The name as the project's record lists it when `name` is listed there (case-folded; an agent whose page line is still owed is not listed), else None."""
+    fold = name.casefold()
+    return next((n for n, a in rec["agents"].items() if n.casefold() == fold and not a.get("page_owed")), None)
+
+
 def listed_answer(rec: dict[str, Any], key: str, where: str, name: str, front: bool, mandate: str, surface: str = "") -> tuple[str, _Refusal | None]:
     """A name the page already lists (case-folded) → (the name as listed, the answer): the same side, mandate and surface (`surface` "" = sala) changes nothing (200), another is a 409; (name, None) when it is not listed."""
-    fold = name.casefold()
-    listed_name = next((n for n, a in rec["agents"].items() if n.casefold() == fold and not a.get("page_owed")), None)     # names compare case-folded
+    listed_name = listed_name_of(rec, name)
     if listed_name is None:
         return name, None
     name = str(listed_name)
     cur = rec["agents"][name]
     if (cur["front"], cur["mandate_line"], str(cur.get("surface") or "")) == (front, mandate, surface):          # the role is read from the name: the one asked for is no part of "the same"
         return name, (200, {"project": rec["id"], "key": key, "agent": {name: cur}, "page_owed": False, "page_yaml": "", "note": f"{name} is already listed on {where}: nothing changed"})
-    return name, (409, {"error": f"{name} is already listed on {where} as {'front' if cur['front'] else 'background'}{' on ' + cur['surface'] if cur.get('surface') else ''} ({cur['role']}): {cur['mandate_line'][:120]!r}; "
-                                 "to change its mandate line use `client.py post project-agent-mandate`; to change its side or its surface, retire it, or rename it, then list it again"})
+    return name, (409, {"error": listed_conflict_text(name, cur, where)})
+
+
+def listed_conflict_text(name: str, cur: dict[str, Any], where: str) -> str:
+    """The text of a 409 for a name the page already lists (`cur` is its entry on the record, `name` as listed)."""
+    return (f"{name} is already listed on {where} as {'front' if cur['front'] else 'background'}{' on ' + cur['surface'] if cur.get('surface') else ''} ({cur['role']}): {cur['mandate_line'][:120]!r}; "
+            "to change its mandate line use `client.py post project-agent-mandate`; to change its side or its surface, retire it, or rename it, then list it again")
 
 
 def pending_name(pending: dict[str, Any], name: str) -> str:
@@ -1637,10 +1665,72 @@ def pending_name(pending: dict[str, Any], name: str) -> str:
 def pending_refusal(pend: dict[str, Any], sender: str, name: str, where: str, front: bool, role: str, mandate: str) -> _Refusal | None:
     """A pending entry another session registered, as something else: only that session changes it."""
     if pend and pend.get("by") != sender and (pend.get("front"), pend.get("role"), pend.get("mandate_line")) != (front, role, mandate):
-        return 409, {"error": f"{name} was already registered for {where} by another session ({pend.get('by') or 'unknown'}) as "
-                              f"{'front' if pend.get('front') else 'background'} ({pend.get('role')}): {str(pend.get('mandate_line'))[:120]!r}; "
-                              "only that session changes it"}
+        return 409, {"error": pending_conflict_text(pend, name, where)}
     return None
+
+
+def pending_conflict_text(pend: dict[str, Any], name: str, where: str) -> str:
+    """The text of a 409 for a name a pending entry holds (`pend` is that entry): another session registered it."""
+    return (f"{name} was already registered for {where} by another session ({pend.get('by') or 'unknown'}) as "
+            f"{'front' if pend.get('front') else 'background'} ({pend.get('role')}): {str(pend.get('mandate_line'))[:120]!r}; "
+            "only that session changes it")
+
+
+# get agent-name ---------------------------------------------------------------
+NAME_CODES = ("ok", "format", "prefix", "clash", "listed", "pending", "hub", "hidden", "retired")      # what `get agent-name` tells for a name: ok, or the check that refuses it
+NAME_LIMIT = 20                                                                                          # the names one `get agent-name` call may ask about
+
+
+def name_params(params: dict[str, str]) -> tuple[tuple[str, list[str]] | None, tuple[int, str, str] | None]:
+    """The query of `get agent-name?key=<project>&names=<a,b,c>` (a single `name=` too) → ((project, names), None), or (None, the 400 as (status, type, text)).
+    `names` is comma separated, each name stripped and an empty one dropped; at most NAME_LIMIT, at least one."""
+    project = str(params.get("key") or "").strip()
+    if not project or len(project) > 200:
+        return None, (400, "text/plain", "key = a project: its id (prj_<8 hex>), its page key or its bare slug")
+    raw = [x.strip() for x in str(params.get("names") or "").split(",")] + [str(params.get("name") or "").strip()]
+    names = [x for x in raw if x]
+    if not names:
+        return None, (400, "text/plain", "names = the agent names to check, comma separated (or name = one)")
+    if len(names) > NAME_LIMIT:
+        return None, (400, "text/plain", f"names = at most {NAME_LIMIT} names; {len(names)} were asked")
+    return (project, names), None
+
+
+def name_verdict(name: str, rec: dict[str, Any], entry: dict[str, Any], reg: dict[str, Any], entries: dict[str, Any], pending: dict[str, Any], key_of: Callable[[str], str]) -> tuple[str, str]:
+    """Would `post project-agent` take `name` as a new agent of the project `rec` → (code, reason): ("ok", "") or the code of the first check that refuses it, with that check's own text.
+    The checks are the ones the register runs, in its order (the project's own state first: a hub page, a retired project, a hidden one: the same code for every name): the name's shape,
+    the project's name as its start, a name that belongs to another project, a name the page already lists, a name a pending entry holds. Reads nothing and writes nothing: `entry` is the registry's
+    row of the project, `reg` the registry, `entries` the project record's entries by id, `pending` the pending agents by id, `key_of` an id's page key. Who registers is not known here, so a name a pending
+    entry holds is told held, as it is to any other session."""
+    key = rec["key"]; where = key or rec["id"]
+    for code, bad in (("hub", hub_refusal(rec, entry, "list the agent there")), ("retired", retired_refusal(rec, key) if rec["retired"] else None),
+                      ("hidden", hidden_refusal(key) if not rec["listed"] else None), ("format", name_refusal(name))):
+        if bad:
+            return code, bad[1]["error"]
+    prefixes = project_prefixes(rec, entry, reg)
+    bad = prefix_refusal(name, prefixes, where)
+    if bad:
+        return "prefix", bad[1]["error"]
+    clash = name_clash(name, key, rec["id"], prefixes, reg, entries, pending, key_of)
+    if clash:
+        return "clash", clash
+    listed = listed_name_of(rec, name)
+    if listed is not None:
+        return "listed", listed_conflict_text(listed, rec["agents"][listed], where)
+    owed = pending.get(rec["id"], {})
+    spelled = pending_name(owed, name)
+    if owed.get(spelled):
+        return "pending", pending_conflict_text(owed[spelled], spelled, where)
+    return "ok", ""
+
+
+def name_verdicts(names: list[str], rec: dict[str, Any], entry: dict[str, Any], reg: dict[str, Any], entries: dict[str, Any], pending: dict[str, Any], key_of: Callable[[str], str]) -> dict[str, Any]:
+    """The answer of `get agent-name`: {project, key, results: [{name, valid, code, reason}] in the order asked, first_free: the first name that is valid (None when none is), prefixes: what the project's names start with}."""
+    results = []
+    for n in names:
+        code, reason = name_verdict(n, rec, entry, reg, entries, pending, key_of)
+        results.append({"name": n, "valid": code == "ok", "code": code, "reason": reason})
+    return {"project": rec["id"], "key": rec["key"], "results": results, "first_free": next((r["name"] for r in results if r["valid"]), None), "prefixes": project_prefixes(rec, entry, reg)}
 
 
 def agent_added(rec: dict[str, Any], key: str, where: str, res: dict[str, Any], new: dict[str, Any]) -> _Refusal:
