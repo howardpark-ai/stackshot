@@ -29,6 +29,7 @@ from stackshot.web.tools import message as _tool_message
 from stackshot.web.tools import route as _tool_route
 from stackshot.web.tools import anchors as _tool_anchors
 from stackshot.web.tools import rules as _tool_rules
+from stackshot.web import requestlog as _requestlog
 from stackshot.web.middleware import _Fingerprint, _LinkIds, _ReadOnly, _RefusalLog, _RetiredInputs
 from stackshot.web.routes import client_api as _routes_client_api
 from stackshot.web.routes import answers as _routes_answers
@@ -190,12 +191,14 @@ def build(
         ),
         auth=_oauth._auth(),
     )
+    mcp.add_middleware(_requestlog.RequestRoute())      # first, so outermost: it names the request's route for the request log (web/requestlog.py), and changes nothing
     mcp.add_middleware(_Fingerprint(mcp))
     mcp.add_middleware(_LinkIds())
     # The refusal log, the standby copy's read-only refusal and the retired-input refusal come after _LinkIds, in this order.
     mcp.add_middleware(_RefusalLog())
     mcp.add_middleware(_ReadOnly())
     mcp.add_middleware(_RetiredInputs())
+    _requestlog.install(mcp)      # the HTTP app is served inside the request log's wrapper, outside every other layer
     _custom_route_plain = mcp.custom_route
     mcp.custom_route = _custom_route_ro
     _tool_notes.bind(main_agent=main_agent)

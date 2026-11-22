@@ -36,6 +36,7 @@ from stackshot.service import item_open as _item_open
 from stackshot.service import item_sync as _item_sync
 from stackshot.service import job_gap as _job_gap
 from stackshot.service import messaging as _messaging
+from stackshot.service.client_reads import NO_SUCH_READ as _NO_SUCH_READ
 from stackshot.service import migrations as _migrations
 from stackshot.service import owner_words as _owner_words
 from stackshot.service import page_debt as _pdsvc
@@ -49,6 +50,7 @@ from stackshot.service.projects import _form_call, _new_project, _project_agent,
 from stackshot.service.store import _load
 from stackshot.waits import event_waits as _ew
 from stackshot.waits import held as _held
+from stackshot.web import requestlog as _requestlog
 from stackshot.web.publish import _publish
 
 
@@ -58,8 +60,8 @@ _client_get, _recycle_wanted_tokens = None, None      # the server's own, set by
 _CLIENTS = _cfg.secrets("clients.json")     # {machine: {"sha256": <hex of its token>, "created": <iso>}}, written by client.py mint
 
 
-def _client_machine(authorization: str) -> str:
-    """The machine a client token belongs to, "" when it belongs to none. The server keeps the token's SHA-256, never the token."""
+def _client_machine(authorization: str, request: Any = None) -> str:
+    """The machine a client token belongs to, "" when it belongs to none. The server keeps the token's SHA-256, never the token. With the request, the machine is also the caller of its line in the request log."""
     import hashlib
     import hmac
     tok = authorization[7:].strip() if authorization[:7].lower() == "bearer " else ""
@@ -74,6 +76,8 @@ def _client_machine(authorization: str) -> str:
     for name, v in d.items():       # no early exit: the same work whichever entry matches
         if isinstance(v, dict) and hmac.compare_digest(str(v.get("sha256") or ""), h):
             hit = str(name)
+    if hit and request is not None:
+        _requestlog.note(request, caller=hit)
     return hit
 
 
@@ -95,6 +99,9 @@ def _client_config() -> dict[str, Any]:
     if _brains.configured():    # each second brain's page rules and mirror, so a client box links its pages to the right mirror (no gbrain home: a client writes nothing)
         out["brains"] = _brains.client_entries()
     return out
+
+
+_NO_SUCH_WRITE = "no such write"       # what the client API answers (404) to a verb no branch of _client_post took; client_write reads it to tell a verb it handled from a guess
 
 
 def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -306,7 +313,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         else:
             _clients.seen(machine, uuid)
         return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")})}
-    return 404, {"error": "no such write: message | handover | held | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | item-sync | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
+    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | item-sync | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
 
 
 async def client_write(request: Request):
@@ -315,7 +322,7 @@ async def client_write(request: Request):
     open until a line waits for one of them or `wait` seconds pass."""
     import asyncio
     from starlette.concurrency import run_in_threadpool
-    machine = _client_machine(request.headers.get("authorization", ""))
+    machine = _client_machine(request.headers.get("authorization", ""), request)
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
     what = str(request.path_params.get("what", ""))
@@ -327,6 +334,7 @@ async def client_write(request: Request):
         return JSONResponse({"error": "the body is a JSON object"}, status_code=400)
     nocache = {"Cache-Control": "no-store"}
     if what == "poll":
+        _requestlog.note(request, route="/client/poll")
         sessions = [x for x in (body.get("sessions") or []) if isinstance(x, dict)]
         try:
             wait = min(_POLL_MAX, max(0.0, float(body.get("wait") or 0)))
@@ -351,6 +359,8 @@ async def client_write(request: Request):
             deliveries = []                 # a line taken in that moment is leased, and returns to the inbox when its lease runs out
         return JSONResponse({"deliveries": deliveries, "machine": machine, "current": current}, headers=nocache)
     status, out = await run_in_threadpool(_client_post, machine, what, body)      # delivery can take seconds: off the event loop
+    if not (status == 404 and str(out.get("error", "")).startswith(_NO_SUCH_WRITE)):
+        _requestlog.note(request, route="/client/" + what)          # a verb a branch took is a route of its own; a guess stays `/client/{other}` in the request log
     return JSONResponse(out, status_code=status, headers=nocache)
 
 
@@ -413,7 +423,7 @@ def _client_item_watch(machine: str, key: str, body: dict[str, Any]) -> tuple[in
 
 async def _client_foryou_call(request: Request, fn: Any, *args: Any):
     from starlette.concurrency import run_in_threadpool
-    machine = _client_machine(request.headers.get("authorization", ""))
+    machine = _client_machine(request.headers.get("authorization", ""), request)
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
     try:
@@ -435,10 +445,17 @@ async def client_item_watch(request: Request):
 
 
 async def client_api(request: Request):
-    machine = _client_machine(request.headers.get("authorization", ""))
+    machine = _client_machine(request.headers.get("authorization", ""), request)
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
     what = str(request.path_params.get("what", ""))
+    resp = await _client_api_read(request, machine, what)
+    if not (resp.status_code == 404 and bytes(resp.body).startswith(_NO_SUCH_READ.encode())):
+        _requestlog.note(request, route="/client/" + what)          # a verb a branch took is a route of its own; a guess stays `/client/{other}` in the request log
+    return resp
+
+
+async def _client_api_read(request: Request, machine: str, what: str):
     if what == "whoami":
         return JSONResponse({"machine": machine}, headers={"Cache-Control": "no-store"})
     if what == "config":
