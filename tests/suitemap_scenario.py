@@ -277,6 +277,7 @@ def traced():
     try: return int(next(l for l in open("/proc/self/status") if l.startswith("TracerPid:")).split()[1]) != 0
     except Exception: return True
 use_strace = shutil.which("strace") is not None and not traced()
+os.environ["STACKSHOT_TEST_LAUNCHER"] = ""   # suitemap.py runs below stay here, whatever test launcher the machine has configured
 ENV = {k: v for k, v in os.environ.items() if not k.startswith(("COVERAGE_", "SUITEMAP_", "GITHUB_"))}
 ENV.update(SCENARIO_TESTS=SCR, SUITEMAP_ROOT=str(R), SUITEMAP_STRACE="1" if use_strace else "0", SUITEMAP_CACHE_DIR=str(T / "cache"))   # the index cache of these runs is in the scratch folder, never the user's
 def memoized(kind, key, make, *, env, rev):
@@ -1660,7 +1661,7 @@ COPY = T / "checkout-copy"
 subprocess.run(["git", "clone", "-q", "--no-checkout", "--shared", CHECKOUT, str(COPY)], check=True, capture_output=True)
 subprocess.run(["git", "-C", str(COPY), "read-tree", "HEAD"], check=True, capture_output=True)
 COPY_HEAD = subprocess.run(["git", "-C", str(COPY), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
-(COPY / "tests").mkdir(); shutil.copy(os.path.join(SCR, "suitemap.py"), COPY / "tests" / "suitemap.py")   # the index has the tracked files; the one script the steps run is put in place
+(COPY / "tests").mkdir(); shutil.copy(os.path.join(SCR, "suitemap.py"), COPY / "tests" / "suitemap.py"); shutil.copy(os.path.join(SCR, "_launcher.py"), COPY / "tests" / "_launcher.py")   # the index has the tracked files; the one script the steps run is put in place
 (COPY / ".suitemap").mkdir()
 (COPY / ".suitemap" / "map.json").write_text(json.dumps({"format": sm.FORMAT, "commit": COPY_HEAD, "strace": True,
     "suites": {n: {"ok": True, "seconds": 16, "py": {}} for n in every}}))
@@ -1792,7 +1793,7 @@ check("tests.yml: the proof job can never fail the run (continue-on-error on the
       prj.get("continue-on-error") is True and all(st.get("continue-on-error") is True for st in prj["steps"] if st.get("id") in ("find", "stamp", "up"))
       and prj["permissions"] == {"contents": "read", "actions": "read"} and prj["outputs"] == {"proven": "${{ steps.final.outputs.proven }}", "run_id": "${{ steps.final.outputs.run_id }}"}, (prj.get("permissions"), prj.get("outputs")))
 K = T / "cancel"; (K / "tests").mkdir(parents=True); MARK = T / "marks"; MARK.mkdir()
-for f in ("run-suite", "suitemap.py"): shutil.copy(os.path.join(SCR, f), K / "tests" / f)
+for f in ("run-suite", "suitemap.py", "_launcher.py"): shutil.copy(os.path.join(SCR, f), K / "tests" / f)
 for f in ("pyproject.toml", "uv.lock"): shutil.copy(os.path.join(SCR, "..", f), K / f)
 os.chmod(K / "tests/run-suite", 0o755)
 SAYS = f"import os, pathlib\npathlib.Path({str(MARK)!r}, '{{0}}').write_text(f\"{{{{os.getpid()}}}} {{{{os.environ['TMPDIR']}}}}\")\n"

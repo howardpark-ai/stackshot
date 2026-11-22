@@ -15,6 +15,7 @@ A suite's folders are locked while it runs and removed when it ends, however it 
 import json, os, pathlib, re, shutil, signal, subprocess, sys, tempfile, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 sys.path.insert(0, SCR)
+os.environ["STACKSHOT_TEST_LAUNCHER"] = ""   # the run-suite copies below run here, whatever test launcher the machine has configured
 import _scratch
 tmp = _scratch.mkdtemp(prefix="scratchtest-"); T = pathlib.Path(tmp)
 fails = []; ran = []

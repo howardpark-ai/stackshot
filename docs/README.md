@@ -8,7 +8,7 @@ These pages hold the detail behind the [README](../README.md). Each page starts 
 - [Scope](scope.md): Which ways of running stackshot are supported (one person, one server) and which are out of scope.
 - [Install](install.md): The three install commands in one place, with a pointer to the full walk-through.
 - [The Windows client](windows.md): How a Windows machine runs Claude Code as a client: the token, the puller and the hooks.
-- [Development](development.md): How a change is made, tested and released, what running sessions need after a release, and how to run a local server.
+- [Development](development.md): How a change is made, tested and released, what running sessions need after a release, how to run a local server, and how a machine sends its test runs to another one.
 
 ## Configuration
 

@@ -420,7 +420,11 @@ def git(*a, check=False):
 
 
 def suites():
-    return sorted(SUITE_RE.match(f).group(1) for f in (git("ls-files", "tests/") or "").split("\n") if SUITE_RE.match(f))
+    found = sorted(SUITE_RE.match(f).group(1) for f in (git("ls-files", "tests/") or "").split("\n") if SUITE_RE.match(f))
+    if not found:   # an empty list would select nothing and let a run pass: a tree with no repository (a copy without .git) is an error, not "no suites"
+        print(f"suitemap: no suites found: `git ls-files tests/` in {ROOT} gave none (is it a git repository with the tests tracked?)", file=sys.stderr)
+        sys.exit(2)
+    return found
 
 
 # ---------------------------------------------------------------- scopes
@@ -3279,6 +3283,19 @@ def audit(args):
     return 0
 
 
+def relaunch(args):
+    """a machine that sends its test runs elsewhere (tests/_launcher.py: the launcher file and the contract) runs this invocation there, as typed:
+    the subcommands that run or read the test tree, never --help or a bad command line (argparse has ended those already). `measure` needs the
+    test environment's coverage, so it goes as the `uv run` form CI uses; the others need only git and the standard library."""
+    if args.cmd not in ("run", "measure", "select", "audit", "list", "plan"):
+        return
+    import _launcher
+    names = getattr(args, "suites", None) or []
+    mode = _launcher.mode_for_suites(names) if args.cmd == "run" else "history"   # only `run` can do with the files alone: every other subcommand reads git
+    py = ["uv", "run", "--locked", "--only-group", "tests", "python"] if args.cmd == "measure" else ["python3"]
+    _launcher.relaunch(mode, [*py, sys.argv[0], *sys.argv[1:]])
+
+
 def main():
     ap = argparse.ArgumentParser(prog="tests/suitemap.py", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -3293,6 +3310,7 @@ def main():
     p = sub.add_parser("warm"); p.add_argument("--rev", default="HEAD")
     p = sub.add_parser("audit"); p.add_argument("--old", required=True); p.add_argument("--new", required=True); p.add_argument("--to", required=True)
     args = ap.parse_args()
+    relaunch(args)
     example_rule()   # a typo in SUITEMAP_EXAMPLE_RULE is an error at once, not a silent default
     docstring_rule()
     import_rule()

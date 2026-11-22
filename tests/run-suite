@@ -26,6 +26,17 @@ case $name in
     *)       script=$here/${name}_scenario.py ;;
 esac
 [ -f "$script" ] || { echo "run-suite: no such suite: $script" >&2; exit 2; }
+# A machine that sends its test runs elsewhere says so in ~/.config/stackshot/test-launcher (or STACKSHOT_TEST_LAUNCHER): the run then
+# continues through that launcher, which takes this script's place (tests/_launcher.py has the rules and docs/development.md the contract).
+# With none configured nothing below runs but one `test -f`. The loop guard (STACKSHOT_TEST_LAUNCHED set: never launch again) is _launcher.py's.
+if { [ -n "${STACKSHOT_TEST_LAUNCHER:-}" ] \
+        || { [ -z "${STACKSHOT_TEST_LAUNCHER+set}" ] && [ -f "${STACKSHOT_TEST_LAUNCHER_FILE:-${XDG_CONFIG_HOME:-${HOME:-}/.config}/stackshot/test-launcher}" ]; }; } \
+   && command -v python3 >/dev/null 2>&1; then
+    launch=$(python3 "$here/_launcher.py" resolve "$name") || launch=
+    # $launch: the launcher's command, quoted for eval, and its --git mode; STACKSHOT_TEST_LAUNCHED=1 goes with it, so nothing launches twice.
+    # The command is passed as it was typed ($0), so a launcher that runs it in a copy of the tree finds the copy's script, not this one's path.
+    [ -z "$launch" ] || { STACKSHOT_TEST_LAUNCHED=1; export STACKSHOT_TEST_LAUNCHED; eval "exec $launch -- \"\$0\" \"\$name\" \"\$@\""; }
+fi
 UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT:-${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv}
 export UV_PROJECT_ENVIRONMENT
 # The store locks (stackshot/core/xlock.py) run strict wherever the tests run: a lock out of order, or one whose lock file cannot be had, raises instead of being logged. Production leaves it off (the variable unset).

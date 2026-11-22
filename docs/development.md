@@ -1,6 +1,6 @@
 # Development
 
-What this page covers: how a change is made, tested and released, what running sessions need after a release, and how to run a local server. Back to the [README](../README.md).
+What this page covers: how a change is made, tested and released, what running sessions need after a release, how to run a local server, and how a machine can send its test runs to another one. Back to the [README](../README.md).
 
 How a change is made, tested and released is in [CONTRIBUTING.md](../CONTRIBUTING.md): a branch in its own worktree, a pull
 request against `main`, and `release.sh` on the server box, which puts the PR in GitHub's merge queue and runs `deploy.sh` on what the queue merges. The test suites are
@@ -21,3 +21,32 @@ For a local server without sign-in:
 
 The code font is D2Coding (Naver, SIL Open Font License 1.1), vendored in `fonts/` and served by the server itself at `/fonts/D2Coding-Regular.woff2`
 (public, versioned by `?v=`, kept a year); `fonts/README.md` has its source, the conversion and how to replace it.
+
+## Sending test runs to another machine
+
+A machine that should not run the tests itself (a small server, a laptop on battery) can send `tests/run-suite <suite>` and `python3 tests/suitemap.py <subcommand>` to a machine that should, with no change to what is typed: the same output and the same exit code come back. The repository names no machine and no tool for it; the machine supplies a launcher, a program of its own, and says so in a one-line file.
+
+- **The config file** is `$XDG_CONFIG_HOME/stackshot/test-launcher` (`~/.config/stackshot/test-launcher` when that is unset; `STACKSHOT_TEST_LAUNCHER_FILE` names another path). Its first line that is not blank and does not start with `#` is the launcher's command: one program, optionally followed by words, split the way a POSIX shell splits (quotes and backslashes only: nothing is expanded or substituted). No file, an empty file or a file of comments means no launcher: everything runs here, exactly as without this feature.
+- **The environment** wins over the file: `STACKSHOT_TEST_LAUNCHER` replaces the file's line for one run, and set to an empty string (`STACKSHOT_TEST_LAUNCHER= tests/run-suite pilot`) it switches the launcher off for that run, the way to run locally on purpose.
+- **The call** is `<launcher> --git <mode> -- <command> [args...]`, started in the caller's working directory, where `<command>` is the command line as it was typed (the suite runner and its arguments; for `suitemap.py` the interpreter, the script and its arguments, and for `measure`, which needs the coverage package of the test environment, `uv run --locked --only-group tests python tests/suitemap.py ...`, the form CI uses). The launcher runs it on the other machine, in a copy of the tree. `<mode>` says what the far side's copy must hold: `history` when the run reads git (the `suitemap` and `clean_text` suites, and the `suitemap.py` subcommands `list`, `plan`, `measure`, `select` and `audit`, which ask git for the tracked suites, a commit or a diff), so the copy must be a git repository with its history; `snapshot` when the files alone are enough (`tests/run-suite` of the other suites, and `suitemap.py run` of them). A far side given `snapshot` may have no git at all, so it must not be given a run that needs one: `suitemap.py` itself refuses a tree whose `git ls-files tests/` is empty (exit 2, a line on stderr) instead of listing no suites.
+- **The output is the launcher's**: it takes the place of the process, so its stdout, stderr and exit code are the run's, and nothing is added to stdout. One line on stderr, `running through the test launcher: <launcher>`, says why the run is not local; `STACKSHOT_TEST_LAUNCHER_QUIET=1` drops it.
+- **The loop guard**: the launcher is started with `STACKSHOT_TEST_LAUNCHED=1` in its environment, and while that variable is set nothing launches again. A launcher whose other side keeps it in the command's environment (or has no config file) never loops, and `suitemap.py run`, which calls `tests/run-suite` for each suite, sends itself once and its suites stay where it runs.
+- **A launcher that is missing or not executable**, or a line that cannot be split, is said once (`test launcher <path> is not executable: running here`) and the run is local: a wrong config never fails a run. Which other machine to try when the first is down is the launcher's business; the runner does not know about it.
+- `--help`, a bad command line, and the subcommands that do not run or read the tree (`warm`, `shard`, `merge`, `stamp`) always stay local.
+
+A launcher can be a short script. This one runs the command on a machine called `test-box` over ssh, in the same directory of a copy of the tree that it keeps in sync itself (the host name, the `rsync` line and the paths are placeholders), and passes the exit code on. A launcher must fail, and never run the command on a stale copy, when the copy fails: the `|| exit` after `rsync` does it. Its arguments reach the far side exactly as typed only when the far command is run by `bash` (a login shell such as `dash` reads `$'...'` and non-ASCII words differently), so the far shell must be bash, or, as here, the launcher runs the remote command through `bash -c` and the login shell does not matter:
+
+```sh
+#!/bin/bash
+# /usr/local/bin/test-launcher [--git history|snapshot] -- command [args...]
+mode=snapshot
+[ "$1" = --git ] && { mode=$2; shift 2; }
+[ "$1" = -- ] && shift
+skip=--exclude=.git; [ "$mode" = history ] && skip=
+rsync -a --delete $skip ./ test-box:work/tree/ || exit    # a failed copy ends the launcher with rsync's status
+# printf %q quotes each argument for bash; the whole line goes to the far side inside single quotes, run by bash -c
+inner="cd work/tree && STACKSHOT_TEST_LAUNCHED=1 $(printf '%q ' "$@")"
+exec ssh test-box "bash -c '${inner//"'"/"'\\''"}'"
+```
+
+and the config file holds its path: `/usr/local/bin/test-launcher`.

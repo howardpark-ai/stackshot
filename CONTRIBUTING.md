@@ -141,7 +141,7 @@ script's path, so a suite that carried its own inline metadata built a fresh env
 `${XDG_CACHE_HOME:-~/.cache}/stackshot/test-venv` (only the `tests` group: the package itself is not installed, the suites run from the checkout). The first run in any checkout builds that environment, every later run in any
 checkout reuses it, and `--locked` fails on a stale `uv.lock` instead of resolving afresh. **Run a suite through
 `tests/run-suite <name>`** (`pilot`, or `phone_width_check`): it shares the one environment and gives the run a scratch folder that is
-removed afterwards. `./tests/x_scenario.py` does not run, the suites have no shebang.
+removed afterwards. `./tests/x_scenario.py` does not run, the suites have no shebang. A machine that should not run the tests itself can send `tests/run-suite` and `tests/suitemap.py` to another one through a launcher it configures (`tests/_launcher.py`, [docs/development.md](docs/development.md#sending-test-runs-to-another-machine)); with none configured nothing changes.
 
 ## Page text: the string table, and no text in another language
 
