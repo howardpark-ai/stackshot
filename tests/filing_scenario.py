@@ -4,6 +4,9 @@ recorders, no live store, no network, no model call.
   1  one item per filing rule: stuck-elsewhere (the first open step is someone else's), arbitrary-hold (a hold nothing explains), mislabeled-state (a stored state its fields contradict), reads-as-wait (an alive
      item whose next says it waits) are each a finding of the category and the evidence the daily run gave before the pass took them (field_findings(ten_minute=True)), which the daily run no longer makes; the broad words (when, once, after, until) are a flag and no finding; and none of these is raised
      for a clean item, a closed one, an item that already waits (its next is the record of the wait), an item idle for hours (an hourly audit line's rule) or one stale by its dates (stale is, too)
+  1d mover-no-session (audit_checks.check_mover_no_session): an open item whose mover is a name no session of the registry (a name, an alias, a retired row) or of the fleet's session files carries is a finding naming the mover and the
+     item's last write, whose fix sets the mover to the project's front agent (else asks for a live session); none for a live session, an alias of one, a person, no mover, a closed item, a cloud session or an outside party; a registry
+     that cannot be read finds nothing
   2  the words of an alive item's next are read from next itself (audit_checks.wait_words): a precise line, the broad words only when no line reads as a wait, a negation, a waiting item, a closed one;
      the note that get carries comes from the same words (nothing is stored), and a flag stored by an older write is ignored
   3  the pass: findings go to their movers, one message per recipient, headed as a filing check; a second pass sends nothing (the same finding is not sent again while its item is unwritten) and keeps the stamps;
@@ -132,6 +135,77 @@ check("1c …beside the server's line a mover's wait line is the finding, and th
       [f["detail"] for f in fs if f["id"] == BID(37) and f["category"] == "reads-as-wait"] and "waiting until 09:00" in [f["detail"] for f in fs if f["id"] == BID(37) and f["category"] == "reads-as-wait"][0]
       and "address" not in [f["detail"] for f in fs if f["id"] == BID(37) and f["category"] == "reads-as-wait"][0], [f for f in fs if f["id"] == BID(37)])
 check("1c wait_words: the recorded line is skipped, its words add no broad flag", AC.wait_words(steps_["a34"], None, now) == ([], []) and AC.wait_words(steps_["a35"], None, now)[0], (AC.wait_words(steps_["a34"], None, now), AC.wait_words(steps_["a35"], None, now)))
+
+# ---- 1d. mover-no-session: an open item whose mover is a name no live or known session carries
+from stackshot.fleet import sessions_registry as SR
+PID_LIVE, PID_GONE = "00000000-0000-4000-8000-0000000000b1", "00000000-0000-4000-8000-0000000000b2"
+reg_dir = T / "sessions-links"; (reg_dir / "a").mkdir(parents=True)
+def reg_row(pid, name, state, aliases=()):
+    return {"id": pid, "name": name, "aliases": list(aliases), "project": None, "project_key": None, "role": None, "lane": "max", "model": "opus", "effort": "medium", "pane": name, "cwd": "/srv/work",
+            "state": state, "created": "2026-10-21T21:00:00Z", "retired_at": None if state == "live" else "2026-10-22T07:00:00Z", "transcripts": []}
+reg_file = reg_dir / "a/session-registry.json"
+def write_registry(*rows): reg_file.write_text(json.dumps({"schema": 1, "machine": "a", "written": "2026-10-22T07:00:00Z", "sessions": {r["id"]: r for r in rows}})); SR.reset()
+LIVE_ROW, GONE_ROW = reg_row(PID_LIVE, "alpha-main", "live", ["alpha-main-old"]), reg_row(PID_GONE, "alpha-gone", "retired")
+client_cfg = _cfg.CFG.setdefault("client", {}); had_links = client_cfg.get("session_links")
+def moved_by(i, who, **kw): return item(i, wrote=now - H, state="doing", needs=[who] if who else [], mover=who, next=f"{who}: build it" if who else "", **kw)
+def no_session(items_, env_=None): return [f for f in AC.filing_findings(items_, {}, now, env_ or env())[0] if f["category"] == "mover-no-session"]
+ghosts = build(moved_by(40, "alpha-general"),                         # a name no session carries
+               moved_by(41, "alpha-main"),                            # the live session
+               moved_by(42, "alpha-main-old"),                        # an old name of the live session (its alias)
+               moved_by(43, "Alpha-Main"),                            # the live session in another letter case
+               moved_by(44, "Oliver"),                                # the person
+               moved_by(45, ""),                                      # nobody
+               item(46, status="completed", wrote=now - 40 * H, state="doing", needs=["alpha-general"], mover="alpha-general", next="alpha-general: build it", outcome="done"),   # closed
+               moved_by(47, "alpha-gone"),                            # a retired row still names its session: known
+               moved_by(48, "cse" + "_" + "0123456789abcdef"),        # a cloud session (built in parts: the literal has the shape of a real id)
+               moved_by(49, "an outside vendor"))                     # an outside party
+client_cfg["session_links"] = str(reg_dir)
+try:
+    write_registry(LIVE_ROW, GONE_ROW)
+    got_ns = [f["id"] for f in no_session(ghosts)]
+    check("1d a mover no session carries is a mover-no-session finding, and only that one: not a live session, its alias, the same name in another case, the person, no mover, a closed item, a retired row's name, a cloud session or an outside party",
+          got_ns == [BID(40)], got_ns)
+    f40 = no_session(ghosts)[0]
+    check("1d the evidence names the mover and the item's last write", "alpha-general" in f40["detail"] and f"item last written {AC._stamp(now - H)}" in f40["detail"] and "no live or known session" in f40["detail"], f40)
+    check("1d the fix names the project's front agent from its page, and the finding goes to that agent (through the page key, unmarked)",
+          f40["fix"] == "set the mover to alpha-main, the project's front agent" and f40["to"] == "alpha-main" and AR.recipient(f40["to"], f40["project"], env(), f40["mover"]) == ("projects/alpha", False), (f40, AR.recipient(f40["to"], f40["project"], env(), f40["mover"])))
+    check("1d it is a plain filing finding: the daily run's shape, source code, a fix line, no need of the person", f40["source"] == "code" and f40["owner"] == "alpha-general" and f40["mover"] == "alpha-general"
+          and not AC.needs_person("mover-no-session") and AC.FIX["mover-no-session"] and "mover-no-session" in AC.CHECKS_FILING, f40)
+    nomain = AR.Env(roles=ROLES, fallback=lambda p: "", builder=lambda p: "alpha-builder", page_of=lambda p: ("", None), deliver=deliver, sessions=lambda: None)
+    f40b = no_session(ghosts, nomain)[0]
+    check("1d with no front agent to name, the fix asks for a live session and the finding goes to the audit's main agent", f40b["fix"].startswith("name a live session as the mover") and f40b["to"] == _cfg.audit_main(), f40b)
+    same_main = AR.Env(roles=ROLES, fallback=lambda p: "alpha-general", builder=lambda p: "alpha-builder", page_of=lambda p: ("", None), deliver=deliver, sessions=lambda: None)
+    check("1d a front agent that is the mover itself is no one to set it to", no_session(ghosts, same_main)[0]["fix"].startswith("name a live session"))
+    daily_ns, _p, _n = AC.field_findings(ghosts, {}, now, env(), ten_minute=True)
+    check("1d the daily run makes none (it is the filing pass's check)", not [d for d in daily_ns if d["category"] == "mover-no-session"], daily_ns)
+    clear_state(); r_ns = AR.filing_pass(now=now, items=ghosts, anchors={}, env=env())
+    check("1d the pass sends it once, to the front agent's page key, as '<id> · mover-no-session · <evidence> · <fix>'",
+          [(to, l.split(" · ")[1]) for to, t, _f in sent for l in t.splitlines() if l.startswith("board#")] == [("projects/alpha", "mover-no-session")] and r_ns["findings"] == 1, (sent, r_ns))
+    clear_state()
+    real_view = AC._fleet.view
+    AC._fleet.view = lambda: type("V", (), {"by_name": staticmethod(lambda present_only=False: {"alpha-general": "00000000-0000-4000-8000-0000000000c1"})})()
+    try: known_by_fleet = no_session(ghosts) == []
+    finally: AC._fleet.view = real_view
+    check("1d a name the fleet's own session files list, that the registry does not hold yet, is known", known_by_fleet)
+    # fail open: a registry that does not read (a file torn from the start: a file that read before stands in for up to 30 minutes), no registry file, a lookup that raises
+    torn_dir = T / "sessions-links-torn"; (torn_dir / "a").mkdir(parents=True); (torn_dir / "a/session-registry.json").write_text("{ torn")
+    client_cfg["session_links"] = str(torn_dir); SR.reset()
+    check("1d fail open: a registry file that does not read finds nothing", AC.session_names() is None and no_session(ghosts) == [], AC.session_names())
+    empty_dir = T / "sessions-links-none"; empty_dir.mkdir()
+    client_cfg["session_links"] = str(empty_dir); SR.reset()
+    check("1d fail open: no registry file finds nothing", AC.session_names() is None and no_session(ghosts) == [])
+    client_cfg["session_links"] = str(reg_dir); write_registry(LIVE_ROW)
+    real_load = AC._sr.load
+    AC._sr.load = lambda: (_ for _ in ()).throw(RuntimeError("unreadable"))
+    try: raised_none = AC.session_names() is None
+    finally: AC._sr.load = real_load
+    check("1d fail open: a registry lookup that raises gives no names, so finds nothing", raised_none and AC.check_mover_no_session("alpha-general", None) is False)
+    check("1d …and with the registry back it is found again (a retired row's name is then unknown, a live one's still known)", [f["id"] for f in no_session(ghosts)] == [BID(40), BID(47)], [f["id"] for f in no_session(ghosts)])
+finally:
+    if had_links is None: client_cfg.pop("session_links", None)
+    else: client_cfg["session_links"] = had_links
+    SR.reset(); clear_state()
+check("1d with no registry at all (no store configured) nothing is found for an unknown mover", no_session(ghosts) == [])
 
 # ---- 2. the words of next
 alive = lambda nxt: item(20, wrote=now - H, state="doing", needs=["home-agent"], next=nxt)[1]
