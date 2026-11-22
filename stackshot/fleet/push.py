@@ -41,6 +41,7 @@ import sys
 import time
 
 from stackshot.core import config as _cfg  # noqa: E402
+from stackshot.fleet import fleet as _fleet  # noqa: E402  — publisher(): the box that runs this server
 from stackshot.fleet import inbox as _inbox  # noqa: E402  — label(): the `from:` line
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  — a permanent session id → the session's name now
 
@@ -51,7 +52,7 @@ PAUSE = os.path.join(A, f"paused-{SRC}.json")
 HELD = os.path.join(A, f"held-{SRC}.txt")
 REG = os.path.expanduser("~/.claude/sessions")
 CLAUDE = os.path.expanduser("~/.local/bin/claude")
-PUB = str(_cfg.get("fleet", "publisher_letter") or "a")
+PUB = _fleet.publisher()                        # the box that runs this server: [fleet] publisher_letter, else found from the hostname
 CSE = re.compile(r"^cse_[A-Za-z0-9]{20,}$")    # a tagged id (24 characters after cse_), not a label such as cse_voice
 FALLBACK_LOG = os.path.join(A, "push-fallback.jsonl")     # bridge: one line per drop labelled by caller(), the callers still to switch
 INBOX_WAIT = float(os.environ.get("PUSH_INBOX_WAIT", "4"))      # s to wait for the machine's confirmation before answering "inbox"

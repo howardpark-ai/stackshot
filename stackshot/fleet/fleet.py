@@ -12,6 +12,7 @@ items only.
 from __future__ import annotations
 
 import json
+import socket
 import time
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,75 @@ def names() -> dict[str, str]:
     return out
 
 
+# ---------------------------------------------------------------- the box that runs this server
+# The publisher is the box the server runs on: the first column of the Machines panel, always live, and the one box whose own
+# versions are read from the binary. [fleet] publisher_letter, when set, names it outright (an override, as it has always been);
+# unset, it is found from the OS hostname, so a server moved to another box, or failed over, carries it along.
+def own_hostname() -> str:
+    """The OS hostname of the box this process runs on ("" when it cannot be read)."""
+    try:
+        return socket.gethostname()
+    except OSError:
+        return ""
+
+
+def _hkey(h: Any) -> str:
+    """A host name as compared: lower-cased, the domain part left off (a box answers to `box-a` and `box-a.example.net`)."""
+    return str(h or "").strip().lower().split(".")[0]
+
+
+def _names_rows() -> list[tuple[str, str, str]] | None:
+    """The rows of paths.fleet_names as (hostname, fleet name, letter); None when the file cannot be read."""
+    out: list[tuple[str, str, str]] = []
+    try:
+        for ln in open(_cfg.path("paths", "fleet_names"), encoding="utf-8"):
+            c = [x.strip() for x in ln.rstrip("\n").split("\t")]
+            if ln.strip() and not ln.startswith("#") and len(c) >= 3 and c[2]:
+                out.append((c[0], c[1], c[2]))
+    except Exception:
+        return None
+    return out
+
+
+def own_names() -> set[str]:
+    """Every name this box answers to, compared by `_hkey`: its OS hostname and, when the fleet's names table lists it, the table's hostname and fleet name
+    (the OS hostname `HOST-1` is the fleet's `box-x`). A host in [machines_panel] ssh_hosts that is one of these is read here, not over ssh."""
+    me = _hkey(own_hostname())
+    if not me:
+        return set()
+    out = {me}
+    for h, f, _l in _names_rows() or []:
+        if me in (_hkey(h), _hkey(f)):
+            out.update((_hkey(h), _hkey(f)))
+    return out
+
+
+def is_own_host(host: str) -> bool:
+    """Whether `host` (a name in ssh_hosts) is this box itself."""
+    return _hkey(host) in own_names() if _hkey(host) else False
+
+
+def publisher() -> str:
+    """The key of the box that runs this server: [fleet] publisher_letter when it is set (an explicit value always wins), else found from the hostname:
+    the letter of the names table's row for this box (paths.fleet_names, by OS hostname or fleet name), else the letter of the fleet machine whose name this box
+    answers to, else the lower-cased hostname itself (a stable key; the panel names the card by it). Fails open: with no hostname, or a names table that cannot
+    be read and no fleet machine to match, it is "a", the key every install had before the letter was derived."""
+    given = str(_cfg.get("fleet", "publisher_letter") or "").strip()
+    if given:
+        return given
+    me = own_names()
+    if not me:
+        return "a"
+    rows = _names_rows()
+    for _h, f, letter in rows or []:
+        if _hkey(f) in me or _hkey(_h) in me:
+            return letter
+    for L in letters():
+        if _hkey(read_shared(L, "machine").get("fleet")) in me:
+            return L
+    return "a" if rows is None else _hkey(own_hostname())
+
+
 def ssh_host_names() -> list[str]:
     """The names in [machines_panel] ssh_hosts, in config order, a repeat once (the list versions.ssh_hosts_read probes; a bad name there is skipped by it, not here)."""
     cfg = _cfg.get("machines_panel", "ssh_hosts") or []
@@ -98,7 +168,7 @@ def machines_order(fleet: dict[str, str] | None = None, hosts: list[str] | None 
     card, keyed by the full hostname. The Runners page and the panel's Runners section follow this order."""
     fleet = names() if fleet is None else fleet
     hosts = ssh_host_names() if hosts is None else hosts
-    pub = str(_cfg.get("fleet", "publisher_letter") or "a")
+    pub = publisher()
     out: list[str] = []
     for L in [pub] + sorted(x for x in fleet if x != pub):
         n = fleet.get(L, L)

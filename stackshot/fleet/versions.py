@@ -6,9 +6,9 @@ The packages come from stackshot.toml [machines_panel]: `installed = "fleet"` (o
 `"github-release:<owner/repo>"`; `machines = [letters]` where a host-only package runs.
 A machine is online while its puller checks in, within [client] online_minutes (machine.json `online`, written by clients.py),
 else "offline since" its last check-in; a machine with no puller on record is offline since it was last seen. The publisher is
-always live. (The ssh probe of the fleet-state writer, and `[client] liveness`, were removed.)
+always live; it is the box the server runs on, [fleet] publisher_letter when set, else found from the hostname (fleet.publisher). (The ssh probe of the fleet-state writer, and `[client] liveness`, were removed.)
 Machines with no sala fleet letter (such as spare-box) are listed in [machines_panel] `ssh_hosts`: the publisher reads each over
-one `ssh -o BatchMode=yes` call per refresh (ssh_hosts_read) that prints every package's version command, a package's `ssh_cmd`, else its
+one `ssh -o BatchMode=yes` call per refresh (ssh_hosts_read; a host that is the publisher's own box is read by running the same script here, never over ssh) that prints every package's version command, a package's `ssh_cmd`, else its
 `cmd:` command, else its `self_cmd`; a package the host does not have gives no version and so no row. The result is cached in
 versions.ssh.json and refreshed by a forced write (the timer publish, every [publish] every_minutes, and a bump) or when older than
 SSH_CACHE_MIN; a write-triggered publish in between reads the cache. An unreachable host keeps its last versions and is marked so.
@@ -45,8 +45,8 @@ SSH_TIMEOUT = 10             # s: the whole ssh call per host (ConnectTimeout 5 
 ZONE = _cfg.tz()
 
 
-def _pub() -> str:          # the publisher's letter, read at use (a reload is live)
-    return str(_cfg.get("fleet", "publisher_letter") or "a")
+def _pub() -> str:          # the publisher's key, read at use (a reload is live): [fleet] publisher_letter, else found from the hostname (fleet.publisher)
+    return _fleet.publisher()
 
 
 def _run(cmd: list[str], timeout: int = 20, env: dict | None = None) -> str:
@@ -129,6 +129,16 @@ def _ssh(host: str, script: str, timeout: int = SSH_TIMEOUT) -> tuple[int, str]:
         return 255, ""
 
 
+def _run_here(script: str, timeout: int = SSH_TIMEOUT) -> tuple[int, str]:
+    """(exit code, stdout) of `script` run on this box, the way `_ssh` runs it on another: `sh -c`, no stdin, under the same timeout. The read of a host in ssh_hosts that is this box
+    (a box never ssh's to itself). 255 = it could not run. The one place that runs a host's script here: tests replace it."""
+    try:
+        r = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        return r.returncode, r.stdout
+    except Exception:
+        return 255, ""
+
+
 def _ssh_cmd(pk: dict) -> str:
     """The command that prints package pk's version on an ssh host: its `ssh_cmd`, else the `cmd:` command, else `self_cmd`."""
     if pk.get("ssh_cmd"):
@@ -200,11 +210,12 @@ def ssh_hosts_read(force: bool = False) -> list[dict]:
         try: return now - float(prev[h].get("ts", 0)) >= SSH_CACHE_MIN * 60
         except Exception: return True
     due = [h for h in hosts if force or h not in prev or stale(h)]
+    own = {h for h in hosts if _fleet.is_own_host(h)}            # the hosts that are this box: read by running the script here
     def probe(h: str) -> dict:
         t = dt.datetime.now(ZONE).strftime("%Y-%m-%d %H:%M %Z")
         old = prev.get(h) or {}
         try:
-            rc, out = _ssh(h, script) if script else (255, "")
+            rc, out = (_run_here(script) if h in own else _ssh(h, script)) if script else (255, "")   # this box is read here: a box never ssh's to itself
             if rc == 0:
                 return {"name": h, "reachable": True, "checked": t, "last_ok": t, "ts": now, "packages": _ssh_parse(out, names)}
         except Exception as e:                               # one host's failure never drops the others' cards

@@ -30,6 +30,7 @@ from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.core import interp as _interp
 from stackshot.core.instance import NAME, OWNER
+from stackshot.fleet import fleet as _fleetstate   # publisher(): the box that runs this server
 from stackshot.fleet import liveness as _lv
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
@@ -72,7 +73,7 @@ _NOT_FOR_OWNER_RE = re.compile(r"\b(?:" + "|".join(re.escape(p) for p in _NOT_FO
 
 
 def _pub_letter() -> str:
-    return str(_cfg.get("fleet", "publisher_letter") or "a")
+    return _fleetstate.publisher()
 
 
 # The one hop Claude's own cross-session messaging cannot make is cloud/Cowork → a local pane (and Cowork → Cowork). The

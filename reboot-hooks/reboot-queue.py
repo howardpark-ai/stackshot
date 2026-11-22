@@ -17,9 +17,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 from stackshot.core import config as _cfg  # noqa: E402  (stackshot.toml)
 from stackshot.core import interp as _interp  # noqa: E402  (a missing interpreter never stops a delivery)
+from stackshot.fleet import fleet as _fleet  # noqa: E402  (the box that runs this server)
 A = str(_cfg.state("anchor-hub"))
 FLEET = str(_cfg.fleet_dir())
-PUB = str(_cfg.get("fleet", "publisher_letter") or "a")
+PUB = _fleet.publisher()
 PUSH = [sys.executable, os.path.join(HERE, "..", "stackshot", "fleet", "push.py")]
 
 

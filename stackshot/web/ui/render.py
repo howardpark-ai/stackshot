@@ -1778,7 +1778,7 @@ class Board:
         """`contact_of(item) -> str` (the server's `_contact_label`): the item's contact as the item page's side column names it, so a list row names the same agent. None reads the stored contact."""
         self.contact_of = contact_of; self._contacts = {}      # the lookup runs at most once per item in a render (row_contact)
         ZONE = _cfg.tz(); now = now or datetime.datetime.now(ZONE)
-        PUB = str(_cfg.get("fleet", "publisher_letter") or "a")                  # the box that runs the server: first column, always live
+        PUB = _fleet.publisher()                                                 # the box that runs the server: first column, always live
         FLEET = fleet_names()                                                    # letter → fleet name
         TITLE = str(_cfg.get("instance", "title") or _cfg.get("instance", "name") or "stackshot")
         _PKGS = list(_cfg.get("machines_panel", "packages") or [])
