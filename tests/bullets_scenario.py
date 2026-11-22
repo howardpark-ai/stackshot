@@ -755,7 +755,7 @@ check("5d line cap: a cut that would pass the line cap is no fix", BT.split_long
 r, fx = with_fixes(lambda: create(f"- Goal: {A}, {B}"))
 check("5d write: a one-clause bullet over the limit is stored as two bullets, and the fix line says where it was cut", _service_store._load(r[1])["description"] == f"- Goal: {A},\n- {B}" and [k for k, _ in fx] == ["description-bullet"] and "comma" in fx[0][1] and "no word changed" in fx[0][1] and "over 120 characters" in fx[0][1], (_service_store._load(r[1])["description"], fx))
 check("5d write: …the reply line does not invite a resend", "send it again" not in _CL.reply_note(fx), _CL.reply_note(fx))
-check("5d write: …the item's History says it was cut at a comma", any("split by the server at the end of a sentence or a comma" in (t or "") for t in hist(r[1])), hist(r[1]))
+check("5d write: …the item's History says it was cut at a comma, colon, dash or parenthesis, and the reply line says a spaced dash at a cut is dropped", any("split by the server at the end of a sentence or a comma, colon, dash or parenthesis" in (t or "") for t in hist(r[1])) and "no word changed; a spaced dash at a cut is dropped" in fx[0][1], (hist(r[1]), fx))
 g6 = create()[1]
 _, fx = with_fixes(lambda: _update_svc._update(g6, description=f"- Goal: {A}: {B}", sender=MAIN))
 check("5d write: an update is put right the same way", _service_store._load(g6)["description"] == f"- Goal: {A}:\n- {B}" and [k for k, _ in fx] == ["description-bullet"], (_service_store._load(g6)["description"], fx))
@@ -763,8 +763,33 @@ _, fx_r = with_fixes(lambda: _update_svc._update(g6, description=f"- Goal: {A}: 
 check("5d write: …and the same text sent again is no new fix", fx_r == [], fx_r)
 refused("5d write: a bullet with no usable cut is refused as before, with its length and the limit", lambda: create("- Goal: " + "word " * 25), "description bullet is", "limit is 120")
 (got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets(f"- Goal: {A}, {B}"))
-check("5d fix_long_bullets: the History line and the reply line name the comma; a sentence-only split keeps its old wording", got_n == "description: 1 long bullet split by the server at the end of a sentence or a comma" and "comma" in fx_d[0][1] and "at the end of a sentence into" in with_fixes(lambda: _fg.fix_long_bullets(LONG2))[1][0][1], (got_n, fx_d))
+check("5d fix_long_bullets: the History line and the reply line name the comma; a sentence-only split keeps its old wording", got_n == "description: 1 long bullet split by the server at the end of a sentence or a comma, colon, dash or parenthesis" and "comma" in fx_d[0][1] and "at the end of a sentence into" in with_fixes(lambda: _fg.fix_long_bullets(LONG2))[1][0][1] and with_fixes(lambda: _fg.fix_long_bullets(LONG2))[1][0][1].endswith("no word changed"), (got_n, fx_d))
 (got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets(f"- Goal: {A}, {B}\nplain prose that is no bullet"))
 check("5d fix_long_bullets: a cut text with a later line that is no bullet comes back cut, no note, nothing counted, and the write is refused for that line", got_t.splitlines()[:2] == [f"- Goal: {A},", f"- {B}"] and got_n == "" and fx_d == [], (got_t, got_n, fx_d))
+
+# ---- 5e. the second tier's edges: the fit including the marker, the floor of a piece, the clause's own gap, and the cost on a clause padded with spaces
+check("5e fit: a first piece that reads exactly 120 with its `- ` marker stands", soft("- " + "a" * 117 + ", " + "b" * 20) == (["- " + "a" * 117 + ",", "- " + "b" * 20], 1, 1), soft("- " + "a" * 117 + ", " + "b" * 20))
+check("5e fit: …one more character and it does not (the marker counts), so there is no cut", soft("- " + "a" * 118 + ", " + "b" * 20) is None and soft("- " + "a" * 119 + ", " + "b" * 20) is None, soft("- " + "a" * 118 + ", " + "b" * 20))
+check("5e fit: a last piece that reads exactly 120 with its marker stands, and one more does not", soft("- " + "a" * 20 + ", " + "b" * 118) == (["- " + "a" * 20 + ",", "- " + "b" * 118], 1, 1) and soft("- " + "a" * 20 + ", " + "b" * 119) is None, soft("- " + "a" * 20 + ", " + "b" * 119))
+check("5e fit: an indented bullet's indent is no part of what it reads: the marker is the dash and its space", soft("  - " + "a" * 117 + ", " + "b" * 20) == (["  - " + "a" * 117 + ",", "  - " + "b" * 20], 1, 1), soft("  - " + "a" * 117 + ", " + "b" * 20))
+check("5e floor: a first piece of 10 characters stands, one of 9 does not", soft("- " + "a" * 9 + ", " + "b" * 115) == (["- " + "a" * 9 + ",", "- " + "b" * 115], 1, 1) and soft("- " + "a" * 8 + ", " + "b" * 115) is None, soft("- " + "a" * 8 + ", " + "b" * 115))
+check("5e floor: a last piece of 10 characters stands, one of 9 does not", soft("- " + "a" * 108 + ", " + "b" * 10) == (["- " + "a" * 108 + ",", "- " + "b" * 10], 1, 1) and soft("- " + "a" * 108 + ", " + "b" * 9) is None, soft("- " + "a" * 108 + ", " + "b" * 9))
+two = "- " + A + ", " + B + ".  " + "d" * 20 + "."
+check("5e gap: the clause's own gap (two spaces) is kept when a later clause merges onto the last piece of a cut one", soft(two) == (["- " + A + ",", "- " + B + ".  " + "d" * 20 + "."], 1, 1), soft(two))
+# a clause padded with spaces: the cost per cut does not grow with the padding, and the answer is the one the small text gets
+PAD = " " * 100
+def timed(t, n_lines=8):
+    t0 = time.time(); got = BT.split_long_ex(t, n_lines, 120); return got, time.time() - t0
+got_big, dt_big = timed("- " + ("x," + PAD) * 400)
+got_small, _ = timed("- " + ("x," + PAD) * 20)
+check("5e padding: 400 commas with 100 spaces between them (40 KB) is refused at once, well under a second (bound 1 s; it took 3 s before)", got_big is None and dt_big < 1.0, (got_big is None, dt_big))
+check("5e padding: …the same answer as the text of 20 of them, which also needs more than 8 lines", got_small is None, got_small)
+got_ok, dt_ok = timed("- " + ("x," + PAD) * 7 + "y" * 5, 40)
+check("5e padding: seven units padded with spaces are cut a piece each within the limit, as a plain text of that shape is", got_ok is not None and BT.judge(got_ok[0], 40, 120) is None and got_ok[2] == 1 and "".join(got_ok[0].split()).replace("-", "") == "x," * 7 + "y" * 5 and dt_ok < 1.0, (got_ok and got_ok[0].count("\n"), dt_ok))
+wide = "- " + "a" * 60 + "," + " " * 30000 + "b" * 60
+got_w, dt_w = timed(wide)
+check("5e padding: a gap of 30,000 spaces is one cut, dropped with it, and costs nothing", got_w is not None and got_w[0].splitlines() == ["- " + "a" * 60 + ",", "- " + "b" * 60] and dt_w < 1.0, (got_w and len(got_w[0]), dt_w))
+got_l, dt_l = timed("- " + "a" * 60 + "," + " " * 30000 + "[" + "b" * 50 + "](https://example.com/" + "u" * 200 + ")")
+check("5e padding: …with a link after it, the link stays whole and reads as its words", got_l is not None and got_l[0].splitlines()[1].startswith("- [bbb") and "(https://example.com/" + "u" * 200 + ")" in got_l[0] and dt_l < 1.0, (got_l and got_l[0][:80], dt_l))
 
 print(("ok" if not fails else "FAILED") + f": bullets scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

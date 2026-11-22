@@ -385,10 +385,23 @@ _RX_SOFT_CUT = re.compile(r"(?<=[,:]) +(?=\S)|(?<=\S) +[-\u2013\u2014] +(?=\S)|(
 _SOFT_MIN = 10                  # a piece cut by the second tier reads at least this many characters: a stub of a few words is no bullet
 
 
-def _soft_units(c: str, mark: str, line_max: int) -> list[tuple[str, str]] | None:
+def _soft_units(c: str, mark: str, line_max: int, cap: int) -> list[tuple[str, str]] | None:
     """One clause `c` that reads over `line_max` (after `mark`) as (the piece, the gap that followed it) units, cut from the left at the last comma, colon, spaced dash or opening parenthesis that leaves the
     piece within the limit; the rest is cut again the same way until it fits. A cut is never made inside a link, a naked URL or a code span, an open parenthesis or an unclosed `**` emphasis, and never leaves a
-    piece that reads under `_SOFT_MIN`. The last unit's gap is "" (the caller gives it the clause's own). None when no such cut gives a fit."""
+    piece that reads under `_SOFT_MIN`. The last unit's gap is "" (the caller gives it the clause's own). None when no such cut gives a fit, or when it would take more than `cap` cuts (more pieces than the
+    description may have lines). Linear in the clause: what a stretch reads is taken from one table of the characters that count (a link's markup and a naked URL do not), by bisection, and only the piece a cut
+    makes is measured in full (`visible_len`) to confirm it, so a clause padded with spaces costs no more per cut than a short one."""
+    links = list(RX_MD_LINK.finditer(c))
+    own = {m.span() for m in links}
+    zero = sorted([(m.start(), m.start(1)) for m in links] + [(m.end(1), m.end()) for m in links] + [sp for sp in _spans(c) if sp not in own])     # what reads as nothing: a link's brackets and destination, a naked URL
+    zends = [b for _, b in zero]
+    zsum = [0]
+    for a, b in zero:
+        zsum.append(zsum[-1] + b - a)
+
+    def reads(x: int) -> int:         # what c[:x] reads, for an x that is no place inside a link or a URL
+        return x - zsum[bisect.bisect_right(zends, x)]
+
     starts, ends = _merged(_spans(c) + [m.span() for m in _RX_CODE_SPAN.finditer(c)])
 
     def inside(x: int) -> bool:
@@ -404,16 +417,27 @@ def _soft_units(c: str, mark: str, line_max: int) -> list[tuple[str, str]] | Non
         if inside(s) or inside(m.end()) or opens > closes or strong % 2:
             continue
         cuts.append((s, m.end()))
+    vs = [reads(s) for s, _ in cuts]
+    ve = [reads(e) for _, e in cuts]
+    vend = reads(len(c.rstrip()))
+    room = line_max - len(mark.lstrip())
     out: list[tuple[str, str]] = []
-    at = 0
-    while visible_len(mark + c[at:]) > line_max:
-        for s, e in reversed(cuts):
-            if s > at and visible_len(mark + c[at:s]) <= line_max and visible_len(c[at:s]) >= _SOFT_MIN and visible_len(c[e:]) >= _SOFT_MIN:
+    at = vat = 0
+    while vend - vat > room:
+        if len(out) > cap:
+            return None
+        j = bisect.bisect_right(vs, vat + room) - 1           # the last cut whose first piece fits; the ones before it read less
+        while j >= 0 and cuts[j][0] > at and vs[j] - vat >= _SOFT_MIN:
+            s, e = cuts[j]
+            if vend - ve[j] >= _SOFT_MIN and visible_len(mark + c[at:s]) <= line_max and visible_len(c[at:s]) >= _SOFT_MIN:
                 out.append((c[at:s], c[s:e]))
-                at = e
+                at, vat = e, ve[j]
                 break
+            j -= 1
         else:
             return None
+    if visible_len(mark + c[at:]) > line_max:
+        return None
     out.append((c[at:], ""))
     return out
 
@@ -463,7 +487,7 @@ def split_long_ex(text: str, max_lines: int, line_max: int) -> tuple[str, int, i
         for c, after in _clauses(body):
             units = [(c, after)]
             if visible_len(mark + c) > line_max:
-                if (units := _soft_units(c, mark, line_max)) is None:
+                if (units := _soft_units(c, mark, line_max, max_lines)) is None:
                     return None
                 units[-1] = (units[-1][0], after)
                 soft_here = True

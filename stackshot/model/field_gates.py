@@ -180,8 +180,9 @@ def fix_long_bullets(desc: str, stored: str | None = None) -> tuple[str, str]:
         return new, ""
     if stored is not None and new.strip() == str(stored).strip():          # the same long text again, already stored as split: nothing is changed, so nothing is counted, told or noted
         return new, ""
-    where, hist = ("at the end of a sentence or at a comma, colon, dash or parenthesis", "at the end of a sentence or a comma") if soft else ("at the end of a sentence",) * 2
-    _calls.fixed("description-bullet", f"{n} description bullet{'' if n == 1 else 's'} over {line_max} characters {'was' if n == 1 else 'were'} split {where} into shorter bullets, no word changed", fields=["description"], stored=new, sent=desc)
+    where, hist = ("at the end of a sentence or at a comma, colon, dash or parenthesis", "at the end of a sentence or a comma, colon, dash or parenthesis") if soft else ("at the end of a sentence",) * 2
+    kept = "no word changed; a spaced dash at a cut is dropped" if soft else "no word changed"
+    _calls.fixed("description-bullet", f"{n} description bullet{'' if n == 1 else 's'} over {line_max} characters {'was' if n == 1 else 'were'} split {where} into shorter bullets, {kept}", fields=["description"], stored=new, sent=desc)
     return new, f"description: {n} long bullet{'' if n == 1 else 's'} split by the server {hist}"
 
 
