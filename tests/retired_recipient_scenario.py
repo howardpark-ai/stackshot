@@ -196,6 +196,34 @@ check("a retired sole agent of a page is refused to the sender, naming the page 
 res = _messaging._message("work-osprey-x", "to a live agent", "home-beta")
 check("a live name is sent to as before (nothing readdressed)", res.startswith("delivered") or res.startswith("inbox") or res.startswith("queued"), res)
 
+# ---- 5b. the message tool says nothing about a name it cannot see: an empty, partial or unreadable view of the fleet is no proof of a retired name, so the refusal stands as before
+def refused_unseen(to, sender="home-beta", **kw):
+    a, m = len(routed("projects/alpha")), len(sock_sent)
+    try: res, e = _messaging._message(to, "a question for a pane that may be running", sender, **kw), ""
+    except ToolError as x: res, e = "", str(x)
+    return res, e, len(routed("projects/alpha")) == a and len(sock_sent) == m
+class EmptyUnreadable(dict):
+    unreadable = ["a"]
+home_only = {k: v for k, v in view[0].items() if v["name"] == "home-beta"}
+for label, fake in (("an empty heartbeat index", lambda: {}), ("a partial index (only another session in it)", lambda: dict(home_only)),
+                    ("an unreadable view", lambda: EmptyUnreadable()), ("a partial, unreadable index", lambda: Partial(home_only))):
+    _sr._sessions_index = fake
+    for who in ("work-osprey-x", "work-osprey-fresh"):          # a pane that runs but is in no heartbeat the tool can read, and one that has just started
+        res, e, quiet = refused_unseen(who)
+        check(f"message tool, {label}: a message to {who} is refused as before, not rerouted to its project and not called retired", e.startswith(f"Refused: no session '{who}' in the heartbeat") and "is retired" not in e and not res and quiet, (res, e))
+    for who in ("work-osprey-x", "work-osprey-fresh"):
+        res, e, quiet = refused_unseen(who, sender="a-nightly-script", origin="a")
+        check(f"…a script's message to {who} too ({label})", e.startswith("Refused: no session") and quiet, (res, e))
+_sr._sessions_index = _idx
+n_ml = len(ml.read_text().splitlines())
+res, e, quiet = refused_unseen("zz-fresh-never", sender="a-nightly-script", origin="a")
+check("a name no project takes that no heartbeat has seen (a readable view) is refused as before, and the message log does not call it retired", e.startswith("Refused: no session 'zz-fresh-never'") and quiet and len(ml.read_text().splitlines()) == n_ml, (e, ml.read_text().splitlines()[n_ml:]))
+res, e, quiet = refused_unseen("work-osprey-fresh")
+check("a name just started (in no heartbeat yet) on a readable view is refused as before too: only a name the view shows gone is rerouted", e.startswith("Refused: no session 'work-osprey-fresh' in the heartbeat") and quiet, (res, e))
+a0 = len(routed("projects/alpha"))
+res = _messaging._message("work-osprey-old", "positive control: a gone name on a readable view", "home-beta")
+check("…while a gone name on a readable view is still rerouted (the positive case)", res.startswith("'work-osprey-old' is retired (") and len(routed("projects/alpha")) == a0 + 1, res)
+
 # ---- 6. the sweep of the queue
 SQ = T / "sweepstate/hub/queue-msg"; SQ.mkdir(parents=True)
 def put(name, rows): (SQ / f"{name}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))

@@ -594,11 +594,11 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                 proj = _project_of_name(to, _anc.session_roles(), idx)      # a retired session whose row is forgotten, or a misspelling of an agent's name: its project still takes the message
             except Exception:  # noqa: BLE001
                 proj = ""
-            known = _rr.gone_why(to)           # the registry knows the name as an old name of a session or a retired one: it is no misspelling of a live name, however near the live one is
-            if proj and (known or not near) and _rr.takes_other(proj, to):           # a name no pane has and that is no near spelling of a live one is a retired name: its project takes the message, and the router rules it
-                return _sent_instead(to, known or "no session of that name is in the heartbeat", proj, raw, sender, auth, origin, fyi)
-            if origin and not proj:
-                _log_not_delivered(sender, to, text, f"returned to its sender — {to} is retired (no session of that name is in the heartbeat) and no project takes its messages")
+            known = _rr.gone_why(to)           # "" for an empty, partial or unreadable view of the fleet, and for a name that may be a pane just started: only a readable view that shows the name gone (a retired or old name) says so, however near a live name it is
+            if proj and known and _rr.takes_other(proj, to):           # then its project takes the message, and the router rules it; on any doubt the refusal below stands, as it did before
+                return _sent_instead(to, known, proj, raw, sender, auth, origin, fyi)
+            if origin and not proj and known:
+                _log_not_delivered(sender, to, text, f"returned to its sender — {to} is retired ({known}) and no project takes its messages")
             raise ToolError(f"Refused: no session {to!r} in the heartbeat — " + (f"if it is an agent of {proj}, send to {_project_takes(proj)} (message(to={proj!r}, …)); " if proj else "")
                             + (f"did you mean {', '.join(near)}? " if near else "") + f"panes right now: {', '.join(live)}; "
                             "a project is addressed by its page key (to=projects/<slug>), a cloud/Cowork session by its cse_… id (a pane started in the last few minutes shows up at its machine's next heartbeat)")
