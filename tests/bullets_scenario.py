@@ -639,15 +639,19 @@ def pieces(t):
 for w in ("e.g.", "i.e.", "Mr.", "Dr.", "vs."):
     check(f"5b no cut: after {w} (the one cut there is): no fix", pieces("- " + "x" * 60 + f" {w} " + "y" * 60 + ".") is None, pieces("- " + "x" * 60 + f" {w} " + "y" * 60 + "."))
 check("5b no cut: after a numbered item like 3.", pieces("- " + "x" * 60 + " step 3. " + "y" * 60 + ".") is None, None)
-check("5b no cut: inside parentheses", pieces("- " + "x" * 50 + " (first part. second part " + "y" * 60 + ")") is None, None)
+check("5b no cut: inside parentheses (the sentence end in them is no cut; the second tier cuts before the parenthesis instead, so it stays whole)", pieces("- " + "x" * 50 + " (first part. second part " + "y" * 60 + ")") == ["- " + "x" * 50, "- (first part. second part " + "y" * 60 + ")"], pieces("- " + "x" * 50 + " (first part. second part " + "y" * 60 + ")"))
+check("5b no cut: …and with the parenthesis at the start of the bullet there is no cut at all", pieces("- (" + "x" * 50 + " first part. second part " + "y" * 60 + ")") is None, None)
 check("5b no cut: after an entity (the semicolon of &amp; is no clause end, the text never comes out as '&amp')", pieces("- " + "x" * 60 + " fish &amp; " + "y" * 60 + ".") is None, None)
 check("5b no cut: …and one more spelled with a number, &#38;", pieces("- " + "x" * 60 + " fish &#38; " + "y" * 60 + ".") is None, None)
 check("5b no cut: a real sentence end beside them is still a cut (an abbreviation in the text does not stop the split)", pieces("- Use e.g. " + "x" * 10 + ", then " + "y" * 60 + ". " + "z" * 40 + ".") is not None and len(pieces("- Use e.g. " + "x" * 10 + ", then " + "y" * 60 + ". " + "z" * 40 + ".")) == 2, None)
 check("5b no cut: …a parenthesis that closes before the full stop is no bar", pieces("- " + "x" * 50 + " (a note) " + "y" * 20 + ". " + "z" * 60 + ".") is not None, None)
 check("5b no cut: …and a semicolon after a word still ends a clause", pieces("- " + "x" * 60 + "; " + "y" * 60 + ".") == ["- " + "x" * 60 + ";", "- " + "y" * 60 + "."], pieces("- " + "x" * 60 + "; " + "y" * 60 + "."))
-# the re-check of the split: a text whose split would still break the form (a prose line elsewhere) is left as written, and nothing is counted or noted
+# the re-check of the split: a text whose split would still break the form (a prose line elsewhere) comes back split but with no note and no fix counted: the gate refuses the fault that is left, not the long bullet
 (got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets(LONG2 + "\nplain prose that is no bullet"))
-check("5b re-check: a split text that still breaks the form (a later line that is no bullet) is no fix: the text comes back as written, no note, nothing counted", got_t == LONG2 + "\nplain prose that is no bullet" and got_n == "" and fx_d == [], (got_t, got_n, fx_d))
+check("5b re-check: a split text that still breaks the form (a later line that is no bullet) comes back split, with no note and nothing counted", got_t == "- Goal: " + "a" * 55 + ".\n- " + "b" * 60 + ".\nplain prose that is no bullet" and got_n == "" and fx_d == [], (got_t, got_n, fx_d))
+refused("5b re-check: …so the write is refused for the line that is no bullet, not for the long bullet the server would have put right", lambda: create(LONG2 + "\nplain prose that is no bullet"), "not a `- ` bullet")
+(got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets("plain prose first\n" + LONG2))
+check("5b re-check: a line that is no bullet before the long bullet is the first fault: the text is left as written, no note, nothing counted", got_t == "plain prose first\n" + LONG2 and got_n == "" and fx_d == [], (got_t, got_n, fx_d))
 (got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets(LONG2))
 check("5b fix_long_bullets: the text split, the History line for the item (the count, by the server), and the one counted fix", got_t.count("\n") == 1 and got_n == "description: 1 long bullet split by the server at the end of a sentence" and [k for k, _ in fx_d] == ["description-bullet"], (got_t, got_n, fx_d))
 (got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets("- Goal: ok\n- fits"))
@@ -712,5 +716,167 @@ check("5c resend: …and no second History line, and the stored text is as it wa
 check("5c resend: fix_long_bullets with the stored text equal to the split gives the split text, no note and no fix; with another stored text it is a fix again", n_r == "" and fx_r2 == [] and [k for k, _ in with_fixes(lambda: _fg.fix_long_bullets(f"- {S1} {S2}", "- other"))[1]] == ["description-bullet"], fx_r2)
 tok_ = _CL.begin(); _fg.fix_long_bullets(f"- {S1} {S2}"); _, det_ = _CL.end_detail(tok_)
 check("5c resend: the fix keeps a digest of what the writer sent (the detail of the fix, never the text), so the same text again undoes nothing, and other text does", det_.get("description-bullet", {}).get("sent") and not _CL.undone("description-bullet", det_["description-bullet"], {"description": f"- {S1}  {S2}"}) and _CL.undone("description-bullet", det_["description-bullet"], {"description": "- other"}), det_)
+
+# ---- 5d. the second tier: a clause still over the limit on its own is cut at the last comma, colon, spaced dash or opening parenthesis that leaves each piece within the limit
+A, B, C = "a" * 70, "b" * 50, "c" * 40
+def soft(t):
+    got = BT.split_long_ex(t, 8, 120)
+    return None if got is None else (got[0].splitlines(), got[1], got[2])
+check("5d comma: a one-clause bullet of 124 characters is cut after its comma, the comma stays at the end of the first piece, no word is lost", soft(f"- {A}, {B}") == ([f"- {A},", f"- {B}"], 1, 1), soft(f"- {A}, {B}"))
+check("5d colon: cut after the colon, which stays", soft(f"- {A}: {B}") == ([f"- {A}:", f"- {B}"], 1, 1), soft(f"- {A}: {B}"))
+check("5d dash: cut at a spaced dash, which is the separator the new bullet replaces (a hyphen inside a word is no cut)", soft(f"- {A} - {B}") == ([f"- {A}", f"- {B}"], 1, 1) and soft("- " + "a" * 70 + "-" + "b" * 50) is None, soft(f"- {A} - {B}"))
+check("5d dash: an en dash and an em dash with spaces cut the same way", soft(f"- {A} \u2013 {B}") == ([f"- {A}", f"- {B}"], 1, 1) and soft(f"- {A} \u2014 {B}") == ([f"- {A}", f"- {B}"], 1, 1), soft(f"- {A} \u2013 {B}"))
+check("5d parenthesis: cut before an opening parenthesis, which opens the second piece", soft(f"- {A} ({B})") == ([f"- {A}", f"- ({B})"], 1, 1), soft(f"- {A} ({B})"))
+C32 = "c" * 32
+check("5d last cut: of several commas the last one that leaves the first piece within the limit is taken", soft(f"- {C32}, {C32}, {C32}, {C32}") == ([f"- {C32}, {C32}, {C32},", f"- {C32}"], 1, 1), soft(f"- {C32}, {C32}, {C32}, {C32}"))
+check("5d three pieces: a clause that needs two cuts is cut twice, each piece within the limit", (lambda r: r is not None and len(r[0]) == 3 and all(len(x) <= 120 for x in r[0]))(soft(f"- {A}, {A}, {A}")), soft(f"- {A}, {A}, {A}"))
+check("5d first tier first: a sentence end that makes every piece fit is used, and the second tier is not touched", soft("- " + "x" * 60 + ". " + "y" * 30 + ", " + "z" * 30) == (["- " + "x" * 60 + ".", "- " + "y" * 30 + ", " + "z" * 30], 1, 0), soft("- " + "x" * 60 + ". " + "y" * 30 + ", " + "z" * 30))
+check("5d mixed: the short sentence stays with the first piece of the long one when they fit, the rest follows", soft("- " + "s" * 20 + ". " + "u" * 60 + ", " + "v" * 60) == (["- " + "s" * 20 + ". " + "u" * 60 + ",", "- " + "v" * 60], 1, 1), soft("- " + "s" * 20 + ". " + "u" * 60 + ", " + "v" * 60))
+check("5d words: every word of the bullet is in the pieces, in order (the dash is the only thing a cut takes)", " ".join(" ".join(soft(f"- {A}, {B}")[0]).replace("- ", "").split()) == f"{A}, {B}", None)
+check("5d idempotent: the split text keeps the form, and a second split finds nothing to do", BT.judge(BT.split_long(f"- {A}, {B}", 8, 120)[0], 8, 120) is None and BT.split_long(BT.split_long(f"- {A}, {B}", 8, 120)[0], 8, 120) is None, None)
+check("5d line ends: a CRLF text is cut with CRLF, the second piece takes the line's own end", BT.split_long(f"- {A}, {B}\r\n- tail\r\n", 8, 120)[0] == f"- {A},\r\n- {B}\r\n- tail\r\n", BT.split_long(f"- {A}, {B}\r\n- tail\r\n", 8, 120))
+check("5d indent: the pieces keep the bullet's indent", soft(f"  - {A}, {B}")[0] == [f"  - {A},", f"  - {B}"], soft(f"  - {A}, {B}"))
+# where the second tier does not cut
+URL = "https://example.com/" + "u" * 200
+got_u = BT.split_long(f"- {A}, {B} {URL}", 8, 120)
+check("5d url: a long address that does not count toward the limit stays whole in its piece", got_u is not None and URL in got_u[0] and got_u[0].splitlines()[0] == f"- {A},", got_u)
+check("5d url: a comma and a space inside a link's words is no cut (the link stays whole): no fix", soft("- " + "x" * 40 + " [see, then " + "y" * 40 + "](https://example.com/p) " + "z" * 40) is None, None)
+check("5d code: a comma inside a code span is no cut", soft("- " + "x" * 40 + " `p, " + "y" * 40 + "` " + "z" * 40) is None, None)
+check("5d parenthesis open: a comma inside an open parenthesis is no cut (the parenthesis would stay open)", soft("- (" + "b" * 60 + ", " + "c" * 60 + ")") is None, None)
+check("5d emphasis: a comma inside an open ** emphasis is no cut", soft("- **" + "b" * 60 + ", " + "c" * 60 + "**") is None, None)
+check("5d no space: a comma with no space after it (1,000) and a colon inside a time are no cut", soft("- " + "x" * 60 + ",1" + "y" * 60) is None and soft("- " + "x" * 60 + ":30" + "y" * 60) is None, None)
+check("5d too short: a second piece under ten characters is no cut", soft("- " + "a" * 114 + ", then ok") is None, soft("- " + "a" * 114 + ", then ok"))
+check("5d too short: a first piece under ten characters is no cut", soft("- ok, " + "b" * 125) is None, None)
+check("5d too short: …but an earlier comma that leaves both pieces long enough is used (the last cut would leave a stub)", soft(f"- {A}, " + "b" * 40 + ", end ok") == ([f"- {A},", "- " + "b" * 40 + ", end ok"], 1, 1), soft(f"- {A}, " + "b" * 40 + ", end ok"))
+check("5d no cut: a piece still over the limit after the only cut is no fix", soft("- " + "a" * 60 + ", " + "b" * 130) is None, None)
+check("5d no cut: a long bullet with no comma, colon, dash or parenthesis is no fix, as before", soft("- " + "a" * 125) is None and soft("- " + "word " * 25) is None, None)
+check("5d children: a long bullet with an indented bullet under it is still not cut", BT.split_long(f"- {A}, {B}\n  - child", 8, 120) is None, None)
+check("5d line cap: a cut that would pass the line cap is no fix", BT.split_long("\n".join([f"- {A}, {B}"] + [f"- fact {i}" for i in range(7)]), 8, 120) is None, None)
+r, fx = with_fixes(lambda: create(f"- Goal: {A}, {B}"))
+check("5d write: a one-clause bullet over the limit is stored as two bullets, and the fix line says where it was cut", _service_store._load(r[1])["description"] == f"- Goal: {A},\n- {B}" and [k for k, _ in fx] == ["description-bullet"] and "comma" in fx[0][1] and "no word changed" in fx[0][1] and "over 120 characters" in fx[0][1], (_service_store._load(r[1])["description"], fx))
+check("5d write: …the reply line does not invite a resend", "send it again" not in _CL.reply_note(fx), _CL.reply_note(fx))
+check("5d write: …the item's History says it was cut at a comma, colon, dash or parenthesis, and the reply line says a spaced dash at a cut is dropped", any("split by the server at the end of a sentence or a comma, colon, dash or parenthesis" in (t or "") for t in hist(r[1])) and "no word changed; a spaced dash at a cut is dropped" in fx[0][1], (hist(r[1]), fx))
+g6 = create()[1]
+_, fx = with_fixes(lambda: _update_svc._update(g6, description=f"- Goal: {A}: {B}", sender=MAIN))
+check("5d write: an update is put right the same way", _service_store._load(g6)["description"] == f"- Goal: {A}:\n- {B}" and [k for k, _ in fx] == ["description-bullet"], (_service_store._load(g6)["description"], fx))
+_, fx_r = with_fixes(lambda: _update_svc._update(g6, description=f"- Goal: {A}: {B}", sender=MAIN))
+check("5d write: …and the same text sent again is no new fix", fx_r == [], fx_r)
+refused("5d write: a bullet with no usable cut is refused as before, with its length and the limit", lambda: create("- Goal: " + "word " * 25), "description bullet is", "limit is 120")
+(got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets(f"- Goal: {A}, {B}"))
+check("5d fix_long_bullets: the History line and the reply line name the comma; a sentence-only split keeps its old wording", got_n == "description: 1 long bullet split by the server at the end of a sentence or a comma, colon, dash or parenthesis" and "comma" in fx_d[0][1] and "at the end of a sentence into" in with_fixes(lambda: _fg.fix_long_bullets(LONG2))[1][0][1] and with_fixes(lambda: _fg.fix_long_bullets(LONG2))[1][0][1].endswith("no word changed"), (got_n, fx_d))
+(got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets(f"- Goal: {A}, {B}\nplain prose that is no bullet"))
+check("5d fix_long_bullets: a cut text with a later line that is no bullet comes back cut, no note, nothing counted, and the write is refused for that line", got_t.splitlines()[:2] == [f"- Goal: {A},", f"- {B}"] and got_n == "" and fx_d == [], (got_t, got_n, fx_d))
+
+# ---- 5e. the second tier's edges: the fit including the marker, the floor of a piece, the clause's own gap, and the cost on a clause padded with spaces
+check("5e fit: a first piece that reads exactly 120 with its `- ` marker stands", soft("- " + "a" * 117 + ", " + "b" * 20) == (["- " + "a" * 117 + ",", "- " + "b" * 20], 1, 1), soft("- " + "a" * 117 + ", " + "b" * 20))
+check("5e fit: …one more character and it does not (the marker counts), so there is no cut", soft("- " + "a" * 118 + ", " + "b" * 20) is None and soft("- " + "a" * 119 + ", " + "b" * 20) is None, soft("- " + "a" * 118 + ", " + "b" * 20))
+check("5e fit: a last piece that reads exactly 120 with its marker stands, and one more does not", soft("- " + "a" * 20 + ", " + "b" * 118) == (["- " + "a" * 20 + ",", "- " + "b" * 118], 1, 1) and soft("- " + "a" * 20 + ", " + "b" * 119) is None, soft("- " + "a" * 20 + ", " + "b" * 119))
+check("5e fit: an indented bullet's indent is no part of what it reads: the marker is the dash and its space", soft("  - " + "a" * 117 + ", " + "b" * 20) == (["  - " + "a" * 117 + ",", "  - " + "b" * 20], 1, 1), soft("  - " + "a" * 117 + ", " + "b" * 20))
+check("5e floor: a first piece of 10 characters stands, one of 9 does not", soft("- " + "a" * 9 + ", " + "b" * 115) == (["- " + "a" * 9 + ",", "- " + "b" * 115], 1, 1) and soft("- " + "a" * 8 + ", " + "b" * 115) is None, soft("- " + "a" * 8 + ", " + "b" * 115))
+check("5e floor: a last piece of 10 characters stands, one of 9 does not", soft("- " + "a" * 108 + ", " + "b" * 10) == (["- " + "a" * 108 + ",", "- " + "b" * 10], 1, 1) and soft("- " + "a" * 108 + ", " + "b" * 9) is None, soft("- " + "a" * 108 + ", " + "b" * 9))
+two = "- " + A + ", " + B + ".  " + "d" * 20 + "."
+check("5e gap: the clause's own gap (two spaces) is kept when a later clause merges onto the last piece of a cut one", soft(two) == (["- " + A + ",", "- " + B + ".  " + "d" * 20 + "."], 1, 1), soft(two))
+# a clause padded with spaces: the cost per cut does not grow with the padding, and the answer is the one the small text gets
+PAD = " " * 100
+def timed(t, n_lines=8):
+    t0 = time.time(); got = BT.split_long_ex(t, n_lines, 120); return got, time.time() - t0
+got_big, dt_big = timed("- " + ("x," + PAD) * 400)
+got_small, _ = timed("- " + ("x," + PAD) * 20)
+check("5e padding: 400 commas with 100 spaces between them (40 KB) is refused at once, well under a second (bound 1 s; it took 3 s before)", got_big is None and dt_big < 1.0, (got_big is None, dt_big))
+check("5e padding: …the same answer as the text of 20 of them, which also needs more than 8 lines", got_small is None, got_small)
+got_ok, dt_ok = timed("- " + ("x," + PAD) * 7 + "y" * 5, 40)
+check("5e padding: seven units padded with spaces are cut a piece each within the limit, as a plain text of that shape is", got_ok is not None and BT.judge(got_ok[0], 40, 120) is None and got_ok[2] == 1 and "".join(got_ok[0].split()).replace("-", "") == "x," * 7 + "y" * 5 and dt_ok < 1.0, (got_ok and got_ok[0].count("\n"), dt_ok))
+wide = "- " + "a" * 60 + "," + " " * 30000 + "b" * 60
+got_w, dt_w = timed(wide)
+check("5e padding: a gap of 30,000 spaces is one cut, dropped with it, and costs nothing", got_w is not None and got_w[0].splitlines() == ["- " + "a" * 60 + ",", "- " + "b" * 60] and dt_w < 1.0, (got_w and len(got_w[0]), dt_w))
+got_l, dt_l = timed("- " + "a" * 60 + "," + " " * 30000 + "[" + "b" * 50 + "](https://example.com/" + "u" * 200 + ")")
+check("5e padding: …with a link after it, the link stays whole and reads as its words", got_l is not None and got_l[0].splitlines()[1].startswith("- [bbb") and "(https://example.com/" + "u" * 200 + ")" in got_l[0] and dt_l < 1.0, (got_l and got_l[0][:80], dt_l))
+
+# ---- 5f. what a piece reads is what `visible_len` says: an address that is the text of a link reads as nothing (every address reaches the splitter as `[url](url)`), the trimmed ends of a piece, spans that overlap
+UL = "https://example.com/" + "u" * 60
+check("5f autolink: an address written as `[url](url)` in the first piece reads as nothing, the cut is still made", soft(f"- Goal: {'a' * 80}, see [{UL}]({UL}), {'b' * 90}") == ([f"- Goal: {'a' * 80}, see [{UL}]({UL}),", "- " + "b" * 90], 1, 1), soft(f"- Goal: {'a' * 80}, see [{UL}]({UL}), {'b' * 90}"))
+check("5f autolink: …and in the last piece", soft(f"- {'a' * 112}, see [{UL}]({UL}) right now") == ([f"- {'a' * 112},", f"- see [{UL}]({UL}) right now"], 1, 1), soft(f"- {'a' * 112}, see [{UL}]({UL}) right now"))
+check("5f autolink: …and a link whose text is a plain address that differs from its destination", soft(f"- {'a' * 80} [{UL}](https://example.org/x), {'b' * 60}") == ([f"- {'a' * 80} [{UL}](https://example.org/x),", "- " + "b" * 60], 1, 1), soft(f"- {'a' * 80} [{UL}](https://example.org/x), {'b' * 60}"))
+check("5f overlap: an address that starts before a link (`http://a/[x](http://b)`) reads as nothing, and the cut after it is made", soft(f"- {'a' * 80} http://a/[x](http://b), {'b' * 60}") == ([f"- {'a' * 80} http://a/[x](http://b),", "- " + "b" * 60], 1, 1), soft(f"- {'a' * 80} http://a/[x](http://b), {'b' * 60}"))
+check("5f overlap: …also with two of them in a row, and a link whose text runs on into text (`[http://a](u)/more`)", soft(f"- {'a' * 60} http://a/[x](http://b) http://c/[y](http://d), {'b' * 60} [http://e](u)/more") == ([f"- {'a' * 60} http://a/[x](http://b) http://c/[y](http://d),", "- " + "b" * 60 + " [http://e](u)/more"], 1, 1), soft(f"- {'a' * 60} http://a/[x](http://b) http://c/[y](http://d), {'b' * 60} [http://e](u)/more"))
+CJK = "\u4e2d\u6587"
+check("5f floor: a last piece that reads 9 characters once its address is taken out and its ends are trimmed is no cut, 10 is", soft(f"- {'a' * 110}, https://example.com/qqqq xy the {CJK}") is None and soft(f"- {'a' * 110}, https://example.com/qqqq xyz the {CJK}") is not None, soft(f"- {'a' * 110}, https://example.com/qqqq xy the {CJK}"))
+check("5f floor: …the same for a first piece that opens with an address and a space", soft(f"- https://example.com/qqqq abcd efg, {'b' * 118}") is None and soft(f"- https://example.com/qqqq abcd efgh, {'b' * 118}") is not None, soft(f"- https://example.com/qqqq abcd efgh, {'b' * 118}"))
+check("5f trim: the spaces before an address that ends the rest do not count (the ends of a piece are trimmed), so the rest fits and the cut is made", soft(f"- {'a' * 20}, " + "b" * 110 + " " * 15 + "https://e.example/zz") == ([f"- {'a' * 20},", "- " + "b" * 110 + " " * 15 + "https://e.example/zz"], 1, 1), soft(f"- {'a' * 20}, " + "b" * 110 + " " * 15 + "https://e.example/zz"))
+check("5f trim: …and the spaces a bullet ends with", soft(f"- {'a' * 20}, " + "b" * 110 + " " * 15) == ([f"- {'a' * 20},", "- " + "b" * 110 + " " * 15], 1, 1), soft(f"- {'a' * 20}, " + "b" * 110 + " " * 15))
+check("5f trim: the spaces before an address that ends a first piece (its comma is the address's) do not count either", soft("- " + "a" * 100 + " " * 30 + "http://x.test/z, " + "b" * 50) == (["- " + "a" * 100 + " " * 30 + "http://x.test/z,", "- " + "b" * 50], 1, 1), soft("- " + "a" * 100 + " " * 30 + "http://x.test/z, " + "b" * 50))
+# the table and the full measure agree: the cut finder written out plainly (every cut measured with `visible_len`, quadratic) gives the same text as the real one
+def _ref_soft_units(c, mark, line_max, cap):
+    starts, ends = BT._merged(BT._spans(c) + [m.span() for m in BT._RX_CODE_SPAN.finditer(c)])
+    def inside(x):
+        k = bisect.bisect_left(starts, x) - 1
+        return k >= 0 and x < ends[k]
+    cuts = []
+    seen = opens = closes = strong = 0
+    for m in BT._RX_SOFT_CUT.finditer(c):
+        s_ = m.start(); seg = c[seen:s_]
+        opens, closes, strong, seen = opens + seg.count("("), closes + seg.count(")"), strong + seg.count("**"), s_
+        if inside(s_) or inside(m.end()) or opens > closes or strong % 2:
+            continue
+        cuts.append((s_, m.end()))
+    out, at = [], 0
+    while BT.visible_len(mark + c[at:]) > line_max:
+        for s_, e_ in reversed(cuts):
+            if s_ > at and BT.visible_len(mark + c[at:s_]) <= line_max and BT.visible_len(c[at:s_]) >= BT._SOFT_MIN and BT.visible_len(c[e_:]) >= BT._SOFT_MIN:
+                out.append((c[at:s_], c[s_:e_])); at = e_
+                break
+        else:
+            return None
+    out.append((c[at:], ""))
+    return out
+import bisect
+rnd = random.Random(1421)
+def _word():
+    return "".join(rnd.choice("abcdefghij") for _ in range(rnd.randint(1, 14)))
+def _url():
+    return rnd.choice(["https://example.com/", "http://a.test/x?y=1&z=", "https://sub.example.org/p/"]) + "q" * rnd.choice([0, 3, 25, 70])
+def _tok():
+    r = rnd.random()
+    if r < .50: return _word()
+    if r < .60: return _url()
+    if r < .70: u = _url(); return f"[{u}]({u})"
+    if r < .76: return f"[{_word()} {_word()}]({_url()})"
+    if r < .80: return f"[{_url()}]({_url()})"
+    if r < .84: return f"{_url()}[{_word()}]({_url()})"
+    if r < .88: return f"`{_word()}, {_word()}`"
+    if r < .92: return f"[{_url()}]({_url()})/{_word()}"
+    return f"**{_word()}**"
+SEPS = [", ", ": ", " - ", " \u2013 ", " (", " ", " ", ". ", "; ", "  ", ",  ", " ) "]
+def _bullet():
+    t, want = "- " + _tok(), rnd.randint(105, 330)
+    while len(BT._visible(t)) < want:
+        t += rnd.choice(SEPS) + _tok()
+    return t + rnd.choice(["", "", ".", ")"])
+cases = [_bullet() for _ in range(500)] + [_bullet().replace("- ", "  - ", 1) for _ in range(50)]
+real = [BT.split_long_ex(t, 8, 120) for t in cases]
+BT._soft_units, _kept_units = _ref_soft_units, BT._soft_units
+try:
+    refs = [BT.split_long_ex(t, 8, 120) for t in cases]
+finally:
+    BT._soft_units = _kept_units
+bad = [k for k, (a, b) in enumerate(zip(real, refs)) if a != b]
+check("5f differential: over 550 generated bullets (links, addresses, autolinks, code spans, every kind of cut) the output is the plain finder's, identical", not bad and len({r is None for r in real}) == 2 and sum(r is not None and r[2] for r in real) > 60, (len(bad), [cases[k] for k in bad[:2]], [real[k] for k in bad[:1]], [refs[k] for k in bad[:1]]))
+# the full measures are what decide: with the table made too generous (a piece's fit and floor by 6) the output is still the plain finder's
+BT._SOFT_SLACK = (6, 0)
+try:
+    real_s = [BT.split_long_ex(t, 8, 120) for t in cases]
+finally:
+    BT._SOFT_SLACK = (0, 0)
+check("5f confirmed: …and with the table reading 6 too generously for a piece's fit and floor, still identical (the confirmations decide)", real_s == refs, sum(a != b for a, b in zip(real_s, refs)))
+def soft_slack(t, slack):
+    BT._SOFT_SLACK = slack
+    try:
+        return soft(t)
+    finally:
+        BT._SOFT_SLACK = (0, 0)
+check("5f confirmed: a first piece one over the limit is rejected by the full measure, not accepted on the table's word", soft_slack("- " + "a" * 118 + ", " + "b" * 20, (6, 0)) is None, soft_slack("- " + "a" * 118 + ", " + "b" * 20, (6, 0)))
+check("5f confirmed: a first piece under the floor is rejected by the full measure", soft_slack("- " + "a" * 3 + ", " + "b" * 118, (6, 0)) is None, soft_slack("- " + "a" * 3 + ", " + "b" * 118, (6, 0)))
+check("5f confirmed: a last piece under the floor is rejected by the full measure", soft_slack("- " + "a" * 115 + ", " + "b" * 4, (6, 0)) is None, soft_slack("- " + "a" * 115 + ", " + "b" * 4, (6, 0)))
+check("5f confirmed: a rest that the table says fits but reads over is refused by the final measure, never handed on", soft_slack("- " + "a" * 20 + ", " + "b" * 122, (0, 6)) is None, soft_slack("- " + "a" * 20 + ", " + "b" * 122, (0, 6)))
 
 print(("ok" if not fails else "FAILED") + f": bullets scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

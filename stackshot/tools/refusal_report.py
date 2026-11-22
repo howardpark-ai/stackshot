@@ -3,7 +3,7 @@
 Reads the call log the server keeps (call_log.py: one line per create, update, complete, confirm and message call, went through or refused, in
 `<paths.state>/calls/<YYYY-MM>.jsonl`) and reports, for one calendar week Monday to Sunday in the instance timezone: how many create and update calls
 were refused of how many, the share, the week before it, the kinds of refusal that make most of them, the sessions that were refused most, and what the
-server corrected instead of refusing (a bare item number, a wake with seconds or an offset, a subject with no scope prefix, a long description bullet split at its sentences,
+server corrected instead of refusing (a bare item number, a wake with seconds or an offset, a subject with no scope prefix, a long description bullet split at its sentence ends or, for one clause, at a comma, colon, dash or parenthesis,
 a step left out of next kept open, a subject or a status line cut at its last word that fits, an ask-by with a time of day cut to its day, a bare address in a description written as a link, the server's own fixes of a wait), and how many of those fixes the writer sent back (call_log.bounces; of the fixes of the kinds that have the check, call_log.CHECKED), and the streaks: one writer refused STREAK_MIN (3) times or more on one call (the same tool and item) with each refusal within STREAK_WINDOW (15 minutes) of the one before, counted by kind and listed first, since a streak marks a gap in the tool text. One more line, when the week or the one before it had any: the wait loops the minute walk found (audit/wait_loops.py: items that wait on each other), counted from its log. Tokenless: no model call.
 
     refusal_report.py run [--dry-run] [--force] [--week YYYY-MM-DD]
