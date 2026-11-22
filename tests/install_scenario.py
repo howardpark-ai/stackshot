@@ -188,9 +188,16 @@ UH = T / "uhome"; UH.mkdir()
 (T / "sbin/systemctl").write_text(f'''#!/bin/sh
 echo "$*" >> {tmp}/systemctl.log
 # the environment the user manager gives stackshot.service: carries the standby switch while the file `standby-env` exists (the drop-in docs/read-only-standby.md names)
+# and the EnvironmentFile= lines the file `envfiles` holds (systemd's own form: `<path> (ignore_errors=no)`, one per line)
+case "$*" in *"show stackshot.service -p EnvironmentFiles"*) [ -e {tmp}/envfiles ] && cat {tmp}/envfiles; exit 0 ;; esac
 case "$*" in *"show stackshot.service"*) if [ -e {tmp}/standby-env ]; then echo "PATH=/usr/bin $(cat {tmp}/standby-env)"; fi; exit 0 ;; esac
-# the start limit of stackshot-minute.service, as systemd keeps it: while the file `tripped` exists a restart is refused until reset-failed has cleared the count
-case "$*" in *reset-failed*stackshot-minute*) rm -f {tmp}/tripped ;; *restart*stackshot-minute*) if [ -e {tmp}/tripped ]; then echo "Start request repeated too quickly." >&2; exit 1; fi ;; esac
+# the start limit of stackshot-minute.service, as systemd keeps it: while the file `tripped` exists the unit is failed, a restart is refused until reset-failed has cleared the count, and reset-failed on a unit that is not
+# failed exits 1 ("Unit ... not loaded"), as the real one does
+case "$*" in *reset-failed*stackshot-minute*) if [ -e {tmp}/tripped ]; then rm -f {tmp}/tripped; else echo "Failed to reset failed state of unit stackshot-minute.service: Unit stackshot-minute.service not loaded." >&2; exit 1; fi ;; *restart*stackshot-minute*) if [ -e {tmp}/tripped ]; then echo "Start request repeated too quickly." >&2; exit 1; fi ;; esac
+# a minute unit that cannot be stopped: while the file `minute-stuck` exists `disable --now`, `stop` and `disable` for it fail and is-active says what the file holds (active when it is empty); with `minute-half` only `disable --now` and `stop` fail and the unit is inactive
+case "$*" in *disable*--now*stackshot-minute*|*stop*stackshot-minute*) if [ -e {tmp}/minute-stuck ] || [ -e {tmp}/minute-half ]; then echo "Failed to stop stackshot-minute.service: Access denied" >&2; exit 1; fi ;; esac
+case "$*" in *disable*stackshot-minute*) if [ -e {tmp}/minute-stuck ]; then echo "Failed to disable unit: Access denied" >&2; exit 1; fi ;; esac
+case "$*" in *is-active*stackshot-minute*) if [ -e {tmp}/minute-stuck ]; then st="$(cat {tmp}/minute-stuck)"; echo "${{st:-active}}"; exit 0; elif [ -e {tmp}/minute-half ]; then echo inactive; exit 3; fi ;; esac
 case "$*" in *is-enabled*|*is-active*) [ -e {tmp}/other-off ] && exit 1 ;; esac
 exit 0
 '''); (T / "sbin/systemctl").chmod(0o755)
@@ -462,7 +469,38 @@ rc, ldef, _ = render(UC, env=mhome(6, STACKSHOT_READ_ONLY="0"))
 check("STACKSHOT_READ_ONLY=0 is no standby: the unit is in the default list, last", rc == 0 and ldef[-1:] == [MIN], ldef)
 units(UC, env=mhome(7))
 rc, out, calls = units(UC, env=mhome(7, STACKSHOT_READ_ONLY="1"))
-check("a unit installed earlier on a box that is a standby now: left as it is (skipped, not removed, not stopped)", rc == 0 and (mdir(7) / MIN).is_file() and not minute_calls(calls) and "read-only standby" in out, (out[-300:], calls))
+dn, rm_, rf_ = f"--user disable --now --quiet {MIN}", "--user daemon-reload", f"--user reset-failed {MIN}"
+check("a unit installed earlier on a box that is a standby now: stopped and disabled first, then its file removed, said so (a running runner cannot notice, and the server's standby drop-in reaches stackshot.service only)",
+      rc == 0 and not (mdir(7) / MIN).exists() and dn in calls and calls.index(dn) < calls.index(rm_) and f"{MIN}: stopped, disabled and removed (this box is a read-only standby: a runner would write the board)" in out
+      and not any(re.search(r"\b(start|restart)\b.*stackshot-minute", c) for c in calls), (out[-400:], calls))
+check("...the failed state it may leave is cleared after the removal (a unit past its start limit lingers as not-found failed otherwise), and a reset-failed that exits 1 for a unit that is not failed is no failure",
+      rf_ in calls and calls.index(rf_) > calls.index(dn) and "FAILED" not in out, (out[-400:], calls))
+units(UC, env=mhome(43)); (T / "standby-env").write_text("STACKSHOT_READ_ONLY=1")
+rc, out, calls = units(UC, env=mhome(43))
+check("...the same when the standby is what the user manager's environment for stackshot.service says (the drop-in)", rc == 0 and not (mdir(43) / MIN).exists() and dn in calls and "read-only standby" in out, (out[-300:], calls))
+(T / "standby-env").unlink()
+# a standby set by an EnvironmentFile= (systemctl show -p Environment does not list it): the files `-p EnvironmentFiles` names are read, the last STACKSHOT_READ_ONLY= line of a file decides and overrides Environment=
+(T / "envf-on").write_text('# comment\nFOO=1\nSTACKSHOT_READ_ONLY=1\n'); (T / "envf-q").write_text('STACKSHOT_READ_ONLY="1"\n'); (T / "envf-off").write_text('STACKSHOT_READ_ONLY=1\nSTACKSHOT_READ_ONLY=0\n')
+(T / "envf-cmt").write_text('#STACKSHOT_READ_ONLY=1\n;STACKSHOT_READ_ONLY=1\n'); (T / "envf-long").write_text('STACKSHOT_READ_ONLY=10\n'); (T / "envf-sp").write_text('  STACKSHOT_READ_ONLY=1  \n')
+for n_, (listing, who, standby_) in enumerate((
+        (f"{T}/envf-on (ignore_errors=no)\n", "a file with STACKSHOT_READ_ONLY=1", True), (f"{T}/envf-q (ignore_errors=yes)\n", "a file with the value in quotes", True),
+        (f"{T}/envf-sp (ignore_errors=no)\n", "a file with the line indented and trailing blanks", True),
+        (f"{T}/envf-off (ignore_errors=no)\n", "a file whose last line says 0", False), (f"{T}/envf-cmt (ignore_errors=no)\n", "a file that only has it in comments", False),
+        (f"{T}/envf-long (ignore_errors=no)\n", "a file with STACKSHOT_READ_ONLY=10", False), (f"{T}/nothing-here (ignore_errors=yes)\n", "a file that is not there", False),
+        (f"{T}/envf-off (ignore_errors=no)\n{T}/envf-on (ignore_errors=no)\n", "two files, the later one on", True), (f"{T}/envf-on (ignore_errors=no)\n{T}/envf-off (ignore_errors=no)\n", "two files, the later one off", False)), 50):
+    (T / "envfiles").write_text(listing)
+    rc, out, calls = units(UC, env=mhome(n_))
+    check(f"EnvironmentFile= with {who}: " + ("a standby (the unit is not installed, said so)" if standby_ else "no standby (the unit is installed)"),
+          rc == 0 and ((not (mdir(n_) / MIN).exists() and "read-only standby" in out) if standby_ else ((mdir(n_) / MIN).is_file() and "read-only standby" not in out)), (out[-300:], calls))
+(T / "envfiles").write_text(f"{T}/envf-off (ignore_errors=no)\n"); (T / "standby-env").write_text("STACKSHOT_READ_ONLY=1")
+rc, out, calls = units(UC, env=mhome(60))
+check("a file that says STACKSHOT_READ_ONLY=0 overrides Environment=STACKSHOT_READ_ONLY=1 (systemd lets EnvironmentFile= win): no standby", rc == 0 and (mdir(60) / MIN).is_file(), (out[-300:], calls))
+(T / "envfiles").write_text(f"{T}/envf-on (ignore_errors=no)\n"); (T / "standby-env").write_text("STACKSHOT_READ_ONLY=0")
+rc, out, calls = units(UC, env=mhome(61))
+check("a file that says STACKSHOT_READ_ONLY=1 overrides Environment=STACKSHOT_READ_ONLY=0: a standby", rc == 0 and not (mdir(61) / MIN).exists() and "read-only standby" in out, (out[-300:], calls))
+(T / "envfiles").unlink(); (T / "standby-env").unlink()
+rc, out, calls = units(IC, env=mhome(62))
+check("units at inline asks the user manager nothing about EnvironmentFile= either", rc == 0 and not any("show stackshot.service" in c for c in calls), calls)
 
 # flipping back to inline (and a value that is not "unit"): the installed unit is stopped, disabled and removed, as the audit's pair is
 units(UC, env=mhome(8))
@@ -472,8 +510,77 @@ check("units back at inline: the minute unit is disabled and stopped, its file r
       and out.count("stackshot-minute.service: stopped, disabled and removed ([runner] process is not \"unit\")") == 1 and all(c.startswith("--user ") for c in calls), (calls, out[-400:]))
 check("...and says on that line that the server runs no runner until it is restarted, with the command", re.search(r'(?m)^  stackshot-minute\.service: stopped, disabled and removed .*the server runs no runner until it is restarted: systemctl --user restart stackshot\.service$', out) is not None, out[-400:])
 check("...the disable comes before the file goes: the process is stopped while its unit is still known", calls.index("--user disable --now --quiet stackshot-minute.service") < calls.index("--user daemon-reload"), calls)
+check("...and a failed state the unit may leave is cleared after the removal: reset-failed comes after the disable, and exits 1 for a unit that is not failed without failing the script", rf_ in calls and calls.index(rf_) > calls.index(dn) and "FAILED" not in out, calls)
 rc, out, calls = units(IC, env=mhome(8))
 check("units at inline again, none installed: only skipped, no call for it", rc == 0 and not minute_calls(calls) and 'stackshot-minute.service: skipped ([runner] process is not "unit")' in out, (calls, out[-300:]))
+# a unit that already tripped its start limit (failed) and goes at inline: its failed state is reset, or it lingers as not-found failed and the user manager reads degraded
+units(UC, env=mhome(63)); (T / "tripped").write_text("")
+rc, out, calls = units(IC, env=mhome(63))
+check("units back at inline, the unit failed (start limit tripped): removed, and reset-failed run after the disable so nothing lingers", rc == 0 and not (mdir(63) / MIN).exists() and not (T / "tripped").exists()
+      and rf_ in calls and calls.index(rf_) > calls.index(dn), (rc, calls, out[-300:]))
+(T / "tripped").unlink(missing_ok=True)
+
+# C4: a unit that cannot be stopped is never removed while it runs, and the script says so and ends with an error after installing the rest
+units(UC, env=mhome(64)); (T / "minute-stuck").write_text("")
+rc, out, calls = units(IC, env=mhome(64))
+check("units back at inline, the unit cannot be stopped: its file stays, the failure is named on stderr, the exit is nonzero", rc != 0 and (mdir(64) / MIN).is_file() and "FAILED to stop stackshot-minute.service (it is active)" in out
+      and "its file is left in place" in out and "stopped, disabled and removed" not in out and f"--user stop {MIN}" in calls, (rc, out[-500:], calls))
+check("...the others are installed as usual (the failure ends the script, never stops it half way) and the removal is not claimed", (mdir(64) / "stackshot.service").is_file() and "--user daemon-reload" in calls and f"{MIN}: skipped" not in out, (calls, out[-300:]))
+units(UC, env=mhome(66)); rc, out, calls = units(UC, env=mhome(66, STACKSHOT_READ_ONLY="1"))
+check("a standby whose unit cannot be stopped: the same, file kept and nonzero exit", rc != 0 and (mdir(66) / MIN).is_file() and "FAILED to stop" in out, (rc, out[-400:]))
+# a unit that is still on its way up or down is not stopped either: only "inactive" or "failed" (or not loaded) lets the file go
+for i, state in enumerate(("activating", "deactivating", "reloading")):
+    units(UC, env=mhome(70 + i)); (T / "minute-stuck").write_text(state)
+    rc, out, calls = units(IC, env=mhome(70 + i))
+    check(f"units back at inline, the unit cannot be stopped and is {state}: its file stays, the failure names the state, the exit is nonzero", rc != 0 and (mdir(70 + i) / MIN).is_file() and f"FAILED to stop stackshot-minute.service (it is {state})" in out
+          and "stopped, disabled and removed" not in out, (rc, out[-400:]))
+(T / "minute-stuck").unlink(); (T / "minute-half").write_text("")
+units(UC, env=mhome(67)); rc, out, calls = units(IC, env=mhome(67))
+check("disable --now fails but the unit is not running after it (a unit that is not loaded): treated as stopped, removed, exit 0", rc == 0 and not (mdir(67) / MIN).exists() and "stopped, disabled and removed" in out and "FAILED" not in out, (rc, out[-400:], calls))
+(T / "minute-half").unlink()
+# the minute-off verb (deploy.sh's rollback to a commit from before the unit runs it): stopped, disabled and removed whatever the setting says
+units(UC, env=mhome(68)); (T / "systemctl.log").unlink(missing_ok=True)
+r = subprocess.run([os.path.join(STACK, "install.sh"), "minute-off", "--config", UC], capture_output=True, text=True, env=mhome(68), stdin=subprocess.DEVNULL); calls = (T / "systemctl.log").read_text().splitlines()
+check("install.sh minute-off at unit: the unit is stopped, disabled and removed, the manager reloaded after it", r.returncode == 0 and not (mdir(68) / MIN).exists() and dn in calls and "--user daemon-reload" in calls
+      and calls.index(dn) < calls.index("--user daemon-reload") and rf_ in calls and "stackshot-minute.service: stopped, disabled and removed" in r.stdout and (mdir(68) / "stackshot.service").is_file(), (r.returncode, r.stdout + r.stderr, calls))
+(T / "systemctl.log").unlink(missing_ok=True)
+r = subprocess.run([os.path.join(STACK, "install.sh"), "minute-off", "--config", UC], capture_output=True, text=True, env=mhome(68), stdin=subprocess.DEVNULL)
+check("install.sh minute-off with no unit installed: says so, exit 0, no stop", r.returncode == 0 and "stackshot-minute.service: not installed" in r.stdout and not minute_calls((T / "systemctl.log").read_text().splitlines()), r.stdout + r.stderr)
+units(UC, env=mhome(69)); (T / "minute-stuck").write_text("")
+r = subprocess.run([os.path.join(STACK, "install.sh"), "minute-off", "--config", UC], capture_output=True, text=True, env=mhome(69), stdin=subprocess.DEVNULL)
+check("install.sh minute-off with a unit that cannot be stopped: its file stays, the failure is named, exit 1", r.returncode == 1 and (mdir(69) / MIN).is_file() and "FAILED to stop stackshot-minute.service" in r.stderr, r.stdout + r.stderr)
+(T / "minute-stuck").unlink()
+# no systemctl on the PATH (a box without systemd, a stripped cron PATH): with no unit file there is nothing to stop and it says so, exit 0; with the file there it fails closed and says why, the file kept
+def nosystemctl_path(dest, path_dirs):
+    """A PATH like `path_dirs` with no systemctl: each dir that holds one is replaced by `dest`, which links every other entry of those dirs (the first of a name wins). A name already linked is tested with lexists: a dangling link (a runner lists one in both /bin and /usr/bin) reads as absent through exists(), and the second os.symlink raises FileExistsError."""
+    dest.mkdir(exist_ok=True)
+    dirs = [d_ for d_ in dict.fromkeys(path_dirs) if d_]
+    for d_ in dirs:
+        if os.path.isfile(os.path.join(d_, "systemctl")):
+            for n_ in os.listdir(d_):
+                if n_ != "systemctl" and not os.path.lexists(dest / n_): os.symlink(os.path.join(d_, n_), dest / n_)
+    return os.pathsep.join(str(dest) if os.path.isfile(os.path.join(d_, "systemctl")) else d_ for d_ in dirs)
+NOSD = T / "nosd"
+NOSD_PATH = nosystemctl_path(NOSD, os.environ.get("PATH", "").split(os.pathsep))
+# the runner's case: a link whose target does not exist, listed in two PATH dirs that both hold a systemctl (the runner's /bin and /usr/bin both list grub-ntldr-img); a real file of the same name in both, and one only in the second
+XD = T / "nosd-x"; XD.mkdir(); xa, xb = XD / "a", XD / "b"; xa.mkdir(); xb.mkdir()
+for xd_ in (xa, xb):
+    (xd_ / "systemctl").write_text("#!/bin/sh\n"); os.symlink(str(XD / "gone-target"), xd_ / "dangling-tool"); (xd_ / "same-tool").write_text("x\n")
+(xb / "only-in-b").write_text("x\n")
+try: xpath, xerr = nosystemctl_path(XD / "nosd", [str(xa), str(XD / "plain"), str(xb), str(xa)]), None
+except Exception as e_: xpath, xerr = None, repr(e_)
+check("the no-systemctl PATH dir is built from two PATH dirs that both list the same dangling link: no error, one link per name (the first), the dir without a systemctl kept in its place, no systemctl",
+      xerr is None and sorted(os.listdir(XD / "nosd")) == ["dangling-tool", "only-in-b", "same-tool"] and os.readlink(XD / "nosd" / "dangling-tool") == str(xa / "dangling-tool") and not os.path.exists(XD / "nosd" / "dangling-tool") and os.readlink(XD / "nosd" / "same-tool") == str(xa / "same-tool")
+      and xpath == os.pathsep.join((str(XD / "nosd"), str(XD / "plain"), str(XD / "nosd"))), (xerr, xpath, sorted(os.listdir(XD / "nosd")) if (XD / "nosd").exists() else None))
+def nosys(n): return {**ENV, "HOME": str(T / f"uhome-m{n}"), "PATH": f"{tmp}/bin:" + NOSD_PATH}
+assert shutil.which("systemctl", path=nosys(0)["PATH"]) is None, "the PATH of these cases has no systemctl"
+(T / f"uhome-m80").mkdir(); (T / "systemctl.log").unlink(missing_ok=True)
+r = subprocess.run([os.path.join(STACK, "install.sh"), "minute-off", "--config", UC], capture_output=True, text=True, env=nosys(80), stdin=subprocess.DEVNULL)
+check("install.sh minute-off with no systemctl and no unit file: 'not installed', exit 0 (nothing to stop, so no user manager is needed to say so)", r.returncode == 0 and "stackshot-minute.service: not installed" in r.stdout and "user manager" not in r.stderr, (r.returncode, r.stdout + r.stderr))
+units(UC, env=mhome(81))
+r = subprocess.run([os.path.join(STACK, "install.sh"), "minute-off", "--config", UC], capture_output=True, text=True, env=nosys(81), stdin=subprocess.DEVNULL)
+check("install.sh minute-off with no systemctl and the unit file there: fails closed (exit 1), the file stays, and the message says systemctl is not available (not a user-manager message)",
+      r.returncode == 1 and (mdir(81) / MIN).is_file() and "could not be stopped: systemctl is not available" in r.stderr and "user manager" not in r.stderr, (r.returncode, r.stdout + r.stderr))
 units(UC, env=mhome(9))
 rc, out, calls = units(conf("m-bad2.toml", runner="Inline "), env=mhome(9))
 check('units with [runner] process = "Inline " after unit: read as inline (stripped, lowercased), so the unit is removed', rc == 0 and not (mdir(9) / MIN).exists() and "--user disable --now --quiet stackshot-minute.service" in calls, (calls, out[-300:]))
@@ -518,6 +625,7 @@ check("the usage lines of install.sh (units, puller, render) start their text in
 
 r = subprocess.run([os.path.join(STACK, "install.sh")], capture_output=True, text=True, env=ENV)
 check("the usage text lists the minute unit and its condition", r.returncode == 2 and "stackshot-minute.service only when [runner] process = \"unit\"" in r.stdout and "standby" in r.stdout, r.stdout[:1500])
+check("the usage text names the minute-off verb and says why a standby removes the unit (a running process reads the standby switch at its start only)", "./install.sh minute-off" in r.stdout and "cannot notice" in r.stdout and "exits 1" in r.stdout, r.stdout[:2500])
 r = subprocess.run([os.path.join(STACK, "install.sh")], capture_output=True, text=True, env=ENV)
 check("no verb: the usage text, exit 2", r.returncode == 2 and "--start" in r.stdout and "account_id" in r.stdout and "set -euo" not in r.stdout, r.stdout[-300:])
 check("the usage text explains the user manager and lingering", "systemctl --user" in r.stdout and "enable-linger" in r.stdout, r.stdout[-300:])

@@ -41,8 +41,15 @@
 # is off is skipped, never removed or disabled: an existing one stays as it is. Two exceptions. The audit's pair:
 # with [audit] enabled = false a timer installed by an earlier run is disabled and stopped and both files are removed, since
 # a timer left behind would fire every day into a cue the server refuses. Its service is never restarted here: that would cue an audit.
-# And stackshot-minute.service: with [runner] process back at "inline" (a value that is neither "inline" nor "unit" counts as inline) the unit an earlier run
-# installed is stopped, disabled and removed, so a runner left running does not keep the lock the server's own runner needs; on a standby with "unit" it is only skipped.
+# And stackshot-minute.service: with [runner] process back at "inline" (a value that is neither "inline" nor "unit" counts as inline), or on a box that is a read-only standby, the unit an earlier run
+# installed is stopped, disabled and removed. At inline so a runner left running does not keep the lock the server's own runner needs; on a standby because its read-only state is read from the
+# environment at a start only, so a runner that is already running cannot notice the change and would go on writing the board (the standby's drop-in reaches stackshot.service alone, and `stackshot minute`
+# exits 4 on a standby only when it is started). The stop comes first and the file is removed only once the unit is off: when `disable --now` fails it tries `stop` and `disable` apart, and a unit that is still running after that keeps
+# its file, the failure is printed on stderr, the other units are installed all the same, and the script exits 1 at its end (a unit removed while it runs would be left running with no file to stop it by).
+# A failed state the unit leaves (a tripped start limit) is cleared with reset-failed after the removal, so it does not linger as "not-found failed".
+#   ./install.sh minute-off         stop, disable and remove stackshot-minute.service whatever the setting says (deploy.sh's rollback to a commit from before the unit, whose own deploy.sh knows nothing of it);
+#                                   exit 1 and the file kept when it cannot be stopped (or when systemctl is missing and the file exists); "not installed" and exit 0, with no systemctl needed, when there is nothing to remove
+# CPUWeight=50 in the unit is ignored where the cpu controller is not delegated to the user manager (systemd then logs nothing and the weight does not apply); Nice=10 does.
 set -euo pipefail
 USER="${USER:-$(id -un)}"                     # unset under some sudo, cron and container shells; the units and loginctl need it
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -67,13 +74,23 @@ HUB=0; case "$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/conf
 read -r AUDIT AUDIT_AT RUNNER_PROCESS AUDIT_PROJECT < <(STACKSHOT_CONFIG="$CONFIG" python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from stackshot.core import config as c; print(int(c.audit_enabled()), ",".join(c.audit_at()), c.runner_process(), c.audit_project())' "$CHECKOUT")   # the audit's timer pair, its HH:MM times (comma-joined: one OnCalendar line each), and [runner] process ("inline" for any value but "unit")
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 . "$HERE/units/scope.sh"      # UNIT_DIR, xdg_repair, user_manager_ok (config.py refused a removed mode above, with its line)
-standby() {   # 0 on a read-only standby: STACKSHOT_READ_ONLY=1 in this environment, or in the environment the user manager gives stackshot.service (the drop-in docs/read-only-standby.md names)
-    [ "${STACKSHOT_READ_ONLY:-}" = 1 ] && return 0
-    case " $(systemctl --user show stackshot.service -p Environment --value 2>/dev/null || true) " in *" STACKSHOT_READ_ONLY=1 "*) return 0 ;; esac
-    return 1
+MINUTE=0; MINUTE_OFF=inline; MINUTE_STUCK=0     # stackshot-minute.service: only at [runner] process = "unit", and never on a standby (`stackshot minute` exits 4 there); MINUTE_OFF says why it is not wanted
+if [ "$RUNNER_PROCESS" = unit ]; then if standby; then MINUTE_OFF=standby; else MINUTE=1; MINUTE_OFF=""; fi; fi
+minute_off() {   # stop and disable the minute unit: 0 once nothing of it runs, 1 (a line on stderr says what failed) when it still does. `disable --now` first; when it fails, `stop` and `disable` apart; then the unit's own state decides,
+    # since a failed call can still have stopped it (a unit that is not loaded is "inactive") and a runner that survives would keep the runner's lock, so that the server's inline runner could not start
+    local u=stackshot-minute.service err st
+    err="$(systemctl --user disable --now --quiet "$u" 2>&1)" && return 0
+    systemctl --user stop "$u" >/dev/null 2>&1 || true
+    systemctl --user disable --quiet "$u" >/dev/null 2>&1 || true
+    st="$(systemctl --user is-active "$u" 2>/dev/null || true)"
+    case "$st" in active|activating|deactivating|reloading|refreshing) echo "  FAILED to stop $u (it is $st): ${err:-systemctl said nothing}" >&2; return 1 ;; esac
+    return 0
 }
-MINUTE=0; MINUTE_STANDBY=0     # stackshot-minute.service: only at [runner] process = "unit", and never on a standby (`stackshot minute` exits 4 there)
-if [ "$RUNNER_PROCESS" = unit ]; then if standby; then MINUTE_STANDBY=1; else MINUTE=1; fi; fi
+minute_remove() {   # stop, disable and remove the installed minute unit, then clear a failed state it may leave (a unit that already tripped its start limit, or exited 3 or 4, lingers as "not-found failed" and the user manager reads degraded). 1 when it could not be stopped: its file stays
+    minute_off || return 1
+    rm -f "$UNIT_DIR/stackshot-minute.service"
+    systemctl --user reset-failed stackshot-minute.service 2>/dev/null || true      # exits 1 for a unit that is not failed: nothing to clear
+}
 SERVERU=" stackshot.service stackshot-reload.service stackshot-reload.path stackshot-portal-sync.service stackshot.service.d-portal-sync.conf "   # the server's units: their header names the user manager
 render() {   # render <name> → stdout: the template with its placeholders filled in
     local t="$HERE/units/$1.in"; [ -f "$t" ] || { echo "no template $t" >&2; return 1; }
@@ -162,13 +179,16 @@ case "$VERB" in
                     echo "  stackshot-audit.timer, stackshot-audit.service: skipped ([audit] enabled is not true)"
                 fi
             fi
-            if [ $MINUTE = 0 ]; then
-                if [ $MINUTE_STANDBY = 1 ]; then
+            if [ $MINUTE = 0 ]; then       # not wanted: back at "inline" the server runs the runner again; on a standby `stackshot minute` exits 4 at its start, and a runner already running there is a writer the standby drop-in does not reach
+                if [ -f "$UNIT_DIR/stackshot-minute.service" ]; then   # an installed unit goes, stopped first: a process cannot notice that its box became a standby, and a runner left running keeps the lock the server's own runner needs
+                    if minute_remove; then
+                        if [ "$MINUTE_OFF" = standby ]; then echo "  stackshot-minute.service: stopped, disabled and removed (this box is a read-only standby: a runner would write the board)"
+                        else echo "  stackshot-minute.service: stopped, disabled and removed ([runner] process is not \"unit\"); the server runs no runner until it is restarted: systemctl --user restart stackshot.service"; fi
+                    else      # still running: its file stays (a unit that is gone from disk but alive is one nobody can find), and the script ends with an error after the rest is installed
+                        MINUTE_STUCK=1; echo "  stackshot-minute.service: its file is left in place, it could not be stopped; stop it (systemctl --user stop stackshot-minute.service), then run this again" >&2
+                    fi
+                elif [ "$MINUTE_OFF" = standby ]; then
                     echo "  stackshot-minute.service: skipped ([runner] process is \"unit\", but this box is a read-only standby)"
-                elif [ -f "$UNIT_DIR/stackshot-minute.service" ]; then   # back at "inline": the server runs the runner again, and a runner left running here would keep its lock
-                    systemctl --user disable --now --quiet stackshot-minute.service 2>/dev/null || true
-                    rm -f "$UNIT_DIR/stackshot-minute.service"
-                    echo "  stackshot-minute.service: stopped, disabled and removed ([runner] process is not \"unit\"); the server runs no runner until it is restarted: systemctl --user restart stackshot.service"
                 else
                     echo "  stackshot-minute.service: skipped ([runner] process is not \"unit\")"
                 fi
@@ -209,6 +229,18 @@ case "$VERB" in
             elif [ "$QUIET_HINT" = 0 ]; then
                 echo "changed, not restarted: ${changed[*]}  (rerun with --restart, or restart them yourself)"
             fi
+        fi
+        [ $MINUTE_STUCK = 0 ] || { echo "not finished: stackshot-minute.service is still running" >&2; exit 1; } ;;
+    minute-off)   # the minute unit stopped, disabled and removed, whatever the setting says: deploy.sh runs it before a rollback to a commit from before this unit, whose own deploy.sh knows nothing of it
+        if [ ! -f "$UNIT_DIR/stackshot-minute.service" ]; then      # the file first: with nothing installed there is nothing to stop, and no systemctl is needed to say so
+            echo "  stackshot-minute.service: not installed"
+        elif ! command -v systemctl >/dev/null 2>&1; then      # fail closed: a unit file that cannot be stopped is not removed
+            echo "  stackshot-minute.service: its file is left in place, it could not be stopped: systemctl is not available" >&2; exit 1
+        else
+            user_manager_ok || exit 1
+            minute_remove || { echo "  stackshot-minute.service: its file is left in place, it could not be stopped; stop it (systemctl --user stop stackshot-minute.service), then run this again" >&2; exit 1; }
+            systemctl --user daemon-reload
+            echo "  stackshot-minute.service: stopped, disabled and removed"
         fi ;;
     *) sed -n '2,/^set -euo/{/^set -euo/!p}' "$0"; exit 2 ;;
 esac
