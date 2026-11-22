@@ -19,7 +19,7 @@ anchor-hub flushes queues when a session comes back.
 
 Sources: ANCHOR_PUSH_SOURCE=hub (anchor-hub's notices, the default) or msg (the message tool and the prompts it carries), each
 with its own queue dir and pause flag. While paused-<source>.json exists a delivery is queued and --flush refuses (exit 5), and a
-session listed in held-<source>.txt (a reboot's resume did not verify it) keeps its queue; ANCHOR_PUSH_FORCE=1 overrides both.
+session listed in held-<source>.txt (another tool's hold) or in held-resume-<source>.txt (a reboot's resume did not verify it) keeps its queue; ANCHOR_PUSH_FORCE=1 overrides both.
 
 The inbox: after putting a line there this script waits a few seconds for the machine's confirmation, so the
 answer is still "delivered" when the pane is live, and "inbox" when the line waits for its machine (asleep, or its puller
@@ -48,7 +48,8 @@ SRC = "msg" if os.environ.get("ANCHOR_PUSH_SOURCE") == "msg" else "hub"
 A = str(_cfg.state("anchor-hub"))
 Q = os.path.join(A, "queue-msg" if SRC == "msg" else "queue")
 PAUSE = os.path.join(A, f"paused-{SRC}.json")
-HELD = os.path.join(A, f"held-{SRC}.txt")
+HELD = os.path.join(A, f"held-{SRC}.txt")                   # another tool's holds
+HELD_RESUME = os.path.join(A, f"held-resume-{SRC}.txt")     # a reboot's resume's holds; a key in either file holds
 REG = os.path.expanduser("~/.claude/sessions")
 CLAUDE = os.path.expanduser("~/.local/bin/claude")
 PUB = str(_cfg.get("fleet", "publisher_letter") or "a")
@@ -62,8 +63,13 @@ def paused(name: str) -> bool:
         return False
     if os.path.exists(PAUSE):
         return True
+    held: set[str] = set()
+    for f in (HELD, HELD_RESUME):                    # the union of both files; one that cannot be read (missing) lists nothing
+        try:
+            held |= {ln.rstrip("\n") for ln in open(f, encoding="utf-8")}
+        except Exception:
+            pass
     try:
-        held = {ln.rstrip("\n") for ln in open(HELD, encoding="utf-8")}
         return name in held or bool(held and _sr.expand([name]) & _sr.expand_flag(held))     # a hold may list the session by its permanent id; an old name of it holds nothing else
     except Exception:
         return False

@@ -25,6 +25,7 @@ import os
 import re
 import secrets
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +34,7 @@ from stackshot.fleet import liveness as _lv
 from stackshot.fleet import sessions_registry as _sr
 
 DIR: Path = _cfg.state("inbox")
-FLAGS: Path = _cfg.state("anchor-hub")           # paused-<src>.json · held-<src>.txt · release-<src>.txt, shared with the push path
+FLAGS: Path = _cfg.state("anchor-hub")           # paused-<src>.json · held-<src>.txt (the fleet tool's holds) · held-resume-<src>.txt (a reboot's resume, read as one list with it) · release-<src>.txt, shared with the push path
 LEASE = 120.0                                    # s a handed-out line stays reserved for the puller that took it
 RETRY = 10.0                                     # s before a line whose delivery failed is offered again
 SOURCES = ("hub", "msg")
@@ -175,9 +176,20 @@ def _lines(p: Path) -> set[str]:
         return set()
 
 
+def held_files(src: str) -> tuple[str, str]:
+    """The two files a source's holds are kept in: another tool's `held-<src>.txt` and the reboot's resume's own `held-resume-<src>.txt`. A key in either holds."""
+    return f"held-{src}.txt", f"held-resume-{src}.txt"
+
+
 def blocked(src: str) -> tuple[bool, set[str], set[str]]:
-    """(the source is paused, the keys a resume released while it is, the keys a resume held back)."""
-    return (FLAGS / f"paused-{src}.json").exists(), _lines(FLAGS / f"release-{src}.txt"), _lines(FLAGS / f"held-{src}.txt")
+    """(the source is paused, the keys a resume released while it is, the keys held back: the union of both hold files, a missing one counting as empty)."""
+    a, b = held_files(src)
+    return (FLAGS / f"paused-{src}.json").exists(), _lines(FLAGS / f"release-{src}.txt"), _lines(FLAGS / a) | _lines(FLAGS / b)
+
+
+def _held_in(src: str, match: Callable[[set[str]], bool]) -> str:
+    """The name of the hold file whose keys `match` accepts, both names joined with ' and ' when each does, '' when neither does."""
+    return " and ".join(f for f in held_files(src) if match(_lines(FLAGS / f)))
 
 
 def _keys(it: dict[str, Any]) -> set[str]:
@@ -211,7 +223,8 @@ def _log_held(src: str, it: dict[str, Any], held_raw: set[str], now: float) -> N
         k = f"{src}:{e}"
         if why and now - _stale_logged.get(k, -1e12) >= STALE_LOG:
             _stale_logged[k] = now
-            log.warning("inbox: line %s for %s is held by '%s' in held-%s.txt, an entry that %s", it.get("id"), it.get("to"), e, src, why)
+            log.warning("inbox: line %s for %s is held by '%s' in %s, an entry that %s", it.get("id"), it.get("to"), e,
+                        _held_in(src, lambda ls, e=e: e in ls) or held_files(src)[0], why)
 
 
 def _newest(cands: list[str], rank: dict[str, float] | None) -> list[str]:
@@ -391,13 +404,14 @@ def alive(it: dict[str, Any], idx: dict[str, dict[str, Any]] | None = None) -> b
 
 
 def deliberate(it: dict[str, Any]) -> str:
-    """Why this line waits on purpose, '' when it does not: a hold on its session (sala's relaunch hold, a reboot's resume) in held-<src>.txt, or its source paused
+    """Why this line waits on purpose, '' when it does not: a hold on its session (another tool's relaunch hold in held-<src>.txt, a reboot's resume in held-resume-<src>.txt), or its source paused
     (paused-<src>.json) without a release for it. These are known waits, sala's own watch frees a hold a dead relaunch left after 10 minutes: the flag leaves them alone."""
     src = str(it.get("src") or "msg")
     paused, released, held = blocked(src)
     keys = _keys(it)
     if keys & _sr.expand_flag(held):
-        return f"a hold on it in held-{src}.txt has not been lifted"
+        where = _held_in(src, lambda ls: bool(keys & _sr.expand_flag(ls))) or held_files(src)[0]
+        return f"a hold on it in {where} has not been lifted"
     if paused and not keys & _sr.expand_flag(released):
         return f"deliveries of its kind are paused (paused-{src}.json)"
     return ""

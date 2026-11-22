@@ -20,7 +20,13 @@ session (never the name its puller reports: a relaunched pane reports the CLI's 
 sessions carry one name. A line that still waits `[client] inbox_flag_minutes` (default 5) for a session that is running, on a
 machine whose puller checks in, is reported once, with the likeliest reason, to the running pane that sent it and to the fleet's
 keeper (`inbox.new_overdue`, the clients' tick). Not reported: a line held on purpose (a relaunch hold in
-`held-msg.txt`, a paused source), the flag's own lines, and anything in the first minute after the server starts.
+`held-msg.txt` or `held-resume-msg.txt`, a paused source), the flag's own lines, and anything in the first minute after the server starts.
+
+**Two hold files per source** (beside the pause flags `paused-<src>.json` in the state folder; `<src>` is `hub` or `msg`). `held-<src>.txt` is written by another tool (the fleet tool's
+relaunch hold) and `held-resume-<src>.txt` by a reboot's resume (the sessions it could not verify); each writer replaces only its own file, so
+neither erases the other's holds. Every reader takes the **union** of the two: `inbox.blocked` (so `inbox.take` and
+`inbox.deliberate`) and `push.paused` hold a session's lines and queue when its key (the address, the transcript id, the name or the permanent
+id) is in either file. A missing or empty file lists nothing. The reason text and the journal line name the file the key was found in, or both.
 
 **The puller keeps a client box current** (puller 9; the PC's helper is its one service, and it
 keeps itself current). Every poll's answer carries what is current (`clients.current`: the server's puller `VERSION` and
