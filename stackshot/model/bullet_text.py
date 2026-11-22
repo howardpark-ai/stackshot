@@ -385,22 +385,82 @@ _RX_SOFT_CUT = re.compile(r"(?<=[,:]) +(?=\S)|(?<=\S) +[-\u2013\u2014] +(?=\S)|(
 _SOFT_MIN = 10                  # a piece cut by the second tier reads at least this many characters: a stub of a few words is no bullet
 
 
+_RX_NONSPACE = re.compile(r"\S")
+_SOFT_SLACK = (0, 0)           # a test seam, (a piece's fit and floor, the rest's fit): how far the table below may read too generously, so a test can show the full `visible_len` confirmations are what decide
+
+
 def _soft_units(c: str, mark: str, line_max: int, cap: int) -> list[tuple[str, str]] | None:
     """One clause `c` that reads over `line_max` (after `mark`) as (the piece, the gap that followed it) units, cut from the left at the last comma, colon, spaced dash or opening parenthesis that leaves the
     piece within the limit; the rest is cut again the same way until it fits. A cut is never made inside a link, a naked URL or a code span, an open parenthesis or an unclosed `**` emphasis, and never leaves a
     piece that reads under `_SOFT_MIN`. The last unit's gap is "" (the caller gives it the clause's own). None when no such cut gives a fit, or when it would take more than `cap` cuts (more pieces than the
-    description may have lines). Linear in the clause: what a stretch reads is taken from one table of the characters that count (a link's markup and a naked URL do not), by bisection, and only the piece a cut
-    makes is measured in full (`visible_len`) to confirm it, so a clause padded with spaces costs no more per cut than a short one."""
+    description may have lines).
+    Linear in the clause: what a stretch reads comes from one table, bisected, and only the pieces a cut makes are then measured in full (`visible_len`), which decides. The table counts what `visible_len` counts: a
+    link as its words, then no naked URL (also one that sits in a link's words, or starts before a link: those stretches are merged), the ends of a piece trimmed (so the spaces beside an edge URL do not count),
+    the spaces inside a piece do."""
     links = list(RX_MD_LINK.finditer(c))
-    own = {m.span() for m in links}
-    zero = sorted([(m.start(), m.start(1)) for m in links] + [(m.end(1), m.end()) for m in links] + [sp for sp in _spans(c) if sp not in own])     # what reads as nothing: a link's brackets and destination, a naked URL
-    zends = [b for _, b in zero]
+    zero = [(m.start(), m.start(1)) for m in links] + [(m.end(1), m.end()) for m in links]          # a link's brackets and destination read as nothing
+    runs_t: list[int] = []
+    runs_o: list[int] = []                    # where each stretch of the link-less text `t` starts in `t` and in `c`
+    tlen = pos = 0
+    for m in links:
+        for lo, hi in ((pos, m.start()), (m.start(1), m.end(1))):
+            if hi > lo:
+                runs_t.append(tlen)
+                runs_o.append(lo)
+                tlen += hi - lo
+        pos = m.end()
+    if len(c) > pos:
+        runs_t.append(tlen)
+        runs_o.append(pos)
+    for u in RX_NAKED_URL.finditer(RX_MD_LINK.sub(r"\1", c)):          # the addresses `_visible` takes out, found as it finds them, then put back at their place in `c`
+        p, q = u.span()
+        i, k = bisect.bisect_right(runs_t, p) - 1, bisect.bisect_right(runs_t, q - 1) - 1
+        zero.append((runs_o[i] + p - runs_t[i], runs_o[k] + q - runs_t[k]))
+    zst: list[int] = []
+    zen: list[int] = []
+    for x, y in sorted(zero):
+        if zen and x <= zen[-1]:
+            zen[-1] = max(zen[-1], y)
+        else:
+            zst.append(x)
+            zen.append(y)
     zsum = [0]
-    for a, b in zero:
-        zsum.append(zsum[-1] + b - a)
+    for x, y in zip(zst, zen):
+        zsum.append(zsum[-1] + y - x)
 
-    def reads(x: int) -> int:         # what c[:x] reads, for an x that is no place inside a link or a URL
-        return x - zsum[bisect.bisect_right(zends, x)]
+    def reads(x: int) -> int:         # what c[:x] reads before the ends are trimmed, for an x that is no place inside a link or a URL
+        return x - zsum[bisect.bisect_right(zen, x)]
+
+    def zskip(x: int) -> int:         # x, or the end of the stretch of nothing that holds it
+        k = bisect.bisect_right(zst, x) - 1
+        return zen[k] if k >= 0 and x < zen[k] else x
+
+    def zback(x: int) -> int:         # x, or the start of the stretch of nothing that holds the character before it
+        k = bisect.bisect_right(zst, x - 1) - 1
+        return zst[k] if k >= 0 and x - 1 < zen[k] else x
+
+    def first_visible(x: int, hi: int) -> int | None:          # the first character in c[x:hi] that is no space and does not read as nothing
+        while x < hi:
+            if (y := zskip(x)) != x:
+                x = y
+            elif (m := _RX_NONSPACE.search(c, x, hi)) is None:
+                return None
+            elif (y := zskip(m.start())) == m.start():
+                return m.start()
+            else:
+                x = y
+        return None
+
+    def last_visible_end(lo: int, x: int) -> int | None:       # the end of the last such character in c[lo:x]
+        while x > lo:
+            w = c[max(lo, x - 512):x]
+            if n := len(w) - len(w.rstrip()):
+                x -= n
+            elif (y := zback(x)) != x:
+                x = max(y, lo)
+            else:
+                return x
+        return None
 
     starts, ends = _merged(_spans(c) + [m.span() for m in _RX_CODE_SPAN.finditer(c)])
 
@@ -417,21 +477,37 @@ def _soft_units(c: str, mark: str, line_max: int, cap: int) -> list[tuple[str, s
         if inside(s) or inside(m.end()) or opens > closes or strong % 2:
             continue
         cuts.append((s, m.end()))
-    vs = [reads(s) for s, _ in cuts]
-    ve = [reads(e) for _, e in cuts]
-    vend = reads(len(c.rstrip()))
+    a0, send = first_visible(0, len(c)), last_visible_end(0, len(c))
+    if a0 is None or send is None:
+        return None
+    sp: list[int] = []                         # for each cut: where the first piece's last readable character ends, and where the rest's first begins
+    last, lo = 0, 0
+    for s, _ in cuts:
+        last = x if (x := last_visible_end(lo, s)) is not None else last
+        sp.append(last)
+        lo = s
+    ep = [0] * len(cuts)
+    nxt = len(c)
+    for j in range(len(cuts) - 1, -1, -1):
+        hi = cuts[j + 1][1] if j + 1 < len(cuts) else len(c)
+        nxt = x if (x := first_visible(cuts[j][1], hi)) is not None else nxt
+        ep[j] = nxt
+    vs, ve, vep = [reads(x) for x in sp], [reads(e) for _, e in cuts], [reads(x) for x in ep]
+    vend = reads(send)
     room = line_max - len(mark.lstrip())
+    slack, slack_end = _SOFT_SLACK
     out: list[tuple[str, str]] = []
     at = vat = 0
-    while vend - vat > room:
+    vap = reads(a0)
+    while vend - vat > room + slack_end:
         if len(out) > cap:
             return None
-        j = bisect.bisect_right(vs, vat + room) - 1           # the last cut whose first piece fits; the ones before it read less
-        while j >= 0 and cuts[j][0] > at and vs[j] - vat >= _SOFT_MIN:
+        j = bisect.bisect_right(vs, vat + room + slack) - 1           # the last cut whose first piece fits; the ones before it read less
+        while j >= 0 and cuts[j][0] > at and vs[j] - vap >= _SOFT_MIN - slack:
             s, e = cuts[j]
-            if vend - ve[j] >= _SOFT_MIN and visible_len(mark + c[at:s]) <= line_max and visible_len(c[at:s]) >= _SOFT_MIN:
+            if vend - vep[j] >= _SOFT_MIN - slack and visible_len(mark + c[at:s]) <= line_max and visible_len(c[at:s]) >= _SOFT_MIN and visible_len(c[e:]) >= _SOFT_MIN:
                 out.append((c[at:s], c[s:e]))
-                at, vat = e, ve[j]
+                at, vat, vap = e, ve[j], vep[j]
                 break
             j -= 1
         else:

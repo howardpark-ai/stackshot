@@ -792,4 +792,91 @@ check("5e padding: a gap of 30,000 spaces is one cut, dropped with it, and costs
 got_l, dt_l = timed("- " + "a" * 60 + "," + " " * 30000 + "[" + "b" * 50 + "](https://example.com/" + "u" * 200 + ")")
 check("5e padding: …with a link after it, the link stays whole and reads as its words", got_l is not None and got_l[0].splitlines()[1].startswith("- [bbb") and "(https://example.com/" + "u" * 200 + ")" in got_l[0] and dt_l < 1.0, (got_l and got_l[0][:80], dt_l))
 
+# ---- 5f. what a piece reads is what `visible_len` says: an address that is the text of a link reads as nothing (every address reaches the splitter as `[url](url)`), the trimmed ends of a piece, spans that overlap
+UL = "https://example.com/" + "u" * 60
+check("5f autolink: an address written as `[url](url)` in the first piece reads as nothing, the cut is still made", soft(f"- Goal: {'a' * 80}, see [{UL}]({UL}), {'b' * 90}") == ([f"- Goal: {'a' * 80}, see [{UL}]({UL}),", "- " + "b" * 90], 1, 1), soft(f"- Goal: {'a' * 80}, see [{UL}]({UL}), {'b' * 90}"))
+check("5f autolink: …and in the last piece", soft(f"- {'a' * 112}, see [{UL}]({UL}) right now") == ([f"- {'a' * 112},", f"- see [{UL}]({UL}) right now"], 1, 1), soft(f"- {'a' * 112}, see [{UL}]({UL}) right now"))
+check("5f autolink: …and a link whose text is a plain address that differs from its destination", soft(f"- {'a' * 80} [{UL}](https://example.org/x), {'b' * 60}") == ([f"- {'a' * 80} [{UL}](https://example.org/x),", "- " + "b" * 60], 1, 1), soft(f"- {'a' * 80} [{UL}](https://example.org/x), {'b' * 60}"))
+check("5f overlap: an address that starts before a link (`http://a/[x](http://b)`) reads as nothing, and the cut after it is made", soft(f"- {'a' * 80} http://a/[x](http://b), {'b' * 60}") == ([f"- {'a' * 80} http://a/[x](http://b),", "- " + "b" * 60], 1, 1), soft(f"- {'a' * 80} http://a/[x](http://b), {'b' * 60}"))
+check("5f overlap: …also with two of them in a row, and a link whose text runs on into text (`[http://a](u)/more`)", soft(f"- {'a' * 60} http://a/[x](http://b) http://c/[y](http://d), {'b' * 60} [http://e](u)/more") == ([f"- {'a' * 60} http://a/[x](http://b) http://c/[y](http://d),", "- " + "b" * 60 + " [http://e](u)/more"], 1, 1), soft(f"- {'a' * 60} http://a/[x](http://b) http://c/[y](http://d), {'b' * 60} [http://e](u)/more"))
+CJK = "\u4e2d\u6587"
+check("5f floor: a last piece that reads 9 characters once its address is taken out and its ends are trimmed is no cut, 10 is", soft(f"- {'a' * 110}, https://example.com/qqqq xy the {CJK}") is None and soft(f"- {'a' * 110}, https://example.com/qqqq xyz the {CJK}") is not None, soft(f"- {'a' * 110}, https://example.com/qqqq xy the {CJK}"))
+check("5f floor: …the same for a first piece that opens with an address and a space", soft(f"- https://example.com/qqqq abcd efg, {'b' * 118}") is None and soft(f"- https://example.com/qqqq abcd efgh, {'b' * 118}") is not None, soft(f"- https://example.com/qqqq abcd efgh, {'b' * 118}"))
+check("5f trim: the spaces before an address that ends the rest do not count (the ends of a piece are trimmed), so the rest fits and the cut is made", soft(f"- {'a' * 20}, " + "b" * 110 + " " * 15 + "https://e.example/zz") == ([f"- {'a' * 20},", "- " + "b" * 110 + " " * 15 + "https://e.example/zz"], 1, 1), soft(f"- {'a' * 20}, " + "b" * 110 + " " * 15 + "https://e.example/zz"))
+check("5f trim: …and the spaces a bullet ends with", soft(f"- {'a' * 20}, " + "b" * 110 + " " * 15) == ([f"- {'a' * 20},", "- " + "b" * 110 + " " * 15], 1, 1), soft(f"- {'a' * 20}, " + "b" * 110 + " " * 15))
+check("5f trim: the spaces before an address that ends a first piece (its comma is the address's) do not count either", soft("- " + "a" * 100 + " " * 30 + "http://x.test/z, " + "b" * 50) == (["- " + "a" * 100 + " " * 30 + "http://x.test/z,", "- " + "b" * 50], 1, 1), soft("- " + "a" * 100 + " " * 30 + "http://x.test/z, " + "b" * 50))
+# the table and the full measure agree: the cut finder written out plainly (every cut measured with `visible_len`, quadratic) gives the same text as the real one
+def _ref_soft_units(c, mark, line_max, cap):
+    starts, ends = BT._merged(BT._spans(c) + [m.span() for m in BT._RX_CODE_SPAN.finditer(c)])
+    def inside(x):
+        k = bisect.bisect_left(starts, x) - 1
+        return k >= 0 and x < ends[k]
+    cuts = []
+    seen = opens = closes = strong = 0
+    for m in BT._RX_SOFT_CUT.finditer(c):
+        s_ = m.start(); seg = c[seen:s_]
+        opens, closes, strong, seen = opens + seg.count("("), closes + seg.count(")"), strong + seg.count("**"), s_
+        if inside(s_) or inside(m.end()) or opens > closes or strong % 2:
+            continue
+        cuts.append((s_, m.end()))
+    out, at = [], 0
+    while BT.visible_len(mark + c[at:]) > line_max:
+        for s_, e_ in reversed(cuts):
+            if s_ > at and BT.visible_len(mark + c[at:s_]) <= line_max and BT.visible_len(c[at:s_]) >= BT._SOFT_MIN and BT.visible_len(c[e_:]) >= BT._SOFT_MIN:
+                out.append((c[at:s_], c[s_:e_])); at = e_
+                break
+        else:
+            return None
+    out.append((c[at:], ""))
+    return out
+import bisect
+rnd = random.Random(1421)
+def _word():
+    return "".join(rnd.choice("abcdefghij") for _ in range(rnd.randint(1, 14)))
+def _url():
+    return rnd.choice(["https://example.com/", "http://a.test/x?y=1&z=", "https://sub.example.org/p/"]) + "q" * rnd.choice([0, 3, 25, 70])
+def _tok():
+    r = rnd.random()
+    if r < .50: return _word()
+    if r < .60: return _url()
+    if r < .70: u = _url(); return f"[{u}]({u})"
+    if r < .76: return f"[{_word()} {_word()}]({_url()})"
+    if r < .80: return f"[{_url()}]({_url()})"
+    if r < .84: return f"{_url()}[{_word()}]({_url()})"
+    if r < .88: return f"`{_word()}, {_word()}`"
+    if r < .92: return f"[{_url()}]({_url()})/{_word()}"
+    return f"**{_word()}**"
+SEPS = [", ", ": ", " - ", " \u2013 ", " (", " ", " ", ". ", "; ", "  ", ",  ", " ) "]
+def _bullet():
+    t, want = "- " + _tok(), rnd.randint(105, 330)
+    while len(BT._visible(t)) < want:
+        t += rnd.choice(SEPS) + _tok()
+    return t + rnd.choice(["", "", ".", ")"])
+cases = [_bullet() for _ in range(500)] + [_bullet().replace("- ", "  - ", 1) for _ in range(50)]
+real = [BT.split_long_ex(t, 8, 120) for t in cases]
+BT._soft_units, _kept_units = _ref_soft_units, BT._soft_units
+try:
+    refs = [BT.split_long_ex(t, 8, 120) for t in cases]
+finally:
+    BT._soft_units = _kept_units
+bad = [k for k, (a, b) in enumerate(zip(real, refs)) if a != b]
+check("5f differential: over 550 generated bullets (links, addresses, autolinks, code spans, every kind of cut) the output is the plain finder's, identical", not bad and len({r is None for r in real}) == 2 and sum(r is not None and r[2] for r in real) > 60, (len(bad), [cases[k] for k in bad[:2]], [real[k] for k in bad[:1]], [refs[k] for k in bad[:1]]))
+# the full measures are what decide: with the table made too generous (a piece's fit and floor by 6) the output is still the plain finder's
+BT._SOFT_SLACK = (6, 0)
+try:
+    real_s = [BT.split_long_ex(t, 8, 120) for t in cases]
+finally:
+    BT._SOFT_SLACK = (0, 0)
+check("5f confirmed: …and with the table reading 6 too generously for a piece's fit and floor, still identical (the confirmations decide)", real_s == refs, sum(a != b for a, b in zip(real_s, refs)))
+def soft_slack(t, slack):
+    BT._SOFT_SLACK = slack
+    try:
+        return soft(t)
+    finally:
+        BT._SOFT_SLACK = (0, 0)
+check("5f confirmed: a first piece one over the limit is rejected by the full measure, not accepted on the table's word", soft_slack("- " + "a" * 118 + ", " + "b" * 20, (6, 0)) is None, soft_slack("- " + "a" * 118 + ", " + "b" * 20, (6, 0)))
+check("5f confirmed: a first piece under the floor is rejected by the full measure", soft_slack("- " + "a" * 3 + ", " + "b" * 118, (6, 0)) is None, soft_slack("- " + "a" * 3 + ", " + "b" * 118, (6, 0)))
+check("5f confirmed: a last piece under the floor is rejected by the full measure", soft_slack("- " + "a" * 115 + ", " + "b" * 4, (6, 0)) is None, soft_slack("- " + "a" * 115 + ", " + "b" * 4, (6, 0)))
+check("5f confirmed: a rest that the table says fits but reads over is refused by the final measure, never handed on", soft_slack("- " + "a" * 20 + ", " + "b" * 122, (0, 6)) is None, soft_slack("- " + "a" * 20 + ", " + "b" * 122, (0, 6)))
+
 print(("ok" if not fails else "FAILED") + f": bullets scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
