@@ -102,6 +102,13 @@ kinds = {
     "Refused: metadata.wake must be YYYY-MM-DD or YYYY-MM-DDTHH:MM (+04) — got 'x'": "a wake in the wrong form",
     "bad item id '12' — ids read board#<n>": "an item id in the wrong form",
     "Refused: ask must read as a question": "an ask in the wrong form",
+    # the hand-off refusal (service/update.py) names the sessions handed to and quotes `<session>: <action>`: it is not a front agent's
+    f"Refused: this update hands {BID(7)} to worker-a (a line of next in the form `<session>: <action>`) and nothing would close the item once that work is done. Add check=<what closes it>": "a hand-off with no check or date",
+    f"Refused: this update hands {BID(7)} to worker-a, worker-b (a line of next in the form `<session>: <action>`) and nothing would close the item": "a hand-off with no check or date",
+    # the refusals that do name a front agent keep their kind
+    f"Refused: demo-main is a user-facing agent of projects/demo, and mover=demo-main from another session hands it an item it gets no notice of": "a front agent named as mover",
+    "Refused: a name is not a background agent of any project, nor this project's keeper; needs names one of those": "a front agent named as mover",
+    'Refused: the step "demo-main: ask" opens with demo-main, a user-facing agent of projects/demo: it gets no work notice': "a front agent named as mover",
 }
 for why, want in kinds.items():
     check(f"1 kind_of: {want}", CL.kind_of(why) == want, CL.kind_of(why))
@@ -394,8 +401,20 @@ rows5 = lines()
 check("5 call_log: a bounce-back is a row field of its own, apart from the fixes", [x for x in rows5 if x.get("bounce")][0]["bounce"] == ["wake"] and "fix" not in [x for x in rows5 if x.get("bounce")][0], [x for x in rows5 if x.get("bounce")])
 c5, p5 = RR.collect(mon)
 t5 = RR.build(mon, c5, p5)
-check("5 report: the fixes the writer sent back, of all fixes, with the share and the kinds", "- fixes the writer sent back: 3 of 10 (30.0%) (wake 2 of 6 · description-bullet 1 of 4)" in t5, t5)
+check("5 report: the fixes the writer sent back, of the fixes checked, with the share and the kinds", "- fixes the writer sent back: 3 of the 10 fixes checked (30.0%) (wake 2 of 6 · description-bullet 1 of 4)" in t5, t5)
 check("5 report: …the refusal share is still the first line, apart from it", "create and update: 5 of 57 calls refused (8.8%)" in t5 and "corrected by the server instead of refused: 10 (wake 6 · description-bullet 4)" in t5, t5)
+# only the fixes of a kind with a send-back check are in the share: a fix with none (item-id, step-kept, step-none) can never be sent back, so it stays out of the denominator, the corrected line still counts it
+wipe()
+add("update", True, 1, mon + dt.timedelta(days=1), fixes=[("wake", "w")]); add("update", True, 1, mon + dt.timedelta(days=1), fixes=[("item-id", "i")])
+add("update", True, 1, mon + dt.timedelta(days=2), fixes=[("step-kept", "k")]); add("update", True, 1, mon + dt.timedelta(days=2), fixes=[("wake", "w")])
+CL.record("update", True, item="g1", sender="a", fixes=[(CL.BOUNCE + "wake", "")], now=epoch(2026, 11, 4, 11))
+c5b, p5b = RR.collect(mon)
+t5b = RR.build(mon, c5b, p5b)
+check("5 report: the share counts only the fixes of the checked kinds (1 of the 2 wake fixes, not of the 4 fixes made), and says so", "- fixes the writer sent back: 1 of the 2 fixes checked (50.0%) (wake 1 of 2)" in t5b and "corrected by the server instead of refused: 4 (wake 2 · item-id 1 · step-kept 1)" in t5b, t5b)
+add("update", True, 1, mon - dt.timedelta(days=6), fixes=[("wake", "w")]); add("update", True, 1, mon - dt.timedelta(days=6), fixes=[("item-id", "i")]); add("update", True, 1, mon - dt.timedelta(days=6), fixes=[("item-id", "i")])
+c5c, p5c = RR.collect(mon)
+t5c = RR.build(mon, c5c, p5c)
+check("5 report: …and so does the week before (1 checked fix of the 3 made)", "; the week before 0 of 1 (0.0%)" in t5c, t5c)
 wipe(); add("update", True, 10, mon + dt.timedelta(days=1))
 c6, p6 = RR.collect(mon)
 check("5 report: with no fixes and no bounce-backs the line is left out", "sent back" not in RR.build(mon, c6, p6), None)
@@ -569,7 +588,7 @@ CL.record("update", True, item="g1", sender="a", fixes=[(CL.BOUNCE + "subject-pr
 c8, p8 = RR.collect(mon)
 t8 = RR.build(mon, c8, p8)
 check("8 report: send-backs are clamped to the fixes of their kind (2 wake send-backs of 1 wake fix read 1 of 1), never 'N of M' with N over M, and a kind with no fix shows none",
-      "1 of 1 (100.0%)" in t8 and "2 of 1" not in t8 and "200.0%" not in t8 and "subject-prefix" not in t8.split("sent back")[-1].split("\n")[0], t8)
+      "1 of the 1 fix checked (100.0%)" in t8 and "2 of 1" not in t8 and "200.0%" not in t8 and "subject-prefix" not in t8.split("sent back")[-1].split("\n")[0], t8)
 
 # a refused create has no item: its call digest tells one create from another
 def rc(t_min, call, sender="team-back"):

@@ -307,7 +307,8 @@ _KINDS: tuple[tuple[str, str], ...] = (
     (r"needs names more than one mover", "needs naming more than one mover"),
     (r"reword: step", "a reword of another session's step"),
     (r"leaves .* open with no open step|new item has no open step", "an open item left with no open step"),
-    (r"user-facing agent|not a background agent|this update hands ", "a front agent named as mover"),
+    (r"this update hands ", "a hand-off with no check or date"),          # before the front agent kind: that refusal names the sessions handed to, none is a front agent
+    (r"user-facing agent|not a background agent", "a front agent named as mover"),
     (r"state is a retired input|ranks are retired", "a retired input"),
     (r"pass sender=", "no sender"),
 )
