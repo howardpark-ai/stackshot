@@ -208,7 +208,7 @@ async def _colors_machine(request: Request, op: str):
     """The fleet tool's web server, by the machine token (Authorization: Bearer, as every /client route): 401 without a valid one (the plain text of the other /client routes),
     403 when its machine is not in [project_agent] form_machines. A write also needs `sender` to be "sala-web" and a label in form_senders (_form_call, as the For you writes)."""
     from starlette.concurrency import run_in_threadpool
-    machine = _client_machine(request.headers.get("authorization", ""))
+    machine = _client_machine(request.headers.get("authorization", ""), request)
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
     if machine not in _cfg_names("form_machines", _FORM_MACHINES):

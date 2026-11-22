@@ -1021,6 +1021,7 @@ PROGRAMS = {
     "ghmigrate": ("stackshot.github.ghmigrate", "move a board store's open items onto GitHub Issues"),
     "server": ("stackshot.web.server", "the MCP connector and the board (needs the server extra: uv run --extra server stackshot server)"),
     "minute": ("stackshot.web.minute", "the minute set's runner as a process of its own, when [runner] process = \"unit\" (needs the server extra: uv run --extra server stackshot minute)"),
+    "requests": ("stackshot.tools.request_summary", "the server's request log: `requests summary` (p50 and p95 per route, the slowest calls, the errors, the starts)"),
     "publish": ("stackshot.web.publish", "the stackshot publisher"),
     "render": ("stackshot.web.render", "the board's text renderer"),
 }

@@ -1907,6 +1907,7 @@ DOCUSE_ALLOW = {
     ("stackshot/web/tools/anchors.py", ".tool("): (1, "the mcp.tool(...)(function) registration in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
     ("stackshot/web/tools/rules.py", ".tool("): (2, "the mcp.tool(...)(function) registrations in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
     ("stackshot/web/tools/rules.py", ".resource("): (1, "the mcp.resource(...)(function) registration of the rules resource: given its description in the call"),
+    ("tests/requestlog_scenario.py", "@.tool"): (2, "the two tools of a throwaway FastMCP instance, registered to see how a call is named in the request log; no docstring is read"),
     ("tests/audit_run_scenario.py", ".prompt("): (3, "AR.prompt(...) is the audit's own function that builds a text, not a registry"),
     ("tests/release_queue_scenario.py", "import *"): (1, "the release harness's own helpers; no function of the checkout is read through them by a docstring"),
     ("tests/release_scenario.py", "import *"): (1, "the release harness's own helpers; no function of the checkout is read through them by a docstring"),
