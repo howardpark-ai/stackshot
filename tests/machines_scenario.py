@@ -239,7 +239,7 @@ ANSWER["box-d"] = (0, {"claude code": "1.7.39 (Claude Code)", "gbrain": "gbrain 
 CALLS.clear(); ver.SSH_OUT.unlink(missing_ok=True)
 doc = ver.write(force=True); hs = {h["name"]: h for h in doc["ssh_hosts"]}; sec = panel(); z = card(sec, "box-z")
 check("own host: box-z, the server's own box, is read by running the script here (once, every package asked), never over ssh; the other hosts are still read over ssh",
-      len(HERE) == 1 and HERE[0].count("@@") == 2 and [h for h, _ in CALLS] == ["box-d", "box-g"], (HERE, CALLS))
+      len(HERE) == 1 and HERE[0].count("@@") == 2 and sorted(h for h, _ in CALLS) == ["box-d", "box-g"], (HERE, CALLS))   # the hosts are probed in parallel threads: no order
 check("own host: box-z answers: reachable, its versions in versions.json, in config order",
       [h["name"] for h in doc["ssh_hosts"]] == ["box-z", "box-d", "box-g"] and hs["box-z"]["reachable"] is True and hs["box-z"]["packages"] == {"claude code": "1.7.40", "gbrain": "1.9.12"}, doc["ssh_hosts"])
 check("publisher: box-z is the first card, once, ahead of the fleet (it has no puller and no state of its own); the others follow, the ssh-only hosts last",
