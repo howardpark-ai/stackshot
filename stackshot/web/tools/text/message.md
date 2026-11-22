@@ -36,8 +36,8 @@ names the agent in no item's needs, so send it again without fyi if it does ask;
 when the router passes it to a background agent or a front agent; to a front agent it is held for that agent's next
 turn, needs no {{FOR_OWNER}} on its first line and starts no turn (the reply begins 'not passed on' when its hook
 cannot fetch held lines); a message that carries {{FOR_OWNER}} or needs: decision is delivered or refused whatever the
-flag says. A message to a session that is retired (its pane gone for good, an old name of a renamed session) is not refused when its project has another agent to take it: it goes to the project, where the router rules it, and the reply begins
-`'<name>' is retired (<why>), so this went to its project '<key>' instead — held for the router …`. When no project can take it (the name belongs to none, or it is the project's only agent) it is refused, saying why. A message to
+flag says. A message to a retired session (pane gone, or an old name) goes to its project for the router to rule, the reply beginning
+`'<name>' is retired (<why>), so this went to its project …`; it is refused only when no other agent of a project can take it. A message to
 a project is answered `held for the router — the router rules notice <id> …`, ending `get(item_id="<id>") shows its
 ruling`: call get with that id. The reply adds NOT PASSED ON when you move the item it names: write
 the item to hand a step on. A reply that begins `inbox` means the line waits in the server's inbox for the session's
