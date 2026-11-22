@@ -159,26 +159,30 @@ def _next_line_max() -> int:
 
 
 def fix_long_bullets(desc: str, stored: str | None = None) -> tuple[str, str]:
-    """A description whose bullets read over the limit, put right instead of refused: each long bullet is split at the gaps after its sentences into shorter bullets (bullet_text.split_long: no word is
-    dropped, nothing is cut inside a link or a code span), and the reply says so (call_log.fixed). → (the text, the History line the caller writes onto the item: the server changed it, "" when it did not). The text as given when it is within the form, when the fault is anything but a long bullet, or when the
-    split cannot be made (a sentence of its own over the limit, more than the line cap): the gate then refuses it as before. A description with no bullet form required ([description] require_bullets = false) is left alone. `stored` is the description the item holds already (an update passes it): when the split gives
-    exactly that text, the same long description has been sent before and is stored as split, so the server changed nothing this time: no fix is counted, no reply line, no History line."""
+    """A description whose bullets read over the limit, put right instead of refused: each long bullet is split at the gaps after its sentences into shorter bullets, and a clause still over the limit on its own at
+    its last comma, colon, spaced dash or opening parenthesis that leaves each piece within it (bullet_text.split_long_ex: no word is dropped, nothing is cut inside a link, a naked URL or a code span), and the reply says so
+    (call_log.fixed). → (the text, the History line the caller writes onto the item: the server changed it, "" when it did not). The text as given when it is within the form, when the fault is anything but a long bullet,
+    or when the split cannot be made (a clause with no cut that fits, more than the line cap): the gate then refuses it as before. A description with no bullet form required ([description] require_bullets = false) is
+    left alone. When the split text breaks the form some other way (a later line that is no bullet), the split text comes back with no note and no fix counted, so the gate refuses the fault that is left, not a long
+    bullet the server would have put right. `stored` is the description the item holds already (an update passes it): when the split gives exactly that text, the same long description has been sent before and is
+    stored as split, so the server changed nothing this time: no fix is counted, no reply line, no History line."""
     if not desc or not _bullets_on():
         return desc, ""
     max_lines, line_max = _description_limits()
     bad = _bt.judge(desc, max_lines, line_max)
     if not bad or bad[0] != "long":
         return desc, ""
-    res = _bt.split_long(desc, max_lines, line_max)
+    res = _bt.split_long_ex(desc, max_lines, line_max)
     if not res:
         return desc, ""
-    new, n = res
-    if _bt.judge(new, max_lines, line_max):          # a split that still breaks the form (a later line not a bullet) is no fix
-        return desc, ""
+    new, n, soft = res
+    if _bt.judge(new, max_lines, line_max):          # a split that still breaks the form (a later line not a bullet) is no fix: the gate refuses the fault that is left, and nothing is counted or told
+        return new, ""
     if stored is not None and new.strip() == str(stored).strip():          # the same long text again, already stored as split: nothing is changed, so nothing is counted, told or noted
         return new, ""
-    _calls.fixed("description-bullet", f"{n} description bullet{'' if n == 1 else 's'} over {line_max} characters {'was' if n == 1 else 'were'} split at the end of a sentence into shorter bullets, no word changed", fields=["description"], stored=new, sent=desc)
-    return new, f"description: {n} long bullet{'' if n == 1 else 's'} split by the server at the end of a sentence"
+    where, hist = ("at the end of a sentence or at a comma, colon, dash or parenthesis", "at the end of a sentence or a comma") if soft else ("at the end of a sentence",) * 2
+    _calls.fixed("description-bullet", f"{n} description bullet{'' if n == 1 else 's'} over {line_max} characters {'was' if n == 1 else 'were'} split {where} into shorter bullets, no word changed", fields=["description"], stored=new, sent=desc)
+    return new, f"description: {n} long bullet{'' if n == 1 else 's'} split by the server {hist}"
 
 
 def _description_fault(desc: str) -> tuple[str, str, int] | None:

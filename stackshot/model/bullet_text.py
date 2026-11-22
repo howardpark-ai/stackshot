@@ -10,6 +10,7 @@ Used by server.py's description and next gates, by the cold call's close (cold_c
                 (a `>` quote line is not held to the marker, a fenced block is held to nothing but the line count)
   first_bullet  the text of a description's first `- ` bullet (a fenced block and a `>` quote line are not bullets), None when it has none
   goal_of       the sentence a description's first bullet gives after its `Goal:` label (the label is case-sensitive and sits right after the dash), None when the first bullet does not open that way
+  split_long    a description's long bullets cut at a sentence end (first tier), else at a comma, colon, spaced dash or opening parenthesis (second tier: `split_long_ex` also says how many needed it)
   clip_bullet   one bullet shortened to `line_max` visible characters at a word boundary that lies outside any link and any naked URL, then an ellipsis
   bullets       a text as `- ` bullets, split on lines only, each clipped, at most `max_lines` of them (the last says how many more there were)
   _clip_line    free text as one line of a notice: whitespace collapsed, cut at a word before a limit with an ellipsis
@@ -378,10 +379,50 @@ def _clauses(body: str) -> list[tuple[str, str]]:
     return out
 
 
-def split_long(text: str, max_lines: int, line_max: int) -> tuple[str, int] | None:
+# The second tier of a split: a clause that is over the limit on its own is cut at a comma or a colon (the mark stays at the end of the first piece, as a semicolon does), at a spaced dash (the dash is
+# the separator the new bullet replaces and is dropped) or before an opening parenthesis (it opens the next piece). Each gap is a space run with a character that is no space after it.
+_RX_SOFT_CUT = re.compile(r"(?<=[,:]) +(?=\S)|(?<=\S) +[-\u2013\u2014] +(?=\S)|(?<=\S) +(?=\()")
+_SOFT_MIN = 10                  # a piece cut by the second tier reads at least this many characters: a stub of a few words is no bullet
+
+
+def _soft_units(c: str, mark: str, line_max: int) -> list[tuple[str, str]] | None:
+    """One clause `c` that reads over `line_max` (after `mark`) as (the piece, the gap that followed it) units, cut from the left at the last comma, colon, spaced dash or opening parenthesis that leaves the
+    piece within the limit; the rest is cut again the same way until it fits. A cut is never made inside a link, a naked URL or a code span, an open parenthesis or an unclosed `**` emphasis, and never leaves a
+    piece that reads under `_SOFT_MIN`. The last unit's gap is "" (the caller gives it the clause's own). None when no such cut gives a fit."""
+    starts, ends = _merged(_spans(c) + [m.span() for m in _RX_CODE_SPAN.finditer(c)])
+
+    def inside(x: int) -> bool:
+        k = bisect.bisect_left(starts, x) - 1
+        return k >= 0 and x < ends[k]
+
+    cuts: list[tuple[int, int]] = []
+    seen = opens = closes = strong = 0
+    for m in _RX_SOFT_CUT.finditer(c):
+        s = m.start()
+        seg = c[seen:s]
+        opens, closes, strong, seen = opens + seg.count("("), closes + seg.count(")"), strong + seg.count("**"), s
+        if inside(s) or inside(m.end()) or opens > closes or strong % 2:
+            continue
+        cuts.append((s, m.end()))
+    out: list[tuple[str, str]] = []
+    at = 0
+    while visible_len(mark + c[at:]) > line_max:
+        for s, e in reversed(cuts):
+            if s > at and visible_len(mark + c[at:s]) <= line_max and visible_len(c[at:s]) >= _SOFT_MIN and visible_len(c[e:]) >= _SOFT_MIN:
+                out.append((c[at:s], c[s:e]))
+                at = e
+                break
+        else:
+            return None
+    out.append((c[at:], ""))
+    return out
+
+
+def split_long_ex(text: str, max_lines: int, line_max: int) -> tuple[str, int, int] | None:
     """A description whose only fault is bullets that read over `line_max`, put right without losing a word: each such bullet is cut at the gaps after a full stop or a semicolon (never inside a link, a naked
-    URL or a code span) into the fewest bullets that each read within `line_max`, the same indent and dash on each. → (the new text, how many bullets were split), or None when it cannot be done that way: a
-    clause of its own over the limit, a result over `max_lines` lines, a long bullet that has an indented line under it (its children would end up under the last piece), or no long bullet to split. A cut is not
+    URL or a code span) into the fewest bullets that each read within `line_max`, the same indent and dash on each. A clause that is over the limit on its own gets a second tier (`_soft_units`): it is cut at
+    the last comma, colon, spaced dash or opening parenthesis that leaves each piece within the limit. → (the new text, how many bullets were split, how many of those needed the second tier), or None when it
+    cannot be done that way: a clause with no such cut, a result over `max_lines` lines, a long bullet that has an indented line under it (its children would end up under the last piece), or no long bullet to split. A cut is not
     made inside an open parenthesis or an open `**` emphasis, nor after an entity, an abbreviation (e.g., i.e., Mr., etc., St., No., U.S.) or a bare number. A `>` quote line, a fenced block and a line that is no
     bullet are left as they are (the gate still judges them). The text changes at the cut and nowhere else: each semicolon stays, the spaces between the clauses that stay together stay as written, and every
     line end (LF, CRLF or any other the text has) is kept; a cut puts that line's own end between its pieces. The bullets that need a split are summed up first: when what they read, spaces left out, cannot fit
@@ -405,7 +446,7 @@ def split_long(text: str, max_lines: int, line_max: int) -> tuple[str, int] | No
     if not long_at or dense > max_lines * line_max:
         return None
     out: list[str] = []
-    n = 0
+    n = soft = 0
     todo = set(long_at)
     for k, ln in enumerate(lines):
         if k not in todo:
@@ -418,22 +459,35 @@ def split_long(text: str, max_lines: int, line_max: int) -> tuple[str, int] | No
             return None
         pieces: list[str] = []
         gap = ""
+        soft_here = False
         for c, after in _clauses(body):
+            units = [(c, after)]
             if visible_len(mark + c) > line_max:
-                return None
-            if pieces and visible_len(mark + pieces[-1] + gap + c) <= line_max:
-                pieces[-1] += gap + c
-            else:
-                pieces.append(c)
-            gap = after
+                if (units := _soft_units(c, mark, line_max)) is None:
+                    return None
+                units[-1] = (units[-1][0], after)
+                soft_here = True
+            for u, g in units:
+                if pieces and visible_len(mark + pieces[-1] + gap + u) <= line_max:
+                    pieces[-1] += gap + u
+                else:
+                    pieces.append(u)
+                gap = g
         if len(pieces) < 2:
             return None
         sep = ends[k] or default_end
         out.extend(mark + p + (sep if i < len(pieces) - 1 else ends[k]) for i, p in enumerate(pieces))
         n += 1
+        soft += soft_here
     if not n or len([ln for ln in out if ln.strip()]) > max_lines:
         return None
-    return "".join(out), n
+    return "".join(out), n, soft
+
+
+def split_long(text: str, max_lines: int, line_max: int) -> tuple[str, int] | None:
+    """`split_long_ex` without the count of bullets that needed the second tier: (the new text, how many bullets were split), or None."""
+    res = split_long_ex(text, max_lines, line_max)
+    return None if res is None else res[:2]
 
 
 _RX_FIRST_BULLET = re.compile(r"^\s*-[ \t]+(\S.*)$")
