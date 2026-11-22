@@ -19,7 +19,7 @@ An item is handed on when all of these hold:
     line means the hourly pass is off or the item was off the agent since), and nothing has moved the item since that line (`silence.clock` is not later than it: a step done, a state change, the
     mover's own write, an event on an anchor, the owner's answer all count), and it has had no activity for a full hour (`hourly.HOUR`): the first audit line is owed after 45 minutes (`hourly.EVERY`), so an idle line can be younger than an hour of silence, and the item waits for the hour before it is handed on;
   - it is open and on an agent as the board shows it, not held, and its hand-off, if it has one, was taken (an untaken hand-off is the hand-off audit's);
-  - its mover is not a front agent: an item a front agent moves is the owner's work and is left where it is;
+  - if its mover is a front agent, no step of the owner's or of that agent's own is open on it (`_front_step_open`): such an item is the owner's work and is left where it is. An item a front agent moves with no open step of either (the owner has answered and nothing is left to do) is idle like any other and goes to the project's builder;
   - it was not handed on by this pass in the last 24 hours (`DAY`). An item handed on once and idle again after that may be handed again.
 
 A builder is free when it is not the mover of any open item that is on an agent (an item it is to take counts: an untaken hand-off names it as mover) and its pane is not in a turn on this box
@@ -115,6 +115,14 @@ def mark_none(meta: dict[str, Any], now: float) -> None:
     meta[KEY] = {**{k: v for k, v in _record(meta).items() if k in ("handed_at", "from", "to")}, "none_at": now}
 
 
+def _front_step_open(meta: dict[str, Any], mover: str) -> bool:
+    """Is a step of the owner's (one that names nobody counts) or of `mover` itself open on the item? A step of a third session is not."""
+    try:
+        return any(s["status"] == _steps.OPEN and (_steps.is_his(s["text"]) or _steps.opener(s["text"]).casefold() == str(mover).casefold()) for s in _steps.view(meta))
+    except Exception:  # noqa: BLE001
+        return True      # a record that cannot be read leaves the item where it is
+
+
 def due(items: dict[str, dict[str, Any]], gid: str, now: float, front: Callable[[Any, str], bool] | None = None) -> dict[str, Any] | None:
     """The row of the open item `gid` when it is to be handed on now (see the module doc), else None. `front(name, project)` says who is a front agent (None reads none as front)."""
     item = items.get(gid) or {}
@@ -126,8 +134,8 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, front: Callable[
     if _ho.awaiting_session(it):
         return None      # an untaken hand-off is the hand-off audit's, front agent or not
     project = str(meta.get("project") or "")
-    if front is not None and front(mover, project):
-        return None
+    if front is not None and front(mover, project) and _front_step_open(meta, mover):
+        return None      # a front agent's item is left where it is while a step of the owner's or of that agent's own is open; one with no such step (an answered item, say) is idle like any other
     if not _hourly.idle_marked(meta, now):
         return None
     line = _hourly.last_line(meta, now)
