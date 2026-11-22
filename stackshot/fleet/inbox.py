@@ -31,6 +31,7 @@ from typing import Any
 from stackshot.core import config as _cfg
 from stackshot.fleet import liveness as _lv
 from stackshot.fleet import sessions_registry as _sr
+from stackshot.fleet import stale_notice as _stale
 
 DIR: Path = _cfg.state("inbox")
 FLAGS: Path = _cfg.state("anchor-hub")           # paused-<src>.json · held-<src>.txt · release-<src>.txt, shared with the push path
@@ -293,6 +294,9 @@ def take(live: dict[str, str], known: set[str] | None = None, only_src: str | No
         for it in _items(only_src):
             if it["id"] in leases:
                 continue
+            if _stale.expired(it, now):             # an automatic notice that waited past the cutoff goes whether or not a session can take it now (a retired session's lines would otherwise wait for ever)
+                _drop(it, leases, "older than the cutoff")
+                continue
             paused, released, held = flags[it["src"]]
             held_raw = held
             released, held = _sr.expand_flag(released), _sr.expand_flag(held)     # a name the session no longer carries names nothing but itself
@@ -305,6 +309,14 @@ def take(live: dict[str, str], known: set[str] | None = None, only_src: str | No
             u = _target(it, live, known, rank, carriers)
             if u:
                 out.setdefault((u, it["src"]), []).append(it)
+        for (u, src), its in list(out.items()):
+            keep, dropped = _stale.screen(its, {u, live.get(u, ""), *(k for it in its for k in _keys(it))}, now)     # a notice whose item has closed, moved or been parked again since is not handed out
+            for it, why in dropped:
+                _drop(it, leases, why)
+            if keep:
+                out[(u, src)] = keep
+            else:
+                del out[(u, src)]
         for (u, src), its in out.items():
             for it in its:
                 leases[it["id"]] = now + LEASE
@@ -315,6 +327,17 @@ def take(live: dict[str, str], known: set[str] | None = None, only_src: str | No
         text = lines[0] if len(its) == 1 else f"{HEAD[src]} {len(its)} queued while you were away:\n" + "\n".join(lines)
         res.append({"session": u, "name": live.get(u, ""), "src": src, "ids": [i["id"] for i in its], "text": text})
     return res
+
+
+def _drop(it: dict[str, Any], leases: dict[str, float], why: str) -> None:
+    """Remove a waiting line that is no longer worth delivering (the caller holds the lock), with a line in the journal."""
+    for s in SOURCES:
+        try:
+            (DIR / s / f"{it['id']}.json").unlink()
+        except OSError:
+            pass
+    leases.pop(it["id"], None)
+    log.info("inbox: dropped line %s for %s: %s", it.get("id"), it.get("to"), why)
 
 
 def ack(delivered: list[str], failed: list[str] | None = None, now: float | None = None) -> int:
