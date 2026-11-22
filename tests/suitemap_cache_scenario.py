@@ -222,7 +222,7 @@ distinct = len({git("rev-parse", f"{C1}:{p}").strip() for p in FIX if p.endswith
 TREE = {c: git("rev-parse", c + "^{tree}").strip() for c in (C1, C2, C3)}
 
 ENV = {k: v for k, v in os.environ.items() if not k.startswith(("COVERAGE_", "SUITEMAP_", "GITHUB_", "SCENARIO_"))}
-ENV.update(SCENARIO_TESTS=SCR, SUITEMAP_ROOT=str(R), HOME=str(T / "home"), XDG_CACHE_HOME=str(T / "xdg"))
+ENV.update(SCENARIO_TESTS=SCR, SUITEMAP_ROOT=str(R), HOME=str(T / "home"), XDG_CACHE_HOME=str(T / "xdg"), STACKSHOT_TEST_LAUNCHER="")   # no test launcher here, whatever the machine has configured
 ALL = ",".join(FIELDS)
 def cdir(name): return str(T / ("cd-" + name))
 def dump(rev, name, env=None, patch="", fields=ALL, timeout=90):
