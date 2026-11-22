@@ -8,7 +8,7 @@ Every rule is a probe that returns whether the rule held on a fixture, run twice
   2  an idle item with a free builder is handed to it through the minute pass's own write: the builder is the mover, the hand-off record names it from the server, ONE History line says why and names the
      mover it left, the builder is told, -main gets ONE message that asks nothing, nobody else is told (the owner never), no step or decision is made for the owner
   3  what is read: the newest line must be idle (a verified one is not), not old (a line older than 6 hours 15 minutes is no news), and nothing may have moved the item since it
-  4  what is left alone: a hold, a parked item, a stored wait, an item behind an open one, the owner's item, a closed item, an untaken hand-off, a front agent's item
+  4  what is left alone: a hold, a parked item, a stored wait, an item behind an open one, the owner's item, a closed item, an untaken hand-off, a front agent's item while a step of the owner's or of that agent's own is open on it (one with no such step is handed on)
   5  which builder is free: not one whose pane is in a turn, not one that moves an open item on an agent (an untaken hand-off to it counts), one that moves a held item is free; the project's own
      background agents only, never a builder of another project, however idle; a project with no background agent of its own, or none free, keeps the item and -main is told; the item's own mover is never picked;
      a name with no pane or an unreadable pane is not free
@@ -321,6 +321,25 @@ rule("4 an untaken hand-off is left to the hand-off audit", probe_untaken, [(HO,
 def probe_front_mover():
     wipe(); on(); panes["team-back"] = "idle"; put(1, mover="home-main", act=90); return tick() == [] and mover_of(1) == "home-main" and sent == []
 rule("4 an item a front agent moves is left where it is (it is the owner's work)", probe_front_mover, [(telling, "front_keeper", lambda w, p: (False, ""))])
+def front_case(**meta):
+    """A front agent's item idle for 90 minutes, with `meta` over the default (a step of the front agent's own is open) → the ids a pass hands on, the stored mover."""
+    wipe(); on(); panes["team-back"] = "idle"; put(1, mover="home-main", act=90, **meta); return tick(), mover_of(1)
+def probe_front_own_step():
+    got, mv = front_case(); return got == [] and mv == "home-main" and sent == []
+rule("4 a front agent's item with an open step of the front agent's own is left where it is", probe_front_own_step, [(HI, "_front_step_open", lambda m, mover: False)])
+def probe_front_his_step():
+    from stackshot.tools import next_report as nr
+    got, mv = front_case(next="Oliver: pick one", needs=["decision"], ask="pick one", state="your-call")
+    return got == [] and mv == "home-main" and sent == [] and HI.due(nr.load_all(None), "1", now0) is None      # with no front test at all it is still skipped: the board's reading skips it
+check("4 a front agent's item with an open step of the owner's is left where it is (skipped by the board's reading, with no front test given)", probe_front_his_step() is True)
+def probe_front_answered():
+    got, mv = front_case(next="", needs=[])
+    return got == ["a1"] and mv == "team-back" and len(to_builder("team-back")) == 1
+rule("4 a front agent's item the owner has answered, with no open step of the owner's or of the front agent's, is handed to the project's builder like any other idle item", probe_front_answered, [(HI, "_front_step_open", lambda m, mover: True)])
+def probe_front_third_step():
+    got, mv = front_case(next="team-aux: look at it", needs=["team-aux"])
+    return got == ["a1"] and mv == "team-back"
+rule("4 a step of a third session does not keep a front agent's item", probe_front_third_step, [(HI, "_front_step_open", lambda m, mover: True)])
 def probe_unreadable():
     wipe(); on(); panes["team-back"] = "idle"; put(1, act=90); d = rd(1); d["metadata"]["next"] = 7; d["metadata"]["needs"] = {"x": 1}; (T / "store/a/1.json").write_text(json.dumps(d))
     return isinstance(tick(), list)
