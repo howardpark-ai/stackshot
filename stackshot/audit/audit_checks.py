@@ -7,8 +7,9 @@ the filing pass (every ten minutes, in the server) share one copy of the rules.
                                               stale; an item with no date of its own is given the hourly audit line and the idle hand-over, audit/hourly.py, audit/hand_idle.py); → (findings, idle-pass entries, open items read); `env` supplies role_map().
                                               `ten_minute=True` adds the filing and dates passes' checks back, which is how the scenarios compare the passes with what the daily run used to find
   check_stale / check_ask_missing / check_stuck_elsewhere / idle_pass    the per-item rules behind it
-  filing_findings(items, anchors, now, env)   the filing rules (is the item filed in the right state?): stuck-elsewhere, arbitrary-hold, mislabeled-state, reads-as-wait, step-handover, ask-options (check_ask_options), and why-not-now for a wake that is the
+  filing_findings(items, anchors, now, env)   the filing rules (is the item filed in the right state?): stuck-elsewhere, arbitrary-hold, mislabeled-state, mover-no-session (the mover is no session), reads-as-wait, step-handover, ask-options (check_ask_options), and why-not-now for a wake that is the
                                               whole of a wait (date_only_wait: the shape the write parks, found in code every ten minutes, no model call, no cap); → (findings, flags)
+  check_mover_no_session(mover, names)        an open item whose mover is a session name that no live or known session carries (its notices wait in a queue nobody reads); `session_names()` reads the names once per pass
   check_ask_options(meta)                     an ask that shows Yes / No under an open question or whose Recommend is no yes or no while it lists no options, or whose Recommend does not match its Decide or its options (reads with ask_read.py, the write gates' own matchers)
   check_step_handover(item, meta, mover, known, roles, now)   a finished step that did not hand the item on: a delivery step with no proof before another session's step, or a next session never reached after a done step
   dates_findings(items, anchors, now, env)    the dates rule (has the item's own wake passed with nobody acting?): the stale check's date half; → (findings, idle-pass entries)
@@ -39,6 +40,7 @@ from stackshot.waits import event_waits as _ew  # noqa: E402
 from stackshot.waits import handover as _hv  # noqa: E402
 from stackshot.model import model as _model  # noqa: E402
 from stackshot.model import model_guards as _mg  # noqa: E402
+from stackshot.fleet import fleet as _fleet  # noqa: E402
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402
 from stackshot.model import states as _states  # noqa: E402
 from stackshot.waits import watchers as _watch  # noqa: E402
@@ -55,6 +57,7 @@ FIX = {
     "stale": "write the item: done, moved, or a new date",
     "ask-missing": f"write the ask {_cfg.owner()} is to decide, or take needs: decision off the item",
     "stuck-elsewhere": "the step's named session takes it, or the step is renamed to the item's mover",
+    "mover-no-session": "set the mover to the project's front agent, or name a live session as the mover",
     "next rules": "rewrite next as the rule says",
     "board checks": "move the item, or write what holds it and the state that fits",
     "next-done": "tick or drop the step that is already done",
@@ -82,9 +85,9 @@ FIX = {
 #                   next-done, wrong-needs, unneeded-escalation, older-than-page, obsolete-wait, goal-unclear (the judgment checks: each says what the item's text should say),
 #                   step-handover (a session hands the item on), proof-wait (a session stages the event and closes the item), wait-loop (items that wait on each other: a session ends the newest link)
 #   needs him       stale (an item he moves is past its own wake: only he writes a date, a decision or a done; the dates pass leaves an item he moves alone today, so it is kept for a pass that does)
-#   its own `to`    stuck-elsewhere (the session whose step it is), event-missing (the builder): not the person's findings, unchanged
+#   its own `to`    stuck-elsewhere (the session whose step it is), event-missing (the builder): not the person's findings, unchanged; mover-no-session (the project's front agent, which sets the mover; it needs nothing of him either)
 NO_PERSON_NEED = frozenset({"ask-missing", "ask-options", "next rules", "board checks", "reads-as-wait", "why-not-now", "wait-end", "next-done", "wrong-needs", "unneeded-escalation",
-                            "older-than-page", "obsolete-wait", "goal-unclear", "step-handover", "proof-wait", "wait-loop"})
+                            "older-than-page", "obsolete-wait", "goal-unclear", "step-handover", "proof-wait", "wait-loop", "mover-no-session"})
 
 
 def needs_person(category: Any) -> bool:
@@ -287,6 +290,61 @@ def stuck_detail(nm: str, mover: str, line: str, last: float) -> str:
     return f"the first open step is {nm}'s, the item's mover is {mover or 'nobody'}: {line}{since}"
 
 
+def session_names() -> set[str] | None:
+    """Every name a session goes by, case-folded, for the mover-no-session check: the names and aliases (the old names a rename keeps) of every row of the session registry, retired rows included (an item still names
+    its mover), and the names the fleet's own session files list that the registry may not hold yet. None when the registry holds no session or cannot be read: the check then finds nothing (it fails open). Never raises."""
+    try:
+        reg = _sr.load()
+        if not reg.rows:
+            return None
+        names = {str(n).casefold() for n in reg.by_name}
+        try:
+            names |= {str(n).casefold() for n in _fleet.view().by_name(present_only=True)}
+        except Exception:  # noqa: BLE001  (the registry alone then says who is known)
+            pass
+        return names
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def check_mover_no_session(mover: str, names: set[str] | None) -> bool:
+    """Is the item's mover a session name that no live or known session carries? A message to such a mover goes into a queue nobody reads, so its wake notices never arrive and the item stalls unseen (an item moved
+    by `home-agent` while the live session is `home-agent-main`). No case for: nobody, the person, an outside party, a cloud session or an id (`_no_session`, `anchors.is_id`), the instance's own name, or a name any registry row carries as its
+    name or alias (a renamed session's old name reads as that session), and none when `names` is None (the registry could not be read)."""
+    w = str(mover or "").strip()
+    if names is None or _no_session(w) or _model.is_owner(w) or w.startswith("cse_") or _UUID_RX.match(w):
+        return False
+    if w.casefold() == str(_cfg.get("instance", "name") or "stackshot").strip().casefold():
+        return False
+    return w.casefold() not in names
+
+
+_UUID_RX = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def mover_no_session_detail(mover: str, last: float) -> str:
+    """The evidence line of a mover-no-session finding: the mover's name and the item's last write."""
+    since = f", item last written {_stamp(last)}" if last else ""
+    return f"the item's mover is {mover}, and no live or known session goes by that name, so the notices that wake it wait in a queue nobody reads{since}"
+
+
+def _audit_main(env: Any, project: str) -> str:
+    """Where a finding goes that names no front agent: the project's -main agent as the audit names it (`Env.main_of`: its page's, else [audit] main), "" for an environment with no such reader (the finding then goes to the mover)."""
+    try:
+        return str(env.main_of(project) or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def mover_no_session_front(env: Any, project: str, mover: str) -> str:
+    """The project's front agent (its -main agent, from its page) that an item whose mover is no session is set to, "" when it cannot be named or is the mover itself."""
+    try:
+        main = str(env.main_named(project) or "").strip()
+    except Exception:  # noqa: BLE001  (an environment that cannot name it: the finding asks for a live session instead)
+        return ""
+    return "" if not main or main.casefold() == str(mover or "").strip().casefold() else main
+
+
 def field_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], now: float, env: Any, ten_minute: bool = False) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
     """(findings, idle-pass entries, open items read) of the checks that read item fields only, as the daily run makes them. The checks the ten-minute passes make (`filing_findings`, `dates_findings`:
     stuck-elsewhere, the board report's arbitrary-hold and mislabeled-state, and the date half of stale) are not made here; `ten_minute=True` makes them too (the daily run's checks before the passes took
@@ -336,7 +394,7 @@ def field_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], no
 
 # ---------- the filing rules: is the item filed in the right state? ----------
 FILING_KINDS = ("arbitrary-hold", "mislabeled-state")      # the board report's kinds that are filing rules (all of them now)
-CHECKS_FILING = ("stuck-elsewhere", "board checks", "reads-as-wait", "step-handover", "ask-options", "why-not-now", "wait-end", "event-missing", "wait-loop")      # the categories the filing pass can raise (`wait-loop` is the minute walk's, audit/wait_loops.py, told through the same delivery)
+CHECKS_FILING = ("stuck-elsewhere", "mover-no-session", "board checks", "reads-as-wait", "step-handover", "ask-options", "why-not-now", "wait-end", "event-missing", "wait-loop")      # the categories the filing pass can raise (`wait-loop` is the minute walk's, audit/wait_loops.py, told through the same delivery)
 
 
 _YESNO_FIRST_RX = re.compile(r"\s*(?:yes|no|approve|decline)\b", re.I)      # a Recommend part that opens by answering a yes/no
@@ -474,7 +532,7 @@ def covered_lines(meta: dict[str, Any], gaps: list[Any]) -> set[str]:
 
 
 def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], now: float, env: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """(findings, flags) of the filing rules over the open items; reads only. A finding has the shape, category and evidence the daily run's had before the pass took these rules over (the run no longer finds them): stuck-elsewhere (the first open step belongs to someone other than the mover), board checks (the board report's arbitrary-hold,
+    """(findings, flags) of the filing rules over the open items; reads only. A finding has the shape, category and evidence the daily run's had before the pass took these rules over (the run no longer finds them): stuck-elsewhere (the first open step belongs to someone other than the mover), mover-no-session (the mover is a name no live or known session carries), board checks (the board report's arbitrary-hold,
     a hold nothing explains, and mislabeled-state, a stored state its fields contradict), reads-as-wait (an alive item whose next says it waits) and why-not-now (an alive item whose wake is the whole of its wait: date_only_wait). `flags` = [{"id", "project", "mover",
     "words"}], one per alive item whose next uses the broad words that can hide a wait: a candidate for the model check, no finding of its own."""
     from stackshot.tools import board_report as _br  # noqa: PLC0415
@@ -482,6 +540,7 @@ def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], n
     findings: list[dict[str, Any]] = []
     flags: list[dict[str, Any]] = []
     known = {k.lower() for k in env.role_map()} | {_norm(k) for k in env.role_map()}
+    names = session_names()      # once for the pass; None (no registry) leaves the mover-no-session check quiet
     _br.install_fallback()
     wait_mode = _cfg.audit_wait_end()
     by_shown = {_nr.shown(g): g for g in items}
@@ -504,6 +563,11 @@ def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], n
         if se:
             nm, line = se
             add(gid, meta, mover, "stuck-elsewhere", stuck_detail(nm, mover, line, last), to=nm)
+        if check_mover_no_session(mover, names):
+            proj = str(meta.get("project") or "")
+            front = mover_no_session_front(env, proj, mover)
+            add(gid, meta, mover, "mover-no-session", mover_no_session_detail(mover, last), to=front or _audit_main(env, proj),
+                fix=f"set the mover to {front}, the project's front agent" if front else "name a live session as the mover (the project's front agent cannot be named)")
         for kind, detail in _br.check_item(it, gid, items, anchors, now):
             if kind in FILING_KINDS:
                 add(gid, meta, mover, "board checks", f"{kind}: {detail}")
