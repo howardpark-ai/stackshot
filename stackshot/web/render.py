@@ -780,7 +780,7 @@ class Board:
 
     def __init__(self, data_dir: str, now=None):
         ZONE = _cfg.tz(); now = now or datetime.datetime.now(ZONE)
-        PUB = str(_cfg.get("fleet", "publisher_letter") or "a")                  # the box that runs the server: first column, always live
+        PUB = _fleet.publisher()                                                 # the box that runs the server: first column, always live
         FLEET = fleet_names()                                                    # letter → fleet name
         TITLE = str(_cfg.get("instance", "title") or _cfg.get("instance", "name") or "stackshot")
         _PKGS = list(_cfg.get("machines_panel", "packages") or [])

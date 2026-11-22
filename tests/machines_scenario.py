@@ -7,6 +7,7 @@ package, a package the host lacks giving no row, a version behind the latest sho
 force; an unreachable host showing offline with its last versions and, if it never answered, one offline row; the script that goes over ssh
 (each command in its own subshell, the executable's directory on PATH, a missing executable silent) run for real here under bash; and the
 default (no ssh_hosts) changing nothing and never calling ssh; and a host that is also a fleet machine drawn as that machine's one card (ssh-probed versions, the fleet's rows, its alert card).
+Also: the publisher found from the hostname (the names table, the fleet state, the hostname itself; an explicit [fleet] publisher_letter wins; fails open to a), the server's own host read by running the script here and the other hosts over ssh from it.
 
     tests/run-suite machines        → exit 0 / 1"""
 import json, os, re, sys, pathlib, tempfile, logging, subprocess, datetime, shutil
@@ -16,7 +17,7 @@ tmp = _scratch.mkdtemp(prefix="machinestest-"); T = pathlib.Path(tmp)
 toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
-                 ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("timezone", "Asia/Dubai")):
+                 ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("timezone", "Asia/Dubai"), ("fleet_names", f"{tmp}/names.tsv")):   # names.tsv: absent until the publisher section below writes it
     toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
 toml, n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[home] "]', toml); assert n == 1
 toml, n = re.subn(r'(?m)^latest_lookups = true', 'latest_lookups = false', toml); assert n == 1                  # never npm or GitHub
@@ -194,6 +195,78 @@ check("a probe that raises or a damaged cache entry keeps that host's last state
       hs["box-g"]["reachable"] is False and hs["box-g"]["packages"] == {"gbrain": "1.9.10"} and hs["box-d"]["reachable"] is True
       and names(sec)[-2:] == ["box-d", "box-g"] and [r[0] for r in rows(card(sec, "box-g"))] == ["offline"], (hs, names(sec)))
 ver._ssh = good
+
+# ---- the publisher is the box the server runs on, found from the hostname; the ssh hosts are read from where it runs
+from stackshot.fleet import fleet as flt
+FL = ver._cfg.CFG.setdefault("fleet", {}); NAMES = T / "names.tsv"
+own_was, ssh_was = flt.own_hostname, list(ver._cfg.CFG["machines_panel"].get("ssh_hosts") or [])
+check("publisher: the key is unset in the example config, so what follows finds the box from its hostname", not FL.get("publisher_letter"), FL)
+flt.own_hostname = lambda: "Host-Z.example.net"
+check("publisher: no readable names table and no fleet machine of that name: the key every install had before, a", flt.publisher() == "a", flt.publisher())
+NAMES.write_text("# os hostname\tfleet name\tletter\nbox-a\tbox-a\ta\nHOST-Z\tbox-z\tz\n", encoding="utf-8")
+check("publisher: unset, the names table's row for this box gives its letter (OS hostname, any case, domain left off)", flt.publisher() == "z", flt.publisher())
+flt.own_hostname = lambda: "box-z"
+check("publisher: …or by the fleet name in that row", flt.publisher() == "z", flt.publisher())
+FL["publisher_letter"] = "b"
+check("publisher: an explicit [fleet] publisher_letter wins over the hostname", flt.publisher() == "b", flt.publisher())
+FL["publisher_letter"] = "  "
+check("publisher: a blank value is unset", flt.publisher() == "z", flt.publisher()); FL.pop("publisher_letter")
+flt.own_hostname = lambda: "stranger"
+check("publisher: a hostname the table does not list and no fleet machine answers to is its own key (lower-cased), not another box's letter", flt.publisher() == "stranger", flt.publisher())
+(T / "fleet/q").mkdir(); (T / "fleet/q/machine.json").write_text(json.dumps({"letter": "q", "fleet": "Stranger", "claude": "1.7.40"})); (T / "fleet/q/sessions.json").write_text("{}")
+check("publisher: …unless the fleet state holds a machine of that name: its letter", flt.publisher() == "q", flt.publisher())
+shutil.rmtree(T / "fleet/q")
+flt.own_hostname = lambda: ""
+check("publisher: a hostname that cannot be read fails open to a", flt.publisher() == "a", flt.publisher())
+flt.own_hostname = lambda: "box-z"; NAMES.write_text("not\ta\ttable", encoding="utf-8")
+check("publisher: a readable names table with no row of this box gives the hostname key", flt.publisher() == "box-z", flt.publisher())
+NAMES.unlink()
+check("publisher: a names table that cannot be read gives a", flt.publisher() == "a", flt.publisher())
+NAMES.write_text("HOST-Z\tbox-z\tz\n", encoding="utf-8")
+check("own host: the OS hostname and the names table's hostname and fleet name are this box; another name is not",
+      flt.is_own_host("box-z") and flt.is_own_host("HOST-Z") and flt.is_own_host("host-z.example.net") and not flt.is_own_host("box-d") and not flt.is_own_host(""), flt.own_names())
+check("panel order: the publisher's name first, then the fleet by letter",
+      flt.machines_order({"a": "box-a", "z": "box-z", "b": "box-c"}, []) == ["box-z", "box-a", "box-c"], flt.machines_order({"a": "box-a", "z": "box-z", "b": "box-c"}, []))
+
+# the server runs on box-z (a letter in the names table, no puller, so no fleet state of its own): its card is first and live with its versions; box-d is read over ssh, box-z is not
+HERE = []                                                       # every script run on this box for an ssh_hosts entry
+def fake_here(script, timeout=10):
+    HERE.append(script); asked = [int(x) for x in re.findall(r"@@(\d+)", script)]
+    said = {"claude code": "1.7.40 (Claude Code)", "gbrain": "gbrain 1.9.12"}
+    return 0, "".join(f"@@{i}\n{said.get(PKGS[i], '')}\n" for i in asked)
+ver._run_here = fake_here; ver._cfg.CFG["machines_panel"]["ssh_hosts"] = ["box-z", "box-d", "box-g"]
+ANSWER["box-d"] = (0, {"claude code": "1.7.39 (Claude Code)", "gbrain": "gbrain 1.9.12"}); ANSWER["box-g"] = (0, {"gbrain": "gbrain 1.9.10"})
+CALLS.clear(); ver.SSH_OUT.unlink(missing_ok=True)
+doc = ver.write(force=True); hs = {h["name"]: h for h in doc["ssh_hosts"]}; sec = panel(); z = card(sec, "box-z")
+check("own host: box-z, the server's own box, is read by running the script here (once, every package asked), never over ssh; the other hosts are still read over ssh",
+      len(HERE) == 1 and HERE[0].count("@@") == 2 and sorted(h for h, _ in CALLS) == ["box-d", "box-g"], (HERE, CALLS))   # the hosts are probed in parallel threads: no order
+check("own host: box-z answers: reachable, its versions in versions.json, in config order",
+      [h["name"] for h in doc["ssh_hosts"]] == ["box-z", "box-d", "box-g"] and hs["box-z"]["reachable"] is True and hs["box-z"]["packages"] == {"claude code": "1.7.40", "gbrain": "1.9.12"}, doc["ssh_hosts"])
+check("publisher: box-z is the first card, once, ahead of the fleet (it has no puller and no state of its own); the others follow, the ssh-only hosts last",
+      names(sec) == ["box-z", "box-a", "box-c", "box-b", "box-e", "box-d", "box-g"] and sec.count(">box-z</b>") == 1, names(sec))
+check("publisher: its card is live with its own versions (claude code from the binary, gbrain) and no offline row",
+      [(r[0], r[1], r[2], r[3]) for r in rows(z)] == [("latest", "claude code", "1.7.40", "latest ✓"), ("latest", "gbrain", "1.9.12", "latest ✓")], rows(z))
+check("publisher: versions.json holds it as live with its claude version, under the key the panel's first column uses",
+      doc["packages"][0]["machine_state"].get("z") == "live" and doc["packages"][0]["machines"].get("z") == "1.7.40", doc["packages"][0])
+# the same list on the box that ran the server before: it is read here and box-z over ssh
+flt.own_hostname = lambda: "box-a"; NAMES.write_text("box-a\tbox-a\ta\nHOST-Z\tbox-z\tz\n", encoding="utf-8")
+ver._cfg.CFG["machines_panel"]["ssh_hosts"] = ["box-z", "box-a"]; ANSWER["box-z"] = (0, {"claude code": "1.7.38 (Claude Code)"}); ANSWER["box-a"] = (0, {})
+CALLS.clear(); HERE.clear(); ver.SSH_OUT.unlink(missing_ok=True)
+doc = ver.write(force=True)
+check("moved: with the server on box-a, box-a is read here and box-z over ssh (the same list, read from wherever the server runs); box-a is the publisher",
+      len(HERE) == 1 and [h for h, _ in CALLS] == ["box-z"] and flt.publisher() == "a" and doc["packages"][0]["machine_state"].get("a") == "live", (HERE, CALLS, flt.publisher()))
+ANSWER["box-z"] = (255, {}); doc = ver.write(force=True); hs = {h["name"]: h for h in doc["ssh_hosts"]}
+check("moved: an unreachable ssh host does not touch the box's own read", hs["box-z"]["reachable"] is False and hs["box-a"]["reachable"] is True, hs)
+# the one place that runs a host's script here: sh -c, no stdin, the host's timeout (subprocess.run replaced: nothing runs)
+import importlib; ver3 = importlib.reload(ver); seen = {}
+def fake_run2(cmd, **kw): seen["cmd"] = cmd; seen["kw"] = kw; return subprocess.CompletedProcess(cmd, 0, "@@0\nx 1.0.0\n", "")
+ver3.subprocess.run = fake_run2; rc, out = ver3._run_here("echo hi")
+check("run here: `sh -c <script>`, no stdin, the ssh timeout; its exit code and output as _ssh gives them",
+      seen["cmd"] == ["sh", "-c", "echo hi"] and seen["kw"]["timeout"] == ver3.SSH_TIMEOUT and seen["kw"]["stdin"] == subprocess.DEVNULL and (rc, out) == (0, "@@0\nx 1.0.0\n"), seen)
+def boom_here(cmd, **kw): raise subprocess.TimeoutExpired(cmd, 10)
+ver3.subprocess.run = boom_here
+check("run here: a timeout is a failed read (255), not an exception", ver3._run_here("x") == (255, ""))
+flt.own_hostname = own_was; NAMES.unlink(missing_ok=True); ver = ver3; ver._ssh = good; ver._cfg.CFG["machines_panel"]["ssh_hosts"] = ssh_was
 
 # ---- the real _ssh, its command line (subprocess.run replaced: nothing connects)
 real = {}

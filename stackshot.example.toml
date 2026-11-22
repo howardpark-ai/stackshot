@@ -67,7 +67,9 @@ fallback_project = ""                               # the project page a termina
 letter = "s"                                        # every new item is s<n>: one global sequence, allocated only by the server
 
 [fleet]
-publisher_letter = "a"                              # the box that runs this server: first column of the Machines panel, always live
+# publisher_letter = "a"                            # the box that runs this server: first column of the Machines panel, always live. Unset (the default), the server finds it from its own
+                                                    # hostname, so a server moved to another box, or failed over, carries it: the letter of that box's row in paths.fleet_names, else the letter of
+                                                    # the fleet machine of that name, else the hostname itself. Set it only to name the box outright (it then always wins).
 operator_label = "fleet operator"                   # the fleet operator session the sessions tool names (the fleet state's `master`)
 operator_session = ""                               # the session of this name is the operator: the one the sessions tool names for fleet work (machine.json `master`). Name a session that runs; a retired session (its pane gone) here is not sent to (its project's keeper is). It is also the fleet's builder: the one message a ladder sends when nobody can take a quiet item (the stall pass, the hand-off ladder, the idle pass), and the one told of a pane stopped on an error or a line waiting in the inbox
                                                     # Contract: none (it names a session; nothing is exchanged).
@@ -368,7 +370,8 @@ cooldown_minutes = 60                               # a project that got an agen
 latest_lookups = true                               # false: never ask npm or GitHub for the latest versions; the cache as it is (a staging copy)
 ssh_hosts = []                                      # machines with no fleet letter, each shown as one more card on the Machines panel after the fleet's, in this order
                                                     #, e.g. ["box-c", "box-d"]. The publisher reads each over one `ssh -o BatchMode=yes -o ConnectTimeout=5 <host>`
-                                                    # call (key auth, no prompt, 10 s hard timeout) per refresh: the timer publish (every [publish] every_minutes) and `bump`
+                                                    # call (key auth, no prompt, 10 s hard timeout) per refresh; a host that is the publisher's own box (its OS hostname or its fleet name) is
+                                                    # read by running the same commands on it, never over ssh, so the list can be the same wherever the server runs: the timer publish (every [publish] every_minutes) and `bump`
                                                     # read it afresh, a write-triggered publish in between uses the cache (<state>/site/versions.ssh.json). The call runs each
                                                     # package's version command (below); a package the host lacks gets no row; an unreachable host shows "offline" with its last versions.
 
