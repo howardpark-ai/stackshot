@@ -1568,6 +1568,17 @@ def gate_cap(item: dict[str, Any], said_l: list[dict[str, Any]], what: str, show
                     f"pass wait_basis=\"<what happens> YYYY-MM-DD\" with it; or set a {what} within {cap:g} days and set it again then.")
 
 
+def basis_unneeded(item: dict[str, Any], wake: str, held: bool = False) -> float | None:
+    """The days to `wake` when a wait_basis sent with it is not needed (the gate below would refuse it as such): an open item, a wake, no time wait held (`held` as for the gate) and the wake within
+    [waiting] cap_days (or the cap off). None when the basis is needed, or when another refusal of the gate comes first (a closed item, no wake). The update tool drops such a basis and says so
+    (call_log.fixed "wait-basis-dropped") instead of refusing it."""
+    if item.get("status") == "completed" or not wake or held:
+        return None
+    cap = _wt.cap_days()
+    days = (_hooks().wake_at(wake).timestamp() - time.time()) / 86400.0
+    return max(days, 0.0) if (not _wt.cap_needs_owner() or days <= cap) else None
+
+
 def gate_wait_basis(item: dict[str, Any], text: str, wake: str, held: bool = False) -> str:
     """The wait_basis a session gives for the wake of a time wait (a hold's window, or a verifying item's wake: `held` is true for both; the basis is the end of a wait-and-see window the work itself needs, "<what the window collects> ends
     YYYY-MM-DD", at any length) or for a wake past the cap (the owner's rule that an agent-set park needs a

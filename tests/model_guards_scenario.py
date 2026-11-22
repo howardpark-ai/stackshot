@@ -864,7 +864,9 @@ upd(204, wake=day(3))
 check("switch: guards off: a plain re-park counts as before", mt(204).get("repark") == 1, mt(204))
 upd(204, next="home-front: look a third time")
 check("switch: guards off: …and a next edit resets the count (today's test: every field but the wait's own)", "repark" not in mt(204), mt(204))
-refused_nw("switch: guards off: a basis on a held wake within the cap is 'not needed' again", 203, lambda: upd(203, wait_basis=f"visit on {day(9)}"), "not needed")
+basis_203 = mt(203).get("wait_basis")
+upd(203, wait_basis=f"visit on {day(8)}")
+check("switch: guards off: a basis on a held wake within the cap is not needed again: it is dropped, the stored one stays", mt(203).get("wait_basis") == basis_203 and basis_203 is not None, mt(203))
 set_cfg()
 
 # ================================================================ a create that passes, and the multi-problem refusal

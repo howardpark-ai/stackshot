@@ -966,7 +966,13 @@ def update_unlocked(
             raise ToolError("Refused: clear_wait_basis drops the basis; it does not go with a new one")
         if clear_wake or clear_hold:
             raise ToolError("Refused: wait_basis goes with a wake; this call drops the wake")
-        basis_ok = _gates.gate_wait_basis({**item, "status": status or item.get("status")}, basis_txt, h.parse_wake(wake) if wake else str(meta.get("wake") or "") or basis_day, held=h.model_guards_on() and bool(hold or h.is_held(item) or _reads_time_wait(item) or state_st == "verifying") and not clear_hold)
+        b_item, b_wake = {**item, "status": status or item.get("status")}, (h.parse_wake(wake) if wake else str(meta.get("wake") or "") or basis_day)
+        b_held = h.model_guards_on() and bool(hold or h.is_held(item) or _reads_time_wait(item) or state_st == "verifying") and not clear_hold
+        if (b_days := _gates.basis_unneeded(b_item, b_wake, b_held)) is not None:      # a basis for a wake within the cap needs none: the server drops it and says so, instead of refusing
+            _calls.fixed("wait-basis-dropped", f"wait_basis was dropped: the wake ({b_wake}) is {b_days:.0f} days out, within the {_wt.cap_days():g} days a wait may run, so the wake needs no basis; the wake is set as sent")
+            basis_txt, wait_basis = "", ""
+        else:
+            basis_ok = _gates.gate_wait_basis(b_item, basis_txt, b_wake, held=b_held)
     if wake:                      # a moment to come
         stored = h.parse_wake(wake)
         if h.wake_at(stored) <= _pages.zone_now():      # for a date-only wake the same as "after today"
