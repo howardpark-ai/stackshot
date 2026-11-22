@@ -146,6 +146,16 @@ check("blocker: the wake is written and wait_reason is not stored", wk_(mt(2)) a
 # ---- no reason
 reset()
 refused("no reason: a wake without wait_reason is refused, naming the parameter", lambda: upd(3, wake=D(2)), "wait_reason", "a wait on your own item needs its reason", i=3, calls=0)
+try:
+    upd(3, wake=D(2)); no_reason_msg = ""
+except ToolError as e_:
+    no_reason_msg = str(e_)
+check("no reason: the refusal shows the call again with wait_reason added, and the park for a date outside the work", f'To wait, send the same call again: wake="{D(2)}", wait_reason="<what the step waits on that is not available now>".' in no_reason_msg
+      and 'hold=true, until="YYYY-MM-DD" and wait_basis="<what happens> YYYY-MM-DD"' in no_reason_msg, no_reason_msg[-400:])
+reset(); item(41)
+passes("no reason: the shown call, sent again with a reason in place of the placeholder, goes through", lambda: upd(41, wake=D(2), wait_reason=REASON), 1)
+check("no reason: …and the wake is stored", wk_(mt(41)) == D(2), mt(41))
+reset()
 refused("no reason: a dated own step without wait_reason is refused", lambda: upd(3, next=f"home-agent: apply the step on {D(4)}"), "wait_reason", i=3, calls=0)
 refused("no reason: a reason that is too short is refused", lambda: upd(3, wake=D(2), wait_reason="later"), "wait_reason", i=3, calls=0)
 refused("no reason: tomorrow reads as a wait", lambda: upd(3, next="home-agent: apply the step tomorrow"), "wait_reason", i=3, calls=0)

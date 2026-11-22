@@ -201,4 +201,82 @@ res, made, got = created("> only a quote line")
 check("b create refused: no `- ` bullet at all shows no corrected description", isinstance(res, ToolError) and "no `- ` bullet" in str(res) and "Send the description again" not in str(res), str(res)[:300])
 check("b the fix has no send-back check and invites no resend", "description-goal" not in CL.CHECKED and "description-goal" in CL.NO_RESEND, None)
 
+# ================================================================ c. refusals that name the fix and show the corrected call; the corrected call goes through the same gate
+from stackshot.model import said as SAID
+from stackshot.service import wait_gates as WG
+from stackshot.service import asks as ASKS
+no_machine = lambda t: not re.search(r"\b(box-[a-d]|sala|salamander)\b", t, re.I)
+
+# an ask in the wrong form: the test it failed and an ask that passes (the board-wide cases are in pilot_scenario)
+def ask_msg(a):
+    try:
+        ASKS._gate_ask(a); return ""
+    except ToolError as e:
+        return str(e)
+for name, a, why in (("a pipe between the parts", "Decide: ship it | Recommend: yes | Stakes: a week | By: Fri", "the parts are joined by \u201c|\u201d and the separator is \u201c · \u201d"),
+                     ("a semicolon", "Decide: ship it; Recommend: yes; Stakes: a week; By: Fri", "the parts are joined by \u201c;\u201d"),
+                     ("a line break", "Decide: ship it\nRecommend: yes\nStakes: a week\nBy: Fri", "it holds a line break, and an ask is one line"),
+                     ("the By part left out", "Decide: ship it · Recommend: yes · Stakes: a week", "the part By is missing"),
+                     ("two parts left out", "Decide: ship it · Recommend: yes", "the part Stakes is missing (and By)"),
+                     ("too long", "Decide: " + "x" * 230 + " · Recommend: yes · Stakes: a week · By: Fri", "it is 282 characters, and the limit is 240")):
+    m = ask_msg(a)
+    check(f"c ask: {name}: the refusal names the test it failed", m.startswith('Refused: ask must read "') and f"This ask fails because {why}" in m, m[:300])
+    shown_a = m.split(":\n")[-1]
+    check(f"c ask: {name}: …and shows an ask that the same gate takes as it stands", ASKS._gate_ask(shown_a) == shown_a, m[-200:])
+check("c ask: the pipe case shows the writer's own parts in the form", "Your ask in the form, to send again:\nDecide: ship it · Recommend: yes · Stakes: a week · By: Fri" in ask_msg("Decide: ship it | Recommend: yes | Stakes: a week | By: Fri"), None)
+check("c ask: the refusals name no machine and no fleet tool", no_machine(ask_msg("x")), None)
+
+# said: not valid JSON
+try:
+    SAID.parse("said=[{tag: Acked-by, quote: go on}]"); said_msg = ""
+except ValueError as e:
+    said_msg = str(e)
+check("c said: a text that is not JSON is refused naming what it started with", "not valid JSON (it starts 'said=[{tag: Acked-by, quote: go on}]')" in said_msg, said_msg[:200])
+check("c said: …and shows the exact shape as JSON, with its keys and values in double quotes", SAID.JSON_EXAMPLE in said_msg and '"tag": "Acked-by"' in said_msg and '"quote"' in said_msg and '"msg"' in said_msg, said_msg[-300:])
+shown_said = json.loads(re.search(r'said=(\[\{"tag".*?\}\])', said_msg).group(1)) if re.search(r'said=(\[\{"tag".*?\}\])', said_msg) else None
+check("c said: the shown example is itself valid JSON", isinstance(shown_said, list) and shown_said and shown_said[0]["tag"] == "Acked-by", said_msg[-300:])
+got_said = SAID.parse(json.dumps(shown_said)) if shown_said else []
+check("c said: …and resent as shown, the shape gate takes it as one entry", len(got_said) == 1 and got_said[0]["tag"] == "Acked-by", got_said)
+check("c said: …the text names no machine and no fleet tool", no_machine(said_msg), said_msg)
+try:
+    SAID.parse("x" * 200); long_said = ""
+except ValueError as e:
+    long_said = str(e)
+check("c said: what it started with is cut at 60 characters", f"it starts {'x' * 60!r})" in long_said and "x" * 61 not in long_said, long_said[:160])
+
+# an option without its label or its line
+def opt_msg(opts):
+    try:
+        WG._gate_options(opts); return ""
+    except ToolError as e:
+        return str(e)
+m1 = opt_msg([{"label": "Approve"}, {"label": "Decline", "line": "Keep it", "recommended": True}])
+check("c option: a missing line is named as the line, with the option's place", m1.startswith("Refused: option 1 has no line.") and "no label" not in m1, m1[:200])
+m2 = opt_msg([{"label": "Approve", "line": "Ship it", "recommended": True}, {"line": "Keep it"}])
+check("c option: a missing label is named as the label", m2.startswith("Refused: option 2 has no label."), m2[:200])
+m3 = opt_msg([{"name": "Approve", "description": "Ship it"}, {"title": "Decline", "text": "Keep it"}])
+check("c option: both missing: named together, with the keys it did carry", m3.startswith("Refused: option 1 has no label and no line. It carries the keys name, description;") and "label, line and recommended only" in m3, m3[:300])
+ex_opts = json.loads(m3.split("An example that passes: options=", 1)[1])
+check("c option: the example in the refusal is a valid list", len(ex_opts) == 2 and sum(o["recommended"] for o in ex_opts) == 1, ex_opts)
+check("c option: …and resent as shown, the same gate takes it", len(WG._gate_options(json.dumps(ex_opts))) == 2, None)
+check("c option: …the form line stays and no machine or fleet tool is named", "recommended\": true" in m3 and no_machine(m3), m3)
+
+# a wait_basis the rule does not take: the forms and the corrected call
+item(120)
+res, made = upd(120, hold=True, until=local_day(40), wait_basis="waiting for the vendor reply")
+basis_msg = str(res) if isinstance(res, ToolError) else ""
+corr = re.search(r'Send the same call again with wait_basis="(.*?)", the date being the day the wait ends', basis_msg)
+check("c wait_basis: a basis with no date names the forms it takes", 'The forms it takes are "<what happens> YYYY-MM-DD" and, for a window the work itself needs, "<what the window collects> ends YYYY-MM-DD".' in basis_msg, basis_msg[-400:])
+check("c wait_basis: …and shows the call with the writer's own words and the wake's day filled in", bool(corr) and corr.group(1) == f"waiting for the vendor reply {local_day(40)}", basis_msg[-300:])
+res, made = upd(120, hold=True, until=local_day(40), wait_basis=corr.group(1) if corr else "")
+check("c wait_basis: …resent as shown, it goes through and stores the basis", not isinstance(res, ToolError) and W.basis_of(mt(120)) == f"waiting for the vendor reply {local_day(40)}", (str(res)[:200], mt(120)))
+item(121)
+res, made = upd(121, hold=True, until=local_day(40), wait_basis=f"the vendor answered on {local_day(2)}")
+basis_msg2 = str(res) if isinstance(res, ToolError) else ""
+corr2 = re.search(r'Send the same call again with wait_basis="(.*?)", the date', basis_msg2)
+check("c wait_basis: a basis whose date is off shows a placeholder for the words and the wake's day", bool(corr2) and corr2.group(1) == f"<what the wait stands on> {local_day(40)}", basis_msg2[-300:])
+res, made = upd(121, hold=True, until=local_day(40), wait_basis=(corr2.group(1) if corr2 else "").replace("<what the wait stands on>", "the vendor answers"))
+check("c wait_basis: …with the placeholder replaced by words, the shown call goes through", not isinstance(res, ToolError) and bool(W.basis_of(mt(121))), (str(res)[:200], mt(121)))
+check("c wait_basis: …the text names no machine and no fleet tool", no_machine(basis_msg) and no_machine(basis_msg2), basis_msg)
+
 print(("ok" if not fails else "FAILED") + f": refusal hints scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

@@ -48,6 +48,8 @@ DEFAULT_PREFIXES: tuple[str, ...] = ()      # [said] injected_prefixes: the mess
 DEFAULT_PHRASES: tuple[str, ...] = ()       # [said] injected_phrases: the message contains one (the fleet tool's wording)
 FORM = ("said=[{tag: Acked-by | Suggested-by | Reported-by, quote: his sentences cut verbatim, msg: the uuid of his message, session: where he said it (optional)}], "
         "or, to prove he did his steps from a message he sent while the session worked (a queued_command attachment entry, origin human), {kind: acted, quote: a piece of its text verbatim, msg: the uuid of the attachment entry, session (optional)}")
+JSON_EXAMPLE = ('said=[{"tag": "Acked-by", "quote": "<his sentences, cut verbatim>", "msg": "00000000-0000-4000-8000-000000000000"}] '
+                '(the zero uuid stands for the uuid of his message)')
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 TRAILER_RX = re.compile(r"^(?P<tag>Acked-by|Suggested-by|Reported-by|Done-by): (?P<who>[^<\n]+?) <(?P<url>[^>\s]+)>(?P<unchecked> \(unchecked\))?$")
 _ANCHOR_RX = re.compile(r"#said-(\d+)$")
@@ -88,7 +90,7 @@ def parse(spec: Any) -> list[dict[str, str]]:
         try:
             spec = json.loads(s)
         except ValueError:
-            raise ValueError(f"said: not valid JSON; pass a list of objects, {FORM}")
+            raise ValueError(f"said: not valid JSON (it starts {s[:60]!r}); pass a list of objects, {FORM}. As JSON, with its keys and values in double quotes: {JSON_EXAMPLE}")
     if isinstance(spec, dict):
         spec = [spec]
     if spec is None:

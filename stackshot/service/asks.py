@@ -11,6 +11,7 @@ surface's, reached through service/save_hooks.py; the hand-over after his decisi
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
 from __future__ import annotations
 
+import re
 import datetime as dt
 import sys
 import time
@@ -46,10 +47,51 @@ _FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries
 # ----------------------------------------------------------------------------- the ask line
 
 
+_ASK_LABELS = ("Decide", "Recommend", "Stakes", "By")
+_ASK_EXAMPLE = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
+_ASK_BREAKS = "\r\n\v\f\x85\u2028\u2029"
+_ASK_SEP_TAIL = re.compile(r"[\s|;/,\-\u2013\u2014\u00b7\u2022]+$")           # what a writer puts between two parts in place of " · "
+
+
+def _ask_fault(ask: str) -> tuple[str, str]:
+    """Why an ask is not in the form (the first test of web/render.parse_ask it fails, in plain words) and the ask the writer can send instead → (why, the ask): the writer's own parts joined as the form
+    wants them when all four are there in order, within the length and not empty, else a valid ask to copy the shape from."""
+    mx = int(_hooks().ask_max())
+    t = str(ask or "")
+    flat = " ".join(t.split())
+    hits = {lb: m.start() for lb in _ASK_LABELS if (m := re.search(rf"(?<![\w])({lb}):", flat))}
+    in_order = len(hits) == 4 and list(hits.values()) == sorted(hits.values())
+    parts: list[str] = []
+    if in_order:
+        bounds = [*hits.values(), len(flat)]
+        parts = [_ASK_SEP_TAIL.sub("", flat[b + len(lb) + 1:e]).strip() for lb, b, e in zip(_ASK_LABELS, bounds, bounds[1:])]
+    fixed = " · ".join(f"{lb}: {x}" for lb, x in zip(_ASK_LABELS, parts)) if parts and all(parts) else ""
+    if any(c in t for c in _ASK_BREAKS):
+        why = "it holds a line break, and an ask is one line"
+    elif len(t.strip()) > mx:
+        why = f"it is {len(t.strip())} characters, and the limit is {mx}"
+    elif missing := [lb for lb in _ASK_LABELS if lb not in hits]:
+        why = f"the part {missing[0]} is missing" + (f" (and {', '.join(missing[1:])})" if len(missing) > 1 else "")
+    elif not in_order:
+        why = f"the parts are not in the order {', '.join(_ASK_LABELS)}"
+    elif not all(parts):
+        why = f"the part {_ASK_LABELS[parts.index('')]} is empty"
+    else:
+        before = [flat[:e].rstrip()[-1:] for e in list(hits.values())[1:]]          # the character right before each part after the first
+        sep = next((c for c in before if c and c in "|;/,-\u2013\u2014\u2022"), "")
+        why = f"the parts are joined by \u201c{sep}\u201d and the separator is \u201c · \u201d (a space, a middle dot, a space)" if sep else "the parts are not joined by \u201c · \u201d (a space, a middle dot, a space)"
+    if fixed and len(fixed) <= mx and _hooks().parse_ask(fixed) is not None:
+        return why, fixed
+    return why, _ASK_EXAMPLE
+
+
 def _gate_ask(ask: str) -> str:
-    """An ask as given → its stored form; the shape refusal whatever the stage."""
+    """An ask as given → its stored form; the shape refusal whatever the stage. The refusal names the test the ask failed and shows an ask that passes it: the writer's own parts in the form when they are all there, else an example."""
     if _hooks().parse_ask(ask) is None:
-        raise ToolError(f'Refused: ask must read "{_hooks().ask_form()}" in one line of at most {_hooks().ask_max()} characters')
+        why, fixed = _ask_fault(ask)
+        mine = fixed != _ASK_EXAMPLE
+        raise ToolError(f'Refused: ask must read "{_hooks().ask_form()}" in one line of at most {_hooks().ask_max()} characters. This ask fails because {why}. '
+                        f"{'Your ask in the form, to send again' if mine else 'An ask that passes, to copy the shape from'}:\n{fixed}")
     return ask.strip()
 
 

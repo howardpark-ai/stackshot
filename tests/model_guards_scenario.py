@@ -226,7 +226,15 @@ check("2 post-wake mover: …a relay's default is the owner, who always passes",
 # ================================================================ 3. a time wait carries his words or a real date
 item(68, needs=[BACK])
 refused_nw("3 snooze: a hold with a wake and no reason is refused, saying what counts", 68, lambda: upd(68, hold=True, wake=day(3)), "waits on a time (wake", "no reason", "wait_basis=", "Acked-by", "set no date")
-upd(68, hold=True, wake=day(3), wait_basis=f"vendor visit booked for {day(4)}")
+try:
+    upd(68, hold=True, wake=day(3)); snooze_msg = ""
+except Exception as e_:
+    snooze_msg = str(e_)
+snooze_call = re.search(r'send the same call again with (wait_basis="<what the window collects> ends [0-9-]+")\.', snooze_msg)
+check("3 snooze: …the refusal shows the call with wait_basis added, ending on the wake's day", bool(snooze_call) and snooze_call.group(1).endswith(f'ends {day(3)}"'), snooze_msg[-300:])
+upd(68, hold=True, wake=day(3), wait_basis=snooze_call.group(1).split('"')[1].replace("<what the window collects>", "the soak") if snooze_call else "")
+check("3 snooze: …sent again as shown (the window's words filled in), the park goes through and stores the basis", hd_(mt(68)) is True and mt(68).get("wait_basis", {}).get("text", "").startswith("the soak ends"), mt(68))
+upd(68, wait_basis=f"vendor visit booked for {day(4)}")
 check("3 snooze: …a real date (wait_basis) stands for it, at any length (the cap is not what asks)", mt(68)["wait_basis"]["text"].startswith("vendor visit") and hd_(mt(68)) is True, mt(68))
 item(69, needs=[BACK], answers=[{"ts": time.time(), "kind": "comment", "text": "park it until next week, nothing to do now", "via": "board"}])
 upd(69, hold=True, wake=day(3))

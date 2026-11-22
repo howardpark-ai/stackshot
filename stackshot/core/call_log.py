@@ -300,6 +300,7 @@ _KINDS: tuple[tuple[str, str], ...] = (
     (r"Refused: option \d+ ", "an option without its label and line"),
     (r"Refused: said[\[:]", "a said entry in the wrong form"),
     (r"wait on another item's close has no end|wait on news only .* relays has no end", "a wait on another item with no end date"),
+    (r"a wait on your own item needs its reason", "a wait set without its reason"),          # before wait_basis: this refusal names wait_basis as the other way to park
     (r"wait_basis", "a wait_basis the rule does not take"),
     (r"metadata\.wake must be", "a wake in the wrong form"),
     (r"bad item id", "an item id in the wrong form"),

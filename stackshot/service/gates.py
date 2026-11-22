@@ -1142,7 +1142,8 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
     except Exception as e:  # noqa: BLE001  — the rule is an extra: a failure in it lets the write through, never a 500
         print(f"wait guard: {gid or 'a new item'} not judged: {e.__class__.__name__}: {e}; the write passes", file=sys.stderr, flush=True)
         return
-    why = _selfwait.gate(subject=subject, waits=waits, step=step, reason=wait_reason, now=today)
+    call = ", ".join(([f'wake="{wake_given}"'] if wake_new else []) + (['next="<your next, as you sent it>"'] if dated else []))
+    why = _selfwait.gate(subject=subject, waits=waits, step=step, reason=wait_reason, now=today, call=call)
     if why:
         raise ToolError(f"Refused: {why}")
 
@@ -1607,9 +1608,13 @@ def gate_wait_basis(item: dict[str, Any], text: str, wake: str, held: bool = Fal
     wake_day = h.wake_at(wake).date()
     why = _wt.basis_problem(t, wake_day)
     if why:
-        raise ToolError(f"Refused: wait_basis must name the real-world date the wait stands on as a real YYYY-MM-DD, from the wake or ask-by day ({wake_day.isoformat()}) to "
+        day = wake_day.isoformat()
+        base = t if why.startswith("it names no date") and len(t) + 11 <= 300 else "<what the wait stands on>"
+        raise ToolError(f"Refused: wait_basis must name the real-world date the wait stands on as a real YYYY-MM-DD, from the wake or ask-by day ({day}) to "
                         f"{_wt.BASIS_WINDOW_DAYS} days after it: {why}. \"The vendor visits Tue 2099-03-10 14:00\" on a wake of 2099-03-10 is a basis; "
-                        "a date years off, or one that is not on the calendar, is a way around the rule")
+                        "a date years off, or one that is not on the calendar, is a way around the rule. "
+                        f"The forms it takes are \"<what happens> YYYY-MM-DD\" and, for a window the work itself needs, \"<what the window collects> ends YYYY-MM-DD\". "
+                        f"Send the same call again with wait_basis=\"{base} {day}\", the date being the day the wait ends")
     return t
 
 
