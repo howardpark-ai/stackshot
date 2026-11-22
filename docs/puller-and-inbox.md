@@ -92,3 +92,17 @@ every box (the server never says yes to its own box: `deploy.sh` keeps that chec
 current: its heartbeat fast-forwarded the checkout to `origin/main` every round, and its watchdog provisioned a lagging box
 over ssh (`stackshot/fleet/client.py puller-lag`, still served for the panel); both retire on sala's side, replaced by this. The helper has no
 part in the Claude CLI (it only reports the installed version): the machine's own provisioning step updates it.
+
+**A line for a name that is no live session is not left in a queue** (`stackshot/fleet/retired_recipient.py`, called by `push.py` and by the message relay). A message or notice sent to a retired agent, to an old name of a renamed session,
+or to a session whose every pane has been gone longer than `[client] dead_after_minutes` on a machine that is online, used to wait in `queue-msg/<name>.jsonl` for a session that never came back. It now goes to
+the project the name belongs to (the page that lists the name, else the page whose project name the session name starts with: the rule the message tool names a refused recipient's project by), recorded for the project's router
+exactly as a message to the page key is, and the router picks the receiver. When no page that has another agent can be told (the name belongs to no project, or it is the project's only agent), the line goes back to its
+sender saying the receiver is retired, or, when the sender is a script (the server's own name, a label such as `<job> (a script on <machine>)`), is only written to the journal. The sender is told either way:
+`push.py` prints one line that begins `queued (retired: <name>, <why>; …` and says who got the line, and the message tool's reply begins `'<name>' is retired (<why>), so this went to its project '<key>' instead — held for the router …`.
+The router's own deliveries are never readdressed (it would rule its own pass again), a name no heartbeat has seen is called retired only for a line that has waited longer than `[client] dead_after_minutes` (a pane started a minute ago is in no heartbeat yet), a hub-source line
+(`queue/`) and a line held for a reboot's pause are queued as before, and a fleet view that is partial or does not read says nothing about any name: the line is queued as before. Every readdressed or returned line is one line of
+`queue-msg-retired.jsonl` in the hub's state directory (id, name, reason, what was done, the notice id).
+
+The lines such names had already left behind are cleaned once: `python3 stackshot/fleet/retired_recipient.py sweep [--queue DIR]` is the dry run (it prints the counts per name and per action and writes nothing), and `sweep --apply` does it.
+A stale notice (`stale_notice.screen`: its item closed, parked again or moved to another session, older than `[client] stale_notice_hours`, or repeated by a newer one) is dropped, every other line of a gone name is readdressed or returned as above,
+a line of a name with a live session stays, the queue file is moved to `archive/` in the hub's state directory (never deleted), and each dropped, readdressed or returned line is journalled with its id. A run cut off before it moved a file does not repeat the lines the journal already has.
