@@ -38,12 +38,13 @@ layer any session reads before acting. This script is the mechanism behind the r
   (piloted by session name, then every page keeper: for a session that keeps a page a debt settles only on a
    Current-state edit)
   pending               list pending touches for every session
-  agent-listed <name>    (the fleet tool calls it before a spawn or a rename) is this session name on its project page's `agents:` line (a
-                        background agent under its `background:` sub-map counts)? The project is the page whose `display-name:` line
-                        (the project's name prefix) is the longest `<name>-` prefix of <name>;
-                        the pages are read from the files, not from the registry. Exit 0 = fine (listed: prints the mandate; or no
-                        such page; or <name> is itself that prefix), 3 = not listed (one line: the page and the line to add),
-                        2 = cannot tell (no brain here)
+  agent-listed <name>    (the fleet tool may ask it before a spawn or a rename) is this session name listed on its project's `agents` in the
+                        project record (a background agent counts; one whose page line is still owed does not)? The project is the one
+                        whose name prefix is the longest `<prefix>-` prefix of <name>, as the register and the client read `agent-name`
+                        pick it. A project the record has no entry for yet is read from its page's `display-name:` and `agents:` lines
+                        the way the register derives its entry. Exit 0 = fine (listed: prints the mandate; or no such project; or
+                        <name> is itself that prefix), 3 = not listed (one line: the project and the line to add),
+                        2 = cannot tell (no brain here, or the project record cannot be read)
   resolve <value>       print the normalized page key and whether it exists (0/1)
 
 Freshness = the page's last commit or write (local `git log -1` and the file's mtime on the server box; the server's answer
@@ -532,31 +533,48 @@ def _read_brain(b, base, fms, rels):
             fms[key] = fm; rels[key] = (rel, f)
 
 def agent_listed(name, fms=None):
-    """May a session of this name start as an agent? → (exit code, one line). An agent is named `<project name>-<suffix>` (the
-    prefix is the `display-name:` line of its project's page), so its page is the one whose name is the longest such prefix; the name has to be on an `agents:` line of a page that project
-    keeps before the agent exists, because the agent reads its mandate there at its first prompt (a pane
-    spawned a minute before its line was written). 0 = listed, or nothing to check (no project of that prefix, or the
-    name is itself a project name: a name that extends another's is not that one's agent); 3 = not listed."""
+    """May a session of this name start as an agent? → (exit code, one line). The project record decides (`<store>/project-record.json`, the entry's `agents` map): an agent is named `<project name>-<suffix>`,
+    and the name has to be listed there before the agent exists, because the agent reads its mandate at its first prompt. The project a name belongs to is the one the register and the client read `agent-name`
+    pick: the longest `<prefix>-` of the project prefixes (project_verbs.project_prefixes) the name starts with; an agent whose page line is still owed is not in the entry's map, so it is not listed
+    (project_verbs.listed_name_of). A project the record has no entry for yet is answered the way the register would derive its entry (project_verbs.derive_entry from its page's name line, `fms` = the
+    pages as read now); an archived project, or a page that is retired, names no project. 0 = listed, or nothing to check (no project of that prefix, or the name is itself a project's name: a
+    name that extends another's is not that one's agent); 3 = not listed; 2 = cannot tell (the record cannot be read). project_verbs imports this module, so it is imported here, where it is used."""
     name = str(name or "").strip()
+    bad = _pr.record_error()
+    if bad: return 2, "cannot tell: the project record cannot be read (" + " ".join(bad.split()) + ")"
+    from stackshot.projects import project_verbs as _v, projects as _prj
     if fms is None: fms = read_pages()[0]
-    hubs = {}                                       # project name → the active pages whose name line it is
-    for key, fm in fms.items():
-        who, role = keeper_of(key, fms, marks=False)     # the project's name line: a mark names an agent, never the project
-        if who and role == NAME and _active(fm): hubs.setdefault(who, []).append(key)
-    if name in hubs: return 0, f"the name of {', '.join(sorted(hubs[name]))}: not an agent"
-    over = [s for s in hubs if name.startswith(s + "-") and len(name) > len(s) + 1]
+    rows = {k: page_row(k, fm, fms) for k, fm in fms.items()}
+    ents = _pr.entries()
+    reg = _pr.apply(rows, ents)                       # the record laid over the pages' lines, as the server reads the registry
+    held = {*_pr.by_page(ents), *_pr.by_former_key(ents)}
+    projects = [(pid, e) for pid, e in sorted(ents.items()) if (e.get("status") or "active") != "archived"]
+    for key, row in sorted(rows.items()):             # a page the record has no entry for: the entry the register derives, when the page names a project
+        if key in held or not _prj.page_active(row): continue
+        e = _v.derive_entry("", key, row, rows, None, "")
+        if e.get("name"): projects.append((f"page:{key}", e))
+    named = {}                                        # folded prefix → (prefix as written, [(label, record)])
+    for pid, e in projects:
+        key = _pr.page_key(e); row = reg.get(key) if key else None
+        if isinstance(row, dict):
+            rec = {"id": pid, "key": key, "keeper": str(row.get("session") or ""), "agents": _prj.agent_records(key, row, reg)}
+        else:                                         # no page of this instance's store: the record's own view of the project
+            row = {}; rec = {"id": pid, "key": key, "keeper": str(e.get("name") or ""), "agents": _pr.view(pid, e)["agents"], "pageless": True}
+        for pre in dict.fromkeys(_v.project_prefixes(rec, row, reg)):
+            if pre: named.setdefault(pre.casefold(), (pre, []))[1].append((key or pid, rec))
+    fold = name.casefold()
+    if fold in named: return 0, f"the name of {', '.join(sorted({k for k, _ in named[fold][1]}))}: not an agent"
+    over = [p for p in named if fold.startswith(p + "-") and len(fold) > len(p) + 1]
     if not over: return 0, "no project page for this name: nothing to check"
-    st = max(over, key=len)
-    maps = {k: split_agents(fms[k].get("agents"))[0] for k in hubs[st]}  # flat: a background agent counts (the fleet tool spawns and renames it)
-    maps = {k: m for k, m in maps.items() if m}
-    for k in sorted(maps):
-        if name in maps[k]: return 0, f"listed on {k}: {maps[k][name]}"
-    # where the line belongs: the page that already lists agents, else the project's top page: the one its name ends in
-    # (lab-hub → projects/hub), a projects/ page before an infra/ one
-    slug = lambda k: k.split("/")[1]
-    hub = sorted(hubs[st], key=lambda k: (k not in maps, k.count("/"), not (st == slug(k) or st.endswith("-" + slug(k))),
-                                          not k.startswith(_cfg.page_dirs()[0] + "/"), k))[0]
-    return 3, (f"not listed: {name} is not under `agents:` on {hub} (the page whose `display-name:` line is {st}). The line "
+    st = max(over, key=len); shown, members = named[st]
+    for k, rec in sorted(members, key=lambda m: m[0]):
+        hit = _v.listed_name_of(rec, name)
+        if hit: return 0, f"listed on {k}: {rec['agents'][hit].get('mandate_line', '')}"
+    # where the line belongs: the project that already lists agents, else its top page: the one its name ends in (lab-hub → projects/hub), a projects/ page before an infra/ one
+    slug = lambda k: k.rsplit("/", 1)[-1]
+    hub = sorted(members, key=lambda m: (not m[1]["agents"], m[0].count("/"), not (st == slug(m[0]).casefold() or st.endswith("-" + slug(m[0]).casefold())),
+                                         not m[0].startswith(_cfg.page_dirs()[0] + "/"), m[0]))[0][0]
+    return 3, (f"not listed: {name} is not under `agents:` in the project record of {hub} (the project named {shown}). The line "
                f"`{name}: <mandate>` has to be added there first (ask the project's -main agent), then the session can be made.")
 
 def hub_line(key, fm, fms, quiet=True):
@@ -578,6 +596,28 @@ def _registry_json(pages):
     from stackshot.projects import projects as _prj      # the one writer of the file's text (sorted keys, the page's own agent order)
     return _prj.registry_json({"pages": pages})
 
+def page_row(key, fm, fms, quiet=True):
+    """The registry row a page's own lines give (everything but what the publisher adds: `updated`, `mirror`, the keeper problems and the lead agents): the page's title, name, org, tags, type and status, its
+    keeper (`session` and `role`, with the `legacy_` pair where a `keeper:` mark took the place of the old lines), its `hub`, and its `agents` with the `back_agents` subset. The registry is built from it, and
+    `agent_listed` lays the project record over the same rows, so the two read a page alike."""
+    board = fm.get("board") or []
+    if isinstance(board, str): board = [board] if board else []
+    who, role = keeper_of(key, fms)             # `session` stays the registry's name for the page's keeper: every reader uses it (a page's `keeper:` mark, when it has one, else its old lines)
+    old = keeper_of(key, fms, marks=False)      # what the old lines give: kept as `legacy_session` and `legacy_role` where a mark took their place
+    agents, back = split_agents(fm.get("agents"))
+    row = {"title": fm.get("title") or key, "name": fm.get("name") or "", "org": fm.get("org") or "", "tags": fm.get("tags") or [], "type": fm.get("type") or "", "session": who,
+           "status": fm.get("status") or "", "board": board,
+           "board_row": str(fm.get("board_row") or "").strip().lower() in ("true", "yes", "row")}   # a sub-page that earns its own board row
+    if role: row["role"] = role                 # name · agent · inherited · mark
+    if (who, role) != old:                      # only where a mark applies: with none, every field is what it always was
+        if old[0]: row["legacy_session"] = old[0]
+        if old[1]: row["legacy_role"] = old[1]
+    hub = hub_line(key, fm, fms, quiet)         # the project this page's tree belongs to on the board (anchors.hub_of)
+    if hub: row["hub"] = hub
+    if agents: row["agents"] = agents
+    if back: row["back_agents"] = back
+    return row
+
 def cmd_registry(quiet=False):
     if not os.path.isdir(BRAIN): print("no brain mirror here — the registry is built on the publisher", file=sys.stderr); return 0
     pages = {}; fms, rels, skipped = read_pages_ex(); gts = {}
@@ -586,32 +626,18 @@ def cmd_registry(quiet=False):
         b = _brains.for_key(key); base = BRAIN if b.default else str(b.path)
         if b.name not in gts: gts[b.name] = git_times(base=base)
         gt = gts[b.name]
-        board = fm.get("board") or []
-        if isinstance(board, str): board = [board] if board else []
-        who, role = keeper_of(key, fms)             # `session` stays the registry's name for the page's keeper: every reader uses it (a page's `keeper:` mark, when it has one, else its old lines)
-        old = keeper_of(key, fms, marks=False)      # what the old lines give: kept as `legacy_session` and `legacy_role` where a mark took their place
-        agents, back = split_agents(fm.get("agents"))
-        pages[key] = {"title": fm.get("title") or key, "name": fm.get("name") or "", "org": fm.get("org") or "", "tags": fm.get("tags") or [], "type": fm.get("type") or "", "session": who,
-                      "status": fm.get("status") or "", "board": board,
-                      "board_row": str(fm.get("board_row") or "").strip().lower() in ("true", "yes", "row"),   # a sub-page that earns its own board row
-                      "updated": gt.get(rel) or git_ts(rel, base) or int(os.path.getmtime(f)),
-                      "mirror": (b.mirror_url if not b.default else _mirror()).format(key=key)}
-        if role: pages[key]["role"] = role          # name · agent · inherited · mark
-        if (who, role) != old:                      # only where a mark applies: with none, every field is what it always was
-            if old[0]: pages[key]["legacy_session"] = old[0]
-            if old[1]: pages[key]["legacy_role"] = old[1]
+        pages[key] = page_row(key, fm, fms, quiet)
+        pages[key]["updated"] = gt.get(rel) or git_ts(rel, base) or int(os.path.getmtime(f))
+        pages[key]["mirror"] = (b.mirror_url if not b.default else _mirror()).format(key=key)
         problems = keeper_problems(key, fms)
         if problems:
             pages[key]["keeper_problems"] = problems
             if not quiet:
                 for pr in problems: print(f"  ! {key}: {pr}", file=sys.stderr)
-        hub = hub_line(key, fm, fms, quiet)         # the project this page's tree belongs to on the board (anchors.hub_of)
-        if hub: pages[key]["hub"] = hub
-        # `agents` = every agent of the hub, front and background, flat {name: mandate}, as its keeper wrote them: every reader
-        # (agent-listed, the fleet tool's spawn, rename and recycle) sees the background ones too. `back_agents` = the background subset:
-        # sessions the owner does not talk to, kept off the board's index. Front-only = agents minus back_agents.
-        if agents: pages[key]["agents"] = agents
-        if back: pages[key]["back_agents"] = back
+        # The row's `agents` = every agent of the hub, front and background, flat {name: mandate}, as its keeper wrote them: every reader
+        # (the fleet tool's spawn, rename and recycle) sees the background ones too. `back_agents` = the background subset:
+        # sessions the person does not talk to, kept off the board's index. Front-only = agents minus back_agents.
+        agents = pages[key].get("agents") or {}; hub = pages[key].get("hub")
         # `lead_agents` = the agents of this page, its top-level page or its hub that the page's lead names (lead_agents()); the router's
         # anchor-work rule (a notice from a filtered anchor goes to the one that is not the -main agent) reads it from here.
         cand = list(dict.fromkeys([*agents, *split_agents((fms.get("/".join(key.split("/")[:2])) or {}).get("agents"))[0], *split_agents((fms.get(hub or "") or {}).get("agents"))[0]]))

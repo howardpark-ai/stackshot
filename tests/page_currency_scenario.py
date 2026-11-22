@@ -118,37 +118,83 @@ check("frontmatter: a hyphenated key parses as a key, and a plain key after it s
 check("registry: a quoted mandate reads without its quotes, a doubled apostrophe as one", R2["projects/quoted"].get("agents") == {"s-q-main": "chores and forms (a checklist); Oliver's contact", "s-q-two": 'says "hi" twice', "s-q-wrap": "a quoted value, Oliver's, that wraps onto a second line"}, R2["projects/quoted"].get("agents"))
 (T / "brain/projects/quoted.md").unlink()
 check("registry: a top-level page that names nobody has no keeper", who("ops/alone") == ("", None), who("ops/alone"))
-# ---- 1c. agent-listed: no agent before its `agents:` line (sala asks before a spawn or a rename); read from the files, not the registry
+# ---- 1c. agent-listed: no agent before it is listed, read from the project record (a project the record has no entry for yet: from its page's lines)
+# The record's entries are fixtures here (`record`); a page beside one lists less than its entry, so a check passes only when the record is what answers.
+RECP = T / "store/project-record.json"; _rec_orig = RECP.read_text(encoding="utf-8") if RECP.exists() else None
+def record(ents, pending=None, raw=None):
+    doc = {"schema": 1, "ids": {i: e["page"] for i, e in ents.items() if e.get("page")}, "projects_schema": 1, "projects": ents}
+    if pending: doc["pending_agents"] = pending
+    new = str(RECP) + ".new"; open(new, "w", encoding="utf-8").write(raw if raw is not None else json.dumps(doc)); os.replace(new, RECP)     # a new file each time: the reader's cache keys on the inode
+ag = lambda mandate, front=True: {"front": front, "mandate_line": mandate}
+E = {"prj_0000d00d": {"name": "r-a", "title": "Ra", "page": "projects/ra", "agents": {"r-a-main": ag("does the main work"), "r-a-docs": ag("writes the docs, Oliver's"), "r-a-sweep": ag("sweeps the inbox", False)}},
+     "prj_0000cafe": {"name": "r-f", "title": "Rf", "page": "projects/rf", "agents": {"r-f-press": ag("drafts and ships the newsletters, keeps the mailing list, and answers the subscribers"), "r-f-short": ag("one line")}},
+     "prj_0000c0de": {"name": "r-a-x", "title": "Rdeep", "page": "projects/rdeep", "agents": {"r-a-x-main": ag("deeper")}},
+     "prj_0000f00d": {"name": "r-gone", "title": "Rgone", "page": "projects/rgone", "status": "archived", "agents": {"r-gone-main": ag("left")}},
+     "prj_0000b001": {"name": "r-w", "title": "Rw", "page": "projects/rw", "agents": {"r-w-main": ag("talks")}},
+     "prj_deadbeef": {"name": "r-p", "title": "Rp", "agents": {"r-p-main": ag("a project with no page")}},
+     "prj_0000e1e1": {"name": "r-mv", "title": "Rmv", "page": "projects/rmv-new", "former_keys": ["projects/rmv-old"], "agents": {"r-mv-main": ag("moved")}},
+     "prj_0000e2e2": {"name": "r-m", "title": "Rm", "page": "projects/rm", "agents": {}},
+     "prj_0000e3e3": {"name": "r-m", "title": "Rm host", "page": "ops/rm-host", "agents": {}},
+     "prj_0000e4e4": {"name": "r-q", "title": "Rq", "page": "projects/rq", "agents": {}},
+     "prj_0000e5e5": {"name": "r-q", "title": "Rq lists", "page": "ops/rq-lists", "agents": {"r-q-main": ag("the one that lists")}}}
+PEND = {"prj_0000b001": {"r-w-owed": {"front": True, "role": "owed", "mandate_line": "still owed to the page", "by": "a-label", "at": "2026-01-01T00:00:00Z"}}}
+fmpage("projects/ra.md", "type: project\ntitle: Ra\ndisplay-name: r-a\nagents:\n  r-a-main: the page's own line")        # the page lists less than the record: no r-a-docs, no r-a-sweep
+fmpage("projects/rw.md", "type: project\ntitle: Rw\ndisplay-name: r-w\nagents:\n  r-w-main: the page's own line\n  r-w-ghost: only the page lists it\n  r-w-owed: the page lists it, the record says it is owed")
+fmpage("projects/rmv-old.md", "type: project\ntitle: Rmv old\ndisplay-name: r-mv\nagents:\n  r-mv-stale: the page at the key the project left")
+fmpage("projects/rgone.md", "type: project\ntitle: Rgone\ndisplay-name: r-gone\nagents:\n  r-gone-main: the page still lists it")      # the page lists it, the record has archived the project
+fmpage("projects/noname.md", "type: project\ntitle: No name\nagents:\n  noname-main: a page with no name line")
 fmpage("projects/other.md", "type: project\ntitle: Other\ndisplay-name: s-hub")
 fmpage("ops/hubhost.md", "type: note\ntitle: Host\ndisplay-name: s-hub")
 fmpage("projects/deeper.md", "type: project\ntitle: Deeper\ndisplay-name: s-hub-main-x")
 fmpage("projects/gone.md", "type: project\ntitle: Gone\ndisplay-name: s-gone\nstatus: completed")
+record(E, PEND)
 al = p.agent_listed
-check("agent-listed: a listed agent passes with its mandate", al("s-hub-main") == (0, "listed on projects/hub: upgrades, the curator"), al("s-hub-main"))
-check("agent-listed: a folded mandate counts and prints whole", al("s-f-press") == (0, "listed on projects/folded: drafts and ships the newsletters, keeps the mailing list, and answers the subscribers"), al("s-f-press"))
-check("agent-listed: an inline map counts (the old session: key names the project)", fmpage("projects/legacy.md", "type: project\ntitle: Legacy\nsession: old-name\nagents: {old-name-one: \"does x\"}") or al("old-name-one")[0] == 0, al("old-name-one"))
-c, line = al("s-hub-new")
-check("agent-listed: an unlisted name is refused, naming the page that lists agents and the line to add", c == 3 and "on projects/hub " in line and "`s-hub-new: <mandate>`" in line and "`display-name:` line is s-hub" in line, (c, line))
-check("agent-listed: a background agent passes with its mandate (sala spawns and renames it)", al("s-bg-sweep") == (0, "listed on projects/bg: sweeps the inbox, Oliver's") and al("s-bg-watch") == (0, "listed on projects/bg: watches the releases and files them"), (al("s-bg-sweep"), al("s-bg-watch")))
-check("agent-listed: a background agent in the inline form, and a front one beside it, pass", al("s-bgi-night")[0] == 0 and al("s-bgi-main") == (0, "listed on projects/bgi: talks"), (al("s-bgi-night"), al("s-bgi-main")))
-check("agent-listed: the reserved background key is no agent's name", al("s-bg-background")[0] == 3, al("s-bg-background"))
-c, line = al("s-bg-new")
-check("agent-listed: an unlisted name beside a background: map is refused, naming the agents: line", c == 3 and "is not under `agents:` on projects/bg " in line and "back_agents" not in line and "`s-bg-new: <mandate>`" in line, (c, line))
-check("agent-listed: the project's own name is no agent", al("s-hub")[0] == 0 and al("s-hub")[1].startswith("the name of "), al("s-hub"))
-check("agent-listed: a name that extends another's is no agent of it", al("s-hub-main-x")[0] == 0 and "the name of projects/deeper" in al("s-hub-main-x")[1], al("s-hub-main-x"))
-check("agent-listed: the longest name prefix decides", al("s-hub-main-x-docs")[0] == 3 and "on projects/deeper " in al("s-hub-main-x-docs")[1], al("s-hub-main-x-docs"))
-check("agent-listed: a name under no project is free", al("someone-else") == (0, "no project page for this name: nothing to check") and al("s-hubbub")[0] == 0 and al("s-hub-")[0] == 0, (al("someone-else"), al("s-hubbub"), al("s-hub-")))
-check("agent-listed: a completed page names no project", al("s-gone-main")[0] == 0, al("s-gone-main"))
+check("agent-listed: a listed agent passes with its mandate from the record", al("r-a-main") == (0, "listed on projects/ra: does the main work"), al("r-a-main"))
+check("agent-listed: an agent the record lists and its page's agents: block lacks passes", al("r-a-docs") == (0, "listed on projects/ra: writes the docs, Oliver's"), al("r-a-docs"))
+check("agent-listed: a name is matched case-folded, as the register does", al("R-A-Docs") == (0, "listed on projects/ra: writes the docs, Oliver's"), al("R-A-Docs"))
+check("agent-listed: a folded mandate prints whole (a project with no page of this store read, its key from the record)", al("r-f-press") == (0, "listed on projects/rf: drafts and ships the newsletters, keeps the mailing list, and answers the subscribers"), al("r-f-press"))
+c, line = al("r-a-new")
+check("agent-listed: an unlisted name is refused, naming the project record, the project and the line to add, in one line", c == 3 and "of projects/ra " in line and "in the project record" in line and "(the project named r-a)" in line and "`r-a-new: <mandate>`" in line and "\n" not in line, (c, line))
+check("agent-listed: a background agent passes with its mandate (sala spawns and renames it)", al("r-a-sweep") == (0, "listed on projects/ra: sweeps the inbox"), al("r-a-sweep"))
+check("agent-listed: the reserved background key is no agent's name", al("r-a-background")[0] == 3, al("r-a-background"))
+check("agent-listed: the project's own name is no agent", al("r-a") == (0, "the name of projects/ra: not an agent"), al("r-a"))
+check("agent-listed: a name that extends another's is no agent of it", al("r-a-x") == (0, "the name of projects/rdeep: not an agent"), al("r-a-x"))
+check("agent-listed: the longest name prefix decides", al("r-a-x-docs")[0] == 3 and "of projects/rdeep " in al("r-a-x-docs")[1] and al("r-a-x-main") == (0, "listed on projects/rdeep: deeper"), (al("r-a-x-docs"), al("r-a-x-main")))
+check("agent-listed: a name under no project is free", al("someone-else") == (0, "no project page for this name: nothing to check") and al("r-abba")[0] == 0 and al("r-a-")[0] == 0, (al("someone-else"), al("r-abba"), al("r-a-")))
+check("agent-listed: an archived project names no project", al("r-gone-main") == (0, "no project page for this name: nothing to check") and al("r-gone")[0] == 0 and "the name of" not in al("r-gone")[1], (al("r-gone-main"), al("r-gone")))
+check("agent-listed: a page with no name line, and no entry, is no project", al("noname-extra") == (0, "no project page for this name: nothing to check") and al("noname-main")[0] == 0, (al("noname-extra"), al("noname-main")))
+check("agent-listed: a project with no page at all is read from the record, and an unlisted name there is refused by its id", al("r-p-main") == (0, "listed on prj_deadbeef: a project with no page") and al("r-p-new")[0] == 3 and "of prj_deadbeef " in al("r-p-new")[1], (al("r-p-main"), al("r-p-new")))
+check("agent-listed: the page a project left is no project: its agents: block answers nothing", al("r-mv-main") == (0, "listed on projects/rmv-new: moved") and al("r-mv-stale")[0] == 3 and "of projects/rmv-new " in al("r-mv-stale")[1], (al("r-mv-main"), al("r-mv-stale")))
+check("agent-listed: the record wins over the page: a name only the page lists is refused, the record's mandate is the one printed", al("r-w-ghost")[0] == 3 and al("r-w-main") == (0, "listed on projects/rw: talks"), (al("r-w-ghost"), al("r-w-main")))
+check("agent-listed: an agent whose page line is still owed (the record's pending list) is not listed, though its page lists it", al("r-w-owed")[0] == 3 and "of projects/rw " in al("r-w-owed")[1], al("r-w-owed"))
+check("agent-listed: with no agents anywhere, the line belongs on the project whose key the name ends in, a projects/ page before another", al("r-m-main")[0] == 3 and "of projects/rm " in al("r-m-main")[1] and "(the project named r-m)" in al("r-m-main")[1], al("r-m-main"))
+check("agent-listed: the line belongs on the project that already lists agents, before the one a projects/ key and its name would favor", al("r-q-new")[0] == 3 and "of ops/rq-lists " in al("r-q-new")[1] and al("r-q-main") == (0, "listed on ops/rq-lists: the one that lists"), (al("r-q-new"), al("r-q-main")))
+# a project the record has no entry for yet: the entry the register derives from its page's lines, beside the projects the record holds
+check("agent-listed: an unmigrated project's page lines answer (the old `session:` key names the project, an inline map counts)", fmpage("projects/legacy.md", "type: project\ntitle: Legacy\nsession: old-name\nagents: {old-name-one: \"does x\"}") or al("old-name-one") == (0, "listed on projects/legacy: does x"), al("old-name-one"))
+check("agent-listed: an unmigrated project's unlisted name is refused, naming its page", al("s-hub-new")[0] == 3 and "of projects/hub " in al("s-hub-new")[1] and "(the project named s-hub)" in al("s-hub-new")[1] and al("s-bg-new")[0] == 3 and "back_agents" not in al("s-bg-new")[1], (al("s-hub-new"), al("s-bg-new")))
+check("agent-listed: a name an unmigrated page extends is no agent of it, and the longest prefix decides", al("s-hub-main-x")[0] == 0 and "the name of projects/deeper" in al("s-hub-main-x")[1] and al("s-hub-main-x-docs")[0] == 3 and "of projects/deeper " in al("s-hub-main-x-docs")[1], (al("s-hub-main-x"), al("s-hub-main-x-docs")))
+check("agent-listed: an unmigrated project's background agents pass, and the reserved key is no name", al("s-bg-sweep") == (0, "listed on projects/bg: sweeps the inbox, Oliver's") and al("s-bgi-night")[0] == 0 and al("s-bg-background")[0] == 3, (al("s-bg-sweep"), al("s-bgi-night"), al("s-bg-background")))
+check("agent-listed: a completed page the record has no entry for names no project", al("s-gone-main")[0] == 0 and "no project" in al("s-gone-main")[1], al("s-gone-main"))
 check("agent-listed: a `display-name:` page makes its project's agents listed and its name no agent", al("x-proj-main")[0] == 0 and al("x-proj-main")[1].startswith("listed on projects/dn-") and al("x-proj")[1].startswith("the name of ")
-      and al("x-new-main")[0] == 3 and "on projects/dn-both " in al("x-new-main")[1] and al("q-old-main") == (0, "no project page for this name: nothing to check"), (al("x-proj-main"), al("x-proj"), al("x-new-main"), al("q-old-main")))
+      and al("x-new-main")[0] == 3 and "of projects/dn-both " in al("x-new-main")[1] and al("q-old-main") == (0, "no project page for this name: nothing to check"), (al("x-proj-main"), al("x-proj"), al("x-new-main"), al("q-old-main")))
 (T / "brain/projects/hub.md").write_text((T / "brain/projects/hub.md").read_text().replace("agents:\n  s-hub-main: 'upgrades, the curator'\n  s-hub-docs: writes the docs\n", ""), encoding="utf-8")
-check("agent-listed: with no agents: line anywhere, the page named is the one the project's name ends in", al("s-hub-main")[0] == 3 and "on projects/hub " in al("s-hub-main")[1], al("s-hub-main"))
+check("agent-listed: an unmigrated project with no agents: line anywhere, the page named is the one the project's name ends in", al("s-hub-main")[0] == 3 and "of projects/hub " in al("s-hub-main")[1], al("s-hub-main"))
 fmpage("projects/fresh.md", "type: project\ntitle: Fresh\ndisplay-name: s-fresh\nagents:\n  s-fresh-main: the contact")
-check("agent-listed: a line written a moment ago counts (files, not the registry)", "projects/fresh" not in R and al("s-fresh-main") == (0, "listed on projects/fresh: the contact"), al("s-fresh-main"))
+check("agent-listed: a line written a moment ago counts for a project with no entry (the files, not the registry)", "projects/fresh" not in R and al("s-fresh-main") == (0, "listed on projects/fresh: the contact"), al("s-fresh-main"))
+RECP.unlink()
+check("agent-listed: with no record file the pages answer, as before the record existed", al("s-fresh-main") == (0, "listed on projects/fresh: the contact") and al("s-fresh-docs")[0] == 3 and al("r-a-main") == (0, "listed on projects/ra: the page's own line") and al("r-a-docs")[0] == 3, (al("s-fresh-main"), al("s-fresh-docs"), al("r-a-main"), al("r-a-docs")))
+record(E, PEND)
 run = lambda n: subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "agent-listed", n], capture_output=True, text=True, env=os.environ)
-r3, r0, r1 = run("s-fresh-docs"), run("s-fresh-main"), run("")
-check("agent-listed: the command exits 3 / 0 / 1 with one line", (r3.returncode, r0.returncode, r1.returncode) == (3, 0, 1) and r3.stdout.count("\n") == 1 and r0.stdout.strip() == "listed on projects/fresh: the contact", (r3.returncode, r3.stdout, r0.returncode, r0.stdout, r1.returncode))
-for x in ("projects/other.md", "ops/hubhost.md", "projects/deeper.md", "projects/gone.md", "projects/fresh.md"): (T / "brain" / x).unlink()
+r3, r0, r1 = run("r-a-new"), run("r-a-docs"), run("")
+check("agent-listed: the command exits 3 / 0 / 1 with one line", (r3.returncode, r0.returncode, r1.returncode) == (3, 0, 1) and r3.stdout.count("\n") == 1 and r0.stdout.strip() == "listed on projects/ra: writes the docs, Oliver's", (r3.returncode, r3.stdout, r0.returncode, r0.stdout, r1.returncode))
+record(E, raw="{ this is not json")
+bad = al("r-a-docs"); rb = run("r-a-docs")
+check("agent-listed: a record that cannot be read is 'cannot tell' (2), in one line, for every name and never a refusal", bad[0] == 2 and "project record" in bad[1] and "\n" not in bad[1] and al("someone-else")[0] == 2 and rb.returncode == 2 and rb.stdout.count("\n") == 1, (bad, rb.returncode, rb.stdout))
+record(E, raw=json.dumps({"schema": 1, "ids": {}, "projects_schema": 99, "projects": {}}))
+check("agent-listed: …also a record of a schema this code does not read", al("r-a-docs")[0] == 2, al("r-a-docs"))
+if _rec_orig is None: RECP.unlink()
+else: RECP.write_text(_rec_orig, encoding="utf-8")
+for x in ("projects/other.md", "ops/hubhost.md", "projects/deeper.md", "projects/gone.md", "projects/fresh.md", "projects/ra.md", "projects/rw.md", "projects/rmv-old.md", "projects/rgone.md", "projects/noname.md"): (T / "brain" / x).unlink()
 for d in ("projects/hub", "projects/legacy"): shutil.rmtree(T / "brain" / d)
 for x in ("projects/hub.md", "projects/legacy.md", "ops/alone.md", "projects/folded.md", "projects/bg.md", "projects/bgi.md"): (T / "brain" / x).unlink()
 
