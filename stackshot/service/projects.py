@@ -1,4 +1,4 @@
-"""service/projects.py: the calls of the fleet tool's New session form that make and list projects and register their agents: `get projects` (`_projects_list`), `post project` (`_new_project`),
+"""service/projects.py: the calls of the fleet tool's New session form that make and list projects and register their agents: `get projects` (`_projects_list`), `get agent-name` (`_agent_name`, the register's name checks as a read), `post project` (`_new_project`),
 `post project-list` (`_project_list`), `post project-agent` (`_project_agent`, `_project_agent_locked`), `post project-agent-mandate` (`_project_agent_mandate`), and the reads and the writes of
 `post project-agent-rename` and `post project-agent-retire`, with what reads the config to decide whether a caller is the form (`_form_call`, `_cfg_names`, `[project_agent]` form_senders and form_machines),
 the one lock the writes share (`_PROJECT_LOCK`, with `_RENAMING`, the page keys a rename or retire has in flight) and the page store they write through (`_page_io`, `PAGE_IO`).
@@ -306,6 +306,23 @@ def _projects_list(params: dict[str, str]) -> tuple[int, str, str]:
     except ValueError as e:         # the id file is damaged and a page has no id in the registry: nothing is minted, the reader tries again
         return 503, "text/plain", f"the project record cannot be read right now: {e}"
     out = {"scope": scope or "all", "q": q, "generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "scopes": _prj.scopes(), "projects": rows}
+    return 200, "application/json", json.dumps(out, ensure_ascii=False)
+
+
+def _agent_name(params: dict[str, str]) -> tuple[int, str, str]:
+    """`get agent-name?key=<project>&names=<a,b,c>` (or one `name=`): would `post project-agent` take each name as a new agent of the project? A pure read: no sender, no lock, nothing written.
+    The checks are project_verbs.name_verdict's, which are the register's own. → {project, key, results: [{name, valid, code, reason}], first_free, prefixes}; 400 a bad `key` or a bad `names` (none, or
+    more than project_verbs.NAME_LIMIT), 404 an unknown project, 400 an ambiguous one, 503 the project record cannot be read. A hub page, a hidden project and a retired one are answered 200, with that code for every name."""
+    parsed, bad = _verbs.name_params(params)
+    if bad: return bad
+    project, names = parsed
+    try:
+        reg = _prj.with_made(_registry("projects"))
+        rec, refusal = _verbs.pick_project(project, _recs_of(project, reg))
+    except ValueError as e:         # the id file is damaged and a page has no id in the registry: nothing is minted, the reader tries again
+        return 503, "text/plain", f"the project record cannot be read right now: {e}"
+    if refusal: return refusal[0], "text/plain", refusal[1]["error"]
+    out = _verbs.name_verdicts(names, rec, reg.get(rec["key"]) or {}, reg, _pr.entries(), _prj._pending_all(), lambda pid: _prj.id_to_key(pid, reg))
     return 200, "application/json", json.dumps(out, ensure_ascii=False)
 
 

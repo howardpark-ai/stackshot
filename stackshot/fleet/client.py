@@ -81,6 +81,16 @@ runs on every box.
                                 A hidden project is never deleted. A scope is a project's group, set on purpose (post project, post project-list
                                 --scope) else derived: a key whose prefix [project_scopes.by_prefix] maps to a scope, else the page's org, else its tag, else the default scope. Exit 0 ·
                                 1 a bad scope (400), no token or not reached.
+  client.py get agent-name <project> <name> [<name> ...]
+                                would `post project-agent` take each name as a new agent of the project? The same checks, as a read: nothing is
+                                written, no --sender, no lock. Prints the server's JSON {"project", "key", "results": [{name, valid, code, reason}],
+                                "first_free", "prefixes"}: one result per name in the order asked, `code` one of ok | format | prefix | clash | listed |
+                                pending | hub | hidden | retired, `reason` the text the register gives for it (empty for ok), `first_free` the first name
+                                that is valid (null when none is), `prefixes` what the project's names must start with. A name already listed on the project
+                                is not valid (the register changes nothing for it only when side and mandate match); a name a pending entry holds is told held. At most
+                                20 names, none with a comma. A hub page, a hidden project and a retired one answer with that code for every name.
+                                Exit 0 when the call answers, even when every name is invalid · 1 an unknown or ambiguous project (404, 400),
+                                a bad call, no token or not reached.
   client.py post project --scope <scope> (--key <projects/slug> | --name <name> [--page <page key or link>] [--make-page true|false]) [--title <title>] [--sender <label>]
                                 make a new project (project_verbs.create): its entry in the project record first (a new permanent id, the name, the scope, the
                                 mark that lists it), then its page when it has one. A page is optional: with `--name` alone the project has no page and none is
@@ -363,7 +373,7 @@ CLIENTS = os.path.join(SECRETS, "clients.json")
 TOKENS = os.path.join(SECRETS, "client-tokens")
 TOKEN = os.path.join(SECRETS, "client.token")
 URLF = os.path.join(SECRETS, "client.url")
-READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "roles", "project", "projects", "answer", "notice", "for-you")
+READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "roles", "project", "projects", "agent-name", "answer", "notice", "for-you")
 
 
 def _write_private(path: str, text: str) -> None:
@@ -705,6 +715,20 @@ def projects(argv: list[str], timeout: float = 20.0) -> int:
         return 1
     status, body = get("projects", timeout=timeout, scope=opt["scope"].strip(), q=opt.get("q", "").strip())
     if status != 200: print(f"stackshot: projects not read [{status}] {body}"[:700], file=sys.stderr); return 1
+    print(body.rstrip()); return 0
+
+
+AGENT_NAME_USAGE = "usage: client.py get agent-name <project> <name> [<name> ...]   (at most 20 names, none with a comma)"
+
+
+def agent_name(argv: list[str], timeout: float = 20.0) -> int:
+    """`get agent-name <project> <name>...`: ask whether each name is acceptable for a new agent of the project (the register's checks, nothing written) → the server's JSON on stdout, exit 0 whenever the
+    call answers; 1 and the reason on stderr when refused (an unknown project), misused, or not reached."""
+    a = [x.strip() for x in argv]
+    if len(a) < 2 or not all(a) or any(x.startswith("--") for x in a) or any("," in x for x in a):
+        print(AGENT_NAME_USAGE, file=sys.stderr); return 1
+    status, body = get("agent-name", timeout=timeout, key=a[0], names=",".join(a[1:]))
+    if status != 200: print(f"stackshot: agent name not checked [{status}] {body}"[:700], file=sys.stderr); return 1
     print(body.rstrip()); return 0
 
 
@@ -1146,6 +1170,9 @@ def main(argv: list[str]) -> int:
     if cmd == "get" and len(argv) > 2 and argv[2] == "projects":
         try: return projects(argv[3:])
         except Exception as e: print(f"stackshot: projects not read ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
+    if cmd == "get" and len(argv) > 2 and argv[2] == "agent-name":
+        try: return agent_name(argv[3:])
+        except Exception as e: print(f"stackshot: agent name not checked ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
     if cmd == "post" and len(argv) > 2 and argv[2] == "state":
         try: return state_set(argv[3:])
         except Exception as e: print(f"stackshot: state not set ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1

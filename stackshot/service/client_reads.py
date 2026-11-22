@@ -45,7 +45,7 @@ from stackshot.service import foryou as _fy
 from stackshot.service import gates as _gates
 from stackshot.service import item_read as _item_read
 from stackshot.service.passes_hooks import hooks as _hooks
-from stackshot.service.projects import _projects_list
+from stackshot.service.projects import _agent_name, _projects_list
 from stackshot.service.store import _legacy_hold, _legacy_needs, _path
 from stackshot.waits import dated_wait as _dw
 from stackshot.waits import waiting as _wt
@@ -84,6 +84,8 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
         return 200, "application/json", json.dumps(recs[0], ensure_ascii=False)
     if what == "projects":              # the fleet tool's New session form: the listed projects of a scope, hidden ones too when q matches (projects?scope=<s>&q=<text>)
         return _projects_list(params)
+    if what == "agent-name":            # would `post project-agent` take these names as new agents of a project (agent-name?key=<project>&names=<a,b,c>): the same checks, nothing written
+        return _agent_name(params)
     if what == "page-ts":
         key = _prj.to_key(str(params.get("key") or "").strip("/"))
         if key.endswith(".md"):
@@ -110,7 +112,7 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
         return 200, "text/plain; charset=utf-8", _hooks().holds_report()
     if what == "for-you":               # the For you list: {"generated", "rows": newest first, "flags": {item: watch | mute}} (the fleet tool's items sheet reads it)
         return 200, "application/json", json.dumps(_fy.payload(_gh.shown), ensure_ascii=False)
-    return 404, "text/plain", "no such read: registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | answer?key=<item id> | notice?key=<notice id> | holds | for-you | whoami | config | roles"
+    return 404, "text/plain", "no such read: registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | answer?key=<item id> | notice?key=<notice id> | holds | for-you | whoami | config | roles"
 
 
 def _wait_fields(gid: str, it: dict[str, Any], ctx: "_agents._WaitCtx") -> dict[str, Any]:

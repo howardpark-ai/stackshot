@@ -131,6 +131,15 @@ Underneath it is one authenticated write:
   model's reading. It is never empty: an item the page cannot place (a dead or unreadable one) is `"agents"`, as `home.classify` puts it, so the fleet tool's items sheet groups exactly as the page does.
 - `GET /client/for-you` returns `{"generated", "rows": [{id, kind, item, project, what, url, urgent, ts, when, slacked}], "flags": {"board#N": "watch" | "mute"}}`
   (rows newest first; an item with no flag is in neither).
+- `GET /client/agent-name?key=<project>&names=<a,b,c>` (or one `name=`) tells whether `post project-agent` would take each name as a new agent of the project, and writes nothing: no sender, no lock,
+  the same machine token as the other reads. `key` is an id, a page key or a bare slug; `names` is comma separated, each stripped, at most 20 and at least one (400 otherwise, with a plain line).
+  200 `{"project": <the project's id>, "key": <its page key>, "results": [{"name", "valid", "code", "reason"}], "first_free", "prefixes"}`: one result per name in the order asked, `code` one of
+  `ok`, `format` (the name's shape), `prefix` (it does not start with the project's name), `clash` (it belongs to another project, case-folded), `listed` (the project already lists it), `pending`
+  (a pending entry holds it), `hub` (the page is a sub-page or has a `hub:` line), `hidden` (the project is not listed), `retired` (its page status is a retired one); `reason` is the text the register
+  gives for it, and empty for `ok`. `hub`, `hidden` and `retired` are told for every name. `first_free` is the first name in the order asked that is valid, or null; `prefixes` are what the project's names
+  must start with. The register is the final word: this read applies its checks one at a time and reserves nothing, so a caller registers the name it picked next. A name already listed is not valid here
+  (the register changes nothing for it only when side and mandate match), and a name a pending entry holds is told held whoever asks. 404 an unknown project, 400 an ambiguous one, 401 no token,
+  503 the project record cannot be read. `stackshot/fleet/client.py get agent-name <project> <name> [<name> ...]` prints the JSON and exits 0 whenever the call answers, even when every name is invalid.
 - `POST /client/for-you/seen`, `Authorization: Bearer <machine token>`, body `{"id": <row id, a whole number from 1> | "all", "sender": "<label>"}`.
   200 `{"ok": true, "seen": [<ids that left the list>], "rows": [<the rows still unseen, as in GET /client/for-you>]}` (`"all"` on an empty list is 200 with
   `"seen": []`). 400 a body that is not an object, a `sender` that is not one line of at most 80 characters, or an `id` that is neither; 401 no or an unknown
