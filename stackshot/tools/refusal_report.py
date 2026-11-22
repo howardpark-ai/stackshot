@@ -4,7 +4,7 @@ Reads the call log the server keeps (call_log.py: one line per create, update, c
 `<paths.state>/calls/<YYYY-MM>.jsonl`) and reports, for one calendar week Monday to Sunday in the instance timezone: how many create and update calls
 were refused of how many, the share, the week before it, the kinds of refusal that make most of them, the sessions that were refused most, and what the
 server corrected instead of refusing (a bare item number, a wake with seconds or an offset, a subject with no scope prefix, a long description bullet split at its sentences,
-a step left out of next kept open, a subject or a status line cut at its last word that fits, an ask-by with a time of day cut to its day, a bare address in a description written as a link, the server's own fixes of a wait), and how many of those fixes the writer sent back (call_log.bounces), and the streaks: one writer refused STREAK_MIN (3) times or more on one call (the same tool and item) with each refusal within STREAK_WINDOW (15 minutes) of the one before, counted by kind and listed first, since a streak marks a gap in the tool text. One more line, when the week or the one before it had any: the wait loops the minute walk found (audit/wait_loops.py: items that wait on each other), counted from its log. Tokenless: no model call.
+a step left out of next kept open, a subject or a status line cut at its last word that fits, an ask-by with a time of day cut to its day, a bare address in a description written as a link, the server's own fixes of a wait), and how many of those fixes the writer sent back (call_log.bounces; of the fixes of the kinds that have the check, call_log.CHECKED), and the streaks: one writer refused STREAK_MIN (3) times or more on one call (the same tool and item) with each refusal within STREAK_WINDOW (15 minutes) of the one before, counted by kind and listed first, since a streak marks a gap in the tool text. One more line, when the week or the one before it had any: the wait loops the minute walk found (audit/wait_loops.py: items that wait on each other), counted from its log. Tokenless: no model call.
 
     refusal_report.py run [--dry-run] [--force] [--week YYYY-MM-DD]
     audit.py refusals [--dry-run] [--force] [--week YYYY-MM-DD]       the same, from the audit's own entry point (the timer's unit runs it after the audit run)
@@ -178,9 +178,10 @@ def build(monday: dt.date, cur: dict[str, Any], prev: dict[str, Any], *, top: in
         total = sum(cur["fixes"].values())
         lines.append(f"- corrected by the server instead of refused: {total:,} (" + " · ".join(f"{k} {v:,}" for k, v in cur["fixes"].most_common()) + ")")
     if cur["bounces"] or prev["bounces"]:
-        sent_back, made = sum(cur["bounces"].values()), sum(cur["fixes"].values())
-        before_back, before_made = sum(prev["bounces"].values()), sum(prev["fixes"].values())
-        lines.append(f"- fixes the writer sent back: {sent_back:,} of {made:,} ({_share(sent_back, made)})" + (f"; the week before {before_back:,} of {before_made:,} ({_share(before_back, before_made)})" if before_made else "")
+        checked = lambda c: sum(v for k, v in c.items() if k in _cl.CHECKED)          # only a fix of a kind with a send-back check can be sent back: the share is of those, not of every fix
+        sent_back, made = checked(cur["bounces"]), checked(cur["fixes"])
+        before_back, before_made = checked(prev["bounces"]), checked(prev["fixes"])
+        lines.append(f"- fixes the writer sent back: {sent_back:,} of the {made:,} fix{'' if made == 1 else 'es'} checked ({_share(sent_back, made)})" + (f"; the week before {before_back:,} of {before_made:,} ({_share(before_back, before_made)})" if before_made else "")
                      + (" (" + " · ".join(f"{k} {v:,}" + (f" of {cur['fixes'][k]:,}" if cur["fixes"].get(k) else "") for k, v in cur["bounces"].most_common()) + ")" if cur["bounces"] else ""))
     if cur.get("loops") or prev.get("loops"):
         lines.append(f"- wait loops found (items that wait on each other, told to their movers): {cur.get('loops', 0):,}; the week before {prev.get('loops', 0):,}")
