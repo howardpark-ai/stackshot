@@ -359,12 +359,29 @@ RQ = f"{STACK}/reboot-hooks/reboot-queue.py"
 r = subprocess.run([sys.executable, RQ, "count", "--source", "msg"], capture_output=True, text=True, env=env)
 check("reboot queue count: what waits in the inbox counts as queued", json.loads(r.stdout) == {"items": 2, "sessions": 2}, r.stdout + r.stderr[-200:])
 (T / "listed.txt").write_text(U(5) + "\n")
+inbox.put("local-pane", "for a pane on this box nobody verified", "msg")          # registered above, so it has a session row; not listed: held
+(F / "held-msg.txt").write_text("fleet-tool-hold\n"); (F / "held-hub.txt").write_text("fleet-tool-hub-hold\n")     # the fleet tool's own files: the resume never writes them
+REG = T / "sala/a/session-registry.json"; REG.parent.mkdir(parents=True, exist_ok=True)     # the session registry the resume also asks: a registry that holds a row, so "no row" can be told from "no registry"
+REG.write_text(json.dumps({"schema": 1, "machine": "a", "sessions": {U(60): {"id": U(60), "name": "registry-only", "state": "retired", "aliases": [], "transcripts": []}}}))
+(F / "held-resume-msg.txt").write_text("sala-master\nold-retired-pane\n")           # an earlier resume's: a held session with a row and nothing queued stays, one no row names goes
 th = confirm_soon(1.0)
 r = subprocess.run([sys.executable, RQ, "resume", "--source", "msg", "--sessions", str(T / "listed.txt"), "--wait", "8"], capture_output=True, text=True, env=env); th.join()
 q = json.loads(r.stdout or "{}")
-check("reboot queue resume: the verified session's line is released and confirmed, the other key is held", r.returncode == 0 and (q.get("delivered"), q.get("held"), q.get("held_sessions"), q.get("waiting")) == (1, 1, ["ghost-pane"], 0), r.stdout + r.stderr[-300:])
-check("…the release list is gone and the hold is on file for after the pause", not (F / "release-msg.txt").exists() and (F / "held-msg.txt").read_text() == "ghost-pane\n")
-(F / "paused-msg.json").unlink(); (F / "held-msg.txt").write_text(""); inbox.ack([f[:-5] for f in os.listdir(T / "state/inbox/msg") if f.endswith(".json")])
+check("reboot queue resume: the verified session's line is released and confirmed, the unverified pane with a row is held, the keys no row names are retired and not held",
+      r.returncode == 0 and (q.get("delivered"), q.get("held"), q.get("held_sessions"), q.get("waiting")) == (1, 1, ["local-pane"], 0) and q.get("retired_sessions") == ["ghost-pane", "old-retired-pane"], r.stdout + r.stderr[-300:])
+check("…the release list is gone and the resume's own file holds the held keys (an earlier hold included), no retired one", not (F / "release-msg.txt").exists() and (F / "held-resume-msg.txt").read_text() == "local-pane\nsala-master\n", (F / "held-resume-msg.txt").read_text())
+check("…the resume wrote neither held-msg.txt nor held-hub.txt: the fleet tool's files are as it left them", (F / "held-msg.txt").read_text() == "fleet-tool-hold\n" and (F / "held-hub.txt").read_text() == "fleet-tool-hub-hold\n")
+check("…the readers hold the union of the two files, the retired keys in neither", inbox.blocked("msg")[2] == {"fleet-tool-hold", "local-pane", "sala-master"}, inbox.blocked("msg"))
+REG.unlink(); (F / "held-resume-msg.txt").write_text("old-retired-pane\n")      # no registry to read (its folder missing or unreadable): not a retirement, so no key without a fleet row is dropped
+r = subprocess.run([sys.executable, RQ, "resume", "--source", "msg", "--sessions", str(T / "listed.txt"), "--wait", "2"], capture_output=True, text=True, env=env)
+q = json.loads(r.stdout or "{}")
+check("reboot queue resume with no session registry rows: a key with no fleet row is kept held, none is reported retired",
+      r.returncode == 0 and q.get("retired_sessions") == [] and (F / "held-resume-msg.txt").read_text() == "ghost-pane\nlocal-pane\nold-retired-pane\n", (r.stdout + r.stderr[-300:], (F / "held-resume-msg.txt").read_text()))
+(F / "paused-msg.json").unlink(); (F / "held-msg.txt").write_text(""); (F / "held-hub.txt").write_text("")
+check("a key held in the resume's file keeps its line after the pause is lifted", inbox.take({U(40): "local-pane"}, now=time.time() + 60) == [])
+(F / "held-resume-msg.txt").write_text("")
+check("…and is served once the key leaves that file", len(inbox.take({U(40): "local-pane"}, now=time.time() + 120)) == 1)
+inbox.ack([f[:-5] for f in os.listdir(T / "state/inbox/msg") if f.endswith(".json")])
 
 # ---- the item: every drop names its sender on a short first line
 check("label: a `from:` line on top; no sender (a line stored before senders were kept), the text as it was",
