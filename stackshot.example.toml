@@ -777,7 +777,7 @@ dead_after_minutes = 60                             # the message tool refuses a
 inbox_flag_minutes = 5                              # a line that waits this long in the server's inbox for a session that is running (not marked gone, on a machine whose puller checks
                                                     # in) is reported once: to the session that sent it, and to the fleet's builder ([fleet] operator_session; its project's keeper
                                                     # when it is retired), with the likeliest reason, and a journal line. A line held on purpose (sala's relaunch hold in
-                                                    # held-msg.txt, a paused source) and the flag's own lines are not reported. 0 turns it off
+                                                    # held-msg.txt or held-resume-msg.txt, a paused source) and the flag's own lines are not reported. 0 turns it off
 stale_notice_hours = 6                              # a queued stall, wake, wait-ended or hand-off notice older than this is dropped instead of delivered (a session that was away, or a box that was
                                                     # moved, would otherwise get a batch of old lines). Whatever its age, such a notice is also dropped when the item it names has closed, been parked
                                                     # again or has another mover by then, and of several about the same items only the newest is delivered. 0 turns the expiry off (the state checks stay)

@@ -152,6 +152,48 @@ with TestClient(app) as c:
     inbox.new_overdue(300.0, now=TN + 1000, idx=fl.sessions())
     check("overdue: the record of reported lines keeps only the lines still waiting", rd(T / "state/inbox/flagged.json") == {}, rd(T / "state/inbox/flagged.json"))
 
+    # ---- the two hold files: another tool's held-msg.txt and a reboot's resume's held-resume-msg.txt are read as one list (the union)
+    HM, HR = inbox.FLAGS / "held-msg.txt", inbox.FLAGS / "held-resume-msg.txt"
+    live_n = {NEW: NAME}
+    def holds(main=None, resume=None):
+        for f, v in ((HM, main), (HR, resume)):
+            if v is None: f.unlink(missing_ok=True)
+            else: f.write_text(v, encoding="utf-8")
+    def drain(): inbox.ack([i["id"] for i in inbox._items("msg")])
+    def probe(tag, main, resume, held, where):
+        holds(main, resume); drain()
+        pid_ = inbox.put(NAME, f"two files {tag}", "msg", now=TN + 3000, sender="x")
+        got = inbox.take(live_n, only_src="msg", now=TN + 3001)
+        why_ = inbox.deliberate(inbox.peek([pid_])[0])
+        flagged = inbox.new_overdue(300.0, now=TN + 3700, idx=fl.sessions())
+        check(f"two hold files, {tag}: take " + ("holds the line" if held else "hands the line out"), (got == []) == held and (held or (len(got) == 1 and got[0]["ids"] == [pid_])), got)
+        check(f"two hold files, {tag}: the line still waits in the inbox until it is delivered", inbox.waiting("msg") == {NAME: 1}, inbox.waiting("msg"))
+        check(f"two hold files, {tag}: the reason names " + (" and ".join(where) if where else "no hold"),
+              (all(w in why_ for w in where) and all(x not in why_ for x in {"held-msg.txt", "held-resume-msg.txt"} - set(where))) if held else "has not been lifted" not in why_, why_)
+        check(f"two hold files, {tag}: a held line is a known wait (not flagged), a free one is", ([x["id"] for x in flagged] == []) == held, flagged)
+        drain()
+    probe("a key only in the resume's file", None, NAME + "\n", True, ["held-resume-msg.txt"])
+    probe("a key only in the other tool's file", NAME + "\n", None, True, ["held-msg.txt"])
+    probe("a key in both files", NAME + "\n", NAME + "\n", True, ["held-msg.txt", "held-resume-msg.txt"])
+    probe("the key in the resume's file, another key in the other tool's", "somebody-else\n", NAME + "\n", True, ["held-resume-msg.txt"])
+    probe("the key in the other tool's file, another key in the resume's", NAME + "\n", "somebody-else\n", True, ["held-msg.txt"])
+    probe("the key in neither file (both list others)", "somebody-else\n", "somebody-more\n", False, [])
+    probe("the resume's file missing, the other tool's empty", "", None, False, [])
+    probe("the resume's file empty, the other tool's missing", None, "\n\n", False, [])
+    probe("neither file exists", None, None, False, [])
+    probe("the resume's file empty, the key in the other tool's", NAME + "\n", "", True, ["held-msg.txt"])
+    # a hold in the resume's file lifts when the file is replaced: the line goes out at once
+    holds(None, NAME + "\n"); drain()
+    lift = inbox.put(NAME, "two files, lifted", "msg", now=TN + 3000, sender="x")
+    held_now = inbox.take(live_n, only_src="msg", now=TN + 3001); holds(None, "")
+    out_now = inbox.take(live_n, only_src="msg", now=TN + 3002)
+    check("two hold files: the resume's hold, once its file is replaced, no longer holds the line", held_now == [] and [i for r in out_now for i in r["ids"]] == [lift], (held_now, out_now))
+    drain(); holds(None, None)
+    # each source reads its own pair of files
+    (inbox.FLAGS / "held-resume-hub.txt").write_text(NAME + "\n")
+    check("two hold files: a hub hold holds no msg line, and is read for hub", inbox.blocked("msg")[2] == set() and inbox.blocked("hub")[2] == {NAME}, (inbox.blocked("msg"), inbox.blocked("hub")))
+    (inbox.FLAGS / "held-resume-hub.txt").unlink()
+
     # ---- the server's pass: who is told, when, and what
     sent = []
     fleetev.inbox_flag_send = lambda to, text: sent.append((to, text))
