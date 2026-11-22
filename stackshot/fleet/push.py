@@ -226,6 +226,19 @@ def deliver_inbox(name: str, text: str, sender: str = "", ref: str = "") -> int:
     print(f"inbox → {name}"); return 1
 
 
+def retired(name: str, text: str, sender: str) -> str:
+    """A message-source line for a name that is no live session (a retired agent, an old name, a name nobody runs) is not left in the queue: retired_recipient hands it to the project's router, or
+    returns it to its sender, and answers the one line that says so ("" = as before: the name may be live, or anything failed, and the caller queues it)."""
+    if SRC != "msg" or os.environ.get("ANCHOR_PUSH_FORCE"):
+        return ""
+    try:
+        from stackshot.fleet import retired_recipient as _rr
+        res = _rr.handle(name, text, sender, deliver=deliver)
+        return res.line if res else ""
+    except Exception:
+        return ""
+
+
 def deliver(name: str, text: str, sender: str = "") -> int:
     ref = name                      # as the caller wrote it: the inbox resolves it to the permanent id once
     name = _sr.delivery(name)       # a permanent session id is delivered to the session by the name it has now
@@ -246,6 +259,9 @@ def deliver(name: str, text: str, sender: str = "") -> int:
     sock = resolve(name)
     if sock and send(sock, _inbox.label(sender, text)):
         print(f"delivered → {name}"); return 0
+    said = retired(name, text, sender)
+    if said:
+        print(said); return 1
     enqueue(name, text, sender); print(f"queued → {name}"); return 1
 
 

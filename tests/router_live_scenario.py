@@ -660,9 +660,12 @@ except ToolError as x: e = str(x)
 check("…the refusal names projects/eta, not home-eta", e.startswith("Refused: home-eta-main is a front agent") and "to='projects/eta'" in e and "home-eta " not in e and "steward" not in e, e)
 SJ = T / "fleet/a/sessions.json"; SJ_SAVE = SJ.read_text()
 p_a = len(pushes())
-try: _messaging._message("home-eta", "to the retired name-line session", "home-beta"); e = ""
-except ToolError as x: e = str(x)
-check("retired-name: a message to the retired name-line session of projects/eta is refused, naming the page key, where the router rules it", e.startswith("Refused:") and "message(to='projects/eta'" in e and "the project, where the router rules it (to='projects/eta')" in e and len(pushes()) == p_a, (e, pushes()[p_a:]))
+_n_eta2 = {x["id"] for x in routing.read("projects/eta")}
+try: e = _messaging._message("home-eta", "to the retired name-line session", "home-beta")
+except ToolError as x: e = "Refused: " + str(x)
+_new_eta2 = [x for x in routing.read("projects/eta") if x["id"] not in _n_eta2]
+check("retired-name: a message to the retired name-line session of projects/eta goes to the project, where the router rules it, and is not pushed to the retired name", e.startswith("'home-eta' is retired") and "so this went to its project 'projects/eta' instead" in e and len(pushes()) == p_a and len(_new_eta2) == 1, (e, pushes()[p_a:], _new_eta2))
+for _x in _new_eta2: routing.rule(_x["id"], "dropped", by="test")      # settled by hand, so the tick below has nothing of it to rule
 SJ.write_text(json.dumps({**json.loads(SJ_SAVE), "ffffffff-ffff-4fff-8fff-ffffffffffff": {"name": "home-eta", "machine": "a", "url": "", "seen": "x"}}))
 try: _messaging._message("home-eta", "to a keeper whose pane runs", "home-beta"); e = ""
 except ToolError as x: e = str(x)
@@ -670,9 +673,14 @@ check("retired-name: …but a keeper whose pane is running under that name is a 
 _gone = (__import__("datetime").datetime.now(__import__("datetime").timezone.utc) - __import__("datetime").timedelta(hours=2)).isoformat().replace("+00:00", "Z")
 SJ.write_text(json.dumps({**json.loads(SJ_SAVE), "ffffffff-ffff-4fff-8fff-ffffffffffff": {"name": "home-eta", "machine": "a", "url": "", "seen": "x", "gone": _gone}}))
 p_a = len(pushes())
-try: _messaging._message("home-eta", "to the retired name-line session, its row gone", "home-beta"); e = ""
-except ToolError as x: e = str(x)
-check("retired-name: a retired name-line session that has a gone row is refused (the retired-and-not-running branch), naming the page key", a.session_roles()["home-eta"].get("retired") and e.startswith("Refused: 'home-eta' cannot receive this (a retired name-line session") and "message(to='projects/eta'" in e and len(pushes()) == p_a, (e, pushes()[p_a:]))
+_n_eta = {x["id"] for x in routing.read("projects/eta")}
+try: e = _messaging._message("home-eta", "to the retired name-line session, its row gone", "home-beta")
+except ToolError as x: e = "Refused: " + str(x)
+_new_eta = [x for x in routing.read("projects/eta") if x["id"] not in _n_eta]
+check("retired-name: a retired name-line session that has a gone row (the retired-and-not-running branch) is not refused: its message is recorded for projects/eta, where the router rules it, and the sender is told",
+      a.session_roles()["home-eta"].get("retired") and e.startswith("'home-eta' is retired (a retired name-line session") and "so this went to its project 'projects/eta' instead — held for the router" in e and len(pushes()) == p_a
+      and len(_new_eta) == 1 and _new_eta[0].get("live") and _new_eta[0].get("pilot"), (e, pushes()[p_a:], _new_eta))
+for _x in _new_eta: routing.rule(_x["id"], "dropped", by="test")      # settled by hand, so the tick below has nothing of it to rule
 SJ.write_text(SJ_SAVE)
 check("retired-name: a retired name-line session (the router is live for projects/alpha) whose pane is running is still delivered to: a running pane is a pane",
       a.session_roles()["work-osprey"].get("retired") and _messaging._message("work-osprey", "to a running retired name-line session", "home-beta").startswith("delivered") and [x[0] for x in pushes()[p_a:]][-1:] == ["work-osprey"], pushes()[p_a:])

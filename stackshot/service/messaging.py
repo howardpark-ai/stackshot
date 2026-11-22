@@ -32,6 +32,7 @@ from stackshot.core import interp as _interp
 from stackshot.core.instance import NAME, OWNER
 from stackshot.fleet import fleet as _fleetstate   # publisher(): the box that runs this server
 from stackshot.fleet import liveness as _lv
+from stackshot.fleet import retired_recipient as _rr
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import activity as _activity
@@ -120,44 +121,21 @@ def _pane_dead(rec: Any, now: float | None = None) -> str:
 
 
 def _project_of_name(name: str, roles: dict[str, Any], idx: dict[str, Any]) -> str:
-    """The page key a session name belongs to and whose page would get the message to someone else: the page that lists the name (roles), else
-    the page whose project name the session's name starts with (`<project>-<role>`, projects._name_prefixes), the longer name first. Several
-    pages can share one display name (projects/hub, projects/example, projects/example-portal and a sub-page all answer to `my-project`),
-    so among the pages of one prefix the choice is, in order: a page whose `agents:` map lists the exact name; a page with a
-    non-empty agents map, a top-level page (no sub-page) whose key slug is the prefix's last part (`my-project` → `stackshot`) first,
-    else the one with the most agents; then the rest, the shallower page first. A page counts only when it has a
-    keeper to pass the message to (the stand-in: its builder, else its -main agent, else its hub's, else the scope's general one): the
-    router rules every page's message. "" when no page can be told."""
-    reg = _anc.registry()
-    def reaches(k: str) -> bool:
-        return bool(_telling.stand_in_keeper(k, reg))
-    k = str((roles.get(_sr._role_name(roles, name)) or {}).get("project") or "")
-    if k in reg and reaches(k):
-        return k
-    fold = name.casefold(); best: list[tuple[int, int, int, int, int, str]] = []
-    dirs = tuple(d + "/" for d in _cfg.page_dirs())
-    for k, e in reg.items():
-        if not isinstance(e, dict) or not k.startswith(dirs):
-            continue
-        try:
-            pre = _prj._name_prefixes(k, e, reg)
-        except Exception:  # noqa: BLE001
-            continue
-        hit = [x for x in pre if fold.startswith(x.casefold() + "-") and len(name) > len(x) + 1]
-        if hit:
-            x = max(hit, key=len)
-            ags = {str(a).casefold() for a in (e.get("agents") if isinstance(e.get("agents"), dict) else {})}
-            depth = k.count("/"); slug = k.rsplit("/", 1)[-1].casefold()
-            home = depth == 1 and (x.casefold() == slug or x.casefold().endswith("-" + slug))
-            # the exact listing first; then pages with agents (the slug's top-level page, else the most agents); then the rest
-            best.append((-len(x), 0 if fold in ags else 1 if ags else 2, 0 if home else 1, -len(ags), depth, k))
-    return next((t[-1] for t in sorted(best) if reaches(t[-1])), "")
+    """The page key a session name belongs to and whose page would get the message to someone else (retired_recipient.project_of_name holds the rule, which the queue's sweep asks too): the page that
+    lists the name, else the page whose project name the session's name starts with, and only a page that has a keeper to pass the message to (the stand-in, `_telling.stand_in_keeper`). "" when no page can be told."""
+    return _rr.project_of_name(name, roles, lambda k, reg: _telling.stand_in_keeper(k, reg))
+
+
+class _Retired(ToolError):
+    """A message to a retired session or one whose pane is gone, when a project page can take it instead: `_message` sends it to that page (`project`) and tells the sender so."""
+    def __init__(self, msg: str, name: str, project: str, why: str) -> None:
+        super().__init__(msg)
+        self.name, self.project, self.why = name, project, why
 
 
 def _dead_recipient(to: str, cands: list[dict[str, Any]], idx: dict[str, dict[str, Any]]) -> None:
-    """a message to a session that is retired or has no pane is refused, naming where to send it instead: the project key when a
-    page can be told that reaches someone else (`to=projects/<slug>`, which the router or the page's keeper passes on), else the panes there
-    are, near spellings first. A retired name-line session (roles `retired`) with no pane running is refused whatever its machine is doing; any other
+    """a message to a session that is retired or has no pane is refused. When a page can be told that reaches someone else (`to=projects/<slug>`, which the router rules) the refusal is a `_Retired`,
+    which `_message` turns into a send to that page; else it names the panes there are, near spellings first. A retired name-line session (roles `retired`) with no pane running is refused whatever its machine is doing; any other
     session only when every row it has is dead (_pane_dead). Never called for a page key. A transcript id whose name has a pane running under
     another id is told to use the name."""
     name = str(next((r.get("name") for r in cands if r.get("name")), "") or to)
@@ -177,8 +155,11 @@ def _dead_recipient(to: str, cands: list[dict[str, Any]], idx: dict[str, dict[st
         raise ToolError(f"Refused: the session with id {to!r} cannot receive this ({why}), but a pane named {name!r} is running under another id: address it by name, to={name!r}.")
     proj = _project_of_name(name, roles, idx)
     if proj:
-        raise ToolError(f"Refused: {name!r} cannot receive this ({why}), so a message to it would sit in the queue and never arrive. "
-                        f"Send it to {_project_takes(proj)} instead: message(to={proj!r}, …).")
+        refused = (f"Refused: {name!r} cannot receive this ({why}), so a message to it would sit in the queue and never arrive. "
+                   f"Send it to {_project_takes(proj)} instead: message(to={proj!r}, …).")
+        if _rr.takes_other(proj, name):
+            raise _Retired(refused, name, proj, why)      # the router can pass it to another agent of the page: `_message` sends it there
+        raise ToolError(refused)                          # the page's only agent is this one: no receiver, the refusal goes back to the sender
     live = sorted({str(r.get("name")) for r in idx.values() if r.get("name") and _lv.present(r)})
     near = difflib.get_close_matches(name, live, n=3, cutoff=0.6)
     raise ToolError(f"Refused: {name!r} cannot receive this ({why}), so a message to it would sit in the queue and never arrive, and no project page that reaches someone else could be told for it "
@@ -529,6 +510,13 @@ def _front_fyi_name(to: str, raw: str, idx: dict[str, dict[str, Any]]) -> str:
         return ""
 
 
+def _sent_instead(name: str, why: str, project: str, raw: str, sender: str, auth: str, origin: str, fyi: bool) -> str:
+    """A message to a retired session (or a name no pane has) goes to the project it belongs to, as a message to the page key (the router rules it); the sender's reply says so in front of the usual
+    answer ("held for the router — the router rules notice <id> …"), so it knows the receiver is retired and where the message went."""
+    got = _message(project, raw, sender, auth, origin, fyi)
+    return f"{name!r} is retired ({why}), so this went to its project {project!r} instead — {got}"
+
+
 def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False) -> str:
     """`origin` = the machine, when the sender is a script there and not a session (POST /client/message): the envelope
     says so, and that it cannot be answered. `fyi`: the sender marks a message that asks nothing. To a background agent it is held and
@@ -606,13 +594,22 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                 proj = _project_of_name(to, _anc.session_roles(), idx)      # a retired session whose row is forgotten, or a misspelling of an agent's name: its project still takes the message
             except Exception:  # noqa: BLE001
                 proj = ""
+            known = _rr.gone_why(to)           # the registry knows the name as an old name of a session or a retired one: it is no misspelling of a live name, however near the live one is
+            if proj and (known or not near) and _rr.takes_other(proj, to):           # a name no pane has and that is no near spelling of a live one is a retired name: its project takes the message, and the router rules it
+                return _sent_instead(to, known or "no session of that name is in the heartbeat", proj, raw, sender, auth, origin, fyi)
+            if origin and not proj:
+                _log_not_delivered(sender, to, text, f"returned to its sender — {to} is retired (no session of that name is in the heartbeat) and no project takes its messages")
             raise ToolError(f"Refused: no session {to!r} in the heartbeat — " + (f"if it is an agent of {proj}, send to {_project_takes(proj)} (message(to={proj!r}, …)); " if proj else "")
                             + (f"did you mean {', '.join(near)}? " if near else "") + f"panes right now: {', '.join(live)}; "
                             "a project is addressed by its page key (to=projects/<slug>), a cloud/Cowork session by its cse_… id (a pane started in the last few minutes shows up at its machine's next heartbeat)")
         if rec and not is_key:
             try:
                 _dead_recipient(to, [rec] if idx.get(to) else named, idx)       # a retired session, or one whose pane is gone, is no address
-            except ToolError:
+            except _Retired as r:           # a page that has an agent takes it instead: the router rules it, and the sender is told so
+                return _sent_instead(r.name, r.why, r.project, raw, sender, auth, origin, fyi)
+            except ToolError as e:
+                if origin:
+                    _log_not_delivered(sender, to, text, f"returned to its sender — {e}")        # a script reads a status, not a sentence: the message log has it
                 raise
             except Exception as e:  # noqa: BLE001  — the check is an extra: a failure in it delivers or queues as before
                 print(f"message: dead-recipient check failed for {to!r}, sending as before: {e!r}", file=sys.stderr, flush=True)
@@ -718,6 +715,8 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         m = _fleetev.inbox_flag_minutes()
         return (f"{outcome} — it waits in the server's inbox until the session's machine fetches it: its puller asks about once a minute while the session runs (a session that is not running, or a machine that is asleep, takes longer)"
                 + (f". If the session is running and the line is still there after {m:g} minutes, the fleet's keeper is told why, and so are you when you are a running pane (a cloud or Cowork sender is not)" if m > 0 else "") + named)
+    if outcome.startswith("queued (retired"):         # the push found the receiver retired after this check had let it pass: push.py readdressed or returned the line, and its outcome says who got it
+        return f"{outcome} — nothing was left in a queue; the line above says where it went" + named
     if outcome.startswith("queued"):
         return f"{outcome} — the session is not live right now; anchor-hub delivers the queue when it comes back{(' (' + err + ')') if err else ''}" + named
     raise ToolError(f"Delivery failed: {outcome or 'no result'}{(' — ' + err) if err else ''}")
