@@ -21,6 +21,9 @@ Sources: ANCHOR_PUSH_SOURCE=hub (anchor-hub's notices, the default) or msg (the 
 with its own queue dir and pause flag. While paused-<source>.json exists a delivery is queued and --flush refuses (exit 5), and a
 session listed in held-<source>.txt (a reboot's resume did not verify it) keeps its queue; ANCHOR_PUSH_FORCE=1 overrides both.
 
+Before a queued line is delivered (--flush, and the inbox's hand-out) it passes stale_notice.screen: a stall, wake, wait-ended or hand-off notice that is older than
+[client] stale_notice_hours, or whose items have closed, been parked again or changed mover, is dropped, and of several about the same items only the newest goes.
+
 The inbox: after putting a line there this script waits a few seconds for the machine's confirmation, so the
 answer is still "delivered" when the pane is live, and "inbox" when the line waits for its machine (asleep, or its puller
 down: it goes out when that machine next asks). Cloud sessions are always delivered from here.
@@ -31,6 +34,7 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
     _here = _os.path.dirname(_os.path.abspath(__file__))
     _sys.path[:] = [_os.path.dirname(_os.path.dirname(_here))] + [p for p in _sys.path if _os.path.abspath(p or ".") != _here]
 
+import fcntl
 import glob
 import json
 import os
@@ -42,6 +46,7 @@ import time
 
 from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.fleet import inbox as _inbox  # noqa: E402  — label(): the `from:` line
+from stackshot.fleet import stale_notice as _stale  # noqa: E402  — the screen a queued notice passes before delivery
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  — a permanent session id → the session's name now
 
 SRC = "msg" if os.environ.get("ANCHOR_PUSH_SOURCE") == "msg" else "hub"
@@ -109,10 +114,23 @@ def note_fallback(name: str, sender: str) -> None:
         pass
 
 
+class _queue_lock:
+    """One lock for the queue directory: an append and the rewrite that drops stale lines never interleave (a line appended while a rewrite runs would be lost)."""
+    def __enter__(self):
+        os.makedirs(Q, exist_ok=True)
+        self.f = open(os.path.join(Q, ".lock"), "w")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *a):
+        fcntl.flock(self.f, fcntl.LOCK_UN); self.f.close()
+        return False
+
+
 def enqueue(name: str, text: str, sender: str = "") -> None:
-    os.makedirs(Q, exist_ok=True)
-    with open(os.path.join(Q, f"{name}.jsonl"), "a", encoding="utf-8") as f:
-        f.write(json.dumps({"t": time.time(), "text": text, "from": sender}) + "\n")
+    with _queue_lock():
+        with open(os.path.join(Q, f"{name}.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": time.time(), "text": text, "from": sender}) + "\n")
 
 
 def registry() -> list[dict]:
@@ -231,7 +249,22 @@ def flush(name: str) -> int:
         return 0
     if paused(name):
         print(f"paused or held ({SRC}): {name} keeps its queue", file=sys.stderr); return 5
-    items = [_inbox.label(str(e.get("from") or ""), e["text"]) for e in (json.loads(ln) for ln in open(qf, encoding="utf-8") if ln.strip())]
+    with _queue_lock():         # a notice that is no longer true is dropped before anything is sent, also for a session that is not live (its queue would otherwise only grow)
+        rows = [json.loads(ln) for ln in open(qf, encoding="utf-8") if ln.strip()]
+        keep, dropped = _stale.screen(rows, [name])
+        if dropped:
+            for _row, why in dropped:
+                print(f"dropped a stale notice for {name}: {why}")      # stdout: the sender's retry logs a flush's stdout, never its stderr
+            if keep:
+                tmp = qf + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write("".join(json.dumps(r) + "\n" for r in keep))
+                os.replace(tmp, qf)
+            else:
+                os.remove(qf)
+    if not keep:
+        print(f"dropped {len(dropped)} stale → {name}"); return 0
+    items = [_inbox.label(str(e.get("from") or ""), e["text"]) for e in keep]
     # the header says what kind of queue this is: the message queue holds stackshot messages, board relays and keeper
     # prompts, none of them an anchor change (a [board] notice arrived under "[anchor] 1 queued…")
     head = "[stackshot]" if SRC == "msg" else "[anchor]"

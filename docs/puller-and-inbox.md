@@ -22,6 +22,17 @@ machine whose puller checks in, is reported once, with the likeliest reason, to 
 keeper (`inbox.new_overdue`, the clients' tick). Not reported: a line held on purpose (a relaunch hold in
 `held-msg.txt`, a paused source), the flag's own lines, and anything in the first minute after the server starts.
 
+**A queued notice is checked before it is delivered** (`stackshot/fleet/stale_notice.py`). A stall reminder, a wake, "a wait ended" and a hand-off that
+was not taken are true when sent, and a session that is away (or a box that was moved) takes them hours or weeks later. Both queues that hold a
+notice for a session that cannot take it yet, the per-session queue `push.py --flush` delivers (the `queue-msg/<session>.jsonl` files of the hub's state directory) and
+the inbox (`inbox.take`), pass the lines through `stale_notice.screen` right before handing them out. Only the server's own notices are screened (a line that opens with
+`[stackshot]` and has one of those shapes; a message another session wrote opens `[stackshot message]` and is never touched). A screened line is
+dropped, with a journal line, when it is older than `[client] stale_notice_hours` (default 6; `0` turns the expiry off), when every item it names has
+closed, when every item it names has been parked again since (stall, wake and hand-off notices say the item is the recipient's to move now), or when
+every item it names has another session as its mover (the recipient is not its mover, its `then` or a session in its needs; an item the owner moves, or no one, keeps its notices, since they go to the project's builder). Of several lines of the same kind about the same items only the newest is delivered. An age expiry also
+reaches a line no session can take (a retired session's queue), where the items are not read. What the screen cannot read (an item that is
+missing, a recipient it cannot tell from the mover) is delivered as before.
+
 **The puller keeps a client box current** (puller 9; the PC's helper is its one service, and it
 keeps itself current). Every poll's answer carries what is current (`clients.current`: the server's puller `VERSION` and
 checkout commit, and whether that box may update itself). When the box is behind (its checkout is not at the server's

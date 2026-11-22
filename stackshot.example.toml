@@ -775,6 +775,9 @@ inbox_flag_minutes = 5                              # a line that waits this lon
                                                     # in) is reported once: to the session that sent it, and to the fleet's builder ([fleet] operator_session; its project's keeper
                                                     # when it is retired), with the likeliest reason, and a journal line. A line held on purpose (sala's relaunch hold in
                                                     # held-msg.txt, a paused source) and the flag's own lines are not reported. 0 turns it off
+stale_notice_hours = 6                              # a queued stall, wake, wait-ended or hand-off notice older than this is dropped instead of delivered (a session that was away, or a box that was
+                                                    # moved, would otherwise get a batch of old lines). Whatever its age, such a notice is also dropped when the item it names has closed, been parked
+                                                    # again or has another mover by then, and of several about the same items only the newest is delivered. 0 turns the expiry off (the state checks stay)
 self_update = true                                  # true: a client box's puller keeps its stackshot checkout current while the box is idle (no live session,
                                                     # no claude process): the whole checkout fast-forwarded to the server's commit, then the puller reloaded;
                                                     # a target commit tried once, then after 1 h, 4 h and daily, every attempt reported with its poll
