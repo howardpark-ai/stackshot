@@ -58,12 +58,12 @@ when Y"); at most {{SUBJECT_MAX}} characters, the scope prefix counted; a longer
 rest goes in the description bullets. An update that leaves subject out or sets the stored one is never refused for its length. description: the item's background as `- ` bullets of live state, one fact each: at most {{DESC_MAX_LINES}}
 lines, and every line, `- ` included, at most {{DESC_LINE_MAX}} characters (a link counts by its text); split a longer
 fact into two bullets or put it on the project page; prose, a longer line and more lines are refused. The first bullet
-opens `Goal:` (case-sensitive) with the outcome wanted in a sentence (the subject names the same outcome); a symptom,
+opens `Goal:` (`goal:` or a bold label is put right) with the outcome wanted in a sentence (the subject's outcome); a symptom,
 cause or trigger goes in a later bullet that opens `Problem:`. Then what the item is and where it lives (his words as
 a bullet such as `- {{OWNER}}: …`; parallel bullets go under one parent bullet, indented two spaces); never steps or
 commands for {{OWNER}} (those go in step, below), no working notes, status or history; prune what is no longer live;
-details go on the project page. A create, or an update that replaces the description, whose first bullet does not open
-`Goal:` is refused; an update that leaves description out is never judged. Item text renders as
+details go on the project page. A create, or an update that replaces the description, whose first bullet is no goal
+is refused; an update that leaves description out is never judged. Item text renders as
 markdown (nested `- ` lists, **bold**, `code`, > quotes; no raw HTML, headings or tables). next: {{NEXT_WORDS}}
 {{NEXT_REFUSALS}}A line of next is refused unless it is <= {{NEXT_LINE_MAX}} characters after its `<actor>: ` prefix,
 and <= {{NEXT_LINE_FULL}} in all (a link counts by its text); only the text you write in a call is checked. Each line
@@ -244,7 +244,7 @@ outcome on a close.
 ## param DESCRIPTION
 The item's background as `- ` bullets, at most {{DESC_MAX_LINES}} lines, every line `- ` included at most
 {{DESC_LINE_MAX}} characters, live state only (never steps or commands): description="- Goal: the export finishes in
-under a minute\n- Problem: the nightly run takes 9 minutes". The first bullet opens `Goal:` (case-sensitive), a
+under a minute\n- Problem: the nightly run takes 9 minutes". The first bullet opens `Goal:`, a
 symptom or cause goes in a later `Problem:` bullet, {{OWNER}}'s words go in a bullet such as `- {{OWNER}}: …`, and
 parallel bullets go under one parent bullet, indented two spaces.
 

@@ -186,7 +186,7 @@ check("…and back on by default", "must open with its goal" in refusal(lambda: 
 TOOLS = {t.name: t.description for t in __import__("asyncio").run(server.mcp.list_tools())}
 for t in ("create", "update"):
     check(f"the {t} tool's text says the subject is the outcome and the first bullet opens `Goal:`, a symptom goes under `Problem:`",
-          "the outcome wanted" in TOOLS[t] and "opens `Goal:`" in TOOLS[t] and "opens `Problem:`" in TOOLS[t] and "never the symptom" in TOOLS[t] and "case-sensitive" in TOOLS[t], TOOLS[t][:300])
+          "the outcome wanted" in TOOLS[t] and "opens `Goal:`" in TOOLS[t] and "opens `Problem:`" in TOOLS[t] and "never the symptom" in TOOLS[t] and "is put right" in TOOLS[t], TOOLS[t][:300])
 check("the shared form says an update that leaves the description out is never judged", "an update that leaves description out is never judged" in _wt_text._ITEM_FORM, None)
 
 print(("ok" if not fails else "FAILED") + f": goal_first scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

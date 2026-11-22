@@ -258,6 +258,41 @@ upd(75, hold=True, wake=day(3))
 check("3 snooze: with [model] guards = false the same write passes (the switch)", hd_(mt(75)) is True, mt(75))
 set_cfg()
 
+# a wake more than a year out: the hint to send the same call again with a basis must be a call the basis gate takes (it takes no wake further out than a year), so none is shown for it
+_waiting_cfg = _cfg.CFG.setdefault("waiting", {}); _was_owner_cap = _waiting_cfg.get("cap_needs_owner")
+try:
+    _waiting_cfg["cap_needs_owner"] = False          # the cap is not what refuses a far wake first
+    for n_, days_ in ((430, 400), (431, 300)):
+        item(n_, needs=[BACK])
+        try:
+            upd(n_, hold=True, wake=day(days_)); far_msg = ""
+        except Exception as e_:
+            far_msg = str(e_)
+        hint_ = re.search(r'send the same call again with wait_basis="(<what the window collects> ends [0-9-]+)"', far_msg)
+        if days_ > 365:
+            check("3 snooze: a wake more than a year out is refused for its reason and shows no call to send again that the basis gate would refuse", "no reason" in far_msg and not hint_ and "at most 365 days out" in far_msg, far_msg[-400:])
+            try:
+                upd(n_, hold=True, wake=day(days_), wait_basis=f"the soak ends {day(days_)}"); far_ok_ = True
+            except Exception as e_:
+                far_ok_ = False
+            check("3 snooze: …a basis is indeed refused for such a wake", far_ok_ is False, None)
+        else:
+            check("3 snooze: a wake inside the year shows the call to send again", bool(hint_), far_msg[-400:])
+            upd(n_, hold=True, wake=day(days_), wait_basis=hint_.group(1).replace("<what the window collects>", "the soak") if hint_ else "")
+            check("3 snooze: …and the shown call, with the window's words filled in, goes through", hd_(mt(n_)) is True and mt(n_).get("wait_basis", {}).get("text", "").startswith("the soak ends"), mt(n_))
+finally:
+    if _was_owner_cap is None: _waiting_cfg.pop("cap_needs_owner", None)
+    else: _waiting_cfg["cap_needs_owner"] = _was_owner_cap
+
+# a wake sent with a wait_basis the update tool drops is parked by the write as the same wake sent alone is (the date-only park reads the call after the drop)
+PARK_STEP = f"{BACK}: on {day(3)} rotate the key"          # the only open step waits for the wake's own day
+item(432, needs=[BACK], next=""); item(433, needs=[BACK], next="")
+out_alone = _update_svc._update("a432", sender=BACK, next=PARK_STEP, wake=day(3), wait_reason="the vendor replies after that date")
+out_basis = _update_svc._update("a433", sender=BACK, next=PARK_STEP, wake=day(3), wait_basis=f"the vendor visits {day(3)}", wait_reason="the vendor replies after that date")
+park_keys = ("hold", "wait_kind", "wake", "until", "phase", "waits_on")
+check("3 snooze: a wake alone with a step that waits for it is parked by the write", out_alone.count("(parked: wake") == 1 and hd_(mt(432)) is True and bool(W.basis_of(mt(432))), (out_alone[-300:], mt(432)))
+check("3 snooze: …and the same call with a basis the tool drops is parked the same way, the basis the wake's own reason", out_basis.count("(parked: wake") == 1 and {k: mt(432).get(k) for k in park_keys} == {k: mt(433).get(k) for k in park_keys} and "vendor visits" not in str(mt(433).get("wait_basis")), (out_basis[-300:], mt(433)))
+
 # ================================================================ 4. filler
 item(76, needs=[BACK])
 refused_nw("4 filler: a next line that is TBD", 76, lambda: upd(76, next="home-front: TBD"), "next holds a placeholder", "write the real next")

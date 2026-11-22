@@ -1034,11 +1034,14 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
         if w.kind == "time" and wake:
             quote = str(_wt.words_of(m).get("quote") or "")
             if not (w.basis or (quote and has_wait_words(quote))):
+                at_ = _wt.wake_epoch(wake)
+                far_ok = at_ is None or (at_ - time.time()) / 86400.0 <= _wt.BASIS_MAX_WAKE_DAYS      # the basis gate takes no wake further out than this: a call to send again with one would be refused
                 add("snooze", f"{what} waits on a time (wake {wake}) with no reason: a time wait carries {H}'s words (his answer on the item, or said=[{{tag: Acked-by, quote, msg}}] with a quote that "
                               f"parks, waits, says until or names a date) or a real outside date (wait_basis=\"<what happens> YYYY-MM-DD\"). With neither, a park has no reason: when the work itself needs this window (a soak, "
                               "a log or data collection, a trial week, a timer you started), add wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\" (a verifying item's wake takes it too, with no park; a park's wake does at any length); to only check back on work you keep moving, set no date: "
                               "a date with no park is a wait until it (outside a hand-off) and the item reads as waiting (a front agent's own date on work another session moves is refused: that result lands through stackshot). "
-                              f"To keep the park, send the same call again with wait_basis=\"<what the window collects> ends {wake[:10]}\".")
+                              + (f"To keep the park, send the same call again with wait_basis=\"<what the window collects> ends {wake[:10]}\"." if far_ok
+                                 else f"A basis stands for a wake at most {_wt.BASIS_MAX_WAKE_DAYS} days out, and this wake ({wake[:10]}) is further: set a nearer one."))
         if w.kind in ("anchor", "item", "relay", "event"):
             end = clean(m.get("ask_by")) or (w.backstop if w.kind != "relay" else "") or (w.until if w.kind == "relay" else "")
             if not end:

@@ -50,7 +50,7 @@ _FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries
 _ASK_LABELS = ("Decide", "Recommend", "Stakes", "By")
 _ASK_EXAMPLE = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 _ASK_BREAKS = "\r\n\v\f\x85\u2028\u2029"
-_ASK_SEP_TAIL = re.compile(r"[\s|;/,\-\u2013\u2014\u00b7\u2022]+$")           # what a writer puts between two parts in place of " · "
+_ASK_SEP_TAIL = " |;/,-\u2013\u2014\u00b7\u2022"           # what a writer puts between two parts in place of " · " (the text is flattened first, so a space is the only white space): stripped off the end of a part with str.rstrip, never a regex, whose cost grows with the square of a long run of it
 
 
 def _ask_fault(ask: str) -> tuple[str, str]:
@@ -62,9 +62,9 @@ def _ask_fault(ask: str) -> tuple[str, str]:
     hits = {lb: m.start() for lb in _ASK_LABELS if (m := re.search(rf"(?<![\w])({lb}):", flat))}
     in_order = len(hits) == 4 and list(hits.values()) == sorted(hits.values())
     parts: list[str] = []
-    if in_order:
+    if in_order and len(t.strip()) <= mx:      # the parts are built only for an ask within the limit (a longer one is refused for its length, and its parts are never shown): the work stays in step with the limit
         bounds = [*hits.values(), len(flat)]
-        parts = [_ASK_SEP_TAIL.sub("", flat[b + len(lb) + 1:e]).strip() for lb, b, e in zip(_ASK_LABELS, bounds, bounds[1:])]
+        parts = [flat[b + len(lb) + 1:e].rstrip(_ASK_SEP_TAIL).strip() for lb, b, e in zip(_ASK_LABELS, bounds, bounds[1:])]
     fixed = " · ".join(f"{lb}: {x}" for lb, x in zip(_ASK_LABELS, parts)) if parts and all(parts) else ""
     if any(c in t for c in _ASK_BREAKS):
         why = "it holds a line break, and an ask is one line"

@@ -118,7 +118,7 @@ reword.
 The old name of until, accepted for now: when the item wakes, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a
 time of day, in the board timezone (a relay or event wait takes the day alone, YYYY-MM-DD). Alone it is a wait, as
 until says. A
-wait on your own item also needs wait_reason (at least {{WAIT_GUARD_REASON_MIN}} characters); a wait with wait_basis
+wait on your own item also needs wait_reason (at least {{WAIT_GUARD_REASON_MIN}} characters); a wait with a kept wait_basis
 needs none, and a wake more than {{CAP_DAYS}} days out needs a wait_basis. Moving a wake (or ask_by) later with the
 item otherwise as it was is refused: in the same write mark a step done or dropped, write the next step or a new
 reason, or change what the wait stands on (wait_kind, wait_event, wait_anchor, after; a flip back to an earlier one

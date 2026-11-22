@@ -609,25 +609,33 @@ def first_bullet(text: str) -> str | None:
     return None
 
 
+# What `str.splitlines` ends a line at: a line's end is read the same way here as `first_bullet` reads the lines, so a bullet with an unusual end keeps it.
+_LINE_END_CHARS = "\r\n\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
+
+
+def _end_of(ln: str) -> str:
+    return ln[len(ln.rstrip(_LINE_END_CHARS)):]
+
+
+def _body_of(ln: str) -> str:
+    return ln[:len(ln) - len(_end_of(ln))]
+
+
 def _first_bullet_at(text: str) -> tuple[list[str], int] | None:
     """(the lines of `text` with their line ends, the index of its first `- ` bullet as `first_bullet` reads it), None when it has none."""
     lines = str(text or "").splitlines(keepends=True)
     fenced = False
     for i, ln in enumerate(lines):
-        if _RX_FENCE.match(ln.rstrip("\r\n")):
+        if _RX_FENCE.match(_body_of(ln)):
             fenced = not fenced
             continue
-        if not fenced and _RX_FIRST_BULLET.match(ln.rstrip("\r\n")):
+        if not fenced and _RX_FIRST_BULLET.match(_body_of(ln)):
             return lines, i
     return None
 
 
-def _end_of(ln: str) -> str:
-    return ln[len(ln.rstrip("\r\n")):]
-
-
-# A goal label in another form: any case, Goal or Goals, the Korean word for it (written as escapes: no Hangul in the repository), a colon (also the wide one) or a spaced dash after it, optional bold marks.
-_RX_GOAL_FORM = re.compile(r"^[ \t]*-[ \t]+\*{0,2}(?P<label>goals?|\ubaa9\ud45c)\*{0,2}(?:[ \t]*[:\uff1a]|[ \t]+[-\u2013\u2014])\*{0,2}[ \t]*(?P<rest>\S.*)$", re.I)
+# A goal label in another form: any case, Goal or Goals, the Korean word for it (written as escapes: no Hangul in the repository), a colon (also the wide one) or one spaced dash after it, optional bold marks.
+_RX_GOAL_FORM = re.compile(r"^(?P<indent>[ \t]*)-[ \t]+(?P<open>\*{0,2})(?P<label>goals?|\ubaa9\ud45c)(?P<c1>\*{0,2})(?:[ \t]*[:\uff1a]|[ \t]+[-\u2013\u2014](?![-\u2013\u2014]))(?P<c2>\*{0,2})[ \t]*(?P<rest>\S.*)$", re.I)
 
 
 _RX_GOAL_BARE = re.compile(r"^\*{0,2}(?:goals?|\ubaa9\ud45c)\*{0,2}(?:[ \t]*[:\uff1a]|[ \t]+[-\u2013\u2014])?\*{0,2}[ \t]*$", re.I)
@@ -635,17 +643,27 @@ _RX_GOAL_BARE = re.compile(r"^\*{0,2}(?:goals?|\ubaa9\ud45c)\*{0,2}(?:[ \t]*[:\u
 
 def relabel_goal(text: str) -> tuple[str, str] | None:
     """A description whose first `- ` bullet opens with a goal word in another form (`goal: x`, `Goal - x`, `GOALS: x`, the Korean label, a bold one) → (the text with that bullet written `- Goal: x`, the label as
-    written), the words after it untouched and the other lines byte for byte. None when the first bullet already opens `Goal:`, opens with anything else, or holds a label and nothing after it (a goal is a sentence)."""
+    written), the bullet's indent, its line end and the words after the label untouched and the other lines byte for byte. A bold mark that opens before the label and closes after the sentence (`**Goal: x**`) goes with
+    the label. None when the first bullet already opens `Goal:`, opens with anything else, holds a label and nothing after it (a goal is a sentence), or would be left with a bold mark that does not close."""
     if goal_of(text) is not None:
         return None
     at = _first_bullet_at(text)
     if at is None:
         return None
     lines, i = at
-    m = _RX_GOAL_FORM.match(lines[i].rstrip("\r\n"))
+    m = _RX_GOAL_FORM.match(_body_of(lines[i]))
     if m is None:
         return None
-    lines[i] = f"- {GOAL_LABEL} {m.group('rest').strip()}" + _end_of(lines[i])
+    rest, mark = m.group("rest").strip(), m.group("open")
+    if mark and not (m.group("c1") or m.group("c2")):
+        n = rest.count(mark)
+        if n == 1 and rest.endswith(mark):
+            rest = rest[:-len(mark)].rstrip()      # the mark that opened before the label closes after the sentence: the label's own mark goes, and so does its close
+        elif n:
+            return None                            # a mark inside the sentence that the label's would have paired with: dropping one leaves them paired wrongly
+    if not rest or rest.count("**") % 2:
+        return None
+    lines[i] = f"{m.group('indent')}- {GOAL_LABEL} {rest}" + _end_of(lines[i])
     return "".join(lines), m.group("label")
 
 
@@ -656,7 +674,7 @@ def goal_example(text: str) -> str | None:
     if at is None:
         return None
     lines, i = at
-    first = _RX_FIRST_BULLET.match(lines[i].rstrip("\r\n")).group(1).strip()
+    first = _RX_FIRST_BULLET.match(_body_of(lines[i])).group(1).strip()
     if _RX_GOAL_BARE.match(first):          # a label and nothing after it: there is no sentence to carry over
         return None
     lines[i] = f"- {GOAL_LABEL} {first}" + _end_of(lines[i])

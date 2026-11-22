@@ -1062,7 +1062,7 @@ def gate_sender_watch(gid: str, item_now: dict[str, Any], sender: str, *, handed
 # step now: the ready work then sits idle until the date. self_wait.py holds the rule and the model call: such a write carries wait_reason (what the step waits on), and a model is
 # asked once whether the step could be done now given that reason; yes refuses. The call is slow, so this gate runs BEFORE the item lock is taken (a read of the item as stored,
 # never a write), and it fails open: any failure, a missing model, a call past the hourly cap, passes the write. Out of scope, because the wait already names its blocker: a wait on
-# another item (after), on the owner or an outside party (needs decision or external), a stored wait (wait_kind), a park (hold, wait_basis), a hand-off to another session, an item
+# another item (after), on the owner or an outside party (needs decision or external), a stored wait (wait_kind), a park (hold, or a wait_basis the update tool keeps: one it drops, for a wake within the cap, is judged as if unsent), a hand-off to another session, an item
 # that does not stay alive, and a mover other than the sender.
 _SELF_WAIT_STATES_OUT = ("parked", "outside", "blocked", "verifying", "completed", "your-call", "your-step")
 
@@ -1076,8 +1076,11 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
     try:
         if not _cfg.wait_guard_on() or not sender.strip() or _model.is_owner(sender) or str(status or "").strip().lower() in ("completed", "closed"):
             return
-        if hold or str(state or "").strip().lower() in _SELF_WAIT_STATES_OUT or wait_kind.strip() or str(wait_basis or "").strip():
+        basis_given = bool(str(wait_basis or "").strip())
+        if hold or str(state or "").strip().lower() in _SELF_WAIT_STATES_OUT or wait_kind.strip():
             return
+        if basis_given and (clear_wake or clear_hold or clear_wait or " ".join(str(wait_basis).split()).lower() in hk.ask_none):
+            return                                          # a basis that clears, or goes with a wake this call drops: the write's own checks refuse or read it
         if _needs_list(needs) and any(x.lower() in _NEEDS_KINDS for x in _needs_list(needs)):
             return
         if _after_of({"after": after if isinstance(after, list) else _needs_list(after)}):
@@ -1121,6 +1124,8 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
             if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not _handoff.ho_same(mod.mover, sender):
                 return
             stored_wake = str(_wt.wake_value(item.get("metadata") or {}) or "")
+            if basis_given and basis_unneeded(item, wake_given or stored_wake.strip()) is None:
+                return                                      # a park that carries its basis (a wake past the cap, or a time wait's window) names its own reason; a basis the update tool drops (a wake within the cap) is no reason, so the wake is judged as if it were not sent
             wake_new = bool(wake_given) and wake_given != stored_wake.strip()      # re-sending the stored wake sets nothing
             stored_next = str((item.get("metadata") or {}).get("next") or "")
         else:
@@ -1614,7 +1619,7 @@ def gate_wait_basis(item: dict[str, Any], text: str, wake: str, held: bool = Fal
                         f"{_wt.BASIS_WINDOW_DAYS} days after it: {why}. \"The vendor visits Tue 2099-03-10 14:00\" on a wake of 2099-03-10 is a basis; "
                         "a date years off, or one that is not on the calendar, is a way around the rule. "
                         f"The forms it takes are \"<what happens> YYYY-MM-DD\" and, for a window the work itself needs, \"<what the window collects> ends YYYY-MM-DD\". "
-                        f"Send the same call again with wait_basis=\"{base} {day}\", the date being the day the wait ends")
+                        f"Send the same call again with wait_basis={json.dumps(f'{base} {day}', ensure_ascii=False)}, the date being the day the wait ends")
     return t
 
 

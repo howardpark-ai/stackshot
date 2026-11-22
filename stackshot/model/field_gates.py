@@ -224,17 +224,19 @@ _GOAL_RETRY = (" Retry the call with the description's first bullet changed; a s
                "(portal_codemode_execute with codemode.stackshot_create or codemode.stackshot_update), and a relaunch does not refresh it.")
 
 
-def fix_goal_label(desc: str) -> str:
+def fix_goal_label(desc: str, stored: str = "") -> str:
     """A session's description whose first `- ` bullet opens with a goal word in another form (`goal: x`, `Goal - x`, `GOALS: x`, a bold label, the Korean word for it), put right instead of refused: the bullet is written
     `- Goal: x` (bullet_text.relabel_goal: the words after the label and every other line are as written) and the reply says so (call_log.fixed). The text as given when it opens with `Goal:` already, when its first bullet
     opens with anything else (the gate then refuses it and shows the description with that bullet as the goal) or holds a label and nothing after it. The callers run it where `_gate_goal` would judge the text.
-    [description] require_bullets = false switches it off with the other form checks."""
+    [description] require_bullets = false switches it off with the other form checks. `stored` is the description the item holds (an update): a text that is the stored one once relabelled is no fix."""
     if not desc or not _bullets_on():
         return desc
     res = _bt.relabel_goal(desc)
     if res is None:
         return desc
     new, label = res
+    if stored.strip() and new.strip() == stored.strip():
+        return new          # the stored text with only its label written otherwise: the write changes nothing, so no fix is counted or told
     _calls.fixed("description-goal", f"the description's first bullet opened with \u201c{label}\u201d and is stored as `- Goal: ...`, the words after it as you wrote them; to change the goal, send the description with the first bullet you want",
                  fields=["description"], stored=new, sent=desc)
     return new

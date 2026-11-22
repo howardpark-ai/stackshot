@@ -226,6 +226,21 @@ quiet("scope: a close makes no call", lambda: _wt_complete.stackshot_complete("a
 quiet("scope: an undated write makes no call", lambda: upd(18, next="home-agent: build it, then test it"))
 quiet("scope: a past date is no wait", lambda: upd(19, next=f"home-agent: the build of {D(-3)} failed, fix it"))
 
+# ---- a wait_basis the update tool drops (a wake within the cap needs none) is no reason: the wake is judged as if it were not sent; one it keeps (a wake past the cap) names its own reason
+CAP = int(_WT.cap_days())
+for n in (41, 42, 43, 44, 45): item(n)
+reset(answer(True))
+refused("basis dropped: a wake within the cap with a basis and no reason, on the sender's own item, is refused as without the basis", lambda: upd(41, wake=D(3), wait_basis=f"the vendor visits {D(3)}"), "wait_reason", i=41, calls=0)
+refused("basis dropped: …a basis of any words is no way round it", lambda: upd(41, wake=D(3), wait_basis=f"x {D(3)}"), "wait_reason", i=41, calls=0)
+refused("basis dropped: …with a reason, the model judges the step (yes refuses) as for a wake sent alone", lambda: upd(42, wake=D(3), wait_basis=f"the vendor visits {D(3)}", wait_reason=REASON), "can be done now", i=42, calls=1)
+reset(answer(False, "the vendor has not replied"))
+passes("basis dropped: …no: the wake is accepted, one call", lambda: upd(43, wake=D(3), wait_basis=f"the vendor visits {D(3)}", wait_reason=REASON), 1)
+check("basis dropped: …the basis is not stored and the wake is", "wait_basis" not in mt(43) and bool(wk_(mt(43)) or _WT.stored_until(mt(43))), mt(43))
+reset(answer(True))
+passes("basis kept: a wake just past the cap with its basis is no wait of the sender's without a reason: accepted, no call", lambda: upd(44, wake=D(CAP + 1), wait_basis=f"the vendor visits {D(CAP + 1)}"), 0)
+check("basis kept: …and the basis is stored", bool(_WT.basis_of(mt(44))), mt(44))
+passes("basis kept: a wake far past the cap with its basis: accepted, no call", lambda: upd(45, wake=D(40), wait_basis=f"the vendor visits {D(40)}"), 0)
+
 # ---- a create
 reset(answer(True, "it can start now"))
 before = files()
