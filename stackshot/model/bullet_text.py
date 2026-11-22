@@ -609,6 +609,60 @@ def first_bullet(text: str) -> str | None:
     return None
 
 
+def _first_bullet_at(text: str) -> tuple[list[str], int] | None:
+    """(the lines of `text` with their line ends, the index of its first `- ` bullet as `first_bullet` reads it), None when it has none."""
+    lines = str(text or "").splitlines(keepends=True)
+    fenced = False
+    for i, ln in enumerate(lines):
+        if _RX_FENCE.match(ln.rstrip("\r\n")):
+            fenced = not fenced
+            continue
+        if not fenced and _RX_FIRST_BULLET.match(ln.rstrip("\r\n")):
+            return lines, i
+    return None
+
+
+def _end_of(ln: str) -> str:
+    return ln[len(ln.rstrip("\r\n")):]
+
+
+# A goal label in another form: any case, Goal or Goals, the Korean word for it (written as escapes: no Hangul in the repository), a colon (also the wide one) or a spaced dash after it, optional bold marks.
+_RX_GOAL_FORM = re.compile(r"^[ \t]*-[ \t]+\*{0,2}(?P<label>goals?|\ubaa9\ud45c)\*{0,2}(?:[ \t]*[:\uff1a]|[ \t]+[-\u2013\u2014])\*{0,2}[ \t]*(?P<rest>\S.*)$", re.I)
+
+
+_RX_GOAL_BARE = re.compile(r"^\*{0,2}(?:goals?|\ubaa9\ud45c)\*{0,2}(?:[ \t]*[:\uff1a]|[ \t]+[-\u2013\u2014])?\*{0,2}[ \t]*$", re.I)
+
+
+def relabel_goal(text: str) -> tuple[str, str] | None:
+    """A description whose first `- ` bullet opens with a goal word in another form (`goal: x`, `Goal - x`, `GOALS: x`, the Korean label, a bold one) → (the text with that bullet written `- Goal: x`, the label as
+    written), the words after it untouched and the other lines byte for byte. None when the first bullet already opens `Goal:`, opens with anything else, or holds a label and nothing after it (a goal is a sentence)."""
+    if goal_of(text) is not None:
+        return None
+    at = _first_bullet_at(text)
+    if at is None:
+        return None
+    lines, i = at
+    m = _RX_GOAL_FORM.match(lines[i].rstrip("\r\n"))
+    if m is None:
+        return None
+    lines[i] = f"- {GOAL_LABEL} {m.group('rest').strip()}" + _end_of(lines[i])
+    return "".join(lines), m.group("label")
+
+
+def goal_example(text: str) -> str | None:
+    """The description as written with its first `- ` bullet turned into the goal: `- Goal: <that bullet>`, the other lines as they are; None when the text has no bullet. What a refusal for a description that does not
+    open with its goal shows, so the writer can send it again as it is (or reword the goal in it)."""
+    at = _first_bullet_at(text)
+    if at is None:
+        return None
+    lines, i = at
+    first = _RX_FIRST_BULLET.match(lines[i].rstrip("\r\n")).group(1).strip()
+    if _RX_GOAL_BARE.match(first):          # a label and nothing after it: there is no sentence to carry over
+        return None
+    lines[i] = f"- {GOAL_LABEL} {first}" + _end_of(lines[i])
+    return "".join(lines).strip("\r\n")
+
+
 def goal_of(text: str) -> str | None:
     """The goal a description states: what follows `Goal:` in its first bullet when that bullet opens with it (case-sensitive, the label right after the dash) and says something after it; else None."""
     b = first_bullet(text)

@@ -220,9 +220,12 @@ def create_item(
     _fg._gate_subject(subject)
     _fg._gate_recycle_item(subject)
     description = _fg.fix_bare_urls(description, None, session=_writes.session_next())       # a bare address in a description becomes a link to itself (the reply says so); next and ask keep the refusal
+    goal_judged = _writes.session_next() and not by      # the create tool's own call: a script's item (the question route, a watcher, the terminal prompt) is filed whatever its first bullet
+    if goal_judged:
+        description = _fg.fix_goal_label(description)       # a goal word in another form opening the first bullet is written `Goal:` (a pure form fix; the reply says so)
     description, split_note = _fg.fix_long_bullets(description)       # a bullet over the limit is split at its sentences (a pure form fix; the reply says so, and History)
     _fg._gate_description(description)
-    if _writes.session_next() and not by:      # the create tool's own call: a script's item (the question route, a watcher, the terminal prompt) is filed whatever its first bullet
+    if goal_judged:
         _fg._gate_goal(description)
     _fg._gate_next(next, has_ask=bool(ask.strip()) and ask.strip().lower() not in h.ask_none, session=_writes.session_next())
     ask = "" if ask.strip().lower() in h.ask_none else ask

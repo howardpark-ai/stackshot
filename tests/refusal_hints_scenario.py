@@ -133,4 +133,72 @@ check("a the fix has no send-back check (sending it again is dropped again) and 
 out_mw, err_mw = run_mw("update", {"item_id": "a101", "sender": MAIN}, lambda: reply(_wt_update.stackshot_update("a101", sender=MAIN, until=local_day(4), wait_basis=BASIS(4), wait_reason="the vendor replies after that date")))
 check("a the reply carries the line, and the call log counts the fix", "(fixed for you:" in txt(out_mw) and "wait_basis was dropped" in txt(out_mw) and any("wait-basis-dropped" in (r.get("fix") or []) for r in CL.read(0, time.time() + 86400)), txt(out_mw)[-300:])
 
+# ================================================================ b. a goal label in another form is relabelled; any other first bullet is refused with the corrected description shown
+KO_GOAL = "\ubaa9\ud45c"            # the Korean word for goal, as escapes: no Hangul in the repository
+def created(desc, **kw):
+    res, made = create(desc=desc, **kw)
+    return res, made, (rd(gid_of(res))["description"] if gid_of(res) else "")
+for name, desc, want in (("lowercase `goal:`", "- goal: the run finishes\n- It lives here", "- Goal: the run finishes\n- It lives here"),
+                         ("`Goal -`", "- Goal - the run finishes\n- It lives here", "- Goal: the run finishes\n- It lives here"),
+                         ("`GOALS :`", "- GOALS : the run finishes", "- Goal: the run finishes"),
+                         ("a bold label", "- **Goal:** the run finishes\n- It lives here", "- Goal: the run finishes\n- It lives here"),
+                         ("the Korean label", f"- {KO_GOAL}: the run finishes\n- It lives here", "- Goal: the run finishes\n- It lives here"),
+                         ("an en dash", "- Goal \u2013 the run finishes", "- Goal: the run finishes"),
+                         ("the label on the first bullet after a quote line", "> a note\n- goal: the run finishes", "> a note\n- Goal: the run finishes")):
+    res, made, got = created(desc)
+    check(f"b create: {name} is stored as `- Goal: ...`, one description-goal fix", not isinstance(res, ToolError) and got == want and kinds(made) == ["description-goal"], (str(res)[:200], got, made))
+res, made, got = created(f"- {KO_GOAL}: the run finishes")
+check("b create: the reply line names the label as written and says the words are as written", "description-goal" in kinds(made) and KO_GOAL in dict(made)["description-goal"] and "as you wrote them" in dict(made)["description-goal"], made)
+check("b create: the line names no machine and no fleet tool", not re.search(r"\b(box-[a-d]|sala|salamander)\b", dict(made)["description-goal"], re.I), made)
+res, made, got = created("- Goal: the run finishes")
+check("b create: a first bullet that opens `Goal:` is stored as written, no fix", got == "- Goal: the run finishes" and kinds(made) == [], (got, made))
+res, made, got = created("- goal-oriented work happens here")
+check("b create: a first bullet that only starts with the letters (goal-oriented) is no label: refused", isinstance(res, ToolError) and "must open with its goal" in str(res) and kinds(made) == [], (str(res)[:200], made))
+res, made, got = created("- Goal:\n- Problem: x")
+check("b create: a label with nothing after it is refused as before, and shows no example to copy", isinstance(res, ToolError) and "Send the description again" not in str(res) and kinds(made) == [], str(res)[:300])
+res, made = fx(lambda: _wt_create._create(subject="[home] built by the server", description="- goal: x\n- b", project=STK, owner=MAIN, next=f"{MAIN}: carry on"))
+check("b a script's create is filed whatever its first bullet: stored as written, no fix", isinstance(res, str) and "- goal: x\n- b" == rd(gid_of(res))["description"] and kinds(made) == [], (str(res)[:200], made))
+item(110, desc="- A thing\n- It lives here")
+res, made = upd(110, description="- goal: the thing works\n- It lives here")
+check("b update: a replacement with `goal:` is stored as `Goal:`, one fix", not isinstance(res, ToolError) and rd(110)["description"] == "- Goal: the thing works\n- It lives here" and kinds(made) == ["description-goal"], (str(res)[:200], made))
+res, made = upd(110, description="- Goal: the thing works\n- It lives here")
+check("b update: the stored text sent back changes nothing and counts no fix", kinds(made) == [] and rd(110)["description"] == "- Goal: the thing works\n- It lives here", made)
+item(111, desc="- goal: legacy label\n- It lives here")
+res, made = upd(111, description="- goal: legacy label\n- It lives here")
+check("b update: the stored text sent back with its old label is no rewrite: no fix", kinds(made) == [] and rd(111)["description"] == "- goal: legacy label\n- It lives here", (str(res)[:200], made))
+res, made = script(110, description="- goal: written by a script\n- It lives here")
+check("b update: a script's replacement is left as written, no fix", not isinstance(res, ToolError) and "description-goal" not in kinds(made) and rd(110)["description"].startswith("- goal: written by a script"), (str(res)[:200], made))
+res, made, got = created("- " + "w" * 95 + "\n- It lives here")
+KO_LONG = "- " + KO_GOAL + ": " + "w" * 112
+res, made, got = created(KO_LONG)
+check("b create: the Korean label is two characters shorter than `Goal:`, so the relabelled line is judged for its length as stored", not isinstance(res, ToolError) and got.startswith("- Goal: ") and all(len(x) <= 120 for x in got.split("\n")), (str(res)[:200], got))
+
+# the refusal shows the corrected description, and sent back as shown it goes through
+SYM = "- The run fails when the disk is full\n- It lives here\n- Done when done"
+res, made, got = created(SYM)
+shown = "- Goal: The run fails when the disk is full\n- It lives here\n- Done when done"
+check("b create refused: a first bullet that is no goal word: the refusal shows the description with that bullet as the goal", isinstance(res, ToolError) and "Send the description again with that bullet as the goal:\n" + shown + "\n" in str(res) and kinds(made) == [], str(res)[:500])
+check("b …it says what to do when that bullet names a symptom, and keeps the rule and the retry hint", "move the bullet to a later bullet that opens `Problem:`" in str(res) and "The subject and the first bullet state the outcome wanted" in str(res) and "Retry the call" in str(res), str(res)[:900])
+check("b …the refusal names no machine and no fleet tool", not re.search(r"\b(box-[a-d]|sala|salamander)\b", str(res), re.I), str(res)[:300])
+n_before = len(list((T / "store").rglob("[0-9]*.json")))
+res2, made2, got2 = created(shown)
+check("b …resend the description as shown: it goes through, stored as shown", not isinstance(res2, ToolError) and got2 == shown, (str(res2)[:200], got2))
+item(112, desc="- A thing\n- It lives here")
+res, made = upd(112, description=SYM)
+check("b update refused: the same example, and the stored text is unchanged", isinstance(res, ToolError) and "Send the description again with that bullet as the goal:\n" + shown in str(res) and rd(112)["description"] == "- A thing\n- It lives here", str(res)[:400])
+res, made = upd(112, description=shown)
+check("b …resend it as shown: it goes through", not isinstance(res, ToolError) and rd(112)["description"] == shown, str(res)[:300])
+NEAR = "- " + "x" * 116                         # 118 characters: `- Goal: ` in front of it makes the line 126, and it has no place to be split
+res, made, got = created(NEAR + "\n- It lives here")
+check("b create refused: a first bullet that would be over the limit with the label in front, and cannot be split, shows no example to copy", isinstance(res, ToolError) and "must open with its goal" in str(res) and "Send the description again" not in str(res), str(res)[:400])
+CLAUSE_TEXT = "the nightly run reads the whole table, " * 2 + "then writes the report to disk now ok"          # 115 characters: a bullet of 117 passes the form gate, `Goal: ` in front makes it 125, with commas to split at
+res, made, got = created("- " + CLAUSE_TEXT + "\n- It lives here")
+shown_long = "- Goal: " + CLAUSE_TEXT + "\n- It lives here"
+check("b create refused: a first bullet that the bullet fix can split once the label is in front still shows its example", isinstance(res, ToolError) and "Send the description again with that bullet as the goal:\n" + shown_long + "\n" in str(res), str(res)[:600])
+res2, made2, got2 = created(shown_long)
+check("b …and resent as shown it goes through: split by the bullet fix, the goal kept first", not isinstance(res2, ToolError) and got2.startswith("- Goal: ") and all(len(x) <= 120 for x in got2.split("\n")), (str(res2)[:300], got2))
+res, made, got = created("> only a quote line")
+check("b create refused: no `- ` bullet at all shows no corrected description", isinstance(res, ToolError) and "no `- ` bullet" in str(res) and "Send the description again" not in str(res), str(res)[:300])
+check("b the fix has no send-back check and invites no resend", "description-goal" not in CL.CHECKED and "description-goal" in CL.NO_RESEND, None)
+
 print(("ok" if not fails else "FAILED") + f": refusal hints scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

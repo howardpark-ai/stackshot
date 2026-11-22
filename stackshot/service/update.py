@@ -840,6 +840,8 @@ def update_unlocked(
         _fg._gate_subject(subject, str(item.get("subject") or ""))
         item["subject"] = subject
     if description:
+        if (_writes.session_next() and not reformat and not sender.strip().startswith("a script on ") and description.strip() != str(item_was.get("description") or "").strip()):     # the text the goal gate judges below
+            description = _fg.fix_goal_label(description)       # a goal word in another form opening the first bullet is written `Goal:` (a pure form fix; the reply says so)
         description, split_note = _fg.fix_long_bullets(description, str(item_was.get("description") or ""))       # a bullet over the limit is split at its sentences (a pure form fix; the reply says so, and History)
         if split_note:
             _stall.note(meta, time.time(), split_note)

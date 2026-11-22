@@ -1,7 +1,7 @@
 """Scenario test for the goal-first form of an item's text (the create and update tools' `Goal:` gate) — fixture data, no live store, no network.
 
 Covers: a session's create is refused unless the description's first `- ` bullet opens `Goal:` (case-sensitive, the label right after the dash, with a sentence after it):
-no bullet at all, another label, a lowercase `goal:`, `Goals:`, a bold label, a bare `Goal:` and a goal that sits second are all refused, each with a refusal that names the
+no bullet at all, another label, a bare `Goal:` and a goal that sits second are all refused, each with a refusal that names the
 first words it saw, says the subject and the first bullet state the outcome wanted, sends a symptom, cause or trigger to a later `Problem:` bullet, gives the before and after
 example and the retry hint, and files nothing; the same description with `- Goal: …` first passes (a leading quote line or a later `Problem:` bullet is fine; the first `- ` bullet
 is the one read); an update that replaces the description is judged the same, an update that leaves the description out, sends the stored text back, closes the item or sets a
@@ -91,9 +91,6 @@ n0 = n_items()
 SEEN = "the first bullet starts"
 for name, desc, saw in (("another label first", "- Problem: it fails when the disk is full\n- Goal: it does not", "Problem: it fails when"),
                         ("an unlabeled first bullet", "- A thing\n- It lives here\n- Done when done", "A thing"),
-                        ("a lowercase `goal:`", "- goal: the run finishes", "goal: the run finishes"),
-                        ("`Goals:`", "- Goals: the run finishes", "Goals: the run finishes"),
-                        ("a bold label", "- **Goal:** the run finishes", "**Goal:** the run finishes"),
                         ("a bare `Goal:` with no sentence", "- Goal:\n- Problem: x", "Goal:"),
                         ("the goal second", "- Problem: it fails\n- Goal: it works", "Problem: it fails")):
     e = refusal(lambda: create(desc))
@@ -130,8 +127,8 @@ check("update passes: the stored text sent back is no rewrite", stored("a41")["d
 e = refusal(lambda: update("a41", description="- A thing, reworded\n- It lives here"))
 check("update refused: a replacement description with no Goal bullet, naming what it saw", e.startswith("Refused: the description must open with its goal") and f"{SEEN} “A thing, reworded”" in e, e)
 check("…and it wrote nothing", stored("a41")["description"].startswith("- A thing\n"), stored("a41")["description"])
-e = refusal(lambda: update("a41", description="- goal: lowercase\n- It lives here"))
-check("update refused: a lowercase label", "must open with its goal" in e, e)
+r = update("a41", description="- goal: lowercase\n- It lives here")
+check("update passes: a lowercase label is stored as `Goal:` (the server fix, tests/refusal_hints_scenario.py)", stored("a41")["description"] == "- Goal: lowercase\n- It lives here", stored("a41")["description"])
 r = update("a41", description="- Goal: The thing works\n- Problem: it did not\n- It lives here")
 check("update passes: a replacement that opens with `Goal:`", stored("a41")["description"].startswith("- Goal: The thing works"), r)
 r = update("a41", description="- Goal: The thing works\n- Problem: it did not")
