@@ -62,7 +62,7 @@ def _ask_fault(ask: str) -> tuple[str, str]:
     hits = {lb: m.start() for lb in _ASK_LABELS if (m := re.search(rf"(?<![\w])({lb}):", flat))}
     in_order = len(hits) == 4 and list(hits.values()) == sorted(hits.values())
     parts: list[str] = []
-    if in_order and len(t.strip()) <= mx:      # the parts are built only for an ask within the limit (a longer one is refused for its length, and its parts are never shown): the work stays in step with the limit
+    if in_order and len(flat) <= mx:      # the parts are built only when the ask, its white space collapsed, fits the limit (the form a refusal for its raw length or a line break shows): a longer text is refused for its length and shows no parts, so the work never outgrows the limit
         bounds = [*hits.values(), len(flat)]
         parts = [flat[b + len(lb) + 1:e].rstrip(_ASK_SEP_TAIL).strip() for lb, b, e in zip(_ASK_LABELS, bounds, bounds[1:])]
     fixed = " · ".join(f"{lb}: {x}" for lb, x in zip(_ASK_LABELS, parts)) if parts and all(parts) else ""

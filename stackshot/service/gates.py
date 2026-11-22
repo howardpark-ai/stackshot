@@ -1076,11 +1076,11 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
     try:
         if not _cfg.wait_guard_on() or not sender.strip() or _model.is_owner(sender) or str(status or "").strip().lower() in ("completed", "closed"):
             return
-        basis_given = bool(str(wait_basis or "").strip())
+        basis_given = bool(str(wait_basis or "").strip()) and " ".join(str(wait_basis).split()).lower() not in hk.ask_none      # a word that clears (none, clear, -) is no basis: the wake is judged as sent without one
         if hold or str(state or "").strip().lower() in _SELF_WAIT_STATES_OUT or wait_kind.strip():
             return
-        if basis_given and (clear_wake or clear_hold or clear_wait or " ".join(str(wait_basis).split()).lower() in hk.ask_none):
-            return                                          # a basis that clears, or goes with a wake this call drops: the write's own checks refuse or read it
+        if basis_given and (clear_wake or clear_hold):
+            return                                          # a basis beside a wake or a hold this call drops: the update tool refuses the call whatever the gate says, so no model call is spent on it
         if _needs_list(needs) and any(x.lower() in _NEEDS_KINDS for x in _needs_list(needs)):
             return
         if _after_of({"after": after if isinstance(after, list) else _needs_list(after)}):

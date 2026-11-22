@@ -58,7 +58,7 @@ when Y"); at most {{SUBJECT_MAX}} characters, the scope prefix counted; a longer
 rest goes in the description bullets. An update that leaves subject out or sets the stored one is never refused for its length. description: the item's background as `- ` bullets of live state, one fact each: at most {{DESC_MAX_LINES}}
 lines, and every line, `- ` included, at most {{DESC_LINE_MAX}} characters (a link counts by its text); split a longer
 fact into two bullets or put it on the project page; prose, a longer line and more lines are refused. The first bullet
-opens `Goal:` (`goal:` or a bold label is put right) with the outcome wanted in a sentence (the subject's outcome); a symptom,
+opens `Goal:` (`goal:` or a bold label is put right) with the outcome wanted in a sentence (match the subject); a symptom,
 cause or trigger goes in a later bullet that opens `Problem:`. Then what the item is and where it lives (his words as
 a bullet such as `- {{OWNER}}: …`; parallel bullets go under one parent bullet, indented two spaces); never steps or
 commands for {{OWNER}} (those go in step, below), no working notes, status or history; prune what is no longer live;

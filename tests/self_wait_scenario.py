@@ -241,6 +241,26 @@ passes("basis kept: a wake just past the cap with its basis is no wait of the se
 check("basis kept: …and the basis is stored", bool(_WT.basis_of(mt(44))), mt(44))
 passes("basis kept: a wake far past the cap with its basis: accepted, no call", lambda: upd(45, wake=D(40), wait_basis=f"the vendor visits {D(40)}"), 0)
 
+# a basis word that clears (none, clear, -) is no basis, clear_wait does not excuse a dropped one, and a basis beside clear_wake or clear_hold is the update tool's refusal (no model call is spent on it)
+for n in range(46, 62): item(n)
+for k, w in enumerate(("none", "clear", "-", "NONE")):
+    reset(answer(True))
+    refused(f"basis word {w!r}: an in-window wake on the sender's own item with no reason is refused as without a basis, no call", lambda w=w, n=46 + k: upd(n, wake=D(3), wait_basis=w), "wait_reason", i=46 + k, calls=0)
+reset(answer(True))
+refused("basis word: …with a reason, the model judges the step (yes refuses)", lambda: upd(50, wake=D(3), wait_basis="none", wait_reason=REASON), "can be done now", i=50, calls=1)
+reset(answer(False, "the vendor has not replied"))
+passes("basis word: …no: the wake is accepted, one call", lambda: upd(51, wake=D(3), wait_basis="clear", wait_reason=REASON), 1)
+check("basis word: …and no basis is stored", "wait_basis" not in mt(51) and bool(wk_(mt(51)) or _WT.stored_until(mt(51))), mt(51))
+reset(answer(True))
+refused("clear_wait: an in-window wake with a basis the tool drops and no reason is refused, no call", lambda: upd(52, wake=D(3), wait_basis=f"the vendor visits {D(3)}", clear_wait=True), "wait_reason", i=52, calls=0)
+refused("clear_wait: …a basis of junk words is no way round it", lambda: upd(52, wake=D(3), wait_basis="x", clear_wait=True), "wait_reason", i=52, calls=0)
+refused("clear_wait: …with a reason, the model judges the step (yes refuses)", lambda: upd(53, wake=D(3), wait_basis=f"the vendor visits {D(3)}", clear_wait=True, wait_reason=REASON), "can be done now", i=53, calls=1)
+reset(answer(True))
+refused("clear_wake with a basis: refused by the write itself, no model call", lambda: upd(54, wake=D(3), clear_wake=True, wait_basis=f"the vendor visits {D(3)}"), i=54, calls=0)
+refused("clear_hold with a basis: refused by the write itself, no model call", lambda: upd(55, wake=D(3), clear_hold=True, wait_basis=f"the vendor visits {D(3)}"), i=55, calls=0)
+reset(answer(True))
+passes("basis kept: a wake past the cap with its basis still passes with no call", lambda: upd(56, wake=D(CAP + 5), wait_basis=f"the vendor visits {D(CAP + 5)}"), 0)
+
 # ---- a create
 reset(answer(True, "it can start now"))
 before = files()

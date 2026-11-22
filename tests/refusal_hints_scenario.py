@@ -150,6 +150,9 @@ finally:
     else: _waiting["cap_needs_owner"] = _was_owner
 same_keys = ("hold", "state", "wait_kind", "wait_basis", "wake", "until", "wait_until")
 check("a a wake sent with a dropped basis is stored as the same wake sent alone is (the item before, with the same call and no basis)", {k: mt(102).get(k) for k in same_keys if k != "state"} == {k: mt(101).get(k) for k in same_keys if k != "state"}, (mt(101), mt(102)))
+item(114)
+res, made = upd(114, until=local_day(3), wait_basis=BASIS(3), clear_wait_basis=True, wait_reason="the vendor replies after that date")
+check("a clear_wait_basis with a basis is refused, the basis is not dropped to make the call pass", isinstance(res, ToolError) and "clear_wait_basis drops the basis" in str(res) and "wait-basis-dropped" not in kinds(made), (str(res)[:200], made))
 check("a the fix has no send-back check (sending it again is dropped again) and invites no resend", "wait-basis-dropped" not in CL.CHECKED and "wait-basis-dropped" in CL.NO_RESEND, None)
 out_mw, err_mw = run_mw("update", {"item_id": "a101", "sender": MAIN}, lambda: reply(_wt_update.stackshot_update("a101", sender=MAIN, until=local_day(4), wait_basis=BASIS(4), wait_reason="the vendor replies after that date")))
 check("a the reply carries the line, and the call log counts the fix", "(fixed for you:" in txt(out_mw) and "wait_basis was dropped" in txt(out_mw) and any("wait-basis-dropped" in (r.get("fix") or []) for r in CL.read(0, time.time() + 86400)), txt(out_mw)[-300:])
@@ -204,6 +207,11 @@ for name, desc, want in (("a wide colon", "- Goal\uff1a the run finishes\n- It l
     got_bt = BT.relabel_goal(desc)
     check(f"b relabel: {name}", got_bt is not None and got_bt[0] == want, got_bt)
 check("b relabel: a bold phrase that would be left open is not relabelled (the refusal shows the example instead); one opened and never closed leaves no mark", BT.relabel_goal("- **Goal: the run** and **more\n") is None and BT.relabel_goal("- Goal: **the run\n") is None and BT.relabel_goal("- **Goal: the run finishes\n")[0] == "- Goal: the run finishes\n", None)
+check("b relabel: a bold phrase that closes before more words is left to the refusal (a mark inside the sentence the label's would have paired with)", BT.relabel_goal("- **Goal: x** more") is None, None)
+res, made, got = created("- **Goal: the run** and more\n- It lives here")
+check("b create: …and the refusal shows the first bullet as the goal, nothing stored", isinstance(res, ToolError) and "must open with its goal" in str(res), str(res)[:300])
+check("b relabel: a bold close after a bold label is left to the refusal (the marks would not pair)", BT.relabel_goal("- **Goal:** x**") is None, None)
+check("b relabel: the space before the bold close goes with it: no trailing space is stored", BT.relabel_goal("- **Goal: the run finishes **\n- It lives here")[0] == "- Goal: the run finishes\n- It lives here", BT.relabel_goal("- **Goal: the run finishes **\n- It lives here"))
 check("b relabel: two dashes are no one spaced dash: not relabelled, no `- ` carried into the sentence", BT.relabel_goal("- Goal -- the run finishes") is None and BT.relabel_goal("- Goal \u2013\u2013 the run finishes") is None and BT.relabel_goal("- Goal - the run finishes")[0] == "- Goal: the run finishes", None)
 for sep_name, sep in (("a vertical tab", "\x0b"), ("a form feed", "\x0c"), ("the line separator", "\u2028"), ("the paragraph separator", "\u2029"), ("a next-line mark", "\x85")):
     got_bt = BT.relabel_goal(f"- goal: the run finishes{sep}- It lives here")
@@ -369,6 +377,12 @@ t0 = time.perf_counter(); m_run2 = ask_msg(RUN2); took2 = time.perf_counter() - 
 check("c ask: …so is one with all four labels and a long run in a part", "characters, and the limit is" in m_run2 and took2 < 1.0, (took2, m_run2[:160]))
 m_edge = ask_msg("Decide: " + "x" * 150 + " ,;| Recommend: yes | Stakes: a week | By: Fri")
 check("c ask: an ask within the limit with a run of separators after a part is cleaned: the parts are cut of them", ("Decide: " + "x" * 150 + " · Recommend: yes") in m_edge, m_edge[-300:])
+PADDED = "Decide:" + " " * 100 + "ship it ; Recommend: yes | Stakes: a week" + " " * 150 + "| By: Fri"          # about 300 raw characters, 60 once the white space is collapsed
+m_pad = ask_msg(PADDED)
+check("c ask: an ask over the limit as written whose collapsed form fits still shows the writer's own parts in the form", len(PADDED.strip()) > 240 and "it is " in m_pad and "Your ask in the form, to send again:\nDecide: ship it · Recommend: yes · Stakes: a week · By: Fri" in m_pad, (len(PADDED), m_pad[-300:]))
+check("c ask: …and what it shows goes through the same gate", ASKS._gate_ask(m_pad.split(":\n")[-1]) == m_pad.split(":\n")[-1], m_pad[-200:])
+t0 = time.perf_counter(); m_pad2 = ask_msg("Decide: x" + " " * 200000 + "| Recommend: y | Stakes: z | By: w"); took3 = time.perf_counter() - t0
+check("c ask: …and a long run of white space is as cheap", took3 < 1.0 and "Your ask in the form" in m_pad2, (took3, m_pad2[-200:]))
 m_sep = ask_msg("Decide: ship it ,;/ Recommend: yes - Stakes: a week \u2014 By: Fri")
 check("c ask: separators at the end of a part (comma, dash, em dash, semicolon, slash) are all cut off the corrected ask", m_sep.endswith("Decide: ship it · Recommend: yes · Stakes: a week · By: Fri"), m_sep[-200:])
 
