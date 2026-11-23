@@ -59,8 +59,8 @@ def _form_call(machine: str, sender: str) -> bool:
 def _bg_call(machine: str, sender: str, front: bool, surface: str) -> tuple[bool, tuple[int, dict[str, Any]] | None]:
     """Is this `post project-agent` a background call: the fleet tool's timer listing a background agent for a project whose want is open? -> (True, None), (False, None) when the `sender` label is not in
     [project_agent] bg_senders (the other rules decide), or (False, the 403) for a bg label that fails a condition: the machine its token proves (`machine`, never the body) must be in bg_machines
-    (form_machines when bg_machines is empty) and the agent a background agent (`front` false, `surface` "" for the default). The open want is checked after (_bgw.open_state). Read where used, so a reload applies."""
-    machines = _cfg_names("bg_machines", _BG_MACHINES) or _cfg_names("form_machines", _FORM_MACHINES)
+    (form_machines when bg_machines is absent or empty; a bg_machines of the wrong type allows no machine) and the agent a background agent (`front` false, `surface` "" for the default). The open want is checked after (_bgw.open_state). Read where used, so a reload applies."""
+    machines = _verbs.bg_machine_names(_cfg.get("project_agent"), _BG_MACHINES, _FORM_MACHINES)
     return _verbs.bg_gate(machine, sender, _cfg_names("bg_senders", _BG_SENDERS), machines, front, surface)
 
 

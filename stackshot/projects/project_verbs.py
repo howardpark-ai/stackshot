@@ -1457,6 +1457,18 @@ def section_names(sec: Any, key: str, default: list[str]) -> list[str]:
     return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
 
 
+def bg_machine_names(sec: Any, bg_default: list[str], form_default: list[str]) -> list[str]:
+    """The machines a background call may come from, from the `[project_agent]` section as the config holds it: `bg_machines`; when it is absent or empty, `form_machines`. A `bg_machines` of the
+    wrong type (a number, a table) is no machine at all, never a fall back to the form's: a wrong type never means a wider rule than the file says."""
+    names = section_names(sec, "bg_machines", bg_default)
+    if names:
+        return names
+    v = sec.get("bg_machines") if isinstance(sec, dict) else None
+    if v is not None and not isinstance(v, (str, list)):
+        return []
+    return section_names(sec, "form_machines", form_default)
+
+
 def form_call(machine: str, sender: str, senders: list[str], machines: list[str]) -> bool:
     """Is this call the New session form's? Only when the `sender` label is in form_senders AND the machine its token proves (`machine`, never the body) is in
     form_machines: a label alone is not enough, since any token holder can type it."""

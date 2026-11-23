@@ -407,6 +407,14 @@ check("project-agent: …another label may not (403), and a stranger's session i
       and pa(NEW, "work-new-one-other", U["home-outsider"], role="other")[0] == 403 and pa(NEW, "work-new-one-third", "work-new-one-main", role="third")[0] == 403)
 st, out = pa(NEW, "work-new-one-main", "fleet-web")
 check("project-agent: said again as it stands → 200, nothing new, the page unchanged", st == 200 and "nothing changed" in out["note"] and list(rec(NEW)["agents"]) == ["work-new-one-main", "work-new-one-second"], (st, out))
+CFG_PA_MORE = _cfg.CFG.get("project_agent", "absent")
+_cfg.CFG["project_agent"] = {"form_machines": ["box-a"], "bg_senders": ["fleet-web"], "bg_machines": ["box-e"]}      # the label that listed these agents is a bg sender too, and box-c is no bg machine
+st, out = pa(NEW, "work-new-one-second", "fleet-web", role="second", front=False, mandate="b: with a colon")
+st2, out2 = pa(NEW, "work-new-one-main", "fleet-web")
+if CFG_PA_MORE == "absent": _cfg.CFG.pop("project_agent", None)
+else: _cfg.CFG["project_agent"] = CFG_PA_MORE
+check("background call: a bg sender that is on the further-agents path (it listed every agent) is handled by that path alone: the bg machine rule, the background-only rule and the want check are not applied to it (200 from a machine that is no bg machine, a front agent too)",
+      st == 200 and st2 == 200 and "nothing changed" in out["note"] and "nothing changed" in out2["note"] and list(rec(NEW)["agents"]) == ["work-new-one-main", "work-new-one-second"], (st, out, st2, out2))
 st, out = pa(NEW, "work-new-one-main", "fleet-web", mandate="another mandate")
 check("project-agent: the same name with another mandate is a 409 (retire it or rename it first); the record keeps the old line", st == 409 and rec(NEW)["agents"]["work-new-one-main"]["mandate_line"] == "the main agent", (st, out))
 pverbs.agent_add(NEW, "work-new-one-keeper", True, "listed by a session", by="some-session", io=gio)
@@ -632,12 +640,15 @@ page("projects/nu2.md", "type: project\ntitle: Nu two\norg: home\ndisplay-name: 
 page("projects/nu3.md", "type: project\ntitle: Nu three\norg: home\ndisplay-name: home-nu3\nagents:\n  home-nu3-main: talks to Oliver") # want served
 page("projects/nu4.md", "type: project\ntitle: Nu four\norg: home\ndisplay-name: home-nu4\nagents:\n  home-nu4-main: talks to Oliver") # want open, then retired
 page("projects/nu5.md", "type: project\ntitle: Nu five\norg: home\ndisplay-name: home-nu5\nagents:\n  home-nu5-main: talks to Oliver") # want open, switch off
+page("projects/nu6.md", "type: project\ntitle: Nu six\norg: home\ndisplay-name: home-nu6\nagents:\n  home-nu6-main: talks to Oliver") # want open: the token's machine against the body's
+page("projects/nu7.md", "type: project\ntitle: Nu seven\norg: home\ndisplay-name: home-nu7\nagents:\n  home-nu7-main: talks to Oliver") # no want: a label that is the form's and a bg sender
+page("projects/nu8.md", "type: project\ntitle: Nu eight\norg: home\ndisplay-name: home-nu8\nagents:\n  background:\n    home-nu8-desk: keeps the desk") # no front agent: not eligible, a want written by hand
 p.cmd_registry(quiet=True)
-NU, NU2, NU3, NU4, NU5 = (rec(f"projects/{k}")["id"] for k in ("nu", "nu2", "nu3", "nu4", "nu5"))
+NU, NU2, NU3, NU4, NU5, NU6, NU7, NU8 = (rec(f"projects/{k}")["id"] for k in ("nu", "nu2", "nu3", "nu4", "nu5", "nu6", "nu7", "nu8"))
 _cfg.CFG["background_agent"] = {"enabled": True, "max_open": 10}
 _cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"], "bg_senders": ["fleet-timer"], "bg_machines": ["box-e"]}
-check("background call: the want is recorded for nu, nu3, nu4 and nu5 (not nu2) and wanted() serves them", all(_bgw.want_background(f"projects/{k}", "message") for k in ("nu", "nu3", "nu4", "nu5"))
-      and {r["key"] for r in _bgw.wanted()} >= {"projects/nu", "projects/nu3", "projects/nu4", "projects/nu5"} and _bgw.open_state("projects/nu2") == "none", _bgw.wanted())
+check("background call: the want is recorded for nu, nu3, nu4, nu5 and nu6 (not nu2, not nu7) and wanted() serves them", all(_bgw.want_background(f"projects/{k}", "message") for k in ("nu", "nu3", "nu4", "nu5", "nu6"))
+      and {r["key"] for r in _bgw.wanted()} >= {"projects/nu", "projects/nu3", "projects/nu4", "projects/nu5", "projects/nu6"} and _bgw.open_state("projects/nu2") == "none" and _bgw.open_state("projects/nu7") == "none", _bgw.wanted())
 def bpa(token_machine, project, name, sender="fleet-timer", role="worker", front=False, mandate="a worker for the timer", **kw):
     return _rt_client._client_post(token_machine, "project-agent", {"project": project, "name": name, "role": role, "front": front, "mandate": mandate, "sender": sender, **kw})
 def bg_listed(key): return {n: a for n, a in (pverbs.pr.entries().get(rec(key)["id"], {}).get("agents") or {}).items() if a.get("by")}
@@ -652,8 +663,11 @@ st, out = bpa("box-e", "projects/nu", "home-nu-worker", sender="another-label")
 check("background call: a label that is not in bg_senders, from the allowed machine, is refused as before (403: a name proves nothing)", st == 403 and "name" in out["error"] and not bg_listed("projects/nu"), (st, out))
 st, out = bpa("box-e", "projects/nu", "home-nu-worker", sender="fleet-web")
 check("background call: a form label (form_senders only) from a machine that is not the form's is refused as before (403: a name)", st == 403 and "name" in out["error"] and not bg_listed("projects/nu"), (st, out))
-st, out = bpa("box-c", "projects/nu2", "home-nu2-w", machine="box-e")
-check("background call: a body field `machine` decides nothing (the token's machine does): 403 from box-c though the body says the allowed machine", st == 403 and not bg_listed("projects/nu2"), (st, out))
+st, out = bpa("box-c", "projects/nu", "home-nu-worker", machine="box-e")
+check("background call: a body field `machine` decides nothing (the token's machine does), on a project whose want is open: 403 on the machine rule from box-c though the body names the allowed machine", st == 403 and "bg_machines" in out["error"] and "open want" not in out["error"]
+      and _bgw.open_state("projects/nu") == "open" and not bg_listed("projects/nu"), (st, out))
+st, out = bpa("box-e", "projects/nu6", "home-nu6-worker", machine="box-c")
+check("background call: …and the other way round: the token's machine is allowed, the body names one that is not: 200", st == 200 and bg_listed("projects/nu6")["home-nu6-worker"]["by"] == "fleet-timer", (st, out))
 st, out = bpa("box-e", "projects/nu", "home-nu-main-front", role="main-front", front=True)
 check("background call: a FRONT agent is a 403 (a background agent only), nothing recorded", st == 403 and "background agent only" in out["error"] and texts_ok(out) and not bg_listed("projects/nu"), (st, out))
 st, out = bpa("box-e", "projects/nu", "home-nu-slack", role="slack", front=True)
@@ -695,6 +709,20 @@ check("background call: …the page's own agent is untouched and the want is no 
       and _bgw.open_state("projects/nu") == "has_agent" and "projects/nu" not in {r["key"] for r in _bgw.wanted()}, (rec("projects/nu")["agents"], _bgw.open_state("projects/nu")))
 st, out = bpa("box-e", "projects/nu", "home-nu-second")
 check("background call: a second agent for the same project is a 403 (it has one now); the same call again is a 403 too, nothing changed", st == 403 and "background agent already" in out["error"] and bpa("box-e", "projects/nu", "home-nu-worker")[0] == 403 and set(bg_listed("projects/nu")) == {"home-nu-worker"}, (st, out))
+st, out = bpa("box-e", "projects/nu8", "home-nu8-worker")
+with _bgw._locked(): w_ = _bgw._read(); w_[NU8] = {"key": "projects/nu8", "at": time.time()}; _bgw._write(w_)
+st2, out2 = bpa("box-e", "projects/nu8", "home-nu8-worker")
+check("background call: a listed, unretired, top-level project with no front agent that is a fleet session (nu8 lists a background agent only), even with a want written for it, is not eligible: 403 that says so, nothing recorded",
+      rec("projects/nu8")["listed"] is True and _bgw.open_state("projects/nu8") == "not_eligible" and st == 403 and st2 == 403 and "not a top-level project that lists a front agent" in out2["error"] and texts_ok(out2)
+      and "home-nu8-worker" not in rec("projects/nu8")["agents"] and not bg_listed("projects/nu8"), (st, out, st2, out2, rec("projects/nu8")))
+# a label that is the form's and a bg sender too: the form's rules decide, the bg gate and the want check are not applied (nu7 has no want, the label's machine is the form's and no bg machine)
+CFG_BOTH = _cfg.CFG["project_agent"]
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-both"], "form_machines": ["box-a"], "bg_senders": ["fleet-both"], "bg_machines": ["box-e"]}
+st, out = bpa("box-a", "projects/nu7", "home-nu7-lead", sender="fleet-both", role="lead", front=True)
+st2, out2 = bpa("box-e", "projects/nu7", "home-nu7-desk", sender="fleet-both", role="desk")
+check("background call: a label that is the form's and a bg sender is handled as the form's call from the form's machine: a front agent on a project with no want is a 200 (no bg rule applies); from the bg machine it is not the form's, so the bg rules decide (403, no want)",
+      st == 200 and rec("projects/nu7")["agents"]["home-nu7-lead"]["front"] is True and st2 == 403 and "open want" in out2["error"] and "home-nu7-desk" not in rec("projects/nu7")["agents"], (st, out, st2, out2))
+_cfg.CFG["project_agent"] = CFG_BOTH
 # the config: bg_machines empty or absent falls back to form_machines; a section that is no table, or a value of the wrong type, means nobody
 with _bgw._locked(): w_ = _bgw._read(); w_[NU2] = {"key": "projects/nu2", "at": time.time()}; _bgw._write(w_)
 _cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"], "bg_senders": ["fleet-timer"], "bg_machines": []}
@@ -703,6 +731,15 @@ check("background call: bg_machines empty falls back to form_machines: a machine
 _cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"], "bg_senders": ["fleet-timer"]}
 st, out = bpa("box-e", "projects/nu2", "home-nu2-worker")
 check("background call: …bg_machines absent, the same; the machine that bg_machines named before is no longer allowed", st == 403 and "machine" in out["error"], (st, out))
+for bad_ in (5, {"box-a": 1}, True):
+    _cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"], "bg_senders": ["fleet-timer"], "bg_machines": bad_}
+    st, out = bpa("box-a", "projects/nu2", "home-nu2-worker")
+    check(f"background call: a bg_machines of the wrong type ({bad_!r}) allows no machine, though form_machines would allow it: 403 on the machine rule, nothing listed", st == 403 and "bg_machines" in out["error"] and not bg_listed("projects/nu2")
+          and _psvc._bg_call("box-a", "fleet-timer", False, "")[1][0] == 403, (st, out))
+for ok_ in ("", [], " ", [" "]):
+    _cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"], "bg_senders": ["fleet-timer"], "bg_machines": ok_}
+    check(f"background call: …a bg_machines of the right type that is empty ({ok_!r}) falls back to form_machines", _psvc._bg_call("box-a", "fleet-timer", False, "") == (True, None) and _psvc._bg_call("box-c", "fleet-timer", False, "")[1][0] == 403)
+_cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"], "bg_senders": ["fleet-timer"]}
 check("background call: …and the form's machine is allowed (bg_machines empty), though the label is no form call", _psvc._bg_call("box-a", "fleet-timer", False, "") == (True, None) and _psvc._form_call("box-a", "fleet-timer") is False)
 st, out = bpa("box-a", "projects/nu2", "home-nu2-worker")
 check("background call: …the call lists the agent (200)", st == 200 and bg_listed("projects/nu2")["home-nu2-worker"]["by"] == "fleet-timer", (st, out))
@@ -742,8 +779,8 @@ check("background call: the hidden and retired rules are the form's: agent_calle
 _cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}
 if CFG_BA_BG is None: _cfg.CFG.pop("background_agent", None)
 else: _cfg.CFG["background_agent"] = CFG_BA_BG
-with prj._Locked(): d_ = prj._read(); [d_["pending_agents"].pop(x_, None) for x_ in (NU, NU2, NU3, NU4, NU5)]; prj._write(d_)
-for f_ in ("nu", "nu2", "nu3", "nu4", "nu5"): (T / f"brain/projects/{f_}.md").unlink()
+with prj._Locked(): d_ = prj._read(); [d_["pending_agents"].pop(x_, None) for x_ in (NU, NU2, NU3, NU4, NU5, NU6, NU7, NU8)]; prj._write(d_)
+for f_ in ("nu", "nu2", "nu3", "nu4", "nu5", "nu6", "nu7", "nu8"): (T / f"brain/projects/{f_}.md").unlink()
 (T / "state/background-wanted.json").unlink(missing_ok=True); (T / "state/background-wanted.lock").unlink(missing_ok=True); p.cmd_registry(quiet=True)
 
 with prj._Locked(): d_ = prj._read(); d_["pending_agents"].pop(L, None); d_["pending_agents"].pop(MU, None); d_["pending_agents"].pop(rec("projects/lambda-docs")["id"], None); d_["pending_agents"].get(A, {}).pop("home-sparrow-formcheck", None); prj._write(d_)   # leave the later sections their fixtures
