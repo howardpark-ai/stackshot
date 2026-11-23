@@ -479,6 +479,29 @@ out, err, _ = sel_after(lambda: sub("mod.py", "the tool's description", "the too
 check("a decorated function's docstring is module level (a decorator reads it at import)", out == "all", (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "a static method's docstring", "a static method's new docstring"), "static docstring")
 check("a docstring under a decorator that only wraps (@staticmethod) is the function's own body", out.split() == ["a", "c"], (out, err))
+# a def the change ADDS, called by a module-level assignment of the same change (`SIGV = sigfn()`): the map was measured before the def existed, so nothing says what
+# the call runs at import; every suite that ran the file's module level (a, b, z; c reads it as text) is chosen, which is every suite. A new def that only another
+# function's body calls, or that no statement calls, is read by its readers alone, as any name is: the text reader (c) here, as the map has no suite that ran its caller
+def new_def_at_import():
+    sub("mod.py", "def h():", "def sigfn():\n    return 'sig'\n\n\nSIGV = sigfn()\n\n\ndef h():")
+out, err, _ = sel_after(new_def_at_import, "a new def called at import")
+check("NEWDEF1 a def added together with a module-level assignment that calls it reaches every suite that ran the file's module level (the callee has no measurement)", out == "all", (out, err))
+def new_class_at_import():
+    sub("mod.py", "def h():", "class Fresh:\n    pass\n\n\nFRESH = Fresh()\n\n\ndef h():")
+out, err, _ = sel_after(new_class_at_import, "a new class made at import")
+check("NEWDEF2 a class added together with a module-level assignment that makes an instance of it is the same", out == "all", (out, err))
+def new_def_in_body():
+    sub("mod.py", "def h():", "def sigfn():\n    return 'sig'\n\n\ndef uses_sigfn():\n    return sigfn()\n\n\ndef h():")
+out, err, _ = sel_after(new_def_in_body, "a new def called only inside another new function")
+check("NEWDEF3 a def added and called only from a function body does not widen: the text reader alone (no suite ran the new caller)", out.split() == ["c"], (out, err))
+def old_def_at_import():
+    sub("mod.py", "def h():", "OLDV = f()\n\n\ndef h():")
+out, err, _ = sel_after(old_def_at_import, "a module-level call of a def the map knew")
+check("NEWDEF4 a module-level call of a def that existed at the map's commit is still measured (pure): the suites that read the new name, the text reader alone", out.split() == ["c"], (out, err))
+def new_def_unread():
+    sub("mod.py", "def h():", "def sigfn():\n    return 'sig'\n\n\nLATER = 5\n\n\ndef h():")
+out, err, _ = sel_after(new_def_unread, "a new def no module-level statement reads")
+check("NEWDEF5 a def added next to a module-level constant that does not read it does not widen: the text reader alone", out.split() == ["c"], (out, err))
 # [ahead docstrings c]
 # ---- Docstrings (Wed Nov 11th 2026): the docstring of an undecorated module-level function is not code; deep() is run by b (through g), named by nobody;
 # documented() is never run, and z reads its __doc__; the K.s case above and the decorated one are the rule's other side
