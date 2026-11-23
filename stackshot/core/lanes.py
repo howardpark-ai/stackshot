@@ -31,6 +31,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from stackshot.core import agentbox as _ab
+
 ENV = "STACKSHOT_LANE_NAMES"
 DEFAULT_PATH = "~/.local/state/salamander/lane-names.json"
 DEFAULT_CODE = "subscription-1"        # the lane a pane is on when the lane record has neither a row for it nor a default: the tool's own fallback, by code
@@ -46,7 +48,7 @@ _said: set[tuple[str, str]] = set()     # (path, reason) of the lines already lo
 def path() -> Path:
     """The lane-names file: STACKSHOT_LANE_NAMES when set and not empty, else the tool's own location. Read at each call (the environment is live)."""
     v = (os.environ.get(ENV) or "").strip()
-    return Path(os.path.expanduser(v or DEFAULT_PATH))
+    return _ab.mirror_file(Path(os.path.expanduser(v or DEFAULT_PATH)), keep=True)      # with [agents_box] ssh set: the local copy of the agents' box's file (core/agentbox.py)
 
 
 def _say(p: Path, reason: str, skipped: bool = False) -> None:

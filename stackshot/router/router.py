@@ -73,6 +73,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Callable
 
+from stackshot.core import agentbox as _ab
 from stackshot.core import config as _cfg
 from stackshot.core.lines import newline_lines
 from stackshot.router import routing as _routing
@@ -1208,7 +1209,8 @@ def run_call(message: str, system: str | None = None, model_name: str | None = N
     limit = timeout_s() if timeout is None else max(1.0, float(timeout))
     try:
         with tempfile.TemporaryDirectory(prefix=_cfg.ROUTER_CWD_PREFIX) as cwd:
-            p = subprocess.Popen(build_argv(system, model_name, lane), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd,
+            # [agents_box] ssh set: the same call runs on that box, in an empty temporary directory made there (the prefix the puller knows a router call by) and ended there at the limit
+            p = subprocess.Popen(_ab.argv(build_argv(system, model_name, lane), scratch=_cfg.ROUTER_CWD_PREFIX, remote_timeout=limit + 5), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd,
                                  start_new_session=True)
             try:
                 stdout, stderr = p.communicate(message, timeout=limit)
@@ -1237,7 +1239,9 @@ def run_call(message: str, system: str | None = None, model_name: str | None = N
         out["cost_usd"] = d.get("total_cost_usd") if isinstance(d.get("total_cost_usd"), (int, float)) else None
         out["api_ms"] = d.get("duration_api_ms") if isinstance(d.get("duration_api_ms"), (int, float)) else None
         out["turns"] = d.get("num_turns") if isinstance(d.get("num_turns"), (int, float)) else None
-    if p.returncode != 0:
+    if (why := _ab.unreachable(p.returncode, stderr)):
+        out.update(status="spawn", note=_clean(why, 160))         # ssh could not reach the agents' box: the call never ran (logged); the callers retry or fall back as for any call that could not start
+    elif p.returncode != 0:
         out.update(status="exit", note=_clean(out["text"] or stderr or stdout, 160))
     elif not isinstance(d, dict):
         out.update(status="badjson", note=_clean(stdout or stderr, 160))

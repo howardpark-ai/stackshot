@@ -30,6 +30,7 @@ import tempfile
 import time
 from typing import Any
 
+from stackshot.core import agentbox as _ab  # noqa: E402  (the agents' box over ssh, when [agents_box] ssh names one)
 from stackshot.core import config as _cfg  # noqa: E402  (stackshot.toml; next to this module)
 from stackshot.core import filecache as _fc  # noqa: E402  (a file's stamp, and its parse kept while the file is as it was)
 from stackshot.core import passmemo as _pm  # noqa: E402  (what one pass works out once)
@@ -473,18 +474,20 @@ _ROLE_RANK = {"front": 0, "back": 1, NAME_ROLE: 2}
 SALA_TIMEOUT = 4.0      # s: how long one read of `sala sessions --json` may take; a slower or failing read leaves the roles without the `live` field
 
 
-def sala_rows(timeout: float = SALA_TIMEOUT) -> list[dict[str, Any]] | None:
+def sala_rows(timeout: float | None = None) -> list[dict[str, Any]] | None:
     """The rows of `sala sessions --json` (the live sessions; its --all adds the retired ones), or None when sala cannot be read: no fleet store configured
     ([client] session_links empty: an instance with no sala fleet, and every test), no `sala` on PATH (STACKSHOT_SALA names another executable), a read over
-    `timeout`, a non-zero exit or output that is not the sessions list. Never raises. The read runs in its own process group with its output in a temp file,
+    `timeout`, a non-zero exit or output that is not the sessions list. Never raises. With [agents_box] ssh set the same command runs on that box over ssh (core/agentbox.py; an ssh that cannot reach it is a non-zero exit, and logged). The read runs in its own process group with its output in a temp file,
     so a timeout kills sala and everything it started, and a child that kept the output open cannot hold the read past `timeout`. A caller that needs the
-    names, the aliases and the renames reads sala once here and derives each from the rows (live_of, renames_of)."""
+    names, the aliases and the renames reads sala once here and derives each from the rows (live_of, renames_of). `timeout` None: SALA_TIMEOUT, or with [agents_box] ssh set that setting's `timeout` (the
+    ssh handshake and the command, which the short local limit would cut)."""
     try:
-        if _sr._dir() is None:
+        timeout = float(timeout) if timeout is not None else (_ab.call_limit() if _ab.enabled() else SALA_TIMEOUT)
+        if _sr._dir() is None or _ab.down():      # (down: the agents' box did not answer a moment ago; the roles go without `live` rather than wait for it again)
             return None
-        exe = os.environ.get("STACKSHOT_SALA") or shutil.which("sala") or os.path.expanduser("~/.local/bin/sala")
+        exe = os.environ.get("STACKSHOT_SALA") or ("sala" if _ab.enabled() else shutil.which("sala") or os.path.expanduser("~/.local/bin/sala"))    # with [agents_box] ssh set, sala is looked for on that box's PATH
         with tempfile.TemporaryFile() as out:
-            p = subprocess.Popen([exe, "sessions", "--json"], stdout=out, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True)
+            p = subprocess.Popen(_ab.argv([exe, "sessions", "--json"], remote_timeout=timeout), stdout=out, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True)
             try:
                 p.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -493,9 +496,12 @@ def sala_rows(timeout: float = SALA_TIMEOUT) -> list[dict[str, Any]] | None:
                 except OSError:
                     p.kill()
                 p.wait()
+                _ab.failed("sala sessions --json", f"no answer within {timeout:g} s")
                 return None
             if p.returncode != 0:
+                _ab.unreachable(p.returncode)
                 return None
+            _ab.answered()
             out.seek(0)
             rows = json.loads(out.read().decode("utf-8")).get("sessions")
         return [x for x in rows if isinstance(x, dict)] if isinstance(rows, list) else None
@@ -514,7 +520,7 @@ def sessions_of(rows: list[dict[str, Any]]) -> tuple[set[str], set[str]]:
     return names, aliases
 
 
-def sala_sessions(timeout: float = SALA_TIMEOUT) -> tuple[set[str], set[str]] | None:
+def sala_sessions(timeout: float | None = None) -> tuple[set[str], set[str]] | None:
     """The sessions sala lists now (`sala sessions --json`, which lists the live ones; its --all adds the retired rows) as (their names, their aliases), two sets (an alias is the name a live
     session had before a rename; a roles.json key is often one), or None when sala cannot be read (sala_rows has the cases). Never raises. One call reads sala once; a roles build calls it once
     and hands the set to session_roles / file_roles."""
@@ -522,7 +528,7 @@ def sala_sessions(timeout: float = SALA_TIMEOUT) -> tuple[set[str], set[str]] | 
     return None if rows is None else sessions_of(rows)
 
 
-def sala_live(timeout: float = SALA_TIMEOUT) -> set[str] | None:
+def sala_live(timeout: float | None = None) -> set[str] | None:
     """The names of the sessions sala lists now and every alias of them, as one set (a roles.json key is often an alias of a live session), or None when sala cannot be read (sala_sessions has the
     cases). The caller reads sala once per build and hands the set to session_roles / file_roles."""
     got = sala_sessions(timeout)

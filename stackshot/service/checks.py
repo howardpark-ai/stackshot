@@ -22,6 +22,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
+from stackshot.core import agentbox as _ab
 from stackshot.core import config as _cfg
 from stackshot.core import ghbudget as _gb
 from stackshot.core import lanes as _lanes
@@ -203,7 +204,7 @@ def lanes_file() -> Path | None:
     """[client] lanes_file, read at use (a reload is live): the fleet tool's lane record, one row per session, `<session>\\t<lane>`;
     None when unset or empty (no lane data: the lane check is off)."""
     v = str(_cfg.get("client", "lanes_file") or "").strip()
-    return Path(os.path.expanduser(v)) if v else None
+    return _ab.mirror_file(Path(os.path.expanduser(v)), "lane-default") if v else None      # with [agents_box] ssh set: the copy of the record and its default, not kept: past stale_seconds of a silent box it is dropped (core/agentbox.py)
 
 
 def lane_record(pane: str) -> tuple[str, str]:
@@ -216,7 +217,7 @@ def lane_record(pane: str) -> tuple[str, str]:
     try:
         rows = p.read_text(encoding="utf-8").splitlines()
     except OSError as e:
-        return "", f"lane data not readable: {p} ({e.strerror or e})"
+        return "", f"lane data not readable: {p} ({e.strerror or e})" + ("; with the agents box set, the copy of the record is dropped when the box has not answered for stale_seconds, so the lane cannot be checked now" if _ab.enabled() else "")
     rec = ""
     for ln in rows:
         parts = ln.rstrip("\r").split("\t")

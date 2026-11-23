@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 import functools
+import inspect
 import json
 import re
 import sys
@@ -28,6 +29,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot.anchors import anchor_scope as _ascope
 from stackshot.anchors import anchors as _anc
+from stackshot.core import agentbox as _ab
 from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
@@ -1506,6 +1508,26 @@ def _handover_by_hand(gid: str, done: list[str]) -> str:
             else f"\n(the next step is {to}'s, but {to} cannot take the item now ({_clip_line(ho['why'], 80)}): it stays with you)")
 
 
+def said_preread(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+    """With [agents_box] ssh set, the lookups of the write's `said` that go over ssh (the copy of the session registry, the transcripts on the agents' box) are made here, BEFORE the item lock, and
+    kept in the write's lookaside (`agentbox.lookaside`): under the lock nothing is sent to the box, because a slow or silent box would hold up every write of every item. The gate is run dry
+    (no fix noted, the result thrown away, any refusal left for the real run under the lock to raise again from the same answers), with the session it will be given there: the sender, else the
+    item's owner, else its mover. Nothing without that setting or without a `said`."""
+    if not _ab.enabled():
+        return
+    try:
+        got = inspect.signature(update_unlocked).bind_partial(*args, **kwargs).arguments
+        said = got.get("said")
+        if said is None or said == [] or (isinstance(said, str) and not said.strip()):
+            return
+        sess = str(got.get("sender") or "").strip()
+        if not sess:
+            sess = str(got.get("owner") or "").strip() or _telling.holder(_load(_norm_id(str(got.get("item_id") or ""), bare=_bare_id_ok(str(got.get("status") or "")))))
+        _gates.gate_said(said, sess, "", dry=True)
+    except Exception:  # noqa: BLE001  — a lookup that failed is the write's own refusal, raised under the lock from the same (missing) answers
+        pass
+
+
 def update_item(*args: Any, **kwargs: Any) -> str:
     """update_unlocked under the item lock (a failed delivery's record writes items from another thread; an
     update reads, changes and saves, so they take turns). The one entry of the update write: the update and complete tools, and every write of an item that the server makes (a wake, a cold call, a script's row)
@@ -1514,14 +1536,16 @@ def update_item(*args: Any, **kwargs: Any) -> str:
     h.evwait_preread(kwargs.get("wait_kind"), kwargs.get("wait_event"))      # an event wait's facts (GitHub, git) are read before the lock, not under it
     for phrase_ in _wlw.event_phrases(kwargs.get("waits")):      # …and those of every event line of a list
         h.evwait_preread("event", phrase_)
-    with _writes.ITEM_LOCK:
-        try:
+    with _ab.lookaside():
+        said_preread(args, kwargs)          # …and the said gate's lookups on the agents' box: no ssh is made while the item lock is held (core/agentbox.py)
+        with _writes.ITEM_LOCK:
             try:
-                return update_unlocked(*args, **kwargs)
-            except _gates.HisStepRefusal as e:      # his step left first in next under an agent's state: the write itself may say what became of it (step_settle.py)
-                return _settle.run(e, args, kwargs, update_unlocked)
-        finally:
-            _telling.CLOSE_WAS.item = None
+                try:
+                    return update_unlocked(*args, **kwargs)
+                except _gates.HisStepRefusal as e:      # his step left first in next under an agent's state: the write itself may say what became of it (step_settle.py)
+                    return _settle.run(e, args, kwargs, update_unlocked)
+            finally:
+                _telling.CLOSE_WAS.item = None
 
 
 @functools.wraps(update_unlocked)      # the tool's own signature stays visible to anything that reads it

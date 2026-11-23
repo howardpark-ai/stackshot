@@ -69,6 +69,11 @@ def _held() -> list[str]:
     return _HELD.__dict__.setdefault("names", [])
 
 
+def holds(name: str) -> bool:
+    """Does the calling thread hold the XLock named `name` now? (a code that must not start a slow call under a lock asks; nothing is taken)."""
+    return name in _held()
+
+
 def enabled() -> bool:
     """[locks] cross_process, read at each first hold (the key is restart-only, so it stays as the process started with it): False only when it is set to false.
     The read-only standby never takes the flock either: it writes nothing, and its backstop refuses a lock file's creation."""

@@ -27,6 +27,7 @@ from typing import Any
 from fastmcp.exceptions import ToolError
 
 from stackshot.anchors import anchors as _anc
+from stackshot.core import agentbox as _ab
 from stackshot.core import config as _cfg
 from stackshot.core import interp as _interp
 from stackshot.core.instance import NAME, OWNER
@@ -170,6 +171,18 @@ REPORT_ITEMS_MAX = 3        # a report that names more items than this is delive
 
 
 ANSWERED_DAYS = 7         # a router notice written onto its items is remembered this long, so a ruling that failed to write and is retried does not write the History line twice
+
+
+def _transcript_here(to: str) -> bool:
+    """Has a session of this transcript id ever run on the box the agents run on (a file <claude config>/projects/*/<id>.jsonl)? With [agents_box] ssh set, that box is asked; a box that does not answer
+    is not a reason to refuse a message, so it reads as yes (and is logged)."""
+    if _ab.enabled():
+        import glob as _glob  # noqa: PLC0415
+        try:
+            return bool(_ab.glob(f"~/.claude/projects/*/{_glob.escape(to)}.jsonl"))
+        except _ab.BoxError:
+            return True
+    return any(Path.home().joinpath(".claude", "projects").glob(f"*/{to}.jsonl"))
 
 
 def _answered_dir() -> Path:
@@ -613,7 +626,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                 raise
             except Exception as e:  # noqa: BLE001  — the check is an extra: a failure in it delivers or queues as before
                 print(f"message: dead-recipient check failed for {to!r}, sending as before: {e!r}", file=sys.stderr, flush=True)
-        if not rec and not any(Path.home().joinpath(".claude", "projects").glob(f"*/{to}.jsonl")):
+        if not rec and not _transcript_here(to):
             # an id no machine reports and no pane here ever had is refused: a queue "until the session comes back" would never end
             # for a claude.ai chat id
             raise ToolError(f"Refused: {to!r} is not a session stackshot can deliver to — no pane with this transcript id is in any machine's heartbeat, and none "

@@ -27,10 +27,12 @@ from typing import Any, Callable
 from fastmcp.exceptions import ToolError
 
 from stackshot.anchors import anchors as _anc
+from stackshot.core import agentbox as _ab
 from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
 from stackshot.core import store as _store
 from stackshot.core.instance import OWNER
+from stackshot.fleet import clients as _clients
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
@@ -1482,6 +1484,13 @@ def _said_roots() -> tuple[str, ...]:
     return _said.roots_of(_cfg.get("said", "transcripts"))
 
 
+def _box_refusal(who: str, sess: str, e: Exception) -> ToolError:
+    """The refusal of a `said` entry whose transcript is on the box the agents run on ([agents_box] ssh) and that box did not answer. A session with no transcript there is stored unchecked, as before; a box that
+    could not be asked is not "no transcript": the write is refused, with the reason, rather than stored unchecked without a word. The reason is logged by core/agentbox.py as well."""
+    return ToolError(f"Refused: {who}: the transcript of {_session_label(sess) or sess or 'the sender'} could not be read from the box the sessions run on ({e}); the entry is not stored unchecked in its place. "
+                     f"Send the same call again in a minute; if it keeps failing, {OWNER} needs to know that box is not reachable.")
+
+
 def _said_verify(sess: str, spec: dict[str, str], root: Any, prefixes: Any, phrases: Any, marker: str = "") -> tuple[str, dict[str, Any]]:
     """Check one said entry against the transcript of the session it names → (the transcript id to store, said.verify's result). A permanent id
     (what _session_id gives once the registry knows the session) has no transcript of its own, so the candidates are: the session as given
@@ -1491,31 +1500,43 @@ def _said_verify(sess: str, spec: dict[str, str], root: Any, prefixes: Any, phra
     fn = _said.verify_acted if spec.get("kind") == _said.ACTED else _said.verify
     sid, cands = _said_candidates(sess)
     for c in cands:
-        if _said.find_transcript(c, root) is not None:
+        if _said.locate(c, root) is not None:
             return c, fn(c, spec["msg"], spec["quote"], root, prefixes, phrases, marker)
+    _clients.require_links_copy(answering=True)       # [agents_box] ssh set and no transcript found: only a box that answers now makes that "no transcript"; a silent box (a copy that may lack the session) is a refusal, not an unchecked entry
     keep = next((c for c in cands if not _sr.is_perm_id(c)), sid)       # nothing readable on this box: stored unchecked under a transcript id, not the permanent id
     return keep, fn(keep, spec["msg"], spec["quote"], root, prefixes, phrases, marker)
 
 
 def _said_candidates(sess: str) -> tuple[str, list[str]]:
     """The session's id and the transcript ids its `said` is looked for under, in order (see _said_verify)."""
+    _clients.require_links_copy()                     # [agents_box] ssh set: a name is resolved from the box's registry, and a copy that is missing or a day old is no ground for storing a quote unchecked: BoxError, the caller refuses
     h = _hooks()
     sid = h.session_id(sess)                          # a pane name → its transcript uuid (old rule) or its permanent id (registry); ids pass through
     given = str(sess or "").strip().lower()
     return sid, [c for c in dict.fromkeys([given if _said.is_uuid(given) else "", *reversed(_sr.transcripts(sid)), sid]) if c]
 
 
-def _said_plain(quote: str, sess: str, root: Any, prefixes: Any, phrases: Any, marker: str) -> list[dict[str, str]]:
+def _said_plain(quote: str, sess: str, root: Any, prefixes: Any, phrases: Any, marker: str, dry: bool = False) -> list[dict[str, str]]:
     """A `said` sent as plain text → the one entry it stands for, an Acked-by with that quote, and his message found in the sender's transcript by its words (the latest of his own typed messages that holds
     them; the same transcript lookup as the structured form, then the same check). A transcript this box cannot read leaves the entry unchecked, as the structured form does. A readable transcript with no
     message of his that holds the text is refused: the words are not his."""
-    sid, cands = _said_candidates(sess)
+    try:
+        sid, cands = _said_candidates(sess)
+    except _ab.BoxError as e:
+        raise _box_refusal("said", sess, e) from e
     msg = ""
+    seen = False
     for c in cands:
-        path = _said.find_transcript(c, root)
+        try:
+            path = _said.locate(c, root)
+        except _ab.BoxError as e:
+            raise _box_refusal("said", sess, e) from e
         if path is not None:
+            seen = True
             try:
                 msg = _said.find_by_quote(path, quote, prefixes, phrases, marker)
+            except _ab.BoxError as e:
+                raise _box_refusal("said", sess, e) from e
             except OSError:
                 msg = ""
                 break               # a transcript that cannot be read: unchecked, like any other
@@ -1523,26 +1544,33 @@ def _said_plain(quote: str, sess: str, root: Any, prefixes: Any, phrases: Any, m
                 raise ToolError(f"Refused: said: no message of {OWNER}'s own in the transcript of {_session_label(c) or sess or 'the sender'} holds that text (whitespace aside); "
                                 f"cut his sentences verbatim, or pass said as a list of objects, {_said.FORM}")
             break
-    _calls.fixed("said-text", f"said was sent as text, so it is recorded as {OWNER}'s Acked-by with that quote"
-                 + (f", found in his message {msg[:8]} of the sender's session" if msg else " (no transcript of the sender's session can be read here, so it is stored unchecked)")
-                 + "; to record another tag or a message that is not the latest holding those words, pass said as a list of objects")
+    if not seen:
+        try:
+            _clients.require_links_copy(answering=True)       # no transcript found: unchecked only when the box answers now (see _said_verify)
+        except _ab.BoxError as e:
+            raise _box_refusal("said", sess, e) from e
+    if not dry:
+        _calls.fixed("said-text", f"said was sent as text, so it is recorded as {OWNER}'s Acked-by with that quote"
+                     + (f", found in his message {msg[:8]} of the sender's session" if msg else " (no transcript of the sender's session can be read here, so it is stored unchecked)")
+                     + "; to record another tag or a message that is not the latest holding those words, pass said as a list of objects")
     return [{"tag": "Acked-by", "quote": quote, "msg": msg, "session": "", "kind": _said.WORDS}]
 
 
-def gate_said(said: Any, default_session: str, by: str) -> list[dict[str, Any]]:
+def gate_said(said: Any, default_session: str, by: str, dry: bool = False) -> list[dict[str, Any]]:
     """The `said` argument of a create, update or complete → the entries to append to metadata.said, each checked against the
     transcript of the session it names (said.verify): {tag, quote, session (resolved to its transcript uuid the way an owner is),
     msg, ts (the message's clock), checked, prompt_source (for the record only), by (the sender)}. A readable transcript that
     fails the check refuses the whole write, naming the entry and the test; an unreadable one (a cloud session, another
     machine, a name no live pane carries) stores the entry unchecked. [] when nothing was passed. An entry of kind acted (proof he did his steps:
-    a queued_command attachment entry of human origin) is stored with tag Done-by and kind acted; it never counts as his words or his decision."""
+    a queued_command attachment entry of human origin) is stored with tag Done-by and kind acted; it never counts as his words or his decision.
+    `dry`: only the lookups (the registry copy, the transcripts on the agents' box) are made, for `update.said_preread` to run before the item lock; the fixes are not noted and the result is thrown away."""
     if said is None or said == [] or (isinstance(said, str) and not said.strip()):
         return []
     root = _said_roots()
     prefixes, phrases = _said.prefixes_of(_cfg.get("said", "injected_prefixes")), _said.phrases_of(_cfg.get("said", "injected_phrases"))   # stopgaps for messages before the marker
     marker = str(_cfg.get("said", "injected_marker") or "")                   # what the fleet tool puts at the start of text it types; "" = none
     if quote := _said.plain_quote(said):      # text, not the structured form: his words as an Acked-by, his message found by them (the server takes the fix and says so)
-        specs = _said_plain(quote, default_session, root, prefixes, phrases, marker)
+        specs = _said_plain(quote, default_session, root, prefixes, phrases, marker, dry)
     else:
         try:
             specs = _said.parse(said)
@@ -1551,7 +1579,10 @@ def gate_said(said: Any, default_session: str, by: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for i, s in enumerate(specs):
         sess = s["session"] or default_session
-        sid, r = _said_verify(sess, s, root, prefixes, phrases, marker)   # the transcript it was checked against (never the permanent session id: that has no jsonl)
+        try:
+            sid, r = _said_verify(sess, s, root, prefixes, phrases, marker)   # the transcript it was checked against (never the permanent session id: that has no jsonl)
+        except _ab.BoxError as e:
+            raise _box_refusal(f"said[{i}] ({s['tag']})", sess, e) from e
         who = f"said[{i}] ({s['tag']})"
         label = _session_label(sid) or sess or "the sender"
         if r["code"] == "missing":
