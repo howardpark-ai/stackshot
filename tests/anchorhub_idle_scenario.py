@@ -63,7 +63,7 @@ def one_pass():
 
 def new_hub(bound, saved_state, saved_ci):
     h = core.Hub(); h.write_status = lambda: None; h.emit = lambda ev: None; h.bindings = {a: {"s"} for a in bound}
-    h.saved = {"github": {"me": "oliver", "state": saved_state, "ci": saved_ci}}
+    h.saved = {"github": {"me": "oliver", "state": saved_state, "ci": saved_ci, "looked": {k: 1.0 for k in saved_state}}}      # every saved anchor was read before (an anchor not in `looked` is a catch-up's, read in full whatever its state)
     caught.clear(); ghr.run(h); return h
 
 CLOSED = {"state": "closed", "comments": 0, "updated": "2026-10-28T00:00:00Z", "pr": True, "merged": True}
