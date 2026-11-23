@@ -292,7 +292,7 @@ def loop_pass(*, now: float | None = None, items: dict[str, dict[str, Any]] | No
     kept_fps = {str(f.get("detail") or "").split(":", 1)[0] for f in findings}
     new_rings = [lp for lp in found if f"loop {lp.fingerprint}" in kept_fps and f"loop {lp.fingerprint}" not in old_fps]      # a ring is found when its first finding is on the record (a ring the cap held back is found by the pass that records it)
     res["found"] = len(new_rings)
-    sent, reached, sending_from = _ar.deliver_findings(env, fresh, f"Wait loop check {_ar._stamp(now)}") if fresh else ([], [], env.clock())
+    sent, reached, sending_from = _ar.deliver_findings(env, fresh, f"Wait loop check {_ar._stamp(now)}", full) if fresh else ([], [], env.clock())
     end = max(env.clock(), now)
     sending_from = max(sending_from, now)
     for f in reached:

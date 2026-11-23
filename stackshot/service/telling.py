@@ -7,7 +7,7 @@ for its pane and it touched the item), holds a notice that asks nothing of a bac
 Notices of stackshot's own that ask a front agent nothing never start its turn. Through the gate as an fyi line or a board line: the stall summaries to -main (tag `stall_summary`), the anchors notice of a completed
 item, a script's fyi (the audit's run summary, the server's parked-wait and moved-step lines), a peer's fyi, a machine's check-in told to a front agent for an item that is waiting (on a wake, another item or an outside party:
 `event_waits.machine_anchor_poll` sends it as a `progress` notice, one for each item) and a wake that only leaves a front agent's item in its place in the queue (`wakes._front_queue_row`, held kind `queue`). What asks stays a turn:
-the audit's findings, the page-agent and registry lines, a wake that puts an item back in its lane, "is yours now", a machine's check-in for an item that is its mover's to do now, a stall or balance notice.
+the audit's findings on an item that waits on him (a decision, a step of his; one on an item that waits on nothing of his goes as an fyi), the page-agent and registry lines, a wake that puts an item back in its lane, "is yours now", a machine's check-in for an item that is its mover's to do now, a stall or balance notice.
 They moved out of server.py as they were: the same texts, the same sessions told, the same order of events. A name that service/create.py, service/update.py, service/gates.py or server.py calls on this module has lost
 its leading underscore (`_tell_woken` is `tell_woken`); the helpers beside it keep theirs.
 
@@ -1701,6 +1701,7 @@ def tell_woken(gid: str, owner: str, note: str, tag: str = "wake", result: "dict
         return None
     if front_gate(gid, owner, note, tag, getattr(FRONT_HINT, "kind", "")):
         return None
+    kind = getattr(FRONT_HINT, "kind", "") or FRONT_TAG_KIND.get(tag, "progress")      # the gate's own kind, read here: the push thread below has no hint of its own
     try:
         told = getattr(HO_STATE, "told", None)      # step 2: what this write has told, so its hand-off notice does not double it
         if told is not None:
@@ -1710,7 +1711,7 @@ def tell_woken(gid: str, owner: str, note: str, tag: str = "wake", result: "dict
     def run() -> None:
         try:
             r = subprocess.run([*_interp.resilient(PUSH), "--from", NAME, owner, note], capture_output=True, text=True, timeout=110,
-                               env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg"})
+                               env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg", "ANCHOR_PUSH_KIND": kind})      # push.py stores the kind on the queued line: the "N queued while you were away" digest never files an exempt one
             out = (r.stdout.strip().splitlines() or [""])[-1]
             err = (r.stderr.strip().splitlines() or [""])[-1]
             if result is not None:

@@ -463,6 +463,40 @@ def _turn_warranted(name: str, text: str) -> bool:
         return False
 
 
+def digest_fyi(agent: str, lines: list[str], kinds: list[str] | None = None) -> list[int]:
+    """The ruling on a digest, the lines queued for a pane that was away ("N queued while you were away", inbox.take and push.flush): a front agent's turn starts only for what is the person's, so the digest is a turn when
+    a line carries his mark (the held rule's own test, `[for <owner>]` or needs: decision) and he is talking with that agent now, or when he asked it to tell him about an item a line names (front_turn.warranted, the test a
+    marked message passes). Otherwise the lines are filed as fyi lines (telling.front_fyi: held for the agent's next turn, the board line written on the items they name).
+    `kinds[i]` is the kind of line i (inbox.kind_of: the front gate's kind stored with the line, "exempt" for the shape of a hand-off, wake or stall notice). A line of an exempt kind (telling.FRONT_TAG_KIND: a hand-off, a
+    wake, a relayed board answer, a stall, a comment, a notice that asks its mover to act) is never filed, with or without his mark: the digest is a turn, as the gate's own rule has it ("held, the item would sit unmoved").
+    DESIGN CHOICE (decided, not a gap): a line carrying his mark that is filed because he is not at the pane (after a recycle the presence stamp is gone) rides his next prompt and starts no turn; that is intended.
+    Note: `held.add` cuts a filed line to held.LINE_MAX (260) characters, so a long filed line keeps its full text only in messages.jsonl.
+    → the positions of the lines filed, in order: all of them, or the prefix before the first line that could not be filed (that line and the ones after it are handed out as a turn, the filed ones never again: no line is
+    delivered twice and none is lost). [] for anything else, which hands the digest out as before: an agent that is no front agent, a hook that cannot fetch held lines (nothing would carry the lines), a digest with an exempt
+    line, a first line that could not be filed, any failure."""
+    try:
+        if not agent or not _telling.front_sender(agent) or not _held.enabled() or not _held.can_fetch(agent):
+            return []
+        ks = list(kinds or [])
+        if any(_telling.FRONT_TAG_KIND.get(k, k) == "exempt" for k in ks):
+            return []
+        text = "\n".join(lines)
+        if _front_turn.warranted(agent, _agent_names._item_refs(text), bool(_held._owner_mark().search(text))):
+            return []
+        filed: list[int] = []
+        for i, ln in enumerate(lines):
+            try:
+                ok = _telling.front_fyi(agent, ln, ",".join(_agent_names._item_refs(ln))) == ("fyi", "")
+            except Exception:  # noqa: BLE001  — a line that could not be filed ends the filing: the rest goes out as a turn
+                ok = False
+            if not ok:
+                break
+            filed.append(i)
+        return filed
+    except Exception:  # noqa: BLE001  — an extra: a failure in it hands the digest out as it always was
+        return []
+
+
 def _cut_note(line: str, routed: bool = False, script: bool = False) -> str:
     """The sentence a reply adds when a held line is shorter than the message: a held line holds `held.LINE_MAX` characters, and the sender's reply must not promise the whole text.
     `routed`: the message goes to a project, so the line is held only if the router passes it on as an fyi (it may deliver it whole instead). `script`: the sender is a script, which has no item tools: it is told of a page."""

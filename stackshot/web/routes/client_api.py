@@ -348,7 +348,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
                 return 400, {"error": str(e)}
         else:
             _clients.seen(machine, uuid)
-        return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")})}
+        return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")}, digest=_messaging.digest_fyi, on_filed=_handoff.handoff_acked)}
     return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
 
 
@@ -389,7 +389,7 @@ async def client_write(request: Request):
         deadline = time.time() + wait
         try:
             while True:
-                deliveries = await run_in_threadpool(lambda: _inbox.take(live, rank=rank)) if live else []
+                deliveries = await run_in_threadpool(lambda: _inbox.take(live, rank=rank, digest=_messaging.digest_fyi, on_filed=_handoff.handoff_acked)) if live else []
                 if deliveries or time.time() >= deadline:
                     break
                 await asyncio.sleep(1.0)

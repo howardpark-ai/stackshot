@@ -3,7 +3,7 @@
 The server box reaches into no other machine (since an earlier change this is the one path there; the ssh delivery is gone): push.py puts
 the line here, and the machine's puller (puller.py) asks for what is waiting for the sessions live on it, hands each line to
 the CLI's own inbox, and confirms. One file per item, <state>/inbox/<source>/<id>.json:
-    {id, ts, src: hub|msg, to: <as addressed: a transcript uuid or a pane name>, uuid, name, pid, text}
+    {id, ts, src: hub|msg, to: <as addressed: a transcript uuid or a pane name>, uuid, name, pid, text[, from][, kind]}
 `pid` is the PERMANENT session id the line is for (sessions_registry.py), resolved when the line is put (code finds a
 session by its permanent id, names are for people): from a name, an alias, a transcript id or the permanent id itself, of a live registry session. A poll offers
 the line to whichever live transcript carries that id (`_carriers`), so a relaunch with a new transcript, a rename or the CLI's placeholder name cannot strand it;
@@ -135,9 +135,33 @@ def _live_pid(ref: str) -> str:
     return str(r["id"]) if r and r.get("state") == "live" else ""
 
 
-def put(to: str, text: str, src: str = "hub", now: float | None = None, sender: str = "") -> str:
+_KIND = re.compile(r"^[a-z][a-z_-]{0,19}$")
+
+
+def clean_kind(kind: Any) -> str:
+    """A line's kind as stored: the front gate's own word for the notice (telling.FRONT_TAG_KIND: exempt, close, progress, stuck, message), lower-case letters only; anything else is "" (no kind)."""
+    k = str(kind or "").strip().lower()
+    return k if _KIND.match(k) else ""
+
+
+def kind_of(row: dict[str, Any]) -> str:
+    """The kind of a queued line (an inbox line or a row of push.py's queue): the `kind` its sender stored (put, `enqueue`), else "exempt" for a line whose text has the shape of an automatic notice that asks its recipient
+    to act (stale_notice.classify: a stall, a wake, a hand-off), else "" (unknown: a line a script or a session wrote, or one stored before the kind was). A caller that gets "exempt" must hand the line out as a turn."""
+    k = clean_kind(row.get("kind"))
+    return k or ("exempt" if stale_kind(row.get("text")) else "")
+
+
+def stale_kind(text: Any) -> str:
+    """The shape of an automatic notice that asks its recipient to act (stale_notice.classify), "" for any other line."""
+    try:
+        return _stale.classify(text)[0]
+    except Exception:  # noqa: BLE001  — an unreadable line has no shape
+        return ""
+
+
+def put(to: str, text: str, src: str = "hub", now: float | None = None, sender: str = "", kind: str = "") -> str:
     """One line for a session → its id. `to` = a transcript uuid, a pane name or a permanent session id, as the caller addressed it; `sender` goes out
-    as the line's `from:`. The permanent id the reference resolves to is stored on the line (`pid`) and is what a poll matches by."""
+    as the line's `from:`; `kind` (clean_kind) is stored with the line when given, so the digest can tell a notice that asks its recipient to act from one that does not. The permanent id the reference resolves to is stored on the line (`pid`) and is what a poll matches by."""
     src = "msg" if src == "msg" else "hub"
     ref = str(to).strip()
     pid = _live_pid(ref)                  # from what the caller wrote, before it is turned into an address: a permanent id, a transcript id or a name all end here
@@ -150,6 +174,8 @@ def put(to: str, text: str, src: str = "hub", now: float | None = None, sender: 
         name = _sr.display_name(pid) or name            # the name is for people: the session's name now
     iid = f"{int((time.time() if now is None else now) * 1000):013d}-{secrets.token_hex(3)}"
     it = {"id": iid, "ts": time.time() if now is None else now, "src": src, "to": to, "uuid": uuid, "name": name, "pid": pid, "text": text, "from": sender}
+    if clean_kind(kind):
+        it["kind"] = clean_kind(kind)
     with _locked():
         d = DIR / src; d.mkdir(parents=True, exist_ok=True)
         tmp = d / f".{iid}.tmp"
@@ -304,12 +330,35 @@ def _target(it: dict[str, Any], live: dict[str, str], known: set[str], rank: dic
     return by_name[0] if uuid not in known else ""          # addressed by id: only when that session exists nowhere any more
 
 
+Digest = Callable[[str, list[str], list[str]], "list[int] | bool"]
+Filed = Callable[[list[dict[str, Any]]], None]
+
+
+def filed_as_fyi(digest: Digest | None, name: str, lines: list[str], kinds: list[str] | None = None) -> list[int]:
+    """Which of the lines waiting for the session `name` does the digest hook take as an fyi, which starts no turn (`digest(name, lines, kinds)` → the positions it filed for the session's next turn, which the caller drops;
+    `True` is all of them)? `kinds[i]` is the kind of line i (kind_of; "" when unknown). The hook files in order and stops at the first line it cannot file, so what it answers is a prefix: the lines after it are handed out
+    as one turn and the lines before it never again. A caller with no hook, a name it does not know, a hook that files nothing or fails: [], and the lines are handed out as one turn, as they always were. The hook is the
+    server's (service/messaging.digest_fyi: a layer above this module, so it is given, never imported)."""
+    if digest is None or not name or not lines:
+        return []
+    try:
+        res = digest(name, lines, list(kinds) if kinds is not None else [""] * len(lines))
+        if res is True:
+            return list(range(len(lines)))
+        return sorted({i for i in (res or []) if isinstance(i, int) and 0 <= i < len(lines)})
+    except Exception as e:  # noqa: BLE001  — the hook is an extra: a failure in it hands the lines out as before
+        log.warning("inbox: digest for %s not filed as an fyi (%s: %s); handed out as a turn", name, e.__class__.__name__, e)
+        return []
+
+
 def take(live: dict[str, str], known: set[str] | None = None, only_src: str | None = None, now: float | None = None,
-         rank: dict[str, float] | None = None) -> list[dict[str, Any]]:
+         rank: dict[str, float] | None = None, digest: Digest | None = None, on_filed: Filed | None = None) -> list[dict[str, Any]]:
     """What a puller is handed for the sessions live on its machine (uuid → name): one delivery per (session, source),
     several waiting lines folded into one turn, each line leased until it is confirmed. `live` carries the server's own name for
     each session (the poll passes what the server kept, never the CLI's placeholder a relaunched pane reports); `rank` (uuid →
     when the session was registered) settles several live namesakes or several live carriers of one permanent id (`_newest`).
+    `digest`: the server's ruling on the folded lines of a session (`filed_as_fyi`); lines it files as an fyi are removed here and no delivery is made for them, the others of the session are handed out as one turn.
+    `on_filed`: told which lines (as stored) were filed, once they are acked: a filed line is a confirmed delivery, so the server marks the hand-off it carries delivered, as its ack route does (`_notify_filed`).
     → [{session, name, src, ids: [...], text}]"""
     now = time.time() if now is None else now
     known = _present(_index()) if known is None else known
@@ -351,9 +400,29 @@ def take(live: dict[str, str], known: set[str] | None = None, only_src: str | No
     res = []
     for (u, src), its in out.items():
         lines = [label(str(i.get("from") or ""), i["text"]) for i in its]
+        kinds = [kind_of(i) for i in its]
+        filed = filed_as_fyi(digest, live.get(u, ""), lines, kinds) if len(its) > 1 else []      # no line asks him for anything and he is not there for this pane: those lines ride its next turn, they start none
+        if filed:
+            gone = [its[k] for k in filed]
+            ack([i["id"] for i in gone], now=now)
+            _notify_filed(on_filed, gone)
+            its = [it for k, it in enumerate(its) if k not in set(filed)]      # a failed filing leaves the lines it did not reach: they go out as a turn, the filed ones never twice
+            lines = [ln for k, ln in enumerate(lines) if k not in set(filed)]
+            if not its:
+                continue
         text = lines[0] if len(its) == 1 else f"{HEAD[src]} {len(its)} queued while you were away:\n" + "\n".join(lines)
         res.append({"session": u, "name": live.get(u, ""), "src": src, "ids": [i["id"] for i in its], "text": text})
     return res
+
+
+def _notify_filed(on_filed: Filed | None, gone: list[dict[str, Any]]) -> None:
+    """Tell the server's hook which lines were filed (they are acked, as stored): the ack route does the same for a line a puller confirmed, which marks a hand-off notice among them delivered. Never raises."""
+    if on_filed is None:
+        return
+    try:
+        on_filed(gone)
+    except Exception as e:  # noqa: BLE001  — the lines are filed and acked either way
+        log.warning("inbox: filed lines not reported (%s: %s)", e.__class__.__name__, e)
 
 
 def _drop(it: dict[str, Any], leases: dict[str, float], why: str) -> None:

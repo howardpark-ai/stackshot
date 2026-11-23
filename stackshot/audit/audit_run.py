@@ -750,6 +750,21 @@ def person_moves(who: Any, mover: Any) -> bool:
     return not m or _model.is_owner(m)
 
 
+def waits_on_person(f: dict[str, Any], items: dict[str, dict[str, Any]] | None, by_shown: dict[str, str], now: float | None = None) -> bool | None:
+    """Does the item a finding names wait on the person: a decision or a step of his, the model reading it as alive with the person as its mover (`Model.owner_moves`: needs holds decision, or the state is
+    your-call or your-step)? False for an item that waits on nothing of his (a session moves it, or it waits on a time, an event or another item), None when that cannot be told: no items given, an id that names none
+    of them, an item the model cannot read. A caller that must not start a front turn for nothing sends a finding only on a True; one that cannot tell keeps what it did before."""
+    gid = by_shown.get(str(f.get("id") or "")) if items else None
+    it = items.get(gid) if gid else None
+    if not isinstance(it, dict):
+        return None
+    try:
+        _it, _meta, after_open, _mover = _item_view(items, gid)
+        return _model.derive(it, now, after_open).owner_moves
+    except Exception:  # noqa: BLE001  — an item the model cannot read is no ground to hold its finding back
+        return None
+
+
 def quiet_target(f: dict[str, Any], env: Env) -> tuple[str, bool]:
     """(where a finding that needs nothing of the person goes when it would have been marked for him, whether it goes as a held note). The project's builder when it has one that is a live background agent: a plain
     unmarked message. A project with none (front-only, or no live builder) holds it through the front gate for its front agent's next turn: no turn started, nothing marked. With no front agent either, the project's
@@ -1069,16 +1084,40 @@ def recheck_fresh(env: Env, items: dict[str, dict[str, Any]], by_shown: dict[str
     return kept, dropped
 
 
-def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float]:
+def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str, items: dict[str, dict[str, Any]] | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float]:
     """Send `fresh` findings, one message per recipient (a finding goes to its mover, or the project's -main agent / page key as `recipient` says; a mover that cannot be reached falls back to the
     project's -main agent). `label` opens each message head ("Board audit 2099-03-03"). → (what was sent, the findings that reached someone, `sending_from`: the time just before the first send).
     `sending_from` is the time a write the caller did not make is told apart from the deliveries' own: a message that names an item may write it.
     A finding that needs nothing of the person, on an item he moves (`finding_route`), goes unmarked to the project's builder as a plain message, else, in a project with no live background agent, as a held note
     for its front agent's next turn, one message for each finding, sent as an fyi (the server's front gate files it and starts no turn). A held note that cannot be filed (the agent's hook cannot fetch held lines) goes
-    unmarked to the project's page key instead, never marked for the person."""
+    unmarked to the project's page key instead, never marked for the person.
+    A front agent's turn starts only for what is the person's: a finding that would go to a front agent marked for him (`front`: its -main agent directly, as the chase of an unmoved finding, as the second level, or as the fallback
+    of a mover that cannot be reached) goes marked only when its item waits on him (`waits_on_person`). Any other finding goes as a finding that needs nothing of him does: held for the front agent's next turn as an fyi (one
+    message for each finding; the front gate files it and writes the item's board line), and its fallback is the page key, unmarked. `items` (the pass's items by id) lets a finding's item be read; without it nothing can be
+    told, and a marked finding stays marked, as before."""
     sent: list[dict[str, Any]] = []
     sending_from = env.clock()
     reached_fs: list[dict[str, Any]] = []
+    by_shown: dict[str, str] = {}
+    if items:
+        from stackshot.tools import next_report as _nr  # noqa: PLC0415
+        by_shown = {_nr.shown(g): g for g in items}
+    now = env.clock()
+
+    def quiet(f: dict[str, Any]) -> bool:
+        """Is the finding's item known to wait on nothing of the person: a marked message about it would start a front turn for nothing."""
+        return waits_on_person(f, items, by_shown, now) is False
+
+    def held_note(to: str, f: dict[str, Any]) -> bool:
+        """One finding as a held note (an fyi) for the front agent `to`; a note the agent cannot be given goes unmarked to the project's page key, as the main route's held note does."""
+        ok, said = _send(env, to, compose([held_line_of(f)], f"[stackshot] {label}:", False), fyi=True)
+        sent.append({"to": to, "lines": 1, "delivered": ok, "said": _clip(said, 120), "kind": "held"})
+        if not ok and str(f.get("project") or "").strip():
+            pk = page_key(f["project"])
+            ok, said = _send(env, pk, compose([line_of(f)], f"[stackshot] {label}: 1 item(s) for {to}, whose session takes no held note; please pass it to whoever moves it (id · check · evidence · what fixes it).", False))
+            sent.append({"to": pk, "lines": 1, "delivered": ok, "said": _clip(said, 120), "kind": "project", "for": to})
+        return ok
+
     groups: dict[tuple[str, bool, bool, tuple[str, str, str]], dict[str, Any]] = {}     # (recipient, whether its message is marked for the owner), as `esc` and the digest: one session can be a front agent for one project and the mover of another's item
     esc: dict[tuple[str, bool], list[tuple[dict[str, Any], str]]] = {}     # (recipient, whether its message is marked for the owner): one session can be a front agent for one project and a builder for another, and gets one message of each kind
     up: dict[str, list[tuple[dict[str, Any], str]]] = {}
@@ -1089,6 +1128,11 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
         if front0 or not to0 or to0 == page_key(proj) or not main or _norm_name(to0) == _norm_name(main) or _norm_name(env.chase_of(proj)[0]) == _norm_name(main):
             f["lvl"] = 2
             reached_fs.append(f)       # its first recipient was not a builder (a front agent's or a retired mover's finding went to the builder at level 1, by design, and ends there), or -main is the builder: nobody is left to tell, the finding goes quiet
+            continue
+        if quiet(f):       # its item waits on nothing of the person: a held note for the -main agent's next turn, not a marked message
+            if held_note(main, f):
+                f["lvl"] = 2
+                reached_fs.append(f)
             continue
         up.setdefault(main, []).append((f, f"{f['id']} · nobody answered after {f.get('tries', 1) - 1} messages · {f['category']} · {_clip(f['detail'], 200)} · {f.get('mover') or 'its mover'} writes it, or says what holds it"))
     for to, ls in sorted(up.items()):
@@ -1102,6 +1146,11 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
         b, bfront = chase_to(env, proj, f.get("mover") or "", f.get("to") or "")       # a front-only project's -main agent (marked for the owner), else its builder; the page key when that is the mover itself
         if not proj and not b:
             continue
+        if bfront and quiet(f):       # a front agent chases it, and its item waits on nothing of the person: held for its next turn
+            if held_note(b, f):
+                f["lvl"] = 1
+                reached_fs.append(f)
+            continue
         esc.setdefault((b, bfront), []).append((f, f"{f['id']} · unmoved after {f.get('tries', 1) - 1} messages · {f['category']} · {_clip(f['detail'], 200)} · {f.get('mover') or 'its mover'} writes it, or says what holds it"))
     fresh = [f for f in fresh if not f.get("escalate")]
     for (to, front), ls in sorted(esc.items()):
@@ -1112,9 +1161,12 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
             reached_fs += [f for f, _ln in ls]
     for f in fresh:
         to, front, held = finding_route(f, env)
+        idle_item = quiet(f)       # its item waits on nothing of the person
+        if front and not held and idle_item:       # it would be marked for him: held for the front agent's next turn instead, which starts none
+            front, held = False, True
         g = groups.setdefault((to, front, held, finding_key(f) if held else ("", "", "")), {"front": front, "held": held, "lines": [], "by": [], "fs": []})      # a held note is one finding's: a held line is one short line
         g["lines"].append(held_line_of(f) if held else line_of(f))
-        g["by"].append((f["project"], line_of(f), not _ac.needs_person(f.get("category")) and person_moves(f.get("to") or f.get("mover"), f.get("mover"))))      # the last: needs nothing of the person, on an item he moves: never marked for him
+        g["by"].append((f["project"], line_of(f), idle_item or (not _ac.needs_person(f.get("category")) and person_moves(f.get("to") or f.get("mover"), f.get("mover")))))      # the last: its item waits on nothing of the person's, or it needs nothing of him on an item he moves: never marked for him
         g["fs"].append(f)
     for (to, _front, _held, _unit), g in sorted(groups.items()):
         text = compose(g["lines"], f"[stackshot] {label}:" if g["held"] else f"[stackshot] {label}: {len(g['lines'])} item(s) for you (id · check · evidence · what fixes it).", g["front"])
@@ -1641,7 +1693,7 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
                       "chased": sid in chased_before})
 
     # the messages: one per recipient per run
-    sent, reached_fs, sending_from = deliver_findings(env, fresh, f"Board audit {label}")
+    sent, reached_fs, sending_from = deliver_findings(env, fresh, f"Board audit {label}", items)
     sending_from = max(sending_from, t0)
     # the unmoved digest lists an item once: the run that first finds it unmoved chases it to the builder, and only a delivered digest counts as a chase; the record's `stuck` and the summary keep naming it until it is written
     jobs: dict[tuple[str, bool], list[tuple[dict[str, Any], str]]] = {}     # (recipient, whether its digest is marked for the owner: a front-only project's -main agent); as `esc`, keyed by both
@@ -2050,7 +2102,7 @@ def filing_pass(*, now: float | None = None, items: dict[str, dict[str, Any]] | 
     res = {"open": n_open, "findings": len(findings), "fresh": len(fresh), "repeats": len(repeats), "flags": len(flags), "sent": []}
     if dry:
         return {**res, "dry": True, "detail": findings, "flag_detail": flags}
-    sent, reached_fs, sending_from = deliver_findings(env, fresh, f"Filing check {_stamp(now)}") if fresh else ([], [], env.clock())
+    sent, reached_fs, sending_from = deliver_findings(env, fresh, f"Filing check {_stamp(now)}", items) if fresh else ([], [], env.clock())
     end = max(env.clock(), now)
     sending_from = max(sending_from, now)
     for f in reached_fs:
@@ -2108,7 +2160,7 @@ def dates_pass(*, now: float | None = None, items: dict[str, dict[str, Any]] | N
     res = {"open": n_open, "findings": len(findings), "fresh": len(fresh), "repeats": len(repeats), "idle_pass": len(passes), "sent": []}
     if dry:
         return {**res, "dry": True, "detail": findings, "idle_pass_detail": passes}
-    sent, reached_fs, sending_from = deliver_findings(env, fresh, f"Dates check {_stamp(now)}") if fresh else ([], [], env.clock())
+    sent, reached_fs, sending_from = deliver_findings(env, fresh, f"Dates check {_stamp(now)}", items) if fresh else ([], [], env.clock())
     end = max(env.clock(), now)
     sending_from = max(sending_from, now)
     for f in reached_fs:

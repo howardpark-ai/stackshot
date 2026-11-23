@@ -5,7 +5,7 @@ a builder is unchanged. Fixture data (English stand-in names) in a temporary sto
   1  the choice on its own (Env.chase_of): a front-only project with a -main agent -> (that agent, front); a project with a builder -> (the builder, not front); a front-only project whose -main agent cannot
      be named -> ([audit] builder, not front) with one line on stderr per project; a finding with no project, a front-only test that raises and a -main read that raises keep the builder; an environment
      that names the builder itself says the project has one (no test made); with the registry in hand the test and the -main agent are read from it (the default path, no front_only= given)
-  2  the finding that stayed unanswered (the filing pass, three sends, then the escalation): a front-only project's goes to its -main agent, marked `[for <owner>]`, and the level after it (the message to -main
+  2  the finding that stayed unanswered (the filing pass, three sends, then the escalation): a front-only project's goes to its -main agent as a held note (an fyi: these items wait on nothing of the owner's; a marked message is for an item that waits on him, tests/audit_front_turn_scenario.py), and the level after it (the message to -main
      for a finding that went to a builder) is not sent, as -main has been told; a project with a builder's goes to the builder unmarked and then on to -main, as before; a front-only project with no -main
      agent goes to [audit] builder as before
   3  the unmoved digest (the daily run): the same split, one message per recipient, marked for the owner when it goes to a front agent; a digest that is not delivered leaves the item unchased
@@ -123,7 +123,8 @@ check("2 the sends before the escalation went to the agent whose step it is, in 
 sent.clear(); AR.filing_pass(now=tk, env=env())
 unmoved = lambda to: [t for t in said(to) if "unmoved after 3 messages" in t]
 solo_u, built_u, orphan_u = unmoved("solo-main"), unmoved("built-builder"), unmoved("falcon-engineer")
-check("2 a front-only project's finding goes to its -main agent as unmoved, marked for the owner", len(solo_u) == 1 and solo_u[0].startswith("[for Oliver]\n") and B + "9101" in solo_u[0] and "chase the mover (job)" in solo_u[0], solo_u)
+solo_h = [t for to, t, f in sent if to == "solo-main" and f]       # its item is moved by a session, so waits on nothing of his: the chase is a held note (an fyi, no mark), which starts no turn
+check("2 a front-only project's finding goes to its -main agent as unmoved: held for its next turn (an fyi), not marked for the owner", len(solo_h) == 1 and not solo_h[0].startswith("[for") and B + "9101" in solo_h[0] and "stuck-elsewhere" in solo_h[0], sent)
 check("2 …and not to the builder of any project, nor to the global audit builder", B + "9101" not in "".join(said("built-builder") + said("falcon-engineer")), sent)
 check("2 a project with a builder: its builder, unmarked, as before", len(built_u) == 1 and not built_u[0].startswith("[for") and B + "9102" in built_u[0] and B + "9101" not in built_u[0] and B + "9103" not in built_u[0], built_u)
 check("2 a front-only project with no -main agent: the global audit builder, unmarked, as before", len(orphan_u) == 1 and not orphan_u[0].startswith("[for") and B + "9103" in orphan_u[0], orphan_u)
@@ -132,8 +133,8 @@ sent.clear(); AR.filing_pass(now=tk + 10 * M, env=env())
 check("2 …nothing more before the next remind_hours", sent == [], sent)
 tk += REM + 60; sent.clear(); AR.filing_pass(now=tk, env=env())
 up = {to: t for to, t, _f in sent}
-check("2 the next level (-main told of a finding that went to a builder): the project with a builder's -main agent is told once, marked for the owner",
-      "built-main" in up and up["built-main"].startswith("[for Oliver]\n") and B + "9102" in up["built-main"] and "nobody answered after" in up["built-main"], up)
+check("2 the next level (-main told of a finding that went to a builder): the project with a builder's -main agent is told once, as a held note (an fyi, no mark: its item waits on nothing of the owner's)",
+      "built-main" in up and not up["built-main"].startswith("[for") and B + "9102" in up["built-main"] and [f for to, _t, f in sent if to == "built-main"] == [True], sent)
 check("2 …a front-only project's -main agent is not told a second time (it had the finding already)", "solo-main" not in up, [(to, t[:80]) for to, t in up.items()])
 check("2 …and a front-only project with no -main agent keeps the old second level: [audit] main, marked, the builder named as having had it", "falcon-main" in up and B + "9103" in up["falcon-main"], up)
 sent.clear()
@@ -182,8 +183,9 @@ for n in range(3):
 sent.clear(); AR.filing_pass(now=tk, env=env())
 to_sm = [t for t in said("solo-main") if "unmoved after 3 messages" in t]
 marked = [t for t in to_sm if t.startswith("[for Oliver]\n")]; plain = [t for t in to_sm if not t.startswith("[for Oliver]")]
-check("4a one session, two kinds of recipient: the unanswered findings make two messages to it, one for each project", len(to_sm) == 2, [t[:70] for t in to_sm])
-check("4a …the one for the project it is -main of is marked for the owner and holds only that project's item", len(marked) == 1 and B + "9201" in marked[0] and B + "9202" not in marked[0], marked)
+held_sm = [t for to, t, f in sent if to == "solo-main" and f]
+check("4a one session, two kinds of recipient: the unanswered findings make two messages to it, one for each project (a held note as its -main agent, a plain message as the builder)", len(to_sm) == 1 and len(held_sm) == 1, ([t[:70] for t in to_sm], [t[:70] for t in held_sm]))
+check("4a …the one for the project it is -main of is a held note, not marked for the owner, and holds only that project's item", not marked and len(held_sm) == 1 and not held_sm[0].startswith("[for") and B + "9201" in held_sm[0] and B + "9202" not in held_sm[0], (marked, held_sm))
 check("4a …the one for the project it builds is not marked and holds only that project's item (it was marked before: the mark followed the recipient's name)", len(plain) == 1 and B + "9202" in plain[0] and B + "9201" not in plain[0], plain)
 
 wipe_store(); clear_state(); sent.clear()
