@@ -55,7 +55,7 @@ check("3 …a narrower one lets a close one pass (60 s out, margin 30 s)", run("
 
 # ================================================================ 4. the wiring of each guarded suite
 GUARDED = ("cap_words", "waiting", "until_write", "agent_due", "event_wait", "state_checks",
-           "wait_list_write", "date_only_wait", "box_online_wait", "handoff", "state", "migration", "until_migrate", "mover_migrate", "mover_sweep")
+           "wait_list", "date_only_wait", "box_online_wait", "handoff", "state", "migration", "until_migrate", "mover_migrate", "mover_sweep")
 def clock_read(node):
     """a call that reads the clock: time.time(), datetime's now()/today()/utcnow(), zone_now(), and time.gmtime()/localtime()/strftime(fmt) with no time given"""
     if not isinstance(node, ast.Call): return False
