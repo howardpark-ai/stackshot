@@ -151,16 +151,22 @@ DELIVERED = [          # every shape the review named, and the earlier asks: non
     # negation and trouble in the new words ("stopped", "taken"), and a bare answer: no report, so it goes on to the answer rule and reaches the agent that asked
     "no, it is not finished", "the runner stopped", "the port is taken", "the permission is not removed yet", "yes, finished", "yes, a1 is merged", "no, merged", "the unit isn't retired",
     "a1: still not deployed", "the old unit is no longer removed", "the watch is stopped yet again", "taken by the other session", "the item is not complete", "stopped", "Yeah, done (010cc0d).",
+    # a status that says what is missing is trouble, whatever status word it holds
+    "done, but nothing is live", "nothing was removed", "nothing merged", "none deployed", "no PR merged", "zero merged", "closed, nothing deployed", "Done except the docs", "merged, except the docs",
+    "partly done", "half merged", "partial merge", "merged without the docs", "no one merged it", "done, but the port is in use", "the suites are red; fixed in 010cc0d", "Yes, finished. FYI.",
 ]
 HELD = [               # a plain status report, every sentence one of the shapes
     "PR 23 is live.", "a1 merged and deployed.", "PR #18 is up; the suites pass.", "fixed in 010cc0d. Suites are green.", "Recorded on the item. No change to the unit.", "released; closed.",
     "[for Oliver] done: the unit is live and the suites pass", "For osprey-main, a1: merged, deployed, green.", "`a1` is merged", "opened PR #18", "merged in 010cc0d\nlive since 15:10", "No change. Unchanged since a1.",
     "Taken.", "taken", "Done (010cc0d).", "Done (010cc0d) and live.", "the item is complete", "the item is closed and the unit is removed", f"board#{BID_A}: the watch is stopped and the item is closed.", "a1: the old unit is retired; the suites pass.",
     "[for Oliver] a1: Taken.", "the work is finished and merged", "the watch is stopped.", "a1: the old unit is now stopped and removed", "No change. Nothing changed since a1.",
+    "No change.", "No changes.", "no unit changed", "nothing changed", "no config changed", "PR 12 merged and live", "item complete", "FYI, the item is closed.", "Done (abc1234).",
+    f"Taken (board#{BID_A}).", "Taken (PR 12).", "Taken (a1, PR 12).", "No-op, unchanged.", "no-change, merged",       # the ids leave an empty bracket; "no-op" is no answer
 ]
 check("reports: every shape of ask, trouble, waiting, naming and plan is delivered", [t for t in DELIVERED if reports.is_report(t, FRONT)] == [], [(t, reports.report_doubt(t, FRONT)) for t in DELIVERED if reports.is_report(t, FRONT)])
-NOTED_NOT = ["a1: , should I deploy the unit now? I need your go.", "a1: , the suite failed on the runner", "a1: , see ```x```", "a1: , please look at the page", "a1: , the page awaits Oliver"]
-NOTED_YES = ["a1: , the docs page reads fine", "a1: , the unit is up, a plain note", "a1: , nothing else to say"]
+NOTED_NOT = ["a1: , should I deploy the unit now? I need your go.", "a1: , the suite failed on the runner", "a1: , see ```x```", "a1: , please look at the page", "a1: , the page awaits Oliver",
+             "Yes, finished.  ", "a1: , yes, closed", "a1: , yes, finished. ", ": no, merged", "a1:  yeah, done"]       # an opening yes or no is an answer even beside a fixed phrase
+NOTED_YES = ["a1: , the docs page reads fine", "a1: , the unit is up, a plain note", "a1: , nothing else to say", "a1: , the item is closed", "a1: , no-op, unchanged", "a1: , the answer is in the item"]
 check("reports (noted): a fixed no-action phrase skips only the status shape: a question, a fence, trouble or an ask beside it is no note",
       [t for t in NOTED_NOT if reports.is_report(t, FRONT, noted=True)] == [] and [t for t in NOTED_YES if not reports.is_report(t, FRONT, noted=True)] == [],
       ([t for t in NOTED_NOT if reports.is_report(t, FRONT, noted=True)], [t for t in NOTED_YES if not reports.is_report(t, FRONT, noted=True)]))

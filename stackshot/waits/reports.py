@@ -10,7 +10,8 @@ report only when ALL of these hold, and `report_doubt` names the first that does
 
   1. no `?` anywhere (a URL's included) and no fenced block; a code span only when it is an id, sha, path or short command;
   2. no word of trouble, waiting, asking, deciding or negation (TROUBLE: fail, broke, rolled back, cost, $, blocked, wait*, await*, pending, need*, must,
-     should, require*, review*, ready, approve*, decid*, confirm*, please, option, not, -n't, no longer, yet, still, never, plus the configured
+     should, require*, review*, ready, approve*, decid*, confirm*, please, option, not, -n't, no longer, yet, still, never, nothing (but not "nothing changed", "nothing else to say"),
+     no (but not "no change", "no unit changed"), none, no one, zero, without, except, partly, partial*, half, in use, red (a status that says what is missing: "nothing merged", "done except the docs"), plus the configured
      [keywords.reports] ask_words …); a sentence that opens with an answer word ("yes, finished", "no, merged") is not a report either (see ANSWER);
   3. no word that puts the action on someone: the owner or one of his aliases, you, your, owner, keeper, a front agent's name (`avoid`);
   4. no future or conditional (will, once, when, if, then, until …): a plan is not a status;
@@ -41,6 +42,7 @@ TROUBLE = (
     r"please", r"ask\w*", r"options?", r"recommend\w*", r"propos\w*", r"questions?", r"choose", r"choice", r"stuck", r"unable", r"cannot", r"can't",
     r"offline", r"down", r"problem\w*", r"urgent", r"risk\w*", r"warn\w*", r"crash\w*", r"denied", r"refus\w*", r"missing", r"revert\w*", r"regress\w*",
     r"not", r"\w+n't", r"no longer", r"yet", r"still", r"never", r"nor",            # negation: "it is not finished", "not removed yet" say the opposite of a status
+    r"nothing(?! changed| else to (?:say|add|report))", r"no(?! changes?(?![\w-])| \w+ changed(?![\w-]))", r"none", r"no one", r"zero", r"without", r"except", r"partly", r"partial\w*", r"half", r"in use", r"red",      # "nothing merged", "done except the docs", "half merged": a status that says what is missing ("nothing changed" is a status)
 )
 PEOPLE = (r"you", r"you'?ll", r"your", r"yours", r"yourself", r"owner", r"keeper", r"front agents?", r"main agent", r"user")
 FUTURE = (r"will", r"would", r"going to", r"once", r"when", r"if", r"unless", r"until", r"then", r"soon", r"later", r"next", r"follows?", r"after", r"before")
@@ -53,7 +55,8 @@ _STOPPED = re.compile(r"(?<![\w-])(?:is|are|was|were|been|now|got) stopped(?![\w
 # A sentence that opens with an answer word ("yes, finished", "no, it is merged") is a reply to someone's question, and the gate cannot tell from the text alone whether
 # it is a hand-back or an answer the asker is waiting for. DECISION: such a text is never a report, so it goes on to the answer rule and reaches the front agent when
 # it answers a question that agent put (a genuine answer lost is worse than a report that rides one turn). "No change" and "no \w+ changed" are no answer: the comma tells.
-_ANSWER = re.compile(r"\A\s*(?:(?:yes|yeah|yep|yup|nope|nah)\b|no\s*[,:;!-])", re.I)
+_ANSWER = re.compile(r"\A\s*(?:(?:yes|yeah|yep|yup|nope|nah)\b|no\b(?!-)\s*[,:;!-])", re.I)      # "no" as a whole word: "no-op" and "no-change" are no answer
+_EMPTY_BRACKETS = re.compile(r"[(\[{][^\w()\[\]{}]*[)\]}]")          # what is left of "(#12)" or "(PR 12, abc1234)" once the ids are out
 
 _word = lambda alts: re.compile(r"(?<![\w-])(?:" + "|".join(alts) + r")(?![\w-])", re.I)
 _TROUBLE, _PEOPLE, _FUTURE, _STATUS = _word(TROUBLE), _word(PEOPLE), _word(FUTURE), _word(STATUS)
@@ -76,7 +79,7 @@ def _status_shape(s: str) -> bool:
 def report_doubt(text: str, avoid: tuple[str, ...] | list[str] = (), noted: bool = False) -> str:
     """"" when the text clearly only reports; else the first reason it is not taken for a report (a phrase for the log and the tests).
     `avoid` = names that must not appear (every front agent's name). `noted` = the text says in a fixed phrase that nothing is needed from him (the caller has
-    taken that phrase out of `text`, since "needed" is itself a word of waiting): only the status-shape test is skipped, so a note that asks a question, holds a
+    taken that phrase out of `text`, since "needed" is itself a word of waiting): only the status-shape test is skipped (an opening yes or no is still an answer), so a note that asks a question, holds a
     fenced block or an ask or trouble word is no report, and the caller goes on to the answer rule. Pure: the same text always gives the same answer."""
     t = str(text or "")
     if "?" in t or "？" in t:
@@ -98,10 +101,10 @@ def report_doubt(text: str, avoid: tuple[str, ...] | list[str] = (), noted: bool
             return f"{what} ({m.group(0)!r})"
     if any(w in t for w in _cfg.keywords("reports", "ask_words")):
         return "a configured word of asking or waiting"
-    if noted:
-        return ""
-    sentences = [s.strip(" :-*•\t") for s in re.split(r"[.!;\n]+", _IDS.sub(" ", t))]
+    sentences = [s.strip(" :,-*•\t") for s in re.split(r"[.!;\n]+", _EMPTY_BRACKETS.sub(" ", _IDS.sub(" ", t)))]
     sentences = [s for s in sentences if re.search(r"[^\W\d_]", s)]
+    if noted:               # the status shape and the length are not tested, but an opening yes or no is an answer all the same ("Yes, finished. FYI.")
+        return next((f"an answer, not a report ({s[:40]!r})" for s in sentences if _ANSWER.match(s)), "")
     if not sentences:
         return "nothing said"
     for s in sentences:
