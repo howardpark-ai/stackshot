@@ -118,12 +118,15 @@ def host() -> str:
     h = str(_cfg.get("agents_box", "ssh") or "").strip()
     if not h or h.startswith("-") or any(c.isspace() for c in h):
         return ""
+    return "" if is_this_box(h) else h
+
+
+def is_this_box(h: str) -> bool:
+    """Does the host `h` (a name, an alias, `user@host`, an address) name this machine: its own name or short name (the domain may differ), or a loopback name or address?"""
     bare = h.rsplit("@", 1)[-1].strip("[]").lower()
     me = _ME[0] or _ME.__setitem__(0, socket.gethostname().lower()) or _ME[0]
     short = me.split(".")[0]
-    if bare in (me, short) or bare.split(".")[0] == short or _loopback(bare):
-        return ""
-    return h
+    return bare in (me, short) or bare.split(".")[0] == short or _loopback(bare)
 
 
 _LOOP: dict[str, bool] = {}

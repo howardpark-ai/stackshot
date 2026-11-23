@@ -122,6 +122,30 @@ _short = socket.gethostname().split(".")[0]
 for h_ in ("127.0.0.1", "me@127.0.0.5", "localhost", "LOCALHOST", "me@[::1]", "localhost.localdomain", f"{_short}.example.invalid"):
     setbox(ssh=h_)
     check(f"ssh naming this machine by a loopback name or address, or its short name ({h_}) is read as local", not ab.enabled() and ab.argv(["a"]) == ["a"])
+# is_this_box with the machine's name injected (a test box's own hostname may be a loopback name, which hides the name branches): the FQDN, the short name, the domain that differs, the case
+_me0, _lb0 = ab._ME[0], ab._loopback
+ab._loopback = lambda name: False      # the loopback branch has its own checks above; here no name is looked up
+try:
+    ab._ME[0] = "box.lan.example"
+    for h_, want, why in (("box.lan.example", True, "its full name"), ("BOX.Lan.EXAMPLE", True, "its full name in other case"), ("box", True, "its short name"), ("Me@BOX", True, "user@short name in capitals"),
+                          ("box.other.example", True, "its short name under another domain"), ("me@box.other.example", True, "user@short name under another domain"),
+                          ("boxer.lan.example", False, "another box whose name starts like it"), ("other.lan.example", False, "another box in its domain"), ("my-box", False, "a name that only ends like it"),
+                          ("bo", False, "a prefix of its short name")):
+        check(f"is_this_box with this box named box.lan.example: {h_} ({why}) is {'this box' if want else 'another box'}", ab.is_this_box(h_) is want, h_)
+    setbox(ssh="me@box.other.example")
+    check("host() reads a host that names this box under another domain as local", not ab.enabled() and ab.host() == "")
+    setbox(ssh="other.lan.example")
+    check("host() keeps a host that is another box", ab.host() == "other.lan.example")
+    # the machine's own name is lower-cased when it is first read (the hostname may be set in capitals)
+    ab._ME[0] = ""
+    _gh = socket.gethostname
+    try:
+        socket.gethostname = lambda: "Box.Lan.EXAMPLE"
+        check("the machine's own name is taken in lower case: its capitals-spelled name and its short name are this box", ab.is_this_box("box.lan.example") and ab.is_this_box("BOX") and ab._ME[0] == "box.lan.example", ab._ME[0])
+    finally:
+        socket.gethostname = _gh
+finally:
+    ab._ME[0], ab._loopback = _me0, _lb0
 setbox(ssh="agents-box"); ab.LOCAL_ONLY = True
 check("LOCAL_ONLY (the puller) ignores the setting", not ab.enabled() and ab.mirror_dir("/x") == pathlib.Path("/x"))
 ab.LOCAL_ONLY = False

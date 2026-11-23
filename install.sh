@@ -33,7 +33,15 @@
 #   options: --checkout DIR  --config FILE  --restart (restart the units whose file changed; otherwise only say which)
 #            --start (after enabling, start the long-running units of this verb, or restart them if running; how setup
 #            brings a fresh box up)  --quiet-hint (do not print the "changed, not restarted" hint; setup's own next line says
-#            why the server is not started)
+#            why the server is not started)  --force-host (see below)
+#
+# The server host (`units` only): the server's units belong on the box the instance's server runs on, and `units` refuses on any other, in one line on stderr, exit 1, before it touches lingering or a unit. The config names
+# that host in [release] deploy_ssh (a name, an alias or user@host, or a host word: the host the server runs on, for a box that only runs release.sh) and says "not here" with [server] box = false; stackshot/core/config.py
+# server_host_refusal() decides. A host that names this box (its own name or short name, or a loopback name or address) is the server host. A config that names no server host (deploy_ssh empty, [server] box unset or true) refuses
+# nothing, as before. A read-only standby (units/scope.sh standby()) keeps its own path and is never refused. --force-host skips the check, for a deliberate install on another box (a server moved there before its config says so). deploy.sh, `stackshot setup` and `stackshot doctor` pass it: they run on the server host by nature.
+# The check makes no lookup of its own (an ssh alias or a non-loopback address of this box is not recognized), a host word whose lookup does not resolve refuses, a deploy_ssh naming another box wins over [server] box = true,
+# and a check that cannot run (a config it cannot read) refuses nothing.
+# `render`, `puller` and `minute-off` are not checked: they install no server unit.
 #
 # Installing never restarts anything unless --restart or --start is given: deploy.sh restarts the server, the minute runner, anchor-hub and the
 # puller when a change touches them (the reload path only reloads the config file). A unit whose rendered text is unchanged
@@ -53,7 +61,7 @@
 set -euo pipefail
 USER="${USER:-$(id -un)}"                     # unset under some sudo, cron and container shells; the units and loginctl need it
 HERE="$(cd "$(dirname "$0")" && pwd)"
-CHECKOUT="$HERE"; CONFIG=""; RESTART=0; START=0; QUIET_HINT=0; VERB="${1:-}"; shift || true
+CHECKOUT="$HERE"; CONFIG=""; RESTART=0; START=0; QUIET_HINT=0; FORCE_HOST=0; VERB="${1:-}"; shift || true
 ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -62,6 +70,7 @@ while [ $# -gt 0 ]; do
         --restart) RESTART=1; shift ;;
         --start) START=1; shift ;;
         --quiet-hint) QUIET_HINT=1; shift ;;
+        --force-host) FORCE_HOST=1; shift ;;
         *) ARGS+=("$1"); shift ;;
     esac
 done
@@ -146,6 +155,10 @@ case "$VERB" in
         first=1
         for n in "${ARGS[@]:-${SERVER[@]} ${USERU[@]}}"; do for m in $n; do [ $first = 1 ] || echo "# ---------------- $m"; first=0; render "$m"; done; done ;;
     units|puller)
+        if [ "$VERB" = units ] && [ "$FORCE_HOST" = 0 ]; then      # the server's units go on the server host only: checked once, first, before lingering or any unit is touched; one line and exit 1 on another box
+            why="$(STACKSHOT_CONFIG="$CONFIG" python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from stackshot.core import config as c; print(c.server_host_refusal())' "$CHECKOUT" 2>/dev/null)" || why=""      # a config that names no server host, or a check that cannot run, refuses nothing
+            if [ -n "$why" ] && ! standby; then echo "refused: $why (a deliberate install here: --force-host)" >&2; exit 1; fi      # a read-only standby keeps its own path
+        fi
         echo "checkout $CHECKOUT · config $CONFIG · user $USER · $UNITS_SAYS"
         ensure_linger
         xdg_repair                           # enabling lingering just now may have made the runtime directory

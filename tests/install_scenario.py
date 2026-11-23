@@ -27,6 +27,10 @@ standby, and every other unit renders to the same bytes as at "unit"; at "unit" 
 (checked by key and by section), installed, enabled, and started or restarted after the server; on a standby (the environment of the script
 or the user manager's for stackshot.service) it is skipped; back at inline an installed one is stopped, disabled and removed. The reload path
 reaches it through ReloadPropagatedFrom, so the reload service stays exactly as it was.
+The server host: `units` refuses, in one line before anything is touched (no unit, no loginctl call, no systemctl call but the read that asks whether the box is a standby), on a box that is not
+the server host the config names ([release] deploy_ssh, a host word included, or [server] box = false); a deploy_ssh that names this box (its
+name, short name or a loopback address) installs; a config naming no server host installs as before; a read-only standby is never refused;
+--force-host installs anyway; render and puller are not checked; a host word whose lookup does not resolve is refused and the line says so; a check whose config read fails refuses nothing.
 
     tests/run-suite install        → exit 0 / 1"""
 import os, re, shutil, subprocess, sys, pathlib, tempfile
@@ -620,6 +624,83 @@ check("units alone (no --start, no --restart): no reset-failed and no restart", 
 rc, out, calls = units(IC, "--start", env=mhome(42))
 check("units --start at inline: no reset-failed for anything", rc == 0 and not any("reset-failed" in c for c in calls), calls)
 (T / "tripped").unlink(missing_ok=True)
+# ---- the server host: `units` installs the server's units on the box the instance's server runs on and refuses on any other, in one line, before anything is touched
+import socket
+ME = socket.gethostname()
+def hconf(name, deploy=None, box=None, lookup=None):
+    t = pathlib.Path(conf(name)).read_text(encoding="utf-8")
+    if deploy is not None:
+        t, n = re.subn(r'(?m)^deploy_ssh = "[^"]*"', lambda m: f'deploy_ssh = "{deploy}"', t); assert n == 1
+    if box is not None:
+        t, n = re.subn(r'(?m)^# box = true\b', f'box = {box}', t); assert n == 1
+    if lookup is not None:
+        assert "\n[hosts]" not in t; t += f'\n[hosts]\nlookup = "{lookup} {{role}}"\n'
+    p = T / name; p.write_text(t, encoding="utf-8"); return str(p)
+def hhome(n): return {**UENV, "HOME": str(T / f"uhome-h{n}")}
+def hdir(n): return T / f"uhome-h{n}/.config/systemd/user"
+def untouched(n, calls): return not hdir(n).exists() and all(c.startswith("--user show ") for c in calls) and not (T / "loginctl.log").exists()      # no unit, no systemctl call but the standby question (a read), not even lingering
+def refused_line(out): return out.strip().count("\n") == 0 and out.startswith("refused: ")
+(T / "loginctl.log").unlink(missing_ok=True)
+rc, out, calls = units(hconf("host-other.toml", deploy="host-a.example"), env=hhome(1))
+check("units on a box that is not the server host (deploy_ssh names another): exit 1, one line naming that host, this box and --force-host, nothing installed or touched",
+      rc == 1 and refused_line(out) and "host-a.example" in out and ME in out and "--force-host" in out and untouched(1, calls), (rc, out[-400:], calls))
+for n, dep, who in ((2, ME, "its own name"), (3, ME.split(".")[0].upper(), "its short name in capitals"), (4, f"deploy@{ME.split('.')[0]}", "user@short name"), (5, "127.0.0.1", "a loopback address"), (6, "localhost", "localhost")):
+    rc, out, calls = units(hconf(f"host-same{n}.toml", deploy=dep), env=hhome(n))
+    check(f"units on the server host (deploy_ssh names this box by {who}): installed", rc == 0 and "refused" not in out and (hdir(n) / "stackshot.service").is_file(), (rc, out[-300:]))
+rc, out, calls = units(hconf("host-none.toml"), env=hhome(7))
+check("units when the config names no server host (the example's deploy_ssh is empty, [server] box unset): installed, as before", rc == 0 and "refused" not in out and (hdir(7) / "stackshot.service").is_file(), (rc, out[-300:]))
+rc, out, calls = units(hconf("host-boxtrue.toml", box="true"), env=hhome(8))
+check("units with [server] box = true and no host named: installed", rc == 0 and (hdir(8) / "stackshot.service").is_file(), (rc, out[-300:]))
+(T / "loginctl.log").unlink(missing_ok=True)
+rc, out, calls = units(hconf("host-boxfalse.toml", box="false"), env=hhome(9))
+check("units with [server] box = false (this box was told the server runs elsewhere): exit 1, one line saying so, nothing touched",
+      rc == 1 and refused_line(out) and "[server] box = false" in out and ME in out and "--force-host" in out and untouched(9, calls), (rc, out[-400:], calls))
+rc, out, calls = units(hconf("host-boxfalse-me.toml", deploy=ME, box="false"), env=hhome(10))
+check("units with deploy_ssh naming this box and [server] box = false: the named host wins, installed", rc == 0 and (hdir(10) / "stackshot.service").is_file(), (rc, out[-300:]))
+(T / "loginctl.log").unlink(missing_ok=True)
+rc, out, calls = units(hconf("host-conflict.toml", deploy="host-a.example", box="true"), env=hhome(11))
+check("units with deploy_ssh naming another box and [server] box = true: refused (the named host wins)", rc == 1 and refused_line(out) and not hdir(11).exists(), (rc, out[-300:]))
+# a read-only standby keeps today's path, whichever way its switch is set
+rc, out, calls = units(hconf("host-standby.toml", deploy="host-a.example"), env={**hhome(12), "STACKSHOT_READ_ONLY": "1"})
+check("units on a read-only standby (STACKSHOT_READ_ONLY=1) whose config names another host: installed, not refused", rc == 0 and "refused" not in out and (hdir(12) / "stackshot.service").is_file(), (rc, out[-300:]))
+(T / "standby-env").write_text("STACKSHOT_READ_ONLY=1")
+rc, out, calls = units(hconf("host-standby2.toml", box="false"), env=hhome(13))
+check("units on a standby the user manager's environment for stackshot.service says: installed, not refused", rc == 0 and "refused" not in out and (hdir(13) / "stackshot.service").is_file(), (rc, out[-300:]))
+(T / "standby-env").unlink()
+rc, out, calls = units(hconf("host-standby3.toml", deploy="host-a.example"), env={**hhome(14), "STACKSHOT_READ_ONLY": "0"})
+check("STACKSHOT_READ_ONLY=0 is no standby: refused", rc == 1 and refused_line(out) and not hdir(14).exists(), (rc, out[-300:]))
+# --force-host: a deliberate install through
+rc, out, calls = units(hconf("host-force.toml", deploy="host-a.example"), "--force-host", env=hhome(15))
+check("units --force-host on another box: installed, nothing refused", rc == 0 and "refused" not in out and (hdir(15) / "stackshot.service").is_file() and (hdir(15) / "stackshot-reload.path").is_file(), (rc, out[-300:]))
+rc, out, calls = units(hconf("host-force2.toml", box="false"), "--force-host", "--start", env=hhome(16))
+check("units --force-host with [server] box = false, and --start: installed and started", rc == 0 and "--user restart stackshot.service" in calls, (rc, out[-300:], calls))
+# the other verbs are not checked: they install no server unit
+rc, ren, _ = render(hconf("host-render.toml", deploy="host-a.example"), env=hhome(17))
+check("render on another box: not refused", rc == 0 and ren, (rc, ren))
+r = subprocess.run([os.path.join(STACK, "install.sh"), "puller", "--config", str(T / "host-render.toml")], capture_output=True, text=True, env=hhome(18), stdin=subprocess.DEVNULL)
+check("puller on another box: installs the puller alone, not refused", r.returncode == 0 and "refused" not in r.stdout + r.stderr and (hdir(18) / "stackshot-puller.service").is_file() and not (hdir(18) / "stackshot.service").exists(), (r.returncode, r.stdout[-300:], r.stderr[-300:]))
+# a host word is looked up per [hosts]: the lookup names this box, another box, or there is none
+for n, say, want_ok in ((19, ME, True), (20, "host-a.example", False)):
+    lk = T / f"where-{n}"; lk.write_text(f"#!/bin/sh\necho {say}\n"); lk.chmod(0o755)
+    rc, out, calls = units(hconf(f"host-word{n}.toml", deploy="host:server", lookup=str(lk)), env=hhome(n))
+    check(f"deploy_ssh as a host word whose lookup names {'this box' if want_ok else 'another box'}: " + ("installed" if want_ok else "refused, naming that host"),
+          (rc == 0 and (hdir(n) / "stackshot.service").is_file()) if want_ok else (rc == 1 and refused_line(out) and say in out and not hdir(n).exists()), (rc, out[-300:]))
+rc, out, calls = units(hconf("host-word21.toml", deploy="host:server"), env=hhome(21))
+check("deploy_ssh as a host word with no lookup: the word stays as written, so it is another host: refused, naming the word and saying the lookup did not resolve",
+      rc == 1 and refused_line(out) and "host:server" in out and "did not resolve" in out and not hdir(21).exists(), (rc, out[-300:]))
+lk = T / "where-fail"; lk.write_text("#!/bin/sh\nexit 1\n"); lk.chmod(0o755)
+rc, out, calls = units(hconf("host-word22.toml", deploy="host:server", lookup=str(lk)), env=hhome(22))
+check("deploy_ssh as a host word whose lookup fails: refused, and the line says the lookup did not resolve", rc == 1 and refused_line(out) and "did not resolve" in out and not hdir(22).exists(), (rc, out[-300:]))
+rc, out, calls = units(hconf("host-other2.toml", deploy="host-a.example"), env=hhome(23))
+check("the refusal for another host says an alias or an address of this box is not recognized, and to name the box by its hostname", rc == 1 and "not recognized" in out and "hostname" in out, out[-400:])
+# a check that cannot run (the config read behind it fails) refuses nothing: the install goes on, and the failure stays out of the output (a python3 that fails for that one call, and is the real one for the others)
+(T / "pyfail").mkdir()
+(T / "pyfail/python3").write_text('#!/bin/sh\ncase "$*" in *server_host_refusal*) echo "Traceback: the config could not be read" >&2; exit 1 ;; esac\nexec ' + shutil.which("python3") + ' "$@"\n'); (T / "pyfail/python3").chmod(0o755)
+rc, out, calls = units(hconf("host-readfail.toml", deploy="host-a.example"), env={**hhome(24), "PATH": f"{T}/pyfail:" + hhome(24)["PATH"]})
+check("units when the config read behind the server-host check fails: the check refuses nothing (fails open), installs, and prints none of the failure",
+      rc == 0 and "refused" not in out and "Traceback" not in out and (hdir(24) / "stackshot.service").is_file(), (rc, out[-300:]))
+r = subprocess.run([os.path.join(STACK, "install.sh")], capture_output=True, text=True, env=ENV)
+check("the usage text names --force-host and the server host rule", "--force-host" in r.stdout and "server host" in r.stdout and "deploy_ssh" in r.stdout, r.stdout[:600])
 # the usage lines of the header: the description starts in the same column on each
 usage = [l for l in pathlib.Path(STACK, "install.sh").read_text(encoding="utf-8").splitlines() if re.match(r"#   \./install\.sh (units|puller|render)\b", l)]
 cols = {len(re.match(r"#   \./install\.sh (?:units|puller|render(?: \[name\])?) +", l).group(0)) for l in usage}
