@@ -876,7 +876,7 @@ class Board:
         self.undelivered = [r for r in open_w if isinstance(r["metadata"].get("undelivered"), list) and r["metadata"]["undelivered"]]   # a notice that could not be delivered, on the item
         self.basis_waits = sorted([r for r in open_w if _wt.basis_of(r["metadata"])], key=lambda r: (wake_key(r), sort_key(r)))   # waits that stand on a real-world date (wait_basis): listed once a week in the head
         self.provision = provision_lag(now)            # [(hostname, online)] of the boxes whose stackshot puller is behind
-        self.mfacts = {L: _fleet.read(L, "machine") for L in _fleet.letters()}   # each machine's view: its last setup run and update attempts (machine_alerts)
+        self.mfacts = {L: _fleet.read(L, "machine") for L in _fleet.drawn_letters()}   # each drawn machine's view (a retired box gives no alert card): its last setup run and update attempts (machine_alerts)
         self._sc = (_SC_DEFAULT, _SC_ORG, _SC_TAG, _SC_PRE)
 
     # ---------------- the model ----------------

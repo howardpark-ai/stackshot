@@ -25,10 +25,35 @@ FLEET_DIR: Path = _cfg.fleet_dir()
 
 
 def letters() -> list[str]:
-    """Machine letters with live state, sorted."""
+    """Machine letters with live state, sorted: every folder of the view, a retired box's too. The readers that find a session or a box's facts
+    (session maps, the inbox, a pane's machine) read this; the readers that draw the boxes read `drawn_letters`."""
     if not FLEET_DIR.is_dir():
         return []
     return sorted(p.name for p in FLEET_DIR.iterdir() if p.is_dir() and len(p.name) == 1)
+
+
+def retired_letters() -> frozenset[str]:
+    """The letters [fleet] retired_letters names: boxes that are gone and are no longer drawn. A missing key, a value that is not a list (one string counts as a list of one), an
+    item that is not a string and an empty one are ignored; whitespace around a letter is stripped, and the letter is compared as given (the board's letters are lower-case)."""
+    cfg = _cfg.get("fleet", "retired_letters") or []
+    if isinstance(cfg, str):
+        cfg = [cfg]
+    if not isinstance(cfg, (list, tuple)):
+        return frozenset()
+    return frozenset(x.strip() for x in cfg if isinstance(x, str) and x.strip())
+
+
+def not_drawn() -> frozenset[str]:
+    """The letters left out of every drawing: [fleet] retired_letters without the publisher's letter (the box that runs this server is never retired)."""
+    out = retired_letters()
+    return out - {publisher()} if out else out
+
+
+def drawn_letters() -> list[str]:
+    """The letters to draw as boxes (the Machines panel's cards, `names`, the versions read, the board's per-machine facts, the sessions tool's machine list): `letters` without `not_drawn`.
+    The folder of a retired letter stays and is written as before: only the drawing leaves it out, so its sessions still resolve and still own their items."""
+    out = not_drawn()
+    return [L for L in letters() if L not in out] if out else letters()
 
 
 def read(letter: str, name: str) -> dict[str, Any]:
@@ -64,7 +89,7 @@ def sessions_unreadable() -> list[str]:
 
 
 def names() -> dict[str, str]:
-    """letter → fleet name: session-names.tsv first (a box with no fleet state yet), then the fleet state's own `fleet` name."""
+    """letter → fleet name: session-names.tsv first (a box with no fleet state yet), then the fleet state's own `fleet` name; a letter in [fleet] retired_letters (`not_drawn`) is left out of both."""
     out: dict[str, str] = {}
     try:
         for ln in open(_cfg.path("paths", "fleet_names"), encoding="utf-8"):
@@ -77,7 +102,8 @@ def names() -> dict[str, str]:
         n = read(L, "machine").get("fleet")
         if n:
             out[L] = n
-    return out
+    gone = not_drawn()                                       # a retired box is named by neither the folder nor a row of the names table
+    return {L: n for L, n in out.items() if L not in gone}
 
 
 # ---------------------------------------------------------------- the box that runs this server

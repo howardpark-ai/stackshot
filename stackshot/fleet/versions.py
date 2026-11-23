@@ -244,7 +244,7 @@ def machines_state() -> tuple[dict[str, str], dict[str, str]]:
     while its puller checks in (machine.json `online`, written by clients.py), the publisher always; a machine with no puller
     on record is offline since it was last seen."""
     machines: dict[str, str] = {}; state: dict[str, str] = {}
-    for L in _fleet.letters():
+    for L in _fleet.drawn_letters():                         # a retired box (its row in paths.fleet_names commented out) is no card, whatever folder it left
         d = _fleet.read(L, "machine")
         if not d:
             continue
