@@ -14,7 +14,11 @@ What a suite touches, at two grains:
     the suites that ran that function. A change at module level that only binds names (a def or class, a constant, the
     docstring, an import) reaches the code that READS them, by name (see *names* below): the functions whose bodies name
     them, followed across imports and through the bindings that use them, and the suites whose own file names them. One
-    with effects at import (an unknown decorator, a call statement) reaches every suite that ran the file. A registered
+    with effects at import (an unknown decorator, a call statement) reaches every suite that ran the file. A statement that
+    calls one of our own functions to bind a value (`SIG = signature()`) counts what the callee runs as measured, which holds
+    only for a callee that existed at the map's commit: when the change adds the def or class that a module-level statement of the
+    file reads, it reaches every suite that ran the file's module level (a new def that only function bodies call is reached by
+    its readers, as any name is). A registered
     function (@mcp.tool on the module's own object) reaches its callers and whatever lists the registry. A change that is
     only comments and blank lines reaches no suite by code.
   * Files, whole. strace records every tracked file a process of the suite opens, stats, runs or looks for (a failed lookup
@@ -89,7 +93,8 @@ The rules, per changed file F (git diff --name-status -M), the first that applie
      lists may still be looked up by a name nobody tried before (the import machinery lists the sys.path directories, the
      checkout and tests/, so those are listed by every suite)
   6. F is a .py file → the suites that read it whole, the suites that ran the functions its changed lines are in, and
-     those that read the names its module-level changes bind (a new file: whoever imports it changed too; one named like a
+     those that read the names its module-level changes bind (and, when a def or class the change adds is read by a module-level
+     statement of the file, the suites that ran the file's module level: no map measured the new callee; a new file: whoever imports it changed too; one named like a
      module the suites import, which it could shadow → all); a new .py file (added, or a rename's new side) also reaches the
      suites that read as text every .py file the directory held at the map's commit: such a suite globs the directory (a
      scenario that parses every module of service/), so it reads the new file too, and no earlier measurement could have
@@ -533,7 +538,9 @@ PURE_METHODS = {"get", "replace", "split", "rsplit", "join", "strip", "lstrip", 
 PATH_METHODS = {"resolve", "absolute", "expanduser", "joinpath", "with_name", "with_suffix", "as_posix"}
 PATH_ROOTS = {"Path", "pathlib.Path", "Path.home", "pathlib.Path.home"}
 # a call to one of our own functions in a module-level assignment computes the value from our code (what that code runs at
-# import is the callee's, measured); its effects are its body's, which a change to the call's arguments does not touch
+# import is the callee's, measured, when the callee existed at the map's commit; a def or class the change itself adds has no
+# measurement, so a module-level statement that reads one takes the file's module scope: py_change); its effects are its
+# body's, which a change to the call's arguments does not touch
 REPO_CALLS_BIND = True
 DYN_LOAD = {"spec_from_file_location", "importlib.util.spec_from_file_location", "run_path", "runpy.run_path"}
 # decorators that only wrap or describe what they decorate: a change under them is the function's own
@@ -2783,6 +2790,13 @@ def py_change(names, S, a, b, old, new):
                     bnames = {n for n in bnames if n in added}
                 bound |= {n if isinstance(n, tuple) else (mn.mod, n) for n in bnames}
                 own |= {(p, n) for n in bnames if isinstance(n, str) and n in mn.functions | mn.classes}
+    if mo is not None and mw is not None and mo.ok and mw.ok and new:
+        # a def or class this change ADDS, read by a module-level statement of the new file (`SIG = signature()`): that statement runs the new
+        # code at import, and no map measured it (the callee of a call is measured only if it existed at the map's commit, see REPO_CALLS_BIND),
+        # so the suites that ran the file's module level run it. A new def that only function bodies call is reached by readers() as before
+        fresh = (mw.functions | mw.classes) - (mo.functions | mo.classes)
+        if fresh and any((mw.mod, n) in st[4] for st in mw.stmts for n in fresh):
+            fns.add((new, ""))
     # a function whose code or def line changed too is selected as before: only a function whose changed lines are all docstring
     # keeps the name rule. The code that reads a docstring is reached either way
     docs = {(p, fn, mod) for p, fn, mod in docs if (p, fn) not in fns and (mod, fn) not in bound}
