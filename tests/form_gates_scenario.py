@@ -44,6 +44,7 @@ from stackshot.model import field_gates as _fg
 from stackshot.model import steps as S
 from stackshot.model import work as WK
 from stackshot.waits import waiting as W
+from stackshot.waits import wait_list_write as _wlw
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import update as _wt_update
 from fastmcp.exceptions import ToolError
@@ -279,6 +280,8 @@ CASES8 = [
     ("update, a waits list on a closed item", lambda: upd(47, waits=LIST2)),
     ("update, a clear of waits beside an until on a closed item", lambda: upd(47, waits=[], until=local_day(5))),
     ("update, an until on a closed item", lambda: upd(47, until=local_day(5))),
+    ("update, a clear_hold beside a waits list with an until", lambda: upd(40, waits=LIST2, until=local_day(5), clear_hold=True)),
+    ("update, a clear_hold beside a waits list with an until on a held item", lambda: (item(48, hold=True, wake=local_day(4)), upd(48, waits=LIST2, until=local_day(5), clear_hold=True))[1]),
 ]
 CASES8_ON = [      # the guards judge the mover: they are on
     ("update, an unknown mover on a relay wait", lambda: upd(40, hold=True, mover="home-nobody", wait_kind="relay", wait_event="the vendor", ask_by=local_day(5))),
@@ -367,6 +370,9 @@ for _g in (False, True):      # the calls with ONE mistake that a waits list bes
         ("update, a clear of waits beside an until on a closed item", "Refused: a completed item takes no wake; set it open first"),
         ("update, an until on a closed item", "Refused: a completed item takes no wake; set it open first")):
         MAIN8[f"{_lab}|{_g}"] = _txt
+    for _lab in ("update, a clear_hold beside a waits list with an until", "update, a clear_hold beside a waits list with an until on a held item"):      # main's one refusal for a list beside clear_hold (the until beside it is the list's backstop day, no wake)
+        MAIN8[f"{_lab}|{_g}"] = ("Refused: waits is a wait on a list and does not go with clear_hold: put each thing waited on in a line of waits and the backstop day in until ("
+                                 + _wlw.FORM + "); clear_wait=true ends a wait on its own")
 NEXT_TAIL = ". One step is one action with one named actor: open the line with who takes it: `<session>:`, `the owner:` or the outside party's name. A line under a step that belongs to it starts with `- `; results go on the project page (Current state or a timeline line), never into next"
 EVENT_TAIL = " is not an event the server watches. Pass one of: pr_released <owner/repo#n> | pr_merged <owner/repo#n> | recycle [<machine>] | fleet_op <verb | any | many> [<machine>] | job_run <name> | box_online <machine>"
 for _tag, _ph in PLACEHOLDERS:      # a placeholder in next, and as an event: main says the one mistake once (guards on)

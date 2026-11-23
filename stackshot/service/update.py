@@ -972,7 +972,7 @@ def update_unlocked(
             fc.add("Refused: status must be open | completed")
         else:
             item["status"] = status
-    if clear_hold and (hold or wake):
+    if clear_hold and (hold or (wake and not (_wlw.passed(waits) and not _wlw.clearing(waits)))):      # (an until beside a list is the list's backstop day, no wake: the list's own refusal says the clear_hold, once)
         fc.add("Refused: clear_hold releases the item and drops its wake; it does not go with hold or wake")
     if hold and item.get("status") == "completed":
         fc.add("Refused: a completed item cannot be parked; set it open first")
