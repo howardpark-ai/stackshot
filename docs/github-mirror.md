@@ -52,7 +52,7 @@ default, one GET each; no webhook, since the server sits behind an access proxy)
 (by default the login the mirror's token belongs to) with no `[author: …]` header (the mirror's older comments carry one) is the owner's own: it is recorded on the
 item under `metadata.answers` as `{ts, kind: "comment", text, via: "github", url, comment_id}`, shown in the item page's
 history as written on GitHub, and told in one line to the item's mover and to every session named in its needs (a front
-agent mover hears it marked for the owner). It clears no needs, changes no status and owes no page; the server's save of it
+agent mover hears it unmarked, as any other mover does: the comment asks the person for nothing). It clears no needs, changes no status and owes no page; the server's save of it
 is not echoed back to the issue. The cursor and the ids delivered live in `<state>/github/comments.json`: a restart delivers
 nothing twice, an edit of a delivered comment is not a new one, and the first run starts at "now", never at the history
 before the deploy.

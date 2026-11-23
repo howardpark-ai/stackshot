@@ -525,7 +525,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         told.clear(); post("/items/a6/answer", {"token": tok("a6"), "choice": "Decline"})
     finally:
         telling.front_keeper = _fs
-    check("a front-agent owner's line carries [for Oliver] on its first line", [(t[1], t[2]) for t in told] == [(OWNER, f"[for Oliver] [stackshot] Oliver answered a6 on the board: Decline → {BOARD}/items/a6")], told)
+    check("a front-agent owner's line is unmarked: the answer asks the person for nothing", [(t[1], t[2]) for t in told] == [(OWNER, f"[stackshot] Oliver answered a6 on the board: Decline → {BOARD}/items/a6")], told)
 
     # ---- 6. an old id's address answers the item it names now
     mp = G.load_map(STORE); mp["aliases"]["s9"] = "a3"; G.save_map(mp, STORE)

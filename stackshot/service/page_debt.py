@@ -20,7 +20,6 @@ from typing import Any
 
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
-from stackshot.core.instance import OWNER
 from stackshot.fleet import liveness as _lv
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.fleet.sessions_registry import _sessions_index
@@ -36,7 +35,6 @@ from stackshot.service import telling as _telling
 from stackshot.service.passes_hooks import hooks as _hooks
 from stackshot.service.store import _load
 
-_FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as server.py holds it
 
 
 PAGE_DEBT_LOCK = threading.Lock()
@@ -98,8 +96,7 @@ def page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[t
     """The debts the call did not settle go, in one message with the rows as today's relay writes them, to the agent that keeps the page
     (page_agent: the page's own `agent:`, when live), else the agent the project marks as its keeper, else the project's builder (a background agent whose mandate builds), else its -main
     agent (anchors.fallback_main: its project's, else the scope's general -main agent); with none of them the debts stay moved, for the next audit run's call.
-    The [for <owner>] mark is on the message only when that agent is a front one (a -main or other top-level `agents:` entry,
-    whose pane takes a peer's message only with it); a background agent gets the plain text. → who was told."""
+    The message is unmarked for a front agent too (a -main or other top-level `agents:` entry): the page update is the agent's to write, the person has nothing to do. → who was told."""
     own = page_agent(key)
     main = _hooks().main_agent(key)
     builder = _hooks().builder_agent(key)
@@ -111,7 +108,6 @@ def page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[t
     keeper = lead or builder or main
     if not keeper:
         return ""         # nobody can take them: they stay moved, and the next audit run's call tries again
-    front = _telling.front_keeper(lead, key)[0] if lead else (not builder and bool(main))      # the -main agent is front by construction; a builder and the keeper fallback are not
     rows = []
     for gid, what, writer in debts:
         try:
@@ -120,7 +116,7 @@ def page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[t
             item = {}
         rows.append((key, gid, item, what, writer))
     n = len(rows); s, are, them = ("s", "are", "them") if n != 1 else ("", "is", "it")
-    head = ((_FOR_OWNER + " ") if front else "") + (
+    head = (
             f"[board] {n} page update{s} on {key} {are} yours to write: the writer{s} left {them} undone past {_hooks().grace_min()} min and the "
             f"audit's page call could not write {them} ({clean_line(why, 200)}). "
             + ("Write the Current state: you keep this page." if lead else "Write the Current state, or hand it to the agent that keeps the page."))

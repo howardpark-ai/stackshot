@@ -158,8 +158,8 @@ check("1 step 1 (the notice again) sends nothing to -main or the fleet's builder
 done = stk(T2)
 mp = MAIN_ONLY("a1")
 check("1 nobody can take it (no builder in the project, cold call off): the record carries the request and the mover is unchanged", "a1" in done and bool(ho(1).get("recovery_at")) and mt(1).get("mover") == "home-peer3", (done, ho(1)))
-check("1 …ONE message went to the project's -main agent, marked for the owner on its first line, naming the item and the quiet session, asking it to decide, owing no reply",
-      len(mp) == 1 and mp[0][1].startswith(f"[for {OWN}]\n[stackshot] a1 ") and "home-peer3" in mp[0][1] and "decide" in mp[0][1] and "no builder" in mp[0][1] and "no reply is owed" in mp[0][1], mp)
+check("1 …ONE message went to the project's -main agent, unmarked, naming the item and the quiet session, asking it to decide, owing no reply",
+      len(mp) == 1 and mp[0][1].startswith("[stackshot] a1 ") and f"[for {OWN}]" not in mp[0][1] and "home-peer3" in mp[0][1] and "decide" in mp[0][1] and "no builder" in mp[0][1] and "no reply is owed" in mp[0][1], mp)
 check("1 …the fleet's builder was told nothing, and the quiet session got only the notice of step 1", not FLEET_ONLY("a1") and len(pushes_to("home-peer3", "a1")) == 1, pushes())
 check("1 …the History line says the -main agent was asked, and what was tried without a builder", "home-peer3 is quiet" in log_of(1)[-1]["text"] and "home-beta-front was asked to recover it" in log_of(1)[-1]["text"]
       and "project's builder" not in log_of(1)[-1]["text"], log_of(1))

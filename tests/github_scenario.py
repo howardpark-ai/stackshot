@@ -22,7 +22,7 @@ number: the file moves, l<n> becomes an alias, an `after` list and an anchor sco
 survives a restart.
 
 The inbound half (phase 3): the owner's own comment on an item's issue (his login, no `[author: …]` header) is recorded on the item (metadata.answers: {ts,
-kind comment, text, via github, url, comment_id}), told once to the owner (marked [for the owner] when it is a front agent) and to each session in its needs,
+kind comment, text, via github, url, comment_id}), told once to the owner (unmarked, a front agent too) and to each session in its needs,
 shown in the item page's History as written on GitHub, and leaves needs, status and the clocks alone. The mirror's older comments (they carry the header),
 another user's, an edit of a delivered comment, history edited after the reader started and a comment on an issue no item mirrors are passed by; a re-read and
 a restart deliver nothing twice; the first read starts at now; a comment the hook could not take waits for the next read; the reader thread delivers on its own;
@@ -1001,14 +1001,14 @@ r2 = G.poll_comments(GH, STORE, say=lambda s: None)
 check("a comment the hook could not take is left for the next read (not in seen, the cursor before it) and then goes once",
       r1["failed"] == 1 and r1["new"] == 0 and c_r["id"] not in st1["seen"] and G._epoch(st1["since"]) <= G._epoch(c_r["updated_at"])
       and r2["new"] == 1 and len(told) == 1 and all("taken at the second try" in t[2] for t in told) and rd(g_c[0], gn)["metadata"]["answers"][-1]["comment_id"] == c_r["id"], (r1, st1, r2, told))
-# a front agent mover hears it marked for the owner (_FOR_OWNER)
+# a front agent mover hears it unmarked (the comment asks the person for nothing)
 c_f = F.comment(n_c, "yes, go ahead"); told.clear(); _fs = telling.front_keeper
 telling.front_keeper = lambda who, project="": (True, "home-keeper")
 try: r = G.poll_comments(GH, STORE, say=lambda s: None)
 finally: telling.front_keeper = _fs
 NOTE_F = f"[stackshot] the owner commented on board#{gn} on GitHub: yes, go ahead → https://board.example.org/items/{gn}"
-check("a front agent mover hears it marked [for the owner]",
-      r["new"] == 1 and sorted(told) == [(g_c, "home-other", f"[for the owner] {NOTE_F}", "comment")], told)
+check("a front agent mover hears it unmarked: the comment asks the person for nothing",
+      r["new"] == 1 and sorted(told) == [(g_c, "home-other", NOTE_F, "comment")], told)
 long = ("a long word of the owner's " * 60).strip()
 c_l = F.comment(n_c, long + "\n\nsecond paragraph"); told.clear(); r = G.poll_comments(GH, STORE, say=lambda s: None)
 check("a long comment is clipped in the notice (one line, an ellipsis, under 800 chars) and kept whole on the item",

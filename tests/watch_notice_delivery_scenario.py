@@ -109,7 +109,7 @@ text = p[0][1] if p else ""
 reset()
 telling.tell_woken("a1", U[F_B], MARK + " " + text, tag="watch"); drain()
 q = pushes()
-check("1 the same notice carrying the old mark is pushed exactly as the unmarked one: same recipient, same count, the mark the only difference", len(q) == 1 and q[0][0] == p[0][0] and q[0][1] == MARK + " " + text, q)
+check("1 the same notice carrying the old mark is pushed exactly as the unmarked one: same recipient, same count, the mark the only difference", len(q) == 1 and q[0][0] == U[F_B] and q[0][1] == MARK + " " + text, q)
 check("1 …and that left nothing held either", held.count(U[F_B]) == 0 and not board_lines(1), (held.count(U[F_B]), board_lines(1)))
 reset()
 telling.tell_woken("a1", U[F_B], text, tag="watch"); drain()
@@ -150,6 +150,7 @@ for label, note in (("unmarked", NOTE), ("marked", MARK + " " + NOTE)):
     reset(); h0 = held.count(U[F_B])
     telling.tell_woken("a5", U[F_B], note, tag="owner"); drain()
     check(f"4 a progress notice, {label}, to the front agent while nobody is there: not pushed (the gate reads the kind, not the mark)", pushes() == [], pushes())
+    check(f"4 …and, {label}, it was queued for the agent's next turn, not dropped (the gate filed it as a line)", telling.FRONT_HINT.result[0] in ("fyi", "held") and (telling.FRONT_HINT.result[0] != "fyi" or held.count(U[F_B]) == h0 + 1), (telling.FRONT_HINT.result, h0, held.count(U[F_B])))
 check("4 …so the watch notice in 1 was pushed because of its kind: the same gate, the same agent, the same state", telling.FRONT_TAG_KIND.get("owner") == "progress" and telling.FRONT_TAG_KIND.get("watch") == "exempt", None)
 
 # ================================================================ 5. the delivery program does not read the mark

@@ -248,9 +248,9 @@ try:
 finally:
     pdebt._telling.pilot_relay_many, pdebt._routing.rule, pdebt.page_debt_forget = _relay, _rule, _forget
     write_record({})
-check("page debt fallback: no mark → the builder (as before); a mark on a front agent that is not the builder → that agent, told as a front agent that keeps the page; a mark on the builder → the builder",
+check("page debt fallback: no mark → the builder (as before); a mark on a front agent that is not the builder → that agent, told (unmarked) as the agent that keeps the page; a mark on the builder → the builder",
       (to0, to1, to2) == ("team-forge-builder", "team-forge-docs", "team-forge-builder") and [k for k, _h in sent] == ["team-forge-builder", "team-forge-docs", "team-forge-builder"]
-      and "you keep this page" not in sent[0][1] and "you keep this page" in sent[1][1] and sent[1][1].startswith("[for ") and not sent[0][1].startswith("[for "), (to0, to1, to2, sent))
+      and "you keep this page" not in sent[0][1] and "you keep this page" in sent[1][1] and sent[1][1].startswith("[board] ") and not sent[0][1].startswith("[for "), (to0, to1, to2, sent))
 
 # ---- 14. the keeper flag follows the agent over all its projects
 L = ids["projects/loft"]

@@ -48,7 +48,6 @@ from stackshot.service.save_hooks import hooks as _hooks
 from stackshot.waits import held as _held
 from stackshot.waits import watchers as _watch
 
-_FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as web/tools/text.py holds it
 
 
 def _session_id(value: str) -> str:
@@ -133,10 +132,10 @@ def _also_reached(meta: dict[str, Any]) -> list[tuple[str, bool]]:
 
 def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str = "", handed: str = "") -> list[str]:
     """Push the answer to the item's mover (holder, never the creator) and to every session named in its needs, one line each, through the owner-notice
-    path (tell_woken). A front-agent mover's line carries the mark a front agent takes. After a Done or a note on his step (`then` is who the item moved to) the then-mover is told too,
+    path (tell_woken). A front-agent mover's line is unmarked as any other (the person has nothing to do; the line is pushed to a front agent whatever it carries). After a Done or a note on his step (`then` is who the item moved to) the then-mover is told too,
     in its own line: the step he did and "it's yours now". After a decision that handed the item to its stored then-mover (`handed`) the same: its line ends "It's yours now". → the session ids told."""
     meta = item.get("metadata") or {}
-    owner, project = _telling.holder(item), str(meta.get("project") or "")
+    owner = _telling.holder(item)
     verb = "answered" if rec.get("kind") == "decision" else "commented on"
     url = _item_url(gid) or _telling.notice_link(gid)
     done = f"; parked with a wake on {rec['parked']}, set by the server" if rec.get("parked") else ""   # a stored raise's park, applied
@@ -165,10 +164,9 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
         told.append(sid)
     if owner:
         oid = _session_id(owner)
-        front = _telling.front_keeper(owner, project)[0]
         mine = oid == thenid
         base = to_then(line) if mine else line
-        tell(oid, f"{_FOR_OWNER} {base}" if front else base)
+        tell(oid, base)
     for s in _needs_sessions(meta):
         sid = _session_id(s)
         if sid and sid not in told:

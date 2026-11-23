@@ -364,8 +364,8 @@ check("9.3 after the take minutes the new mover is reminded once, and only it; t
 d2 = float(ho(60)["delivered_at"])
 done = tick(d2 + 22 * MIN, 60); drain()
 ask = main_asked("a60")
-check("9.4 after another take minutes the last rung asks the project's -main agent once, marked for the owner, naming the item and the quiet mover; the item stays with its mover and the hander is still told nothing", done == ["a60"] and len(ask) == 1
-      and ask[0][1].startswith(f"{MARK}\n[stackshot] a60 ") and FD in ask[0][1] and mt(60).get("mover") == FD and not pushes_to(FS), (done, ask, pushes()))
+check("9.4 after another take minutes the last rung asks the project's -main agent once, unmarked, naming the item and the quiet mover; the item stays with its mover and the hander is still told nothing", done == ["a60"] and len(ask) == 1
+      and ask[0][1].startswith("[stackshot] a60 ") and MARK not in ask[0][1] and FD in ask[0][1] and mt(60).get("mover") == FD and not pushes_to(FS), (done, ask, pushes()))
 check("9.5 …later passes send nothing more", tick(d2 + 5 * 3600, 60) == [] and len(main_asked("a60")) == 1, pushes())
 # contrast: a project with a builder keeps a front agent's hand-off exempt (a front-to-front record the hand-over rule would refuse there, written as the machinery would have)
 put(61, project="projects/bd", mover=BD, handoff=H.new_record(BD, U[BD], BM, now0 - 3600, **{"delivered_at": now0 - 3500}))

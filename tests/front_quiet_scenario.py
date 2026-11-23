@@ -497,7 +497,7 @@ set_presence()
 # The idle hand-over's and the balancer's summary to the project's -main agent say "Nothing is asked of you and no reply is owed" (tag stall_summary); the busy-stretch notice and the notice
 # to a quiet mover ask for action (tag stall). The first is progress for the gate, the others stay exempt.
 from stackshot.service import audit_ticks as _audit_ticks, ladder as _ladder
-SUMMARY = lambda g: f"{telling._FOR_OWNER}\n[stackshot] {g} \"[home] item\" (projects/alpha): no activity for an hour and nothing the audit could verify, and no builder was free to take it, so it stays with home-peer.\nNothing is asked of you and no reply is owed; nothing here is for Oliver. \u2192 https://x/items/{g}"
+SUMMARY = lambda g: f"[stackshot] {g} \"[home] item\" (projects/alpha): no activity for an hour and nothing the audit could verify, and no builder was free to take it, so it stays with home-peer.\nNothing is asked of you and no reply is owed; nothing here is for Oliver. \u2192 https://x/items/{g}"
 check("11 summary: the tag is mapped to progress in FRONT_TAG_KIND", telling.FRONT_TAG_KIND.get("stall_summary") == "progress", telling.FRONT_TAG_KIND)
 check("11 summary: …and the two tags that ask for action stay exempt (the busy-stretch and quiet-mover notices send tag stall; the cold call and the balancer's disregard line keep theirs)", telling.FRONT_TAG_KIND.get("stall") == "exempt" and telling.FRONT_TAG_KIND.get("balance") == "exempt", telling.FRONT_TAG_KIND)
 # the senders: the two -main summaries use the progress tag, the busy-stretch and quiet-mover notices the exempt one
@@ -522,15 +522,15 @@ check("11 present: …and the board line says it hears of it on its next turn", 
 held.take(U["home-front"])
 # the two notices that ask for action are still pushed as a turn, owner away or not
 unstamp("home-front"); item(112, writer="home-front")
-p, h = tell("a112", "home-front", f"{telling._FOR_OWNER}\n[stackshot] a112 \"[home] item\": no write on it but the hourly audit lines for about 4 hours. Please look.\nNo reply is owed to the audit; nothing here is for Oliver. \u2192 https://x/items/a112", tag="stall")
+p, h = tell("a112", "home-front", "[stackshot] a112 \"[home] item\": no write on it but the hourly audit lines for about 4 hours. Please look.\nNo reply is owed to the audit; nothing here is for Oliver. \u2192 https://x/items/a112", tag="stall")
 check("11 exempt: the busy-stretch notice (tag stall) to a front agent is still pushed with the owner away, and leaves no held line", len(p) == 1 and p[0][0] == U["home-front"] and h == 0 and not quiet_log(112) and not held_log("a112"), (p, h))
-p, h = tell("a112", "home-front", f"{telling._FOR_OWNER}\n[stackshot] you have had no turn running for 10 minutes and these items are still yours: a112 \u2192 https://x/items/a112", tag="stall")
+p, h = tell("a112", "home-front", "[stackshot] you have had no turn running for 10 minutes and these items are still yours: a112 \u2192 https://x/items/a112", tag="stall")
 check("11 exempt: …and so is the notice to a quiet mover (tag stall)", len(p) == 1 and p[0][0] == U["home-front"] and h == 0 and not quiet_log(112), (p, h))
 # a summary of several items through the real gate: each item's board line is its own line, never the whole summary clipped, and carries no owner mark
 LEADS = {g: f"a{g} \"[home] item {g}\" (projects/alpha)" for g in (120, 121, 122)}
 LINES = {f"a{g}": f"{LEADS[g]}: no activity for an hour and nothing the audit could verify, and no builder was free to take it, so it stays with home-peer" for g in LEADS}
 GIDS = ",".join(LINES)
-MULTI = f"{telling._FOR_OWNER}\n[stackshot] 3 items had no activity for an hour and nothing the audit could verify:\n" + "\n".join("- " + x for x in LINES.values()) + "\nNothing is asked of you and no reply is owed; nothing here is for Oliver. → https://x/board"
+MULTI = "[stackshot] 3 items had no activity for an hour and nothing the audit could verify:\n" + "\n".join("- " + x for x in LINES.values()) + "\nNothing is asked of you and no reply is owed; nothing here is for Oliver. → https://x/board"
 def tell_multi(who):
     p0, h0 = len(pushes()), held.count(U[who])
     telling.tell_news(LINES, GIDS, U[who], MULTI, tag="stall_summary"); drain()

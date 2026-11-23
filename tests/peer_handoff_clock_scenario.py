@@ -191,7 +191,7 @@ check("1 …the hander, the project's -main agent and the fleet's builder are to
 check("1 …and nothing goes down the ladder before the next take minutes", tick(d1b + 5 * MIN, 1) == [] and not ho(1).get("recovery_at"), ho(1))
 done = tick(d1b + 11 * MIN, 1); drain()
 mp = main_recovery_pushes("a1")
-check("1 after another take minutes the last rung asks the project's -main agent, once, marked for the owner, naming the item and the quiet new mover", done == ["a1"] and len(mp) == 1 and mp[0][1].startswith(f"[for {OWN}]\n[stackshot] a1 ")
+check("1 after another take minutes the last rung asks the project's -main agent, once, unmarked, naming the item and the quiet new mover", done == ["a1"] and len(mp) == 1 and mp[0][1].startswith("[stackshot] a1 ") and f"[for {OWN}]" not in mp[0][1]
       and "home-peer2" in mp[0][1] and bool(ho(1).get("recovery_at")) and ho(1).get("recovery_by") == "the project's -main agent", (done, mp, ho(1)))
 check("1 …and says what was tried (the notice and one reminder), not a fresh session's call and the sender, and does not call the -main agent the hander", "What the ladder tried: the hand-off notice went to home-peer2 and, with no work started after 10 min, one reminder." in mp[0][1]
       and "fresh session" not in mp[0][1] and "yourself" not in mp[0][1], mp)
@@ -228,7 +228,7 @@ check("2 …its ask is the hand-off's notice again to the new mover, a `handoff`
 check("2 …the hander and the -main agent are told nothing so far", not pushes_to("home-peer") and not pushes_to("home-delta-main", "a4"), pushes())
 t = time.time() + 11 * MIN + 31 * MIN
 stk(t); stk(t + 11 * MIN + 1); stk(t + 22 * MIN + 2)
-check("2 the look and the last rung follow: the new mover is asked once more, then the -main agent is asked once (marked for the owner)", len(main_recovery_pushes("a4")) == 1 and main_recovery_pushes("a4")[0][1].startswith(f"[for {OWN}]\n[stackshot] a4 ")
+check("2 the look and the last rung follow: the new mover is asked once more, then the -main agent is asked once (unmarked)", len(main_recovery_pushes("a4")) == 1 and main_recovery_pushes("a4")[0][1].startswith("[stackshot] a4 ") and f"[for {OWN}]" not in main_recovery_pushes("a4")[0][1]
       and len(texts("home-peer2", "a4")) >= 3, (pushes(), ent, stall_svc.stall_load().get("a4")))
 check("2 …the request says what was tried with the ladder on: the notice sent again and the pane looked at", "What the ladder tried: the hand-off notice went to home-peer2, was sent again after 10 min with no work started, and its pane was looked at later." in main_recovery_pushes("a4")[0][1]
       and "fresh session" not in main_recovery_pushes("a4")[0][1], main_recovery_pushes("a4"))

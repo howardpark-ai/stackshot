@@ -38,7 +38,6 @@ from stackshot.service import writes as _writes
 from stackshot.service import agents as _agents
 from stackshot.waits import stall as _stall
 
-_FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as server.py holds it
 
 
 def _session_id(value: str) -> str:
@@ -152,7 +151,7 @@ def _recovery_tell(gid: str, item: dict[str, Any], quiet: str, why: str, tried: 
     """The last rung of the ladders: ONE message to the fleet's builder naming the item and the quiet session and asking it to take the fix through its usual path (the callers send it once
     per episode: a hand-off record, a stall record; they mark the episode BEFORE this send, on purpose: a failed send is not retried every pass, `metadata.undelivered`
     records it and the audit's unmoved digest is the backstop). The item stays with its mover; the message is not for the owner and owes no reply. The History line is written here, after the
-    outcome is known, so it says what happened. A front-only project's request goes to its -main agent instead (`_recovery_target`), marked for the owner as every message to a front agent is, and asks it to decide
+    outcome is known, so it says what happened. A front-only project's request goes to its -main agent instead (`_recovery_target`), unmarked (the person has nothing to do; the notice is pushed to a front agent whatever it carries), and asks it to decide
     (bring the session back, message it, or hand the item on); the others go to the fleet's builder. → the outcome: "asked" (the send was started; a delivery that fails later lands in metadata.undelivered), "held" (the front gate held it), "self" (the quiet
     session is the builder itself), "nobody" (no builder resolves), "failed" (the send raised). `target` is the caller's `_recovery_target` (computed once on the raw session, as the caller's wording of `tried` used it);
     without it the target is read here on `quiet`. Never raises."""
@@ -169,7 +168,7 @@ def _recovery_tell(gid: str, item: dict[str, Any], quiet: str, why: str, tried: 
         else:
             meta = item.get("metadata") or {}
             if kind == "main":
-                text = (f"{_FOR_OWNER}\n[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it, and the project lists no builder to take it. "
+                text = (f"[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it, and the project lists no builder to take it. "
                         f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please decide what it needs: bring the session back, message {quiet}, or hand the item on (update mover=<session>). "
                         f"The item stays with {quiet} meanwhile, and no reply is owed (put the result on the item). → {_telling.notice_link(gid)}")
             else:
