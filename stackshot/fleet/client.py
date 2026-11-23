@@ -295,6 +295,19 @@ runs on every box.
                                 messages have no background agent to go to and that could use one (the agent is called
                                 <name prefix>-<role>); nothing when none, when [background_agent] enabled is off or when the
                                 server cannot be asked. Reads only. Exit 0 whatever happened.
+  client.py project-activity [--json]
+                                for a script that decides whether a project is quiet: per project, when it last heard from outside and when
+                                its owner last gave input. Plain output is one line per project, "<project key> <anchor> <owner>", each a
+                                whole epoch second or - for none; --json prints {"projects": {"<project key>": {"anchor": <epoch|null>,
+                                "owner": <epoch|null>}}}. anchor = the newest anchor notice from outside (an event on a watched thing; not
+                                a board notice, a message, a routine event on the fleet's own repository, a log-only anchor or the hub's
+                                own warning). owner = the newest of his board actions (an answer, decision, Done, note or comment on an
+                                item, on the board or on its GitHub issue; not a step the server settled on a mail) and his front-chat
+                                messages (the time he last typed in a front agent's pane; not a notice, a relayed message or a background
+                                agent's pane). A sub-page counts for its project. Only projects with either time are listed; a project
+                                not listed has had neither. Reads only. Exit 0 and the answer (nothing printed when no project has
+                                either) · 1 and the reason on stderr when the server cannot be asked or refuses, so a script never reads
+                                a failure as "no activity".
   client.py recycle-due --item <id> | --pr <PR url>
                                 for a script: mark a recycle of this machine's panes as due on an existing open item, as a
                                 session would with update(recycle=true): the item by id, or the open items whose anchors include
@@ -373,7 +386,7 @@ CLIENTS = os.path.join(SECRETS, "clients.json")
 TOKENS = os.path.join(SECRETS, "client-tokens")
 TOKEN = os.path.join(SECRETS, "client.token")
 URLF = os.path.join(SECRETS, "client.url")
-READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "roles", "project", "projects", "agent-name", "answer", "notice", "for-you")
+READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "project", "projects", "agent-name", "answer", "notice", "for-you")
 
 
 def _write_private(path: str, text: str) -> None:
@@ -1017,6 +1030,25 @@ def item_sync(argv: list[str], timeout: float = 60.0) -> int:
     print(f"{d['item']} {d.get('note') or d.get('action')}" if d.get("item") else str(d.get("note") or f"no open item for {marker}; nothing was done")); return 0
 
 
+PROJECT_ACTIVITY_USAGE = "usage: client.py project-activity [--json]"
+
+
+def project_activity(argv: list[str], timeout: float = 20.0) -> int:
+    """`project-activity [--json]`: per project the epoch of its newest anchor notice from outside and of its owner's newest input, as one line each
+    ("<project key> <anchor|-> <owner|->") or, with --json, the server's {"projects": {key: {"anchor", "owner"}}} → exit 0 (nothing printed when no
+    project has either time); 1 and the reason on stderr when the server is not reached or refuses (never an empty answer for a failure), 1 on misuse."""
+    if any(a != "--json" for a in argv) or len(argv) > 1: print(PROJECT_ACTIVITY_USAGE, file=sys.stderr); return 1
+    status, body = get("project-activity", timeout=timeout)
+    try: rows = json.loads(body)["projects"] if status == 200 else None
+    except Exception: rows = None
+    if not isinstance(rows, dict): print(f"stackshot: project activity not read [{status}] {body}"[:600], file=sys.stderr); return 1
+    if argv: print(json.dumps({"projects": rows}, ensure_ascii=False, sort_keys=True)); return 0
+    for key in sorted(rows):
+        r = rows[key] if isinstance(rows[key], dict) else {}
+        print(key, *(r[k] if isinstance(r.get(k), int) and not isinstance(r.get(k), bool) else "-" for k in ("anchor", "owner")))
+    return 0
+
+
 def answer(item: str, timeout: float = 20.0) -> int:
     """The owner's latest board answer on an item, as the server's one line (<option label> TAB <text>) -> exit 0 (nothing printed while
     he has not answered), 1 when the item is not found, the server is not reached or the id is misused."""
@@ -1131,6 +1163,9 @@ def main(argv: list[str]) -> int:
             if status == 200 and body.strip(): print(body.strip())
         except Exception: pass
         return 0
+    if cmd == "project-activity":
+        try: return project_activity(argv[2:])
+        except Exception as e: print(f"stackshot: project activity not read ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
     if cmd == "background-wanted":
         try:
             status, body = get("background-wanted", timeout=8.0)
