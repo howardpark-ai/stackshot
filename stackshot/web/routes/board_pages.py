@@ -149,7 +149,7 @@ def _details_page(request: Request, key: str):
 
 # The web app manifest, so the board installs as an app window (Chrome "Install page as app"). render.py's _APP_HEAD links it
 # with crossorigin="use-credentials" so Chrome's fetch carries the Cloudflare Access cookie; in the server's own sign-in it is
-# public like the icons it names: the favicon (<state>/site/favicon.svg, sizes "any") and the PNGs of _APP_ICONS (a launcher
+# public like the icons it names: the favicon (icons/favicon.svg, sizes "any") and the PNGs of _APP_ICONS (a launcher
 # or splash screen that rasterises the SVG at a small size and scales it up looks soft). theme_color
 # is the light theme's --bg token, the background of the board's sticky header; background_color, the splash screen's, is the
 # mark's tile colour (#1f1f21), the full-bleed background of every PNG icon, so the splash is the icon's own dark.
@@ -334,9 +334,9 @@ async def site_file(request: Request):
     if name == _FONT_PATH:                # /fonts/<the bundled font file>, versioned by ?v= like the icons (immutable when the version is current)
         p = _rmod.FONT_DIR / _rmod.FONT_FILE
         return _icon_file(request, p, "font/woff2") if p.is_file() else PlainTextResponse("not found", status_code=404)
-    if name in _APP_ICONS:                # from the checkout, not <state>/site: they ship with the code that names them
+    if name in _APP_ICONS or name == "favicon.svg":   # from the checkout, not <state>/site: they ship with the code that names them
         p = _APP_ICON_DIR / name
-        return _icon_file(request, p, "image/png") if p.is_file() else PlainTextResponse("not found", status_code=404)
+        return _icon_file(request, p, "image/svg+xml" if name == "favicon.svg" else "image/png") if p.is_file() else PlainTextResponse("not found", status_code=404)
     if name == "board.md" and _ro.is_read_only():       # standby: from the in-memory render (_ro_board), no file
         from starlette.concurrency import run_in_threadpool
         r = await run_in_threadpool(_ro_board)
@@ -352,8 +352,6 @@ async def site_file(request: Request):
         return PlainTextResponse("not found", status_code=404)
     p = _SITE_DIR / name
     if p.is_file() and p.suffix in _SITE_TYPES:
-        if name == "favicon.svg":         # linked with its version like the app icons (render.py icon_href)
-            return _icon_file(request, p, _SITE_TYPES[p.suffix])
         return FileResponse(str(p), media_type=_SITE_TYPES[p.suffix])
     return PlainTextResponse("not found", status_code=404)
 

@@ -747,7 +747,7 @@ _KIND_ORDER = ["Slack", "Notion", "Gmail", "Drive", "GitHub", "Link"]
 # an installed app (Chrome, Android) takes its icons through the browser's HTTP cache and Cloudflare's edge, and an icon
 # under an unchanged URL never reached it (the maskable icon stayed the old white one). The
 # versions are read once, when this module is imported (the server's start; deploy.sh restarts it when icons/ changes),
-# from the committed icons/ (auth/signin.py _APP_ICONS) and the favicon in <state>/site. The version is a query string and the
+# from the committed icons/ (auth/signin.py _APP_ICONS, and favicon.svg beside them). The version is a query string and the
 # file names stay: the Cloudflare Access bypass names the icons' exact paths, which a query string keeps and a new name would
 # not. server.py serves a request whose ?v= is the version of the bytes it sends as immutable; any other, as before.
 ICON_DIR = _paths.ROOT / "icons"
@@ -757,8 +757,7 @@ def asset_version(p) -> str:
         return hashlib.sha256(Path(p).read_bytes()).hexdigest()[:12]
     except OSError:
         return ""
-ICON_V = {p.name: asset_version(p) for p in sorted(ICON_DIR.glob("*")) if p.suffix in (".png", ".ico")}
-ICON_V["favicon.svg"] = asset_version(_cfg.state("site", "favicon.svg"))
+ICON_V = {p.name: asset_version(p) for p in sorted(ICON_DIR.glob("*")) if p.suffix in (".png", ".ico", ".svg")}
 def icon_href(name: str) -> str:
     """An icon's URL with its version: /<name>?v=<version>, or /<name> for a file that is not there."""
     v = ICON_V.get(name)
