@@ -1096,6 +1096,18 @@ def _new_page_notes(name: str, b: dict[str, Any]) -> list[str]:
     return out
 
 
+def server_box(cfg: dict[str, Any] | None = None) -> bool | None:
+    """[server] box: True = this machine is the server box and reads the page registry and page times from its own checkouts; False = it never does (a pane
+    hook always asks the server's client API, whatever clones it holds); None = unset, the older rule: a machine that has the pages checkout is the server box
+    (pages.py decides from the checkout). Anything but a boolean or a string that is "true" or "false" (any case, spaces around it left off) reads as unset; `notes` says so."""
+    v = get("server", "box", cfg=cfg)
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str) and v.strip().lower() in ("true", "false"):
+        return v.strip().lower() == "true"
+    return None
+
+
 def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     """Settings problems that do not stop the start but change behaviour silently: one line each, [] when the file is fine. The config
     is exactly one file with no defaults merged in (see the head), so a [page_gate] without keeper_currency means the page rules
@@ -1130,6 +1142,9 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
         au = au if isinstance(au, dict) else {}
         if not (au.get("enabled") is True or str(au.get("enabled")).strip().lower() in ("true", "1", "yes")) or str(au.get("mode") or "").strip().lower() == "agent":
             out.append('[router] page_debt is on, but the page-debt call is made by the audit run\'s pages stage: with [audit] enabled off or mode = "agent" no pass runs and the page debts wait; turn the audit on in script mode')
+    sv = get("server", cfg=cfg)
+    if isinstance(sv, dict) and "box" in sv and server_box(cfg) is None:
+        out.append(f'[server] box = {sv["box"]!r} is neither true nor false, so it is read as unset: a machine that holds the pages checkout is taken for the server box; write box = true or box = false')
     br = get("brains", cfg=cfg)
     if br is not None and not isinstance(br, list):
         out.append("brains is not a list of [[brains]] tables, so no second brain is used: write each one as a [[brains]] table (the example config has one)")
@@ -1374,8 +1389,10 @@ if __name__ == "__main__":
         print(PATH); sys.exit(0)
     if a == ["check"]:                # a removed mode in the file already stopped the import above with its line; here: nothing to say
         sys.exit(0)
+    if a == ["server-box"]:           # [server] box as server_box() reads it: true, false, or nothing when unset or not a boolean (the SessionStart hook asks)
+        v = server_box(); print("" if v is None else "true" if v else "false"); sys.exit(0)
     if len(a) < 2 or a[0] not in ("get", "path", "state", "secrets"):
-        sys.exit("usage: config.py get a.b.c | path a.b | state <parts…> | secrets <parts…> | file | check")
+        sys.exit("usage: config.py get a.b.c | path a.b | state <parts…> | secrets <parts…> | server-box | file | check")
     if a[0] == "get":
         v = get(*a[1].split("."))
         print("" if v is None else v if isinstance(v, str) else __import__("json").dumps(v))

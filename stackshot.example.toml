@@ -831,6 +831,9 @@ session_horizon_days = 30                           # a gone session's identity 
 host = "127.0.0.1"
 port = 8020
 path = "/mcp"
+# box = true                                        # whether this machine is the server box: it then reads the page registry, page times and the board's brief from its own checkouts
+                                                    # ([paths] brain, store). false = never (a pane hook always asks the server's client API, whatever clones the machine holds): set it on
+                                                    # a machine that only runs sessions. Unset (the default): a machine that holds the pages checkout is taken for the server box
 
 [items_api]                                         # what the items API (`items?key=<session>`, which the fleet tool's web board reads) emits
 owner_mover_kind = "legacy"                         # the `mover.kind` of an item that is the owner's move. "legacy" (the default) = a legacy owner label that stays supported: the owner's

@@ -414,7 +414,7 @@ p._cfg.CFG["instance"]["timezone"] = "Asia/Dubai"
 saved_brain = p.BRAIN; p.BRAIN = f"{tmp}/no-such-pages"
 nc = p.describe("projects/beta", v)
 check("flavor plain, no pages copy here: the nag names the page in a checkout of the pages repository, one parenthesis",
-      "— update the page (edit the page `projects/beta.md` in a checkout of the pages repository, which this machine has none of: its Current state, "
+      "— update the page (edit the page `projects/beta.md` in a checkout of the pages repository, which this machine does not read pages from: its Current state, "
       "and a dated line under its Timeline; commit and push). Only if" in nc and "no copy" not in nc, nc)
 p.BRAIN = saved_brain
 p._cfg.CFG.setdefault("pages", {})["flavor"] = "gbrain"; check("flavor: config gbrain is read", p._cfg.page_flavor() == "gbrain")

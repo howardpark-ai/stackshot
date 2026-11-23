@@ -56,6 +56,7 @@ from typing import Any
 
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg
+from stackshot.fleet import fleet as _flt
 from stackshot.fleet import liveness as _lv
 
 DIR: Path = _cfg.state("clients")
@@ -290,15 +291,22 @@ def names_table() -> dict[str, tuple[str, str]]:
 
 
 def _machine(st: dict[str, Any], machine: str) -> dict[str, Any]:
-    """The machine's record, made on first sight. Its letter comes from the names table; a machine the table does not know
-    takes the first letter nothing uses (c is the cloud's, the ids' own letter is the store's)."""
+    """The machine's record, made on first sight. Its letter comes from the names table; the server box itself (the machine whose name is this box's own
+    hostname) that the table does not list takes [fleet] publisher_letter when that is set and no other machine holds it, so the Machines panel shows one card
+    for it; any other machine the table does not know takes the first letter nothing uses (c is the cloud's, the ids' own letter is the store's,
+    and [fleet] publisher_letter is the server box's, so another machine registering first never takes it)."""
     m = st["machines"].get(machine)
     if m:
         return m
     fleet, letter = names_table().get(machine.lower(), (machine, ""))
     if not letter:
-        used = {x.get("letter") for x in st["machines"].values()} | {v[1] for v in names_table().values()} | {"c", str(_cfg.get("ids", "letter") or "s")}
-        letter = next((ch for ch in "abdefghijklmnopqrtuvwxyz" if ch not in used), "z")
+        pub = str(_cfg.get("fleet", "publisher_letter") or "").strip()
+        taken = {x.get("letter") for x in st["machines"].values()} | {v[1] for v in names_table().values()}
+        if pub and pub not in taken and _flt.is_own_host(machine):
+            letter = pub
+        else:
+            used = taken | {"c", str(_cfg.get("ids", "letter") or "s"), pub}
+            letter = next((ch for ch in "abdefghijklmnopqrtuvwxyz" if ch not in used), "z")
     m = st["machines"][machine] = {"letter": letter, "fleet": fleet, "first": _iso()}
     return m
 
