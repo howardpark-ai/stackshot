@@ -373,8 +373,8 @@ fy.add(key="page:hid", kind="closed", gid="a52", item="a52", project="projects/a
 full = B_.html()
 _blocks = re.search(r'<meta name="stackshot-blocks" content="([^"]*)">', full).group(1)
 _body = full.split("<body", 1)[1]       # the style sheet in the head keeps its unused For you rules; the body is what is shown
-check("the full board page does not show the For you section while _SHOW_FOR_YOU in ui/render.py is off: no section, heading, seen form, seen script, jump link or block fingerprint (the home fold script names the old for-you key it removes)",
-      ui_render._SHOW_FOR_YOU is False and 'id="for-you"' not in _body and "For you" not in _body and "fy-" not in _body and "for-you" not in _body.replace(ui_render._HOME_FOLD_JS, "")
+check("the full board page does not show the For you section while _SHOW_FOR_YOU in ui/render.py is off: no section, heading, seen form, seen script, jump link or block fingerprint",
+      ui_render._SHOW_FOR_YOU is False and 'id="for-you"' not in _body and "For you" not in _body and "fy-" not in _body and "for-you" not in _body
       and ui_render._FORYOU_JS not in full and "for-you" not in [p.split("=")[0] for p in _blocks.split()], _blocks)
 check("…the row is still recorded (display only): the list holds it", any(r["what"] == "row behind the hidden section" for r in fy.rows()), fy.rows())
 ui_render._SHOW_FOR_YOU = True

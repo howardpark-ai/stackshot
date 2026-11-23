@@ -223,7 +223,7 @@ def page_html(board: Any, snap: dict[str, Any], token: Any = None) -> str:
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
             f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_e(title)}</title>'
             f'<link rel="icon" href="{R.icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{_e(font_css)}">' if font_css else "")
-            + R._THEME_HEAD + R._APP_HEAD + f'<style>{board._css()}{_CSS}</style></head>{R._PANEL_BODY}<div id="layout"><main id="top">{board.page_header()}'
+            + R._THEME_HEAD + R._FOLD_HEAD + R._APP_HEAD + f'<style>{board._css()}{_CSS}</style></head>{R._PANEL_BODY}<div id="layout"><main id="top">{board.page_header()}'
             f'<h1>{_e(_i18n.t("runners.heading"))}</h1>{sub}'
             f'<p id="rn-note" class="rstale-js" role="status"></p><p id="rn-result" role="status" aria-live="polite"></p>'
             f'<div id="rn-body" data-ts="{int(snap["ts"])}"{" data-stale=\"1\"" if snap.get("stale") else ""}{" data-refreshing=\"1\"" if snap.get("refreshing") or snap.get("pending") else ""}>{table_html(snap, token=token)}</div></main>' + board.panel_tail()

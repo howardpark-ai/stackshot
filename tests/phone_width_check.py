@@ -520,29 +520,31 @@ with sync_playwright() as p:
             fo = pg.evaluate("Object.fromEntries([...document.querySelectorAll('details.fold')].map(d => [d.dataset.fold, d.open]))")
             PANEL4 = {"machines", "runners", "anchorhub", "audit-panel", "projects-panel"}      # the side panel's sections: open on every load
             check(f"{tag}: as the page loads the main column has Your move and Queued for release open (On agent and Waiting closed) and the panel's Machines, Runners, Anchor hub, Audit and Projects are open", {k for k, v in fo.items() if v} == BASE | PANEL4 and {"agents-at-work", "waiting-list"} <= set(fo), fo)
-            # nothing is remembered. A fold opened by hand is closed again on the next load; the old stored keys are removed (and have no effect); the item and project pages' keys stay; a hash opens a section or the section of a row.
+            # every fold is remembered per browser. A fold toggled by hand is as it was left on the next load; untouched folds keep their defaults; a hash opens a section or the section of a row and stays in the address.
             if w == 412:
                 FOLDS = "Object.fromEntries([...document.querySelectorAll('details.fold')].map(d => [d.dataset.fold, d.open]))"
-                KEYS = "Object.keys(localStorage).filter(k => k.startsWith('stackshot.fold.')).sort()"
+                KEYS = "Object.fromEntries(Object.keys(localStorage).filter(k => k.startsWith('stackshot.fold.')).sort().map(k => [k, localStorage.getItem(k)]))"
                 pg.evaluate("document.querySelector('#waiting-list summary').click()"); pg.wait_for_timeout(50)
-                check(f"{tag}: a section opened by hand is open", pg.evaluate("document.querySelector('#waiting-list details.fold').open"))
-                pg.evaluate("() => { localStorage.setItem('stackshot.fold.your-move', '0'); localStorage.setItem('stackshot.fold.waiting-list', '1'); localStorage.setItem('stackshot.fold.completed', '1'); localStorage.setItem('stackshot.fold.machines', '0'); localStorage.setItem('stackshot.fold.anchorhub', '0'); localStorage.setItem('stackshot.fold.item.history', '1') }")
+                check(f"{tag}: a section opened by hand is open and its key is stored as 1", pg.evaluate("document.querySelector('#waiting-list details.fold').open") and pg.evaluate(KEYS).get("stackshot.fold.waiting-list") == "1", pg.evaluate(KEYS))
+                pg.evaluate("document.querySelector('#your-move summary').click()"); pg.evaluate("document.querySelector('#machines summary').click()"); pg.wait_for_timeout(50)
+                check(f"{tag}: closing Your move and the panel's Machines stores 0 for each", pg.evaluate(KEYS).get("stackshot.fold.your-move") == "0" and pg.evaluate(KEYS).get("stackshot.fold.machines") == "0", pg.evaluate(KEYS))
                 pg.reload(); pg.wait_for_timeout(150)
                 fo2 = pg.evaluate(FOLDS)
-                check(f"{tag}: after a reload only Your move and Queued for release are open again in the main column and the panel's sections are open, whatever was stored or opened by hand", {k for k, v in fo2.items() if v} == BASE | PANEL4, fo2)
-                check(f"{tag}: the old section keys are gone from storage, the item page's key stays", pg.evaluate(KEYS) == ["stackshot.fold.item.history"], pg.evaluate(KEYS))
+                check(f"{tag}: after a reload the folds are as they were left (Waiting open, Your move and Machines closed) and every other fold keeps its default", {k for k, v in fo2.items() if v} == (BASE | PANEL4 | {"waiting-list"}) - {"your-move", "machines"}, fo2)
+                pg4 = ctx.new_page(); pg4.goto(PAGES["board"].as_uri()); pg4.wait_for_timeout(150)
+                check(f"{tag}: a second tab of the same browser starts from the stored state too", {k for k, v in pg4.evaluate(FOLDS).items() if v} == (BASE | PANEL4 | {"waiting-list"}) - {"your-move", "machines"}, pg4.evaluate(FOLDS))
+                pg4.close()
                 pg.evaluate("document.querySelector('#agents-at-work summary').click()"); pg.wait_for_timeout(50)
-                check(f"{tag}: opening a section writes nothing to storage", pg.evaluate(KEYS) == ["stackshot.fold.item.history"], pg.evaluate(KEYS))
-                rid = pg.evaluate("(document.querySelector('#agents-at-work li.hrow') || {}).id || ''")
+                check(f"{tag}: opening a section writes its key", pg.evaluate(KEYS).get("stackshot.fold.agents-at-work") == "1", pg.evaluate(KEYS))
                 pg3 = ctx.new_page(); pg3.goto(PAGES["board"].as_uri() + "#waiting-list"); pg3.wait_for_timeout(200)
                 fh = pg3.evaluate(FOLDS)
-                check(f"{tag}: a link to #waiting-list opens that section on load, the others stay as they were", {k for k, v in fh.items() if v} == BASE | {"waiting-list"} | PANEL4, fh)
-                check(f"{tag}: ... and the hash is dropped from the address once it has opened, so a reload shows only the first two open again", pg3.evaluate("location.hash") == "", pg3.evaluate("location.href"))
+                check(f"{tag}: a link to #waiting-list opens that section on load, the folds the viewer left stay as they were", fh.get("waiting-list") is True and fh.get("agents-at-work") is True and fh.get("your-move") is False, fh)
+                check(f"{tag}: ... and the hash stays in the address, as on the item and project pages", pg3.evaluate("location.hash") == "#waiting-list", pg3.evaluate("location.href"))
                 pg3.reload(); pg3.wait_for_timeout(200)
-                check(f"{tag}: ... the reload of that page has only Your move and Queued for release open in the main column", {k for k, v in pg3.evaluate(FOLDS).items() if v} == BASE | PANEL4, pg3.evaluate(FOLDS))
+                check(f"{tag}: ... and a reload of that page keeps the opened section open, with the hash still in the address", pg3.evaluate(FOLDS).get("waiting-list") is True and pg3.evaluate("location.hash") == "#waiting-list", pg3.evaluate(FOLDS))
                 pg3.evaluate("location.hash = '#agents-at-work'"); pg3.wait_for_timeout(200)
                 check(f"{tag}: changing the hash to #agents-at-work opens that section too", pg3.evaluate("document.querySelector('#agents-at-work details.fold').open"), pg3.evaluate(FOLDS))
-                check(f"{tag}: ... and drops that hash too", pg3.evaluate("location.hash") == "", pg3.evaluate("location.href"))
+                check(f"{tag}: ... and keeps that hash too", pg3.evaluate("location.hash") == "#agents-at-work", pg3.evaluate("location.href"))
                 pg3.close()
                 check(f"{tag}: the On agent list has a row to link to", bool(rid), rid)
                 pg4 = ctx.new_page(); pg4.goto(PAGES["board"].as_uri() + "#" + rid); pg4.wait_for_timeout(200)
@@ -604,7 +606,7 @@ with sync_playwright() as p:
             check(f"{tag}: the cards are one width, on one row (two rows of three and two on a phone), and the header holds title, rendered line, cards and search in that order",
                   len({c['w'] for c in cd}) == 1 and len({c['top'] for c in cd}) == (2 if w < 481 else 1) and pg.evaluate("(() => { const t = s => document.querySelector(s).getBoundingClientRect().top; return t('header.top .site') <= t('header.top .rline') && t('header.top .rline') < t('#counts') && t('#counts') < t('header.top .sbox'); })()"), cd)
             pg.click('#counts a[href="#waiting-list"]'); pg.wait_for_timeout(100)
-            check(f"{tag}: a count's link goes to its list: the section opens and the hash is dropped from the address", pg.evaluate("document.querySelector('#waiting-list details.fold').open") and pg.evaluate("location.hash") == "")
+            check(f"{tag}: a count's link goes to its list: the section opens and the hash stays in the address", pg.evaluate("document.querySelector('#waiting-list details.fold').open") and pg.evaluate("location.hash") == "#waiting-list")
             if HSHOTS and (w, scheme) in ((360, "light"), (360, "dark"), (412, "light"), (1440, "light")):
                 pg.evaluate("window.scrollTo(0, 0)"); pg.wait_for_timeout(100); pg.screenshot(path=os.path.join(HSHOTS, f"home-{w}-{scheme}.png"), full_page=True)
             if HSHOTS and w in (360, 1440):
@@ -743,7 +745,7 @@ with sync_playwright() as p:
         pg.evaluate("window.scrollTo(0, 0)")      # the header is sticky when wide: measure from the top
         gp = pg.evaluate("(() => { const n = document.querySelector('p.isent'), h = document.querySelector('header.top'), t = document.querySelector('h2'); return n && h && t ? {gap: Math.round(n.getBoundingClientRect().top - h.getBoundingClientRect().bottom), sec: parseFloat(getComputedStyle(t).marginTop)} : null })()")
         check(f"home answer {w}: the notice has the gap the page puts between sections (an h2's top margin, 32 px) above it, off the header's divider", gp and gp["sec"] == 32 and gp["gap"] == gp["sec"], gp)
-        check(f"home answer {w}: ?sent, item and name are dropped from the address, and so is the hash once its section has opened", pg.evaluate("location.search") == "" and pg.evaluate("location.hash") == "", pg.evaluate("window.location.href"))
+        check(f"home answer {w}: ?sent, item and name are dropped from the address, the hash stays", pg.evaluate("location.search") == "" and pg.evaluate("location.hash") == "#your-move", pg.evaluate("window.location.href"))
         sw, vw, wide = pg.evaluate(WIDE)
         check(f"home answer {w}: the notice keeps the page the screen's width", sw == vw == w, (sw, vw, wide))
         bk = pg.evaluate("""(() => { const f = document.querySelector('form.hanswer'); f.hidden = false; f.querySelector('input[name=token]').value = 'T'; const li = f.closest('li[id]'); f.addEventListener('submit', e => e.preventDefault());
@@ -874,7 +876,7 @@ with sync_playwright() as p:
     check("reload board 412: keyboard focus shows the button's focus ring, and its label and title read Reload / Reload page",
           pg.evaluate("getComputedStyle(document.querySelector('#reload')).outlineStyle") == "solid" and pg.get_attribute("#reload", "aria-label") == "Reload" and pg.get_attribute("#reload", "title") == "Reload page")
     ctx.close()
-    # ---- the summary panel (pinned on load at 800 px and up, at 960 before): nothing remembered; a drawer on a phone, peek and pin on a wide screen ----
+    # ---- the summary panel (pinned on load at 800 px and up, at 960 before): its open or closed state is not stored, only its section folds are; a drawer on a phone, peek and pin on a wide screen ----
     SHOTS = os.environ.get("PHONE_WIDTH_SHOTS", "")     # set it to a directory to keep a screenshot of each state
     if SHOTS: os.makedirs(SHOTS, exist_ok=True)
     def shot(pg, name):

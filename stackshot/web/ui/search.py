@@ -309,7 +309,7 @@ def results_html(board: Any, q: str, opts: Any = None) -> str:
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
             f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{esc(title)}</title>'
             f'<link rel="icon" href="{R.icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{esc(font_css)}">' if font_css else "")
-            + R._THEME_HEAD + R._APP_HEAD + f'<style>{board._css()}</style></head>{R._PANEL_BODY}<div id="layout"><main id="top">{board.page_header(q=q, search_page=True)}'
+            + R._THEME_HEAD + R._FOLD_HEAD + R._APP_HEAD + f'<style>{board._css()}</style></head>{R._PANEL_BODY}<div id="layout"><main id="top">{board.page_header(q=q, search_page=True)}'
             f'<h1>{esc(_i18n.t("search.heading"))}</h1>{_controls(q, f, board.now, n_kind, n_state)}<div class="se-summary" role="status">{note}</div>{results}{more}</main>'
             + board.panel_tail() + R._FAB_PAIR + R._THEME_JS + R._RELOAD_JS + R._TOTOP_JS + R._BFCACHE_JS + '</body></html>')
 

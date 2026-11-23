@@ -937,7 +937,7 @@ _THEME_BTN = ('<button type="button" class="b ico theme" id="theme" aria-label="
               '<svg class="i-dark" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>')
 # The reload button. It floats on every page, stacked right above the floating 'to the top' button: the same round 44 px
 # button as #totop (shared CSS rule), fixed 10 px above it at the bottom right. Back to top is always shown (it does not wait for a scroll),
-# so the pair is always a stack and neither moves. A full reload; the browser keeps the scroll position, the item page's and project page's folds are in localStorage (the home page's are not) and
+# so the pair is always a stack and neither moves. A full reload; the browser keeps the scroll position, every fold of every page is in localStorage and
 # the panel pins again on load. One delegated listener (_RELOAD_JS) serves the button wherever the page puts it, so the board's in-place
 # swap needs no re-bind; the pair sits outside every swapped block. The target of Back to top is the page's id="top" element (the board's
 # main, the item page's and the project page's main). _FAB_PAIR is the one copy of the markup, _TOTOP_JS of its click handler.
@@ -951,52 +951,45 @@ _FAB_PAIR = _RELOAD_FAB + "\n" + _TOTOP_LINK
 _FAB_PAIR += _ct.BODY   # the color tool's init, at the end of every page's body: it draws the Colors button into the side panel's mount (#panel-colors) and the panel in the body
 _TOTOP_JS = ("<script>(function(){var b=document.getElementById('totop');if(!b)return;"
              "b.addEventListener('click',function(e){e.preventDefault();window.scrollTo(0,0);history.replaceState(null,'',' ')})})();</script>")
-# The folds' open state is per browser (localStorage). The toggle listener is delegated (toggle does not bubble: capture on the
-# document), so a section the in-place update swaps in (_LIVE_JS) keeps recording without a re-bind; the swap itself carries
-# each fold's live open state over to its new node. Two kinds (the scope groups inside a section
-# collapsible like the sections): a section fold renders closed and opens on a stored '1'; a scope group fold renders open and
-# closes on a stored '0'. A hash to a line opens every fold around it (its group and its section); to a section, the section.
+# Every fold on every page of the board keeps its open state per browser (localStorage, key `stackshot.fold.<data-fold>`), whichever page it is on: the home page's
+# sections (Your move, On agent, Queued for release, Waiting) and the project groups inside them, the item and project pages' sections, the Closed and Projects pages' groups, and the side
+# panel's sections (Machines, Runners, Anchor hub, Audit, Projects). A panel section's data-fold is its section id, the same on every page that draws the panel, so one choice holds on all of them.
+# The toggle listener is delegated (toggle does not bubble: capture on the document), so a section the in-place update swaps in (_LIVE_JS) keeps recording without a
+# re-bind; the swap itself carries each fold's live open state over to its new node, and a fold the old block did not have gets its stored state through window.stackshotFold (the
+# one apply function, defined here). Two kinds (the scope groups inside a section collapsible like the sections): a section fold renders closed and opens on a stored '1'; a scope group
+# fold renders open and closes on a stored '0'; a fold never touched has nothing stored and keeps what the page renders. A hash to a line opens every fold around it (its group and its
+# section); to a section, the section: the hash stays in the address, and the open is recorded like any other toggle (the listener writes on a programmatic open too).
+# The script runs after the panel's markup (panel_tail and the home page put it at the end of the body), so its first pass reaches the panel's folds as well.
 _FOLD_GO = r"""function go(h,scroll){if(!h)return;var id=decodeURIComponent(h.replace(/^#/,''));var el=document.getElementById(id);if(!el)return;
 if(el.matches&&el.matches('section')){var s=el.querySelector('details.fold');if(s&&!s.open)s.open=true}
 else for(var d=el.closest&&el.closest('details.fold');d;d=d.parentElement&&d.parentElement.closest('details.fold'))if(!d.open)d.open=true;if(scroll)el.scrollIntoView()}
 """
-_FOLD_HASH = r"""go(location.hash,false);window.addEventListener('load',function(){if(location.hash)go(location.hash,true)});
-window.addEventListener('hashchange',function(){go(location.hash,true)});
-document.querySelectorAll('a.hcard[href^="#"]').forEach(function(a){a.addEventListener('click',function(){var h=a.getAttribute('href');if(h===location.hash){go(h,true)}})});})();"""
-_FOLD_JS = (r"""(function(){var K='stackshot.fold.',F=[].slice.call(document.querySelectorAll('details.fold')).filter(function(d){return !d.closest('#panel')});
+_FOLD_JS = (r"""(function(){var K='stackshot.fold.';
 function get(k){try{return localStorage.getItem(K+k)}catch(e){return null}}function put(k,v){try{localStorage.setItem(K+k,v)}catch(e){}}
-F.forEach(function(d){var v=get(d.getAttribute('data-fold'));if(d.open){if(v==='0')d.open=false}else if(v==='1')d.open=true});
-""" + _FOLD_GO + r"""document.addEventListener('toggle',function(e){var d=e.target;if(d&&d.matches&&d.matches('details.fold')&&d.isConnected&&!d.closest('#panel'))put(d.getAttribute('data-fold'),d.open?'1':'0')},true);
-""" + _FOLD_HASH)
-# The home page's own fold script (only Your move open, all the others closed by default, nothing remembered):
-# the home page remembers nothing. The server renders Your move open and every other fold of
-# the main column (On agent, Waiting, For you, the Task board, Completed) closed, and Queued for release open; the side panel's sections (Machines, Runners, Anchor hub,
-# Audit) render open; this script neither
-# reads nor writes a fold's state, and removes the keys an earlier version stored for these sections (_HOME_OLD_FOLD_KEYS: the section
-# ids only, since the item page's and the project page's folds keep their own "item.*" / "project.*" keys in the same store). A hash
-# to a section, or to a row inside a closed one, still opens it on load and on hashchange (the same go() as _FOLD_JS).
-_HOME_OLD_FOLD_KEYS = ("for-you", "your-move", "agents-at-work", "queued-release", "waiting-list", "by-project", "completed", "machines", "anchorhub")
-_HOME_FOLD_JS = (r"""(function(){try{""" + json.dumps(list(_HOME_OLD_FOLD_KEYS)) + r""".forEach(function(k){localStorage.removeItem('stackshot.fold.'+k)})}catch(e){}
-""" + _FOLD_GO + r"""var go0=go;go=function(h,scroll){go0(h,scroll);if(scroll&&location.hash)try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}};
-""" + _FOLD_HASH)
-# First paint (the For you section always appeared expanded on page load and then instantly closed itself):
-# _FOLD_JS runs at the end of the body, so a fold whose stored state differs from its rendered default (For you rendered
-# open, stored '0') painted in the default state and snapped a moment later. _FOLD_HEAD sits in the head, next to _THEME_HEAD,
+function ap(d){var v=get(d.getAttribute('data-fold'));if(d.open){if(v==='0')d.open=false}else if(v==='1')d.open=true}
+window.stackshotFold=ap;[].forEach.call(document.querySelectorAll('details.fold'),ap);
+""" + _FOLD_GO + r"""document.addEventListener('toggle',function(e){var d=e.target;if(d&&d.matches&&d.matches('details.fold')&&d.isConnected)put(d.getAttribute('data-fold'),d.open?'1':'0')},true);
+go(location.hash,false);window.addEventListener('load',function(){if(location.hash)go(location.hash,true)});
+window.addEventListener('hashchange',function(){go(location.hash,true)});
+document.querySelectorAll('a.hcard[href^="#"]').forEach(function(a){a.addEventListener('click',function(){var h=a.getAttribute('href');if(h===location.hash){go(h,true)}})});})();""")
+# First paint (a fold whose stored state differs from what the page renders, a section drawn open and stored '0', would paint open and snap shut):
+# _FOLD_JS runs at the end of the body, so a fold whose stored state differs from its rendered default painted in the default state
+# and snapped a moment later. _FOLD_HEAD sits in the head, next to _THEME_HEAD, on every page that has folds (all of them draw the side panel),
 # and watches the parser: a MutationObserver on the document element sees each details.fold as it is inserted (and any inside an
 # added subtree) and applies the stored state exactly as _FOLD_JS does, in a microtask, before the browser renders. It stops at
 # DOMContentLoaded (after one last pass over the pending records). _FOLD_JS keeps its own pass as a backstop, for a browser without
 # MutationObserver. Storage that throws (a private window) leaves the rendered default.
 _FOLD_HEAD = ("<script>(function(){if(!window.MutationObserver)return;"
-              "function ap(d){if(d.closest('#panel'))return;var v=null;try{v=localStorage.getItem('stackshot.fold.'+d.getAttribute('data-fold'))}catch(e){}"
+              "function ap(d){var v=null;try{v=localStorage.getItem('stackshot.fold.'+d.getAttribute('data-fold'))}catch(e){}"
               "if(d.open){if(v==='0')d.open=false}else if(v==='1')d.open=true}"
               "function sc(n){if(n.nodeType!==1)return;if(n.matches('details.fold'))ap(n);[].forEach.call(n.querySelectorAll('details.fold'),ap)}"
               "function run(rs){rs.forEach(function(r){[].forEach.call(r.addedNodes,sc)})}"
               "var o=new MutationObserver(run);o.observe(document.documentElement,{childList:true,subtree:true});"
               "document.addEventListener('DOMContentLoaded',function(){run(o.takeRecords());o.disconnect()})})();</script>")
-# The top-level sections (Need your call (agents), For you, Task board in the main column; Machines, Runners, Anchor hub, Audit and Projects in the panel) fold like the item sections: the same details.fold
+# The top-level sections (Your move, On agent, Queued for release and Waiting in the main column; Machines, Runners, Anchor hub, Audit and Projects in the panel) fold like the item sections: the same details.fold
 # markup.
-# In the main column only Your move renders open, the panel's sections all render open, and nothing is remembered (_HOME_FOLD_JS), a hash to the section id opens it,
-# and the in-place swap carries the live open state over. The key is the section id (distinct from every item section's and scope group's). The Tasks tiles are in the summary panel (_PANEL_JS), with Machines and Anchor hub, not in the main column.
+# In the main column Your move and Queued for release render open and the others closed, the panel's sections all render open; each is remembered per browser (_FOLD_JS) and a
+# fold never touched keeps that default. A hash to the section id opens it, and the in-place swap carries the live open state over. The key is the section id (distinct from every item section's and scope group's). The Tasks tiles are in the summary panel (_PANEL_JS), with Machines and Anchor hub, not in the main column.
 def _top_fold(sid: str, h2: str, body: str, is_open: bool = False) -> str:
     # A side-panel section carries the grip that moves it (see the panel order, below) beside the fold, not inside its <summary>: a button in a summary is nested interactive
     # content and merges its name into the summary's ("Runners Move Runners section"); beside it, the summary keeps the title as its name and the grip its own.
@@ -1132,7 +1125,7 @@ _THEME_JS = ("<script>(function(){var b=document.getElementById('theme');if(!b)r
 # link to the main column. It is PINNED on a wide screen and a closed drawer on a narrow one. What a click on a wide screen leaves, pinned or unpinned, is the person's own and is kept on the server with
 # their panel order (uiprefs.py `panel_open`; POST /prefs/panel-open, saved by _PANEL_JS), so it holds on every page, reload, browser and device; the default, nothing stored, is pinned. The drawer under 800 px is
 # never stored and starts closed whatever is stored. Its sections (Machines,
-# Runners, Anchor hub, Audit and Projects) are open on every load (_HOME_FOLD_JS). The default
+# Runners, Anchor hub, Audit and Projects) render open and each keeps the person's own choice per browser (_FOLD_JS). The default
 # is the page's own markup, so the first paint has it: every page is drawn with the body class panel-pin (the pin rules live inside the
 # min-width:800px media query, so on a narrow screen the class changes nothing the eye sees) and the button aria-expanded="true" with the title "Hide summary panel"; the server then
 # draws it closed for a person whose stored state is closed (apply_panel_open, on the way out like the section order: a bare <body> and the button "false" with "Show summary panel"), so the first paint is right on
@@ -1145,7 +1138,7 @@ _THEME_JS = ("<script>(function(){var b=document.getElementById('theme');if(!b)r
 # Whatever closes the drawer returns focus to the button, the one control that opens it, also after a tap on the scrim blurred focus to the body.
 # The item, project, Landed and Search pages carry the same panel as home: the same body class, frame, button, script and blocks
 # (Board.panel_blocks, Board.panel_tail), pinned by default the same way, the item page included, and kept the same way (one stored state for every page). Their folds in the
-# panel are not remembered either: _FOLD_JS and _FOLD_HEAD leave a fold inside #panel alone. The Audit script's addresses are absolute (/audit/status, /audit/now),
+# panel are remembered like every other fold, by the same key on every page (a panel section's data-fold is its section id; panel_tail carries _FOLD_JS, every page's head _FOLD_HEAD). The Audit script's addresses are absolute (/audit/status, /audit/now),
 # since those pages are not at the root.
 _PANEL_DOCK_PX = 800   # the one width at which the panel docks (was 960): the CSS media query below and _PANEL_JS's matchMedia both take it from here, so they cannot drift apart. A zoomed desktop window is narrower in CSS px, so 960 was too high; at 800 the pinned main column is 480 px (800 - 2*16 padding - 288 room for the panel), measured usable by tests/phone_width_check.py.
 # The item page's Details column (.iside) sits beside the main column (.imain) and moves above it, into the one-column strip it has under 768 px, whenever
@@ -1596,7 +1589,7 @@ function bl(d){var m=d.querySelector('meta[name="stackshot-blocks"]'),o={};if(m)
 function key(a){return a.id?'#'+a.id:a.getAttribute('href')?a.tagName+'|'+a.className+'|'+a.getAttribute('href'):''}
 function swap(o,n){var x=document.importNode(n,true),f={},a=document.activeElement,k='';
 o.querySelectorAll('details.fold').forEach(function(d){f[d.getAttribute('data-fold')]=d.open});
-x.querySelectorAll('details.fold').forEach(function(d){var k=d.getAttribute('data-fold');if(k in f)d.open=f[k]});
+x.querySelectorAll('details.fold').forEach(function(d){var k=d.getAttribute('data-fold');if(k in f)d.open=f[k];else if(window.stackshotFold)window.stackshotFold(d)});
 var oa=o.querySelector('#audit'),na=x.querySelector('#audit');if(oa&&na)na.parentNode.replaceChild(oa,na);
 if(a&&a!==document.body&&o.contains(a)&&!(oa&&oa.contains(a)))k=key(a);
 o.parentNode.replaceChild(x,o);if(oa&&a&&oa.contains(a)&&document.activeElement!==a)try{a.focus({preventScroll:true})}catch(e){}
@@ -2954,7 +2947,7 @@ class Board:
                 + fold("description", _t("item.background"), dsc, True)
                 + fold("history", _t("item.history", count=f'<span class="count">{len(changes)}{"+" if more else ""}</span>'), hist)
                 + fold("comments", _t("item.comments", count=f'<span class="count">{len(said_)}</span>'), comm)
-                + f'</div></div><script>{_FOLD_JS}</script>' + (f'<script>(function(){{{_LACT_JS}}})();</script>' if act_html else "") + '</main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _SAID_JS + _BFCACHE_JS + (_ANSWER_JS + _CARDS_JS + "<script>" + _ABOX_JS + "</script>" + _SENDKEY_JS if '<form class="ianswer"' in form + cform else "") + '</body></html>')
+                + f'</div></div>' + (f'<script>(function(){{{_LACT_JS}}})();</script>' if act_html else "") + '</main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _SAID_JS + _BFCACHE_JS + (_ANSWER_JS + _CARDS_JS + "<script>" + _ABOX_JS + "</script>" + _SENDKEY_JS if '<form class="ianswer"' in form + cform else "") + '</body></html>')
     def wait_day(self, v) -> str:
         """A wait's end as a person reads it: "Sat Mar 28th" for a date, "Sat Mar 28th 09:00" for a date and a time (the board's zone); the text itself when it reads as neither."""
         t = str(v or "").strip().replace(" ", "T")
@@ -3089,7 +3082,7 @@ class Board:
                 + fold("sessions", _t("routing.sec_sessions"), n_sess, sess_body or f'<p class="empty">{_t("page.none")}</p>')
                 + fold("anchors", _t("routing.sec_anchors"), len(seen), f'<ul class="alist">{alist}</ul>' if alist else f'<p class="empty">{_t("page.none")}</p>')
                 + fold("notices", _t("routing.sec_notices"), len(notes), f'<div class="rwrap"><table class="rlog"><thead><tr><th>{_t("routing.th_when", tz=_cfg.tz_abbr())}</th><th>{_t("routing.th_source")}</th><th>{_t("routing.th_what")}</th><th>{_t("routing.th_for")}</th><th>{_t("routing.th_ruling")}</th><th>{_t("routing.th_reason")}</th></tr></thead><tbody>{rows}</tbody></table></div>' if rows else f'<p class="empty">{_t("routing.nothing")}</p>', open_=False)
-                + f'<script>{_FOLD_JS}</script>' + (f'<script>(function(){{{_LACT_JS}}})();</script>' if 'data-at="' in items_body else '') + '</main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _CARDS_JS + f'<script>{_HOME_JS}</script>' + _SENDKEY_JS + _BFCACHE_JS + '</body></html>')
+                + (f'<script>(function(){{{_LACT_JS}}})();</script>' if 'data-at="' in items_body else '') + '</main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _CARDS_JS + f'<script>{_HOME_JS}</script>' + _SENDKEY_JS + _BFCACHE_JS + '</body></html>')
 
     # ---------------- the emitters ----------------
     def render(self, modes) -> dict:
@@ -3939,7 +3932,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         names the list in each subsection's data-fold key (`<prefix>.<scope>`); `row` is as in scope_groups."""
         return _grp.sections(prefix, self.scope_groups(items, row), draw)
     def home_section(self, sid, title, pairs, which, empty):
-        """One of the four lists as a top-level fold: Your move and Queued for release render open, On agent and Waiting closed, nothing remembered. The heading is the list's name and its count; the rows are the one row,
+        """One of the four lists as a top-level fold: Your move and Queued for release render open, On agent and Waiting closed, and each keeps the person's own choice per browser (_FOLD_JS). The heading is the list's name and its count; the rows are the one row,
         in a foldable subsection per scope (scope_sections: the scope's name and row count in the summary, the Closed page's h3.iscope, open even in a list that starts closed); a list with no rows keeps its one empty line."""
         if not pairs: return _top_fold(sid, f'<h2>{esc(title)} <span class="count">0</span></h2>', f'<p class="empty">{esc(empty)}</p>', is_open=(which in (_home.YOUR_MOVE, RELEASE_LIST)))
         body = self.scope_sections(f"home.{sid}", pairs, lambda p: self.home_row(p[0], p[1], which, named=True), row=lambda p: p[0])
@@ -3952,7 +3945,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         Every card is 60 px tall at every width (a label never wraps; Queued for release says "Queued" where the column is narrow); the count is part of that. The column is the same with the side panel closed as with it pinned (the CSS caps the column to the pinned one's in every state),
         so the cards' size and that wording never follow the panel.
         `lists` is home_lists() (default: drawn here, so a page that is not home gets the same four counts home shows from the same code). `off_home=True` (every page but home): the four list cards link to home
-        with that list open (`/#your-move` and so on: home opens the section a hash names, _FOLD_HASH), where on home itself they are the bare `#your-move` that filters in place."""
+        with that list open (`/#your-move` and so on: home opens the section a hash names, _FOLD_JS), where on home itself they are the bare `#your-move` that filters in place."""
         lists = self.home_lists() if lists is None else lists
         at = under("/") if off_home else ""
         def card(href, cls, label, n, tip="", short="", new=0):
@@ -4054,9 +4047,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("state.closed")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
-                + _THEME_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
+                + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
                 f'<h1>{_t("state.closed")}</h1><section id="new" class="lnew"><h2 class="lsec">{_t("closed.new")} <span class="count">{len(rows)}</span></h2><p class="lnote"{" data-n" if rows else ""}>{note}</p>{btn}{secs}</section>{self.completed_html(page)}</main>'
-                + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + f'<script>{_HOME_FOLD_JS}</script><script>{_LANDED_JS}</script></body></html>')
+                + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + f'<script>{_LANDED_JS}</script></body></html>')
 
     def projects_html(self) -> str:
         """The Projects page (GET /projects, behind the board's sign-in): the list of projects and their running agents (projects_table). A project's items and watch are on its own page."""
@@ -4065,9 +4058,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("projects.title")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
-                + _THEME_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
+                + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
                 f'<h1>{_t("projects.title")}</h1><p class="pjnote">{_t("projects.note")}</p><section id="by-project">{self.projects_table()}</section></main>'
-                + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + f'<script>{_HOME_FOLD_JS}</script></body></html>')
+                + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + '</body></html>')
 
     # TEMPORARY PROBE (the installed-app session link test) (remove, or promote into sess_html, in the follow-up PR): GET /probe/sala-link, a signed-in page of the same session link written six ways, so a tap on an Android phone
     # in the installed stackshot app shows which way opens the installed sala app instead of a Chrome Custom Tab. It makes no write and changes no link on any other page.
@@ -4123,7 +4116,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("probe.title")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
-                + _THEME_HEAD + _APP_HEAD + f'<style>{self._css()}ul.probe{{list-style:none;padding:0;margin:0}}ul.probe li{{margin:0 0 16px;overflow-wrap:anywhere}}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
+                + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}ul.probe{{list-style:none;padding:0;margin:0}}ul.probe li{{margin:0 0 16px;overflow-wrap:anywhere}}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
                 f'<h1>{_t("probe.title")}</h1><p class="pjnote">{_t("probe.note")}</p>{body}</main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + '</body></html>')
 
@@ -4205,7 +4198,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("audit.title")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
-                + _THEME_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top" class="audits-page">{self.page_header()}'
+                + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top" class="audits-page">{self.page_header()}'
                 f'<div class="atop"><h1>{_t("audit.title")}</h1>{btn}</div><p class="asub">{e(sub)}</p><div class="apaces">{paces_html}</div>'
                 f'<h2>{_t("audit.groups")} <small>{_t("audit.groups_hint")}</small></h2><div class="agroups">{groups_html}</div>'
                 f'<h2>{_t("audit.findings")} <small>{e(fsub)}</small></h2>{feed}'
@@ -4227,7 +4220,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         """What follows a page's </main> on every page but home: the summary panel as the home page has it (the same frame, the same
         five blocks from panel_blocks), the end of <div id="layout"> (opened before the <main>, with <body class="panel-pin">: every page is drawn with the panel open, and apply_panel_open closes it for a person who has), the panel's scripts and the header's height script (_HDR_JS). The script of
         the Audit card is the home page's; the card's refresh on the page's poll stays the home page's (these pages do not poll). GitHub calls: see panel_blocks (none of its own; at most one throttled background runners refresh per 120 s, shared by all pages)."""
-        return _panel_frame(self.panel_blocks()) + f'</div><script>{_PANEL_JS}</script><script>{_PORDER_JS}</script><script>{_LANG_JS}</script><script>{_AUDIT_JS}</script><script>{_HDR_JS}</script>' + _STAMP_JS
+        return _panel_frame(self.panel_blocks()) + f'</div><script>{_PANEL_JS}</script><script>{_PORDER_JS}</script><script>{_LANG_JS}</script><script>{_AUDIT_JS}</script><script>{_HDR_JS}</script><script>{_FOLD_JS}</script>' + _STAMP_JS
 
     def panel_blocks(self) -> dict:
         """The side panel's five blocks (Machines, Runners, Anchor hub, Audit, Projects) as HTML, keyed as the home page swaps them: the one builder the home page and every other page
@@ -4514,7 +4507,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         conn = f'''<div id="conn" class="conn" role="status" aria-live="polite" hidden><span class="c-down">{_t("home.conn.down", as_of=as_of)}</span><span class="c-new">{_t("home.conn.new", btn='<button type="button" id="conn-reload" class="b warn">' + esc(_t("home.conn.reload")) + '</button>')}</span><span class="c-out">{_t("home.conn.out", link=f'<a href="{under("/")}" id="conn-signin">' + esc(_t("home.conn.signin")) + '</a>')}</span></div>\n'''
         _h = io.StringIO()
         with contextlib.redirect_stdout(_h):
-            print(f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><meta name="stackshot-rendered" content="{ts}"><meta name="stackshot-shell" content="{shell}"><meta name="stackshot-blocks" content="{blocks}"><title>{esc(TITLE)}</title><link rel="icon" href="{icon_href('favicon.svg')}" type="image/svg+xml">{_font_link}{_THEME_HEAD}{_APP_HEAD}<style>{css}</style><noscript><style>form.hanswer{{display:none}}</style></noscript></head>{_PANEL_BODY}<div id="layout"><main id="top">
+            print(f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><meta name="stackshot-rendered" content="{ts}"><meta name="stackshot-shell" content="{shell}"><meta name="stackshot-blocks" content="{blocks}"><title>{esc(TITLE)}</title><link rel="icon" href="{icon_href('favicon.svg')}" type="image/svg+xml">{_font_link}{_THEME_HEAD}{_FOLD_HEAD}{_APP_HEAD}<style>{css}</style><noscript><style>form.hanswer{{display:none}}</style></noscript></head>{_PANEL_BODY}<div id="layout"><main id="top">
 {self.page_header(counts=BL["counts"], h1=True, conn=conn, rstamp=rstamp)}
 {BL["status"]}
 {BL["for-you"]}
@@ -4528,7 +4521,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
 <script>{_PANEL_JS}</script>
 <script>{_PORDER_JS}</script>
 <script>{_LANG_JS}</script>
-<script>{_HOME_FOLD_JS}</script>
+<script>{_FOLD_JS}</script>
 {self.sent_notes_html()}
 {_CARDS_JS}
 <script>{_HOME_JS}</script>

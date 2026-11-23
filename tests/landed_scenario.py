@@ -338,8 +338,8 @@ check("...the subject's scope prefix is not repeated on the lines (the heading s
 agree("mixed scopes: 9 listed under three subsections", 9)
 # the subsections fold like home's (one shared helper, ui/groups.py): native details, open by default, the count in the summary, a key of their own
 subsK = re.findall(r'<details class="fold sfold hscope" data-fold="([^"]+)"( open)?><summary><h3 class="iscope">', newsec(pm))
-check("the New subsections are native details.fold with the h3.iscope in the summary, open by default, one data-fold key each (closed.new.<scope>), the page's script keeps no fold state",
-      subsK == [("closed.new.work", " open"), ("closed.new.home", " open"), ("closed.new.ops", " open")] and "setItem" not in render._HOME_FOLD_JS, subsK)
+check("the New subsections are native details.fold with the h3.iscope in the summary, open by default, one data-fold key each (closed.new.<scope>), the page's fold script (render._FOLD_JS, through the panel's tail) remembers each one",
+      subsK == [("closed.new.work", " open"), ("closed.new.home", " open"), ("closed.new.ops", " open")] and "setItem(K+k,v)" in render._FOLD_JS and pm.count("<script>" + render._FOLD_JS + "</script>") == 1 and render._FOLD_HEAD in pm, subsK)
 # the same markup and the same grouping as home's lists: the Closed page calls the Board's shared scope_sections, so a row's scope, the order and the count come from one place
 shared = b.scope_sections("x", [(None, r) for r in b.rows if r["gid"] in ("a20", "a31", "a30", "a22")], lambda pr: "<li></li>", row=lambda pr: pr[1])
 check("the Closed page's grouping is Board.scope_sections, the one home's lists call (same order: work, home, ops; same summary form)",

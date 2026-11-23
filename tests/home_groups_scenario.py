@@ -11,7 +11,7 @@ h3.iscope heading), the scopes in [project_scopes] order (work, home, ops here),
   * a row whose scope is not one of the configured scopes is not dropped: it sits in a last subsection under the scope's own name;
   * which lists start open is as it was (Your move and Queued for release); a project page's lists are not grouped by scope;
   * each subsection is a native <details> (no script of its own): its summary holds the h3.iscope with the scope's name and the row count, it renders open (also inside a list that starts closed), each has its own data-fold key
-    (the list and the scope, unique on the page: the live swap matches folds by it), and the page remembers no subsection's state (the home fold script reads and writes no storage).
+    (the list and the scope, unique on the page: the live swap matches folds by it), and the page's one fold script (render._FOLD_JS) remembers each subsection's state per browser under its key (tests/fold_memory_scenario.py).
 
     tests/run-suite home_groups        → exit 0 / 1"""
 import datetime, json, os, re, sys, pathlib, time, logging
@@ -152,10 +152,10 @@ check("every subsection is a details.fold with the h3.iscope in its summary, one
 check("each subsection renders open, also those inside On agent and Waiting, which start closed", all(o for _f, o in subs) and len(subs) == 10, subs)
 check("the subsections' data-fold keys are unique on the page and name the list and the scope (home.<list>.<scope>)",
       len({f for f, _o in subs}) == len(subs) and {f for f, _o in subs} >= {"home.your-move.work", "home.agents-at-work.home", "home.queued-release.ops", "home.waiting-list.work"}, [f for f, _o in subs])
-check("no subsection key is a section id or one of the old stored keys the home fold script removes", not ({f for f, _o in subs} & {f for f, _o in folds}) and not any(f in render._HOME_OLD_FOLD_KEYS for f, _o in subs))
+check("no subsection key is a section id (a key is one fold's remembered state: a subsection and a section never share one)", not ({f for f, _o in subs} & {f for f, _o in folds}) and all(f.count(".") >= 2 for f, _o in subs))
 check("the rows sit in a ul.ir-rows right after the summary (the project page's list shape), and the old div.hscope is gone", '</summary><ul class="ir-rows">' in YMs and 'class="hscope"' not in h)
-check("the home fold script stores nothing for a subsection (it reads and writes no localStorage state), so a fold lasts only until the page is reloaded",
-      "setItem" not in render._HOME_FOLD_JS and "getItem" not in render._HOME_FOLD_JS)
+check("the home page's fold script remembers a subsection like any fold: it reads and writes the subsection's key (stackshot.fold.<data-fold>), so a fold lasts across a reload",
+      "setItem(K+k,v)" in render._FOLD_JS and "getItem(K+k)" in render._FOLD_JS and h.count("<script>" + render._FOLD_JS + "</script>") == 1)
 
 # ---- the project page is not grouped ----
 PI = b.project_items("projects/dsl")[2]
