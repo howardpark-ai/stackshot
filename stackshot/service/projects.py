@@ -37,8 +37,9 @@ _BG_MACHINES: list[str] = []     # ... and no machine of its own: an empty bg_ma
 
 
 def _cfg_names(key: str, default: list[str]) -> list[str]:
-    """[project_agent] <key> as a list of strings (see project_verbs.section_names). Read where it is used, so a reload applies."""
-    return _verbs.section_names(_cfg.get("project_agent"), key, default)
+    """[project_agent] <key> as a list of strings (see project_verbs.section_names), each `host:<role>` word resolved to the host it names now (core/config.py `host`: the section is read whole,
+    so get() does not see the leaf; an unresolved word stays as written and matches no machine). Read where it is used, so a reload applies."""
+    return [_cfg.host(n) for n in _verbs.section_names(_cfg.get("project_agent"), key, default)]
 
 
 PASS_NOT_FORM = ("refused: a pass opens only the New session form's calls: `sender` must be the key's label, or start with it and a `-`; "
@@ -60,7 +61,7 @@ def _bg_call(machine: str, sender: str, front: bool, surface: str) -> tuple[bool
     """Is this `post project-agent` a background call: the fleet tool's timer listing a background agent for a project whose want is open? -> (True, None), (False, None) when the `sender` label is not in
     [project_agent] bg_senders (the other rules decide), or (False, the 403) for a bg label that fails a condition: the machine its token proves (`machine`, never the body) must be in bg_machines
     (form_machines when bg_machines is absent or empty; a bg_machines of the wrong type allows no machine) and the agent a background agent (`front` false, `surface` "" for the default). The open want is checked after (_bgw.open_state). Read where used, so a reload applies."""
-    machines = _verbs.bg_machine_names(_cfg.get("project_agent"), _BG_MACHINES, _FORM_MACHINES)
+    machines = [_cfg.host(n) for n in _verbs.bg_machine_names(_cfg.get("project_agent"), _BG_MACHINES, _FORM_MACHINES)]      # bg_machines, or form_machines when it is empty: each host word resolved here (the section is read whole)
     return _verbs.bg_gate(machine, sender, _cfg_names("bg_senders", _BG_SENDERS), machines, front, surface)
 
 

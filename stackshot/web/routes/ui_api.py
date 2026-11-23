@@ -212,7 +212,8 @@ async def _colors_machine(request: Request, op: str):
     machine = _client_machine(request.headers.get("authorization", ""), request) or _caller_pass.pass_machine(request.headers.get("authorization", ""))      # a pass is the other way in (service/caller_pass.py)
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
-    if machine not in _cfg_names("form_machines", _FORM_MACHINES) and not _caller_pass.is_pass(machine):
+    # a host word in form_machines is looked up by a command that may take seconds: off the event loop, here and in the form check below
+    if not _caller_pass.is_pass(machine) and machine not in await run_in_threadpool(_cfg_names, "form_machines", _FORM_MACHINES):
         return _colors_err(403, _COLORS_NOT_MACHINE)
     body: dict[str, Any] = {}
     if op != "list":
@@ -223,7 +224,7 @@ async def _colors_machine(request: Request, op: str):
         sender = body.get("sender")
         if not isinstance(sender, str) or not sender.strip() or len(sender.strip()) > 80 or any(ord(c) < 32 or ord(c) == 127 for c in sender.strip()):
             return _colors_err(400, "sender = the caller's own label: one line of at most 80 characters", "sender")
-        if sender.strip() != _colorcombos.WEB_LABEL or not _form_call(machine, sender.strip()):
+        if sender.strip() != _colorcombos.WEB_LABEL or not await run_in_threadpool(_form_call, machine, sender.strip()):
             return _colors_err(403, _COLORS_NOT_FORM, "sender")
     return await run_in_threadpool(_colors_run, op, body, _colorcombos.WEB_LABEL)
 

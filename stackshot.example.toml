@@ -50,13 +50,19 @@ copy_project_lines = true                           # the copy of a project's re
                                                     # `shared` never gets the copy, whatever this says. false does not stop the creation of a page for a new project (`create --make-page` still makes it from the template on a brain not marked `shared`, with no copied
                                                     # line written onto it). Turn it off once nothing outside stackshot reads the page lines
 
+# [hosts]                                           # OPTIONAL: a setting that names a machine (a host) may name its ROLE instead, written `host:<role>` (letters, digits, `-`, `_`, `.`), so a machine that moves between boxes changes one record, not
+                                                    # this file. These keys say how a role is looked up (stackshot/core/config.py; docs/configuration.md, "Host words"). Live. Unset = a `host:<role>` word stays as written and fails where it is used
+# lookup = "/usr/local/bin/where-is {role}"         # a command, run WITHOUT a shell: split into words, each `~`-expanded, `{role}` replaced inside the word. It prints the host on its first line (one word of letters, digits and . _ @ -; at most 4096 bytes are read); anything else, or a non-zero exit, is a failure
+# timeout = 5                                       # seconds one lookup may take
+# cache_seconds = 30                                # an answer is trusted this long; a failed lookup keeps the last good answer and is tried again after 5 seconds
+
 [steps]                                             # where the owner runs the commands of a board step (the text of the create and update tools is built from this at start: restart-only)
 owner_shell = ""                                    # "powershell" = the owner runs a step's commands in PowerShell on a Windows machine: a command in a next line that starts "<owner>:" must say where it runs ("In PowerShell: ...")
                                                     # and a command for the Linux host is written `ssh -t <bash_host> '<command>'`; a bare bash command is refused.
                                                     # "sala-shell" = the owner runs them in sala's Shell, a terminal in the sala web UI that runs bash on bash_host (paste there with Shift+Insert, not Ctrl+V): a command is bash as typed there, or
                                                     # `ssh <host> '<command>'` for another machine; no line saying where it runs is asked for, and a PowerShell or Windows-only command outside ssh is refused.
                                                     # "" (the default) = no place is asked for: a command only has to be in backticks
-bash_host = ""                                      # the Linux host that such a bash command is run on over ssh (powershell), or the one sala's Shell runs on (sala-shell), e.g. "myhost"; "" = none named
+bash_host = ""                                      # the Linux host that such a bash command is run on over ssh (powershell), or the one sala's Shell runs on (sala-shell), e.g. "myhost" or a role word, "host:primary" (see [hosts]); "" = none named
 shell_name = ""                                     # sala-shell only: the name of the owner's Shell session in sala, written into the tool text next to "sala's Shell" (e.g. "my-shell"); "" = none named, the text says "sala's Shell" alone
 shell_url = ""                                      # sala-shell only: the page that opens the owner's shell, e.g. "https://shell.example.com/terminal" or "/shell"; a command's box then carries an "Open shell" link to it (a new tab). Only an http(s) URL (no user name or password in it, a port from 1 to 65535 if any) or a path starting with "/" counts; "" = no link
 
@@ -364,7 +370,7 @@ retired_statuses = ["archived", "retired", "closed", "done", "dropped", "complet
 [project_agent]                                     # optional: who may add an agent to a listed project without a session (stackshot/fleet/client.py post project-agent), rename an agent's page entry (post project-agent-rename) and drop a retired agent (post project-agent-retire); without this section these are the defaults
 form_senders = []                                  # the labels of the fleet tool's New session form, e.g. ["sala-web", "sala-retire"] (sala-retire = sala's retire step, post project-agent-retire). A call is the form's only when its --sender is one of these AND ...
                                                     # Contract: stackshot-contracts.md in howardpark-ai/salamander, 21 (the web terminal's project calls).
-form_machines = []                                  # ... the machine its token proves is one of these, e.g. ["myhost"] (a label alone proves nothing: any token holder can type it). [] = no call is the form's
+form_machines = []                                  # ... the machine its token proves is one of these, e.g. ["myhost"] or a role word, ["host:primary"] (see [hosts]; a label alone proves nothing: any token holder can type it). [] = no call is the form's
 bg_senders = []                                     # the label of the fleet tool's timer that lists a background agent for a project with an open want (see [background_agent]), e.g. ["fleet-timer"]. A post project-agent --back call is a background call only when its --sender is one of these AND ...
 bg_machines = []                                    # ... the machine its token proves is one of these (empty = the machines of form_machines). A background call lists a background agent only, on a project whose want is open right now; it opens nothing else (the rename, retire and mandate calls read form_senders only). [] and [] = no background call
 
@@ -376,7 +382,7 @@ cooldown_minutes = 60                               # a project that got an agen
 [machines_panel]
 latest_lookups = true                               # false: never ask npm or GitHub for the latest versions; the cache as it is (a staging copy)
 ssh_hosts = []                                      # machines with no fleet letter, each shown as one more card on the Machines panel after the fleet's, in this order
-                                                    #, e.g. ["box-c", "box-d"]. The publisher reads each over one `ssh -o BatchMode=yes -o ConnectTimeout=5 <host>`
+                                                    #, e.g. ["box-c", "box-d"]; an item may be a role word ("host:primary", see [hosts]). The publisher reads each over one `ssh -o BatchMode=yes -o ConnectTimeout=5 <host>`
                                                     # call (key auth, no prompt, 10 s hard timeout) per refresh; a host that is the publisher's own box (its OS hostname or its fleet name) is
                                                     # read by running the same commands on it, never over ssh, so the list can be the same wherever the server runs: the timer publish (every [publish] every_minutes) and `bump`
                                                     # read it afresh, a write-triggered publish in between uses the cache (<state>/site/versions.ssh.json). The call runs each
@@ -856,7 +862,7 @@ session_horizon_days = 30                           # a gone session's identity 
 
 [agents_box]                                        # OPTIONAL: the server runs on another box than the agents' sessions (stackshot/core/agentbox.py; docs/agents-box.md). Unset (the default) = one box: nothing here is read
                                                     # and every command and file is local, exactly as before. Set in the SERVER's config file; a box that finds its own name here (or a loopback address) ignores it. Live
-# ssh = "agents-box"                                # the agents' box as ssh takes it (a name, an alias of ~/.ssh/config, user@host). Set: the commands the server runs on the agents' side (the fleet tool's session list,
+# ssh = "agents-box"                                # the agents' box as ssh takes it (a name, an alias of ~/.ssh/config, user@host, or a role word such as "host:agents", see [hosts]). Set: the commands the server runs on the agents' side (the fleet tool's session list,
                                                     # the router's and the audit's model calls, `[for_you] slack_command`) run there over a non-interactive ssh (BatchMode, no pty, every argument quoted),
                                                     # and the files it reads there ([client] session_links and lanes_file, the lane-names file, the CLI's registry of live panes, the prompt stamps) are copied
                                                     # here, one ssh call each, and read from the copy; a transcript is read there (`said`). A box that does not answer is logged, never waited for

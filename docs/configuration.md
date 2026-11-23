@@ -1,6 +1,6 @@
 # Configuration
 
-What this page covers: the config file, where it is read from, and the keys for the instance, paths, pages, subjects, descriptions, the page rule, the audit, asks, publishing, the GitHub mirror and the scopes. Back to the [README](../README.md).
+What this page covers: the config file, where it is read from, host words, and the keys for the instance, paths, pages, subjects, descriptions, the page rule, the audit, asks, publishing, the GitHub mirror and the scopes. Back to the [README](../README.md).
 
 An instance is one TOML file outside this repository: `$STACKSHOT_CONFIG`, else `~/.config/stackshot/stackshot.toml`,
 else a `stackshot.toml` next to the code, else the shipped `stackshot.example.toml` (see `stackshot/core/config.py`). Only one file is
@@ -37,6 +37,9 @@ A running process reads the file again without a restart: the server on `systemc
 | `pages.timeline_source` | `"stackshot"` | The source word on the timeline line a page move writes (`stackshot/projects/rename_page.py`; gbrain flavor). | |
 | `pages.copy_project_lines` | `true` | The copy of a project's record onto its page's `display-name:`, `status:` and `agents:` lines, written after every project verb (`project_verbs.mirror`). `false` retires the copy on every brain at once: the record is the only place those fields live, and a script reads them with `stackshot projects fields <project>` (the record first, the page's lines for a project the record does not hold yet). A page of a brain marked `shared` never gets the copy, whatever this says. A new project's page is still made (`create --make-page`, `mirror --make-page`) on a brain not marked `shared`, with the template's lines and no copy onto it. | |
 | `ids.letter` | `"s"` | The letter of every new id (`s<n>`): one global sequence, allocated only by the server. | |
+| `hosts.lookup` | unset (commented in the example) | How a host word (`host:<role>`, see [Host words](#host-words-naming-a-machine-by-its-role)) is looked up: a command with the placeholder `{role}`, run without a shell, e.g. `"/usr/local/bin/where-is {role}"`. Unset = a host word stays as written. Live. | if used |
+| `hosts.timeout` | `5` | Seconds one lookup may take; a lookup that takes longer is a failure. | |
+| `hosts.cache_seconds` | `30` | How long a role's answer is trusted before it is looked up again. | |
 | `fleet.publisher_letter` | unset | The box that runs the server: first column of the Machines panel, always live. Unset, the server finds it from its own hostname, so a server moved to another box carries it: the letter of that box's row in `paths.fleet_names` (matched by OS hostname or fleet name, case-insensitive, domain left off), else the letter of the fleet machine of that name, else the lower-cased hostname itself; a names table that cannot be read and no fleet machine to match gives `"a"`. A value set here always wins, in every place the key is read (the panel, `push.py`, `reboot-hooks/reboot-queue.py`, the message tool's texts), so a new server box with no row in the names table sets it. | |
 | `server.box` | unset | Whether this machine is the server box and reads the page registry, page times and the board's brief from its own checkouts. `true`: it does. `false`: it never does, so a pane hook always asks the server's client API, even when a clone of the pages repository or the store is on the disk. Unset (the default): a machine that holds the pages checkout (`paths.brain`) is taken for the server box. Accepted: the booleans `true` and `false`, or the strings "true" and "false" in any case with spaces around them (the SessionStart hook and the other pane hooks read it the same way); any other value reads as unset (`doctor` and a server start say so). Restart-only for the server; read by each hook at its start. Setting it when the server moves: [INSTALL.md](../INSTALL.md#moving-the-server-to-another-box). | |
 | `fleet.operator_label` | `"fleet operator"` | What the `sessions` tool calls the session that operates the others. | |
@@ -139,6 +142,32 @@ A running process reads the file again without a restart: the server on `systemc
 | `project_scopes.orgs` | every scope in `order` | The scopes a page may name as its `org:`. | |
 | `project_scopes.by_prefix.<prefix>` | none | A page key prefix mapped to a scope, e.g. `"infra/" = "infra"`. | |
 | `project_scopes.by_tag.<tag>` | none | A page's tag mapped to a scope (used when its `org` names none), e.g. `infra = "infra"`. | |
+
+## Host words: naming a machine by its role
+
+Some settings name a machine, and a machine can move between boxes. Such a setting may name the machine's **role** instead: the string `host:<role>`, where the role is made of letters, digits, `-`, `_` and `.` (for example `host:primary`). A real host name never holds a colon, so no value written before collides with it. The instance says how a role is looked up with the `[hosts]` table, so a move changes one record (what the lookup answers), not every setting that names the machine.
+
+The settings that take a host word are `machines_panel.ssh_hosts` (each item of the list), `project_agent.form_machines` (each item), `steps.bash_host` and `agents_box.ssh`. Any other setting reads its value as written. `instance.machine` is an id label, not a host, and is never looked up.
+
+```toml
+[hosts]
+lookup = "/usr/local/bin/where-is {role}"
+timeout = 5
+cache_seconds = 30
+
+[steps]
+bash_host = "host:primary"
+
+[project_agent]
+form_machines = ["host:primary", "db-primary"]
+```
+
+- **`lookup`**: a command with the placeholder `{role}`. It is run without a shell: the line is split into words (as a shell would split it, but nothing else a shell does happens), each word has a leading `~` expanded, and `{role}` is replaced inside the word it stands in, so the role never reaches a shell. A role is never run when it holds anything but the characters above. The command prints the host on its first line of standard output, one word made of letters, digits and `.`, `_`, `@`, `-`, starting with a letter or a digit (a name, an alias, `user@host`); an empty line, a word with spaces, a colon or any other character, or a name that starts with `-` is not accepted. At most 4096 bytes of its output are read, and more than that is a failure. A non-zero exit, no answer within `timeout`, or a command that is not found is a failure.
+- **`timeout`**: seconds one lookup may take (default 5). A lookup that outlasts it is ended, and counts as a failure.
+- **`cache_seconds`**: how long an answer for a role is trusted (default 30). A lookup of one role runs once at a time, so many readers asking at once cause one call.
+- **Failures never stand in for a host.** When a lookup fails after an earlier good answer, that last good host keeps answering, and the lookup is tried again after 5 seconds, not at every read. When there is no good answer at all (no `lookup` set, or the first lookup failed), the word itself is what the setting reads, for example `host:primary`: it is never an empty value and never a guess. An unresolved word fails where it is used (an ssh to it fails, a machine list never matches it) instead of reading as "this box" or as "no host". One line on standard error says each failure streak, naming the role and the reason.
+- A reload of the config file makes every answer due again, so the next read looks it up, and clears the failure marks; the last good hosts are kept, so a lookup that fails right after a reload still answers with one (a changed `lookup` command never reuses the old command's answers). `stackshot config get <key>` prints the host a word names now; a table that is read whole (`project_agent`) has its words resolved where the list is read.
+- `steps.bash_host` is read into the tool texts at the server's start (the `steps` table is restart-only), so a move changes those texts at the next restart, and a first lookup that fails at the start leaves the word itself (`host:primary`) in the texts until a restart; `agents_box.ssh`, `project_agent.form_machines` and `machines_panel.ssh_hosts` follow the lookup as the cache expires.
 
 The code's defaults are the example's values, so a key missing from the file behaves as the table says. A config lists
 every key anyway, because `bin/stackshot setup` writes a complete copy of the example with your values filled in.
