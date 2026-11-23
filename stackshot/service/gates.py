@@ -39,6 +39,7 @@ from stackshot.model.bullet_text import _clip_line
 from stackshot.model import contact as _contact
 from stackshot.model import draft as _draft
 from stackshot.model import field_gates as _fg
+from stackshot.model import holders as _holders
 from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
@@ -55,6 +56,7 @@ from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import _registry, _roles_sync_safe
 from stackshot.router import router_live as _router_live
 from stackshot.service import handoff as _handoff
+from stackshot.service import item_read as _item_read
 from stackshot.service import telling as _telling
 from stackshot.service import wakes as _wakes
 from stackshot.service import watching as _watching
@@ -1067,6 +1069,17 @@ def gate_sender_watch(gid: str, item_now: dict[str, Any], sender: str, *, handed
 _SELF_WAIT_STATES_OUT = ("parked", "outside", "blocked", "verifying", "completed", "your-call", "your-step")
 
 
+def _stored_time_wait(item: dict[str, Any]) -> bool:
+    """The model reads the open item as stored as a wait on a time (the update tool's `_reads_time_wait`, which the gate cannot import)."""
+    if item.get("status") != "open":
+        return False
+    try:
+        mod = _item_read._model_of(item)
+    except Exception:  # noqa: BLE001
+        return False
+    return mod.state == _model.WAITING and mod.wait is not None and mod.wait.kind == "time"
+
+
 def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = "", mover: str = "", needs: Any = "", after: Any = "", wait_kind: str = "", hold: bool = False,
                     wait_basis: str = "", state: str = "", status: str = "", wait_reason: str = "", clear_next: bool = False, clear_wake: bool = False, clear_needs: bool = False,
                     clear_after: bool = False, clear_wait: bool = False, clear_hold: bool = False, creating: dict[str, Any] | None = None) -> None:
@@ -1077,6 +1090,8 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
         if not _cfg.wait_guard_on() or not sender.strip() or _model.is_owner(sender) or str(status or "").strip().lower() in ("completed", "closed"):
             return
         basis_given = bool(str(wait_basis or "").strip()) and " ".join(str(wait_basis).split()).lower() not in hk.ask_none      # a word that clears (none, clear, -) is no basis: the wake is judged as sent without one
+        if wait_kind.strip().lower() in hk.ask_none:
+            wait_kind, clear_wait = "", True                # a wait_kind of none, clear or - is a clear of the wait (the update tool reads it so), never a kind
         if hold or str(state or "").strip().lower() in _SELF_WAIT_STATES_OUT or wait_kind.strip():
             return
         if basis_given and (clear_wake or clear_hold):
@@ -1124,7 +1139,8 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
             if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not _handoff.ho_same(mod.mover, sender):
                 return
             stored_wake = str(_wt.wake_value(item.get("metadata") or {}) or "")
-            if basis_given and basis_unneeded(item, wake_given or stored_wake.strip()) is None:
+            held = hk.model_guards_on() and not clear_hold and bool(_holders._is_held(item) or _stored_time_wait(item))      # as the update tool reads it (_basis_frame): an item that holds a time wait keeps a basis for its wake at any length
+            if basis_given and basis_unneeded(item, wake_given or stored_wake.strip(), held) is None:
                 return                                      # a park that carries its basis (a wake past the cap, or a time wait's window) names its own reason; a basis the update tool drops (a wake within the cap) is no reason, so the wake is judged as if it were not sent
             wake_new = bool(wake_given) and wake_given != stored_wake.strip()      # re-sending the stored wake sets nothing
             stored_next = str((item.get("metadata") or {}).get("next") or "")

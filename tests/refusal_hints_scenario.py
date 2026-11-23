@@ -383,6 +383,11 @@ check("c ask: an ask over the limit as written whose collapsed form fits still s
 check("c ask: …and what it shows goes through the same gate", ASKS._gate_ask(m_pad.split(":\n")[-1]) == m_pad.split(":\n")[-1], m_pad[-200:])
 t0 = time.perf_counter(); m_pad2 = ask_msg("Decide: x" + " " * 200000 + "| Recommend: y | Stakes: z | By: w"); took3 = time.perf_counter() - t0
 check("c ask: …and a long run of white space is as cheap", took3 < 1.0 and "Your ask in the form" in m_pad2, (took3, m_pad2[-200:]))
+_tail = " | Recommend: yes | Stakes: a week | By: Fri"
+EXACT = "Decide: " + "x" * (240 - len("Decide: ") - len(_tail)) + _tail          # 240 characters collapsed: exactly the limit
+check("c ask: an ask whose collapsed form is exactly the limit still shows its parts in the form", len(EXACT) == 240 and ("Your ask in the form, to send again:\nDecide: " + "x" * (240 - len("Decide: ") - len(_tail)) + " · Recommend: yes") in ask_msg(EXACT.replace(" | ", "  |   ")), None)
+m_over = ask_msg("Decide: " + "x" * (241 - len("Decide: ") - len(_tail)) + _tail)
+check("c ask: …and one a character longer is refused for its length and shows the example", "it is 241 characters" in m_over and "An ask that passes, to copy the shape from" in m_over, m_over[-300:])
 m_sep = ask_msg("Decide: ship it ,;/ Recommend: yes - Stakes: a week \u2014 By: Fri")
 check("c ask: separators at the end of a part (comma, dash, em dash, semicolon, slash) are all cut off the corrected ask", m_sep.endswith("Decide: ship it · Recommend: yes · Stakes: a week · By: Fri"), m_sep[-200:])
 
