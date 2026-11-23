@@ -111,7 +111,7 @@ _FRONT_QUIET = "\n(its {word} {owner} is a front agent: not told; the board show
 
 def tell_comment(gid: str, item: dict[str, Any], text: str) -> list[str]:
     """the owner's comment on GitHub, one line to the item's mover (holder) and to every session named in its needs, each
-    once. A front agent mover hears it marked for the owner (_FOR_OWNER): the mark is what reaches its Claude. The text is clipped
+    once. A front agent mover hears it marked for the owner (_FOR_OWNER), since it is the owner's own words (the mark is for the agent to read; delivery reads the tag, not the mark). The text is clipped
     to one line; the whole comment is on the item and its issue. → the session ids told."""
     h = _hooks()
     meta = item.get("metadata") or {}
@@ -410,7 +410,7 @@ def front_role(who: str) -> bool | None:
 # ended wait lands on) never goes to a front agent: the item goes to the project's builder; a project without one keeps the item with its current mover. What
 # The owner or a session sets explicitly (a mover, a `then`) is left as written. (2) A notice about an item reaches a front agent only when the owner is there for that pane (he typed in
 # it within [presence] minutes: a stamp file the prompt hook writes) AND the agent touched the item in its current conversation; a progress notice then rides his next turn (fyi),
-# a close or a stuck item is told as a turn (the [for <owner>] mark on one stackshot sends itself exempts nothing), everything else is held and logged. Messages a session sends on
+# a close or a stuck item is told as a turn (a notice for the agent's own move carries no [for <owner>] mark, and the mark exempts nothing where one is carried), everything else is held and logged. Messages a session sends on
 # purpose through the message tool are not touched, except an fyi to a front agent (front_fyi): it rides the agent's next turn and starts none.
 PRESENCE_MINUTES = 30.0
 
@@ -1566,7 +1566,6 @@ def tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip: 
             lines.append(f"- … and {len(keep) - _MENTION_LINES_MAX} more")
         body = f"[stackshot] {cause}." + (" An open item you move names it:\n" if len(keep) == 1 else f" {len(keep)} open items you move name it:\n") + "\n".join(lines) \
             + f"\nIf one of them waited on {me}, it can go on now: refresh its next and set after= for any wait that is left."
-        project = str((keep[0][1].get("metadata") or {}).get("project") or "")
         tell_kind("close", ",".join(g for g, _i in keep), sid, body, tag="close")      # a front keeper hears a close only under presence plus touched
         if sid not in told and gate_result()[0] != "held":      # a front keeper the gate held was not told: the reply line must not say it was
             told.append(sid)
@@ -1734,7 +1733,7 @@ def tell_woken(gid: str, owner: str, note: str, tag: str = "wake", result: "dict
 
 def tell_check_closed(gid: str, item: dict[str, Any], label: str) -> list[str]:
     """The server closed `gid` itself on its done check: its mover is told in one line (holder, the mover as it stood before the close; a close is told to the mover alone,
-    never to its `then` or its creator). A front agent mover hears it as a close by another session does, marked (tell_owner_check_closed). A close with the owner's own words on the item
+    never to its `then` or its creator). A front agent mover hears it as a close by another session does, in one line without the owner's mark (tell_owner_check_closed). A close with the owner's own words on the item
     is also a row on his For you list, made when the close is saved (_foryou_on_save). → the session ids told."""
     h = _hooks()
     meta = item.get("metadata") or {}
