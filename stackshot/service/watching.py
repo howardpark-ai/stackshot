@@ -232,7 +232,8 @@ def watch_text(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> tuple[s
     """The message to one session about the items whose wait ended and are now its move: (the text, the mark a front agent takes or "", the item ids), None for no rows. The mark goes only on a front
     agent's message about an item that waits on his decision: that is the one wake with something for the person to do. An item whose open step is the front agent's own is its move, not his: told
     without the mark, as a wait that ends on a front agent otherwise passes the item to the project's builder (watch_fire), and in a project with none the front agent is told without the mark too. The mark
-    is not what delivers the line: a watch notice is exempt from the front gate (telling.FRONT_TAG_KIND), so it is pushed to a front agent, marked or not."""
+    is not what delivers the line: a watch notice is exempt from the front gate (telling.FRONT_TAG_KIND), so it is pushed to a front agent that has something for him in it, marked or not; one that is the agent's own move is told as a
+    progress notice (watch_tell)."""
     if not rows:
         return None
     msg_rows = [(_gh.shown(g), what, f"{it.get('subject') or ''} ({(it.get('metadata') or {}).get('project') or 'no project'})", _telling.notice_link(g)) for g, it, what in rows]
@@ -242,13 +243,14 @@ def watch_text(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> tuple[s
 
 def watch_tell(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> None:
     """One message to one session about every item whose wait ended and is now its move (several items for one recipient in one pass are one message, a single one a single line).
-    A front agent gets the mark only for an item that waits on his decision. A delivery that fails is recorded on the items (tell_woken)."""
+    A front agent gets the mark only for an item that waits on his decision, and only that notice starts its turn: when no item in it holds something for him (telling.carries_for_owner) it is a progress notice,
+    filed for the agent's next turn (telling.tell_own_move). A delivery that fails is recorded on the items (tell_woken)."""
     if not sid:
         print(f"watch: {', '.join(g for g, *_ in rows)} woke with nobody to tell", file=sys.stderr, flush=True)
         return
     x = watch_text(sid, rows)
     if x:
-        _telling.tell_woken(",".join(x[2]), sid, (x[1] + " " if x[1] else "") + x[0], tag="watch")
+        _telling.tell_own_move(",".join(x[2]), sid, (x[1] + " " if x[1] else "") + x[0], tag="watch", items={g: it for g, it, _w in rows})      # a front agent hears an end that is its own move as a progress notice: it rides its next turn
 
 
 def watch_pass(now: float | None = None, wout: dict[str, list[tuple[str, dict[str, Any], str]]] | None = None) -> list[str]:

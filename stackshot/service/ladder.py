@@ -148,8 +148,8 @@ def ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "list
 
 
 def ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, dict[str, str]]") -> None:
-    """ONE notice to the -main agent `to` for the items (gid, line) of silent live background movers that came due together. It goes through the gate as a notice that asks a front agent to act (tag
-    "stall", kind exempt), unmarked (the owner has nothing to do there: the move is the agent's; the gate delivers it by its kind, not its first line), and says how to stop the repeats. A lone item reads as a sentence about that item, several as a list."""
+    """ONE notice to the -main agent `to` for the items (gid, line) of silent live background movers that came due together. It goes through the gate as a progress notice (tag "stall", `telling.tell_own_move`) when no item in it holds something for the owner, so it rides the -main agent's next turn and starts none; one that
+    does (an item waiting on his decision or his step) keeps the kind of its tag, exempt, and starts a turn. Unmarked either way (the gate reads the kind, not the first line), and it says how to stop the repeats. A lone item reads as a sentence about that item, several as a list."""
     gids = [g for g, _l in items]
     every = f"{_ladder.MAIN_EVERY / 3600.0:g} hours"
     stop = f"To stop the repeats, write to the item, park it or set its wait; it comes again in {every} while the item stays silent. "
@@ -163,7 +163,7 @@ def ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, d
         tail = (f"\nDecide for each whether it needs a nudge or a different mover: message its mover, or hand the item on (update mover=<session>). If you do nothing each stays with its mover. {stop}"
                 f"→ {_inst.BOARD_URL}")
         text = head + "\n" + "\n".join("- " + l for _g, l in items) + tail
-    _telling.tell_woken(",".join(gids), _hooks().session_id(to) or to, text, tag="stall")
+    _telling.tell_own_move(",".join(gids), _hooks().session_id(to) or to, text, tag="stall")      # the mover is live and nobody else is asked: with nothing for the owner on the items, a progress notice, filed for the -main agent's next turn
 
 
 def laddered(gid: str, who: str, now: float, at: float | None = None) -> bool:

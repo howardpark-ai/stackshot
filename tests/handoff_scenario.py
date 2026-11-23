@@ -136,7 +136,9 @@ QUEUED, PAUSED = T / "push-queued.txt", T / "push-paused.txt"
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
 _real_tell = telling.tell_woken
+TOLD = []      # every notice the server tells, as [session id, text], pushed or not: a request to a -main agent is a progress notice (telling.tell_own_move), held while nobody is there, so its checks read this
 def _tell(gid, owner, note, tag="wake"):
+    TOLD.append([owner, note])
     th = _real_tell(gid, owner, note, tag)
     if th: THREADS.append(th)
     return th
@@ -159,7 +161,8 @@ def set_cfg(**kw): _cfg.CFG["model"] = dict(kw)
 set_cfg()
 _cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the last rung of the ladder asks it, once, to recover a session nobody could hand the item to
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
-def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, with no owner mark
+def told_to(who, gid=None): return [p for p in TOLD if p[0] == U[who] and (gid is None or gid in p[1])]
+def main_recovery_pushes(gid): return [p for p in told_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, with no owner mark
 hcold_svc.COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"}
 COLD_MSGS = []
 def cold(answer, status="ok"):

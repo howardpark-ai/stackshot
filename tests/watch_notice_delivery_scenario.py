@@ -5,15 +5,16 @@ step is its own, although the person has nothing to do there: the move is the ag
 and the real delivery path (watching.watch_tell -> telling.tell_woken -> telling.front_gate -> the push command; only the push command's last hop, the program that writes into the pane, is replaced by a
 recorder) and proves that dropping the mark changes nothing about who is told:
 
-  1  a front agent that is the item's mover (a step of its own, the wait ending on it in a project with no builder) is pushed the notice while the person is not there for its pane: unmarked, once, with no held
-     line and no front-agent board line; the same text with the old mark on it is pushed exactly the same (the gate decides by the notice's kind, not by its first line)
+  1  a front agent that is the item's mover (a step of its own, the wait ending on it in a project with no builder) is told the notice once, as a progress notice (the item waits on no decision of his): no turn, nothing pushed
+     while the person is not there for its pane, the news on the item's board line; unmarked; the same text with the old mark on it is held exactly the same (the gate decides by the notice's kind, not by its first line); sent
+     with its tag alone (no kind from its sender) it would be pushed, so what makes it progress is its sender (telling.tell_own_move)
   2  an item that waits on his decision (the mark stays) is pushed to the front agent too, marked
   3  a background agent is told as before: pushed once, unmarked, nothing held
-  4  the contrast that makes 1 mean something: a notice of the kind that is held (a progress notice) to the same front agent in the same state is held whether it carries the mark or not, so the gate does read
-     the kind, and a watch notice is not of that kind
+  4  the contrast: a notice of the kind that is held (a progress notice) to the same front agent in the same state is held whether it carries the mark or not, so the gate does read
+     the kind; the watch and stall tags are still of the kind that asks
   5  the delivery program does not read the mark (push.py and inbox.py name no `[for ...]` test)
   6  the other notices a front agent hears for its own move carry no mark either and are delivered as they were: a close by another session (pushed under his ask, held without it, marked or not),
-     the ladder's notice about a silent background mover (pushed with nobody there), the page-debt fallback to a front agent (the agent's own page update to write: pushed, unmarked); a notice that
+     the ladder's notice about a silent background mover (a progress notice: held with nobody there; with his decision in it, pushed), the page-debt fallback to a front agent (the agent's own page update to write: pushed, unmarked); a notice that
      carries his own words (his comment) keeps the mark
 
     tests/run-suite watch_notice_delivery        -> exit 0 / 1"""
@@ -82,7 +83,9 @@ PUSHLOG = T / "push.log"
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
 _real_tell = telling.tell_woken
+TOLD = []      # every notice the server tells, as [session id, text], pushed or not: a front agent's own move is told as a progress notice (telling.tell_own_move), held while nobody is there
 def _tell(gid, owner, note, tag="wake", result=None):
+    TOLD.append([owner, note])
     th = _real_tell(gid, owner, note, tag)
     if th: THREADS.append(th)
     return th
@@ -91,7 +94,7 @@ def drain():
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def reset():
-    drain(); PUSHLOG.unlink(missing_ok=True)
+    drain(); PUSHLOG.unlink(missing_ok=True); TOLD.clear()
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_HOURS * 3600))
 def board_lines(i): return (mt(i).get("front_quiet") or {}).get("log") or []
 
@@ -99,26 +102,23 @@ def board_lines(i): return (mt(i).get("front_quiet") or {}).get("log") or []
 check("setup: the front agent is one for both projects, the builder is not", telling.front_keeper(F_B, "projects/echo")[0] and telling.front_keeper(F_B, "projects/delta")[0] and not telling.front_keeper(B_B, "projects/delta")[0], None)
 check("setup: nobody is there for the front agent's pane", not telling.presence_here(U[F_B]), None)
 
-# ================================================================ 1. the front agent's own move: pushed, unmarked, as it is pushed with the mark
+# ================================================================ 1. the front agent's own move: told as a progress notice, so no turn, with or without the mark
 item(1, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_B, needs=[], next=f"{F_B}: ask him which one to keep", subject="[home] its own step")
 reset(); woke = wakes_svc.wake_pass(); drain()
-p = pushes()
+p, tl = pushes(), [t for t in TOLD if t[0] == U[F_B]]
 check("1 the wake turns the item and the front agent keeps it (no builder in the project)", "a1" in woke and mt(1).get("mover") == F_B, (woke, mt(1)))
-check("1 the real wake pass pushes the notice to the front agent, once, while nobody is there for its pane", len(p) == 1 and p[0][0] == U[F_B], p)
-check("1 …unmarked: no mark on the first line or anywhere in it, and it says whose move it is", p and not p[0][1].startswith(MARK) and MARK not in p[0][1] and "is yours now" in p[0][1] and p[0][1].startswith("[stackshot] "), p)
-check("1 …it names the item and where to find it", p and " a1 " in p[0][1] and "/items/a1" in p[0][1], p)
-check("1 …nothing held for the agent's next turn and no front-agent line on the item", held.count(U[F_B]) == 0 and not board_lines(1), (held.count(U[F_B]), board_lines(1)))
-text = p[0][1] if p else ""
+check("1 the real wake pass tells the front agent once, and starts no turn of its own: nothing is pushed while nobody is there for its pane (the item waits on no decision of his)", len(tl) == 1 and p == [], (tl, p))
+check("1 …the notice is unmarked: no mark on the first line or anywhere in it, and it says whose move it is", tl and not tl[0][1].startswith(MARK) and MARK not in tl[0][1] and "is yours now" in tl[0][1] and tl[0][1].startswith("[stackshot] "), tl)
+check("1 …it names the item and where to find it", tl and " a1 " in tl[0][1] and "/items/a1" in tl[0][1], tl)
+check("1 …no held line for its next turn (nobody is there), and the item's board line carries the news", held.count(U[F_B]) == 0 and len(board_lines(1)) == 1 and "is yours now" in board_lines(1)[0]["text"] and "was not told" in board_lines(1)[0]["text"], (held.count(U[F_B]), board_lines(1)))
+text = tl[0][1] if tl else ""
 reset()
-telling.tell_woken("a1", U[F_B], MARK + " " + text, tag="watch"); drain()
-q = pushes()
-check("1 the same notice carrying the old mark is pushed exactly as the unmarked one: same recipient, same count, the mark the only difference", len(q) == 1 and q[0][0] == p[0][0] and q[0][1] == MARK + " " + text, q)
-check("1 …and that left nothing held either", held.count(U[F_B]) == 0 and not board_lines(1), (held.count(U[F_B]), board_lines(1)))
+telling.tell_kind("progress", "a1", U[F_B], MARK + " " + text, tag="watch"); drain()
+check("1 the same notice carrying the old mark is held exactly the same: nothing pushed (the gate reads the kind, not the first line)", pushes() == [], pushes())
 reset()
 telling.tell_woken("a1", U[F_B], text, tag="watch"); drain()
-check("1 the unmarked line through the gate directly (tell_woken, tag watch): pushed", len(pushes()) == 1 and pushes()[0][0] == U[F_B], pushes())
-check("1 …the gate's verdict for it is none: it is of the kind that asks its mover to act (exempt), so no hold and no log line",
-      telling.FRONT_TAG_KIND.get("watch") == "exempt" and telling.FRONT_HINT.result == ("", ""), (telling.FRONT_TAG_KIND.get("watch"), telling.FRONT_HINT.result))
+check("1 the same line through the gate with the tag alone (tell_woken, tag watch, no kind from its sender) is pushed: the tag's kind is exempt, and what makes the wake pass's notice progress is its sender", len(pushes()) == 1 and pushes()[0][0] == U[F_B], pushes())
+check("1 …the gate's verdict for it is none: no hold and no log line", telling.FRONT_TAG_KIND.get("watch") == "exempt" and telling.FRONT_HINT.result == ("", ""), (telling.FRONT_TAG_KIND.get("watch"), telling.FRONT_HINT.result))
 
 # ================================================================ 2. an item that waits on his decision: marked, pushed
 item(2, needs=["decision"], ask="Decide: a or b \u00b7 Recommend: a \u00b7 Stakes: none \u00b7 By: no date", subject="[home] waits on his decision")
@@ -153,7 +153,7 @@ for label, note in (("unmarked", NOTE), ("marked", MARK + " " + NOTE)):
     reset(); h0 = held.count(U[F_B])
     telling.tell_woken("a5", U[F_B], note, tag="owner"); drain()
     check(f"4 a progress notice, {label}, to the front agent while nobody is there: not pushed (the gate reads the kind, not the mark)", pushes() == [], pushes())
-check("4 …so the watch notice in 1 was pushed because of its kind: the same gate, the same agent, the same state", telling.FRONT_TAG_KIND.get("owner") == "progress" and telling.FRONT_TAG_KIND.get("watch") == "exempt", None)
+check("4 …so the watch notice in 1 was held because its sender told it as progress: the same gate, the same agent, the same state; the tags themselves are as they were", telling.FRONT_TAG_KIND.get("owner") == "progress" and telling.FRONT_TAG_KIND.get("watch") == "exempt", None)
 
 # ================================================================ 5. the delivery program does not read the mark
 for f in ("push.py", "inbox.py"):
@@ -174,12 +174,17 @@ reset(); telling.tell_owner_close("a7", rd(7), SOLO, True, []); drain()
 check("6a the same close with no ask of his and nobody there is held, as it was with the mark: the gate reads the kind and the state, never the first line", pushes() == [] and telling.gate_result()[0] == "held", (pushes(), telling.gate_result()))
 reset(); telling.tell_woken("a7", U[F_B], MARK + " [stackshot] a7 closed", tag="owner"); drain()
 check("6a …and a close that carries the old mark is held exactly the same", pushes() == [], pushes())
-# 6b. the ladder's notice to a -main agent about a silent background mover: no mark, pushed while nobody is there (the stall tag asks its agent to act)
+# 6b. the ladder's notice to a -main agent about a silent background mover: no mark; with nothing in it for the owner it is a progress notice (no turn while nobody is there), with his decision in it it is pushed
 item(8, mover=B_B, project="projects/delta", subject="[home] a silent mover's item")
-reset(); ladder_svc.ladder_main_tell(F_B, [("a8", "a8 line")], {"a8": {"subject": "[home] item 8", "mover": B_B, "since": "Mon Nov 9th 02:00", "span": "4 hours", "told": ""}}); drain()
+INFO = lambda g: {g: {"subject": "[home] item 8", "mover": B_B, "since": "Mon Nov 9th 02:00", "span": "4 hours", "told": ""}}
+reset(); ladder_svc.ladder_main_tell(F_B, [("a8", "a8 line")], INFO("a8")); drain()
+p, tl = pushes(), [t for t in TOLD if t[0] == U[F_B]]
+check("6b the ladder's notice about a silent background mover is told to the -main agent, once, and starts no turn of its own: nothing pushed with nobody there for its pane", len(tl) == 1 and p == [] and "has had no write from its background mover" in tl[0][1], (tl, p))
+check("6b …unmarked, and it asks the agent to decide (the agent's move, nothing for the owner)", tl and MARK not in tl[0][1] and tl[0][1].startswith("[stackshot] ") and "Decide whether it needs a nudge" in tl[0][1], tl)
+item(11, mover=B_B, project="projects/delta", needs=["decision"], ask="Decide: a or b \u00b7 Recommend: a \u00b7 Stakes: none \u00b7 By: no date", subject="[home] a silent mover's item that waits on his decision")
+reset(); ladder_svc.ladder_main_tell(F_B, [("a11", "a11 line")], INFO("a11")); drain()
 p = pushes()
-check("6b the ladder's notice about a silent background mover is pushed to the -main agent, once, with nobody there for its pane", len(p) == 1 and p[0][0] == U[F_B] and "has had no write from its background mover" in p[0][1], p)
-check("6b …unmarked, and it asks the agent to decide (the agent's move, nothing for the owner)", p and MARK not in p[0][1] and p[0][1].startswith("[stackshot] ") and "Decide whether it needs a nudge" in p[0][1], p)
+check("6b …with an item that waits on his decision in it the notice is pushed to the -main agent, once, with nobody there (the kind of its tag, stall, asks the agent to act)", len(p) == 1 and p[0][0] == U[F_B] and "has had no write from its background mover" in p[0][1], p)
 check("6b …delivered because of its tag: stall is of the kind that asks the agent to act", telling.FRONT_TAG_KIND.get("stall") == "exempt" and telling.FRONT_TAG_KIND.get("ask") == "exempt", None)
 # 6c. his own words keep the mark: his comment on GitHub and an item that waits on his decision are for him, the mover is told marked
 item(9, mover=F_B, subject="[home] he commented")

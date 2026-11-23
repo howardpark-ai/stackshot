@@ -6,8 +6,9 @@ page update is owed (`pilot_relay`, `pilot_relay_many`, `writer_charge`). Every 
 for its pane and it touched the item), holds a notice that asks nothing of a background agent (`hold_notice`, waits/held.py), pushes the rest through the delivery script (`PUSH`) and records what came back undelivered.
 Notices of stackshot's own that ask a front agent nothing never start its turn. Through the gate as an fyi line or a board line: the stall summaries to -main (tag `stall_summary`), the anchors notice of a completed
 item, a script's fyi (the audit's run summary, the server's parked-wait and moved-step lines), a peer's fyi, a machine's check-in told to a front agent for an item that is waiting (on a wake, another item or an outside party:
-`event_waits.machine_anchor_poll` sends it as a `progress` notice, one for each item) and a wake that only leaves a front agent's item in its place in the queue (`wakes._front_queue_row`, held kind `queue`). What asks stays a turn:
-the audit's findings on an item that waits on him (a decision, a step of his; one on an item that waits on nothing of his goes as an fyi), the page-agent and registry lines, a wake that puts an item back in its lane, "is yours now", a machine's check-in for an item that is its mover's to do now, a stall or balance notice.
+`event_waits.machine_anchor_poll` sends it as a `progress` notice, one for each item) and a wake that only leaves a front agent's item in its place in the queue (`wakes._front_queue_row`, held kind `queue`). What asks stays a turn: the audit's findings on an item that waits on him (a decision, a step of his; one on an item that waits on nothing of his goes as an fyi), the page-agent and registry lines, a machine's check-in for an item that is its mover's to do now, a balance notice and the busy-stretch stall notice. So do a wake, a watcher's
+"is yours now", the line of his board answer that hands an item over, and the ladder's or the recovery's request to a -main agent, when an item in them waits on his decision or is his step (`carries_for_owner`); where nothing in them
+is for him, their sender tells them as `progress` (`tell_own_move`): the notice rides the agent's next turn and starts none.
 They moved out of server.py as they were: the same texts, the same sessions told, the same order of events. A name that service/create.py, service/update.py, service/gates.py or server.py calls on this module has lost
 its leading underscore (`_tell_woken` is `tell_woken`); the helpers beside it keep theirs.
 
@@ -46,7 +47,7 @@ from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model, nextlines as _nl
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _GID, _item_url
-from stackshot.model.needs import _needs_kinds, _NEEDS_KINDS, _needs_list, _needs_of, _needs_sessions, _observers_of
+from stackshot.model.needs import _needs_kinds, _NEEDS_KINDS, _needs_list, _needs_of, _needs_sessions, _observers_of, _waits_decision
 from stackshot.model.said import _owner_words
 from stackshot.projects import keeper_reads as _reads
 from stackshot.router import router_live as _router_live, routing as _routing
@@ -416,7 +417,7 @@ PRESENCE_MINUTES = 30.0
 
 
 FRONT_TAG_KIND = {"answer": "exempt", "handoff": "exempt", "migration": "exempt", "recycle": "exempt", "needs": "exempt",
-                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt", "balance": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved
+                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt", "balance": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved. A sender of the own-move ones (wake, watch, the answer line that hands an item over, the stall request to a -main agent) tells a front agent the kind "progress" instead when no item in the notice holds something for the owner (tell_own_move); the tag stays, it names the sender
                    "close": "close", "check": "close",      # a notice's tag names its kind unless the sender passes one
                    "owner": "progress", "observer": "progress",
                    "stall_summary": "progress",
@@ -448,6 +449,36 @@ def tell_news(news: "dict[str, str]", *args: Any, **kw: Any) -> "threading.Threa
         return tell_woken(*args, **kw)
     finally:
         FRONT_HINT.news = old
+
+
+def carries_for_owner(gid: str, item: "dict[str, Any] | None" = None) -> bool:
+    """Does the item hold something for him: it waits on his decision (`needs.hold decision`, the test the owner mark and his queue use: model/needs.py `_waits_decision`), or the board reads the move as his (his step:
+    service/foryou_events.py `_owner_moves`, the reading that sorts an item into Your move)? `item` is the caller's copy when it has one, else the store's. An item that is not open, or cannot be read, counts as holding
+    something: the notice keeps its tag."""
+    try:
+        it = item if item is not None else _load(gid)
+        if it.get("status") != "open":
+            return True
+        return _waits_decision(it.get("metadata") or {}) or _fyev._owner_moves(gid, it)
+    except Exception:  # noqa: BLE001  — an unreadable item is not shown to be free of him
+        return True
+
+
+def own_move_kind(owner: str, gids: str, items: "dict[str, dict[str, Any]] | None" = None) -> str:
+    """The kind a notice about `gids` (one id or several, comma-separated) is told to `owner` in when it asks the agent to act on its own move and nothing in it is for him: "progress" when `owner` is a front agent and
+    no item named holds anything for him (`carries_for_owner`), so the notice rides the agent's next turn and starts none; "" otherwise (the tag's own kind stands: a background agent, a session whose role cannot be
+    read, an item that waits on his decision or is his step, one that cannot be read, `[router] hold_notices = false`). `items`: the caller's copies by id, read from the store where it has none."""
+    ids = [g for g in re.split(r"[,\s]+", str(gids or "")) if _GID.match(g)]
+    if not ids or not _held.enabled() or not front_sender(owner):      # [router] hold_notices = false: every notice is delivered as before
+        return ""
+    have = items or {}
+    return "" if any(carries_for_owner(g, have.get(g)) for g in ids) else "progress"
+
+
+def tell_own_move(gid: str, owner: str, note: str, tag: str = "wake", result: "dict[str, Any] | None" = None, items: "dict[str, dict[str, Any]] | None" = None) -> "threading.Thread | None":
+    """tell_woken for a notice that asks its agent to act on its own move (a wake or a wait that ended, his answer relayed, a stall request): told to a front agent as a progress notice (`own_move_kind`) when nothing in it
+    is for him, so it rides the agent's next turn and starts none; the tag, which names the sender in the logs, is the caller's. For any other recipient, or an item that holds something for him, it is tell_woken as ever."""
+    return tell_kind(own_move_kind(owner, gid, items), gid, owner, note, tag=tag, **({} if result is None else {"result": result}))
 
 
 def gate_result() -> tuple[str, str]:
@@ -682,7 +713,8 @@ def _front_held_log(gid: str, owner: str, kind: str, reason: str, note: str, fil
 
 def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = "", log: bool = True, held_kind: str = "fyi", board: bool = True) -> bool:
     """the one gate every item notice passes in tell_woken. → True when the notice was handled here (held, or filed as an fyi line) and must not be pushed. False: send it as ever.
-    Not gated: a recipient that is no front agent, a kind of "exempt" (his board answer relayed, a hand-off, a migration, a recycle, a notice that asks the mover to act). The [for <owner>]
+    Not gated: a recipient that is no front agent, a kind of "exempt" (his board answer relayed, a hand-off, a migration, a recycle, a notice that asks the mover to act and holds something for him: a notice that asks the agent to act on
+    its own move and holds nothing for him is told by its sender as "progress", `tell_own_move`, and is gated like any progress notice). The [for <owner>]
     mark does not exempt a notice: a close or a stuck notice stackshot itself sends carries it, and takes a turn of its own only under presence plus touched. A message a session sends
     on purpose goes through the message tool, which passes here only when it is an fyi to a front agent (kind `message`, front_fyi); one that asks something does not.
     A tag the map does not know is a progress notice (held when he is away); tests/front_quiet_scenario.py fails on a tag passed to the gate that the map lacks.

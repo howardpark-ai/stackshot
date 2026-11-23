@@ -107,7 +107,9 @@ PUSHLOG = T / "push.log"
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
 _real_tell = telling.tell_woken
+TOLD = []      # every notice the server tells, as [session id, text], pushed or not: a request to a -main agent is a progress notice (telling.tell_own_move), held while nobody is there, so its checks read this
 def _tell(gid, owner, note, tag="wake"):
+    TOLD.append([owner, note])
     th = _real_tell(gid, owner, note, tag)
     if th: THREADS.append(th)
     return th
@@ -127,7 +129,8 @@ def set_stall(**kw):
 set_cfg(); set_stall()
 _cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the ladders' last rung asks it, once per episode, to recover a quiet session
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
-def main_recovery_pushes(gid): return [p for p in pushes_to("home-delta-main", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, with no owner mark
+def told_to(who, gid=None): return [p for p in TOLD if p[0] == U[who] and (gid is None or gid in p[1])]
+def main_recovery_pushes(gid): return [p for p in told_to("home-delta-main", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, with no owner mark
 item(97, status="completed", answers=[{"ts": 9e9, "kind": "comment", "text": "Pause it for now.", "via": "board"}])      # Oliver's answer, the pause_item of every pause below
 stall_svc.stall_since(B)          # the pass first ran at B (before every clock below); test 12 starts from no file at all
 COLD_MSGS = []

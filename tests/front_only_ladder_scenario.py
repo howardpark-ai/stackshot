@@ -98,7 +98,9 @@ PUSHLOG = T / "push.log"
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
 _real_tell = telling.tell_woken
+TOLD = []      # every notice the server tells, as [session id, text], pushed or not: a request to a -main agent is a progress notice (telling.tell_own_move), held while Oliver is away, so its checks read this
 def _tell(gid, owner, note, tag="wake"):
+    TOLD.append([owner, note])
     th = _real_tell(gid, owner, note, tag)
     if th: THREADS.append(th)
     return th
@@ -118,7 +120,8 @@ def set_stall(**kw):
 set_cfg(); set_stall()
 _cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the ladders' last rung asks it, once per episode, to recover a quiet session
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
-def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, with no owner mark
+def told_to(who, gid=None): return [p for p in TOLD if p[0] == U[who] and (gid is None or gid in p[1])]
+def main_recovery_pushes(gid): return [p for p in told_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, with no owner mark
 item(97, status="completed", answers=[{"ts": 9e9, "kind": "comment", "text": "Pause it for now.", "via": "board"}])      # Oliver's answer, the pause_item of every pause below
 stall_svc.stall_since(B)          # the pass first ran at B (before every clock below); test 12 starts from no file at all
 COLD_MSGS = []
@@ -150,7 +153,7 @@ T2 = T1 + 10 * MIN + 1.0
 
 set_cfg(cold_call=False)
 FLEET_ONLY = lambda gid: [p for p in pushes_to("home-fleet", gid)]
-MAIN_ONLY = lambda gid: [p for p in pushes_to("home-beta-front", gid)]
+MAIN_ONLY = lambda gid: told_to("home-beta-front", gid)
 
 # ================================================================ 1. a front-only project ends at its -main agent
 item(1, project="projects/beta", mover="home-peer3"); cli_row("home-peer3", "idle", IDLE0)
@@ -161,7 +164,7 @@ check("1 nobody can take it (no builder in the project, cold call off): the reco
 check("1 …ONE message went to the project's -main agent, with no owner mark, naming the item and the quiet session, asking it to decide, owing no reply",
       len(mp) == 1 and mp[0][1].startswith("[stackshot] a1 ") and f"[for {OWN}]" not in mp[0][1] and "home-peer3" in mp[0][1] and "decide" in mp[0][1] and "no builder" in mp[0][1] and "no reply is owed" in mp[0][1], mp)
 check("1 …the fleet's builder was told nothing, and the quiet session got only the notice of step 1", not FLEET_ONLY("a1") and len(pushes_to("home-peer3", "a1")) == 1, pushes())
-check("1 …the History line says the -main agent was asked, and what was tried without a builder", "home-peer3 is quiet" in log_of(1)[-1]["text"] and "home-beta-front was asked to recover it" in log_of(1)[-1]["text"]
+check("1 …the History line says the -main agent was asked, and what was tried without a builder", "home-peer3 is quiet" in log_of(1)[-1]["text"] and "the message to home-beta-front starts no turn of its own" in log_of(1)[-1]["text"]
       and "project's builder" not in log_of(1)[-1]["text"], log_of(1))
 check("1 …the item is not on the owner's list, and later passes send nothing more", "decision" not in (mt(1).get("needs") or []) and not mt(1).get("ask") and stk(T2 + 21) == [] and stk(T2 + 5 * 3600) == [] and len(MAIN_ONLY("a1")) == 1, (mt(1), pushes()))
 close(1)
@@ -196,7 +199,7 @@ def rec(to, frm="home-send", **kw):
     return H.new_record(to, U[to], frm, now0 - 3600, **{"delivered_at": now0 - 3500, **kw})
 # ================================================================ 5. what the request says: who was actually asked, what was tried, computed once
 def ev_texts(i): return [e["text"] for e in ho(i).get("events", [])]
-def msgs(gid, who): return [p[1] for p in pushes_to(who, gid)]
+def msgs(gid, who): return [p[1] for p in told_to(who, gid)]
 # (a) the -main agent was asked: every line that names the recipient says so, not the fleet's builder
 item(10, project="projects/beta", mover="home-peer3"); cli_row("home-peer3", "idle", IDLE0)
 CALLS.clear(); _pane_recovery._recovery_target = _counting
@@ -206,7 +209,7 @@ check("5 the target is computed once per request (the record, the wording of `tr
 check("5 …the hand-off record says who was asked, and its event line names the -main agent, not the fleet's builder", ho(10).get("recovery_by") == "the project's -main agent"
       and any("the project's -main agent was asked" in t for t in ev_texts(10)) and not any("fleet's builder" in t for t in ev_texts(10)), (ho(10), ev_texts(10)))
 check("5 …`get` reads it the same way (the hand-off line)", any("the project's -main agent was asked to recover it" in l for l in H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x)) and not any("fleet" in l for l in H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x)), H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x))
-check("5 …the journal note of the History write names the -main agent", any(g == "a10" and "the project's -main agent was asked" in n for g, n in NOTES) and not any(g == "a10" and "fleet" in n and "recovery" not in n for g, n in NOTES), [n for g, n in NOTES if g == "a10"])
+check("5 …the journal note of the History write names the -main agent", any(g == "a10" and "the project's -main agent was told" in n for g, n in NOTES) and not any(g == "a10" and "fleet" in n and "recovery" not in n for g, n in NOTES), [n for g, n in NOTES if g == "a10"])
 check("5 …and what was tried says there was no builder (a stall record: the notice again and a fresh session's call)", any("What the ladder tried: the stall pass sent the notice again and asked a fresh session who takes it." in t for t in msgs("a10", "home-beta-front"))
       and not any("project's builder" in t for t in msgs("a10", "home-beta-front")), msgs("a10", "home-beta-front"))
 _it10 = rd(10); H.touch(_it10, "home-peer3", U["home-peer3"], T2 + 60, handoff_svc.ho_same)

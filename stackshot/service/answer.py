@@ -160,21 +160,24 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     told: list[str] = []
     if judge and rec.get("applied"):      # the server read his note and applied it (note_read.py): the then-mover is told what was done instead of being asked to judge the note
         judge = ". " + str(rec["applied"])
-    def tell(sid: str, text: str) -> None:
-        _telling.tell_woken(gid, sid, text, tag="answer")
+    def tell(sid: str, text: str, yours: bool = False) -> None:
+        if yours:      # the line that hands the item over ("It's yours now"): to a front agent it is a progress notice when the item holds nothing for him (telling.own_move_kind), filed for its next turn; his relayed words keep their kind
+            _telling.tell_own_move(gid, sid, text, tag="answer", items={gid: item})
+        else:
+            _telling.tell_woken(gid, sid, text, tag="answer")
         told.append(sid)
     if owner:
         oid = _session_id(owner)
         front = _telling.front_keeper(owner, project)[0]
         mine = oid == thenid
         base = to_then(line) if mine else line
-        tell(oid, f"{_FOR_OWNER} {base}" if front else base)
+        tell(oid, f"{_FOR_OWNER} {base}" if front else base, yours=mine)
     for s in _needs_sessions(meta):
         sid = _session_id(s)
         if sid and sid not in told:
-            tell(sid, to_then(line) if sid == thenid else line)
+            tell(sid, to_then(line) if sid == thenid else line, yours=sid == thenid)
     if thenid and thenid not in told:          # the then-mover is neither the mover nor in needs (a stored `then`): it is told, and its write settles the answer
-        tell(thenid, to_then(line))
+        tell(thenid, to_then(line), yours=True)
     if not told:
         print(f"answer: {gid} has no mover and names no session to tell", file=sys.stderr, flush=True)
     seen, handed_to = list(told), list(told)
