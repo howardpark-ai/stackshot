@@ -1463,6 +1463,39 @@ def form_call(machine: str, sender: str, senders: list[str], machines: list[str]
     return bool(machine) and bool(sender) and sender in senders and machine in machines
 
 
+BG_NOT_MACHINE = ("refused: the token's machine may not make a background call: it is not in [project_agent] bg_machines "
+                  "(form_machines when bg_machines is empty)")
+BG_NOT_BACKGROUND = "refused: a background call lists a background agent only (front false, on the default surface); a front agent or an agent on another surface is not its to list"
+_BG_WANT_TEXT = {      # background_want.open_state's answer -> why the project takes no agent from a background call
+    "off": "[background_agent] enabled is off",
+    "none": "no message has asked for one",
+    "served": "its want was served already",
+    "has_agent": "it has a background agent already",
+    "not_eligible": "it is not a top-level project that lists a front agent, or it is retired or hidden",
+    "error": "its wants cannot be read right now",
+}
+
+
+def bg_gate(machine: str, sender: str, senders: list[str], machines: list[str], front: bool, surface: str) -> tuple[bool, _Refusal | None]:
+    """Is this call a background call, as far as the caller and the agent say? -> (True, None) when the `sender` label is in bg_senders, the machine its token proves (`machine`, never
+    the body) is in `machines` (bg_machines, else form_machines) and the agent listed is a background agent (`front` false, `surface` "" for the default one); (False, None) when the
+    label is not in bg_senders (the other rules decide); (False, the 403) for a bg label that fails a condition, naming it. The open want is `bg_want_refusal`'s."""
+    if not (sender and sender in senders):
+        return False, None
+    if not machine or machine not in machines:
+        return False, (403, {"error": BG_NOT_MACHINE})
+    if front or surface:
+        return False, (403, {"error": BG_NOT_BACKGROUND})
+    return True, None
+
+
+def bg_want_refusal(state: str, where: str) -> _Refusal | None:
+    """A background call needs an open want for the project right now: None for state "open" (background_want.open_state), else the 403 that says which condition fails."""
+    if state == "open":
+        return None
+    return 403, {"error": f"refused: {where} has no open want for a background agent: {_BG_WANT_TEXT.get(state, _BG_WANT_TEXT['error'])}"}
+
+
 def unwritable(e: Exception, done: str = "changed") -> str:
     """The text of a 503 when the project record cannot be read or written: `done` is what was not done ("changed", "made")."""
     return f"the project record cannot be read or written right now, nothing was {done}: {e}"
@@ -1619,8 +1652,10 @@ def hidden_refusal(key: str) -> _Refusal:
     return 403, {"error": f"refused: {key} is hidden, not listed. List it again first with `client.py post project-list --key {key}`, then add the agent"}
 
 
-def agent_caller_refusal(rec: dict[str, Any], key: str, form: bool, first: bool, more: bool, sender: str, is_id: bool, names_get: Callable[[str, str], str]) -> _Refusal | None:
-    """Who may register an agent: a label on the first-agent or further-agents path, or the New session form (`form`), or the keeper or a front agent as a session id."""
+def agent_caller_refusal(rec: dict[str, Any], key: str, form: bool, first: bool, more: bool, sender: str, is_id: bool, names_get: Callable[[str, str], str], bg: bool = False) -> _Refusal | None:
+    """Who may register an agent: a label on the first-agent or further-agents path, or the New session form (`form`), or a background call (`bg`, bg_gate said so; the open want is checked after this),
+    or the keeper or a front agent as a session id."""
+    form = form or bg        # a background call is a label's call as the form's is: the same retired, hidden and label rules
     if (first or more or form) and rec["retired"]:        # a label is the form's word: a retired project takes no agent from it (the keeper's and a front agent's session ids still may)
         return retired_refusal(rec, key)
     if form and not rec["listed"]:

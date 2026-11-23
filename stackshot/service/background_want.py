@@ -164,6 +164,27 @@ def _open(wants: dict[str, Any], looks: dict[str, Any] | None = None) -> list[tu
     return out
 
 
+def open_state(project: str) -> str:
+    """Is there an open want for `project` right now, the way `wanted()` serves it? "open" when the switch is on, the project is eligible, has no background agent and its want is recorded and not served; else
+    why not: "off" (the switch), "not_eligible" (see `_look`), "has_agent" (a background agent is listed), "none" (no want recorded) or "served" (its want was served). "error" when the file cannot be
+    read as a whole. Reads only, never raises: the check `post project-agent` makes for a background call."""
+    try:
+        if not enabled():
+            return "off"
+        look = _look(project)
+        if look is None:
+            return "not_eligible"
+        if look["agent"]:
+            return "has_agent"
+        w = _read().get(look["id"])
+        if w is None:
+            return "none"
+        return "served" if "served" in w else "open"
+    except Exception as e:  # noqa: BLE001
+        print(f"background want: {project} not read: {e.__class__.__name__}: {str(e)[:120]}", file=sys.stderr, flush=True)
+        return "error"
+
+
 def want_background(project: str, kind: str, now: float | None = None) -> bool:
     """Record that `project` could use a background agent: a message (`kind`) reached it and it has none. -> True when a new want was recorded, False for anything else (switch off, another kind, not eligible, a want
     already open, the cooldown not over, the cap reached, a failure). Never raises."""

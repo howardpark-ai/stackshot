@@ -60,7 +60,7 @@ runs on every box.
                                 Watch / Mute settings on items (an item with no flag is in neither); "watch" adds an item that is not watched by
                                 default, "mute" stops rows for it. A row leaves the list when he marks it seen on the board. Reads only.
                                 Exit 0 · 1 no token or not reached.
-  client.py post project-agent <project> <name> --role <role> (--front | --back) [--surface sala|slack] --mandate "<one line>" [--sender <session id>]
+  client.py post project-agent <project> <name> --role <role> (--front | --back) [--surface sala|slack] --mandate "<one line>" [--sender <session id | label>]
                                 ask to list a new agent of a project (<project> = its id, page key or bare slug). --surface is where a front agent talks with him: sala (the
                                 default, a session of sala's list) or slack (an agent that answers his Slack app messages: a front agent that is never the project's keeper, a background
                                 agent or its -main agent, and that no router, audit or stall notice is addressed to); the role slack stands for it (`--role slack --front`), and
@@ -75,6 +75,14 @@ runs on every box.
                                 project: 403, list it again first with post project-list). The name must still start with the project's name;
                                 it never changes an agent already listed. The same label from another machine, or another label from that
                                 machine, gets the rules above.
+                                A third caller: the fleet tool's timer, for a project with an open want for a background agent (a message reached it and it lists
+                                none: `client.py background-wanted`). A BACKGROUND CALL has a --sender label in the server's [project_agent] bg_senders (default: none) AND
+                                a token from a machine in bg_machines (default: none; when empty, form_machines), and lists a background agent only (--back, no slack surface) on a project whose want is
+                                open right now: [background_agent] enabled on, the want recorded and not served, and no background agent listed yet. Anything else is 403,
+                                and the reason names the condition that failed (the machine is not allowed, not a background agent, no open want: off, none recorded, served, a
+                                background agent already, or a project that is hidden, retired or not a top-level project with a front agent). The name check, the clashes and the
+                                listed and pending rules are the form's. It never changes an agent already listed, and opens nothing else: bg_senders gives no access to
+                                project-agent-rename, -retire or -mandate, nor to the For you writes and the saved colors.
                                 The agent is written to the project's agents map in the project record, with its mandate line, and then the page's
                                 `agents:` block is written from the record (a project with no page of this instance's page store gets no page write):
                                 there is no line the page still owes, so the reply carries "page_owed": false and "page_yaml": "", and a "mirror"
@@ -144,7 +152,7 @@ runs on every box.
                                 roles.json follow.
                                 It renames no session (the fleet tool's). Same gate as the New session form's calls: --sender must be a label in
                                 the server's [project_agent] form_senders AND the token a machine in form_machines, else 403 (no default label:
-                                pass it). NEW must start with the project's name and belong to no other project. Prints the server's JSON, exit 0:
+                                pass it; a background call's label in bg_senders does not count). NEW must start with the project's name and belong to no other project. Prints the server's JSON, exit 0:
                                 {"project", "key", "result": "renamed" | "already renamed", "old", "new", "front", "role", "mandate", "note"}. "already
                                 renamed" (200) = OLD is no longer listed and NEW is; the reply carries NEW's front, role and mandate so the caller
                                 can check it is the entry it expects. Treat it as done only for a rename you started (a retry after a lost reply):
@@ -165,7 +173,7 @@ runs on every box.
                                 sweep once none is left, however they left (completed or handed to another project); a failed page write is told in
                                 the note and does not fail the retire. Nothing more is asked of the caller.
                                 Same gate as post project-agent-rename: --sender must be a label in the server's [project_agent] form_senders
-                                (sala's: sala-retire) AND the token a machine in form_machines, else 403 (no default label: pass it).
+                                (sala's: sala-retire) AND the token a machine in form_machines, else 403 (no default label: pass it; a background call's label in bg_senders does not count).
                                 Prints the server's JSON, exit 0: {"project", "key", "result", "agent", "note", ...} with
                                 200 "line removed" = the agent was on the project's agents map and is off it, the page written from the record (or the agent is the
                                 project's own session, named by its page's display-name, on a one-session project with no agents map: its agents map is now empty) ·
@@ -304,7 +312,8 @@ runs on every box.
   client.py background-wanted   the fleet tool's timer: one line "<project key> <name prefix> <front agent>" per project whose
                                 messages have no background agent to go to and that could use one (the agent is called
                                 <name prefix>-<role>); nothing when none, when [background_agent] enabled is off or when the
-                                server cannot be asked. Reads only. Exit 0 whatever happened.
+                                server cannot be asked. Reads only. Exit 0 whatever happened. The timer lists the agent with `post project-agent --back`,
+                                a background call (see there).
   client.py project-activity [--json]
                                 for a script that decides whether a project is quiet: per project, when it last heard from outside and when
                                 its owner last gave input. Plain output is one line per project, "<project key> <anchor> <owner>", each a
@@ -717,13 +726,15 @@ def sweep_step_proof(argv: list[str], timeout: float = 180.0) -> int:
     return 0
 
 
-PROJECT_AGENT_USAGE = 'usage: client.py post project-agent <project> <name> --role <role> (--front | --back) [--surface sala|slack] --mandate "<one line>" [--sender <session id>]'
+PROJECT_AGENT_USAGE = ('usage: client.py post project-agent <project> <name> --role <role> (--front | --back) [--surface sala|slack] --mandate "<one line>" [--sender <session id | label>]'
+                       '\n  --sender: the asking session\'s id (the keeper or a front agent); the New session form\'s label (form_senders) from its machine; or, with --back, the timer\'s label (bg_senders) for a project whose want is open')
 
 
 def project_agent(argv: list[str], timeout: float = 30.0) -> int:
     """List a new agent of a project → exit 0 recorded, 1 refused, not reached or misused. The server allows the
     the agent marked as the project's keeper and its front agents, told by the asking session's id: --sender, else $CLAUDE_CODE_SESSION_ID. Also allowed: the fleet tool's New
-    session form (a --sender label in the server's [project_agent] form_senders, sent from a machine in form_machines), on any listed project."""
+    session form (a --sender label in the server's [project_agent] form_senders, sent from a machine in form_machines), on any listed project; and a background call, the fleet tool's timer
+    listing a background agent (--back) for a project whose want is open (a --sender label in bg_senders, from a machine in bg_machines, else form_machines)."""
     a, opt = list(argv), {}
     for k in ("role", "mandate", "sender", "surface"):
         if "--" + k in a:
