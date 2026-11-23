@@ -346,6 +346,15 @@ runs on every box.
                                 fleet tool posts one fleet_op report at the end of every op; nothing posts job_run yet. A
                                 recycle (client.py recycled) and a PR's release (client.py released) are reported by their own hooks.
                                 Exit 0 reported · 1 refused or not reached.
+  client.py job-failed <unit> <host> <ISO-Z time of the failing run> <project>
+  client.py job-ok <unit> <host> <ISO-Z time>
+                                for a scheduled job's failure hook and its success hook (no --sender: the label is `job alert`). job-failed files ONE board item
+                                per (unit, host) for the project's builder (<project> = `scope/project`, a project page key, or a single `-` when the unit has none; a `-` or
+                                a project this server has no page for is filed under the builder of the general project [job_alert] fallback_project names, and the item says so; none set is refused), or, when that item is open, adds the
+                                run's time to it and counts it; prints the item's id, exit 0. job-ok closes the open item of (unit, host) with the run's time as the reason;
+                                with none open (or the success older than the item's latest failed run) it prints nothing and exits 0, and sending it twice closes once.
+                                Exit 1 and the reason on stderr when refused, not reached or misused (usage): a caller that must not fail on it ignores the status,
+                                and re-sends a job-ok that did not arrive.
   client.py sweep-step-proof [--dry-run]
                                 once, by hand (the server also does it every couple of minutes): every open step that names the event which
                                 finishes it (`release PR #N`, `merge PR #N`, or a step_proof on the item) whose event has happened (the pull
@@ -973,6 +982,34 @@ def job_gap(argv: list[str], timeout: float = 60.0) -> int:
     return 0
 
 
+JOB_FAILED_USAGE = "usage: client.py job-failed <unit> <host> <ISO-Z time of the failing run, 2026-11-23T02:15:00Z> <project: scope/project, or - for none>"
+JOB_OK_USAGE = "usage: client.py job-ok <unit> <host> <ISO-Z time of the successful run, 2026-11-23T02:15:00Z>"
+
+
+def _job_alert(what: str, argv: list[str], keys: tuple[str, ...], usage: str, timeout: float) -> int:
+    """`job-failed <unit> <host> <time> <project>` / `job-ok <unit> <host> <time>`: positional only (a project of `-` is a value, never an option) -> exit 0 (job-failed prints the item's id, job-ok the ids it
+    closed, none when none was open), 1 and the reason on stderr when refused, not reached or misused."""
+    if len(argv) != len(keys) or any(not a.strip() for a in argv): print(usage, file=sys.stderr); return 1
+    status, d = post(what, dict(zip(keys, (a.strip() for a in argv))), timeout)
+    if status != 200 or not isinstance(d, dict):
+        print(f"stackshot: {what} not sent [{status}] {d.get('error') if isinstance(d, dict) else d}"[:1200], file=sys.stderr); return 1
+    if what == "job-failed":
+        if not d.get("item"): print("stackshot: job-failed not filed [200] the server answered no item id", file=sys.stderr); return 1
+        if d.get("fallback"): print(f"stackshot: {d['item']} is with {d.get('mover')}: the job's project was not its own builder's", file=sys.stderr)
+        print(d["item"]); return 0
+    for gid in d.get("closed") or []: print(gid)
+    if not d.get("closed") and "older" in str(d.get("note") or ""): print(f"stackshot: {d['note']}", file=sys.stderr)
+    return 0
+
+
+def job_failed(argv: list[str], timeout: float = 30.0) -> int:
+    return _job_alert("job-failed", argv, ("unit", "host", "time", "project"), JOB_FAILED_USAGE, timeout)
+
+
+def job_ok(argv: list[str], timeout: float = 30.0) -> int:
+    return _job_alert("job-ok", argv, ("unit", "host", "time"), JOB_OK_USAGE, timeout)
+
+
 ITEM_OPEN_USAGE = ('usage: client.py post item-open <kind>:<what> --project <key|id|slug> --subject "<action and object>" --mover <agent> --step "<agent>: <what it does>" '
                    '--line "<fact>" [--line "<fact>" ...] [--sender <label>]')
 
@@ -1184,6 +1221,12 @@ def main(argv: list[str]) -> int:
     if cmd == "event":
         try: return event(argv[2:])
         except Exception as e: print(f"stackshot: event not reported ({type(e).__name__}: {str(e)[:160]})"); return 1
+    if cmd == "job-failed":
+        try: return job_failed(argv[2:])
+        except Exception as e: print(f"stackshot: job-failed not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
+    if cmd == "job-ok":
+        try: return job_ok(argv[2:])
+        except Exception as e: print(f"stackshot: job-ok not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
     if cmd == "sweep-step-proof":
         try: return sweep_step_proof(argv[2:])
         except Exception as e: print(f"stackshot: sweep not run ({type(e).__name__}: {str(e)[:160]})"); return 1

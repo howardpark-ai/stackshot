@@ -532,6 +532,8 @@ _WHAT_TABLE = [
     "job-gap -> _job_gap._jobgap_post",
     "item-open -> _item_open._itemopen_post",
     "item-sync -> _item_sync._itemsync_post",
+    "job-failed -> _job_alert._jobalert_failed_post",
+    "job-ok -> _job_alert._jobalert_ok_post",
     "cap-words -> _owner_words._script_sender, _norm_id, _update_svc._update, _owner_words._record_cap_words, _gh.shown",
     "rebullet -> _owner_words._rebullet_write",
     "state -> _owner_words._state_write",
