@@ -353,7 +353,7 @@ runs on every box.
   client.py job-failed <unit> <host> <ISO-Z time of the failing run> <project>
   client.py job-ok <unit> <host> <ISO-Z time>
                                 for a scheduled job's failure hook and its success hook (no --sender: the label is `job alert`). job-failed files ONE board item
-                                per (unit, host) for the project's builder (<project> = `scope/project`, a project page key, or a single `-` when the unit has none; a `-` or
+                                per (unit, host) for the project's builder (<project> = a project page key, a `scope/project` label, or a single `-` when the unit has none; a `-` or
                                 a project this server has no page for is filed under the builder of the general project [job_alert] fallback_project names, and the item says so; none set is refused), or, when that item is open, adds the
                                 run's time to it and counts it; prints the item's id, exit 0. job-ok closes the open item of (unit, host) with the run's time as the reason;
                                 with none open (or the success older than the item's latest failed run) it prints nothing and exits 0, and sending it twice closes once.
@@ -986,7 +986,7 @@ def job_gap(argv: list[str], timeout: float = 60.0) -> int:
     return 0
 
 
-JOB_FAILED_USAGE = "usage: client.py job-failed <unit> <host> <ISO-Z time of the failing run, 2026-11-23T02:15:00Z> <project: scope/project, or - for none>"
+JOB_FAILED_USAGE = "usage: client.py job-failed <unit> <host> <ISO-Z time of the failing run, 2026-11-23T02:15:00Z> <project: a page key, a scope/project label, or - for none>"
 JOB_OK_USAGE = "usage: client.py job-ok <unit> <host> <ISO-Z time of the successful run, 2026-11-23T02:15:00Z>"
 
 

@@ -6,7 +6,7 @@ recorded as creator as "job alert (a script on <machine>)", a description that s
 told once, nothing is owed to the page); a repeat failure with another time adds the line and the count and files nothing, the same time again counts once; another unit or another host is another item;
 job-ok closes it (outcome done, the run's time in the reason and in the end state), a second job-ok and a job-ok with no item are ignored (200, nothing closed), a job-ok older than the item's latest failed run
 leaves it open; a failure after the close opens a NEW item unless its time is no later than the success that closed the last one (a retry or a late call: seen, nothing filed); a time later than now plus 5 minutes is refused
-on both routes (so is one the board cannot show), one instant spelled two ways counts once, the kept times stay in order whatever order they arrive in, a project key that names several pages is refused; a project of `-`, one the registry does not have and a project with no builder (the -main agent moves it, and says so) are filed as the text says,
+on both routes (so is one the board cannot show), one instant spelled two ways counts once, the kept times stay in order whatever order they arrive in, a project key that names several pages is refused; a `scope/project` label is resolved by the instance's `[job_alert.projects]` map, then the key, then the one page whose display-name is the label with `/` made `-` (two such pages are refused; only an active page of `type: project` counts, a finished, merged, archived or note page of the name is no match, and a note says how the label was resolved); a time stored in the old spelling counts as the same instant; the 400 for a clock that is ahead says by how many minutes; a project of `-`, one the registry does not have and a project with no builder (the -main agent moves it, and says so) are filed as the text says,
 the general project missing is a 409; the key is read from the item (the module is reloaded between calls: nothing is kept in memory); the newest 20 times are kept while the count goes on; bad input is refused
 with nothing filed; eight threads failing one job file one item; over HTTP (401 without a token) and through client.py (the id alone on stdout, usage on misuse, exit 1 when refused or not reached).
 
@@ -31,13 +31,14 @@ for d in ("store/a", "fleet/a", "links/a", "brain/projects", "brain/infra", "sec
 (T / "store/next-id").write_text("10"); (T / "store/anchors.json").write_text("{}")
 
 def uid(n): return f"00000000-0000-4000-8000-{n:012d}"
-S = {"build": uid(101), "main": uid(102), "docs": uid(103), "nbmain": uid(104), "gbuild": uid(105), "gmain": uid(106), "tmain": uid(107)}
+S = {"build": uid(101), "main": uid(102), "docs": uid(103), "nbmain": uid(104), "gbuild": uid(105), "gmain": uid(106), "tmain": uid(107), "wmain": uid(108), "wbuild": uid(109), "bmain": uid(110)}
 def row(key, name, project_key):
     return {"id": S[key], "name": name, "aliases": [], "project": None, "project_key": project_key, "role": None, "lane": "max", "model": "opus", "effort": "medium", "pane": name,
             "cwd": "/work", "state": "live", "created": "2026-10-21T21:00:00Z", "retired_at": None,
             "transcripts": [{"id": uid(200 + int(S[key][-3:]) - 100), "machine": "a", "at": "2026-10-21T21:00:00Z", "why": "import"}]}
 ROWS = [row("build", "home-sparrow-builder", "projects/alpha"), row("main", "home-sparrow-main", "projects/alpha"), row("docs", "home-sparrow-docs", "projects/alpha"), row("nbmain", "home-nobuild-main", "projects/nobuild"),
-        row("gbuild", "heron-engineer", "ops/general"), row("gmain", "heron-main", "ops/general"), row("tmain", "home-twin-main", "projects/twin")]
+        row("gbuild", "heron-engineer", "ops/general"), row("gmain", "heron-main", "ops/general"), row("tmain", "home-twin-main", "projects/twin"),
+        row("wmain", "acme-widgets-main", "projects/acme-widgets"), row("wbuild", "acme-widgets-builder", "projects/acme-widgets"), row("bmain", "acme-bolts-main", "projects/acme-bolts")]
 (T / "links/a/session-registry.json").write_text(json.dumps({"schema": 1, "machine": "a", "written": "2026-10-22T07:00:00Z", "sessions": {r["id"]: r for r in ROWS}}), encoding="utf-8")
 def page(rel, front):
     q = T / "brain" / rel; q.parent.mkdir(parents=True, exist_ok=True); q.write_text("---\n" + front + "\n---\n\n# x\n", encoding="utf-8")
@@ -45,6 +46,20 @@ page("projects/alpha.md", "type: project\ntitle: Alpha\ndisplay-name: home-sparr
 page("projects/nobuild.md", "type: project\ntitle: Nobuild\ndisplay-name: home-nobuild\nagents:\n  home-nobuild-main: talks to Oliver\nstatus: active")
 page("projects/twin.md", "type: project\ntitle: Twin\ndisplay-name: home-twin\nagents:\n  home-twin-main: talks to Oliver\nstatus: active")
 page("ops/twin.md", "type: project\ntitle: Twin ops\ndisplay-name: home-twinops\nagents:\n  home-twinops-main: talks to Oliver\nstatus: active")
+page("projects/acme-widgets.md", "type: project\ntitle: Widgets\ndisplay-name: acme-widgets\nagents:\n  acme-widgets-main: talks to Oliver\n  background:\n    acme-widgets-builder: builds\nstatus: active")
+page("projects/acme-widgets/mechanics.md", "type: project\ntitle: Widget mechanics\ndisplay-name: acme-widgets\nstatus: active")      # a sub-page carries its project's name line: it is no second page of the name
+page("projects/dupe-a.md", "type: project\ntitle: Dupe A\ndisplay-name: acme-dupe\nagents:\n  acme-dupe-main: talks to Oliver\nstatus: active")
+page("projects/dupe-b.md", "type: project\ntitle: Dupe B\ndisplay-name: acme-dupe\nagents:\n  acme-dupe-main: talks to Oliver\nstatus: active")
+page("projects/acme-bolts.md", "type: project\ntitle: Bolts\ndisplay-name: acme-bolts\nagents:\n  acme-bolts-main: talks to Oliver\nstatus: active")
+page("projects/acme-bolts-old.md", "type: project\ntitle: Bolts, finished\ndisplay-name: acme-bolts\nagents:\n  acme-bolts-main: talks to Oliver\nstatus: completed")
+page("projects/acme-gone.md", "type: project\ntitle: Gone\ndisplay-name: acme-gone\nagents:\n  acme-gone-main: talks to Oliver\nstatus: merged")
+page("projects/acme-shelved.md", "type: project\ntitle: Shelved\ndisplay-name: acme-shelved\nagents:\n  acme-shelved-main: talks to Oliver\nstatus: archived")
+page("projects/acme-finished.md", "type: project\ntitle: Finished\ndisplay-name: acme-finished\nagents:\n  acme-finished-main: talks to Oliver\nstatus: done")
+page("projects/acme-memo.md", "type: note\ntitle: Memo\ndisplay-name: acme-memo\nstatus: completed")
+page("projects/acme-memo-live.md", "type: note\ntitle: Memo, live\ndisplay-name: acme-memo\nstatus: active")
+page("projects/acme-twin-a.md", "type: project\ntitle: Twin A\ndisplay-name: acme-twin\nagents:\n  acme-twin-main: talks to Oliver\nstatus: active")
+page("projects/acme-twin-b.md", "type: project\ntitle: Twin B\ndisplay-name: acme-twin\nagents:\n  acme-twin-main: talks to Oliver\nstatus: active")
+page("projects/acme-twin-old.md", "type: project\ntitle: Twin, finished\ndisplay-name: acme-twin\nagents:\n  acme-twin-main: talks to Oliver\nstatus: completed")
 page("ops/general.md", "type: project\ntitle: General\ndisplay-name: heron\nagents:\n  heron-main: talks to Oliver\n  background:\n    heron-engineer: builds and fixes needing no decision\nstatus: active")
 for pg in (T / "brain").rglob("*.md"): os.utime(pg, (time.time() - 8 * 3600, time.time() - 8 * 3600))      # the pages are older than any debt (and the 5-minute slack), so a debt charged by a write would stand
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
@@ -272,6 +287,10 @@ st, e = ok(unit="far.service", time_="9999-12-31T23:59:59Z")
 check("job-ok with a time in year 9999: the same 400", st == 400 and "later than now" in e["error"], (st, e))
 st, e = failed(unit="far.service", time_="2099-01-01T00:00:00Z")
 check("job-failed with a time far ahead of the clock: 400, nothing filed", st == 400 and "later than now" in e["error"] and len(items()) == n7, (st, e))
+st, e = failed(unit="far.service", time_="2027-01-01T01:00:00Z")
+check("a time an hour ahead of the clock: the 400 says plainly that the machine's clock is ahead of the server's by 60 minutes, nothing filed", st == 400 and "the machine's clock is ahead of the server's by 60 minutes" in e["error"] and len(items()) == n7, (st, e))
+st, e = ok(unit="far.service", time_="2027-01-01T00:06:30Z")
+check("…the same text on job-ok, the whole minutes only (6 minutes 30 seconds ahead is 6)", st == 400 and "the machine's clock is ahead of the server's by 6 minutes" in e["error"], (st, e))
 st, f0 = failed(unit="future.service", time_="2026-12-08T02:15:00Z")
 st, e = failed(unit="future.service", time_="2099-01-01T00:00:00Z")
 check("a far-future failure sent for an open item is refused and adds nothing", st == 400 and item(f0["item"])["metadata"]["job_alert_count"] == 1 and item(f0["item"])["metadata"]["job_alert_runs"] == ["2026-12-08T02:15:00Z"], (st, e))
@@ -326,12 +345,80 @@ d = item(o1["item"])["description"].splitlines()
 check("…and the description lists them in that order", d[2].startswith("- Failed run at Fri Dec 11th 12:00 ") and d[3].startswith("- Failed run at Fri Dec 11th 14:00 "), d)
 ok(unit="sort.service", time_="2026-12-11T11:00:00Z")
 
+# ---- 9d2. an item written with the old spelling of a time: the instants are compared, never the strings
+st, w1 = failed(unit="spell.service", time_="2026-12-12T02:00:00Z")
+raw_ = item(w1["item"]); raw_["metadata"]["job_alert_runs"] = ["2026-12-12T02:00:00.000Z"]
+from stackshot.service import writes as _wr
+with _wr.ITEM_LOCK: _wr.save(_model_ids._norm_id(w1["item"]), raw_, note="test: the old spelling of the time")
+check("(setup) the open item holds its failed run's time in the old spelling `:00.000Z`", item(w1["item"])["metadata"]["job_alert_runs"] == ["2026-12-12T02:00:00.000Z"], item(w1["item"])["metadata"])
+st, w2 = failed(unit="spell.service", time_="2026-12-12T02:00:00Z")
+check("the same instant sent as `:00Z` is seen on that open item: one failure, the stored time untouched, nothing filed", st == 200 and w2["action"] == "seen" and w2["item"] == w1["item"] and w2["failures"] == 1
+      and item(w1["item"])["metadata"]["job_alert_runs"] == ["2026-12-12T02:00:00.000Z"] and item(w1["item"])["metadata"]["job_alert_count"] == 1, (st, w2, item(w1["item"])["metadata"]))
+ok(unit="spell.service", time_="2026-12-12T03:00:00Z")
+raw_ = item(w1["item"]); raw_["metadata"]["closed_by_ok_at"] = "2026-12-12T03:00:00.000Z"
+with _wr.ITEM_LOCK: _wr.save(_model_ids._norm_id(w1["item"]), raw_, note="test: the old spelling of the time")
+n_sp = len(items())
+st, w3 = failed(unit="spell.service", time_="2026-12-12T03:00:00Z")
+check("…and so is a failure at the instant of a success stored as `:00.000Z` on the closed item: seen, nothing filed", st == 200 and w3["action"] == "seen" and w3["item"] == w1["item"] and len(items()) == n_sp, (st, w3))
+
 # ---- 9e. a project key that names several pages is refused, never the first one
 n9 = len(items())
 st, e = failed(unit="twin.service", project="twin")
 check("a bare slug that names two pages: 409 that names both and asks for the full key, nothing filed", st == 409 and "projects/twin" in e["error"] and "ops/twin" in e["error"] and "full key" in e["error"] and len(items()) == n9 and open_for("twin.service", "host-a") == [], (st, e))
 st, e = failed(unit="twin.service", project="projects/twin")
 check("…while the full key of one of them files under it", st == 200 and e["project"] == "projects/twin" and e["owner"] == "home-twin-main" and e["mover"] == "home-twin-main", (st, e)); ok(unit="twin.service")
+
+# ---- 9f. a `scope/project` label: the instance's map, then the key or slug, then the project's name with the `/` made `-`, then the general project
+n10 = len(items())
+st, l1 = failed(unit="lab1.service", project="acme/widgets")
+check("a label `acme/widgets`: the one top-level page whose display-name is `acme-widgets` (its sub-page with the same name line is no second page), its builder moves it, not a fallback",
+      st == 200 and l1["project"] == "projects/acme-widgets" and l1["mover"] == "acme-widgets-builder" and l1["owner"] == "acme-widgets-main" and l1["fallback"] is False
+      and "no project page here" not in item(l1["item"])["description"], (st, l1)); ok(unit="lab1.service")
+check("…and the item's note says it was found by the project's name", "acme/widgets is the project name of projects/acme-widgets" in item(l1["item"])["description"], item(l1["item"])["description"])
+st, l2 = failed(unit="lab2.service", project="Acme/Widgets")
+check("…the name is compared without regard to case", st == 200 and l2["project"] == "projects/acme-widgets" and l2["fallback"] is False, (st, l2)); ok(unit="lab2.service")
+st, l3 = failed(unit="lab3.service", project="acme/gadgets")
+check("a label no page's name matches is the general project's, and the item says so", st == 200 and l3["project"] == "ops/general" and l3["fallback"] is True and "acme/gadgets is no project page here" in item(l3["item"])["description"], (st, l3)); ok(unit="lab3.service")
+n_l = len(items())
+st, e = failed(unit="lab4.service", project="acme/dupe")
+check("a label that two top-level pages' names match: 409 that names both pages, nothing filed", st == 409 and "projects/dupe-a" in e["error"] and "projects/dupe-b" in e["error"] and "full key" in e["error"] and len(items()) == n_l, (st, e))
+st, l4a = failed(unit="lab4a.service", project="acme/bolts")
+check("the name match counts active project pages only: `acme/bolts` is the active page, a completed page with the same name line is no second match (no 409)", st == 200 and l4a["project"] == "projects/acme-bolts" and "no project page here" not in item(l4a["item"])["description"], (st, l4a)); ok(unit="lab4a.service")
+n_f = len(items())
+for lab_, unit_, status_ in (("acme/gone", "lab4b.service", "merged"), ("acme/shelved", "lab4c.service", "archived"), ("acme/finished", "lab4d.service", "done")):
+    st, l4b = failed(unit=unit_, project=lab_)
+    check(f"a label whose only page is `status: {status_}` is no match: the general project's, the item says so", st == 200 and l4b["project"] == "ops/general" and l4b["fallback"] is True and f"{lab_} is no project page here" in item(l4b["item"])["description"], (st, l4b)); ok(unit=unit_)
+st, l4e = failed(unit="lab4e.service", project="acme/memo")
+check("a page of `type: note` whose name line is the label is ignored, finished or not: the general project's", st == 200 and l4e["project"] == "ops/general" and l4e["fallback"] is True, (st, l4e)); ok(unit="lab4e.service")
+n_g = len(items())
+st, e = failed(unit="lab4f.service", project="acme/twin")
+check("two active pages of one name still give the 409, naming the two active pages (not the finished one) and saying the map pins the label", st == 409 and "projects/acme-twin-a" in e["error"] and "projects/acme-twin-b" in e["error"] and "acme-twin-old" not in e["error"] and "[job_alert.projects]" in e["error"] and len(items()) == n_g, (st, e))
+st, l4 = failed(unit="lab5.service", project="projects/alpha")
+check("a full page key still wins as before", st == 200 and l4["project"] == "projects/alpha", (st, l4)); ok(unit="lab5.service")
+st, l5 = failed(unit="lab6.service", project="home-sparrow")
+check("a text with no `/` is a key or slug only, never read as a project name (`home-sparrow` is the name of projects/alpha, and no page's key): the general project's", st == 200 and l5["project"] == "ops/general" and l5["fallback"] is True, (st, l5)); ok(unit="lab6.service")
+_cfg.CFG["job_alert"] = {"fallback_project": "ops/general", "projects": {"shop/cart": "projects/alpha", "acme/widgets": "projects/nobuild", "alpha": "projects/nobuild", "shop/ghost": "projects/ghost", "acme/dupe": "projects/twin"}}
+st, m1 = failed(unit="lab7.service", project="shop/cart")
+check("[job_alert.projects] maps a label no page's name matches to its page key, and it is not a fallback", st == 200 and m1["project"] == "projects/alpha" and m1["mover"] == "home-sparrow-builder" and m1["fallback"] is False, (st, m1)); ok(unit="lab7.service")
+check("…and the item's note says the map did it", "shop/cart is mapped to projects/alpha by [job_alert.projects]" in item(m1["item"])["description"], item(m1["item"])["description"])
+st, m2 = failed(unit="lab8.service", project="acme/widgets")
+check("the map is consulted before the project's name: `acme/widgets` goes where the map says", st == 200 and m2["project"] == "projects/nobuild", (st, m2)); ok(unit="lab8.service")
+st, m3 = failed(unit="lab9.service", project="alpha")
+check("…and before the page key or slug: `alpha` goes where the map says, not to projects/alpha", st == 200 and m3["project"] == "projects/nobuild", (st, m3)); ok(unit="lab9.service")
+st, m4 = failed(unit="lab10.service", project="shop/ghost")
+check("a mapped key that names no page falls through (here to the general project, the label being no page's name)", st == 200 and m4["project"] == "ops/general" and m4["fallback"] is True, (st, m4)); ok(unit="lab10.service")
+st, m5 = failed(unit="lab11.service", project="acme/dupe")
+check("a label that two pages' names match is no longer ambiguous once the map names its page", st == 200 and m5["project"] == "projects/twin", (st, m5)); ok(unit="lab11.service")
+_cfg.CFG["job_alert"] = {"fallback_project": "ops/general", "projects": "not a table"}
+st, m6 = failed(unit="lab12.service", project="acme/widgets")
+check("a map that is no table is ignored (the label goes by its name)", st == 200 and m6["project"] == "projects/acme-widgets", (st, m6)); ok(unit="lab12.service")
+_cfg.CFG["job_alert"] = {"fallback_project": "ops/general"}
+st, m7 = failed(unit="lab13.service", project="shop/cart")
+check("with no map set the same label is the general project's", st == 200 and m7["project"] == "ops/general" and m7["fallback"] is True, (st, m7)); ok(unit="lab13.service")
+_cfg.CFG.pop("job_alert", None)
+st, e = failed(unit="lab14.service", project="acme/gadgets")
+check("a label that matches nothing with no general project set: the 409 as before", st == 409 and "no general project is set" in e["error"], (st, e))
+_cfg.CFG["job_alert"] = {"fallback_project": "ops/general"}
 
 # ---- 10. over HTTP and through client.py
 app = server.mcp.http_app()
