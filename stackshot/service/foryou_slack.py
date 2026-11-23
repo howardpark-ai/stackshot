@@ -16,6 +16,7 @@ import tempfile
 import threading
 from typing import Any
 
+from stackshot.core import agentbox as _ab
 from stackshot.core import config as _cfg
 from stackshot.notify import slack as _slack
 from stackshot.service import foryou as _fysvc
@@ -94,7 +95,7 @@ def _for_you_slack_post(text: str) -> str:
         return _slack.NO_PATH
     with tempfile.TemporaryFile() as err:
         try:
-            p = subprocess.Popen(shlex.split(cmd), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err, start_new_session=True)
+            p = subprocess.Popen(_ab.argv(shlex.split(cmd), remote_timeout=_FORYOU_SLACK_TIMEOUT + 5), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err, start_new_session=True)      # [agents_box] ssh set: the command runs on that box, the text on its standard input
         except (OSError, ValueError) as e:
             return f"{e.__class__.__name__}: {e}"
         try:
@@ -115,7 +116,10 @@ def _for_you_slack_post(text: str) -> str:
                 pass
             return _slack.timed_out(cmd, _FORYOU_SLACK_TIMEOUT)
         if p.returncode == 0:
+            _ab.answered()
             return ""
         err.seek(0)
         tail = err.read(300).decode("utf-8", "replace").strip().splitlines()
+        if (why := _ab.unreachable(p.returncode, "\n".join(tail))):
+            return why                    # the box did not answer over ssh: the post is retried by the queue's own tries, and logged
         return _slack.exited(cmd, p.returncode, tail)

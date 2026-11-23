@@ -83,7 +83,10 @@ from stackshot import paths as _paths
 HERE = str(_paths.ROOT)      # the checkout: the package sits in HERE/stackshot, and the reload and the self-update work on this folder
 from stackshot.fleet import client as _client  # noqa: E402  (the address, the token, the POST)
 from stackshot.core import config as _cfg  # noqa: E402  (ROUTER_CWD_PREFIX; [client] self_update, paths.state)
+from stackshot.core import agentbox as _agentbox  # noqa: E402  (the server's way to reach this box: never used by the puller, which runs on it)
 from stackshot.model import said as _said  # noqa: E402  (stdlib only: the transcript's last error, for `stopped`)
+
+_agentbox.LOCAL_ONLY = True
 
 # Provision on the Windows boxes restarts the puller task when this differs from the log's last `puller <v>: polling` line: bump it whenever running pullers must pick a change up.
 # From 8 on a running puller notices the change itself and reloads (see "Reloading"); a puller older than 8 still needs that one restart.

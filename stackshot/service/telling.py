@@ -38,7 +38,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot import paths as _paths
 from stackshot.anchors import anchors as _anc
-from stackshot.core import config as _cfg, interp as _interp, store as _store, xlock as _xlock
+from stackshot.core import agentbox as _ab, config as _cfg, interp as _interp, store as _store, xlock as _xlock
 from stackshot.core.instance import NAME, OWNER
 from stackshot.core.store import _item_files
 from stackshot.fleet.sessions_registry import _session_label, _sessions_index
@@ -482,7 +482,7 @@ def presence_minutes() -> float:
 
 
 def presence_here(who: str, now: float | None = None, idx: dict[str, Any] | None = None) -> bool:
-    """is the owner there for this pane: the stamp file <state>/prompts/<session id> (written by the prompt hook of the config repo; stackshot only reads it) holds epoch seconds
+    """is the owner there for this pane: the stamp file <state>/prompts/<session id> (written by the prompt hook of the config repo; stackshot only reads it; with [agents_box] ssh set, a copy of the one on that box) holds epoch seconds
     within [presence] minutes. The pane's session id comes from the CLI registry (service/handoff.py `handoff_pane_row`: ~/.claude/sessions/<pid>.json). A pane this box does not run, a missing, empty or
     unreadable file, a stamp from the future or an old one: not there."""
     h = _hooks()
@@ -491,7 +491,7 @@ def presence_here(who: str, now: float | None = None, idx: dict[str, Any] | None
         sid = str((row[1] if row else {}).get("sessionId") or "")
         if not sid or "/" in sid or sid.startswith("."):
             return False
-        ts = float(_cfg.state("prompts", sid).read_text(encoding="utf-8").strip().split()[0])
+        ts = float((_ab.prompts_dir() / sid).read_text(encoding="utf-8").strip().split()[0])
         now = time.time() if now is None else now
         return 0 <= now - ts <= presence_minutes() * 60.0
     except Exception:  # noqa: BLE001  — no stamp, no presence
@@ -504,7 +504,7 @@ def present_fronts(now: float | None = None, idx: dict[str, Any] | None = None) 
     out: list[str] = []
     try:
         idx = _sessions_index() if idx is None else idx
-        names = sorted(f.name for f in _cfg.state("prompts").iterdir() if f.is_file())
+        names = sorted(f.name for f in _ab.prompts_dir().iterdir() if f.is_file())
     except Exception:  # noqa: BLE001  — no stamp folder, no conversation
         return out
     for sid in names:

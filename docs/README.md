@@ -46,6 +46,7 @@ These pages hold the detail behind the [README](../README.md). Each page starts 
 - [Session links and the Machines panel](machines-and-sessions.md): How the board links to a session, and what the Machines panel shows for each machine and package.
 - [The client contract](client-contract.md): What a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, and a gap in a scheduled job.
 - [The fleet tool](fleet-tool.md): The points of contact between stackshot and an optional fleet tool: session links, lanes, recycles, spawns, reboots, CLI updates and naming.
+- [The agents' box over ssh](agents-box.md): Running the server on another box than the agents: the optional `[agents_box]` setting, what the server then runs and reads on the agents' box over ssh, and what happens when that box does not answer.
 - [A read-only standby copy](read-only-standby.md): How a warm second instance runs from a copy of the data and never writes, with one switch for takeover.
 - [What a running session reloads](session-reload.md): Which files a release changes reach a running session on its next call, and which only at its start.
 

@@ -106,6 +106,15 @@ The keys are grouped in three pages by what they set: [Configuration](configurat
 | `client.limit_file` | `""` | The fleet tool's usage-limit watch state (sala's: `"~/.claude/salamander-limit.json"`). Not read any more (it served the re-send of an unruled notice to a keeper, which went with the old routing); the key stays so an existing config loads. Contract: [12, Lanes and limit state read by stackshot](https://github.com/howardpark-ai/salamander/blob/main/docs/stackshot-contracts.md#12-lanes-and-limit-state-read-by-stackshot). | if used |
 | `client.recycle_env_prefix` | `""` | `stackshot/fleet/client.py recycled` (the fleet tool's end-of-recycle hook) reads a flag it is not given from `<prefix>KIND`, `STARTED`, `FLAG_AT`, `RESULT` and `SKIPPED` in the environment (sala's: `"SALA_RECYCLE_"`; sala calls the hook once per cleared recycle flag, and `FLAG_AT`, that flag's time, makes the call cover the items flagged at or before it). `""`: the flags only. Contract: [4, Post-recycle hook](https://github.com/howardpark-ai/salamander/blob/main/docs/stackshot-contracts.md#4-post-recycle-hook). | if used |
 | `client.session_ttl_hours` | `12` | A session registered by a hook on a machine with no puller is forgotten after this long without a sign of life. | |
+| `agents_box.ssh` | unset | The box the agents' sessions run on, as ssh takes it (a name, an alias, `user@host`), for a server that runs on another box. Unset (the default) = one box: nothing is read from this section and everything is local. Set: the commands and files of the agents' side are reached over a non-interactive ssh. [The agents' box over ssh](agents-box.md). Live. | if used |
+| `agents_box.ssh_options` | `[]` | Extra ssh arguments, one word each. | if used |
+| `agents_box.connect_timeout`, `.timeout` | `5`, `20` | Seconds ssh waits to connect, and seconds one call may take. | |
+| `agents_box.cache_seconds`, `.retry_seconds`, `.stale_seconds` | `5`, `15`, `120` | How long a copy of the box's files is trusted, how long a box that failed to connect is left alone (for every folder at once), and how long the last copy of pane liveness and prompt stamps stands in for a box that stops answering (the registry, links and lane files stay served). | |
+| `agents_box.registry_max_age` | `86400` | The oldest copy of the session registry and links the `said` check goes by; an older one, or none, refuses the write. | |
+| `agents_box.max_file_bytes` | `8388608` | A file larger than this is left out of a copy. | |
+| `agents_box.path_prepend` | `"~/.local/bin"` | Added in front of `PATH` for a command run over ssh. | |
+| `agents_box.prompts_dir` | `"~/.local/state/stackshot/prompts"` | Where the prompt hook on the agents' box writes its stamps. | if used |
+| `agents_box.mirror_dir` | `<paths.state>/agentbox` | Where the copies of the box's files are kept. | |
 | `server.host`, `.port`, `.path` | `"127.0.0.1"`, `8020`, `"/mcp"` | Where the server listens and where the connector is served. | |
 
 ## Gmail thread anchors: the link

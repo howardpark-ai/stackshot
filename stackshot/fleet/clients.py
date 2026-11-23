@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Any
 
 from stackshot import paths as _paths
+from stackshot.core import agentbox as _ab
 from stackshot.core import config as _cfg
 from stackshot.fleet import fleet as _flt
 from stackshot.fleet import liveness as _lv
@@ -543,11 +544,30 @@ _LINKS: dict[str, Any] = {"dir": None, "sig": None, "map": {}, "sleep": {}}     
 _LINKS_WARNED: list[str] = [""]                                          # the problem last logged, so it is logged once and again only when it changes
 
 
-def _links_dir() -> Path | None:
-    """[client] session_links, read at use (a reload is live): None when it is set empty (no links at all)."""
+LINKS_FILES = ("*/sessions.json", "*/session-registry.json")           # what the store holds that is read here (and by sessions_registry.py)
+
+
+def _links_path() -> Path | None:
     v = _cfg.get("client", "session_links")
     v = SESSION_LINKS_DEFAULT if v is None else str(v).strip()
     return Path(os.path.expanduser(v)) if v else None
+
+
+def _links_dir() -> Path | None:
+    """[client] session_links, read at use (a reload is live): None when it is set empty (no links at all). With [agents_box] ssh set the store is on that box and this is
+    the local copy of its two files per machine (core/agentbox.py), one ssh call for both readers (this module's links and sessions_registry.py's registry). The copy is kept
+    when the box stops answering (a name that stopped resolving would read as no session), and `require_links_copy` is the test of a check that must not go by an old one."""
+    p = _links_path()
+    return _ab.mirror_dir(p, LINKS_FILES, keep=True) if p is not None else None
+
+
+def require_links_copy(answering: bool = False) -> None:
+    """With [agents_box] ssh set: raise `agentbox.BoxError` when the copy of the session store and registry was never made, or is older than `[agents_box] registry_max_age` (a check of someone's words
+    that resolves a session by name must refuse then, not go on with nothing). `answering`: the box must answer now as well (for a name that resolved to no transcript: a copy that stands in for a silent box
+    may lack the session). Nothing without that setting, or with the store set empty."""
+    p = _links_path()
+    if p is not None:
+        _ab.require_copy(p, LINKS_FILES, what="the session registry", answering=answering)
 
 
 def _links_warn(msg: str) -> None:

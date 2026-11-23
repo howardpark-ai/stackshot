@@ -8,7 +8,8 @@ result), not text a tool typed into the pane for him (it starts with the configu
 the fleet tool puts at the start of what it types: sala's `<!-- sala -->`; or, for messages from before the marker, it starts with one of the configured prefixes or contains one of the
 configured phrases: stopgaps nothing newer relies on), and the quote is in it, whitespace aside. A readable
 transcript that fails the check refuses the write; a transcript the box cannot read (a cloud session, another machine)
-stores the entry unchecked.
+stores the entry unchecked. With [agents_box] ssh set the transcripts are on that box and are read there over ssh (`locate`; core/agentbox.py): a session with no transcript on it is
+unchecked as before, but a box that does not answer (`agentbox.BoxError`) is never read as "no transcript": the gate refuses the write and says why.
 
 A second, separate kind of entry (kind "acted", stored with the tag Done-by): proof that the owner DID his steps, never his words.
 A message he sends while a session is working (a reply he got elsewhere, pasted in) is not stored as a typed user message: Claude Code
@@ -28,12 +29,14 @@ of a comment) and the renderer (the History's tags): the caller passes the trans
 The one exception is `_owner_words`, which tells whether an item shows the owner's own words: it reads the owner's name from core/instance.py and nothing else."""
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import json
 import re
 from pathlib import Path
 from typing import Any
 
+from stackshot.core import agentbox as _ab
 from stackshot.core.instance import OWNER
 from stackshot.core.lines import newline_lines
 
@@ -151,7 +154,7 @@ def find_by_quote(path: Path, quote: str, prefixes: tuple[str, ...] | list[str] 
     q = norm_ws(quote)
     words = sorted(set(re.findall(r"[A-Za-z0-9]{4,}", q)), key=len, reverse=True)[:1]
     found = ""
-    with open(path, encoding="utf-8", errors="replace") as f:
+    with _lines_of(path, all_of=('"user"',), any_of=(*words, "\\u") if words else ()) as f:
         for line in f:
             if '"user"' not in line or (any(w not in line for w in words) and "\\u" not in line):      # a line with a \u escape may spell a word of the quote in escapes: parse it
                 continue
@@ -162,6 +165,17 @@ def find_by_quote(path: Path, quote: str, prefixes: tuple[str, ...] | list[str] 
             if isinstance(e, dict) and e.get("uuid") and check(e, q, prefixes, phrases, marker)[0] == "ok":
                 found = str(e["uuid"]).lower()
     return found
+
+
+@contextlib.contextmanager
+def _lines_of(path: Any, all_of: tuple[str, ...] = (), any_of: tuple[str, ...] = (), ci: bool = False):
+    """The lines of a transcript to look through: the file's own lines, or, for a file on the agents' box (`agentbox.RemoteFile`), the lines of it that hold every string of `all_of` and one of `any_of` (a superset of what
+    the caller's own test keeps: the box sends back only those, never a whole transcript). `agentbox.BoxError` when the box does not answer: never read as a file that is not there."""
+    if isinstance(path, _ab.RemoteFile):
+        yield _ab.grep_lines(path, all_of=all_of, any_of=any_of, ci=ci)
+        return
+    with open(path, encoding="utf-8", errors="replace") as f:
+        yield f
 
 
 def is_uuid(value: Any) -> bool:
@@ -189,11 +203,26 @@ def find_transcript(session: str, roots: Any) -> Path | None:
     return max(hits, key=lambda h: h[0])[1] if hits else None
 
 
+def locate(session: str, roots: Any) -> "Path | _ab.RemoteFile | None":
+    """find_transcript for the check of his words (verify, verify_acted, the `said` gate): with [agents_box] ssh set the transcript is looked for on that box (`agentbox.RemoteFile`, read through
+    find_entry and find_by_quote), never here; otherwise exactly find_transcript. None when no file carries the session. `agentbox.BoxError` when the box does not answer."""
+    if not _ab.enabled():
+        return find_transcript(session, roots)
+    s = str(session or "").strip().lower()
+    if not is_uuid(s):
+        return None
+    hits: list[tuple[float, str]] = []
+    import glob as _glob  # noqa: PLC0415
+    for root in ([roots] if isinstance(roots, (str, Path)) else list(roots or ())):
+        hits += [(m, p) for p, m in _ab.glob(f"{root}/*/{_glob.escape(s)}.jsonl")]
+    return _ab.RemoteFile(max(hits, key=lambda h: h[0])[1]) if hits else None
+
+
 def find_entry(path: Path, msg: str) -> dict[str, Any] | None:
     """The transcript entry whose uuid is `msg`, None when none has it. The file is read line by line; only a line that
     carries the uuid is parsed. OSError when the file cannot be read."""
     m = str(msg or "").strip().lower()
-    with open(path, encoding="utf-8", errors="replace") as f:
+    with _lines_of(path, any_of=(m,), ci=True) as f:
         for line in f:
             if m not in line.lower():
                 continue
@@ -331,9 +360,9 @@ def verify(session: str, msg: str, quote: str, root: Any, prefixes: tuple[str, .
     True), "unreadable" (no transcript for the session here, or one the box cannot read: checked False, nothing refused),
     else one of check()'s failure codes (the caller refuses the write). prompt_source is the entry's promptSource (typed,
     queued, …) for the record only: it never decides the outcome."""
-    path = find_transcript(session, root)
+    path = locate(session, root)
     if path is None:
-        return {"code": "unreadable", "detail": "no transcript for this session on this box", "checked": False, "ts": 0.0, "prompt_source": "", "path": ""}
+        return {"code": "unreadable", "detail": f"no transcript for this session on {'the agents box' if _ab.enabled() else 'this box'}", "checked": False, "ts": 0.0, "prompt_source": "", "path": ""}
     try:
         entry = find_entry(path, msg)
     except OSError as e:
@@ -401,9 +430,9 @@ def verify_acted(session: str, msg: str, quote: str, root: Any, prefixes: tuple[
     """verify() for a kind-acted entry: the same transcript lookup (find_entry streams the file and parses only the line that carries the
     uuid, so a transcript of hundreds of megabytes is never held in memory), the same injected-text test and the same result shape,
     check_acted's codes."""
-    path = find_transcript(session, root)
+    path = locate(session, root)
     if path is None:
-        return {"code": "unreadable", "detail": "no transcript for this session on this box", "checked": False, "ts": 0.0, "prompt_source": "", "path": ""}
+        return {"code": "unreadable", "detail": f"no transcript for this session on {'the agents box' if _ab.enabled() else 'this box'}", "checked": False, "ts": 0.0, "prompt_source": "", "path": ""}
     try:
         entry = find_entry(path, msg)
     except OSError as e:

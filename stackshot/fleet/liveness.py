@@ -40,6 +40,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from stackshot.core import agentbox as _ab
 from stackshot.core import filecache as _fc
 
 from stackshot.core import config as _cfg
@@ -200,7 +201,7 @@ def pane_row(names: Iterable[str], ids: Iterable[str], sessions_dir: Path) -> tu
     names, ids = {n for n in names if n}, {i for i in ids if i}
     best: tuple[float, dict[str, Any]] | None = None
     try:
-        files = list(Path(sessions_dir).glob("*.json"))
+        files = list(_ab.mirror_dir(sessions_dir, ("*.json",), pid_key="pid").glob("*.json"))      # with [agents_box] ssh set: the copy of the registry's rows of live processes
     except OSError:
         return None
     for f in files:
@@ -210,7 +211,7 @@ def pane_row(names: Iterable[str], ids: Iterable[str], sessions_dir: Path) -> tu
                 continue
             if not (r.get("sessionId") in ids or r.get("name") in names):
                 continue
-            os.kill(int(r.get("pid")), 0)                    # a row of a process that is gone says nothing
+            _ab.check_pid(r.get("pid"))                    # a row of a process that is gone says nothing
             at = float(r.get("statusUpdatedAt") or r.get("updatedAt") or 0) / 1000.0
             if best is None or at > best[0]:
                 best = (at, dict(r))
@@ -224,7 +225,7 @@ def registered(names: Iterable[str], ids: Iterable[str], sessions_dir: Path) -> 
     a session that is registered here but is no pane this server can look into is not a session that is gone (the hourly audit reads the first as unknown, the second as idle)."""
     names, ids = {n for n in names if n}, {i for i in ids if i}
     try:
-        files = list(Path(sessions_dir).glob("*.json"))
+        files = list(_ab.mirror_dir(sessions_dir, ("*.json",), pid_key="pid").glob("*.json"))
     except OSError:
         return False
     for f in files:
@@ -232,7 +233,7 @@ def registered(names: Iterable[str], ids: Iterable[str], sessions_dir: Path) -> 
             r = _fc.read_json(f)
             if not (r.get("sessionId") in ids or r.get("name") in names):
                 continue
-            os.kill(int(r.get("pid")), 0)
+            _ab.check_pid(r.get("pid"))
             return True
         except Exception:  # noqa: BLE001
             continue

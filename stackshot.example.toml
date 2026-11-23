@@ -845,6 +845,25 @@ session_ttl_hours = 12                              # a session registered by it
 session_horizon_days = 30                           # a gone session's identity (name, link, machine) stays in the view this long, and for as long as an open board
                                                     # item names it as owner; then it is forgotten (identity apart from presence)
 
+[agents_box]                                        # OPTIONAL: the server runs on another box than the agents' sessions (stackshot/core/agentbox.py; docs/agents-box.md). Unset (the default) = one box: nothing here is read
+                                                    # and every command and file is local, exactly as before. Set in the SERVER's config file; a box that finds its own name here (or a loopback address) ignores it. Live
+# ssh = "agents-box"                                # the agents' box as ssh takes it (a name, an alias of ~/.ssh/config, user@host). Set: the commands the server runs on the agents' side (the fleet tool's session list,
+                                                    # the router's and the audit's model calls, `[for_you] slack_command`) run there over a non-interactive ssh (BatchMode, no pty, every argument quoted),
+                                                    # and the files it reads there ([client] session_links and lanes_file, the lane-names file, the CLI's registry of live panes, the prompt stamps) are copied
+                                                    # here, one ssh call each, and read from the copy; a transcript is read there (`said`). A box that does not answer is logged, never waited for
+# ssh_options = []                                  # extra ssh arguments, one word each, e.g. ["-i", "~/.ssh/stackshot-agents", "-p", "2222"]; BatchMode and the timeouts below stay ours
+# connect_timeout = 5                               # seconds ssh waits to connect
+# timeout = 20                                      # seconds one call (a copy, a lookup, a transcript read) may take
+# cache_seconds = 5                                 # a copy of the box's files, and a lookup of transcripts, is trusted this long
+# retry_seconds = 15                                # after a call failed to connect the box is not asked again, for any file or lookup, for this long (readers keep the last copy meanwhile)
+# stale_seconds = 120                               # the last copy of pane liveness and prompt stamps stands in this long for a box that no longer answers; then they read as absent (unknown). The lane record goes the same way (the lane check then says it cannot be made). The session
+                                                    # registry and links and the lane-names file are kept, however long
+# registry_max_age = 86400                          # the oldest copy of the session registry and links the `said` check goes by (seconds); an older one, or none, and the write is refused with the reason
+# max_file_bytes = 8388608                          # a file larger than this is left out of a copy (and logged)
+# path_prepend = "~/.local/bin"                     # added in front of PATH for a command run over ssh (a non-login shell has no ~/.local/bin); "~" is the box's home
+# prompts_dir = "~/.local/state/stackshot/prompts"  # where the prompt hook on the agents' box writes its stamps (read by the presence check)
+# mirror_dir = ""                                   # where the copies are kept; "" = <paths.state>/agentbox
+
 [server]
 host = "127.0.0.1"
 port = 8020
