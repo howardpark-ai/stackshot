@@ -536,6 +536,7 @@ with sync_playwright() as p:
                 pg4.close()
                 pg.evaluate("document.querySelector('#agents-at-work summary').click()"); pg.wait_for_timeout(50)
                 check(f"{tag}: opening a section writes its key", pg.evaluate(KEYS).get("stackshot.fold.agents-at-work") == "1", pg.evaluate(KEYS))
+                rid = pg.evaluate("(document.querySelector('#agents-at-work li.hrow') || {}).id || ''")
                 pg3 = ctx.new_page(); pg3.goto(PAGES["board"].as_uri() + "#waiting-list"); pg3.wait_for_timeout(200)
                 fh = pg3.evaluate(FOLDS)
                 check(f"{tag}: a link to #waiting-list opens that section on load, the folds the viewer left stay as they were", fh.get("waiting-list") is True and fh.get("agents-at-work") is True and fh.get("your-move") is False, fh)
