@@ -18,7 +18,10 @@ that tool lifts its own holds.
 Stdlib only, as inbox.py."""
 from __future__ import annotations
 
-import fcntl
+try:
+    import fcntl
+except ModuleNotFoundError:      # Windows has no flock: the file lock below is then not taken (a module the puller's box may import must load there)
+    fcntl = None  # type: ignore[assignment]
 import json
 import logging
 import os
@@ -54,11 +57,14 @@ class _locked:
     def __enter__(self):
         _flags().mkdir(parents=True, exist_ok=True)
         self.f = open(_flags() / ".holds-api.lock", "w")
-        fcntl.flock(self.f, fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(self.f, fcntl.LOCK_EX)
         return self
 
     def __exit__(self, *a):
-        fcntl.flock(self.f, fcntl.LOCK_UN); self.f.close()
+        if fcntl is not None:
+            fcntl.flock(self.f, fcntl.LOCK_UN)
+        self.f.close()
         return False
 
 

@@ -41,7 +41,10 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
     _here = _os.path.dirname(_os.path.abspath(__file__))
     _sys.path[:] = [_os.path.dirname(_os.path.dirname(_here))] + [p for p in _sys.path if _os.path.abspath(p or ".") != _here]
 
-import fcntl
+try:
+    import fcntl
+except ModuleNotFoundError:      # Windows has no flock: the file lock below is then not taken (a module the puller's box may import must load there)
+    fcntl = None  # type: ignore[assignment]
 import glob
 import ipaddress
 import json
@@ -135,11 +138,14 @@ class _queue_lock:
     def __enter__(self):
         os.makedirs(Q, exist_ok=True)
         self.f = open(os.path.join(Q, ".lock"), "w")
-        fcntl.flock(self.f, fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(self.f, fcntl.LOCK_EX)
         return self
 
     def __exit__(self, *a):
-        fcntl.flock(self.f, fcntl.LOCK_UN); self.f.close()
+        if fcntl is not None:
+            fcntl.flock(self.f, fcntl.LOCK_UN)
+        self.f.close()
         return False
 
 
