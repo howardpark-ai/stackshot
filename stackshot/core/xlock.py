@@ -29,13 +29,17 @@ anchors (`machine-anchors`) alone. No path takes the wake pass while it holds th
 from __future__ import annotations
 
 import errno
-import fcntl
 import os
 import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+try:
+    import fcntl
+except ModuleNotFoundError:      # Windows: the puller reaches this module through agentbox and has no flock; every XLock is then its front thread lock (enabled() is false)
+    fcntl = None  # type: ignore[assignment]
 
 from stackshot.core import config as _cfg
 from stackshot.core import readonly as _ro
@@ -77,7 +81,7 @@ def holds(name: str) -> bool:
 def enabled() -> bool:
     """[locks] cross_process, read at each first hold (the key is restart-only, so it stays as the process started with it): False only when it is set to false.
     The read-only standby never takes the flock either: it writes nothing, and its backstop refuses a lock file's creation."""
-    return _cfg.get("locks", "cross_process", default=True) is not False and not _ro.is_read_only()
+    return fcntl is not None and _cfg.get("locks", "cross_process", default=True) is not False and not _ro.is_read_only()
 
 
 def _open(path: Path) -> int:

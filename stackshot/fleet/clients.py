@@ -41,7 +41,10 @@ Cloud and Cowork sessions (cse_…) are not in this view: cloud.py keeps their c
 from __future__ import annotations
 
 import datetime as dt
-import fcntl
+try:
+    import fcntl
+except ModuleNotFoundError:      # Windows has no flock: the file lock below is then not taken (a module the puller's box may import must load there)
+    fcntl = None  # type: ignore[assignment]
 import json
 import logging
 import os
@@ -112,11 +115,14 @@ class _locked:
         _LOCK.acquire()
         DIR.mkdir(parents=True, exist_ok=True)
         self.f = open(DIR / "lock", "w")
-        fcntl.flock(self.f, fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(self.f, fcntl.LOCK_EX)
         return self
 
     def __exit__(self, *a):
-        fcntl.flock(self.f, fcntl.LOCK_UN); self.f.close(); _LOCK.release()
+        if fcntl is not None:
+            fcntl.flock(self.f, fcntl.LOCK_UN)
+        self.f.close(); _LOCK.release()
         return False
 
 
