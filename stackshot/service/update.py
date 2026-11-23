@@ -532,14 +532,14 @@ def _reads_time_wait(item: dict[str, Any]) -> bool:
     return _gates.reads_time_wait(item)
 
 
-def _basis_frame(item: dict[str, Any], meta: dict[str, Any], status: str, wake: str, ask_by: str, wait_kind: str, hold: bool, clear_hold: bool, state_st: str) -> tuple[dict[str, Any], str, bool]:
+def _basis_frame(item: dict[str, Any], meta: dict[str, Any], status: str, wake: str, ask_by: str, wait_kind: str, hold: bool, state_st: str) -> tuple[dict[str, Any], str, bool]:
     """What a wait_basis is judged against, for the write that sends it → (the item with the status the write gives it, the wake it stands for, whether the item is a time wait held: a hold, a held or verifying
     item). Raises ToolError for a wake in no valid form. A relay or event wait keeps its date in ask_by, not in a wake: its basis stands for that day."""
     h = _hooks()
     basis_day = ""
     if not wake and not meta.get("wake") and (wait_kind.strip().lower() or _uw.kind_of(meta)) in ("relay", "event"):
         basis_day = _uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))
-    held = _gates.basis_held(item, hold=hold, clear_hold=clear_hold, verifying=state_st == "verifying")
+    held = _gates.basis_held(item, hold=hold, verifying=state_st == "verifying")
     return {**item, "status": status or item.get("status")}, (h.parse_wake(wake) if wake else str(meta.get("wake") or "") or basis_day), held
 
 
@@ -944,7 +944,7 @@ def update_unlocked(
     h.record_fixes(meta, fixes)      # what the tool fixed in this call (server_fixes.py): the mark and a History line, or the mark taken off when the mover sent the value again
     if str(wait_basis or "").strip() and not (clear_wait_basis or clear_wake or clear_hold) and " ".join(str(wait_basis).split()).lower() not in h.ask_none:      # a basis for a wake within the cap needs none: dropped here, before the date-only park below reads it, so the wake is parked as a wake sent alone is; the server says so and does not refuse
         try:
-            e_item, e_wake, e_held = _basis_frame(item, meta, status, wake, ask_by, wait_kind, hold, clear_hold, state_st)
+            e_item, e_wake, e_held = _basis_frame(item, meta, status, wake, ask_by, wait_kind, hold, state_st)
             e_days = _gates.basis_unneeded(e_item, e_wake, e_held)
         except ToolError:
             e_days = None      # a wake in no valid form: the wake check below refuses it with its own message
@@ -979,7 +979,7 @@ def update_unlocked(
             raise ToolError("Refused: clear_wait_basis drops the basis; it does not go with a new one")
         if clear_wake or clear_hold:
             raise ToolError("Refused: wait_basis goes with a wake; this call drops the wake")
-        b_item, b_wake, b_held = _basis_frame(item, meta, status, wake, ask_by, wait_kind, hold, clear_hold, state_st)
+        b_item, b_wake, b_held = _basis_frame(item, meta, status, wake, ask_by, wait_kind, hold, state_st)
         basis_ok = _gates.gate_wait_basis(b_item, basis_txt, b_wake, held=b_held)
     if wake:                      # a moment to come
         stored = h.parse_wake(wake)

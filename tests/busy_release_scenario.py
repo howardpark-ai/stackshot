@@ -58,6 +58,9 @@ from stackshot.service import audit_ticks as audit_ticks_svc, gates, telling, up
 from stackshot.tools import next_report as _nr
 from stackshot.web.tools import update as _wt_update
 from stackshot.web.ui import releasing as _rel
+from stackshot.waits import self_wait as _selfwait
+_selfwait._run = lambda message: {"status": "ok", "text": json.dumps({"can_do_now": False, "reason": "the soak window has to end first"})}      # the self-wait check judges a wait_reason: never a real model call here, and the answer is no, so the busy refusal is what the call meets
+SOAK = "the soak window has to end before the part can be applied"      # a wait on the sender's own item names its reason, so a bare until reaches the busy gate (which runs after the self-wait check)
 from stackshot.model import steps as _steps
 
 @contextlib.contextmanager
@@ -377,7 +380,7 @@ with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(_rlive
     got = update(1, **HOLD)
     check("5 a hold while the release of the item's anchored pull request runs is refused through the real tool, naming the release, its unit, its log and its stage", RELWORDS(got) and "PR #77 tied to this item is running (unit stackshot-release-77.service, its log written 2 min ago, in the merge queue (QUEUED position 1))" in got[1], got)
     check("5 …and the refused write stores nothing", json.dumps(read(1), sort_keys=True) == before and not read(1)["metadata"].get("until") and not read(1)["metadata"].get("hold"))
-    got = update(1, until=FUT, next=f"{BACK}: do it", wait_basis=f"the soak window ends {FUT}")
+    got = update(1, until=FUT, next=f"{BACK}: do it", wait_basis=f"the soak window ends {FUT}", wait_reason=SOAK)
     check("5 …an until alone (a date the write turns into a hold) is refused as a hold is", RELWORDS(got), got)
     got = update(1, sender=BACK, work={"text": "PR 77 in the merge queue", "state": "in progress"})
     check("5 …a status line with work= (keeping it in hand) goes through", got[0] == "ok", got)
