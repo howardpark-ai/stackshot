@@ -1,6 +1,6 @@
 """service/projects.py: the calls of the fleet tool's New session form that make and list projects and register their agents: `get projects` (`_projects_list`), `get agent-name` (`_agent_name`, the register's name checks as a read), `post project` (`_new_project`),
 `post project-list` (`_project_list`), `post project-agent` (`_project_agent`, `_project_agent_locked`), `post project-agent-mandate` (`_project_agent_mandate`), and the reads and the writes of
-`post project-agent-rename` and `post project-agent-retire`, with what reads the config to decide whether a caller is the form (`_form_call`, `_cfg_names`, `[project_agent]` form_senders and form_machines),
+`post project-agent-rename` and `post project-agent-retire`, with what reads the config to decide whether a caller is the form (`_form_call`, `_bg_call`, `_cfg_names`, `[project_agent]` form_senders, form_machines, bg_senders and bg_machines),
 the one lock the writes share (`_PROJECT_LOCK`, with `_RENAMING`, the page keys a rename or retire has in flight) and the page store they write through (`_page_io`, `PAGE_IO`).
 
 The rules are not here: the shape of each body, who may ask, the name rules and the words of every refusal and answer are in projects/project_verbs.py (the section "the New session form's checks"), which reads
@@ -25,12 +25,15 @@ from stackshot.projects import project_verbs as _verbs
 from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import _projects_sync_safe, _registry
 from stackshot.router import page_debt as _page_debt
+from stackshot.service import background_want as _bgw
 from stackshot.service import caller_pass as _caller_pass
 from stackshot.service import contacts as _contacts
 
 
 _FORM_SENDERS: list[str] = []     # the defaults of [project_agent] (stackshot.example.toml): no sender label, so no form call, until the instance names the New session form's label
 _FORM_MACHINES: list[str] = []     # ... and of form_machines (none until the instance names the machine whose token the form is allowed from)
+_BG_SENDERS: list[str] = []     # the defaults of bg_senders and bg_machines: no label, so no background call, until the instance names the fleet tool's label
+_BG_MACHINES: list[str] = []     # ... and no machine of its own: an empty bg_machines falls back to form_machines
 
 
 def _cfg_names(key: str, default: list[str]) -> list[str]:
@@ -51,6 +54,14 @@ def _form_call(machine: str, sender: str) -> bool:
     if _caller_pass.is_pass(machine):
         return _caller_pass.form_pass_ok(machine, sender)
     return _verbs.form_call(machine, sender, _cfg_names("form_senders", _FORM_SENDERS), _cfg_names("form_machines", _FORM_MACHINES))
+
+
+def _bg_call(machine: str, sender: str, front: bool, surface: str) -> tuple[bool, tuple[int, dict[str, Any]] | None]:
+    """Is this `post project-agent` a background call: the fleet tool's timer listing a background agent for a project whose want is open? -> (True, None), (False, None) when the `sender` label is not in
+    [project_agent] bg_senders (the other rules decide), or (False, the 403) for a bg label that fails a condition: the machine its token proves (`machine`, never the body) must be in bg_machines
+    (form_machines when bg_machines is absent or empty; a bg_machines of the wrong type allows no machine) and the agent a background agent (`front` false, `surface` "" for the default). The open want is checked after (_bgw.open_state). Read where used, so a reload applies."""
+    machines = _verbs.bg_machine_names(_cfg.get("project_agent"), _BG_MACHINES, _FORM_MACHINES)
+    return _verbs.bg_gate(machine, sender, _cfg_names("bg_senders", _BG_SENDERS), machines, front, surface)
 
 
 def _name_clash(name: str, key: str, pid: str, prefixes: list[str], reg: dict[str, Any]) -> str:
@@ -104,9 +115,14 @@ def _project_agent_locked(machine: str, body: dict[str, Any], pages: dict | None
     caller to list it again first with `post project-list`). Every other check still applies: validation, the project-name prefix, a name already
     on the page ("already listed"), a name already pending by another sender (409). A form call never edits or removes an agent that is on the page
     and never changes another sender's pending agent. The same label from another machine, or another label from the form's machine, gets the rules above.
+    (4) a background call (_bg_call: `sender` in [project_agent] bg_senders AND the token's machine in bg_machines, form_machines when bg_machines is empty; defaults: no sender label, no machine)
+    may list a BACKGROUND agent (front false, the default surface; a front or a slack agent is a 403) on a listed project whose want for a background agent is open right now (service/background_want.py: the
+    switch [background_agent] enabled is on, a message recorded the want, it is not served and the project lists no background agent yet; otherwise a 403 that says which). It is the fleet tool's timer, which
+    lists the agent the want asks for. Every other check still applies as for the form, a retired or hidden project included; it never edits or removes an agent and never changes another sender's pending agent,
+    and it opens nothing else: the rename, the retire, the mandate and the color routes read form_senders only.
     A name belongs to one project, on every path: a name that is already an agent of another project (its page map or its pending list), or that starts
     with the longer name prefix of another project (team-alpha-docs-main under projects/alpha, when projects/alpha-docs is named team-alpha-docs), is a
-    409. Names compare case-folded here and for "already listed" and the pending 409. A non-table `[project_agent]` section switches form calls off.
+    409. Names compare case-folded here and for "already listed" and the pending 409. A non-table `[project_agent]` section switches form and background calls off.
     The reply carries `page_yaml` (empty: the
     page is written from the record, so there is nothing for the form to show), `page_owed` false, the `mirror` and a `note` that says the record has the agent.
     """
@@ -134,8 +150,15 @@ def _project_agent_locked(machine: str, body: dict[str, Any], pages: dict | None
     listed_by = (_pr.entries().get(rec["id"]) or {}).get("agents") or {}          # the agents the record lists, with who listed each (a migrated agent names nobody)
     first, more = _verbs.label_paths(rec, mark, owed, listed_by, keeper_live, sender, age)
     form = _form_call(machine, sender)         # the New session form: the label AND the machine its token proves (never the body's)
-    bad = _verbs.agent_caller_refusal(rec, key, form, first, more, sender, _anc.is_id(sender), nm.get)
+    bg = False
+    if not (form or first or more):             # a label that is neither the form's nor on the first-agent or further-agents path: is it the fleet tool's background call?
+        bg, bad = _bg_call(machine, sender, front, surface)
+        if bad: return bad
+    bad = _verbs.agent_caller_refusal(rec, key, form, first, more, sender, _anc.is_id(sender), nm.get, bg=bg)
     if bad: return bad
+    if bg:
+        bad = _verbs.bg_want_refusal(_bgw.open_state(rec["id"]), where)         # the project's want is open right now (switch on, recorded, not served, no background agent yet)
+        if bad: return bad
     prefixes = _verbs.project_prefixes(rec, entry, reg)      # the name, else the page's slug: an agent is always <project>-<role>
     bad = _verbs.prefix_refusal(name, prefixes, where)
     if bad: return bad

@@ -60,7 +60,7 @@ check("the name check has teeth: it flags a planted box name and a planted made-
       bool(leaks("a box-a here", fleet=False)) and all(leaks(x, fleet=False) for x in MADE_UP_OWNER), [leaks(x, fleet=False) for x in MADE_UP_OWNER])
 check("the example config: every machine and person setting is empty or generic",
       all(ex[s].get(k) in ("", [], {}) for s, k in (("runners", "owner"), ("runners", "boxes"), ("runners", "local_box"), ("steps", "owner_shell"), ("steps", "bash_host"), ("steps", "shell_name"), ("terminal", "fallback_project"),
-                                                       ("project_agent", "form_machines"), ("model", "rebullet_machines"), ("model", "migration_machines"), ("model", "migration_senders"),
+                                                       ("project_agent", "form_machines"), ("project_agent", "bg_senders"), ("project_agent", "bg_machines"), ("model", "rebullet_machines"), ("model", "migration_machines"), ("model", "migration_senders"),
                                                        ("said", "injected_prefixes"), ("said", "injected_phrases"), ("instance", "owner_aliases"), ("pages", "template_page"), ("pages", "rules_line")))
       and ex["project_scopes"]["order"] == ["general"] and ex["project_scopes"]["default"] == "general", ex.get("project_scopes"))
 

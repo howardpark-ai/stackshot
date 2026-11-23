@@ -149,7 +149,7 @@ Underneath it is one authenticated write:
 - `POST /client/for-you/seen`, `Authorization: Bearer <machine token>`, body `{"id": <row id, a whole number from 1> | "all", "sender": "<label>"}`.
   200 `{"ok": true, "seen": [<ids that left the list>], "rows": [<the rows still unseen, as in GET /client/for-you>]}` (`"all"` on an empty list is 200 with
   `"seen": []`). 400 a body that is not an object, a `sender` that is not one line of at most 80 characters, or an `id` that is neither; 401 no or an unknown
-  token; 403 the caller is not the web form (`sender` not in `form_senders`, or the token's machine not in `form_machines`); 404 an id that is no row on the
+  token; 403 the caller is not the web form (`sender` not in `form_senders`, or the token's machine not in `form_machines`; a `bg_senders` label is not the web form); 404 an id that is no row on the
   list (never made, or already seen).
 - `POST /client/items/{key}/watch`, the same token, body `{"state": "watch" | "mute" | "default", "sender": "<label>"}`. `{key}` is an item as shown
   (`board%23N` in the path, or `N`) or its store id, read the way the other client routes read an id. 200 `{"ok": true, "item": "board#N", "state": "<the
