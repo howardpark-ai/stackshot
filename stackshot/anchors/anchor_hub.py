@@ -38,6 +38,32 @@ if __name__ == "__main__" and _ro.is_read_only() and (sys.argv[1] if len(sys.arg
 from stackshot.anchors.anchorhub.core import Hub, ADIR, CTL, ENVF, MIRROR, RESCAN, STATUS, _cfg, load_bindings, log, now_iso, start_receiver
 from stackshot.anchors.anchorhub import slack, gworkspace, notion, github
 
+# ---------- the bindings' watch ----------
+def change_handler(dirty: threading.Event):
+    """The watcher's handler: sets `dirty` for a change that can alter the bindings, drops the rest."""
+    from watchdog.events import FileSystemEventHandler
+    class H(FileSystemEventHandler):
+        def on_any_event(self, e):
+            # Only a change counts. The watcher also reports a file being opened or closed, so the hub's own read of the store
+            # started the next pass (a rescan twice a second instead of every RESCAN s). And in the hub's own
+            # state dir only extra.json (bindings) and a pause flag (a lift flushes the queues) count: its status and read
+            # positions are its own writes.
+            if e.event_type not in ("modified", "created", "deleted", "moved"): return
+            for p in (e.src_path, getattr(e, "dest_path", "")):
+                if not p.endswith(".json"): continue
+                if os.path.dirname(p) == ADIR and not (os.path.basename(p) == "extra.json" or os.path.basename(p).startswith("paused-")): continue
+                dirty.set()
+    return H()
+
+def watch_dirs(obs, handler, dirs) -> None:
+    """Watch each folder (not its subfolders) for the four kinds of change the handler counts. The filter also sets the kernel's mask: the opens, reads and closes of the
+    server's own reads of the store (thousands a second) never reach the process, where each was built, dispatched and then dropped by the handler."""
+    from watchdog.events import FileCreatedEvent, FileDeletedEvent, FileModifiedEvent, FileMovedEvent
+    kept = [FileModifiedEvent, FileCreatedEvent, FileDeletedEvent, FileMovedEvent]
+    for d in dirs:
+        try: obs.schedule(handler, d, recursive=False, event_filter=kept)
+        except TypeError: obs.schedule(handler, d, recursive=False)      # a watchdog older than event_filter: every event, the handler drops the rest as before
+
 # ---------- main ----------
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
@@ -66,21 +92,9 @@ def main():
     hub.rescan()   # resolvers are registered now → label every bound anchor for the board
     # bindings: rebuild the moment the board mirror or extra.json changes (inotify); RESCAN is the fallback
     from watchdog.observers import Observer
-    from watchdog.events import FileSystemEventHandler
     dirty = threading.Event()
-    class H(FileSystemEventHandler):
-        def on_any_event(self, e):
-            # Only a change counts. The watcher also reports a file being opened or closed, so the hub's own read of the store
-            # started the next pass (a rescan twice a second instead of every RESCAN s). And in the hub's own
-            # state dir only extra.json (bindings) and a pause flag (a lift flushes the queues) count: its status and read
-            # positions are its own writes.
-            if e.event_type not in ("modified", "created", "deleted", "moved"): return
-            for p in (e.src_path, getattr(e, "dest_path", "")):
-                if not p.endswith(".json"): continue
-                if os.path.dirname(p) == ADIR and not (os.path.basename(p) == "extra.json" or os.path.basename(p).startswith("paused-")): continue
-                dirty.set()
     obs = Observer()
-    for d in glob.glob(f"{MIRROR}/?") + [MIRROR, ADIR]: obs.schedule(H(), d, recursive=False)   # MIRROR itself: anchors.json + projects.json
+    watch_dirs(obs, change_handler(dirty), glob.glob(f"{MIRROR}/?") + [MIRROR, ADIR])      # MIRROR itself: anchors.json + projects.json
     obs.daemon = True; obs.start()
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
