@@ -11,6 +11,12 @@ FINISHED_EVERY = 10   # a closed or merged anchor is looked at once in this many
 LATE_MERGE_S = _events.FLOOR_H * 3600   # s; an anchor first read on a pull request that merged this recently still writes the merge line (the event log's own window: older is no news)
 LATE_TRIES = 3   # a late merge line that cannot be written is tried again on the next pass this many times in all; then the anchor is seeded without it (each try is a counted read of the issue)
 LATE_SKEW = 120   # s; how far ahead of the hub's clock a merge time may be and still be read as now (GitHub's clock against this one); further ahead is a torn time and writes nothing
+PR_FIELDS = ("head_ref", "author", "sha", "own_branch", "key", "looked")   # what the CI state of an anchor says about the pull request itself: dropped when GitHub shows no pull request under that number, so nothing stale is carried into a notice
+RECHECK_FAST = 600   # s; a pull request number GitHub answered 404 for is asked again this often during its first RECHECK_FAST_FOR seconds (it may be a number that did not exist yet), then once in RECHECK_SLOW
+RECHECK_FAST_FOR = 3600   # s
+RECHECK_SLOW = 3600   # s; hourly until the number has been missing for RECHECK_SLOW_FOR seconds, then once in RECHECK_DAILY
+RECHECK_SLOW_FOR = 86400   # s
+RECHECK_DAILY = 86400   # s
 PER_ANCHOR_ETAGS = 6  # ETags kept in the saved file per anchor (pull request, check runs of the newest commit, issue: three in use)
 def run(hub: Hub):
     etags: dict[str, str] = {}
@@ -122,6 +128,9 @@ def run(hub: Hub):
         state[_anc.anchor_id(k) or k] = v                     # no silent re-seed after a restart — a downtime's changes are reported; keyed by the anchor's current name ([github.moved])
     ci_st: dict[str, dict] = {_anc.anchor_id(k) or k: {**v, "key": (v["key"][0], tuple(v["key"][1])) if isinstance(v.get("key"), list) else v.get("key")}
                               for k, v in ((hub.saved.get("github") or {}).get("ci") or {}).items()}
+    for v in ci_st.values():
+        if v.get("pr") is False:                           # saved while no pull request was known under that number: what it says about one (carried over from an entry of another repository's name, or left by an earlier version) is dropped
+            for f in PR_FIELDS: v.pop(f, None)
     def adopt(d, a_id):
         """[github.moved]: saved state, CI state and the like are keyed by the anchor id. When a pair is added while the hub runs (a config reload), the
         entry stored under the other name of the same repository is moved to the id the bindings use now, before it is read, so a run in flight, a
@@ -282,6 +291,8 @@ def run(hub: Hub):
         if not title:
             with hub.lock: title = ((hub.status.get("anchors") or {}).get(a_id) or {}).get("title") or f"{repo.split('/')[1]}#{n}"
         hub.event(a_id, {"title": title, "who": c.get("author") or "someone", "text": f"new commit {c['sha'][:7]}", "url": f"https://github.com/{repo}/pull/{n}", "ts": when, "etype": "pr_commit", "repo_id": rid(repo), "vouched": "commit", "record_only": True, **pr_meta(c)}, kind="github-state")
+    issue_gone: set[str] = set()                      # anchors whose issue read answered 404 at the last look (memory only: a restart asks once more)
+    def gone_404(e): return "404" in str(e) or "Not Found" in str(e)
     def ci(a_id, repo, n, key=None, title=None):
         """CI on a watched pull request (a failed run can otherwise go unnoticed). One notice per head
         commit once all its check runs have finished, naming the failed ones (canceled ones counted, not a trigger); a later
@@ -289,12 +300,21 @@ def run(hub: Hub):
         (a green result is activity on the item whatever the head before it was): that one is record_only, written to the event log and
         delivered to no one, so a green on every push wakes nothing. First sight seeds silently when CI has already finished; when it was
         still running, the first finished result is reported (c["pending"])."""
-        c = ci_st.setdefault(key or a_id, {"pr": None, "sha": None, "key": None})
-        if c["pr"] is False: return
+        ck = key or a_id
+        c = ci_st.setdefault(ck, {"pr": None, "sha": None, "key": None})
+        now = time.time()
+        if c["pr"] is not True and ((state.get(a_id) or {}).get("pr") is False or a_id in issue_gone): return      # the issue read found an issue, or found nothing under this number: no pull request can be there (a pull request is an issue too), so none is asked for
+        if c["pr"] is False:                                  # no pull request under this number as of the last look: asked again after a wait (one that did not exist yet may have been opened since)
+            age = now - c.get("missing", now)
+            if now - c.get("tried", 0) < (RECHECK_FAST if age < RECHECK_FAST_FOR else RECHECK_SLOW if age < RECHECK_SLOW_FOR else RECHECK_DAILY): return
+            etags.pop(f"/repos/{repo}/pulls/{n}", None)       # asked in full: an ETag from before the miss (an entry saved by an earlier version) must not turn the answer into a 304 the entry cannot read
         try: p = gh(f"/repos/{repo}/pulls/{n}", conditional=True)
         except Exception as e:
-            if "404" in str(e) or "Not Found" in str(e): c["pr"] = False
+            if gone_404(e):
+                ci_st[ck] = c = {**{k: v for k, v in c.items() if k not in PR_FIELDS}, "pr": False, "missing": c.get("missing", now), "tried": now}      # one replacement: the minute's snapshot sees the entry before or after, never half of it; nothing of an earlier pull request stays to be put on a notice
+                etags.pop(f"/repos/{repo}/pulls/{n}", None); committed.get(a_id, {}).pop(f"/repos/{repo}/pulls/{n}", None)      # the saved copy of the ETag goes too (settle() only adds what is still held, and a read that failed after its 200 keeps the older saved one on purpose): a restart must not answer 304 for what is gone
             return
+        if c["pr"] is False and p is not None: ci_st[ck] = c = {"pr": None, "sha": None, "key": None}      # the pull request exists now: a first sight, with nothing from before it
         last, c["looked"] = c.get("looked"), time.time()      # when this pull request was last looked at (kept with the CI state, so it survives a restart): a head that changed after a gap was missed, not seen live
         if p is not None:
             c["pr"] = True
@@ -305,7 +325,7 @@ def run(hub: Hub):
             hr, br = (str((((p.get(k) or {}).get("repo")) or {}).get("full_name") or "").lower() for k in ("head", "base"))
             c["own_branch"] = bool(hr) and hr == br      # the head branch is in the repository itself, not a fork's (a deleted fork has no head repo, and a payload that does not say names none): only then is a CI result the repository's own side moving
             if was and c["sha"] != was: commit_seen(a_id, repo, n, c, last is None or c["looked"] - last > COMMIT_DOWNTIME, title)      # the head commit changed since the last read of this pull request (a first sight has no earlier sha and records nothing; a 304 has no payload and records nothing)
-        if not c["sha"]: return
+        if not c.get("sha"): return
         try: r = gh(f"/repos/{repo}/commits/{c['sha']}/check-runs?per_page=100", conditional=True)
         except Exception: return
         if r is None: return
@@ -384,7 +404,11 @@ def run(hub: Hub):
             try: ci(a_id, repo, n)
             except Exception as e: log.warning("github ci %s: %s", a_id, str(e)[:120])
         try:
-            i = gh(f"/repos/{repo}/issues/{n}", conditional=True)
+            try: i = gh(f"/repos/{repo}/issues/{n}", conditional=True)
+            except Exception as e:
+                if gone_404(e): issue_gone.add(a_id)      # nothing under this number (yet): the pull request read leaves it alone until the issue read finds something
+                raise
+            issue_gone.discard(a_id)
             if i is None: return                         # 304: nothing changed
             learn(repo, i.get("repository"))
             st = state.get(a_id)

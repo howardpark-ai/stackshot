@@ -1168,5 +1168,134 @@ EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
 hub_.emit(HUB.Event(anchor=A13, kind="github-state", title="widgets#140", who="alice", text="new commit", url=f"{W_}/pull/140", ts=time.time() - 30, etype="pr_commit", vouched=""))
 check("16 a commit event the source did not vouch for (a fork's) writes no line", EL.read(0)[0] == [], EL.read(0)[0])
 
+# ================================================================ 17. a pull request number GitHub does not know (yet) is asked again after a wait; nothing of an earlier pull request is kept under it
+def pr_reads(G, n): return sum(1 for p, _ in G.calls if p == f"/repos/acme/widgets/pulls/{n}")
+def runs17(n, status, conclusion=None): return {f"/repos/acme/widgets/commits/{f'{n:02d}' * 20}/check-runs?per_page=100": {"check_runs": [{"name": "suites", "status": status, **({"conclusion": conclusion} if conclusion else {})}]}}
+STALE17 = {"pr": True, "sha": "e" * 40, "key": ["e" * 40, []], "head_ref": "builder-a/old-topic", "author": "olduser", "own_branch": True, "looked": time.time() - 30}
+FIELDS17 = ("head_ref", "author", "sha", "own_branch", "key", "looked", "pending")
+N17 = 150; A17 = f"github:acme/widgets#{N17}"; PP17 = f"/repos/acme/widgets/pulls/{N17}"
+g17 = {"/user": {"login": "hubaccount"}, **pr9(N17), **runs17(N17, "in_progress")}; real17 = g17[PP17]; real17["head"]["ref"] = "builder-a/topic"; g17[PP17] = "404"
+with GH(g17, [A17]) as G:
+    G.one(); c17 = G.hub.gh_state["ci"][A17]
+    check("17 a 404 for the pull request is no longer final: it is recorded with the time of the first miss and of this look", c17["pr"] is False and isinstance(c17.get("missing"), float) and isinstance(c17.get("tried"), float) and pr_reads(G, N17) == 1, (c17, G.calls))
+    G.skew += 300.0; G.one()
+    check("17 the back-off holds: a pass five minutes later does not ask GitHub for the pull request again", pr_reads(G, N17) == 1, G.calls)
+    G.skew += 301.0; G.one(); c17 = G.hub.gh_state["ci"][A17]
+    check("17 …and one past ten minutes asks again (still 404: still nothing, the time of the first miss is kept)", pr_reads(G, N17) == 2 and c17["pr"] is False and c17["missing"] < c17["tried"], (c17, G.calls))
+    G.skew += 200.0; G.one(); c17 = G.hub.gh_state["ci"][A17]
+    check("17 …the wait runs from the last look, not the first miss", pr_reads(G, N17) == 2, G.calls)
+    g17[PP17] = real17; G.skew += 401.0; evs17 = G.one(); c17 = G.hub.gh_state["ci"][A17]
+    check("17 a pull request that appears later under that number is read: its head branch and author are the real ones, and the miss marks are gone", pr_reads(G, N17) == 3 and c17["pr"] is True and c17["head_ref"] == "builder-a/topic" and c17["author"] == "someone" and "missing" not in c17 and "tried" not in c17, c17)
+    check("17 …and it is a first sight: CI still running seeds no key and leaves the pending marker, nothing is reported", c17["key"] is None and c17.get("pending") is True and not [e for e in evs17 if e.etype in ("ci_failed", "ci_passed", "pr_commit")], ([(e.etype, e.head) for e in evs17], c17))
+    g17.update(runs17(N17, "completed", "failure")); G.skew += 60.0; evs17 = [e for e in G.one() if e.etype == "ci_failed"]
+    check("17 …the first finished result is a notice carrying the real head branch, so the router names the right builder", len(evs17) == 1 and evs17[0].head == "builder-a/topic" and evs17[0].author == "someone", [(e.etype, e.head, e.author) for e in evs17])
+
+# the wait lengthens to an hour after the first hour of misses
+N17b = 151; A17b = f"github:acme/widgets#{N17b}"; PP17b = f"/repos/acme/widgets/pulls/{N17b}"
+g17b = {"/user": {"login": "hubaccount"}, **pr9(N17b)}; g17b[PP17b] = "404"
+def saved17(a, c): return {"github": {"me": "hubaccount", "state": {a: {"state": "open", "comments": 0, "updated": iso9(0), "pr": True, "merged": False}}, "ci": {a: c}}}
+with GH(g17b, [A17b], saved=saved17(A17b, {"pr": False, "missing": time.time() - 2 * H, "tried": time.time() - 40 * MIN})) as G:
+    G.one()
+    check("17 after the first hour of misses a look 40 minutes ago is not repeated", pr_reads(G, N17b) == 0, G.calls)
+    G.skew += 21 * MIN + 1; G.one()
+    check("17 …and one an hour ago is", pr_reads(G, N17b) == 1, G.calls)
+with GH(g17b, [A17b], saved=saved17(A17b, {"pr": False, "missing": time.time() - 30 * MIN, "tried": time.time() - 11 * MIN})) as G:
+    G.one()
+    check("17 within the first hour a look eleven minutes ago is repeated", pr_reads(G, N17b) == 1, G.calls)
+
+# a number that is an issue (the issue read says so) is not asked for as a pull request again
+N17c = 152; A17c = f"github:acme/widgets#{N17c}"; PP17c = f"/repos/acme/widgets/pulls/{N17c}"
+g17c = {"/user": {"login": "hubaccount"}, **pr9(N17c)}; g17c[PP17c] = "404"; g17c[f"/repos/acme/widgets/issues/{N17c}"].pop("pull_request")
+with GH(g17c, [A17c]) as G:
+    G.one(); G.skew += 700.0; G.one(); G.skew += 700.0; G.one()
+    check("17 an issue is not asked for as a pull request again once it is known to be one (a read each pass would cost the hourly budget)", pr_reads(G, N17c) == 1 and G.hub.gh_state["state"][A17c]["pr"] is False, (G.calls, G.hub.gh_state["state"].get(A17c)))
+
+# a 404 drops what the entry said about the pull request that was there: no stale branch or author on a notice
+N17d = 153; A17d = f"github:acme/widgets#{N17d}"; PP17d = f"/repos/acme/widgets/pulls/{N17d}"
+g17d = {"/user": {"login": "hubaccount"}, **pr9(N17d)}; g17d[PP17d] = "404"
+with GH(g17d, [A17d], saved=saved17(A17d, dict(STALE17))) as G:
+    G.one(); c17 = G.hub.gh_state["ci"][A17d]
+    check("17 a 404 drops the fields that describe the pull request (head branch, author, sha, own-branch mark, CI key, last look)", c17["pr"] is False and not [f for f in FIELDS17 if f in c17], c17)
+    g17d[f"/repos/acme/widgets/issues/{N17d}"]["state"] = "closed"; g17d[f"/repos/acme/widgets/issues/{N17d}"]["updated_at"] = iso9(10)
+    evs17 = G.one()
+    check("17 …so a notice on that number carries no head branch or author of the old entry", [(e.etype, e.head, e.author) for e in evs17] == [("pr_closed", "", "")], [(e.etype, e.head, e.author) for e in evs17])
+
+# a saved entry that says no pull request but still describes one (a state moved from an earlier repository name, or written before this) is healed when it is loaded
+N17e = 154; A17e = f"github:acme/widgets#{N17e}"; PP17e = f"/repos/acme/widgets/pulls/{N17e}"
+g17e = {"/user": {"login": "hubaccount"}, **pr9(N17e), **runs17(N17e, "completed", "success")}; real17e = g17e[PP17e]; real17e["head"]["ref"] = "builder-b/other"; g17e[PP17e] = "404"
+with GH(g17e, [A17e], saved=saved17(A17e, {**STALE17, "pr": False})) as G:
+    c17 = G.hub.gh_state["ci"][A17e]
+    check("17 a saved entry with pr False and stale pull request fields is cleaned when it is loaded (no pass needed)", c17 == {"pr": False}, c17)
+    check("17 …and nothing of it reaches a notice", pr_reads(G, N17e) == 0 and not G.hub.gh_state["ci"][A17e].get("head_ref"), G.calls)
+    g17e[PP17e] = real17e; evs17 = G.one(); c17 = G.hub.gh_state["ci"][A17e]
+    check("17 …and the first pass reads the pull request that exists now: real head branch, a first sight (no commit event, no CI notice from the stale sha)",
+          c17["pr"] is True and c17["head_ref"] == "builder-b/other" and c17["sha"] == f"{N17e:02d}" * 20 and not [e for e in evs17 if e.etype in ("pr_commit", "ci_failed", "ci_passed")], (c17, [(e.etype, e.head) for e in evs17]))
+
+# an entry that was False and still holds a sha (a state this version does not write, but one that must not make a commit event) starts fresh when the pull request exists
+N17f = 155; A17f = f"github:acme/widgets#{N17f}"; PP17f = f"/repos/acme/widgets/pulls/{N17f}"
+g17f = {"/user": {"login": "hubaccount"}, **pr9(N17f), **runs17(N17f, "completed", "success")}
+with GH(g17f, [A17f], saved=saved17(A17f, {"pr": False})) as G:
+    G.hub.gh_state["ci"][A17f].update({"sha": "d" * 40, "key": ("d" * 40, ()), "looked": time.time() - 5, "head_ref": "builder-a/old-topic", "author": "olduser", "own_branch": True})
+    evs17 = G.one(); c17 = G.hub.gh_state["ci"][A17f]
+    check("17 an entry that was False and turns True starts fresh: nothing from its old sha (no commit event, no CI notice), the real head branch", not [e for e in evs17 if e.etype in ("pr_commit", "ci_failed", "ci_passed")] and c17["head_ref"] == "x/y" and c17["sha"] == f"{N17f:02d}" * 20 and c17["key"] == (f"{N17f:02d}" * 20, ()), (c17, [(e.etype, e.head) for e in evs17]))
+
+# a saved ETag does not outlive a 404: after a restart the pull request that comes back unchanged is read in full, not answered 304 into an entry that has lost its head
+N17g = 156; A17g = f"github:acme/widgets#{N17g}"; PP17g = f"/repos/acme/widgets/pulls/{N17g}"
+g17g = {"/user": {"login": "hubaccount"}, **pr9(N17g), **runs17(N17g, "completed", "success")}; real17g = g17g[PP17g]; real17g["head"]["ref"] = "builder-a/topic"
+with GH(g17g, [A17g], etags=True) as G:
+    G.one(); c17 = G.hub.gh_state["ci"][A17g]
+    check("17 the pull request is read and its ETag is saved with the entry", c17["pr"] is True and PP17g in G.hub.gh_state["committed"][A17g], (c17, G.hub.gh_state["committed"]))
+    g17g[PP17g] = "404"; G.one()
+    check("17 …a 404 for it drops the ETag from what is saved too (not only from the live ones)", PP17g not in G.hub.gh_state["etags"] and PP17g not in G.hub.gh_state["committed"][A17g] and G.hub.gh_state["ci"][A17g]["pr"] is False, (G.hub.gh_state["etags"], G.hub.gh_state["committed"]))
+    saved17g = json.loads(json.dumps(HUB._jsonable(G.hub.savers["github"]())))
+    check("17 …and the saved read position holds no ETag for the pull request", PP17g not in saved17g["etags"].get(A17g, {}), saved17g["etags"])
+g17g[PP17g] = real17g
+with GH(g17g, [A17g], etags=True, saved={"github": saved17g}) as G:
+    G.skew += 601.0; G.one(); c17 = G.hub.gh_state["ci"][A17g]
+    check("17 after a restart the pull request that is back and unchanged is read in full: the real head branch, a sha, no 304 for it", c17["pr"] is True and c17["head_ref"] == "builder-a/topic" and c17["sha"] == f"{N17g:02d}" * 20 and PP17g not in G.not_modified, (c17, G.not_modified))
+# …and a saved file from before this (the ETag kept beside an entry that says no pull request, and no sha) heals too
+g17h = {"/user": {"login": "hubaccount"}, **pr9(157), **runs17(157, "completed", "success")}; PP17h = "/repos/acme/widgets/pulls/157"; A17h = "github:acme/widgets#157"; real17h = g17h[PP17h]; real17h["head"]["ref"] = "builder-a/topic"
+tag17h = '"' + hashlib.sha1(json.dumps(real17h).encode()).hexdigest()[:12] + '"'
+sv17h = saved17(A17h, {"pr": False, "missing": time.time() - 2 * H, "tried": time.time() - 2 * H}); sv17h["github"]["etags"] = {A17h: {PP17h: tag17h}}
+with GH(g17h, [A17h], etags=True, saved=sv17h) as G:
+    G.one(); c17 = G.hub.gh_state["ci"][A17h]
+    check("17 an entry saved with that ETag beside it is read in full, no KeyError, and heals", c17["pr"] is True and c17["head_ref"] == "builder-a/topic" and PP17h not in G.not_modified, (c17, G.not_modified))
+
+# a number that exists under neither read (only under the repository's old name) costs nothing after the first look
+N17i = 158; A17i = f"github:acme/widgets#{N17i}"; PP17i = f"/repos/acme/widgets/pulls/{N17i}"; IP17i = f"/repos/acme/widgets/issues/{N17i}"
+g17i = {"/user": {"login": "hubaccount"}, **pr9(N17i)}; real17i = g17i[PP17i]; real_issue17i = g17i[IP17i]; g17i[PP17i] = "404"; g17i[IP17i] = "404"
+with GH(g17i, [A17i]) as G:
+    G.one(); G.skew += 700.0; G.one(); G.skew += 2 * H; G.one(); G.skew += 30 * H; G.one()
+    check("17 a number the issue read also answers 404 for: the pull request is asked for once (the first look), never again, however long it is missing", pr_reads(G, N17i) == 1 and G.hub.gh_state["ci"][A17i]["pr"] is False, (G.calls, G.hub.gh_state["ci"][A17i]))
+    g17i[IP17i] = real_issue17i; g17i[PP17i] = real17i; G.one(); c17 = G.hub.gh_state["ci"][A17i]
+    check("17 …the issue read that finds it ends the skip (one pass later the pull request is asked for, on the usual back-off)", pr_reads(G, N17i) == 1 and c17["pr"] is False, (G.calls, c17)); G.skew += 700.0; G.one(); c17 = G.hub.gh_state["ci"][A17i]
+    check("17 …and the pull request is then read", pr_reads(G, N17i) == 2 and c17["pr"] is True and c17["head_ref"] == "x/y", (G.calls, c17))
+# a 404 for the issue's comments only is not a missing number
+N17j = 159; A17j = f"github:acme/widgets#{N17j}"; PP17j = f"/repos/acme/widgets/pulls/{N17j}"
+g17j = {"/user": {"login": "hubaccount"}, **pr9(N17j, comments=1)}; g17j[PP17j] = "404"; g17j[f"/repos/acme/widgets/issues/{N17j}/comments?per_page=100&page=1"] = "404"
+with GH(g17j, [A17j], saved=saved17(A17j, {"pr": False, "missing": time.time() - 2 * H, "tried": time.time() - 2 * H})) as G:
+    G.one(); G.skew += 3601.0; G.one()
+    check("17 a 404 on the comments of an issue that exists does not stop the pull request being asked for", pr_reads(G, N17j) >= 1, G.calls)
+
+# the retry is hourly for the first day of misses, then daily
+N17k = 160; A17k = f"github:acme/widgets#{N17k}"
+g17k = {"/user": {"login": "hubaccount"}, **pr9(N17k)}; g17k[f"/repos/acme/widgets/pulls/{N17k}"] = "404"
+for miss_ago, tried_ago, reads, what in ((30 * H, 2 * H, 0, "missing for more than a day, looked at two hours ago: not asked"), (30 * H, 25 * H, 1, "missing for more than a day, looked at 25 hours ago: asked"),
+                                         (23 * H, 2 * H, 1, "missing for 23 hours, looked at two hours ago: asked (still hourly)")):
+    with GH(g17k, [A17k], saved=saved17(A17k, {"pr": False, "missing": time.time() - miss_ago, "tried": time.time() - tried_ago})) as G:
+        G.one()
+        check(f"17 {what}", pr_reads(G, N17k) == reads, (reads, G.calls))
+with GH(g17k, [A17k], saved=saved17(A17k, {"pr": False, "missing": time.time() - 30 * H, "tried": time.time() - 23 * H})) as G:
+    G.one(); G.skew += 2 * H; G.one()
+    check("17 …and the daily wait runs from the last look: 25 hours after it, not before", pr_reads(G, N17k) == 1, G.calls)
+
+# an issue anchor whose state is loaded before the first pull request read (a restart) is not asked for as a pull request at all
+N17l = 161; A17l = f"github:acme/widgets#{N17l}"; PP17l = f"/repos/acme/widgets/pulls/{N17l}"
+g17l = {"/user": {"login": "hubaccount"}, **pr9(N17l)}; g17l[PP17l] = "404"; g17l[f"/repos/acme/widgets/issues/{N17l}"].pop("pull_request")
+sv17l = saved17(A17l, {"pr": None}); sv17l["github"]["state"][A17l]["pr"] = False; del sv17l["github"]["ci"][A17l]
+with GH(g17l, [A17l], saved=sv17l) as G:
+    G.one(); G.skew += 700.0; G.one()
+    check("17 an issue whose saved state says it is one is not asked for as a pull request on the first pass either", pr_reads(G, N17l) == 0, G.calls)
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
