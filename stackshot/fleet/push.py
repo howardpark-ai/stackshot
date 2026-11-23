@@ -62,6 +62,7 @@ from stackshot.fleet import stale_notice as _stale  # noqa: E402  — the screen
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  — a permanent session id → the session's name now
 
 SRC = "msg" if os.environ.get("ANCHOR_PUSH_SOURCE") == "msg" else "hub"
+KIND = _inbox.clean_kind(os.environ.get("ANCHOR_PUSH_KIND"))     # the front gate's kind of the notice this process pushes (telling.tell_woken sets it): stored on the line, "" for a sender that gives none
 A = str(_cfg.state("anchor-hub"))
 Q = os.path.join(A, "queue-msg" if SRC == "msg" else "queue")
 PAUSE = os.path.join(A, f"paused-{SRC}.json")
@@ -156,7 +157,7 @@ class _queue_lock:
 def enqueue(name: str, text: str, sender: str = "") -> None:
     with _queue_lock():
         with open(os.path.join(Q, f"{name}.jsonl"), "a", encoding="utf-8") as f:
-            f.write(json.dumps({"t": time.time(), "text": text, "from": sender}) + "\n")
+            f.write(json.dumps({"t": time.time(), "text": text, "from": sender, **({"kind": KIND} if KIND else {})}) + "\n")      # a row with no kind is read as it always was (inbox.kind_of)
 
 
 def registry() -> list[dict]:
@@ -234,7 +235,7 @@ def deliver_inbox(name: str, text: str, sender: str = "", ref: str = "") -> int:
     """A pane the inbox serves: the line waits in the server's inbox for the pane's machine. exit 0 delivered · 1 waiting. `ref` = the target as the caller wrote it
     (a permanent session id, a name, a transcript id): the inbox stores the permanent id it resolves to on the line; `name` is the address it was turned into."""
     inbox = _inbox
-    iid = inbox.put(ref or name, text, SRC, sender=sender)
+    iid = inbox.put(ref or name, text, SRC, sender=sender, kind=KIND)
     if paused(name):
         print(f"queued (paused for a reboot) → {name}"); return 1
     t0 = time.time()
@@ -388,13 +389,24 @@ def flush(name: str, digest: "_inbox.Digest | None" = None) -> int:
                 os.remove(qf)
     if not keep:
         print(f"dropped {len(dropped)} stale → {name}"); return 0
+    head = "[stackshot]" if SRC == "msg" else "[anchor]"      # the header says what kind of queue this is: the message queue holds stackshot messages, board relays and keeper prompts, none of them an anchor change (a [board] notice arrived under "[anchor] 1 queued…")
     items = [_inbox.label(str(e.get("from") or ""), e["text"]) for e in keep]
-    # the header says what kind of queue this is: the message queue holds stackshot messages, board relays and keeper
-    # prompts, none of them an anchor change (a [board] notice arrived under "[anchor] 1 queued…")
-    head = "[stackshot]" if SRC == "msg" else "[anchor]"
+    filed = _inbox.filed_as_fyi(digest, name, items, [_inbox.kind_of(e) for e in keep])      # no line asks him for anything and he is not there for this pane: those lines ride its next turn, they start none
+    if filed:
+        left = [e for i, e in enumerate(keep) if i not in set(filed)]      # a failed filing leaves the lines it did not reach: they go out as a turn, the filed ones never twice
+        with _queue_lock():
+            if left:
+                tmp = qf + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write("".join(json.dumps(r) + "\n" for r in left))
+                os.replace(tmp, qf)
+            else:
+                os.remove(qf)
+        print(f"filed {len(filed)} as an fyi → {name}")
+        if not left:
+            return 0
+        keep = left; items = [_inbox.label(str(e.get("from") or ""), e["text"]) for e in keep]
     text = f"{head} {len(items)} queued while you were away:\n" + "\n".join(items)
-    if _inbox.filed_as_fyi(digest, name, items):        # no line asks him for anything and he is not there for this pane: the lines ride its next turn, they start none
-        os.remove(qf); print(f"filed {len(items)} as an fyi → {name}"); return 0
     if CSE.match(name):                     # a cloud session is retried at most once per rescan; a session that is gone keeps its queue
         ok, _ = cloud_send(name, text)
         if not ok:

@@ -10,7 +10,10 @@ cannot fetch held lines.
   4  no line carries his mark and he is there: still an fyi (presence alone is not a need); a line about an item he asked the agent to tell him about is a turn, there or not
   5  what is never filed: the digest of a background agent, of a front agent whose hook cannot fetch held lines, a single line, a hook that fails: handed out as before, no line lost
   6  push.flush takes the same hook: filed lines are dropped from the queue and no send is made; a digest that is a turn is sent as before (not live here: exit 3, the queue kept)
-  7  the server's two paths into inbox.take (the drain and the poll) give it the hook
+  7  the server's two paths into inbox.take (the drain and the poll) give it the hook and the filed-lines report (the hand-off's delivery)
+  8  a line of an exempt kind (hand-off, wake, answer, stall, comment) is never filed: a digest with one is a turn, marked or not, he there or not; by the kind stored with the line or, with none, by the shape of the notice;
+     the kind reaches the line (tell_woken gives push.py the gate's kind, put and enqueue keep it)
+  9  filing is no all-or-nothing: a line that cannot be filed ends the filing, the lines before it are gone and never handed out again, the others go out as one turn; the filed lines are reported (on_filed, the hand-off's ack)
 
     tests/run-suite front_digest        -> exit 0 / 1"""
 import json, os, re, sys, time, pathlib, logging
@@ -82,8 +85,8 @@ def reset():
         if p.name != "clients.json": p.unlink()
     for w in UID: unstamp(w)
     for p in pathlib.Path(push.Q).glob("*"): p.unlink()
-def put(who, *texts):
-    return [inbox.put(UID[who], t, "msg", sender="home-peer") for t in texts]
+def put(who, *texts, kind=""):
+    return [inbox.put(UID[who], t, "msg", sender="home-peer", kind=kind) for t in texts]
 def take(who, digest=HOOK):
     return inbox.take({UID[who]: who}, known={UID[who]}, only_src="msg", digest=digest)
 def held_text(who="home-front"):
@@ -142,12 +145,12 @@ check("5 a front agent whose hook cannot fetch held lines gets the digest as a t
 reset(); put("home-front", PLAIN[0])
 tk = take("home-front")
 check("5 a single line is no digest: handed out as it always was", len(tk) == 1 and tk[0]["text"].startswith("from: home-peer") and held.count("home-front") == 0, tk)
-def broken(name, lines): raise RuntimeError("the hook failed")
+def broken(name, lines, kinds): raise RuntimeError("the hook failed")
 reset(); ids = put("home-front", *PLAIN)
 tk = take("home-front", digest=broken)
 check("5 a hook that fails hands the digest out as before: nothing lost", len(tk) == 1 and tk[0]["ids"] == ids and held.count("home-front") == 0, tk)
 reset(); put("home-front", *PLAIN)
-tk = take("home-front", digest=lambda name, lines: False)
+tk = take("home-front", digest=lambda name, lines, kinds: [])
 check("5 a hook that says no hands the digest out", len(tk) == 1 and len(tk[0]["ids"]) == 3, tk)
 
 # ---- 6. push.flush takes the same hook
@@ -170,6 +173,115 @@ check("6 …a digest that is a turn (marked, and he is there) is sent: not filed
 import inspect
 from stackshot.web.routes import client_api
 check("7 the puller's drain and its poll both give inbox.take the server's hook", inspect.getsource(client_api).count("digest=_messaging.digest_fyi") == 2)
+check("7 …and both report the filed lines to the hand-off's ack (a filed hand-off notice is a delivered one)", inspect.getsource(client_api).count("on_filed=_handoff.handoff_acked") == 2)
+
+# ---- 8. a line of an exempt kind is never filed
+HANDOFF = f"[stackshot] {shown(30)} it came to you: its sender moved it, take it from here"
+WAKE = f"[stackshot] {shown(30)} is yours now: its wait ended"
+STALL = "[stackshot] you have had no turn running for 40 minutes on an open item"
+ANSWER = f"{shown(30)}: his answer, relayed: go with the second option"       # no mark, no known shape: only its stored kind says what it is
+COMMENT = f"{shown(30)}: a comment on your item, nothing more"
+def turn_of(texts, kinds, away=True):
+    """Put the lines (each with the kind it is stored with, "" = none) in the inbox of home-front, take them with the server's hook → (deliveries, fyi lines filed)."""
+    reset()
+    if not away: stamp("home-front")
+    for t, k in zip(texts, kinds): inbox.put(UID["home-front"], t, "msg", sender="home-peer", kind=k)
+    tk = take("home-front")
+    return tk, held.count("home-front")
+for label, text, kind in (("a hand-off notice", HANDOFF, ""), ("a wake notice", WAKE, ""), ("a stall notice", STALL, ""),
+                          ("a relayed board answer", ANSWER, "exempt"), ("a comment notice", COMMENT, "exempt"), ("a hand-off notice with its kind stored", HANDOFF, "exempt")):
+    tk, n = turn_of([PLAIN[0], text], ["", kind])
+    check(f"8 {label} in a digest, no mark, he is away: a turn, nothing filed", len(tk) == 1 and len(tk[0]["ids"]) == 2 and text in tk[0]["text"] and n == 0 and inbox.waiting() != {}, (tk, n))
+    tk, n = turn_of([text, PLAIN[2]], [kind, ""], away=False)
+    check(f"8 …the same with him there for the pane: a turn, nothing filed", len(tk) == 1 and len(tk[0]["ids"]) == 2 and n == 0, (tk, n))
+tk, n = turn_of([f"{MARK} {PLAIN[0]}", COMMENT], ["", "exempt"])
+check("8 an exempt line beside a marked one while he is away: still a turn: the exempt line is never filed", len(tk) == 1 and n == 0, (tk, n))
+for kind in ("progress", "close", "message", "", "stuck"):
+    tk, n = turn_of([PLAIN[0], PLAIN[2]], [kind, ""])
+    check(f"8 control: lines of kind {kind or 'none'!r} that ask nothing are still filed (the hook files what asks nothing of him)", tk == [] and n == 2, (tk, n))
+reset()
+check("8 the hook reads a tag as well as a kind: a line stored as 'handoff' or 'comment' is exempt", all(HOOK("home-front", PLAIN[:2], [tg, ""]) == [] for tg in ("handoff", "wake", "answer", "stall", "comment")) and held.count("home-front") == 0)
+check("8 inbox.kind_of: the stored kind first; the shape of a stall, wake or hand-off notice is exempt; anything else is unknown", (inbox.kind_of({"kind": "close", "text": HANDOFF}), inbox.kind_of({"text": HANDOFF}), inbox.kind_of({"text": WAKE}), inbox.kind_of({"text": STALL}),
+       inbox.kind_of({"text": PLAIN[0]}), inbox.kind_of({"kind": "Bad Kind!", "text": PLAIN[0]})) == ("close", "exempt", "exempt", "exempt", "", ""))
+# the kind reaches the line: put and enqueue keep it, tell_woken gives push.py the gate's kind
+reset(); iid = inbox.put(UID["home-front"], PLAIN[0], "msg", sender="home-peer", kind="exempt"); iid2 = inbox.put(UID["home-front"], PLAIN[1], "msg", sender="home-peer")
+stored = {r["id"]: r for r in inbox.peek([iid, iid2])}
+check("8 inbox.put stores the kind with the line, and no key when none is given (a line as it always was)", stored[iid].get("kind") == "exempt" and "kind" not in stored[iid2], stored)
+check("8 push.py reads $ANCHOR_PUSH_KIND through the same cleaning (a word, never free text)", push._inbox.clean_kind("exempt") == "exempt" and push._inbox.clean_kind("a b; rm") == "" and push._inbox.clean_kind(None) == "")
+import subprocess as _sp, threading
+class _Done:
+    returncode = 0; stdout = "inbox → x\n"; stderr = ""
+seen_env = []
+def fake_run(cmd, **kw):
+    seen_env.append(kw.get("env", {}).get("ANCHOR_PUSH_KIND")); return _Done()
+real_run = _sp.run; _sp.run = fake_run
+try:
+    for tag, hint, want in (("handoff", "", "exempt"), ("wake", "", "exempt"), ("answer", "", "exempt"), ("stall", "", "exempt"), ("comment", "", "exempt"),
+                            ("owner", "close", "close"), ("owner", "", "progress"), ("wake", "progress", "progress")):
+        seen_env.clear()
+        telling.FRONT_HINT.kind = hint
+        try: th = telling.tell_woken(shown(30), "team-back", f"[stackshot] {shown(30)} a notice", tag=tag)
+        finally: telling.FRONT_HINT.kind = ""
+        if th: th.join(20)
+        check(f"8 tell_woken gives push.py the gate's kind: tag {tag!r}{' hint ' + repr(hint) if hint else ''} → {want}", seen_env == [want], seen_env)
+finally:
+    _sp.run = real_run
+
+# ---- 9. filing is no all-or-nothing, and a line is never delivered twice
+real_fyi = telling.front_fyi
+def fyi_failing_at(n, how="refuse"):
+    """front_fyi as it is, but the n-th call (0-based) cannot file its line."""
+    calls = []
+    def f(agent, note, *a, **kw):
+        calls.append(note)
+        if len(calls) - 1 == n:
+            if how == "raise": raise RuntimeError("the held store failed")
+            return ("held", "its hook cannot fetch held lines")
+        return real_fyi(agent, note, *a, **kw)
+    return f
+LINES = [f"{shown(30)}: line one, nothing to do", "line two, a notice about nothing", f"{shown(30)}: line three, the release went out"]
+for how in ("refuse", "raise"):
+    reset(); ids = put("home-front", *LINES)
+    telling.front_fyi = fyi_failing_at(1, how)
+    try: tk = take("home-front")
+    finally: telling.front_fyi = real_fyi
+    check(f"9 filing line 2 fails ({how}): line 1 is filed and gone, lines 2 and 3 go out as one turn, line 1 is not in it", len(tk) == 1 and tk[0]["ids"] == ids[1:] and "line one" not in tk[0]["text"] and "line two" in tk[0]["text"] and "line three" in tk[0]["text"]
+          and held.count("home-front") == 1 and "line one" in held_text() and "line two" not in held_text(), (tk, held.count("home-front"), held_text()))
+    check(f"9 …the filed line is out of the inbox, the others stay leased until the puller confirms them", set(x["id"] for x in inbox._items()) == set(ids[1:]) and set(inbox._leases()) == set(ids[1:]), (inbox._items(), inbox._leases()))
+    check(f"9 …a second poll hands nothing out again (no line twice)", take("home-front") == [], inbox.waiting())
+reset(); ids = put("home-front", *LINES)
+telling.front_fyi = fyi_failing_at(0)
+try: tk = take("home-front")
+finally: telling.front_fyi = real_fyi
+check("9 filing line 1 fails: nothing is filed and the whole digest is a turn", len(tk) == 1 and tk[0]["ids"] == ids and held.count("home-front") == 0, tk)
+reset(); ids = put("home-front", *LINES)
+telling.front_fyi = fyi_failing_at(2)
+try: tk = take("home-front")
+finally: telling.front_fyi = real_fyi
+check("9 filing line 3 fails: lines 1 and 2 are filed, the third goes out alone as itself (no digest header)", len(tk) == 1 and tk[0]["ids"] == ids[2:] and tk[0]["text"].startswith("from: home-peer") and "queued while you were away" not in tk[0]["text"] and held.count("home-front") == 2, (tk, held.count("home-front")))
+# push.flush: the same
+reset(); queue("home-front", *LINES)
+telling.front_fyi = fyi_failing_at(1)
+try: rc = push.flush("home-front", digest=HOOK)
+finally: telling.front_fyi = real_fyi
+rest = [json.loads(ln)["text"] for ln in qf("home-front").read_text().splitlines()] if qf("home-front").exists() else []
+check("9 push.flush: line 1 filed and gone from the queue, lines 2 and 3 are what it tries to send (not live here: exit 3, the queue keeps those two)", rc == 3 and rest == LINES[1:] and held.count("home-front") == 1, (rc, rest, held.count("home-front")))
+# the report of the filed lines (the hand-off's ack)
+reset(); ids = put("home-front", *LINES); reported = []
+tk = inbox.take({UID["home-front"]: "home-front"}, known={UID["home-front"]}, only_src="msg", digest=HOOK, on_filed=lambda lines: reported.append([x["id"] for x in lines]))
+check("9 every filed line is reported to on_filed once, as stored (the hand-off's delivery is marked as the ack route marks it)", tk == [] and reported == [ids], (tk, reported))
+reset(); ids = put("home-front", *LINES); reported = []
+telling.front_fyi = fyi_failing_at(2)
+try: tk = inbox.take({UID["home-front"]: "home-front"}, known={UID["home-front"]}, only_src="msg", digest=HOOK, on_filed=lambda lines: reported.append([x["id"] for x in lines]))
+finally: telling.front_fyi = real_fyi
+check("9 …only the lines that were filed are reported, never the one handed out", reported == [ids[:2]] and tk[0]["ids"] == ids[2:], (reported, tk))
+def bad_report(lines): raise RuntimeError("the report failed")
+reset(); ids = put("home-front", *LINES)
+tk = inbox.take({UID["home-front"]: "home-front"}, known={UID["home-front"]}, only_src="msg", digest=HOOK, on_filed=bad_report)
+check("9 a report that fails changes nothing: the lines are filed and gone", tk == [] and held.count("home-front") == 3 and inbox.waiting() == {}, (tk, held.count("home-front")))
+reset(); put("home-front", *LINES); reported = []
+tk = inbox.take({UID["home-front"]: "home-front"}, known={UID["home-front"]}, only_src="msg", digest=lambda n, l, k: [], on_filed=lambda lines: reported.append(1))
+check("9 nothing filed, nothing reported", len(tk) == 1 and reported == [], (tk, reported))
 
 reset()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

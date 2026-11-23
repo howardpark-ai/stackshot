@@ -1701,6 +1701,7 @@ def tell_woken(gid: str, owner: str, note: str, tag: str = "wake", result: "dict
         return None
     if front_gate(gid, owner, note, tag, getattr(FRONT_HINT, "kind", "")):
         return None
+    kind = getattr(FRONT_HINT, "kind", "") or FRONT_TAG_KIND.get(tag, "progress")      # the gate's own kind, read here: the push thread below has no hint of its own
     try:
         told = getattr(HO_STATE, "told", None)      # step 2: what this write has told, so its hand-off notice does not double it
         if told is not None:
@@ -1710,7 +1711,7 @@ def tell_woken(gid: str, owner: str, note: str, tag: str = "wake", result: "dict
     def run() -> None:
         try:
             r = subprocess.run([*_interp.resilient(PUSH), "--from", NAME, owner, note], capture_output=True, text=True, timeout=110,
-                               env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg"})
+                               env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg", "ANCHOR_PUSH_KIND": kind})      # push.py stores the kind on the queued line: the "N queued while you were away" digest never files an exempt one
             out = (r.stdout.strip().splitlines() or [""])[-1]
             err = (r.stderr.strip().splitlines() or [""])[-1]
             if result is not None:
