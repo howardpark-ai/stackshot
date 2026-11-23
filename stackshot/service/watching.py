@@ -230,18 +230,19 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
 
 def watch_text(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> tuple[str, str, list[str]] | None:
     """The message to one session about the items whose wait ended and are now its move: (the text, the mark a front agent takes or "", the item ids), None for no rows. The mark goes only on a front
-    agent's message about an item that waits on his decision or whose open step is its own: a wait that ends on a front agent otherwise passes the item to the project's builder (watch_fire), and in a
-    project with none the front agent is told without the mark."""
+    agent's message about an item that waits on his decision: that is the one wake with something for the person to do. An item whose open step is the front agent's own is its move, not his: told
+    without the mark, as a wait that ends on a front agent otherwise passes the item to the project's builder (watch_fire), and in a project with none the front agent is told without the mark too. The mark
+    is not what delivers the line: a watch notice is exempt from the front gate (telling.FRONT_TAG_KIND), so it is pushed to a front agent, marked or not."""
     if not rows:
         return None
     msg_rows = [(_gh.shown(g), what, f"{it.get('subject') or ''} ({(it.get('metadata') or {}).get('project') or 'no project'})", _telling.notice_link(g)) for g, it, what in rows]
-    marked = any(_telling.front_keeper(sid, str((m := it.get("metadata") or {}).get("project") or ""))[0] and (_waits_decision(m) or _own_step(m, sid)) for _g, it, _w in rows)      # per row, as each row's project reads the recipient (a keeper of one project is a front agent of another): a front agent takes what is his to do, a wake that asks him nothing is not marked for him
+    marked = any(_telling.front_keeper(sid, str((m := it.get("metadata") or {}).get("project") or ""))[0] and _waits_decision(m) for _g, it, _w in rows)      # per row, as each row's project reads the recipient (a keeper of one project is a front agent of another): the mark is for what he has to decide; a wake that is the agent's own move is not marked
     return _watch.message(msg_rows), (_FOR_OWNER if marked else ""), [g for g, *_ in rows]
 
 
 def watch_tell(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> None:
     """One message to one session about every item whose wait ended and is now its move (several items for one recipient in one pass are one message, a single one a single line).
-    A front agent gets the mark a front agent takes. A delivery that fails is recorded on the items (tell_woken)."""
+    A front agent gets the mark only for an item that waits on his decision. A delivery that fails is recorded on the items (tell_woken)."""
     if not sid:
         print(f"watch: {', '.join(g for g, *_ in rows)} woke with nobody to tell", file=sys.stderr, flush=True)
         return
