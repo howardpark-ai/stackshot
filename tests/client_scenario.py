@@ -530,6 +530,19 @@ try: st, ct, b = cr._client_get("anchors-record", {}); j = json.loads(b)
 finally: cr._RECORDS_BYTES = _by
 check("anchors-record: past the byte bound the later projects are left out and truncated is true", st == 200 and j["truncated"] is True and list(j["anchors"]) == ["projects/alpha"], b[:200])
 
+# projects-record: the project record alone, the value state-files carries as `projects`
+PR_ = {"schema": 1, "generated": "2030-01-01T00:00:00Z", "projects": {"p-e1": {"id": "p-e1", "key": "projects/alpha", "keeper": "sparrow", "agents": {}}}, "by_key": {"projects/alpha": "p-e1"}}
+(T / "state").mkdir(exist_ok=True); PRF_ = T / "state/projects.json"
+PRF_.write_text(json.dumps(PR_)); st, ct, b = cr._client_get("projects-record", {}); sf_ = json.loads(cr._client_get("state-files", {})[2])
+check("projects-record: the file as published, as 200 JSON", st == 200 and ct == "application/json" and json.loads(b) == PR_, (st, ct, b[:200]))
+check("projects-record: equal to what state-files carries under projects, and to no other part of it", json.loads(b) == sf_["projects"] and set(json.loads(b)) == set(PR_) and "fleet" not in json.loads(b) and "host" not in json.loads(b), (b[:200], str(sf_)[:200]))
+PRF_.write_text(json.dumps({**PR_, "generated": "2031-02-02T00:00:00Z"})); st, ct, b = cr._client_get("projects-record", {})
+check("projects-record: follows the file at each call, and still equals state-files", st == 200 and json.loads(b)["generated"] == "2031-02-02T00:00:00Z" and json.loads(b) == json.loads(cr._client_get("state-files", {})[2])["projects"], (st, b[:200]))
+PRF_.write_text("{not json"); st, ct, b = cr._client_get("projects-record", {}); check("projects-record: a file that does not read is 503, not an empty answer", st == 503 and ct.startswith("text/plain") and "Traceback" not in b and "project record" in b, (st, b))
+PRF_.write_text("[1]"); st, ct, b = cr._client_get("projects-record", {}); check("projects-record: a file that is no object is 503", st == 503, (st, b))
+PRF_.unlink(); st, ct, b = cr._client_get("projects-record", {}); check("projects-record: no file is 503, as state-files carries null for it", st == 503 and json.loads(cr._client_get("state-files", {})[2])["projects"] is None, (st, b))
+PRF_.write_text(json.dumps(PR_))
+
 # the anchors that name an item come with it (anchor_scope, the model's own reader): a project-wide anchor names no item
 (T / "store/anchors.json").write_text(json.dumps({**AN, "projects/beta": [{"url": "https://github.com/o/r/pull/7", "items": ["a2", "a1"], "added": 1700000005.0, "by": "x"}, {"url": "https://example.test/z", "items": ["a1"], "added": 1700000006.0, "by": "y"}]}))
 j = json.loads(cr._client_get("item-record", {"key": "a2"})[2]); a_ = j["anchors"]
@@ -548,7 +561,7 @@ check("no anchors file: the reads answer with no anchors", json.loads(cr._client
 (T / "store/anchors.json").write_text(json.dumps(AN))
 
 with TestClient(app) as c:
-    for path, prm in (("item-record", {"key": "a2"}), ("open-records", {"key": U}), ("anchors-record", {})):
+    for path, prm in (("item-record", {"key": "a2"}), ("open-records", {"key": U}), ("anchors-record", {}), ("projects-record", {})):
         r = c.get(f"/client/{path}", params=prm); check(f"http: {path} without a token → 401", r.status_code == 401, r.status_code)
         r = c.get(f"/client/{path}", params=prm, headers={"Authorization": "Bearer " + "y" * 43}); check(f"http: {path} with an unknown token → 401", r.status_code == 401, r.status_code)
     r = c.get("/client/item-record", params={"key": "a2"}, headers=H); check("http: item-record with the machine's token is the read's own answer", r.status_code == 200 and r.text == cr._client_item_record("a2")[2] and r.headers["cache-control"] == "no-store", r.text[:150])
@@ -556,6 +569,7 @@ with TestClient(app) as c:
     r = c.get("/client/item-record", params={"key": "a999"}, headers=H); check("http: item-record with an unknown id → 404", r.status_code == 404, r.status_code)
     r = c.get("/client/open-records", params={"key": U}, headers=H); check("http: open-records with the machine's token", r.status_code == 200 and [x["id"] for x in r.json()["items"]] == ["a1", "a2", "a3", "a4", "a7"], r.text[:150])
     r = c.get("/client/anchors-record", headers=H); check("http: anchors-record with the machine's token", r.status_code == 200 and r.json()["anchors"] == AN, r.text[:150])
+    r = c.get("/client/projects-record", headers=H); check("http: projects-record with the machine's token is the read's own answer, and the value state-files carries", r.status_code == 200 and r.text == cr._client_projects_record()[2] and r.json() == PR_ == c.get("/client/state-files", headers=H).json()["projects"] and r.headers["cache-control"] == "no-store", r.text[:150])
     r = c.get("/client/open-records", params={"key": U}, headers=H); check("http: open-records is the read's own answer", r.text == cr._client_open_records(U)[2], r.text[:150])
     _real_or = cr._client_open_records; _loop_seen = []
     def _probe_or(k):
@@ -574,15 +588,15 @@ with TestClient(app) as c:
     r = c.get("/client/item-record", params={"key": "a2"}, headers={"Authorization": "Bearer " + other}); check("http: any machine's token reads, as for the other client reads (the gate is the machine token and nothing else)", r.status_code == 200 and r.json()["id"] == "a2", r.status_code)
     client.revoke("box-other")
     for what_, hd_x in (("a revoked token", {"Authorization": "Bearer " + other}), ("a Basic credential", {"Authorization": "Basic " + tok}), ("the token as a bare Authorization value", {"Authorization": tok}), ("the token in a cookie", {"Cookie": "token=" + tok, "stackshot_token": tok}), ("a short bearer", {"Authorization": "Bearer short"})):
-        for path, prm in (("item-record", {"key": "a2"}), ("open-records", {"key": U}), ("anchors-record", {})):
+        for path, prm in (("item-record", {"key": "a2"}), ("open-records", {"key": U}), ("anchors-record", {}), ("projects-record", {})):
             r = c.get(f"/client/{path}", params=prm, headers=hd_x); check(f"http: {path} with {what_} → 401, no record in the answer", r.status_code == 401 and "subject" not in r.text, (r.status_code, r.text[:80]))
-    for path, prm in (("item-record", {"key": "a2", "token": tok}), ("open-records", {"key": U, "token": tok}), ("anchors-record", {"token": tok})):
+    for path, prm in (("item-record", {"key": "a2", "token": tok}), ("open-records", {"key": U, "token": tok}), ("anchors-record", {"token": tok}), ("projects-record", {"token": tok})):
         r = c.get(f"/client/{path}", params=prm); check(f"http: {path} with the token in the query string → 401", r.status_code == 401, r.status_code)
-    r = c.get("/client/nothing", headers=H); check("http: the 404 list names the new reads", all(w in r.text for w in ("item-record?key=<item id>", "open-records?key=<session>", "anchors-record")), r.text[:200])
+    r = c.get("/client/nothing", headers=H); check("http: the 404 list names the new reads", all(w in r.text for w in ("item-record?key=<item id>", "open-records?key=<session>", "anchors-record", "projects-record")), r.text[:200])
 _usage_text = open(client.__file__, encoding="utf-8").read().split('"""', 2)[1]       # the usage text is the module's opening string, read as text
 _new_lines = _usage_text.split("client.py get item-record")[1].split("client.py get inbox-holds")[0]
-check("client.py knows the three reads and its usage text names them, with no machine and no session manager in the new lines", all(w in client.READS for w in ("item-record", "open-records", "anchors-record"))
-      and all(f"client.py get {w}" in _usage_text for w in ("item-record", "open-records", "anchors-record")) and "sala" not in _new_lines.casefold() and "hp-" not in _new_lines)
+check("client.py knows the four reads and its usage text names them, with no machine and no session manager in the new lines", all(w in client.READS for w in ("item-record", "open-records", "anchors-record", "projects-record"))
+      and all(f"client.py get {w}" in _usage_text for w in ("item-record", "open-records", "anchors-record", "projects-record")) and "sala" not in _new_lines.casefold() and "hp-" not in _new_lines)
 (T / "store/anchors.json").write_text("{}")
 for n in (9,): (T / f"store/a/{n}.json").unlink()        # the later sections count the fixture's items
 
