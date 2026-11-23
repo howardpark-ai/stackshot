@@ -269,12 +269,15 @@ check("2p2: …while the passive 'is stopped' with 'complete' is still a hand-ba
 # a status that says what is missing, and an opening yes or no beside a fixed phrase, are no hand-back: delivered to the agent that asked, never written onto the item
 for text in ("a1: done, but nothing is live", "a1: nothing was removed", "a1: nothing merged", "a1: none deployed", "a1: no PR merged", "a1: zero merged", "a1: closed, nothing deployed",
              "a1: Done except the docs", "a1: merged, except the docs", "a1: partly done", "a1: half merged", "a1: done, but the port is in use", "a1: the suites are red",
-             "a1: Yes, finished. FYI.", "a1: FYI: no, merged", "a1: for the record: yes, closed", "a1: FYI, yes, closed"):
+             "a1: Yes, finished. FYI.", "a1: FYI: no, merged", "a1: for the record: yes, closed", "a1: FYI, yes, closed",
+             "a1: No changes were merged.", "a1: No change landed.", "a1: Merged, no changes were deployed.", "a1: 3 of 5 merged", "a1: merged, only the docs", "a1: mostly done",
+             "a1: done, the job timed out", "a1: Done, no errors, but nothing is live"):
     asked_present(); n0 = len(pushes()); out = msg(FRONT, text, BACK); settle()
     check(f"2p3: {text!r} is no hand-back: delivered to the agent that asked, not written onto the item", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, (out, pushes()[n0:]))
 # …and the plain reports of the same words stay hand-backs: written onto the item, no turn
 for text in ("a1: No change.", "a1: No changes.", "a1: no unit changed", "a1: nothing changed", "a1: Taken.", "Taken (a1).", "a1: Taken (PR 12).", "a1: Done (abc1234).", "a1: PR 12 merged and live",
-             "a1: item complete", "a1: the watch is stopped and the item is closed", "a1: FYI, the item is closed.", "a1: No-op, unchanged."):
+             "a1: item complete", "a1: the watch is stopped and the item is closed", "a1: FYI, the item is closed.", "a1: No-op, unchanged.",
+             "a1: Done, no errors.", "a1: Merged without conflicts.", "a1: Closed without merging.", "a1: Merged, nothing to report.", "a1: Taken (PR 12 and PR 13).", "a1: Taken (PRs 12, 13 and 14)."):
     asked_present(); n0 = len(pushes()); out = msg(FRONT, text, BACK); settle()
     check(f"2p4: {text!r} is a hand-back: written onto the item, not delivered", out.startswith("Not delivered: written onto a1") and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
 asked_present(); n0 = len(pushes()); out = msg(FRONT, "Taken.", BACK); settle()

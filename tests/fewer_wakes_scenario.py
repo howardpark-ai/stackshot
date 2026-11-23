@@ -154,6 +154,13 @@ DELIVERED = [          # every shape the review named, and the earlier asks: non
     # a status that says what is missing is trouble, whatever status word it holds
     "done, but nothing is live", "nothing was removed", "nothing merged", "none deployed", "no PR merged", "zero merged", "closed, nothing deployed", "Done except the docs", "merged, except the docs",
     "partly done", "half merged", "partial merge", "merged without the docs", "no one merged it", "done, but the port is in use", "the suites are red; fixed in 010cc0d", "Yes, finished. FYI.",
+    # "no change(s)" is a status only when no status word follows it: these say that nothing happened
+    "No changes were merged.", "No changes deployed.", "No change landed.", "No change merged.", "Merged, no changes were deployed.", "No change was released.", "no changes are live", "No change got fixed.",
+    # a part of the work only, or a step that did not happen
+    "3 of 5 merged", "merged 3/5", "only a1 merged", "merged, only the docs", "merged minus the docs", "merged, other than the docs", "merged apart from the docs", "merged in part", "mostly done",
+    "done for now", "merged; the docs are omitted", "done; two steps skipped", "the deploy timed out; fixed", "the job errored; fixed", "aborted; closed", "the host is unreachable; closed",
+    "degraded; fixed", "unmerged; closed", "abandoned; closed", "superseded; closed", "Done, no regressions", "Done, no errors, but nothing is live", "Done, no conflicts, but the port is in use",
+    "Merged, no issues, still red", "Closed without merging, but the unit is not removed",
 ]
 HELD = [               # a plain status report, every sentence one of the shapes
     "PR 23 is live.", "a1 merged and deployed.", "PR #18 is up; the suites pass.", "fixed in 010cc0d. Suites are green.", "Recorded on the item. No change to the unit.", "released; closed.",
@@ -162,7 +169,16 @@ HELD = [               # a plain status report, every sentence one of the shapes
     "[for Oliver] a1: Taken.", "the work is finished and merged", "the watch is stopped.", "a1: the old unit is now stopped and removed", "No change. Nothing changed since a1.",
     "No change.", "No changes.", "no unit changed", "nothing changed", "no config changed", "PR 12 merged and live", "item complete", "FYI, the item is closed.", "Done (abc1234).",
     f"Taken (board#{BID_A}).", "Taken (PR 12).", "Taken (a1, PR 12).", "No-op, unchanged.", "no-change, merged",       # the ids leave an empty bracket; "no-op" is no answer
+    f"Taken (board#{BID_A}, board#{BID_A}).", "Taken (a1 and a2).", "Taken (PRs 12 and 13).", "Taken [a1, PR 12 and PR 13].",       # several ids in one bracket leave only separators and "and"
+    "No changes in the unit; merged.", "No change to the unit. Live.",           # a status word that does not follow "no change" directly
+    # clean bills: a phrase that says nothing went wrong, beside a status
+    "Done, no issues.", "Done, no conflicts.", "Done, no errors.", "Merged, no failures.", "Done, no follow-ups.", "Done; no incidents.", "Merged, no downtime.", "Suites green, no flakes.",
+    "Merged; nothing to report.", "Closed, nothing left to do.", "Done; nothing else open.", "Merged and live, nothing pending.", "Merged, none pending.", "Merged without conflicts.",
+    "Closed without merging.", "closed without merging", "Merged, no error. Live.",
 ]
+check("reports: a clean bill is no trouble only where no other word of trouble stands in the sentence", reports.report_doubt("Done, no errors, but nothing is live").startswith("a word of trouble")
+      and reports.report_doubt("Done, no issues") == "" and reports.report_doubt("Done, no regressions").startswith("a word of trouble") and reports.report_doubt("Closed without merging, still red").startswith("a word of trouble"),
+      [reports.report_doubt(t) for t in ("Done, no errors, but nothing is live", "Done, no issues", "Done, no regressions", "Closed without merging, still red")])
 check("reports: every shape of ask, trouble, waiting, naming and plan is delivered", [t for t in DELIVERED if reports.is_report(t, FRONT)] == [], [(t, reports.report_doubt(t, FRONT)) for t in DELIVERED if reports.is_report(t, FRONT)])
 NOTED_NOT = ["a1: , should I deploy the unit now? I need your go.", "a1: , the suite failed on the runner", "a1: , see ```x```", "a1: , please look at the page", "a1: , the page awaits Oliver",
              "Yes, finished.  ", "a1: , yes, closed", "a1: , yes, finished. ", ": no, merged", "a1:  yeah, done"]       # an opening yes or no is an answer even beside a fixed phrase

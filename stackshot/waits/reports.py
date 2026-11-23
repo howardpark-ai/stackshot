@@ -11,7 +11,9 @@ report only when ALL of these hold, and `report_doubt` names the first that does
   1. no `?` anywhere (a URL's included) and no fenced block; a code span only when it is an id, sha, path or short command;
   2. no word of trouble, waiting, asking, deciding or negation (TROUBLE: fail, broke, rolled back, cost, $, blocked, wait*, await*, pending, need*, must,
      should, require*, review*, ready, approve*, decid*, confirm*, please, option, not, -n't, no longer, yet, still, never, nothing (but not "nothing changed", "nothing else to say"),
-     no (but not "no change", "no unit changed"), none, no one, zero, without, except, partly, partial*, half, in use, red (a status that says what is missing: "nothing merged", "done except the docs"), plus the configured
+     no (but not "no change", "no changes", "no unit changed", and "no change(s) merged" is trouble), none, no one, zero, without, except, partly, partial*, half, in use, red, only, "3 of 5", "3/5", minus,
+     "other than", "apart from", "in part", mostly, "for now", omitted, skipped, "timed out", errored, aborted, unreachable, degraded, unmerged, abandoned, superseded (a status that says what is missing:
+     "nothing merged", "done except the docs"; the clean bills in CLEAN are no trouble: "no issues", "no conflicts", "no errors", "nothing to report", "closed without merging" ...), plus the configured
      [keywords.reports] ask_words …); a sentence that opens with an answer word ("yes, finished", "no, merged") is not a report either (see ANSWER);
   3. no word that puts the action on someone: the owner or one of his aliases, you, your, owner, keeper, a front agent's name (`avoid`);
   4. no future or conditional (will, once, when, if, then, until …): a plan is not a status;
@@ -36,13 +38,18 @@ _SPAN = re.compile(r"`([^`\n]*)`")
 _SPAN_OK = re.compile(r"[\w./#:@=~$+*-]+(?: [\w./#:@=~$+*\"'-]+){0,3}")           # an id, sha, path or short command: no prose
 _IDS = re.compile(r"\bboard#\d+|\b[a-z]\d+\b|#\d+|\b(?:pr|pull request)s? #?\d+|\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b|\b\d[\d:.,/-]*\b", re.I)
 
+# "no change(s)" is a status, but not when a status word follows it: "No changes were merged." and "No change landed." say that nothing happened.
+_NO_CHANGE_DONE = (r"(?![ ]+(?:(?:were|was|is|are|got|been) )?(?:merged|deployed|landed|live|released|pushed|fixed|removed|retired|closed|opened|completed?|finished|done|shipped|applied)(?![\w-]))")
+
 TROUBLE = (
     r"fail\w*", r"broke\w*", r"broken", r"errors?", r"roll(?:ed)?[ -]?back", r"costs?", r"cost\w+", r"blocked?\w*", r"wait\w*", r"await\w*", r"pending",
     r"need\w*", r"must", r"should", r"require\w*", r"review\w*", r"merge-ready", r"ready", r"approv\w*", r"decid\w*", r"decision\w*", r"confirm\w*",
     r"please", r"ask\w*", r"options?", r"recommend\w*", r"propos\w*", r"questions?", r"choose", r"choice", r"stuck", r"unable", r"cannot", r"can't",
     r"offline", r"down", r"problem\w*", r"urgent", r"risk\w*", r"warn\w*", r"crash\w*", r"denied", r"refus\w*", r"missing", r"revert\w*", r"regress\w*",
     r"not", r"\w+n't", r"no longer", r"yet", r"still", r"never", r"nor",            # negation: "it is not finished", "not removed yet" say the opposite of a status
-    r"nothing(?! changed| else to (?:say|add|report))", r"no(?! changes?(?![\w-])| \w+ changed(?![\w-]))", r"none", r"no one", r"zero", r"without", r"except", r"partly", r"partial\w*", r"half", r"in use", r"red",      # "nothing merged", "done except the docs", "half merged": a status that says what is missing ("nothing changed" is a status)
+    r"nothing(?! changed| else to (?:say|add|report))", r"no(?! changes?(?![\w-])" + _NO_CHANGE_DONE + r"| \w+ changed(?![\w-]))", r"none", r"no one", r"zero", r"without", r"except", r"partly", r"partial\w*", r"half", r"in use", r"red",      # "nothing merged", "done except the docs", "half merged": a status that says what is missing ("nothing changed" is a status)
+    r"only", r"of \d+", r"\d+/\d+", r"minus", r"other than", r"apart from", r"in part", r"mostly", r"for now", r"omitted", r"skipped", r"timed out", r"errored", r"aborted",
+    r"unreachable", r"degraded", r"unmerged", r"abandoned", r"superseded",          # "3 of 5 merged", "merged, only the docs", "skipped": a part of the work only, or a step that did not happen
 )
 PEOPLE = (r"you", r"you'?ll", r"your", r"yours", r"yourself", r"owner", r"keeper", r"front agents?", r"main agent", r"user")
 FUTURE = (r"will", r"would", r"going to", r"once", r"when", r"if", r"unless", r"until", r"then", r"soon", r"later", r"next", r"follows?", r"after", r"before")
@@ -56,10 +63,15 @@ _STOPPED = re.compile(r"(?<![\w-])(?:is|are|was|were|been|now|got) stopped(?![\w
 # it is a hand-back or an answer the asker is waiting for. DECISION: such a text is never a report, so it goes on to the answer rule and reaches the front agent when
 # it answers a question that agent put (a genuine answer lost is worse than a report that rides one turn). "No change" and "no \w+ changed" are no answer: the comma tells.
 _ANSWER = re.compile(r"\A\s*(?:(?:yes|yeah|yep|yup|nope|nah)\b|no\b(?!-)\s*[,:;!-])", re.I)      # "no" as a whole word: "no-op" and "no-change" are no answer
-_EMPTY_BRACKETS = re.compile(r"[(\[{][^\w()\[\]{}]*[)\]}]")          # what is left of "(#12)" or "(PR 12, abc1234)" once the ids are out
+_EMPTY_BRACKETS = re.compile(r"[(\[{](?:[^\w()\[\]{}]|\band\b)*[)\]}]", re.I)          # what is left of "(#12)", "(PR 12, abc1234)" or "(a1 and b2)" once the ids are out
+# Clean bills: a phrase that says nothing went wrong holds a word of trouble ("no", "nothing", "without") that is no trouble here. Taken out before the trouble words are
+# looked for, so any other word of trouble in the sentence still stops it ("Done, no errors, but nothing is live" is no report). They are no status shape themselves.
+CLEAN = (r"no (?:issues?|conflicts?|errors?|failures?|follow-ups?|incidents?|downtime|flakes?)", r"nothing to report", r"nothing left to do", r"nothing else open",
+         r"nothing pending", r"none pending", r"without conflicts?")
+_CLEAN_CLOSED = re.compile(r"(?<![\w-])(closed) without merging(?![\w-])", re.I)       # keeps "closed", which is the status
 
 _word = lambda alts: re.compile(r"(?<![\w-])(?:" + "|".join(alts) + r")(?![\w-])", re.I)
-_TROUBLE, _PEOPLE, _FUTURE, _STATUS = _word(TROUBLE), _word(PEOPLE), _word(FUTURE), _word(STATUS)
+_TROUBLE, _PEOPLE, _FUTURE, _STATUS, _CLEAN = _word(TROUBLE), _word(PEOPLE), _word(FUTURE), _word(STATUS), _word(CLEAN)
 
 
 def _people():
@@ -95,6 +107,7 @@ def report_doubt(text: str, avoid: tuple[str, ...] | list[str] = (), noted: bool
     for n in avoid:
         if n and n.lower() in t.lower():
             return f"the name {n}"
+    t = _CLEAN.sub(" ", _CLEAN_CLOSED.sub(r"\1", t))
     for rx, what in ((_TROUBLE, "a word of trouble or waiting"), (_people(), "a person or role named"), (_FUTURE, "a plan, not a status")):
         m = rx.search(t)
         if m:
