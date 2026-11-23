@@ -61,7 +61,7 @@ def item(i, status="open", **meta):
                                                      "updated": now - 3600, "state_updated": now - 3600, "confirmed": now - 3600, "metadata": base}))
 for i in range(1, 40):
     item(i)                                                       # items in the agent's hands, one open step each
-(T / "store/next-id").write_text("60"); (T / "store/anchors.json").write_text("{}")
+(T / "store/next-id").write_text("200"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
@@ -82,6 +82,7 @@ from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import update as _wt_update
+from stackshot.service import gates as _G
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -288,6 +289,75 @@ item(74, wait_kind="time", wake=D(2)); item(75, hold=True, wake=D(2), wait_basis
 for n in (74, 75):
     out = passes(f"stored time wait a{n}: clear_wait with an in-window wake and a window basis: the check judges nothing (no call), as the tool keeps the basis", lambda n=n: upd(n, clear_wait=True, wake=D(3), wait_basis=f"the soak ends {D(3)}"), 0)
     check(f"stored time wait a{n}: …and the tool stores the basis it kept", bool(_WT.basis_of(mt(n))), (out, mt(n)))
+
+# the check reads `held` as the update tool does: a stored until stands as the old working fields first (until_write.unfold_item), so the two cannot differ
+HELD_LOG = []
+_real_bu = _G.basis_unneeded
+def _bu_logged(it, wake, held=False):
+    HELD_LOG.append((sys._getframe(1).f_code.co_name, bool(held))); return _real_bu(it, wake, held)
+_G.basis_unneeded = _bu_logged
+@contextlib.contextmanager
+def guards(on):
+    m = _cfg.CFG.setdefault("model", {}); was = m.get("guards", "unset"); m["guards"] = on
+    try: yield
+    finally:
+        if was == "unset": m.pop("guards", None)
+        else: m["guards"] = was
+STEP = lambda: f"home-agent: apply on {D(3)}"
+for n in range(80, 120): item(n)
+for n, kw in ((80, {"until": D(2)}), (81, {"until": D(2)}), (82, {"until": f"{D(2)} 10:00"}), (83, {"until": f"{D(2)} 10:00"})): item(n, **kw)
+for k, (n, kw) in enumerate(((80, {"clear_wait": True}), (81, {"wait_kind": "none"}), (82, {"clear_wait": True}), (83, {"wait_kind": "none"}))):
+    reset(answer(True))
+    form = "date-only" if n < 82 else "timed"
+    refused(f"until form ({form}) {tuple(kw)[0]}: a dated step with a basis the tool drops and no reason is refused as without the basis, no call", lambda n=n, kw=kw: upd(n, next=STEP(), wait_basis="x", **kw), "wait_reason", i=n, calls=0)
+    refused(f"until form ({form}) {tuple(kw)[0]}: …with a reason, the model judges the step (yes refuses), one call", lambda n=n, kw=kw: upd(n, next=STEP(), wait_basis="x", wait_reason=REASON, **kw), "can be done now", i=n, calls=1)
+# gate and tool agree on `held` for every way a wait is stored (the until form included): each call that reaches both logs the same value from both
+STATES = (("until date-only", dict(until=D(2))), ("until timed", dict(until=f"{D(2)} 10:00")), ("until with a kind time", dict(until=D(2), wait_kind="time")),
+          ("until with a basis", dict(until=D(2), wait_basis={"text": f"the vendor visits {D(2)}", "by": "home-agent", "at": now})), ("wake with a hold", dict(hold=True, wake=D(2))),
+          ("wake with a kind time", dict(wait_kind="time", wake=D(2))), ("no wait", {}))
+for k, (name, kw) in enumerate(STATES):
+    n = 90 + k; item(n, **kw)
+    for j, extra in enumerate(({"clear_wait": True}, {"wait_kind": "none"})):
+        if j: n = 100 + k; item(n, **kw)
+        reset(answer(False, "the vendor has not replied")); HELD_LOG.clear()
+        try: upd(n, next=STEP(), wait_basis=f"the soak ends {D(2)}", wait_reason=REASON, **extra)
+        except ToolError: pass
+        g = [h for who, h in HELD_LOG if who == "gate_self_wait"]; t = [h for who, h in HELD_LOG if who == "update_unlocked"]
+        if "hold" in name: check(f"agreement: {name}, {tuple(extra)[0]}: a stored hold is no wait the check judges (it returns before it reads held), the tool reads it held", not g and t == [True], (g, t))
+        else: check(f"agreement: {name}, {tuple(extra)[0]}: the gate and the tool both read held, and read the same", bool(g) and bool(t) and g == t, (g, t))
+# a padded wait_kind is the same clear
+for n in (84, 85): item(n)
+reset(answer(True))
+refused("wait_kind ' none ': padded, still a clear of the wait: an in-window wake with no reason is refused, no call", lambda: upd(84, wake=D(3), wait_kind=" none "), "wait_reason", i=84, calls=0)
+refused("wait_kind ' Clear ': …in any case", lambda: upd(85, wake=D(3), wait_kind=" Clear "), "wait_reason", i=85, calls=0)
+# a wait_kind of none (or clear_wait) on an item that stores a wait clears it for the check too: the dated step is judged as the step of an item in work
+for n, kw in ((86, dict(wait_kind="time", until=D(2))), (87, dict(wait_kind="time", until=D(2)))):
+    item(n, **kw)
+reset(answer(True))
+refused("stored wait: wait_kind none clears it for the check: a dated step with a reason is judged (yes refuses), one call", lambda: upd(86, next=STEP(), wait_kind="none", wait_reason=REASON), "can be done now", i=86, calls=1)
+reset(answer(True))
+refused("stored wait: clear_wait clears it for the check: a dated step with a reason is judged (yes refuses), one call", lambda: upd(87, next=STEP(), clear_wait=True, wait_reason=REASON), "can be done now", i=87, calls=1)
+reset(answer(True))
+refused("stored wait: wait_kind none and a dated step with no reason is refused, no call", lambda: upd(86, next=STEP(), wait_kind="none"), "wait_reason", i=86, calls=0)
+# with the model guards off nothing is held: the same call as the stored time wait above (a basis the tool drops) is judged as without a basis
+item(88, wait_kind="time", until=D(2))
+for n in (88,):
+    with guards(False):
+        reset(answer(True))
+        refused(f"guards off a{n}: clear_wait with an in-window wake and a basis and no reason is refused as without the basis, no call", lambda n=n: upd(n, clear_wait=True, wake=D(3), wait_basis=f"the soak ends {D(3)}"), "wait_reason", i=n, calls=0)
+
+# the check reads the item's wait for `held` only when the call carries a basis: a call with none derives nothing extra
+READS = []
+_real_rtw = _G.reads_time_wait
+_G.reads_time_wait = lambda it: (READS.append(1), _real_rtw(it))[1]
+item(107, until=D(2))
+reset(answer(False, "the vendor has not replied")); READS.clear()
+passes("no basis: a dated step with a reason is judged (one call) and the wait is not read for held", lambda: upd(107, next=STEP(), clear_wait=True, wait_reason=REASON), 1)
+check("no basis: …reads_time_wait ran for nobody", not READS, READS)
+item(108, until=D(2)); reset(answer(False, "the vendor has not replied")); READS.clear()
+passes("basis: …the same step with a basis the tool drops reads the wait for held", lambda: upd(108, next=STEP(), clear_wait=True, wait_basis="x", wait_reason=REASON), 1)
+check("basis: …reads_time_wait ran", bool(READS), READS)
+_G.reads_time_wait = _real_rtw
 
 # ---- a create
 reset(answer(True, "it can start now"))

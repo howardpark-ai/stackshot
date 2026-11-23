@@ -528,17 +528,8 @@ def _answered_since_note(gid: str, item: dict[str, Any], sender: str) -> str:
 
 
 def _reads_time_wait(item: dict[str, Any]) -> bool:
-    """The model reads the open item as a wait on a time with no hold flag: a verifying item (its end date is its wait), or any item the model reads as a time wait (wait_kind=time). The snooze guard
-    (model_guards) asks such a wait for its reason like a hold's, so update takes a wait_basis for its wake at any length, as it does for a held item; a wake an alive item
-    carries as a hand-off's backstop (no until) is not a wait and reads False."""
-    h = _hooks()
-    if item.get("status") != "open":
-        return False
-    try:
-        mod = h.model_of(item)
-    except Exception:  # noqa: BLE001
-        return False
-    return mod.state == _model.WAITING and mod.wait is not None and mod.wait.kind == "time"
+    """The model reads the open item as a wait on a time with no hold flag (the gate's `reads_time_wait`: one reading for the tool and the self-wait check)."""
+    return _gates.reads_time_wait(item)
 
 
 def _basis_frame(item: dict[str, Any], meta: dict[str, Any], status: str, wake: str, ask_by: str, wait_kind: str, hold: bool, clear_hold: bool, state_st: str) -> tuple[dict[str, Any], str, bool]:
@@ -548,7 +539,7 @@ def _basis_frame(item: dict[str, Any], meta: dict[str, Any], status: str, wake: 
     basis_day = ""
     if not wake and not meta.get("wake") and (wait_kind.strip().lower() or _uw.kind_of(meta)) in ("relay", "event"):
         basis_day = _uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))
-    held = h.model_guards_on() and bool(hold or h.is_held(item) or _reads_time_wait(item) or state_st == "verifying") and not clear_hold
+    held = _gates.basis_held(item, hold=hold, clear_hold=clear_hold, verifying=state_st == "verifying")
     return {**item, "status": status or item.get("status")}, (h.parse_wake(wake) if wake else str(meta.get("wake") or "") or basis_day), held
 
 

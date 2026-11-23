@@ -39,8 +39,8 @@ from stackshot.model.bullet_text import _clip_line
 from stackshot.model import contact as _contact
 from stackshot.model import draft as _draft
 from stackshot.model import field_gates as _fg
-from stackshot.model import holders as _holders
 from stackshot.model.ids import _bare_id_ok, _norm_id
+from stackshot.model import holders as _holders
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model.needs import _after_of, _canon_needs, _needs_kinds, _NEEDS_KINDS, _needs_list, _needs_sessions, _waits_decision
@@ -1069,15 +1069,24 @@ def gate_sender_watch(gid: str, item_now: dict[str, Any], sender: str, *, handed
 _SELF_WAIT_STATES_OUT = ("parked", "outside", "blocked", "verifying", "completed", "your-call", "your-step")
 
 
-def _stored_time_wait(item: dict[str, Any]) -> bool:
-    """The model reads the open item as stored as a wait on a time (the update tool's `_reads_time_wait`, which the gate cannot import)."""
+def reads_time_wait(item: dict[str, Any]) -> bool:
+    """The model reads the open item as a wait on a time with no hold flag: a verifying item (its end date is its wait), or any item the model reads as a time wait (wait_kind=time). The snooze guard
+    (model_guards) asks such a wait for its reason like a hold's, so update takes a wait_basis for its wake at any length, as it does for a held item; a wake an alive item
+    carries as a hand-off's backstop (no until) is not a wait and reads False."""
     if item.get("status") != "open":
         return False
     try:
-        mod = _item_read._model_of(item)
+        mod = _item_read._model_of(item)    # the reader the hooks carry (wiring.py: model_of)
     except Exception:  # noqa: BLE001
         return False
     return mod.state == _model.WAITING and mod.wait is not None and mod.wait.kind == "time"
+
+
+def basis_held(item: dict[str, Any], *, hold: bool = False, clear_hold: bool = False, verifying: bool = False) -> bool:
+    """Whether a wait_basis is judged for a time wait held: a hold, a held or verifying item. The one reading for the update tool (`_basis_frame`) and the self-wait check, so the two cannot differ;
+    `item` is the item as the tool reads it, with a stored until stood in as the old working fields (`until_write.unfold_item`)."""
+    hk = _hooks()
+    return hk.model_guards_on() and bool(hold or _holders._is_held(item) or reads_time_wait(item) or verifying) and not clear_hold
 
 
 def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = "", mover: str = "", needs: Any = "", after: Any = "", wait_kind: str = "", hold: bool = False,
@@ -1139,9 +1148,11 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
             if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not _handoff.ho_same(mod.mover, sender):
                 return
             stored_wake = str(_wt.wake_value(item.get("metadata") or {}) or "")
-            held = hk.model_guards_on() and not clear_hold and bool(_holders._is_held(item) or _stored_time_wait(item))      # as the update tool reads it (_basis_frame): an item that holds a time wait keeps a basis for its wake at any length
-            if basis_given and basis_unneeded(item, wake_given or stored_wake.strip(), held) is None:
-                return                                      # a park that carries its basis (a wake past the cap, or a time wait's window) names its own reason; a basis the update tool drops (a wake within the cap) is no reason, so the wake is judged as if it were not sent
+            if basis_given:
+                tool_item = json.loads(json.dumps(item))
+                _uw.unfold_item(tool_item)                  # the item as the update tool reads it: a stored until stands as the old working fields, so the two read the same held
+                if basis_unneeded(item, wake_given or stored_wake.strip(), basis_held(tool_item, clear_hold=clear_hold)) is None:
+                    return                                      # a park that carries its basis (a wake past the cap, or a time wait's window) names its own reason; a basis the update tool drops (a wake within the cap) is no reason, so the wake is judged as if it were not sent
             wake_new = bool(wake_given) and wake_given != stored_wake.strip()      # re-sending the stored wake sets nothing
             stored_next = str((item.get("metadata") or {}).get("next") or "")
         else:
