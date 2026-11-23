@@ -70,6 +70,8 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
             return 200, "application/json", ROLES.read_text(encoding="utf-8")
         except Exception:
             return 503, "text/plain", "no roles yet"
+    if what == "projects-record":       # the project record alone, the value `state-files` carries as `projects` (client.py get projects-record)
+        return _client_projects_record()
     if what == "state-files":           # the files a box that does not run the server reads from its own state folder; the puller of such a box keeps copies (puller 12, [client] mirror_server_state)
         return _state_files()
     if what == "rules":
@@ -132,7 +134,7 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
         return 200, "application/json", json.dumps(_inbox_holds.waiting(keys), ensure_ascii=False)
     if what == "for-you":               # the For you list: {"generated", "rows": newest first, "flags": {item: watch | mute}} (the fleet tool's items sheet reads it)
         return 200, "application/json", json.dumps(_fy.payload(_gh.shown), ensure_ascii=False)
-    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | item-record?key=<item id> | open-records?key=<session> | anchors-record | answer?key=<item id> | notice?key=<notice id> | holds | inbox-holds[?key=<key>] | inbox-waiting?key=<name[,id]> | for-you | whoami | config | roles | state-files"
+    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | item-record?key=<item id> | open-records?key=<session> | anchors-record | projects-record | answer?key=<item id> | notice?key=<notice id> | holds | inbox-holds[?key=<key>] | inbox-waiting?key=<name[,id]> | for-you | whoami | config | roles | state-files"
 
 
 def _json_file(path: Any) -> Any:
@@ -142,6 +144,19 @@ def _json_file(path: Any) -> Any:
             return json.load(f)
     except (OSError, ValueError):
         return None
+
+
+def _projects_record() -> Any:
+    """The project record as published (projects.json, parsed, nothing else done to it), None when it is absent or does not read. `state-files` carries this value as `projects` and `projects-record` answers it alone."""
+    return _json_file(_prj.published_path())
+
+
+def _client_projects_record() -> tuple[int, str, str]:
+    """`projects-record`: exactly the value `state-files` carries under `projects` (the project record, one JSON object), without the other files. 503 when the file is absent, does not read or is no object (never a smaller or empty answer)."""
+    rec = _projects_record()
+    if not isinstance(rec, dict):
+        return 503, "text/plain", f"the project record {_UNREADABLE}"
+    return 200, "application/json", json.dumps(rec, ensure_ascii=False)
 
 
 def _state_files() -> tuple[int, str, str]:
@@ -156,7 +171,7 @@ def _state_files() -> tuple[int, str, str]:
     except OSError:
         sha = ""
     out = {"host": socket.gethostname(), "generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-           "projects": _json_file(_prj.published_path()), "fleet": {L: v for L, v in fleet.items() if v["machine"]},
+           "projects": _projects_record(), "fleet": {L: v for L, v in fleet.items() if v["machine"]},
            "versions": _json_file(_cfg.state("site", "versions.json")), "advertised_commit": sha}
     return 200, "application/json", json.dumps(out, ensure_ascii=False)
 

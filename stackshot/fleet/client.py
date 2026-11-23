@@ -17,7 +17,7 @@ runs on every box.
                                 item-scoped anchor): item, mover, wake, who set it and when ("before the record" for a park stored
                                 before the server wrote one), one line each, so the item's mover can release them one by one
                                 (update clear_hold=true). Reads only: nothing is released here. Exit 0 listed · 1 not reached.
-  client.py get <read> [key]    registry | rules | brief | page-ts <page key | project id> | items <session> | item-record <id> | open-records <session> | anchors-record | project <id | page key | slug> | holds |
+  client.py get <read> [key]    registry | rules | brief | page-ts <page key | project id> | items <session> | item-record <id> | open-records <session> | anchors-record | projects-record | project <id | page key | slug> | holds |
                                 answer <board#N> (below) | for-you (below) | whoami | config | roles | state-files — read from the server with this machine's token (<secrets>/client.token);
                                 config = the instance's non-secret settings;
                                 roles = every session's role, {"generated": <UTC>, "sessions": {name: {role, project}}}; an agent
@@ -397,6 +397,7 @@ runs on every box.
                                 {"session", "total": how many open items it has, "truncated": true when the answer left some out (at most 300 records and about 4 MB), "unreadable": [ids of items whose file does not read], "items": [{id, shown, record, anchors}]}.
                                 A closed item is not in it. 400 a bad key, 503 an anchors file that does not read. Reads only.
   client.py get anchors-record  the anchors map as the board's file holds it: {"anchors": {<project key>: [{url, items, added, by}]}, "truncated": true when a very large map was cut}; {} without a file, 503 when it does not read. Reads only.
+  client.py get projects-record the project record alone, the value `get state-files` carries as `projects` (projects.json as the server publishes it, one JSON object), without that read's other files. 503 when it is not there or does not read. Reads only.
   client.py get inbox-holds [<key>]
                                 what is held: {"holds": [{kind, key, origin (api | file | resume: which file holds it), since, expires}], "now"}, since and expires (epoch, null for none) only for a hold
                                 made by post inbox-hold. With a key, that key's rows. Reads only.
@@ -427,7 +428,7 @@ CLIENTS = os.path.join(SECRETS, "clients.json")
 TOKENS = os.path.join(SECRETS, "client-tokens")
 TOKEN = os.path.join(SECRETS, "client.token")
 URLF = os.path.join(SECRETS, "client.url")
-READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "item-record", "open-records", "anchors-record", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you", "inbox-holds", "inbox-waiting")
+READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "item-record", "open-records", "anchors-record", "projects-record", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you", "inbox-holds", "inbox-waiting")
 
 
 def _write_private(path: str, text: str) -> None:
