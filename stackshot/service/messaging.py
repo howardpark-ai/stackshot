@@ -219,7 +219,7 @@ def _write_on_items(target: str, sname: str, sender: str, raw: str, body: str, g
     return f"Not delivered: written onto {shown} as a History line from {sname}, " + because
 
 
-def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str, Any]], roles: dict[str, Any], via: str = "") -> str:
+def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str, Any]], roles: dict[str, Any], via: str = "", noted: bool = False) -> str:
     """(a front agent is woken by a message only when it has something to do or to
     tell him). A background agent's message to the front agent `target` that names a board item and **clearly only reports** (reports.report_doubt
     finds nothing: every sentence a status shape, no question mark, no trouble or waiting word, nobody named to act) is written onto each item it
@@ -227,7 +227,8 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
     says so and names the items. Everything else is delivered: a text the test does not clearly take for a report, one that names no item (or more
     than REPORT_ITEMS_MAX), one whose item waits on his decision or names the front agent in its needs, one from a session that is not a background
     agent, and any failure here (where the code cannot tell, nothing is lost). → the reply line, or "" (deliver it).
-    `via` = the page key it was addressed to, when it was a `For <agent>` message to a project."""
+    `via` = the page key it was addressed to, when it was a `For <agent>` message to a project. `noted` = the text itself says in a fixed phrase that nothing is needed from him (_NOT_FOR_OWNER), so the shape test is skipped
+    (the item rules stay): _gate_front's unmarked path, where such a note is written onto its item and not refused."""
     try:
         sname = _sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or ""))
         if not sname or roles[sname]["role"] != "back" or sname.casefold() == str(target).casefold():
@@ -237,7 +238,7 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
         if not gids or len(gids) > REPORT_ITEMS_MAX:
             return ""
         front = tuple(n for n, r in roles.items() if r.get("role") == "front")
-        if _reports.report_doubt(raw, front):             # held back only what clearly reads as a status report (reports.py); everything else is delivered
+        if not noted and _reports.report_doubt(raw, front):             # held back only what clearly reads as a status report (reports.py); everything else is delivered
             return ""
         tid = _session_id(target)
         for gid in gids:                                  # an item that waits on his decision, or names the front agent in its needs, is the front agent's business
@@ -373,8 +374,10 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
         a background agent's marked message that only reports on a board item is written onto the item instead (_builder_report);
         it is delivered, a turn, only when he is talking with that agent now or asked it to tell him about an item the text names (front_turn.warranted; his own message always; a script's is tested too); else it never reaches the agent, not even held: refused, naming the background agent that works a named item (else the project), and logged;
       unmarked, from the person himself or with the mark or needs: decision away from the first line: refused, the mark goes on the first line;
-      unmarked, an answer to a question the front agent itself put to the sender (answer_route): delivered while he is in that conversation, else written onto the item it names, else held;
-      unmarked, a done, taken or no-ask note (a fixed phrase, or a plain status report): refused, one line: write it on the board item or say nothing;
+      unmarked, from a background agent, a done, taken or no-ask note (a fixed phrase, or a status report, reports.is_report), tested BEFORE the answer rule below, so a hand-back is never taken for an answer to a question: written onto the item it names (_builder_report),
+        else refused, one line: write it on the board item or say nothing;
+      unmarked, an answer to a question the front agent itself put to the sender (answer_route; a hand-back is not one): delivered while he is in that conversation, else written onto the item it names, else held;
+      unmarked, from any other sender, a done, taken or no-ask note (a fixed phrase, or a plain status report): refused, one line: write it on the board item or say nothing;
       a front agent's message to a peer front agent, or the project's background agent's own: held for the agent's next turn (_Hold), the channel between front agents and the way a builder reaches the front agent;
       any other unmarked message: refused naming the project's background agent, the address it goes to; a project with none holds it for the agent's next turn (_Hold: telling.front_fyi).
     → the sender's reply (item-written), a _Hold, or None (deliver it). Raises ToolError for a refusal."""
@@ -394,6 +397,15 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
         if (sender.strip() and _model.is_owner(sender)) or _held._owner_mark().search(text):
             raise ToolError(f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and it takes what is for {OWNER} only with {_FOR_OWNER} on the message's first line. "
                             f"Put {_FOR_OWNER} on the first line if this is for {OWNER}; anything else goes to {goes} instead.")
+        front = tuple(n for n, r in roles.items() if r.get("role") == "front")
+        done_note = (f"Refused: {name} is a front agent of {project} and takes no done, taken or no-action note: write it on the board item it concerns (update or complete), or say nothing.")
+        if sname and roles.get(sname, {}).get("role") == "back":      # a background agent's hand-back is no answer to a question, whatever the front agent asked it before: it goes onto the item or is refused, before the answer rule
+            said_nothing = bool(_NOT_FOR_OWNER_RE.search(text))
+            if said_nothing or _reports.is_report(text, front):
+                rep_ = _builder_report(name, text, sender, idx, roles, noted=said_nothing)
+                if rep_:
+                    return rep_
+                raise ToolError(done_note)
         kind, arg = answer_route(name, project, sender, text, idx, roles) if sender.strip() else ("", "")
         if kind == "deliver":
             return None
@@ -401,9 +413,8 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
             return arg
         if kind == "hold" and _held.enabled():
             return _Hold(arg, project)
-        front = tuple(n for n, r in roles.items() if r.get("role") == "front")
         if _NOT_FOR_OWNER_RE.search(text) or _reports.is_report(text, front):
-            raise ToolError(f"Refused: {name} is a front agent of {project} and takes no done, taken or no-action note: write it on the board item it concerns (update or complete), or say nothing.")
+            raise ToolError(done_note)
         peer_ = bool(sname) and roles.get(sname, {}).get("role") == "front" and sname.casefold() != name.casefold()      # a front agent's message to a peer front agent: the channel between them
         if _held.enabled():
             if peer_:

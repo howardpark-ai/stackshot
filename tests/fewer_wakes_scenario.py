@@ -145,10 +145,15 @@ DELIVERED = [          # every shape the review named, and the earlier asks: non
     "the second pass is done in staging: the remaining lines are back on the page. The tree is ready for the rebuild; nothing is uploaded.",
     "the step is merged; \"pending\" only means not applied yet. In order now: PR 22 is releasing; then I apply the hook if it passes; then the last row (needs the other side).",
     "the server has no call that drops a pending agent, so the fix starts there. I asked projects/example for one; I build the client side once they name it.",
+    # the widened shapes (taken, stopped, complete ...) keep every word of trouble, asking and planning
+    "taken; please confirm the plan", "taken. I will start once the runner is back", "the watch is stopped; it needs a restart", "stopped on a failing suite", "taken, is it the right item?",
+    "the item is complete; decide whether to ship", "the item is finished and awaits your look", "done (010cc0d); should I deploy?", "the unit is removed; Oliver can check it",
 ]
 HELD = [               # a plain status report, every sentence one of the shapes
     "PR 23 is live.", "a1 merged and deployed.", "PR #18 is up; the suites pass.", "fixed in 010cc0d. Suites are green.", "Recorded on the item. No change to the unit.", "released; closed.",
     "[for Oliver] done: the unit is live and the suites pass", "For osprey-main, a1: merged, deployed, green.", "`a1` is merged", "opened PR #18", "merged in 010cc0d\nlive since 15:10", "No change. Unchanged since a1.",
+    "Taken.", "taken", "Done (010cc0d).", "Done (010cc0d) and live.", "the item is complete", "the item is closed and the unit is removed", f"board#{BID_A}: the watch is stopped and the item is closed.", "a1: the old unit is retired; the suites pass.",
+    "[for Oliver] a1: Taken.", "the work is finished and merged",
 ]
 check("reports: every shape of ask, trouble, waiting, naming and plan is delivered", [t for t in DELIVERED if reports.is_report(t, FRONT)] == [], [(t, reports.report_doubt(t, FRONT)) for t in DELIVERED if reports.is_report(t, FRONT)])
 check("reports: a plain status report is held back", [t for t in HELD if not reports.is_report(t, FRONT)] == [], [(t, reports.report_doubt(t, FRONT)) for t in HELD if not reports.is_report(t, FRONT)])
@@ -217,8 +222,14 @@ rep = _messaging._message("osprey-x", "a1 is merged, the suites pass", "home-bet
 check("…a message to a background agent is never held back", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
 rep = _messaging._message("osprey-main", f"{MK} a1 is live", "nightly-job", origin="testbox"); settle()
 check("…a script's message (origin) is not a builder's", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
-check("1g: an unmarked message is still refused first, and 'no action needed' is still refused, builder or not",
-      why(lambda: _messaging._message("osprey-main", "a1 is merged", "osprey-x")).startswith("Refused: osprey-main is a front agent")
+rep = _messaging._message("osprey-main", f"{MK} a1: Done (010cc0d), the unit is live. Taken.", "osprey-x"); settle()
+check("1f2: a builder's marked 'Done (sha)' / 'Taken' note on an item is written onto it, not delivered", rep.startswith("Not delivered: written onto a1"), rep)
+rep = _messaging._message("osprey-main", f"{MK} a1: the watch is stopped and the item is closed", "osprey-x"); settle()
+check("…and so is '<thing> is stopped and the item is closed'", rep.startswith("Not delivered: written onto a1"), rep)
+rep = _messaging._message("osprey-main", "a1 is merged", "osprey-x"); settle()
+check("1g: an unmarked report from a builder that names an item is written onto it (no turn), one that names none is refused, and a marked 'no action needed' is still refused, builder or not",
+      rep.startswith("Not delivered: written onto a1") and why(lambda: _messaging._message("osprey-main", "the build is merged", "osprey-x")).startswith("Refused: osprey-main is a front agent")
+      and why(lambda: _messaging._message("osprey-main", "a1 is merged", "home-beta")).startswith("Refused: osprey-main is a front agent")
       and "says nothing is needed from him ('no action needed')" in why(lambda: _messaging._message("osprey-main", f"{MK} a1 is merged, no action needed", "osprey-x")))
 # a message to a project that opens "For <front agent>"
 p0, s0 = len(pushes()), len(saved); n0 = len(routing.read("projects/alpha"))

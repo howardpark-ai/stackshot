@@ -15,7 +15,8 @@ report only when ALL of these hold, and `report_doubt` names the first that does
   4. no future or conditional (will, once, when, if, then, until …): a plan is not a status;
   5. every sentence, once the mark, the `For <agent>,` address and the ids (items, PRs, shas, numbers) are taken out, is short and says one
      of the status shapes (STATUS): done, live, merged, released, deployed, closed, opened, fixed, passes, green, recorded, written, pushed,
-     landed, unchanged, "is up", "no change".
+     landed, unchanged, taken, stopped, complete, finished, removed, retired, "is up", "no change". A sentence holds one of them anywhere ("Taken.", "the item is complete",
+     "Done (<sha>)", "<thing> is stopped and the item is closed"); the words of trouble, asking and planning above still stop it.
 
 Anything else is delivered, and so is a failure in the check (the caller's). Stdlib only."""
 from __future__ import annotations
@@ -40,7 +41,8 @@ TROUBLE = (
 PEOPLE = (r"you", r"you'?ll", r"your", r"yours", r"yourself", r"owner", r"keeper", r"front agents?", r"main agent", r"user")
 FUTURE = (r"will", r"would", r"going to", r"once", r"when", r"if", r"unless", r"until", r"then", r"soon", r"later", r"next", r"follows?", r"after", r"before")
 STATUS = (r"done", r"live", r"merged", r"released", r"deployed", r"closed", r"opened", r"fixed", r"pass", r"passes", r"passed", r"passing", r"green", r"recorded",
-          r"written", r"unchanged", r"pushed", r"landed", r"is up", r"no changes?", r"nothing changed", r"no \w+ changed")
+          r"written", r"unchanged", r"pushed", r"landed", r"is up", r"no changes?", r"nothing changed", r"no \w+ changed",
+          r"taken", r"stopped", r"completed?", r"finished", r"removed", r"retired")
 
 _word = lambda alts: re.compile(r"(?<![\w-])(?:" + "|".join(alts) + r")(?![\w-])", re.I)
 _TROUBLE, _PEOPLE, _FUTURE, _STATUS = _word(TROUBLE), _word(PEOPLE), _word(FUTURE), _word(STATUS)

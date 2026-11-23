@@ -6,6 +6,7 @@ Covers (messaging._gate_front / answer_route / asked_by / router_answer, router_
      (a project with none: held for the next turn, no turn); a done, taken or no-action note is refused in one line, marked or not; the person's own unmarked message is refused without the mark.
   2. An answer to a question the front agent itself wrote to the sender: delivered unmarked while the person's last message to that agent is 30 minutes old or less, and at 31 minutes written onto
      the item it names, else held through the front gate. The signal for "was written to" is the message log (one row per message through the tool, `from` the agent, `to` the sender, within a day).
+     A background agent's hand-back (a done, taken or no-action note, a plain status report) is never an answer: it is written onto the item it names, else refused, whatever the front agent asked it before.
   3. fyi=true and a message to a project page or a background agent are as before.
   4. The router: a pass to a front agent with no need of the person (no ruling for him, no words of his, no hand-back, no mark or needs: decision in the text, no named item waiting on a decision) goes to the
      project's background agent, unmarked, text intact, the routing log naming the new target; a project with none holds it through the front gate, unmarked, starting no turn; with each need signal it stays
@@ -227,6 +228,32 @@ no_log(); fresh(); log_row("work-osprey-x", "work-osprey-docs", 5, text="please 
 check("2m: a message from the project's builder that asks nothing makes the sender's later note no answer (the staged test of a plain note to the front agent)", out.startswith("Refused") and reach(A, n0) == [], (out, pushes()[n0:]))
 no_log(); log_row(FRONT, BACK, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", BACK); settle()
 check("2k: an answer that needs the person is marked and delivered whatever the conversation", out.startswith("delivered") and len(reach(A, n0)) == 1 and mark() in reach(A, n0)[0][1], (out, pushes()[n0:]))
+
+# a background agent's hand-back is tested BEFORE the answer rule: a question the front agent put to it makes a hand-back no answer
+def asked_present(minutes_ago=5):
+    no_log(); fresh(); log_row(FRONT, BACK, 5); stamp(A, minutes_ago)      # the agent asked the builder a question and the person is in that conversation: the old order delivered any note the builder sent now
+for name, text in (("a bare taken", "Taken."), ("a done note with a sha", "Done (010cc0d)."), ("a status that names no item", "the PR is merged, the suites pass."), ("a stopped thing", "the watch is stopped and the item is complete.")):
+    asked_present(); n0 = len(pushes()); out = msg(FRONT, text, BACK); settle()
+    check(f"2n: a builder's hand-back ({name}) that names no item is refused, not delivered as an answer, while the person is in the conversation", out.startswith("Refused") and "takes no done, taken or no-action note" in out and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
+asked_present(); n0 = len(pushes()); out = msg(FRONT, "a1: Done (010cc0d), the unit is live.", BACK); settle()
+rows_ = [x for x in mlog() if "written onto a1" in str(x.get("outcome"))]
+check("2n2: …a hand-back that names an open item is written onto it (History line), not delivered, not held, while he is in the conversation", out.startswith("Not delivered: written onto a1") and reach(A, n0) == [] and held.count(A) == 0 and len(rows_) == 1, (out, rows_))
+asked_present(); out = msg(FRONT, "a1: taken.", BACK); settle()
+check("2n3: …'taken' with an item is written onto it too", out.startswith("Not delivered: written onto a1"), out)
+asked_present(); n0 = len(pushes()); out = msg(FRONT, "a14: the unit is live.", BACK); settle()
+check("2n4: …a hand-back on an item that waits on his decision is refused, never delivered as an answer", out.startswith("Refused") and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
+asked_present(); n0 = len(pushes()); out = msg(FRONT, "a1: for the record, the docs page reads fine", BACK); settle()
+check("2n5: …a fixed no-action phrase is a note too: written onto the item", out.startswith("Not delivered: written onto a1") and reach(A, n0) == [], (out, pushes()[n0:]))
+for name, text in (("a status with a wait in it", "yes, a1 is merged; the docs page awaits review"), ("a status with a question", "a1 is merged, is the docs page next?"), ("a status with a plan", "a1 is merged and I will deploy it later"),
+                   ("a plain answer", "yes, the export is ready for review"), ("a short answer that is no status shape", "no, the docs page is the other way round")):
+    asked_present(); n0 = len(pushes()); out = msg(FRONT, text, BACK); settle()
+    check(f"2n6: an answer that is no report ({name}) is still delivered to the agent, unmarked, while he is in the conversation", out.startswith("delivered") and len(reach(A, n0)) == 1 and mark() not in reach(A, n0)[0][1], (out, pushes()[n0:]))
+asked_present(31); n0 = len(pushes()); out = msg(FRONT, "a1: is the docs page next? it awaits review", BACK); settle()
+check("2n7: …and at 31 minutes one that is no report and names an item is written onto it as an answer, as before", out.startswith("Not delivered: written onto a1") and reach(A, n0) == [], (out, pushes()[n0:]))
+no_log(); fresh(); log_row(FRONT, "home-beta", 5); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the PR is merged", "home-beta"); settle()
+check("2n8: the report test is for a background agent's hand-back: a session that is no background agent keeps the old order, its answer delivered", out.startswith("delivered") and len(reach(A, n0)) == 1, (out, pushes()[n0:]))
+asked_present(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na1: Done (010cc0d), the unit is live and taken.", BACK); settle()
+check("2n9: a marked hand-back of the same shape is written onto the item, not delivered, whatever the conversation", out.startswith("Not delivered: written onto a1") and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
 
 # ---- 3. unchanged paths
 no_log(); fresh(); n0 = len(pushes()); out = msg(FRONT, "the build is done", BACK, fyi=True); settle()
