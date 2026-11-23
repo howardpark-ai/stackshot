@@ -132,7 +132,8 @@ def get(*keys: str, default: Any = None, cfg: dict[str, Any] | None = None) -> A
 # matches it) rather than read as "this box" or "no host". After a good answer a later failed lookup keeps the last good value standing, and is tried again after 5 seconds.
 HOST_RETRY_SECONDS = 5.0          # a failed lookup of a role is not tried again for this long (the last good value, if any, answers meanwhile)
 _HOST_WORD = re.compile(r"host:([A-Za-z0-9_.][A-Za-z0-9._-]*)")       # the whole value; the role does not start with "-" (it becomes a word of the lookup's argv)
-_HOST_NAME = re.compile(r"[^\s:\x00-\x1f\x7f-\x9f-][^\s:\x00-\x1f\x7f-\x9f]*")   # what a lookup may print: one word, no colon, no control character, not starting with "-" (never an ssh option)
+_HOST_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]*")      # what a lookup may print: one word of letters, digits and . _ @ - (a name, an alias, user@host), never starting with "-" (an ssh option); it reaches ssh and tool text
+_HOST_MAX_OUT = 4096              # the most of a lookup's output that is read; more is a failure
 _host_clock = time.monotonic      # tests patch this
 _HOST_LOCK = threading.Lock()     # guards the three tables below, never held across a lookup
 _HOST_GOOD: dict[tuple[str, str], tuple[str, float]] = {}      # (lookup, role) -> (host, when it was got)
@@ -169,18 +170,31 @@ def _hosts_number(sec: dict[str, Any], key: str, default: float, zero: bool) -> 
 
 def _host_lookup(tpl: str, role: str, timeout: float) -> tuple[str | None, str]:
     """Run the lookup once: (the host, "") or (None, why it failed). No shell: the command's words are split here, `~` expanded, and `{role}` is replaced inside the
-    word, so the role (made of safe characters only) never reaches a shell. Bounded: a lookup that outlasts `timeout` is killed with its process group."""
+    word, so the role (made of safe characters only) never reaches a shell. Bounded in time and in size: a lookup that outlasts `timeout` is killed with its process group,
+    and at most _HOST_MAX_OUT bytes of its output are read (more is a failure)."""
     p = None
+    reader = None
     try:
         words = shlex.split(tpl)
         if not any("{role}" in w for w in words):
             return None, "the lookup has no {role} in it"
         argv = [os.path.expanduser(w).replace("{role}", role) for w in words]
         p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+        got: list[bytes] = []
+        stdout = p.stdout
+        assert stdout is not None
+        reader = threading.Thread(target=lambda: got.append(stdout.read(_HOST_MAX_OUT + 1)), daemon=True)
+        t0 = time.monotonic()
+        reader.start()
+        reader.join(timeout)
+        if reader.is_alive():                   # no end of output in time (a child may hold the pipe open too)
+            return None, f"no answer in {timeout:g} s"
+        out = got[0] if got else b""
+        if len(out) > _HOST_MAX_OUT:
+            return None, f"more than {_HOST_MAX_OUT} bytes of output"
         try:
-            out, _ = p.communicate(timeout=timeout)
+            p.wait(timeout=max(0.05, timeout - (time.monotonic() - t0)))
         except subprocess.TimeoutExpired:
-            _host_kill(p)
             return None, f"no answer in {timeout:g} s"
         if p.returncode != 0:
             return None, f"exit {p.returncode}"
@@ -190,28 +204,35 @@ def _host_lookup(tpl: str, role: str, timeout: float) -> tuple[str | None, str]:
             return None, "the first line is not one host name"
         return name, ""
     except Exception as e:                  # a command not found, an unreadable template, anything else: a failure, never an exception
-        if p is not None:
-            _host_kill(p)
         return None, type(e).__name__
+    finally:
+        if p is not None:
+            _host_end(p, reader)
 
 
-def _host_kill(p: "subprocess.Popen[bytes]") -> None:
-    """End the lookup we started: its own process group (it was made with start_new_session), never a process found by name."""
+def _host_end(p: "subprocess.Popen[bytes]", reader: "threading.Thread | None") -> None:
+    """End the lookup we started, whatever came of it: its own process group (it was made with start_new_session), so a child it left behind goes too; never a process found by name.
+    Only a lookup still running, or one whose output a child still holds open, is ended: a finished and reaped one has no group to signal (its pid may be another process's by now).
+    Then the reader is joined and the pipe closed."""
+    if p.poll() is None or (reader is not None and reader.is_alive()):
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(p.pid, signal.SIGKILL)
+            else:
+                p.kill()
+        except OSError:
+            pass
     try:
-        if hasattr(os, "killpg"):
-            os.killpg(p.pid, signal.SIGKILL)
-        else:
-            p.kill()
-    except OSError:
-        pass
-    try:
-        p.communicate(timeout=2)
+        p.wait(timeout=2)
     except Exception:
-        for f in (p.stdout, p.stdin, p.stderr):
-            try:
-                if f: f.close()
-            except Exception:
-                pass
+        pass
+    if reader is not None:
+        reader.join(2)
+    for f in (p.stdout, p.stdin, p.stderr):
+        try:
+            if f: f.close()
+        except Exception:
+            pass
 
 
 def _host_resolve(role: str) -> str | None:
@@ -259,9 +280,12 @@ def _host_resolve(role: str) -> str | None:
 
 
 def _host_reset() -> None:
-    """Forget every answer and failure (a reload: the lookup may be another command now)."""
+    """A reload: every cached answer is due again (a lookup runs at the next read), and the failure marks go; the last good hosts stay, so a lookup that fails after a reload still has one
+    to answer with. The cache key holds the lookup command, so a changed command never reuses another command's answer."""
     with _HOST_LOCK:
-        _HOST_GOOD.clear(); _HOST_FAILED.clear()
+        for k, (v, _) in list(_HOST_GOOD.items()):
+            _HOST_GOOD[k] = (v, float("-inf"))
+        _HOST_FAILED.clear()
 
 
 def host(value: Any) -> Any:

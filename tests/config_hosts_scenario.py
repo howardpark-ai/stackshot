@@ -6,9 +6,9 @@ Covers: a plain value, a number, a table and a list of plain items come back as 
 ones are kept, a table is not touched even when it holds a host word; `config.host()` resolves one value and returns any other unchanged; the cache (one call for many reads inside cache_seconds, a new one after it,
 a role of its own each); a later failed lookup keeps the last good value and is tried again after 5 seconds, not at every read, and a recovery shows; no `[hosts] lookup`, a lookup with no {role}, a command
 that is not found, a first lookup that fails, and a lookup that is a host word itself all leave the word as written (never "" and never a guess) and never raise or recurse; what a lookup may print (the first
-line, stripped; an empty line, spaces inside, a colon, a leading "-" and a non-zero exit are failures); a lookup that never answers is ended within the timeout and its process is gone; the lookup runs without
+line, stripped; an empty line, spaces inside, a colon, a leading "-" and a non-zero exit are failures); a lookup that never answers is ended within the timeout and its process is gone, and so is a child it left holding its output (the process group is killed); a lookup that prints without end is cut at 4096 bytes and ended; the lookup runs without
 a shell (a template word with shell characters runs nothing, {role} is replaced inside a longer word, `~` is expanded); the role's own characters (a role with a space, a colon, `;`, `$(`, a leading `-` is no
-host word and runs nothing); two threads asking one role cause one lookup, and a slow role does not hold up another; one stderr line per failure streak; reload() drops the cache and takes the new lookup; each of the four
+host word and runs nothing); two threads asking one role cause one lookup, and a slow role does not hold up another; one stderr line per failure streak; reload() makes every answer due, clears the failure marks, keeps the last good hosts and takes the new lookup; each of the four
 readers resolves (`[project_agent] form_machines` through the form gate's helper, `[steps] bash_host`, `[agents_box] ssh`, `[machines_panel] ssh_hosts`), and `config.py get` on the command line.
 
     tests/run-suite config_hosts        → exit 0 / 1"""
@@ -37,6 +37,13 @@ case "$(cat "{MODE}")" in
   byrole) if [ "$1" = "slowrole" ]; then sleep 1.5; fi; echo "host-of-$1"; exit 0;;
   hang) echo $$ > "{T}/hang.pid"; exec sleep 60;;
   moved) echo "moved-$1"; exit 0;;
+  unicode) echo "hôst"; exit 0;;
+  slash) echo "a/b"; exit 0;;
+  semi) echo "a;b"; exit 0;;
+  at) echo "user@host-1.example.net"; exit 0;;
+  big) head -c 5000 /dev/zero | tr '\\0' a; echo; exit 0;;
+  flood) echo $$ > "{T}/flood.pid"; exec yes aaaaaaaa;;
+  gchild) sleep 60 & echo $! > "{T}/gchild.pid"; wait;;
 esac
 echo "host-of-$1"
 ''', encoding="utf-8")
@@ -81,9 +88,12 @@ def logged() -> list[list[str]]:
         if ln == "--": out.append(cur); cur = []
         else: cur.append(ln)
     return out
+def forget():
+    """Every answer and failure gone (what a fresh process knows); config._host_reset keeps the last good hosts, which a reload must."""
+    C._HOST_GOOD.clear(); C._HOST_FAILED.clear()
 def fresh(mode="ok", **hosts):
     """Forget every answer, clear the log, set the stub's mode and the [hosts] table the next checks run under (the stub by default)."""
-    C._host_reset(); LOG.write_text(""); MODE.write_text(mode); CLOCK[0] += 1000
+    forget(); LOG.write_text(""); MODE.write_text(mode); CLOCK[0] += 1000
     C.CFG["hosts"] = {"lookup": f"{STUB} {{role}}", "timeout": 5, "cache_seconds": 30, **hosts}
     if "lookup" in hosts and hosts["lookup"] is None: del C.CFG["hosts"]["lookup"]
 def err_of(fn):
@@ -188,6 +198,9 @@ try:
     for mode, name, want in (("empty", "no output", "host:web"), ("blank", "an empty first line (the host on a later line does not count)", "host:web"),
                              ("spaces", "a name with a space inside", "host:web"), ("colon", "a name with a colon", "host:web"), ("dash", "a name that starts with '-' (an ssh option)", "host:web"),
                              ("fail", "a non-zero exit", "host:web"),
+                             ("unicode", "a name with a character outside letters, digits and . _ @ -", "host:web"), ("slash", "a name with a slash", "host:web"), ("semi", "a name with a semicolon", "host:web"),
+                             ("big", "more than 4096 bytes on the first line", "host:web"),
+                             ("at", "user@host.example, the form ssh takes (accepted)", "user@host-1.example.net"),
                              ("padded", "a first line with spaces around it (taken stripped)", "host-of-web"), ("crlf", "a first line ended by CR LF", "host-of-web"),
                              ("multi", "more lines after the first (ignored)", "host-of-web")):
         fresh(mode)
@@ -201,6 +214,23 @@ try:
     check("…with its reason on the one stderr line", "no answer in 0.5 s" in errtxt, errtxt)
     pid = (T / "hang.pid").read_text().strip() if (T / "hang.pid").exists() else ""
     check("…and the process it started is gone", pid.isdigit() and not os.path.exists(f"/proc/{pid}"), pid)
+
+    fresh("flood", timeout=5)
+    t0 = time.monotonic(); got, errtxt = err_of(lambda: C.host("host:web")); took = time.monotonic() - t0
+    check("a lookup that never stops printing is a failure at once (its output is read up to 4096 bytes), not at the timeout", got == "host:web" and took < 3 and "4096 bytes" in errtxt, (got, took, errtxt))
+    pid = (T / "flood.pid").read_text().strip() if (T / "flood.pid").exists() else ""
+    check("…and the process it started is ended", pid.isdigit() and not os.path.exists(f"/proc/{pid}"), pid)
+    fresh("gchild", timeout=0.5)
+    t0 = time.monotonic(); got = quiet(lambda: C.host("host:web")); took = time.monotonic() - t0
+    gpid = (T / "gchild.pid").read_text().strip() if (T / "gchild.pid").exists() else ""
+    gone = False
+    for _ in range(40):
+        if gpid.isdigit() and not os.path.exists(f"/proc/{gpid}"): gone = True; break
+        time.sleep(0.05)
+    check("a lookup that left a child holding its output is ended within the timeout, and the child (a grandchild of the server) is ended with it: the whole process group is killed", got == "host:web" and took < 4 and gone, (got, took, gpid, gone))
+    if gpid.isdigit() and os.path.exists(f"/proc/{gpid}"):
+        try: os.kill(int(gpid), 9)       # by the pid the stub wrote, never by name
+        except OSError: pass
 
     # ---- no shell
     fresh(lookup=f"{STUB} {{role}} ; touch {SENT} && echo x > {SENT} $(touch {SENT}) `touch {SENT}`")
@@ -264,6 +294,17 @@ try:
     C.CFG["project_agent"] = {"form_senders": ["form-x"], "form_machines": "host:primary"}
     check("…a bare string counts as one item, resolved", PS._cfg_names("form_machines", []) == ["host-of-primary"])
     check("…the default of an unset key is returned as it is", PS._cfg_names("other", ["host-z"]) == ["host-z"])
+    bg_sec = {"bg_senders": ["bg-x"], "bg_machines": ["host:primary", "db-primary"], "form_machines": ["db-form"]}
+    C.CFG["project_agent"] = dict(bg_sec)
+    okc, no = PS._bg_call("host-of-primary", "bg-x", False, ""), PS._bg_call("host-other", "bg-x", False, "")
+    check("bg_machines: a host word in it is resolved; a background call from the machine it names is allowed, from another a 403", okc == (True, None) and no[0] is False and no[1] is not None and no[1][0] == 403, (okc, no))
+    check("…a plain item of it still matches, and form_machines is not consulted while bg_machines is set", PS._bg_call("db-primary", "bg-x", False, "") == (True, None) and PS._bg_call("db-form", "bg-x", False, "")[0] is False)
+    C.CFG["project_agent"] = {"bg_senders": ["bg-x"], "bg_machines": [], "form_machines": ["host:primary", "db-form"]}
+    check("an empty bg_machines falls back to form_machines, its host words resolved too", PS._bg_call("host-of-primary", "bg-x", False, "") == (True, None) and PS._bg_call("db-form", "bg-x", False, "") == (True, None) and PS._bg_call("host-other", "bg-x", False, "")[0] is False)
+    C.CFG["project_agent"] = {"bg_senders": ["bg-x"], "form_machines": "host:primary"}
+    check("…an absent bg_machines the same", PS._bg_call("host-of-primary", "bg-x", False, "") == (True, None))
+    fresh(lookup=None); C.CFG["project_agent"] = dict(bg_sec)
+    check("…with no lookup the word stays as written and matches no machine's token", PS._bg_call("host-of-primary", "bg-x", False, "")[0] is False and PS._bg_call("host:primary", "bg-x", False, "") == (True, None))
     fresh(lookup=None); C.CFG["project_agent"] = {"form_senders": ["form-x"], "form_machines": ["host:primary", "db-primary"]}
     check("…with no lookup the word stays in the list and matches no machine's token", PS._cfg_names("form_machines", []) == ["host:primary", "db-primary"] and not PS._form_call("host-of-primary", "form-x"))
     fresh(); C.CFG["steps"] = {"owner_shell": "powershell", "bash_host": "host:primary"}
@@ -290,17 +331,50 @@ try:
     fresh(lookup=None); C.CFG["machines_panel"] = {"ssh_hosts": ["host:spare", "box-d"]}
     check("…with no lookup the word is listed as written (an unreachable card, never a missing one)", FL.ssh_host_names() == ["host:spare", "box-d"])
 
+    # ---- the colors routes look a host word up off the event loop
+    import asyncio
+    from stackshot.web.routes import ui_api as UI
+    fresh(cache_seconds=0); C.CFG["project_agent"] = {"form_senders": ["sala-web"], "form_machines": ["host:primary"]}      # cache_seconds 0: every read of the word runs a lookup, so each gate shows its thread
+    seen = []; real_lookup = C._host_lookup
+    def spy(*a, **k):
+        seen.append(threading.get_ident()); return real_lookup(*a, **k)
+    C._host_lookup = spy
+    class Req:
+        headers = {"authorization": "Bearer x"}
+        async def json(self): return {"sender": "sala-web", "name": "n", "values": {}}
+    UI._client_machine = lambda auth, request=None: "host-of-primary"
+    UI._colors_body = lambda request: asyncio.sleep(0, {"sender": "sala-web"})
+    UI._colors_run = lambda op, body, via: (op, via)
+    loop_ids = []
+    async def drive():
+        loop_ids.append(threading.get_ident())
+        r1 = await UI._colors_machine(Req(), "list")
+        forget(); CLOCK[0] += 1000
+        r2 = await UI._colors_machine(Req(), "save")
+        return r1, r2
+    r1, r2 = asyncio.run(drive())
+    UI._client_machine = lambda auth, request=None: "host-other"
+    r3 = asyncio.run(UI._colors_machine(Req(), "list"))
+    C._host_lookup = real_lookup
+    check("a colors call from the machine a role names passes the gate (list, and save with the form's sender)", getattr(r1, "status_code", 200) == 200 and getattr(r2, "status_code", 200) == 200, (r1, r2))
+    check("…and a machine the role does not name is a 403", getattr(r3, "status_code", None) == 403, r3)
+    check("the host-word lookup of the colors routes ran, and on a worker thread, never on the event loop's", len(seen) >= 4 and loop_ids[0] not in seen, (seen, loop_ids))
+
     # ---- reload and the command line
-    C.reload(); C._host_reset(); LOG.write_text(""); MODE.write_text("ok"); CLOCK[0] += 1000
+    C.reload(); forget(); LOG.write_text(""); MODE.write_text("ok"); CLOCK[0] += 1000
     check("after a reload the config is the file's", C.get("machines_panel", "ssh_hosts") == ["host-of-spare", "box-d", "host-of-spare"] and calls() == 1, (C.get("machines_panel", "ssh_hosts"), calls()))
     CLOCK[0] += 1; C.host("host:spare")
     check("an answer is cached", calls() == 1)
     write_conf(f"{STUB2} {{role}}")
     changed = quiet(C.reload)
     check("a reload of a changed file went through", changed is not None and "hosts.lookup" in changed, changed)
-    check("…it dropped the cache: the new lookup answers at once, inside cache_seconds", C.host("host:spare") == "else-spare", C.host("host:spare"))
+    check("…it made the answers due: the new lookup answers at once, inside cache_seconds", C.host("host:spare") == "else-spare", C.host("host:spare"))
     MODE.write_text("fail"); write_conf(f"{STUB} {{role}}"); quiet(C.reload); CLOCK[0] += 1
-    check("…and a reload forgets the last good value too: a lookup that now fails leaves the word", quiet(lambda: C.host("host:spare")) == "host:spare")
+    calls_before = calls()
+    got = quiet(lambda: C.host("host:spare"))
+    check("…a reload makes the answers due, not gone: the next read runs the lookup again, and when it fails the last good host of that same command still answers", calls() == calls_before + 1 and got == "host-of-spare", (got, calls(), calls_before))
+    write_conf(f"{STUB2.parent}/where-none {{role}}"); quiet(C.reload); CLOCK[0] += 1
+    check("…while a changed lookup command has no answer of its own: another command's last good host is not used, the word stays", quiet(lambda: C.host("host:spare")) == "host:spare")
     MODE.write_text("ok"); write_conf(f"{STUB} {{role}}")
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env["STACKSHOT_CONFIG"] = str(CONF)
