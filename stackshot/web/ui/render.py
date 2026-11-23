@@ -883,7 +883,7 @@ _THEME_HEAD = ("<script>(function(){var p='system';try{p=localStorage.getItem('"
 # an installed app (Chrome, Android) takes its icons through the browser's HTTP cache and Cloudflare's edge, and an icon
 # under an unchanged URL never reached it (the maskable icon kept its old look). The
 # versions are read once, when this module is imported (the server's start; deploy.sh restarts it when icons/ changes),
-# from the committed icons/ (auth/signin.py _APP_ICONS) and the favicon in <state>/site. The version is a query string and the
+# from the committed icons/ (auth/signin.py _APP_ICONS, and favicon.svg beside them). The version is a query string and the
 # file names stay: the Cloudflare Access bypass names the icons' exact paths, which a query string keeps and a new name would
 # not. routes/board_pages.py serves a request whose ?v= is the version of the bytes it sends as immutable; any other, as before.
 # The icon and font files, their versions and addresses are the shared ones (render.py): static files at their root addresses, served once for both UIs.

@@ -7,7 +7,7 @@ dir, and for the tests, which patch what they need. Stdlib only (tomllib), so th
     from stackshot.core.config import CFG, get, path, state, secrets
     get("instance", "owner")            → "the owner"
     path("paths", "store")              → Path, ~ expanded
-    state("site", "favicon.svg")        → <paths.state>/site/favicon.svg
+    state("site", "robots.txt")         → <paths.state>/site/robots.txt
     secrets("oauth.env")                → <paths.secrets>/oauth.env
 
 CLI (for shell scripts; `bin/stackshot config ...`, or `python3 <checkout>/stackshot/core/config.py ...` where there is no uv):

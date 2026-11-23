@@ -33,7 +33,6 @@ toml, n = re.subn(r"(?m)^require_marks = true", "require_marks = false", toml); 
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet")   # the session and machine state is a fixture under fleet/
 S, A, B, X = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333", "44444444-4444-4444-8444-444444444444"
 for d in ("store/a", "fleet/a", "state/anchor-hub", "state/site", "secrets", "touch", "repo", "sala"): (T / d).mkdir(parents=True)
-(T / "state/site/favicon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"/>')   # the favicon render.py versions at import
 (T / "fleet/a/sessions.json").write_text(json.dumps({S: {"name": "work-osprey", "machine": "a", "url": "", "seen": "x"}, A: {"name": "work-osprey-main", "machine": "a", "url": "", "seen": "x"},
                                                       B: {"name": "home-beta", "machine": "a", "url": "", "seen": "x"}, X: {"name": "work-osprey-x", "machine": "a", "url": "", "seen": "x"}}))
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
@@ -430,7 +429,7 @@ check("board: the floating buttons share one rule (same size, round, fixed, safe
 # first 12 hex of the SHA-256 of the file's bytes (render.py ICON_V), so a new icon is a new URL to the browser and the edge.
 import hashlib
 _v_touch = hashlib.sha256((pathlib.Path(STACK) / "icons/apple-touch-icon.png").read_bytes()).hexdigest()[:12]
-_v_fav = hashlib.sha256((T / "state/site/favicon.svg").read_bytes()).hexdigest()[:12]
+_v_fav = hashlib.sha256((pathlib.Path(STACK) / "icons/favicon.svg").read_bytes()).hexdigest()[:12]
 _d1, _d2 = T / "one.png", T / "two.png"; _d1.write_bytes(b"\x89PNG one"); _d2.write_bytes(b"\x89PNG two")
 _va, _vb = render.asset_version(_d1), render.asset_version(_d2)
 check("asset_version: 12 hex of the bytes' SHA-256, a different version for different bytes, the same for the same bytes",

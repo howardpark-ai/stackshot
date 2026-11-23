@@ -1,6 +1,6 @@
-"""Rebuild the installed app's PNG icons in icons/ from the board's mark (_ICON in web/app.py, the same SVG as
-<state>/site/favicon.svg). The server serves the committed PNGs as they are and needs no renderer; run this only when
-the mark changes, and commit the PNGs with it:
+"""Rebuild the installed app's icons in icons/ from the board's mark (_ICON in web/app.py): the PNGs below and
+icons/favicon.svg, the mark's own bytes, which the server serves at /favicon.svg. The server serves the committed files
+as they are and needs no renderer; run this only when the mark changes, and commit the files with it:
 
     uv run --locked --extra icons python -m stackshot.tools.make_icons      (from the checkout)
 
@@ -23,7 +23,8 @@ MASKABLE_SCALE = 0.8
 m = re.search(r'^_ICON = "data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)"', (ROOT / "stackshot" / "web" / "app.py").read_text(encoding="utf-8"), re.M)
 if not m:
     sys.exit("make_icons: _ICON not found in web/app.py")
-MARK = base64.b64decode(m.group(1)).decode("utf-8").strip()
+RAW = base64.b64decode(m.group(1))                          # the mark's bytes, written to icons/favicon.svg as they are
+MARK = RAW.decode("utf-8").strip()
 inner = re.fullmatch(r'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">(.*)</svg>', MARK, re.S)
 if not inner:
     sys.exit("make_icons: the mark is no longer a 64x64 SVG; update this script with it")
@@ -50,6 +51,8 @@ ICONS = {
 
 out = ROOT / "icons"
 out.mkdir(exist_ok=True)
+(out / "favicon.svg").write_bytes(RAW)
+print(f"favicon.svg: {len(RAW)} bytes")
 for name, (px, src) in ICONS.items():
     png = bytes(resvg_py.svg_to_bytes(svg_string=src, width=px, height=px))
     (out / name).write_bytes(png)

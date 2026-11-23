@@ -33,7 +33,6 @@ U = lambda n: f"{n:08d}-0000-4000-8000-000000000000"
 (T / "store/a/1.json").write_text(json.dumps({"id": "1", "subject": "[home] item 1", "description": "A thing. It lives here. Done when done.", "status": "open", "metadata": {"owner": "sparrow", "project": "projects/alpha"}}))
 (T / "store/next-id").write_text("10"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\nname: Alpha\n---\n\n# Alpha\n")   # name: as in its registry entry, so a background publish that rebuilds the registry keeps the title
-(T / "state/site/favicon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"/>')   # versioned at the server's start (render.py ICON_V)
 sys.path.insert(0, STACK); logging.disable(logging.WARNING)
 fails = []; ran = []
 def check(name, cond, got=None):
@@ -876,7 +875,7 @@ with TestClient(app) as c:
     check("the web app manifest is served signed out, like the favicon it names (the page links it with use-credentials for the edge)",
           r.status_code == 200 and r.headers.get("content-type", "").split(";")[0] == "application/manifest+json"
           and {k: mf.get(k) for k in ("name", "short_name", "start_url", "scope", "display")} == {"name": "stackshot", "short_name": "stackshot", "start_url": "/", "scope": "/", "display": "standalone"}
-          and (mf.get("icons") or [None])[0] == {"src": f"/favicon.svg?v={_hv(T / 'state/site/favicon.svg')}", "type": "image/svg+xml", "sizes": "any", "purpose": "any"}
+          and (mf.get("icons") or [None])[0] == {"src": f"/favicon.svg?v={_hv(pathlib.Path(STACK, 'icons', 'favicon.svg'))}", "type": "image/svg+xml", "sizes": "any", "purpose": "any"}
           and re.fullmatch(r"#[0-9a-f]{6}", str(mf.get("theme_color", ""))), (r.status_code, r.headers.get("content-type"), mf))
     check("…and is itself served no-cache, so a new icon version reaches the installer at its next fetch", r.headers.get("cache-control") == "no-cache", r.headers.get("cache-control"))
     check("…its background_color (the splash screen) is the icons' full-bleed tile colour #1f1f21", mf.get("background_color") == "#1f1f21", mf.get("background_color"))
@@ -920,17 +919,32 @@ with TestClient(app) as c:
     check("…and the pages' stylesheet names exactly that URL, versioned by the file's bytes", f"{fu}?v={fv0}" == render.font_href(), (render.font_href(), fv0))
     check("…a name next to it is 404 (no directory listing, no other file under /fonts/)", all(c.get(u, follow_redirects=False).status_code in (404, 302) for u in ("/fonts/", "/fonts/OFL.txt", "/fonts/../server.py", "/fonts/README.md")))
     check("…and /manifest.webmanifest/x is not it", c.get("/manifest.webmanifest/x", cookies={"stackshot_ui": sess}, follow_redirects=False).status_code == 404)
-    fav = T / "state/site/favicon.svg"; fv = _hv(fav)
+    # the favicon: committed as icons/favicon.svg (the mark's own bytes), served from the checkout like the PNG icons, never from <state>/site
+    import base64; from stackshot.web.routes import board_pages as _bpg
+    fav = pathlib.Path(STACK, "icons", "favicon.svg"); fv = _hv(fav)
+    _m = re.search(r'^_ICON = "data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)"', pathlib.Path(STACK, "stackshot/web/app.py").read_text(encoding="utf-8"), re.M)
+    mark = base64.b64decode(_m.group(1)) if _m else b""
+    check("icons/favicon.svg is exactly the mark (web/app.py _ICON, decoded), byte for byte", bool(mark) and fav.read_bytes() == mark, (len(mark), fav.stat().st_size))
+    check("…and <state>/site is empty, so what follows is served from the checkout alone", sorted(x.name for x in (T / "state/site").iterdir()) == [], sorted(x.name for x in (T / "state/site").iterdir()))
     r, rv = c.get("/favicon.svg", follow_redirects=False), c.get(f"/favicon.svg?v={fv}", follow_redirects=False)
-    check("/favicon.svg: unversioned as before (signed out, image/svg+xml, no Cache-Control); ?v=<its version> immutable",
+    check("/favicon.svg: the committed mark's bytes with an empty <state>/site; unversioned as before (signed out, image/svg+xml, no Cache-Control); ?v=<its version> immutable",
           r.status_code == rv.status_code == 200 and r.headers.get("content-type", "").split(";")[0] == "image/svg+xml" and "cache-control" not in r.headers
-          and rv.content == fav.read_bytes() and rv.headers.get("cache-control") == "public, max-age=31536000, immutable", (dict(r.headers), dict(rv.headers)))
-    fav.write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"/>')         # redrawn on disk without a restart
-    r = c.get(f"/favicon.svg?v={fv}", follow_redirects=False)
-    check("…a file redrawn after the start: its old version no longer matches the bytes sent, so it is not immutable",
-          r.status_code == 200 and r.content == fav.read_bytes() and "cache-control" not in r.headers and _hv(fav) != fv, dict(r.headers))
-    r = c.get(f"/favicon.svg?v={_hv(fav)}", follow_redirects=False)
-    check("…and the new bytes' version is", r.headers.get("cache-control") == "public, max-age=31536000, immutable", dict(r.headers))
+          and r.content == mark and rv.content == mark and rv.headers.get("cache-control") == "public, max-age=31536000, immutable", (r.status_code, dict(r.headers), dict(rv.headers)))
+    pg = c.get("/", cookies={"stackshot_ui": sess}, follow_redirects=False).text
+    check("the pages link the icon as /favicon.svg?v=<the committed file's version>", f'<link rel="icon" href="/favicon.svg?v={fv}" type="image/svg+xml">' in pg and render.icon_href("favicon.svg") == f"/favicon.svg?v={fv}", re.findall(r'<link rel="icon"[^>]*>', pg))
+    _dir = _bpg._APP_ICON_DIR; _alt = T / "icons-redrawn"; _alt.mkdir()
+    try:
+        (_alt / "favicon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"/>')         # redrawn on disk without a restart
+        _bpg._APP_ICON_DIR = _alt
+        r = c.get(f"/favicon.svg?v={fv}", follow_redirects=False)
+        check("…a file redrawn after the start: its old version no longer matches the bytes sent, so it is not immutable",
+              r.status_code == 200 and r.content == (_alt / "favicon.svg").read_bytes() and "cache-control" not in r.headers and _hv(_alt / "favicon.svg") != fv, dict(r.headers))
+        r = c.get(f"/favicon.svg?v={_hv(_alt / 'favicon.svg')}", follow_redirects=False)
+        check("…and the new bytes' version is", r.headers.get("cache-control") == "public, max-age=31536000, immutable", dict(r.headers))
+        (_alt / "favicon.svg").unlink()
+        check("…and a checkout without the file answers 404, with nothing from <state>/site to fall back on", c.get("/favicon.svg", follow_redirects=False).status_code == 404)
+    finally:
+        _bpg._APP_ICON_DIR = _dir
     forged = sess[:-1] + ("0" if sess[-1] != "0" else "1")          # one hex digit of the signature changed, whatever it was
     r = c.get("/", cookies={"stackshot_ui": forged}, follow_redirects=False)
     exp = _signin._ui_sign(json.dumps({"email": "you@example.com", "exp": time.time() - 5})); r2 = c.get("/", cookies={"stackshot_ui": exp}, follow_redirects=False)
