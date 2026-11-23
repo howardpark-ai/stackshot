@@ -227,8 +227,8 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
     says so and names the items. Everything else is delivered: a text the test does not clearly take for a report, one that names no item (or more
     than REPORT_ITEMS_MAX), one whose item waits on his decision or names the front agent in its needs, one from a session that is not a background
     agent, and any failure here (where the code cannot tell, nothing is lost). → the reply line, or "" (deliver it).
-    `via` = the page key it was addressed to, when it was a `For <agent>` message to a project. `noted` = the text itself says in a fixed phrase that nothing is needed from him (_NOT_FOR_OWNER), so the shape test is skipped
-    (the item rules stay): _gate_front's unmarked path, where such a note is written onto its item and not refused."""
+    `via` = the page key it was addressed to, when it was a `For <agent>` message to a project. `noted` = the text itself says in a fixed phrase that nothing is needed from him (_NOT_FOR_OWNER), so only the status-shape test is skipped
+    (the question, fence, trouble, ask, person and plan tests and the item rules stay: "FYI, should I deploy it now?" is no note): _gate_front's unmarked path, where such a note is written onto its item and not refused."""
     try:
         sname = _sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or ""))
         if not sname or roles[sname]["role"] != "back" or sname.casefold() == str(target).casefold():
@@ -238,7 +238,7 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
         if not gids or len(gids) > REPORT_ITEMS_MAX:
             return ""
         front = tuple(n for n, r in roles.items() if r.get("role") == "front")
-        if not noted and _reports.report_doubt(raw, front):             # held back only what clearly reads as a status report (reports.py); everything else is delivered
+        if _reports.report_doubt(_NOT_FOR_OWNER_RE.sub(" ", raw) if noted else raw, front, noted=noted):      # held back only what clearly reads as a status report (reports.py); everything else is delivered
             return ""
         tid = _session_id(target)
         for gid in gids:                                  # an item that waits on his decision, or names the front agent in its needs, is the front agent's business
@@ -401,7 +401,8 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
         done_note = (f"Refused: {name} is a front agent of {project} and takes no done, taken or no-action note: write it on the board item it concerns (update or complete), or say nothing.")
         if sname and roles.get(sname, {}).get("role") == "back":      # a background agent's hand-back is no answer to a question, whatever the front agent asked it before: it goes onto the item or is refused, before the answer rule
             said_nothing = bool(_NOT_FOR_OWNER_RE.search(text))
-            if said_nothing or _reports.is_report(text, front):
+            # a fixed no-action phrase skips only the status-shape test: a question, an ask or a word of trouble beside it makes the text no note, and it goes on to the answer rule below
+            if _reports.is_report(_NOT_FOR_OWNER_RE.sub(" ", text) if said_nothing else text, front, noted=said_nothing):
                 rep_ = _builder_report(name, text, sender, idx, roles, noted=said_nothing)
                 if rep_:
                     return rep_

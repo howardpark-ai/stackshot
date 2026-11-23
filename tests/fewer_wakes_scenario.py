@@ -148,14 +148,22 @@ DELIVERED = [          # every shape the review named, and the earlier asks: non
     # the widened shapes (taken, stopped, complete ...) keep every word of trouble, asking and planning
     "taken; please confirm the plan", "taken. I will start once the runner is back", "the watch is stopped; it needs a restart", "stopped on a failing suite", "taken, is it the right item?",
     "the item is complete; decide whether to ship", "the item is finished and awaits your look", "done (010cc0d); should I deploy?", "the unit is removed; Oliver can check it",
+    # negation and trouble in the new words ("stopped", "taken"), and a bare answer: no report, so it goes on to the answer rule and reaches the agent that asked
+    "no, it is not finished", "the runner stopped", "the port is taken", "the permission is not removed yet", "yes, finished", "yes, a1 is merged", "no, merged", "the unit isn't retired",
+    "a1: still not deployed", "the old unit is no longer removed", "the watch is stopped yet again", "taken by the other session", "the item is not complete", "stopped", "Yeah, done (010cc0d).",
 ]
 HELD = [               # a plain status report, every sentence one of the shapes
     "PR 23 is live.", "a1 merged and deployed.", "PR #18 is up; the suites pass.", "fixed in 010cc0d. Suites are green.", "Recorded on the item. No change to the unit.", "released; closed.",
     "[for Oliver] done: the unit is live and the suites pass", "For osprey-main, a1: merged, deployed, green.", "`a1` is merged", "opened PR #18", "merged in 010cc0d\nlive since 15:10", "No change. Unchanged since a1.",
     "Taken.", "taken", "Done (010cc0d).", "Done (010cc0d) and live.", "the item is complete", "the item is closed and the unit is removed", f"board#{BID_A}: the watch is stopped and the item is closed.", "a1: the old unit is retired; the suites pass.",
-    "[for Oliver] a1: Taken.", "the work is finished and merged",
+    "[for Oliver] a1: Taken.", "the work is finished and merged", "the watch is stopped.", "a1: the old unit is now stopped and removed", "No change. Nothing changed since a1.",
 ]
 check("reports: every shape of ask, trouble, waiting, naming and plan is delivered", [t for t in DELIVERED if reports.is_report(t, FRONT)] == [], [(t, reports.report_doubt(t, FRONT)) for t in DELIVERED if reports.is_report(t, FRONT)])
+NOTED_NOT = ["a1: , should I deploy the unit now? I need your go.", "a1: , the suite failed on the runner", "a1: , see ```x```", "a1: , please look at the page", "a1: , the page awaits Oliver"]
+NOTED_YES = ["a1: , the docs page reads fine", "a1: , the unit is up, a plain note", "a1: , nothing else to say"]
+check("reports (noted): a fixed no-action phrase skips only the status shape: a question, a fence, trouble or an ask beside it is no note",
+      [t for t in NOTED_NOT if reports.is_report(t, FRONT, noted=True)] == [] and [t for t in NOTED_YES if not reports.is_report(t, FRONT, noted=True)] == [],
+      ([t for t in NOTED_NOT if reports.is_report(t, FRONT, noted=True)], [t for t in NOTED_YES if not reports.is_report(t, FRONT, noted=True)]))
 check("reports: a plain status report is held back", [t for t in HELD if not reports.is_report(t, FRONT)] == [], [(t, reports.report_doubt(t, FRONT)) for t in HELD if not reports.is_report(t, FRONT)])
 check("reports: the reason names what stopped it", reports.report_doubt("is it live?") == "a question mark" and reports.report_doubt("live; ask Oliver") .startswith("a word of trouble")
       and reports.report_doubt("The footer line stays.").startswith("a sentence that is no status shape") and reports.report_doubt("live, see `a long prose span here now ok`") == "a code span with prose"

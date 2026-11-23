@@ -255,6 +255,22 @@ check("2n8: the report test is for a background agent's hand-back: a session tha
 asked_present(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na1: Done (010cc0d), the unit is live and taken.", BACK); settle()
 check("2n9: a marked hand-back of the same shape is written onto the item, not delivered, whatever the conversation", out.startswith("Not delivered: written onto a1") and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
 
+# a fixed no-action phrase skips only the status shape: a question, an ask or trouble beside it makes the text no note, so it is an answer when the agent asked
+for name, text in (("a question and an ask", "a1: FYI, should I deploy the unit now? I need your go."), ("a word of trouble", "a1: no action needed, but the deploy failed on the runner"),
+                   ("an ask", "a1: for the record, please look at the docs page before it ships")):
+    asked_present(); n0 = len(pushes()); out = msg(FRONT, text, BACK); settle()
+    check(f"2o: a no-action phrase with {name} is no note: not written onto the item, delivered to the agent as an answer", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, (out, pushes()[n0:]))
+# 'taken' and 'stopped' are trouble outside their one form, and a bare answer is no report: all of these reach the agent that asked
+for text in ("a1: no, it is not finished", "a1: the runner stopped", "a1: the port is taken", "a1: the permission is not removed yet", "yes, finished", "no, merged"):
+    asked_present(); n0 = len(pushes()); out = msg(FRONT, text, BACK); settle()
+    check(f"2p: {text!r} is not a hand-back: delivered to the agent that asked, not refused, not written onto the item", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, (out, pushes()[n0:]))
+asked_present(); n0 = len(pushes()); out = msg(FRONT, "a1: the watch is stopped and the item is complete.", BACK); settle()
+check("2p2: …while the passive 'is stopped' with 'complete' is still a hand-back, written onto the item", out.startswith("Not delivered: written onto a1") and reach(A, n0) == [], (out, pushes()[n0:]))
+# the hand-back order is for a background agent only: a peer front agent (a front role of its own) keeps the old order, its answer delivered and no hand-back test applied
+for text in ("the PR is merged, the suites pass.", "Taken.", "a1: Done (010cc0d), the unit is live."):
+    no_log(); fresh(); log_row(FRONT, SOLO, 5); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, text, SOLO); settle()
+    check(f"2q: a peer front agent's {text!r} after a question of the agent is its answer, delivered (the old order), not refused or written onto an item", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, (out, pushes()[n0:]))
+
 # ---- 3. unchanged paths
 no_log(); fresh(); n0 = len(pushes()); out = msg(FRONT, "the build is done", BACK, fyi=True); settle()
 check("3a: an fyi to a front agent is held as before, with the fyi wording", out.startswith("held for work-osprey-main's next turn (fyi: it asks nothing") and reach(A, n0) == [] and held.count(A) == 1, out)

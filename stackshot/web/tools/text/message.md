@@ -14,7 +14,8 @@ then names that agent in the item's needs, unless that would leave the item with
 already moves it, or it waits on a decision): the agent is then not named, the reply says so in one line, and the way
 to hand the item over is update(mover=<agent>), which tells the new mover itself. An item id cited only for context, not handed over, goes in backticks,
 since a plain-word id names the receiver on that item. A front agent is given a turn only by what {{OWNER}} has to do: its
-message carries {{FOR_OWNER}} on its first line (except fyi=true, below) and starts a turn only while he talks with that agent or has it in tell_him of an item it names; else it goes to that item's builder or is refused. An unmarked message is delivered only as
+message carries {{FOR_OWNER}} on its first line (except fyi=true, below) and starts a turn only while he talks with that agent or has it in tell_him of an item it names; else it goes to that item's builder or is refused. A background agent's hand-back (a done, taken or no-action note) is tested first and is never taken for an
+answer, whatever the front agent asked it before: it goes onto the item it names, else is refused. Any other unmarked message is delivered only as
 the answer to a question it wrote to you, while he is in that conversation (30 minutes); later
 it goes onto the item it names, else is held; so is a front peer's or the background agent's own. Any other is refused, naming
 the project's background agent (none: held). A done, taken or
@@ -23,10 +24,12 @@ message to a front agent (marked, or a project message that opens For <front age
 items is held back, not delivered, only when it clearly reads as a plain status report: the reply then begins 'Not
 delivered: written onto <item> as a History line from <sender>, because ...' and the message sits on the item for the
 front agent to read there. It reads as a plain status report only when every sentence says done, live, merged,
-released, deployed, closed, opened, fixed, passes, green, recorded or unchanged, and the text has no question mark (a
-URL's included), no word of trouble, waiting or asking (failed, broke, rolled back, blocked, waiting, need, must,
-should, review, ready, approve, decide, confirm, please ...), no plan (will, if, when, then), no person or front agent
-named to act, and no prose in a code span. Everything else is delivered (the reply begins 'delivered'), and so is a
+released, deployed, closed, opened, fixed, passes, green, recorded, unchanged, complete, finished, removed or retired
+(taken only as a sentence of its own, stopped only as 'is stopped'), and the text has no question mark (a
+URL's included), no word of trouble, negation, waiting or asking (failed, broke, rolled back, blocked, waiting, need, must,
+should, review, ready, approve, decide, confirm, please, not, no longer, yet, still ...), no plan (will, if, when, then), no person or front agent
+named to act, no prose in a code span, and no opening yes or no (a bare answer is delivered to the agent that asked). A fixed no-action phrase
+skips only the status words: a question or an ask beside it makes the text no note. Everything else is delivered (the reply begins 'delivered'), and so is a
 message whose item waits on a decision (needs: decision) or names the front agent in its needs. A move to
 needs=decision reaches {{OWNER}} on the board, not through a message. A merge-queue group number in a release line ("group g7",
 "split from g7", "[g7]") names no item. Long content goes on a page or into a repo, with the pointer in the message.

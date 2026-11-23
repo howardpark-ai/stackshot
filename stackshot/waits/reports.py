@@ -9,14 +9,17 @@ is turned around: **only what clearly reads as a status report is held back; eve
 report only when ALL of these hold, and `report_doubt` names the first that does not:
 
   1. no `?` anywhere (a URL's included) and no fenced block; a code span only when it is an id, sha, path or short command;
-  2. no word of trouble, waiting, asking or deciding (TROUBLE: fail, broke, rolled back, cost, $, blocked, wait*, await*, pending, need*, must,
-     should, require*, review*, ready, approve*, decid*, confirm*, please, option, plus the configured [keywords.reports] ask_words …);
+  2. no word of trouble, waiting, asking, deciding or negation (TROUBLE: fail, broke, rolled back, cost, $, blocked, wait*, await*, pending, need*, must,
+     should, require*, review*, ready, approve*, decid*, confirm*, please, option, not, -n't, no longer, yet, still, never, plus the configured
+     [keywords.reports] ask_words …); a sentence that opens with an answer word ("yes, finished", "no, merged") is not a report either (see ANSWER);
   3. no word that puts the action on someone: the owner or one of his aliases, you, your, owner, keeper, a front agent's name (`avoid`);
   4. no future or conditional (will, once, when, if, then, until …): a plan is not a status;
   5. every sentence, once the mark, the `For <agent>,` address and the ids (items, PRs, shas, numbers) are taken out, is short and says one
      of the status shapes (STATUS): done, live, merged, released, deployed, closed, opened, fixed, passes, green, recorded, written, pushed,
-     landed, unchanged, taken, stopped, complete, finished, removed, retired, "is up", "no change". A sentence holds one of them anywhere ("Taken.", "the item is complete",
-     "Done (<sha>)", "<thing> is stopped and the item is closed"); the words of trouble, asking and planning above still stop it.
+     landed, unchanged, complete, finished, removed, retired, "is up", "no change". A sentence holds one of them anywhere ("the item is complete", "Done (<sha>)").
+     Two words are status only in one form, because in another they are trouble: "taken" only as a sentence of its own ("Taken." is the claim of an
+     item; "the port is taken" is a problem) and "stopped" only in the passive ("the watch is stopped"; "the runner stopped" is a crash). The words of
+     trouble, negation, asking and planning above still stop it.
 
 Anything else is delivered, and so is a failure in the check (the caller's). Stdlib only."""
 from __future__ import annotations
@@ -37,12 +40,20 @@ TROUBLE = (
     r"need\w*", r"must", r"should", r"require\w*", r"review\w*", r"merge-ready", r"ready", r"approv\w*", r"decid\w*", r"decision\w*", r"confirm\w*",
     r"please", r"ask\w*", r"options?", r"recommend\w*", r"propos\w*", r"questions?", r"choose", r"choice", r"stuck", r"unable", r"cannot", r"can't",
     r"offline", r"down", r"problem\w*", r"urgent", r"risk\w*", r"warn\w*", r"crash\w*", r"denied", r"refus\w*", r"missing", r"revert\w*", r"regress\w*",
+    r"not", r"\w+n't", r"no longer", r"yet", r"still", r"never", r"nor",            # negation: "it is not finished", "not removed yet" say the opposite of a status
 )
 PEOPLE = (r"you", r"you'?ll", r"your", r"yours", r"yourself", r"owner", r"keeper", r"front agents?", r"main agent", r"user")
 FUTURE = (r"will", r"would", r"going to", r"once", r"when", r"if", r"unless", r"until", r"then", r"soon", r"later", r"next", r"follows?", r"after", r"before")
 STATUS = (r"done", r"live", r"merged", r"released", r"deployed", r"closed", r"opened", r"fixed", r"pass", r"passes", r"passed", r"passing", r"green", r"recorded",
           r"written", r"unchanged", r"pushed", r"landed", r"is up", r"no changes?", r"nothing changed", r"no \w+ changed",
-          r"taken", r"stopped", r"completed?", r"finished", r"removed", r"retired")
+          r"completed?", r"finished", r"removed", r"retired")
+# Two words are a status in one form only (see the docstring): "taken" as a whole sentence ("Taken."), "stopped" in the passive ("the watch is stopped").
+_TAKEN = re.compile(r"taken", re.I)
+_STOPPED = re.compile(r"(?<![\w-])(?:is|are|was|were|been|now|got) stopped(?![\w-])", re.I)
+# A sentence that opens with an answer word ("yes, finished", "no, it is merged") is a reply to someone's question, and the gate cannot tell from the text alone whether
+# it is a hand-back or an answer the asker is waiting for. DECISION: such a text is never a report, so it goes on to the answer rule and reaches the front agent when
+# it answers a question that agent put (a genuine answer lost is worse than a report that rides one turn). "No change" and "no \w+ changed" are no answer: the comma tells.
+_ANSWER = re.compile(r"\A\s*(?:(?:yes|yeah|yep|yup|nope|nah)\b|no\s*[,:;!-])", re.I)
 
 _word = lambda alts: re.compile(r"(?<![\w-])(?:" + "|".join(alts) + r")(?![\w-])", re.I)
 _TROUBLE, _PEOPLE, _FUTURE, _STATUS = _word(TROUBLE), _word(PEOPLE), _word(FUTURE), _word(STATUS)
@@ -57,9 +68,16 @@ def _people():
 SENTENCE_WORDS = 30                      # a status sentence is short; a longer one is prose
 
 
-def report_doubt(text: str, avoid: tuple[str, ...] | list[str] = ()) -> str:
+def _status_shape(s: str) -> bool:
+    """Does one sentence (marks and ids taken out) say a status shape: a STATUS word anywhere, "taken" as the whole sentence, "stopped" in the passive."""
+    return bool(_STATUS.search(s) or _STOPPED.search(s) or _TAKEN.fullmatch(s.strip()))
+
+
+def report_doubt(text: str, avoid: tuple[str, ...] | list[str] = (), noted: bool = False) -> str:
     """"" when the text clearly only reports; else the first reason it is not taken for a report (a phrase for the log and the tests).
-    `avoid` = names that must not appear (every front agent's name). Pure: the same text always gives the same answer."""
+    `avoid` = names that must not appear (every front agent's name). `noted` = the text says in a fixed phrase that nothing is needed from him (the caller has
+    taken that phrase out of `text`, since "needed" is itself a word of waiting): only the status-shape test is skipped, so a note that asks a question, holds a
+    fenced block or an ask or trouble word is no report, and the caller goes on to the answer rule. Pure: the same text always gives the same answer."""
     t = str(text or "")
     if "?" in t or "？" in t:
         return "a question mark"
@@ -80,6 +98,8 @@ def report_doubt(text: str, avoid: tuple[str, ...] | list[str] = ()) -> str:
             return f"{what} ({m.group(0)!r})"
     if any(w in t for w in _cfg.keywords("reports", "ask_words")):
         return "a configured word of asking or waiting"
+    if noted:
+        return ""
     sentences = [s.strip(" :-*•\t") for s in re.split(r"[.!;\n]+", _IDS.sub(" ", t))]
     sentences = [s for s in sentences if re.search(r"[^\W\d_]", s)]
     if not sentences:
@@ -87,11 +107,13 @@ def report_doubt(text: str, avoid: tuple[str, ...] | list[str] = ()) -> str:
     for s in sentences:
         if len(s.split()) > SENTENCE_WORDS:
             return "a long sentence"
-        if not _STATUS.search(s):
+        if _ANSWER.match(s):
+            return f"an answer, not a report ({s[:40]!r})"
+        if not _status_shape(s):
             return f"a sentence that is no status shape ({s[:40]!r})"
     return ""
 
 
-def is_report(text: str, avoid: tuple[str, ...] | list[str] = ()) -> bool:
+def is_report(text: str, avoid: tuple[str, ...] | list[str] = (), noted: bool = False) -> bool:
     """True when the text clearly only reports (report_doubt finds nothing)."""
-    return not report_doubt(text, avoid)
+    return not report_doubt(text, avoid, noted)
