@@ -467,6 +467,125 @@ check("items: list is the home page's own reading of the item (home.list_of on t
 for n in (21, 22, 23): (T / f"store/a/{n}.json").unlink()        # the later sections count the fixture's items
 (T / "fleet/a/sessions.json").write_text(json.dumps({U: {"name": "sparrow", "machine": "a"}, V: {"name": "home-other", "machine": "a"}}))
 
+# ---- 7c. the raw reads: item-record, open-records, anchors-record return what the store files hold, nothing derived
+cr = client_reads_svc; from stackshot.github import ghsync as _gh_
+raw = lambda n: json.loads((T / f"store/a/{n}.json").read_text(encoding="utf-8"))
+st, ct, b = cr._client_get("item-record", {"key": "a2"}); j = json.loads(b)
+check("item-record: exactly the stored record (compared with the file), with its id and how it is shown", st == 200 and ct == "application/json" and j == {"id": "a2", "shown": "a2", "record": raw(2), "anchors": []} and j["record"]["metadata"]["then"] == U, (st, b[:300]))
+st, ct, b = cr._client_get("item-record", {"key": "a3"}); j = json.loads(b)
+check("item-record: nothing is read through: the retired status stays as stored, no derived field is added", st == 200 and j["record"] == raw(3) and j["record"]["status"] == "on_hold" and "hold" not in j["record"]["metadata"], b[:300])
+st, ct, b = cr._client_get("item-record", {"key": "a5"}); j = json.loads(b)
+check("item-record: a closed item is returned too", st == 200 and j["record"] == raw(5) and j["record"]["status"] == "completed", b[:300])
+st, ct, b = cr._client_get("item-record", {"key": "A2"}); check("item-record: the id is read as the other reads read it (case)", st == 200 and json.loads(b)["id"] == "a2", (st, b[:100]))
+for bad in ("", "x; rm -rf", "a\n2", "a" * 201, "not an id"):
+    st, ct, b = cr._client_get("item-record", {"key": bad}); check(f"item-record refuses the id {bad[:8]!r} cleanly (400, no traceback)", st == 400 and "Traceback" not in b, (st, b[:120]))
+st, ct, b = cr._client_get("item-record", {"key": "a999"}); check("item-record: an id that names no item is 404", st == 404 and ct.startswith("text/plain"), (st, b))
+(T / "store/a/8.json").write_text("{not json"); st, ct, b = cr._client_get("item-record", {"key": "a8"}); check("item-record: a file that is there and does not read is 503 (not 404: the item exists), not a crash", st == 503 and "Traceback" not in b, (st, b)); (T / "store/a/8.json").write_text("[1]")
+st, ct, b = cr._client_get("item-record", {"key": "a8"}); check("item-record: a file that is no record is 503 too", st == 503, (st, b)); (T / "store/a/8.json").unlink()
+_mpf = T / "store" / _gh_.MAP_NAME; _mp0 = _mpf.read_text() if _mpf.exists() else None; mp_ = _gh_.load_map(T / "store"); _gh_.save_map({**mp_, "aliases": {**mp_["aliases"], "s9": "a2"}}, T / "store")
+try: st, ct, b = cr._client_get("item-record", {"key": "s9"}); j = json.loads(b)
+finally: _mpf.unlink() if _mp0 is None else _mpf.write_text(_mp0)
+check("item-record: an old id of a migrated item reads through the alias map and answers the id now", st == 200 and j["id"] == "a2" and j["record"] == raw(2), (st, b[:150]))
+
+item(9, U, "completed", meta={"mover": U})
+def recs(key): st_, _c, b_ = cr._client_get("open-records", {"key": key}); return st_, json.loads(b_) if st_ == 200 else b_
+for who in (U, "sparrow", V, "nobody-at-all"):
+    st, j = recs(who); want = gids(cr._client_get("items", {"key": who})[2])
+    check(f"open-records ({who[:8]}): the same items as `items`, in the same order, each the stored record", st == 200 and [x["id"] for x in j["items"]] == want and all(x["record"] == raw(int(x["id"][1:])) for x in j["items"]) and j["total"] == len(want) and j["truncated"] is False and j["session"] == who, (st, str(j)[:300]))
+st, j = recs(U); ids_ = [x["id"] for x in j["items"]]
+check("open-records: the session's items in every state (held, retired status, a decision it takes after), never a closed one; item-record has the closed one", ids_ == ["a1", "a2", "a3", "a4", "a7"] and "a5" not in ids_ and "a9" not in ids_ and json.loads(cr._client_get("item-record", {"key": "a9"})[2])["record"]["status"] == "completed", ids_)
+check("open-records: another session's items are not in it", recs(V)[1]["items"][0]["id"] == "a6" and len(recs(V)[1]["items"]) == 1 and recs("nobody-at-all")[1] == {"session": "nobody-at-all", "total": 0, "truncated": False, "unreadable": [], "items": []}, recs(V)[1])
+_rr = cr._raw_record      # the view skips a file that does not read, so the race (a file damaged after the view listed it) is made by the read itself
+cr._raw_record = lambda p: (None, "unreadable") if str(p).endswith("/4.json") else _rr(p)
+try: st, j = recs(U)
+finally: cr._raw_record = _rr
+check("open-records: an item whose file does not read when it is read is named in `unreadable`, left out of items, and the rest still answer", st == 200 and j["unreadable"] == ["a4"] and [x["id"] for x in j["items"]] == ["a1", "a2", "a3", "a7"] and j["total"] == 5, j)
+cr._raw_record = lambda p: (lambda r: ({**r[0], "status": "completed"}, "") if str(p).endswith("/2.json") and r[0] else r)(_rr(p))      # item 2 closes between the view's listing and the read of its file
+try: st, j = recs(U)
+finally: cr._raw_record = _rr
+check("open-records: an item that closed after the view listed it is left out and not counted in total, and the answer is not truncated for it", st == 200 and [x["id"] for x in j["items"]] == ["a1", "a3", "a4", "a7"] and j["total"] == 4 and j["truncated"] is False and j["unreadable"] == [], j)
+(T / "store/a/4.json").write_text(json.dumps({**raw(4), "status": "completed"}))
+check("open-records: an item closed on the file is dropped from the next answer and from its total, and the answer is not truncated for it", [x["id"] for x in recs(U)[1]["items"]] == ["a1", "a2", "a3", "a7"] and recs(U)[1]["total"] == 4 and recs(U)[1]["truncated"] is False, recs(U)[1]["total"])
+(T / "store/a/4.json").write_text(json.dumps({**raw(4), "status": "open"}))
+for bad in ("", "a\nb", "x" * 201):
+    st, ct, b = cr._client_get("open-records", {"key": bad}); check(f"open-records refuses the key {bad[:6]!r}", st == 400, (st, b))
+_mx, _by = cr._RECORDS_MAX, cr._RECORDS_BYTES
+try:
+    cr._RECORDS_MAX = 2; st, j = recs(U)
+    check("open-records: past the cap the answer is cut, total says how many there are and truncated is true", st == 200 and len(j["items"]) == 2 and j["total"] == 5 and j["truncated"] is True and [x["id"] for x in j["items"]] == ["a1", "a2"], (len(j["items"]), j["total"], j["truncated"]))
+    cr._RECORDS_MAX = _mx; cr._RECORDS_BYTES = 1; st, j = recs(U)
+    check("open-records: past the byte bound the answer is cut too, and holds at least one record", st == 200 and len(j["items"]) == 1 and j["truncated"] is True, (len(j["items"]), j["truncated"]))
+    cr._RECORDS_BYTES = _by; cr._RECORDS_MAX = 5; st, j = recs(U)
+    check("open-records: exactly the cap is not truncated", st == 200 and len(j["items"]) == 5 and j["truncated"] is False, (len(j["items"]), j["truncated"]))
+finally: cr._RECORDS_MAX, cr._RECORDS_BYTES = _mx, _by
+
+AN = {"projects/alpha": [{"url": "https://github.com/o/r/pull/7", "items": ["a2"], "added": 1700000000.0, "by": "sparrow"}, {"url": "https://example.test/x", "items": None, "added": 1700000001.0, "by": "x"}], "projects/beta": []}
+(T / "store/anchors.json").write_text(json.dumps(AN)); st, ct, b = cr._client_get("anchors-record", {})
+check("anchors-record: the map exactly as the file has it", st == 200 and json.loads(b) == {"anchors": json.loads((T / "store/anchors.json").read_text()), "truncated": False} and json.loads(b)["anchors"] == AN, (st, b[:200]))
+(T / "store/anchors.json").unlink(); st, ct, b = cr._client_get("anchors-record", {}); check("anchors-record: no file is an empty map", st == 200 and json.loads(b) == {"anchors": {}, "truncated": False}, (st, b))
+(T / "store/anchors.json").write_text("{not json"); st, ct, b = cr._client_get("anchors-record", {}); check("anchors-record: a file that does not read is 503", st == 503, (st, b))
+(T / "store/anchors.json").write_text("[1]"); st, ct, b = cr._client_get("anchors-record", {}); check("anchors-record: a file that is no map is 503", st == 503, (st, b))
+(T / "store/anchors.json").write_text(json.dumps(AN)); cr._RECORDS_BYTES = 1
+try: st, ct, b = cr._client_get("anchors-record", {}); j = json.loads(b)
+finally: cr._RECORDS_BYTES = _by
+check("anchors-record: past the byte bound the later projects are left out and truncated is true", st == 200 and j["truncated"] is True and list(j["anchors"]) == ["projects/alpha"], b[:200])
+
+# the anchors that name an item come with it (anchor_scope, the model's own reader): a project-wide anchor names no item
+(T / "store/anchors.json").write_text(json.dumps({**AN, "projects/beta": [{"url": "https://github.com/o/r/pull/7", "items": ["a2", "a1"], "added": 1700000005.0, "by": "x"}, {"url": "https://example.test/z", "items": ["a1"], "added": 1700000006.0, "by": "y"}]}))
+j = json.loads(cr._client_get("item-record", {"key": "a2"})[2]); a_ = j["anchors"]
+check("item-record: the anchors scoped to the item, each once with the page that holds it and every page, `scoped` not carried, the project-wide anchor left out",
+      j["record"] == raw(2) and len(a_) == 1 and a_[0]["url"] == "https://github.com/o/r/pull/7" and a_[0]["page"] == "projects/alpha" and a_[0]["pages"] == ["projects/alpha", "projects/beta"] and sorted(a_[0]["items"]) == ["a1", "a2"] and "scoped" not in a_[0]
+      and all(x["url"] != "https://example.test/x" for x in a_), a_)
+check("item-record: an item no anchor names has an empty list", json.loads(cr._client_get("item-record", {"key": "a3"})[2])["anchors"] == [])
+check("item-record: the anchors of another item are not in it", [x["url"] for x in json.loads(cr._client_get("item-record", {"key": "a1"})[2])["anchors"]] == ["https://github.com/o/r/pull/7", "https://example.test/z"], json.loads(cr._client_get("item-record", {"key": "a1"})[2])["anchors"])
+st, j = recs(U); by_ = {x["id"]: x["anchors"] for x in j["items"]}
+check("open-records: every row carries its own scoped anchors, as item-record gives them", st == 200 and all(by_[g] == json.loads(cr._client_get("item-record", {"key": g})[2])["anchors"] for g in by_) and len(by_["a2"]) == 1 and by_["a3"] == [], by_)
+(T / "store/anchors.json").write_text("{not json")
+st1, _c, b1 = cr._client_get("item-record", {"key": "a2"}); st2, _c, b2 = cr._client_get("open-records", {"key": U}); st3, _c, b3 = cr._client_get("item-record", {"key": "a999"})
+check("an anchors file that does not read is 503 for item-record and open-records (never an answer with the anchors left off); an item that does not exist is still 404", (st1, st2, st3) == (503, 503, 404) and "Traceback" not in b1 + b2, (st1, st2, st3, b1, b2))
+(T / "store/anchors.json").unlink()
+check("no anchors file: the reads answer with no anchors", json.loads(cr._client_get("item-record", {"key": "a2"})[2])["anchors"] == [] and recs(U)[0] == 200)
+(T / "store/anchors.json").write_text(json.dumps(AN))
+
+with TestClient(app) as c:
+    for path, prm in (("item-record", {"key": "a2"}), ("open-records", {"key": U}), ("anchors-record", {})):
+        r = c.get(f"/client/{path}", params=prm); check(f"http: {path} without a token → 401", r.status_code == 401, r.status_code)
+        r = c.get(f"/client/{path}", params=prm, headers={"Authorization": "Bearer " + "y" * 43}); check(f"http: {path} with an unknown token → 401", r.status_code == 401, r.status_code)
+    r = c.get("/client/item-record", params={"key": "a2"}, headers=H); check("http: item-record with the machine's token is the read's own answer", r.status_code == 200 and r.text == cr._client_item_record("a2")[2] and r.headers["cache-control"] == "no-store", r.text[:150])
+    r = c.get("/client/item-record", params={"key": "zz9; x"}, headers=H); check("http: item-record with a bad id → 400", r.status_code == 400, (r.status_code, r.text[:100]))
+    r = c.get("/client/item-record", params={"key": "a999"}, headers=H); check("http: item-record with an unknown id → 404", r.status_code == 404, r.status_code)
+    r = c.get("/client/open-records", params={"key": U}, headers=H); check("http: open-records with the machine's token", r.status_code == 200 and [x["id"] for x in r.json()["items"]] == ["a1", "a2", "a3", "a4", "a7"], r.text[:150])
+    r = c.get("/client/anchors-record", headers=H); check("http: anchors-record with the machine's token", r.status_code == 200 and r.json()["anchors"] == AN, r.text[:150])
+    r = c.get("/client/open-records", params={"key": U}, headers=H); check("http: open-records is the read's own answer", r.text == cr._client_open_records(U)[2], r.text[:150])
+    _real_or = cr._client_open_records; _loop_seen = []
+    def _probe_or(k):
+        try: asyncio.get_running_loop(); _loop_seen.append(True)
+        except RuntimeError: _loop_seen.append(False)
+        return _real_or(k)
+    cr._client_open_records = _probe_or
+    try:
+        r = c.get("/client/open-records", params={"key": U}, headers=H)
+    finally:
+        cr._client_open_records = _real_or
+    check("http: open-records is answered from the threadpool, not the event loop (it scans the board)", r.status_code == 200 and _loop_seen == [False], (r.status_code, _loop_seen))
+    r = c.get("/client/open-records", params={"key": "a\nb"}, headers=H); check("http: open-records with a bad key → 400", r.status_code == 400, (r.status_code, r.text[:100]))
+    r = c.get("/client/item-record", headers=H); check("http: item-record with no key → 400", r.status_code == 400, (r.status_code, r.text[:100]))
+    other = open(client.mint("box-other")).read().strip()
+    r = c.get("/client/item-record", params={"key": "a2"}, headers={"Authorization": "Bearer " + other}); check("http: any machine's token reads, as for the other client reads (the gate is the machine token and nothing else)", r.status_code == 200 and r.json()["id"] == "a2", r.status_code)
+    client.revoke("box-other")
+    for what_, hd_x in (("a revoked token", {"Authorization": "Bearer " + other}), ("a Basic credential", {"Authorization": "Basic " + tok}), ("the token as a bare Authorization value", {"Authorization": tok}), ("the token in a cookie", {"Cookie": "token=" + tok, "stackshot_token": tok}), ("a short bearer", {"Authorization": "Bearer short"})):
+        for path, prm in (("item-record", {"key": "a2"}), ("open-records", {"key": U}), ("anchors-record", {})):
+            r = c.get(f"/client/{path}", params=prm, headers=hd_x); check(f"http: {path} with {what_} → 401, no record in the answer", r.status_code == 401 and "subject" not in r.text, (r.status_code, r.text[:80]))
+    for path, prm in (("item-record", {"key": "a2", "token": tok}), ("open-records", {"key": U, "token": tok}), ("anchors-record", {"token": tok})):
+        r = c.get(f"/client/{path}", params=prm); check(f"http: {path} with the token in the query string → 401", r.status_code == 401, r.status_code)
+    r = c.get("/client/nothing", headers=H); check("http: the 404 list names the new reads", all(w in r.text for w in ("item-record?key=<item id>", "open-records?key=<session>", "anchors-record")), r.text[:200])
+_usage_text = open(client.__file__, encoding="utf-8").read().split('"""', 2)[1]       # the usage text is the module's opening string, read as text
+_new_lines = _usage_text.split("client.py get item-record")[1].split("client.py get inbox-holds")[0]
+check("client.py knows the three reads and its usage text names them, with no machine and no session manager in the new lines", all(w in client.READS for w in ("item-record", "open-records", "anchors-record"))
+      and all(f"client.py get {w}" in _usage_text for w in ("item-record", "open-records", "anchors-record")) and "sala" not in _new_lines.casefold() and "hp-" not in _new_lines)
+(T / "store/anchors.json").write_text("{}")
+for n in (9,): (T / f"store/a/{n}.json").unlink()        # the later sections count the fixture's items
+
 # ---- 8. owner_name follows an owner change: update(owner=…) without owner_name left the old owner's
 # name on the item, and the old owner's board check (items?key=, by owner or owner_name) kept asking about what it handed over
 W = "cccccccc-3333-4333-8333-333333333333"                  # a uuid the fleet does not know

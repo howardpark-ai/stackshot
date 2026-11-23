@@ -36,7 +36,7 @@ from stackshot.model import item_project as _ip
 from stackshot.model import model as _model
 from stackshot.model import queued as _queued
 from stackshot.model import states as _states
-from stackshot.model.ids import _GID
+from stackshot.model.ids import _GID, _norm_id
 from stackshot.model.needs import _needs_of, _needs_sessions
 from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import ROLES, _registry, _roles_sync_safe
@@ -105,6 +105,12 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
         return _client_items(str(params.get("key") or ""))
     if what == "item-facts":
         return _client_item_facts(str(params.get("key") or ""), str(params.get("ids") or ""))
+    if what == "item-record":           # one item's stored record, as the file holds it (client.py get item-record <id>)
+        return _client_item_record(str(params.get("key") or ""))
+    if what == "open-records":          # the stored records of the open items a session moves or is named on (client.py get open-records <session>)
+        return _client_open_records(str(params.get("key") or ""))
+    if what == "anchors-record":        # the anchors map as its file holds it (client.py get anchors-record)
+        return _client_anchors_record()
     if what == "answer":                # a script reads the owner's latest board answer on an item (client.py get answer board#N)
         return _handover._client_answer(str(params.get("key") or ""))
     if what == "notice":                # a script reads what the router did with a notice (client.py get notice <id>): the text get(item_id=<id>) shows
@@ -126,7 +132,7 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
         return 200, "application/json", json.dumps(_inbox_holds.waiting(keys), ensure_ascii=False)
     if what == "for-you":               # the For you list: {"generated", "rows": newest first, "flags": {item: watch | mute}} (the fleet tool's items sheet reads it)
         return 200, "application/json", json.dumps(_fy.payload(_gh.shown), ensure_ascii=False)
-    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | answer?key=<item id> | notice?key=<notice id> | holds | inbox-holds[?key=<key>] | inbox-waiting?key=<name[,id]> | for-you | whoami | config | roles | state-files"
+    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | item-record?key=<item id> | open-records?key=<session> | anchors-record | answer?key=<item id> | notice?key=<notice id> | holds | inbox-holds[?key=<key>] | inbox-waiting?key=<name[,id]> | for-you | whoami | config | roles | state-files"
 
 
 def _json_file(path: Any) -> Any:
@@ -289,22 +295,27 @@ class _ItemsView:
             r = self.rows[gid] = _item_row(gid, p, it, self.ctx, self.queue)
         return r
 
+    def selected(self, k: str) -> list[tuple[str, Any, dict[str, Any], list[str], bool]]:
+        """The one rule of which open items a session is asked about: [(gid, path, item, roles, named in needs)] of every item the session moves, takes after the answer (`then`) or is named on in its needs,
+        in the store's order. `items` rows and `open-records` both read it."""
+        nm = self.nm
+        me = {k, _anc.canonical(k, nm)}
+        me |= {nm.get(x, "") for x in list(me)}
+        me.discard("")
+        out = []
+        for gid, p, it, mover_ids, then_ids, linked_ids in self.entries:
+            is_mover, is_then, linked = bool(mover_ids & me), bool(then_ids & me), bool(linked_ids & me)
+            if not (is_mover or is_then or linked):
+                continue
+            out.append((gid, p, it, ([_ROLE_MOVER] if is_mover else []) + ([_ROLE_THEN] if is_then else []) + ([_ROLE_NEEDS] if linked else []), linked))
+        return out
+
     def body_for(self, k: str) -> str:
         with self.lock:
             hit = self.bodies.get(k)
             if hit is not None:
                 return hit
-            nm = self.nm
-            me = {k, _anc.canonical(k, nm)}
-            me |= {nm.get(x, "") for x in list(me)}
-            me.discard("")
-            out = []
-            for gid, p, it, mover_ids, then_ids, linked_ids in self.entries:
-                is_mover, is_then, linked = bool(mover_ids & me), bool(then_ids & me), bool(linked_ids & me)
-                if not (is_mover or is_then or linked):
-                    continue
-                roles = ([_ROLE_MOVER] if is_mover else []) + ([_ROLE_THEN] if is_then else []) + ([_ROLE_NEEDS] if linked else [])
-                out.append({**self.row(gid, p, it), "roles": roles, **({"role": "agent"} if linked else {})})
+            out = [{**self.row(gid, p, it), "roles": roles, **({"role": "agent"} if linked else {})} for gid, p, it, roles, linked in self.selected(k)]
             body = json.dumps({"items": out}, ensure_ascii=False)
             if len(self.bodies) < _VIEW_KEYS_MAX:
                 self.bodies[k] = body
@@ -508,3 +519,110 @@ def _client_item_facts(key: str, ids: str) -> tuple[int, str, str]:
                 row["outcome"] = str(m["outcome"])
         out[g] = row
     return 200, "application/json", json.dumps({"items": out}, ensure_ascii=False)
+
+
+_RECORDS_MAX = 300              # open-records: at most this many records in one answer
+_RECORDS_BYTES = 4_000_000      # open-records and anchors-record: …and at most about this many bytes of JSON; past either, `truncated` is true and the rest is left out
+_UNREADABLE = "cannot be read right now"
+
+
+def _raw_record(p: Any) -> tuple[dict[str, Any] | None, str]:
+    """An item file as the store holds it, parsed and nothing else done to it (no legacy read-through, nothing derived) → (record, ""), (None, "missing") when there is no such file,
+    (None, "unreadable") when it is there and does not read or is no object."""
+    try:
+        with open(p, encoding="utf-8") as f:
+            rec = json.load(f)
+    except FileNotFoundError:
+        return None, "missing"
+    except (OSError, ValueError):
+        return None, "unreadable"
+    return (rec, "") if isinstance(rec, dict) else (None, "unreadable")
+
+
+def _anchors_file() -> dict[str, Any] | None:
+    """The anchors file parsed as it stands: {} when there is none, None when it is there and does not read or is no map (a caller answers 503 then, never a smaller answer)."""
+    try:
+        with open(_anc.FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _row(gid: str, rec: dict[str, Any], anchors: dict[str, Any]) -> dict[str, Any]:
+    """One item as the raw reads give it: `record` the file as it is; `anchors` the anchors that name this item (anchor_scope: from every project's page, each once, with `page` and `pages`; a project-wide
+    anchor names no item), the one the model's own readers use."""
+    meta = rec.get("metadata") if isinstance(rec.get("metadata"), dict) else {}
+    scoped = [{k: v for k, v in a.items() if k != "scoped"} for a in _item_read._scoped_anchors(str(meta.get("project") or ""), gid, anchors)]
+    return {"id": gid, "shown": _gh.shown(gid), "record": rec, "anchors": scoped}
+
+
+def _client_item_record(key: str) -> tuple[int, str, str]:
+    """`item-record?key=<item id>`: one item's stored record exactly as its file holds it (subject, status, metadata with its steps, phase, mover and wait fields), open or closed, nothing derived, with the anchors that
+    name it. -> {id, shown, record, anchors}: `id` the store's id now (an old id of a migrated item is read through the alias map), `shown` how it is written for a person (board#N), `anchors` the
+    entries of the anchors file scoped to the item (`[]` for none). 400 for a bad id, 404 for an id that names no item, 503 when the item's file or the anchors file is there and does not read."""
+    k = str(key or "").strip()
+    if not k or len(k) > 200 or any(c in k for c in "\r\n\t"):
+        return 400, "text/plain", "key = an item id as shown: board#<n>, or <letter><n> for an older item"
+    try:
+        gid = _norm_id(k)
+    except ToolError as e:
+        return 400, "text/plain", str(e)
+    rec, why = _raw_record(_path(gid))
+    if why == "missing":
+        return 404, "text/plain", f"no item {_gh.shown(gid)}"
+    anchors = _anchors_file()
+    if rec is None or anchors is None:
+        return 503, "text/plain", f"the {'item' if rec is None else 'anchors'} file {_UNREADABLE}"
+    return 200, "application/json", json.dumps(_row(gid, rec, anchors), ensure_ascii=False)
+
+
+def _client_open_records(key: str) -> tuple[int, str, str]:
+    """`open-records?key=<session>`: the stored records of the open items the session moves, takes after the answer or is named on in the needs of: the selection of `items?key=` (the view's `selected`), each as
+    `item-record` gives it now (the file as it is, with its anchors), in one call. -> {session, total, truncated, unreadable, items: [{id, shown, record, anchors}]}; `total` is how many open items the session has
+    (one that closed since the view was read is not counted), the answer holds at most `_RECORDS_MAX` of them and about `_RECORDS_BYTES` bytes, `truncated` is true when it left some out; `unreadable` lists the
+    ids of items whose file stopped reading during this call (left out of `items`; a file corrupt before the call is skipped by the view and is in neither). A closed item is not listed. 503 when the anchors file does not read."""
+    k = str(key or "").strip()
+    if not k or len(k) > 200 or any(c in k for c in "\r\n\t"):
+        return 400, "text/plain", "key = the asking session: its transcript uuid, cse_ id or pane name"
+    anchors = _anchors_file()
+    if anchors is None:
+        return 503, "text/plain", f"the anchors file {_UNREADABLE}"
+    sel = _items_view().selected(k)
+    out: list[dict[str, Any]] = []
+    bad: list[str] = []
+    size, listed, gone = 0, 0, 0
+    for gid, p, _it, _roles, _linked in sel:
+        rec, why = _raw_record(p)
+        if rec is None or rec.get("status") not in ("open", "on_hold"):         # on_hold: the retired status the reads still take for an open, held item
+            if rec is None and why == "unreadable":
+                bad.append(gid)
+            else:
+                gone += 1
+            listed += 1
+            continue
+        row = _row(gid, rec, anchors)
+        n = len(json.dumps(row, ensure_ascii=False))
+        if len(out) >= _RECORDS_MAX or (out and size + n > _RECORDS_BYTES):
+            break
+        out.append(row); size += n; listed += 1
+    return 200, "application/json", json.dumps({"session": k, "total": len(sel) - gone, "truncated": listed < len(sel), "unreadable": bad, "items": out}, ensure_ascii=False)
+
+
+def _client_anchors_record() -> tuple[int, str, str]:
+    """`anchors-record`: the anchors map as its store file holds it ({project key: [{url, items, added, by}]}), nothing derived. -> {anchors, truncated}: `anchors` is {} when the file is not there; past about `_RECORDS_BYTES`
+    bytes the projects after that point are left out and `truncated` is true. 503 when the file is there and does not read."""
+    data = _anchors_file()
+    if data is None:
+        return 503, "text/plain", f"the anchors file {_UNREADABLE}"
+    out: dict[str, Any] = {}
+    size, truncated = 0, False
+    for page, entries in data.items():
+        n = len(json.dumps(entries, ensure_ascii=False)) + len(str(page))
+        if out and size + n > _RECORDS_BYTES:
+            truncated = True
+            break
+        out[page] = entries; size += n
+    return 200, "application/json", json.dumps({"anchors": out, "truncated": truncated}, ensure_ascii=False)
