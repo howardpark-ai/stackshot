@@ -30,6 +30,8 @@ whose `started` is two hours old or more is a crashed run, not a running one: it
                               No model, no tokens.
     audit.py refusals [--dry-run] [--force] [--week DATE]  the weekly count of refused board writes (tools/refusal_report.py): the last full week, Monday to Sunday, sent once to [refusal_report] to
                               (default [audit] summary_to) as a message that asks nothing; [refusal_report] enabled gates it, --dry-run only prints. The timer's unit runs it after the run. No model, no tokens.
+    audit.py catches [--dry-run] [--force] [--day DATE]  the daily count of a hook's catches (tools/catch_report.py): yesterday, per source, beside the day before, with the panes and senders caught most, sent once to
+                              [catch_report] to (default [audit] summary_to) as a message that asks nothing; [catch_report] enabled gates it, --dry-run only prints. The timer's unit runs it after the run. No model, no tokens.
     audit.py next-check [--line|--json]   the open items that break the Next rules N1 to N7 (tools/next_report.py): read only, the
                               audit agent lists each as a finding of the category `next rules`. Closed items are left as they are. No model, no tokens.
     audit.py board-check [--line|--json]  the open items that are held for no concrete reason or carry the wrong state (tools/board_report.py):
@@ -326,6 +328,9 @@ def main(argv: list[str]) -> int:
     if argv[:1] == ["refusals"]:
         from stackshot.tools import refusal_report  # noqa: PLC0415 — only the refusals verb needs it
         return refusal_report.main(["run", *argv[1:]])
+    if argv[:1] == ["catches"]:
+        from stackshot.tools import catch_report  # noqa: PLC0415 — only the catches verb needs it
+        return catch_report.main(["run", *argv[1:]])
     if argv[:1] == ["next-check"]:
         from stackshot.tools import next_report  # noqa: PLC0415 — only the next-check verb needs it
         return next_report.main(argv[1:])
@@ -340,7 +345,7 @@ def main(argv: list[str]) -> int:
         return registry_report.main(argv[1:])
     if argv[:1] == ["orphans"] and set(argv[1:]) <= {"--apply"}:
         return orphans("--apply" in argv)
-    print("usage: audit.py cue <reason> | run [--dry-run] | status | scan [--dry-run] | refusals [--dry-run] [--force] [--week DATE] | next-check [--line|--json] | board-check [--line|--json] | page-agents [--line|--json] | registry [--line|--json] | orphans [--apply]", file=sys.stderr)
+    print("usage: audit.py cue <reason> | run [--dry-run] | status | scan [--dry-run] | refusals [--dry-run] [--force] [--week DATE] | catches [--dry-run] [--force] [--day DATE] | next-check [--line|--json] | board-check [--line|--json] | page-agents [--line|--json] | registry [--line|--json] | orphans [--apply]", file=sys.stderr)
     return 2
 
 

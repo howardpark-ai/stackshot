@@ -98,6 +98,10 @@ A running process reads the file again without a restart: the server on `systemc
 | `refusal_report.to` | `""` | The page key or session name the weekly report goes to; empty is `[audit] summary_to`. Live. | |
 | `refusal_report.top` | `6` | How many kinds of refusal the report lists (1 to 20). Live. | |
 | `refusal_report.sender` | `"stackshot refusal report"` | The sender the message carries. Live. | |
+| `catch_report.enabled` | `false` | The daily count of a hook's catches (`stackshot/tools/catch_report.py`, run by the audit's unit after the audit run): `true` sends one message that asks nothing for each finished day, the catches per source beside the day before; `false` sends nothing (`stackshot/audit/audit.py catches --dry-run` still prints yesterday). The catch log is kept either way. Live. | |
+| `catch_report.to` | `""` | The page key or session name the daily report goes to; empty is `[audit] summary_to`. Live. | |
+| `catch_report.top` | `5` | How many panes and senders the report lists (1 to 20). Live. | |
+| `catch_report.sender` | `"stackshot catch report"` | The sender the message carries. Live. | |
 | `audit.main` | `"my-main"` | Script mode: the `-main` agent that gets findings addressed to the owner (marked `[for <owner>]`) when the project has none of its own. | |
 | `audit.model` | `""` | Script mode: the model of the judgment calls; empty is the `[router]` model. | |
 | `audit.lane` | `""` | Script mode: a sala lane for the judgment calls (for example `"cloud-lane"`): each runs as `salamander lane exec <lane> -- claude …`, with the lane's environment and no other provider's key. Empty: the `[router]` command's own lane. Only the audit's calls move; every other router call keeps the `[router]` command. The model (`audit.model`, else `[router] model`) must exist on the lane. | |

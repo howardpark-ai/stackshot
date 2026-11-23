@@ -30,3 +30,5 @@ ExecStartPost=-/usr/bin/timeout 300 @UV@ run --project @CHECKOUT@ --locked pytho
 # the weekly count of refused board writes (no model; a message that asks nothing, once per finished Monday-to-Sunday week, so the unit's two runs a day send it once); [refusal_report] enabled = false (the default) makes it a no-op.
 # Run through `stackshot audit` (the locked project environment), like the cue above
 ExecStartPost=-/usr/bin/timeout 120 @UV@ run --project @CHECKOUT@ --locked stackshot audit refusals
+# the daily count of a hook's catches (no model; a message that asks nothing, once per finished day, so the unit's two runs a day send it once); [catch_report] enabled = false (the default) makes it a no-op. Run through `stackshot audit`, like the line above
+ExecStartPost=-/usr/bin/timeout 120 @UV@ run --project @CHECKOUT@ --locked stackshot audit catches
