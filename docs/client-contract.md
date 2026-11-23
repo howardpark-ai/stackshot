@@ -333,4 +333,4 @@ caller. The client sends the value as it is, whether or not it starts with `ssp_
 (`<pass>`), and a failure to build the request with it says only that detail is withheld while `STACKSHOT_CLIENT_PASS` is in use. A pass lasts 10 minutes, so the caller trades again and sets the variable again for a later call.
 
   `tool-text`: client calls only, no MCP tool changes. Code: `stackshot/fleet/caller_keys.py` (the files), `stackshot/service/caller_pass.py` (enroll, claim, pass, the gate), the routes in
-  `stackshot/web/routes/client_api.py`; tests: `tests/caller_keys_scenario.py`.
+  `stackshot/web/routes/client_api.py`; tests: `tests/client_scenario.py` (its caller_keys part).
