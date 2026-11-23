@@ -60,15 +60,15 @@ def _foryou_make(gid: str, item: dict[str, Any], kind: str, what: str, disc: Any
     return row
 
 
-def _owner_moves(gid: str, item: dict[str, Any]) -> bool:
+def _owner_moves(gid: str, item: dict[str, Any], unread: bool = False) -> bool:
     """Is the item the owner's move now? The board's own reading: the model's view of the item (the one that sorts it into the Your move list), alive with the owner as the mover. An item that waits (an until, an
     item, an anchor event or the owner's relay, a hold, needs=external) is no one's move yet, even where the owner is named as who picks it up; an item an agent moves is an agent's. A read that fails counts as not his: the row is
-    made without the post, and the next pass raises it when the item reads."""
+    made without the post, and the next pass raises it when the item reads. `unread`: what a failed read answers instead (a caller that must not take an item for free of him when it cannot be read)."""
     try:
         it = dict(item, gid=gid)
         return _model.view(it, _item_read._model_of(it), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {})).owner_moves
     except Exception:  # noqa: BLE001
-        return False
+        return unread
 
 
 def _foryou_raise(gid: str, item: dict[str, Any], kind: str, disc: Any) -> dict[str, Any] | None:

@@ -181,7 +181,7 @@ def _stall_pass(now: float | None) -> list[str]:
     for to in _ho.batch(main_rows):      # ONE notice per -main agent for every silent live background mover's item that came due in this pass
         mine = [(g, l) for t, g, l in main_rows if t == to]
         try:
-            _laddersvc.ladder_main_tell(to, mine, main_info)
+            _laddersvc.ladder_main_tell(to, mine, main_info, now)
         except Exception as e:  # noqa: BLE001  — the History lines are written; the next interval tells again
             print(f"stall: the notice to {to} about {len(mine)} silent items failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     if acted:

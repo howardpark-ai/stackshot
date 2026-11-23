@@ -99,7 +99,9 @@ PUSHLOG = T / "push.log"
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
 _real_tell = telling.tell_woken
+TOLD = []      # every notice the server tells, as [session id, text], pushed or not: a request to a -main agent is a progress notice (telling.tell_own_move), held while Oliver is away, so its checks read this
 def _tell(gid, owner, note, tag="wake"):
+    TOLD.append([owner, note])
     th = _real_tell(gid, owner, note, tag)
     if th: THREADS.append(th)
     return th
@@ -111,7 +113,8 @@ def drain():
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
-def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, with no owner mark
+def told_to(who, gid=None): return [p for p in TOLD if p[0] == U[who] and (gid is None or gid in p[1])]
+def main_recovery_pushes(gid): return [p for p in told_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, with no owner mark
 def look_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "nothing written for" in p[1]]
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "have had no turn running" in p[1]]
 def set_cfg(**kw): _cfg.CFG["model"] = dict(kw)
@@ -424,7 +427,7 @@ check("10j action: the first rung of a pane-triggered ladder (the ask) still wai
       LD.action({"mover": "m", "step": 0, "last": 0.0}, "busy", 1.0, 0.0, 5000.0, 10.0, 30.0, background=True, live=True) == "" and LD.action({"mover": "m", "step": 0, "last": 0.0}, "idle", 1.0, 0.0, 5000.0, 10.0, 30.0, background=True, live=True) == "ask", None)
 
 # ================================================================ 11. a live background mover that stays silent after the look reaches the project's -main agent
-def main_notices(i, to="home-front"): return [p for p in pushes_to(to, f"a{i}") if "background mover" in p[1]]
+def main_notices(i, to="home-front"): return [p for p in told_to(to, f"a{i}") if "background mover" in p[1]]
 def all_main_notices(to="home-front"): return [p for p in pushes_to(to) if "background mover" in p[1]]
 ladder_cfg(True); set_live("home-docs"); set_live("team-back")
 # 11a. the incident: a silent item on a live busy background agent: ask, look, then nothing for hours; now -main hears of it, once an interval
@@ -444,7 +447,7 @@ check("11a the notice carries no owner mark (nothing is for him: the move is the
 check("11a the notice says how to stop the repeats: write to the item, park it or set its wait, and that it comes again in 4 hours while the item stays silent",
       "To stop the repeats, write to the item, park it or set its wait; it comes again in 4 hours while the item stays silent." in t70, t70)
 check("11a no cold call, no hand-off: the item stays with its mover on the same rung; the entry carries the stamp; a History line says it", len(COLD_MSGS) == n_cold and mt(70).get("mover") == "home-docs" and entry(70)["step"] == 2 and entry(70).get("main_at") == now0 + 41 * MIN
-      and any("was told to decide on a nudge or a different mover" in x["text"] for x in log_of(70)), (entry(70), log_of(70)))
+      and any("was not sent the request to decide on a nudge or a different mover" in x["text"] for x in log_of(70)) and not any("was told to decide" in x["text"] for x in log_of(70)), (entry(70), log_of(70)))
 for off in (41 * MIN + 60, 2 * H, 4 * H, 4 * H + 40 * MIN):
     stk(now0 + off)
 check("11a no repeat before the interval: passes a minute, 80 minutes, 4 hours and 4 hours 40 minutes after the first notice add none", len(main_notices(70)) == 1, pushes_to("home-front", "a70"))
@@ -488,15 +491,15 @@ cli_row("home-docs", "busy", now0 - 20 * MIN); cli_row("team-back", "busy", now0
 c_a, c_b = len(all_main_notices()), len(all_main_notices("home-beta-front")); enter([75, 76, 78, 79])
 for k in range(4): stk(now0 + (31 + k) * MIN)      # one look a pass for each agent: the four items reach the cold call's rung a minute or two apart
 check("11e before it, nothing has gone to either -main", len(all_main_notices()) == c_a and len(all_main_notices("home-beta-front")) == c_b and all(entry(i)["step"] == 2 for i in (75, 76, 78, 79)), [entry(i) for i in (75, 76, 78, 79)])
-p0 = len(pushes()); d1 = stk(now0 + 50 * MIN)
-n_alpha = [p for p in pushes()[p0:] if p[0] == U["home-front"] and "background movers" in p[1]]
-n_beta = [p for p in pushes()[p0:] if p[0] == U["home-beta-front"] and "background mover" in p[1]]
+p0 = len(TOLD); d1 = stk(now0 + 50 * MIN)
+n_alpha = [p for p in TOLD[p0:] if p[0] == U["home-front"] and "background movers" in p[1]]
+n_beta = [p for p in TOLD[p0:] if p[0] == U["home-beta-front"] and "background mover" in p[1]]
 check("11e three items due for one -main in one pass: ONE notice that lists all three (id, project, mover, time since the last write), the fourth item's notice goes to its own -main",
       sorted(d1) == ["a75", "a76", "a78", "a79"] and len(n_alpha) == 1 and len(n_beta) == 1 and all(_gh.shown(f"a{i}") in n_alpha[0][1] for i in (75, 76, 78))
       and n_alpha[0][1].count("\n- ") == 3 and "[for Oliver]" not in n_alpha[0][1] and n_alpha[0][1].startswith("[stackshot] ") and n_alpha[0][1].count("(projects/alpha): mover ") == 3 and "mover home-docs" in n_alpha[0][1] and "mover team-back" in n_alpha[0][1]
       and "no write since" in n_alpha[0][1] and "To stop the repeats, write to the item, park it or set its wait" in n_alpha[0][1] and _gh.shown("a79") not in n_alpha[0][1] and "a79" in n_beta[0][1], (d1, n_alpha, n_beta))
-check("11e …every listed item's entry is stamped and has its History line; the next pass sends nothing more", all(entry(i).get("main_at") == now0 + 50 * MIN for i in (75, 76, 78, 79)) and all(any("was told to decide" in x["text"] for x in log_of(i)) for i in (75, 76, 78, 79))
-      and not stk(now0 + 50 * MIN + 60) and len(pushes()) == p0 + 2, [entry(i) for i in (75, 79)])
+check("11e …every listed item's entry is stamped and has its History line; the next pass sends nothing more", all(entry(i).get("main_at") == now0 + 50 * MIN for i in (75, 76, 78, 79)) and all(any("was not sent the request to decide on a nudge or a different mover" in x["text"] for x in log_of(i)) for i in (75, 76, 78, 79))
+      and not stk(now0 + 50 * MIN + 60) and len(TOLD) == p0 + 2, [entry(i) for i in (75, 79)])
 close(75, 76, 78, 79)
 # 11f. a project with no -main agent: the History line alone, the rung is taken (no retry every pass)
 clear_records(); put(77, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)

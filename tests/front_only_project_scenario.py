@@ -117,7 +117,9 @@ PUSHLOG = T / "push.log"
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
 _real_tell = telling.tell_woken
+TOLD = []      # every notice the server tells, as [session id, text], pushed or not: a request to a -main agent is a progress notice (telling.tell_own_move), held while nobody is there, so its checks read this
 def _tell(gid, owner, note, tag="wake", **kw):
+    TOLD.append([owner, note])
     th = _real_tell(gid, owner, note, tag, **kw)
     if th: THREADS.append(th)
     return th
@@ -350,7 +352,7 @@ finally:
 MIN = 60.0
 def tick(at, *ids): return handoff_svc.handoff_tick(now=at, only=[f"a{i}" for i in ids])
 def ho(i): return mt(i).get("handoff") or {}
-def main_asked(gid): return [p for p in pushes_to(FM, gid) if "has gone quiet" in p[1]]
+def main_asked(gid): return [p for p in TOLD if p[0] == U[FM] and gid in p[1] and "has gone quiet" in p[1]]
 close_all()
 put(60, mover=FS)
 upd(60, FS, mover=FD, next=f"{FD}: do the thing"); drain()

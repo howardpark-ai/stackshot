@@ -119,7 +119,9 @@ PUSHLOG = T / "push.log"
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 THREADS = []
 _real_tell = telling.tell_woken
+TOLD = []      # every notice the server tells, as [session id, text], pushed or not: a request to a -main agent is a progress notice (telling.tell_own_move), held while Oliver is away, so its checks read this
 def _tell(gid, owner, note, tag="wake"):
+    TOLD.append([owner, note])
     th = _real_tell(gid, owner, note, tag)
     if th: THREADS.append(th)
     return th
@@ -139,7 +141,8 @@ def set_stall(**kw):
 set_cfg(); set_stall()
 _cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the ladders' last rung asks it, once per episode, to recover a quiet session
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
-def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, with no owner mark
+def told_to(who, gid=None): return [p for p in TOLD if p[0] == U[who] and (gid is None or gid in p[1])]
+def main_recovery_pushes(gid): return [p for p in told_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, with no owner mark
 item(97, status="completed", answers=[{"ts": 9e9, "kind": "comment", "text": "Pause it for now.", "via": "board"}])      # Oliver's answer, the pause_item of every pause below
 stall_svc.stall_since(B)          # the pass first ran at B (before every clock below); test 12 starts from no file at all
 COLD_MSGS = []
@@ -206,7 +209,7 @@ done = stk(T2)
 m3 = mt(3)
 check("3 recovery: no builder in the project and the cold call off: nobody can take it: the mover is unchanged and the item is not returned to a sender, and the record carries the request",
       "a3" in done and bool(ho(3).get("recovery_at")) and ho(3).get("stall") is True and ho(3).get("to") == "home-peer3" and m3.get("mover") == "home-peer3" and "stuck" not in ho(3) and "stuck_reason" not in ho(3), (done, ho(3), log_of(3)))
-check("3 recovery: …a History line says which session is quiet, who was asked and what was tried", "home-peer3 is quiet" in log_of(3)[-1]["text"] and "home-beta-front was asked to recover it" in log_of(3)[-1]["text"] and "tried:" in log_of(3)[-1]["text"], log_of(3))
+check("3 recovery: …a History line says which session is quiet, who was asked and what was tried", "home-peer3 is quiet" in log_of(3)[-1]["text"] and "the message to home-beta-front starts no turn of its own" in log_of(3)[-1]["text"] and "tried:" in log_of(3)[-1]["text"], log_of(3))
 rp = main_recovery_pushes("a3")
 check("3 recovery: …exactly one message went to the project's -main agent (beta lists no background agent, so there is no builder to ask), with no owner mark, opening `[stackshot] <item> …`, naming the quiet session and asking it to decide; it owes no reply; the fleet's builder was not asked",
       len(rp) == 1 and rp[0][1].startswith("[stackshot] a3 ") and f"[for {OWN}]" not in rp[0][1] and "home-peer3" in rp[0][1] and "decide" in rp[0][1] and "no reply is owed" in rp[0][1] and not recovery_pushes("a3"), rp)
@@ -220,7 +223,7 @@ _st = stall_svc.stall_load(); _st.pop("a3", None); stall_svc.stall_save(_st)
 X3 = T3 + 3 * 3600
 walked = stk(X3) + stk(X3 + 11 * MIN) + stk(X3 + 22 * MIN) + stk(X3 + 33 * MIN)
 check("3 recovery: …and the request is once per record, not per pass: with the pass's own entry wiped the ladder walks again and still sends no second message", len(main_recovery_pushes("a3")) == 1 and bool(ho(3).get("recovery_at"))
-      and sum("was asked to recover it" in x["text"] for x in log_of(3)) == 1, (walked, main_recovery_pushes("a3"), log_of(3)))
+      and sum("starts no turn of its own" in x["text"] for x in log_of(3)) == 1, (walked, main_recovery_pushes("a3"), log_of(3)))
 check("3 recovery: …the journal-side brief and the board list no stuck line for it", "stuck" not in handoff_svc.handoff_brief().lower() and all("stuck" not in ln for ln in H.brief_lines({"a3": rd(3)}, time.time())), handoff_svc.handoff_brief()[-300:])
 # the mover writing to the item ends the episode: the ladder starts over, and a later episode may ask again (one message for each)
 _update_svc._update("a3", sender="home-peer3", next="home-peer3: back at it")
@@ -230,7 +233,7 @@ at3 = max(floor3, ho(3).get("at") or 0)      # the stall record's own stamp (a p
 check("3 episode: …the ladder starts over from the write: nothing for 10 minutes, then step 1 again with no new message", stk(at3 + 5 * MIN) == [] and "a3" in stk(at3 + 10 * MIN + 5) and len(main_recovery_pushes("a3")) == 1, (ho(3), log_of(3)))
 done = stk(at3 + 20 * MIN + 10)
 check("3 episode: …and at the last rung the new episode asks once more: two messages in all, one for each episode, and a second History line", "a3" in done and len(main_recovery_pushes("a3")) == 2 and bool(ho(3).get("recovery_at"))
-      and sum("was asked to recover it" in x["text"] for x in log_of(3)) == 2, (done, main_recovery_pushes("a3"), log_of(3)))
+      and sum("starts no turn of its own" in x["text"] for x in log_of(3)) == 2, (done, main_recovery_pushes("a3"), log_of(3)))
 check("3 episode: …and that one is not repeated either", stk(at3 + 20 * MIN + 40) == [] and stk(at3 + 6 * 3600) == [] and len(main_recovery_pushes("a3")) == 2, main_recovery_pushes("a3"))
 # an item that moves to another session (not by its mover's write) ends the record too: the new mover's ladder is its own
 writes.save("a3", {**rd(3), "metadata": {**mt(3), "mover": "home-peer2", "next": "home-peer2: take over"}})

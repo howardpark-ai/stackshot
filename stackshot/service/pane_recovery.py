@@ -120,11 +120,12 @@ def _recovery_target(project: str, quiet: str) -> tuple[str, str, bool]:
 
 def _recovery_note(item: dict[str, Any], now: float, quiet: str, why: str, tried: str, outcome: str, to: str = "") -> str:
     """The History line of a recovery request (metadata.stall.log, shown on the item as a line said by the server): which session is quiet, what happened to the request
-    (`outcome`, as _recovery_tell reports it: asked, held, self, nobody, failed) and what the ladder tried. The line names the session asked by its own name, so it
+    (`outcome`, as _recovery_tell reports it: asked, fyi, held, self, nobody, failed) and what the ladder tried. The line names the session asked by its own name, so it
     says the same whether that is the fleet's builder or a front-only project's -main agent. Written onto `item` in place; the caller saves it. → the text."""
     label = _sr._session_label(to) or to
     said = {"asked": f"{label} was asked to recover it",
-            "held": f"not sent: the message to {label} was held back, not delivered",
+            "fyi": f"the message to {label} was filed for its next turn, starting no turn of its own",
+            "held": f"the message to {label} starts no turn of its own; the news stays on the item",
             "self": f"not sent: {label} is the fleet's builder itself, so nobody else could be asked",      # only a fleet request can be its own quiet session: the -main agent is never chosen for itself (_recovery_target)
             "failed": f"not sent: the send to {label} failed",
             "nobody": "not sent: no fleet builder resolves (operator_session unset, retired or without a keeper)"}.get(outcome, outcome)
@@ -142,7 +143,7 @@ def _recovery_log(gid: str, quiet: str, why: str, tried: str, outcome: str, to: 
                 return
             _recovery_note(item, time.time() if now is None else now, quiet, why, tried, outcome, to)
             role = _RECOVERY_ROLE.get(kind, _RECOVERY_ROLE["fleet"])
-            _writes.save(gid, item, note="nobody could take it: " + (f"{role} was asked" if outcome == "asked" else f"{role} could not be asked"))      # the server's own act: the state clock stays, and no page is owed
+            _writes.save(gid, item, note="nobody could take it: " + (f"{role} was asked" if outcome == "asked" else f"{role} was told, starting no turn" if outcome in ("fyi", "held") else f"{role} could not be asked"))      # the server's own act: the state clock stays, and no page is owed
     except Exception as e:  # noqa: BLE001
         print(f"recovery: {gid} History line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
@@ -152,7 +153,7 @@ def _recovery_tell(gid: str, item: dict[str, Any], quiet: str, why: str, tried: 
     per episode: a hand-off record, a stall record; they mark the episode BEFORE this send, on purpose: a failed send is not retried every pass, `metadata.undelivered`
     records it and the audit's unmoved digest is the backstop). The item stays with its mover; the message is not for the owner and owes no reply. The History line is written here, after the
     outcome is known, so it says what happened. A front-only project's request goes to its -main agent instead (`_recovery_target`), without the owner's mark (the notice is for the agent's own move), and asks it to decide
-    (bring the session back, message it, or hand the item on); the others go to the fleet's builder. → the outcome: "asked" (the send was started; a delivery that fails later lands in metadata.undelivered), "held" (the front gate held it), "self" (the quiet
+    (bring the session back, message it, or hand the item on); the others go to the fleet's builder. → the outcome: "asked" (the send was started; a delivery that fails later lands in metadata.undelivered), "fyi" (a -main agent's, with nothing for the owner on the item: a progress notice, filed for its next turn and starting none), "held" (a progress notice the front gate held while nobody is there: no turn, the request stays on the item), "self" (the quiet
     session is the builder itself), "nobody" (no builder resolves), "failed" (the send raised). `target` is the caller's `_recovery_target` (computed once on the raw session, as the caller's wording of `tried` used it);
     without it the target is read here on `quiet`. Never raises."""
     to, outcome, kind = "", "failed", "fleet"
@@ -175,9 +176,10 @@ def _recovery_tell(gid: str, item: dict[str, Any], quiet: str, why: str, tried: 
                 text = (f"[stackshot] fleet recovery: {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it. "
                         f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please take the fix through your usual path: bring the session back, or hand the item to a session that runs. "
                         f"The item stays with {quiet} meanwhile; nothing here is for {OWNER}, and no reply is owed (put the result on the item). → {_telling.notice_link(gid)}")
-            th = _telling.tell_woken(gid, to_id, text, tag=tag)
-            outcome = "asked" if th is not None else "held"
-            print(f"recovery: {gid} {quiet} is quiet; " + (f"{to} asked to recover it" if th is not None else f"the message to {to} was held back"), file=sys.stderr, flush=True)
+            th = _telling.tell_own_move(gid, to_id, text, tag=tag, items={gid: item})      # to a -main agent, with nothing for him on the item, a progress notice: filed for its next turn
+            filed = th is None and _telling.gate_result()[0] == "fyi"
+            outcome = "asked" if th is not None else "fyi" if filed else "held"
+            print(f"recovery: {gid} {quiet} is quiet; " + (f"{to} asked to recover it" if th is not None else f"the message to {to} was filed for its next turn" if filed else f"the message to {to} started no turn"), file=sys.stderr, flush=True)
     except Exception as e:  # noqa: BLE001
         print(f"recovery: {gid} not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     _recovery_log(gid, quiet, why, tried, outcome, to, now, kind)
