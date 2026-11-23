@@ -911,7 +911,7 @@ check("header: the board's title carries stackshot's icon, decorative, at the fa
       re.search(r'<h1 class="site"><a href="/"><img class="logo" src="' + re.escape(_fav) + r'" alt="" aria-hidden="true">', qh) is not None and f'<link rel="icon" href="{_fav}"' in qh
       and "h1 .logo,.site .logo{width:1.2em;height:1.2em;" in bq._css(), _fav)
 check("top sections: the home page remembers its folds as every page does (its script is the shared fold script, the swap carries the live open state over and hands a fresh fold to the stored one, and it reads no storage itself)",
-      "localStorage.getItem(K+k)" in ui_render._FOLD_JS and "localStorage.setItem(K+k,v)" in ui_render._FOLD_JS and "if(k in f){if(d.open!==f[k]){d._fs=f[k];d.open=f[k]}}else if(window.stackshotFold)window.stackshotFold(d)" in ui_render._LIVE_JS
+      "localStorage.getItem(K+k)" in ui_render._FOLD_JS and "localStorage.setItem(K+k,v)" in ui_render._FOLD_JS and "if(k in f){if(d.open!==f[k])d.open=f[k]}else if(window.stackshotFold)window.stackshotFold(d);d._fs=d.open" in ui_render._LIVE_JS
       and "localStorage" not in ui_render._LIVE_JS and "<script>" + ui_render._FOLD_JS + "</script>" in qh)
 import _colors as _C1; _qh_full, qh = qh, _C1.without_colortool(qh)      # the color tool's library (shared/colortool.js) watches data-theme with a MutationObserver: the next check reads the page without its script blocks
 check("board: the pre-paint fold script is in the head, as on the item and project pages, so a remembered fold is applied before the first paint",
@@ -939,7 +939,7 @@ check("panel sections: the Machines cards share one set of three columns (the ma
 check("panel sections: the fold script (not the panel's own scripts) keeps Machines, Runners, Anchor hub and Audit per browser, and the in-place swap keeps each fold as it is on screen",
       "stackshot.fold" not in ui_render._PANEL_JS and "sessionStorage" not in ui_render._PANEL_JS and "localStorage" not in ui_render._AUDIT_JS and "sessionStorage" not in ui_render._AUDIT_JS
       and "#panel" not in ui_render._FOLD_JS and _pj == ui_render._PANEL_JS
-      and "o.querySelectorAll('details.fold').forEach(function(d){f[d.getAttribute('data-fold')]=d.open})" in ui_render._LIVE_JS and "if(k in f){if(d.open!==f[k]){d._fs=f[k];d.open=f[k]}}" in ui_render._LIVE_JS
+      and "o.querySelectorAll('details.fold').forEach(function(d){f[d.getAttribute('data-fold')]=d.open})" in ui_render._LIVE_JS and "if(k in f){if(d.open!==f[k])d.open=f[k]}" in ui_render._LIVE_JS
       and "stackshot.fold." not in ui_render._LIVE_JS and "audit-panel" not in ui_render._FOLD_JS, ui_render._PANEL_JS[:200])
 check("sections: a hash to a section or to a line inside one opens it; the three counts' links do too", "el.closest('details.fold')" in _js.replace("el.closest&&el.closest", "el.closest") and "el.querySelector('details.fold')" in _js
       and "addEventListener('hashchange'" in _js and all(f'href="#{h}"' in qh[qh.find('id="counts"'):qh.find("</nav>", qh.find('id="counts"'))] for h in ("your-move", "agents-at-work", "waiting-list")), _js)
@@ -1107,7 +1107,7 @@ check("scope groups: on load a fold rendered open closes on a stored '0'; a clos
       "var v=get(d.getAttribute('data-fold'));if(d.open){if(v==='0')d.open=false}else if(v==='1')d.open=true" in _fj and "get(d.getAttribute('data-fold'))==='1')d.open=true" not in _fj, _fj)
 check("scope groups: the in-place swap carries each fold's live state both ways (a closed group stays closed, an open one open)",
       "o.querySelectorAll('details.fold').forEach(function(d){f[d.getAttribute('data-fold')]=d.open})" in ui_render._LIVE_JS
-      and "if(k in f){if(d.open!==f[k]){d._fs=f[k];d.open=f[k]}}" in ui_render._LIVE_JS and "localStorage" not in ui_render._LIVE_JS[ui_render._LIVE_JS.find("function swap"):ui_render._LIVE_JS.find("function apply")]
+      and "if(k in f){if(d.open!==f[k])d.open=f[k]}" in ui_render._LIVE_JS and "localStorage" not in ui_render._LIVE_JS[ui_render._LIVE_JS.find("function swap"):ui_render._LIVE_JS.find("function apply")]
       and "if(f[d.getAttribute('data-fold')])d.open=true" not in ui_render._LIVE_JS, ui_render._LIVE_JS[ui_render._LIVE_JS.find("function swap"):][:400])
 check("scope groups: a hash to a line opens every fold around it; to a section, just the section",
       "if(el.matches&&el.matches('section')){var s=el.querySelector('details.fold');if(s&&!s.open)s.open=true}" in _fj
@@ -2353,7 +2353,7 @@ check("in place: a different shell (a deploy's script or style), a different blo
       "if(!SH||!sh||sh.content!==SH.content)throw 0" in L and "if(!K.length||K.join(' ')!==Object.keys(V).join(' '))throw 0" in L and "if(!o||!n)throw 0" in L)
 check("in place: only a changed block is swapped; a block with a popover open waits; folds, the live audit line and the scroll are kept",
       "if(V[k]===W[k])return;" in L and "if(o.querySelector('details:not(.fold)[open]')){later=true;return}" in L
-      and "if(k in f){if(d.open!==f[k]){d._fs=f[k];d.open=f[k]}}" in L and "if(oa&&na)na.parentNode.replaceChild(oa,na)" in L and "if(window.scrollY!==y)window.scrollTo(0,y)" in L)
+      and "if(k in f){if(d.open!==f[k])d.open=f[k]}" in L and "if(oa&&na)na.parentNode.replaceChild(oa,na)" in L and "if(window.scrollY!==y)window.scrollTo(0,y)" in L)
 check("in place: the render stamp and the 'as of' move only when every block is in; the page scripts hear stackshot:swapped",
       "R=S;M.content=String(S)}" in L and "document.dispatchEvent(new Event('stackshot:swapped'))" in L
       and "document.addEventListener('stackshot:swapped',hdr)" in he and "document.addEventListener('stackshot:swapped',function(){tick();rcv()})" in he)

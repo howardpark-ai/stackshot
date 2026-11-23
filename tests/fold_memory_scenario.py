@@ -16,7 +16,8 @@ Covers:
   * a hash to a section, to a row inside a closed group and to a count's section opens it on load and on hashchange; the hash stays in the address; the open is recorded, so a reload
     without the hash shows it still open; nothing removes a stored key;
   * the live swap: a block swapped in keeps what the viewer left on screen, hands a fold the old block did not have to the stored state, and a fold it swaps in keeps recording;
-    the swap's carry-over never writes (a stale tab does not overwrite a newer stored choice); a count card's same-hash click reopens its section, also after a swap replaced the cards.
+    the swap's carry-over never writes (a stale tab does not overwrite a newer stored choice), and neither does the toggle a swapped-in fold fires on arrival when its state did not
+    change (a node that arrives open fires one, as the browser does); a count card's same-hash click reopens its section, also after a swap replaced the cards.
 
     tests/run-suite fold_memory        → exit 0 / 1"""
 import json, logging, os, pathlib, re, shutil, subprocess, sys, time
@@ -108,7 +109,7 @@ class El {
   get isConnected() { let n = this; while (n.parentElement) n = n.parentElement; return n === curDoc.documentElement; }
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; } setAttribute(k, v) { this.attrs[k] = String(v); }
   get open() { return this._open; }
-  set open(v) { v = !!v; if (v === this._open) return; this._open = v; queue.push(this); }
+  set open(v) { v = !!v; if (v === this._open) return; this._open = v; enqueue(this); }
   matches(sel) { return match(this, sel); }
   closest(sel) { for (let n = this; n; n = n.parentElement) if (match(n, sel)) return n; return null; }
   querySelectorAll(sel) { const r = []; (function w(n) { for (const c of n.children) { if (match(c, sel)) r.push(c); w(c); } })(this); return r; }
@@ -116,7 +117,7 @@ class El {
   contains(o) { for (let n = o; n; n = n.parentElement) if (n === this) return true; return false; }
   appendChild(c) { c.parentElement = this; this.children.push(c); return c; }
   removeChild(c) { this.children = this.children.filter(x => x !== c); c.parentElement = null; return c; }
-  replaceChild(n, o) { const i = this.children.indexOf(o); this.children[i] = n; n.parentElement = this; o.parentElement = null; return o; }
+  replaceChild(n, o) { const i = this.children.indexOf(o); this.children[i] = n; n.parentElement = this; o.parentElement = null; queueOpen(n); return o; }      // a details that arrives open fires its toggle, as the browser does for an element inserted with the open attribute
   addEventListener(t, fn) { (this.l = this.l || {})[t] = (this.l[t] || []).concat([fn]); }
   scrollIntoView() {} focus() {}
   clone() { const e = new El(this.tag, Object.assign({}, this.attrs)); e._open = this._open; this.children.forEach(c => e.appendChild(c.clone())); return e; }
@@ -149,6 +150,8 @@ function parse(src) {          // the page's markup, without scripts, styles, co
   return root;
 }
 let curDoc = null;
+function enqueue(el) { if (!queue.includes(el)) queue.push(el); }      // one pending toggle per element, as in the browser
+function queueOpen(n) { if (n.tag === 'details' && n._open) enqueue(n); n.children.forEach(queueOpen); }
 const settle = async () => { for (let i = 0; i < 4; i++) { await new Promise(r => setImmediate(r)); const q = queue.splice(0); for (const el of q) fire(el); } };
 function fire(el) { if (!curDoc || !el.isConnected) return; (curDoc.listeners.toggle || []).filter(l => l.cap).forEach(l => l.fn({ target: el })); }
 function makeStore(throwing) {
@@ -180,7 +183,7 @@ async function load(name, store, o) {
   const insert = (parent, node) => {      // a parser insertion: the observers hear of it in a microtask
     parent.appendChild(node);
     for (const ob of doc.observers) { ob.recs.push({ addedNodes: [node] }); queueMicrotask(() => { const r = ob.recs.splice(0); if (r.length) ob.cb(r, ob); }); }
-    (function w(n) { if (n.tag === 'details' && n._open) queue.push(n); n.children.forEach(w); })(node);      // a browser also fires toggle for an open attribute the parser sets
+    queueOpen(node);      // a browser also fires toggle for an open attribute the parser sets
   };
   for (const ch of body.children) { const sub = ch; sub.parentElement = null; insert(bodyEl, sub); await Promise.resolve(); }
   const folds = () => Object.fromEntries(docEl.querySelectorAll('details.fold').map(d => [d.attrs['data-fold'], d.open]));
@@ -301,6 +304,21 @@ const PANEL = new Set(data.panel);
     await r.toggle('machines'); const afterClose = st.m.get(keyOf('machines')); await r.toggle('machines');
     out.stale.laterTogglesRecord = afterClose === '0' && st.m.get(keyOf('machines')) === '1' && r.el('machines').open === true;
   }
+  // a stale tab's swap that changes no fold: the tab shows its default-open folds open, a second tab closed them since (stored 0), the refreshed blocks draw them open too, so the carry-over
+  // has nothing to change; the nodes still arrive open and fire their toggle, which must not write (a send from a home row lands on this swap, and a stale tab's refresh reset a fold another tab closed)
+  {
+    const st = makeStore(false); const r = await load('home', st); vm.runInContext(data.swap + ';this.__swap=swap', r.ctx);
+    const fresh = parse(data.pages.home); const meta = fresh.querySelectorAll('meta').find(m => m.attrs.name === 'stackshot-blocks');
+    const ids = meta ? meta.attrs.content.split(' ').map(p => p.split('=')[0]).filter(Boolean) : [];
+    const swapped = []; const logged0 = st.log.length;
+    for (const id of ids) {
+      const ob = r.doc.getElementById(id), nb = fresh.querySelector('#' + id); if (!ob || !nb) continue;
+      const keys = ob.querySelectorAll('details.fold').filter(d => d.open).map(d => d.attrs['data-fold']); if (!keys.length) continue;
+      keys.forEach(k => st.m.set(keyOf(k), '0'));      // a second tab closed them
+      r.ctx.__swap(ob, nb); await settle(); swapped.push(...keys);
+    }
+    out.stale2 = { blocks: ids.length, swapped, onScreen: swapped.map(k => r.el(k).open), stored: swapped.map(k => st.m.get(keyOf(k))), written: st.log.slice(logged0) };
+  }
   // the same-hash click on a count card reopens its closed section, on the cards the page drew and on the cards a live swap put in their place
   {
     const st = makeStore(false); const r = await load('home', st, { hash: '#waiting-list' }); vm.runInContext(data.swap + ';this.__swap=swap', r.ctx);
@@ -360,6 +378,9 @@ else:
         st_ = o["stale"]
         check("a swap that restores a fold from a stale on-screen value writes nothing: a second tab's stored 0 stays 0 after the restoration's toggle fires, the fold stays as the viewer sees it, and a later toggle records again",
               st_["wasOpen"] and st_["keptOnScreen"] and st_["stored"] == "0" and st_["noWrite"] and st_["laterTogglesRecord"], st_)
+        s2 = o["stale2"]
+        check("a stale tab's swap that changes no fold writes nothing: the folds it brings in open fire their toggle on arrival, and a second tab's stored 0 stays 0 for every one (the group and the panel section included), the folds staying as the viewer sees them",
+              len(s2["swapped"]) >= 2 and any(k.startswith("home.") for k in s2["swapped"]) and all(s2["onScreen"]) and all(v == "0" for v in s2["stored"]) and s2["written"] == [], s2)
         cd_ = o["card"]
         check("a count card whose hash is the current one reopens its closed section on click, on the cards as drawn and on the cards a live swap put in their place (one delegated handler); another card is left to the browser",
               cd_["hasCard"] and cd_["opensOnLoad"] and cd_["firstClickReopens"] and cd_["afterSwapReopens"] and cd_["otherLeftAlone"], cd_)
