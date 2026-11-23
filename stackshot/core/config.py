@@ -462,6 +462,14 @@ def release_suitemap_warm() -> list[str]:
         return []
 
 
+def release_deploy_ssh() -> str:
+    """[release] deploy_ssh: the ssh host (an alias of ~/.ssh/config, or [user@]host) release.sh runs deploy.sh on, over `ssh -o BatchMode=yes <host>`, in the checkout `~/stackshot` there, for the box that runs release.sh
+    while the server runs on another box. After a deploy there release.sh moves its own checkout to the same commit (a fast-forward, or a reset for a rollback) and restarts only the puller; a checkout that cannot follow (local changes) pauses the release queue and reports the release red. "" (the default) = the deploy runs
+    here, as on a one-box install. release.sh checks the value is a host name and refuses the deploy otherwise."""
+    v = get("release", "deploy_ssh")
+    return v.strip() if isinstance(v, str) else ""
+
+
 def report_notes(cfg: dict[str, Any] | None = None) -> list[str]:
     """Lines for a [audit] summary_to or [release] report_to that is set and cannot be used (see _report_slug): the default stands in its place, so the reports would go to the stand-in page."""
     out: list[str] = []
