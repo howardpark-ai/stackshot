@@ -1397,7 +1397,7 @@ with sync_playwright() as p:
                       d["hrefs"] == ["/"] and d["size"] == "17px" and d["logo"] > 10 and d["deco"] == "none" and d["color"] == d["fg"], d)
                 check(f"{tag}: the panel button and the theme button are in the title bar, the panel, its edge and scrim and the layout wrapper on the page, and the one row of count cards", d["btn"] and d["theme"] and d["edge"] and d["scrim"] and d["layout"] and d["cards"] == 1 and d["panel"] is not None, d)
                 if w == 1300:
-                    check(f"{tag}: the panel is pinned on load (the item page too; a person's stored closed state is the server's, panel_open_scenario): body.panel-pin, visible, 280 px wide, beside the main column and inside the screen",
+                    check(f"{tag}: the panel is pinned on load (the item page too; a person's stored closed state is the server's, panel_prefs_scenario): body.panel-pin, visible, 280 px wide, beside the main column and inside the screen",
                           d["pin"] and d["vis"] == "visible" and abs(d["panel"][1] - 280) < 1 and d["panel"][0] >= d["mainRight"] - 0.5 and d["panel"][2] <= d["vw"] + 0.5, d)
                     check(f"{tag}: the panel button and the theme button are fixed at the window's top right (right edges 56 and 16 px in, top 12 px) and the panel starts 56 px from the top, right under them",
                           abs(d["tbtn"][2] - (w - 16)) < 1 and abs(d["pb"][2] - (w - 56)) < 1 and abs(d["pb"][1] - 12) < 1 and abs(d["tbtn"][1] - 12) < 1 and abs(d["panel"][3] - 56) < 1, d)
@@ -1439,7 +1439,7 @@ with sync_playwright() as p:
     pg.click("#panel-open"); pg.wait_for_timeout(100); d = pg.evaluate(DET)
     check("item page 900: pinning the panel again puts Details on top", d["pin"] and d["below"] > 0 and abs(d["sideLeft"] - d["mainLeft"]) < 1, d)
     ctx.close()
-    # ---- the panel's default: every page opens pinned, the item page too; the pages here are files, so no server keeps a pin or unpin by the button (the server's per-person state is panel_open_scenario's), and nothing is stored in the browser; the width crossing 800 px keeps what was last chosen ----
+    # ---- the panel's default: every page opens pinned, the item page too; the pages here are files, so no server keeps a pin or unpin by the button (the server's per-person state is panel_prefs_scenario's), and nothing is stored in the browser; the width crossing 800 px keeps what was last chosen ----
     KEYS = "() => { try { return Object.keys(localStorage).filter(k => /panel/i.test(k)); } catch (e) { return ['throws']; } }"
     ISPIN = "() => document.body.classList.contains('panel-pin') && getComputedStyle(document.getElementById('panel')).visibility === 'visible'"
     ISOFF = "() => !document.body.classList.contains('panel-pin') && getComputedStyle(document.getElementById('panel')).visibility === 'hidden'"
