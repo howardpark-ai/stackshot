@@ -1,7 +1,7 @@
 """tests/_colors.py — colour helpers the suites share (a module, not a suite): WCAG 2.x contrast, a blend, hue/saturation/lightness, the stylesheet's tokens resolved per theme
 (a token may be a hex, a `var(--other)` or a `color-mix(in srgb, …)` of those), and a finder of every colour literal in a text.
 
-Used by tests/orange_scenario.py, tests/button_set_scenario.py and tests/ui_kit_scenario.py, so the three read the stylesheet the same way."""
+Used by tests/ui_guards_scenario.py (its dark_default, button_set, rows_background and orange parts) and tests/ui_kit_scenario.py, so they all read the stylesheet the same way."""
 import colorsys, re
 
 
