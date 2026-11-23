@@ -25,6 +25,7 @@ from stackshot.projects import project_verbs as _verbs
 from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import _projects_sync_safe, _registry
 from stackshot.router import page_debt as _page_debt
+from stackshot.service import caller_pass as _caller_pass
 from stackshot.service import contacts as _contacts
 
 
@@ -37,9 +38,18 @@ def _cfg_names(key: str, default: list[str]) -> list[str]:
     return _verbs.section_names(_cfg.get("project_agent"), key, default)
 
 
+PASS_NOT_FORM = ("refused: a pass opens only the New session form's calls: `sender` must be the key's label, or start with it and a `-`; "
+                 "a caller that is not the form has no use for a pass")
+
+
 def _form_call(machine: str, sender: str) -> bool:
-    """Is this `post project-agent` the New session form's? Only when the `sender` label is in [project_agent] form_senders AND the machine its
-    token proves (`machine`, never the body) is in form_machines: a label alone is not enough, since any token holder can type it."""
+    """Is this `post project-agent` the New session form's? Either of two ways, and the old one stays until the callers all hold a key:
+    (1) a pass: `machine` is "pass:<fingerprint>" (what a call that carries a live pass of an approved key is given, web/routes/client_api.py), and `sender` is that key's label or starts with it and a `-`
+    (service/caller_pass.py form_pass_ok); the key is the trust, whatever box the call comes from;
+    (2) the host lists: the `sender` label is in [project_agent] form_senders AND the machine its token proves (`machine`, never the body) is in form_machines: a label alone is not enough, since
+    any token holder can type it."""
+    if _caller_pass.is_pass(machine):
+        return _caller_pass.form_pass_ok(machine, sender)
     return _verbs.form_call(machine, sender, _cfg_names("form_senders", _FORM_SENDERS), _cfg_names("form_machines", _FORM_MACHINES))
 
 
@@ -103,6 +113,8 @@ def _project_agent_locked(machine: str, body: dict[str, Any], pages: dict | None
     fields, bad = _verbs.agent_fields(body)
     if bad: return bad
     project, name, role, mandate, sender, front = fields
+    if _caller_pass.is_pass(machine) and not _form_call(machine, sender):       # a pass is the New session form's and nothing else: the other branches take a session id as the proof of who asks
+        return 403, {"error": PASS_NOT_FORM}
     surface, bad = _verbs.agent_surface(body, role, front)         # "" for sala, the default; a slack agent is a front agent that answers his Slack app messages
     if bad: return bad
     reg = _prj.with_made(_registry("projects"))        # a project just made through `post project` is here before the pages checkout has read its page

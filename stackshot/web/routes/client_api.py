@@ -3,6 +3,9 @@
 `_client_post` is the POST dispatcher of /client/{what}: one branch per `what`, each handing the body to the service that does the work (service/recycle.py, released.py, question.py, terminal_prompt.py, job_gap.py, job_alert.py, item_open.py and the others) and answering (status, JSON).
 It is the surface's: it names the services and the status codes, and writes nothing itself. A suite that replaces a function of one of those services sets it on that module and calls `_client_post` here.
 
+A caller may hold a key of its own instead of a machine token (service/caller_pass.py): `POST /keys/enroll` and `POST /keys/pass` (no token) enroll a key and trade a signed claim for a pass, and the form's calls
+(`_PASS_VERBS`, the For you list's two writes, the color tool's routes) take `Authorization: Bearer <pass>` where a machine token goes (`_client_caller`); docs/client-contract.md, *A caller's own key*.
+
 `register(mcp, *, client_get, recycle_wanted_tokens)` adds the routes to the server's `mcp` in the order they were declared in server.py. The two callables are the server's own
 (`_client_get` serves the read calls, `_recycle_wanted_tokens` the tokens a poll hands out) and are looked up when a call is made, never when the routes are added."""
 from __future__ import annotations
@@ -28,6 +31,7 @@ from stackshot.projects import brains as _brains
 from stackshot.router import page_debt as _page_debt
 from stackshot.service import agent_names as _agent_names
 from stackshot.service import background_want as _background_want
+from stackshot.service import caller_pass as _caller_pass
 from stackshot.service import contacts as _contacts
 from stackshot.service import event_waits as _evwaits
 from stackshot.service import foryou as _fy
@@ -81,6 +85,28 @@ def _client_machine(authorization: str, request: Any = None) -> str:
     if hit and request is not None:
         _requestlog.note(request, caller=hit)
     return hit
+
+
+# The calls the New session form makes with a pass (a trade of the caller's own key, service/caller_pass.py) instead of a machine token: listing, renaming and retiring an agent, and the For you list's two writes
+# and the color tool's, which have their own routes. A pass opens nothing else of /client: the machine routes stay the machine token's.
+_PASS_VERBS = ("project-agent", "project-agent-rename", "project-agent-retire")
+_PASS_ONLY_FORM = "a pass opens only the New session form's calls: " + ", ".join(_PASS_VERBS)
+
+
+def _client_caller(request: Any, verb_ok: bool = True) -> tuple[str, str]:
+    """Who a /client write is from -> (the machine a token proves, else "pass:<fingerprint>" for a live pass of an approved key, else ""; "pass" when a pass was refused for the verb). `verb_ok` False: a pass is
+    not taken here (the caller is a verb a pass does not open)."""
+    auth = request.headers.get("authorization", "")
+    machine = _client_machine(auth, request)
+    if machine:
+        return machine, ""
+    pm = _caller_pass.pass_machine(auth)
+    if not pm:
+        return "", ""
+    if not verb_ok:
+        return "", "pass"
+    _requestlog.note(request, caller="key " + pm[len(_caller_pass.MACHINE_PREFIX):][:16])
+    return pm, ""
 
 
 def _client_config() -> dict[str, Any]:
@@ -332,10 +358,12 @@ async def client_write(request: Request):
     open until a line waits for one of them or `wait` seconds pass."""
     import asyncio
     from starlette.concurrency import run_in_threadpool
-    machine = _client_machine(request.headers.get("authorization", ""), request)
+    what = str(request.path_params.get("what", ""))
+    machine, refused = _client_caller(request, what in _PASS_VERBS)
+    if refused:
+        return JSONResponse({"error": _PASS_ONLY_FORM}, status_code=403, headers={"Cache-Control": "no-store"})
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
-    what = str(request.path_params.get("what", ""))
     try:
         body = await request.json()
         if not isinstance(body, dict):
@@ -433,7 +461,7 @@ def _client_item_watch(machine: str, key: str, body: dict[str, Any]) -> tuple[in
 
 async def _client_foryou_call(request: Request, fn: Any, *args: Any):
     from starlette.concurrency import run_in_threadpool
-    machine = _client_machine(request.headers.get("authorization", ""), request)
+    machine, _refused = _client_caller(request)
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
     try:
@@ -495,6 +523,51 @@ async def _client_api_read(request: Request, machine: str, what: str):
     return PlainTextResponse(body, status_code=status, media_type=ctype, headers={"Cache-Control": "no-store"})
 
 
+# The caller's own key: enroll it (no token, a rate limit for each source address, at most 5 keys waiting and 3 from one address) and trade a claim signed with it for a pass. What each takes and answers is service/caller_pass.py's text and docs/client-contract.md's.
+_KEYS_BODY_MAX = 8192
+
+
+def _peer(request: Request) -> str:
+    """The address the connection comes from, as the server itself reads it: uvicorn's `client`, which is the peer, or the client named in X-Forwarded-For when the peer is the loopback proxy in front of the
+    server (uvicorn trusts that header from 127.0.0.1 only). A header the caller sends itself is never read here."""
+    c = request.client
+    return str(c.host) if c and c.host else ""
+
+
+async def _keys_call(request: Request, fn: Any):
+    from starlette.concurrency import run_in_threadpool
+    nocache = {"Cache-Control": "no-store"}
+    try:
+        declared = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        declared = 0
+    if declared > _KEYS_BODY_MAX:
+        return JSONResponse({"error": f"the body is at most {_KEYS_BODY_MAX} bytes"}, status_code=413, headers=nocache)
+    raw = b""
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > _KEYS_BODY_MAX:
+            return JSONResponse({"error": f"the body is at most {_KEYS_BODY_MAX} bytes"}, status_code=413, headers=nocache)
+    try:
+        body = json.loads(raw)
+        if not isinstance(body, dict):
+            raise ValueError
+    except (ValueError, RecursionError):        # RecursionError: a body of arrays or objects nested deeper than the parser goes (8 KB of `[` is enough)
+        return JSONResponse({"error": "the body is a JSON object"}, status_code=400, headers=nocache)
+    status, out = await run_in_threadpool(fn, body, _peer(request))
+    return JSONResponse(out, status_code=status, headers={**nocache, **({"Retry-After": str(out["retry_after"])} if status == 429 and "retry_after" in out else {})})
+
+
+async def keys_enroll(request: Request):
+    """`POST /keys/enroll` {public_key, label, sender}, no token: keep an Ed25519 public key as pending. See caller_pass.enroll."""
+    return await _keys_call(request, _caller_pass.enroll)
+
+
+async def keys_pass(request: Request):
+    """`POST /keys/pass` {claim}, no token: trade a claim signed with an approved key for a pass. See caller_pass.claim_pass."""
+    return await _keys_call(request, _caller_pass.claim_pass)
+
+
 def register(mcp, *, client_get, recycle_wanted_tokens) -> None:
     """Add the routes to the server's `mcp`, in the order they were declared in server.py. Called once."""
     global _client_get, _recycle_wanted_tokens
@@ -503,3 +576,5 @@ def register(mcp, *, client_get, recycle_wanted_tokens) -> None:
     mcp.custom_route("/client/for-you/seen", methods=["POST"])(client_foryou_seen)
     mcp.custom_route("/client/items/{key}/watch", methods=["POST"])(client_item_watch)
     mcp.custom_route("/client/{what}", methods=["GET"])(client_api)
+    mcp.custom_route("/keys/enroll", methods=["POST"])(keys_enroll)
+    mcp.custom_route("/keys/pass", methods=["POST"])(keys_pass)

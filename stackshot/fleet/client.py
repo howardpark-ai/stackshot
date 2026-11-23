@@ -7,6 +7,12 @@ runs on every box.
                                 also installs it as <secrets>/client.token and points <secrets>/client.url at the local port.
   client.py revoke <machine>    forget that machine's token
   client.py list                which machines hold a token (names and dates, nothing secret)
+  client.py keys list|approve <fingerprint>|revoke <fingerprint>
+                                on the server box: the public keys callers registered for themselves (`POST /keys/enroll`, docs/client-contract.md,
+                                *A caller's own key*). list: each key's state (pending | approved), its first 16 fingerprint characters, sender,
+                                label and the board item raised for it. approve: a pending key becomes trusted for the whole New session form, under its sender label and every label that starts with it and a `-`.
+                                revoke: delete the key, pending or approved (the passes it traded stop at once). A fingerprint is typed with at
+                                least its first 8 characters, as many as name one key.
   client.py holds               the open parked items that nothing holds now (no open after item, pane recycle, needs=external or
                                 item-scoped anchor): item, mover, wake, who set it and when ("before the record" for a park stored
                                 before the server wrote one), one line each, so the item's mover can release them one by one
@@ -1351,6 +1357,22 @@ def main(argv: list[str]) -> int:
         try: path = mint(argv[2])
         except ValueError as e: print(e); return 1
         print(f"minted a token for {argv[2]} → {path} (0600; not shown). The server knows it at once."); return 0
+    if cmd == "keys":
+        from stackshot.fleet import caller_keys as _keys
+        verb = argv[2] if len(argv) > 2 else ""
+        try:
+            if verb == "list" and len(argv) == 3:
+                rows = _keys.listing()
+                print("\n".join(rows) if rows else "no key is enrolled"); return 0
+            if verb == "approve" and len(argv) == 4:
+                fp, e = _keys.approve(argv[3])
+                print(f"approved {_keys.short(fp)}  {e['sender']}  {e['label']}" if fp else "no one pending key starts with that (at least 8 hex characters; `keys list` shows them)"); return 0 if fp else 1
+            if verb == "revoke" and len(argv) == 4:
+                fp, kind = _keys.revoke(argv[3])
+                print(f"revoked {_keys.short(fp)} ({kind})" if fp else "no one key starts with that (at least 8 hex characters; `keys list` shows them)"); return 0 if fp else 1
+        except _keys.KeysFileError as e:
+            print(str(e), file=sys.stderr); return 1
+        print("usage: client.py keys list | approve <fingerprint> | revoke <fingerprint>", file=sys.stderr); return 1
     if cmd == "revoke" and len(argv) > 2:
         print("revoked" if revoke(argv[2]) else "no token for that machine"); return 0
     if cmd == "list":

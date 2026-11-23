@@ -14,6 +14,7 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, R
 
 from stackshot.audit import audit as _audit, audit_overview as _audit_overview
 from stackshot.core import readonly as _ro, store as _store
+from stackshot.service import caller_pass as _caller_pass
 from stackshot.service import landed as _ld
 from stackshot.web import i18n as _i18n, uiprefs as _uiprefs, runners as _runners, colorcombos as _colorcombos
 from stackshot.web.answers import _answer_same_origin
@@ -208,10 +209,10 @@ async def _colors_machine(request: Request, op: str):
     """The fleet tool's web server, by the machine token (Authorization: Bearer, as every /client route): 401 without a valid one (the plain text of the other /client routes),
     403 when its machine is not in [project_agent] form_machines. A write also needs `sender` to be "sala-web" and a label in form_senders (_form_call, as the For you writes)."""
     from starlette.concurrency import run_in_threadpool
-    machine = _client_machine(request.headers.get("authorization", ""), request)
+    machine = _client_machine(request.headers.get("authorization", ""), request) or _caller_pass.pass_machine(request.headers.get("authorization", ""))      # a pass is the other way in (service/caller_pass.py)
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
-    if machine not in _cfg_names("form_machines", _FORM_MACHINES):
+    if machine not in _cfg_names("form_machines", _FORM_MACHINES) and not _caller_pass.is_pass(machine):
         return _colors_err(403, _COLORS_NOT_MACHINE)
     body: dict[str, Any] = {}
     if op != "list":
