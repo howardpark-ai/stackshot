@@ -145,12 +145,47 @@ DELIVERED = [          # every shape the review named, and the earlier asks: non
     "the second pass is done in staging: the remaining lines are back on the page. The tree is ready for the rebuild; nothing is uploaded.",
     "the step is merged; \"pending\" only means not applied yet. In order now: PR 22 is releasing; then I apply the hook if it passes; then the last row (needs the other side).",
     "the server has no call that drops a pending agent, so the fix starts there. I asked projects/example for one; I build the client side once they name it.",
+    # the widened shapes (taken, stopped, complete ...) keep every word of trouble, asking and planning
+    "taken; please confirm the plan", "taken. I will start once the runner is back", "the watch is stopped; it needs a restart", "stopped on a failing suite", "taken, is it the right item?",
+    "the item is complete; decide whether to ship", "the item is finished and awaits your look", "done (010cc0d); should I deploy?", "the unit is removed; Oliver can check it",
+    # negation and trouble in the new words ("stopped", "taken"), and a bare answer: no report, so it goes on to the answer rule and reaches the agent that asked
+    "no, it is not finished", "the runner stopped", "the port is taken", "the permission is not removed yet", "yes, finished", "yes, a1 is merged", "no, merged", "the unit isn't retired",
+    "a1: still not deployed", "the old unit is no longer removed", "the watch is stopped yet again", "taken by the other session", "the item is not complete", "stopped", "Yeah, done (010cc0d).",
+    # a status that says what is missing is trouble, whatever status word it holds
+    "done, but nothing is live", "nothing was removed", "nothing merged", "none deployed", "no PR merged", "zero merged", "closed, nothing deployed", "Done except the docs", "merged, except the docs",
+    "partly done", "half merged", "partial merge", "merged without the docs", "no one merged it", "done, but the port is in use", "the suites are red; fixed in 010cc0d", "Yes, finished. FYI.",
+    # "no change(s)" is a status only when no status word follows it: these say that nothing happened
+    "No changes were merged.", "No changes deployed.", "No change landed.", "No change merged.", "Merged, no changes were deployed.", "No change was released.", "no changes are live", "No change got fixed.",
+    # a part of the work only, or a step that did not happen
+    "3 of 5 merged", "merged 3/5", "only a1 merged", "merged, only the docs", "merged minus the docs", "merged, other than the docs", "merged apart from the docs", "merged in part", "mostly done",
+    "done for now", "merged; the docs are omitted", "done; two steps skipped", "the deploy timed out; fixed", "the job errored; fixed", "aborted; closed", "the host is unreachable; closed",
+    "degraded; fixed", "unmerged; closed", "abandoned; closed", "superseded; closed", "Done, no regressions", "Done, no errors, but nothing is live", "Done, no conflicts, but the port is in use",
+    "Merged, no issues, still red", "Closed without merging, but the unit is not removed",
 ]
 HELD = [               # a plain status report, every sentence one of the shapes
     "PR 23 is live.", "a1 merged and deployed.", "PR #18 is up; the suites pass.", "fixed in 010cc0d. Suites are green.", "Recorded on the item. No change to the unit.", "released; closed.",
     "[for Oliver] done: the unit is live and the suites pass", "For osprey-main, a1: merged, deployed, green.", "`a1` is merged", "opened PR #18", "merged in 010cc0d\nlive since 15:10", "No change. Unchanged since a1.",
+    "Taken.", "taken", "Done (010cc0d).", "Done (010cc0d) and live.", "the item is complete", "the item is closed and the unit is removed", f"board#{BID_A}: the watch is stopped and the item is closed.", "a1: the old unit is retired; the suites pass.",
+    "[for Oliver] a1: Taken.", "the work is finished and merged", "the watch is stopped.", "a1: the old unit is now stopped and removed", "No change. Nothing changed since a1.",
+    "No change.", "No changes.", "no unit changed", "nothing changed", "no config changed", "PR 12 merged and live", "item complete", "FYI, the item is closed.", "Done (abc1234).",
+    f"Taken (board#{BID_A}).", "Taken (PR 12).", "Taken (a1, PR 12).", "No-op, unchanged.", "no-change, merged",       # the ids leave an empty bracket; "no-op" is no answer
+    f"Taken (board#{BID_A}, board#{BID_A}).", "Taken (a1 and a2).", "Taken (PRs 12 and 13).", "Taken [a1, PR 12 and PR 13].",       # several ids in one bracket leave only separators and "and"
+    "No changes in the unit; merged.", "No change to the unit. Live.",           # a status word that does not follow "no change" directly
+    # clean bills: a phrase that says nothing went wrong, beside a status
+    "Done, no issues.", "Done, no conflicts.", "Done, no errors.", "Merged, no failures.", "Done, no follow-ups.", "Done; no incidents.", "Merged, no downtime.", "Suites green, no flakes.",
+    "Merged; nothing to report.", "Closed, nothing left to do.", "Done; nothing else open.", "Merged and live, nothing pending.", "Merged, none pending.", "Merged without conflicts.",
+    "Closed without merging.", "closed without merging", "Merged, no error. Live.",
 ]
+check("reports: a clean bill is no trouble only where no other word of trouble stands in the sentence", reports.report_doubt("Done, no errors, but nothing is live").startswith("a word of trouble")
+      and reports.report_doubt("Done, no issues") == "" and reports.report_doubt("Done, no regressions").startswith("a word of trouble") and reports.report_doubt("Closed without merging, still red").startswith("a word of trouble"),
+      [reports.report_doubt(t) for t in ("Done, no errors, but nothing is live", "Done, no issues", "Done, no regressions", "Closed without merging, still red")])
 check("reports: every shape of ask, trouble, waiting, naming and plan is delivered", [t for t in DELIVERED if reports.is_report(t, FRONT)] == [], [(t, reports.report_doubt(t, FRONT)) for t in DELIVERED if reports.is_report(t, FRONT)])
+NOTED_NOT = ["a1: , should I deploy the unit now? I need your go.", "a1: , the suite failed on the runner", "a1: , see ```x```", "a1: , please look at the page", "a1: , the page awaits Oliver",
+             "Yes, finished.  ", "a1: , yes, closed", "a1: , yes, finished. ", ": no, merged", "a1:  yeah, done"]       # an opening yes or no is an answer even beside a fixed phrase
+NOTED_YES = ["a1: , the docs page reads fine", "a1: , the unit is up, a plain note", "a1: , nothing else to say", "a1: , the item is closed", "a1: , no-op, unchanged", "a1: , the answer is in the item"]
+check("reports (noted): a fixed no-action phrase skips only the status shape: a question, a fence, trouble or an ask beside it is no note",
+      [t for t in NOTED_NOT if reports.is_report(t, FRONT, noted=True)] == [] and [t for t in NOTED_YES if not reports.is_report(t, FRONT, noted=True)] == [],
+      ([t for t in NOTED_NOT if reports.is_report(t, FRONT, noted=True)], [t for t in NOTED_YES if not reports.is_report(t, FRONT, noted=True)]))
 check("reports: a plain status report is held back", [t for t in HELD if not reports.is_report(t, FRONT)] == [], [(t, reports.report_doubt(t, FRONT)) for t in HELD if not reports.is_report(t, FRONT)])
 check("reports: the reason names what stopped it", reports.report_doubt("is it live?") == "a question mark" and reports.report_doubt("live; ask Oliver") .startswith("a word of trouble")
       and reports.report_doubt("The footer line stays.").startswith("a sentence that is no status shape") and reports.report_doubt("live, see `a long prose span here now ok`") == "a code span with prose"
@@ -217,8 +252,14 @@ rep = _messaging._message("osprey-x", "a1 is merged, the suites pass", "home-bet
 check("…a message to a background agent is never held back", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
 rep = _messaging._message("osprey-main", f"{MK} a1 is live", "nightly-job", origin="testbox"); settle()
 check("…a script's message (origin) is not a builder's", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
-check("1g: an unmarked message is still refused first, and 'no action needed' is still refused, builder or not",
-      why(lambda: _messaging._message("osprey-main", "a1 is merged", "osprey-x")).startswith("Refused: osprey-main is a front agent")
+rep = _messaging._message("osprey-main", f"{MK} a1: Done (010cc0d), the unit is live. Taken.", "osprey-x"); settle()
+check("1f2: a builder's marked 'Done (sha)' / 'Taken' note on an item is written onto it, not delivered", rep.startswith("Not delivered: written onto a1"), rep)
+rep = _messaging._message("osprey-main", f"{MK} a1: the watch is stopped and the item is closed", "osprey-x"); settle()
+check("…and so is '<thing> is stopped and the item is closed'", rep.startswith("Not delivered: written onto a1"), rep)
+rep = _messaging._message("osprey-main", "a1 is merged", "osprey-x"); settle()
+check("1g: an unmarked report from a builder that names an item is written onto it (no turn), one that names none is refused, and a marked 'no action needed' is still refused, builder or not",
+      rep.startswith("Not delivered: written onto a1") and why(lambda: _messaging._message("osprey-main", "the build is merged", "osprey-x")).startswith("Refused: osprey-main is a front agent")
+      and why(lambda: _messaging._message("osprey-main", "a1 is merged", "home-beta")).startswith("Refused: osprey-main is a front agent")
       and "says nothing is needed from him ('no action needed')" in why(lambda: _messaging._message("osprey-main", f"{MK} a1 is merged, no action needed", "osprey-x")))
 # a message to a project that opens "For <front agent>"
 p0, s0 = len(pushes()), len(saved); n0 = len(routing.read("projects/alpha"))
