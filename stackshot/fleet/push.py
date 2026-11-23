@@ -73,13 +73,17 @@ FALLBACK_LOG = os.path.join(A, "push-fallback.jsonl")     # bridge: one line per
 INBOX_WAIT = float(os.environ.get("PUSH_INBOX_WAIT", "4"))      # s to wait for the machine's confirmation before answering "inbox"
 
 
-def paused(name: str) -> bool:
+def paused(name: str, src: str | None = None) -> bool:
+    """Is a delivery to `name` paused or held? Of this process's own source (ANCHOR_PUSH_SOURCE), or of `src` ("hub" or "msg") when a caller asks for the other: anchor-hub asks it of both queues without starting a process for each."""
+    pause, files = PAUSE, (HELD, HELD_RESUME, HELD_API)
+    if src is not None and src != SRC:
+        pause, files = os.path.join(A, f"paused-{src}.json"), tuple(os.path.join(A, f"{k}-{src}.txt") for k in ("held", "held-resume", "held-api"))
     if os.environ.get("ANCHOR_PUSH_FORCE"):
         return False
-    if os.path.exists(PAUSE):
+    if os.path.exists(pause):
         return True
     held: set[str] = set()
-    for f in (HELD, HELD_RESUME, HELD_API):         # the union of the three files; one that cannot be read (missing) lists nothing
+    for f in files:         # the union of the three files; one that cannot be read (missing) lists nothing
         try:
             held |= {ln.rstrip("\n") for ln in open(f, encoding="utf-8")}
         except Exception:
@@ -345,6 +349,11 @@ def deliver(name: str, text: str, sender: str = "") -> int:
     if said:
         print(said); return 1
     enqueue(name, text, sender); print(f"queued → {name}"); return 1
+
+
+def flush_held(name: str, src: str) -> bool:
+    """Would `--flush name` of source `src` stop at its first check (exit 5: paused or held), having done nothing? anchor-hub skips the process then; the same test `flush` makes."""
+    return paused(_sr.delivery(name), src)
 
 
 def flush(name: str) -> int:

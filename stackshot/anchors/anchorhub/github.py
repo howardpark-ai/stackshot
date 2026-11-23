@@ -131,12 +131,21 @@ def run(hub: Hub):
     for v in ci_st.values():
         if v.get("pr") is False:                           # saved while no pull request was known under that number: what it says about one (carried over from an entry of another repository's name, or left by an earlier version) is dropped
             for f in PR_FIELDS: v.pop(f, None)
+    canon_memo: dict[str, str] = {}; canon_for: list = [None]      # id → its current name, and the [github.moved] table that memo was made under (the poll thread alone uses them)
     def adopt(d, a_id):
         """[github.moved]: saved state, CI state and the like are keyed by the anchor id. When a pair is added while the hub runs (a config reload), the
         entry stored under the other name of the same repository is moved to the id the bindings use now, before it is read, so a run in flight, a
         comment or a merge in the gap is still reported and no entry is left under the dead name. An empty table: nothing is looked at, nothing moves."""
-        if not _cfg.moved_repos(): return
-        for k in [k for k in d if k != a_id and k.startswith("github:") and (_anc.anchor_id(k) or k) == (_anc.anchor_id(a_id) or a_id)]:
+        moved = _cfg.moved_repos()
+        if not moved: return
+        if moved != canon_for[0]: canon_memo.clear(); canon_for[0] = moved      # a name's current form changes only with the table: remembered until it does
+        elif len(canon_memo) > 20000: canon_memo.clear()
+        def canon(k):
+            c = canon_memo.get(k)
+            if c is None: c = canon_memo[k] = _anc.anchor_id(k) or k
+            return c
+        want = canon(a_id)
+        for k in [k for k in d if k != a_id and k.startswith("github:") and canon(k) == want]:
             v = d.pop(k)
             if a_id not in d: d[a_id] = v
     # restore what a 304 needs to be believed — the ETags with the state they were taken at, the learnt repository IDs, the saved

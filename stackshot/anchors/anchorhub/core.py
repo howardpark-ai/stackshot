@@ -400,12 +400,20 @@ class Hub:
                 except Exception as e: log.warning("routing log %s: %s", project, str(e)[:120])
                 self.deliver(anchor, s, line)
 
+    def held_queue(self, name: str, src: str) -> bool:
+        """Is this queue paused or held now (push.py `--flush` stops there with exit 5)? Asked in this process, which costs microseconds, where the process costs about 150 ms of CPU. Any doubt (push.py cannot be loaded or asked) → False: the process is started, as it always was."""
+        try:
+            from stackshot.fleet import push as _push
+            return bool(_push.flush_held(name, src))
+        except Exception: return False
+
     def flush_queues(self):
         """Retry every queue: anchor-hub's own (queue/) and stackshot's messages (queue-msg/). push.py refuses while that
         source is paused for a reboot (exit 5), so a paused queue simply waits."""
         for src, d in (("hub", "queue"), ("msg", "queue-msg")):
             for qf in glob.glob(f"{ADIR}/{d}/*.jsonl"):
                 name = os.path.basename(qf)[:-6]
+                if self.held_queue(name, src): continue      # a paused or held queue: push.py would answer exit 5 at once, having done nothing; the next rescan asks again, so a lifted hold flushes as soon as before
                 r = subprocess.run([*_interp.resilient(PUSH), "--flush", name], capture_output=True, text=True, env={**os.environ, "ANCHOR_PUSH_SOURCE": src})
                 if r.returncode == 0 and r.stdout.strip(): log.info(r.stdout.strip())
 
