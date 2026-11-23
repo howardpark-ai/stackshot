@@ -12,11 +12,15 @@ runs on every box.
                                 before the server wrote one), one line each, so the item's mover can release them one by one
                                 (update clear_hold=true). Reads only: nothing is released here. Exit 0 listed · 1 not reached.
   client.py get <read> [key]    registry | rules | brief | page-ts <page key | project id> | items <session> | project <id | page key | slug> | holds |
-                                answer <board#N> (below) | for-you (below) | whoami | config | roles — read from the server with this machine's token (<secrets>/client.token);
+                                answer <board#N> (below) | for-you (below) | whoami | config | roles | state-files — read from the server with this machine's token (<secrets>/client.token);
                                 config = the instance's non-secret settings;
                                 roles = every session's role, {"generated": <UTC>, "sessions": {name: {role, project}}}; an agent
                                 the project record holds whose page line is still owed is listed under its project like a page's, front
                                 or back by its flag, with page_owed: true in its entry (no such key for a page's own agents);
+                                state-files = the files a box that does not run the server reads from its own state folder, as one JSON object:
+                                {host, generated, projects (projects.json), fleet ({letter: {machine, sessions}}), versions (site/versions.json),
+                                advertised_commit}; one that is not there is null or "". The puller of such a box keeps them current when
+                                `[client] mirror_server_state = true` (with roles.json from `roles`); a reader may also fetch it by hand;
                                 project = one project's record, {id, key, keeper, keeper_agent, keeper_source, agents: {name: {front, role,
                                 mandate_line, keeper?}}}: its permanent id (prj_<8 hex>), the page key it has now, the page's keeper and its
                                 agents (a name the page does not list yet carries page_owed: true). The keeper is a mark on one agent:
@@ -386,7 +390,7 @@ CLIENTS = os.path.join(SECRETS, "clients.json")
 TOKENS = os.path.join(SECRETS, "client-tokens")
 TOKEN = os.path.join(SECRETS, "client.token")
 URLF = os.path.join(SECRETS, "client.url")
-READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "project", "projects", "agent-name", "answer", "notice", "for-you")
+READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you")
 
 
 def _write_private(path: str, text: str) -> None:

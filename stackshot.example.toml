@@ -791,6 +791,12 @@ repo_url = ""                                       # the repository address the
                                                     # = this server checkout's origin as https with no user or password (git@github.com:o/r.git -> https://github.com/o/r.git).
                                                     # Set it when that is not an address the boxes can fetch from (an ssh alias). A clean, idle box whose origin is another
                                                     # repository takes it (fetching from it first); the same repository in another form (ssh or https) is no move. Server's config. Live
+mirror_server_state = false                         # a client box's puller (puller 12) keeps copies of the server's published state files in its own state folder (roles.json, projects.json,
+                                                    # clients/fleet/<letter>/machine.json and sessions.json, site/versions.json, clients/advertised-commit), for the readers on that box that
+                                                    # open them directly: set true in the config of a box whose server runs on ANOTHER machine. false (default): one box, unchanged. A copy is
+                                                    # rewritten by a temporary file and a rename after each successful poll (at most every 30 s); a read that fails, or an answer that is
+                                                    # empty or misshapen, leaves the old file in place (logged once). A box that is the server itself (a loopback server address, or the
+                                                    # server's own hostname in the answer, or the server's secrets file clients.json on the box) never writes. Client box's config. Live
 session_links = ""                                  # the fleet tool's live store of session links, <letter>/sessions.json: a session's link is the url the
                                                     # tool writes for its transcript id there (stackshot builds none; no row or an empty url = no link, a
                                                     # missing store is logged once). e.g. "~/.local/state/salamander/fleet" (sala's heartbeat store).
