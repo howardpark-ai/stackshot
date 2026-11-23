@@ -18,6 +18,11 @@ RECHECK_SLOW = 3600   # s; hourly until the number has been missing for RECHECK_
 RECHECK_SLOW_FOR = 86400   # s
 RECHECK_DAILY = 86400   # s
 PER_ANCHOR_ETAGS = 6  # ETags kept in the saved file per anchor (pull request, check runs of the newest commit, issue: three in use)
+CATCHUP_SHARE = 2 / 3   # an anchor not yet read since the first read or a change of login (a catch-up: every read of it is a full, counted 200, no ETag to answer 304) is started only while the hour's ledger, the server's reads included, holds fewer than this share of [github] read_budget: a third of it is always left, for the server's own reads and for the anchors already read (a change in one of them is a counted 200 too). The check is made before each anchor, so a pass can pass the line by what one anchor costs (a handful of reads), never by more
+RETRY_AFTER = 3   # a look that failed this many times in a row is no longer tried every pass, when GitHub answered another look in the passes (a failure of everything may be an outage, not the anchor's: those anchors are tried every pass)
+RETRY_FIRST = 4 * GHPOLL   # s; the wait after that, doubled by each further failure up to RETRY_MAX: an anchor that cannot be read (a deleted issue GitHub answers 403 or 5xx for) costs a few reads an hour, not 120, and is behind every anchor not tried yet
+RETRY_MAX = 3600   # s
+GONE = re.compile(r"HTTP(?:/\d(?:\.\d)?)? 4(?:04|10)\b|Not Found|\bGone\b")   # what GitHub answers for a number with nothing under it, for good: 404, or 410 for a deleted issue (the answer to the question, not a failed look)
 APP_TOKEN = re.compile(r"Resource not accessible by integration", re.I)   # what GitHub answers an App's installation token for a call only a person's token may make
 def run(hub: Hub):
     etags: dict[str, str] = {}
@@ -25,9 +30,11 @@ def run(hub: Hub):
     # for each of them. An ETag is saved only once the pass has finished with the anchor it belongs to (`committed`, filled by settle()): a save in the
     # middle of a read (the clean stop of a restart, the minute's save) never holds an ETag whose answer the saved state has not taken in yet, so a
     # change that arrives meanwhile is a 200 after the restart and is reported. A 304 needs no body: what the answer would have said is in the saved state.
+    failed: list[bool] = [False]                            # set when the look at the anchor in hand failed for a reason that is not the anchor's (a refusal, GitHub's error, a network): it is then not counted as read, and a catch-up tries it again
     touched: list[str] = []                                # the conditional paths read for the anchor being looked at
     committed: dict[str, dict[str, str]] = {}              # anchor id → {path: ETag} as of its last finished look: what is saved
     resolved: dict[str, dict] = {}                         # anchor id → {path, etag, info}: the board's label, answered from here on a 304
+    looked: dict[str, float] = {}                          # anchor id → when the poll last finished with it (a finished anchor's turn that is skipped counts). Saved with the ETags and dropped with them when the login changes: an anchor that is not here has not been read under this login, and is what a catch-up still has to do
     # GitHub's numeric repository ID (repository.id) survives a transfer to another owner; the anchor's owner/name does not. IDs are learnt from the
     # responses that carry one, by the repo name the anchor uses, and put on every event as repo_id (Event.repo_id, matched by [pilot] own_repos):
     # a notification thread's `repository`, a pull request's `base.repo`, an issue's `repository` when GitHub includes it. A release answer has none
@@ -39,6 +46,9 @@ def run(hub: Hub):
     def held():
         """Seconds until the hourly read cap has room (0 = it has): the cap is the ledger's, shared with the server (ghbudget.py, [github] read_budget)."""
         return _gb.wait(_gb.READ, _gb.read_cap())
+    def paced():
+        """Seconds until a catch-up may start another anchor (0 = it may): the ledger's count of the hour, the server's reads included, against CATCHUP_SHARE of the cap. Not the cap itself, so this wait is no failure."""
+        return _gb.wait(_gb.READ, max(1, int(_gb.read_cap() * CATCHUP_SHARE)))
     def counted(r):
         """A `gh` call GitHub answered goes into the ledger; a call that never reached it (no network) does not."""
         if r.returncode == 0 or not re.search(r"error connecting|could not resolve|timed? ?out|connection (refused|reset)", r.stderr or "", re.I): _gb.note(_gb.READ, caller="receivers")
@@ -118,7 +128,7 @@ def run(hub: Hub):
         path = f"/repos/{repo}/issues/{n}"
         try: i, tag = cached_get(a_id, path)
         except Exception as e:
-            if not re.search(r"HTTP 4(04|10)", str(e)): return {"url": f"https://github.com/{repo}/issues/{n}"}    # not a refusal: tried again
+            if not GONE.search(str(e)): return {"url": f"https://github.com/{repo}/issues/{n}"}    # not a refusal: tried again
             resolved.pop(a_id, None)
             return {"title": f"{repo}#{n}", "url": f"https://github.com/{repo}/issues/{n}", "unreadable": f"GitHub shows {me or 'this token'} no issue or pull request there"}
         if i is None and cached: return cached                           # 304: nothing changed since the last resolution, which is saved
@@ -171,12 +181,15 @@ def run(hub: Hub):
                 if a not in state or not (a.endswith("@releases") or a.endswith("@notifications") or a in ci_st): continue
                 if isinstance(per, dict) and all(isinstance(p, str) and isinstance(t, str) and t for p, t in per.items()):
                     committed[a] = dict(per); etags.update(per)
+            for a, t in (sv.get("looked") or {}).items():
+                if isinstance(t, (int, float)) and not isinstance(t, bool) and t >= 0: looked[_anc.anchor_id(a) or a] = float(t)
+            for a in committed: looked.setdefault(a, 0.0)      # a file from before `looked` was kept: an anchor with ETags was read, whenever
             for a, ent in (sv.get("resolved") or {}).items():
                 if isinstance(ent, dict) and isinstance(ent.get("info"), dict) and isinstance(ent.get("etag"), str) and isinstance(ent.get("path"), str): resolved[_anc.anchor_id(a) or a] = ent
             for k, v in (sv.get("repo_ids") or {}).items():
                 if isinstance(v, int) and not isinstance(v, bool) and v > 0: repo_ids[str(k).lower()] = v
         except Exception as e:
-            log.warning("github: saved ETags not used (%s)", str(e)[:80]); committed.clear(); etags.clear(); resolved.clear()
+            log.warning("github: saved ETags not used (%s)", str(e)[:80]); committed.clear(); etags.clear(); resolved.clear(); looked.clear()
     def settle(a_id):
         """The look at `a_id` is finished: the ETags it read (and still holds: a read that failed after its 200 dropped its ETag) are what is saved for it."""
         per = committed.setdefault(a_id, {})
@@ -188,6 +201,7 @@ def run(hub: Hub):
         """The saved read position (each list() / dict() below is one step under the GIL, the poll thread goes on meanwhile). Only watched anchors keep ETags and resolutions."""
         with hub.lock: bound = {_anc.anchor_id(k) or k for k in hub.bindings if k.startswith("github:")}
         return {"state": state, "ci": ci_st, "me": me, "repo_ids": dict(repo_ids),
+                "looked": {a: t for a, t in list(looked.items()) if (_anc.anchor_id(a) or a) in bound},
                 "etags": {a: dict(per) for a, per in list(committed.items()) if (_anc.anchor_id(a) or a) in bound and per},
                 "resolved": {a: dict(e) for a, e in list(resolved.items()) if (_anc.anchor_id(a) or a) in bound}}
     hub.savers["github"] = snapshot
@@ -203,7 +217,7 @@ def run(hub: Hub):
         try: r = gh(f"/repos/{repo}/releases/latest", conditional=True)
         except Exception as e:
             if "404" in str(e) or "Not Found" in str(e): state.setdefault(a_id, {"tag": None}); return
-            log.warning("github %s: %s", a_id, str(e)[:120])
+            log.warning("github %s: %s", a_id, str(e)[:120]); failed[0] = True
             if "rate limit" in str(e).lower() or "403" in str(e): hub.hold("github", BACKOFF); time.sleep(BACKOFF)
             return
         if r is None: return                                  # 304: unchanged
@@ -260,7 +274,7 @@ def run(hub: Hub):
         npath = f"/repos/{repo}/notifications?all=true&per_page=50"
         try: ns = gh(npath, conditional=True)
         except Exception as e:
-            log.warning("github %s: %s", a_id, str(e)[:120]); return
+            log.warning("github %s: %s", a_id, str(e)[:120]); failed[0] = True; return
         if ns is None: return                                 # 304: nothing new
         st = state.setdefault(a_id, {"threads": None, "said": {}})
         seen = st["threads"]
@@ -316,7 +330,7 @@ def run(hub: Hub):
             with hub.lock: title = ((hub.status.get("anchors") or {}).get(a_id) or {}).get("title") or f"{repo.split('/')[1]}#{n}"
         hub.event(a_id, {"title": title, "who": c.get("author") or "someone", "text": f"new commit {c['sha'][:7]}", "url": f"https://github.com/{repo}/pull/{n}", "ts": when, "etype": "pr_commit", "repo_id": rid(repo), "vouched": "commit", "record_only": True, **pr_meta(c)}, kind="github-state")
     issue_gone: set[str] = set()                      # anchors whose issue read answered 404 at the last look (memory only: a restart asks once more)
-    def gone_404(e): return "404" in str(e) or "Not Found" in str(e)
+    def gone_404(e): return bool(GONE.search(str(e)))
     def ci(a_id, repo, n, key=None, title=None):
         """CI on a watched pull request (a failed run can otherwise go unnoticed). One notice per head
         commit once all its check runs have finished, naming the failed ones (canceled ones counted, not a trigger); a later
@@ -334,7 +348,8 @@ def run(hub: Hub):
             etags.pop(f"/repos/{repo}/pulls/{n}", None)       # asked in full: an ETag from before the miss (an entry saved by an earlier version) must not turn the answer into a 304 the entry cannot read
         try: p = gh(f"/repos/{repo}/pulls/{n}", conditional=True)
         except Exception as e:
-            if gone_404(e):
+            if not gone_404(e): failed[0] = True      # not an answer (GitHub's error, a refusal, the cap): the look at the anchor is not a read, as for the issue
+            else:
                 ci_st[ck] = c = {**{k: v for k, v in c.items() if k not in PR_FIELDS}, "pr": False, "missing": c.get("missing", now), "tried": now}      # one replacement: the minute's snapshot sees the entry before or after, never half of it; nothing of an earlier pull request stays to be put on a notice
                 etags.pop(f"/repos/{repo}/pulls/{n}", None); committed.get(a_id, {}).pop(f"/repos/{repo}/pulls/{n}", None)      # the saved copy of the ETag goes too (settle() only adds what is still held, and a read that failed after its 200 keeps the older saved one on purpose): a restart must not answer 304 for what is gone
             return
@@ -351,7 +366,9 @@ def run(hub: Hub):
             if was and c["sha"] != was: commit_seen(a_id, repo, n, c, last is None or c["looked"] - last > COMMIT_DOWNTIME, title)      # the head commit changed since the last read of this pull request (a first sight has no earlier sha and records nothing; a 304 has no payload and records nothing)
         if not c.get("sha"): return
         try: r = gh(f"/repos/{repo}/commits/{c['sha']}/check-runs?per_page=100", conditional=True)
-        except Exception: return
+        except Exception as e:
+            if not gone_404(e): failed[0] = True      # a commit GitHub no longer has (a forced push) is an answer; anything else is not a look
+            return
         if r is None: return
         runs = r.get("check_runs") or []
         if not runs or any(x.get("status") != "completed" for x in runs):      # still running: wait for the whole set
@@ -388,7 +405,9 @@ def run(hub: Hub):
         if st.get("state") != "closed": return "full"
         if "merged" not in st: return "issue"
         if not (st["merged"] or not st["pr"]): return "full"
-        return "full" if (passno + zlib.crc32(a_id.encode())) % FINISHED_EVERY == 0 else "skip"
+        # An anchor not in `looked` (a catch-up: the first start, a change of login) is read, never skipped: the pacing in one_pass lets it through as a read to be paid for, and a skip would put it in `looked` unread, so its turn
+        # (within FINISHED_EVERY passes) would read it in full, unpaced, past the allowance.
+        return "full" if a_id not in looked or (passno + zlib.crc32(a_id.encode())) % FINISHED_EVERY == 0 else "skip"
     late_failed: dict[str, int] = {}                  # anchor id → tries of its late merge line that failed (memory only: a restart gives a few more, no more)
     def logged_merge(repo, n):
         """Which logs hold this pull request's merge already (written by another anchor on it, the repository's notifications, an earlier try or start)? → (merge log, event log). Each is read from its start: a merge found late is rare.
@@ -464,27 +483,48 @@ def run(hub: Hub):
             state[a_id] = snap(i)
         except Exception as e:
             log.warning("github %s: %s", a_id, str(e)[:120])
+            if not gone_404(e): failed[0] = True                 # nothing under that number is an answer (read again later by the poll's own schedule); any other failure is not a look
             etags.pop(f"/repos/{repo}/issues/{n}", None)         # a read that failed after the issue's 200 (the comments, refused by the cap or GitHub) is made again next pass, not answered 304
             if "rate limit" in str(e).lower() or "403" in str(e): hub.hold("github", BACKOFF); time.sleep(BACKOFF)
     hub.hold("github", FIRST_PASS)                         # the first pass after a start reads every anchor: the board counts no age until it ends or this time is up
-    hub.gh_state = {"ci": ci_st, "state": state, "etags": etags, "news": thread_news, "committed": committed, "resolved": resolved}      # for inspection and tests
+    hub.gh_state = {"ci": ci_st, "state": state, "etags": etags, "news": thread_news, "committed": committed, "resolved": resolved, "looked": looked}      # for inspection and tests
     capped_now = [False]                                                # the cap warning is logged when the state changes, not every pass
+    catching_now = [False]                                              # the catch-up is logged when it begins and when it ends, not every pass
     notif_said = [False]                                                # the skipped notification anchors are logged once for the run, not every pass
     passes = [0]                                                        # polls made since the receiver started (the finished anchors' turn is counted by it)
+    retry: dict[str, tuple[int, float]] = {}                            # anchor id → (looks that failed in a row, when it is tried next): memory only, a restart gives each a few more tries
+    hub.gh_state["retry"] = retry
+    def fails(a_id): return retry.get(a_id, (0, 0.0))[0]
     def one_pass():
+        """One poll over every anchor. A CATCH-UP (a first start, a change of login, anchors bound for the first time: every anchor not in `looked`) reads anchors in turn, the ones never read
+        first, and starts another only while `paced()` allows, so it never takes more than CATCHUP_SHARE of the hour's reads; the rest wait for the next pass, and a catch-up the hour's reads cannot yet
+        finish is shown on the card as healthy, with a note of how far it is. The anchors already read are looked at in every pass, the one read longest ago first, whatever the catch-up has left."""
         with hub.lock: ids = [k for k in hub.bindings if k.startswith("github:")]
-        skipped = False; user_only = 0                              # user_only: the notification anchors an App token cannot read (counted, not asked)
+        # never read first (as bound), then by when each was last read, the longest ago first; within each, an anchor whose looks keep failing goes behind the ones that do not (sorted() is stable: the order bound is kept)
+        ids = sorted((a for a in ids if a not in looked), key=fails) + sorted((a for a in ids if a in looked), key=lambda a: (fails(a), looked[a]))
+        skipped = False; user_only = 0; paced_out = False           # user_only: the notification anchors an App token cannot read (counted, not asked); paced_out: no anchor not yet read is started in this pass
+        t0 = time.time(); bad: list[str] = []; answered = False     # bad: the anchors whose look failed in this pass; answered: a look in it that GitHub answered (a failure of every look is an outage, and no anchor's)
         for a_id in ids:
             if held() > 0:                                          # the hourly read cap is spent: the rest of this pass reads nothing; the next pass looks again
                 skipped = True; break
-            adopt(state, a_id); adopt(ci_st, a_id)           # before release, notifications, ci and the issue read look at either
-            touched.clear()
+            adopt(state, a_id); adopt(ci_st, a_id); adopt(looked, a_id)           # before release, notifications, ci and the issue read look at either
+            if retry.get(a_id, (0, 0.0))[1] > t0: continue      # its looks keep failing: not before its time (it reads as unread, or as it was, meanwhile)
+            if a_id not in looked and (paced_out or paced() > 0):   # not read yet, and the catch-up has had its share of the hour: it waits for room, and the anchors already read go on
+                paced_out = True; continue
+            touched.clear(); failed[0] = False; asked = True
             if a_id.endswith("@releases"): release(a_id)
             elif a_id.endswith("@notifications"):
-                if app_token: user_only += 1                          # the user's notifications API is closed to an App token (403): skipped, and said once below
+                if app_token: user_only += 1; asked = False           # the user's notifications API is closed to an App token (403): skipped, and said once below
                 else: notifications(a_id)                             # CI: GitHub's own ci_activity
             elif (mode := how(a_id, passes[0])) != "skip": watch(a_id, with_ci=mode == "full")
+            else: asked = False
             settle(a_id)
+            if failed[0]: bad.append(a_id)                      # a look that failed is not a read: the anchor stays unread (or keeps its old turn) and is tried again
+            else:
+                looked[a_id] = time.time(); retry.pop(a_id, None); answered = answered or asked
+        for a_id in bad:                                        # every failed look is counted (an anchor that failed goes behind those that did not); the wait between tries starts only in a pass in which GitHub answered another look: if it answered none, it may be down, and the anchors are tried again next pass
+            n = fails(a_id) + 1; retry[a_id] = (n, t0 + min(RETRY_MAX, RETRY_FIRST * 2 ** (n - RETRY_AFTER)) if answered and n >= RETRY_AFTER else 0.0)
+        for a_id in [a for a in retry if a not in ids]: del retry[a_id]      # no longer bound
         passes[0] += 1
         if skipped:                                                 # a pass the cap cut short is not a finished check
             msg = f"reads held by the hourly cap, resume in {_gb.held_words(held())}"
@@ -496,9 +536,17 @@ def run(hub: Hub):
             with hub.lock: hub.status.setdefault("github", {})["last_pass"] = time.time()
             # The skipped anchors are no failure and no error count: the receiver is healthy, and its status line (the `error` field, which a healthy report leaves
             # as a note: the card shows it on hover) says they wait for a user's sign-in. The log says it once.
-            note = f"{user_only} notification anchor{'s' if user_only != 1 else ''} not read: they need a user sign-in (an App token cannot read them)" if user_only else None
-            if note and not notif_said[0]: notif_said[0] = True; log.info("github: %s", note)
-            hub.health("github", True, note)                        # a finished poll pass is GitHub's real check
+            user_note = f"{user_only} notification anchor{'s' if user_only != 1 else ''} not read: they need a user sign-in (an App token cannot read them)" if user_only else None
+            if user_note and not notif_said[0]: notif_said[0] = True; log.info("github: %s", user_note)
+            # A catch-up is no failure either: the anchors it has not reached wait for the hour's reads, and the note says how far it is (it is gone once every anchor has been read).
+            # An anchor whose looks keep failing is no part of it (it would read "n-1 of n" for good): it is said apart, as tried less often.
+            unread = [a for a in ids if a not in looked]; stuck = [a for a in ids if retry.get(a, (0, 0.0))[1] > 0]; open_ = [a for a in unread if a not in stuck]
+            catch_note = f"catching up: {len(ids) - len(unread)} of {len(ids) - len(unread) + len(open_)} anchors read" if open_ else None
+            stuck_note = f"{len(stuck)} anchor{'s' if len(stuck) != 1 else ''} could not be read, tried again less often" if stuck else None
+            if catch_note and not catching_now[0]: log.info("github: %s; it keeps the hour's reads under %d%% of the budget and goes on as they expire", catch_note, round(CATCHUP_SHARE * 100))
+            elif not catch_note and catching_now[0]: log.info("github: caught up: every anchor that can be read has been read")
+            catching_now[0] = bool(catch_note)
+            hub.health("github", True, "; ".join(n for n in (catch_note, stuck_note, user_note) if n) or None)      # a finished poll pass is GitHub's real check
     def loop():
         # A pass that raises (a status file that could not be written, a bug) is logged and the next pass runs: the poll thread never ends on one.
         # The pause is on the dot: every poll fires at :00 s (conditional GETs: unchanged issues cost nothing); time.sleep is looked up at each call.
