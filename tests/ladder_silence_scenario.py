@@ -17,7 +17,7 @@ panes that are files in a temp folder, messages recorded by a fake push, a fake 
      within 90 minutes holds the ladder; a live pane gets no cold call and no builder (its silence goes to -main, section 11), a pane that is not live goes on to the cold call and the builder (never the builder itself); one notice per agent per pass;
      a front agent keeps the pane rule; ladder.action for a background mover;
      only the mover's own work line holds the ladder; an empty or unreadable heartbeat is unknown (live); a gone entry reaches the cold call whatever the heartbeat shows
- 11  a live background mover that stays silent after the look is told to the project's -main agent: a notice to the project's -main agent `minutes` after the look (marked for the owner, naming the silence, asking for a nudge or a
+ 11  a live background mover that stays silent after the look is told to the project's -main agent: a notice to the project's -main agent `minutes` after the look (with no owner mark, naming the silence, asking for a nudge or a
      different mover and saying how to stop the repeats), the same notice again only every `ladder.MAIN_EVERY`, never one per pass; ONE notice per -main agent per pass, listing every item due for it; a front mover, a fresh work line and
      a mover whose pane is not live (the cold call, the builder) get none; a project with no -main agent gets the History line alone; a mover that is the project's -main agent itself is told nothing (nobody is above it) and its History line and the note of its save say so
 
@@ -111,7 +111,7 @@ def drain():
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
-def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, marked for the owner
+def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, with no owner mark
 def look_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "nothing written for" in p[1]]
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "have had no turn running" in p[1]]
 def set_cfg(**kw): _cfg.CFG["model"] = dict(kw)

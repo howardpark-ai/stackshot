@@ -711,8 +711,8 @@ check("a nameless page: the board relay is held for the router (live line, stash
 p_n = len(pushes()); n_log = len(routing.read("ops/note-x"))
 to_n = pdebt_svc.page_debt_fallback("ops/note-x", {S: {"ts": time.time(), "item": "a30", "moved": True}}, [("a30", "changed", "work-osprey-x")], "the call failed", time.time()); settle()
 ln_ = routing.read("ops/note-x")[n_log:]
-check("page debt fallback on a page with no `session:` line: the debt is delivered to the general -main agent with the mark, in a routing line ruled passed to it; it is not held for the router and forgotten",
-      to_n == "heron-main" and [x[0] for x in pushes()[p_n:]] == ["heron-main"] and pushes()[p_n][1].startswith("[for Oliver]") and "yours to write" in pushes()[p_n][1]
+check("page debt fallback on a page with no `session:` line: the debt is delivered to the general -main agent without the mark, in a routing line ruled passed to it; it is not held for the router and forgotten",
+      to_n == "heron-main" and [x[0] for x in pushes()[p_n:]] == ["heron-main"] and pushes()[p_n][1].startswith("[board] ") and "[for Oliver]" not in pushes()[p_n][1] and "yours to write" in pushes()[p_n][1]
       and len(ln_) == 1 and ln_[0]["to"] == "heron-main" and not ln_[0].get("live") and not live.stashed(ln_[0]["id"]) and ln_[0].get("ruling") == "passed" and ln_[0].get("ruled_to") == "heron-main", (to_n, pushes()[p_n:], ln_))
 # review round 2: the 30-minute move of a nameless page's debt (page call not live), a sub-page's own agent, a one-session page's front-agent owner, the completion anchor
 _pj["pages"]["ops/note-x/kept"] = page("Note X kept", "work-osprey-main", role="agent")      # a sub-page kept by a front agent (role agent): its `session:` is its agent, not the project's keeper

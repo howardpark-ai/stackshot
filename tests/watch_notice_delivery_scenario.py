@@ -13,7 +13,8 @@ recorder) and proves that dropping the mark changes nothing about who is told:
      the kind, and a watch notice is not of that kind
   5  the delivery program does not read the mark (push.py and inbox.py name no `[for ...]` test)
   6  the other notices a front agent hears for its own move carry no mark either and are delivered as they were: a close by another session (pushed under his ask, held without it, marked or not),
-     the ladder's notice about a silent background mover (pushed with nobody there); a notice that carries his own words (his comment) keeps the mark
+     the ladder's notice about a silent background mover (pushed with nobody there), the page-debt fallback to a front agent (the agent's own page update to write: pushed, unmarked); a notice that
+     carries his own words (his comment) keeps the mark
 
     tests/run-suite watch_notice_delivery        -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -185,6 +186,21 @@ item(9, mover=F_B, subject="[home] he commented")
 reset(); told9 = telling.tell_comment("a9", rd(9), "please ship it on Friday"); drain()
 p = pushes()
 check("6c his comment on GitHub reaches the front agent that moves the item, marked: they are his own words", len(p) == 1 and p[0][0] == U[F_B] and p[0][1].startswith(MARK + " "), (told9, p))
+
+# 6d. the page-debt fallback to a front agent: the page update is the agent's own to write and holds nothing for the owner, so it carries no mark, and it is pushed to the front agent all the same (its delivery reads no mark)
+from stackshot.service import page_debt as pdebt_svc
+item(10, mover=F_B, subject="[home] a page update owed")
+def waited_pushes(n, secs=15):
+    t = time.time() + secs
+    while len(pushes()) < n and time.time() < t: time.sleep(0.1)
+    return pushes()
+reset(); to_d = pdebt_svc.page_debt_fallback("projects/echo", {SOLO: {"ts": time.time(), "item": "a10", "moved": True}}, [("a10", "changed (description)", SOLO)], "the call failed", time.time())
+p = waited_pushes(1)
+check("6d the page-debt fallback goes to the project's front -main agent and is pushed to it once", to_d == F_B and len(p) == 1 and p[0][0] in (F_B, U[F_B]) and "yours to write" in p[0][1], (to_d, p))
+check("6d …with no owner mark anywhere in it, a notice that opens with the board's own tag", p and MARK not in p[0][1] and p[0][1].startswith("[board] 1 page update on projects/echo is yours to write"), p)
+reset(); to_e = pdebt_svc.page_debt_fallback("projects/delta", {SOLO: {"ts": time.time(), "item": "a10", "moved": True}}, [("a10", "changed (description)", SOLO)], "the call failed", time.time())
+p = waited_pushes(1)
+check("6d …and to a builder, as before: unmarked, pushed once", to_e == B_B and len(p) == 1 and p[0][0] in (B_B, U[B_B]) and MARK not in p[0][1] and p[0][1].startswith("[board] 1 page update"), (to_e, p))
 
 print(f"\n{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
