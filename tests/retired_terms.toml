@@ -331,3 +331,26 @@ allow = []
 retired = "New holds"
 use = "`Newly parked` (the board's section of the items parked in the last 24 hours)"
 allow = []
+
+# ---- the home page's fold script that remembered nothing (and the panel's folds that were left alone): retired when every fold of every page kept its state per browser.
+# Every fold, the home page's sections and groups and the side panel's sections included, is read and written by `_FOLD_JS` (and applied before the first paint by `_FOLD_HEAD`)
+# under `stackshot.fold.<data-fold>`; the home's own script and its list of old keys to remove are gone.
+[[term]]
+retired = "_HOME_FOLD_JS"
+use = "`_FOLD_JS`: the one fold script of every page (it reads and writes `stackshot.fold.<data-fold>`)"
+allow = []
+
+[[term]]
+retired = "_HOME_OLD_FOLD_KEYS"
+use = "nothing: no stored fold key is removed any more; every key under `stackshot.fold.` is a fold's remembered state"
+allow = []
+
+[[term]]
+retired = "remembers no fold state"
+use = "every fold keeps its open state per browser (`_FOLD_JS`), the home page's and the side panel's included"
+allow = []
+
+[[term]]
+retired = "nothing is remembered across a reload"
+use = "every fold keeps its open state per browser (`_FOLD_JS`)"
+allow = []

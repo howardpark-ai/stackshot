@@ -5,8 +5,8 @@ call this, so the order of the scopes, the heading, the count and the fold are o
 (Board.scope_groups) and how a row is drawn, and this puts them in the one shape.
 
 A subsection is a native `<details class="fold sfold hscope" open>` whose `<summary>` holds the same `h3.iscope` the project page's lists use (the name and the count of its rows), then the
-rows as one `ul.ir-rows`. It renders open: a viewer closes it by a tap, and nothing is remembered (home's fold script keeps no state; the live swap on home carries a subsection's open state over
-by its data-fold key, so each key here names its list and its scope)."""
+rows as one `ul.ir-rows`. It renders open: a viewer closes it by a tap, and the page's fold script (`_FOLD_JS` in render.py) remembers that per browser under the data-fold key (the live swap on home carries a subsection's open state over
+by it too), so each key here names its list and its scope."""
 from __future__ import annotations
 
 from stackshot.web.ui.kit import esc, rows

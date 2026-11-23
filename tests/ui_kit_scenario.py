@@ -924,7 +924,7 @@ check("pages restored from the back-forward cache reload: the item page (with or
 # the first-paint fold script
 FH = r2._FOLD_HEAD
 check("the first-paint fold script sits in the head of the item page and of the project page, before the stylesheet", all(FH in pg and pg.find(FH) < pg.find("<style>") for pg in (ITEMP, PRJP)), FH[:120])
-check("the first-paint fold script applies a stored state at once and leaves a fold inside the side panel alone", "MutationObserver" in FH and "closest('#panel')" in FH and "DOMContentLoaded" in FH, FH)
+check("the first-paint fold script applies a stored state at once, to a fold inside the side panel too (one key per section on every page)", "MutationObserver" in FH and "#panel" not in FH and "DOMContentLoaded" in FH, FH)
 
 # ---- 14. History after a decision, the reminder line, the comment heading, and the text helpers
 ASK14 = "Decide: whether to ship the change · Recommend: ship · Stakes: none · By: Fri"
@@ -1140,8 +1140,8 @@ check("Closed: a cleared line keeps its place (no fade) and Clear and Undo share
       and "li.lrow form.lclear .b,li.lrow form.lundo .b{width:64px;min-width:64px;padding-left:0;padding-right:0}" in css and re.search(r"span\.lgone\{[^}]*min-width:64px", css) is not None)
 check("the stylesheet carries no board number in a note of its own", "board#" not in css and "task-a-" not in css)
 
-# small pins: the home page drops its hash once a section has opened; the panel's close button keeps its size; the form fields keep their border, fill and placeholder tokens
-check("home: a click on a link to a section opens it and the address drops the hash", "history.replaceState(null,'',location.pathname+location.search)" in home and "var go0=go;go=function(h,scroll){go0(h,scroll);if(scroll&&location.hash)" in home)
+# small pins: the home page keeps its hash once a section has opened; the panel's close button keeps its size; the form fields keep their border, fill and placeholder tokens
+check("home: a click on a link to a section opens it and the address keeps the hash (the page's one fold script, as on every page)", "replaceState" not in r2._FOLD_JS and "var go0=go" not in home and "go(location.hash,false)" in home)
 check("the panel's close button keeps its own size: a rule on .b.pbtn, which outranks the plain button's", re.search(r"\.b\.pbtn\{font-size:(?:20|22)px;line-height:1;flex:none\}", css) is not None)
 check("form fields carry the border, fill and placeholder tokens in both themes", len(re.findall(r"--ibd:#[0-9a-f]{6}", css)) >= 2 and len(re.findall(r"--ifill:#[0-9a-f]{6}", css)) >= 2 and len(re.findall(r"--iph:#[0-9a-f]{6}", css)) >= 2
       and "form.hanswer textarea" in css and ".ianswer textarea" in css, re.findall(r"--i(?:bd|fill|ph):#[0-9a-f]{6}", css))

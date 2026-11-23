@@ -486,7 +486,7 @@ check("an item he moves has exactly one form with a text box: the decision's, th
 check("…its own buttons stay: answer on a decision, done and note on a step (two buttons), a plain comment on his item that asks nothing; one button each otherwise",
       all(PG_HIS[g].count('name="act" value="answer"') == 1 for g in ("a1", "a36", "a14")) and all(PG_HIS[g].count('name="act" value="done"') == 1 and PG_HIS[g].count('name="act" value="note"') == 1 for g in ("a30", "a23", "a61"))
       and PG_HIS["a10"].count('name="act" value="comment"') == 1 and all(h.count('name="act"') == (2 if g in ("a30", "a23", "a61") else 1) for g, h in PG_HIS.items()), None)
-cm = lambda h: h[h.index('id="comments"'):h.index("</div></div><script>")]
+cm = lambda h: h[h.index('id="comments"'):h.index("</details>", h.index('id="comments"'))]
 check("the Comments fold keeps the list: his comment is in it, the count says 1, and it holds no form, a text box or a button; an item with none says so",
       "looks fine to me" in cm(PG_THEIRS["a71"]) and 'ev-comment' in cm(PG_THEIRS["a71"]) and '<span class="count">1</span>' in cm(PG_THEIRS["a71"])
       and all("<form" not in cm(h) and "<textarea" not in cm(h) and "<button" not in cm(h) for h in (*PG_THEIRS.values(), *PG_HIS.values())) and "no comments" in cm(PG_THEIRS["a2"]), cm(PG_THEIRS["a71"])[:500])

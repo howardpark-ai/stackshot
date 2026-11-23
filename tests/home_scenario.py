@@ -224,23 +224,25 @@ check("folds: in the main column Your move and Queued for release are open (On a
       {re.search(r'data-fold="([^"]+)"', f).group(1) for f in _folds if " open" in f} == {"your-move", "queued-release", "machines", "runners", "anchorhub", "audit-panel", "projects-panel"}
       and {re.search(r'data-fold="([^"]+)"', f).group(1) for f in _folds if " open" not in f} == {"agents-at-work", "waiting-list"}, _folds)
 _pf = re.findall(r'<details class="fold"[^>]*>', h[h.find('<aside id="panel"'):h.find("</aside>")])
-check("folds: every panel section renders open, whatever the visit before (the markup is the state, no stored key is read for it)",
+check("folds: every panel section renders open by default (the markup is the default; a stored choice is applied by the script, tests/fold_memory_scenario.py)",
       len(_pf) == 5 and all(f.endswith(" open>") for f in _pf), _pf)
-_hj = h[h.find('<script>(function(){try{["for-you"'):]
-_hj = _hj[:_hj.find("</script>")]
 import _colors as _C1; _h_full, h = h, _C1.without_colortool(h)      # the color tool's library (shared/colortool.js) watches data-theme with a MutationObserver: the next check reads the page without its script blocks
-check("folds: the home page remembers no fold state: its script neither reads nor writes localStorage, has no toggle listener, and removes the old section keys; no pre-paint fold script in the head",
-      _hj and "localStorage.getItem" not in _hj and "localStorage.setItem" not in _hj and "'toggle'" not in _hj and "localStorage.removeItem('stackshot.fold.'+k)" in _hj
-      and all(f'"{k}"' in _hj for k in ("for-you", "your-move", "agents-at-work", "waiting-list", "by-project", "completed", "machines", "anchorhub"))
-      and render._FOLD_HEAD not in h and render._FOLD_JS not in h and "localStorage.setItem('stackshot.fold." not in h and "MutationObserver" not in h[:h.find("</head>")], _hj[:300])
+_hd = h[:h.find("</head>")]
+check("folds: the home page remembers every fold, as the item and project pages do: the one fold script (render._FOLD_JS) is on it once, after the side panel's markup, and the pre-paint script is in the head before the first fold; no script of its own removes stored keys",
+      h.count(f"<script>{render._FOLD_JS}</script>") == 1 and h.find(render._FOLD_JS) > h.find('<aside id="panel"') > 0 and h.count(render._FOLD_HEAD) == 1 and render._FOLD_HEAD in _hd
+      and h.find(render._FOLD_HEAD) > h.find(render._THEME_HEAD) > 0 and h.find(render._FOLD_HEAD) < h.find('<details class="fold"') and not hasattr(render, "_HOME_FOLD_JS") and not hasattr(render, "_HOME_OLD_FOLD_KEYS")
+      and "removeItem" not in render._FOLD_JS and "removeItem" not in render._FOLD_HEAD, (h.count(render._FOLD_JS), h.count(render._FOLD_HEAD)))
+check("folds: the script reads and writes one key per fold, stackshot.fold.<data-fold>, for the home's sections and groups and for the side panel's sections alike (no #panel exception); the toggle listener is delegated",
+      "localStorage.getItem(K+k)" in render._FOLD_JS and "localStorage.setItem(K+k,v)" in render._FOLD_JS and "K='stackshot.fold.'" in render._FOLD_JS
+      and "#panel" not in render._FOLD_JS and "#panel" not in render._FOLD_HEAD
+      and "document.addEventListener('toggle'" in render._FOLD_JS and "put(d.getAttribute('data-fold'),d.open?'1':'0')" in render._FOLD_JS, render._FOLD_JS[:400])
 h = _h_full
+_hj = render._FOLD_JS
 check("folds: a hash to a section, or to a row inside a closed one, opens it on load and on hashchange",
       "if(el.matches&&el.matches('section')){var s=el.querySelector('details.fold');if(s&&!s.open)s.open=true}" in _hj and "el.closest&&el.closest('details.fold')" in _hj
       and "go(location.hash,false)" in _hj and "addEventListener('hashchange'" in _hj and "addEventListener('load'" in _hj, _hj[:300])
-check("folds: once a hash has opened its section (on load, on hashchange, on a card's click) the home script drops the hash from the address, so a reload shows only Your move open; the item and project pages' script keeps the hash",
-      "history.replaceState(null,'',location.pathname+location.search)" in _hj and "var go0=go;go=function(h,scroll){go0(h,scroll);if(scroll&&location.hash)" in _hj
-      and _hj.find("history.replaceState") > _hj.find("function go(h,scroll)") and _hj.find("history.replaceState") < _hj.find("go(location.hash,false)")
-      and "replaceState" not in render._FOLD_JS and "replaceState" not in render._FOLD_HASH and "replaceState" not in render._FOLD_GO, _hj[:700])
+check("folds: the hash stays in the address after it has opened its section, as on the item and project pages (the home page no longer drops it: a reload shows the folds as they were left)",
+      "replaceState" not in _hj and "replaceState" not in render._FOLD_GO and "replaceState" not in render._FOLD_HEAD, _hj[:700])
 check("lists: items that store the model's fields (a mover, a time wait with its mover, who picks it up) land by them", "task-a-40" in YM and f"home-other picks it up" in re.sub(r"<[^>]+>", "", row_of(WL, 41)), row_of(WL, 41))
 check("lists: a model-less item (needs a session, no stored mover) is Agents at work with its needs session as the mover, by model.derive", "task-a-10" in AW and "team-back" in row_of(AW, 10))
 

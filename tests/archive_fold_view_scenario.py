@@ -4,7 +4,7 @@ in-process, on a temporary config).
 Covers: the archived projects (a page status in retired_statuses) sit in one foldable group named Archived, drawn as home's scope subsections are (a native
 `<details class="fold sfold">` whose summary holds `h3.iscope` with the name and the count of its projects, a data-fold key), closed on load, after the active projects,
 with the projects listed by scope inside; the count is the number of archived projects over every scope; a page with no archived project draws no group; a scope
-whose projects are all archived keeps its side-panel anchor inside the group, and the page opens the fold on a hash (the home fold script is on the page); the word
+whose projects are all archived keeps its side-panel anchor inside the group, and the page opens the fold on a hash (the fold script is on the page); the word
 "finished" is gone from the Projects page's table, the side panel's hover text (`N active, M archived`) and the project page's group of agents, which says Archived;
 and a project whose last agent is retired shows in the group once its page says archived.
 
@@ -66,7 +66,7 @@ check("Archived: the infra scope has only an archived project, so its anchor (th
 
 # ---- the page and the side panel
 html = board().projects_html()
-check("Projects page: it carries the Archived heading and the home fold script (a hash into the closed group opens it)", HEAD in html and "go(location.hash,false)" in html and html.count('data-fold="projects.archived"') == 1)
+check("Projects page: it carries the Archived heading and the fold script (a hash into the closed group opens it)", HEAD in html and "go(location.hash,false)" in html and html.count('data-fold="projects.archived"') == 1)
 panel = board().panel_blocks()["projects-panel"]
 check("side panel: a scope's hover text says 'N active, M archived' (the word 'finished' is gone)", 'title="1 active, 1 archived"' in panel and "finished" not in panel, text(panel))
 check("side panel: a scope with only archived projects says '0 active, 1 archived'", 'title="0 active, 1 archived"' in panel, text(panel))

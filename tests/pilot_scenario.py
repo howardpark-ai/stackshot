@@ -835,7 +835,7 @@ check("item lines (Completed): a two-column grid, the subject and the meta both 
       and "margin-left:auto" not in _cs[_cs.find("li.iline .imeta{"):_cs.find("}", _cs.find("li.iline .imeta{"))], _cs[_cs.find("ul.ilines"):][:900])
 check("item rows: nothing expands inline on the project page or the board: no description, no next box, no card", "It lives here" not in _bh and 'class="next"' not in _bh and "article class=\"task\"" not in _bh
       and "It lives here" not in _ns_a and '<li class="irow hrow" id="task-a-60" data-st="you">' in _ns_a)
-# the home page's folds: only Your move open, every other fold closed, each with its own key (Oliver step 3, part 1; only Your move open, nothing remembered)
+# the home page's folds: only Your move open, every other fold closed, each with its own key (the defaults are Your move open, every other fold closed; a stored choice wins, tests/fold_memory_scenario.py)
 _top = re.findall(r'<section id="([a-z-]+)"><details class="fold" data-fold="([a-z-]+)"( open)?><summary><h2[ >]', qh)
 check("top sections: Your move and Queued for release are open by default, Agents at work and Waiting closed, each keyed by its own id; Machines and the Anchor hub sit in the panel; For you is hidden (ui_render._SHOW_FOR_YOU)",
       all(a == b for a, b, _o in _top) and [(a, o) for a, _b, o in _top if a not in ("machines", "runners", "anchorhub", "audit-panel", "projects-panel")] == [("your-move", " open"), ("agents-at-work", ""), ("queued-release", " open"), ("waiting-list", "")]
@@ -846,7 +846,7 @@ check("top sections: the side panel's sections render open (Machines, Runners, A
 check("top sections: the heading is the summary, the old plain h2 is gone, no fold in the title bar, and the page holds no Tasks overview",
       "<summary><h2>Your move <span" in qh and '<section id="by-project"><h2' not in qh and '<details' not in qh[qh.find('<header class="top">'):qh.find('</header>')] and 'id="overview"' not in qh, _top)
 # the summary panel: Machines and Anchor hub in a panel on the right, out of the main column,
-# closed on every load and remembered nowhere; the main column starts at the three counts (part 1)
+# open on a first visit, each section's fold remembered per browser; the main column starts at the three counts (part 1)
 _mn = qh[qh.find('<main id="top">'):qh.find("</main>")]; _pn = qh[qh.find('<aside id="panel"'):qh.find("</aside>")]
 check("panel: one aside after the main column holds Machines, and none of it is in the main column",
       qh.count('<aside id="panel"') == 1 and qh.find("</main>") < qh.find('<aside id="panel"') and '<section id="machines">' in _pn and all(x not in _mn for x in ('id="machines"', 'id="runners"', 'id="anchorhub"')), _pn[:300])
@@ -910,17 +910,17 @@ _fav = render.icon_href("favicon.svg")
 check("header: the board's title carries stackshot's icon, decorative, at the favicon's own versioned URL",
       re.search(r'<h1 class="site"><a href="/"><img class="logo" src="' + re.escape(_fav) + r'" alt="" aria-hidden="true">', qh) is not None and f'<link rel="icon" href="{_fav}"' in qh
       and "h1 .logo,.site .logo{width:1.2em;height:1.2em;" in bq._css(), _fav)
-check("top sections: the home page keeps no stored fold state (its script reads and writes none, the swap carries only the live open state over and reads no storage)",
-      "localStorage.getItem" not in ui_render._HOME_FOLD_JS and "localStorage.setItem" not in ui_render._HOME_FOLD_JS and "if(k in f)d.open=f[k]" in ui_render._LIVE_JS
-      and "localStorage.getItem('stackshot.fold." not in ui_render._LIVE_JS and "<script>" + ui_render._HOME_FOLD_JS + "</script>" in qh and ui_render._FOLD_JS not in qh)
+check("top sections: the home page remembers its folds as every page does (its script is the shared fold script, the swap carries the live open state over and hands a fresh fold to the stored one, and it reads no storage itself)",
+      "localStorage.getItem(K+k)" in ui_render._FOLD_JS and "localStorage.setItem(K+k,v)" in ui_render._FOLD_JS and "if(k in f)d.open=f[k];else if(window.stackshotFold)window.stackshotFold(d)" in ui_render._LIVE_JS
+      and "localStorage" not in ui_render._LIVE_JS and "<script>" + ui_render._FOLD_JS + "</script>" in qh)
 import _colors as _C1; _qh_full, qh = qh, _C1.without_colortool(qh)      # the color tool's library (shared/colortool.js) watches data-theme with a MutationObserver: the next check reads the page without its script blocks
-check("board: no pre-paint fold script in the head (the markup is the state: Your move open, the rest closed); the pre-paint script stays on the item and project pages",
-      ui_render._FOLD_HEAD not in qh and "MutationObserver" not in qh[:qh.find("</head>")] and "stackshot.fold." not in qh[:qh.find("</head>")], qh.find(ui_render._FOLD_HEAD))
+check("board: the pre-paint fold script is in the head, as on the item and project pages, so a remembered fold is applied before the first paint",
+      qh.count(ui_render._FOLD_HEAD) == 1 and qh.find(ui_render._FOLD_HEAD) < qh.find("</head>") and "MutationObserver" in ui_render._FOLD_HEAD and "stackshot.fold." in ui_render._FOLD_HEAD, qh.find(ui_render._FOLD_HEAD))
 qh = _qh_full
-_js = qh[qh.find("<script>(function(){try{[\"for-you\""):][:1600]
-check("sections: state kept nowhere: no read, no write, no toggle listener; the old section keys are removed once on load, guarded (storage that throws = nothing happens), and only those keys (the item and project folds keep theirs)",
-      "try{[\"for-you\", \"your-move\", \"agents-at-work\", \"queued-release\", \"waiting-list\", \"by-project\", \"completed\", \"machines\", \"anchorhub\"].forEach(function(k){localStorage.removeItem('stackshot.fold.'+k)})}catch(e){}" in _js
-      and "getItem" not in _js and "setItem" not in _js and "addEventListener('toggle'" not in _js and "item." not in _js.split("function go")[0] and "project." not in _js.split("function go")[0]
+_js = qh[qh.find("<script>" + ui_render._FOLD_JS) + 8:][:len(ui_render._FOLD_JS)]
+check("sections: state kept per browser: a read, a write and one delegated toggle listener, each guarded (storage that throws = nothing happens); no stored key is ever removed",
+      "function get(k){try{return localStorage.getItem(K+k)}catch(e){return null}}function put(k,v){try{localStorage.setItem(K+k,v)}catch(e){}}" in _js and "removeItem" not in _js and "removeItem" not in ui_render._FOLD_HEAD
+      and _js == ui_render._FOLD_JS and "addEventListener('toggle'" in _js and "item." not in _js.split("function go")[0] and "project." not in _js.split("function go")[0]
       and 0 < qh.find("</main>") < qh.find('<section id="machines">') < qh.find(_js[:40]), _js)   # the script runs after the panel, so its folds are reached too
 _pj = qh[qh.find(ui_render._PANEL_JS):][:len(ui_render._PANEL_JS)]
 _css = qh[qh.find("<style>"):qh.find("</style>")]
@@ -936,11 +936,11 @@ check("panel sections: the Machines cards share one set of three columns (the ma
       and "#panel #runners .matrix{grid-template-columns" not in _css and "#panel #runners .matrix" not in _css
       and "#panel #machines .mcol{grid-column:1/-1;grid-template-columns:subgrid}" in _css and "#panel #machines .pc.mach{grid-template-columns:subgrid}" in _css
       and "#panel #machines .mcol>.pc{grid-column:1/-1}" in _css and ".mr{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,max-content) minmax(0,max-content) minmax(0,1fr);grid-template-columns:subgrid;" in _css, _css[_css.find(":is(#machines"):][:300])
-check("panel sections: no fold-storage key is read or written for Machines, Runners, Anchor hub or Audit (neither script has a storage call), and the in-place swap keeps each fold as it is on screen",
+check("panel sections: the fold script (not the panel's own scripts) keeps Machines, Runners, Anchor hub and Audit per browser, and the in-place swap keeps each fold as it is on screen",
       "stackshot.fold" not in ui_render._PANEL_JS and "sessionStorage" not in ui_render._PANEL_JS and "localStorage" not in ui_render._AUDIT_JS and "sessionStorage" not in ui_render._AUDIT_JS
-      and "localStorage" not in ui_render._HOME_FOLD_JS.replace("localStorage.removeItem('stackshot.fold.'+k)", "") and _pj == ui_render._PANEL_JS
+      and "#panel" not in ui_render._FOLD_JS and _pj == ui_render._PANEL_JS
       and "o.querySelectorAll('details.fold').forEach(function(d){f[d.getAttribute('data-fold')]=d.open})" in ui_render._LIVE_JS and "if(k in f)d.open=f[k]" in ui_render._LIVE_JS
-      and "stackshot.fold." not in ui_render._LIVE_JS and "audit-panel" not in ui_render._HOME_FOLD_JS, ui_render._PANEL_JS[:200])
+      and "stackshot.fold." not in ui_render._LIVE_JS and "audit-panel" not in ui_render._FOLD_JS, ui_render._PANEL_JS[:200])
 check("sections: a hash to a section or to a line inside one opens it; the three counts' links do too", "el.closest('details.fold')" in _js.replace("el.closest&&el.closest", "el.closest") and "el.querySelector('details.fold')" in _js
       and "addEventListener('hashchange'" in _js and all(f'href="#{h}"' in qh[qh.find('id="counts"'):qh.find("</nav>", qh.find('id="counts"'))] for h in ("your-move", "agents-at-work", "waiting-list")), _js)
 check("row ids open the item's page in a new tab", '<a class="ir-link" href="/items/a61" target="_blank" rel="noopener"><span class="ir-id">a61</span>' in qh and 'href="#task-a-61"' not in qh)
@@ -2357,7 +2357,7 @@ check("in place: only a changed block is swapped; a block with a popover open wa
 check("in place: the render stamp and the 'as of' move only when every block is in; the page scripts hear stackshot:swapped",
       "R=S;M.content=String(S)}" in L and "document.dispatchEvent(new Event('stackshot:swapped'))" in L
       and "document.addEventListener('stackshot:swapped',hdr)" in he and "document.addEventListener('stackshot:swapped',function(){tick();rcv()})" in he)
-check("in place: the item and project pages' fold toggle stays delegated (a swapped-in fold keeps recording), the home page records nothing", "document.addEventListener('toggle',function(e){var d=e.target;if(d&&d.matches&&d.matches('details.fold')" not in he
+check("in place: every page's fold toggle is delegated (a swapped-in fold keeps recording), the home page's included: it carries the one shared script and binds nothing per fold", he.count("<script>" + ui_render._FOLD_JS + "</script>") == 1
       and "d.addEventListener('toggle'" not in ui_render._FOLD_JS and "document.addEventListener('toggle',function(e){var d=e.target;if(d&&d.matches&&d.matches('details.fold')" in ui_render._FOLD_JS)
 _bm = lambda h: re.search(r'<meta name="stackshot-blocks" content="([^"]*)">', h).group(1)
 _sh = lambda h: re.search(r'<meta name="stackshot-shell" content="([0-9a-f]{16})">', h).group(1)
