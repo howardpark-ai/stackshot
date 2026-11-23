@@ -116,8 +116,7 @@ def page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[t
             item = {}
         rows.append((key, gid, item, what, writer))
     n = len(rows); s, are, them = ("s", "are", "them") if n != 1 else ("", "is", "it")
-    head = (
-            f"[board] {n} page update{s} on {key} {are} yours to write: the writer{s} left {them} undone past {_hooks().grace_min()} min and the "
+    head = (f"[board] {n} page update{s} on {key} {are} yours to write: the writer{s} left {them} undone past {_hooks().grace_min()} min and the "
             f"audit's page call could not write {them} ({clean_line(why, 200)}). "
             + ("Write the Current state: you keep this page." if lead else "Write the Current state, or hand it to the agent that keeps the page."))
     if keeper and rows:
