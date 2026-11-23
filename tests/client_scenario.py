@@ -543,6 +543,8 @@ _WHAT_TABLE = [
     "seen -> _clients.seen",
     "ack -> _inbox.peek, _inbox.ack, _handoff.handoff_acked",
     "held -> _clients.sessions_on, _held.ack, _held.mark_client, _held.lease",
+    "inbox-hold -> _inbox_holds.api_hold",
+    "inbox-release -> _inbox_holds.api_release",
     "drain -> _clients.sessions_on, _clients.seen, _clients.register, _inbox.take",
 ]
 check("client_post: the `what` -> handlers table of the dispatcher is the one it had in server.py (%d branches)" % len(_WHAT_TABLE), _what_table(_rt_client._client_post) == _WHAT_TABLE, _what_table(_rt_client._client_post))

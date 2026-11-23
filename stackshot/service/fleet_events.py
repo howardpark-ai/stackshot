@@ -28,6 +28,7 @@ from stackshot.core.instance import NAME
 from stackshot.fleet import clients as _clients
 from stackshot.fleet import fleet as _fleet
 from stackshot.fleet import inbox as _inbox
+from stackshot.fleet import inbox_holds as _inbox_holds
 from stackshot.fleet import liveness as _lv
 from stackshot.fleet.sessions_registry import _sessions_index
 from stackshot.service import telling as _telling
@@ -37,6 +38,10 @@ from stackshot.service.passes_hooks import hooks as _hooks
 def clients_tick() -> None:
     """The server's own clients, as time passes: a puller that stopped checking in makes its machine offline (clients.py)."""
     _clients.tick()
+    try:
+        _inbox_holds.sweep()      # a hold made through the client API that was never released expires (its own clock inside)
+    except Exception as e:  # noqa: BLE001  — an extra, as the flag is
+        print(f"inbox: hold sweep failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     try:
         inbox_flag_tick()     # its own clock, below; it reads no item, so it goes on while a migration holds the board
     except Exception as e:  # noqa: BLE001  — the flag is an extra: the clients' tick above has run

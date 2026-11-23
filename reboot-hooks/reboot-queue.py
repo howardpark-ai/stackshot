@@ -117,7 +117,7 @@ def main():
     delivered = held = failed = 0; to, held_keys, failed_keys = set(), [], []; held_by = {}
     def deliverable(k):                          # the one test the push queue and the kept holds share: a key the reboot did not touch, or one a resume verified
         return k in allowed or k.startswith("cse_") or (k in elsewhere and k not in here_keys)
-    env = {**os.environ, "ANCHOR_PUSH_SOURCE": src, "ANCHOR_PUSH_FORCE": "1"}
+    env = {**os.environ, "ANCHOR_PUSH_SOURCE": src, "ANCHOR_PUSH_FORCE": "1", "ANCHOR_PUSH_MODE": "local"}     # local: this flushes this box's own queue, and a server-mode flush exits 0 without flushing
     for key, n in q.items():                     # the push queue: cloud sessions, and panes on this box that were not live
         go = deliverable(key)
         if not go:

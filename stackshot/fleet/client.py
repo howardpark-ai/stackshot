@@ -375,6 +375,20 @@ runs on every box.
                                 for a machine's provisioning script: report how its setup run ended. The server keeps the latest
                                 result for this machine (the token's); a failed run shows on the machine's column of the board's
                                 Machines panel, with the step named. Prints one line. Exit 0 recorded · 1 refused or not reached.
+  client.py post inbox-hold <key> [<key> ...] [--kind msg|hub] [--minutes N]
+  client.py post inbox-release <key> [<key> ...] [--kind msg|hub]
+                                hold a session's inbox so a line is not handed out while its pane is relaunched, and lift it: the keys are the session's transcript id
+                                and its name; without --kind both sources (msg and hub) are named, as the file hold does. The server keeps these holds in a file of their
+                                own and honors them together with the ones a tool on its box writes into held-<source>.txt. A hold lasts --minutes (above 0, at most 1440; 0 is refused; without it [client] inbox_hold_minutes,
+                                10), and holding again refreshes it; one never released is taken out within a minute after its time is up. At most 500 keys are held at a time. A release lifts only holds made by this call: a key that is held in
+                                another tool's file stays held and is named in `held_elsewhere`. Prints the server's JSON ({held, expires} or
+                                {released, held_elsewhere?}). Exit 0 · 1 refused or not reached.
+  client.py get inbox-holds [<key>]
+                                what is held: {"holds": [{kind, key, origin (api | file | resume: which file holds it), since, expires}], "now"}, since and expires (epoch, null for none) only for a hold
+                                made by post inbox-hold. With a key, that key's rows. Reads only.
+  client.py get inbox-waiting <name>[,<transcript id>]
+                                does a line wait in the server's inbox for that session (a line whose address, transcript id, name or permanent id is one of the keys),
+                                held or not: {"keys", "hub": n, "msg": n, "waiting": bool, "held": {"hub", "msg"}}. Reads only.
   client.py register            a session's SessionStart hook: tell the server this session exists (the hook's JSON on stdin
                                 names it; its name, Remote Control link and version come from the CLI's own registry)
   client.py seen                its Stop hook: a sign of life (the hook's JSON on stdin)
@@ -399,7 +413,7 @@ CLIENTS = os.path.join(SECRETS, "clients.json")
 TOKENS = os.path.join(SECRETS, "client-tokens")
 TOKEN = os.path.join(SECRETS, "client.token")
 URLF = os.path.join(SECRETS, "client.url")
-READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you")
+READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you", "inbox-holds", "inbox-waiting")
 
 
 def _write_private(path: str, text: str) -> None:
@@ -875,6 +889,43 @@ def watch(argv: list[str]) -> int:
     return _post_json("items/" + urllib.parse.quote(item, safe="") + "/watch", body, "flag not set", 30.0)
 
 
+INBOX_HOLD_USAGE = "usage: client.py post inbox-hold <key> [<key> ...] [--kind msg|hub] [--minutes N]   (the keys: the session's transcript id and its name)"
+INBOX_RELEASE_USAGE = "usage: client.py post inbox-release <key> [<key> ...] [--kind msg|hub]"
+
+
+def _inbox_keys(argv: list[str], names: tuple[str, ...], usage: str) -> tuple[list[str], dict] | None:
+    """Positional keys and `--name value` options of an inbox hold call → (keys, options); None (the usage on stderr) when a value is missing, a key is empty or none is given."""
+    a, opt = list(argv), {}
+    for k in names:
+        if "--" + k in a:
+            i = a.index("--" + k)
+            if i + 1 >= len(a): print(f"--{k} needs a value\n{usage}", file=sys.stderr); return None
+            opt[k] = a[i + 1]; del a[i:i + 2]
+    if not a or any(not x.strip() or x.startswith("--") for x in a): print(usage, file=sys.stderr); return None
+    return [x.strip() for x in a], opt
+
+
+def inbox_hold(argv: list[str]) -> int:
+    """`post inbox-hold <key>... [--kind K] [--minutes N]`: hold a session's inbox on the server → the server's JSON on stdout, exit 0; 1 and the reason on stderr when refused, misused or not reached."""
+    got = _inbox_keys(argv, ("kind", "minutes"), INBOX_HOLD_USAGE)
+    if got is None: return 1
+    keys, opt = got
+    body: dict = {"keys": keys}
+    if opt.get("kind"): body["kinds"] = [opt["kind"]]
+    if opt.get("minutes"): body["minutes"] = opt["minutes"]
+    return _post_json("inbox-hold", body, "hold not made", 30.0)
+
+
+def inbox_release(argv: list[str]) -> int:
+    """`post inbox-release <key>... [--kind K]`: lift a hold on a session's inbox → the server's JSON on stdout, exit 0; 1 and the reason on stderr when refused, misused or not reached."""
+    got = _inbox_keys(argv, ("kind",), INBOX_RELEASE_USAGE)
+    if got is None: return 1
+    keys, opt = got
+    body: dict = {"keys": keys}
+    if opt.get("kind"): body["kinds"] = [opt["kind"]]
+    return _post_json("inbox-release", body, "hold not lifted", 30.0)
+
+
 def state_set(argv: list[str]) -> int:
     """`post state ...`: retired (no state to set or clear), so nothing is sent: the refusal that names what update takes instead → stderr, exit 1."""
     print(_retired.client_refusal(_cfg.owner()), file=sys.stderr)
@@ -1245,7 +1296,8 @@ def main(argv: list[str]) -> int:
         except Exception as e: print(f"stackshot: agent not listed ({type(e).__name__}: {str(e)[:160]})"); return 1
     for verb, fn, what in (("project", project_new, "project not made"), ("project-list", project_list, "project not listed"),
                           ("project-agent-mandate", project_agent_mandate, "mandate not changed"),
-                          ("project-agent-rename", project_agent_rename, "agent not renamed"), ("project-agent-retire", project_agent_retire, "agent not retired"), ("for-you-seen", for_you_seen, "not marked seen"), ("watch", watch, "flag not set")):
+                          ("project-agent-rename", project_agent_rename, "agent not renamed"), ("project-agent-retire", project_agent_retire, "agent not retired"), ("for-you-seen", for_you_seen, "not marked seen"), ("watch", watch, "flag not set"),
+                          ("inbox-hold", inbox_hold, "hold not made"), ("inbox-release", inbox_release, "hold not lifted")):
         if cmd == "post" and len(argv) > 2 and argv[2] == verb:
             try: return fn(argv[3:])
             except Exception as e: print(f"stackshot: {what} ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
