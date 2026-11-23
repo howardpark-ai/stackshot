@@ -288,6 +288,8 @@ def create_item(
     model_set, _ = fc.call(_gates.gate_model_args, {"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
                                                  "until": until_v, "post_wake_mover": post_wake_mover}, {}, default=({}, set()))   # a "none" on a create is nothing to clear
     args_bad = fc.count > n_args      # the model's arguments are refused (an until that is no date, a wait_kind that is none): the date is not read again for the waits list
+    if args_bad and until_v:
+        fc.mark(_faults.UNTIL)          # the date is kept but not trusted beside refused arguments: the list is not judged on its absence either
     list_plan = fc.call(_gates.gate_waits, waits, wait_mode, gid="", project=project, creating=True, stored={}, backstop=str(h.parse_wake(until_v)) if until_v and not args_bad else "",
                         others={"wait_kind": _model.clean(wait_kind), "wait_anchor": _model.clean(wait_anchor), "wait_event": _model.clean(wait_event), "ask_by": _model.clean(ask_by),
                                 "after": after if isinstance(after, list) and after or isinstance(after, str) and after.strip().lower() not in ("", *h.ask_none) else ""},
@@ -301,7 +303,7 @@ def create_item(
         meta["contact"] = contact_v
     draft_txt, _ = fc.call(_gates.gate_draft_args, draft, False, default=("", False))             # the verbatim text the owner pastes elsewhere; a create has no state to guard it by (the guard runs when an update sets your-step)
     if anchors:
-        fc.add("Refused: anchors belong to the project, not the item — create the item, then anchors(project=<its project>, add=[url…], items=[<its id>]) for a thread about this item, or without items for a project-wide one")
+        fc.add("Refused: anchors belong to the project, not the item — create the item, then anchors(project=<its project>, add=[url…], items=[<its id>]) for a thread about this item, or without items for a project-wide one", text=True)
     if not by:                             # a script owes no page; the creator's own debt is not its to be refused for
         fc.call(h.refuse_if_owing, owner)
     if fc.state_bad:         # the checkpoint: a fault that leaves the stored state open ends the form's checks here; the ones below read the item as this create would store it

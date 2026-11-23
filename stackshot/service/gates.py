@@ -637,8 +637,7 @@ def gate_waits(waits: Any, wait_mode: Any, *, gid: str, project: str, creating: 
     if kind == "list":
         if not backstop and not _faults.current().marked(_faults.UNTIL):
             raise ToolError("Refused: a list needs its backstop day, the day the item comes back at the latest whatever has arrived: pass until=YYYY-MM-DD (or YYYY-MM-DDTHH:MM) beside waits")
-        if backstop:      # a backstop day the call gave but the gate refused is not there to hold the time lines against
-            gate_time_lines([(i, ln["until"]) for i, ln in enumerate(lines, 1) if ln["kind"] == "time"], backstop)
+        gate_time_lines([(i, ln["until"]) for i, ln in enumerate(lines, 1) if ln["kind"] == "time"], backstop)      # a backstop day the call gave but the gate refused is "" here, which holds no time line (time_before is False for no date)
     note = ""
     for i, ln in enumerate(lines, 1):
         if ln.get("arrived") or _wl.line_key(ln) in have:

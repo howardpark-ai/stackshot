@@ -240,6 +240,8 @@ PLACEHOLDERS = [("tbd", "tbd"), ("TBD", "TBD"), ("a question mark", "?"), ("dots
 ASK8 = "Decide: ship it now · Recommend: yes · Stakes: a week of delay · By: no date"
 OPTS8 = [{"label": "yes", "line": "ship it now", "recommended": True}, {"label": "no", "line": "wait a week", "recommended": False}]
 LIST2 = [{"kind": "relay", "event": "the lease"}, {"kind": "relay", "event": "the vendor"}]
+LONG8 = "x" * 301
+LIST_T8 = [{"kind": "time", "until": local_day(3)}, {"kind": "relay", "event": "the vendor"}]
 def item_closed(i):      # a completed item: its checklist is the record
     item(i); d = rd(i); d["status"] = "completed"; (T / f"store/a/{i}.json").write_text(json.dumps(d))
 # every call below has ONE mistake: main refuses it with one problem, and so does this change, in main's own words (guards off and on)
@@ -265,6 +267,18 @@ CASES8 = [
     ("update, a step marked done beside a new next on a closed item", lambda: upd(47, next="falcon-main: build it again", done=[1])),
     ("update, a wait_basis on a hold with no wake", lambda: upd(40, hold=True, wait_basis=f"the vendor ships {local_day(9)}")),
     ("update, a hold with a wake on a closed item", lambda: upd(47, hold=True, wake=local_day(5))),
+    ("create, a then over 300 characters beside a waits list with a valid until", lambda: create(waits=LIST2, until=local_day(5), then=LONG8)),
+    ("create, a goal over 300 characters beside a waits list with a valid until", lambda: create(waits=LIST2, until=local_day(5), goal=LONG8)),
+    ("create, a mover over 300 characters beside a waits list with a valid until", lambda: create(waits=LIST2, until=local_day(5), mover=LONG8)),
+    ("create, a post_wake_mover over 300 characters beside a waits list with a valid until", lambda: create(waits=LIST2, until=local_day(5), post_wake_mover=LONG8)),
+    ("create, a mover and a post_wake_mover that differ beside a waits list with a valid until", lambda: create(waits=LIST2, until=local_day(5), mover=MAIN, post_wake_mover=OTHER)),
+    ("create, a then over 300 characters beside a waits list with a time line and a valid until", lambda: create(waits=LIST_T8, until=local_day(5), then=LONG8)),
+    ("create, a waits list with a time line and an until that is no date", lambda: create(waits=LIST_T8, until="garbage")),
+    ("create, a waits list with a time line and an until that is in the past", lambda: create(waits=LIST_T8, until=local_day(-3))),
+    ("update, a waits list with an until on a closed item", lambda: upd(47, waits=LIST2, until=local_day(5))),
+    ("update, a waits list on a closed item", lambda: upd(47, waits=LIST2)),
+    ("update, a clear of waits beside an until on a closed item", lambda: upd(47, waits=[], until=local_day(5))),
+    ("update, an until on a closed item", lambda: upd(47, until=local_day(5))),
 ]
 CASES8_ON = [      # the guards judge the mover: they are on
     ("update, an unknown mover on a relay wait", lambda: upd(40, hold=True, mover="home-nobody", wait_kind="relay", wait_event="the vendor", ask_by=local_day(5))),
@@ -335,6 +349,24 @@ MAIN8.update({      # the same, for the calls with ONE mistake that were refused
     "create, a next of None beside the owner as mover|True": "Refused: next line 'None' does not say who takes it: start every line with `<name>: ` where name is the owner, a session, the project's background agent or the outside party who takes the step (for example `the owner: run \u2026`, `<session>: \u2026` or `Kim: \u2026`); a name in the line's body is not enough. Put file names, commands and code in backticks.",
     "create, a session as mover of a decision, the step opening with a front agent|True": "Refused: this item has mover=home-other on an item whose state is your-call, which is the owner's move. An item that is the owner's makes him the mover: leave mover out, or set mover=the owner, and name home-other in then=home-other (his answer or Done hands the item to them). To give the item to home-other now, take decision out of needs and name a session as mover instead.",
 })
+_LONG300 = "Refused: {} is one line of at most 300 characters (got 301)"
+_MOVER_DIFF = "Refused: mover and post_wake_mover differ (mover=falcon-main, post_wake_mover=home-other); post_wake_mover is the old name of mover, the one who moves the item (on a waiting item, the one who takes it when the wait ends): pass mover=<who> alone"
+_CLOSED_WAITS = "Refused: a completed item waits on nothing; waits goes with an open item"
+for _g in (False, True):      # the calls with ONE mistake that a waits list beside a date or a closed item made two problems (taken from main)
+    for _lab, _txt in (
+        ("create, a then over 300 characters beside a waits list with a valid until", _LONG300.format("then")),
+        ("create, a goal over 300 characters beside a waits list with a valid until", _LONG300.format("goal")),
+        ("create, a mover over 300 characters beside a waits list with a valid until", _LONG300.format("mover")),
+        ("create, a post_wake_mover over 300 characters beside a waits list with a valid until", _LONG300.format("post_wake_mover")),
+        ("create, a mover and a post_wake_mover that differ beside a waits list with a valid until", _MOVER_DIFF),
+        ("create, a then over 300 characters beside a waits list with a time line and a valid until", _LONG300.format("then")),
+        ("create, a waits list with a time line and an until that is no date", "Refused: until is YYYY-MM-DD or YYYY-MM-DDTHH:MM (+04), a real date (got 'garbage')"),
+        ("create, a waits list with a time line and an until that is in the past", "Refused: until must be in the future (+04)"),
+        ("update, a waits list with an until on a closed item", _CLOSED_WAITS),
+        ("update, a waits list on a closed item", _CLOSED_WAITS),
+        ("update, a clear of waits beside an until on a closed item", "Refused: a completed item takes no wake; set it open first"),
+        ("update, an until on a closed item", "Refused: a completed item takes no wake; set it open first")):
+        MAIN8[f"{_lab}|{_g}"] = _txt
 NEXT_TAIL = ". One step is one action with one named actor: open the line with who takes it: `<session>:`, `the owner:` or the outside party's name. A line under a step that belongs to it starts with `- `; results go on the project page (Current state or a timeline line), never into next"
 EVENT_TAIL = " is not an event the server watches. Pass one of: pr_released <owner/repo#n> | pr_merged <owner/repo#n> | recycle [<machine>] | fleet_op <verb | any | many> [<machine>] | job_run <name> | box_online <machine>"
 for _tag, _ph in PLACEHOLDERS:      # a placeholder in next, and as an event: main says the one mistake once (guards on)
@@ -347,6 +379,17 @@ for g, cl in ((False, CASES8), (True, CASES8 + CASES8_ON)):
         item(40); item_nosteps(46); item_closed(47)
         res, made = fn()
         check(f"8 {lab} (guards {'on' if g else 'off'}): one problem, main's text", msg(res) == MAIN8[f"{lab}|{g}"] and "problems in this call" not in msg(res), (msg(res)[:500], MAIN8[f"{lab}|{g}"][:300]))
+for g in (False, True):      # a create with anchors (which belong to the project) beside a bad event wait: two mistakes, two problems (the anchors' fault does not end the checks of the wait)
+    _cfg.CFG["model"]["guards"] = g
+    for lab, ev, want in (("an event that is none", "bogus", "wait_event 'bogus' is not an event the server watches"), ("no event", "", "an event wait names its event in wait_event")):
+        res, made = create(anchors=[URL_A], wait_kind="event", wait_event=ev, ask_by=local_day(5))
+        fl, skipped = parts(res)
+        check(f"8 a create with anchors beside {lab} (guards {'on' if g else 'off'}): two mistakes, two problems", msg(res).startswith(HEAD.format(n=2)) and len(fl) == 2 and fl[0].startswith("anchors belong to the project") and fl[1].startswith(want), msg(res)[:600])
+for g in (False, True):      # a refused argument of the model beside a waits list with no until: two mistakes, two problems (the list still needs its backstop day)
+    _cfg.CFG["model"]["guards"] = g
+    res, made = create(waits=LIST2, then=LONG8)
+    fl, skipped = parts(res)
+    check(f"8 a create with a then over 300 characters beside a waits list with no until (guards {'on' if g else 'off'}): two mistakes, two problems", msg(res).startswith(HEAD.format(n=2)) and len(fl) == 2 and fl[0].startswith("then is one line of at most 300") and fl[1].startswith("a list needs its backstop day"), msg(res)[:600])
 _cfg.CFG["model"]["guards"] = True
 item(40)
 res, made = upd(40, next="do the thing", mover="home-nobody")

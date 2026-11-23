@@ -976,7 +976,7 @@ def update_unlocked(
         fc.add("Refused: clear_hold releases the item and drops its wake; it does not go with hold or wake")
     if hold and item.get("status") == "completed":
         fc.add("Refused: a completed item cannot be parked; set it open first")
-    elif wake and item.get("status") == "completed":      # (a park with its wake is one mistake, said by the park)
+    elif wake and item.get("status") == "completed" and not (_wlw.passed(waits) and not _wlw.clearing(waits)):      # (a park with its wake is one mistake, said by the park; a list beside its until on a closed item is one, said by the list)
         fc.add("Refused: a completed item takes no wake; set it open first")
     if recycle and clear_recycle:
         fc.add("Refused: recycle and clear_recycle do not go together")
