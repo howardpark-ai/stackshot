@@ -264,6 +264,7 @@ How the pieces move files:
 
 - On the server, sessions edit a page, commit and push.
 - The publisher (inside the server) also fetches `origin main` and fast-forwards the data repository before each publish. It does this for the data repository only.
+- When the data repository and `origin main` have each moved on different files (your laptop pushed a page while the board committed data), the publisher heals it with a merge made off the live working tree and pushes it. When both changed the same lines of a file (or one deleted a file the other edited), it leaves the repository as it is, prints one line on stderr (at most once an hour) and pushes nothing: that needs a manual merge (`git fetch origin main`, `git merge origin/main`, fix the files, commit, push).
 - Your laptop pulls and pushes through git like any other clone.
 
 ### Choose a layout

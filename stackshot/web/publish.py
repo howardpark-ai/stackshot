@@ -1,7 +1,7 @@
 """publish.py — the stackshot publisher.
 
 publish()   refresh the version tracker + the project-page registry, render board.md from the
-            store, commit board-data/ + board.md + projects.json when anything changed, fetch/rebase/push. One flock; safe to call often.
+            store, commit board-data/ + board.md + projects.json when anything changed, fetch, then push, fast-forward or (diverged on disjoint files) merge off the live tree; never a rebase. One flock; safe to call often.
 bump()      refresh the latest-version lookups (npm, gbrain releases), then publish; installed versions come from the
             fleet state the fleet tool writes before calling it. `--host` is accepted and ignored (the split).
 brief()     the one-line brief + top items (session-start banner).
@@ -19,9 +19,11 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
 
 import fcntl
 import os
+import re
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from stackshot.core import config as _cfg  # noqa: E402
@@ -49,9 +51,79 @@ def _git(*args: str, check: bool = False) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True, check=check)
 
 
+_NOTED: dict[str, float] = {}      # kind of note -> when it was last printed (time.monotonic)
+_NOTE_EVERY = 3600.0               # a note repeats at most hourly per process: the publish runs every few seconds after a write
+
+
+def _note(kind: str, text: str) -> None:
+    now = time.monotonic()
+    if kind in _NOTED and now - _NOTED[kind] < _NOTE_EVERY:
+        return
+    _NOTED[kind] = now
+    print(text, file=sys.stderr)
+
+
+_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+|\S+@\S+:\S+")      # an address, whatever its scheme (an scp-style one included)
+
+
+def _why(r: subprocess.CompletedProcess) -> str:
+    """Why a push was refused, in the mirror's own words (its first `remote:` line) or the ref's rejection; a line that carries an address is skipped."""
+    lines = [l.strip() for l in r.stderr.splitlines()]
+    for pick in (lambda l: l.startswith("remote:"), lambda l: "rejected]" in l):
+        for l in lines:
+            if pick(l) and not _URL.search(l) and l.removeprefix("remote:").strip():
+                return l
+    return "no reason given"
+
+
+def _refused(r: subprocess.CompletedProcess) -> str:
+    """The line of a refused `git merge` that says why (a `fatal:` or `error:` line, else the first), with the file it names when git's next line does (a tab-indented path under "would be overwritten")."""
+    lines = [l for l in r.stderr.splitlines() if l.strip()]
+    if not lines:
+        return "no reason given"
+    at = next((i for i, l in enumerate(lines) if l.startswith(("fatal:", "error:"))), 0)
+    files = [l.strip() for l in lines[at + 1:] if l.startswith(("\t", "    "))]
+    return lines[at].strip() + (f" ({files[0]})" if files else "")
+
+
+def _identity() -> dict[str, str]:
+    """The environment a commit made off the live tree needs: the store clone's own configured identity, and where it has none the author of its last commit."""
+    env = {}
+    for key, cfg, fmt in (("NAME", "name", "an"), ("EMAIL", "email", "ae")):
+        v = _git("config", f"user.{cfg}").stdout.strip() or _git("log", "-1", f"--format=%{fmt}").stdout.strip()
+        if v:
+            env[f"GIT_AUTHOR_{key}"] = env[f"GIT_COMMITTER_{key}"] = v
+    return env
+
+
+_MID = ("rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD")      # what git leaves in its directory while an operation of a session is unfinished
+
+
+def _midway() -> str:
+    """What the store clone is in the middle of, as a phrase, or "" when the publisher's git step may run: a session's rebase, merge, cherry-pick or revert that is
+    not finished, a detached HEAD (a checkout of a commit, a rebase stopped at `edit`) or a branch with no commit yet. A commit, a merge or a push made then would land on that
+    HEAD, not on the branch, and be lost or stranded. The git directory is asked for, not assumed: in a linked worktree `.git` is a file."""
+    g = _git("rev-parse", "--git-dir")
+    if g.returncode != 0 or not g.stdout.strip():
+        return ""                                                                        # not a repository at all: the git step fails on its own, as it always did
+    here = REPO / g.stdout.strip()
+    found = next((m for m in _MID if (here / m).exists()), "")
+    if found:
+        return "in the middle of a " + {"rebase-merge": "rebase", "rebase-apply": "rebase", "MERGE_HEAD": "merge", "CHERRY_PICK_HEAD": "cherry-pick", "REVERT_HEAD": "revert"}[found]
+    if _git("symbolic-ref", "-q", "HEAD").returncode != 0:
+        return "on a detached HEAD"
+    if _git("rev-parse", "--verify", "-q", "HEAD").returncode != 0:
+        return "on a branch with no commit yet"
+    return ""
+
+
 def _gitsync(msg: str, *paths: str) -> None:
     """Commit the given paths and push. `--only` with the pathspecs: the server shares this checkout with every session on
-    the host, and a plain commit swept in whatever a session had staged (a deletion went out under a board message)."""
+    the host, and a plain commit swept in whatever a session had staged (a deletion went out under a board message).
+    While a session has the clone midway through something (`_midway`) the whole step is skipped, with one note an hour, and the files stay as they are."""
+    if (why := _midway()):
+        _note("midway", f"publish: the store clone is {why}; the git step (commit, merge, push) waits until it is finished")
+        return
     have = [p for p in paths if (REPO / p).exists()]
     for p in have:
         _git("add", "-A", "--", p)
@@ -62,10 +134,53 @@ def _gitsync(msg: str, *paths: str) -> None:
         return                                                   # a quiet publish: nothing to push, no fetch or rebase either
     if _git("fetch", "--quiet", "origin", "main").returncode != 0:
         return
-    if _git("rebase", "--autostash", "--quiet", "origin/main").returncode != 0:
-        _git("rebase", "--abort")
+    # Nothing here rebases, stashes or checks out: a rebase of a diverged clone rewrote the live working tree for seconds on every attempt and a write made
+    # then was lost. Where origin stands decides the step. Other writers (an editor on a laptop, a session on the host) push pages to the same repository, so
+    # the clone can diverge from origin on DISJOINT files, and that heals by a merge made off the live tree (`merge-tree` and `commit-tree` touch no file; the
+    # fast-forward to the merge changes only files the origin side changed, and git refuses it where one has an uncommitted edit). A real conflict is left
+    # alone and noted once an hour: it needs a manual fix.
+    def push() -> None:
+        r = _git("push", "--quiet", "origin", "main")
+        if r.returncode != 0:
+            _note("push", f"publish: git push was refused: {_why(r)}")
+    def forward(target: str, was: str = "") -> bool:
+        r = _git("merge", "--ff-only", "--no-autostash", "--quiet", target)
+        if r.returncode != 0 and not (was and _git("rev-parse", "HEAD").stdout.strip() != was):    # a session that committed meanwhile is no failure: the next cycle makes the merge again
+            _note("merge", f"publish: fast-forward to the mirror failed: {_refused(r)}")
+        return r.returncode == 0
+    # Both refs are read once, here: every step below works on these two commits, never on the names again. A name read twice can have moved between the reads
+    # (a session commits in this checkout, a fetch moves origin/main), and a merge commit whose tree came from one pair of commits and whose parents are another
+    # pair is accepted by the fast-forward and drops a file.
+    heads = [_git("rev-parse", "--verify", ref) for ref in ("HEAD", "origin/main")]
+    if any(h.returncode != 0 or not h.stdout.strip() for h in heads):
+        _note("refs", f"publish: could not read the store's or the mirror's head (git exit {max(h.returncode for h in heads)}); nothing pushed")
         return
-    _git("push", "--quiet", "origin", "main")
+    mine, theirs = (h.stdout.strip() for h in heads)
+    up = _git("merge-base", "--is-ancestor", theirs, mine).returncode                    # 0: origin is behind or equal; 1: not; more: git failed
+    if up == 0:                                                                          # push what origin lacks
+        if _git("rev-list", "--count", f"{theirs}..{mine}").stdout.strip() not in ("", "0"):
+            push()
+        return
+    down = _git("merge-base", "--is-ancestor", mine, theirs).returncode if up == 1 else up
+    if up > 1 or down > 1:
+        _note("refs", f"publish: could not compare the store with its mirror (git exit {max(up, down)}); nothing pushed")
+    elif down == 0:                                                                      # the store is behind: only adds the newer remote files
+        forward(theirs, was=mine)                                                        # a session that commits between the read and the merge is no failure either
+    else:                                                                                # diverged
+        mt = _git("merge-tree", "--write-tree", mine, theirs)
+        if mt.returncode == 0 and mt.stdout.split():
+            c = subprocess.run(["git", "-C", str(REPO), "commit-tree", mt.stdout.split()[0], "-p", mine, "-p", theirs, "-m", "board: merge the mirror's commits"],
+                               capture_output=True, text=True, env={**os.environ, **_identity()})
+            if c.returncode != 0 or not c.stdout.strip():
+                _note("merge", f"publish: could not make the merge with the mirror: {(c.stderr.strip().splitlines() or ['no reason given'])[0]}")
+            elif forward(c.stdout.strip(), was=mine):                                    # refused where HEAD is no longer `mine`: nothing is lost, the next cycle merges again
+                push()
+        elif mt.returncode == 1:                                                         # a real conflict: left as it is
+            n = _git("rev-list", "--left-right", "--count", f"{mine}...{theirs}").stdout.split()
+            local, remote = (n + ["?", "?"])[:2]
+            _note("diverged", f"publish: the store and its mirror have diverged and conflict; the live store is left as it is, and it needs a manual merge (local {local} ahead, origin {remote} ahead)")
+        else:
+            _note("mergetree", f"publish: could not check the store against its mirror (git exit {mt.returncode}); nothing pushed")
 
 
 def publish(force_versions: bool = False, host: str = "") -> str:
@@ -75,8 +190,8 @@ def publish(force_versions: bool = False, host: str = "") -> str:
     with open(LOCK, "w") as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)
         # other writers' commits to the repo arrive through git (the fleet's heartbeats no longer do: fleet.py)
-        if _git_on() and _git("fetch", "--quiet", "origin", "main").returncode == 0:
-            _git("merge", "--ff-only", "--quiet", "origin/main")
+        if _git_on() and not _midway() and _git("fetch", "--quiet", "origin", "main").returncode == 0:
+            _git("merge", "--ff-only", "--no-autostash", "--quiet", "origin/main")
         try: _ver.write(force=force_versions)                # installed vs latest for the Machines panel (versions.py; a host is not needed)
         except Exception as e: print(f"versions: {e}", file=sys.stderr)
         try: _pages.cmd_registry(quiet=True)                  # the page registry from the brain mirror, one git pass

@@ -126,7 +126,7 @@ Expected: a version. Missing: ask the user to install uv. Do not use `pip instal
 git --version && curl --version | head -1
 ```
 
-Expected: both print versions.
+Expected: both print versions, and git is 2.38 or newer (the publisher's merge check uses `git merge-tree --write-tree`).
 
 ```bash
 systemctl --user show-environment | head -1
@@ -234,7 +234,7 @@ git -C ~/stackshot-data rev-parse --abbrev-ref --symbolic-full-name @{u}
 
 Expected: `origin/main`.
 
-Why this is required: `stackshot/web/publish.py:65` returns without pushing when `git fetch origin main` fails, and an empty remote has no `main` (stackshot/web/publish.py:62-70). A missing upstream makes `rev-list @{u}..HEAD` fail, which the code reads as "nothing to push" (stackshot/web/publish.py:63).
+Why this is required: `_gitsync` in stackshot/web/publish.py returns without pushing when `git fetch origin main` fails, and an empty remote has no `main`. A missing upstream makes `rev-list @{u}..HEAD` fail, which the code reads as "nothing to push".
 
 If the remote is not wanted yet: set `[publish] git = false` in the config instead and tell the user.
 
@@ -392,7 +392,7 @@ Check with `get` that `mover:` shows your session. If a message or notice stays 
 | T6 | Server crashes at start with `IndexError` in `_auth` | `[auth] allowed_emails` is empty | stackshot/web/auth/oauth.py | Add an email; doctor refuses to start it in this case |
 | T7 | Server exits 1: "port 127.0.0.1:8020 is taken" | A second server or another program | stackshot/web/server.py | `ss -ltnp \| grep 8020`; change `[server] port`, then `./install.sh units --start` |
 | T8 | Server exits 2: "STACKSHOT_CONFIG is unset and ... is not the production checkout" | Started by hand from outside `~/stackshot` | stackshot/web/server.py | Use the unit, or export `STACKSHOT_CONFIG` |
-| T9 | Data repo never reaches the remote; no error | Empty remote has no `main`, so the publisher's fetch fails and it returns silently | stackshot/web/publish.py:62-70 | Step 4: `git push -u origin main` by hand |
+| T9 | Data repo never reaches the remote; no error | Empty remote has no `main`, so the publisher's fetch fails and it returns silently | `_gitsync` in stackshot/web/publish.py | Step 4: `git push -u origin main` by hand |
 | T10 | Board page opens for anyone with the URL | `[auth] ui_open = true` (default) | stackshot/web/auth/signin.py: the comment block above `_ui_open`, and `_ui_email`/`_ui_guard` | Step 3 |
 | T11 | `systemctl --user` "cannot reach your user manager" | Shell is not a login session; no `XDG_RUNTIME_DIR` | stackshot; units/scope.sh:19 | `export XDG_RUNTIME_DIR=/run/user/$(id -u)` or log in with ssh/console |
 | T12 | Units stop at logout or are missing after reboot | Lingering off | install.sh; stackshot | H5 |
@@ -409,9 +409,13 @@ Check with `get` that `mover:` shows your session. If a message or notice stays 
 | T23 | Claude Code lists only `authenticate` stubs for the connector | Connector not signed in for the CLI | n/a | Hand-off H3, then a new session. `TODO(verify)` |
 | T24 | New connector tools or parameters do not appear after an update | claude.ai caches the tool list for about a day | docs/board-and-connector.md, "A new tool or parameter" | Wait, or call the new form through a portal. Not needed for a board-alone setup |
 | T25 | Config edit seems ignored | Restart-only key | `RESTART_ONLY` in stackshot/core/config.py; [INSTALL.md](../INSTALL.md) "Changing the config" | `systemctl --user restart stackshot.service`; for `[server] port`/`[instance] timezone` run `./install.sh units` first |
-| T26 | A page edited in an Obsidian vault does not settle a session's page debt | Freshness is read from the server's checkout (last commit time or file mtime) | stackshot/projects/pages.py:423-437 | The server must pull that repo. The default layout (pages inside the data repo) is pulled by the publisher at stackshot/web/publish.py:80-81. A separate pages repo is not pulled by anything: add a timer |
+| T26 | A page edited in an Obsidian vault does not settle a session's page debt | Freshness is read from the server's checkout (last commit time or file mtime) | stackshot/projects/pages.py:423-437 | The server must pull that repo. The default layout (pages inside the data repo) is pulled by the publisher (the fast-forward at the top of `publish()` in stackshot/web/publish.py). A separate pages repo is not pulled by anything: add a timer |
 | T27 | `update` refused: "a wait on your own item needs its reason" | `[wait_guard]`: a bare `wake`, or a `next` line whose step is dated later than today, with no `wait_reason`. A `wake` together with `hold=true` and `wait_basis` is not judged and needs none (seen accepted on a scratch instance); neither is a wait on another item (`after`), on the owner or an outside party (`needs`) | stackshot/waits/self_wait.py, example `[wait_guard]` | Pass `wait_reason=<what the step waits on that is not available now, at least 15 characters>`. If nothing blocks the step, do it now. A refusal that says the step could be done now came from one model call: it is not a server fault |
 | T28 | `stackshot/tools/project.py move-page` refuses | A plain-pages install: `move-page` runs stackshot/projects/rename_page.py (stackshot/tools/project.py:6), and the page-moving tools (stackshot/projects/rename_page.py, stackshot/projects/page_keeper.py) refuse under `[pages] flavor = "plain"` | tests/neutral_install_scenario.py:172-175 (the two tools' refusal; `move-page` itself is not run there) | There is no verb for it on plain pages. Do not switch the flavor |
+| T29 | stderr says "publish: the store and its mirror have diverged and conflict" and board data stops reaching the remote; `publish.py flush` exits non-zero | Another writer (an Obsidian laptop, a session) pushed a change that overlaps one the store made (the same lines of a file, or a file deleted on one side and edited on the other). A divergence on different files, or on different parts of one file, heals by itself: the publisher makes a merge commit off the live tree, moves to it and pushes. Only a real conflict is left alone, and the line repeats at most once an hour | `_gitsync` in stackshot/web/publish.py | In `~/stackshot-data` run `git fetch origin main`, then `git merge origin/main`, fix the conflicting files, commit and `git push origin main`. Do it when no write is in flight: the merge edits the live files. The publisher resumes at its next publish |
+| T30 | stderr says "publish: fast-forward to the mirror failed" with a file name, or with `Unable to create ... index.lock` | The mirror changed a file that has an uncommitted edit in the store, so git will not overwrite it. The `index.lock` form is momentary: a session's own git command held the lock at that moment | `_gitsync` in stackshot/web/publish.py | Commit or discard that edit (`git -C ~/stackshot-data status`); the next publish moves on by itself. For `index.lock`, do nothing unless it repeats: then no git command is running, and the stale lock file may be removed |
+| T31 | stderr says "publish: could not check the store against its mirror (git exit 129)" | `git merge-tree --write-tree` needs git 2.38 or newer; an older git answers 129 (usage), so a diverged store is never merged | `_gitsync` in stackshot/web/publish.py | `git --version`; upgrade git to 2.38 or newer. Until then, merge by hand as in T29 |
+| T32 | stderr says "publish: the store clone is on a detached HEAD" (or "in the middle of a rebase", "a merge", "a cherry-pick", "a revert", or "on a branch with no commit yet"); "the git step (commit, merge, push) waits until it is finished"; board data stops reaching the remote | A session left `~/stackshot-data` in the middle of a git operation (a stopped `rebase -i`, an unfinished merge, a checkout of a commit). A commit or merge made then would land on that HEAD, not on `main`, so the publisher makes none and pushes nothing; the files are rendered and written as usual. The line repeats at most once an hour | `_midway` and `_gitsync` in stackshot/web/publish.py | `git -C ~/stackshot-data status`, then finish the operation or end it (`git rebase --abort`, `git merge --abort`, `git switch main`). The publisher resumes at its next publish; nothing is lost meanwhile |
 
 ## 7. Using the board afterwards
 
