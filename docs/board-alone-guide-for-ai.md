@@ -468,7 +468,7 @@ A project is an entry in `project-record.json` (store folder), keyed by an id `p
 
 An item can be filed on a project by its id (`project=prj_...`), also for one with no page. A project with no page is absent from `stackshot/fleet/client.py get projects` and `stackshot/fleet/client.py get project <prj_id>` answers 404 for it (the registry is built from pages), though `stackshot/tools/project.py show <prj_id>` reads it and an item filed on it works with an explicit `mover`. There is no verb that deletes a project. Hand-made page files are still read by the registry and get a record entry at their first verb.
 
-Reads from a shell on the box, with the box's own token: `~/stackshot/bin/stackshot client get brief`, `get whoami`, `get items <session>`, `get rules`.
+Reads from a shell on the box, with the box's own token: `~/stackshot/bin/stackshot client get brief`, `get whoami`, `get items <session>`, `get item-record <id>`, `get open-records <session>`, `get anchors-record`, `get rules`.
 
 ## 8. Updating
 
