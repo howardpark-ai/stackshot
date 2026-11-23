@@ -32,7 +32,7 @@ from stackshot.service import released_live as _live
 from stackshot.service import stall as _stallsvc
 from stackshot.service import telling as _telling
 from stackshot.service import watching as _watching
-from stackshot.service.store import _legacy_hold, _load
+from stackshot.service.store import _legacy_hold, _load_open
 from stackshot.service.wake_hooks import hooks as _hooks
 from stackshot.waits import event_waits as _ew
 from stackshot.waits import held as _held
@@ -95,7 +95,9 @@ def evwait_report(ev: dict[str, Any], now: float | None = None, told: dict[str, 
     fired: list[str] = []
     for gid, _p in _item_files():
         try:
-            it = _load(gid)
+            it = _load_open(gid)                 # a wait is a watcher's only while its item is open (`watches`): a closed item has none to turn
+            if it is None:
+                continue
             m = it.get("metadata") or {}
             if _watch.stored_kind(m) == _wl.LIST and _watch.watches(it):          # a wait on a list: every open event line this event answers is marked
                 hits = lambda meta: _wl.lines_for_event(meta, lambda ph: _ew.matches(_watching.event_spec(ph), ev))
@@ -158,7 +160,9 @@ def evwait_box_poll(now: float, told: dict[str, str], turned: set[tuple[str, str
     waits: list[tuple[str, "_ew.Spec"]] = []
     for gid, _p in _item_files():
         try:
-            it = _load(gid)
+            it = _load_open(gid)                 # event_specs of a closed item is []
+            if it is None:
+                continue
             m = it.get("metadata") or {}
             for sp in event_specs(it):
                 if sp.kind == _ew.BOX_ONLINE:
@@ -201,7 +205,9 @@ def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
     waits: list[tuple[str, "_ew.Spec"]] = []
     for gid, _p in _item_files():
         try:
-            it = _load(gid)
+            it = _load_open(gid)                 # event_specs of a closed item is []
+            if it is None:
+                continue
             m = it.get("metadata") or {}
             for sp in event_specs(it):
                 if sp.kind in _ew.PR_KINDS:
@@ -321,10 +327,10 @@ def machine_anchor_poll(now: float, skip: set[tuple[str, str]]) -> list[str]:
         out: dict[str, list[tuple[str, str, str, str, bool]]] = {}      # session id → [(machine, gid, subject, step, the item is its mover's to do now)]
         for gid, _p in _item_files():
             try:
-                it = _load(gid)
-                meta = it.get("metadata") or {}
-                if it.get("status") != "open":
+                it = _load_open(gid)
+                if it is None:
                     continue
+                meta = it.get("metadata") or {}
                 hits = [(k, scoped) for k, (_n, scoped) in _ma.counts(store, gid, str(meta.get("project") or "")).items() if k in news and (gid, k) not in skip]
                 if not hits:
                     continue

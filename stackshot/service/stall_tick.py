@@ -32,7 +32,7 @@ from stackshot.service import ladder as _laddersvc
 from stackshot.service import stall as _stallsvc
 from stackshot.service import telling as _telling
 from stackshot.service.stall_hooks import hooks as _hooks
-from stackshot.service.store import _load
+from stackshot.service.store import _load_open
 from stackshot.waits import handoff as _ho
 from stackshot.waits import ladder as _ladder
 from stackshot.waits import stall as _stall
@@ -64,8 +64,8 @@ def _stall_pass(now: float | None) -> list[str]:
     queue = _hooks().queue_map(now, _hooks().next_report_all(None)) if _queued.enabled() else {}      # an item queued behind another of its mover's reads waiting: the ladder leaves it as it leaves a waiting one
     for gid, _p in _item_files():
         try:
-            it = _load(gid)
-            if it.get("status") != "open":
+            it = _load_open(gid)
+            if it is None:
                 continue
             if _stall.not_due(it, now, lambda i_: _hooks().after_open(i_.get("metadata") or {})) or gid in queue:
                 continue                 # its work is not due now (the board shows it waiting, or it is the owner's or an outsider's move): no record is kept, so its clock starts when it is due

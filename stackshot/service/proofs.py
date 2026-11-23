@@ -48,7 +48,7 @@ from stackshot.service import telling as _telling
 from stackshot.service import wakes as _wakes
 from stackshot.service import writes as _writes
 from stackshot.service.checks_hooks import hooks as _hooks
-from stackshot.service.store import _load
+from stackshot.service.store import _load, _load_open
 from stackshot.waits import wait_end as _we
 from stackshot.waits import handover as _hv
 from stackshot.waits import watchers as _watch
@@ -512,8 +512,8 @@ def sweep_proofs(dry: bool = False, only: set[str] | None = None, tick: bool = F
         if only is not None and gid not in only:
             continue
         try:
-            it = _load(gid)
-            if it.get("status") != "open":
+            it = _load_open(gid)
+            if it is None:
                 continue
             meta = it.get("metadata") or {}
             cl = _steps.view(meta, keeper=str(meta.get("owner") or ""))

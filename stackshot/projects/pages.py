@@ -481,17 +481,34 @@ def exists(key):
     if reg is None: return None
     return key in reg
 
+_GT_CACHE = {}      # (repo, dirs) -> (HEAD sha, the answer): `git log` of the pages dirs gives the same answer for the same HEAD
+GT_WALKS = [0]      # whole-history walks made, counted for the suite that pins the cache
+
+def _head_sha(base):
+    try:
+        r = subprocess.run(["git", "-C", base, "rev-parse", "--verify", "--quiet", "HEAD"], capture_output=True, text=True, timeout=20)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except Exception: return ""
+
 def git_times(subs=None, base=None):
     """relpath → its last commit time for every page under `subs`, in ONE git call (one call per page is slow on a large tree).
-    `git log --name-only` lists a commit's files after its stamp, newest commit first, so a file's first sighting is its last change."""
-    out = {}; subs = tuple(subs or _cfg.page_dirs())
+    `git log --name-only` lists a commit's files after its stamp, newest commit first, so a file's first sighting is its last change.
+    The walk reads every commit of the brain (seconds of CPU on a large one), so its answer is kept with the HEAD it was read at: the same HEAD
+    answers from the copy kept, a new commit (HEAD moved, a pull included) is read again on the next call. A brain with no readable HEAD is never kept."""
+    out = {}; subs = tuple(subs or _cfg.page_dirs()); base = base or BRAIN
+    head = _head_sha(base); key = (str(base), subs)
+    if head:
+        hit = _GT_CACHE.get(key)
+        if hit and hit[0] == head: return dict(hit[1])
     try:
         # --relative: paths relative to the pages dir even when it sits inside a larger repo (setup's <data>/pages)
-        r = subprocess.run(["git", "-C", base or BRAIN, "log", "--relative", "--format=@@%ct", "--name-only", "--", *subs], capture_output=True, text=True, timeout=60)
+        GT_WALKS[0] += 1
+        r = subprocess.run(["git", "-C", base, "log", "--relative", "--format=@@%ct", "--name-only", "--", *subs], capture_output=True, text=True, timeout=60)
         cur = None
         for ln in r.stdout.splitlines():
             if ln.startswith("@@"): cur = int(ln[2:] or 0); continue
             if ln and cur and ln not in out: out[ln] = cur
+        if head and r.returncode == 0: _GT_CACHE[key] = (head, dict(out))
     except Exception: pass
     return out
 

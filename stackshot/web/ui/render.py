@@ -28,6 +28,7 @@ from stackshot.anchors import receiver_health as _rh   # when a receiver's last 
 from stackshot.anchors import anchor_scope as _ascope   # which anchors count for an item, from every project's page (anchor_scope.py)
 from stackshot.model import draft as _draft   # an item's draft: the verbatim text the owner pastes elsewhere, drawn in a block with a Copy button (draft.py)
 from stackshot.web import itempage as _ip   # the item page's words on the item model: since, next lines
+from stackshot.web import item_history as _ihist   # the commits of an item's file in the store's git, kept per item (item_history.py)
 from stackshot.model import step_commands as _sc   # the step of a your-step item: numbered list, commands to copy (step_commands.py)
 from stackshot.model import steps as _steps   # the checklist behind next: done, dropped and open steps (steps.py)
 from stackshot.model import owner_steps as _os   # the step the server makes on the checklist for his your-step or decision (owner_steps.py)
@@ -2376,13 +2377,9 @@ class Board:
         def git(*args, inp=None):
             return subprocess.run(["git", "-C", d, *args], input=inp, capture_output=True, timeout=10)
         try:
-            lg = git("log", "--follow", "--name-only", "--format=%x01%H%x09%ct", "--", rel)
-            if lg.returncode: return []
-            commits = []
-            for chunk in lg.stdout.decode("utf-8", "replace").split("\x01")[1:]:
-                head, _, rest = chunk.partition("\n"); sha, _, ct = head.partition("\t")
-                path = next((x.strip() for x in rest.splitlines() if x.strip()), "")      # the file's path at that commit (a rename is followed)
-                if sha and path: commits.append((sha, int(ct or 0), path))
+            got = _ihist.commits(d, rel)              # git log --follow, kept per item with the HEAD it was read at (item_history.py)
+            if got is None: return []
+            commits = list(got)      # newest first
             commits.reverse(); out = []
             if commits:
                 buf = git("cat-file", "--batch", inp="".join(f"{sha}:{path}\n" for sha, _c, path in commits).encode()).stdout; i = 0

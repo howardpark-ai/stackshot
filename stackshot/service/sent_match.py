@@ -139,12 +139,12 @@ def _views() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for gid, p in _item_files():
         try:
-            if '"your-step"' not in p.read_text(encoding="utf-8"):
+            it = _svcstore._load_open(gid)
+            if it is None or '"your-step"' not in p.read_text(encoding="utf-8"):
                 continue
-            it = _svcstore._load(gid)
         except (OSError, ValueError, ToolError):
             continue
-        if it.get("status") != "open" or not is_send_step(it):
+        if not is_send_step(it):
             continue
         m = it.get("metadata") or {}
         step = _clean(m.get("step"))
