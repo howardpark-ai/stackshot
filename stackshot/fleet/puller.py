@@ -49,6 +49,14 @@ that fails, or an answer that is empty or misshapen, leaves the old file as it i
 address, or the server's own hostname in the answer) writes nothing. A machine leaves the local fleet view only when
 two fetches in a row lack it.
 
+Puller 13: the puller reads stackshot.toml again when it changes, as the server does on SIGHUP. Once per poll cycle it
+compares the file's signature (device, inode, size and mtime of the file the path leads to, with the link followed, and the resolved path, so a file
+rewritten in place and a link pointed at another file both count) with config.SIG, the one config.py took when it last read the file (so a puller re-run in the same process after a checkout update still sees a change made since the process started); a different one calls config.reload(), which validates the file,
+keeps the running config when it is broken and holds the restart-only keys, and the puller logs one line, `config reload: <the live keys that changed>`
+(or `no live setting changed`, or that the file did not load). The signature moves on even when the file did not load, so a broken file is said once, not at
+every cycle; a file that cannot be stat'ed for a moment is skipped, its signature kept. No setting is copied into a module constant: [client] mirror_server_state,
+self_update and the rest are read where they are used, so the next cycle sees the new value with no restart.
+
 Options: --registry DIR (the CLI's session registry; default ~/.claude/sessions) · --only NAME|UUID (repeatable: serve
 only these sessions, and tell the server the list is partial) · --wait S (how long a poll may be held, default 50) ·
 --dry-run (fetch and confirm nothing, write no state file, also with --once; print what would be delivered, and what the puller would update now and why not).
@@ -91,7 +99,7 @@ _agentbox.LOCAL_ONLY = True
 # Provision on the Windows boxes restarts the puller task when this differs from the log's last `puller <v>: polling` line: bump it whenever running pullers must pick a change up.
 # From 8 on a running puller notices the change itself and reloads (see "Reloading"); a puller older than 8 still needs that one restart.
 # A change to _entry, _fresh, RELOAD or _RELOAD_FILES itself takes effect only after a real restart (the running loop is the old one).
-VERSION = "12"
+VERSION = "13"
 WINDOWS = os.name == "nt"
 RELOAD = "reload"          # main()'s answer when the checkout's VERSION is not the one loaded: _entry runs the file afresh
 RELOAD_MIN_GAP = 600.0     # a reload at most this often (s): a file that keeps differing cannot make a loop
@@ -1414,6 +1422,27 @@ def _mirror_safe() -> str:
         _mirror_failed("mirror", f"{type(e).__name__}: {str(e)[:120]}"); return "failed"
 
 
+def config_tick() -> str:
+    """Once per poll cycle, one stat: when stackshot.toml differs from the signature config.py took at its last read of it (config.SIG, kept by the config module, which outlives a reload of this file), config.reload() (it validates, keeps the old config for a broken file, holds the
+    restart-only keys, never raises) and one log line. config.SIG moves on whatever reload answered, so a broken file is said once. → "same" (nothing changed) · "skipped"
+    (the file cannot be stat'ed now: signature kept, the next cycle looks again) · "reloaded" · "kept" (the file did not load, the running config stays). Never raises."""
+    try:
+        sig = _cfg.signature()
+        if sig is None:
+            return "skipped"
+        if sig == _cfg.SIG:
+            return "same"
+        changed = _cfg.reload()                   # moves config.SIG on whatever it answers
+        if changed is None:
+            print(f"puller {VERSION}: config reload: {_cfg.PATH} did not load, the running config is kept", flush=True)
+            return "kept"
+        print(f"puller {VERSION}: config reload: " + (", ".join(changed) if changed else "no live setting changed"), flush=True)
+        return "reloaded"
+    except Exception as e:                        # noqa: BLE001
+        print(f"puller {VERSION}: config reload failed: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr, flush=True)
+        return "kept"
+
+
 def main(argv: list[str]) -> int | str:
     for st in (sys.stdout, sys.stderr):                 # a Windows console or task log is not UTF-8: never fail on an arrow
         try: st.reconfigure(encoding="utf-8", errors="replace")
@@ -1456,6 +1485,7 @@ def main(argv: list[str]) -> int | str:
             rc = once(reg, only, wait)
         except _Stopped:
             break
+        config_tick()                                 # a changed stackshot.toml is read again here, before the settings below are looked at; never fails the loop
         if rc != 2:
             _mirror_safe()                            # a no-op unless [client] mirror_server_state = true; never fails the loop
         if rc == 2:                                   # the server is away: wait, a little longer each time, at most a minute
