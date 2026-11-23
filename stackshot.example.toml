@@ -516,6 +516,10 @@ never_named = []                                    # background agents the serv
 # "me/my-scripts" = "projects/scripts"
 # "me/my-app" = "projects/app"
 
+# [job_alert]                                       # `stackshot/fleet/client.py job-failed <unit> <host> <time> <project>` files one item per failed scheduled job and machine, for the project's builder; `job-ok` closes it
+                                                    # (docs/client-contract.md). A job with no project (`-`), or one with no single page here, is filed under the general project's builder.
+# fallback_project = "ops/general"                  # that project's page key (no default: with none set a job with no project is refused, 409). Read at each call: a reload applies it
+
 [router]                                            # the router: it rules every notice of every project, live. Rules in code where a rule settles it, otherwise one thin
                                                     # `claude -p` call per project per tick; it applies the ruling with the same `route` and delivers a pass to the target agent. The rollback is a code revert.
 model = "sonnet"                                    # the call's model (--model)

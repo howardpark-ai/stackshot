@@ -1,6 +1,6 @@
 # The client contract
 
-What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, a gap in a scheduled job, an item a script opens for a background agent, and an item a script keeps in step with a condition. Back to the [README](../README.md).
+What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, a gap in a scheduled job, a failed run of a scheduled job, an item a script opens for a background agent, and an item a script keeps in step with a condition. Back to the [README](../README.md).
 
 A machine where Claude Code runs needs three things from stackshot, and no copy of the config:
 
@@ -204,6 +204,31 @@ write, `POST /client/job-gap`, `Authorization: Bearer <machine token>`, body `{"
   proof), so no config change is needed for sala's label `unit-gaps`. The item records `<label> via a script on <machine>`.
 - **The row owes no page.** It sets `TERMINAL_ROW` as the terminal prompt does (no page debt for the script, the builder or the keeper, no router notice, a close told to no one) and the guard on alarming words does not judge the
   watcher's text; the builder's notice at the create is the one thing sent. `tool-text`: a client call only, no MCP tool changes.
+
+## A failed run of a scheduled job
+
+A scheduled job that ends a run in failure reports it, and its next successful run says so, so the failure is ONE board item for the project's builder that closes by itself. The job's failure hook calls the first verb, a success hook the second; neither takes a `--sender` (the label is `job alert`, the item's creator reads `job alert (a script on <machine>)`):
+
+```
+stackshot/fleet/client.py job-failed <unit> <host> <ISO-Z time of the failing run> <project>   # prints the item id, exit 0
+stackshot/fleet/client.py job-ok     <unit> <host> <ISO-Z time of the successful run>          # prints the id it closed, nothing when none was open, exit 0
+```
+
+`<unit>` is the systemd unit's name (`nightly.service`), `<host>` the machine's name, the time an ISO time in UTC (`2026-11-23T02:15:00Z`; one instant is kept in one spelling, so `:00Z` and `:00.000Z` are the same run, and a time more than 5 minutes past the server's clock is a 400), `<project>` a project page key (`scope/project`) or a single `-` for a unit with none. The arguments are positional; a `-` is a value, never an option. Exit 1 prints the reason on stderr (a usage line on misuse); a caller that must not fail on a failed post ignores the status, and re-sends a `job-ok` that was refused or lost. Underneath each is one authenticated write, `Authorization: Bearer <machine token>`, the machine found by the token as for every client write:
+
+```
+POST /client/job-failed   {"unit", "host", "time", "project"}  ->  200 {item, unit, host, project, mover, owner, action: opened | added | seen, failures, fallback}
+POST /client/job-ok       {"unit", "host", "time"}             ->  200 {unit, host, closed: [ids as shown], note}
+```
+
+400 a check or a refusal (a key outside the body's keys, a malformed unit, host, time or project, or the tool's own text for the item); 409 no front agent to file under, a project key that names several pages (send its full key), or no general project to file a job with no project under (the instance has no `[job_alert] fallback_project` set, or it names no page); 503 the project record cannot be read. All four fields are text.
+
+- **One open item per unit and host, read from the item itself.** The item is marked `metadata.job_alert` = `<unit> on <host>`, and the failed runs' times (the newest 20), their count, the unit, the host and the note on where it was filed are in its metadata too, so a restart of the server loses nothing. A failure while an item with the mark is open adds the run's time and counts it (`action: added`) and files nothing; a time the item already holds counts once (`action: seen`), so a call sent twice is one failure; a failure after the close opens a new item, unless its time is no later than the success that closed the last item (the close keeps that time in `metadata.closed_by_ok_at`): a retry or a call that came late is `seen` on that closed item and opens nothing. Unit and host are matched exactly, case-sensitive, so the failure hook and the success hook must send the same host string (`Host-A` and `host-a` are two jobs).
+- **The mover is the project's builder**: the background agent whose mandate builds (`_builder_agent`, the lookup the job-gap route uses), named in needs and told once, at the create; the creator is the project's `-main` agent (its first front agent). A project with no builder is moved by that `-main` agent, and the item, the answer (`fallback: true`) and the client (a line on stderr) say so.
+- **A job with no project, or an unknown one, goes to the general project's builder.** A `-`, and a project that is no page in the registry, are filed under the page `[job_alert] fallback_project` names (the code names none: an instance sets its own general project, for example `ops/general`), and the item's description says so. With none set, or a page the registry does not have, the call is a 409 that names the setting: a 409 means the instance has no `[job_alert] fallback_project` set (or it names no page).
+- **The item's text is plain.** Subject `<prefix> <unit> failed on <host>` (the scope prefix of the project, as for the job-gap route; a long unit name is cut so the subject is never refused), p2. Description bullets, remade from the metadata at every failure: which job on which machine, how many failed runs since the item opened, the time of each of the newest three runs (in the instance's timezone), where it was filed when that is not the job's own project, what to do (read the job's journal on that machine, fix the cause; the next successful run closes the item) and who opened it. `next` is `<mover>: read the journal of <unit> on <host>, fix the cause; the next successful run closes this item`.
+- **`job-ok` closes the open item** through the update tool's own close: outcome `done`, the run's time in the reason (within `[close] reason_max`) and in `outcome_text`. With no open item for the unit and host it is a 200 that does nothing (`closed` empty), so it may be sent on every success and twice for one. A time older than the latest failed run the item holds is also left alone (the note says why): a success sent late, after a newer failure opened the item, says nothing about that failure.
+- **The row owes no page and tells no front agent.** It sets `TERMINAL_ROW` as the other script routes do; the builder's notice at the create is the one thing sent. The alarming-words guard does not judge the job's text. `tool-text`: a client call only, no MCP tool changes. Code: `stackshot/service/job_alert.py`; tests: `tests/job_alert_scenario.py`.
 
 ## An item a script opens for a background agent
 

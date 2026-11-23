@@ -322,6 +322,8 @@ check("the service: a oneshot running `stackshot audit cue scheduled` with the s
       and "\nEnvironment=STACKSHOT_CONFIG=" + os.path.realpath(acfg) + "\n" in sout and "[Install]" not in sout, sout)
 check("the service carries X-Project=ops/example-service (the example's [audit] project) once, in [Unit] (sala job check reports no-project without it)",
       rc == 0 and len(re.findall(r"(?m)^X-Project=", sout)) == 1 and sout.index("\nX-Project=ops/example-service\n") < sout.index("[Service]"), sout)
+check("the service carries X-Runs-With=servers once, on the line right after X-Project, in [Unit]",
+      rc == 0 and len(re.findall(r"(?m)^X-Runs-With=", sout)) == 1 and re.search(r"(?m)^X-Project=[^\n]*\nX-Runs-With=servers\n", sout) and sout.index("\nX-Runs-With=servers\n") < sout.index("[Service]"), sout)
 rc, sout2, _ = render_out(conf("aud-proj.toml", audit="true", project="team/audits"), "stackshot-audit.service")
 check("[audit] project is the unit's X-Project", rc == 0 and "\nX-Project=team/audits\n" in sout2 and "@AUDIT_PROJECT@" not in sout2, sout2)
 for n in AUD:

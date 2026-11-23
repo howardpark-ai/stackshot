@@ -1,6 +1,6 @@
 """client_api.py: the client API, /client/...: what a machine's puller and a session's hooks call (write, for-you seen, item watch and the read calls of /client/{what}).
 
-`_client_post` is the POST dispatcher of /client/{what}: one branch per `what`, each handing the body to the service that does the work (service/recycle.py, released.py, question.py, terminal_prompt.py, job_gap.py, item_open.py and the others) and answering (status, JSON).
+`_client_post` is the POST dispatcher of /client/{what}: one branch per `what`, each handing the body to the service that does the work (service/recycle.py, released.py, question.py, terminal_prompt.py, job_gap.py, job_alert.py, item_open.py and the others) and answering (status, JSON).
 It is the surface's: it names the services and the status codes, and writes nothing itself. A suite that replaces a function of one of those services sets it on that module and calls `_client_post` here.
 
 `register(mcp, *, client_get, recycle_wanted_tokens)` adds the routes to the server's `mcp` in the order they were declared in server.py. The two callables are the server's own
@@ -34,6 +34,7 @@ from stackshot.service import foryou as _fy
 from stackshot.service import handoff as _handoff
 from stackshot.service import item_open as _item_open
 from stackshot.service import item_sync as _item_sync
+from stackshot.service import job_alert as _job_alert
 from stackshot.service import job_gap as _job_gap
 from stackshot.service import messaging as _messaging
 from stackshot.service.client_reads import NO_SUCH_READ as _NO_SUCH_READ
@@ -230,6 +231,10 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         return _item_open._itemopen_post(machine, body)
     if what == "item-sync":     # a script keeps one item for the person in step with a condition: open, refresh, close by its marker (client.py post item-sync)
         return _item_sync._itemsync_post(machine, body)
+    if what == "job-failed":    # a scheduled job's run failed on a machine: one item per (unit, host) for the project's builder, a repeat adds the run's time (client.py job-failed)
+        return _job_alert._jobalert_failed_post(machine, body)
+    if what == "job-ok":        # the job's next run succeeded: the item of (unit, host) closes, none open is a no-op (client.py job-ok)
+        return _job_alert._jobalert_ok_post(machine, body)
     if what == "cap-words":     # tools/cap_words.py --apply: his park words already in the store, or a long wait's real-world date, recorded through the normal write path
         try:
             if "basis" in body:
@@ -313,7 +318,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         else:
             _clients.seen(machine, uuid)
         return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")})}
-    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | item-sync | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
+    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
 
 
 async def client_write(request: Request):

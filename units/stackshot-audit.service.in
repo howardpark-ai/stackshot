@@ -11,6 +11,8 @@ X-Model-Lane=bedrock
 X-Model-Note=script mode: up to [audit] max_calls (40) claude -p calls a run, one at a time, on the [audit] lane (bedrock); agent mode: no call from this unit
 # the job's project, as sala's Agents tab shows it (<scope>/<project>); sala job check reports a timer without it as no-project
 X-Project=@AUDIT_PROJECT@
+X-Runs-With=servers
+# X-Runs-With=servers: the job runs with the stackshot server and moves when the server moves
 
 [Service]
 Type=oneshot
