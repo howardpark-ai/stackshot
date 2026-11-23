@@ -520,6 +520,10 @@ never_named = []                                    # background agents the serv
                                                     # (docs/client-contract.md). A job with no project (`-`), or one with no single page here, is filed under the general project's builder.
 # fallback_project = "ops/general"                  # that project's page key (no default: with none set a job with no project is refused, 409). Read at each call: a reload applies it
 
+# [job_alert.projects]                              # the label a unit carries (`scope/project`, or any text the job tool writes) -> the project page key it is filed under. Consulted first, before the page key and the
+                                                    # project name (`scope-project`); a key that names no page here falls through to them. ABSENT = no label is mapped (the code names none). Read at each call: a reload applies it
+# "acme/widgets" = "projects/acme-widgets"
+
 [router]                                            # the router: it rules every notice of every project, live. Rules in code where a rule settles it, otherwise one thin
                                                     # `claude -p` call per project per tick; it applies the ruling with the same `route` and delivers a pass to the target agent. The rollback is a code revert.
 model = "sonnet"                                    # the call's model (--model)

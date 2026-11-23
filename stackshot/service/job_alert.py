@@ -7,7 +7,7 @@ memory, so a restart of the server loses nothing. While an item with the mark is
 that success's time in `metadata.closed_by_ok_at`: a retry or a call that came late is that item's); a
 `job-ok` with no open item, or older than the latest failed run it was sent for, does nothing. The caller re-sends a `job-ok` that was lost, so both calls are safe to repeat: a time already recorded counts once.
 
-A project of `-` (the unit has none) or one this server has no page for goes to the general project's builder (the page `[job_alert] fallback_project` names: the code names none, an instance sets its own) and the item says so; with none set the call is a 409. A project with no builder is
+The project text is a page key, a `scope/project` label or `-`: the instance's own map `[job_alert.projects]` is read first, then the key or slug, then the page whose `display-name:` is the label with `/` made `-`. A project of `-` (the unit has none) or one this server has no page for goes to the general project's builder (the page `[job_alert] fallback_project` names: the code names none, an instance sets its own) and the item says so; with none set the call is a 409. A project with no builder is
 moved by its -main agent, as job_gap.py does, and says so. Modelled on job_gap.py (the same create path, the lookup of an open item and the write under one lock, a script's row that owes no page and tells no
 front agent); the helpers it files its rows with are service/terminal_prompt.py's.
 
@@ -127,31 +127,64 @@ def _jobalert_check(body: dict[str, Any], keys: tuple[str, ...]) -> tuple[dict[s
     if at is None:
         return {}, (400, {"error": "time = the run's time as an ISO time in UTC, 2026-11-23T02:15:00Z"})
     if at > _jobalert_now() + _JOBALERT_AHEAD:
-        return {}, (400, {"error": "time = the run's time, which cannot be later than now (the server allows 5 minutes for clocks that differ); check the machine's clock"})
+        ahead = int((at - _jobalert_now()).total_seconds() // 60)
+        return {}, (400, {"error": f"time = the run's time, which cannot be later than now (the server allows 5 minutes for clocks that differ): the machine's clock is ahead of the server's by {ahead} minutes; check the machine's clock"})
     try:
         _jobalert_when(got["time"])
     except (OverflowError, ValueError):
         return {}, (400, {"error": "time = a run's time the board can show, 2026-11-23T02:15:00Z"})
     got["time"] = _jobalert_canon(at)
     if "project" in got and got["project"] != "-" and not _JOBALERT_PROJECT.fullmatch(got["project"]):
-        return {}, (400, {"error": "project = `scope/project` (a project page key), or - when the job has no project"})
+        return {}, (400, {"error": "project = a project page key, a `scope/project` label, or - when the job has no project"})
     return got, None
 
 
+def _jobalert_page(key: str, reg: dict[str, Any]) -> dict[str, Any] | None:
+    """The record of the page whose full key is `key` (None when the registry has no such page)."""
+    return next((r for r in _prj.refs(key, reg) if r["key"] == key), None) if key in reg else None
+
+
+def _jobalert_resolve(project: str, reg: dict[str, Any]) -> tuple[dict[str, Any] | None, tuple[int, dict[str, Any]] | None]:
+    """The project page a unit's project text names -> (its record, None), (None, None) when it names none, or (None, the 409) when it names several. In order: the instance's own map of labels to page
+    keys (`[job_alert.projects]`, read at each call; a key that names no page falls through), then the text as an id, a full page key or a bare slug (`projects.refs`), then, for a `scope/project` label, the one
+    top-level page whose `display-name:` line is the label with its `/` made `-` (`projects.name_line`, the line every name check reads; compared without regard to case, and only a page of `type: project` that is
+    active (`projects.page_active`: not done, retired, archived or moved) counts, so a finished page of the same name is no second match). A text that matches two pages of either kind is refused: the caller names one by its full key,
+    or the instance pins the label in its map. A record that was found by the map or by the name carries `via`, the words the item's note says it by."""
+    mapped = _cfg.get("job_alert", "projects")
+    target = str(mapped.get(project) or "").strip().strip("/") if isinstance(mapped, dict) else ""
+    if target and (rec := _jobalert_page(target, reg)):
+        return {**rec, "via": f"{project} is mapped to {rec['key']} by [job_alert.projects]"}, None
+    recs = _prj.refs(project, reg)
+    if len(recs) > 1:
+        return None, (409, {"error": f"{project} names several project pages ({', '.join(r['key'] for r in recs)}), so the item would go to a guess; send the full key of the one that owns the job, or pin it with the `[job_alert.projects]` map"})
+    if recs:
+        return recs[0], None
+    if "/" not in project:
+        return None, None
+    fold = project.replace("/", "-").casefold()
+    keys = [k for k, e in sorted(reg.items()) if isinstance(e, dict) and str(e.get("type") or "").strip().lower() == "project" and _prj.page_active(e) and _prj.name_line(e).casefold() == fold
+            and not _prj.is_sub_page(k, reg, e)]
+    recs = [r for r in (_jobalert_page(k, reg) for k in keys) if r]
+    if len(recs) > 1:
+        return None, (409, {"error": f"{project} is the project name of several pages ({', '.join(r['key'] for r in recs)}), so the item would go to a guess; send the full key of the one that owns the job, or pin it with the `[job_alert.projects]` map"})
+    return ({**recs[0], "via": f"{project} is the project name of {recs[0]['key']}"}, None) if recs else (None, None)
+
+
 def _jobalert_project(project: str) -> tuple[dict[str, Any] | None, str, tuple[int, dict[str, Any]] | None]:
-    """The project the item is filed under -> (its record, why it is the general project's instead or "", None), or (None, "", the refusal). A `-` or a project this server has no page for is the general
-    project's: the page [job_alert] fallback_project names (none by default: an instance sets it); with that missing, or naming no page, nothing can be filed and the caller is told (409). A key that names
-    several pages is refused (409) too: the caller names the one it means by its full key."""
+    """The project the item is filed under -> (its record, why it is the general project's instead or "", None), or (None, "", the refusal). A project text names its page by the instance's label map, a page key or a
+    `scope/project` label (`_jobalert_resolve`). A `-` or a project this server has no page for is the general project's: the page [job_alert] fallback_project names (none by default: an instance sets it); with that missing,
+    or naming no page, nothing can be filed and the caller is told (409). A text that names several pages is refused (409) too: the caller names the one it means by its full key."""
     why = ""
     try:
-        recs = _prj.refs(project, _registry("projects")) if project != "-" else []
-        if len(recs) > 1:
-            return None, "", (409, {"error": f"{project} names several project pages ({', '.join(r['key'] for r in recs)}), so the item would go to a guess; send the full key of the one that owns the job"})
-        if len(recs) == 1:
-            return recs[0], "", None
+        reg = _registry("projects")
+        rec, bad = _jobalert_resolve(project, reg) if project != "-" else (None, None)
+        if bad:
+            return None, "", bad
+        if rec:
+            return rec, "", None
         why = f"{project} is no project page here" if project != "-" else "the job names no project"
         general = str(_cfg.get("job_alert", "fallback_project") or "").strip()
-        recs = _prj.refs(general, _registry("projects")) if general else []
+        recs = _prj.refs(general, reg) if general else []
     except ValueError as e:
         return None, "", (503, {"error": f"the project record cannot be read right now, nothing was filed: {e}"})
     if len(recs) != 1:
@@ -173,14 +206,14 @@ def _jobalert_text(unit: str, host: str, meta: dict[str, Any], machine: str) -> 
 
 def _jobalert_failed_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """`client.py job-failed <unit> <host> <ISO-Z time> <project>`: a scheduled job ended a run in failure on a machine.
-    body: unit, host, time (ISO UTC, the failing run's), project (`scope/project`, or `-` for none): all text, nothing else is taken.
+    body: unit, host, time (ISO UTC, the failing run's), project (a page key, a `scope/project` label, or `-` for none): all text, nothing else is taken.
     One open item per (unit, host), filed through create_item (the create tool's own code: the subject, description and next gates, the project page, the GitHub mirror; a refusal is the tool's text, 400), marked
     metadata.job_alert = "<unit> on <host>". The mover is the project's builder (agents._builder_agent), named in needs and told once, at the create; the creator is the project's front agent (its -main
     first); a project with no builder is moved by that -main agent and says so. A `-` or a project this server has no page for goes to the general project ([job_alert] fallback_project: the page that holds it; none by default) and
     says so; with none set or no such page, 409. The item says which job, which machine, the time of the failed run, how many failed runs since it opened and what to do. While an item with the mark is open the call adds the
     run's time and counts it (a time already on the item counts once, so a call sent twice is one failure) and files nothing; with none open, a time no later than the latest success that closed an item of the mark is that item's (`seen`), so a
     retry or a call that came late opens nothing. The time is kept as one spelling (UTC, the fraction only when not zero) and may not be later than now plus 5 minutes (400). The row owes no page. The creator reads `job alert (a script on <machine>)`.
-    -> (200, {item, unit, host, project, mover, owner, action: opened | added | seen, failures, fallback}); 400 a check, 409 no front agent, no project to file under or a key of several pages, 503 the project record cannot be read."""
+    -> (200, {item, unit, host, project, mover, owner, action: opened | added | seen, failures, fallback}); 400 a check, 409 no front agent, no project to file under or a key or label of several pages, 503 the project record cannot be read."""
     got, bad = _jobalert_check(body, ("unit", "host", "time", "project"))
     if bad:
         return bad
@@ -240,7 +273,7 @@ def _jobalert_open(project: str, unit: str, host: str, when: str, machine: str, 
     owner = front[0]
     builder = _agents._builder_agent(key)
     mover = builder or owner
-    notes = [why] if why else []
+    notes = [why] if why else ([str(rec["via"])] if rec.get("via") else [])
     if not builder:
         notes.append(f"{key} lists no builder, so this is with {owner}, its front agent")
     meta: dict[str, Any] = {"job_alert_runs": [when], "job_alert_count": 1, "job_alert_note": "; ".join(notes)}
