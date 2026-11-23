@@ -1,6 +1,6 @@
 """Browser check of the shipped dark look: on a rendered page in a real browser, the dark theme with nothing stored computes to the shipped look (the original orange look: orange text on a dark brown fill for the small labels, checked against its own 14 fields), the light theme computes as it
 did, a colored preset of the Colors panel changes the look, and Reset in the panel returns a changed look to the shipped one. The static proof (the stylesheet's tokens against the 14 fields, the
-light theme's token block) is tests/dark_default_scenario.py, which CI runs; this one needs the browser (once per machine: uvx playwright@1.63.0 install chromium) and is run by hand, like the other checks.
+light theme's token block) is tests/ui_guards_scenario.py (its dark_default part), which CI runs; this one needs the browser (once per machine: uvx playwright@1.63.0 install chromium) and is run by hand, like the other checks.
 
 The page is the item page of the Board, rendered with no server; a row of the elements that show each of the 14 fields is added to it (a card, a line, muted text, a link, a secondary button, the main
 button, the disabled secondary and idle main buttons, an orange badge, a rec badge and a Your move tag), and their computed styles are read.
@@ -47,7 +47,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
 def rgb(h): return "rgb(%d, %d, %d)" % tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
-OLD = ct.SHIPPED                                    # the shipped look, whose 14 fields tests/dark_default_scenario.py pins
+OLD = ct.SHIPPED                                    # the shipped look, whose 14 fields tests/ui_guards_scenario.py (its dark_default part) pins
 
 PROBE = """() => {
   const old = document.getElementById('dd-probe'); if (old) old.remove();

@@ -1108,7 +1108,7 @@ out, err = ex_sel(lambda: ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), "plain
 check("example config: a map without the file measurement selects every suite, as for any data file", out == "all", (out, err))
 
 # ---- the edits of the delta review, on the real example config and the real tests/_instance.py: each of E1-E4 and E6-E9 breaks the fixture suites
-# (run by hand on a scratch copy: audits_page, button_set, install, orange, server_fixes, wait_end ... fail on E1/E7; stall on E2; 141 of 148 on E3;
+# (run by hand on a scratch copy: audits_page, install, server_fixes, ui_guards, wait_end ... fail on E1/E7; stall on E2; 141 of 148 on E3;
 # all of them on E8/E9/E6), so each must select the fixture readers; E5 and E10 break nothing and stay at the direct readers
 R = T / "repo3"; R.mkdir()
 git("init", "-q", "-b", "main")
@@ -1943,8 +1943,8 @@ DOCUSE_ALLOW = {
     ("tests/rebullet_scenario.py", "__doc__"): (1, "rd_tool.__doc__, a module docstring: read by name, unchanged rule"),
     ("tests/released_scenario.py", "__doc__"): (5, "client.__doc__ five times, a module docstring: read by name, unchanged rule"),
     ("tests/retired_inputs_scenario.py", "__doc__"): (1, "_client.__doc__, a module docstring: read by name, unchanged rule"),
+    ("tests/script_post_kinds_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and terminal_prompt_svc._terminal_prompt.__doc__ (a function it names: the name rule selects the suite)"),
     ("tests/step_proof_scenario.py", "__doc__"): (2, "client.__doc__ twice, a module docstring: read by name, unchanged rule"),
-    ("tests/terminal_prompt_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and terminal_prompt_svc._terminal_prompt.__doc__ (a function it names: the name rule selects the suite)"),
 }
 def doc_uses(files):
     """(file, form, uses found, uses pinned) for every form of {path: source} whose number of uses is not the number the allow list pins"""

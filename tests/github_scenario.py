@@ -35,14 +35,464 @@ The body form (BODY_FORM 3) and the one-time rewrite (resync_bodies): queued onl
 issue whose body is stale, no comment, through the pacer, yielding to a live write that arrives meanwhile. The trailers (said=…), checked against the writer's
 transcript, are stored on the item and shown on its page; they reach GitHub as nothing.
 
+The file has three parts, each in a process of its own (this file started again with `--part <name>`; a part's checks are those of its former suite, and the final line adds them up): the mirror and the id switch (`github`, above), the issues repo addressed by its numeric id (`repo_id`), and the receiver on a GitHub App's token (`app_token`). They set up different instances (the first the example config with an issues repo "o/r", the mirror switched on and off by reloads, a store of fixture items; the second the base config with `issues_repo_id` set and a fake that also answers the redirect of a moved repo; the third the example config with `github_login` set and no store of sessions, and a fake `gh` put in the receiver module's own place) and the code under test reads its config and keeps module state at import, so they do not share a process (the third also replaces the receiver module's subprocess, threading and time).
+
+Part repo_id: [github] issues_repo_id (ghsync.py), the issues repo addressed by its numeric id. GitHub follows a 301 on a read but not on a write, so a write addressed by name (/repos/<owner>/<name>/...) stops when the repo
+changes owner; /repositories/<id>/... does not, since the id survives a transfer. Covers: the key's accessor (a positive integer or
+digit string; empty, missing, zero, negative, a word or a bool = not set). With the id set, every call the mirror makes for the
+issues repo goes to /repositories/<id>/...: the id allocator's create, the queue worker's edit and close, the issue and list reads,
+the comment reader, and a merged-PR check on the issues repo; a write lands while the name's path answers a redirect. With it unset,
+every one of those calls goes to /repos/<owner>/<name>/... exactly as before, and a redirected write's log line names issues_repo_id
+as the fix. Either way the item page's issue link and the map's repo note use issues_repo (the name).
+
+
+Part app_token: the GitHub receiver on a GitHub App's token (stackshot/anchors/anchorhub/github.py): a fake `gh` (the module's own injection point for
+subprocess.run), no network, no thread of the receiver is started.
+
+An App's installation token reads repositories and pull requests, but GitHub answers it 403 "Resource not accessible by integration" for `gh api /user` and for
+the user's notifications; `gh api /rate_limit` works for any accepted token. What it covers:
+  1. The start check. A 403 of that kind on /user is followed by a probe of /rate_limit, and a token that passes starts the receiver. A 401 or a refused
+     /rate_limit does not start it (a person's login is not an App's).
+  2. `me`, the login whose own activity is not news: the setting `[anchor_hub] github_login` for an App token; with no setting, none (the filter is off) and one log
+     line says so; with a person's token, /user's login as before and the setting is not used.
+  3. The `@notifications` anchors: with an App token they are not read (no call, not even to name them), skipped with one log line for the whole run, and the receiver's
+     status stays healthy with a note that they need a user sign-in, never a failure; with a person's token they are read as before.
+  4. The start check is tried again: through start_receiver, a failed check (the network, a login not made yet, a refused credential: a Transient whatever the cause) is
+     retried with a backoff until it passes, and the retry stops at the start.
+
     tests/run-suite github        → exit 0 / 1"""
-import calendar, hashlib, html, json, logging, os, pathlib, re, subprocess, sys, tempfile, threading, time
+import calendar, contextlib, hashlib, html, io, json, logging, os, pathlib, re, subprocess, sys, tempfile, threading, time, types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 BID_A = 9164
 BID_B = 9165
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
+
+# ================================================================ part repo_id: the issues repo addressed by its numeric id
+def part_repo_id():
+    import _scratch, _instance
+    tmp = _scratch.mkdtemp(prefix="ghid-"); T = pathlib.Path(tmp)
+
+    NAME = "example-org/example-board"; RID = 4242
+    BY_NAME = f"/repos/{NAME}"; BY_ID = f"/repositories/{RID}"
+
+
+    # ---- a fake GitHub: one repo, served under its name and its id alike; `moved` makes the name's path answer a redirect to the id's
+    class Fake:
+        def __init__(self):
+            self.issues = {}; self.next = 1; self.comments = []; self.moved = False
+            self.log = []                                   # (method, path)
+            self.lock = threading.Lock()
+
+    F = Fake()
+
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def _send(self, code, obj=None, headers=None):
+            body = json.dumps(obj).encode() if obj is not None else b""
+            self.send_response(code); self.send_header("Content-Type", "application/json")
+            for k, v in {"x-ratelimit-limit": "5000", "x-ratelimit-remaining": "4000", "x-ratelimit-resource": "core", **(headers or {})}.items(): self.send_header(k, v)
+            self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+        def _body(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            return json.loads(self.rfile.read(n) or b"{}") if n else {}
+        def _out(self, i): return {**i, "html_url": f"https://github.example/{NAME}/issues/{i['number']}"}
+        def _handle(self, method):
+            u = urlparse(self.path); full = u.path
+            with F.lock:
+                F.log.append((method, full))
+                if self.headers.get("Authorization") != "Bearer test-token": return self._send(401, {"message": "bad credentials"})
+                if full == "/user": return self._send(200, {"login": "example-owner", "id": 1})
+                if full == "/rate_limit": return self._send(200, {"resources": {"core": {"limit": 5000, "remaining": 4000, "reset": int(time.time()) + 60}}})
+                if full.startswith(BY_NAME + "/"):
+                    if F.moved:                             # the repo changed owner: the old name's path answers a redirect (a GET 301, a write 307)
+                        loc = API + BY_ID + full[len(BY_NAME):]
+                        return self._send(301 if method == "GET" else 307, {"message": "Moved Permanently", "url": loc}, {"Location": loc})
+                    rest = full[len(BY_NAME):]
+                elif full.startswith(BY_ID + "/"):
+                    rest = full[len(BY_ID):]
+                else:
+                    return self._send(404, {"message": f"no route {method} {full}"})
+                if rest == "/issues/comments" and method == "GET": return self._send(200, F.comments)
+                if rest == "/issues" and method == "POST":
+                    b = self._body(); n = F.next; F.next += 1
+                    F.issues[n] = {"number": n, "title": b["title"], "body": b.get("body", ""), "state": "open", "state_reason": None}
+                    return self._send(201, self._out(F.issues[n]))
+                if rest == "/issues" and method == "GET": return self._send(200, [self._out(i) for i in F.issues.values()])
+                m = re.fullmatch(r"/issues/(\d+)", rest)
+                if m and int(m.group(1)) in F.issues:
+                    i = F.issues[int(m.group(1))]
+                    if method == "PATCH":
+                        b = self._body()
+                        for k in ("title", "body", "state", "state_reason"):
+                            if k in b: i[k] = b[k]
+                    return self._send(200, self._out(i))
+                m = re.fullmatch(r"/pulls/(\d+)", rest)
+                if m and method == "GET": return self._send(200, {"number": int(m.group(1)), "state": "open", "merged": False})
+                return self._send(404, {"message": f"no route {method} {full}"})
+        def do_GET(self): self._handle("GET")
+        def do_POST(self): self._handle("POST")
+        def do_PATCH(self): self._handle("PATCH")
+
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H); threading.Thread(target=srv.serve_forever, daemon=True).start()
+    API = f"http://127.0.0.1:{srv.server_address[1]}"
+    (T / "github.token").write_text("test-token\n")
+
+
+    # ---- the instance: the example config with the paths in the temp dir, the mirror on, issue numbers as ids
+    def write_toml(rid: str):
+        toml = _instance.apply(_instance.base_toml())
+        toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml
+        for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
+                         ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
+            toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
+        for pat, val in ((r'^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]'),
+                         (r'^board_url = "[^"]*"', 'board_url = "https://board.example.org"'),
+                         (r'^sync = false', 'sync = true'),
+                         (r'^issue_ids = false', 'issue_ids = true'),
+                         (r'^issues_repo = ""', f'issues_repo = "{NAME}"'),
+                         (r'^issues_repo_id = ""', f'issues_repo_id = {rid}'),
+                         (r'^api_url = "[^"]*"', f'api_url = "{API}"'),
+                         (r'^token_file = ""', f'token_file = "{tmp}/github.token"'),
+                         (r'^min_interval_seconds = [0-9.]+', 'min_interval_seconds = 0'),
+                         (r'^merge_seconds = [0-9.]+', 'merge_seconds = 0'),
+                         (r'^hourly_budget = [0-9]+', 'hourly_budget = 100000'),
+                         (r'^read_budget = [0-9]+', 'read_budget = 100000'),
+                         (r'^guards = true', 'guards = false'),
+                         (r'^require_marks = true', 'require_marks = false')):
+            toml, n = re.subn("(?m)" + pat, val, toml); assert n == 1, pat
+        (T / "stackshot.toml").write_text(toml, encoding="utf-8")
+
+    write_toml(str(RID))
+    (T / "RULES.md").write_text("# rules\n\n" + "- a rule the connector serves, long enough to count as a rulebook.\n" * 20, encoding="utf-8")
+    os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
+    for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects"): (T / d).mkdir(parents=True)
+    OWNER = "00000000-0000-4000-8000-000000000001"; now = time.time()
+    (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
+    (T / "fleet/a/sessions.json").write_text(json.dumps({OWNER: {"name": "home-here", "machine": "a", "seen": now}}))
+    (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project",
+                                                                                    "session": "home-here", "status": "active", "board": [], "board_open": 0}}}))
+    (T / "store/next-id").write_text("1"); (T / "store/anchors.json").write_text("{}")
+    (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
+    git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
+    git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
+    sys.path.insert(0, STACK); logging.disable(logging.INFO)
+    fails = []; ran = []
+    def check(name, cond, got=None):
+        ran.append(name)
+        if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
+    STORE = T / "store"
+    DESC = "- A thing\n- It lives here\n- Finished when it works"
+
+    from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G
+    from stackshot.service import update as _update_svc
+    from stackshot.waits import waiting as _wt
+    from stackshot.core import config as _cfg
+    from stackshot.web import publish as _web_publish
+    from stackshot.web import page_debts as _web_page_debts
+    from stackshot.service import checks as checks_svc
+    from stackshot.web.tools import complete as _wt_complete
+    from stackshot.web.tools import create as _wt_create
+    from stackshot.service import telling
+    from stackshot.web.ui import render as ui_render
+    _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+    _wt.cap_needs_owner = lambda: False
+    _web_page_debts._refuse_if_owing = lambda debtor: None
+    telling.tell_woken = lambda *a, **k: None
+    GHC = _cfg.CFG["github"]
+
+
+    def repo_calls():
+        """The logged calls that name the repo (the token's /user and /rate_limit name none)."""
+        return [(m, p) for m, p in F.log if p not in ("/user", "/rate_limit")]
+
+
+    def round_trip(label):
+        """Every kind of call the mirror makes for the issues repo, through the server's own paths and the process's client:
+        a create (the id allocator), an edit and a close (the queue worker), the issue and list reads, the comment reader, a merged-PR check.
+        → (the item's id, its issue number)."""
+        out = _wt_create._create(subject=f"[home] {label}", description=DESC, project="projects/alpha", owner="home-here", next="x")
+        gid = G.norm(re.search(r"created (\S+)", out).group(1)); n = G.issue_of(gid, STORE)
+        _update_svc._update(gid, description=f"- {label}, edited\n- It lives here\n- Finished when it works", sender="home-here")
+        r1 = G.drain(None, STORE, say=lambda s: None); edited = "edited" in F.issues.get(n, {}).get("body", "")
+        _wt_complete.stackshot_complete(gid, outcome="done", reason="it worked", description="- Done", sender="home-here")
+        r2 = G.drain(None, STORE, say=lambda s: None)
+        G.client().get_issue(n); G.client().list_issues()
+        rp = G.poll_comments(None, STORE, say=lambda s: None)
+        merged, err = checks_svc.pr_merged(f"{NAME}#{n}", time.time(), {})
+        check(f"{label}: the create took issue #{n}, the edit and the close landed, the reads answered", n > 0 and r1["done"] >= 1 and r1["left"] == 0 and edited and r2["done"] == 1 and not rp.get("down")
+              and F.issues[n]["state"] == "closed" and not merged and not err, (out[:200], n, r1, r2, rp, err))
+        return gid, n
+
+
+    def kinds(calls):
+        """What each call was, the issue number taken out: ("POST", "/issues"), ("PATCH", "/issues/N"), …"""
+        return sorted({(m, re.sub(r"/\d+$", "/N", re.sub(r"^/(?:repos/[^/]+/[^/]+|repositories/\d+)", "", p))) for m, p in calls})
+
+
+    EXPECTED = sorted({("POST", "/issues"), ("PATCH", "/issues/N"), ("GET", "/issues/N"), ("GET", "/issues"), ("GET", "/issues/comments"), ("GET", "/pulls/N")})
+
+    # ---- 1. the accessor
+    for v, want in ((RID, RID), (str(RID), RID), (f" {RID} ", RID), ("", 0), (None, 0), (0, 0), (-3, 0), ("-3", 0), ("abc", 0), (True, 0), ("4.5", 0)):
+        GHC["issues_repo_id"] = v
+        check(f"issues_repo_id = {v!r} reads as {want}", G.repo_id() == want, G.repo_id())
+    GHC.pop("issues_repo_id")
+    check("issues_repo_id missing reads as not set", G.repo_id() == 0)
+    GHC["issues_repo_id"] = RID
+    check("the client's path helper: the id's path when set, the name's otherwise",
+          G.GitHub(NAME, API, "t", repo_id_=RID).repo_path("/issues") == f"{BY_ID}/issues" and G.GitHub(NAME, API, "t").repo_path("/issues") == f"{BY_NAME}/issues"
+          and G.GitHub(NAME, API, "t", repo_id_=0).repo_path() == BY_NAME, None)
+
+    # ---- 2. the id set: every call for the issues repo goes to /repositories/<id>/...
+    _cfg.reload()
+    check("the config sets the id and the name", G.repo_id() == RID and G.repo() == NAME and G.enabled() and G.issue_ids(), (G.repo_id(), G.repo()))
+    F.log.clear()
+    gid_a, n_a = round_trip("made with the id set")
+    calls = repo_calls()
+    check("with the id set every call for the issues repo, a read or a write, goes to /repositories/<id>/...",
+          calls and all(p.startswith(BY_ID + "/") for _m, p in calls) and not any(p.startswith("/repos/") for _m, p in F.log), calls)
+    check("…and those calls are the create, the edit and close, the issue and list reads, the comment reader and the PR check", kinds(calls) == EXPECTED, kinds(calls))
+    link = ui_render.issue_url(gid_a, STORE)
+    check("the item page's issue link still uses the name", link == f"https://github.com/{NAME}/issues/{n_a}" and f'href="{link}"' in ui_render.Board(str(STORE)).item_html(gid_a), link)
+    G.note_repo(STORE, say=lambda s: None)
+    check("the map's repo note is the name", G.load_map(STORE).get("repo") == NAME, G.load_map(STORE).get("repo"))
+    # the repo changes owner: the name's path answers a redirect, the writes by id go on
+    F.moved = True; F.log.clear()
+    gid_m, n_m = round_trip("made after the move")
+    check("after a move the writes land by id: no call met the redirect", all(p.startswith(BY_ID + "/") for _m, p in repo_calls()) and F.issues[n_m]["state"] == "closed", repo_calls())
+    F.moved = False
+
+    # ---- 3. the id unset: every call goes to /repos/<owner>/<name>/..., as before
+    write_toml('""'); _cfg.reload()
+    check("the config's empty id is not set", G.repo_id() == 0 and G.repo() == NAME, G.repo_id())
+    F.log.clear()
+    gid_b, n_b = round_trip("made with the id unset")
+    calls = repo_calls()
+    check("with the id unset every call for the issues repo goes to /repos/<owner>/<name>/..., as before",
+          calls and all(p.startswith(BY_NAME + "/") for _m, p in calls) and not any(p.startswith("/repositories/") for _m, p in F.log), calls)
+    check("…the same calls as with the id set", kinds(calls) == EXPECTED, kinds(calls))
+    link = ui_render.issue_url(gid_b, STORE)
+    check("the item page's issue link uses the name", link == f"https://github.com/{NAME}/issues/{n_b}" and f'href="{link}"' in ui_render.Board(str(STORE)).item_html(gid_b), link)
+    # the repo changes owner with no id set: a write waits, and the log line names issues_repo_id as the fix
+    F.moved = True
+    _update_svc._update(gid_b, description="- edited while the repo moves", sender="home-here")
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        r = G.drain(None, STORE, say=lambda s: None)
+    check("with no id set a write after a move waits, and its log line names issues_repo and issues_repo_id",
+          r["done"] == 0 and r["left"] == 1 and "307" in r["down"] and f"does [github] issues_repo = {NAME}" in err.getvalue() and "[github] issues_repo_id" in err.getvalue(), (r, err.getvalue()))
+    F.moved = False
+    r = G.drain(None, STORE, say=lambda s: None)
+    check("the redirect gone, the waiting write lands", r["done"] == 1 and "edited while the repo moves" in F.issues[n_b]["body"], r)
+
+    return ran, fails
+
+# ================================================================ part app_token: the receiver on a GitHub App's token (the former github_app_token suite)
+def part_app_token():
+    import _scratch, _instance
+    tmp = _scratch.mkdtemp(prefix="ghapp-")
+    toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+    toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's store of sessions
+    toml, n1 = re.subn(r'(?m)^state = "[^"]*"', f'state = "{tmp}/state"', toml); toml, n2 = re.subn(r'(?m)^secrets = "[^"]*"', f'secrets = "{tmp}/secrets"', toml)
+    toml, n3 = re.subn(r'(?m)^github_login = ""', 'github_login = "app-bot[bot]"', toml)
+    assert (n1, n2, n3) == (1, 1, 1), (n1, n2, n3)
+    pathlib.Path(tmp, "stackshot.toml").write_text(toml, encoding="utf-8"); os.environ["STACKSHOT_CONFIG"] = f"{tmp}/stackshot.toml"
+    os.environ.pop("ANCHOR_HUB_ALLOW_SELF", None)
+    sys.path.insert(0, STACK)
+
+    _wd = threading.Timer(120, lambda: (print("FAIL: the scenario did not end in 120 s", flush=True), os._exit(3))); _wd.daemon = True; _wd.start()
+    fails = []; ran = []
+    def check(name, ok, got=None):
+        ran.append(name)
+        print(("ok:   " if ok else "FAIL: ") + name + ("" if ok else f"\n      got: {str(got)[:700]}"), flush=True)
+        if not ok: fails.append(name)
+
+    from stackshot.anchors.anchorhub import core, github as ghr
+
+    records: list[str] = []
+    class Capture(logging.Handler):
+        def emit(self, record): records.append(record.getMessage())
+    core.log.addHandler(Capture()); core.log.setLevel(logging.INFO); core.log.propagate = False
+    def logged(pattern): return [r for r in records if re.search(pattern, r)]
+
+    # ---- a fake gh: the paths in GHD answer 200, the paths in DENY answer the App token's 403, the rest 404
+    RP = "/repos/example-owner/stackshot"
+    PR = "github:example-owner/stackshot#26"; BOT_ISSUE = "github:example-owner/stackshot#27"; PERSON_ISSUE = "github:example-owner/stackshot#28"
+    def notif(i): return f"github:example-owner/repo{i}@notifications"
+    def issue(n, login, created, updated):
+        return {"state": "open", "comments": 0, "created_at": created, "updated_at": updated, "closed_at": None, "title": f"issue {n}", "user": {"login": login},
+                "html_url": f"https://github.com/example-owner/stackshot/pull/{n}", "pull_request": {"merged_at": None}}
+    GHD = {"/rate_limit": {"resources": {}},
+           f"{RP}/pulls/26": {"head": {"sha": "a" * 40, "ref": "x/y"}, "user": {"login": "someone"}, "base": {"repo": {"id": 7}}},
+           f"{RP}/commits/{'a' * 40}/check-runs?per_page=100": {"check_runs": [{"name": "suites", "status": "completed", "conclusion": "success"}]},
+           f"{RP}/issues/26": issue(26, "someone", "2026-11-01T00:00:00Z", "2026-11-01T00:00:00Z"),
+           f"{RP}/issues/27": issue(27, "app-bot[bot]", "2026-11-02T00:00:00Z", "2026-11-03T00:00:00Z"),
+           f"{RP}/issues/28": issue(28, "someone", "2026-11-02T00:00:00Z", "2026-11-03T00:00:00Z")}
+    for i in range(7): GHD[f"/repos/example-owner/repo{i}/notifications?all=true&per_page=50"] = []
+    USER = {"login": "example-owner"}
+    mode = {"user": "app"}      # "app": /user is refused as an App token's; "person": /user answers; "401": /user answers a bad credential; "down": every call fails as the network does
+    calls: list[str] = []; rate_denied = [False]
+    def _fake_gh(args, capture_output=True, text=True, timeout=30):
+        a = [x for x in args[2:] if x != "-i" and x != "-H" and not x.startswith("If-None-Match")]; path = a[0]; cond = "-i" in args; calls.append(path)
+        def fail(msg): return types.SimpleNamespace(returncode=1, stdout="", stderr=msg)
+        if mode["user"] == "down": return fail("error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com")
+        if path == "/user":
+            if mode["user"] == "person": body = json.dumps(USER)
+            elif mode["user"] == "401": return fail("HTTP 401: Bad credentials (https://api.github.com/user)")
+            else: return fail("gh: Resource not accessible by integration (HTTP 403)")
+            return types.SimpleNamespace(returncode=0, stdout=body, stderr="")
+        if path == "/rate_limit" and rate_denied[0]: return fail("HTTP 401: Bad credentials (https://api.github.com/rate_limit)")
+        if "/notifications" in path and mode["user"] != "person": return fail("gh: Resource not accessible by integration (HTTP 403)")
+        if path not in GHD: return fail("gh: Not Found (HTTP 404)")
+        body = json.dumps(GHD[path]); return types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")
+    class _Stop(Exception): pass
+    def _no_sleep(s): raise _Stop()
+    caught: list = []
+    ghr.subprocess = types.SimpleNamespace(run=_fake_gh, TimeoutExpired=subprocess.TimeoutExpired)
+    ghr.threading = types.SimpleNamespace(Thread=lambda target, daemon=True: types.SimpleNamespace(start=lambda: caught.append(target)))
+    ghr.time = types.SimpleNamespace(time=time.time, sleep=_no_sleep)
+    real_cfg = ghr._cfg
+    class NoLogin:      # the config as the module sees it, with `[anchor_hub] github_login` empty (a running config keeps the value it started with)
+        def __getattr__(self, k): return getattr(real_cfg, k)
+        def get(self, *a, **kw): return "" if a[:2] == ("anchor_hub", "github_login") else real_cfg.get(*a, **kw)
+
+    def fresh(bindings, user="app"):
+        """A hub with the given anchors bound, the receiver started on the fake gh (as `user`) → the hub."""
+        mode["user"] = user; del calls[:], caught[:]; del records[:]; rate_denied[0] = False
+        h = core.Hub(); h.write_status = lambda: None; h.emit = lambda ev: None; h.bindings = {a: {"sess"} for a in bindings}; h.status["receivers"] = {}
+        ghr.run(h); return h
+    def one_pass():
+        try: caught[0]()
+        except _Stop: pass
+
+    if True:
+        # ---- 1. the start check
+        h1 = fresh([PR])
+        check("start: /user is refused to an App token (403), /rate_limit is probed and passes: the receiver starts", calls == ["/user", "/rate_limit"] and bool(h1.status.get("github")), (calls, h1.status.get("github")))
+        mode["user"] = "app"; rate_denied[0] = True; del calls[:]; hx = core.Hub(); hx.write_status = lambda: None
+        try: ghr.run(hx); err = None
+        except Exception as e: err = e
+        check("start: a refused /rate_limit after the 403 does not start it: a Transient (retried), the receiver not registered", isinstance(err, core.Transient) and calls == ["/user", "/rate_limit"] and not hx.status.get("github"), (err, calls))
+        mode["user"] = "401"; rate_denied[0] = False; del calls[:]
+        try: ghr.run(hx); err = None
+        except Exception as e: err = e
+        check("start: a 401 on /user is no App token's 403: no /rate_limit probe, a Transient naming the refusal", isinstance(err, core.Transient) and calls == ["/user"] and "not authenticated" in str(err), (err, calls))
+        mode["user"] = "person"; h1b = fresh([PR], "person")
+        person_app_lines = logged(r"App token")      # the log of the person's start, taken before another start clears it
+        check("start: a person's token passes /user as before: one call, no probe, `me` is the login /user answers", calls == ["/user"] and h1b.status["github"]["user"] == "example-owner", (calls, h1b.status.get("github")))
+
+        # ---- 2. `me`
+        h2 = fresh([PR], "app")
+        check("me: for an App token it is the setting [anchor_hub] github_login", h2.status["github"]["user"] == "app-bot[bot]", h2.status["github"])
+        seen = lambda hub, a: hub.resolvers["github"](a)["seen"]
+        at = lambda z: core.now_iso_at(core._ts(z))      # a GitHub time as the board's `seen` writes it
+        check("me: the bot's own issue is not news (its newest activity is the issue's update), another login's issue is (its creation)",
+              seen(h2, BOT_ISSUE) == at("2026-11-03T00:00:00Z") and seen(h2, PERSON_ISSUE) == at("2026-11-02T00:00:00Z"), (seen(h2, BOT_ISSUE), seen(h2, PERSON_ISSUE)))
+        check("me: the start says it in one log line naming the login", len(logged(r"ready with an App token.*as app-bot\[bot\]")) == 1, records)
+        ghr._cfg = NoLogin()
+        try: h2b = fresh([PR], "app")
+        finally: ghr._cfg = real_cfg
+        check("me: with no setting there is no login, the receiver still starts, and one log line says the filter is off", h2b.status["github"]["user"] == "" and len(logged(r"no \[anchor_hub\] github_login")) == 1, (h2b.status.get("github"), records))
+        check("me: …and nothing is filtered: the bot's own issue counts as news like anyone's", seen(h2b, BOT_ISSUE) == at("2026-11-02T00:00:00Z"), seen(h2b, BOT_ISSUE))
+        check("me: a person's token ignores the setting (the login is /user's)", h1b.status["github"]["user"] == "example-owner" and not person_app_lines, (h1b.status["github"], person_app_lines))
+
+        # ---- 3. the notification anchors
+        NA = [notif(i) for i in range(7)]
+        h3 = fresh([PR, *NA], "app"); del calls[:]
+        infos = [h3.resolvers["github"](a) for a in NA]; info = infos[-1]
+        check("notifications: an App token's resolver names a notification anchor without a call (no 403 asked for)", not [c for c in calls if "/notifications" in c] and info["title"] == "repo6 notifications" and "unreadable" not in info, (calls, info))
+        one_pass(); one_pass()
+        check("notifications: two passes read the pull request and no notification list", not [c for c in calls if "/notifications" in c] and f"{RP}/pulls/26" in calls, calls)
+        check("notifications: skipped with ONE log line for the whole run, naming the count and the user sign-in", len(logged(r"notification anchors? not read")) == 1 and "7 notification anchors" in logged(r"not read")[0] and "user sign-in" in logged(r"not read")[0], records)
+        rc = h3.status["receivers"]["github"]
+        check("notifications: the receiver's status stays healthy (ok, not a failure) and carries the note that they need a user sign-in",
+              rc["ok"] is True and "7 notification anchors" in (rc["error"] or "") and "user sign-in" in rc["error"], rc)
+        h3.bindings = {PR: {"sess"}}; one_pass(); rc = h3.status["receivers"]["github"]
+        check("notifications: with none bound the note is gone (a healthy report with no note)", rc["ok"] is True and rc["error"] is None, rc)
+        h3p = fresh([PR, notif(0)], "person"); one_pass()
+        check("notifications: a person's token reads them as before, and no note", any("/notifications" in c for c in calls) and h3p.status["receivers"]["github"]["error"] is None and not logged(r"not read"), (calls, h3p.status["receivers"]))
+        hh = core.Hub(); hh.write_status = lambda: None; hh.health("x", True, "a note"); hh.health("y", True); hh.health("z", False, "boom"); hh.health("w", False)
+        r = hh.status["receivers"]
+        check("health: a healthy report keeps its note in `error`, no note stays None, a failure keeps its error or says 'check failed'", (r["x"]["error"], r["y"]["error"], r["z"]["error"], r["w"]["error"]) == ("a note", None, "boom", "check failed") and r["x"]["ok"] is True, r)
+
+        # ---- 4. the retry of a failed start check, through start_receiver (as the service starts it)
+        def started(first_fails, kind):
+            """start_receiver on the fake gh whose first `first_fails` calls of /user fail as `kind`; backoff of a few ms, the loop's waits recorded."""
+            n = {"u": 0}; waits = []; inner = _fake_gh
+            def gh(args, **kw):
+                path = [x for x in args[2:] if x != "-i" and x != "-H" and not x.startswith("If-None-Match")][0]
+                if path == "/user":
+                    n["u"] += 1
+                    if n["u"] > first_fails: rate_denied[0] = False      # whatever kept /rate_limit from passing is over by the last try
+                    if n["u"] <= first_fails:
+                        mode["user"] = kind
+                        try: return inner(args, **kw)
+                        finally: mode["user"] = "app"
+                return inner(args, **kw)
+            ghr.subprocess = types.SimpleNamespace(run=gh, TimeoutExpired=subprocess.TimeoutExpired)
+            class Stop:
+                def wait(self, s): waits.append(s); return False
+            mode["user"] = "app"; del calls[:], caught[:]
+            h = core.Hub(); h.write_status = lambda: None; h.emit = lambda ev: None; h.bindings = {}; h.status["receivers"] = {}
+            t = core.start_receiver(h, "github", ghr.run, lambda: bool(h.status.get("github")), backoff=(0.01, 0.04), stop=Stop())
+            if t: t.join(10)
+            ghr.subprocess = types.SimpleNamespace(run=_fake_gh, TimeoutExpired=subprocess.TimeoutExpired)
+            return h, t, waits, n["u"]
+        for kind, label in (("down", "the network is down"), ("401", "the credential is refused"), ("app", "an App token's 403 with /rate_limit refused")):
+            del records[:]
+            if kind == "app": rate_denied[0] = True
+            h4, t4, waits, users = started(3, kind)
+            rate_denied[0] = False
+            check(f"retry ({label}): the start is tried again after each failure with a growing, capped wait, and starts at the fourth try",
+                  h4.status["receivers"]["github"]["ok"] is True and users == 4 and len(waits) == 3 and all(0 < w <= 0.04 for w in waits) and waits[2] >= waits[0], (h4.status["receivers"], users, waits))
+            check(f"retry ({label}): each failure is one warning line of the receiver, and the recovery one line", len(logged(r"receiver github: start failed")) == 3 and len(logged(r"receiver github: ready after 4 tries")) == 1, records)
+        h5, t5, waits, users = started(0, "app")
+        check("retry: a start that passes at once makes no retry thread, no wait", t5 is None and waits == [] and users == 1 and h5.status["receivers"]["github"]["ok"] is True, (t5, waits, users))
+        h6, t6, waits, users = started(3, "401"); n_calls = len(calls); time.sleep(0.05)
+        check("retry: it stops once started: no further call to gh after the receiver is up", len(calls) == n_calls and not (t6 and t6.is_alive()), (len(calls), n_calls))
+
+
+    return ran, fails
+
+PARTS = ("github", "repo_id", "app_token")
+MARK = "@@github part"
+
+
+def _run_all():
+    total = bad = 0
+    for name in PARTS:
+        r = subprocess.run([sys.executable, os.path.abspath(__file__), "--part", name], stdout=subprocess.PIPE, text=True)
+        seen = [l for l in r.stdout.splitlines() if l.startswith(MARK + " ")]
+        print("\n".join(l for l in r.stdout.splitlines() if not l.startswith(MARK + " ")))
+        if r.returncode != 0 or len(seen) != 1:
+            print(f"FAIL part {name} did not end cleanly (exit {r.returncode})"); bad += 1; continue
+        _, _, _, n, f = seen[0].split(); total += int(n); bad += int(f)
+        print(f"part {name}: {int(n) - int(f)}/{n} checks passed")
+    if bad:
+        print(f"\n{bad} failures in {total} checks"); sys.exit(1)
+    print(f"ok: github scenario, {total} checks")
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    if sys.argv[1:2] == ["--part"]:
+        assert len(sys.argv) == 3 and sys.argv[2] in PARTS, sys.argv
+        if sys.argv[2] == "repo_id":
+            ran, fails = part_repo_id()
+            print(f"{MARK} repo_id {len(ran)} {len(fails)}"); sys.stdout.flush()
+            os._exit(0)      # nothing a thread of the part left behind holds the process (tests/_scratch.py removes the scratch folder first)
+        if sys.argv[2] == "app_token":
+            ran, fails = part_app_token()
+            print(f"{MARK} app_token {len(ran)} {len(fails)}"); sys.stdout.flush()
+            os._exit(0)
+        # "github": the rest of the file, at module level, is that part
+    else: _run_all()
+else: sys.exit("run this file as a script")
+
+# ================================================================ part github: the mirror and the id switch (the rest of the file)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="ghtest-"); T = pathlib.Path(tmp)
 
@@ -2068,4 +2518,4 @@ finally:
     set_reads(100000)
 
 check("over the whole run no label, issue-field, blocked-by, comment or comment-edit call reached GitHub", F.forbidden == [], F.forbidden[:5])
-print(("ok" if not fails else "FAILED") + f": github scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
+print(f"{MARK} github {len(ran)} {len(fails)}"); sys.stdout.flush(); os._exit(0)      # the parent adds up the parts and exits 1 on a failure

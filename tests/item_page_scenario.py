@@ -523,7 +523,7 @@ check("inputs: the fill is lighter than the card in dark, and the answer, commen
       and ".sbox input::placeholder{color:var(--iph" in _c, None)
 
 
-# every page's title bar is the home h1 (logo and title) as a link to "/", and the side panel stands on it, pinned by default as on home (the stored closed state is panel_open_scenario's)
+# every page's title bar is the home h1 (logo and title) as a link to "/", and the side panel stands on it, pinned by default as on home (the stored closed state is panel_prefs_scenario's)
 def title_panel_problems(p):
     bad = []
     if re.findall(r'<(?:h1|p) class="site"><a href="([^"]*)"><img class="logo"', p) != ["/"]: bad.append("title link is not exactly one href=/")

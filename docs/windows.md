@@ -14,7 +14,7 @@ tests or code and should be checked on a real box before they are relied on.
 
 - A checkout of this repository (for `stackshot`, `stackshot/fleet/puller.py`, `stackshot/fleet/client.py`, `stackshot/core/config.py`, `stackshot/projects/pages.py` and the hook
   scripts in `client/hooks/`).
-- Python 3.11 or later on the box, including `pythonw.exe` for the puller. The puller and the client are stdlib only, and every module the puller imports must import without `fcntl`, `pwd`, `grp`, `termios` or `resource` (`tests/windows_import_scenario.py` blocks them and imports the puller; `core/xlock.py` falls back to its thread lock alone there).
+- Python 3.11 or later on the box, including `pythonw.exe` for the puller. The puller and the client are stdlib only, and every module the puller imports must import without `fcntl`, `pwd`, `grp`, `termios` or `resource` (`tests/puller_config_scenario.py` blocks them and imports the puller; `core/xlock.py` falls back to its thread lock alone there).
 - Git for Windows, with Git Bash reachable as a bare `bash` (for the hooks, below).
 - Claude Code, signed in to the account that has the stackshot connector.
 

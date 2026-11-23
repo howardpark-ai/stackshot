@@ -67,7 +67,7 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           `gh`, and an artifact of a public repository downloads only with a token, so it
                                                           runs where the token is, BEFORE the tree is sent to a test runner (a runner's copy
                                                           holds the files git does not ignore, and `.suitemap-ci/` is not ignored; `.suitemap/`,
-                                                          where CI restores its cache, is). Never commit the folder: tests/suitemap_fetch_scenario.py
+                                                          where CI restores its cache, is). Never commit the folder: tests/suitemap_cache_scenario.py
                                                           fails, in CI, a checkout that tracks it. Never relaunched: it runs where it is typed.
   tests/suitemap.py warm [--rev REV]                      build and keep the index of REV (default HEAD) as a `select` would, so the next call that
                                                           needs it loads it: what runs after a merge to main (release.sh,

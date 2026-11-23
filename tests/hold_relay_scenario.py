@@ -1,6 +1,21 @@
-"""Scenario test for hold=true with a wake, and until with a time, on a relay wait (stackshot/service/update.py, stackshot/service/gates.py until_in) — a scratch store and config, no port, no network, no model call.
+"""Scenario test for hold=true and a wake or until with a time of day on a relay or event wait (stackshot/service/update.py, stackshot/service/gates.py until_in) — a scratch store and config, no port,
+no network, no model call. Two parts, one after the other on one scratch store: part A, a hold on a relay or event wait that still stores a work-in-hand state; part B, a hold with a wake on a relay wait.
 
-The report: on an item that waits on a relay with an anchor scoped to it, `update hold=true wake=<a date inside the cap>` was refused with "a hold that waits on a notice from the anchor scoped to
+Part A. The report: an item stored wait_kind=relay beside state doing (the state was stored before the wait was rewritten) listed "model conflict: wait_kind=relay on an item whose state is doing, which
+is alive: the wait wins. To drop the wait, update clear_wait=true; to keep it, park the item: update hold=true (a park ends a stored work-in-hand state)". hold=true with a wake was accepted, but on
+a relay or event wait no hold flag is stored (the wait is the park), and the stored state was left alone, so the conflict stayed: the advice was circular. And wake=<day>T10:00 on a relay wait was
+refused with the ask_by date wording, not the reason until's refusal gives.
+
+  1  hold ends the state   hold=true + wake (or ask_by) on a relay or event wait stored beside state doing: the model has no conflict, the stored state is gone, the wait stays a relay or event wait with its
+                           date, no hold flag; the reply says the state was dropped
+  2  hold, no state        a relay wait with no stored state is unchanged: accepted, no flag, no state note
+  3  wake with a time      wake=<day>T10:00 (and ask_by, and hold with either) on a relay or event wait is fixed, not refused: the day is stored, the time dropped, and the call log counts an ask-by-day fix
+  4  unchanged             a hold on an item with no wait still ends its stored state and sets the flag
+  5  derived state         a relay or event wait whose needs name only a session and that stores no state lists no alive-state conflict; with a stored doing state it does, and a hold clears it;
+                           an anchor wait is not exempt
+  6  alive states only     the hold on a relay or event wait ends doing, your-call and your-step (the states the conflict names); outside (party, chase) and verifying (end, proof) keep state and fields
+
+Part B. The report: on an item that waits on a relay with an anchor scoped to it, `update hold=true wake=<a date inside the cap>` was refused with "a hold that waits on a notice from the anchor scoped to
 <id> still carries a backstop wake", although a wake was given; and `until=<date>T10:00` was refused with the ask_by wording. Cause: the date of a relay or event wait stands in its ask_by (until_in
 sends a wake there), so the hold flag was set with no wake beside it. A relay wait is itself the park until its ask-by day, so the hold adds nothing:
 
@@ -9,7 +24,7 @@ sends a wake there), so the hold flag was set with no wake beside it. A relay wa
   2  until + time   until with a time of day on a relay or event wait is fixed (the day is stored, the time dropped, an ask-by-day fix is counted)
   3  unchanged      an anchor wait with hold=true and a wake keeps its hold flag; a hold with no date on an anchor-scoped item is still refused with the backstop-wake message
 
-    tests/run-suite hold_relay_wake        -> exit 0 / 1"""
+    tests/run-suite hold_relay        -> exit 0 / 1"""
 import datetime as dt, json, logging, os, pathlib, re, sys, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
@@ -81,20 +96,108 @@ def refused(name, f, *want):
 
 A1 = "https://github.com/o/r/pull/101"
 _anc.save({"projects/alpha": [{"url": A1, "items": [f"a{n}" for n in range(1, 12)], "added": now0, "by": "x"}]})
-REL = dict(needs=[BACK], until=w(5), wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)
+REL = dict(needs=["external"], until=w(5), wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)      # needs external: with the stored state gone the item reads as an outside wait
+EVT = dict(needs=["external"], until=w(5), wait_kind="event", wait_event="box_online testbox", post_wake_mover=BACK)
+conflicts = lambda g: list(MODEL.derive(_service_store._load(g)).conflicts)
+STATE_CONFLICT = "which is alive: the wait wins"
+
+# ################################################################ part A: hold=true on a relay or event wait that still stores a state (the former hold_relay_state suite)
+
+# ================================================================ 1. hold ends the stored state
+item(1, state="doing", **REL)
+check("1 setup: the stored doing state beside a relay wait lists the conflict", any(STATE_CONFLICT in c for c in conflicts("a1")), conflicts("a1"))
+out = bupd(1, hold=True, wake=w(3))
+check("1 hold=true + wake on a relay wait with state doing: the stored state is gone", not mt(1).get("state"), mt(1))
+check("1 …the model lists no conflict", not conflicts("a1"), conflicts("a1"))
+check("1 …the wait stays a relay wait with its new date, no hold flag", mt(1).get("wait_kind") == "relay" and W.stored_until(mt(1)) == w(3) and not mt(1).get("hold") and no_old(mt(1)), mt(1))
+check("1 …the reply says the stored state was dropped", "stored state doing dropped" in out, out[-700:])
+
+item(2, state="doing", **REL)
+bupd(2, hold=True, ask_by=w(4))
+check("1 the same with ask_by", not mt(2).get("state") and not conflicts("a2") and W.stored_until(mt(2)) == w(4) and mt(2).get("wait_kind") == "relay", (mt(2), conflicts("a2")))
+
+item(3, state="doing", **REL)
+bupd(3, hold=True)
+check("1 hold=true alone on a relay wait that has its day: the state is gone and the day stands", not mt(3).get("state") and not conflicts("a3") and W.stored_until(mt(3)) == w(5) and not mt(3).get("hold"), (mt(3), conflicts("a3")))
+
+item(4, state="doing", **EVT)
+bupd(4, hold=True, wake=w(3))
+check("1 an event wait takes the same write", not mt(4).get("state") and not conflicts("a4") and mt(4).get("wait_kind") == "event" and W.stored_until(mt(4)) == w(3) and not mt(4).get("hold"), (mt(4), conflicts("a4")))
+
+# ================================================================ 2. no stored state
+item(5, **REL)
+out = bupd(5, hold=True, wake=w(3))
+check("2 a relay wait with no stored state: accepted as before, no state note", not mt(5).get("hold") and W.stored_until(mt(5)) == w(3) and "stored state" not in out and not conflicts("a5"), (mt(5), out[-500:]))
+
+# ================================================================ 3. a wake with a time of day on a relay or event wait
+from stackshot.core import call_log as CL
+def fixed_by(fn):
+    tok = CL.begin()
+    try: fn()
+    finally: fx = CL.end(tok)
+    return fx
+item(6, **REL); item(7, **EVT)
+for i, nm in ((6, "relay"), (7, "event")):
+    kinds = fixed_by(lambda i=i: bupd(i, wake=w(4) + "T10:00"))
+    check(f"3 wake with a time of day on a {nm} wait is fixed: the day is stored, the time dropped, the fix is counted", W.stored_until(mt(i)) == w(4) and [k for k, _ in kinds] == ["ask-by-day"] and "wake" in kinds[0][1], (mt(i), kinds))
+    kinds = fixed_by(lambda i=i: bupd(i, hold=True, wake=w(3) + "T10:00"))
+    check(f"3 hold=true + wake with a time of day on a {nm} wait is fixed the same way", W.stored_until(mt(i)) == w(3) and not mt(i).get("hold") and [k for k, _ in kinds] == ["ask-by-day"] and "wake" in kinds[0][1], (mt(i), kinds))
+    kinds = fixed_by(lambda i=i: bupd(i, ask_by=w(2) + "T10:00"))
+    check(f"3 ask_by with a time of day on a {nm} wait is fixed the same way", W.stored_until(mt(i)) == w(2) and "T" not in str(W.stored_until(mt(i))) and [k for k, _ in kinds] == ["ask-by-day"] and "ask_by" in kinds[0][1], (mt(i), kinds))
+    kinds = fixed_by(lambda i=i: bupd(i, wake=w(1)))
+    check(f"3 …the day alone on the {nm} wait is no fix", W.stored_until(mt(i)) == w(1) and kinds == [], (mt(i), kinds))
+item(8, needs=[BACK], until=w(5), wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", post_wake_mover=BACK)
+bupd(8, wake=w(3) + "T10:00")
+check("3 a wake with a time of day on an anchor wait is still accepted", W.stored_until(mt(8)) == w(3) + "T10:00", mt(8))
+
+# ================================================================ 4. unchanged
+item(9, state="doing", needs=[BACK], answers=[{"ts": now0 - 9 * DAY, "kind": "decision", "text": "park this until Jun 4th", "via": "board"}])
+out = bupd(9, hold=True, wake=w(3))
+check("4 a hold on an item with no wait still ends its stored state and sets the flag", mt(9).get("hold") is True and not mt(9).get("state") and "stored state doing dropped" in out, (mt(9), out[-500:]))
+
+# ================================================================ 5. a wait whose needs name only a session: the item reads alive from its fields
+SES = dict(needs=[BACK], until=w(5), wait_event="the vendor's reply", post_wake_mover=BACK)
+for kind, extra in (("relay", {}), ("event", {"wait_event": "box_online testbox"})):
+    item(30, wait_kind=kind, **{**SES, **extra})
+    check(f"5 a {kind} wait with session-only needs and no stored state lists no conflict", not conflicts("a30"), conflicts("a30"))
+    item(31, wait_kind=kind, state="doing", **{**SES, **extra})
+    check(f"5 …with a stored doing state it still lists the conflict", any(STATE_CONFLICT in c for c in conflicts("a31")), conflicts("a31"))
+    bupd(31, hold=True, wake=w(3))
+    check(f"5 …and a hold on it ends the state and the conflict goes, the {kind} wait and its day stay", not mt(31).get("state") and not conflicts("a31") and mt(31).get("wait_kind") == kind and W.stored_until(mt(31)) == w(3) and not mt(31).get("hold"), (mt(31), conflicts("a31")))
+item(32, wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", **{k: v for k, v in SES.items() if k != "wait_event"})
+check("5 an anchor wait on an alive-reading item still lists the conflict (only relay and event waits are exempt)", any(STATE_CONFLICT in c for c in conflicts("a32")), conflicts("a32"))
+
+# ================================================================ 6. the hold ends only the alive states the conflict line names
+for st in ("doing", "your-call", "your-step"):
+    item(40, state=st, **REL)
+    bupd(40, hold=True, wake=w(3))
+    check(f"6 a relay wait stored as {st} loses the state on a hold and the day stands", not mt(40).get("state") and W.stored_until(mt(40)) == w(3), mt(40))
+item(41, state="outside", party="the vendor", chase=w(4), **REL)
+bupd(41, hold=True, wake=w(3))
+check("6 a relay wait stored as outside keeps its state, party and chase on a hold", mt(41).get("state") == "outside" and mt(41).get("party") == "the vendor" and mt(41).get("chase") == w(4) and W.stored_until(mt(41)) == w(3), mt(41))
+item(42, state="verifying", end=w(4), proof="the log shows it", **REL)
+bupd(42, hold=True, wake=w(3))
+check("6 a relay wait stored as verifying keeps its state, end and proof on a hold", mt(42).get("state") == "verifying" and mt(42).get("end") == w(4) and mt(42).get("proof") == "the log shows it" and W.stored_until(mt(42)) == w(3), mt(42))
+item(43, state="outside", party="the vendor", chase=w(4), **EVT)
+bupd(43, hold=True, wake=w(3))
+check("6 the same on an event wait stored as outside", mt(43).get("state") == "outside" and mt(43).get("party") == "the vendor" and mt(43).get("chase") == w(4), mt(43))
+
+# ################################################################ part B: hold=true with a wake, and until with a time, on a relay wait (the former hold_relay_wake suite)
+# the shared scratch store, helpers and anchor above stand; this part's relay wait names the session in needs (REL2), part A's names external (REL)
+REL2 = dict(needs=[BACK], until=w(5), wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)
 
 # ================================================================ 1. relay + hold
-item(1, **REL)
+item(1, **REL2)
 out = bupd(1, hold=True, wake=w(3))
 check("1 hold=true + wake inside the cap on a relay wait is accepted and stored as until, kind kept", W.stored_until(mt(1)) == w(3) and mt(1).get("wait_kind") == "relay", mt(1))
 check("1 …no hold flag and no old field is stored", not mt(1).get("hold") and no_old(mt(1)), mt(1))
 check("1 …the reply says the wait is the park until its ask-by day", "hold=true is not stored on a relay or event wait" in out and w(3) in out, out[-700:])
 
-item(2, **REL)
+item(2, **REL2)
 bupd(2, hold=True, ask_by=w(4))
 check("1 hold=true + ask_by on a relay wait is accepted too", W.stored_until(mt(2)) == w(4) and not mt(2).get("hold"), mt(2))
 
-item(3, **REL)
+item(3, **REL2)
 out = bupd(3, hold=True)
 check("1 hold=true alone on a relay wait that has its day is accepted, the day stands", W.stored_until(mt(3)) == w(5) and not mt(3).get("hold") and "not stored" in out, (mt(3), out[-500:]))
 
@@ -109,7 +212,7 @@ refused("1 hold=true + a wake past the cap on a relay wait with no stored day is
 check("1 …and nothing was stored", not W.stored_until(mt(5)), mt(5))
 item(50, needs=[BACK], wait_kind="event", wait_event="box_online testbox", post_wake_mover=BACK)
 refused("1 the same on an event wait with no stored day", lambda: bupd(50, hold=True, wake=w(19)), CAP_MSG)
-item(51, **REL)
+item(51, **REL2)
 refused("1 a wake past the cap on a relay wait that has a day is refused too", lambda: bupd(51, hold=True, wake=w(20)), "Refused")
 item(52, **NOREL)
 bupd(52, hold=True, wake=w(5))
@@ -120,12 +223,12 @@ bupd(53, hold=True, wake=w(19))
 check("1 a wake past the cap with the owner's recorded words on the item is accepted, and the words are recorded for the day",
       W.stored_until(mt(53)) == w(19) and not mt(53).get("hold") and (mt(53).get("cap_ok") or {}).get("quote") == park["text"], mt(53))
 
-item(54, **REL)
+item(54, **REL2)
 out = bupd(54, clear_hold=True)
 check("1 clear_hold on a relay wait that holds no flag says the wait goes on and clear_wait ends it", "(clear_hold releases a park, and this relay or event wait holds no flag" in out and "clear_wait=true ends the wait" in out and "on hold" not in out and mt(54).get("wait_kind") == "relay", (out[-400:], mt(54)))
 
 # ================================================================ 2. until with a time
-item(6, **REL)
+item(6, **REL2)
 from stackshot.core import call_log as CL
 tok = CL.begin()
 try: bupd(6, until=w(4) + "T10:00")

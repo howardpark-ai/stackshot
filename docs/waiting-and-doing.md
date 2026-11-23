@@ -31,7 +31,7 @@ An agent that moves an item can park its own work with a wake, or by dating its 
 
 ## A list is written with `waits`
 
-(`stackshot/waits/wait_list_write.py`, `gate_waits` and `waits_clash` in `stackshot/service/gates.py`, `create_item` and `update_unlocked` in `stackshot/service/create.py` and `update.py`, the `create` and `update` tools; `tests/wait_list_write_scenario.py`.)
+(`stackshot/waits/wait_list_write.py`, `gate_waits` and `waits_clash` in `stackshot/service/gates.py`, `create_item` and `update_unlocked` in `stackshot/service/create.py` and `update.py`, the `create` and `update` tools; `tests/wait_list_scenario.py`, its write part.)
 
 A `create` or an `update` writes a list with three parameters: `waits`, `wait_mode` and the existing `until`.
 
@@ -78,7 +78,7 @@ Chases (`metadata.chases`) are not part of a list yet: a list is never chased. T
 
 Anchor and item ids in a list are limited to 300 characters (`wait_list.LINE_MAX`): a longer one is read clipped to its first 300 characters, which no longer matches the notice or the item it names, so the write path refuses a longer one (see *A list is written with `waits`*). A line's `event` text is limited the same way (the write path refuses a longer one, and a stored longer one is read clipped); an arrival's words are only clipped, which shortens what is shown.
 
-**How a list reads on the board** (`wait_list_html` in `stackshot/web/ui/render.py`, `list_mode_words` and `list_watchers` in `stackshot/web/itempage.py`, `model.words` for `get`; `tests/wait_list_display_scenario.py`). An item with one wait reads as it always did; only a stored list that holds is drawn as one (a list that does not hold is the date alone here too).
+**How a list reads on the board** (`wait_list_html` in `stackshot/web/ui/render.py`, `list_mode_words` and `list_watchers` in `stackshot/web/itempage.py`, `model.words` for `get`; `tests/wait_list_scenario.py`, part `display`). An item with one wait reads as it always did; only a stored list that holds is drawn as one (a list that does not hold is the date alone here too).
 
 - **The Waiting row** leads with a head: the mode (`all of 2` or `any of 2`), how many lines have arrived and `back anyway <backstop day>`; the right-hand slot is `until <backstop day>`, as for an item or anchor wait. Under it is one line per wait in the stored order: its kind (`date`, `item`, `anchor`, `news`, `event`), what it waits on, and a box that is ticked with `arrived <time>` once it has. The who line says who picks the item up and who watches: one watcher for each kind of line still open (the scheduler for a date or news, the anchor module for an anchor, the server for an item or a fleet event); a line that has arrived has none to watch, but when every line has arrived the watchers of all the lines are named (`list_watchers`). There is no `ask by` and no chases line: a list has the one backstop day and is never chased.
 - **The item page's wait block** shows the same lines, each with a second line: what watches it (news only the owner relays, the anchor in full, whether an item is open or closed) or, once it has arrived, in what words and when. The head says how the mode ends it (`the first to arrive brings it back`, or `<n> arrived · it comes back when the last one does`). `Backstop` is its own row (`<day> · back at the latest, whatever has arrived`), then `Picks it up` (and `Then`); the single wait's `Watched by` and `Chases` rows are not drawn, and the sidebar's date row reads `Backstop`.
