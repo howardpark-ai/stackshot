@@ -31,7 +31,7 @@ An agent that moves an item can park its own work with a wake, or by dating its 
 
 ## A list is written with `waits`
 
-(`stackshot/waits/wait_list_write.py`, `gate_waits` and `waits_clash` in `stackshot/service/gates.py`, `create_item` and `update_unlocked` in `stackshot/service/create.py` and `update.py`, the `create` and `update` tools; `tests/wait_list_write_scenario.py`.)
+(`stackshot/waits/wait_list_write.py`, `gate_waits` and `waits_clash` in `stackshot/service/gates.py`, `create_item` and `update_unlocked` in `stackshot/service/create.py` and `update.py`, the `create` and `update` tools; `tests/wait_list_scenario.py`, its write part.)
 
 A `create` or an `update` writes a list with three parameters: `waits`, `wait_mode` and the existing `until`.
 
