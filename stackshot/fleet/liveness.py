@@ -17,6 +17,9 @@ The windows, each read at call time so a config reload is live at once, and each
 The answers:
 
     running(row) / gone_for(row, now) / present(row, now)        presence of one session row (fleet.py's view)
+    sleeping(row)                                                 the time a session went to sleep, "" when it is not asleep: a sleeper (its process ended, its pane stays, a line
+                                                                  addressed to it wakes it) is never gone, present, never dead for a send (pane_dead) or down (session_down), and
+                                                                  not live for idle time (idle_live); only a non-empty string in the row's `sleeping` counts
     puller_online(m, now)                                         a machine's own record (clients state): its puller checked in within online_window()
     machine_online_ok(machine_json)                               the view's `online.ok` as a bool
     machine_unreachable(letter, now, started)                     why a machine cannot be reached now, "" when it can or nothing is known
@@ -83,14 +86,22 @@ def ts(iso: Any) -> float:
 # ---------------------------------------------------------------- presence of a session row
 # A row keeps a session's identity as long as the server holds it; `gone` (an ISO time) says its puller stopped reporting it. running = not gone;
 # present = running, or gone for less than grace(); anything older is an identity record, never mistaken for a live session.
+def sleeping(row: Any) -> str:
+    """The time a session went to sleep (its `sleeping` ISO string), "" when it is not asleep. A sleeper has no process, so no puller reports it, but its pane stays and a line addressed to it
+    wakes it: it is present and never dead, kept from going gone for as long as the fleet tool's session-link store carries the mark (clients.py reads it, never writes it). Only a non-empty
+    string counts; any other value (a number, an empty string, none) is not asleep."""
+    v = row.get("sleeping") if isinstance(row, dict) else None
+    return v.strip() if isinstance(v, str) else ""
+
+
 def running(row: Any) -> bool:
-    """Reported by its puller or its hooks now (not marked gone)."""
-    return isinstance(row, dict) and not row.get("gone")
+    """Reported by its puller or its hooks now (not marked gone), or asleep: a sleeper is never gone (see `sleeping`), whatever stamp a row carries."""
+    return isinstance(row, dict) and (not row.get("gone") or bool(sleeping(row)))
 
 
 def gone_for(row: Any, now: float | None = None) -> float:
-    """Seconds since the session was last known running; 0.0 while it runs (an unreadable stamp counts as long gone)."""
-    if not isinstance(row, dict) or not row.get("gone"):
+    """Seconds since the session was last known running; 0.0 while it runs or sleeps (an unreadable stamp counts as long gone)."""
+    if not isinstance(row, dict) or not row.get("gone") or sleeping(row):
         return 0.0
     t = ts(row["gone"])
     return float("inf") if not t else max(0.0, (time.time() if now is None else now) - t)
@@ -103,8 +114,8 @@ def present(row: Any, now: float | None = None) -> bool:
 
 def idle_live(row: Any) -> bool:
     """Is that session running now (its puller or hooks report it, not marked gone)? `row` is its record in the sessions index; none (a cse_ session, whose state the server
-    does not know) is never live: its time is never live time."""
-    return bool(row) and running(row)
+    does not know) is never live: its time is never live time. A sleeper has no process: it is present (a line wakes it), not live."""
+    return bool(row) and running(row) and not sleeping(row)
 
 
 # ---------------------------------------------------------------- machines
@@ -142,6 +153,8 @@ def session_down(row: Any, stuck: Callable[[], str] | None = None, started: floa
     gone past grace() (a relaunch under way is not). Presence here is read against the clock, not `now` (as before): `now` times the machine's silence only."""
     if not isinstance(row, dict) or not row:
         return ""
+    if sleeping(row):      # asleep: it cannot move an item now, but it is not down: the line that wakes it brings it back (a stopped sleeper's old error is no news)
+        return ""
     if running(row):
         why = stuck() if stuck is not None else ""
         if why:
@@ -157,6 +170,8 @@ def pane_dead(row: Any, now: float | None = None) -> str:
     Gone on a machine that is asleep, or one with no puller to tell (online.ok not true): it cannot be told from a pane that is merely away, so it still takes a message (queued
     or inboxed, as before). An unreadable `gone` stamp counts as long gone, for a time not known."""
     from stackshot.fleet import fleet as _fleet  # noqa: PLC0415 — fleet.py imports this module
+    if sleeping(row):      # asleep: the pane stays and a line wakes it, however long it has slept
+        return ""
     gone = gone_for(row, now)
     if gone < dead_after():
         return ""
