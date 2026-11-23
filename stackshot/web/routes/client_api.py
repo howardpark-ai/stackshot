@@ -20,7 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
 
 from stackshot.core import config as _cfg
-from stackshot.fleet import clients as _clients, inbox as _inbox
+from stackshot.fleet import clients as _clients, inbox as _inbox, inbox_holds as _inbox_holds
 from stackshot.fleet.clients import POLL_MAX as _POLL_MAX
 from stackshot.github import ghsync as _gh
 from stackshot.model.ids import _norm_id
@@ -306,6 +306,10 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         _held.mark_client(uuid, name)       # this session's hook fetches held lines: from now on a notice that asks nothing of it is held (the rollout gate)
         text, ids = _held.lease(uuid, name)
         return 200, {"text": text, "ids": ids}
+    if what == "inbox-hold":    # a fleet tool on another box holds a pane's inbox across its relaunch (kept in the API's own held-api-<source>.txt, which the server's readers count with held-<source>.txt, with a time that expires)
+        return _inbox_holds.api_hold(body)
+    if what == "inbox-release":     # ... and lifts it
+        return _inbox_holds.api_release(body)
     if what == "drain":         # no puller on the machine: a session's own hook fetches what waits for it, at its next prompt
         uuid = str(body.get("uuid") or "").lower()
         if not _clients.UUID.match(uuid):
@@ -319,7 +323,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         else:
             _clients.seen(machine, uuid)
         return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")})}
-    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
+    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
 
 
 async def client_write(request: Request):
@@ -483,7 +487,7 @@ async def _client_api_read(request: Request, machine: str, what: str):
             return JSONResponse(await run_in_threadpool(_project_activity.payload), headers={"Cache-Control": "no-store"})
         except _project_activity.Unreadable as e:   # a record it needs cannot be read: an error with the reason, never a smaller answer
             return PlainTextResponse(str(e), status_code=503, headers={"Cache-Control": "no-store"})
-    if what == "items":            # a scan of the board: off the event loop, so the pages keep answering while it runs
+    if what in ("items", "inbox-holds", "inbox-waiting"):   # a scan of the board, a read of the hold files and a walk of the inbox: off the event loop, so the pages keep answering while it runs
         from starlette.concurrency import run_in_threadpool
         status, ctype, body = await run_in_threadpool(_client_get, what, dict(request.query_params))
     else:

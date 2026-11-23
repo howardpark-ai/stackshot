@@ -28,6 +28,7 @@ from stackshot.core import config as _cfg
 from stackshot.core import store as _store
 from stackshot.core.store import _item_files
 from stackshot.fleet import fleet as _fleet
+from stackshot.fleet import inbox_holds as _inbox_holds
 from stackshot.fleet import liveness as _lv
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
@@ -116,9 +117,16 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
             return 404, "text/plain", str(e)
     if what == "holds":                 # the open items on hold whose hold names no reason: read only, each mover releases its own
         return 200, "text/plain; charset=utf-8", _hooks().holds_report()
+    if what == "inbox-holds":           # what is held on sessions' inboxes (fleet/inbox_holds.py): {holds: [{kind, key, origin, since, expires}]}, one key's with ?key=
+        return 200, "application/json", json.dumps(_inbox_holds.listing(str(params.get("key") or "").strip()), ensure_ascii=False)
+    if what == "inbox-waiting":         # does a line wait for this session (?key=<name>[,<transcript id>]): {keys, hub, msg, waiting, held}; held or not it counts
+        keys = [k.strip() for k in str(params.get("key") or "").split(",") if k.strip()]
+        if not keys or len(keys) > 20:
+            return 400, "text/plain", "key = the session's name, or its name and transcript id separated by a comma"
+        return 200, "application/json", json.dumps(_inbox_holds.waiting(keys), ensure_ascii=False)
     if what == "for-you":               # the For you list: {"generated", "rows": newest first, "flags": {item: watch | mute}} (the fleet tool's items sheet reads it)
         return 200, "application/json", json.dumps(_fy.payload(_gh.shown), ensure_ascii=False)
-    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | answer?key=<item id> | notice?key=<notice id> | holds | for-you | whoami | config | roles | state-files"
+    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | answer?key=<item id> | notice?key=<notice id> | holds | inbox-holds[?key=<key>] | inbox-waiting?key=<name[,id]> | for-you | whoami | config | roles | state-files"
 
 
 def _json_file(path: Any) -> Any:

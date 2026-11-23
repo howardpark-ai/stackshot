@@ -42,6 +42,7 @@ These pages hold the detail behind the [README](../README.md). Each page starts 
 ## Machines and clients
 
 - [The puller and the inbox](puller-and-inbox.md): How notices and messages reach a session on another machine, how a client box keeps itself current, and how the machine card is judged.
+- [Holds on a session's inbox](inbox-holds.md): How a tool on another machine holds and releases a session's inbox, asks whether a line waits for a session, and sends a line to a server that is not on its own box.
 - [Session links and the Machines panel](machines-and-sessions.md): How the board links to a session, and what the Machines panel shows for each machine and package.
 - [The client contract](client-contract.md): What a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, and a gap in a scheduled job.
 - [The fleet tool](fleet-tool.md): The points of contact between stackshot and an optional fleet tool: session links, lanes, recycles, spawns, reboots, CLI updates and naming.

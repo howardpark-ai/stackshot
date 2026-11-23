@@ -35,7 +35,7 @@ from stackshot.fleet import sessions_registry as _sr
 from stackshot.fleet import stale_notice as _stale
 
 DIR: Path = _cfg.state("inbox")
-FLAGS: Path = _cfg.state("anchor-hub")           # paused-<src>.json · held-<src>.txt (the fleet tool's holds) · held-resume-<src>.txt (a reboot's resume, read as one list with it) · release-<src>.txt, shared with the push path
+FLAGS: Path = _cfg.state("anchor-hub")           # paused-<src>.json · held-<src>.txt (the fleet tool's holds) · held-resume-<src>.txt (a reboot's resume) · held-api-<src>.txt (the client API's holds), the three read as one list · release-<src>.txt, shared with the push path
 LEASE = 120.0                                    # s a handed-out line stays reserved for the puller that took it
 RETRY = 10.0                                     # s before a line whose delivery failed is offered again
 SOURCES = ("hub", "msg")
@@ -170,26 +170,34 @@ def exists(iid: str) -> bool:
     return any((DIR / s / f"{iid}.json").exists() for s in SOURCES)
 
 
-def _lines(p: Path) -> set[str]:
+def lines_of(p: Path) -> list[str]:
+    """The keys of a flag file, in file order: one per line, surrounding whitespace dropped, blank lines left out; a file that is missing or cannot be read lists none."""
     try:
-        return {ln.strip() for ln in open(p, encoding="utf-8") if ln.strip()}
+        return [ln.strip() for ln in open(p, encoding="utf-8") if ln.strip()]
     except Exception:
-        return set()
+        return []
 
 
-def held_files(src: str) -> tuple[str, str]:
-    """The two files a source's holds are kept in: another tool's `held-<src>.txt` and the reboot's resume's own `held-resume-<src>.txt`. A key in either holds."""
-    return f"held-{src}.txt", f"held-resume-{src}.txt"
+def _lines(p: Path) -> set[str]:
+    return set(lines_of(p))
+
+
+def held_files(src: str) -> tuple[str, str, str]:
+    """The three files a source's holds are kept in: another tool's `held-<src>.txt`, the reboot's resume's own `held-resume-<src>.txt` and the client API's own `held-api-<src>.txt`
+    (inbox_holds.py writes only that one). A key in any of them holds."""
+    return f"held-{src}.txt", f"held-resume-{src}.txt", f"held-api-{src}.txt"
 
 
 def blocked(src: str) -> tuple[bool, set[str], set[str]]:
-    """(the source is paused, the keys a resume released while it is, the keys held back: the union of both hold files, a missing one counting as empty)."""
-    a, b = held_files(src)
-    return (FLAGS / f"paused-{src}.json").exists(), _lines(FLAGS / f"release-{src}.txt"), _lines(FLAGS / a) | _lines(FLAGS / b)
+    """(the source is paused, the keys a resume released while it is, the keys held back: the union of the three hold files, a missing one counting as empty)."""
+    held: set[str] = set()
+    for f in held_files(src):
+        held |= _lines(FLAGS / f)
+    return (FLAGS / f"paused-{src}.json").exists(), _lines(FLAGS / f"release-{src}.txt"), held
 
 
 def _held_in(src: str, match: Callable[[set[str]], bool]) -> str:
-    """The name of the hold file whose keys `match` accepts, both names joined with ' and ' when each does, '' when neither does."""
+    """The name of the hold file whose keys `match` accepts, the names joined with ' and ' when several do, '' when none does."""
     return " and ".join(f for f in held_files(src) if match(_lines(FLAGS / f)))
 
 
@@ -435,7 +443,7 @@ def asleep(it: dict[str, Any], idx: dict[str, dict[str, Any]] | None = None) -> 
 
 
 def deliberate(it: dict[str, Any]) -> str:
-    """Why this line waits on purpose, '' when it does not: a hold on its session (another tool's relaunch hold in held-<src>.txt, a reboot's resume in held-resume-<src>.txt), or its source paused
+    """Why this line waits on purpose, '' when it does not: a hold on its session (another tool's relaunch hold in held-<src>.txt, a reboot's resume in held-resume-<src>.txt, a client API hold in held-api-<src>.txt), or its source paused
     (paused-<src>.json) without a release for it. These are known waits, sala's own watch frees a hold a dead relaunch left after 10 minutes: the flag leaves them alone."""
     src = str(it.get("src") or "msg")
     paused, released, held = blocked(src)

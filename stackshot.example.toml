@@ -786,6 +786,14 @@ inbox_flag_minutes = 5                              # a line that waits this lon
                                                     # in) is reported once: to the session that sent it, and to the fleet's builder ([fleet] operator_session; its project's keeper
                                                     # when it is retired), with the likeliest reason, and a journal line. A line held on purpose (sala's relaunch hold in
                                                     # held-msg.txt or held-resume-msg.txt, a paused source) and the flag's own lines are not reported. 0 turns it off
+inbox_hold_minutes = 10                             # how long a hold on a session's inbox made through the client API (post inbox-hold, docs/inbox-holds.md) lasts when the call names no time; a hold
+                                                    # never released is taken out of its file when it runs out (the minute tick). Above 1440 counts as 1440, a negative or a non-number as 10; 0 = until released (only a call that leaves minutes out gets it: a call that asks for 0 is refused). A hold written into held-<source>.txt
+                                                    # by hand or by a tool's own file edit carries no time and is never expired here. Server's config. Live
+push_mode = "local"                                 # where push.py (the delivery script, run by scripts) puts a line: "local" (the default) = into this box's own inbox and queue
+                                                    # folders, right on the server's box; "server" = send it to the server through the client API's `message` call with this box's token,
+                                                    # for a box that is not the server's (the folders there are nobody's); "auto" = "server" when the client URL ([client] url,
+                                                    # <secrets>/client.url, $STACKSHOT_URL) names another machine, "local" when it is this box or loopback. $ANCHOR_PUSH_MODE overrides it
+                                                    # for one process; the server's own programs set it to local. The server then delivers by the message rules (docs/puller-and-inbox.md). Client box's config
 stale_notice_hours = 6                              # a queued stall, wake, wait-ended or hand-off notice older than this is dropped instead of delivered (a session that was away, or a box that was
                                                     # moved, would otherwise get a batch of old lines). Whatever its age, such a notice is also dropped when the item it names has closed, been parked
                                                     # again or has another mover by then, and of several about the same items only the newest is delivered. 0 turns the expiry off (the state checks stay)

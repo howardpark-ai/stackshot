@@ -17,9 +17,16 @@ the socket (the format the CLI's uds-messaging debug log shows). A cloud or Cowo
 <text>` queues it into the session as a user turn. Not delivered → queued in <state>/anchor-hub/queue[-msg]/<session>.jsonl;
 anchor-hub flushes queues when a session comes back.
 
+Where the server is. By default (`[client] push_mode = "local"`, or $ANCHOR_PUSH_MODE) this program runs on the server's own box and puts the line into the local inbox and queue
+folders. On a box that is not the server's, those folders are nobody's: with `push_mode = "server"` (or "auto" and a client URL that is not this box: [client] url, <secrets>/client.url or
+$STACKSHOT_URL) the line goes to the server through the client API's `message` call (client.py), with this box's token, and the server delivers it by its own rules (a message to a front agent
+is refused unless it is for the person, a source is always the message's). The answer is then the server's: exit 0 delivered or held for the session, 1 waiting in the inbox,
+2 refused (a refusal, no sender, or not passed on), 4 the server could not be reached, this box has no token yet, or the server's delivery failed (nothing was queued here: a caller that must not lose the line tries again). --flush has nothing to flush here: exit 0.
+The server's own programs (server, minute, anchor-hub, audit, audit-run, router-live) set ANCHOR_PUSH_MODE=local for what they start.
+
 Sources: ANCHOR_PUSH_SOURCE=hub (anchor-hub's notices, the default) or msg (the message tool and the prompts it carries), each
 with its own queue dir and pause flag. While paused-<source>.json exists a delivery is queued and --flush refuses (exit 5), and a
-session listed in held-<source>.txt (another tool's hold) or in held-resume-<source>.txt (a reboot's resume did not verify it) keeps its queue; ANCHOR_PUSH_FORCE=1 overrides both.
+session listed in held-<source>.txt (another tool's hold), held-resume-<source>.txt (a reboot's resume did not verify it) or held-api-<source>.txt (a hold made through the client API) keeps its queue; ANCHOR_PUSH_FORCE=1 overrides all.
 
 Before a queued line is delivered (--flush, and the inbox's hand-out) it passes stale_notice.screen: a stall, wake, wait-ended or hand-off notice that is older than
 [client] stale_notice_hours, or whose items have closed, been parked again or changed mover, is dropped, and of several about the same items only the newest goes.
@@ -36,6 +43,7 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
 
 import fcntl
 import glob
+import ipaddress
 import json
 import os
 import re
@@ -55,7 +63,8 @@ A = str(_cfg.state("anchor-hub"))
 Q = os.path.join(A, "queue-msg" if SRC == "msg" else "queue")
 PAUSE = os.path.join(A, f"paused-{SRC}.json")
 HELD = os.path.join(A, f"held-{SRC}.txt")                   # another tool's holds
-HELD_RESUME = os.path.join(A, f"held-resume-{SRC}.txt")     # a reboot's resume's holds; a key in either file holds
+HELD_RESUME = os.path.join(A, f"held-resume-{SRC}.txt")     # a reboot's resume's holds; a key in any of the three files holds
+HELD_API = os.path.join(A, f"held-api-{SRC}.txt")           # the client API's holds (inbox_holds.py writes only this file)
 REG = os.path.expanduser("~/.claude/sessions")
 CLAUDE = os.path.expanduser("~/.local/bin/claude")
 PUB = _fleet.publisher()                        # the box that runs this server: [fleet] publisher_letter, else found from the hostname
@@ -70,7 +79,7 @@ def paused(name: str) -> bool:
     if os.path.exists(PAUSE):
         return True
     held: set[str] = set()
-    for f in (HELD, HELD_RESUME):                    # the union of both files; one that cannot be read (missing) lists nothing
+    for f in (HELD, HELD_RESUME, HELD_API):         # the union of the three files; one that cannot be read (missing) lists nothing
         try:
             held |= {ln.rstrip("\n") for ln in open(f, encoding="utf-8")}
         except Exception:
@@ -239,7 +248,80 @@ def retired(name: str, text: str, sender: str) -> str:
         return ""
 
 
+def _is_this_box(host: str) -> bool:
+    """Does a client URL's host name this box: a loopback or unspecified address (127.x, ::1, 0.0.0.0, ::), localhost, this box's host name or its fully qualified name (any case), or the bare
+    first label of either. A dotted name must be the whole host or fully qualified name: another domain's `<label>.example.org` is not this box because its first label is."""
+    h = host.strip().strip("[]").split("%")[0].rstrip(".").lower()
+    if not h:
+        return False
+    try:
+        ip = ipaddress.ip_address(h)
+        return ip.is_loopback or ip.is_unspecified
+    except ValueError:
+        pass
+    if h == "localhost" or h.endswith(".localhost"):
+        return True
+    names = {n.strip().rstrip(".").lower() for n in (socket.gethostname(), socket.getfqdn()) if n}
+    return h in names or ("." not in h and h in {n.split(".")[0] for n in names})
+
+
+_warned: list[str] = []
+
+
+def _warn_once(why: str) -> None:
+    """One warning line on stderr per process about the push settings (the first problem met): the line still goes by the safe default, the local folders."""
+    if not _warned:
+        _warned.append(why)
+        print(f"push.py: {why}; delivering to the local folders", file=sys.stderr)
+
+
+def server_mode() -> bool:
+    """Is the line sent to the server through the client API: $ANCHOR_PUSH_MODE, else [client] push_mode: "local" (the default) no · "server" yes · "auto" yes when the client URL names another machine
+    (a host that is not this box: see _is_this_box), as it does on a box that is not the server's. A mode that is none of the three, or an "auto" whose client URL gives no host, is local with one
+    warning line on stderr for the process."""
+    mode = (os.environ.get("ANCHOR_PUSH_MODE") or str(_cfg.get("client", "push_mode", default="local") or "local")).strip().lower()
+    if mode == "server":
+        return True
+    if mode == "auto":
+        url = ""
+        try:
+            from urllib.parse import urlparse
+            from stackshot.fleet import client as _client
+            url = _client.server_url()
+            host = (urlparse(url).hostname or "").lower()
+        except Exception:
+            host = ""
+        if not host:
+            if url:
+                _warn_once("push_mode auto could not read a host from the client URL")
+            return False
+        return not _is_this_box(host)
+    if mode != "local":
+        _warn_once(f"push_mode {mode[:40]!r} is none of local, server or auto")
+    return False
+
+
+def deliver_server(name: str, text: str, sender: str = "") -> int:
+    """The line goes to the server (client.py's message call) → the exit code in the header. The server's answer is printed as the other paths print theirs."""
+    if not sender and _cfg.get("anchor_hub", "require_sender"):
+        print("refused: no sender — pass --from <your name> (or set PUSH_FROM); every drop names who sent it", file=sys.stderr); return 2
+    if not sender:
+        sender = caller()
+    from stackshot.fleet import client as _client
+    status, out = _client.message(name, text, sender)
+    if status == 200:
+        print(out); return 1 if out.startswith(("inbox", "queued")) else 2 if out.startswith("not passed on") else 0
+    if not 400 <= status < 500:
+        print(f"server not reached [{status}]: {out}", file=sys.stderr); return 4
+    if out.startswith(("no token on this machine", "Delivery failed")):     # not a refusal of the line: this box has no token yet, or the server's delivery failed: a later try can succeed
+        print(f"not delivered [{status}]: {out}", file=sys.stderr); return 4
+    print(f"refused by the server [{status}]: {out}", file=sys.stderr)
+    return 2
+
+
 def deliver(name: str, text: str, sender: str = "") -> int:
+    if server_mode():
+        return deliver_server(name, text, sender)
     ref = name                      # as the caller wrote it: the inbox resolves it to the permanent id once
     name = _sr.delivery(name)       # a permanent session id is delivered to the session by the name it has now
     if not sender and _cfg.get("anchor_hub", "require_sender"):     # the end state, one config line away
@@ -266,6 +348,8 @@ def deliver(name: str, text: str, sender: str = "") -> int:
 
 
 def flush(name: str) -> int:
+    if server_mode():
+        return 0                    # no queue here: the server holds every line
     name = _sr.delivery(name)
     qf = os.path.join(Q, f"{name}.jsonl")
     if not (os.path.exists(qf) and os.path.getsize(qf)):

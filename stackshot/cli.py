@@ -1027,11 +1027,16 @@ PROGRAMS = {
 }
 
 
+SERVER_PROGRAMS = ("server", "minute", "anchor-hub", "audit", "audit-run", "router-live")     # what the server box runs: its notices are delivered on this box (push.py), never sent on to a server
+
+
 def run_program(name: str, args: list[str]) -> int:
     """Run the package's module for `name` as __main__ with sys.argv = [`stackshot <name>`, *args]; the module's own exit code is this one's.
     runpy puts the module's file in sys.argv[0] and, from Python 3.14, argparse names a parser after `python -m <module>`: a parser the module made
     without a prog is given `stackshot <name>`, so `stackshot ghmigrate -h` prints that, the command that was typed."""
     import runpy
+    if name in SERVER_PROGRAMS:
+        os.environ["ANCHOR_PUSH_MODE"] = "local"      # the push.py these start (and their children) delivers here, whatever [client] push_mode or an inherited mode says: it cannot send through itself
     sys.argv = [f"stackshot {name}", *args]
     _init = argparse.ArgumentParser.__init__
 
