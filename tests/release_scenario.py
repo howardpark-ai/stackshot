@@ -1425,7 +1425,9 @@ rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_MIN)
 check("deploy.sh, minute unit installed, a code change: the server is restarted, then the minute unit through the user manager, and the health check and the republish follow",
       rc == 0 and 0 <= at(log, "server_ctl restart stackshot.service") < at(log, f"systemctl --user restart {M_}") and "healthz ok" in out, (rc, log, out[-300:]))
 check("...and says so in that order, after the units were reinstalled", 0 <= out.find("restarted stackshot.service") < out.find(f"restarted {M_}") and out.count(f"restarted {M_}") == 1 and "healthz ok" in out
-      and at(log, "install.sh units") < at(log, "server_ctl restart stackshot.service"), (out, log))
+      and 0 <= at(log, "install.sh units --force-host") < at(log, "server_ctl restart stackshot.service"), (out, log))
+check("deploy.sh reinstalls the units with --force-host and never a bare `install.sh units`: it runs on the server host, and a refusal of the server-host check after the merge and before the restart would leave the deploy half done",
+      "install.sh units --force-host" in log and "install.sh units" not in log, log)
 rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_NONE)
 check("deploy.sh, no minute unit installed, the same change: the server restarted, nothing asked about the minute unit, nothing said about it", rc == 0 and "server_ctl restart stackshot.service" in log
       and not any("minute" in l for l in log) and "stackshot-minute" not in out, (rc, log, out[-300:]))
@@ -1477,7 +1479,7 @@ check("...on a standby too (install.sh removes the unit at inline wherever the b
 dry_plan = plan_units("docs/notes.md", home=HOME_MIN, runner="inline")[2]
 rc, out, log, gone = real_deploy(("docs/notes.md",), HOME_MIN, runner="inline")
 check("deploy.sh, a docs-only change, unit installed, setting read as inline: the server IS restarted, after install.sh units (which removes the unit) and with the health check and the republish after it; the runner of the real run is the dry run's plan",
-      rc == 0 and 0 <= at(log, "install.sh units") < at(log, "server_ctl restart stackshot.service") and "healthz ok" in out and "republished" in out and [l for l in out.splitlines() if l.startswith("restarts:")] == dry_plan and log.count("server_ctl restart stackshot.service") == 1 and out.count("restarted stackshot.service") == 1
+      rc == 0 and 0 <= at(log, "install.sh units --force-host") < at(log, "server_ctl restart stackshot.service") and "healthz ok" in out and "republished" in out and [l for l in out.splitlines() if l.startswith("restarts:")] == dry_plan and log.count("server_ctl restart stackshot.service") == 1 and out.count("restarted stackshot.service") == 1
       and not any("minute" in l and ("restart" in l or "reset-failed" in l or "is-active" in l) for l in log), (rc, log, out[-500:], dry_plan))
 rc, out, log, gone = real_deploy(("docs/notes.md",), HOME_MIN, runner="unit")
 check("...control, real: at unit the same change restarts no unit and says nothing of a swap", rc == 0 and not any(l.startswith("server_ctl restart") for l in log) and "note:" not in out, (rc, log, out[-300:]))
@@ -1772,7 +1774,7 @@ check("deploy_ssh set, the move touches none of the puller's files: the checkout
       s["rc"] == 0 and f"merge --ff-only --quiet {MERGE}" in s["git"] and restarts(s) == [] and "  local: this checkout is at 0106c0d" in s["out"], (s["rc"], restarts(s), s["out"][-300:]))
 s = fast("ssh-fwd-unit", merge="ok", deploy_ssh=SSHH, localdiff="units/stackshot-puller.service.in")
 check("deploy_ssh set, the puller's unit file changed: the puller restarts and the log says the unit is not reinstalled here",
-      s["rc"] == 0 and restarts(s) == ["--user restart stackshot-puller.service"] and "the puller's unit file changed; ./install.sh units here installs it" in s["out"], (restarts(s), s["out"][-300:]))
+      s["rc"] == 0 and restarts(s) == ["--user restart stackshot-puller.service"] and "the puller's unit file changed; ./install.sh puller here installs it" in s["out"], (restarts(s), s["out"][-300:]))
 s = fast("ssh-fwd-restartfail", merge="ok", deploy_ssh=SSHH, localdiff="stackshot/fleet/client.py", restart_rc="1")
 check("deploy_ssh set, the puller cannot be restarted: one WARNING line, the release is still green (the server is live)", s["rc"] == 0 and "WARNING: stackshot-puller.service could not be restarted here" in s["out"] and len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS), (s["rc"], s["out"][-300:], s["msgs"]))
 s = fast("ssh-fwd-dirty", merge="ok", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py", dirty=" M release.sh")

@@ -518,6 +518,21 @@ check("…no 'changed, not restarted' hint (setup says why the server is not sta
 check("…install.sh warned about lingering, and setup repeats root's command at the end", "WARNING: lingering is off for tester" in o3
       and re.search(r"lingering is off for tester: .*Run this once as root:  sudo loginctl enable-linger tester\nfill oauth.env", o3) is not None, o3[-900:])
 
+# setup is a deliberate install on this box, so it passes --force-host to `install.sh units`; doctor's start of the server does too (a source check: its path needs a live server). A python3 on PATH that says "not the
+# server host" to install.sh's check (and runs the real one for anything else) stands for a config that names another box: without --force-host, setup would stop at the units step.
+(T / "pyshim").mkdir()
+(T / "pyshim/python3").write_text('#!/bin/sh\ncase "$*" in *server_host_refusal*) echo "this box is not the server host: a test says so"; exit 0 ;; esac\nexec ' + shutil.which("python3") + ' "$@"\n'); (T / "pyshim/python3").chmod(0o755)
+H3b = T / "h3b"; H3b.mkdir()
+e3b = {**ENV, "HOME": str(H3b), "PATH": f"{tmp}/pyshim:{tmp}/sdbin:" + ENV["PATH"]}
+r = ss("setup", "--yes", "--data", str(H3b / "sd"), "--emails", "a@example.com", env=e3b)
+check("setup passes --force-host to install.sh units: a check that says 'not the server host' does not stop it", r.returncode == 0 and "refused:" not in r.stdout + r.stderr
+      and (H3b / ".config/systemd/user/stackshot.service").is_file(), (r.stdout + r.stderr)[-800:])
+r = subprocess.run([os.path.join(STACK, "install.sh"), "units", "--config", str(H3b / ".config/stackshot/stackshot.toml")], capture_output=True, text=True, env=e3b, stdin=subprocess.DEVNULL)
+check("…and the same shim does stop a bare install.sh units (the shim is what the setup run got past)", r.returncode == 1 and "refused: this box is not the server host" in r.stderr, (r.returncode, r.stderr[-300:]))
+_cli = pathlib.Path(STACK, "stackshot/cli.py").read_text(encoding="utf-8")
+_calls = re.findall(r'"install\.sh"\), "units"([^\]]*)\]', _cli)
+check("every call of install.sh units in the CLI (setup's step 5, doctor's start of the server) passes --force-host", len(_calls) == 2 and all('"--force-host"' in c for c in _calls), _calls)
+
 # ---- 9. --port: a second instance on the same box, under another account, on a port of its own (one server per user)
 H4 = T / "h4"; H4.mkdir(); e4 = {**ENV, "HOME": str(H4), "USER": "bob"}
 r = ss("setup", "--yes", "--port", "18030", "--data", str(H4 / "sd"), "--no-systemd", env=e4)

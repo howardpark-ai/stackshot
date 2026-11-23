@@ -33,6 +33,7 @@ import os
 import re
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -671,6 +672,27 @@ def release_deploy_ssh() -> str:
     here, as on a one-box install. release.sh checks the value is a host name and refuses the deploy otherwise."""
     v = get("release", "deploy_ssh")
     return v.strip() if isinstance(v, str) else ""
+
+
+def server_host_refusal(cfg: dict[str, Any] | None = None) -> str:
+    """Why this box is not the instance's server host, as one line, or "" when it is (or when the config names no server host at all, so a fresh install is not refused). install.sh `units`
+    asks it once, before it touches a unit. The config names the server host in two places: `[release] deploy_ssh` (the host the server runs on, for a box that only runs release.sh; a host
+    word resolves to the host it names now) and `[server] box = false` (this box was told it is not the server box, as INSTALL.md's "Moving the server to another box" sets on a box that
+    only runs sessions). A host that names this box (its own name or short name, a loopback name or address) is the server host; any other is not, an alias of ~/.ssh/config or an address of this box
+    included (the check makes no lookup of its own). A host word whose lookup does not resolve stays a word, so it names no box this one can be: refused, and the line says the lookup did not resolve.
+    `deploy_ssh` naming another box wins over `[server] box = true`. `[server] box = true` and no host named both leave the box alone. The caller treats a check that cannot run at all (a config that cannot be read)
+    as no refusal."""
+    from stackshot.core import agentbox
+    me = socket.gethostname()
+    h = get("release", "deploy_ssh", cfg=cfg)
+    h = h.strip() if isinstance(h, str) else ""
+    if h and _host_role(h) is not None:
+        return f"this box ({me}) is not the server host: [release] deploy_ssh is the host word {h} and its [hosts] lookup did not resolve, so it names no box this one can be (fix the lookup, or name the host)"
+    if h and not agentbox.is_this_box(h):
+        return f"this box ({me}) is not the server host: [release] deploy_ssh names {h}, so the server's units belong there (an alias or an address of this box is not recognized: name this box by its hostname)"
+    if not h and server_box(cfg) is False:
+        return f"this box ({me}) is not the server host: [server] box = false says the server runs on another box"
+    return ""
 
 
 def report_notes(cfg: dict[str, Any] | None = None) -> list[str]:

@@ -676,7 +676,7 @@ follow_local() {
         if systemctl --user restart stackshot-puller.service >/dev/null 2>&1; then echo "  local: restarted stackshot-puller.service"
         else echo "  WARNING: stackshot-puller.service could not be restarted here: systemctl --user restart stackshot-puller.service"; fi
     fi
-    ! grep -qE '^units/stackshot-puller\.service\.in$' <<< "$files" || echo "  local: the puller's unit file changed; ./install.sh units here installs it"
+    ! grep -qE '^units/stackshot-puller\.service\.in$' <<< "$files" || echo "  local: the puller's unit file changed; ./install.sh puller here installs it"
     return 0
 }
 # follow_why <sha> <deploy_run's output>: the red report's words when the deploy on $DEPLOY_SSH succeeded and follow_local could not move this checkout. The release ends here (main's run is not watched, so nothing rolls the deploy back and

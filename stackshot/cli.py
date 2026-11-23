@@ -483,7 +483,7 @@ def cmd_setup(a: argparse.Namespace) -> int:
     linger_off = False
     if ok:
         say("5. systemd units (user units, systemctl --user)")
-        if run([str(HERE / "install.sh"), "units", "--quiet-hint", "--config", str(cfg)]).returncode != 0:
+        if run([str(HERE / "install.sh"), "units", "--force-host", "--quiet-hint", "--config", str(cfg)]).returncode != 0:
             say("  install.sh units failed; fix the above, then bin/stackshot doctor"); return 1
         r = run([str(HERE / "install.sh"), "puller", "--start", "--config", str(cfg)])
         if r.returncode != 0:
@@ -697,7 +697,7 @@ def cmd_doctor(a: argparse.Namespace) -> int:
     if sd:
         if filled == 2 and emails and unit_active("stackshot.service", True) != "active":
             say("  … stackshot.service is not active: install.sh units --start")
-            run([str(HERE / "install.sh"), "units", "--start", "--config", str(cfg)])
+            run([str(HERE / "install.sh"), "units", "--force-host", "--start", "--config", str(cfg)])
             started = True
     else:
         skip(why)

@@ -184,7 +184,7 @@ fi
 server_ctl stop stackshot-reload.path
 trap 'server_ctl start stackshot-reload.path' EXIT
 [ -n "$ROLLBACK" ] || $G merge --ff-only --quiet "$NEW"   # a rollback (second step) is at NEW already
-./install.sh units | sed 's/^/  /'
+./install.sh units --force-host | sed 's/^/  /'      # deploy.sh runs on the server host only (the deploy lock and the restart below are of this box), so the server-host check of `units` has nothing to refuse here: a refusal after the merge would leave a half-done deploy
 if [ $server = 1 ]; then server_ctl restart stackshot.service; echo "  restarted stackshot.service"; fi
 beat_since=""   # set when the minute unit was restarted here: the moment, for the check of its heartbeat after the health check
 if [ $minute = 1 ] && minute_on; then beat_since="$(python3 -c 'import time; print(time.time())')"; systemctl --user reset-failed stackshot-minute.service 2>/dev/null || true; systemctl --user restart stackshot-minute.service; echo "  restarted stackshot-minute.service"; fi   # after the server (it waits for /healthz at its own start); not installed: [runner] process is not "unit"

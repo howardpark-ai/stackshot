@@ -357,6 +357,26 @@ On every box that only runs sessions:
 
 Left unset, `[server] box` keeps the older rule: a machine that holds the pages checkout is taken for the server box.
 
+The server's units belong on the server host only, so `./install.sh units` checks it once, first, before it touches lingering or any unit.
+The config names the server host in `[release] deploy_ssh` (the host the server runs on, for a box that only runs `release.sh`; a name, an
+alias, `user@host` or a host word) and says "not this box" with `[server] box = false`. On a box that is not that host, `units` prints one line
+(naming the configured host or the setting, this box and the flag), exits 1 and installs nothing; a `deploy_ssh` that names this box (its own
+name or short name, or a loopback name or address) is the server host. A config that names no server host (the default) refuses nothing, and a
+read-only standby ([docs/read-only-standby.md](docs/read-only-standby.md)) is never refused. `./install.sh units --force-host` skips the check
+for a deliberate install, for example on the new server box before its config says so. `render`, `puller` and `minute-off` are not checked.
+`stackshot setup`, `stackshot doctor` (when it starts the server) and `deploy.sh` pass `--force-host` themselves: each runs on the server host by
+its own nature, and a refusal in the middle of a deploy would leave it half done.
+
+Some limits of the check, all on the safe side (a refusal, never a wrong install):
+
+- The check makes no lookup of its own, so an ssh alias of this box, or one of its non-loopback addresses (a VPN address, say), does not count as
+  this box, and `deploy_ssh` naming this box that way is refused. Name this box by its hostname in `deploy_ssh`, or pass `--force-host`.
+- A host word (`host:<role>`) whose `[hosts]` lookup does not resolve (no lookup configured, or it failed) stays a word and names no box this one
+  can be, so `units` refuses and says the lookup did not resolve. Fix the lookup or name the host, or pass `--force-host`.
+- A `deploy_ssh` that names another box wins over `[server] box = true`: the box is refused all the same.
+- If the config cannot be read for the check (the check itself fails), nothing is refused and the install goes on: the check only stops a known
+  wrong host, it never blocks an install it cannot judge.
+
 ## Where things are
 
 | | Path | Set by |
