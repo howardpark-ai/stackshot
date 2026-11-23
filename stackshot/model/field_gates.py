@@ -18,6 +18,7 @@ from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.model import bullet_text as _bt
+from stackshot.model import faults as _faults
 from stackshot.model import model_guards as _mg
 from stackshot.model import next_rules as _nr
 from stackshot.model import nextlines as _nl
@@ -55,16 +56,24 @@ def _fit(text: str, limit: int) -> str:
 _SUBJECT_TAGGED = re.compile(r"[\s​-‏⁠﻿]*(?:\[[^\]]*\]|\w+:)")
 
 
-def _gate_subject(subject: str, current: str | None = None) -> None:
-    """Refuse a subject that does not start with a scope prefix, or is over [subject] max_length. `current` is the stored subject of an update: a write that sets the very text
+def subject_faults(subject: str, current: str | None = None) -> list[str]:
+    """Every fault of a subject's form, each as the refusal it is alone: no scope prefix, over [subject] max_length. `current` is the stored subject of an update: a write that sets the very text
     it already has (a long one stored before the limit) is not a change and passes the length check."""
     s = _cfg.CFG["subject"]
+    out: list[str] = []
     if not any(subject.startswith(pfx) for pfx in s["prefixes"]):
-        raise ToolError(f"Refused: subject must start with one of {s['prefixes']} — got {subject[:40]!r}")
+        out.append(f"Refused: subject must start with one of {s['prefixes']} — got {subject[:40]!r}")
     lim = _subject_max()
     if lim and len(subject) > lim and subject != current:
-        raise ToolError(f"Refused: the subject is {len(subject)} characters and the limit is {lim}, the scope prefix counted. Shorten it to the action and its object; "
-                        "the detail goes in the description bullets (and the project page's timeline).")
+        out.append(f"Refused: the subject is {len(subject)} characters and the limit is {lim}, the scope prefix counted. Shorten it to the action and its object; "
+                   "the detail goes in the description bullets (and the project page's timeline).")
+    return out
+
+
+def _gate_subject(subject: str, current: str | None = None) -> None:
+    """Refuse a subject that does not start with a scope prefix, or is over [subject] max_length (every fault of it, together; `subject_faults` has them as a list)."""
+    if got := subject_faults(subject, current):
+        raise _faults.refusals(got)
 
 
 def fix_long_subject(subject: str, current: str | None = None) -> str:
@@ -192,8 +201,9 @@ def _description_fault(desc: str) -> tuple[str, str, int] | None:
     return _bt.judge(desc, max_lines, line_max) if _bullets_on() else (("lines", "", n) if (n := len([ln for ln in desc.splitlines() if ln.strip()])) > max_lines else None)
 
 
-def _gate_description(desc: str, field: str = "description") -> None:
-    """A description is short `- ` bullets, one fact each, refused at write time and not only noted. Checks the text
+def description_faults(desc: str, field: str = "description") -> list[str]:
+    """Every fault of a description's form, each as the refusal `_gate_description` raises for it alone: the form of its lines (the first bullet or line that breaks it) and, for a description, a forbidden word.
+    A description is short `- ` bullets, one fact each, refused at write time and not only noted. Checks the text
     written in this call and nothing stored (the callers pass it only when the write carries a description, a close included). The judgement is
     bullet_text.judge, which the re-bullet pass uses too: at most [description] max_lines non-blank lines, each a `- ` bullet (a dash and spaces or a tab; an
     indented bullet is a bullet, an indented line that is not one is prose) of at most line_max characters as it reads (a link by its text, its destination in any
@@ -204,20 +214,30 @@ def _gate_description(desc: str, field: str = "description") -> None:
     d = _cfg.CFG["description"]
     max_lines, line_max = _description_limits()
     fix = f"write short `- ` bullets, one fact each (at most {max_lines} lines of {line_max} characters; parallel bullets such as batches, steps or parts go under one parent bullet, indented two spaces); details go on the project page"
+    out: list[str] = []
     bad = _description_fault(desc)
     if bad:
         kind, ln, n = bad
         if kind == "lines":
-            raise ToolError(f"Refused: {field} has {n} lines, the limit is {max_lines}; {fix}")
-        if kind == "marker":
-            raise ToolError(f"Refused: {field} line is not a `- ` bullet: \"{_clip_line(ln, 60)}\"; {fix}")
-        raise ToolError(f"Refused: {field} bullet is {n} characters, the limit is {line_max} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; {fix}")
+            out.append(f"Refused: {field} has {n} lines, the limit is {max_lines}; {fix}")
+        elif kind == "marker":
+            out.append(f"Refused: {field} line is not a `- ` bullet: \"{_clip_line(ln, 60)}\"; {fix}")
+        else:
+            out.append(f"Refused: {field} bullet is {n} characters, the limit is {line_max} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; {fix}")
     if field != "description":
-        return
+        return out
     low = desc.lower()
     for tok in d.get("forbid_tokens", []):
         if tok.lower() in low:
-            raise ToolError(f"Refused: description contains {tok!r} — a description is the live state, never a changelog; fold the resolution into the state")
+            out.append(f"Refused: description contains {tok!r} — a description is the live state, never a changelog; fold the resolution into the state")
+            break
+    return out
+
+
+def _gate_description(desc: str, field: str = "description") -> None:
+    """Refuse a description that breaks the form (every fault of it, together; `description_faults` has them as a list)."""
+    if got := description_faults(desc, field):
+        raise _faults.refusals(got)
 
 
 _GOAL_RETRY = (" Retry the call with the description's first bullet changed; a session whose tool list was cached before this rule reads the live text through the MCP Portal "
@@ -251,40 +271,55 @@ def _sendable(desc: str) -> bool:
     return bool(res) and not _bt.judge(res[0], max_lines, line_max)
 
 
-def _gate_goal(desc: str) -> None:
-    """A session's new description, or one it rewrites, opens with the goal: the first `- ` bullet starts `Goal:` (case-sensitive, right after the dash) and says the outcome wanted;
+def goal_fault(desc: str) -> str:
+    """The refusal text `_gate_goal` raises for `desc`, "" when the description opens with its goal (or the form checks are off). A session's new description, or one it rewrites, opens with the goal: the first `- ` bullet starts `Goal:` (case-sensitive, right after the dash) and says the outcome wanted;
     a symptom, cause or trigger goes in a later bullet that opens `Problem:`. Why: an item once carried a title and bullets that described the trouble and never said what result was wanted.
     Judged on the text written in the call only (the callers run it for a session's create and for an update that replaces the description with other text), after the form gate.
     The first bullet is the first `- ` line (bullet_text.first_bullet); a description with no bullet is refused the same way. [description] require_bullets = false switches it off with the other form checks."""
     if not _bullets_on() or _bt.goal_of(desc) is not None:
-        return
+        return ""
     first = _bt.first_bullet(desc)
     saw = f"the first bullet starts “{_clip_line(' '.join(first.split()[:6]), 60)}”" if first is not None else "it has no `- ` bullet"
     ex = _bt.goal_example(desc)
     if ex is not None and not _sendable(ex):      # a corrected description the form gate would refuse again is no example to copy
         ex = None
     shown = (f" Send the description again with that bullet as the goal:\n{ex}\n" + "If that bullet names a symptom, a cause or a trigger, write the outcome you want as the goal and move the bullet to a later bullet that opens `Problem:`.") if ex else ""
-    raise ToolError(f"Refused: the description must open with its goal, and {saw}.{shown} The subject and the first bullet state the outcome wanted: `- Goal: <the result you want, in a sentence>`; "
+    return (f"Refused: the description must open with its goal, and {saw}.{shown} The subject and the first bullet state the outcome wanted: `- Goal: <the result you want, in a sentence>`; "
                     "a symptom, a cause or a trigger goes in a later bullet that opens `Problem:`. "
                     "Example: the symptom title “Fix X fails when Y” becomes the outcome title “Make X work when Y”, with `- Goal: X works when Y` as the first bullet "
                     "and `- Problem: X fails when Y` as the second. `Goal:` is case-sensitive and sits right after the dash." + _GOAL_RETRY)
 
 
-def _gate_bare_urls(fields: dict[str, str], stored: dict[str, Any] | None = None, session: bool = False) -> None:
-    """A session's write through the create and update tools (`session`: the per-write flag the caller reads) may not put a bare http(s) URL in description, next or ask: the page does not always draw one as a
+def _gate_goal(desc: str) -> None:
+    """Refuse a description that does not open with its goal (`goal_fault` has the rule and the text)."""
+    if why := goal_fault(desc):
+        raise ToolError(why)
+
+
+def bare_url_faults(fields: dict[str, str], stored: dict[str, Any] | None = None, session: bool = False) -> list[str]:
+    """One refusal text per field that holds a bare URL (the first in it), none when the write is no session's. A session's write through the create and update tools (`session`: the per-write flag the caller reads) may not put a bare http(s) URL in description, next or ask: the page does not always draw one as a
     link, so a reader sees plain text. A URL inside `[words](url)`, a code span or a fenced block is fine. Judges the text written in this call, `fields` by name, and of that only a URL
     the stored text of the field (`stored`, an update's) does not already hold, so an update that sets a field again with an old bare URL in it is not refused for that. Scripts and the
     server's own writes are not judged. How a page draws a bare URL is not changed here."""
+    out: list[str] = []
     if not session:
-        return
+        return out
     for field, text in fields.items():
         if not text:
             continue
         old = set(_bt.bare_urls(str((stored or {}).get(field) or "")))
         for url in _bt.bare_urls(text):
             if url not in old:
-                raise ToolError(f"Refused: {field} has a bare URL ({_clip_line(url, 80)}) and the page may not draw it as a link. Write it as `[words](url)`, the words saying what the link opens "
-                                "(a URL in a code span or a fenced block is fine)")
+                out.append(f"Refused: {field} has a bare URL ({_clip_line(url, 80)}) and the page may not draw it as a link. Write it as `[words](url)`, the words saying what the link opens "
+                           "(a URL in a code span or a fenced block is fine)")
+                break
+    return out
+
+
+def _gate_bare_urls(fields: dict[str, str], stored: dict[str, Any] | None = None, session: bool = False) -> None:
+    """Refuse a bare URL in a session's description, next or ask (every field that has one, together; `bare_url_faults` has them as a list)."""
+    if got := bare_url_faults(fields, stored, session):
+        raise _faults.refusals(got)
 
 
 def _owner_command(line: str) -> bool:
@@ -292,6 +327,7 @@ def _owner_command(line: str) -> bool:
     return re.fullmatch(rf"{re.escape(OWNER)}:\s*`[^`\n]+`[.,;]?", line.strip(), re.I) is not None
 
 
+NEXT_LONG_SHOWN = 3         # a next with more long lines than this names the first few and counts the rest
 NEXT_PREFIX_ROOM = 80       # a line of next may be this many characters longer than [metadata.next] line_max in all: room for its `<actor>: ` prefix (the whole-line cap is line_max + 80, 280 by default)
 
 
@@ -315,19 +351,22 @@ def _next_len(line: str) -> int:
     return _visible_len(s[i:])
 
 
-def _gate_next(next_: str, has_ask: bool = False, session: bool = False) -> None:
-    """a `next` line over [metadata.next] line_max (200; 0 = off) characters is refused, where it used to be noted. Checks only the text written
+def next_faults(next_: str, has_ask: bool = False, session: bool = False) -> list[str]:
+    """Every fault of the text of next, each as the refusal `_gate_next` raises for it alone: the lines that name no one (one fault for all of them) and each line over the limit. a `next` line over [metadata.next] line_max (200; 0 = off) characters is refused, where it used to be noted. Checks only the text written
     in this call. A link counts by its text and a naked URL not at all, as in a description. Not judged: a `<owner>: `command`` line (the
     whole command in one backtick span; any other line of his is prose and counts), and next's first non-blank line when it is an ask line and
     the call passes no `ask` (a client without the ask parameter writes the ask there; the server lifts it). Hashes, test counts and past
     tense stay notes (_report_note). (a session's write through the create and update tools only, `session`): a line that opens with no `<actor>:` is refused, naming the line and the fix; a sub-line under a named step is fine."""
+    out: list[str] = []
     if session and (bad := _nr.unnamed(next_, skip_first=None if has_ask else (lambda ln: _rmod.parse_ask(ln) is not None))):
-        raise ToolError(f"Refused: a line of next names no one: \"{_clip_line(bad[0], 60)}\"" + (f" (and {len(bad) - 1} more)" if len(bad) > 1 else "") + (f" ({h})" if (h := _nr.hint(bad[0])) else "") + f". One step is one action with one named actor: {_nr.FIX}. "
-                        "A line under a step that belongs to it starts with `- `; results go on the project page (Current state or a timeline line), never into next")
+        out.append(f"Refused: a line of next names no one: \"{_clip_line(bad[0], 60)}\"" + (f" (and {len(bad) - 1} more)" if len(bad) > 1 else "") + (f" ({h})" if (h := _nr.hint(bad[0])) else "") + f". One step is one action with one named actor: {_nr.FIX}. "
+                   "A line under a step that belongs to it starts with `- `; results go on the project page (Current state or a timeline line), never into next")
     limit = _next_line_max()
     if not limit:
-        return                       # off: [metadata.next] line_max = 0, or [description] require_bullets = false (then _report_note notes a long line again)
+        return out                   # off: [metadata.next] line_max = 0, or [description] require_bullets = false (then _report_note notes a long line again)
     first = True
+    long_: list[str] = []
+    long_more = 0
     for raw in str(next_ or "").splitlines():
         ln = re.sub(r"^\s*(?:[-*\u2022]\s+)?", "", raw)
         if not ln.strip():
@@ -335,12 +374,26 @@ def _gate_next(next_: str, has_ask: bool = False, session: bool = False) -> None
         lifted, first = first and not has_ask and _rmod.parse_ask(ln.strip()) is not None, False
         if lifted or _owner_command(ln):
             continue
+        fault = ""
         if (n := _next_len(ln)) > limit:
-            raise ToolError(f"Refused: a line of next is {n} characters after its `<actor>: ` prefix, the limit is {limit} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; "
-                            "next is one short line per next action, each naming who takes it; results and detail go on the project page (Current state or a timeline line)")
-        if (whole := _visible_len(ln)) > limit + NEXT_PREFIX_ROOM:         # the prefix is a name of up to three words of any length: the line as a whole is capped too
-            raise ToolError(f"Refused: a line of next is {whole} characters in all, the limit for the whole line is {limit + NEXT_PREFIX_ROOM} (the {limit} counts after its `<actor>: ` prefix, which has {NEXT_PREFIX_ROOM} characters of room; "
-                            f"a link's URL does not count): \"{_clip_line(ln, 60)}\"; next is one short line per next action, each naming who takes it, with a short name; results and detail go on the project page (Current state or a timeline line)")
+            fault = (f"Refused: a line of next is {n} characters after its `<actor>: ` prefix, the limit is {limit} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; "
+                     "next is one short line per next action, each naming who takes it; results and detail go on the project page (Current state or a timeline line)")
+        elif (whole := _visible_len(ln)) > limit + NEXT_PREFIX_ROOM:         # the prefix is a name of up to three words of any length: the line as a whole is capped too
+            fault = (f"Refused: a line of next is {whole} characters in all, the limit for the whole line is {limit + NEXT_PREFIX_ROOM} (the {limit} counts after its `<actor>: ` prefix, which has {NEXT_PREFIX_ROOM} characters of room; "
+                     f"a link's URL does not count): \"{_clip_line(ln, 60)}\"; next is one short line per next action, each naming who takes it, with a short name; results and detail go on the project page (Current state or a timeline line)")
+        if fault and len(long_) < NEXT_LONG_SHOWN:
+            long_.append(fault)
+        elif fault:
+            long_more += 1
+    if long_more:
+        long_[-1] += f" (and {long_more} more line{'s' if long_more > 1 else ''} over the limit)"
+    return [*out, *long_]
+
+
+def _gate_next(next_: str, has_ask: bool = False, session: bool = False) -> None:
+    """Refuse a text of next that breaks its form (every fault of it, together; `next_faults` has them as a list)."""
+    if got := next_faults(next_, has_ask, session):
+        raise _faults.refusals(got)
 
 
 def _require_marks() -> bool:

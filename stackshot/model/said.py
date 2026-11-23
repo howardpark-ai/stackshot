@@ -85,52 +85,69 @@ def norm_kind(kind: Any) -> str:
 def parse(spec: Any) -> list[dict[str, str]]:
     """The tool's `said` argument as given → [{tag, quote, msg, session, kind}], each checked for shape: a list of objects, one
     object (taken as a list of one), or a JSON string of either (a client whose cached schema sends the parameter as text).
-    ValueError with the hint on anything else; the transcript check is verify()'s."""
+    ValueError with the hint on anything else (the first fault; `parse_all` has them all); the transcript check is verify()'s."""
+    out, errs = parse_all(spec)
+    if errs:
+        raise ValueError(errs[0])
+    return out
+
+
+def parse_all(spec: Any) -> tuple[list[dict[str, str]], list[str]]:
+    """`parse`, with every fault of the list kept: → (the entries that are well formed, one text per entry or argument that is not). A said that is no list at all has the one fault and no entries."""
     if isinstance(spec, str):
         s = spec.strip()
         if not s:
-            return []
+            return [], []
         try:
             spec = json.loads(s)
         except ValueError:
-            raise ValueError(f"said: not valid JSON (it starts {s[:60]!r}); pass a list of objects, {FORM}. As JSON, with its keys and values in double quotes: {JSON_EXAMPLE}")
+            return [], [f"said: not valid JSON (it starts {s[:60]!r}); pass a list of objects, {FORM}. As JSON, with its keys and values in double quotes: {JSON_EXAMPLE}"]
     if isinstance(spec, dict):
         spec = [spec]
     if spec is None:
-        return []
+        return [], []
     if not isinstance(spec, list):
-        raise ValueError(f"said: a list of objects, {FORM}")
+        return [], [f"said: a list of objects, {FORM}"]
     out: list[dict[str, str]] = []
+    errs: list[str] = []
     for i, x in enumerate(spec):
-        if not isinstance(x, dict):
-            raise ValueError(f"said[{i}]: an object {{tag, quote, msg, session}} or {{kind: acted, quote, msg, session}}, {FORM}")
-        bad = [str(k) for k in x if k not in KEYS]
-        if bad:
-            raise ValueError(f"said[{i}]: unknown key{'s' if len(bad) > 1 else ''} {', '.join(bad)}; the keys are {', '.join(KEYS)}")
         try:
-            kind = norm_kind(x.get("kind"))
-            if kind == ACTED:
-                t = str(x.get("tag") or "").strip()
-                if t and t.lower() != ACTED_TAG.lower():
-                    raise ValueError(f"said: an entry of kind {ACTED} proves he did his steps, never his words: leave tag out (it is stored as {ACTED_TAG}) — got tag {t!r}")
-                tag = ACTED_TAG
-            else:
-                tag = norm_tag(x.get("tag"))
+            out.append(_entry(i, x))
         except ValueError as e:
-            raise ValueError(str(e).replace("said:", f"said[{i}]:", 1))
-        quote = str(x.get("quote") or "")
-        if not norm_ws(quote):
-            raise ValueError(f"said[{i}] ({tag}): quote is required: " + ("a piece of the text he sent, cut verbatim from the attachment entry's prompt" if kind == ACTED
-                                                                            else "his sentences about this item, cut verbatim from his message"))
-        msg = str(x.get("msg") or "").strip()
-        what = "the attachment entry" if kind == ACTED else "his message"
-        if not msg:
-            raise ValueError(f"said[{i}] ({tag}): msg is required: the uuid of {what}, the `uuid` field of its transcript entry")
-        if not _UUID.match(msg):
-            whose = "the attachment entry's" if kind == ACTED else "the message's"
-            raise ValueError(f"said[{i}] ({tag}): msg must be {whose} uuid (the `uuid` field of its transcript entry, 36 characters) — got {msg!r}")
-        out.append({"tag": tag, "quote": quote.strip(), "msg": msg.lower(), "session": str(x.get("session") or "").strip(), "kind": kind})
-    return out
+            errs.append(str(e))
+    return out, errs
+
+
+def _entry(i: int, x: Any) -> dict[str, str]:
+    """One entry of a said list, checked for shape; ValueError with the hint when it is not well formed."""
+    if not isinstance(x, dict):
+        raise ValueError(f"said[{i}]: an object {{tag, quote, msg, session}} or {{kind: acted, quote, msg, session}}, {FORM}")
+    bad = [str(k) for k in x if k not in KEYS]
+    if bad:
+        raise ValueError(f"said[{i}]: unknown key{'s' if len(bad) > 1 else ''} {', '.join(bad)}; the keys are {', '.join(KEYS)}")
+    try:
+        kind = norm_kind(x.get("kind"))
+        if kind == ACTED:
+            t = str(x.get("tag") or "").strip()
+            if t and t.lower() != ACTED_TAG.lower():
+                raise ValueError(f"said: an entry of kind {ACTED} proves he did his steps, never his words: leave tag out (it is stored as {ACTED_TAG}) — got tag {t!r}")
+            tag = ACTED_TAG
+        else:
+            tag = norm_tag(x.get("tag"))
+    except ValueError as e:
+        raise ValueError(str(e).replace("said:", f"said[{i}]:", 1))
+    quote = str(x.get("quote") or "")
+    if not norm_ws(quote):
+        raise ValueError(f"said[{i}] ({tag}): quote is required: " + ("a piece of the text he sent, cut verbatim from the attachment entry's prompt" if kind == ACTED
+                                                                        else "his sentences about this item, cut verbatim from his message"))
+    msg = str(x.get("msg") or "").strip()
+    what = "the attachment entry" if kind == ACTED else "his message"
+    if not msg:
+        raise ValueError(f"said[{i}] ({tag}): msg is required: the uuid of {what}, the `uuid` field of its transcript entry")
+    if not _UUID.match(msg):
+        whose = "the attachment entry's" if kind == ACTED else "the message's"
+        raise ValueError(f"said[{i}] ({tag}): msg must be {whose} uuid (the `uuid` field of its transcript entry, 36 characters) — got {msg!r}")
+    return {"tag": tag, "quote": quote.strip(), "msg": msg.lower(), "session": str(x.get("session") or "").strip(), "kind": kind}
 
 
 def plain_quote(spec: Any) -> str:

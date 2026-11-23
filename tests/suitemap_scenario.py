@@ -2010,6 +2010,7 @@ def ann_forms(src):
 ANNUSE_ALLOW = {
     ("stackshot/web/app.py", "wraps"): (1, "functools.wraps once: the standby wrapper of custom_route, a decorator's wrapper"),
     ("stackshot/service/update.py", "wraps"): (1, "functools.wraps once: `_update`, the thin wrapper that keeps the signature of update_unlocked visible; update_unlocked is used as a value there, so its annotation names stay reads"),
+    ("stackshot/model/faults.py", "wraps"): (1, "functools.wraps once: `collected`, the decorator of update_unlocked and create_item, keeps the signature of the write it wraps visible; nothing evaluates an annotation, and the writes are called by name, never reached through a variable"),
     ("tests/read_only_scenario.py", "getattr of __annotations__ or __wrapped__"): (2, "hasattr(endpoint, '__wrapped__') twice: whether a route is wrapped, nothing is evaluated"),
 }
 def ann_uses(files):

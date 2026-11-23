@@ -63,7 +63,7 @@ cause or trigger goes in a later bullet that opens `Problem:`. Then what the ite
 a bullet such as `- {{OWNER}}: …`; parallel bullets go under one parent bullet, indented two spaces); never steps or
 commands for {{OWNER}} (those go in step, below), no working notes, status or history; prune what is no longer live;
 details go on the project page. A create, or an update that replaces the description, whose first bullet is no goal
-is refused; an update that leaves description out is never judged. Item text renders as
+is refused; an update that leaves description out is never judged. A refusal lists the faults it can check together. Item text renders as
 markdown (nested `- ` lists, **bold**, `code`, > quotes; no raw HTML, headings or tables). next: {{NEXT_WORDS}}
 {{NEXT_REFUSALS}}A line of next is refused unless it is <= {{NEXT_LINE_MAX}} characters after its `<actor>: ` prefix,
 and <= {{NEXT_LINE_FULL}} in all (a link counts by its text); only the text you write in a call is checked. Each line

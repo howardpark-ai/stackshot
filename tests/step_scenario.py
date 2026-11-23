@@ -635,7 +635,7 @@ try:
 except Exception as e:
     got14 = str(e)
 check("14 next: …the whole refusal is `Refused: ` + the pane text for `next line`", got14 == "Refused: " + SC.pane_problem("! sala reauth x", "next line") and got14.startswith("Refused: next line: a `! ` line (`! sala reauth x`)"), got14)
-refused("14 create: a Oliver: next line with a pane-form command is refused", lambda: _wt_create._create(subject="[home] case-b bang", description=DESC, project="projects/alpha", owner="home-front", next="Oliver: ! sala reauth x", needs=["team-back"]), "Refused: next line: a `! ` line", PANE_FIX)
+refused("14 create: a Oliver: next line with a pane-form command is refused", lambda: _wt_create._create(subject="[home] case-b bang", description=DESC, project="projects/alpha", owner="home-front", next="Oliver: ! sala reauth x", needs=["team-back"]), "next line: a `! ` line", PANE_FIX)      # beside the first line being Oliver's step under an agent's state: both come back, so the text is not asked to open the refusal
 upd(151, next="team-back: ! sala reauth x\nteam-back: run `! ls`")
 check("14 next: another agent's line with the pane form is allowed", "team-back: ! sala reauth x" in mt(151)["next"], mt(151)["next"])
 for k_, ln_ in enumerate(("Oliver: open the page and say done!", "Oliver: wow! the page is up", "Oliver: the prefix `! ` types into a pane", "Oliver: In PowerShell run `ssh -t box-a 'sala op ready x'`", "Oliver: !important is a CSS word")):
