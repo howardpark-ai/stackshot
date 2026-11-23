@@ -16,6 +16,7 @@ import datetime as dt
 import json
 import os
 import re
+import socket
 import threading
 import time
 from typing import Any
@@ -68,6 +69,8 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
             return 200, "application/json", ROLES.read_text(encoding="utf-8")
         except Exception:
             return 503, "text/plain", "no roles yet"
+    if what == "state-files":           # the files a box that does not run the server reads from its own state folder; the puller of such a box keeps copies (puller 12, [client] mirror_server_state)
+        return _state_files()
     if what == "rules":
         return 200, "text/markdown; charset=utf-8", _hooks().rules_text("full")
     if what == "brief":
@@ -115,7 +118,33 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
         return 200, "text/plain; charset=utf-8", _hooks().holds_report()
     if what == "for-you":               # the For you list: {"generated", "rows": newest first, "flags": {item: watch | mute}} (the fleet tool's items sheet reads it)
         return 200, "application/json", json.dumps(_fy.payload(_gh.shown), ensure_ascii=False)
-    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | answer?key=<item id> | notice?key=<notice id> | holds | for-you | whoami | config | roles"
+    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | answer?key=<item id> | notice?key=<notice id> | holds | for-you | whoami | config | roles | state-files"
+
+
+def _json_file(path: Any) -> Any:
+    """A state file's JSON, None when it is absent or unreadable (a half-written file never is: the writers rename a finished one into place)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _state_files() -> tuple[int, str, str]:
+    """`get state-files` -> {host, generated, projects, fleet, versions, advertised_commit}: the server's published files as a box that does not run the server needs them in its own
+    state folder. `projects` is projects.json, `fleet` is {letter: {machine, sessions}} (clients/fleet/<letter>/machine.json and sessions.json, a letter only when both read), `versions` is
+    site/versions.json and `advertised_commit` the text of clients/advertised-commit; one that is not there is null (or "" for the commit), never an empty stand-in. `host` is the server's
+    own hostname: the puller writes nothing on the box that carries it. roles.json is `get roles`. Read only; the machine token the route checks is the gate."""
+    broken = set(_fleet.sessions_unreadable())
+    fleet = {L: {"machine": _fleet.read(L, "machine"), "sessions": _fleet.read(L, "sessions")} for L in _fleet.letters() if L not in broken}
+    try:
+        sha = _cfg.state("clients", "advertised-commit").read_text(encoding="utf-8").strip()
+    except OSError:
+        sha = ""
+    out = {"host": socket.gethostname(), "generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "projects": _json_file(_prj.published_path()), "fleet": {L: v for L, v in fleet.items() if v["machine"]},
+           "versions": _json_file(_cfg.state("site", "versions.json")), "advertised_commit": sha}
+    return 200, "application/json", json.dumps(out, ensure_ascii=False)
 
 
 def _wait_fields(gid: str, it: dict[str, Any], ctx: "_agents._WaitCtx") -> dict[str, Any]:

@@ -40,9 +40,18 @@ carries `repo`, the canonical address of the stackshot repository; a clean, idle
 address (fetching from it first), and a clean, idle box whose history is not the server's (a rewrite) saves a rollback branch
 `legacy-<short sha>` at its HEAD and moves to the server's commit with `git reset --keep`. A dirty or busy box is still refused.
 
+Puller 12: a box whose server runs on another machine can keep the server's published state files current for the readers on this
+box (hooks, the session manager, its web page), which read them straight from the state folder. With `[client] mirror_server_state = true` (default
+false: one box is unchanged) every successful poll, at most every MIRROR_MIN_GAP seconds, also reads the server's `roles` and `state-files` answers
+and rewrites roles.json, projects.json, clients/fleet/<letter>/{machine,sessions}.json, site/versions.json and clients/advertised-commit in the
+local state folder, each by a temporary file and a rename (a file that already reads the same is left; roles.json is rewritten every time, its age being read). A fetch
+that fails, or an answer that is empty or misshapen, leaves the old file as it is (logged once until the fetch works again). A box that is the server itself (a loopback
+address, or the server's own hostname in the answer) writes nothing. A machine leaves the local fleet view only when
+two fetches in a row lack it.
+
 Options: --registry DIR (the CLI's session registry; default ~/.claude/sessions) · --only NAME|UUID (repeatable: serve
 only these sessions, and tell the server the list is partial) · --wait S (how long a poll may be held, default 50) ·
---dry-run (fetch and confirm nothing; print what would be delivered, and what the puller would update now and why not).
+--dry-run (fetch and confirm nothing, write no state file, also with --once; print what would be delivered, and what the puller would update now and why not).
 The server's address and this machine's token: as client.py finds them ($STACKSHOT_URL, <secrets>/client.url, [client] url;
 <secrets>/client.token).
 """
@@ -55,6 +64,7 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
 import ast
 import glob
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -67,6 +77,7 @@ import sys
 import tempfile
 import time
 import traceback
+import urllib.parse
 
 from stackshot import paths as _paths
 HERE = str(_paths.ROOT)      # the checkout: the package sits in HERE/stackshot, and the reload and the self-update work on this folder
@@ -77,7 +88,7 @@ from stackshot.model import said as _said  # noqa: E402  (stdlib only: the trans
 # Provision on the Windows boxes restarts the puller task when this differs from the log's last `puller <v>: polling` line: bump it whenever running pullers must pick a change up.
 # From 8 on a running puller notices the change itself and reloads (see "Reloading"); a puller older than 8 still needs that one restart.
 # A change to _entry, _fresh, RELOAD or _RELOAD_FILES itself takes effect only after a real restart (the running loop is the old one).
-VERSION = "11"
+VERSION = "12"
 WINDOWS = os.name == "nt"
 RELOAD = "reload"          # main()'s answer when the checkout's VERSION is not the one loaded: _entry runs the file afresh
 RELOAD_MIN_GAP = 600.0     # a reload at most this often (s): a file that keeps differing cannot make a loop
@@ -1202,6 +1213,204 @@ def once(reg: str, only: list[str] | None, wait: float, dry: bool = False) -> in
     return 1 if (bad and not dry) else 0
 
 
+# ---- puller 12: the server's published state files, mirrored for the readers on this box
+MIRROR_MIN_GAP = 30.0        # a mirror at most this often (s): a poll that returns at once (a line waiting) must not fetch the files every time
+_MIRROR: dict = {"at": 0.0, "bad": set(), "note": set(), "gone": {}}   # when the last one ran; the sources failing now and the notes already said, so each is logged once; letter -> passes it was missing from the view
+_LETTER = re.compile(r"[A-Za-z0-9]{1,16}")       # matched with fullmatch: `$` would accept a trailing newline
+_SHA = re.compile(r"[0-9a-f]{40}")
+_LEFT_AFTER = 2                                  # a letter missing from this many fetches in a row leaves this box's view (one pass can be a torn read on the server)
+_FLEET_FILES = ("machine.json", "sessions.json")
+_TMP_LEFT = re.compile(r"\.(?:machine|sessions)\.json\.\d+\.tmp")   # what a write cut off by a kill leaves beside its file
+
+
+def _own_host() -> str:
+    try:
+        return socket.gethostname()
+    except OSError:
+        return ""
+
+
+def _hkey(h) -> str:
+    """A host name as compared: lower-cased, the domain left off (a box answers to `box-a` and `box-a.example.net`)."""
+    return str(h or "").strip().lower().split(".")[0]
+
+
+def _loopback(url: str) -> bool:
+    """Does the server address name this box itself (localhost or any loopback address)? Then the server is here and keeps its own files."""
+    h = (urllib.parse.urlsplit(url).hostname or "").lower()
+    if h == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def _mirror_say(key: str, text: str) -> None:
+    if key not in _MIRROR["note"]:
+        _MIRROR["note"].add(key)
+        print(f"mirror: {text}", file=sys.stderr, flush=True)
+
+
+def _mirror_failed(key: str, why: str, said: str = "not fetched", then: str = "the local copy is kept") -> None:
+    """A source that could not be read: its local file stays; one log line when it starts failing, not one per poll."""
+    if key not in _MIRROR["bad"]:
+        _MIRROR["bad"].add(key)
+        print(f"mirror: {key} {said} ({why}); {then}", file=sys.stderr, flush=True)
+
+
+def _mirror_ok(key: str) -> None:
+    if key in _MIRROR["bad"]:
+        _MIRROR["bad"].discard(key)
+        print(f"mirror: {key} fetched again", flush=True)
+
+
+def _mirror_write(path, text: str) -> None:
+    """The file whole or not at all: a temporary file in the same folder, then a rename over it."""
+    d = os.path.dirname(str(path)); os.makedirs(d, exist_ok=True)
+    tmp = os.path.join(d, f".{os.path.basename(str(path))}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _mirror_json(v) -> str:
+    return json.dumps(v, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
+
+
+def _mirror_read(what: str):
+    """One client read → the decoded JSON object and its text, or None (the failure logged once)."""
+    status, body = _client.get(what, timeout=30.0)
+    if status != 200:
+        _mirror_failed(what, f"HTTP {status}: {str(body)[:120]}" if status else str(body)[:120]); return None
+    try:
+        d = json.loads(body)
+    except ValueError:
+        _mirror_failed(what, "the answer is not JSON"); return None
+    if not isinstance(d, dict):
+        _mirror_failed(what, "the answer is not an object"); return None
+    _mirror_ok(what)
+    return d, body
+
+
+def _mirror_read_file(path: str):
+    """The text of a local file, None when it is absent or unreadable."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except (OSError, ValueError):
+        return None
+
+
+def _mirror_sweep(view: str, letters: list[str]) -> None:
+    """A machine that left the server's view leaves this one too, once it was missing from _LEFT_AFTER fetches in a row (a letter the server could not read for one pass is
+    absent from that answer). Never when the view came empty. Each folder on its own: the mirrored files go, anything else keeps the folder, and an error on one does not stop the rest."""
+    gone = _MIRROR["gone"]
+    if not letters:
+        gone.clear(); return
+    for L in letters:
+        gone.pop(L, None)
+    try:
+        names = os.listdir(view)
+    except OSError:
+        return
+    for d in names:
+        if len(d) != 1 or d in letters:
+            continue
+        dp = os.path.join(view, d)
+        try:
+            if not os.path.isdir(dp):
+                continue
+            gone[d] = gone.get(d, 0) + 1
+            if gone[d] < _LEFT_AFTER:
+                continue
+            for f in os.listdir(dp):
+                if f in _FLEET_FILES or _TMP_LEFT.fullmatch(f):
+                    os.unlink(os.path.join(dp, f))
+            os.rmdir(dp)
+            gone.pop(d, None); _mirror_ok(f"clients/fleet/{d}")
+        except OSError as e:
+            _mirror_failed(f"clients/fleet/{d}", str(e.strerror or e), "not removed", "tried again at the next pass")
+    for d in [k for k in gone if k not in names]:
+        gone.pop(d, None)
+
+
+def mirror_state(root=None, now: float | None = None) -> str:
+    """Mirror the server's published state files into the local state folder (`root`: that folder, by default [paths] state). → "off" ([client] mirror_server_state is
+    not true) · "wait" (too soon after the last one) · "local" (the server is on this box, by its address or its host in the answer: nothing written) · "failed" (the files read stay as they are) · "done"."""
+    if _cfg.get("client", "mirror_server_state", default=False) is not True:
+        return "off"
+    now = time.time() if now is None else now
+    if 0 <= now - _MIRROR["at"] < MIRROR_MIN_GAP:
+        return "wait"
+    _MIRROR["at"] = now
+    url = _client.server_url()
+    if _loopback(url):
+        _mirror_say("local", "the server's address is this box's own: it keeps its own state files, nothing is mirrored"); return "local"
+    got = _mirror_read("state-files")             # first: it names the server's host, and a box that is the server writes nothing
+    if got is None:
+        return "failed"
+    files = got[0]
+    host = _hkey(files.get("host"))
+    if not host:
+        _mirror_failed("state-files", "the answer names no host, so it is not known whether this box is the server"); return "failed"
+    if host == _hkey(_own_host()):
+        _mirror_say("local", "this box is the server: it keeps its own state files, nothing is mirrored"); return "local"
+    base = os.fspath(root if root is not None else _cfg.state())
+    jobs: list[tuple[str, str]] = []              # (path, text) of what passed its check
+    v = files.get("projects")
+    if isinstance(v, dict) and isinstance(v.get("projects"), dict) and v["projects"] and isinstance(v.get("generated"), str):
+        jobs.append((os.path.join(base, "projects.json"), _mirror_json(v)))
+    v = files.get("versions")
+    if isinstance(v, dict) and v:
+        jobs.append((os.path.join(base, "site", "versions.json"), _mirror_json(v)))
+    v = files.get("advertised_commit")
+    if isinstance(v, str) and _SHA.fullmatch(v):
+        jobs.append((os.path.join(base, "clients", "advertised-commit"), v + "\n"))
+    fleet = files.get("fleet")
+    letters: list[str] = []
+    if isinstance(fleet, dict):
+        for L, pair in fleet.items():
+            if isinstance(L, str) and _LETTER.fullmatch(L) and isinstance(pair, dict) and isinstance(pair.get("machine"), dict) and pair["machine"] \
+                    and isinstance(pair.get("sessions"), dict):   # both files or neither, as the server writes them
+                letters.append(L)
+                for name in ("machine", "sessions"):
+                    jobs.append((os.path.join(base, "clients", "fleet", L, name + ".json"), _mirror_json(pair[name])))
+    roles = _mirror_read("roles")                 # the existing read: roles.json as the server keeps it, "generated" included
+    if roles is not None:
+        r = roles[0]
+        if isinstance(r.get("generated"), str) and isinstance(r.get("sessions"), dict) and r["sessions"]:
+            jobs.append((os.path.join(base, "roles.json"), roles[1]))   # written every time, even unchanged: the readers age the file
+        else:
+            _mirror_failed("roles", "the answer holds no sessions")
+    bad = 0
+    for path, text in jobs:
+        try:
+            if os.path.basename(path) == "roles.json" or _mirror_read_file(path) != text:   # a file that already reads the same is left (its mtime stays); roles.json is the one whose age is read
+                _mirror_write(path, text)
+        except OSError as e:
+            bad += 1; _mirror_failed(os.path.relpath(path, base), f"not written: {e.strerror or e}")
+        else:
+            _mirror_ok(os.path.relpath(path, base))
+    _mirror_sweep(os.path.join(base, "clients", "fleet"), letters)
+    return "done" if jobs and not bad and roles is not None else "failed"
+
+
+def _mirror_safe() -> str:
+    """mirror_state that never lets a failure reach the poll loop."""
+    try:
+        return mirror_state()
+    except Exception as e:                        # noqa: BLE001
+        _mirror_failed("mirror", f"{type(e).__name__}: {str(e)[:120]}"); return "failed"
+
+
 def main(argv: list[str]) -> int | str:
     for st in (sys.stdout, sys.stderr):                 # a Windows console or task log is not UTF-8: never fail on an arrow
         try: st.reconfigure(encoding="utf-8", errors="replace")
@@ -1221,6 +1430,8 @@ def main(argv: list[str]) -> int | str:
         return 0
     if "--once" in a or "--dry-run" in a:
         rc = once(reg, only, 0, dry="--dry-run" in a)
+        if "--once" in a and "--dry-run" not in a and rc != 2:   # a dry run fetches and confirms nothing, and writes no file
+            _mirror_safe()
         if "--dry-run" in a and rc != 2:          # and the update verdict: what would be updated now, or why not
             keep_current(_LAST["current"], sessions(reg), dry=True)
         return rc
@@ -1242,6 +1453,8 @@ def main(argv: list[str]) -> int | str:
             rc = once(reg, only, wait)
         except _Stopped:
             break
+        if rc != 2:
+            _mirror_safe()                            # a no-op unless [client] mirror_server_state = true; never fails the loop
         if rc == 2:                                   # the server is away: wait, a little longer each time, at most a minute
             for _ in range(int(back)):
                 if _STOP:
