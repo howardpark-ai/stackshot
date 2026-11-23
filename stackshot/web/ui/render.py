@@ -955,8 +955,8 @@ _TOTOP_JS = ("<script>(function(){var b=document.getElementById('totop');if(!b)r
 # sections (Your move, On agent, Queued for release, Waiting) and the project groups inside them, the item and project pages' sections, the Closed and Projects pages' groups, and the side
 # panel's sections (Machines, Runners, Anchor hub, Audit, Projects). A panel section's data-fold is its section id, the same on every page that draws the panel, so one choice holds on all of them.
 # The toggle listener is delegated (toggle does not bubble: capture on the document), so a section the in-place update swaps in (_LIVE_JS) keeps recording without a
-# re-bind; the swap itself carries each fold's live open state over to its new node, and a fold the old block did not have gets its stored state through window.stackshotFold (the
-# one apply function, defined here). Two kinds (the scope groups inside a section collapsible like the sections): a section fold renders closed and opens on a stored '1'; a scope group
+# re-bind (the same-hash click on a count card is delegated on the document too); the swap itself carries each fold's live open state over to its new node, and a fold the old block did not have gets its stored state through window.stackshotFold (the
+# one apply function, defined here). The swap's carry-over must not write: it marks the node (`_fs`, the open state it set) and the listener skips the toggle that carries the mark, so a stale tab's live refresh never overwrites a choice another tab stored since. Two kinds (the scope groups inside a section collapsible like the sections): a section fold renders closed and opens on a stored '1'; a scope group
 # fold renders open and closes on a stored '0'; a fold never touched has nothing stored and keeps what the page renders. A hash to a line opens every fold around it (its group and its
 # section); to a section, the section: the hash stays in the address, and the open is recorded like any other toggle (the listener writes on a programmatic open too).
 # The script runs after the panel's markup (panel_tail and the home page put it at the end of the body), so its first pass reaches the panel's folds as well.
@@ -968,10 +968,10 @@ _FOLD_JS = (r"""(function(){var K='stackshot.fold.';
 function get(k){try{return localStorage.getItem(K+k)}catch(e){return null}}function put(k,v){try{localStorage.setItem(K+k,v)}catch(e){}}
 function ap(d){var v=get(d.getAttribute('data-fold'));if(d.open){if(v==='0')d.open=false}else if(v==='1')d.open=true}
 window.stackshotFold=ap;[].forEach.call(document.querySelectorAll('details.fold'),ap);
-""" + _FOLD_GO + r"""document.addEventListener('toggle',function(e){var d=e.target;if(d&&d.matches&&d.matches('details.fold')&&d.isConnected)put(d.getAttribute('data-fold'),d.open?'1':'0')},true);
+""" + _FOLD_GO + r"""document.addEventListener('toggle',function(e){var d=e.target;if(d&&d.matches&&d.matches('details.fold')&&d.isConnected){var m=d._fs;d._fs=null;if(m===d.open)return;put(d.getAttribute('data-fold'),d.open?'1':'0')}},true);
 go(location.hash,false);window.addEventListener('load',function(){if(location.hash)go(location.hash,true)});
 window.addEventListener('hashchange',function(){go(location.hash,true)});
-document.querySelectorAll('a.hcard[href^="#"]').forEach(function(a){a.addEventListener('click',function(){var h=a.getAttribute('href');if(h===location.hash){go(h,true)}})});})();""")
+document.addEventListener('click',function(e){var a=e.target&&e.target.closest?e.target.closest('a.hcard[href^="#"]'):null;if(a){var h=a.getAttribute('href');if(h===location.hash)go(h,true)}});})();""")
 # First paint (a fold whose stored state differs from what the page renders, a section drawn open and stored '0', would paint open and snap shut):
 # _FOLD_JS runs at the end of the body, so a fold whose stored state differs from its rendered default painted in the default state
 # and snapped a moment later. _FOLD_HEAD sits in the head, next to _THEME_HEAD, on every page that has folds (all of them draw the side panel),
@@ -1589,7 +1589,7 @@ function bl(d){var m=d.querySelector('meta[name="stackshot-blocks"]'),o={};if(m)
 function key(a){return a.id?'#'+a.id:a.getAttribute('href')?a.tagName+'|'+a.className+'|'+a.getAttribute('href'):''}
 function swap(o,n){var x=document.importNode(n,true),f={},a=document.activeElement,k='';
 o.querySelectorAll('details.fold').forEach(function(d){f[d.getAttribute('data-fold')]=d.open});
-x.querySelectorAll('details.fold').forEach(function(d){var k=d.getAttribute('data-fold');if(k in f)d.open=f[k];else if(window.stackshotFold)window.stackshotFold(d)});
+x.querySelectorAll('details.fold').forEach(function(d){var k=d.getAttribute('data-fold');if(k in f){if(d.open!==f[k]){d._fs=f[k];d.open=f[k]}}else if(window.stackshotFold)window.stackshotFold(d)});
 var oa=o.querySelector('#audit'),na=x.querySelector('#audit');if(oa&&na)na.parentNode.replaceChild(oa,na);
 if(a&&a!==document.body&&o.contains(a)&&!(oa&&oa.contains(a)))k=key(a);
 o.parentNode.replaceChild(x,o);if(oa&&a&&oa.contains(a)&&document.activeElement!==a)try{a.focus({preventScroll:true})}catch(e){}

@@ -15,7 +15,8 @@ Covers:
   * the panel's choice is one key per section that holds on every page: closing Machines on one page kind closes it on all the others;
   * a hash to a section, to a row inside a closed group and to a count's section opens it on load and on hashchange; the hash stays in the address; the open is recorded, so a reload
     without the hash shows it still open; nothing removes a stored key;
-  * the live swap: a block swapped in keeps what the viewer left on screen, hands a fold the old block did not have to the stored state, and a fold it swaps in keeps recording.
+  * the live swap: a block swapped in keeps what the viewer left on screen, hands a fold the old block did not have to the stored state, and a fold it swaps in keeps recording;
+    the swap's carry-over never writes (a stale tab does not overwrite a newer stored choice); a count card's same-hash click reopens its section, also after a swap replaced the cards.
 
     tests/run-suite fold_memory        → exit 0 / 1"""
 import json, logging, os, pathlib, re, shutil, subprocess, sys, time
@@ -190,6 +191,7 @@ async function load(name, store, o) {
   res.hashchange = async h => { loc.hash = h; (ctx.listeners.hashchange || []).forEach(f => f({})); await settle(); };
   res.toggle = async key => { const d = docEl.querySelectorAll('details.fold').find(x => x.attrs['data-fold'] === key); d.open = !d.open; await settle(); return d; };
   res.el = key => docEl.querySelectorAll('details.fold').find(x => x.attrs['data-fold'] === key);
+  res.click = async el => { const ev = { target: el }; for (let n = el; n; n = n.parentElement) ((n.l || {}).click || []).forEach(fn => fn(ev)); (doc.listeners.click || []).forEach(l => l.fn(ev)); await settle(); };      // a click bubbling from the element up through its ancestors' listeners to the document's
   return res;
 }
 const keyOf = k => 'stackshot.fold.' + k;
@@ -288,6 +290,32 @@ const PANEL = new Set(data.panel);
     const n2 = parse(data.pages.home).querySelector('#machines'); const logged = st2.log.length; r2.ctx.__swap(r2.docEl.querySelector('#machines'), n2); await settle();
     out.swap.noStoreNoWrite = st2.log.length === logged && r2.el('machines').open === n2.querySelector('details.fold').open;
   }
+  // a stale tab's swap restores the fold's on-screen state without writing: another tab closed it since (stored 0), the swap's restoration toggle fires, and the newer choice stays
+  {
+    const st = makeStore(false); const r = await load('home', st); vm.runInContext(data.swap + ';this.__swap=swap', r.ctx);
+    const wasOpen = r.el('machines').open;      // the panel's Machines renders open and nothing is stored: the tab shows it open
+    st.m.set(keyOf('machines'), '0');      // a second tab closes it
+    const nw = parse(data.pages.home).querySelector('#machines'); nw.querySelector('details.fold')._open = false;      // the refreshed markup draws it closed, so the carry-over must open it again
+    const logged = st.log.length; r.ctx.__swap(r.docEl.querySelector('#machines'), nw); await settle();
+    out.stale = { wasOpen, keptOnScreen: r.el('machines').open === true, stored: st.m.get(keyOf('machines')), noWrite: st.log.length === logged };
+    await r.toggle('machines'); const afterClose = st.m.get(keyOf('machines')); await r.toggle('machines');
+    out.stale.laterTogglesRecord = afterClose === '0' && st.m.get(keyOf('machines')) === '1' && r.el('machines').open === true;
+  }
+  // the same-hash click on a count card reopens its closed section, on the cards the page drew and on the cards a live swap put in their place
+  {
+    const st = makeStore(false); const r = await load('home', st, { hash: '#waiting-list' }); vm.runInContext(data.swap + ';this.__swap=swap', r.ctx);
+    const card = () => r.docEl.querySelectorAll('a.hcard').find(a => a.attrs.href === '#waiting-list');
+    out.card = { hasCard: !!card(), opensOnLoad: r.el('waiting-list').open === true };
+    await r.toggle('waiting-list'); const closed1 = r.el('waiting-list').open === false;
+    await r.click(card()); out.card.firstClickReopens = closed1 && r.el('waiting-list').open === true;
+    const oldCounts = r.docEl.querySelector('#counts'); const nw = parse(data.pages.home).querySelector('#counts'); r.ctx.__swap(oldCounts, nw); await settle();
+    const swapped = r.docEl.querySelector('#counts') !== oldCounts && !oldCounts.isConnected;
+    await r.toggle('waiting-list'); const closed2 = r.el('waiting-list').open === false;
+    await r.click(card()); out.card.afterSwapReopens = swapped && closed2 && r.el('waiting-list').open === true && card().parentElement === r.docEl.querySelector('#counts');
+    // a card whose hash is not the current one is left to the browser: its click opens nothing by itself
+    await r.toggle('waiting-list'); const other = r.docEl.querySelectorAll('a.hcard').find(a => a.attrs.href === '#your-move'); const ym = r.el('your-move').open; r.win.location.hash = '#waiting-list';
+    await r.click(other); out.card.otherLeftAlone = r.el('waiting-list').open === false && r.el('your-move').open === ym;
+  }
   process.stdout.write(JSON.stringify(out));
 })().catch(e => { process.stderr.write(String(e && e.stack || e)); process.exit(1); });
 """
@@ -328,6 +356,13 @@ else:
         check("the live swap (the real function from _LIVE_JS): the old block's on-screen state is kept, a fold the old block did not have gets its stored state, the store is unchanged, other blocks are left alone",
               sw["keepsLive"] and sw["freshGetsStored"] and sw["storeIntact"] and sw["otherBlockKept"], sw)
         check("after a swap a toggle of the swapped-in fold is recorded (the delegated listener), and a swap with nothing stored writes nothing", sw["keepsRecording"] and sw["noStoreNoWrite"], sw)
+
+        st_ = o["stale"]
+        check("a swap that restores a fold from a stale on-screen value writes nothing: a second tab's stored 0 stays 0 after the restoration's toggle fires, the fold stays as the viewer sees it, and a later toggle records again",
+              st_["wasOpen"] and st_["keptOnScreen"] and st_["stored"] == "0" and st_["noWrite"] and st_["laterTogglesRecord"], st_)
+        cd_ = o["card"]
+        check("a count card whose hash is the current one reopens its closed section on click, on the cards as drawn and on the cards a live swap put in their place (one delegated handler); another card is left to the browser",
+              cd_["hasCard"] and cd_["opensOnLoad"] and cd_["firstClickReopens"] and cd_["afterSwapReopens"] and cd_["otherLeftAlone"], cd_)
 
 # ---- 3. nothing deletes a stored fold key
 def sources():
