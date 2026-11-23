@@ -768,8 +768,8 @@ from stackshot.service import foryou as fy
 fy_rows = lambda g, kind="closed": [r for r in fy.rows() if r.get("gid") == g and r["kind"] == kind]
 out20 = cl(20); settle()
 new13 = routing.read("projects/alpha")[n13:]; c20 = [n for n in new13 if n.get("label") == "close a20"]
-check("close, Oliver's `said` entry on it, owner a front agent, router live: a row on his For you list; nothing is recorded for the router; the owner is pushed its own one marked line at once (Sun Oct 25th 2026); the reply says both",
-      len(fy_rows("a20")) == 1 and not c20 and [x[1] for x in pushes()[p13:] if x[0] == A or "a20" in x[1] and "closed" in x[1]] == ["[for Oliver] [stackshot] a20 [home] item 20: closed by work-osprey-x: done (PR 33 is live) \u2192 https://stackshot.example.com/items/a20"]
+check("close, Oliver's `said` entry on it, owner a front agent, router live: a row on his For you list; nothing is recorded for the router; the owner is pushed its own one line at once, with no owner mark; the reply says both",
+      len(fy_rows("a20")) == 1 and not c20 and [x[1] for x in pushes()[p13:] if x[0] == A or "a20" in x[1] and "closed" in x[1]] == ["[stackshot] a20 [home] item 20: closed by work-osprey-x: done (PR 33 is live) \u2192 https://stackshot.example.com/items/a20"]
       and "is a row on his For you list" in out20 and "not a message to" not in out20 and "told at once that it was closed" in out20 and "not told" not in out20, (fy.rows(), c20, pushes()[p13:], out20))
 check("…the row: who closed it, the outcome, the subject, the reason (the item id is shown beside it, not inside), and the link",
       fy_rows("a20")[0]["what"] == "closed by work-osprey-x (done): [home] item 20 — PR 33 is live" and fy_rows("a20")[0]["url"].endswith("/items/a20") and "\n" not in fy_rows("a20")[0]["what"], fy_rows("a20"))
@@ -798,8 +798,8 @@ check("a quoted attribution in the description or the close's reason counts as h
 cfg(live=False)
 item(28, "projects/alpha", A, said=SAID); item(29, "projects/alpha", A); p13d = len(pushes())
 out28 = cl(28); settle(); to_main28 = [x for x in pushes()[p13d:] if x[0] == A and "a28" in x[1]]       # a notice the server pushes itself names its session by id
-check("[router] live = false is no longer read: the same close is a row too, and the front agent owner is pushed its one marked line, the same as before",
-      len(to_main28) == 1 and to_main28[0][1].startswith("[for Oliver] [stackshot] a28 [home] item 28: closed by work-osprey-x: done (PR 33 is live)") and len(fy_rows("a28")) == 1
+check("[router] live = false is no longer read: the same close is a row too, and the front agent owner is pushed its one line (no owner mark), the same as before",
+      len(to_main28) == 1 and to_main28[0][1].startswith("[stackshot] a28 [home] item 28: closed by work-osprey-x: done (PR 33 is live)") and len(fy_rows("a28")) == 1
       and "is a row on his For you list" in out28 and "not a message to" not in out28 and "told at once that it was closed" in out28, (to_main28, out28, fy.rows()))
 out29 = cl(29); settle()
 check("[router] live = false is no longer read, no words of his: the owner is told by its one marked line, no keeper is told in its place", len([x for x in pushes()[p13d:] if x[0] == A and "a29" in x[1]]) == 1 and "has been told instead" not in out29
@@ -811,8 +811,8 @@ out30 = _wt_complete.stackshot_complete("a30", outcome="done", reason="PR 34 is 
 c30 = [n for n in routing.read("projects/epsilon")[n13e:] if n.get("label") == "close a30"]
 for _n in routing.read("projects/epsilon")[n13e:]: routing.rule(_n["id"], "dropped", by="test")      # the page-update notice of the close: settled by hand, so the router's later tick makes no call for it
 settle(); p30 = [x for x in pushes()[p13e:] if x[0] == "work-gamma-main" and "a30 closed" in x[1]]
-p30b = [x for x in pushes()[p13e:] if "a30 " in x[1] and "[for Oliver]" in x[1]]
-check("a hub component root (projects/epsilon, hub projects/gamma): a close with a said entry, owner listed on the hub page, is a row too (the row names the component as its project), with no router notice and no old-style message; the owner's one marked line (Sun Oct 25th 2026) is the only push marked for it",
+p30b = [x for x in pushes()[p13e:] if "a30 " in x[1] and x[1].startswith("[stackshot] ") and "[for Oliver]" not in x[1]]
+check("a hub component root (projects/epsilon, hub projects/gamma): a close with a said entry, owner listed on the hub page, is a row too (the row names the component as its project), with no router notice and no old-style message; the owner's one unmarked line is the only push naming it",
       len(fy_rows("a30")) == 1 and fy_rows("a30")[0]["project"] == "projects/epsilon" and not c30 and not p30 and len(p30b) == 1 and "closed by home-beta: done (PR 34 is live)" in p30b[0][1], (fy.rows(), c30, p30, p30b))
 cfg(live=True)
 
@@ -873,8 +873,8 @@ check("(c) the last other session leaves needs, the owner alone: the owner is to
       and not [x for x in pushes()[p67:] if "handed back its step" in x[1]] and "its builder work-osprey-x is passed a note that it is back with them alone, not them" in out67c, (hb_notes(67, n67), t67, pushes()[p67:], out67c[-300:]))
 item(68, "projects/alpha", A, mover=A, needs=[X, "work-osprey-docs"]); p68 = len(pushes())
 out68 = _wt_complete.stackshot_complete("a68", outcome="done", reason="finished", description=NEWD, sender=BK); settle(); d68 = [x for x in hb_pushes(68, p68) if x[0] in (A, "work-osprey-main")]
-check("(d) another session closes the item while a second session is still named: the owner's close line still reaches it, marked",
-      len(d68) == 1 and d68[0][1].startswith("[for Oliver] [stackshot] a68 [home] item 68: closed by work-osprey-x: done (finished) \u2192 ") and "told at once that it was closed" in out68, (pushes()[p68:], out68[-300:]))
+check("(d) another session closes the item while a second session is still named: the owner's close line still reaches it, unmarked",
+      len(d68) == 1 and d68[0][1].startswith("[stackshot] a68 [home] item 68: closed by work-osprey-x: done (finished) \u2192 ") and "told at once that it was closed" in out68, (pushes()[p68:], out68[-300:]))
 item(53, "projects/alpha", A, then=A, needs=[A, X]); p53 = len(pushes()); out53 = hb(53, [A]); settle(); d53 = hb_pushes(53, p53)
 check("the owner named beside the builder, the builder taken out: that leaves the owner alone, and nobody is told, since the builder wrote it", not d53 and "nobody is told" in out53, (d53, out53[-200:]))
 item(54, "projects/alpha", A, then=A, needs=[X]); p54 = len(pushes()); n54 = len(routing.read("projects/alpha")); out54 = hb(54, [A], sender="work-osprey-main"); settle()

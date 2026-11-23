@@ -489,8 +489,8 @@ check("…the held line is the one the keeper would have heard, due 180 seconds 
       and h["line"].endswith("/items/a20") and abs(h["due"] - (t0 + 180)) < 30, h)
 check("3c: the tick before the window ends sends nothing", telling.handback_tick(now=t0 + 60) == [] and len(held()) == 1 and not hb_notes("a20", n0))
 out = _wt_update.stackshot_update("a20", status="completed", outcome="done", reason="PR 26 is live", description="- The thing works and is in use", sender="osprey-x", done=[2]); settle()      # the hand-back line names the front agent: the builder's close marks it itself (done=[2]), as a close no longer settles another session's step
-check("3d: the builder closes the item inside the window: the held hand-back is dropped, and the keeper gets only the close line (one marked message)",
-      held() == {} and not hb_notes("a20", n0) and not hb_pushes("a20", p0) and len(to(A, p0)) == 1 and "closed by osprey-x: done (PR 26 is live)" in to(A, p0)[0][1] and to(A, p0)[0][1].startswith(MK + " "), (held(), to(A, p0)))
+check("3d: the builder closes the item inside the window: the held hand-back is dropped, and the keeper gets only the close line (one message, no owner mark)",
+      held() == {} and not hb_notes("a20", n0) and not hb_pushes("a20", p0) and len(to(A, p0)) == 1 and "closed by osprey-x: done (PR 26 is live)" in to(A, p0)[0][1] and to(A, p0)[0][1].startswith("[stackshot] ") and MK not in to(A, p0)[0][1], (held(), to(A, p0)))
 check("…and the tick after the window sends nothing more", telling.handback_tick(now=t0 + 400) == [] and not hb_notes("a20", n0) and len(to(A, p0)) == 1)
 # no close: delivered when the window ends
 p0, n0 = len(pushes()), len(pushes()); t1 = time.time()

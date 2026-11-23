@@ -1303,17 +1303,17 @@ def tell_owner_check_closed(gid: str, item: dict[str, Any], told: list[str]) -> 
             or _fyev._foryou_key(gid, "closed", item) in _FORYOU_FELL:
         return False
     by = "stackshot's done check"
-    tell_kind("close", gid, oid, f"{_FOR_OWNER} [stackshot] {_gh.shown(gid)} {item.get('subject') or ''}: {_closed_by(item, by)} \u2192 {notice_link(gid)}", tag="owner")      
+    tell_kind("close", gid, oid, f"[stackshot] {_gh.shown(gid)} {item.get('subject') or ''}: {_closed_by(item, by)} \u2192 {notice_link(gid)}", tag="owner")      
     OWNER_HEARD[(gid, oid)] = time.time()
     return gate_result()[0] != "held"      # False when the gate held it: the caller does not count the mover as told
 
 
 def tell_owner_close(gid: str, item: dict[str, Any], writer: str, closing: bool, heard: list[str]) -> str:
     """A session other than the mover closes the item, and the front agent that
-    moves it is told at once, by one marked line (any close, not only one with his words on it: that close is also a row on his For you
-    list, which stays as it is, _foryou_on_save). It is delivered at once with the mark (_FOR_OWNER), router live or not, as
-    close_owner_notice does: the server's own delivery to the mover is what reaches a front agent (the message tool refuses an unmarked
-    message to one, and a marked one that says nothing is needed from him). There is no pilot gate, as for tell_handback. Not when the
+    moves it is told at once, by one line without the owner's mark (any close, not only one with his words on it: that close is also a row on his For you
+    list, which stays as it is, _foryou_on_save): the owner has nothing to do on a close, so it is not marked. It is delivered at once, router live or not, and
+    by its kind (a close: a turn under presence plus touched), not by its first line: the server's own delivery to the mover is what reaches a front agent, and the gate reads
+    the tag and kind, never the mark. There is no pilot gate, as for tell_handback. Not when the
     mover wrote it or is the owner or not a session, not when [board] tell_owner is off, not when the item is muted on his For you list, not
     when the mover is not a front agent (it already hears a close through tell_owner), not when this write already told the mover
     (`heard`), not when the close's For you row failed and was told the old way (_FORYOU_FELL). This function once also told the mover of a builder's step, when a session the
@@ -1336,7 +1336,7 @@ def tell_owner_close(gid: str, item: dict[str, Any], writer: str, closing: bool,
     if not front_keeper(owner, project)[0] or _fyev._foryou_key(gid, "closed", item) in _FORYOU_FELL:
         return ""
     who, olabel, subject = _session_label(writer) or "a session", _session_label(owner), str(item.get("subject") or "")
-    tell_kind("close", gid, oid, f"{_FOR_OWNER} [stackshot] {_gh.shown(gid)} {subject}: {_closed_by(item, who)} \u2192 {notice_link(gid)}", tag="owner")      
+    tell_kind("close", gid, oid, f"[stackshot] {_gh.shown(gid)} {subject}: {_closed_by(item, who)} \u2192 {notice_link(gid)}", tag="owner")      
     res, why = gate_result()      # the gate may have held it: the reply says what became of it
     heard.append(oid)
     OWNER_HEARD[(gid, oid)] = time.time()
@@ -1567,7 +1567,7 @@ def tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip: 
         body = f"[stackshot] {cause}." + (" An open item you move names it:\n" if len(keep) == 1 else f" {len(keep)} open items you move name it:\n") + "\n".join(lines) \
             + f"\nIf one of them waited on {me}, it can go on now: refresh its next and set after= for any wait that is left."
         project = str((keep[0][1].get("metadata") or {}).get("project") or "")
-        tell_kind("close", ",".join(g for g, _i in keep), sid, (_FOR_OWNER + " " if front_keeper(sid, project)[0] else "") + body, tag="close")      # a front keeper hears a close only under presence plus touched
+        tell_kind("close", ",".join(g for g, _i in keep), sid, body, tag="close")      # a front keeper hears a close only under presence plus touched
         if sid not in told and gate_result()[0] != "held":      # a front keeper the gate held was not told: the reply line must not say it was
             told.append(sid)
     MENTIONED.got = (gid, list(dict.fromkeys(g for rows in by_sid.values() for g, _i in rows)), [_session_label(x) or x for x in told])

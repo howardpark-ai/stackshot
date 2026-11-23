@@ -227,8 +227,8 @@ check("2 3 h 59 min: still nobody", tick(at(239)) == [] and sent == [])
 got = tick(at(240))
 check("2 4 h: the -main agent is told, once", got == ["a1"] and len(sent) == 1 and S0()[1] == U["home-main"] and S0()[0] == "a1", (got, sent))
 m = S0()[2]
-check("2 the message is the front agent's form: `[for <owner>]` on line 1, the item and its project, the mover, about 4 hours, a request to look, no reply owed, the tag the ladder's notices use",
-      m.startswith(_web_tools_text._FOR_OWNER + "\n[stackshot] ") and '[home] item 1' in m and "projects/alpha" in m and "team-back" in m and "about 4 hours" in m and "Please look" in m and "pane is in a turn" in m and "No reply is owed" in m and S0()[3] == "stall", m)
+check("2 the message is the front agent's form: no owner mark (nothing is for him), the stall tag that gets it delivered, the item and its project, the mover, about 4 hours, a request to look, no reply owed, the tag the ladder's notices use",
+      m.startswith("[stackshot] ") and _web_tools_text._FOR_OWNER not in m and '[home] item 1' in m and "projects/alpha" in m and "team-back" in m and "about 4 hours" in m and "Please look" in m and "pane is in a turn" in m and "No reply is owed" in m and S0()[3] == "stall", m)
 check("2 one History line says who was told, and the record is on the item (told at 4 h, the stretch counting from the last activity)", len(history(1)) == 1 and "home-main was told" in history(1)[0] and "about 4 hours" in history(1)[0]
       and mt(1).get("busy_tell") == {"at": at(240), "to": "home-main", "kind": "main", "since": now0}, (history(1), mt(1).get("busy_tell")))
 told2 = run(250, 360)
@@ -277,7 +277,7 @@ check("5 a front agent's item: nobody is told before 4 h", told == [] and sent =
 told = run(240, 360)
 check("5 at 4 h the front agent ITSELF is told, once (beta-main holds it; -main of the project, home-main, is not), never the owner", told == ["a1"] and len(sent) == 1 and S0()[1] == U["beta-main"] and to_main() == [] and owner_free(), (told, sent))
 m = S0()[2]
-check("5 its message is for the holder: the front mark on line 1, no write but the hourly lines for about 4 hours, write a line or say what blocks it, no reply owed", m.startswith(_web_tools_text._FOR_OWNER + "\n[stackshot] ") and "no write on it but the hourly audit lines" in m and "about 4 hours" in m and "No reply is owed" in m and S0()[3] == "stall", m)
+check("5 its message is for the holder: no owner mark, no write but the hourly lines for about 4 hours, write a line or say what blocks it, no reply owed", m.startswith("[stackshot] ") and _web_tools_text._FOR_OWNER not in m and "no write on it but the hourly audit lines" in m and "about 4 hours" in m and "No reply is owed" in m and S0()[3] == "stall", m)
 check("5 the History line names the front agent and the record says kind front", len(history(1)) == 1 and "beta-main was told" in history(1)[0] and mt(1).get("busy_tell", {}).get("kind") == "front" and mt(1).get("busy_tell", {}).get("to") == "beta-main", (history(1), mt(1).get("busy_tell")))
 wipe(); put(1, mover="beta-main", act=0); panes["beta-main"] = "idle"
 told = run(10, 250)
@@ -542,7 +542,7 @@ check("11 BT.stretch_start: two lines exactly the limit apart are one stretch fr
 # the History line of both wordings, the freshness margin, one unreadable item among others, a queued item
 wipe(); put(1, act=400, log=SEVEN); tick(now0)
 check("11 the History line of a background mover's item, word for word", history(1) == ["team-back's item has had only a busy pane for its hourly audit lines for about 6 hours: home-main was told"], history(1))
-check("11 …and the message to -main, word for word up to the shared tail", S0()[2].split("\n")[2] == "[stackshot] [home] item 1 \"[home] item 1\" (projects/alpha): team-back has looked busy for about 6 hours (every audit line since said only that its pane is in a turn) with no step change, pull request event or other sign of progress on this item. Please look at what it is doing."
+check("11 …and the message to -main, word for word up to the shared tail", S0()[2].split("\n")[1] == "[stackshot] [home] item 1 \"[home] item 1\" (projects/alpha): team-back has looked busy for about 6 hours (every audit line since said only that its pane is in a turn) with no step change, pull request event or other sign of progress on this item. Please look at what it is doing."
       or "has looked busy for about 6 hours (every audit line since said only that its pane is in a turn) with no step change, pull request event or other sign of progress on this item. Please look at what it is doing." in S0()[2], S0()[2])
 wipe(); put(1, mover="beta-main", act=400, log=SEVEN); tick(now0)
 check("11 the History line of a front agent's item, word for word", history(1) == ["beta-main's item has had no write but the hourly audit lines for about 6 hours: beta-main was told"], history(1))

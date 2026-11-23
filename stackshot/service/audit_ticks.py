@@ -44,7 +44,6 @@ from stackshot.service import telling as _telling
 from stackshot.service import wait_fixes as _wait_fixes
 from stackshot.service import wait_gates as _wait_gates
 from stackshot.service import writes as _writes
-from stackshot.service.messaging import _FOR_OWNER
 from stackshot.service.projects import _page_io
 from stackshot.service.save_hooks import hooks as _hooks
 from stackshot.waits import handoff as _ho
@@ -322,7 +321,7 @@ def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         try:
             gids, lines = [g for g, _k, _l in rows_], [l for _g, _k, l in rows_]
             body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items had only the audit's lines for hours:\n" + "\n".join("- " + x for x in lines)
-            _telling.tell_woken(",".join(gids), _hooks().session_id(to) or to, f"{_FOR_OWNER}\n[stackshot] {body}\nNo reply is owed to the audit; nothing here is for {OWNER}. → "
+            _telling.tell_woken(",".join(gids), _hooks().session_id(to) or to, f"[stackshot] {body}\nNo reply is owed to the audit; nothing here is for {OWNER}. → "
                                 + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
         except Exception as e:  # noqa: BLE001
             print(f"audit: {to} not told of the busy stretches: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -408,7 +407,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         try:
             gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
             body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items had no activity for an hour and nothing the audit could verify:\n" + "\n".join("- " + x for x in lines)
-            _telling.tell_news(dict(pairs), ",".join(gids), _hooks().session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
+            _telling.tell_news(dict(pairs), ",".join(gids), _hooks().session_id(main) or main, f"[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
                         + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall_summary")
         except Exception as e:  # noqa: BLE001
             print(f"audit: {main} not told of the idle items: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -575,7 +574,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         try:
             gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
             body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items stay where they are:\n" + "\n".join("- " + x for x in lines)
-            _telling.tell_news(dict(pairs), ",".join(gids), _hooks().session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
+            _telling.tell_news(dict(pairs), ",".join(gids), _hooks().session_id(main) or main, f"[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
                         + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall_summary")
         except Exception as e:  # noqa: BLE001
             print(f"balance: {main} not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
