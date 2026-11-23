@@ -14,7 +14,7 @@ What is stored, in one small JSON file in the state dir (<state>/for-you.json), 
             item     the item as a session reads it
             what     one line: what happened
             url      the item's page (absolute when the board's address is known)
-            urgent   true for a due date within 24 h: also posted once to Slack
+            urgent   true for a due date within 24 h of an item that is the owner's move: also posted once to Slack (the due row of any other item is made without it, and raised when the item turns to him)
             slacked  when the Slack post was made (epoch), 0 = not posted
             slack_tries  how many times the post was tried (a failed one is tried again on a later pass, SLACK_TRIES in all)
 A file that does not parse is moved aside to for-you.json.bad-<epoch> and the list starts empty (ids go on growing).
@@ -97,6 +97,19 @@ def add(d: dict[str, Any], *, key: str, kind: str, gid: str = "", item: str = ""
     cut = now - KEYS_DAYS * 86400.0
     d["keys"] = {k: v for k, v in d["keys"].items() if v >= cut}
     return row
+
+
+def raise_urgent(d: dict[str, Any], key: str, ts: float) -> dict[str, Any] | None:
+    """The row that `key` made and that is still on the list becomes urgent, at the time `ts` (the clock the post's retry window counts from) → the row, or None when no row of that key is on the list (never made, or marked seen:
+    it stays seen) or the row is urgent already (it was posted or is being retried: it is never raised twice)."""
+    for r in d["rows"]:
+        if r.get("key") == key:
+            if r.get("urgent"):
+                return None
+            r["urgent"] = True
+            r["ts"] = ts
+            return dict(r)
+    return None
 
 
 def row_wanted(row_id: int | str) -> int | None:

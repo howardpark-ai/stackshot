@@ -1,6 +1,6 @@
 """slack.py: what the For you list's Slack post says: the line a row makes, and the reasons and log lines of a post that did not go through.
 
-An urgent row (a due date within 24 h) is also posted once to Slack by service/foryou_slack.py, which owns the configured command, the queue, the worker thread and the process that runs the command.
+An urgent row (a due date within 24 h of an item that is the owner's move) is also posted once to Slack by service/foryou_slack.py, which owns the configured command, the queue, the worker thread and the process that runs the command.
 The words are here: they read no config, no clock and no process, so they are checked without any of them. A reason is what the hook returns for a post that failed ("" is a post that went through)."""
 from __future__ import annotations
 

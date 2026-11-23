@@ -1,4 +1,4 @@
-"""foryou_rows.py: the rows the For you list makes, the rules: whether the owner watches an item (`watched`), the key of one event (`key`), the rows a change of an item makes (`changes`), the Landed list's
+"""foryou_rows.py: the rows the For you list makes, the rules: whether the owner watches an item (`watched`), the key of one event (`key`, `key_of`), the rows a change of an item makes (`changes`), the Landed list's
 record beside them (`landing`, `close_record`) and the due-date look (`due_state`, `due_what`), all on the item as the file held it and as it is now.
 
 A notice for the owner is a row in the For you list (foryou.py: the board's section, `client.py get for-you` for the fleet tool's web server), never a front agent's turn. A row is made for a WATCHED
@@ -7,7 +7,7 @@ item's state change he should see: a close, a reopen, a move to needs=decision, 
 carries his words) and an item that needs his decision. His own setting on the item's page wins: Mute stops its rows, Watch adds an item that is not watched. The rows are made where the change is saved
 (`writes.save` compares the file before and after, so every path that changes an item counts: a session's write, the server's own pass, his board answer), never where a session's message is sent: a message
 a session sends on purpose with [for <owner>] (a decision or a go-ahead asked for) is not touched. A decision row goes when the decision leaves the item's needs (answered, or closed). The urgent rows (a due
-date within 24 h) are also posted once to Slack (service/foryou_slack.py, with the queue and the worker thread that post it).
+date within 24 h of an item that is his move) are also posted once to Slack (service/foryou_slack.py, with the queue and the worker thread that post it).
 
 This module reads no store, no clock, no session and no page: the flag, the session's name, the page's ask parser and the words for a date come in as arguments, and the file, the saves and the pass that
 make the rows are service/foryou_events.py's."""
@@ -55,10 +55,15 @@ def key(gid: str, kind: str, item: dict[str, Any]) -> str:
     return f"{gid}:{kind}:{stamp(item)}"
 
 
+def key_of(gid: str, kind: str, disc: Any) -> str:
+    """The key a row is stored under: the item, the kind of event and what tells one event of that kind from the next (`disc`: a close's state clock, a due date as stored)."""
+    return f"{gid}:{kind}:{disc}"
+
+
 def row_fields(gid: str, item: dict[str, Any], kind: str, what: str, disc: Any, shown: str, url: str, urgent: bool = False) -> dict[str, Any]:
     """The fields of one row for an event on an item, for foryou.add: the item as a session reads it (`shown`), the item's page (`url`), the line cut to WHAT characters."""
     meta = item.get("metadata") or {}
-    return {"key": f"{gid}:{kind}:{disc}", "kind": kind, "gid": gid, "item": shown, "project": str(meta.get("project") or ""),
+    return {"key": key_of(gid, kind, disc), "kind": kind, "gid": gid, "item": shown, "project": str(meta.get("project") or ""),
             "what": _clip_line(what, WHAT), "url": url, "urgent": urgent}
 
 

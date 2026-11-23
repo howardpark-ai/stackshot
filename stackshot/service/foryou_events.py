@@ -19,6 +19,7 @@ from stackshot.model.ids import _item_url
 from stackshot.notify import foryou_rows as _rows
 from stackshot.service import foryou as _fy
 from stackshot.service import foryou_slack as _fyslack
+from stackshot.service import item_read as _item_read
 from stackshot.service import landed as _ld
 from stackshot.service.foryou_hooks import hooks as _hooks
 from stackshot.service.foryou_slack import _foryou_slack
@@ -59,6 +60,29 @@ def _foryou_make(gid: str, item: dict[str, Any], kind: str, what: str, disc: Any
     return row
 
 
+def _owner_moves(gid: str, item: dict[str, Any]) -> bool:
+    """Is the item the owner's move now? The board's own reading: the model's view of the item (the one that sorts it into the Your move list), alive with the owner as the mover. An item that waits (an until, an
+    item, an anchor event or the owner's relay, a hold, needs=external) is no one's move yet, even where the owner is named as who picks it up; an item an agent moves is an agent's. A read that fails counts as not his: the row is
+    made without the post, and the next pass raises it when the item reads."""
+    try:
+        it = dict(item, gid=gid)
+        return _model.view(it, _item_read._model_of(it), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {})).owner_moves
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _foryou_raise(gid: str, item: dict[str, Any], kind: str, disc: Any) -> dict[str, Any] | None:
+    """The row of an event that is on the list without the post becomes urgent and is posted, for a watched item (the row `_foryou_make` made, or one that stays on the list for the owner to see). None when
+    there is no such row (never made, marked seen: it stays seen) or it is urgent already (posted once or on its retries: never twice)."""
+    watched, _why = _foryou_watched(gid, item)
+    if not watched:
+        return None
+    row = _fy.raise_urgent(_rows.key_of(gid, kind, disc))
+    if row:
+        _foryou_slack(row)
+    return row
+
+
 def _foryou_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str = "", own: bool = False) -> None:
     """Called by writes.save with the item as the file held it (`before`, None for a create) and as it is now: the rows for what changed.
     `own` = his own answer from the board, which makes no row (he did it) but still takes a decision row off the list."""
@@ -92,10 +116,17 @@ def _landed_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any
 
 def _foryou_tick(now: float | None = None) -> list[str]:
     """The due-date look (every ten minutes, the dates pass opening the gate): an open watched item whose due date ends
-    within 24 h, or ended less than 24 h ago, gets one URGENT row per due date (also posted to Slack once). A due date longer past is
-    not looked at: the first pass after a deploy must not raise every old overdue item. The same pass hands an urgent row whose Slack post
+    within 24 h, or ended less than 24 h ago, gets one due row per due date. The row is URGENT, and posted to Slack once, only while the
+    item is the owner's move (`_owner_moves`, the board's Your move list: a decision or a step of his); any other item (an agent moves it, or it waits on a date, another
+    item, an outside party or a hold) has its row on the list without the post. The cases:
+      the owner's move at the first pass          → an urgent row, one post;
+      an agent's move or a wait at the first pass → a row, no post; the key (one per item and due date) is made, so the row is not made twice;
+      the item turns to the owner's move later    → the next pass raises that row to urgent and posts it, once (`_foryou_raise`): the row of a due date that is
+                                                    urgent already is never raised or posted again, whoever moves the item after, and a row he marked seen stays seen;
+      the item leaves his move after the post     → the row stays as it is, urgent and posted.
+    A due date longer past is not looked at: the first pass after a deploy must not raise every old overdue item. The same pass hands an urgent row whose Slack post
     failed (or never went, a command named later) to the worker again: under 24 h old, at most SLACK_TRIES tries in all. The board is
-    republished (debounced) when a row was made. → the gids that got a row."""
+    republished (debounced) when a row was made or raised. → the gids that got a row."""
     now = time.time() if now is None else now
     if now - _FORYOU_LAST[0] < _rows.EVERY:
         return []
@@ -108,7 +139,9 @@ def _foryou_tick(now: float | None = None) -> list[str]:
             if due is None:
                 continue
             when, stored = due
-            if _foryou_make(gid, it, "due", _rows.due_what(when, _hooks().when_words(_rows.due_day(stored)), it.get("subject")), stored, urgent=True):
+            his = _owner_moves(gid, it)
+            if _foryou_make(gid, it, "due", _rows.due_what(when, _hooks().when_words(_rows.due_day(stored)), it.get("subject")), stored, urgent=his) \
+                    or (his and _foryou_raise(gid, it, "due", stored)):
                 made.append(gid)
         except Exception as e:  # noqa: BLE001  — one item never stops the pass
             print(f"for-you: {gid} due-date look failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
