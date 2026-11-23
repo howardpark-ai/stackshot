@@ -346,7 +346,7 @@ m1 = opt_msg([{"label": "Approve"}, {"label": "Decline", "line": "Keep it", "rec
 check("c option: a missing line is named as the line, with the option's place", m1.startswith("Refused: option 1 has no line.") and "no label" not in m1, m1[:200])
 m2 = opt_msg([{"label": "Approve", "line": "Ship it", "recommended": True}, {"line": "Keep it"}])
 check("c option: a missing label is named as the label", m2.startswith("Refused: option 2 has no label."), m2[:200])
-m3 = opt_msg([{"name": "Approve", "description": "Ship it"}, {"title": "Decline", "text": "Keep it"}])
+m3 = opt_msg([{"name": "Approve", "description": "Ship it"}, {"label": "Decline", "line": "Keep it", "recommended": True}])
 check("c option: both missing: named together, with the keys it did carry", m3.startswith("Refused: option 1 has no label and no line. It carries the keys 'name', 'description';") and "label, line and recommended only" in m3, m3[:300])
 ex_opts = json.loads(m3.split("An example that passes: options=", 1)[1])
 check("c option: the example in the refusal is a valid list", len(ex_opts) == 2 and sum(o["recommended"] for o in ex_opts) == 1, ex_opts)
@@ -410,14 +410,14 @@ m_sep = ask_msg("Decide: ship it ,;/ Recommend: yes - Stakes: a week \u2014 By: 
 check("c ask: separators at the end of a part (comma, dash, em dash, semicolon, slash) are all cut off the corrected ask", m_sep.endswith("Decide: ship it · Recommend: yes · Stakes: a week · By: Fri"), m_sep[-200:])
 
 # an option key shown back: cut, quoted, counted
-m_key = opt_msg([{"x" * 5000: "a", "line": "b"}, {"label": "Decline", "line": "Keep it"}])
+m_key = opt_msg([{"x" * 5000: "a", "line": "b"}, {"label": "Decline", "line": "Keep it", "recommended": True}])
 check("c option: a huge key is shown cut at 30 characters", "x" * 30 in m_key and "x" * 31 not in m_key and len(m_key) < 1200, len(m_key))
-m_key2 = opt_msg([{'a"b\nc': "a", "line": "b"}, {"label": "Decline", "line": "Keep it"}])
+m_key2 = opt_msg([{'a"b\nc': "a", "line": "b"}, {"label": "Decline", "line": "Keep it", "recommended": True}])
 check("c option: a key with a quote and a line break is shown as a quoted string with the break escaped, on one line", "'a\"b\\nc'" in m_key2 or '"a\\"b\\nc"' in m_key2 or "a\"b\\nc" in m_key2, m_key2[:300])
 check("c option: …and the refusal stays one line up to its example", "\n" not in m_key2.split("An example that passes:")[0], m_key2[:300])
-m_key3 = opt_msg([{"k1": 1, "k2": 2, "k3": 3, "k4": 4, "k5": 5, "k6": 6}, {"label": "Decline", "line": "Keep it"}])
+m_key3 = opt_msg([{"k1": 1, "k2": 2, "k3": 3, "k4": 4, "k5": 5, "k6": 6}, {"label": "Decline", "line": "Keep it", "recommended": True}])
 check("c option: more than four other keys are counted: the first four, and the rest as a number", "It carries the keys 'k1', 'k2', 'k3', 'k4' and 2 more;" in m_key3, m_key3[:300])
-m_key4 = opt_msg([{"k1": 1, "k2": 2, "k3": 3, "k4": 4}, {"label": "Decline", "line": "Keep it"}])
+m_key4 = opt_msg([{"k1": 1, "k2": 2, "k3": 3, "k4": 4}, {"label": "Decline", "line": "Keep it", "recommended": True}])
 check("c option: …exactly four are all named, with no count", "It carries the keys 'k1', 'k2', 'k3', 'k4';" in m_key4 and "more" not in m_key4.split("An example")[0], m_key4[:300])
 
 # said: a text with a quote and a line break is shown quoted, as one string

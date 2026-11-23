@@ -38,6 +38,7 @@ from stackshot.model import ask_leaves as _askl
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model import contact as _contact
 from stackshot.model import draft as _draft
+from stackshot.model import faults as _faults
 from stackshot.model import field_gates as _fg
 from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.model import holders as _holders
@@ -405,10 +406,13 @@ def gate_draft_args(draft: Any, clear: bool) -> tuple[str, bool]:
     if _draft.is_clear(raw):
         clear, raw = True, ""
     text = _draft.normalize(raw)
+    faults: list[str] = []
     if clear and text.strip():
-        raise ToolError("Refused: clear_draft drops the draft; it does not go with a new one")
+        faults.append("Refused: clear_draft drops the draft; it does not go with a new one")
     if len(text) > _draft.MAX:
-        raise ToolError(f"Refused: draft is at most {_draft.MAX} characters (got {len(text)}); a longer text goes in a document, and the step links it")
+        faults.append(f"Refused: draft is at most {_draft.MAX} characters (got {len(text)}); a longer text goes in a document, and the step links it")
+    if faults:
+        raise _faults.refusals(faults)
     return (text if text.strip() else ""), bool(clear)
 
 
@@ -444,20 +448,23 @@ def gate_state_args(carry: dict[str, str]) -> tuple[str, dict[str, str], bool]:
     step="none" (or clear, -, like needs="none") withdraws the step: the your-step state and his open step line go in that write (the only way out of his step besides his Done, a close or a hold).
     The other inputs of the old states (state, clear_state, party, chase, end, proof, chase_note) are refused before the tool runs (retired_inputs.py, web/middleware.py _RetiredInputs)."""
     h = _hooks()
+    faults: list[str] = []
     withdraw = str(carry.get("step") or "").strip().lower() in h.ask_none and bool(str(carry.get("step") or "").strip())
     if withdraw:
         if str(carry.get("supplies") or "").strip():
-            raise ToolError('Refused: step="none" withdraws the step and supplies sets a wait on another item: pass one of them')
+            faults.append('Refused: step="none" withdraws the step and supplies sets a wait on another item: pass one of them')
         carry = {**carry, "step": ""}
     given = {k: _states.carry_text(k, v) for k, v in carry.items() if k not in _states.RETIRED_FIELDS and _states.carry_text(k, v)}      # expected_by and expected_reason are accepted and not kept (RETIRED_NOTE, in service/update.py)
     for k, v in given.items():
         if k == "step":
             if _states.step_problem(v):
-                raise ToolError(f"Refused: {_states.step_problem(v)}")
+                faults.append(f"Refused: {_states.step_problem(v)}")
         elif len(v) > _states.LINE_MAX:
-            raise ToolError(f"Refused: {k} is one line of at most {_states.LINE_MAX} characters — got {len(v)}")
+            faults.append(f"Refused: {k} is one line of at most {_states.LINE_MAX} characters — got {len(v)}")
     if "step" in given and "supplies" in given:
-        raise ToolError("Refused: step is a step for the person it names and supplies says what another item gives this one (a wait on that item): pass one of them")
+        faults.append("Refused: step is a step for the person it names and supplies says what another item gives this one (a wait on that item): pass one of them")
+    if faults:
+        raise _faults.refusals(faults)
     return ("your-step" if "step" in given else "blocked" if "supplies" in given else ""), given, withdraw
 
 
@@ -471,6 +478,7 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict
     for what it drops. post_wake_mover is the old name of mover (an alias in its window, the service folds it, model.fold_picker_alias): passed beside a different mover it is refused here, naming mover.
     Only the form is judged here (model.check_fields): whether an alive item names a mover or a wait its mover is for the write guards."""
     h = _hooks()
+    faults: list[str] = []
     setv: dict[str, str] = {}
     drop: set[str] = set()
     for k in _model.MODEL_FIELDS:
@@ -483,16 +491,17 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict
     if pw_ and mv_ and mv_.lower() not in h.ask_none:      # the old name beside a named mover: the same value is one value, a different one is the one real contradiction (mover=none beside it is the old way to say "no live mover, and this one takes it when the wait ends": the old name then wins as the picker)
         a_, b_ = ("none" if pw_.lower() in h.ask_none else _model.norm_who(pw_).lower()), _model.norm_who(mv_).lower()
         if a_ != b_:
-            raise ToolError(f"Refused: mover and post_wake_mover differ (mover={mv_}, post_wake_mover={pw_}); post_wake_mover is the old name of mover, the one who moves the item "
-                            "(on a waiting item, the one who takes it when the wait ends): pass mover=<who> alone")
+            faults.append(f"Refused: mover and post_wake_mover differ (mover={mv_}, post_wake_mover={pw_}); post_wake_mover is the old name of mover, the one who moves the item "
+                          "(on a waiting item, the one who takes it when the wait ends): pass mover=<who> alone")
     if clears.get("mover") and pw_ and pw_.lower() not in h.ask_none:      # clear_mover and a named old-name picker contradict each other (the alias would store it as mover, over the explicit clear)
-        raise ToolError(f"Refused: clear_mover and post_wake_mover={pw_} contradict each other (post_wake_mover is the old name of mover): clear_mover drops the mover, mover=<who> sets one; pass one of them")
+        faults.append(f"Refused: clear_mover and post_wake_mover={pw_} contradict each other (post_wake_mover is the old name of mover): clear_mover drops the mover, mover=<who> sets one; pass one of them")
     for flag, fields in (("goal", ("goal",)), ("mover", ("mover",)), ("then", ("then",)), ("wait", (*_model.WAIT_GROUP, _model.LEGACY_PICKER_KEY))):
         if clears.get(flag):
             clash = [k for k in fields if k in setv]
             if clash:
-                raise ToolError(f"Refused: clear_{flag} drops {', '.join(k for k in fields if k not in _NOT_PASSED)}; it does not go with a new {', '.join(clash)}")      # `until`, `waits` and `wait_mode` are no write field of this call: the refusal names the five a caller can pass
-            drop.update(fields)
+                faults.append(f"Refused: clear_{flag} drops {', '.join(k for k in fields if k not in _NOT_PASSED)}; it does not go with a new {', '.join(clash)}")      # `until`, `waits` and `wait_mode` are no write field of this call: the refusal names the five a caller can pass
+            else:
+                drop.update(fields)
     if "wait_kind" in setv:
         setv["wait_kind"] = setv["wait_kind"].lower()
     for k in ("mover", "then", "post_wake_mover"):
@@ -500,7 +509,9 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict
             setv[k] = _model.norm_who(setv[k])
     probs = _model.check_fields(setv)
     if probs:
-        raise ToolError("Refused: " + "; ".join(probs))
+        faults.append("Refused: " + "; ".join(probs))
+    if faults:
+        raise _faults.refusals(faults)
     return setv, drop
 
 
@@ -624,9 +635,10 @@ def gate_waits(waits: Any, wait_mode: Any, *, gid: str, project: str, creating: 
     if kind == "none":
         return WaitsPlan("clear", [], note="\n(the one line left had already arrived, so the wait is over and is cleared)")
     if kind == "list":
-        if not backstop:
+        if not backstop and not _faults.current().marked(_faults.UNTIL):
             raise ToolError("Refused: a list needs its backstop day, the day the item comes back at the latest whatever has arrived: pass until=YYYY-MM-DD (or YYYY-MM-DDTHH:MM) beside waits")
-        gate_time_lines([(i, ln["until"]) for i, ln in enumerate(lines, 1) if ln["kind"] == "time"], backstop)
+        if backstop:      # a backstop day the call gave but the gate refused is not there to hold the time lines against
+            gate_time_lines([(i, ln["until"]) for i, ln in enumerate(lines, 1) if ln["kind"] == "time"], backstop)
     note = ""
     for i, ln in enumerate(lines, 1):
         if ln.get("arrived") or _wl.line_key(ln) in have:
@@ -708,8 +720,16 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
         probs = [p for p in probs if p.key != "owner_mover"]      # a re-bullet writes no mover and no state: an item already in the owner-as-mover shape is not refused for the form of its description; the terminal-prompt route creates its row with the owner as mover and sets state your-step with its step in the write that follows (a create sets no state), and that second write is judged
     notes = [p for p in probs if p.key == "description"] if _description_guard_mode() == "note" else []
     probs = [p for p in probs if p not in notes]
+    if any(f.startswith("Refused: a line of next names no one") for f in _faults.current().found):
+        probs = [p for p in probs if p.key != "next_unnamed" and not (p.key == "filler" and p.field == "next")]      # the same unnamed line, already refused by next's own rule (N1): the guard does not say it a second time, nor that the line is a placeholder (a placeholder names no one)
+    if _faults.current().marked(_faults.EVENT):
+        probs = [p for p in probs if p.key != "wait_input" and not (p.key == "filler" and p.field == "wait_event")]        # an event wait whose phrase the wait's own gate refused: its input is missing, and the phrase is no event, for that reason alone, which that fault already says
+    if any(p.key == "next_unnamed" for p in probs):
+        _faults.current().mark(_faults.NEXT)                       # the check that an open step is left reads the same line, which the guard refuses here
+    if any(p.key in ("mover", "post_wake", "mover_state") for p in probs):
+        _faults.current().mark(_faults.MOVER)                      # the hand-off and front-agent-step checks read the same mover (the item's, or the one a wait hands it to): they keep no fault of their own beside this one
     if probs:
-        raise ToolError(_mg.refusal(probs))
+        raise _faults.refusals(["Refused: " + p.text for p in probs], _mg.refusal(probs))
     if touched is None or "next" in touched:
         meta.pop("model_flags", None)      # an older write stored the broad-words flag here; those words are read from next itself now (_ac.wait_words), so a write drops the stored copy
     return "".join(f"\n(note: {p.text})" for p in notes)
@@ -1429,34 +1449,45 @@ def until_in(item_id: str, status: str, until: str, wake: str, ask_by: str, hold
 
 
 def gate_close(gid: str, item: dict[str, Any], outcome: str, reason: str, superseded_by: str, outcome_text: str) -> str:
-    """Refuse a close that does not say how the item ended → the replacing item's id, normalised, or ""."""
+    """Refuse a close that does not say how the item ended → the replacing item's id, normalised, or "". Every fault of the close is kept and refused together (model/faults.py)."""
     h = _hooks()
+    faults: list[str] = []
     missing = [n for n, v in (("outcome", outcome), ("reason", reason), ("outcome_text", outcome_text)) if not v.strip()]
     if outcome == "superseded" and not superseded_by.strip():
         missing.append("superseded_by")
     if missing:
-        raise ToolError(f"Refused: closing {gid} needs {', '.join(missing)}. " + h.close_refusal + h.relaunch)
+        faults.append(f"Refused: closing {gid} needs {', '.join(missing)}. " + h.close_refusal + h.relaunch)
     if outcome == "unrecorded":
-        raise ToolError("Refused: outcome unrecorded means the item closed before the model with no outcome in its record; only the migration writes it. A close says how it ended: "
-                        f"{' | '.join(h.outcomes)}")
-    if outcome not in h.outcomes:
-        raise ToolError(f"Refused: outcome must be one of {' | '.join(h.outcomes)} — got {outcome!r}")
-    if len([ln for ln in reason.splitlines() if ln.strip()]) > 1:
-        raise ToolError("Refused: reason is one line: the end state reached and why the item closed")
-    rmax = _fg._close_reason_max()
-    if rmax and len(reason) > rmax:
-        raise ToolError(f"Refused: the reason is {len(reason)} characters and the limit is {rmax}. Shorten it to the end state reached and why the item closed; "
-                        "the detail goes in the outcome_text bullets (and the project page's timeline).")
-    _fg._gate_description(outcome_text, "outcome_text")
-    if not superseded_by.strip():
-        return ""
-    if outcome != "superseded":
-        raise ToolError(f"Refused: superseded_by goes with outcome=superseded, not {outcome}")
-    rep = _norm_id(superseded_by)
-    if rep == gid:
-        raise ToolError(f"Refused: {gid} cannot be superseded by itself")
-    if not _path(rep).exists():
-        raise ToolError(f"Refused: superseded_by names {rep}, which does not exist; name the item that replaces {gid}")
+        faults.append("Refused: outcome unrecorded means the item closed before the model with no outcome in its record; only the migration writes it. A close says how it ended: "
+                      f"{' | '.join(h.outcomes)}")
+    elif outcome and outcome not in h.outcomes:
+        faults.append(f"Refused: outcome must be one of {' | '.join(h.outcomes)} — got {outcome!r}")
+    if reason.strip():
+        if len([ln for ln in reason.splitlines() if ln.strip()]) > 1:
+            faults.append("Refused: reason is one line: the end state reached and why the item closed")
+        rmax = _fg._close_reason_max()
+        if rmax and len(reason) > rmax:
+            faults.append(f"Refused: the reason is {len(reason)} characters and the limit is {rmax}. Shorten it to the end state reached and why the item closed; "
+                          "the detail goes in the outcome_text bullets (and the project page's timeline).")
+    if outcome_text.strip():
+        faults.extend(_fg.description_faults(outcome_text, "outcome_text"))
+    rep = ""
+    if superseded_by.strip():
+        if outcome != "superseded":
+            faults.append(f"Refused: superseded_by goes with outcome=superseded, not {outcome}")
+        else:
+            try:
+                rep = _norm_id(superseded_by)
+            except ToolError as e:
+                faults.append(str(e))
+            if not rep:
+                pass
+            elif rep == gid:
+                faults.append(f"Refused: {gid} cannot be superseded by itself")
+            elif not _path(rep).exists():
+                faults.append(f"Refused: superseded_by names {rep}, which does not exist; name the item that replaces {gid}")
+    if faults:
+        raise _faults.refusals(faults)
     return rep
 
 
@@ -1538,16 +1569,15 @@ def gate_said(said: Any, default_session: str, by: str) -> list[dict[str, Any]]:
     a queued_command attachment entry of human origin) is stored with tag Done-by and kind acted; it never counts as his words or his decision."""
     if said is None or said == [] or (isinstance(said, str) and not said.strip()):
         return []
+    faults: list[str] = []
     root = _said_roots()
     prefixes, phrases = _said.prefixes_of(_cfg.get("said", "injected_prefixes")), _said.phrases_of(_cfg.get("said", "injected_phrases"))   # stopgaps for messages before the marker
     marker = str(_cfg.get("said", "injected_marker") or "")                   # what the fleet tool puts at the start of text it types; "" = none
     if quote := _said.plain_quote(said):      # text, not the structured form: his words as an Acked-by, his message found by them (the server takes the fix and says so)
         specs = _said_plain(quote, default_session, root, prefixes, phrases, marker)
     else:
-        try:
-            specs = _said.parse(said)
-        except ValueError as e:
-            raise ToolError(f"Refused: {e}")
+        specs, shape = _said.parse_all(said)      # every entry that is not well formed is a fault of its own; the well formed ones are still checked against the transcript
+        faults.extend(f"Refused: {e}" for e in shape)
     out: list[dict[str, Any]] = []
     for i, s in enumerate(specs):
         sess = s["session"] or default_session
@@ -1555,18 +1585,24 @@ def gate_said(said: Any, default_session: str, by: str) -> list[dict[str, Any]]:
         who = f"said[{i}] ({s['tag']})"
         label = _session_label(sid) or sess or "the sender"
         if r["code"] == "missing":
-            raise ToolError(f"Refused: {who}: no message {s['msg']} in the transcript of {label}; msg is the `uuid` field of his message's transcript entry, "
-                            f"and session is the session he said it in (the front session when his words reached you relayed)")
+            faults.append(f"Refused: {who}: no message {s['msg']} in the transcript of {label}; msg is the `uuid` field of his message's transcript entry, "
+                          f"and session is the session he said it in (the front session when his words reached you relayed)")
+            continue
         if s.get("kind") == _said.ACTED and r["code"] in ("not_queued", "not_human"):
-            raise ToolError(f"Refused: {who}: attachment entry {s['msg']} in the transcript of {label} is not a message {OWNER} sent: {r['detail']}")
+            faults.append(f"Refused: {who}: attachment entry {s['msg']} in the transcript of {label} is not a message {OWNER} sent: {r['detail']}")
+            continue
         if r["code"] in ("not_user", "tool_result", "not_human", "meta"):
-            raise ToolError(f"Refused: {who}: message {s['msg']} in the transcript of {label} is not {OWNER}'s own: {r['detail']}")
+            faults.append(f"Refused: {who}: message {s['msg']} in the transcript of {label} is not {OWNER}'s own: {r['detail']}")
+            continue
         if r["code"] == "injected":
-            raise ToolError(f"Refused: {who}: message {s['msg']} in the transcript of {label} is text a tool typed into the pane, not {OWNER}'s own: {r['detail']}")
+            faults.append(f"Refused: {who}: message {s['msg']} in the transcript of {label} is text a tool typed into the pane, not {OWNER}'s own: {r['detail']}")
+            continue
         if r["code"] == "not_attachment":
-            raise ToolError(f"Refused: {who}: entry {s['msg']} in the transcript of {label} cannot prove {OWNER} did a step: {r['detail']}")
+            faults.append(f"Refused: {who}: entry {s['msg']} in the transcript of {label} cannot prove {OWNER} did a step: {r['detail']}")
+            continue
         if r["code"] == "quote":
-            raise ToolError(f"Refused: {who}: {r['detail']} ({'entry' if s.get('kind') == _said.ACTED else 'message'} {s['msg']} in the transcript of {label})")
+            faults.append(f"Refused: {who}: {r['detail']} ({'entry' if s.get('kind') == _said.ACTED else 'message'} {s['msg']} in the transcript of {label})")
+            continue
         e: dict[str, Any] = {"tag": s["tag"], "quote": s["quote"], "session": sid, "msg": s["msg"], "ts": float(r["ts"] or 0), "checked": bool(r["checked"]),
                              "prompt_source": r["prompt_source"], "by": by}
         if not r["checked"]:
@@ -1574,6 +1610,8 @@ def gate_said(said: Any, default_session: str, by: str) -> list[dict[str, Any]]:
         if s.get("kind") == _said.ACTED:
             e["kind"] = _said.ACTED               # proof he did a step, never his words: no check of his words or decision reads it
         out.append(e)
+    if faults:
+        raise _faults.refusals(faults)         # one refusal for every entry that failed, each named by its place in the list
     return out
 
 

@@ -917,7 +917,10 @@ out = _wt_create._create(subject="[home] a good create", description=DESC, proje
 check("create: a write that meets every guard passes", "created s" in out, out)
 refused("create: several problems are listed in one refusal, each with its fix", lambda: _wt_create._create(subject="[home] bad create", description=DESC, project="projects/alpha", owner="home-front",
                                                                                                           next="look into the quota", mover="home-nobody", goal="TBD"),
-        "Refused: 4 problems", "(1)", "(2)", "(3)", "(4)", "quota", "placeholder", "does not say who takes it", "home-nobody")
+        "Refused: 4 problems", "(1)", "(2)", "(3)", "(4)", "quota", "placeholder", "does not say who takes it", "home-nobody", none=("in this call", "no pane of it is in the heartbeat"))      # the guards' own list, as before: the hand-off says the unknown mover again and keeps no fault of its own
+refused("create: the guards' own problems, with no other gate refusing, keep the guards' own list", lambda: _wt_create._create(subject="[home] bad create", description=DESC, project="projects/alpha", owner="home-front",
+                                                                                                          next="look into the quota", goal="TBD"),
+        "Refused: 3 problems. (1)", "(2)", "(3)", "quota", "placeholder", "does not say who takes it", none=("in this call",))
 
 # ================================================================ the report on the existing items
 for g in ("a60", "a61", "a62", "a63", "a64", "a65", "a66", "a67", "a68", "a69", "a70", "a71", "a72", "a73", "a74", "a75", "a76", "a77", "a78", "a79", "a80", "a81", "a82", "a83", "a84", "a85", "a86",

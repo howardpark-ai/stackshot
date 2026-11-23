@@ -48,6 +48,7 @@ class _Flags(dict):
         super().update(**kw)
 FLAGS = _Flags(session_next=False, question=False, terminal_row=False)
 RET = {}                                                     # a hook's return value by name, where the default below is not what a case needs
+LISTY = ("gate_subject", "gate_description", "gate_goal", "gate_next", "gate_bare_urls")   # the form gates the create collects (field_gates' `*_faults`): each lists its faults
 RAISE = {}                                                   # a hook that refuses (ToolError) by name
 BORED = {"gate_options": [], "gate_needs": [], "gate_observers": [], "gate_after": [], "gate_said": [], "parse_check": "", "gate_model_args": ({}, {}), "contact_default": "",
          "gate_draft_args": ("", False), "step_proof_set": "", "fallback_wait_date": ("", "", ""), "evwait_gate": "", "then_stands": "", "owner_then_default": "", "lift_ask": "", "ask_owed": "",
@@ -57,6 +58,9 @@ BORED = {"gate_options": [], "gate_needs": [], "gate_observers": [], "gate_after
 def hook(name):
     def run(*a, **k):
         LOG.append((name, a, k))
+        if name in LISTY:      # a form gate the create collects: it returns its faults as a list (a goal's as one text) instead of raising
+            if name in RAISE: return [RAISE[name]] if name != "gate_goal" else RAISE[name]
+            return RET.get(name, [] if name != "gate_goal" else "")
         if name in RAISE: raise ToolError(RAISE[name])
         if name in RET: return RET[name]
         if name == "session_id": return a[0]
@@ -77,8 +81,8 @@ for _n in REAL_GATES: setattr(gates, _n, hook(_n))
 # the field and decision rules are model/'s and the similar-items note and the project's subject prefix are the create's and service/gates.py's, none a hook either: the create calls each on its owner, so this suite replaces each there
 # with the same recorder, under the name the order below lists it by (the owner's name without its leading underscore)
 from stackshot.model import decision_gates as _dg, field_gates as _fg
-MOVED = {"gate_subject": (_fg, "_gate_subject"), "gate_recycle_item": (_fg, "_gate_recycle_item"), "gate_description": (_fg, "_gate_description"), "gate_goal": (_fg, "_gate_goal"),
-         "gate_next": (_fg, "_gate_next"), "gate_bare_urls": (_fg, "_gate_bare_urls"), "gate_one_decision": (_dg, "_gate_one_decision"), "gate_alternatives": (_dg, "_gate_alternatives"),
+MOVED = {"gate_subject": (_fg, "subject_faults"), "gate_recycle_item": (_fg, "_gate_recycle_item"), "gate_description": (_fg, "description_faults"), "gate_goal": (_fg, "goal_fault"),
+         "gate_next": (_fg, "next_faults"), "gate_bare_urls": (_fg, "bare_url_faults"), "gate_one_decision": (_dg, "_gate_one_decision"), "gate_alternatives": (_dg, "_gate_alternatives"),
          "gate_open_question": (_dg, "_gate_open_question"), "gate_recommend_stance": (_dg, "_gate_recommend_stance"), "gate_mockup": (_dg, "_gate_mockup"),
          "gate_own_action": (_dg, "_gate_own_action"), "options_note": (_dg, "_options_note"), "actor_note": (_dg, "_actor_note"),
          "similar_note": (create, "similar_note"), "project_subject_prefix": (gates, "project_subject_prefix")}
@@ -127,9 +131,9 @@ FLAG_READS = ("session_next", "question", "terminal_row")
 got = names(skip=FLAG_READS)
 check("1 the whole order of a session's create, from the subject gate to the last note of the reply", got == [
     "gate_subject", "gate_recycle_item", "gate_description", "gate_goal", "gate_next", "gate_bare_urls", "gate_options", "session_id", "gate_said", "wait_alias_gate", "gate_model_args",
-    "gate_waits", "contact_default", "next_put", "gate_step_gap", "evwait_gate", "then_stands", "owner_then_default", "gate_draft_args", "gate_metadata", "lift_ask", "ask_owed", "gate_one_decision", "gate_alternatives",
+    "gate_waits", "contact_default", "gate_draft_args", "refuse_if_owing", "next_put", "gate_step_gap", "evwait_gate", "then_stands", "owner_then_default", "gate_metadata", "lift_ask", "ask_owed", "gate_one_decision", "gate_alternatives",
     "gate_open_question", "gate_recommend_stance", "gate_mockup", "gate_own_action", "options_note", "actor_note", "gate_model", "anchor_wait_gate", "gate_owner_step", "model_guards_on",
-    "gate_front_step", "refuse_if_owing", "record_fixes", "save", "pilot_charge", "owed_mark", "tell_needed", "handoff_notify", "publish", "machine_note", "fmt", "said_note", "form_notes",
+    "gate_front_step", "record_fixes", "save", "pilot_charge", "owed_mark", "tell_needed", "handoff_notify", "publish", "machine_note", "fmt", "said_note", "form_notes",
     "similar_note", "nag"], got)
 check("1 …and the reply opens with the created line, then the item as get shows it", reply.startswith(f"created {gh.shown(gid)} — it is being published to the board (") and "<item>" in reply, reply[:200])
 check("1 a create that files the item takes the page debt: the creator is charged for it (the pilot gives no keeper)", called("owed_mark")[0][0] == ("projects/alpha", OWNER, gid), called("owed_mark"))
@@ -274,7 +278,8 @@ RAISE["gate_subject"] = "Refused: first"
 try: mk(); stop = None
 except ToolError: stop = names()
 RAISE.pop("gate_subject")
-check("4 the first gate is the subject's: nothing is called before it", stop == ["gate_subject"] or stop[:1] == ["session_next"] and stop[1:] == ["gate_subject"], stop)
+check("4 the first gate is the subject's: nothing is called before it", [n for n in stop if n not in FLAG_READS][:1] == ["gate_subject"], stop)
+check("4 …the other form gates run on past it (one refusal holds them all), and the write is not saved", {"gate_description", "gate_next", "gate_said"} <= set(stop) and "save" not in stop, stop)
 
 # ---------------------------------------------------------------- 5. request map
 real_remember = create._remember_request
@@ -362,12 +367,12 @@ page_debts._nag = lambda owner="": f"<nag for {owner!r}>"
 try: via_table = tbl.nag("wr3-owner")
 finally: page_debts._nag = real_nag
 check("8 the nag is page_debts' own function looked up at each call (a patch of its owner after the install reaches the create)", via_table == "<nag for 'wr3-owner'>", via_table)
-real_gate = _fg._gate_subject
+real_gate = _fg.subject_faults
 def _patched_gate(*a, **k): raise ToolError("<patched gate>")
-_fg._gate_subject = _patched_gate
+_fg.subject_faults = _patched_gate
 try: mk(); via_gate = None
 except ToolError as e: via_gate = str(e)
-finally: _fg._gate_subject = real_gate
+finally: _fg.subject_faults = real_gate
 n_mv = len(MOVED)
 check("8 the field and decision rules are model/'s, called on their modules at each call (a suite's patch of the owner reaches the create), and none is a hook", via_gate == "<patched gate>" and not ({f.name for f in dataclasses.fields(create.Hooks)} & set(MOVED)) and n_mv >= 16, sorted(MOVED))
 

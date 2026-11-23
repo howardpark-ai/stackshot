@@ -435,7 +435,7 @@ res, made = script(44, description=f"- Goal: A thing\n- Lives at {URL}")
 check("5 a script's write is no session's: its bare address is stored as written, no fix", not isinstance(res, ToolError) and desc_of(44) == f"- Goal: A thing\n- Lives at {URL}" and kinds(made) == [], (res if isinstance(res, ToolError) else "", desc_of(44), made))
 item(45)
 res, made = upd(45, next=f"falcon-main: read {URL}\nfalcon-main: test it")
-check("5 a bare address in next is still refused, nothing written", isinstance(res, ToolError) and "bare URL" in str(res) and mt(45)["next"] == "falcon-main: build it\nfalcon-main: test it" and kinds(made) == [], (res, mt(45)))
+check("5 a bare address in next is still refused, nothing written", isinstance(res, ToolError) and "bare URL" in str(res) and mt(45)["next"] == "falcon-main: build it\nfalcon-main: test it" and kinds(made) == [], (res, mt(45), made))
 A_ = "https://a.example/x"
 check("5 bullet_text.link_bare_urls: links the bare ones only, and returns the addresses it linked", BT.link_bare_urls("- see https://a.example/x.") == ("- see [https://a.example/x](https://a.example/x).", [A_])
       and BT.link_bare_urls("- see [x](https://a.example/x)") == ("- see [x](https://a.example/x)", []) and BT.link_bare_urls("- a\n- b") == ("- a\n- b", []), BT.link_bare_urls("- see https://a.example/x."))

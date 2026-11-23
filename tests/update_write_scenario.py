@@ -64,9 +64,13 @@ BORED = {"ask_owed": "", "gate_options": None, "gate_needs": [], "gate_observers
          "basis_put": None, "basis_words": "", "cap_ok_put": None, "cap_ok_drop": None, "check_how": "", "nl_text_without": "", "finishes_own_line": False, "require_marks": None,
          "owed_mark": None, "refuse_if_owing": None, "push_noted": None, "writer_charge": "", "owner_state_mover_": "", "evwait_preread": None, "close_was_set": None, "lift_ask": "",
          "gate_repark": None, "gate_clock_renewal": None, "gate_ask_on_wait": None, "handover": "", "handoffs_in_": [], "anchor_wait_gate": None, "after_open": False, "gate_work_writer": None}
+LISTY = ("gate_subject", "gate_description", "gate_goal", "gate_next", "gate_bare_urls")   # the form gates the update collects (field_gates' `*_faults`): each lists its faults
 def hook(name):
     def run(*a, **k):
         LOG.append((name, a, k))
+        if name in LISTY:      # a form gate the update collects (field_gates' `*_faults`): it returns its faults as a list (a goal's as one text) instead of raising
+            if name in RAISE: return [RAISE[name]] if name != "gate_goal" else RAISE[name]
+            return RET.get(name, [] if name != "gate_goal" else "")
         if name in RAISE: raise ToolError(RAISE[name])
         if name in RET: return RET[name]
         if name == "session_id": return a[0] if a else ""
@@ -88,8 +92,8 @@ for _n in REAL_GATES: setattr(gates, _n, hook(_n))
 # the field and decision rules are model/'s, not hooks either: the update calls each on its module, so this suite replaces each there with the same recorder, under the name the order lists it by
 # (the owner's name without its leading underscore)
 from stackshot.model import decision_gates as _dg, field_gates as _fg
-MOVED = {"gate_subject": (_fg, "_gate_subject"), "gate_description": (_fg, "_gate_description"), "gate_goal": (_fg, "_gate_goal"), "gate_next": (_fg, "_gate_next"),
-         "gate_bare_urls": (_fg, "_gate_bare_urls"), "marks_given": (_fg, "_marks_given"), "nl_text_without": (_fg, "_nl_text_without"), "require_marks": (_fg, "_require_marks"),
+MOVED = {"gate_subject": (_fg, "subject_faults"), "gate_description": (_fg, "description_faults"), "gate_goal": (_fg, "goal_fault"), "gate_next": (_fg, "next_faults"),
+         "gate_bare_urls": (_fg, "bare_url_faults"), "marks_given": (_fg, "_marks_given"), "nl_text_without": (_fg, "_nl_text_without"), "require_marks": (_fg, "_require_marks"),
          "gate_one_decision": (_dg, "_gate_one_decision"), "gate_alternatives": (_dg, "_gate_alternatives"), "gate_open_question": (_dg, "_gate_open_question"),
          "gate_recommend_stance": (_dg, "_gate_recommend_stance"), "gate_mockup": (_dg, "_gate_mockup"), "gate_own_action": (_dg, "_gate_own_action"),
          "options_note": (_dg, "_options_note"), "actor_note": (_dg, "_actor_note")}
@@ -513,12 +517,12 @@ page_debts._nag = lambda owner="": f"<nag for {owner!r}>"
 try: via_table = tbl.nag("wr3-owner")
 finally: page_debts._nag = real_nag
 check("10 the nag is page_debts' own function looked up at each call (a patch of its owner after the install reaches the update)", via_table == "<nag for 'wr3-owner'>", via_table)
-real_gate = _fg._gate_subject
+real_gate = _fg.subject_faults
 def _patched_gate(*a, **k): raise ToolError("<patched gate>")
-_fg._gate_subject = _patched_gate
+_fg.subject_faults = _patched_gate
 try: update.update_item(put(990001), subject="[home] changed by the patched gate", sender=OWNER); via_gate = None
 except ToolError as e: via_gate = str(e)
-finally: _fg._gate_subject = real_gate
+finally: _fg.subject_faults = real_gate
 check("10 the field and decision rules are model/'s, called on their modules at each call (a suite's patch of the owner reaches the update), and none is a hook", via_gate == "<patched gate>" and not ({f.name for f in dataclasses.fields(update.Hooks)} & set(MOVED)) and len(MOVED) >= 16, (via_gate, sorted(MOVED)))
 real_upd = update._update
 update._update = lambda *a, **k: "<patched update>"

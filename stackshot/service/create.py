@@ -34,6 +34,7 @@ from stackshot.core.store import _item_files, _next_id
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
 from stackshot.model import decision_gates as _dg
+from stackshot.model import faults as _faults
 from stackshot.model import field_gates as _fg
 from stackshot.model import model as _model
 from stackshot.model import similar as _sim
@@ -157,6 +158,7 @@ def _hooks() -> Hooks:
     return _hooks_
 
 
+@_faults.collected
 def create_item(
     subject: str,
     description: str,
@@ -205,6 +207,7 @@ def create_item(
     refuse it either). The mover is told nothing (a front agent mover is never messaged about its item, and no session is named in needs here);
     each session the caller names in needs is told once, as for the tool."""
     h = _hooks()
+    fc = _faults.current()          # the faults of the form this create finds are kept and refused together (model/faults.py)
     if request_id:
         prev = _gh.resolve(_requests().get(request_id) or "")   # an id the worker re-keyed since → the item's id now
         if prev and _path(prev).exists():      # an entry whose item is gone is no previous entry: file anew (the map is rewritten below)
@@ -217,30 +220,40 @@ def create_item(
             subject = pfx_ + subject.lstrip()
             _calls.fixed("subject-prefix", f"the scope prefix {pfx_.strip()} was put before the subject, as the project's scope names it", fields=["subject"], stored=subject)
     subject = _fg.fix_long_subject(subject)       # a subject over the limit is cut at its last word that fits (a pure form fix; the reply says so)
-    _fg._gate_subject(subject)
-    _fg._gate_recycle_item(subject)
+    for f_ in _fg.subject_faults(subject):
+        fc.add(f_, text=True)
+    fc.call(_fg._gate_recycle_item, subject)
     description = _fg.fix_bare_urls(description, None, session=_writes.session_next())       # a bare address in a description becomes a link to itself (the reply says so); next and ask keep the refusal
     goal_judged = _writes.session_next() and not by      # the create tool's own call: a script's item (the question route, a watcher, the terminal prompt) is filed whatever its first bullet
     if goal_judged:
         description = _fg.fix_goal_label(description)       # a goal word in another form opening the first bullet is written `Goal:` (a pure form fix; the reply says so)
     description, split_note = _fg.fix_long_bullets(description)       # a bullet over the limit is split at its sentences (a pure form fix; the reply says so, and History)
-    _fg._gate_description(description)
-    if goal_judged:
-        _fg._gate_goal(description)
-    _fg._gate_next(next, has_ask=bool(ask.strip()) and ask.strip().lower() not in h.ask_none, session=_writes.session_next())
+    form_f = _fg.description_faults(description)
+    for f_ in form_f:
+        fc.add(f_, text=True)
+    if goal_judged and form_f:
+        fc.skip("the check that the description opens with its goal", "it reads the first bullet, which the faults of the description's form above leave unread")
+    elif goal_judged and (f_ := _fg.goal_fault(description)):
+        fc.add(f_, text=True)
+    for f_ in _fg.next_faults(next, has_ask=bool(ask.strip()) and ask.strip().lower() not in h.ask_none, session=_writes.session_next()):
+        fc.add(f_, text=True)
     ask = "" if ask.strip().lower() in h.ask_none else ask
     if ask:
-        ask = h.gate_ask(ask)
-    _fg._gate_bare_urls({"description": description, "next": next, "ask": ask}, session=_writes.session_next())
-    opts = h.gate_options(options)
-    needs_l = _gates.gate_needs(needs, project, owner) if (needs if isinstance(needs, list) else needs.strip()) and str(needs).strip().lower() not in h.ask_none else []
+        ask = fc.call(h.gate_ask, ask, default="")
+    for f_ in _fg.bare_url_faults({"description": description, "next": next, "ask": ask}, session=_writes.session_next()):
+        fc.add(f_, text=True)
+    opts = fc.call(h.gate_options, options)
+    needs_l = fc.call(_gates.gate_needs, needs, project, owner, default=[]) if (needs if isinstance(needs, list) else needs.strip()) and str(needs).strip().lower() not in h.ask_none else []
     if agent.strip() and agent.strip().lower() not in h.ask_none:    # the older form writes the session into needs
-        needs_l = _canon_needs([*_needs_kinds({"needs": needs_l}), _gates.gate_needs_session(agent, project, owner)], _anc.names())
-    obs = _gates.gate_observers(observers) if (observers if isinstance(observers, list) else observers.strip()) and str(observers).strip().lower() not in h.ask_none else []
-    aft = _gates.gate_after(after) if (after if isinstance(after, list) else after.strip()) and str(after).strip().lower() not in h.ask_none else []
+        if (got_agent := fc.call(_gates.gate_needs_session, agent, project, owner)) is not None:
+            needs_l = _canon_needs([*_needs_kinds({"needs": needs_l}), got_agent], _anc.names())
+    obs = fc.call(_gates.gate_observers, observers, default=[]) if (observers if isinstance(observers, list) else observers.strip()) and str(observers).strip().lower() not in h.ask_none else []
+    aft = fc.call(_gates.gate_after, after, default=[]) if (after if isinstance(after, list) else after.strip()) and str(after).strip().lower() not in h.ask_none else []
     owner = h.session_id(owner)                                 # a pane name becomes its transcript id when the heartbeat knows it
-    said_l = _gates.gate_said(said, owner, owner)                    # the trailers: his words checked against the transcript; a failed check refuses the create
-    chk = _checks.parse_check(check) if check.strip() and check.strip().lower() not in h.ask_none else ""   # the done check: gated on its form; a create is never refused for a hand-off
+    n_said = fc.count
+    said_l = fc.call(_gates.gate_said, said, owner, owner, default=[])                    # the trailers: his words checked against the transcript; a failed check refuses the create
+    said_bad = fc.count > n_said                                # his words are not known: the cap on a wait, which they lift, is not judged beside it
+    chk = fc.call(_checks.parse_check, check, default="") if check.strip() and check.strip().lower() not in h.ask_none else ""   # the done check: gated on its form; a create is never refused for a hand-off
     meta: dict[str, Any] = {"owner": owner, "project": project, **(extra or {})}     # extra = a script route's own marks (the terminal prompt's), written with the item
     until_v = _model.clean(until)
     if until_v.lower() in h.ask_none:
@@ -248,41 +261,61 @@ def create_item(
     alias_used = ["ask_by"] if _model.clean(ask_by) and _model.clean(ask_by).lower() not in h.ask_none else []
     alias_ends = h.wait_alias_gate(alias_used)
     by_day = _uw.slot_of(_model.clean(wait_kind).lower()) == "ask_by"      # a relay or event wait: its date is a day
+    n_until = fc.count
     if until_v:
         if by_day:
-            until_v = _gates.ask_by_day(until_v, "until")       # a relay or event wait's date is a day, judged as one: a time of day is dropped (the reply says so), a day that is not ahead is refused naming tomorrow
-        try:
-            until_at = h.wake_at(h.parse_wake(until_v))
-        except ToolError:
-            raise ToolError(f"Refused: until is YYYY-MM-DD or YYYY-MM-DDTHH:MM ({_cfg.tz_abbr()}), a real date (got {until_v!r})")
-        if until_at <= _pages.zone_now():
-            raise ToolError(f"Refused: until must be in the future ({_cfg.tz_abbr()})")
-        if not by_day:      # the cap judges a wait on a date as an update's wake is judged (a relay's or event's ask-by day is no wake)
-            _gates.gate_cap({}, said_l, "until", h.parse_wake(until_v), until_at.timestamp())
+            until_v = fc.call(_gates.ask_by_day, until_v, "until", default="")       # a relay or event wait's date is a day, judged as one: a time of day is dropped (the reply says so), a day that is not ahead is refused naming tomorrow
+        if until_v:
+            try:
+                until_at = h.wake_at(h.parse_wake(until_v))
+            except ToolError:
+                fc.add(f"Refused: until is YYYY-MM-DD or YYYY-MM-DDTHH:MM ({_cfg.tz_abbr()}), a real date (got {until_v!r})")
+                until_v = ""                # the date is not read: what reads it as stored is not judged
+            else:
+                if until_at <= _pages.zone_now():
+                    fc.add(f"Refused: until must be in the future ({_cfg.tz_abbr()})")
+                    until_v = ""
+                elif not by_day:      # the cap judges a wait on a date as an update's wake is judged (a relay's or event's ask-by day is no wake)
+                    fc.call_depending("the cap on how far out a wait may be", "it reads his words in said, which is refused above", said_bad,
+                                      _gates.gate_cap, {}, said_l, "until", h.parse_wake(until_v), until_at.timestamp())
     elif alias_used:
         until_v = _model.clean(ask_by)          # ask_by is the old name of the date (an until beside it wins)
         if by_day:
-            until_v = _gates.ask_by_day(until_v)
-    model_set, _ = _gates.gate_model_args({"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
-                                     "until": until_v, "post_wake_mover": post_wake_mover}, {})   # a "none" on a create is nothing to clear
-    list_plan = _gates.gate_waits(waits, wait_mode, gid="", project=project, creating=True, stored={}, backstop=str(h.parse_wake(until_v)) if until_v else "",
-                                  others={"wait_kind": _model.clean(wait_kind), "wait_anchor": _model.clean(wait_anchor), "wait_event": _model.clean(wait_event), "ask_by": _model.clean(ask_by),
-                                          "after": after if isinstance(after, list) and after or isinstance(after, str) and after.strip().lower() not in ("", *h.ask_none) else ""},
-                                  anchor_gate=lambda tmp: h.anchor_wait_gate({}, tmp, "", creating=True), event_gate=lambda tmp: h.evwait_gate({}, tmp, creating=True))
+            until_v = fc.call(_gates.ask_by_day, until_v, default="")
+    if fc.count > n_until and not until_v:
+        fc.mark(_faults.UNTIL)          # the date was refused and blanked above: a list's backstop day is that date, so the list is not judged on its absence
+    n_args = fc.count
+    model_set, _ = fc.call(_gates.gate_model_args, {"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
+                                                 "until": until_v, "post_wake_mover": post_wake_mover}, {}, default=({}, set()))   # a "none" on a create is nothing to clear
+    args_bad = fc.count > n_args      # the model's arguments are refused (an until that is no date, a wait_kind that is none): the date is not read again for the waits list
+    list_plan = fc.call(_gates.gate_waits, waits, wait_mode, gid="", project=project, creating=True, stored={}, backstop=str(h.parse_wake(until_v)) if until_v and not args_bad else "",
+                        others={"wait_kind": _model.clean(wait_kind), "wait_anchor": _model.clean(wait_anchor), "wait_event": _model.clean(wait_event), "ask_by": _model.clean(ask_by),
+                                "after": after if isinstance(after, list) and after or isinstance(after, str) and after.strip().lower() not in ("", *h.ask_none) else ""},
+                        anchor_gate=lambda tmp: h.anchor_wait_gate({}, tmp, "", creating=True), event_gate=lambda tmp: h.evwait_gate({}, tmp, creating=True))
     if list_plan is not None:           # a list is 2 to 8 lines (a clear of a list that is not there is None; one line on a create is refused by the gate)
         model_set["wait_kind"], model_set["wait_mode"] = "list", list_plan.mode
     if owner_name:
         meta["owner_name"] = owner_name
-    contact_v = _gates.gate_contact(contact, project, (owner,)) if contact.strip() else h.contact_default(owner, project)     # a named contact is checked against the project's front agents; else the creator when it is one, else the project's -main
+    contact_v = fc.call(_gates.gate_contact, contact, project, (owner,), default="") if contact.strip() else h.contact_default(owner, project)     # a named contact is checked against the project's front agents; else the creator when it is one, else the project's -main
     if contact_v:
         meta["contact"] = contact_v
+    draft_txt, _ = fc.call(_gates.gate_draft_args, draft, False, default=("", False))             # the verbatim text the owner pastes elsewhere; a create has no state to guard it by (the guard runs when an update sets your-step)
+    if anchors:
+        fc.add("Refused: anchors belong to the project, not the item — create the item, then anchors(project=<its project>, add=[url…], items=[<its id>]) for a thread about this item, or without items for a project-wide one")
+    if not by:                             # a script owes no page; the creator's own debt is not its to be refused for
+        fc.call(h.refuse_if_owing, owner)
+    if fc.state_bad:         # the checkpoint: a fault that leaves the stored state open ends the form's checks here; the ones below read the item as this create would store it
+        fc.skip("the checks of the item as this create would store it (its mover, the wait's reason and end, the decision, the open step, the hand-off)", "they read what the faults above leave open")
+        fc.raise_now()
     for k, v in (("needs", needs_l), ("ask", ask), ("priority", priority), ("due", due), ("options", opts), ("observers", obs), ("after", aft), ("said", said_l), ("check", chk)):
         if v:
             meta[k] = v
+    n_next = fc.count
     if next:
-        h.next_put(meta, next, owner, owner)     # the writer of a create's lines is its creator (a script's filing included: its label is no session)
-    proof_note = _proofs.step_proof_set(meta, _steps.view(meta, keeper=owner), step_proof) if step_proof is not None else ""     # a step's proof: the event that finishes it
-    _gates.gate_step_gap(meta, _steps.view(meta, keeper=owner), [])      # a step that delivers a pull request, followed by another session's step, needs its proof
+        fc.call(h.next_put, meta, next, owner, owner)     # the writer of a create's lines is its creator (a script's filing included: its label is no session)
+    next_bad = fc.count > n_next          # the lines were not stored: the check that an open step is left is not judged on their absence
+    proof_note = fc.call(_proofs.step_proof_set, meta, _steps.view(meta, keeper=owner), step_proof, default="") if step_proof is not None else ""     # a step's proof: the event that finishes it
+    fc.call(_gates.gate_step_gap, meta, _steps.view(meta, keeper=owner), [])      # a step that delivers a pull request, followed by another session's step, needs its proof
     alias_note = ""
     if _model.clean(post_wake_mover):      # post_wake_mover is the old name of mover (model.fold_picker_alias): the picker of a wait the item is created with, else dropped with a note
         trial = {**meta, **{k: v for k, v in model_set.items() if k != _model.LEGACY_PICKER_KEY}}
@@ -300,38 +333,34 @@ def create_item(
         wait_note += fb_note
     if _wt.stored_until(meta) and not _uw.kind_of(meta) and _wt.after_of(meta):
         meta["wait_kind"] = "item"         # a date beside an after link is that wait's backstop (as ask_by was): the wait stays on the item
-    evw_note = h.evwait_gate({}, meta, creating=True)            # an event wait: its phrase in the canonical form, and refused when the event already happened
+    evw_note = fc.call(h.evwait_gate, {}, meta, creating=True, default="")            # an event wait: its phrase in the canonical form, and refused when the event already happened
     then_note = h.then_stands({"status": "open", "metadata": meta}, meta)      # `then` stands only while the user moves the item: one stored beside an agent is dropped with a note
     then_note += h.owner_then_default(None, meta, "open", _session_label(owner) or owner, "then" in model_set, mover.strip())      # D9: an item created for his call has the agent doing the work as its then (a builder that files its own decision item is its own then), not the front agent that relayed it
-    draft_txt, _ = _gates.gate_draft_args(draft, False)             # the verbatim text the owner pastes elsewhere; a create has no state to guard it by (the guard runs when an update sets your-step)
     if draft_txt:
         meta["draft"] = draft_txt
-    if anchors:
-        raise ToolError("Refused: anchors belong to the project, not the item — create the item, then anchors(project=<its project>, add=[url…], items=[<its id>]) for a thread about this item, or without items for a project-wide one")
-    _gates.gate_metadata(meta, creating=True)
+    fc.call(_gates.gate_metadata, meta, creating=True)
     lifted = "" if ask else h.lift_ask(meta, writer=owner, keeper=owner)   # a client without the ask parameter: the ask's form as next's first line
     asked = lifted + h.ask_owed(meta)       # needs=decision without an ask: a nag line, or refused from [ask] refuse_after
-    _dg._gate_one_decision(meta, description, bool(lifted))  # one decision per item, options in words: the ask is being written
-    _dg._gate_alternatives(meta, description)  # alternatives named, none listed
+    fc.call_family(*_faults.DECISION, _dg._gate_one_decision, meta, description, bool(lifted))  # one decision per item, options in words: the ask is being written
+    fc.call_family(*_faults.DECISION, _dg._gate_alternatives, meta, description)  # alternatives named, none listed
     if not _writes.question():    # a script's question is never lost on its wording: its Decide is the question as written, and the board may take no options
-        _dg._gate_open_question(meta)          # an open question with no options: the page would draw Yes / No under it
-        _dg._gate_recommend_stance(meta)       # no options and a Recommend that is no yes or no: the same Yes / No under a question it cannot answer
-    _dg._gate_mockup(meta, description)        # a mockup linked in the text rides on the ask too
-    _dg._gate_own_action(meta, create=True)    # his own action asked as a decision: it is a your-step
+        fc.call_family(*_faults.DECISION, _dg._gate_open_question, meta)          # an open question with no options: the page would draw Yes / No under it
+        fc.call_family(*_faults.DECISION, _dg._gate_recommend_stance, meta)       # no options and a Recommend that is no yes or no: the same Yes / No under a question it cannot answer
+    fc.call_family(*_faults.DECISION, _dg._gate_mockup, meta, description)        # a mockup linked in the text rides on the ask too
+    fc.call_family(*_faults.DECISION, _dg._gate_own_action, meta, create=True)    # his own action asked as a decision: it is a your-step
     asked += _dg._options_note(meta) + _dg._actor_note(meta)
-    desc_note = _gates.gate_model({"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v))    # the write guards of the item model, every field judged on a create
-    h.anchor_wait_gate({}, meta, creating=True)                  # an anchor wait: its anchor must be on the project's list already (after the model guards, whose refusals are more specific)
-    if _writes.session_next() and not by and (not _nl.split(meta.get("next")) or str(meta.get("next")).strip().lower() in _nl.NONE_WORDS) \
+    desc_note = fc.call(_gates.gate_model, {"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v), default="")    # the write guards of the item model, every field judged on a create
+    fc.call(h.anchor_wait_gate, {}, meta, creating=True)                  # an anchor wait: its anchor must be on the project's list already (after the model guards, whose refusals are more specific)
+    if _writes.session_next() and not by and not next_bad and not fc.marked(_faults.NEXT) and (not _nl.split(meta.get("next")) or str(meta.get("next")).strip().lower() in _nl.NONE_WORDS) \
             and not _model.stood_his({"status": "open", "metadata": meta}, lambda i_: h.after_open(i_.get("metadata") or {})):      # N6: a session's create leaves the item with an open step (his server-made step, from needs=decision with an ask or a your-step, counts)
-        raise ToolError(f"Refused: the new item has no open step in next: {_nr.NO_STEP_FIX_HELD if meta.get('hold') else _nr.NO_STEP_FIX}")
+        fc.add(f"Refused: the new item has no open step in next: {_nr.NO_STEP_FIX_HELD if meta.get('hold') else _nr.NO_STEP_FIX}")
     if not _writes.terminal_row():      # the terminal prompt's row files "<owner>: open … and answer" and sets its state your-step in the next call (service/terminal_prompt.py `_terminal_state`; a create sets no step): its own script, not a session hiding a step
-        _gates.gate_owner_step({"status": "open", "subject": subject, "description": description, "metadata": meta}, create=True)     # The owner's step under an agent's state is refused, as on an update
+        fc.call(_gates.gate_owner_step, {"status": "open", "subject": subject, "description": description, "metadata": meta}, create=True)     # The owner's step under an agent's state is refused, as on an update
     if _writes.session_next() and not by and h.model_guards_on():
-        _gates.gate_front_step("", {"status": "open", "subject": subject, "metadata": meta}, [], _steps.view(meta, keeper=owner), owner)     # a step that opens with a front agent on an item another session moves: nothing could wake it for the step
+        fc.call_depending(*_faults.MOVER_FRONT_STEP, fc.marked(_faults.MOVER), _gates.gate_front_step, "", {"status": "open", "subject": subject, "metadata": meta}, [], _steps.view(meta, keeper=owner), owner)     # a step that opens with a front agent on an item another session moves: nothing could wake it for the step
     if meta.get("mover") or meta.get("then") or _needs_sessions(meta):     # step 2: a hand-off at creation to a session with no pane is refused: an item created with no mover is nobody's hand-off, the project's builder or -main agent takes it (D1)
-        _gates.gate_handoff("", None, {"status": "open", "subject": subject, "metadata": meta}, by or owner)
-    if not by:                             # a script owes no page; the creator's own debt is not its to be refused for
-        h.refuse_if_owing(owner)
+        fc.call_depending(*_faults.MOVER_HANDOFF, fc.marked(_faults.MOVER), _gates.gate_handoff, "", None, {"status": "open", "subject": subject, "metadata": meta}, by or owner)
+    fc.raise_now()                         # every gate has run: what was found is refused together, nothing is stored
     h.record_fixes(meta, fixes)             # what the server fixed in this create (server_fixes.py): the mark and a History line
     if split_note:
         _stall.note(meta, time.time(), split_note)          # the server split long description bullets: a History line says the stored text is not as sent

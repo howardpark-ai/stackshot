@@ -66,6 +66,7 @@ class Problem:
     """One thing a write would leave wrong: the guard that found it and its refusal sentence (what is wrong, and the fix)."""
     key: str
     text: str
+    field: str = ""          # the field a text guard read (goal, next, ask, wait_event): one guard says it of several, and a filter drops it for one field
 
 
 def clean(v: Any) -> str:
@@ -884,7 +885,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
     H = _owner_display()
     out: list[Problem] = []
     flags: list[str] = []
-    add = lambda key, text: out.append(Problem(key, text))
+    add = lambda key, text, field="": out.append(Problem(key, text, field))
     nds = _wt.needs_of(m) if needs is None else list(needs)
     held = bool(m.get("hold")) if hold is None else hold
     nxt = m.get("next") if next_text is None else next_text
@@ -902,7 +903,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
         if text and runs(fname):
             f_ = filler_in(fname, text)
             if f_:
-                add("filler", f"{fname} holds a placeholder ({f_!r}): write the real {fname}, or leave it out until it is known.")
+                add("filler", f"{fname} holds a placeholder ({f_!r}): write the real {fname}, or leave it out until it is known.", fname)
     mod = None
     try:
         mod = _model.derive(item, ctx.now, after_open, anchored)

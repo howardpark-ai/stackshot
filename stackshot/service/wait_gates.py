@@ -33,6 +33,7 @@ from stackshot.core.instance import NAME, OWNER
 from stackshot.fleet import liveness as _lv
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
+from stackshot.model import faults as _faults
 from stackshot.model import model as _model
 from stackshot.model import nextlines as _nl
 from stackshot.model import option_labels as _ol
@@ -112,36 +113,46 @@ def _gate_options(options: Any) -> list[dict[str, Any]] | None:
         return []
     if not _hooks().options_min() <= len(options) <= _hooks().options_max():
         raise ToolError(f"Refused: options takes {_hooks().options_min()} to {_hooks().options_max()} entries, got {len(options)}: {_OPT_FORM}")
-    out, seen = [], set()
+    out, seen, faults, recs = [], set(), [], 0      # every option that fails is a fault of its own
     for i, o in enumerate(options, 1):
         if not isinstance(o, dict):
-            raise ToolError(f"Refused: option {i} is not an object: {_OPT_FORM}")
+            faults.append(f"Refused: option {i} is not an object: {_OPT_FORM}")
+            continue
         label, line, rec = _svcstore._shown_ids(str(o.get("label") or "").strip()), _svcstore._shown_ids(_hooks().unlink_ids(str(o.get("line") or "").strip())), o.get("recommended", False)
         if isinstance(rec, str):
             rec = rec.strip().lower() in ("true", "yes", "1")
+        recs += rec is True
         if not label or not line:
-            raise ToolError(_option_gap(i, o, label, line))
+            faults.append(_option_gap(i, o, label, line))
+            continue
         hit = _OPTION_LINK.search(label + " " + line)
         if hit:
-            raise ToolError(f"Refused: option {i} ({label}) carries a link ({hit.group(0)[:80]}). An option is a clickable card that selects or unselects, so a link in it shows as raw text and can take the select click: "
+            faults.append(f"Refused: option {i} ({label}) carries a link ({hit.group(0)[:80]}). An option is a clickable card that selects or unselects, so a link in it shows as raw text and can take the select click: "
                             f"take the link out of the option and put it in the ask's Decide part, where a mockup goes as {_MOCKUP_ASK}; the option's line says in words what it is.")
+            continue
         if any(c in label + line for c in "\r\n\v\f\x85\u2028\u2029"):
-            raise ToolError(f"Refused: option {i} ({label}): its label and line are one line each")
+            faults.append(f"Refused: option {i} ({label}): its label and line are one line each")
+            continue
         lead = _ol.lone_letter_lead(label)
         if lead:
-            raise ToolError(f"Refused: option {i} ({label}) opens with a lone letter ({lead}). The board letters the options itself (A, B, C by place in the list you give), so a letter in a label can cross its own: "
+            faults.append(f"Refused: option {i} ({label}) opens with a lone letter ({lead}). The board letters the options itself (A, B, C by place in the list you give), so a letter in a label can cross its own: "
                             f"the same option could read as A on the card and B in the label. Name each design of a mockup by name, and use the same words in the mockup and in the options: label=\"One-line strip\", not \"B: one-line strip\".")
+            continue
         if len(label) > _hooks().option_label_max():
-            raise ToolError(f"Refused: option {i}'s label is longer than {_hooks().option_label_max()} characters; put the detail in its line")
+            faults.append(f"Refused: option {i}'s label is longer than {_hooks().option_label_max()} characters; put the detail in its line")
+            continue
         if len(line) > _hooks().option_line_max():
-            raise ToolError(f"Refused: option {i} ({label}): its line is longer than {_hooks().option_line_max()} characters; one sentence")
+            faults.append(f"Refused: option {i} ({label}): its line is longer than {_hooks().option_line_max()} characters; one sentence")
+            continue
         if label.lower() in seen:
-            raise ToolError(f"Refused: two options are labelled {label}")
+            faults.append(f"Refused: two options are labelled {label}")
+            continue
         seen.add(label.lower())
         out.append({"label": label, "line": line, "recommended": rec is True})
-    n = sum(o["recommended"] for o in out)
-    if n != 1:
-        raise ToolError(f"Refused: exactly one option is recommended (recommended: true), got {n}")
+    if recs != 1:
+        faults.append(f"Refused: exactly one option is recommended (recommended: true), got {recs}")
+    if faults:
+        raise _faults.refusals(faults)
     return out
 
 
@@ -232,6 +243,7 @@ def _evwait_gate(old: dict[str, Any], meta: dict[str, Any], creating: bool = Fal
     try:
         sp = _watching.event_spec(meta.get("wait_event"))
     except _ew.EventWaitError as e:
+        _faults.current().mark(_faults.EVENT)      # the model guards read the same phrase: this refusal is the one fault, theirs says it again
         raise ToolError(f"Refused: {e}")
     if sp.kind == _ew.BOX_ONLINE:
         sp = _evw_box_spec(sp)

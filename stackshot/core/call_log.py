@@ -90,6 +90,22 @@ def unfix(kind: str) -> str:
     return gone
 
 
+def mark() -> int:
+    """How many corrections the running call has noted so far (for `rewind`)."""
+    return len(_FIXES.get() or [])
+
+
+def rewind(n: int) -> None:
+    """Take back every correction noted since `mark()` gave `n`: a call refused for its faults corrected nothing (the checks that ran on past a fault, to name every fault at once, may have noted fixes for a write that was not made)."""
+    got = _FIXES.get()
+    if got is None or len(got) <= n:
+        return
+    del got[n:]
+    if (d := _DETAIL.get()) is not None:
+        for k in [k for k in d if not any(kk == k for kk, _ in got)]:
+            d.pop(k)
+
+
 def counted(kind: str, **detail: Any) -> None:
     """A fix of the server's own kind (server_fixes.record) whose reply already tells it in its own words: counted in the log, no line added to the reply."""
     fixed(kind, "", **detail)
@@ -316,9 +332,14 @@ _KINDS: tuple[tuple[str, str], ...] = (
 _KIND_RX = tuple((re.compile(p, re.I), name) for p, name in _KINDS)
 
 
+_COMBINED_RX = re.compile(r"Refused: \d+ problems in this call[^\n]*\n\(1\) (.*?)(?:\n\(2\) |\nNot checked yet|\Z)", re.S)      # faults.combine's shape
+
+
 def kind_of(why: str) -> str:
     """A refusal's text → the kind it is counted under: a named kind of _KINDS, else the text with its ids and numbers folded to 'N' and cut at 70 characters."""
     t = str(why or "")
+    if m := _COMBINED_RX.match(t):          # a refusal of several faults (model/faults.py): counted under its first fault, as a refusal of that one alone is
+        t = "Refused: " + m.group(1)
     for rx, name in _KIND_RX:
         if rx.search(t):
             return name
