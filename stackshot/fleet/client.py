@@ -413,6 +413,11 @@ runs on every box.
                                 happened, printing only what the session should read.
 
 The server's address: $STACKSHOT_URL, else <secrets>/client.url (one line), else [client] url in stackshot.toml.
+Who the call is from: this machine's token (<secrets>/client.token), unless $STACKSHOT_CLIENT_PASS holds a value: then that value goes as the
+Bearer of every get and post of that process instead, and the token file is not read. A caller with a key of its own (docs/client-contract.md, *A caller's
+own key*) trades a signed claim at POST /keys/pass for a pass (ssp_...) and sets the variable for the New session form's calls (post project-agent,
+project-agent-rename, project-agent-retire) only. The client sends the value as it is; the server decides what a pass opens, and refuses what it does not.
+An unset or empty variable changes nothing. The value is never printed, logged or written to a file, and no error text of this client repeats it.
 The machine's fetcher is puller.py, next to this file."""
 import os as _os, sys as _sys
 if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py): the checkout must be importable
@@ -475,35 +480,62 @@ def server_url() -> str:
     return (u or str(_cfg.get("client", "url") or "")).rstrip("/")
 
 
+PASS_ENV = "STACKSHOT_CLIENT_PASS"
+
+
+def _pass() -> str:
+    """The caller's pass from $STACKSHOT_CLIENT_PASS ("" when unset, empty or blanks): sent as the Bearer in place of the machine token. Held only in this process; never printed or written."""
+    return os.environ.get(PASS_ENV, "").strip()
+
+
+def _scrub(text: str, tok: str) -> str:
+    """`text` with the pass taken out, as typed and as an exception's repr writes it: a value that is not a pass, or one the transport refused, never reaches an error text."""
+    if not tok: return text
+    for form in {tok, repr(tok)[1:-1], ascii(tok)[1:-1], repr(tok.encode("utf-8", "replace"))[2:-1]}:
+        if form: text = text.replace(form, "<pass>")
+    return text
+
+
+def _fail(e: Exception, tok: str) -> str:
+    """The text of a call that raised. With a pass in use only a network fault (an OSError) says more than its type, and its text has the pass taken out."""
+    if tok and not isinstance(e, OSError): return f"{type(e).__name__}: detail withheld while {PASS_ENV} is in use"
+    return f"{type(e).__name__}: {_scrub(str(e), tok)[:160]}"
+
+
 def get(what: str, key: str = "", timeout: float = 10.0, **extra: str) -> tuple[int, str]:
-    """One read from the server with this machine's token → (HTTP status, body). 0 = the server could not be reached. `extra`:
+    """One read from the server with this machine's token (or, when $STACKSHOT_CLIENT_PASS is set, with that pass) → (HTTP status, body). 0 = the server could not be reached. `extra`:
     further query parameters (item-facts' ids)."""
     if what not in READS: return 404, "no such read: " + " | ".join(READS)
-    try: tok = open(TOKEN, encoding="utf-8").read().strip()
-    except Exception: return 401, f"no token on this machine ({TOKEN}): mint one on the server box and provision it"
+    pas = _pass(); tok = pas
+    if not pas:
+        try: tok = open(TOKEN, encoding="utf-8").read().strip()
+        except Exception: return 401, f"no token on this machine ({TOKEN}): mint one on the server box and provision it"
     q = {**({"key": key} if key else {}), **{k: v for k, v in extra.items() if v}}
     url = f"{server_url()}/client/{what}" + ("?" + urllib.parse.urlencode(q) if q else "")
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + tok, "User-Agent": "stackshot-client"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r: return r.status, r.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e: return e.code, e.read().decode("utf-8", "replace")
-    except Exception as e: return 0, f"{type(e).__name__}: {str(e)[:160]}"
+        with urllib.request.urlopen(req, timeout=timeout) as r: return r.status, _scrub(r.read().decode("utf-8", "replace"), pas)
+    except urllib.error.HTTPError as e: return e.code, _scrub(e.read().decode("utf-8", "replace"), pas)
+    except Exception as e: return 0, _fail(e, pas)
 
 
 def post(what: str, body: dict, timeout: float = 20.0):
-    """One write to the server with this machine's token → (HTTP status, the decoded JSON answer, or the text when it is not
+    """One write to the server with this machine's token (or, when $STACKSHOT_CLIENT_PASS is set, with that pass) → (HTTP status, the decoded JSON answer, or the text when it is not
     JSON). 0 = the server could not be reached."""
-    try: tok = open(TOKEN, encoding="utf-8").read().strip()
-    except Exception: return 401, f"no token on this machine ({TOKEN}): mint one on the server box and provision it"
+    pas = _pass(); tok = pas
+    if not pas:
+        try: tok = open(TOKEN, encoding="utf-8").read().strip()
+        except Exception: return 401, f"no token on this machine ({TOKEN}): mint one on the server box and provision it"
     req = urllib.request.Request(f"{server_url()}/client/{what}", data=json.dumps(body).encode(), method="POST",
                                  headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json", "User-Agent": "stackshot-client"})
     def dec(raw: bytes):
-        try: return json.loads(raw.decode("utf-8", "replace"))
-        except Exception: return raw.decode("utf-8", "replace")
+        text = _scrub(raw.decode("utf-8", "replace"), pas)
+        try: return json.loads(text)
+        except Exception: return text
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r: return r.status, dec(r.read())
     except urllib.error.HTTPError as e: return e.code, dec(e.read())
-    except Exception as e: return 0, f"{type(e).__name__}: {str(e)[:160]}"
+    except Exception as e: return 0, _fail(e, pas)
 
 
 def held_for(uuid: str, name: str = "", timeout: float = 3.0) -> tuple[str, list[str]]:
