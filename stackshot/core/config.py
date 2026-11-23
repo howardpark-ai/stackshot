@@ -16,8 +16,10 @@ CLI (for shell scripts; `bin/stackshot config ...`, or `python3 <checkout>/stack
                           stackshot config check  → exit 0 when the file names no removed mode; otherwise the refusal line(s), exit 1
                                                      (importing this module does the same: see REMOVED)
 
-Live reload: a long-running process (the server, anchor-hub) calls reload() on SIGHUP, which systemd sends on
-`systemctl --user reload` when stackshot-reload.path sees the file change. A valid file replaces CFG at once and every reader
+Live reload: a long-running process calls reload(). The server does on SIGHUP, which systemd sends on
+`systemctl --user reload` when stackshot-reload.path sees the file change; the client box's puller (fleet/puller.py) has no signal
+and no unit: once per poll cycle it stats the file (a link followed, so a stackshot.toml that links into another repository counts)
+and calls reload() when signature() differs from SIG, the file's signature as of the last read of it (set here, at import and in reload(), so a puller re-run in the same process, which keeps this module, still sees a change made since the config was loaded). A valid file replaces CFG at once and every reader
 sees it at its next get(); a broken one is logged and the running config kept. The keys of RESTART_ONLY keep their running
 value until the next restart. So a reader must never copy a setting into a module constant: read it where it is used.
 """
@@ -50,6 +52,21 @@ def _find() -> Path:
 
 
 PATH = _find()
+
+
+def signature(p: Path | None = None) -> tuple | None:
+    """What identifies the config file's content on disk: the resolved path and the device, inode, size and mtime of the file the path leads to (os.stat follows a link,
+    so a stackshot.toml that links into another repository is watched at its target; a link pointed at another file changes the resolved path). None when it cannot be
+    stat'ed (the file vanished for a moment)."""
+    p = PATH if p is None else p
+    try:
+        st = os.stat(p)
+        return (os.path.realpath(p), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    except OSError:
+        return None
+
+
+SIG: tuple | None = signature()      # the file's signature as of the last read of it (taken just BEFORE the read, so a change during it is seen at the next look); load() below at import, reload() after
 
 
 def load(p: Path = PATH) -> dict[str, Any]:
@@ -1351,7 +1368,8 @@ def reload() -> list[str] | None:
     """Re-read the file (PATH) and check it as `config.py check` does. Valid: swap CFG at once and → the live keys that changed
     ([] for none); a changed RESTART_ONLY key keeps its running value and is logged, never applied. Invalid (a TOML syntax
     error, a missing file, a refused key): log why, keep CFG as it is and → None. Never raises."""
-    global CFG, PENDING
+    global CFG, PENDING, SIG
+    SIG = signature()                                   # before the read, and kept when the file then fails to load: a broken file is looked at (and said) once, not at every look
     try:
         new = load(PATH)
         bad = refused(new)

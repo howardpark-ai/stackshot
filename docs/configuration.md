@@ -7,6 +7,8 @@ else a `stackshot.toml` next to the code, else the shipped `stackshot.example.to
 read; nothing is merged. The table lists every key of `stackshot.example.toml` with its example value. "Yes" in the last
 column marks what a second person must set; "if used" marks what matters only with that optional piece.
 
+A running process reads the file again without a restart: the server on `systemctl --user reload` (SIGHUP, sent when `stackshot-reload.path` sees the file change), and a client box's puller (puller 13) by itself, once per poll cycle, when the file it was started with has changed (a `stackshot.toml` that is a link into another repository is watched at its target, and a link pointed at another file counts as a change). A valid file replaces the running config at once; a broken one is logged and the running config kept; the restart-only keys keep their running value until the next restart. A key marked "Live" is read where it is used, so the next read sees the new value.
+
 | Key | Example | Meaning | Set |
 |---|---|---|---|
 | `instance.name` | `"stackshot"` | The product name in tool texts; the connector's display name is set on claude.ai, not here. | |
