@@ -208,8 +208,8 @@ check("3 recovery: no builder in the project and the cold call off: nobody can t
       "a3" in done and bool(ho(3).get("recovery_at")) and ho(3).get("stall") is True and ho(3).get("to") == "home-peer3" and m3.get("mover") == "home-peer3" and "stuck" not in ho(3) and "stuck_reason" not in ho(3), (done, ho(3), log_of(3)))
 check("3 recovery: …a History line says which session is quiet, who was asked and what was tried", "home-peer3 is quiet" in log_of(3)[-1]["text"] and "home-beta-front was asked to recover it" in log_of(3)[-1]["text"] and "tried:" in log_of(3)[-1]["text"], log_of(3))
 rp = main_recovery_pushes("a3")
-check("3 recovery: …exactly one message went to the project's -main agent (beta lists no background agent, so there is no builder to ask), marked for the owner on its first line, then `[stackshot] <item> …`, naming the quiet session and asking it to decide; it owes no reply; the fleet's builder was not asked",
-      len(rp) == 1 and rp[0][1].startswith(f"[for {OWN}]\n[stackshot] a3 ") and "home-peer3" in rp[0][1] and "decide" in rp[0][1] and "no reply is owed" in rp[0][1] and not recovery_pushes("a3"), rp)
+check("3 recovery: …exactly one message went to the project's -main agent (beta lists no background agent, so there is no builder to ask), with no owner mark, opening `[stackshot] <item> …`, naming the quiet session and asking it to decide; it owes no reply; the fleet's builder was not asked",
+      len(rp) == 1 and rp[0][1].startswith("[stackshot] a3 ") and f"[for {OWN}]" not in rp[0][1] and "home-peer3" in rp[0][1] and "decide" in rp[0][1] and "no reply is owed" in rp[0][1] and not recovery_pushes("a3"), rp)
 check("3 recovery: …nothing went to the quiet session or the project's front, and the item is not on the owner's list: no decision in needs, no ask, no options, no idle raise, and the model keeps its session as the mover",
       len(pushes_to("home-peer3", "a3")) == 1 and "decision" not in (m3.get("needs") or []) and not m3.get("ask") and not m3.get("options") and not (m3.get("idle") or {}).get("raised")
       and not _item_read._model_of({**rd(3), "gid": "a3"}).owner_moves, (pushes_to("home-peer3", "a3"), m3))

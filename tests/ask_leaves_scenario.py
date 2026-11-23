@@ -292,6 +292,16 @@ check("his late option click is kept as a comment, applies nothing and is not st
 res = answer_svc._answer("a3", "", "actually ship it", "answer")
 check("his late note is a comment too (a stale tab's Send as an answer)", res == "comment" and rd(3)["metadata"]["answers"][-1]["kind"] == "comment", res)
 
+# the notice to the mover when the server took an ask off his move: the owner has nothing to do there, so a front agent mover hears it without his mark; a plain agent hears the same line
+_fk = telling.front_keeper
+for who, front in (("front", True), ("plain", False)):
+    telling.front_keeper = lambda w, p="", strict=False, _f=front: (_f, "")
+    item(760 if front else 761, mover="home-agent"); k = 760 if front else 761; upd(f"a{k}", ask=ASK, needs=["decision"], options=OPTS); told.clear()
+    asks_svc._ask_leave(f"a{k}", "the ask is wrong", "", ASK)
+    n_ask = [x for x in told if x[3] == "ask"]
+    check(f"the notice that the ask came off his move reaches the mover ({who} agent), once, with no owner mark", len(n_ask) == 1 and n_ask[0][0] == f"a{k}" and n_ask[0][2].startswith("[stackshot] the ask on ") and "[for " not in n_ask[0][2], told)
+telling.front_keeper = _fk
+
 # the same on the three plain sentences, the bullet in next, and a step; everything around the sentence leaves the ask standing
 for k, t in zip((701, 702, 703), ("My question is moot.", "This ask is no longer needed.", "The ask is stale")):
     item(k, mover="home-agent"); upd(f"a{k}", ask=ASK, needs=["decision"], options=OPTS)

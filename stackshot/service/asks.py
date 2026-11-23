@@ -41,7 +41,6 @@ from stackshot.service.save_hooks import hooks as _hooks
 from stackshot.waits import stall as _stall
 from stackshot.waits import watchers as _watch
 
-_FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as web/tools/text.py holds it
 
 
 # ----------------------------------------------------------------------------- the ask line
@@ -252,7 +251,7 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
             f"The item is back with {_sr._session_label(to) if to else 'its default mover'}. If he answers it late, his answer is kept as a comment → {_item_url(gid) or _telling.notice_link(gid)}")
     if to and not (sender.strip() and _handoff.ho_same(to, sender)):
         try:
-            _telling.tell_woken(gid, _hooks().session_id(to), f"{_FOR_OWNER} {line}" if _telling.front_keeper(to, str(meta.get("project") or ""))[0] else line, tag="ask")
+            _telling.tell_woken(gid, _hooks().session_id(to), line, tag="ask")
         except Exception as e:  # noqa: BLE001  — the ask is off his move; a notice that fails is a stderr line
             print(f"ask: {gid} mover not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     print(f"ask: {gid} taken off the owner's move (its author's word): {why}", file=sys.stderr, flush=True)

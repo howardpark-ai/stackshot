@@ -158,8 +158,8 @@ for live in (True,):      # the router rules every project since the "router off
     check(f"close with his said entry, owner a front agent, {mode}: one closed row", len(rr) == 1, rows())
     check(f"…naming who closed it, the outcome, the subject and the reason; no item id inside (the list shows it beside)",
           rr and rr[0]["what"] == f"closed by osprey-x (done): [home] item {gid_[1:]} — PR 14 is live" and rr[0]["item"] == gid_ and rr[0]["project"] == "projects/alpha" and not rr[0]["urgent"], rr)
-    check(f"…{mode}: the front agent is told by its own message and no other: one line with the mark, no row-style or old-style notice (Sun Oct 25th 2026)",
-          [x[1] for x in to_front(p0) if "closed" in x[1] or "[for Oliver]" in x[1]] == [f"[for Oliver] [stackshot] {gid_} [home] item {gid_[1:]}: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/{gid_}"], pushes()[p0:])
+    check(f"…{mode}: the front agent is told by its own message and no other: one line without the owner mark (nothing is for him on a close), no row-style or old-style notice (Sun Oct 25th 2026)",
+          [x[1] for x in to_front(p0) if "closed" in x[1] or "[for Oliver]" in x[1]] == [f"[stackshot] {gid_} [home] item {gid_[1:]}: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/{gid_}"], pushes()[p0:])
     check(f"…{mode}: no `close` notice is recorded for the router", not [n for n in routing.read("projects/alpha")[n0:] if str(n.get("label", "")).startswith("close ")], routing.read("projects/alpha")[n0:])
     check(f"…{mode}: the reply says it is a row on the For you list and that the owner was told at once", "is a row on his For you list" in out and "not a message to" not in out
           and "(its mover osprey-main is a front agent: told at once that it was closed)" in out and "not told" not in out, out)
@@ -191,8 +191,8 @@ for live in (True,):      # the router rules every project since the "router off
     item(b + 7, owner=B); item(b + 8, owner=B, needs=["osprey-x"], next="osprey-x: migrating")
     g = lambda k: f"a{b + k}"
     p0 = len(pushes()); out = cl(b); settle()
-    check(f"owner told, {mode}: a close by the builder (no words on the item, so no row): one marked line to the front agent owner, with the outcome, the subject and the item link",
-          to_owner(A, g(0), p0) == [f"[for Oliver] [stackshot] {g(0)} [home] item {b}: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/{g(0)}"] and not of(g(0)), (pushes()[p0:], of(g(0))))
+    check(f"owner told, {mode}: a close by the builder (no words on the item, so no row): one unmarked line to the front agent owner, with the outcome, the subject and the item link",
+          to_owner(A, g(0), p0) == [f"[stackshot] {g(0)} [home] item {b}: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/{g(0)}"] and not of(g(0)), (pushes()[p0:], of(g(0))))
     check(f"…{mode}: the reply says so, and not the quiet 'not told' line", "told at once that it was closed" in out and "not told" not in out, out)
     p0 = len(pushes()); out = cl(b + 1, sender="osprey-main"); settle()
     check(f"owner told, {mode}: a close by the owner itself tells the owner nothing", not to_owner(A, g(1), p0) and "told at once" not in out, (pushes()[p0:], out))
@@ -237,15 +237,15 @@ check("...a line of another agent still open: the builder's own last line done p
 # (a) to (c): a builder leaving needs while another session stays, its last work line, and the hand-back's one line, are in router_live_scenario (it has a second background agent)
 # (d) another session closes the item while a second session is still named in its needs: the owner still gets the close line
 item(66, needs=["osprey-x", "osprey-docs"]); p0 = len(pushes()); outd = cl(66); settle()
-check("(d) a close by another session: the front agent owner still gets its one marked close line", to_owner(A, "a66", p0) == [f"[for Oliver] [stackshot] a66 [home] item 66: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/a66"]
+check("(d) a close by another session: the front agent owner still gets its one unmarked close line", to_owner(A, "a66", p0) == [f"[stackshot] a66 [home] item 66: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/a66"]
       and "told at once that it was closed" in outd, (pushes()[p0:], outd))
 # the done check's own close tells a front agent owner too
 CHK = "item_closed a99"
 item(92); item(93); item(94, owner="Oliver"); item(95, owner="an-outside-party"); item(96)
 fy.set_flag("a93", "mute")
 p0 = len(pushes()); checks_svc.check_close("a92", _service_store._load("a92"), CHK, time.time()); settle()
-check("done check: its close tells the front agent owner at once, one marked line, the same shape as a session's close with the check as the closer",
-      len(to_owner(A, "a92", p0)) == 1 and to_owner(A, "a92", p0)[0].startswith("[for Oliver] [stackshot] a92 [home] item 92: closed by stackshot's done check: done (done check passed: ")
+check("done check: its close tells the front agent owner at once, one unmarked line, the same shape as a session's close with the check as the closer",
+      len(to_owner(A, "a92", p0)) == 1 and to_owner(A, "a92", p0)[0].startswith("[stackshot] a92 [home] item 92: closed by stackshot's done check: done (done check passed: ")
       and to_owner(A, "a92", p0)[0].endswith(f") \u2192 {BOARD}/items/a92"), pushes()[p0:])
 # Oliver not there for the pane: the same close tells nobody (the item's close revision is the board's record), and the routing log records it (ruled archived: nothing was filed for the agent's next turn)
 PRESENT[0] = False; item(67, needs=["osprey-x"]); p0 = len(pushes()); n0 = len(routing.read("projects/alpha")); outh = cl(67); settle(); PRESENT[0] = True
@@ -255,17 +255,17 @@ check("Oliver not there for the pane: a close tells the front agent owner nothin
 p0 = len(pushes()); checks_svc.check_close("a93", _service_store._load("a93"), CHK, time.time()); settle()
 check("…a muted item: the owner is not told", not to_owner(A, "a93", p0), pushes()[p0:])
 p0 = len(pushes()); checks_svc.check_close("a94", _service_store._load("a94"), CHK, time.time()); checks_svc.check_close("a95", _service_store._load("a95"), CHK, time.time()); settle()
-check("…the owner Oliver, or a name that is no session: nobody is marked for it", not [x for x in pushes()[p0:] if ("a94" in x[1] or "a95" in x[1]) and "[for Oliver]" in x[1]], pushes()[p0:])
+check("…the owner Oliver, or a name that is no session: nobody is told of it", not to_owner(A, "a94", p0) and not to_owner(A, "a95", p0), pushes()[p0:])
 # the other small gaps: [board] tell_owner off, and an owner that is Oliver or no session, on a close and on a handed-back step
 _cfg.CFG.setdefault("board", {})["tell_owner"] = False
 item(97, needs=["osprey-x"], next="osprey-x: only"); item(98, needs=["external", "osprey-x"])
 p0 = len(pushes()); checks_svc.check_close("a96", _service_store._load("a96"), CHK, time.time()); out = cl(97); outh = _update_svc._update("a98", needs=["external"], next="Oliver: handed back", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
-check("tell_owner off: a done check's close, a session's close and an item back with the owner alone tell the front agent owner nothing", not [x for x in pushes()[p0:] if x[0] == A and re.search(r"a9[678]\b", x[1]) and x[1].startswith("[for Oliver]")]
+check("tell_owner off: a done check's close, a session's close and an item back with the owner alone tell the front agent owner nothing", not [x for x in pushes()[p0:] if x[0] == A and re.search(r"a9[678]\b", x[1]) and not x[1].startswith("[board]")]
       and "told at once" not in out + outh, (pushes()[p0:], out, outh))
 _cfg.CFG["board"]["tell_owner"] = True
 item(99, owner="Oliver", needs=["osprey-x"], next="osprey-x: only"); item(64, owner="an-outside-party", needs=["osprey-x"], next="osprey-x: only")
 p0 = len(pushes()); outs = [_update_svc._update("a99", work={"state": "done"}, sender="osprey-x"), _update_svc._update("a64", work={"state": "done"}, sender="osprey-x"), cl(99), cl(64)]; settle()
-check("an owner that is Oliver or no session (an outside party's name): a close tells nobody marked, and the reply does not say it told one", not [x for x in pushes()[p0:] if re.search(r"a(99|64)\b", x[1]) and x[1].startswith("[for Oliver]")]
+check("an owner that is Oliver or no session (an outside party's name): a close tells nobody, and the reply does not say it told one", not [x for x in pushes()[p0:] if x[0] == A and re.search(r"a(99|64)\b", x[1]) and not x[1].startswith("[board]")]
       and not any("told at once" in o for o in outs), (pushes()[p0:], outs))
 cfg(live=True)
 
@@ -683,8 +683,8 @@ check("the row write fails on a close with his words: no row, the failure is log
       (of("a60"), err12.getvalue(), told[t12:]))
 check("…the writer's reply says which happened: the list could not be written, so the old notice was sent (not 'a row', not 'not told')",
       "For you list could not be written" in out60 and "sent to osprey-main instead" in out60 and "is a row on his For you list" not in out60 and "not told" not in out60, out60)
-check("a watched close with none of his words has no fallback: no row, no old-style notice to the owner (its own marked line of Sun Oct 25th 2026 is the only one)",
-      not of("a62") and len(to_a("a62")) == 1 and to_a("a62")[0][1].startswith("[for Oliver] [stackshot] a62 [home] item 62: closed by osprey-x: done") and "For you list" not in out62, (to_a("a62"), out62))
+check("a watched close with none of his words has no fallback: no row, no old-style notice to the owner (its own unmarked line is the only one)",
+      not of("a62") and len(to_a("a62")) == 1 and to_a("a62")[0][1].startswith("[stackshot] a62 [home] item 62: closed by osprey-x: done") and "For you list" not in out62, (to_a("a62"), out62))
 check("the done check's close with his words: same fallback, the mover is in the ids told, and no keeper (the mover alone)", len(to_a("a61 closed by stackshot's done check")) == 1 and A in told61 and len(told61) == 1, (told61, told[t12:]))
 out63 = (item(63, said=SAID), cl(63))[1]; settle()
 check("(afterwards) with the list writable again the same close is a row, not a notice", len(of("a63", "closed")) == 1 and not to_a("a63 closed") and "is a row on his For you list" in out63, (of("a63"), out63))

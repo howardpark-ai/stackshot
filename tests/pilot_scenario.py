@@ -3878,8 +3878,8 @@ check("tell owner: the project's keeper changing a front agent owner's next send
 n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a16", sender="work-osprey", outcome="done", reason="the keeper closes", description="- Goal: Done"); time.sleep(0.7)
 check("tell owner: the keeper closing a front agent owner's item sends nothing to the page key, the quiet line standing", not to_page(n1) and "went to projects/alpha" not in res, (wait_push(0)[n1:], res[-200:]))
 n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a17", sender="plain-y", outcome="done", reason="plain closes", description="- Goal: Done"); time.sleep(0.7)
-check("tell owner: a close by another session on a front agent's item that is also its project's keeper (no builder) reaches the owner in its one marked line (tell_owner_close) and sends nothing to the page key",
-      not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[for the owner] [stackshot] a17 [home] item 17: closed by plain-y: done (plain closes) → https://stackshot.example.com/items/a17"], (wait_push(0)[n1:], res[-200:]))
+check("tell owner: a close by another session on a front agent's item that is also its project's keeper (no builder) reaches the owner in its one line, with no owner mark (tell_owner_close) and sends nothing to the page key",
+      not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[stackshot] a17 [home] item 17: closed by plain-y: done (plain closes) → https://stackshot.example.com/items/a17"], (wait_push(0)[n1:], res[-200:]))
 # a front agent owner whose write no relay carried (outside the pilot): the page key, through its keeper or stand-in, once
 _NOTE = lambda g, n, what: f"[board] {g} [home] item {n[1:]}: plain-y {what} (mover work-osprey-main may need to act) → https://stackshot.example.com/items/{g}"
 item2(18, "projects/delta", A)
@@ -3894,8 +3894,8 @@ check("tell owner: …naming no builder in the item's needs (the page key's deli
 n1 = len(wait_push(0)); _update_svc._update("a18", next="a second front change", sender="plain-y"); time.sleep(0.5)
 check("tell owner: …and a second change inside ten minutes sends no second inbound", not to_page(n1) and len([x for x in routing.read("projects/delta") if x["kind"] == "message" and "may need to act" in x["text"]]) == 1, wait_push(0)[n1:])
 item2(19, "projects/delta", A); n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a19", sender="plain-y", outcome="done", reason="front owner's item closed", description="- Goal: Done"); time.sleep(0.7)
-check("tell owner: a close of a front agent owner's item no relay carried is told to the owner itself, once, marked, and not also to the page key; the 'not told' line is gone",
-      not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[for the owner] [stackshot] a19 [home] item 19: closed by plain-y: done (front owner's item closed) \u2192 https://stackshot.example.com/items/a19"]
+check("tell owner: a close of a front agent owner's item no relay carried is told to the owner itself, once, unmarked, and not also to the page key; the 'not told' line is gone",
+      not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[stackshot] a19 [home] item 19: closed by plain-y: done (front owner's item closed) \u2192 https://stackshot.example.com/items/a19"]
       and "not told; the board shows it" not in res and "told at once that it was closed" in res, (wait_push(0)[n1:], res[-300:]))
 # a builder's step on a front agent owner's item is never pushed to the owner
 item2(129, "projects/alpha", A, needs=[Xn], next=f"{Xn}: w"); item2(142, "projects/alpha", A, needs=["external", Xn])

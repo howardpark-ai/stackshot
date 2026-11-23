@@ -21,7 +21,6 @@ from typing import Any
 
 from stackshot.core import config as _cfg
 from stackshot.core import instance as _inst
-from stackshot.core.instance import OWNER
 from stackshot.fleet.sessions_registry import _session_label, _sessions_index
 from stackshot.github import ghsync as _gh
 from stackshot.model.bullet_text import _clip_line
@@ -35,7 +34,6 @@ from stackshot.waits import handoff as _ho
 from stackshot.waits import ladder as _ladder
 from stackshot.waits import stall as _stall
 
-_FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as server.py holds it
 
 
 def ladder_on() -> bool:
@@ -151,17 +149,17 @@ def ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "list
 
 def ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, dict[str, str]]") -> None:
     """ONE notice to the -main agent `to` for the items (gid, line) of silent live background movers that came due together. It goes through the gate as a notice that asks a front agent to act (tag
-    "stall", kind exempt), marked for the owner as every message a front agent takes is, and says how to stop the repeats. A lone item reads as a sentence about that item, several as a list."""
+    "stall", kind exempt), unmarked (the owner has nothing to do there: the move is the agent's; the gate delivers it by its kind, not its first line), and says how to stop the repeats. A lone item reads as a sentence about that item, several as a list."""
     gids = [g for g, _l in items]
     every = f"{_ladder.MAIN_EVERY / 3600.0:g} hours"
     stop = f"To stop the repeats, write to the item, park it or set its wait; it comes again in {every} while the item stays silent. "
     if len(items) == 1:
         d = info[gids[0]]
         again = f" {_session_label(to)} was told about this at {d['told']} and nothing has been written since." if d["told"] else ""
-        text = (f"{_FOR_OWNER}\n[stackshot] {_gh.shown(gids[0])} \"{d['subject']}\" has had no write from its background mover {d['mover']} since {d['since']} ({d['span']}), and that session is live, so the ladder asks no one else.{again} "
+        text = (f"[stackshot] {_gh.shown(gids[0])} \"{d['subject']}\" has had no write from its background mover {d['mover']} since {d['since']} ({d['span']}), and that session is live, so the ladder asks no one else.{again} "
                 f"Decide whether it needs a nudge or a different mover: message {d['mover']}, or hand the item on (update mover=<session>). If you do nothing it stays with {d['mover']}. {stop}→ {_telling.notice_link(gids[0])}")
     else:
-        head = f"{_FOR_OWNER}\n[stackshot] {len(items)} items have had no write from their background movers, and those sessions are live, so the ladder asks no one else:"
+        head = f"[stackshot] {len(items)} items have had no write from their background movers, and those sessions are live, so the ladder asks no one else:"
         tail = (f"\nDecide for each whether it needs a nudge or a different mover: message its mover, or hand the item on (update mover=<session>). If you do nothing each stays with its mover. {stop}"
                 f"→ {_inst.BOARD_URL}")
         text = head + "\n" + "\n".join("- " + l for _g, l in items) + tail

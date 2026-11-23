@@ -1,5 +1,5 @@
 """Scenario test for where the stall ladder ends (service/pane_recovery.py: _recovery_target, _recovery_tell, the `recover` step of handoff.next_step): a front-only project (anchors.front_only: its `agents:` map lists no
-`background:` agent, so there is no builder to try) ends at its -main agent, marked for the owner as every message to a front agent is, instead of the fleet's builder; a project with a builder is
+`background:` agent, so there is no builder to try) ends at its -main agent, with no owner mark (it is the agent's move), instead of the fleet's builder; a project with a builder is
 unchanged. Fixture data (English stand-in names) in a temporary store, the push replaced by a recorder, no network, no model call.
 
   1  the stall ladder in a front-only project: the cold call off, no builder, so the last rung asks the project's -main agent, once: one message marked `[for <owner>]` on its first line, naming the item and the
@@ -158,8 +158,8 @@ check("1 step 1 (the notice again) sends nothing to -main or the fleet's builder
 done = stk(T2)
 mp = MAIN_ONLY("a1")
 check("1 nobody can take it (no builder in the project, cold call off): the record carries the request and the mover is unchanged", "a1" in done and bool(ho(1).get("recovery_at")) and mt(1).get("mover") == "home-peer3", (done, ho(1)))
-check("1 …ONE message went to the project's -main agent, marked for the owner on its first line, naming the item and the quiet session, asking it to decide, owing no reply",
-      len(mp) == 1 and mp[0][1].startswith(f"[for {OWN}]\n[stackshot] a1 ") and "home-peer3" in mp[0][1] and "decide" in mp[0][1] and "no builder" in mp[0][1] and "no reply is owed" in mp[0][1], mp)
+check("1 …ONE message went to the project's -main agent, with no owner mark, naming the item and the quiet session, asking it to decide, owing no reply",
+      len(mp) == 1 and mp[0][1].startswith("[stackshot] a1 ") and f"[for {OWN}]" not in mp[0][1] and "home-peer3" in mp[0][1] and "decide" in mp[0][1] and "no builder" in mp[0][1] and "no reply is owed" in mp[0][1], mp)
 check("1 …the fleet's builder was told nothing, and the quiet session got only the notice of step 1", not FLEET_ONLY("a1") and len(pushes_to("home-peer3", "a1")) == 1, pushes())
 check("1 …the History line says the -main agent was asked, and what was tried without a builder", "home-peer3 is quiet" in log_of(1)[-1]["text"] and "home-beta-front was asked to recover it" in log_of(1)[-1]["text"]
       and "project's builder" not in log_of(1)[-1]["text"], log_of(1))

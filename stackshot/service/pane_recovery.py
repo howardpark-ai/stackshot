@@ -38,7 +38,6 @@ from stackshot.service import writes as _writes
 from stackshot.service import agents as _agents
 from stackshot.waits import stall as _stall
 
-_FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as server.py holds it
 
 
 def _session_id(value: str) -> str:
@@ -169,7 +168,7 @@ def _recovery_tell(gid: str, item: dict[str, Any], quiet: str, why: str, tried: 
         else:
             meta = item.get("metadata") or {}
             if kind == "main":
-                text = (f"{_FOR_OWNER}\n[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it, and the project lists no builder to take it. "
+                text = (f"[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it, and the project lists no builder to take it. "
                         f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please decide what it needs: bring the session back, message {quiet}, or hand the item on (update mover=<session>). "
                         f"The item stays with {quiet} meanwhile, and no reply is owed (put the result on the item). → {_telling.notice_link(gid)}")
             else:

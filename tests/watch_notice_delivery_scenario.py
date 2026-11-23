@@ -12,6 +12,8 @@ recorder) and proves that dropping the mark changes nothing about who is told:
   4  the contrast that makes 1 mean something: a notice of the kind that is held (a progress notice) to the same front agent in the same state is held whether it carries the mark or not, so the gate does read
      the kind, and a watch notice is not of that kind
   5  the delivery program does not read the mark (push.py and inbox.py name no `[for ...]` test)
+  6  the other notices a front agent hears for its own move carry no mark either and are delivered as they were: a close by another session (pushed under his ask, held without it, marked or not),
+     the ladder's notice about a silent background mover (pushed with nobody there); a notice that carries his own words (his comment) keeps the mark
 
     tests/run-suite watch_notice_delivery        -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -156,6 +158,33 @@ check("4 …so the watch notice in 1 was pushed because of its kind: the same ga
 for f in ("push.py", "inbox.py"):
     src = (pathlib.Path(STACK) / "stackshot" / "fleet" / f).read_text(encoding="utf-8")
     check(f"5 stackshot/fleet/{f} has no test of the owner mark (nothing there reads `[for ...]`)", not re.search(r"\[for\b|for_owner|_owner_mark|FOR_OWNER", src), f)
+
+# ================================================================ 6. the other notices a front agent hears for its own move: no mark, delivered the same, and his own words keep it
+from stackshot.service import ladder as ladder_svc
+FR = "projects/echo"
+# 6a. a close by another session of an item the front agent moves and was asked to tell him about: one line, no mark, pushed (a close is delivered by its kind, here under his ask)
+item(6, status="completed", mover=F_B, tell_him=[F_B], needs=[], subject="[home] closed by another session")
+reset(); r6 = telling.tell_owner_close("a6", rd(6), SOLO, True, []); drain()
+p = pushes()
+check("6a a close by another session is pushed to the front agent that moves the item, once", len(p) == 1 and p[0][0] == U[F_B] and "closed by" in p[0][1], (r6, p))
+check("6a …with no owner mark anywhere in it, a notice that opens with the server's own tag", p and MARK not in p[0][1] and p[0][1].startswith("[stackshot] "), p)
+item(7, status="completed", mover=F_B, needs=[], subject="[home] closed, nobody asked")
+reset(); telling.tell_owner_close("a7", rd(7), SOLO, True, []); drain()
+check("6a the same close with no ask of his and nobody there is held, as it was with the mark: the gate reads the kind and the state, never the first line", pushes() == [] and telling.gate_result()[0] == "held", (pushes(), telling.gate_result()))
+reset(); telling.tell_woken("a7", U[F_B], MARK + " [stackshot] a7 closed", tag="owner"); drain()
+check("6a …and a close that carries the old mark is held exactly the same", pushes() == [], pushes())
+# 6b. the ladder's notice to a -main agent about a silent background mover: no mark, pushed while nobody is there (the stall tag asks its agent to act)
+item(8, mover=B_B, project="projects/delta", subject="[home] a silent mover's item")
+reset(); ladder_svc.ladder_main_tell(F_B, [("a8", "a8 line")], {"a8": {"subject": "[home] item 8", "mover": B_B, "since": "Mon Nov 9th 02:00", "span": "4 hours", "told": ""}}); drain()
+p = pushes()
+check("6b the ladder's notice about a silent background mover is pushed to the -main agent, once, with nobody there for its pane", len(p) == 1 and p[0][0] == U[F_B] and "has had no write from its background mover" in p[0][1], p)
+check("6b …unmarked, and it asks the agent to decide (the agent's move, nothing for the owner)", p and MARK not in p[0][1] and p[0][1].startswith("[stackshot] ") and "Decide whether it needs a nudge" in p[0][1], p)
+check("6b …delivered because of its tag: stall is of the kind that asks the agent to act", telling.FRONT_TAG_KIND.get("stall") == "exempt" and telling.FRONT_TAG_KIND.get("ask") == "exempt", None)
+# 6c. his own words keep the mark: his comment on GitHub and an item that waits on his decision are for him, the mover is told marked
+item(9, mover=F_B, subject="[home] he commented")
+reset(); told9 = telling.tell_comment("a9", rd(9), "please ship it on Friday"); drain()
+p = pushes()
+check("6c his comment on GitHub reaches the front agent that moves the item, marked: they are his own words", len(p) == 1 and p[0][0] == U[F_B] and p[0][1].startswith(MARK + " "), (told9, p))
 
 print(f"\n{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
