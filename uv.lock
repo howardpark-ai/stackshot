@@ -1776,6 +1776,7 @@ icons = [
     { name = "resvg-py" },
 ]
 server = [
+    { name = "cryptography" },
     { name = "fastmcp" },
     { name = "markdown-it-py" },
 ]
@@ -1783,6 +1784,7 @@ server = [
 [package.dev-dependencies]
 tests = [
     { name = "coverage" },
+    { name = "cryptography" },
     { name = "fastmcp" },
     { name = "httpx" },
     { name = "markdown-it-py" },
@@ -1792,6 +1794,7 @@ tests = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", marker = "extra == 'server'", specifier = ">=44" },
     { name = "fastmcp", marker = "extra == 'server'", specifier = ">=4.0,<5" },
     { name = "google-api-python-client", marker = "extra == 'anchor-hub'", specifier = ">=2.150" },
     { name = "google-auth", marker = "extra == 'anchor-hub'", specifier = ">=2.35" },
@@ -1807,6 +1810,7 @@ provides-extras = ["server", "anchor-hub", "icons"]
 [package.metadata.requires-dev]
 tests = [
     { name = "coverage", specifier = ">=7.10" },
+    { name = "cryptography", specifier = ">=44" },
     { name = "fastmcp", specifier = ">=4.0,<5" },
     { name = "httpx" },
     { name = "markdown-it-py", specifier = ">=4,<5" },

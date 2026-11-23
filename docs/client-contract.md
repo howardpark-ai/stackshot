@@ -1,6 +1,6 @@
 # The client contract
 
-What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, a gap in a scheduled job, a failed run of a scheduled job, an item a script opens for a background agent, and an item a script keeps in step with a condition. Back to the [README](../README.md).
+What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, a gap in a scheduled job, a failed run of a scheduled job, an item a script opens for a background agent, an item a script keeps in step with a condition, and a caller's own key. Back to the [README](../README.md).
 
 A machine where Claude Code runs needs three things from stackshot, and no copy of the config:
 
@@ -280,3 +280,50 @@ Each call prints one line and exits 0: `<item> opened`, `<item> refreshed`, `<it
 - **The subject** is the action and its object; the server puts the project scope's prefix before it, as for `item-open`. **The sender** is the script's own label (one word, at most 60 characters, never the person's name; default `client.py`).
 - **The row owes no page and tells no session.** It sets `TERMINAL_ROW` (`stackshot/service/writes.py`) as the other script routes do: no page debt for the script or the page's keeper, no notice to the `then` agent at the create. `_ITEMSYNC_LOCK` makes the look for an open item and the write one step, so two calls for one marker file one item.
   `tool-text`: a client call only, no MCP tool changes. Code: `stackshot/service/item_sync.py`; tests: `tests/item_open_scenario.py`.
+
+## A caller's own key
+
+A caller (the fleet tool) may be trusted by a key of its own instead of by the machine it runs on. Machine tokens stay as they are for the machine routes; what changes is how the New session form's calls
+(`post project-agent`, `post project-agent-rename`, `post project-agent-retire`, the For you list's two writes and the color tool's `/client/colors/combos` routes) prove who sends them. The gate
+(`_form_call` in `stackshot/service/projects.py`) takes either a live pass of an approved key (below) or, as before, a `sender` label in `[project_agent] form_senders` from a machine in
+`form_machines`; the host lists go once every caller holds a key. Nothing else of `/client` opens to a pass: any other verb answers 403 `{"error": "a pass opens only the New session form's calls: ..."}`.
+
+**The key.** An Ed25519 key pair the caller makes and keeps. The server keeps the public half, as `public_key` (its 32 raw bytes in base64url without padding, 43 characters) and knows it by its
+fingerprint: the SHA-256 of those 32 bytes in hex, 64 characters stored, the first 16 shown. A key is `pending` until the owner approves it, `approved` after, and gone when revoked; a pending key is
+trusted for nothing. Files in `<secrets>`: `keys-pending.json` (at most 5 keys, at most 3 of them from one source address, each kept 7 days) and `keys.json` (the approved ones), beside `clients.json`, 0600. A pending key keeps a short keyed hash of the
+address it came from (a secret the server holds in `<secrets>/keys-source.key`, 0600), never the address.
+
+**`POST /keys/enroll`**, no token, JSON body at most 8 KB: `{"public_key": "<43 characters>", "label": "<what the key is for>", "sender": "<the label its calls carry>"}`. `label` is at most 80
+characters of letters, digits, spaces and `_ , + -`, `sender` at most 80 of letters, digits and `_ -` (both start with a letter or digit; no character that makes markup, a link or a mention, since both are
+written on the board item, and so no `.`: the board makes a link of a bare domain such as `login.example.com`; both are shown in code spans there). A call's own `sender` is then the key's or starts with it and a `-` (a key enrolled as `sala` speaks as `sala-web` and `sala-retire`).
+200 `{"state": "pending" | "approved", "fingerprint": "<64 hex>", "short": "<first 16>", "item": "board#N" | ""}`; the same key again answers its state and changes nothing; `item` is the item of a pending key, and is `""` for a key that is already approved (the answer says `approved`, never which item the key had). 400 a body that is not an object
+or a key, label or sender that is not as above, or a weak key (not in its canonical form, no point of the curve, or a point of small order such as the identity); 413 a body over 8 KB; 429 more than 10 enrolls in 10 minutes from the caller's source address (or 300 from all addresses together), 5 keys already waiting, or 3 already waiting from that address (`retry_after` in seconds on the rate limit, with the `Retry-After` header);
+503 a read-only standby copy, or a key file the server cannot read (it writes nothing over a file it cannot parse; the owner repairs or moves it). A new pending key raises one board item on the project `[caller_keys] item_project` names (ask: whether the key may call as its sender; options Approve and Reject, Reject
+recommended; its Stakes part says that approving gives the key the whole New session form (registering an agent, renaming, retiring, the For you list) and every sender label that starts with its own and a `-`), filed under that project's front agent as a script's decision item; with no project set, or none that lists a front agent, no item is raised (`item` is `""`) and the command line below is the way.
+
+**Approving.** The owner's answer Approve on the item approves the key and Reject deletes it; either takes effect at the next enroll, or at the key's own next claim (the server looks at the item then, by the id kept on the key's entry, so no
+hook is needed and no request makes it scan the store), and the item is closed with the result. Neither the pending limit nor a rate limit stands in the owner's way: `keys approve`, `keys revoke` and a Reject on the item free a place at once. On the server box: `stackshot client keys list` (state, first 16 fingerprint characters, sender, label, item), `stackshot client keys approve <fingerprint>`, `stackshot client keys revoke
+<fingerprint>` (an approved or a pending key; its passes stop at once). A fingerprint is typed with at least its first 8 characters, as many as name one key. A key approved on the command line has its item closed at
+its first claim; the item of a key that is gone is closed by the next enroll that comes at least a minute after the last such look.
+
+**An accepted limit.** The five places for waiting keys are open to any caller, and enroll carries no proof that the caller holds the private key. So a caller with no right to ask can hold all five for their 7 days (from a few addresses, three of them from each), and a new caller cannot enroll while they are held: its enroll answers 429. The owner clears the places with Reject on a key's board item or with `stackshot client keys revoke <fingerprint>`; callers whose keys are approved are not affected, since they need no place.
+
+**`POST /keys/pass`**, no token, body `{"claim": "<compact JWS>"}` (at most 2048 characters): the claim is `<header>.<payload>.<signature>`, each part base64url without padding, the header `{"alg": "EdDSA"}`,
+the signature Ed25519 over the ASCII text `<header>.<payload>` made with the key. The payload: `iss` the key's fingerprint (64 lowercase hex), `aud` the board's address (`[instance] board_url`, as written or
+its origin), `iat` and `exp` in seconds since the epoch (numbers), `jti` a one-time id of 8 to 128 printable characters. The server refuses a claim whose life (`exp - iat`) is over 60 seconds or not
+positive, whose `iat` is more than 60 seconds from its own clock, that has expired, or whose `jti` it has seen from that key in the last minutes. 200 `{"pass": "ssp_...", "expires_in": 600, "fingerprint", "sender"}`:
+an opaque token, valid 10 minutes, kept in memory only (a server restart ends every pass, and the caller trades again), at most 20 live per key. The signature is checked before any limit is applied, and so are the claim's audience, its times and its jti. Until a signature has verified, the answer is the same for every fingerprint: a claim whose signature is not the named key's is 403 `state` `unknown` whether the key is approved, still waiting or not known to the server, so a caller with no right cannot find out which fingerprints exist or wait. Only a claim signed with the key itself is told more: `pending` for a key still waiting, the reason (401) when a claim of an approved key is stale, for another board or used. a claim that is fresh, for this board and unused is
+never turned away because of other callers, and is limited per key (30 a minute); nothing but such a claim, signed with that key, counts there. A request that does not get that far (unreadable, an unknown key, a signature that is not the key's,
+or a signed claim that is expired, for another board or already used, which anyone who has seen it can send again) is
+limited per source address (60 a minute), and all such requests together by a high ceiling (600 a minute) that a single address cannot use up. The source address is the connection's, as the server reads it (the peer, or the client the
+proxy in front of it names in `X-Forwarded-For` when that proxy is on the same box); a header the caller sends itself is never taken for it, an IPv4-mapped IPv6 address counts as the IPv4 address it carries, and any other IPv6 address counts by its /64. 400 a claim that is no compact JWS or whose parts are not JSON
+objects (a part nested too deep for the parser included); 401 a header that is not EdDSA or an `iss` that is not a fingerprint (nothing is looked up for these), and, for a claim whose signature verified, an `aud` that is not this board, a missing or bad `iat`, `exp` or `jti` (a number that is not finite or is past a trillion seconds is bad), a life or clock
+fault, an expired claim or a reused `jti` (`error` says which); 403 a key that is not approved, or a signature that is not the named key's (`state`: `unknown`; `pending` only for a claim signed with the key that is still waiting); 429 a limit above; 503 a standby copy, no `[instance]
+board_url`, or no `cryptography` package on the server (the signature library its other dependencies bring).
+
+**Using the pass.** `Authorization: Bearer <pass>` on a form call, where a machine token went. The server reads it as the caller `pass:<fingerprint>`, which is a form call when the key is still approved and the
+call's `sender` is the key's label or starts with it and a `-`; a key revoked after the pass was given fails the next call. A pass whose call is not the form's (for `post project-agent`: a `sender` the key does not cover, including a session
+id) is 403, never the session-id branch of that verb. A call with neither a valid token nor a valid pass is 401.
+
+  `tool-text`: client calls only, no MCP tool changes. Code: `stackshot/fleet/caller_keys.py` (the files), `stackshot/service/caller_pass.py` (enroll, claim, pass, the gate), the routes in
+  `stackshot/web/routes/client_api.py`; tests: `tests/caller_keys_scenario.py`.
