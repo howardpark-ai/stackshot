@@ -467,6 +467,8 @@ hook_url = "https://hooks.example.com"              # the public address of the 
 hook_port = 8010
 self_emails = []                                    # the owner's own edits and comments are not news (Notion)
 slack_team = ""                                     # permalink host when Slack's auth_test carries no url
+github_login = ""                                   # the login whose own GitHub activity is not news, when `gh api /user` is refused (the token is a GitHub App's: the bot's login, e.g. "my-app[bot]").
+                                                    # Empty: with a person's token its login is read as before; with an App token nothing is told apart and every event is news
 slack_allow_self_channels = []                      # Slack channel ids where the owner's own posts and edits are delivered (bots' posts stay dropped);
                                                     # elsewhere the hub's own user is not news. A list, or one comma- or whitespace-separated string
 direct = {}                                         # anchor id → one session: each event on it goes at once and whole (up to 4,000 chars, with its ts and

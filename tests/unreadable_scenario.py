@@ -525,7 +525,7 @@ check("permanent: a missing file or key, a refused or revoked token (401, 403, i
                                           urllib.error.HTTPError("u", 401, "x", {}, None), urllib.error.HTTPError("u", 403, "x", {}, None), urllib.error.HTTPError("u", 404, "x", {}, None),
                                           nm("RefreshError"), ValueError("bad json"), AttributeError("x"), core.Permanent("x"))))
 
-# github: gh's own network message is a Transient (retried); a refused credential keeps today's way (off, a warning, no retry)
+# github: gh's own network message is a Transient (retried); a refused credential is a Transient too since the GitHub App token start check (start_receiver retries every failure of the start: a login made later needs no restart)
 from stackshot.anchors.anchorhub import github as ghmod
 class Done:
     def __init__(self, rc, err, out=""): self.returncode, self.stderr, self.stdout = rc, err, out
@@ -537,9 +537,9 @@ def gh_with(err, rc=1):
 e1, hg1 = gh_with("error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com")
 check("github: `error connecting to api.github.com` is a Transient, not `not authenticated`", isinstance(e1, core.Transient) and core.transient(e1) and not hg1.status.get("github"), e1)
 e2, hg2 = gh_with("HTTP 401: Bad credentials (https://api.github.com/user)")
-check("github: a refused credential returns as before: no exception, no retry, receiver off", e2 is None and not hg2.status.get("github"), (e2, hg2.status))
+check("github: a refused credential is a Transient (retried), the receiver not registered", isinstance(e2, core.Transient) and "not authenticated" in str(e2) and not hg2.status.get("github"), (e2, hg2.status))
 e3, hg3 = gh_with("To get started with GitHub CLI, please run:  gh auth login")
-check("github: not logged in returns as before too", e3 is None and not hg3.status.get("github"), e3)
+check("github: not logged in is a Transient too (retried until a login is made)", isinstance(e3, core.Transient) and "not authenticated" in str(e3) and not hg3.status.get("github"), e3)
 
 # slack: a connect() that fails closes its client, so a retry does not leave the first one's threads behind (stand-ins for slack_sdk: no Slack)
 class FakeSock:

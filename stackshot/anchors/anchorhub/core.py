@@ -8,7 +8,7 @@ bound to that anchor. The rest of a receiver's contract is what it registers on 
   hub.savers[name]      fn() → its read position                saved each minute and at stop, restored from hub.saved[name]
   hub.catchups[name]    fn(since epoch) → notices caught up     a reboot's resume
   hub.hooks[route]      fn(headers, body) → (status, text)      a vendor's webhook, which usually puts (kind, key) on hub.triggers
-  hub.health(name, ok, err)                                     the result of a real check, shown on the board
+  hub.health(name, ok, err)                                     the result of a real check, shown on the board (a healthy one may carry a note in err, shown on hover)
 An anchor in [anchor_hub] direct (anchor id → one session; read at each event, so a config reload applies it) skips all of
 the routing below: each event goes at once, whole, to that session alone (the direct lane). The value "none" makes the
 anchor log only: each event is written to the routing log and delivered to nobody.
@@ -671,7 +671,7 @@ class Hub:
         their 30-min re-read of the change feed. `checked` on the board is that moment."""
         with self.lock:
             r = self.status.setdefault("receivers", {})
-            r[name] = {"ok": bool(ok), "error": None if ok else (err or "check failed"), "checked": now_iso()}
+            r[name] = {"ok": bool(ok), "error": (err or None) if ok else (err or "check failed"), "checked": now_iso()}      # a healthy report may carry a note in `error` (GitHub: anchors that wait for a user sign-in): the card shows it on hover and stays healthy
             self.status["receivers_ok"] = all(v.get("ok") for v in r.values())
             (self.status.get("hold") or {}).pop(name, None)       # a check ends any announced wait
         self.write_status()
