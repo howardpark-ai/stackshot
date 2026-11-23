@@ -1943,8 +1943,8 @@ DOCUSE_ALLOW = {
     ("tests/rebullet_scenario.py", "__doc__"): (1, "rd_tool.__doc__, a module docstring: read by name, unchanged rule"),
     ("tests/released_scenario.py", "__doc__"): (5, "client.__doc__ five times, a module docstring: read by name, unchanged rule"),
     ("tests/retired_inputs_scenario.py", "__doc__"): (1, "_client.__doc__, a module docstring: read by name, unchanged rule"),
+    ("tests/script_post_kinds_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and terminal_prompt_svc._terminal_prompt.__doc__ (a function it names: the name rule selects the suite)"),
     ("tests/step_proof_scenario.py", "__doc__"): (2, "client.__doc__ twice, a module docstring: read by name, unchanged rule"),
-    ("tests/terminal_prompt_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and terminal_prompt_svc._terminal_prompt.__doc__ (a function it names: the name rule selects the suite)"),
 }
 def doc_uses(files):
     """(file, form, uses found, uses pinned) for every form of {path: source} whose number of uses is not the number the allow list pins"""
