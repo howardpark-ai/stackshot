@@ -1514,11 +1514,17 @@ bad = {"a part missing": "Decide: whether to take vendor A · Recommend: A · By
        "a trailing newline": ASK + "\n",
        "another separator": "Decide: whether to take vendor A - Recommend: A - Stakes: a month - By: Mon Mar 2nd",
        "an empty part": "Decide:  · Recommend: A · Stakes: a month · By: Mon Mar 2nd"}
+WHY = {"a part missing": "the part Stakes is missing", "parts out of order": "the parts are not in the order Decide, Recommend, Stakes, By", "longer than 240": "it is 259 characters, and the limit is 240",
+       "a newline inside": "it holds a line break", "a trailing newline": "it holds a line break", "another separator": "the parts are joined by \u201c-\u201d", "an empty part": "the part Decide is empty"}
 for why, a_ in bad.items():
     n_ = nfiles(); e = refusal(lambda: mk(needs="decision", ask=a_))
-    check(f"ask: misshaped ({why}) refused on create, nothing created", e == SHAPE and nfiles() == n_ and render.parse_ask(a_) is None, e)
+    check(f"ask: misshaped ({why}) refused on create, nothing created", e.startswith(SHAPE + ". This ask fails because " + WHY[why]) and nfiles() == n_ and render.parse_ask(a_) is None, e)
+    shown_ask = e.split(":\n")[-1]
+    check(f"ask: misshaped ({why}): the refusal shows an ask that is itself in the form", render.parse_ask(shown_ask) is not None, e)
     e = refusal(lambda: _update_svc._update(g1, ask=a_, sender="home-beta"))
-    check(f"ask: misshaped ({why}) refused on update, the item unchanged", e == SHAPE and rd(g1)["metadata"]["ask"] == ASK, e)
+    check(f"ask: misshaped ({why}) refused on update, the item unchanged", e.startswith(SHAPE) and rd(g1)["metadata"]["ask"] == ASK, e)
+check("ask: a part missing: the writer's parts are not invented, an example is shown", "An ask that passes, to copy the shape from:\nDecide: ship the thing now" in refusal(lambda: mk(needs="decision", ask=bad["a part missing"])), None)
+check("ask: all four parts in the form's order with another separator: the writer's own parts are shown in the form", "Your ask in the form, to send again:\nDecide: whether to take vendor A · Recommend: A · Stakes: a month · By: Mon Mar 2nd" in refusal(lambda: mk(needs="decision", ask=bad["another separator"])), None)
 check("ask: exactly 240 characters is accepted", render.parse_ask("Decide: " + "x" * (240 - len("Decide:  · Recommend: A · Stakes: a month · By: Mon Mar 2nd")) + " · Recommend: A · Stakes: a month · By: Mon Mar 2nd") is not None)
 # stage one (no refuse_after, or a date to come): accepted, with the nag line
 res = mk(needs="decision"); g2 = gid_of(res)

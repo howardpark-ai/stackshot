@@ -40,6 +40,7 @@ from stackshot.model import contact as _contact
 from stackshot.model import draft as _draft
 from stackshot.model import field_gates as _fg
 from stackshot.model.ids import _bare_id_ok, _norm_id
+from stackshot.model import holders as _holders
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model.needs import _after_of, _canon_needs, _needs_kinds, _NEEDS_KINDS, _needs_list, _needs_sessions, _waits_decision
@@ -55,6 +56,7 @@ from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import _registry, _roles_sync_safe
 from stackshot.router import router_live as _router_live
 from stackshot.service import handoff as _handoff
+from stackshot.service import item_read as _item_read
 from stackshot.service import telling as _telling
 from stackshot.service import wakes as _wakes
 from stackshot.service import watching as _watching
@@ -1062,9 +1064,29 @@ def gate_sender_watch(gid: str, item_now: dict[str, Any], sender: str, *, handed
 # step now: the ready work then sits idle until the date. self_wait.py holds the rule and the model call: such a write carries wait_reason (what the step waits on), and a model is
 # asked once whether the step could be done now given that reason; yes refuses. The call is slow, so this gate runs BEFORE the item lock is taken (a read of the item as stored,
 # never a write), and it fails open: any failure, a missing model, a call past the hourly cap, passes the write. Out of scope, because the wait already names its blocker: a wait on
-# another item (after), on the owner or an outside party (needs decision or external), a stored wait (wait_kind), a park (hold, wait_basis), a hand-off to another session, an item
+# another item (after), on the owner or an outside party (needs decision or external), a stored wait (wait_kind), a park (hold, or a wait_basis the update tool keeps: one it drops, for a wake within the cap, is judged as if unsent), a hand-off to another session, an item
 # that does not stay alive, and a mover other than the sender.
 _SELF_WAIT_STATES_OUT = ("parked", "outside", "blocked", "verifying", "completed", "your-call", "your-step")
+
+
+def reads_time_wait(item: dict[str, Any]) -> bool:
+    """The model reads the open item as a wait on a time with no hold flag: a verifying item (its end date is its wait), or any item the model reads as a time wait (wait_kind=time). The snooze guard
+    (model_guards) asks such a wait for its reason like a hold's, so update takes a wait_basis for its wake at any length, as it does for a held item; a wake an alive item
+    carries as a hand-off's backstop (no until) is not a wait and reads False."""
+    if item.get("status") != "open":
+        return False
+    try:
+        mod = _item_read._model_of(item)    # the reader the hooks carry (wiring.py: model_of)
+    except Exception:  # noqa: BLE001
+        return False
+    return mod.state == _model.WAITING and mod.wait is not None and mod.wait.kind == "time"
+
+
+def basis_held(item: dict[str, Any], *, hold: bool = False, verifying: bool = False) -> bool:
+    """Whether a wait_basis is judged for a time wait held: a hold, a held or verifying item. The one reading for the update tool (`_basis_frame`) and the self-wait check, so the two cannot differ;
+    `item` is the item as the tool reads it, with a stored until stood in as the old working fields (`until_write.unfold_item`)."""
+    hk = _hooks()
+    return hk.model_guards_on() and bool(hold or _holders._is_held(item) or reads_time_wait(item) or verifying)
 
 
 def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = "", mover: str = "", needs: Any = "", after: Any = "", wait_kind: str = "", hold: bool = False,
@@ -1076,8 +1098,13 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
     try:
         if not _cfg.wait_guard_on() or not sender.strip() or _model.is_owner(sender) or str(status or "").strip().lower() in ("completed", "closed"):
             return
-        if hold or str(state or "").strip().lower() in _SELF_WAIT_STATES_OUT or wait_kind.strip() or str(wait_basis or "").strip():
+        basis_given = bool(str(wait_basis or "").strip()) and " ".join(str(wait_basis).split()).lower() not in hk.ask_none      # a word that clears (none, clear, -) is no basis: the wake is judged as sent without one
+        if wait_kind.strip().lower() in hk.ask_none:
+            wait_kind, clear_wait = "", True                # a wait_kind of none, clear or - is a clear of the wait (the update tool reads it so), never a kind
+        if hold or str(state or "").strip().lower() in _SELF_WAIT_STATES_OUT or wait_kind.strip():
             return
+        if basis_given and (clear_wake or clear_hold):
+            return                                          # a basis beside a wake or a hold this call drops: the update tool refuses the call whatever the gate says, so no model call is spent on it
         if _needs_list(needs) and any(x.lower() in _NEEDS_KINDS for x in _needs_list(needs)):
             return
         if _after_of({"after": after if isinstance(after, list) else _needs_list(after)}):
@@ -1121,6 +1148,11 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
             if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not _handoff.ho_same(mod.mover, sender):
                 return
             stored_wake = str(_wt.wake_value(item.get("metadata") or {}) or "")
+            if basis_given:
+                tool_item = json.loads(json.dumps(item))
+                _uw.unfold_item(tool_item)                  # the item as the update tool reads it: a stored until stands as the old working fields, so the two read the same held
+                if basis_unneeded(item, wake_given or stored_wake.strip(), basis_held(tool_item)) is None:
+                    return                                      # a park that carries its basis (a wake past the cap, or a time wait's window) names its own reason; a basis the update tool drops (a wake within the cap) is no reason, so the wake is judged as if it were not sent
             wake_new = bool(wake_given) and wake_given != stored_wake.strip()      # re-sending the stored wake sets nothing
             stored_next = str((item.get("metadata") or {}).get("next") or "")
         else:
@@ -1142,7 +1174,8 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
     except Exception as e:  # noqa: BLE001  — the rule is an extra: a failure in it lets the write through, never a 500
         print(f"wait guard: {gid or 'a new item'} not judged: {e.__class__.__name__}: {e}; the write passes", file=sys.stderr, flush=True)
         return
-    why = _selfwait.gate(subject=subject, waits=waits, step=step, reason=wait_reason, now=today)
+    call = ", ".join(([f'wake="{wake_given}"'] if wake_new else []) + (['next="<your next, as you sent it>"'] if dated else []))
+    why = _selfwait.gate(subject=subject, waits=waits, step=step, reason=wait_reason, now=today, call=call)
     if why:
         raise ToolError(f"Refused: {why}")
 
@@ -1568,6 +1601,17 @@ def gate_cap(item: dict[str, Any], said_l: list[dict[str, Any]], what: str, show
                     f"pass wait_basis=\"<what happens> YYYY-MM-DD\" with it; or set a {what} within {cap:g} days and set it again then.")
 
 
+def basis_unneeded(item: dict[str, Any], wake: str, held: bool = False) -> float | None:
+    """The days to `wake` when a wait_basis sent with it is not needed (the gate below would refuse it as such): an open item, a wake, no time wait held (`held` as for the gate) and the wake within
+    [waiting] cap_days (or the cap off). None when the basis is needed, or when another refusal of the gate comes first (a closed item, no wake). The update tool drops such a basis and says so
+    (call_log.fixed "wait-basis-dropped") instead of refusing it."""
+    if item.get("status") == "completed" or not wake or held:
+        return None
+    cap = _wt.cap_days()
+    days = (_hooks().wake_at(wake).timestamp() - time.time()) / 86400.0
+    return max(days, 0.0) if (not _wt.cap_needs_owner() or days <= cap) else None
+
+
 def gate_wait_basis(item: dict[str, Any], text: str, wake: str, held: bool = False) -> str:
     """The wait_basis a session gives for the wake of a time wait (a hold's window, or a verifying item's wake: `held` is true for both; the basis is the end of a wait-and-see window the work itself needs, "<what the window collects> ends
     YYYY-MM-DD", at any length) or for a wake past the cap (the owner's rule that an agent-set park needs a
@@ -1596,9 +1640,13 @@ def gate_wait_basis(item: dict[str, Any], text: str, wake: str, held: bool = Fal
     wake_day = h.wake_at(wake).date()
     why = _wt.basis_problem(t, wake_day)
     if why:
-        raise ToolError(f"Refused: wait_basis must name the real-world date the wait stands on as a real YYYY-MM-DD, from the wake or ask-by day ({wake_day.isoformat()}) to "
+        day = wake_day.isoformat()
+        base = t if why.startswith("it names no date") and len(t) + 11 <= 300 else "<what the wait stands on>"
+        raise ToolError(f"Refused: wait_basis must name the real-world date the wait stands on as a real YYYY-MM-DD, from the wake or ask-by day ({day}) to "
                         f"{_wt.BASIS_WINDOW_DAYS} days after it: {why}. \"The vendor visits Tue 2099-03-10 14:00\" on a wake of 2099-03-10 is a basis; "
-                        "a date years off, or one that is not on the calendar, is a way around the rule")
+                        "a date years off, or one that is not on the calendar, is a way around the rule. "
+                        f"The forms it takes are \"<what happens> YYYY-MM-DD\" and, for a window the work itself needs, \"<what the window collects> ends YYYY-MM-DD\". "
+                        f"Send the same call again with wait_basis={json.dumps(f'{base} {day}', ensure_ascii=False)}, the date being the day the wait ends")
     return t
 
 

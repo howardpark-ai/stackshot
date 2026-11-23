@@ -325,15 +325,17 @@ def judge(subject: str, step: str, waits: list[str], reason: str, now: dt.dateti
 
 
 # ---------------------------------------------------------------------------------------------------------------- the gate
-def gate(*, subject: str, waits: list[str], step: str, reason: str, now: dt.datetime) -> str:
+def gate(*, subject: str, waits: list[str], step: str, reason: str, now: dt.datetime, call: str = "") -> str:
     """The refusal sentence for a self-set wait ("" when the write may go through). `waits` = what sets it ("wake 2099-03-02T10:00", 'next line "…" (dated 2099-03-03)'); `step` = the sender's
-    own lines of next (the work that waits); `reason` = the write's wait_reason."""
+    own lines of next (the work that waits); `reason` = the write's wait_reason; `call` = the call's own wait arguments as the refusal shows them ("wake=\"2099-03-02\""), so it can show the call again with the reason added."""
     what = "; ".join(waits)
     why = _clean(reason)
     if len(why) < _cfg.WAIT_GUARD_REASON_MIN:
         return (f"a wait on your own item needs its reason: this write sets {what}, and a wait that names no blocker is how ready work sits idle until its date. Pass wait_reason=<what the step waits on "
                 f"that is not available now, at least {_cfg.WAIT_GUARD_REASON_MIN} characters> with the same call (a reply, a build or test still running, a window the work needs, a resource that is down). "
-                "If nothing blocks the step, do it now and write the next step instead of waiting.")
+                "If nothing blocks the step, do it now and write the next step instead of waiting. "
+                f"To wait, send the same call again: {call + ', ' if call else ''}wait_reason=\"<what the step waits on that is not available now>\". "
+                "A wait that stands on a date outside the work is a park instead: hold=true, until=\"YYYY-MM-DD\" and wait_basis=\"<what happens> YYYY-MM-DD\".")
     v = judge(subject, step, waits, why, now)
     if v.status == "ok" and v.now:
         return (f"the step can be done now: {v.why or 'the reason names no blocker'}. Your wait ({what}) is refused. Do the step now, or pass a wait_reason that names the real blocker "

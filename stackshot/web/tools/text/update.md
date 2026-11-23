@@ -23,7 +23,7 @@ nightly run finishes at 03:00"; a window the work itself needs, or a wake past t
 the window, YYYY-MM-DD>", wait_basis="error-log soak ends <that day, YYYY-MM-DD>" (parameter wait_basis has the form;
 it goes with a park's wake, a stored verifying item's wake, or a wake past the cap, and lifts the cap for that wake
 alone; clear_wait_basis=true drops it). A bare date within the cap (until, or its old name wake) is a wait on its own,
-and a basis for it is refused as not needed unless the item is parked (hold=true) or verifying; a date no longer
+and a basis for it is dropped, the reply saying so, unless the item is parked (hold=true) or verifying; a date no longer
 leaves the item active as a reminder (outside a hand-off's backstop): set no date to keep an item moving. A wait that
 can no longer end (a check whose pull request was closed unmerged) fails at once and tells the item's mover.
 clear_wait=true is how an update drops a stored wait (wait_kind and its fields); wait_anchor or wait_event of none and
@@ -118,7 +118,7 @@ reword.
 The old name of until, accepted for now: when the item wakes, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a
 time of day, in the board timezone (a relay or event wait takes the day alone, YYYY-MM-DD). Alone it is a wait, as
 until says. A
-wait on your own item also needs wait_reason (at least {{WAIT_GUARD_REASON_MIN}} characters); a wait with wait_basis
+wait on your own item also needs wait_reason (at least {{WAIT_GUARD_REASON_MIN}} characters); a wait with a kept wait_basis
 needs none, and a wake more than {{CAP_DAYS}} days out needs a wait_basis. Moving a wake (or ask_by) later with the
 item otherwise as it was is refused: in the same write mark a step done or dropped, write the next step or a new
 reason, or change what the wait stands on (wait_kind, wait_event, wait_anchor, after; a flip back to an earlier one
@@ -189,7 +189,7 @@ reply due <YYYY-MM-DD>" (a wake with no date is refused). Three
 wakes take it, each basis bound to the wake it was given for: a park's wake, a verifying item's wake, and a
 wake more than {{CAP_DAYS}} days out (it lifts the cap for that wake alone, up to {{BASIS_MAX_WAKE_DAYS}} days: a wake
 further out is refused whatever the basis). A bare date within the cap takes wait_reason on your own item and a basis
-there is refused as not needed. A park with a wake and no basis takes the line of next or the description that says
+there is dropped, the reply saying so. A park with a wake and no basis takes the line of next or the description that says
 what the work waits for.
 
 ## param RANK

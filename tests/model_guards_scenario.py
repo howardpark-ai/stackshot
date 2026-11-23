@@ -226,7 +226,15 @@ check("2 post-wake mover: …a relay's default is the owner, who always passes",
 # ================================================================ 3. a time wait carries his words or a real date
 item(68, needs=[BACK])
 refused_nw("3 snooze: a hold with a wake and no reason is refused, saying what counts", 68, lambda: upd(68, hold=True, wake=day(3)), "waits on a time (wake", "no reason", "wait_basis=", "Acked-by", "set no date")
-upd(68, hold=True, wake=day(3), wait_basis=f"vendor visit booked for {day(4)}")
+try:
+    upd(68, hold=True, wake=day(3)); snooze_msg = ""
+except Exception as e_:
+    snooze_msg = str(e_)
+snooze_call = re.search(r'send the same call again with (wait_basis="<what the window collects> ends [0-9-]+")\.', snooze_msg)
+check("3 snooze: …the refusal shows the call with wait_basis added, ending on the wake's day", bool(snooze_call) and snooze_call.group(1).endswith(f'ends {day(3)}"'), snooze_msg[-300:])
+upd(68, hold=True, wake=day(3), wait_basis=snooze_call.group(1).split('"')[1].replace("<what the window collects>", "the soak") if snooze_call else "")
+check("3 snooze: …sent again as shown (the window's words filled in), the park goes through and stores the basis", hd_(mt(68)) is True and mt(68).get("wait_basis", {}).get("text", "").startswith("the soak ends"), mt(68))
+upd(68, wait_basis=f"vendor visit booked for {day(4)}")
 check("3 snooze: …a real date (wait_basis) stands for it, at any length (the cap is not what asks)", mt(68)["wait_basis"]["text"].startswith("vendor visit") and hd_(mt(68)) is True, mt(68))
 item(69, needs=[BACK], answers=[{"ts": time.time(), "kind": "comment", "text": "park it until next week, nothing to do now", "via": "board"}])
 upd(69, hold=True, wake=day(3))
@@ -249,6 +257,41 @@ item(75, needs=[BACK])
 upd(75, hold=True, wake=day(3))
 check("3 snooze: with [model] guards = false the same write passes (the switch)", hd_(mt(75)) is True, mt(75))
 set_cfg()
+
+# a wake more than a year out: the hint to send the same call again with a basis must be a call the basis gate takes (it takes no wake further out than a year), so none is shown for it
+_waiting_cfg = _cfg.CFG.setdefault("waiting", {}); _was_owner_cap = _waiting_cfg.get("cap_needs_owner")
+try:
+    _waiting_cfg["cap_needs_owner"] = False          # the cap is not what refuses a far wake first
+    for n_, days_ in ((430, 400), (431, 300)):
+        item(n_, needs=[BACK])
+        try:
+            upd(n_, hold=True, wake=day(days_)); far_msg = ""
+        except Exception as e_:
+            far_msg = str(e_)
+        hint_ = re.search(r'send the same call again with wait_basis="(<what the window collects> ends [0-9-]+)"', far_msg)
+        if days_ > 365:
+            check("3 snooze: a wake more than a year out is refused for its reason and shows no call to send again that the basis gate would refuse", "no reason" in far_msg and not hint_ and "at most 365 days out" in far_msg, far_msg[-400:])
+            try:
+                upd(n_, hold=True, wake=day(days_), wait_basis=f"the soak ends {day(days_)}"); far_ok_ = True
+            except Exception as e_:
+                far_ok_ = False
+            check("3 snooze: …a basis is indeed refused for such a wake", far_ok_ is False, None)
+        else:
+            check("3 snooze: a wake inside the year shows the call to send again", bool(hint_), far_msg[-400:])
+            upd(n_, hold=True, wake=day(days_), wait_basis=hint_.group(1).replace("<what the window collects>", "the soak") if hint_ else "")
+            check("3 snooze: …and the shown call, with the window's words filled in, goes through", hd_(mt(n_)) is True and mt(n_).get("wait_basis", {}).get("text", "").startswith("the soak ends"), mt(n_))
+finally:
+    if _was_owner_cap is None: _waiting_cfg.pop("cap_needs_owner", None)
+    else: _waiting_cfg["cap_needs_owner"] = _was_owner_cap
+
+# a wake sent with a wait_basis the update tool drops is parked by the write as the same wake sent alone is (the date-only park reads the call after the drop)
+PARK_STEP = f"{BACK}: on {day(3)} rotate the key"          # the only open step waits for the wake's own day
+item(432, needs=[BACK], next=""); item(433, needs=[BACK], next="")
+out_alone = _update_svc._update("a432", sender=BACK, next=PARK_STEP, wake=day(3), wait_reason="the vendor replies after that date")
+out_basis = _update_svc._update("a433", sender=BACK, next=PARK_STEP, wake=day(3), wait_basis=f"the vendor visits {day(3)}", wait_reason="the vendor replies after that date")
+park_keys = ("hold", "wait_kind", "wake", "until", "phase", "waits_on")
+check("3 snooze: a wake alone with a step that waits for it is parked by the write", out_alone.count("(parked: wake") == 1 and hd_(mt(432)) is True and bool(W.basis_of(mt(432))), (out_alone[-300:], mt(432)))
+check("3 snooze: …and the same call with a basis the tool drops is parked the same way, the basis the wake's own reason", out_basis.count("(parked: wake") == 1 and {k: mt(432).get(k) for k in park_keys} == {k: mt(433).get(k) for k in park_keys} and "vendor visits" not in str(mt(433).get("wait_basis")), (out_basis[-300:], mt(433)))
 
 # ================================================================ 4. filler
 item(76, needs=[BACK])
@@ -864,7 +907,9 @@ upd(204, wake=day(3))
 check("switch: guards off: a plain re-park counts as before", mt(204).get("repark") == 1, mt(204))
 upd(204, next="home-front: look a third time")
 check("switch: guards off: …and a next edit resets the count (today's test: every field but the wait's own)", "repark" not in mt(204), mt(204))
-refused_nw("switch: guards off: a basis on a held wake within the cap is 'not needed' again", 203, lambda: upd(203, wait_basis=f"visit on {day(9)}"), "not needed")
+basis_203 = mt(203).get("wait_basis")
+upd(203, wait_basis=f"visit on {day(8)}")
+check("switch: guards off: a basis on a held wake within the cap is not needed again: it is dropped, the stored one stays", mt(203).get("wait_basis") == basis_203 and basis_203 is not None, mt(203))
 set_cfg()
 
 # ================================================================ a create that passes, and the multi-problem refusal

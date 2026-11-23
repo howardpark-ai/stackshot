@@ -528,17 +528,19 @@ def _answered_since_note(gid: str, item: dict[str, Any], sender: str) -> str:
 
 
 def _reads_time_wait(item: dict[str, Any]) -> bool:
-    """The model reads the open item as a wait on a time with no hold flag: a verifying item (its end date is its wait), or any item the model reads as a time wait (wait_kind=time). The snooze guard
-    (model_guards) asks such a wait for its reason like a hold's, so update takes a wait_basis for its wake at any length, as it does for a held item; a wake an alive item
-    carries as a hand-off's backstop (no until) is not a wait and reads False."""
+    """The model reads the open item as a wait on a time with no hold flag (the gate's `reads_time_wait`: one reading for the tool and the self-wait check)."""
+    return _gates.reads_time_wait(item)
+
+
+def _basis_frame(item: dict[str, Any], meta: dict[str, Any], status: str, wake: str, ask_by: str, wait_kind: str, hold: bool, state_st: str) -> tuple[dict[str, Any], str, bool]:
+    """What a wait_basis is judged against, for the write that sends it → (the item with the status the write gives it, the wake it stands for, whether the item is a time wait held: a hold, a held or verifying
+    item). Raises ToolError for a wake in no valid form. A relay or event wait keeps its date in ask_by, not in a wake: its basis stands for that day."""
     h = _hooks()
-    if item.get("status") != "open":
-        return False
-    try:
-        mod = h.model_of(item)
-    except Exception:  # noqa: BLE001
-        return False
-    return mod.state == _model.WAITING and mod.wait is not None and mod.wait.kind == "time"
+    basis_day = ""
+    if not wake and not meta.get("wake") and (wait_kind.strip().lower() or _uw.kind_of(meta)) in ("relay", "event"):
+        basis_day = _uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))
+    held = _gates.basis_held(item, hold=hold, verifying=state_st == "verifying")
+    return {**item, "status": status or item.get("status")}, (h.parse_wake(wake) if wake else str(meta.get("wake") or "") or basis_day), held
 
 
 def update_unlocked(
@@ -840,6 +842,8 @@ def update_unlocked(
         _fg._gate_subject(subject, str(item.get("subject") or ""))
         item["subject"] = subject
     if description:
+        if (_writes.session_next() and not reformat and not sender.strip().startswith("a script on ") and description.strip() != str(item_was.get("description") or "").strip()):     # the text the goal gate judges below
+            description = _fg.fix_goal_label(description, str(item_was.get("description") or ""))       # a goal word in another form opening the first bullet is written `Goal:` (a pure form fix; the reply says so)
         description, split_note = _fg.fix_long_bullets(description, str(item_was.get("description") or ""))       # a bullet over the limit is split at its sentences (a pure form fix; the reply says so, and History)
         if split_note:
             _stall.note(meta, time.time(), split_note)
@@ -938,6 +942,15 @@ def update_unlocked(
     # hold=true parks with its wake (the pass releases it), and an item whose needs hold decision is never on hold (_is_held). A stored
     # item keeps the meaning it was written with: held + wake still releases at its wake.
     h.record_fixes(meta, fixes)      # what the tool fixed in this call (server_fixes.py): the mark and a History line, or the mark taken off when the mover sent the value again
+    if str(wait_basis or "").strip() and not (clear_wait_basis or clear_wake or clear_hold) and " ".join(str(wait_basis).split()).lower() not in h.ask_none:      # a basis for a wake within the cap needs none: dropped here, before the date-only park below reads it, so the wake is parked as a wake sent alone is; the server says so and does not refuse
+        try:
+            e_item, e_wake, e_held = _basis_frame(item, meta, status, wake, ask_by, wait_kind, hold, state_st)
+            e_days = _gates.basis_unneeded(e_item, e_wake, e_held)
+        except ToolError:
+            e_days = None      # a wake in no valid form: the wake check below refuses it with its own message
+        if e_days is not None:
+            _calls.fixed("wait-basis-dropped", f"wait_basis was dropped: the wake ({e_wake}) is {e_days:.0f} days out, within the {_wt.cap_days():g} days a wait may run, so the wake needs no basis; the wake is set as sent")
+            wait_basis = ""
     wait_fixed = ""
     if (wake or next_touch) and not (hold or clear_hold or clear_wake or filing_only or wait_basis or clear_wait_basis) and item.get("status") == "open":      # a wake alone that is the whole of the wait: parked by this write (_date_only_wait)
         try:
@@ -966,7 +979,8 @@ def update_unlocked(
             raise ToolError("Refused: clear_wait_basis drops the basis; it does not go with a new one")
         if clear_wake or clear_hold:
             raise ToolError("Refused: wait_basis goes with a wake; this call drops the wake")
-        basis_ok = _gates.gate_wait_basis({**item, "status": status or item.get("status")}, basis_txt, h.parse_wake(wake) if wake else str(meta.get("wake") or "") or basis_day, held=h.model_guards_on() and bool(hold or h.is_held(item) or _reads_time_wait(item) or state_st == "verifying") and not clear_hold)
+        b_item, b_wake, b_held = _basis_frame(item, meta, status, wake, ask_by, wait_kind, hold, state_st)
+        basis_ok = _gates.gate_wait_basis(b_item, basis_txt, b_wake, held=b_held)
     if wake:                      # a moment to come
         stored = h.parse_wake(wake)
         if h.wake_at(stored) <= _pages.zone_now():      # for a date-only wake the same as "after today"

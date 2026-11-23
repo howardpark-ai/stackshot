@@ -74,6 +74,25 @@ from stackshot.waits import watchers as _watch
 _OPTION_LINK = re.compile(r"\[[^\]\n]*\]\([^)\n]*\)|https?://[^\s<>()\[\]]+", re.I)
 
 
+_OPT_EXAMPLE = ('options=[{"label": "Approve", "line": "Ship it now.", "recommended": true}, '
+                '{"label": "Decline", "line": "Keep it as it is.", "recommended": false}]')
+
+
+def _key_shown(k: Any) -> str:
+    """A key the writer sent as it is shown back in a refusal: its repr, so a quote or a line break in it cannot pass for the text around it, cut at 30 characters of the key."""
+    t = str(k)
+    return repr(t[:30]) + ("..." if len(t) > 30 else "")
+
+
+def _option_gap(i: int, o: dict[str, Any], label: str, line: str) -> str:
+    """The refusal of an option that lacks its label or its line: which of the two is empty, the keys it did carry when they are other than the three the form takes, and an example that passes."""
+    lacks = " and no ".join(w for w, v in (("label", label), ("line", line)) if not v)
+    other = [k for k in o if k not in ("label", "line", "recommended")]
+    shown = ", ".join(_key_shown(k) for k in other[:4]) + (f" and {len(other) - 4} more" if len(other) > 4 else "")
+    seen = f" It carries the key{'s' if len(other) > 1 else ''} {shown}; the form takes label, line and recommended only." if other else ""
+    return f"Refused: option {i} has no {lacks}.{seen} Each option is one object with a label and a line: {_OPT_FORM}. An example that passes: {_OPT_EXAMPLE}"
+
+
 def _gate_options(options: Any) -> list[dict[str, Any]] | None:
     """options as given → the stored list, [] to clear ("none", "clear", "-", or an empty list), None when not passed. Refuses
     a misshaped list. A JSON string of the list is read as the list (a client that sends every argument as a string)."""
@@ -101,7 +120,7 @@ def _gate_options(options: Any) -> list[dict[str, Any]] | None:
         if isinstance(rec, str):
             rec = rec.strip().lower() in ("true", "yes", "1")
         if not label or not line:
-            raise ToolError(f"Refused: option {i} needs a label and a line: {_OPT_FORM}")
+            raise ToolError(_option_gap(i, o, label, line))
         hit = _OPTION_LINK.search(label + " " + line)
         if hit:
             raise ToolError(f"Refused: option {i} ({label}) carries a link ({hit.group(0)[:80]}). An option is a clickable card that selects or unselects, so a link in it shows as raw text and can take the select click: "

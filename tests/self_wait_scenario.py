@@ -61,7 +61,7 @@ def item(i, status="open", **meta):
                                                      "updated": now - 3600, "state_updated": now - 3600, "confirmed": now - 3600, "metadata": base}))
 for i in range(1, 40):
     item(i)                                                       # items in the agent's hands, one open step each
-(T / "store/next-id").write_text("60"); (T / "store/anchors.json").write_text("{}")
+(T / "store/next-id").write_text("200"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
@@ -82,6 +82,7 @@ from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import update as _wt_update
+from stackshot.service import gates as _G
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -146,6 +147,16 @@ check("blocker: the wake is written and wait_reason is not stored", wk_(mt(2)) a
 # ---- no reason
 reset()
 refused("no reason: a wake without wait_reason is refused, naming the parameter", lambda: upd(3, wake=D(2)), "wait_reason", "a wait on your own item needs its reason", i=3, calls=0)
+try:
+    upd(3, wake=D(2)); no_reason_msg = ""
+except ToolError as e_:
+    no_reason_msg = str(e_)
+check("no reason: the refusal shows the call again with wait_reason added, and the park for a date outside the work", f'To wait, send the same call again: wake="{D(2)}", wait_reason="<what the step waits on that is not available now>".' in no_reason_msg
+      and 'hold=true, until="YYYY-MM-DD" and wait_basis="<what happens> YYYY-MM-DD"' in no_reason_msg, no_reason_msg[-400:])
+reset(); item(41)
+passes("no reason: the shown call, sent again with a reason in place of the placeholder, goes through", lambda: upd(41, wake=D(2), wait_reason=REASON), 1)
+check("no reason: …and the wake is stored", wk_(mt(41)) == D(2), mt(41))
+reset()
 refused("no reason: a dated own step without wait_reason is refused", lambda: upd(3, next=f"home-agent: apply the step on {D(4)}"), "wait_reason", i=3, calls=0)
 refused("no reason: a reason that is too short is refused", lambda: upd(3, wake=D(2), wait_reason="later"), "wait_reason", i=3, calls=0)
 refused("no reason: tomorrow reads as a wait", lambda: upd(3, next="home-agent: apply the step tomorrow"), "wait_reason", i=3, calls=0)
@@ -215,6 +226,138 @@ quiet("scope: a sender that is not the mover makes no call", lambda: _wt_update.
 quiet("scope: a close makes no call", lambda: _wt_complete.stackshot_complete("a17", sender="home-agent", outcome="done", reason="finished by " + D(1)))
 quiet("scope: an undated write makes no call", lambda: upd(18, next="home-agent: build it, then test it"))
 quiet("scope: a past date is no wait", lambda: upd(19, next=f"home-agent: the build of {D(-3)} failed, fix it"))
+
+# ---- a wait_basis the update tool drops (a wake within the cap needs none) is no reason: the wake is judged as if it were not sent; one it keeps (a wake past the cap) names its own reason
+CAP = int(_WT.cap_days())
+for n in (41, 42, 43, 44, 45): item(n)
+reset(answer(True))
+refused("basis dropped: a wake within the cap with a basis and no reason, on the sender's own item, is refused as without the basis", lambda: upd(41, wake=D(3), wait_basis=f"the vendor visits {D(3)}"), "wait_reason", i=41, calls=0)
+refused("basis dropped: …a basis of any words is no way round it", lambda: upd(41, wake=D(3), wait_basis=f"x {D(3)}"), "wait_reason", i=41, calls=0)
+refused("basis dropped: …with a reason, the model judges the step (yes refuses) as for a wake sent alone", lambda: upd(42, wake=D(3), wait_basis=f"the vendor visits {D(3)}", wait_reason=REASON), "can be done now", i=42, calls=1)
+reset(answer(False, "the vendor has not replied"))
+passes("basis dropped: …no: the wake is accepted, one call", lambda: upd(43, wake=D(3), wait_basis=f"the vendor visits {D(3)}", wait_reason=REASON), 1)
+check("basis dropped: …the basis is not stored and the wake is", "wait_basis" not in mt(43) and bool(wk_(mt(43)) or _WT.stored_until(mt(43))), mt(43))
+reset(answer(True))
+passes("basis kept: a wake just past the cap with its basis is no wait of the sender's without a reason: accepted, no call", lambda: upd(44, wake=D(CAP + 1), wait_basis=f"the vendor visits {D(CAP + 1)}"), 0)
+check("basis kept: …and the basis is stored", bool(_WT.basis_of(mt(44))), mt(44))
+passes("basis kept: a wake far past the cap with its basis: accepted, no call", lambda: upd(45, wake=D(40), wait_basis=f"the vendor visits {D(40)}"), 0)
+
+# a basis word that clears (none, clear, -) is no basis, clear_wait does not excuse a dropped one, and a basis beside clear_wake or clear_hold is the update tool's refusal (no model call is spent on it)
+for n in range(46, 62): item(n)
+for k, w in enumerate(("none", "clear", "-", "NONE")):
+    reset(answer(True))
+    refused(f"basis word {w!r}: an in-window wake on the sender's own item with no reason is refused as without a basis, no call", lambda w=w, n=46 + k: upd(n, wake=D(3), wait_basis=w), "wait_reason", i=46 + k, calls=0)
+reset(answer(True))
+refused("basis word: …with a reason, the model judges the step (yes refuses)", lambda: upd(50, wake=D(3), wait_basis="none", wait_reason=REASON), "can be done now", i=50, calls=1)
+reset(answer(False, "the vendor has not replied"))
+passes("basis word: …no: the wake is accepted, one call", lambda: upd(51, wake=D(3), wait_basis="clear", wait_reason=REASON), 1)
+check("basis word: …and no basis is stored", "wait_basis" not in mt(51) and bool(wk_(mt(51)) or _WT.stored_until(mt(51))), mt(51))
+reset(answer(True))
+refused("clear_wait: an in-window wake with a basis the tool drops and no reason is refused, no call", lambda: upd(52, wake=D(3), wait_basis=f"the vendor visits {D(3)}", clear_wait=True), "wait_reason", i=52, calls=0)
+refused("clear_wait: …a basis of junk words is no way round it", lambda: upd(52, wake=D(3), wait_basis="x", clear_wait=True), "wait_reason", i=52, calls=0)
+refused("clear_wait: …with a reason, the model judges the step (yes refuses)", lambda: upd(53, wake=D(3), wait_basis=f"the vendor visits {D(3)}", clear_wait=True, wait_reason=REASON), "can be done now", i=53, calls=1)
+reset(answer(True))
+refused("clear_wake with a basis and a reason: refused by the write itself, no model call (the early return holds it: the dated step would be judged without it)", lambda: upd(54, next=f"home-agent: apply on {D(3)}", clear_wake=True, wait_basis=f"the vendor visits {D(3)}", wait_reason=REASON), i=54, calls=0)
+refused("clear_hold with a basis and a reason: refused by the write itself, no model call", lambda: upd(55, wake=D(3), clear_hold=True, wait_basis=f"the vendor visits {D(3)}", wait_reason=REASON), i=55, calls=0)
+reset(answer(True))
+passes("basis kept: a wake past the cap with its basis still passes with no call", lambda: upd(56, wake=D(CAP + 5), wait_basis=f"the vendor visits {D(CAP + 5)}"), 0)
+
+# a wait_kind of none, clear or - is a clear of the wait, never a kind: the wake is judged as sent without it
+for n in range(62, 80): item(n)
+for k, w in enumerate(("none", "clear", "-", "NONE")):
+    reset(answer(True))
+    refused(f"wait_kind {w!r}: an in-window wake on the sender's own item with no reason is refused, no call", lambda w=w, n=62 + k: upd(n, wake=D(3), wait_kind=w), "wait_reason", i=62 + k, calls=0)
+reset(answer(True))
+refused("wait_kind: …until= as the date is judged the same", lambda: upd(66, until=D(3), wait_kind="none"), "wait_reason", i=66, calls=0)
+refused("wait_kind: …with a reason, the model judges the step (yes refuses), one call", lambda: upd(67, wake=D(3), wait_kind="clear", wait_reason=REASON), "can be done now", i=67, calls=1)
+reset(answer(False, "the vendor has not replied"))
+passes("wait_kind: …no: the wake is accepted, one call", lambda: upd(68, wake=D(3), wait_kind="-", wait_reason=REASON), 1)
+check("wait_kind: …and no kind is stored", not mt(68).get("wait_kind") and bool(wk_(mt(68)) or _WT.stored_until(mt(68))), mt(68))
+reset(answer(True))
+refused("wait_kind: …with a basis the tool drops too and no reason: refused, no call", lambda: upd(69, wake=D(3), wait_kind="none", wait_basis=f"the vendor visits {D(3)}"), "wait_reason", i=69, calls=0)
+refused("wait_kind: …with that basis and a reason, the model judges the step, one call", lambda: upd(70, wake=D(3), wait_kind="none", wait_basis=f"the vendor visits {D(3)}", wait_reason=REASON), "can be done now", i=70, calls=1)
+# a clearing basis word is no basis whatever its case: judged beside a wake past the cap and beside a dated step
+reset(answer(False, "the vendor has not replied"))
+refused("basis word: NONE beside a wake past the cap is judged (one call), then refused by the cap itself", lambda: upd(71, wake=D(CAP + 5), wait_basis="NONE", wait_reason=REASON), "a wait runs at most", i=71, calls=1)
+reset(answer(False, "the vendor has not replied"))
+passes("basis word: NONE beside clear_wake and a dated step is judged, one call", lambda: upd(72, next=f"home-agent: apply on {D(3)}", clear_wake=True, wait_basis="NONE", wait_reason=REASON), 1)
+reset(answer(False, "the vendor has not replied"))
+passes("basis word: NONE beside clear_hold and a dated step is judged, one call", lambda: upd(73, next=f"home-agent: apply on {D(3)}", clear_hold=True, wait_basis="NONE", wait_reason=REASON), 1)
+# an item that holds a time wait keeps a basis for its wake: the check and the tool agree, with clear_wait too
+reset(answer(True))
+item(74, wait_kind="time", wake=D(2)); item(75, hold=True, wake=D(2), wait_basis={"text": f"the vendor visits {D(2)}", "by": "home-agent", "at": now})
+for n in (74, 75):
+    out = passes(f"stored time wait a{n}: clear_wait with an in-window wake and a window basis: the check judges nothing (no call), as the tool keeps the basis", lambda n=n: upd(n, clear_wait=True, wake=D(3), wait_basis=f"the soak ends {D(3)}"), 0)
+    check(f"stored time wait a{n}: …and the tool stores the basis it kept", bool(_WT.basis_of(mt(n))), (out, mt(n)))
+
+# the check reads `held` as the update tool does: a stored until stands as the old working fields first (until_write.unfold_item), so the two cannot differ
+HELD_LOG = []
+_real_bu = _G.basis_unneeded
+def _bu_logged(it, wake, held=False):
+    HELD_LOG.append((sys._getframe(1).f_code.co_name, bool(held))); return _real_bu(it, wake, held)
+_G.basis_unneeded = _bu_logged
+@contextlib.contextmanager
+def guards(on):
+    m = _cfg.CFG.setdefault("model", {}); was = m.get("guards", "unset"); m["guards"] = on
+    try: yield
+    finally:
+        if was == "unset": m.pop("guards", None)
+        else: m["guards"] = was
+STEP = lambda: f"home-agent: apply on {D(3)}"
+for n in range(80, 120): item(n)
+for n, kw in ((80, {"until": D(2)}), (81, {"until": D(2)}), (82, {"until": f"{D(2)} 10:00"}), (83, {"until": f"{D(2)} 10:00"})): item(n, **kw)
+for k, (n, kw) in enumerate(((80, {"clear_wait": True}), (81, {"wait_kind": "none"}), (82, {"clear_wait": True}), (83, {"wait_kind": "none"}))):
+    reset(answer(True))
+    form = "date-only" if n < 82 else "timed"
+    refused(f"until form ({form}) {tuple(kw)[0]}: a dated step with a basis the tool drops and no reason is refused as without the basis, no call", lambda n=n, kw=kw: upd(n, next=STEP(), wait_basis="x", **kw), "wait_reason", i=n, calls=0)
+    refused(f"until form ({form}) {tuple(kw)[0]}: …with a reason, the model judges the step (yes refuses), one call", lambda n=n, kw=kw: upd(n, next=STEP(), wait_basis="x", wait_reason=REASON, **kw), "can be done now", i=n, calls=1)
+# gate and tool agree on `held` for every way a wait is stored (the until form included): each call that reaches both logs the same value from both
+STATES = (("until date-only", dict(until=D(2))), ("until timed", dict(until=f"{D(2)} 10:00")), ("until with a kind time", dict(until=D(2), wait_kind="time")),
+          ("until with a basis", dict(until=D(2), wait_basis={"text": f"the vendor visits {D(2)}", "by": "home-agent", "at": now})), ("wake with a hold", dict(hold=True, wake=D(2))),
+          ("wake with a kind time", dict(wait_kind="time", wake=D(2))), ("no wait", {}))
+for k, (name, kw) in enumerate(STATES):
+    n = 90 + k; item(n, **kw)
+    for j, extra in enumerate(({"clear_wait": True}, {"wait_kind": "none"})):
+        if j: n = 100 + k; item(n, **kw)
+        reset(answer(False, "the vendor has not replied")); HELD_LOG.clear()
+        try: upd(n, next=STEP(), wait_basis=f"the soak ends {D(2)}", wait_reason=REASON, **extra)
+        except ToolError: pass
+        g = [h for who, h in HELD_LOG if who == "gate_self_wait"]; t = [h for who, h in HELD_LOG if who == "update_unlocked"]
+        if "hold" in name: check(f"agreement: {name}, {tuple(extra)[0]}: a stored hold is no wait the check judges (it returns before it reads held), the tool reads it held", not g and t == [True], (g, t))
+        else: check(f"agreement: {name}, {tuple(extra)[0]}: the gate and the tool both read held, and read the same", bool(g) and bool(t) and g == t, (g, t))
+# a padded wait_kind is the same clear
+for n in (84, 85): item(n)
+reset(answer(True))
+refused("wait_kind ' none ': padded, still a clear of the wait: an in-window wake with no reason is refused, no call", lambda: upd(84, wake=D(3), wait_kind=" none "), "wait_reason", i=84, calls=0)
+refused("wait_kind ' Clear ': …in any case", lambda: upd(85, wake=D(3), wait_kind=" Clear "), "wait_reason", i=85, calls=0)
+# a wait_kind of none (or clear_wait) on an item that stores a wait clears it for the check too: the dated step is judged as the step of an item in work
+for n, kw in ((86, dict(wait_kind="time", until=D(2))), (87, dict(wait_kind="time", until=D(2)))):
+    item(n, **kw)
+reset(answer(True))
+refused("stored wait: wait_kind none clears it for the check: a dated step with a reason is judged (yes refuses), one call", lambda: upd(86, next=STEP(), wait_kind="none", wait_reason=REASON), "can be done now", i=86, calls=1)
+reset(answer(True))
+refused("stored wait: clear_wait clears it for the check: a dated step with a reason is judged (yes refuses), one call", lambda: upd(87, next=STEP(), clear_wait=True, wait_reason=REASON), "can be done now", i=87, calls=1)
+reset(answer(True))
+refused("stored wait: wait_kind none and a dated step with no reason is refused, no call", lambda: upd(86, next=STEP(), wait_kind="none"), "wait_reason", i=86, calls=0)
+# with the model guards off nothing is held: the same call as the stored time wait above (a basis the tool drops) is judged as without a basis
+item(88, wait_kind="time", until=D(2))
+for n in (88,):
+    with guards(False):
+        reset(answer(True))
+        refused(f"guards off a{n}: clear_wait with an in-window wake and a basis and no reason is refused as without the basis, no call", lambda n=n: upd(n, clear_wait=True, wake=D(3), wait_basis=f"the soak ends {D(3)}"), "wait_reason", i=n, calls=0)
+
+# the check reads the item's wait for `held` only when the call carries a basis: a call with none derives nothing extra
+READS = []
+_real_rtw = _G.reads_time_wait
+_G.reads_time_wait = lambda it: (READS.append(1), _real_rtw(it))[1]
+item(107, until=D(2))
+reset(answer(False, "the vendor has not replied")); READS.clear()
+passes("no basis: a dated step with a reason is judged (one call) and the wait is not read for held", lambda: upd(107, next=STEP(), clear_wait=True, wait_reason=REASON), 1)
+check("no basis: …reads_time_wait ran for nobody", not READS, READS)
+item(108, until=D(2)); reset(answer(False, "the vendor has not replied")); READS.clear()
+passes("basis: …the same step with a basis the tool drops reads the wait for held", lambda: upd(108, next=STEP(), clear_wait=True, wait_basis="x", wait_reason=REASON), 1)
+check("basis: …reads_time_wait ran", bool(READS), READS)
+_G.reads_time_wait = _real_rtw
 
 # ---- a create
 reset(answer(True, "it can start now"))

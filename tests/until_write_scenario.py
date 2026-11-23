@@ -427,12 +427,14 @@ for f14 in sorted([*(root14 / "docs").glob("*.md"), *[x for x in (root14 / "stac
 check("5.14 no doc (docs/*.md), file under stackshot/ or scenario under tests/ still teaches the old model: a wake alone is a reminder or never a park, a check-back, a reminder wake (a front agent's own is allowed), a wake pass that reminds, hold=true with wake=, a date that shows no wait", not hits14, hits14[:8])
 # what the update description now says about a basis is what the guard does: a bare date within the cap refuses one, a hold's wake and a date past the cap take one
 item(94, needs=[BACK]); item(95, needs=[BACK]); item(96, needs=[BACK])
-refused("5.14 a bare date within the cap refuses a wait_basis as not needed", lambda: bupd(94, until=w(3), wait_basis=f"the vendor ships {w(3)}"), "wait_basis is not needed", "a wait on its own")
+from stackshot.core import call_log as _CL94
+tok94 = _CL94.begin(); out94 = bupd(94, until=w(3), wait_basis=f"the vendor ships {w(3)}"); made94 = dict(_CL94.end(tok94))
+check("5.14 a bare date within the cap drops a wait_basis and says so: the date is stored as sent, no basis", "wait_basis was dropped" in made94.get("wait-basis-dropped", "") and "needs no basis" in made94.get("wait-basis-dropped", "") and W.stored_until(mt(94)) == w(3) and not W.basis_of(mt(94)), (made94, mt(94)))
 check("5.14 …a hold's wake takes it", bool(bupd(95, hold=True, wake=w(3), wait_basis=f"the vendor ships {w(3)}")) and bool(W.basis_of(mt(95))), mt(95))
 check("5.14 …and a date past the cap takes it", bool(bupd(96, until=w(40), wait_basis=f"the vendor ships {w(40)}")) and bool(W.basis_of(mt(96))), mt(96))
 upd14 = _wt_update._UPDATE_DESC + _wt_update._WAIT_FORM
-check("5.14 the update description says so: a bare date within the cap refuses a basis unless the item is on hold or verifying, and a date no longer leaves an item active as a reminder",
-      "A bare date within the cap (until, or its old name wake) is a wait on its own" in upd14 and "refused as not needed unless the item is parked (hold=true) or verifying" in upd14 and "a date no longer leaves the item active as a reminder" in upd14, None)
+check("5.14 the update description says so: a bare date within the cap drops a basis unless the item is on hold or verifying, and a date no longer leaves an item active as a reminder",
+      "A bare date within the cap (until, or its old name wake) is a wait on its own" in upd14 and "dropped, the reply saying so, unless the item is parked (hold=true) or verifying" in upd14 and "a date no longer leaves the item active as a reminder" in upd14, None)
 check("5.14 docs/item-model.md names until as the one date of a wait", "stored as `until`" in (root14 / "docs" / "item-model.md").read_text(encoding="utf-8"), None)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

@@ -231,8 +231,10 @@ check("B: …and a stored hold with that wake and no basis has none", not W.basi
 
 # refusals
 item(23, wake=day(3))
-refused("B: a wake under the cap that is no hold (a backstop wake) needs no basis: refused (not needed)", lambda: _update_svc._update("a23", wait_basis=B(4), sender="home-owner"), "not needed")
-refused("B: …the same when the wake is set in the same call", lambda: _update_svc._update("a23", wake=day(6), wait_basis=B(7), sender="home-owner"), "not needed")
+_update_svc._update("a23", wait_basis=B(4), sender="home-owner")
+check("B: a wake under the cap that is no hold (a backstop wake) needs no basis: the call goes through, the basis is dropped and not stored", "wait_basis" not in rd(23)["metadata"] and wk_(rd(23)["metadata"]) == day(3), rd(23)["metadata"])
+_update_svc._update("a23", wake=day(6), wait_basis=B(7), sender="home-owner")
+check("B: …the same when the wake is set in the same call: the wake is stored as sent, the basis is not", "wait_basis" not in rd(23)["metadata"] and wk_(rd(23)["metadata"]) == day(6), rd(23)["metadata"])
 item(2020, hold=True, wake=day(3))
 _update_svc._update("a2020", wait_basis=B(4), sender="home-owner")
 check("B: a held wake under the cap takes a basis (a time wait carries a reason at any length)", W.basis_of(rd(2020)["metadata"]) == B(4), rd(2020)["metadata"])
@@ -248,7 +250,8 @@ refused("B: clear_wait_basis does not go with a new basis", lambda: _update_svc.
 refused("B: a basis does not go with a call that drops the wake", lambda: _update_svc._update("a29", wait_basis=B(33), clear_wake=True, sender="home-owner"), "drops the wake")
 check("B: …and nothing was recorded by the refusals", "wait_basis" not in rd(29)["metadata"] and "wait_basis" not in rd(23)["metadata"], (rd(29)["metadata"], rd(23)["metadata"]))
 W._cfg.CFG.setdefault("waiting", {})["cap_needs_owner"] = False
-refused("B: with the cap switched off ([waiting] cap_needs_owner = false) there is nothing to lift on a backstop wake: refused", lambda: _update_svc._update("a23", wait_basis=B(4), sender="home-owner"), "not needed")
+_update_svc._update("a23", wait_basis=B(4), sender="home-owner")
+check("B: with the cap switched off ([waiting] cap_needs_owner = false) there is nothing to lift on a backstop wake: the basis is dropped", "wait_basis" not in rd(23)["metadata"], rd(23)["metadata"])
 _update_svc._update("a29", wait_basis=B(33), sender="home-owner")
 check("B: …a held wake still takes it: it is the time wait's reason, whatever the cap", W.basis_of(rd(29)["metadata"]) == B(33), rd(29)["metadata"])
 W._cfg.CFG["waiting"]["cap_needs_owner"] = True
@@ -645,7 +648,8 @@ check("C: …the item is held, with the wake and the basis bound to it", hd_(m) 
 item(82, needs=["team-back"], state="doing")
 _update_svc._update("a82", wake=day(2), sender="team-back")
 check("C: a wake alone on a doing item is a date to wait on (stored as until, no hold): accepted with no basis", wk_(rd(82)["metadata"]) == day(2) and "hold" not in rd(82)["metadata"] and _WT.stored_until(rd(82)["metadata"]) == day(2), rd(82)["metadata"])
-refused("C: …and a wait_basis for it is not needed", lambda: _update_svc._update("a82", wake=day(3), wait_basis=f"visit on {day(4)}", sender="team-back"), "not needed")
+_update_svc._update("a82", wake=day(3), wait_basis=f"visit on {day(4)}", sender="team-back")
+check("C: …and a wait_basis for it is dropped, the wake kept as sent", "wait_basis" not in rd(82)["metadata"] and wk_(rd(82)["metadata"]) == day(3) and "hold" not in rd(82)["metadata"], rd(82)["metadata"])
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": cap words scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

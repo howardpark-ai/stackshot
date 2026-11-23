@@ -224,6 +224,33 @@ _GOAL_RETRY = (" Retry the call with the description's first bullet changed; a s
                "(portal_codemode_execute with codemode.stackshot_create or codemode.stackshot_update), and a relaunch does not refresh it.")
 
 
+def fix_goal_label(desc: str, stored: str = "") -> str:
+    """A session's description whose first `- ` bullet opens with a goal word in another form (`goal: x`, `Goal - x`, `GOALS: x`, a bold label, the Korean word for it), put right instead of refused: the bullet is written
+    `- Goal: x` (bullet_text.relabel_goal: the words after the label and every other line are as written) and the reply says so (call_log.fixed). The text as given when it opens with `Goal:` already, when its first bullet
+    opens with anything else (the gate then refuses it and shows the description with that bullet as the goal) or holds a label and nothing after it. The callers run it where `_gate_goal` would judge the text.
+    [description] require_bullets = false switches it off with the other form checks. `stored` is the description the item holds (an update): a text that is the stored one once relabelled is no fix."""
+    if not desc or not _bullets_on():
+        return desc
+    res = _bt.relabel_goal(desc)
+    if res is None:
+        return desc
+    new, label = res
+    if stored.strip() and new.strip() == stored.strip():
+        return new          # the stored text with only its label written otherwise: the write changes nothing, so no fix is counted or told
+    _calls.fixed("description-goal", f"the description's first bullet opened with \u201c{label}\u201d and is stored as `- Goal: ...`, the words after it as you wrote them; to change the goal, send the description with the first bullet you want",
+                 fields=["description"], stored=new, sent=desc)
+    return new
+
+
+def _sendable(desc: str) -> bool:
+    """Would `desc` pass the form gate as sent: within the line cap and the bullet length, or after the bullet fix (`fix_long_bullets`) has split what it can. Nothing is counted or noted."""
+    max_lines, line_max = _description_limits()
+    if not _bt.judge(desc, max_lines, line_max):
+        return True
+    res = _bt.split_long_ex(desc, max_lines, line_max)
+    return bool(res) and not _bt.judge(res[0], max_lines, line_max)
+
+
 def _gate_goal(desc: str) -> None:
     """A session's new description, or one it rewrites, opens with the goal: the first `- ` bullet starts `Goal:` (case-sensitive, right after the dash) and says the outcome wanted;
     a symptom, cause or trigger goes in a later bullet that opens `Problem:`. Why: an item once carried a title and bullets that described the trouble and never said what result was wanted.
@@ -233,7 +260,11 @@ def _gate_goal(desc: str) -> None:
         return
     first = _bt.first_bullet(desc)
     saw = f"the first bullet starts “{_clip_line(' '.join(first.split()[:6]), 60)}”" if first is not None else "it has no `- ` bullet"
-    raise ToolError(f"Refused: the description must open with its goal, and {saw}. The subject and the first bullet state the outcome wanted: `- Goal: <the result you want, in a sentence>`; "
+    ex = _bt.goal_example(desc)
+    if ex is not None and not _sendable(ex):      # a corrected description the form gate would refuse again is no example to copy
+        ex = None
+    shown = (f" Send the description again with that bullet as the goal:\n{ex}\n" + "If that bullet names a symptom, a cause or a trigger, write the outcome you want as the goal and move the bullet to a later bullet that opens `Problem:`.") if ex else ""
+    raise ToolError(f"Refused: the description must open with its goal, and {saw}.{shown} The subject and the first bullet state the outcome wanted: `- Goal: <the result you want, in a sentence>`; "
                     "a symptom, a cause or a trigger goes in a later bullet that opens `Problem:`. "
                     "Example: the symptom title “Fix X fails when Y” becomes the outcome title “Make X work when Y”, with `- Goal: X works when Y` as the first bullet "
                     "and `- Problem: X fails when Y` as the second. `Goal:` is case-sensitive and sits right after the dash." + _GOAL_RETRY)
