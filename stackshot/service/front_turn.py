@@ -4,6 +4,7 @@ A front agent is a session the person talks to. An inbound notice (the router's 
   1. it needs his attention and he is talking with that front agent now (`telling.present_fronts`: his last prompt in that pane is within [presence] minutes);
   2. he explicitly asked that front agent to tell him about the notice's subject.
 Any other notice never reaches a front agent, not even held: the router sends it to the item's builder when it is about the builder's work, and otherwise logs it (ruling archived); a message is refused or routed the same way.
+The digest of lines queued while a pane was away (`messaging.digest_fyi`, from `inbox.take`) is asked the same: a turn only under these two cases, else its lines are filed as fyi lines and start none.
 
 The record of case 2 is the item's own `tell_him` list (the update tool's `tell_him`): a front agent he asked to tell him about an item lists itself there. It is written only by a write that carries his own words (`said`,
 checked against the transcript; gates.gate_tell_him), never by a session on its own say, and it is not `observers` (those hear a close or a reopen, and no entry of them is a request to be told). A notice matches the record by its

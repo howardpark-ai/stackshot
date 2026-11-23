@@ -747,17 +747,17 @@ def deliver_down(*down):
     return d
 rec_clear(); fake()
 rec = go(f1, env_=env(deliver=deliver_down("home-agent")))
-fb = [m for m in rec["messages"] if m.get("kind") == "fallback"]
-msg_main = [t for to, t, fy in sent if to == "alpha-main" and "could not be reached" in t]
+fb = [m for m in rec["messages"] if m.get("kind") in ("fallback", "project")]
+msg_main = [t for to, t, fy in sent if to == "projects/alpha" and "could not be reached" in t]
 failed = [m for m in rec["messages"] if m["to"] == "home-agent"]
-check("the mover's message fails: its findings go to the project's -main agent, [for Oliver] first, naming who could not be reached", len(msg_main) == 1 and msg_main[0].startswith("[for Oliver]")
+check("the mover's message fails: its findings (their items wait on nothing of the owner's) go to the project's page key, unmarked, naming who could not be reached", len(msg_main) == 1 and not msg_main[0].startswith("[for")
       and "for home-agent" in msg_main[0] and "board#4 · next rules" in msg_main[0] and "board#5" not in msg_main[0] and "· stale ·" not in msg_main[0], msg_main)
-check("…the message log records the failed one and the fallback beside it", len(failed) == 1 and failed[0]["delivered"] is False and len(fb) == 1 and fb[0]["to"] == "alpha-main" and fb[0]["for"] == "home-agent"
+check("…the message log records the failed one and the fallback beside it", len(failed) == 1 and failed[0]["delivered"] is False and len(fb) == 1 and fb[0]["to"] == "projects/alpha" and fb[0]["for"] == "home-agent"
       and fb[0]["delivered"] is True and fb[0]["lines"] == failed[0]["lines"], rec["messages"])
 check("…and the findings of the other movers are not duplicated to the -main agent", "board#3 · stuck-elsewhere" not in msg_main[0])
-rec_clear(); rec = go(f1, env_=env(deliver=deliver_down("home-agent", "alpha-main")))
-fb = [m for m in rec["messages"] if m.get("kind") == "fallback"]
-check("the -main agent is down too: the fallback is recorded as not delivered, the run still finishes", len(fb) == 1 and fb[0]["delivered"] is False and rec["finished"] is not None and "error" not in rec, rec["messages"])
+rec_clear(); rec = go(f1, env_=env(deliver=deliver_down("home-agent", "projects/alpha")))
+fb = [m for m in rec["messages"] if m.get("kind") in ("fallback", "project")]
+check("the page key it falls back to is down too: the fallback is recorded as not delivered, the run still finishes", len(fb) == 1 and fb[0]["delivered"] is False and rec["finished"] is not None and "error" not in rec, rec["messages"])
 rec_clear(); rec = go(f1, env_=env(deliver=deliver_down("alpha-main")))
 check("a finding already addressed to the -main agent that fails has no one to fall back to: no fallback message", not [m for m in rec["messages"] if m.get("kind") == "fallback"], rec["messages"])
 def deliver_raises(to, text, fyi=False):
@@ -765,7 +765,7 @@ def deliver_raises(to, text, fyi=False):
     if to == "home-agent": raise OSError("connection refused")
     return True, "ok"
 rec_clear(); rec = go(f1, env_=env(deliver=deliver_raises))
-check("a delivery that raises is a failed delivery (the run does not die), and falls back too", rec["finished"] is not None and "error" not in rec and any(m.get("kind") == "fallback" and m["for"] == "home-agent" and m["delivered"] for m in rec["messages"])
+check("a delivery that raises is a failed delivery (the run does not die), and falls back too", rec["finished"] is not None and "error" not in rec and any(m.get("kind") in ("fallback", "project") and m["for"] == "home-agent" and m["delivered"] for m in rec["messages"])
       and any(m["to"] == "home-agent" and "connection refused" in m["said"] and m["delivered"] is False for m in rec["messages"]), rec["messages"])
 
 # ---- 22. the cue's check and the running record are one step under an exclusive lock (item 6)
@@ -884,8 +884,8 @@ check("a front agent refuses the message: the lines go to projects/alpha, with n
 check("…recorded as kind project beside the failed one, and nothing goes to the -main agent as a fallback", len(proj) == 1 and proj[0]["to"] == "projects/alpha" and proj[0]["delivered"] is True and proj[0]["for"] == FRONT_ID
       and not [m for m in rec["messages"] if m.get("kind") == "fallback"] and not [t for to, t, fy in sent if to == "alpha-main" and "could not be reached" in t], rec["messages"])
 rec_clear(); rec = go(f25, env_=env(deliver=deliver_down(FRONT_ID)))
-check("any other failure keeps the -main fallback, marked [for Oliver]", [m for m in rec["messages"] if m.get("kind") == "fallback"] and not [m for m in rec["messages"] if m.get("kind") == "project"]
-      and any(to == "alpha-main" and t.startswith("[for Oliver]") and "could not be reached" in t for to, t, fy in sent), (rec["messages"], sent))
+check("any other failure (a session that is not live): the item waits on nothing of the owner's, so the fallback is the page key, unmarked, and no marked message goes to the -main agent", [m for m in rec["messages"] if m.get("kind") == "project"] and not [m for m in rec["messages"] if m.get("kind") == "fallback"]
+      and any(to == "projects/alpha" and not t.startswith("[for") and "could not be reached" in t for to, t, fy in sent) and not any(to == "alpha-main" and t.startswith("[for Oliver]") for to, t, fy in sent), (rec["messages"], sent))
 f25b = build(item(61, wrote=now - 5 * H, state="doing", needs=[FRONT_ID], next=f"{FRONT_ID}: build it", wake=local(now - 2 * H), project="alpha"))
 rec_clear(); rec = go(f25b, env_=env(deliver=deliver_front))
 check("a bare-slug project (no '/') goes to projects/<slug> as well", [t for to, t, fy in sent if to == "projects/alpha"] and any(m.get("kind") == "project" and m["to"] == "projects/alpha" for m in rec["messages"]), (rec["messages"], sent))

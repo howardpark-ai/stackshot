@@ -304,12 +304,29 @@ def _target(it: dict[str, Any], live: dict[str, str], known: set[str], rank: dic
     return by_name[0] if uuid not in known else ""          # addressed by id: only when that session exists nowhere any more
 
 
+Digest = Callable[[str, list[str]], bool]
+
+
+def filed_as_fyi(digest: Digest | None, name: str, lines: list[str]) -> bool:
+    """Does the digest hook take the lines waiting for the session `name` as an fyi, which starts no turn (`digest(name, lines)` → True: they are filed for the session's next turn and the caller drops them)?
+    A caller with no hook, a name it does not know, a hook that says no or fails: False, and the lines are handed out as one turn, as they always were. The hook is the server's (service/messaging.digest_fyi: a layer above
+    this module, so it is given, never imported)."""
+    if digest is None or not name or not lines:
+        return False
+    try:
+        return bool(digest(name, lines))
+    except Exception as e:  # noqa: BLE001  — the hook is an extra: a failure in it hands the lines out as before
+        log.warning("inbox: digest for %s not filed as an fyi (%s: %s); handed out as a turn", name, e.__class__.__name__, e)
+        return False
+
+
 def take(live: dict[str, str], known: set[str] | None = None, only_src: str | None = None, now: float | None = None,
-         rank: dict[str, float] | None = None) -> list[dict[str, Any]]:
+         rank: dict[str, float] | None = None, digest: Digest | None = None) -> list[dict[str, Any]]:
     """What a puller is handed for the sessions live on its machine (uuid → name): one delivery per (session, source),
     several waiting lines folded into one turn, each line leased until it is confirmed. `live` carries the server's own name for
     each session (the poll passes what the server kept, never the CLI's placeholder a relaunched pane reports); `rank` (uuid →
     when the session was registered) settles several live namesakes or several live carriers of one permanent id (`_newest`).
+    `digest`: the server's ruling on the folded lines of a session (`filed_as_fyi`); lines it files as an fyi are removed here and no delivery is made for them.
     → [{session, name, src, ids: [...], text}]"""
     now = time.time() if now is None else now
     known = _present(_index()) if known is None else known
@@ -351,6 +368,9 @@ def take(live: dict[str, str], known: set[str] | None = None, only_src: str | No
     res = []
     for (u, src), its in out.items():
         lines = [label(str(i.get("from") or ""), i["text"]) for i in its]
+        if len(its) > 1 and filed_as_fyi(digest, live.get(u, ""), lines):      # no line asks him for anything and he is not there for this pane: the lines ride its next turn, they start none
+            ack([i["id"] for i in its], now=now)
+            continue
         text = lines[0] if len(its) == 1 else f"{HEAD[src]} {len(its)} queued while you were away:\n" + "\n".join(lines)
         res.append({"session": u, "name": live.get(u, ""), "src": src, "ids": [i["id"] for i in its], "text": text})
     return res

@@ -463,6 +463,22 @@ def _turn_warranted(name: str, text: str) -> bool:
         return False
 
 
+def digest_fyi(agent: str, lines: list[str]) -> bool:
+    """The ruling on a digest, the lines queued for a pane that was away ("N queued while you were away", inbox.take and push.flush): a front agent's turn starts only for what is the person's, so the digest is a turn when
+    a line carries his mark (the held rule's own test, `[for <owner>]` or needs: decision) and he is talking with that agent now, or when he asked it to tell him about an item a line names (front_turn.warranted, the test a
+    marked message passes). Otherwise each line is filed as an fyi (telling.front_fyi: held for the agent's next turn, the board line written on the items it names) and this says True: the caller drops the lines and starts
+    no turn. False for anything else, which hands the digest out as before: an agent that is no front agent, a hook that cannot fetch held lines (nothing would carry the lines), a line that could not be filed, any failure."""
+    try:
+        if not agent or not _telling.front_sender(agent) or not _held.enabled() or not _held.can_fetch(agent):
+            return False
+        text = "\n".join(lines)
+        if _front_turn.warranted(agent, _agent_names._item_refs(text), bool(_held._owner_mark().search(text))):
+            return False
+        return all(_telling.front_fyi(agent, ln, ",".join(_agent_names._item_refs(ln))) == ("fyi", "") for ln in lines)
+    except Exception:  # noqa: BLE001  — an extra: a failure in it hands the digest out as it always was
+        return False
+
+
 def _cut_note(line: str, routed: bool = False, script: bool = False) -> str:
     """The sentence a reply adds when a held line is shorter than the message: a held line holds `held.LINE_MAX` characters, and the sender's reply must not promise the whole text.
     `routed`: the message goes to a project, so the line is held only if the router passes it on as an fyi (it may deliver it whole instead). `script`: the sender is a script, which has no item tools: it is told of a page."""

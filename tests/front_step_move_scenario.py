@@ -422,8 +422,8 @@ check("8 after the third send the finding goes once to the project's builder as 
 sent.clear(); AR.filing_pass(now=T0 + 2 * REM + 31 * M + 10 * M, env=env())
 check("8 …nothing more is sent before the next remind_hours", sent == [], sent)
 sent.clear(); AR.filing_pass(now=T0 + 3 * REM + 32 * M, env=env()); up = [(to, t) for to, t, _f in sent]
-check("8 a remind_hours after the builder was told and the item still unwritten, the finding reaches the project's -main agent once, marked for the owner, the builder named as having had it",
-      [to for to, _t in up] == ["alpha-main"] and up[0][1].startswith("[for Oliver]\n") and "nobody answered after 4 messages" in up[0][1] and "board#9020" in up[0][1] and "its builder after the reminders" in up[0][1], up)
+check("8 a remind_hours after the builder was told and the item still unwritten, the finding reaches the project's -main agent once, as a held note (an fyi, not marked: the item waits on nothing of the owner's)",
+      [to for to, _t in up] == ["alpha-main"] and not up[0][1].startswith("[for") and "board#9020" in up[0][1] and [f for _to, _t, f in sent] == [True], sent)
 sent.clear()
 for k in range(1, 6): AR.filing_pass(now=T0 + 3 * REM + 32 * M + k * REM, env=env())
 check("8 …and then it is quiet for good until the item is written", sent == [], sent)
@@ -439,8 +439,8 @@ esc2 = [(to, t) for to, t, _f in sent]
 check("8 a mover who is the project's builder is not sent its own escalation: it goes once to the project's page key instead (unmoved, chase the mover), and to no session",
       [to for to, _t in esc2] == ["projects/alpha"] and "unmoved after 3 messages" in esc2[0][1] and "board#9032" in esc2[0][1] and not any(to == "alpha-builder" for to, _t in esc2), esc2)
 sent.clear(); AR.filing_pass(now=tk + REM + 60, env=env()); up2 = [(to, t) for to, t, _f in sent]
-check("8 …and a remind_hours later, still unwritten, the project's -main agent is told (marked for the owner); the builder is not told again",
-      [to for to, _t in up2] == ["alpha-main"] and up2[0][1].startswith("[for Oliver]") and "board#9032" in up2[0][1], up2)
+check("8 …and a remind_hours later, still unwritten, the project's -main agent is told (a held note, not marked for the owner); the builder is not told again",
+      [to for to, _t in up2] == ["alpha-main"] and not up2[0][1].startswith("[for") and "board#9032" in up2[0][1] and [f for _to, _t, f in sent] == [True], sent)
 sent.clear()
 for k_ in range(2, 5): AR.filing_pass(now=tk + k_ * REM, env=env())
 check("8 …and then it is quiet, as for any other finding", sent == [], sent)
@@ -488,7 +488,7 @@ AR.filing_pass(now=tk, env=env(deliver=down))
 rec8 = [f for f in AR.read_filing()["findings"] if f["id"] == "board#9020"]
 check("8 a message to the -main agent that is not reached keeps the finding at its fourth send (tries 4), and the next pass tries it again, once", len(rec8) == 1 and rec8[0].get("tries") == 4, rec8)
 sent.clear(); AR.filing_pass(now=tk + 10 * M, env=env()); retry3 = [(to, t) for to, t, _f in sent]
-check("8 …to the -main agent, marked for the owner", [to for to, _t in retry3] == ["alpha-main"] and retry3[0][1].startswith("[for Oliver]") and "nobody answered after 4 messages" in retry3[0][1], retry3)
+check("8 …to the -main agent, as a held note (not marked for the owner)", [to for to, _t in retry3] == ["alpha-main"] and not retry3[0][1].startswith("[for") and "board#9020" in retry3[0][1], retry3)
 # a finding that did not go to a builder (a front agent's step goes to the page key) has nobody above the builder's escalation: it ends there, with no message to the -main agent
 cfg_audit["front_step_move_hours"] = 0
 wipe_store(); clear_state(); sent.clear()

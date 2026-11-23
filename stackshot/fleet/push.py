@@ -362,7 +362,9 @@ def flush_held(name: str, src: str) -> bool:
     return paused(_sr.delivery(name), src)
 
 
-def flush(name: str) -> int:
+def flush(name: str, digest: "_inbox.Digest | None" = None) -> int:
+    """Deliver what is queued for `name` as one turn. `digest` is the server's ruling on the queued lines (inbox.filed_as_fyi): lines it files as an fyi are dropped from the queue and start no turn. The script
+    (`--flush`) has none: it runs apart from the server, which holds the hooks that rule, so it hands the lines out as it always did."""
     if server_mode():
         return 0                    # no queue here: the server holds every line
     name = _sr.delivery(name)
@@ -391,6 +393,8 @@ def flush(name: str) -> int:
     # prompts, none of them an anchor change (a [board] notice arrived under "[anchor] 1 queued…")
     head = "[stackshot]" if SRC == "msg" else "[anchor]"
     text = f"{head} {len(items)} queued while you were away:\n" + "\n".join(items)
+    if _inbox.filed_as_fyi(digest, name, items):        # no line asks him for anything and he is not there for this pane: the lines ride its next turn, they start none
+        os.remove(qf); print(f"filed {len(items)} as an fyi → {name}"); return 0
     if CSE.match(name):                     # a cloud session is retried at most once per rescan; a session that is gone keeps its queue
         ok, _ = cloud_send(name, text)
         if not ok:
