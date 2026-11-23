@@ -880,7 +880,7 @@ check("the live script reloads only through reload(), only from the fallback or 
       L13.count("location.reload") == 1 and "function reload(){ss(KY,String(window.scrollY||0));location.reload()}" in L13 and L13.count("addEventListener('click',reload)") == 1
       and "if(k==='fail')fallback(ts)" in L13 and "if(!r.ok||r.redirected)throw 0" in L13 and "try{k=apply(t)}catch(e){k='fail'}" in L13)
 check("the in-place swap: a different shell or block set falls back to the reload; only a changed block is swapped; folds, the live audit card and the scroll position are kept; the stamp moves after the last block",
-      "if(!SH||!sh||sh.content!==SH.content)throw 0" in L13 and "K.join(' ')!==Object.keys(V).join(' ')" in L13 and "if(V[k]===W[k])return;" in L13 and "if(k in f){if(d.open!==f[k]){d._fs=f[k];d.open=f[k]}}" in L13
+      "if(!SH||!sh||sh.content!==SH.content)throw 0" in L13 and "K.join(' ')!==Object.keys(V).join(' ')" in L13 and "if(V[k]===W[k])return;" in L13 and "if(k in f){if(d.open!==f[k])d.open=f[k]}" in L13
       and "if(oa&&na)na.parentNode.replaceChild(oa,na)" in L13 and "if(window.scrollY!==y)window.scrollTo(0,y)" in L13 and "R=S;M.content=String(S)}" in L13 and "document.dispatchEvent(new Event('stackshot:swapped'))" in L13)
 check("a newer render is not swapped in while a field has focus or text is selected: the banner shows instead", "if(busy()||tried===ts){newer=true;return}return update(ts)" in L13 and "if(busy())return 'busy'" in L13 and "INPUT|TEXTAREA|SELECT" in L13)
 

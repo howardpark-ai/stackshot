@@ -957,7 +957,7 @@ _TOTOP_JS = ("<script>(function(){var b=document.getElementById('totop');if(!b)r
 # panel's sections (Machines, Runners, Anchor hub, Audit, Projects). A panel section's data-fold is its section id, the same on every page that draws the panel, so one choice holds on all of them.
 # The toggle listener is delegated (toggle does not bubble: capture on the document), so a section the in-place update swaps in (_LIVE_JS) keeps recording without a
 # re-bind (the same-hash click on a count card is delegated on the document too); the swap itself carries each fold's live open state over to its new node, and a fold the old block did not have gets its stored state through window.stackshotFold (the
-# one apply function, defined here). The swap's carry-over must not write: it marks the node (`_fs`, the open state it set) and the listener skips the toggle that carries the mark, so a stale tab's live refresh never overwrites a choice another tab stored since. Two kinds (the scope groups inside a section collapsible like the sections): a section fold renders closed and opens on a stored '1'; a scope group
+# one apply function, defined here). The swap's carry-over must not write: it marks every fold it brings in (`_fs`, the open state the node now has: a node that arrives open fires a toggle in the browser even when the swap changed nothing) and the listener skips the toggle that carries the mark, so a stale tab's live refresh never overwrites a choice another tab stored since. Two kinds (the scope groups inside a section collapsible like the sections): a section fold renders closed and opens on a stored '1'; a scope group
 # fold renders open and closes on a stored '0'; a fold never touched has nothing stored and keeps what the page renders. A hash to a line opens every fold around it (its group and its
 # section); to a section, the section: the hash stays in the address, and the open is recorded like any other toggle (the listener writes on a programmatic open too).
 # The script runs after the panel's markup (panel_tail and the home page put it at the end of the body), so its first pass reaches the panel's folds as well.
@@ -1590,7 +1590,7 @@ function bl(d){var m=d.querySelector('meta[name="stackshot-blocks"]'),o={};if(m)
 function key(a){return a.id?'#'+a.id:a.getAttribute('href')?a.tagName+'|'+a.className+'|'+a.getAttribute('href'):''}
 function swap(o,n){var x=document.importNode(n,true),f={},a=document.activeElement,k='';
 o.querySelectorAll('details.fold').forEach(function(d){f[d.getAttribute('data-fold')]=d.open});
-x.querySelectorAll('details.fold').forEach(function(d){var k=d.getAttribute('data-fold');if(k in f){if(d.open!==f[k]){d._fs=f[k];d.open=f[k]}}else if(window.stackshotFold)window.stackshotFold(d)});
+x.querySelectorAll('details.fold').forEach(function(d){var k=d.getAttribute('data-fold');if(k in f){if(d.open!==f[k])d.open=f[k]}else if(window.stackshotFold)window.stackshotFold(d);d._fs=d.open});
 var oa=o.querySelector('#audit'),na=x.querySelector('#audit');if(oa&&na)na.parentNode.replaceChild(oa,na);
 if(a&&a!==document.body&&o.contains(a)&&!(oa&&oa.contains(a)))k=key(a);
 o.parentNode.replaceChild(x,o);if(oa&&a&&oa.contains(a)&&document.activeElement!==a)try{a.focus({preventScroll:true})}catch(e){}
