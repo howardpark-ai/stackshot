@@ -79,6 +79,8 @@ letter = "s"                                        # every new item is s<n>: on
 # publisher_letter = "a"                            # the box that runs this server: first column of the Machines panel, always live. Unset (the default), the server finds it from its own
                                                     # hostname, so a server moved to another box, or failed over, carries it: the letter of that box's row in paths.fleet_names, else the letter of
                                                     # the fleet machine of that name, else the hostname itself. Set it only to name the box outright (it then always wins).
+# retired_letters = ["x"]                          # letters of boxes that are gone: no card in the Machines panel, not named, no versions or alert card, not listed by the sessions tool. Their sessions and
+                                                    # folders are kept as they are (the publisher's letter is never left out). Default: none.
 operator_label = "fleet operator"                   # the fleet operator session the sessions tool names (the fleet state's `master`)
 operator_session = ""                               # the session of this name is the operator: the one the sessions tool names for fleet work (machine.json `master`). Name a session that runs; a retired session (its pane gone) here is not sent to (its project's keeper is). It is also the fleet's builder: the one message a ladder sends when nobody can take a quiet item (the stall pass, the hand-off ladder, the idle pass), and the one told of a pane stopped on an error or a line waiting in the inbox
                                                     # Contract: none (it names a session; nothing is exchanged).

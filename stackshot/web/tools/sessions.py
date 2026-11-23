@@ -45,7 +45,7 @@ def _sessions_listing(q: str = "", now: float | None = None) -> str:
     states = _machine_states()
     names = _fleet_names()
     out = ["Machines:"]
-    for L in _fleet.letters():
+    for L in _fleet.drawn_letters():                  # the fleet's boxes: a retired box's folder is not listed
         st = states.get(L) or "state unknown"
         m = _fleet.read(L, "machine")
         line = f"- {names[L]}: {'online' if st == 'live' else st} · Claude Code {m.get('claude') or '?'}"
