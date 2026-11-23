@@ -7,8 +7,9 @@ wake moves the item (watching.watch_fire, the one place every watched wait turns
     the notice and reminder recipients and the holder all name the same session), the builder is told unmarked, the front agent is not told at all, and the History line says the wait ended and who continues;
     this holds for every wait kind and cause (a time wait, an item wait, an anchor, an event, a list) and for a wait on a date alone that stored no mover;
   * the project has no builder (none at all, or only background agents with another mandate): the front agent keeps the item and is told as before, but without the mark a front agent takes, which a wake
-    carries only for an item that waits on his decision or whose open step is its own;
-  * a step only the front agent can take (the first open step or the ask opens with its name) keeps the item with it, told and marked;
+    carries only for an item that waits on his decision;
+  * a step only the front agent can take (the first open step or the ask opens with its name) keeps the item with it, told, and not marked: the move is the agent's, he has nothing to do (the notice is pushed to
+    a front agent all the same, tests/watch_notice_delivery_scenario.py);
   * unchanged: a post-wake mover that is a background agent or a session no page lists, the person himself as the post-wake mover (a ready question, nobody told), a front agent that is the keeper of the
     item's own project, and a wake whose end is his decision (the mark stays).
 
@@ -217,10 +218,10 @@ item(17, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[
 reset(); wakes_svc.wake_pass()
 m = mt(17)
 check("9 an open step that opens with the front agent's name keeps the item with it, told", m.get("mover") == F_A and m.get("needs") == [F_A] and len(SENT) == 1 and SENT[0][1] == U[F_A] and not to(U[B_A]), (m, SENT))
-check("9 …marked, so the turn it needs starts, and the History line is the plain one", SENT[0][2].startswith(MARK) and notes_of("a17") == [f"woke: its wake {day(-1)} came → {F_A}"], (SENT, notes_of("a17")))
+check("9 …unmarked (the move is its own, the person has nothing to do), and the History line is the plain one", not SENT[0][2].startswith(MARK) and MARK not in SENT[0][2] and "is yours now" in SENT[0][2] and notes_of("a17") == [f"woke: its wake {day(-1)} came → {F_A}"], (SENT, notes_of("a17")))
 item(18, until=day(-1), needs=[F_A], next=f"{F_A}: ask him which one to keep", subject="[home] its own step, date alone")
 reset(); wakes_svc.wake_pass()
-check("9 …also a wait on a date alone: nothing passes, needs and mover stay as stored", mt(18).get("needs") == [F_A] and not mt(18).get("mover") and len(SENT) == 1 and SENT[0][1] == U[F_A] and SENT[0][2].startswith(MARK) and not to(U[B_A]), (mt(18), SENT))
+check("9 …also a wait on a date alone: nothing passes, needs and mover stay as stored", mt(18).get("needs") == [F_A] and not mt(18).get("mover") and len(SENT) == 1 and SENT[0][1] == U[F_A] and not SENT[0][2].startswith(MARK) and not to(U[B_A]), (mt(18), SENT))
 item(19, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], ask=f"{F_A}: which one do you keep?", subject="[home] its own ask")
 reset(); wakes_svc.wake_pass()
 check("9 …an ask that opens with the front agent's name does the same", mt(19).get("mover") == F_A and len(SENT) == 1 and SENT[0][1] == U[F_A] and not to(U[B_A]), (mt(19), SENT))
@@ -273,11 +274,14 @@ for i, cause, kw in ((24, "anchor", dict(wait_kind="anchor", wait_anchor=AURL, a
 # ================================================================ 12. one message lists items of two projects for one recipient: each row reads the recipient by its own project
 # F_G keeps projects/golf (a front agent of no other kind there) and is a front agent of projects/delta, which has a builder
 def own_step_row(i): return row(i, project="projects/delta", next=f"{F_G}: ask him which one to keep")
+def decision_row(i): return row(i, project="projects/delta", needs=["decision"])
 def golf_row(i): return row(i, project="projects/golf")
-both = watching_svc.watch_text(U[F_G], [golf_row(60), own_step_row(61)])
-rev = watching_svc.watch_text(U[F_G], [own_step_row(61), golf_row(60)])
-check("12 a batch of the keeper's own item first and another project's item with a step of its own second is marked (the second row is his)", both and both[1] == MARK, both)
+both = watching_svc.watch_text(U[F_G], [golf_row(60), decision_row(61)])
+rev = watching_svc.watch_text(U[F_G], [decision_row(61), golf_row(60)])
+check("12 a batch of the keeper's own item first and another project's item that waits on his decision second is marked (the second row is his)", both and both[1] == MARK, both)
 check("12 …and with the rows the other way round it is marked too", rev and rev[1] == MARK, rev)
+check("12 …a step of the agent's own on another project's item is its move, not his: a batch with it is not marked, in either order",
+      watching_svc.watch_text(U[F_G], [golf_row(60), own_step_row(61)])[1] == "" and watching_svc.watch_text(U[F_G], [own_step_row(61), golf_row(60)])[1] == "", None)
 check("12 …a batch of the keeper's own item alone is not marked", watching_svc.watch_text(U[F_G], [golf_row(60), golf_row(62)])[1] == "", None)
 for first, second, ids in (("golf", "delta", (39, 40)), ("delta", "golf", (41, 42))):
     for i, which in zip(ids, (first, second)):
@@ -285,8 +289,8 @@ for first, second, ids in (("golf", "delta", (39, 40)), ("delta", "golf", (41, 4
         else: item(i, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_G, needs=[], project="projects/delta", next=f"{F_G}: ask him which one to keep", subject=f"[home] another project's, its own step {i}")
     reset(); wakes_svc.wake_pass()
     msgs = to(U[F_G])
-    check(f"12 end to end, the {first} item then the {second} item: one message to the recipient, naming both, and it carries the mark in either order",
-          len(msgs) == 1 and all(f"a{i}" in msgs[0][0].split(",") for i in ids) and msgs[0][2].startswith(MARK) and not to(U[B_A]) and mt(ids[0]).get("mover") == F_G and mt(ids[1]).get("mover") == F_G, (msgs, [mt(i).get("mover") for i in ids]))
+    check(f"12 end to end, the {first} item then the {second} item: one message to the recipient, naming both, and it carries no mark, in either order (each is the agent's own move)",
+          len(msgs) == 1 and all(f"a{i}" in msgs[0][0].split(",") for i in ids) and not msgs[0][2].startswith(MARK) and MARK not in msgs[0][2] and not to(U[B_A]) and mt(ids[0]).get("mover") == F_G and mt(ids[1]).get("mover") == F_G, (msgs, [mt(i).get("mover") for i in ids]))
 
 # ================================================================ 13. a standalone relay wait: the person's later answer hands the item on the same way a wake does
 from stackshot.service import answer as answer_svc
