@@ -101,6 +101,8 @@ suitemap_warm_cmd = ""                              # the command, as words, tha
                                                     # loads it, e.g. "my-test-runner --git history --timeout 900 -- python3 tests/suitemap.py warm" (`warm` builds and keeps the index of HEAD).
                                                     # Stopped after 30 minutes; one at a time; a failure or a missing command is a line in <state>/releases/suitemap-warm-<sha>.log and nothing else.
                                                     # "" = none: the release log says so and goes on. Contract: none (a command that is run).
+deploy_ssh = ""                                     # the ssh host release.sh runs deploy.sh on (and the rollback), when the server runs on another box than release.sh: `ssh -o BatchMode=yes -o ConnectTimeout=15 <host> 'cd ~/stackshot && ...'`;
+                                                    # this box's checkout then follows to the same commit and only its puller restarts; a checkout that cannot follow (local changes) pauses the release queue and reports red, `release.sh queue --resume` goes on once it is clean. "" = deploy here (a one-box install). Contract: none (a command that is run).
 
 [subject]
 prefixes = ["[work] ", "[home] "]                   # every subject starts with one of these

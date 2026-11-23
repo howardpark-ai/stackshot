@@ -1744,6 +1744,75 @@ for what, argv in (("no commit", ["--warm"]), ("a word that is not a commit", ["
 s = scenario("warm-pick", raw=["--pick", "23"], pickfiles="server.py", warm=WARM)
 check("--pick (a dry run) starts no index build", s["rc"] == 0 and s["warm_sysrun"] == [] and s["warm"] == [], s["warm_sysrun"])
 
+# ---- 19. where deploy.sh runs: [release] deploy_ssh. Unset: here, as ever. Set to a host: the deploy and the rollback run there over `ssh -o BatchMode=yes <host>` (stub: tests/_release_harness.py SSH), its exit status is the deploy's,
+# and this checkout follows to the same commit (a fast-forward, a reset --keep for a rollback), with the puller restarted only when its files changed. A follow that is skipped or fails (local changes, a failed git move) is a red release, the queue paused, the last good record untouched. The git stub's history is linear; RT_LOCALDIFF names the files of the move.
+SSHH = "deploy-host"
+SSH_FWD = f"-o BatchMode=yes -o ConnectTimeout=15 {SSHH} cd ~/stackshot && DEPLOY_TO={MERGE} ./deploy.sh"
+SSH_RB = (f'-o BatchMode=yes -o ConnectTimeout=15 {SSHH} cd ~/stackshot && L="$(python3 stackshot/core/config.py state releases)/deploy.lock" && mkdir -p "$(dirname "$L")" && '
+          f'exec flock "$L" env DEPLOY_LOCK_FILE="$L" DEPLOY_ROLLBACK=1 DEPLOY_TO={GOOD} ./deploy.sh')
+def ssh_calls(s): return (s["dir"] / "ssh.log").read_text().splitlines() if (s["dir"] / "ssh.log").exists() else []
+def restarts(s): return [l for l in ((s["dir"] / "systemctl.log").read_text().splitlines() if (s["dir"] / "systemctl.log").exists() else []) if " restart " in f" {l} "]
+s = fast("ssh-unset", merge="ok", localdiff="stackshot/fleet/puller.py")
+check("deploy_ssh unset: the deploy runs here (one deploy, pinned), no ssh call, this checkout is not moved and nothing is restarted: a one-box install is as before",
+      s["rc"] == 0 and s["deploys"] == [MERGE] and ssh_calls(s) == [] and "merge --ff-only" not in s["git"] and "reset --keep" not in s["git"] and restarts(s) == [] and "over ssh" not in s["out"], (s["rc"], s["deploys"], ssh_calls(s), s["git"][-300:]))
+s = fast("ssh-unset-rb", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", localdiff="stackshot/fleet/puller.py")
+check("deploy_ssh unset: a rollback is also local, under the lock, no ssh call", s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and s["locks"] == ["held", "held"] and ssh_calls(s) == [] and "reset --keep" not in s["git"], (s["rc"], s["deploys"], s["locks"], ssh_calls(s)))
+s = scenario("ssh-cfg-missing", merge="ok", checks="pending,pass", deploy_ssh=SSHH, deploy_ssh_cfg="missing", extra={"SALA_CODEX_REVIEW": "off"})
+check("a config.py that predates the key reads as unset: the deploy runs here", s["rc"] == 0 and s["deployed"] and ssh_calls(s) == [], (s["rc"], ssh_calls(s)))
+s = fast("ssh-fwd", merge="ok", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py,docs/x.md")
+check("deploy_ssh set: the deploy is one ssh call, BatchMode and a 15 s connect timeout, the host, the checkout there and DEPLOY_TO pinned to the merge; deploy.sh ran once, on the far side of it",
+      s["rc"] == 0 and ssh_calls(s) == [SSH_FWD] and s["deploys"] == [MERGE] and "deploying on deploy-host over ssh" in s["out"], (s["rc"], ssh_calls(s), s["deploys"], s["out"][-400:]))
+check("deploy_ssh set: this checkout fast-forwards to the merge, and only the puller is restarted (its file changed), nothing else",
+      f"merge --ff-only --quiet {MERGE}" in s["git"] and restarts(s) == ["--user restart stackshot-puller.service"] and "  local: restarted stackshot-puller.service" in s["out"], (s["git"][-300:], restarts(s), s["out"][-400:]))
+check("deploy_ssh set: the report still names what the deploy restarted on the server, not the local puller, and is green",
+      len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS) and "restarted: stackshot.service" in s["msgs"][0] and "stackshot-puller" not in s["msgs"][0], s["msgs"])
+check("deploy_ssh set: the deploy ran under the lock of this release, and the lock is free after it", s["locks"] == ["held"] and lock_free(s), (s["locks"],))
+s = fast("ssh-fwd-nopuller", merge="ok", deploy_ssh=SSHH, localdiff="docs/x.md,stackshot/web/render.py")
+check("deploy_ssh set, the move touches none of the puller's files: the checkout follows and nothing is restarted here",
+      s["rc"] == 0 and f"merge --ff-only --quiet {MERGE}" in s["git"] and restarts(s) == [] and "  local: this checkout is at 0106c0d" in s["out"], (s["rc"], restarts(s), s["out"][-300:]))
+s = fast("ssh-fwd-unit", merge="ok", deploy_ssh=SSHH, localdiff="units/stackshot-puller.service.in")
+check("deploy_ssh set, the puller's unit file changed: the puller restarts and the log says the unit is not reinstalled here",
+      s["rc"] == 0 and restarts(s) == ["--user restart stackshot-puller.service"] and "the puller's unit file changed; ./install.sh units here installs it" in s["out"], (restarts(s), s["out"][-300:]))
+s = fast("ssh-fwd-restartfail", merge="ok", deploy_ssh=SSHH, localdiff="stackshot/fleet/client.py", restart_rc="1")
+check("deploy_ssh set, the puller cannot be restarted: one WARNING line, the release is still green (the server is live)", s["rc"] == 0 and "WARNING: stackshot-puller.service could not be restarted here" in s["out"] and len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS), (s["rc"], s["out"][-300:], s["msgs"]))
+s = fast("ssh-fwd-dirty", merge="ok", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py", dirty=" M release.sh")
+check("deploy_ssh set, this checkout has a local change: it is not moved and not restarted, the server is live and the release is red: one report that says the server is live at the merge and this checkout could not follow, and `release.sh queue --resume`",
+      s["rc"] == 1 and s["deploys"] == [MERGE] and "merge --ff-only" not in s["git"] and restarts(s) == [] and len(red(s)) == 1 and "FAILED at deploy" in red(s)[0] and "(deploy-host) is live at 0106c0d but this checkout could not follow" in red(s)[0]
+      and "has local changes, so it was not moved to 0106c0d" in red(s)[0] and "release.sh queue --resume goes on once the checkout is clean" in red(s)[0] and "merged, not live" not in red(s)[0] and lock_free(s), (s["rc"], s["deploys"], s["msgs"], s["out"][-400:]))
+check("deploy_ssh set, the follow was skipped: nothing is recorded as the last good commit (the record is still the old one), the release does not go on to watch main's run, and the report is not green",
+      s["lastgood"] == GOOD and "main's tests" not in s["out"] and not any(m.endswith(GREEN_ARGS) for m in s["msgs"]), (s["lastgood"], s["out"][-300:], s["msgs"]))
+s = fast("ssh-fwd-movefail", merge="ok", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py", move_fail="1")
+check("deploy_ssh set, the fast-forward here fails: no puller restart, the same red report (the server is live at the merge, this checkout could not follow, the exit status), nothing recorded as last good",
+      s["rc"] == 1 and len(red(s)) == 1 and "is live at 0106c0d but this checkout could not follow" in red(s)[0] and "could not be moved to 0106c0d (exit status 128)" in red(s)[0] and restarts(s) == [] and s["lastgood"] == GOOD and not any(m.endswith(GREEN_ARGS) for m in s["msgs"]),
+      (s["rc"], s["out"][-300:], restarts(s), s["msgs"]))
+s = scenario("ssh-fwd-dirty-4d", merge="ok", checks="pending,pass", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py", dirty=" M release.sh", extra={"SALA_CODEX_REVIEW": "off"})
+check("deploy_ssh set, the deploy waited for main's tests (no fast deploy) and this checkout cannot follow: the same red report, not green",
+      s["rc"] == 1 and s["deploys"] == [s["deploy_to"]] and len(red(s)) == 1 and "is live at" in red(s)[0] and "could not follow" in red(s)[0] and not any(m.endswith(GREEN_ARGS) for m in s["msgs"]) and "merge --ff-only" not in s["git"], (s["rc"], s["deploys"], s["msgs"], s["out"][-400:]))
+s = fast("ssh-fail", merge="ok", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py", ssh_fail="1")
+check("deploy_ssh set, the ssh fails (255): the deploy failed, merged and not live, with ssh's own last line; this checkout is not moved and nothing is restarted",
+      s["rc"] == 1 and s["deploys"] == [] and len(red(s)) == 1 and "Connection timed out" in red(s)[0] and "merge --ff-only" not in s["git"] and restarts(s) == [] and lock_free(s), (s["rc"], s["deploys"], s["msgs"], s["git"][-200:]))
+s = fast("ssh-deploy-fail", merge="ok", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py", deploy_fail="1")
+check("deploy_ssh set, deploy.sh itself fails over there: its exit status and last line come back (red), and this checkout is not moved",
+      s["rc"] == 1 and s["deploys"] == [MERGE] and len(red(s)) == 1 and "healthz did not answer" in red(s)[0] and "merge --ff-only" not in s["git"] and restarts(s) == [], (s["rc"], s["deploys"], s["msgs"], s["git"][-200:]))
+s = fast("ssh-badhost", merge="ok", deploy_ssh="-oProxyCommand=evil")
+check("deploy_ssh that is not a host name (an option): the deploy is refused before any ssh call, merged and not live",
+      s["rc"] == 1 and ssh_calls(s) == [] and s["deploys"] == [] and len(red(s)) == 1 and "is not an ssh host name" in red(s)[0], (s["rc"], ssh_calls(s), s["msgs"]))
+s = fast("ssh-rb", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py")
+check("deploy_ssh set, main fails: the rollback is a second ssh call, DEPLOY_ROLLBACK=1 and DEPLOY_TO the last good commit, inside a flock of the far side's own deploy lock",
+      s["rc"] == 1 and ssh_calls(s) == [SSH_FWD, SSH_RB] and s["deploys"] == [MERGE, f"rollback {GOOD}"], (s["rc"], ssh_calls(s), s["deploys"], s["out"][-500:]))
+check("deploy_ssh set, main fails: deploy.sh over there saw its lock held (the far side's, which it checks), and no lock is left held on either side",
+      s["locks"] == ["held", "held"] and (s["dir"] / "remote/releases/deploy.lock").exists() and file_free(s["dir"] / "remote/releases/deploy.lock") and lock_free(s), (s["locks"], file_free(s["dir"] / "remote/releases/deploy.lock")))
+check("deploy_ssh set, main fails: this checkout goes back to the last good commit with a reset --keep (never a hard reset), the puller restarts, and the red report is as for a local rollback",
+      f"reset --keep --quiet {GOOD}" in s["git"] and "reset --hard" not in s["git"] and len(restarts(s)) == 2 and "FAILED at main's tests: rolled back to 600d000" in red(s)[0], (s["git"][-300:], restarts(s), red(s)))
+s = fast("ssh-rb-fail", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py", rollback_fail="1")
+check("deploy_ssh set, the rollback over there fails: the red report says the rollback failed with deploy.sh's last line, and this checkout is not reset",
+      s["rc"] == 1 and "the rollback to 600d000 failed" in red(s)[-1] and "rollback: healthz did not answer" in red(s)[-1] and "reset --keep" not in s["git"], (s["rc"], red(s), s["git"][-200:]))
+
+s = fast("ssh-rb-dirty", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py", reset_fail="1")
+check("deploy_ssh set, main fails, the rollback ran over there but this checkout cannot follow (the reset fails): the server is rolled back, the report is red as for a rollback and says this checkout could not follow, and the queue pause is the rollback's own",
+      s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and "FAILED at main's tests: rolled back to 600d000" in red(s)[0] and "but this checkout is at" in red(s)[0] and "could not be moved to 600d000 (exit status 128)" in red(s)[0]
+      and "release.sh queue --resume goes on once it is clean" in red(s)[0] and "main still holds the failing merge" in red(s)[0] and lock_free(s), (s["rc"], s["deploys"], red(s)))
+
 long = [f"{n} ({k})" for n, k in POLLS if k > MAX_POLLS]
 check(f"no scenario polls more than {MAX_POLLS} times (one that waits main's run out to the 3 h cap: pass RELEASE_CAP_MAIN, as most do)", not long, long)
 

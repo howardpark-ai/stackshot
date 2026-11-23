@@ -251,7 +251,11 @@ case "$*" in
   "rev-list "*)   # the commits between the last good one and main's tip (the gate's (c)): RT_RANGE, comma-separated; up to the tip RT_TIP (the range ends "..<tip>"): RT_RANGE_TIP when given
     case "$*" in *"..${RT_TIP:-NOTIP}") echo "${RT_RANGE_TIP:-$RT_RANGE}" ;; *) echo "$RT_RANGE" ;; esac | tr , '\n' | sed '/^$/d' ;;
   "diff --diff-filter=A --name-only "*) echo "$RT_NEWUNITS" | tr , '\n' | sed '/^$/d' ;;   # unit files a rollback leaves installed (RT_NEWUNITS)
+  "diff --name-only HEAD "*) echo "${RT_LOCALDIFF:-}" | tr , '\n' | sed '/^$/d' ;;   # the files the move of this checkout to the deployed commit changes (deploy_ssh): RT_LOCALDIFF, comma-separated
+  "status --porcelain --untracked-files=no") echo "${RT_DIRTY:-}" ;;   # RT_DIRTY: a local change in this checkout
   "-c core.hooksPath=/dev/null worktree add "*) eval "mkdir -p \"\${$(( $# - 1 ))}\"" ;;   # the index build's checkout (release.sh warm_run): a folder, so the command can run in it
+  "reset --keep "*) [ -z "${RT_RESET_FAIL:-}" ] || { echo "fatal: could not reset, aborting." >&2; exit 128; }; [ -z "${RT_MOVE_FAIL:-}" ] || { echo "fatal: Not possible to fast-forward, aborting." >&2; exit 128; } ;;   # RT_RESET_FAIL: only the rollback's move fails
+  "merge --ff-only "*) [ -z "${RT_MOVE_FAIL:-}" ] || { echo "fatal: Not possible to fast-forward, aborting." >&2; exit 128; } ;;
   "cat-file -e "*) [ -z "${RT_NOHEAD:-}" ] || case "$*" in *"$RT_NOHEAD"*) exit 1 ;; esac ;;
   "merge-base --is-ancestor "*)   # A is an ancestor of B in a linear history, oldest first: RT_HISTORY (comma-separated); B = HEAD is the live checkout, RT_LIVE (unset: A is in it)
     set -- $*; ia=0; ib=0; i=0
@@ -276,12 +280,14 @@ SLEEP = '#!/bin/sh\necho "$*" >> "$RT_DIR/sleep.log"\n'
 # the clock the release reads (date +%s): a fixed start plus every sleep it asked for plus what each look at main's runs cost (RT_POLL_COST), so the waits are read off a clock the test controls
 DATE = ('#!/bin/sh\nif [ "$1" = "+%s" ]; then\n  [ -f "$RT_DIR/clock-base" ] || /usr/bin/date +%s > "$RT_DIR/clock-base"\n'
         '  add=$(cat "$RT_DIR/sleep.log" "$RT_DIR/clock-extra" 2>/dev/null | awk \'{s+=$1} END{print s+0}\')\n  echo $(( $(cat "$RT_DIR/clock-base") + add ))\nelse exec /usr/bin/date "$@"; fi\n')
-CONFIG = ('import os, sys\nif sys.argv[1:] == ["state", "releases"]: print(os.environ["RT_DIR"] + "/releases")\n'
+CONFIG = ('import os, sys\nif sys.argv[1:] == ["state", "releases"]: print(os.environ["RT_DIR"] + ("/remote/releases" if os.environ.get("RT_REMOTE") else "/releases"))\n'
           'def recycle_when_idle(): return os.environ.get("RT_IDLE", "").split()\n'   # [fleet] recycle_when_idle: RT_IDLE, unset = none
           'def notice_cmd(): return os.environ.get("RT_NOTICE", "").split()\n'       # [fleet] notice_cmd: RT_NOTICE, unset = none
           'def release_report_to(): return os.environ.get("RT_REPORT_TO", "")\n'     # [release] report_to: RT_REPORT_TO, unset = "" (release.sh then falls back to the stand-in page)
           'if os.environ.get("RT_CODEX_CFG") != "missing":\n'                        # [release] codex_review: RT_CODEX_CFG = off (false) | crash (the call raises) | missing (a config.py that predates the key: no such function); unset = on
           ' def release_codex_review():\n  if os.environ.get("RT_CODEX_CFG") == "crash": raise RuntimeError("config unreadable")\n  return os.environ.get("RT_CODEX_CFG") != "off"\n'
+          'if os.environ.get("RT_DEPLOY_SSH_CFG") != "missing":\n'                  # [release] deploy_ssh: RT_DEPLOY_SSH (unset = ""); RT_DEPLOY_SSH_CFG = missing (a config.py that predates the key)
+          ' def release_deploy_ssh():\n  return os.environ.get("RT_DEPLOY_SSH", "")\n'
           'if os.environ.get("RT_WARM_CFG") != "missing":\n'                        # [release] suitemap_warm_cmd, as words: RT_WARM (unset = none); RT_WARM_CFG = crash (the call raises) | missing (a config.py that predates the key)
           ' def release_suitemap_warm():\n  if os.environ.get("RT_WARM_CFG") == "crash": raise RuntimeError("config unreadable")\n  return os.environ.get("RT_WARM", "").split()\n')
 CLIENT = ('import os, sys\nif sys.argv[1:2] == ["released"]: open(os.environ["RT_DIR"] + "/released.log", "a").write(" | ".join(sys.argv[1:]) + "\\n"); print("stackshot: closed a1"); sys.exit(1 if os.environ.get("RT_RELEASED") == "fail" else 0)\n'   # the items call is logged apart: the report order below is about deploys and reports
@@ -396,6 +402,12 @@ DEPLOY = ('#!/bin/sh\ntouch "$RT_DIR/deployed"\necho "${DEPLOY_TO:-}" > "$RT_DIR
           '[ -z "${RT_DEPLOY_FAIL:-}" ] || { echo "healthz did not answer"; exit 1; }\n'
           '[ -z "${RT_ROLLBACK_FAIL:-}" ] || [ -z "${DEPLOY_ROLLBACK:-}" ] || { echo "rollback: healthz did not answer"; exit 1; }\n')
 
+# `ssh -o BatchMode=yes -o ConnectTimeout=15 <host> '<command>'` (release.sh deploy_run, [release] deploy_ssh): one line per call in ssh.log; RT_SSH_FAIL = the connection fails (255). Otherwise the command runs here, as the host would run it, but in the
+# environment a login there has: no DEPLOY_LOCK_FILE, HOME = a folder whose stackshot is the scenario's checkout, and the state folder of "the other box" (config.py's `state releases` under remote/ while RT_REMOTE is set), so a lock the
+# release holds on this side is never the one the remote command takes. Never a real ssh.
+SSH = ('#!/bin/sh\necho "$*" >> "$RT_DIR/ssh.log"\n[ -z "${RT_SSH_FAIL:-}" ] || { echo "ssh: connect to host failed: Connection timed out" >&2; exit 255; }\n'
+       'while [ "${1:-}" = -o ]; do shift 2; done\nhost=$1; cmd=$2\nmkdir -p "$RT_DIR/login"; ln -sfn "$RT_DIR/box" "$RT_DIR/login/stackshot"\n'
+       'exec env -u DEPLOY_LOCK_FILE HOME="$RT_DIR/login" RT_REMOTE=1 sh -c "$cmd"\n')
 POLLS = []   # (scenario, sleeps): checked at the end, see MAX_POLLS
 MAX_POLLS = 200   # a scenario that waits main's run out to the default RELEASE_CAP_MAIN (3 h) polls 540 times: 40 s plainly, past
                   # its 100 s under coverage (a slow run on a busy box). lock-outside-checks' 150 are its point
@@ -403,7 +415,7 @@ MAX_POLLS = 200   # a scenario that waits main's run out to the default RELEASE_
 
 # the release queue's scenarios: systemctl answers is-active from RT_ACTIVE (the PRs whose release unit runs), systemd-run starts nothing and writes down the PR it was asked to
 # start (and start:<pr> in the order log); RT_START_FAIL: that PR's start fails. Never the host's systemd
-SYSTEMCTL = ('#!/bin/sh\necho "$*" >> "$RT_DIR/systemctl.log"\nfor a; do u=$a; done\nq=0; case " $* " in *" --quiet "*) q=1 ;; esac\n'
+SYSTEMCTL = ('#!/bin/sh\necho "$*" >> "$RT_DIR/systemctl.log"\n[ "${1:-} ${2:-}" != "--user restart" ] || exit "${RT_RESTART_RC:-0}"\nfor a; do u=$a; done\nq=0; case " $* " in *" --quiet "*) q=1 ;; esac\n'
              'for p in ${RT_ACTIVE:-}; do [ "$u" = "stackshot-release-$p.service" ] && { [ $q = 1 ] || echo active; exit 0; }; done\n[ $q = 1 ] || echo inactive; exit 3\n')
 # The review's own unit (release.sh codex_review_start): `systemd-run --user --quiet --collect --unit salamander-codex-review-<pr>-<epoch> -p StandardOutput=append:<log> ... --setenv=K=V ... <salamander> codex-review <repo> <pr>`.
 # Its argument line is written to sysrun.log, one line per call. RT_SYSRUN = ok (the default) | fail (no user manager: exit 1, nothing started) | timeout, kill (below). On ok the stand-in starts the command detached, as a transient unit would: its own session,
@@ -500,6 +512,8 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
         (d / "xdg/mergequeue/example-owner__stackshot.toml").write_text(mqhost.replace("@DIR@", str(d)) if "=" in mqhost else f'mode = "{mqhost}"\n')
     if units is None: (d / "bin/systemd-run").write_text(SYSTEMD_RUN_DEFAULT); (d / "bin/systemd-run").chmod(0o755)   # the review's unit is answered here, whatever a scenario is about (the host's own systemd-run would start a real unit)
     if env.get("sysrun") in ("timeout", "kill") or env.get("warm_sysrun") in ("timeout", "kill"): (d / "bin/timeout").write_text(TIMEOUT_CUT); (d / "bin/timeout").chmod(0o755)
+    if units is None and env.get("deploy_ssh"): (d / "bin/systemctl").write_text(SYSTEMCTL); (d / "bin/systemctl").chmod(0o755)   # a release with [release] deploy_ssh restarts the puller here: the stub answers, never the host's systemd (the other scenarios read the real one, as before)
+    (d / "bin/ssh").write_text(SSH); (d / "bin/ssh").chmod(0o755)   # what [release] deploy_ssh runs (RT_DEPLOY_SSH)
     (d / "bin/warmcmd").write_text(WARMCMD); (d / "bin/warmcmd").chmod(0o755)   # what [release] suitemap_warm_cmd names (RT_WARM)
     nosal = env.pop("nosalamander", False)   # no `salamander` on PATH at all (the host's own is taken off it too); else the stub above answers, exit 3 (no file) unless RT_SALAMANDER says otherwise
     for pkg in ("stackshot", "stackshot/core", "stackshot/fleet"):   # release.sh runs the checkout's modules by their package paths: stand-ins for two of them

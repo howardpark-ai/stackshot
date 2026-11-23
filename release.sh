@@ -118,6 +118,12 @@
 #                                 The wait looks at main's runs every POLL_MAIN s (60) and the reads are shared between the releases on the box for GH_TTL s (45), so six releases waiting on one run cost what one does. The deploy lock is let go for that
 #                                 wait and taken again for the deploy, so a release waiting on main never holds another one's deploy (a lock still held after 15 min then fails "deploy lock": merged, not deployed). Then ./deploy.sh pinned to the commit main's
 #                                 tests passed on (DEPLOY_TO: the newest commit that contains M whose run passed, never a tip with no passing run);
+#                                 4c-ssh. WHERE deploy.sh RUNS (deploy_run): [release] deploy_ssh unset (the default) = in this checkout, as above. Set to a host (the server runs on another box than release.sh): the deploy, and the rollback, run
+#                                 `ssh -o BatchMode=yes -o ConnectTimeout=15 <host> 'cd ~/stackshot && DEPLOY_TO=<sha> ./deploy.sh'` instead (a rollback inside `flock <that host's deploy lock> env DEPLOY_ROLLBACK=1 ...`, since deploy.sh wants the lock held where it runs),
+#                                 its output in the log and its exit status the deploy's (an ssh that fails is a failed deploy). Then this checkout, which the gate, the live check and the rollback read as the live one, follows (follow_local): git merge --ff-only to the
+#                                 deployed commit (git reset --keep for a rollback), and stackshot-puller.service is restarted when the move touched the puller's files; stackshot.service and the other units are never started here. A checkout with local
+#                                 changes, or one that cannot move, is a failed release (the server is live at the commit, this checkout is not): the queue is paused and the red report says so, and `release.sh queue --resume` goes on once the checkout is clean
+#                                 (a rollback that this checkout could not follow keeps its own red report, with that line added);
 #                                 4e. THE PICKER'S INDEX (suitemap_warm_start, `--warm`): right after a deploy (not after a release that found its merge already live), [release] suitemap_warm_cmd is started on the deployed
 #                                 commit in a transient user unit of its own (stackshot-suitemap-warm-<sha>, output <state>/releases/suitemap-warm-<sha>.log) and never waited for: the unit runs `release.sh --warm <sha>`,
 #                                 which makes a worktree of the commit, runs the command in it (one at a time, stopped after RELEASE_WARM_TIMEOUT, 1800 s) and removes the worktree. The command is the test runner's: it sends the
@@ -201,6 +207,7 @@ sleep() { command sleep "$@" 6>&- 7>&- 8>&- 9>&-; }
 REPO="$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')"
 LOGDIR="$(python3 stackshot/core/config.py state releases)"; mkdir -p "$LOGDIR"
 REPORT_TO="$(python3 -c 'from stackshot.core import config; print(config.release_report_to())' 2>/dev/null)"; REPORT_TO="${REPORT_TO:-projects/example}"   # [release] report_to: where tell() sends the report of a release; the stand-in page when unset (or when this config.py predates the key)
+DEPLOY_SSH="$(python3 -c 'from stackshot.core import config; print((getattr(config, "release_deploy_ssh", lambda: "")() or "").strip())' 2>/dev/null)" || DEPLOY_SSH=""   # [release] deploy_ssh: the host deploy.sh runs on, over ssh; "" (the default, a config.py without the key or one that does not run) = deploy here
 WAIT_CHECKS="${RELEASE_WAIT_CHECKS:-3000}"   # seconds a PR's checks may stay pending (50 min); the knob lets the tests prove the give-up on a short cap, one scenario pins this default
 MERGEABLE_WAIT="${RELEASE_WAIT_MERGEABLE:-180}"   # seconds GitHub may say mergeable UNKNOWN (it recomputes after main moves) before the release gives up; read every 10 s
 LOCK_FILE="${DEPLOY_LOCK_FILE:-$LOGDIR/deploy.lock}"      # next to the other release state; DEPLOY_LOCK_FILE / DEPLOY_LOCK_WAIT let the tests point elsewhere
@@ -635,6 +642,48 @@ else:
     for f in fails: print(f)
     print("ok")'
 }
+# deploy_run <sha> [rollback]: the deploy step (and the rollback), with the lock held by the caller; its output is deploy.sh's, its status deploy.sh's. [release] deploy_ssh unset: ./deploy.sh here, as ever.
+# Set: the same deploy.sh, with the same variables, runs on that host in ~/stackshot over `ssh -o BatchMode=yes -o ConnectTimeout=15`; a rollback there takes the host's own deploy lock around it (deploy.sh refuses a rollback unless the lock is held
+# where it runs, and the lock this release holds is a file on this box). A deploy that succeeded is followed by follow_local, whose status (FOLLOW_SKIPPED_RC) is deploy_run's: the server is live, this checkout is not at the commit.
+FOLLOW_SKIPPED_RC=75
+deploy_run() {
+    local sha="$1" rb="${2:-}" cmd rc=0
+    if [ -z "$DEPLOY_SSH" ]; then
+        if [ -n "$rb" ]; then DEPLOY_LOCK_FILE="$LOCK_FILE" DEPLOY_ROLLBACK=1 DEPLOY_TO="$sha" ./deploy.sh; else DEPLOY_TO="$sha" ./deploy.sh; fi
+        return
+    fi
+    [[ "$DEPLOY_SSH" =~ ^[A-Za-z0-9_][A-Za-z0-9._@:-]*$ ]] || { echo "deploy refused: [release] deploy_ssh = \"$DEPLOY_SSH\" is not an ssh host name"; return 1; }
+    [[ "$sha" =~ ^[0-9a-f]{40,64}$ ]] || { echo "deploy refused: $sha is not a full commit id"; return 1; }
+    if [ -n "$rb" ]; then cmd='cd ~/stackshot && L="$(python3 stackshot/core/config.py state releases)/deploy.lock" && mkdir -p "$(dirname "$L")" && exec flock "$L" env DEPLOY_LOCK_FILE="$L" DEPLOY_ROLLBACK=1 DEPLOY_TO='"$sha"' ./deploy.sh'
+    else cmd='cd ~/stackshot && DEPLOY_TO='"$sha"' ./deploy.sh'; fi
+    echo "deploying on $DEPLOY_SSH over ssh ([release] deploy_ssh)"
+    ssh -o BatchMode=yes -o ConnectTimeout=15 "$DEPLOY_SSH" "$cmd" </dev/null || rc=$?
+    if [ $rc -ne 0 ]; then [ $rc -ne $FOLLOW_SKIPPED_RC ] || rc=1; return $rc; fi   # a deploy.sh that exits with the follow's own status is a plain failure
+    follow_local "$sha" "$rb"
+}
+# follow_local <sha> [rollback]: after a deploy on another box, this checkout (the one release.sh runs in, which the gate and the rollback read as the live one) goes to the same commit: git merge --ff-only, or git reset --keep for
+# a rollback; never the server's units. The puller runs from this checkout: it is restarted only when the move touched its files (deploy.sh's puller list), the rest it reloads on its own. A move that cannot be made (local changes, or the git
+# command fails) returns FOLLOW_SKIPPED_RC with its reason as the last line of the output: the server is live at the commit and this checkout, which the gate, the live check and the rollback read as the live one, is not, so the caller pauses
+# the release queue and reports red (a rollback keeps its own red report and adds the line). A puller that cannot be restarted stays a WARNING line and returns 0.
+follow_local() {
+    local sha="$1" rb="${2:-}" files rc=0
+    if [ -n "$(git status --porcelain --untracked-files=no 2>&1)" ]; then echo "  this checkout ($HERE) has local changes, so it was not moved to ${sha:0:7}; the server is live there: git -C $HERE merge --ff-only ${sha:0:7} (reset --keep for a rollback) once it is clean"; return $FOLLOW_SKIPPED_RC; fi
+    files="$(git diff --name-only HEAD "$sha" 2>/dev/null)"
+    if [ -n "$rb" ]; then git reset --keep --quiet "$sha" || rc=$?; else git merge --ff-only --quiet "$sha" || rc=$?; fi
+    if [ $rc -ne 0 ]; then echo "  this checkout ($HERE) could not be moved to ${sha:0:7} (exit status $rc); the server is live there: git -C $HERE merge --ff-only ${sha:0:7} (reset --keep for a rollback)"; return $FOLLOW_SKIPPED_RC; fi
+    echo "  local: this checkout is at ${sha:0:7}"
+    if grep -qE '^(stackshot/fleet/(puller|client)\.py|stackshot/core/(config|retired_inputs)\.py|stackshot/(__init__|__main__|paths)\.py|units/stackshot-puller\.service\.in)$' <<< "$files"; then
+        if systemctl --user restart stackshot-puller.service >/dev/null 2>&1; then echo "  local: restarted stackshot-puller.service"
+        else echo "  WARNING: stackshot-puller.service could not be restarted here: systemctl --user restart stackshot-puller.service"; fi
+    fi
+    ! grep -qE '^units/stackshot-puller\.service\.in$' <<< "$files" || echo "  local: the puller's unit file changed; ./install.sh units here installs it"
+    return 0
+}
+# follow_why <sha> <deploy_run's output>: the red report's words when the deploy on $DEPLOY_SSH succeeded and follow_local could not move this checkout. The release ends here (main's run is not watched, so nothing rolls the deploy back and
+# this release records nothing as the last good commit: its fast path's record (record_pass_live) only takes a commit this checkout contains, and it never gets there), and the queue was paused by the caller.
+follow_why() {
+    echo "the server ($DEPLOY_SSH) is live at ${1:0:7} but this checkout could not follow ($(echo "$2" | tail -1 | sed 's/^ *//')); it is at $(git rev-parse --short HEAD), and this release does not watch main's run, so a failure there rolls nothing back: release.sh queue --resume goes on once the checkout is clean"
+}
 deploy_gate() {   # $1 = the merge commit M, $2 = 1 when the merge came through GitHub's merge queue (else 0), $3 = why not, under the deploy lock. The merge queue ran the suites its selection picked on the tree it made (a merge_group run, not
                   # every suite), so M deploys at once only when the queue made it and what lies between the live checkout and M is not known to be bad:
                   # (a) the live checkout is an ancestor of M (deploy.sh fast-forwards to it; the commits on the way are merges of the queue, each tested on its tree, or docs-only merges); (b) a last-good commit to roll back to is recorded and in the
@@ -971,7 +1020,11 @@ rollback() {   # main's run failed on $verified, deployed at the merge: go back 
     fi
     # unit and timer files the rolled-back commits added stay installed (a rollback does not disable anything): named in the report
     units="$(git diff --diff-filter=A --name-only "$good" "$now" -- units/ 2>/dev/null | grep -E '\.(service|timer|path|socket)\.in$' | sed -E 's#.*/##; s/\.in$//' | paste -sd, - | sed 's/,/, /g')"
-    out="$(DEPLOY_LOCK_FILE="$LOCK_FILE" DEPLOY_ROLLBACK=1 DEPLOY_TO="$good" ./deploy.sh 2>&1 9>&- 7>&- 6>&-)"; rc=$?; echo "$out"
+    out="$(deploy_run "$good" rollback 2>&1 9>&- 7>&- 6>&-)"; rc=$?; echo "$out"
+    follow_note=""
+    if [ -n "$DEPLOY_SSH" ] && [ $rc -eq $FOLLOW_SKIPPED_RC ]; then   # deploy_ssh: the server is rolled back, this checkout could not follow (the queue is paused already, above)
+        rc=0; follow_note="; the server is rolled back to ${good:0:7} but this checkout is at $(git rev-parse --short HEAD) and could not follow ($(echo "$out" | tail -1 | sed 's/^ *//')): release.sh queue --resume goes on once it is clean"
+    fi
     exec 9>&-     # the lock is released here, before the failure report starts a child
     pending_clear   # the verdict is acted on
     [ $rc -eq 0 ] || fail "rollback" "main's tests failed on ${m:0:7} ($mg_why) and the rollback to ${good:0:7} failed: $(echo "$out" | tail -1) (the checkout is at $(git rev-parse --short HEAD)); $byhand"
@@ -984,7 +1037,7 @@ rollback() {   # main's run failed on $verified, deployed at the merge: go back 
         tell "[release] PR #$b was rolled back with #$pr's failure (main's tests failed on ${m:0:7}, main is live at ${good:0:7}); it is merged but not live; it goes live with the next release once main is fixed, or ./deploy.sh once main's tip run is green · log $LOGDIR/pr-$b.log"
     done
     [ -z "$units" ] || units="; left installed: $units (the rolled-back commits added them), disable by hand if needed"
-    fail "main's tests" "${live_later:+LIVE via a later deploy, }rolled back to ${good:0:7} · $mg_why$covered$removed$units; a rollback does not undo data or state changes the rolled-back commits made; main still holds the failing merge, fix forward or revert it · $recyc"
+    fail "main's tests" "${live_later:+LIVE via a later deploy, }rolled back to ${good:0:7} · $mg_why$covered$removed$units; a rollback does not undo data or state changes the rolled-back commits made; main still holds the failing merge, fix forward or revert it$follow_note · $recyc"
 }
 
 # The head branch of a merged PR, deleted the way `gh pr merge --delete-branch` did, but only after the open PRs based on it are retargeted to main: GitHub closes a PR whose base
@@ -1755,10 +1808,11 @@ print(("paused: " + str(p.get("reason", ""))) if p else ("blocked: " + str(b.get
     out=""; rc=0
     if [ $live_now = 1 ]; then exec 9>&-; sha="$(git rev-parse --short HEAD)"; restarted=nothing
     else
-        out="$(DEPLOY_TO="$verified" ./deploy.sh 2>&1 9>&- 7>&- 6>&-)"; rc=$?; echo "$out"
+        out="$(deploy_run "$verified" 2>&1 9>&- 7>&- 6>&-)"; rc=$?; echo "$out"
         sha="$(git rev-parse --short HEAD)"
-        [ $rc -eq 0 ] || q_pause_now "deploy"   # a failed deploy pauses the queue before the lock is let go, as for a release alone
+        [ $rc -eq 0 ] || q_pause_now "deploy"   # a failed deploy (or one this checkout could not follow, deploy_ssh) pauses the queue before the lock is let go, as for a release alone
         exec 9>&-
+        [ -z "$DEPLOY_SSH" ] || [ $rc -ne $FOLLOW_SKIPPED_RC ] || { pending_clear; fail "deploy" "$(follow_why "$verified" "$out")"; }
         [ $rc -eq 0 ] || { pending_clear; fail "deploy" "$(echo "$out" | tail -1) (main is merged at $sha; the checkout is at $(git rev-parse --short HEAD)): merged, not live"; }
         restarted="$(echo "$out" | sed -n 's/^  restarted //p' | tr '\n' ' ')"; restarted="${restarted:-nothing}"
     fi
@@ -2009,11 +2063,12 @@ print("; ".join(m for m in msgs if m) or (lines[-1] if lines else "no answer"))'
     local out="" rc=0
     if [ $live_now = 1 ]; then exec 9>&-; sha="$(git rev-parse --short HEAD)"
     else
-        out="$(DEPLOY_TO="$verified" ./deploy.sh 2>&1 9>&- 7>&- 6>&-)"; rc=$?; echo "$out"
+        out="$(deploy_run "$verified" 2>&1 9>&- 7>&- 6>&-)"; rc=$?; echo "$out"
         sha="$(git rev-parse --short HEAD)"
-        [ $rc -eq 0 ] || q_pause_now "deploy"   # a failed deploy pauses the queue before the lock is let go, as a rollback does
+        [ $rc -eq 0 ] || q_pause_now "deploy"   # a failed deploy (or one this checkout could not follow, deploy_ssh) pauses the queue before the lock is let go, as a rollback does
         exec 9>&-     # the lock is released here: the failure report, the recycle step and the message below start children that must not inherit it
     fi
+    [ -z "$DEPLOY_SSH" ] || [ $rc -ne $FOLLOW_SKIPPED_RC ] || { pending_clear; fail "deploy" "$(follow_why "$verified" "$out")"; }
     [ $rc -eq 0 ] || { pending_clear; fail "deploy" "$(echo "$out" | tail -1) (main is merged at $sha; the checkout is at $(git rev-parse --short HEAD))"; }   # reported red here: nothing left to verify
     restarted="$(echo "$out" | sed -n 's/^  restarted //p' | tr '\n' ' ')"; restarted="${restarted:-nothing}"
     if [ $live_now = 1 ]; then say "done: $sha, already live, restarted nothing"; else say "done: $sha, restarted $restarted"; fi

@@ -411,6 +411,12 @@ check("queue: a deploy that fails after the merge pauses the queue before the lo
       s["rc"] == 1 and "FAILED at deploy" in red(s)[0] and "PR #23 failed at deploy after its merge" in s["paused"] and "PR #23 failed at deploy after its merge (written before the deploy lock was let go)" in s["qlog"]
       and "the release queue is paused" in red(s)[0], (s["paused"], s["qlog"], s["msgs"]))
 
+# a release the queue started, whose deploy over ssh (deploy_ssh) succeeded but whose checkout here cannot follow: the server is live, the release is red and the queue is paused, as for a failed deploy
+s = fast("q-pause-ssh-follow", merge="ok", deploy_ssh="deploy-host", localdiff="stackshot/fleet/puller.py", dirty=" M release.sh", files=QF(["23", "25"], started=["23"]), units="")
+check("queue: a deploy over ssh whose checkout here cannot follow pauses the queue before the lock is let go (the queue's log says so), and the red report says the server is live and the queue paused",
+      s["rc"] == 1 and s["deploys"] == [MERGE] and "FAILED at deploy" in red(s)[0] and "is live at" in red(s)[0] and "could not follow" in red(s)[0] and "PR #23 failed at deploy after its merge" in s["paused"]
+      and "PR #23 failed at deploy after its merge (written before the deploy lock was let go)" in s["qlog"] and "the release queue is paused" in red(s)[0], (s["paused"], s["qlog"], s["msgs"]))
+
 # a recovery rollback (a release process ended before main's run was read) of a PR the queue started pauses the queue before it takes the deploy lock
 QLOG_a = "2026-11-02T00:00:00Z started PR #26 (release.sh queue); 2 in the queue\n"
 seen = []
@@ -874,6 +880,9 @@ check("main cannot be fetched after the merge: FAILED at merge commit, merged an
 s = grp("on-group-deploy-fails", deploy_fail="1", files=QF(["23", "25", "35"], started=["23"]))
 check("the deploy of the merge fails (healthz): FAILED at deploy, one red report for the group, the release queue paused before the lock is let go, the third PR not started; no `done:` line in either PR's log",
       s["rc"] == 1 and "FAILED at deploy" in glog(s) and s["paused"] and not s["started"] and len(red(s)) == 1 and all("done: " not in prlog(s, n) for n in (23, 25)) and all("FAILED at deploy" in prlog(s, n) for n in (23, 25)), (s["rc"], glog(s)[-500:], s["paused"], s["started"]))
+s = grp("on-group-ssh-follow-skipped", deploy_ssh="deploy-host", localdiff="stackshot/fleet/puller.py", dirty=" M release.sh", files=QF(["23", "25", "35"], started=["23"]))
+check("a group release deployed over ssh whose checkout here cannot follow: FAILED at deploy, one red report that says the server is live and this checkout could not follow, the release queue paused, the third PR not started, no `done:` line",
+      s["rc"] == 1 and s["deploys"] == [M2] and "FAILED at deploy" in glog(s) and "could not follow" in glog(s) and s["paused"] and not s["started"] and len(red(s)) == 1 and all("done: " not in prlog(s, n) for n in (23, 25)), (s["rc"], s["deploys"], glog(s)[-500:], s["paused"], s["started"]))
 s = grp("on-group-main-fails", main="fail", heads=f"{BASE},{M2}", live=M2, removed=GLOG, covered=GLOG, files=QF(["23", "25"], started=["23"]))
 check("main's run fails on the group's merge after the fast deploy: rolled back to the last good commit, FAILED at main's tests, the release queue paused (pause on disk before the lock is let go), the PRs not marked released",
       s["rc"] == 1 and "FAILED at main's tests" in glog(s) and s["deploys"][-1].startswith("rollback") and s["paused"] and s["paused_at_rollback"] == "present" and not s["released"], (s["rc"], s["deploys"], glog(s)[-700:], s["paused"], s["paused_at_rollback"]))
