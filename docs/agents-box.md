@@ -10,7 +10,7 @@ All keys are in `[agents_box]` of the server's config file. Every one except `ss
 
 | Key | Default | Meaning |
 |---|---|---|
-| `ssh` | unset | The agents' box as ssh takes it: a name, an alias of `~/.ssh/config`, or `user@host`. Unset = one box, and so is a value that names this machine (its own name or short name, a loopback name or address): it is read as local. The server's user needs a key that logs in there with no prompt. |
+| `ssh` | unset | The agents' box as ssh takes it: a name, an alias of `~/.ssh/config`, `user@host`, or a host word, `host:<role>`, which the `[hosts]` lookup turns into one of these ([Host words](configuration.md#host-words-naming-a-machine-by-its-role); a word it cannot resolve is tried as written and fails visibly). Unset = one box, and so is a value that names this machine (its own name or short name, a loopback name or address): it is read as local. The server's user needs a key that logs in there with no prompt. |
 | `ssh_options` | `[]` | Extra ssh arguments, one word each (`["-i", "~/.ssh/key", "-p", "2222"]`). They come after ours, so none of them can turn BatchMode off. |
 | `connect_timeout` | `5` | Seconds ssh waits to connect. |
 | `timeout` | `20` | Seconds one call (a copy of files, a lookup, a transcript read) may take. |

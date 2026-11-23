@@ -37,8 +37,9 @@ _BG_MACHINES: list[str] = []     # ... and no machine of its own: an empty bg_ma
 
 
 def _cfg_names(key: str, default: list[str]) -> list[str]:
-    """[project_agent] <key> as a list of strings (see project_verbs.section_names). Read where it is used, so a reload applies."""
-    return _verbs.section_names(_cfg.get("project_agent"), key, default)
+    """[project_agent] <key> as a list of strings (see project_verbs.section_names), each `host:<role>` word resolved to the host it names now (core/config.py `host`: the section is read whole,
+    so get() does not see the leaf; an unresolved word stays as written and matches no machine). Read where it is used, so a reload applies."""
+    return [_cfg.host(n) for n in _verbs.section_names(_cfg.get("project_agent"), key, default)]
 
 
 PASS_NOT_FORM = ("refused: a pass opens only the New session form's calls: `sender` must be the key's label, or start with it and a `-`; "

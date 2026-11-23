@@ -31,7 +31,12 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
 
 import os
 import re
+import shlex
+import signal
+import subprocess
 import sys
+import threading
+import time
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -111,7 +116,164 @@ def get(*keys: str, default: Any = None, cfg: dict[str, Any] | None = None) -> A
         if not isinstance(d, dict) or k not in d:
             return default
         d = d[k]
+    return _hosts_leaf(d)      # a `host:<role>` word at the leaf (a string, or an item of a list) is the host it names now; see "host words" below
+
+
+# ---------------------------------------------------------------- host words
+# A setting that names a machine can name a ROLE instead: the string `host:<role>` (the role: letters, digits, `-`, `_`, `.`; a real host name never holds a colon, so
+# nothing written before collides). The instance says how a role is looked up, so a machine that moves between boxes changes one record, not the config:
+#     [hosts]
+#     lookup = "/usr/local/bin/where-is {role}"   # a command, run WITHOUT a shell (shlex words, each `~`-expanded, {role} replaced inside the word); it prints the host on its first line
+#     timeout = 5                                  # seconds one lookup may take
+#     cache_seconds = 30                           # an answer is trusted this long
+# `get()` resolves a word at the leaf it returns (a string, or each string of a list); `host(value)` resolves one value for a reader that took a whole section first.
+# The lookup settings are read from the raw CFG, never through get(): resolving them cannot recurse. Nothing here raises. A role with no good answer (no lookup set, or the
+# first lookup failed) leaves the word itself in place, never "" and never a guess: an unresolved word must fail where it is used (ssh to it fails, a machine list never
+# matches it) rather than read as "this box" or "no host". After a good answer a later failed lookup keeps the last good value standing, and is tried again after 5 seconds.
+HOST_RETRY_SECONDS = 5.0          # a failed lookup of a role is not tried again for this long (the last good value, if any, answers meanwhile)
+_HOST_WORD = re.compile(r"host:([A-Za-z0-9_.][A-Za-z0-9._-]*)")       # the whole value; the role does not start with "-" (it becomes a word of the lookup's argv)
+_HOST_NAME = re.compile(r"[^\s:\x00-\x1f\x7f-\x9f-][^\s:\x00-\x1f\x7f-\x9f]*")   # what a lookup may print: one word, no colon, no control character, not starting with "-" (never an ssh option)
+_host_clock = time.monotonic      # tests patch this
+_HOST_LOCK = threading.Lock()     # guards the three tables below, never held across a lookup
+_HOST_GOOD: dict[tuple[str, str], tuple[str, float]] = {}      # (lookup, role) -> (host, when it was got)
+_HOST_FAILED: dict[tuple[str, str], float] = {}                # (lookup, role) -> when its last lookup failed (a failure streak, until one succeeds)
+_HOST_ROLE_LOCKS: dict[str, threading.Lock] = {}               # role -> the lock one lookup of that role runs under
+
+
+def _host_role(value: Any) -> str | None:
+    """The role of a host word (`host:<role>`, surrounding whitespace ignored), or None for any other value."""
+    if not isinstance(value, str):
+        return None
+    s = value.strip()
+    if not s.startswith("host:"):
+        return None
+    m = _HOST_WORD.fullmatch(s)
+    return m.group(1) if m else None
+
+
+def _hosts_leaf(d: Any) -> Any:
+    """`d` with its host words resolved: a string, or the strings of a list; any other value (a table too) as it is."""
+    if isinstance(d, str):
+        return host(d)
+    if isinstance(d, list) and any(_host_role(x) is not None for x in d):
+        return [host(x) for x in d]
     return d
+
+
+def _hosts_number(sec: dict[str, Any], key: str, default: float, zero: bool) -> float:
+    v = sec.get(key)
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")) or v < 0 or (v == 0 and not zero):
+        return default
+    return float(v)
+
+
+def _host_lookup(tpl: str, role: str, timeout: float) -> tuple[str | None, str]:
+    """Run the lookup once: (the host, "") or (None, why it failed). No shell: the command's words are split here, `~` expanded, and `{role}` is replaced inside the
+    word, so the role (made of safe characters only) never reaches a shell. Bounded: a lookup that outlasts `timeout` is killed with its process group."""
+    p = None
+    try:
+        words = shlex.split(tpl)
+        if not any("{role}" in w for w in words):
+            return None, "the lookup has no {role} in it"
+        argv = [os.path.expanduser(w).replace("{role}", role) for w in words]
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+        try:
+            out, _ = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _host_kill(p)
+            return None, f"no answer in {timeout:g} s"
+        if p.returncode != 0:
+            return None, f"exit {p.returncode}"
+        lines = out.decode("utf-8", "replace").splitlines()
+        name = lines[0].strip() if lines else ""
+        if not name or _HOST_NAME.fullmatch(name) is None:
+            return None, "the first line is not one host name"
+        return name, ""
+    except Exception as e:                  # a command not found, an unreadable template, anything else: a failure, never an exception
+        if p is not None:
+            _host_kill(p)
+        return None, type(e).__name__
+
+
+def _host_kill(p: "subprocess.Popen[bytes]") -> None:
+    """End the lookup we started: its own process group (it was made with start_new_session), never a process found by name."""
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(p.pid, signal.SIGKILL)
+        else:
+            p.kill()
+    except OSError:
+        pass
+    try:
+        p.communicate(timeout=2)
+    except Exception:
+        for f in (p.stdout, p.stdin, p.stderr):
+            try:
+                if f: f.close()
+            except Exception:
+                pass
+
+
+def _host_resolve(role: str) -> str | None:
+    """The host a role names now, or None when there is no good answer: no lookup set, or no lookup of it has worked yet. Cached per role for `cache_seconds`; a failed
+    lookup keeps the last good value and is not repeated for HOST_RETRY_SECONDS; one lookup of a role at a time, and no lock is held across it but that role's."""
+    sec = CFG.get("hosts") if isinstance(CFG, dict) else None
+    sec = sec if isinstance(sec, dict) else {}
+    tpl = sec.get("lookup")
+    if not isinstance(tpl, str) or not tpl.strip():
+        return None
+    key = (tpl, role)
+    ttl = _hosts_number(sec, "cache_seconds", 30.0, True)
+
+    def peek() -> tuple[bool, str | None]:
+        """(settled, the answer): settled = no lookup is due, the answer is the cached value, or the last good one while a failed lookup rests."""
+        now = _host_clock()
+        with _HOST_LOCK:
+            good, failed = _HOST_GOOD.get(key), _HOST_FAILED.get(key)
+        if good is not None and 0 <= now - good[1] < ttl:
+            return True, good[0]
+        if failed is not None and 0 <= now - failed < HOST_RETRY_SECONDS:
+            return True, good[0] if good else None
+        return False, good[0] if good else None
+
+    done, val = peek()
+    if done:
+        return val
+    with _HOST_LOCK:
+        lock = _HOST_ROLE_LOCKS.setdefault(role, threading.Lock())
+    with lock:
+        done, val = peek()              # another thread may have asked while this one waited
+        if done:
+            return val
+        got, why = _host_lookup(tpl, role, _hosts_number(sec, "timeout", 5.0, False))
+        with _HOST_LOCK:
+            if got is not None:
+                _HOST_GOOD[key] = (got, _host_clock())
+                _HOST_FAILED.pop(key, None)
+                return got
+            first = key not in _HOST_FAILED
+            _HOST_FAILED[key] = _host_clock()
+        if first:                       # one line a failure streak, the role and the reason, never the lookup's output
+            print(f"config hosts: the lookup of role {role!r} failed ({why}); " + ("the last good host stays" if val else "the word stays as written"), file=sys.stderr, flush=True)
+        return val
+
+
+def _host_reset() -> None:
+    """Forget every answer and failure (a reload: the lookup may be another command now)."""
+    with _HOST_LOCK:
+        _HOST_GOOD.clear(); _HOST_FAILED.clear()
+
+
+def host(value: Any) -> Any:
+    """`value` as the host it names: a `host:<role>` word is looked up per [hosts] (cached); any other value, and a word with no good answer, comes back unchanged. Never raises."""
+    role = _host_role(value)
+    if role is None:
+        return value
+    try:
+        got = _host_resolve(role)
+    except Exception:
+        got = None
+    return got if got else value
 
 
 def path(*keys: str, default: str | None = None) -> Path:
@@ -1399,6 +1561,7 @@ def reload() -> list[str] | None:
             else: new[sec].pop(key, None)
         CFG = new
         PENDING = held
+        _host_reset()                                   # the lookup may be another command now
         for n in notes(new):
             _say(n)
         for k in held:
