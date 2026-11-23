@@ -268,7 +268,7 @@ r = subprocess.run([sys.executable, "-c", "import json, time; from stackshot.pro
                    capture_output=True, text=True, env=ENV, cwd=STACK)
 wd = json.loads(r.stdout) if r.returncode == 0 else r.stderr[-300:]
 check("plain, no pages copy: the nag says where the page is, without nested parentheses",
-      "(edit the page `projects/getting-started.md` in a checkout of the pages repository, which this machine has none of: its Current state, and a dated line "
+      "(edit the page `projects/getting-started.md` in a checkout of the pages repository, which this machine does not read pages from: its Current state, and a dated line "
       "under its Timeline; commit and push)." in wd, wd)
 
 # ---- publish.py flush with no origin remote: committed is all there is

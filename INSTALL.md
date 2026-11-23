@@ -201,8 +201,12 @@ on that machine (`sudo loginctl enable-linger <user>`); without it the puller st
 
 Pages are read through the server's client API, so the machine needs no copy of the pages directory.
 When a session there owes a page, the nag names it as `<key>.md` "in a checkout of the pages
-repository, which this machine has none of": edit it in such a checkout (on the server box, or a clone
+repository, which this machine does not read pages from": edit it in such a checkout (on the server box, or a clone
 anywhere), commit and push; with `[pages] flavor = "gbrain"` the nag names gbrain's tools instead.
+
+A machine that only runs sessions sets `[server] box = false` in its config, so its hooks always ask the server even when a clone of the pages
+repository or a copy of the board's store sits on its disk (see [Moving the server to another box](#moving-the-server-to-another-box)); a machine with
+no such clone needs nothing set.
 
 `bin/stackshot doctor` works there too. A machine with no `oauth.env` and no installed `stackshot.service`
 is a client machine, and doctor says so on its first line. It then checks only this machine's half:
@@ -329,6 +333,29 @@ instance moves to user units **before** updating, with the previous release's se
 "Moving an instance from system to user scope" (a section of that release's INSTALL.md, which this repository does not keep),
 then updates as above. The keys themselves may stay in the config at their one remaining value (`doctor` lists them as
 obsolete) or be dropped; the system unit files left disabled on disk are harmless and `doctor` notes them.
+
+### Moving the server to another box
+
+The server runs on one box and the sessions (the pane hooks and the puller) on others. When the server moves, set these, and only
+these, which this repository's settings reference ([`docs/configuration.md`](docs/configuration.md)) describes in full.
+
+On the new server box:
+
+| Setting | What to set |
+|---|---|
+| `[server] box = true` | This box reads the page registry and page times from its own checkouts. The value is `true` or `false` (the strings `"true"` and `"false"` in any case, with spaces around them, read the same); anything else reads as unset, and `doctor` and a server start say so. |
+| `[fleet] publisher_letter` | The key of the Machines panel's first column. Set it: a box whose hostname has no row in `paths.fleet_names` and no fleet machine of that name is otherwise keyed by its lower-cased hostname, and `reboot-hooks/reboot-queue.py` and `push.py` use the same key. The letter must not belong to another machine of the fleet. The server box's own puller takes this letter when it first registers, and any other machine registering first takes another one, so the panel shows one card for the server. The cleanest route for a new server box is still `stackshot setup` there, which writes the box's row in `paths.fleet_names` with this letter, or a row you add by hand (`<os hostname>`, `<fleet name>`, `<letter>`, tab-separated). |
+| `[paths]` | `repo`, `store`, `brain` and `fleet_names` point at this box's checkouts and files, which are copied or cloned here first. `brain` is the pages checkout the server keeps fresh. |
+| `[server] host`, `port`; `[instance] board_url`; `[auth] base_url` | The address the server binds and the one the board and the sign-in answer to. |
+
+On every box that only runs sessions:
+
+| Setting | What to set |
+|---|---|
+| `[server] box = false` | (`false`, or the string `"false"` in any case with spaces around it.) The pane hooks ask the server's client API for the page registry and page times even when a clone of the pages repository or the board's store is on the disk (the clone is no longer read), and the SessionStart hook never renders a brief from a local store. |
+| `<secrets>/client.url` (else `[client] url`) | The server's new address; `stackshot client install --url <server> --token-file <file>` writes it. A box that was the server keeps a `client.url` pointing at its own loopback port until this is changed. |
+
+Left unset, `[server] box` keeps the older rule: a machine that holds the pages checkout is taken for the server box.
 
 ## Where things are
 

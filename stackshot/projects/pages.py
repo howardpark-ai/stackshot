@@ -100,6 +100,12 @@ UNREACHABLE = []     # the client-API reads that found no server in this run (cl
 LOCAL_ONLY = False   # the server sets this on itself (server.py): it is the one the client API asks, so it never asks (see _api)
 UNKNOWN = []         # the touched pages the gate could not check for that reason (stale_touches fills it)
 
+def reads_local(base=None):
+    """Whether this machine reads pages from its own checkout (`base`, default the pages checkout) rather than the server's client API. [server] box says it outright:
+    true = the checkout is read, false = never (a clone held here is ignored, the API answers). Unset keeps the older rule: the checkout is read when it is there."""
+    v = _cfg.server_box()
+    return os.path.isdir(base or BRAIN) if v is None else v
+
 def _api(what, key="", timeout=6.0, **extra):
     """One read of the server's client API with this machine's token (client.py); None when it cannot be had. Short timeout:
     a hook must not wait on the network. A server that cannot be reached at all is remembered in UNREACHABLE.
@@ -117,7 +123,7 @@ def _api(what, key="", timeout=6.0, **extra):
 def load_registry():
     """The page registry: the server box (the pages checkout on its disk) reads its own file; any other machine asks the
     server, and gets None when it cannot be reached (then nothing can be told: no page check, no block)."""
-    if os.path.isdir(BRAIN):
+    if reads_local():
         try: return _pr.apply(json.load(open(REG, encoding="utf-8")).get("pages", {}))     # the project record's entries laid over the page lines
         except Exception: return None
     body = _api("registry")        # the server has laid the entries over it already
@@ -450,7 +456,7 @@ def page_ts(key):
     server's answer (it knows both), else the registry's `updated`; None when nothing can say (the server away: UNREACHABLE)."""
     b = _brains.for_key(key); base = BRAIN if b.default else str(b.path)    # a second brain's page is read from its own copy
     local = os.path.join(base, key + ".md")
-    if os.path.isdir(base) and os.path.exists(local):
+    if reads_local(base) and os.path.exists(local):
         t = git_ts(key + ".md", base)      # the coordinator commits a put some seconds to minutes later; the file is written at once
         return max(t or 0, int(os.path.getmtime(local)))   # same rule as the stackshot server's ledger
     body = _api("page-ts", key)
@@ -465,8 +471,8 @@ def page_ts(key):
     return None
 
 def exists(key):
-    """True / False / None (cannot tell: no local brain and no registry, or the page's second brain cannot be read)."""
-    if os.path.isdir(BRAIN):
+    """True / False / None (cannot tell: no local brain and no registry, or the page's second brain cannot be read). With no checkout on the disk the registry answers, whatever [server] box says."""
+    if reads_local() and os.path.isdir(BRAIN):
         b = _brains.for_key(key)
         if b.default: return os.path.exists(os.path.join(BRAIN, key + ".md"))
         if _brains.problem(b): return None
@@ -619,7 +625,7 @@ def page_row(key, fm, fms, quiet=True):
     return row
 
 def cmd_registry(quiet=False):
-    if not os.path.isdir(BRAIN): print("no brain mirror here — the registry is built on the publisher", file=sys.stderr); return 0
+    if not reads_local(): print("no brain mirror here — the registry is built on the publisher", file=sys.stderr); return 0
     pages = {}; fms, rels, skipped = read_pages_ex(); gts = {}
     for key, fm in fms.items():
         rel, f = rels[key]
@@ -1047,7 +1053,7 @@ def ct_at(key, ts):
 def ct_changed_since(key, ts):
     """True when the page's compiled truth differs from its version at ts - [page_rule] slack_seconds; a page with no version by then counts
     any put. Without the pages checkout (another machine) fall back to the timestamp rule."""
-    if not os.path.isdir(_base(key)):
+    if not reads_local(_base(key)):
         pt = page_ts(key); return pt is not None and pt >= int(ts) - _slack()
     now = ct_now(key)
     if now is None: return False
@@ -1275,7 +1281,7 @@ def cmd_keeper():
     try: payload = json.load(sys.stdin)
     except Exception: payload = {}
     sid = sid_of(payload); name = session_name(sid)
-    pages = keeper_pages(sid, name) if in_currency(sid, name) and os.path.isdir(BRAIN) else []
+    pages = keeper_pages(sid, name) if in_currency(sid, name) and reads_local() else []
     if not pages:
         mark_shown(sid, "pending")      # not a keeper by any name it has yet: a spawned pane is named after it starts, so nag looks again
         return 0
@@ -1336,13 +1342,13 @@ def stale_touches(sid, strict=False, skipped=None):
     for key, v in list(tc.items()):
         if key.startswith(NO_PROJECT):
             out.append((key, v)); continue
-        if os.path.isdir(BRAIN):        # the server box: a second brain whose copy is missing or stale is not checked (fail open, never blocks)
+        if reads_local():        # the server box: a second brain whose copy is missing or stale is not checked (fail open, never blocks)
             nb = _brains.skip(key, "the page gate accepts its pages unchecked until it reads again")
             if nb:
                 if skipped is not None: skipped[key] = nb
                 continue
         pt = page_ts(key)
-        if pt is None and UNREACHABLE and not os.path.isdir(BRAIN):
+        if pt is None and UNREACHABLE and not reads_local():
             UNKNOWN.append(key); continue        # the server cannot be reached from this machine: neither stale nor settled, checked again next time
         if pt is not None and pt >= int(v.get("ts", 0)) - _slack() and (not touch_strict(v, strict) or ct_changed_since(key, int(v.get("ts", 0)))):
             del st["touches"][key]      # pilot: a timeline line alone does not settle it, the Current state must change
@@ -1366,10 +1372,10 @@ def describe(key, v, strict=False):
                f"with expected_revision (the read's revision) and edits [{{old_text, new_text}}]; put_page only for a whole rewrite; "
                f"never edit or git inside the brain mirror). ")
     else:
-        if os.path.isdir(BRAIN):
+        if reads_local():
             how = f"(edit {plain_page_path(key)} (its Current state, and a dated line under its Timeline), commit and push). "
         else:       # no pages copy on this machine (a client box): say where the page is, in one parenthesis
-            how = (f"(edit the page `{key}.md` in a checkout of the pages repository, which this machine has none of: its Current state, "
+            how = (f"(edit the page `{key}.md` in a checkout of the pages repository, which this machine does not read pages from: its Current state, "
                    "and a dated line under its Timeline; commit and push). ")
     return head + how + f"Only if the board edit needed no page change: `python3 {HERE}/stackshot/projects/pages.py clear {key}`."
 
@@ -1410,7 +1416,7 @@ def cmd_nag():
                 print(held, flush=True)
                 _client.held_ack(sid, ids)
         except Exception: pass
-    if pilot and is_pending(sid) and os.path.isdir(BRAIN):
+    if pilot and is_pending(sid) and reads_local():
         # a keeper that was spawned, not revived: it had no name at its session start (the fresh pane), so
         # it gets its pages at the first prompt after the name is known. A session started before this marker existed has none
         # and waits for its next session start.
@@ -1800,7 +1806,7 @@ def main(argv):
     if cmd == "pending": return cmd_pending()
     if cmd == "agent-listed":      # agent-listed <name>: 0 fine · 3 not listed · 2 cannot tell (the fleet tool refuses on 3 only)
         if len(argv) < 3 or not argv[2].strip(): print("usage: pages.py agent-listed <session name>", file=sys.stderr); return 1
-        if not os.path.isdir(BRAIN): print("cannot tell: no brain mirror on this machine"); return 2
+        if not reads_local(): print("cannot tell: no brain mirror on this machine"); return 2
         code, line = agent_listed(argv[2]); print(line); return code
     if cmd == "resolve":
         key = norm(argv[2] if len(argv) > 2 else ""); ex = exists(key); print(key, ex); return 0 if ex else 1
