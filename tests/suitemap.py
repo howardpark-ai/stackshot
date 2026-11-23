@@ -50,9 +50,21 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           map is of SHA or of a commit with the same tree (T: that commit's tree, for a
                                                           checkout that lacks it), holds exactly the suites of SHA and marks none failed;
                                                           else exit 1 with the reason (nothing is guessed: a refusal means the whole run follows)
-  tests/suitemap.py select --map MAP [--to REV]           print `all`, or the suites to run separated by spaces (empty: none);
+  tests/suitemap.py select [--map MAP] [--to REV]         print `all`, or the suites to run separated by spaces (empty: none);
                                                           the reason for each changed file goes to stderr, and to
-                                                          $GITHUB_STEP_SUMMARY when set. The change is git diff <map's commit> <REV>
+                                                          $GITHUB_STEP_SUMMARY when set. The change is git diff <map's commit> <REV>.
+                                                          With no --map it reads `.suitemap-ci/map.json`, the one `fetch` wrote. First on
+                                                          stderr, one line: which commit of main the map is of and how far REV is from it, or,
+                                                          when the pick is wider than CI's (no map, a map refused as corrupt or of another
+                                                          format, a map whose commit this checkout lacks), that it is, and why
+  tests/suitemap.py fetch [--sha SHA] [--repo OWNER/NAME] download the map main's newest successful run of tests.yml published (the
+                                                          artifact `suitemap`) into `.suitemap-ci/map.json`: the newest run of a commit this
+                                                          checkout descends from, or of SHA; an older one when an artifact has expired. Uses
+                                                          `gh`, and an artifact of a public repository downloads only with a token, so it
+                                                          runs where the token is, BEFORE the tree is sent to a test runner (a runner's copy
+                                                          holds the files git does not ignore, and `.suitemap-ci/` is not ignored; `.suitemap/`,
+                                                          where CI restores its cache, is). Never commit the folder: tests/suitemap_fetch_scenario.py
+                                                          fails, in CI, a checkout that tracks it. Never relaunched: it runs where it is typed.
   tests/suitemap.py warm [--rev REV]                      build and keep the index of REV (default HEAD) as a `select` would, so the next call that
                                                           needs it loads it: what runs after a merge to main (release.sh,
                                                           [release] suitemap_warm_cmd; see *The index cache*). Exit 0 when it
@@ -66,7 +78,7 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           the selection runs it always, so it says nothing about reach
 
 The rules, per changed file F (git diff --name-status -M), the first that applies:
-  1. no map, a map of another format, a commit that does not resolve           → all
+  1. no map, a map of another format, a commit that does not resolve           → all (and one line says the pick is wider than CI's, which has a map)
   2. F is the harness: .github/, tests/run-suite, pyproject.toml, uv.lock, tests/suitemap.py → all;
      F is a link of the DATA table (tests/example_base.toml) → all
   3. F = tests/<suite>_scenario.py                                              → that suite
@@ -341,6 +353,8 @@ The output of select and audit is the same with no cache, a cold folder, a warme
 import argparse, ast, atexit, collections, contextlib, datetime, difflib, fcntl, hashlib, io, json, os, pickle, re, shutil, signal, stat, subprocess, sys, tempfile, time, tomllib, zlib
 
 FORMAT = 1
+CI_MAP_DIR = ".suitemap-ci"   # where `fetch` keeps main's map and `select` looks when no --map is named: NOT .suitemap/ (CI's, gitignored): a test runner's copy of the tree carries only the files git does not ignore
+CI_ARTIFACT, CI_WORKFLOW = "suitemap", ".github/workflows/tests.yml"   # what main's run publishes (see *The gate, per event* in CONTRIBUTING.md)
 TRACE_MAX_AGE = 24   # hours: a suite's files are traced again at least this often
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.realpath(os.environ.get("SUITEMAP_ROOT") or os.path.dirname(HERE))
@@ -2651,13 +2665,26 @@ def stamp(args):
 
 
 # ---------------------------------------------------------------- select
-def load_map(path):
+def read_map(path):
+    """(map, None) for a file that can serve as the map, else (None, why it cannot): missing, not JSON, another format, no commit or no suites table"""
     try:
         with open(path) as f:
             m = json.load(f)
-        return m if m.get("format") == FORMAT and isinstance(m.get("suites"), dict) and m.get("commit") else None
-    except (OSError, ValueError, AttributeError):
-        return None
+    except FileNotFoundError:
+        return None, "missing"
+    except (OSError, ValueError) as e:
+        return None, f"not readable as JSON ({type(e).__name__})"
+    if not isinstance(m, dict):
+        return None, "not a JSON object"
+    if m.get("format") != FORMAT:
+        return None, f"format {m.get('format')!r}, and this tool reads format {FORMAT}"
+    if not isinstance(m.get("suites"), dict) or not m.get("commit"):
+        return None, "no commit or no suites table"
+    return m, None
+
+
+def load_map(path):
+    return read_map(path)[0]
 
 
 def show(rev, path):
@@ -3197,12 +3224,37 @@ def summary(lines):
             f.write("\n".join(lines) + "\n")
 
 
+def ci_map_path():
+    return os.path.join(ROOT, CI_MAP_DIR, "map.json")
+
+
+def map_notes(path, explicit, m, why, to):
+    """the one line `select` says on stderr about the map it was given, or about its absence: where a pick is wider than CI's (no map, a refused map, a map whose commit this
+    checkout lacks) it says so; else which commit of main the map is of and how far HEAD is from it (CI picks by the newest map main saved, which may be newer than a change's base)"""
+    rel = os.path.relpath(path, ROOT)
+    if m is None and why == "missing":
+        hint = "" if explicit else " Run `tests/suitemap.py fetch` first, on a machine with a GitHub token, before the tree is sent to a test runner."
+        return f"suitemap: no CI map here ({rel}): every suite is picked, wider than CI's pick.{hint}"
+    if m is None:
+        return f"suitemap: the map {rel} is refused ({why}): every suite is picked, wider than CI's pick. Remove it and run `tests/suitemap.py fetch`."
+    a = m["commit"]
+    if git("cat-file", "-e", f"{a}^{{commit}}") is None:
+        return f"suitemap: the map is of main {a[:12]}, which this checkout does not hold (a copy sent without history?): every suite is picked, wider than CI's pick."
+    if git("merge-base", "--is-ancestor", a, to) is not None:
+        n = (git("rev-list", "--count", f"{a}..{to}") or "?").strip()
+        return f"suitemap: CI map of main {a[:12]} ({n} commit(s) before {to[:12] if len(to) == 40 else to})"
+    return f"suitemap: CI map of main {a[:12]}, which is not an ancestor of {to}: the change counted is the difference from it"
+
+
 def select(args):
-    m = load_map(args.map)
+    explicit = args.map is not None
+    path = args.map if explicit else ci_map_path()
+    m, why = read_map(path)
     to = args.to
     a = m["commit"] if m else to
     if m:
         have(a)
+    print(map_notes(path, explicit, m, why, to), file=sys.stderr)
     sel, why = selection(m, a, to, skip_b=True)   # the map's commit is main's, shared by every pull request: always kept; the head is this change's alone
     total = len(suites_at(to))
     for f, r in why:
@@ -3219,6 +3271,69 @@ def select(args):
                 + (", ".join(sorted(sel)) or "none"))
     summary(["### Suite selection", head, "", "| changed | reason |", "|---|---|"] + [f"| `{f}` | {r} |" for f, r in why])
     return 0
+
+
+def gh_json(*a):
+    """(parsed JSON, None) of `gh api …`, or (None, why): gh missing, refused (no token), or an answer that is no JSON"""
+    try:
+        r = subprocess.run(["gh", "api", *a], capture_output=True, text=True)
+    except OSError as e:
+        return None, f"gh cannot be run ({e.strerror or e})"
+    if r.returncode:
+        return None, f"gh api {a[0]} failed: {(r.stderr.strip() or r.stdout.strip())[:300]}"
+    try:
+        return json.loads(r.stdout), None
+    except ValueError:
+        return None, f"gh api {a[0]} gave no JSON"
+
+
+def origin_repo():
+    """owner/name of the GitHub repository `origin` points at, or None"""
+    mt = re.search(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$", (git("remote", "get-url", "origin") or "").strip())
+    return mt.group(1) if mt else None
+
+
+def fetch(args):
+    """download the map main's newest run of the tests workflow published (the artifact `suitemap`) into CI_MAP_DIR/map.json, so a test runner's copy of this tree picks the suites CI picks:
+    the newest successful push to main at or before HEAD (or --sha), the next older when its artifact is gone. Needs `gh` and a token (an artifact of a public repository downloads only with
+    one), so it runs where the token is, before the tree is sent. Writes nothing on a failure; one line on stdout on success."""
+    repo = args.repo or origin_repo()
+    if not repo:
+        print("suitemap: fetch: no repository: `origin` is not a GitHub remote; name it with --repo OWNER/NAME", file=sys.stderr)
+        return 1
+    runs, err = gh_json(f"repos/{repo}/actions/runs?branch=main&event=push&status=success&per_page=100")
+    if err:
+        print(f"suitemap: fetch: {err}\n  (an artifact needs a GitHub token even in a public repository: run `gh auth login`, or set GH_TOKEN)", file=sys.stderr)
+        return 1
+    ours = [r for r in runs.get("workflow_runs", []) if str(r.get("path", "")).startswith(CI_WORKFLOW)]
+    if args.sha:
+        ours = [r for r in ours if str(r.get("head_sha", "")).startswith(args.sha)]
+    else:   # a run of a commit this checkout descends from: its map is what a pull request on this base gets
+        ours = [r for r in ours if git("merge-base", "--is-ancestor", str(r.get("head_sha", "")), "HEAD") is not None]
+    if not ours:
+        print(f"suitemap: fetch: no successful run of {CI_WORKFLOW} on main {'at ' + args.sha if args.sha else 'at or before HEAD'} among the newest 100 pushes", file=sys.stderr)
+        return 1
+    out = ci_map_path()
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    problems = []
+    for r in ours[:5]:
+        work = tempfile.mkdtemp(prefix=".dl-", dir=os.path.dirname(out))
+        try:
+            d = subprocess.run(["gh", "run", "download", str(r["id"]), "--repo", repo, "-n", CI_ARTIFACT, "-D", work], capture_output=True, text=True)
+            if d.returncode:
+                problems.append(f"run {r['id']}: {d.stderr.strip()[:200] or 'download failed'}")
+                continue
+            m, why = read_map(os.path.join(work, "map.json"))
+            if m is None or not re.fullmatch(r"[0-9a-f]{7,40}", str(m["commit"])):
+                problems.append(f"run {r['id']}: the artifact is refused ({why or 'its commit is no hash'})")
+                continue
+            os.replace(os.path.join(work, "map.json"), out)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        print(f"suitemap: fetched the CI map of main {m['commit'][:12]} (run {r['id']}, {r.get('created_at', '?')}, {len(m['suites'])} suites) into {os.path.relpath(out, ROOT)}")
+        return 0
+    print("suitemap: fetch: no usable map:\n  " + "\n  ".join(problems), file=sys.stderr)
+    return 1
 
 
 def warm(args):
@@ -3306,7 +3421,8 @@ def main():
     p = sub.add_parser("shard"); p.add_argument("--of", type=int, required=True); p.add_argument("--index", type=int, required=True); p.add_argument("--map")
     p = sub.add_parser("merge"); p.add_argument("--map", required=True); p.add_argument("shards", nargs="+")
     p = sub.add_parser("stamp"); p.add_argument("--map", required=True); p.add_argument("--sha", required=True); p.add_argument("--tree"); p.add_argument("--out")
-    p = sub.add_parser("select"); p.add_argument("--map", required=True); p.add_argument("--to", default="HEAD")
+    p = sub.add_parser("select"); p.add_argument("--map"); p.add_argument("--to", default="HEAD")
+    p = sub.add_parser("fetch"); p.add_argument("--sha"); p.add_argument("--repo")
     p = sub.add_parser("warm"); p.add_argument("--rev", default="HEAD")
     p = sub.add_parser("audit"); p.add_argument("--old", required=True); p.add_argument("--new", required=True); p.add_argument("--to", required=True)
     args = ap.parse_args()
@@ -3321,7 +3437,7 @@ def main():
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0
-    return {"measure": measure, "run": run, "plan": plan, "shard": shard, "merge": merge, "stamp": stamp, "select": select, "audit": audit, "warm": warm}[args.cmd](args)
+    return {"measure": measure, "run": run, "plan": plan, "shard": shard, "merge": merge, "stamp": stamp, "select": select, "fetch": fetch, "audit": audit, "warm": warm}[args.cmd](args)
 
 
 if __name__ == "__main__":
