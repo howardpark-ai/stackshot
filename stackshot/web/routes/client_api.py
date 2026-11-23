@@ -40,6 +40,7 @@ from stackshot.service.client_reads import NO_SUCH_READ as _NO_SUCH_READ
 from stackshot.service import migrations as _migrations
 from stackshot.service import owner_words as _owner_words
 from stackshot.service import page_debt as _pdsvc
+from stackshot.service import project_activity as _project_activity
 from stackshot.service import proofs as _proofs
 from stackshot.service import question as _question_svc
 from stackshot.service import recycle as _recycle_svc
@@ -471,6 +472,12 @@ async def _client_api_read(request: Request, machine: str, what: str):
     if what == "background-wanted":   # the fleet tool's timer: "<project key> <name prefix> <front agent>" per project that could use a background agent; nothing with [background_agent] enabled off
         from starlette.concurrency import run_in_threadpool
         return PlainTextResponse(await run_in_threadpool(_background_want.wanted_lines), headers={"Cache-Control": "no-store"})
+    if what == "project-activity":   # a script's read: {"projects": {<project key>: {"anchor": <epoch | null>, "owner": <epoch | null>}}}, only the projects that have either time
+        from starlette.concurrency import run_in_threadpool
+        try:
+            return JSONResponse(await run_in_threadpool(_project_activity.payload), headers={"Cache-Control": "no-store"})
+        except _project_activity.Unreadable as e:   # a record it needs cannot be read: an error with the reason, never a smaller answer
+            return PlainTextResponse(str(e), status_code=503, headers={"Cache-Control": "no-store"})
     if what == "items":            # a scan of the board: off the event loop, so the pages keep answering while it runs
         from starlette.concurrency import run_in_threadpool
         status, ctype, body = await run_in_threadpool(_client_get, what, dict(request.query_params))
