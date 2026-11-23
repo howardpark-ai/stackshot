@@ -7,7 +7,7 @@ for its pane and it touched the item), holds a notice that asks nothing of a bac
 Notices of stackshot's own that ask a front agent nothing never start its turn. Through the gate as an fyi line or a board line: the stall summaries to -main (tag `stall_summary`), the anchors notice of a completed
 item, a script's fyi (the audit's run summary, the server's parked-wait and moved-step lines), a peer's fyi, a machine's check-in told to a front agent for an item that is waiting (on a wake, another item or an outside party:
 `event_waits.machine_anchor_poll` sends it as a `progress` notice, one for each item) and a wake that only leaves a front agent's item in its place in the queue (`wakes._front_queue_row`, held kind `queue`). What asks stays a turn: the audit's findings on an item that waits on him (a decision, a step of his; one on an item that waits on nothing of his goes as an fyi), the page-agent and registry lines, a machine's check-in for an item that is its mover's to do now, a balance notice and the busy-stretch stall notice. So do a wake, a watcher's
-"is yours now", the line of his board answer that hands an item over, and the ladder's or the recovery's request to a -main agent, when an item in them waits on his decision or is his step (`carries_for_owner`); where nothing in them
+"is yours now", the line of his board answer that hands an item over when it carries none of his words (a Done with no note; a line with his pick or his note keeps its kind), and the ladder's or the recovery's request to a -main agent, when an item in them waits on his decision or is his step (`carries_for_owner`); where nothing in them
 is for him, their sender tells them as `progress` (`tell_own_move`): the notice rides the agent's next turn and starts none.
 They moved out of server.py as they were: the same texts, the same sessions told, the same order of events. A name that service/create.py, service/update.py, service/gates.py or server.py calls on this module has lost
 its leading underscore (`_tell_woken` is `tell_woken`); the helpers beside it keep theirs.
@@ -417,7 +417,7 @@ PRESENCE_MINUTES = 30.0
 
 
 FRONT_TAG_KIND = {"answer": "exempt", "handoff": "exempt", "migration": "exempt", "recycle": "exempt", "needs": "exempt",
-                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt", "balance": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved. A sender of the own-move ones (wake, watch, the answer line that hands an item over, the stall request to a -main agent) tells a front agent the kind "progress" instead when no item in the notice holds something for the owner (tell_own_move); the tag stays, it names the sender
+                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt", "balance": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved. A sender of the own-move ones (wake, watch, the answer line that hands an item over with none of his words (a Done with no note), the stall request to a -main agent) tells a front agent the kind "progress" instead when no item in the notice holds something for the owner (tell_own_move); the tag stays, it names the sender
                    "close": "close", "check": "close",      # a notice's tag names its kind unless the sender passes one
                    "owner": "progress", "observer": "progress",
                    "stall_summary": "progress",
@@ -459,7 +459,7 @@ def carries_for_owner(gid: str, item: "dict[str, Any] | None" = None) -> bool:
         it = item if item is not None else _load(gid)
         if it.get("status") != "open":
             return True
-        return _waits_decision(it.get("metadata") or {}) or _fyev._owner_moves(gid, it)
+        return _waits_decision(it.get("metadata") or {}) or _fyev._owner_moves(gid, it, unread=True)
     except Exception:  # noqa: BLE001  — an unreadable item is not shown to be free of him
         return True
 

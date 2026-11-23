@@ -20,7 +20,7 @@ and the agent touched the item in its current conversation. Fixture data, no liv
      mover's to do now, a wake that puts an item back in its lane, and a background agent's are unchanged; one check-in for several waiting items is one message each (each board line its own, each held line keeps
      its link), an item waiting on an outside party is waiting too, a failed reading is told as asking, a project the router rules and [router] hold_notices = false are covered
 
-  13 a notice that hands a front agent its own move (a wake, a watcher's "is yours now", the answer line that hands an item over, the ladder's and the recovery's request to a -main agent) with nothing in it
+  13 a notice that hands a front agent its own move (a wake, a watcher's "is yours now", the bare answer line that hands an item over (a Done with no note), the ladder's and the recovery's request to a -main agent) with nothing in it
      for him (the item waits on no decision of his and is not his step) is a progress notice: no turn of its own, held or an fyi line; with his decision or his step in it, with a background agent as its
      recipient, or with [router] hold_notices = false, it is delivered as before
 
@@ -682,10 +682,10 @@ finally:
     _config.CFG["router"].pop("hold_notices", None)
 
 # ================================================================ 13. a notice that hands a front agent its own move, with nothing in it for him, is a progress notice
-# A wake, a watcher's "is yours now", the answer line that hands an item over and the ladder's and recovery's request to a -main agent ask the agent to act, so they were exempt from the gate and started a turn
+# A wake, a watcher's "is yours now", the bare answer line that hands an item over (a Done with no note; a line with his pick or his note keeps its kind) and the ladder's and recovery's request to a -main agent ask the agent to act, so they were exempt from the gate and started a turn
 # whether or not Oliver was there. Where the item waits on no decision of his and is not his step, nothing in them is for him: their sender tells them as `progress` (telling.tell_own_move): held, or an fyi line on
 # his next turn, never a turn of their own. An item that waits on his decision, or is his step, keeps the tag's kind (pushed), and so does a background agent's notice and `[router] hold_notices = false`.
-from stackshot.service import watching as _watching, pane_recovery as _pr, answer as _answer
+from stackshot.service import watching as _watching, pane_recovery as _pr, answer as _answer, update as _update, foryou_events as _fyev
 def own_rows(*ids): return [(f"a{i}", rd(i) | {"gid": f"a{i}"}, "its wake came") for i in ids]
 def sent_to_front(fn):
     """Run fn, drain its sends -> (pushes to home-front, held lines added for it)."""
@@ -698,6 +698,14 @@ item(162, mover="Oliver", then="home-front", writer="home-front", next="Oliver: 
 check("13 setup: an item that waits on his decision, and one that is his step, hold something for him; a front agent's own move does not",
       telling.carries_for_owner("a161") and telling.carries_for_owner("a162") and not telling.carries_for_owner("a160"), (telling.carries_for_owner("a161"), telling.carries_for_owner("a162"), telling.carries_for_owner("a160")))
 check("13 setup: …an item that is closed, or cannot be read, is not shown to be free of him", telling.carries_for_owner("a163") and telling.carries_for_owner("a9999"), (telling.carries_for_owner("a163"), telling.carries_for_owner("a9999")))
+_view = _fyev._model.view
+def _boom(*a, **k): raise RuntimeError("the model's view cannot be read")
+_fyev._model.view = _boom
+try:
+    check("13 setup: an item whose model view cannot be read is not shown to be free of him either: it holds something for him, and its notice keeps its tag's kind", telling.carries_for_owner("a160") and telling.own_move_kind(U["home-front"], "a160") == "", (telling.carries_for_owner("a160"), telling.own_move_kind(U["home-front"], "a160")))
+finally:
+    _fyev._model.view = _view
+check("13 setup: …and one that reads is judged again afterwards", not telling.carries_for_owner("a160"), None)
 check("13 kind: a front agent's own move is told as progress; with his decision in it, his step, a background agent, no item named, or a front agent whose role is unknown, the tag's kind stands",
       telling.own_move_kind(U["home-front"], "a160") == "progress" and telling.own_move_kind(U["home-front"], "a161") == "" and telling.own_move_kind(U["home-front"], "a162") == ""
       and telling.own_move_kind(U["team-back"], "a160") == "" and telling.own_move_kind(U["home-front"], "") == "" and telling.own_move_kind("nobody-we-know", "a160") == "", (telling.own_move_kind(U["home-front"], "a160"), telling.own_move_kind(U["home-front"], "a161")))
@@ -747,13 +755,15 @@ item(167, mover="team-back", writer="team-back"); p0 = len(pushes())
 _wakes.wake_tell(U["team-back"], [wake_row(167)]); drain()
 check("13b wake: a background agent's wake is pushed as before", len([x for x in pushes()[p0:] if x[0] == U["team-back"]]) == 1, pushes()[p0:])
 
-# 13c. the answer line that hands an item over ("It's yours now"); his own words relayed to the mover keep their kind
-SAY = {"kind": "decision", "text": "go on", "ts": time.time()}
-def deliver(i, then="", handed=""): return _answer._answer_deliver(f"a{i}", rd(i) | {"gid": f"a{i}"}, dict(SAY), then, handed)
+# 13c. the answer line that hands an item over ("It's yours now"): a line that carries his words keeps its kind; only the bare hand-over of a Done with no note is a progress notice
+SAY = {"kind": "decision", "text": "go on", "ts": time.time()}      # a pick with his words
+BARE = {"kind": "decision", "choice": "Done", "step": "do the thing", "ts": time.time()}      # a Done with no note: the line carries none of his words
+NOTED = {**BARE, "text": "did it, the date is 5 Nov"}      # a Done with his note
+REPLY = {"kind": "step-reply", "step": "do the thing", "text": "not today, ask me Friday", "ts": time.time()}      # his note on the step, no Done
+def deliver(i, then="", handed="", rec=None): return _answer._answer_deliver(f"a{i}", rd(i) | {"gid": f"a{i}"}, dict(rec or SAY), then, handed)
 item(170, mover="home-front", writer="home-front"); held.take(U["home-front"])
 p, h = sent_to_front(lambda: deliver(170, handed="home-front"))
-check("13c answer: the line that hands the item to the front agent that moves it (\"It's yours now\") starts no turn with Oliver away: nothing pushed", p == [], (p, h))
-check("13c answer: …the board keeps it (a History line saying it was not told)", quiet_log(170) and any("was not told (" in x["text"] and "yours now" in x["text"] for x in quiet_log(170)), quiet_log(170))
+check("13c answer: the line that hands the item to the front agent that moves it, with his words in it (a pick, \"It's yours now\"), starts its turn as before, Oliver away: pushed", len(p) == 1 and "yours now" in p[0][1] and "go on" in p[0][1], (p, h))
 item(171, mover="home-front", writer="home-front")
 p, h = sent_to_front(lambda: deliver(171))
 check("13c answer: …his own answer relayed to the mover, with nothing handed over, keeps its kind: pushed, marked, with Oliver away", len(p) == 1 and p[0][1].startswith(telling._FOR_OWNER + " ") and "yours now" not in p[0][1], (p, h))
@@ -763,15 +773,49 @@ check("13c answer: …the hand-over line of an item that still waits on his deci
 item(173, mover="team-back", writer="team-back"); p0 = len(pushes())
 deliver(173, handed="team-back"); drain()
 check("13c answer: …and the hand-over line to a background agent is pushed as before", len([x for x in pushes()[p0:] if x[0] == U["team-back"]]) == 1, pushes()[p0:])
+item(178, mover="home-front", writer="home-front"); held.take(U["home-front"])
+p, h = sent_to_front(lambda: deliver(178, then="home-front", rec=BARE))
+check("13c answer: the bare hand-over of a Done with no note, to the front agent that now moves the item, starts no turn with Oliver away: nothing pushed", p == [], (p, h))
+check("13c answer: …the board keeps it (a History line saying it was not told)", quiet_log(178) and any("was not told (" in x["text"] and "yours now" in x["text"] for x in quiet_log(178)), quiet_log(178))
 item(174, mover="team-back", writer="team-back", needs=["home-front"]); held.take(U["home-front"]); unstamp("home-front")
-p, h = sent_to_front(lambda: deliver(174, then="home-front"))
-check("13c answer: …the line to a session named in the item's needs that takes it over (the stored then-mover) is a progress notice too: nothing pushed with Oliver away", p == [], (p, h))
+p, h = sent_to_front(lambda: deliver(174, then="home-front", rec=BARE))
+check("13c answer: …the bare line to a session named in the item's needs that takes it over (the stored then-mover) is a progress notice too: nothing pushed with Oliver away", p == [], (p, h))
 item(175, mover="team-back", writer="team-back")
-p, h = sent_to_front(lambda: deliver(175, then="home-front"))
-check("13c answer: …and so is the line to a then-mover that is neither the mover nor in needs", p == [], (p, h))
+p, h = sent_to_front(lambda: deliver(175, then="home-front", rec=BARE))
+check("13c answer: …and so is the bare line to a then-mover that is neither the mover nor in needs", p == [], (p, h))
+item(176, mover="team-back", writer="team-back", needs=["home-front"])
+p, h = sent_to_front(lambda: deliver(176, then="home-front", rec=NOTED))
+check("13c answer: a Done with his note, told to the then-mover, carries his words and starts its turn as before, Oliver away: pushed with the note", len(p) == 1 and "yours now" in p[0][1] and "did it, the date is 5 Nov" in p[0][1], (p, h))
+item(179, mover="team-back", writer="team-back")
+p, h = sent_to_front(lambda: deliver(179, then="home-front", rec=NOTED))
+check("13c answer: …also when the then-mover is neither the mover nor in needs", len(p) == 1 and "did it, the date is 5 Nov" in p[0][1], (p, h))
+item(169, mover="team-back", writer="team-back")
+p, h = sent_to_front(lambda: deliver(169, then="home-front", rec=REPLY))
+check("13c answer: …and his note on the step (a step reply) to the then-mover: pushed", len(p) == 1 and "not today, ask me Friday" in p[0][1], (p, h))
 item(177, mover="team-back", writer="team-back", needs=["decision"], ask=ASK)
-p, h = sent_to_front(lambda: deliver(177, then="home-front"))
-check("13c answer: …with his decision still waiting on the item, the same line is pushed as before", len(p) == 1 and "yours now" in p[0][1], (p, h))
+p, h = sent_to_front(lambda: deliver(177, then="home-front", rec=BARE))
+check("13c answer: …with his decision still waiting on the item, even the bare line is pushed as before", len(p) == 1 and "yours now" in p[0][1], (p, h))
+# 13c. who is told: a line the gate archived is not on the reply or on the answer's record, so the writer's "he answered since" note still comes
+def answered_note(i, who, t0):
+    telling_touched, telling.touched_or_unknown = telling.touched_or_unknown, lambda *a, **k: False
+    try: return _update._answered_since_note(f"a{i}", rd(i) | {"gid": f"a{i}"}, who)
+    finally: telling.touched_or_unknown = telling_touched
+t0 = time.time() - 120; rec0 = {**BARE, "ts": t0}
+item(181, mover="team-back", writer="team-back", needs=["home-front"], answers=[rec0]); held.take(U["home-front"]); unstamp("home-front")
+box = {}
+p, h = sent_to_front(lambda: box.update(told=_answer._answer_deliver("a181", rd(181) | {"gid": "a181"}, dict(rec0), "home-front", "")))
+check("13c told: a hand-over the gate archived (Oliver away) does not name its session as told; the background mover that was pushed to is", box.get("told") == [U["team-back"]], (box, p, h))
+check("13c told: …nor does the answer's record keep it: the session it was not told is not in metadata.answers[].told", U["home-front"] not in (mt(181)["answers"][-1].get("told") or []) and U["team-back"] in (mt(181)["answers"][-1].get("told") or []), mt(181)["answers"])
+check("13c told: …so its next write still gets the 'he answered since' note", "answered" in answered_note(181, "home-front", t0) and "board" in answered_note(181, "home-front", t0), answered_note(181, "home-front", t0))
+item(182, mover="team-back", writer="team-back", needs=["home-front"], answers=[rec0]); stamp("home-front", 60); item(182, mover="team-back", writer="home-front", needs=["home-front"], answers=[rec0])
+box = {}
+p, h = sent_to_front(lambda: box.update(told=_answer._answer_deliver("a182", rd(182) | {"gid": "a182"}, dict(rec0), "home-front", "")))
+check("13c told: …a hand-over filed for the agent's next turn (Oliver there, item touched) was told: it is named and on the record, and gets no 'answered since' note", p == [] and h == 1 and U["home-front"] in box.get("told", []) and U["home-front"] in (mt(182)["answers"][-1].get("told") or []) and answered_note(182, "home-front", t0) == "", (box, p, h, mt(182)["answers"]))
+item(183, mover="team-back", writer="team-back", needs=["home-front"], answers=[{**SAY, "ts": t0}]); held.take(U["home-front"]); unstamp("home-front")
+box = {}
+p, h = sent_to_front(lambda: box.update(told=_answer._answer_deliver("a183", rd(183) | {"gid": "a183"}, {**SAY, "ts": t0}, "home-front", "")))
+check("13c told: …and a line with his words, pushed, is named as told and on the record", len(p) == 1 and U["home-front"] in box.get("told", []) and U["home-front"] in (mt(183)["answers"][-1].get("told") or []), (box, p, h))
+held.take(U["home-front"]); unstamp("home-front")
 
 # 13d. the ladder's notice to a -main agent about a silent live background mover (tag stall)
 def ladder_tell(i): _ladder.ladder_main_tell("home-front", [(f"a{i}", f"a{i} line")], {f"a{i}": {"subject": f"[home] item {i}", "mover": "team-back", "since": "Mon Nov 9th 02:00", "span": "4 hours", "told": ""}})
@@ -780,11 +824,16 @@ unstamp("home-front"); held.take(U["home-front"])
 p, h = sent_to_front(lambda: ladder_tell(180))
 check("13d ladder: the notice about a silent live background mover starts no -main turn when nothing in it is for him, Oliver away: nothing pushed", p == [], (p, h))
 check("13d ladder: …the board keeps the news and the routing log has the held line", quiet_log(180) and "was not told (" in quiet_log(180)[-1]["text"] and held_log("a180"), (quiet_log(180), held_log("a180")))
+def stall_texts(i): return [x.get("text", "") for x in ((mt(i).get("stall") or {}).get("log") or [])]
+check("13d ladder: the History line says what became of the notice the gate archived: not sent, never 'was told'", any("was not sent the request to decide on a nudge or a different mover" in t and "team-back is live" in t for t in stall_texts(180)) and not any("was told to decide" in t for t in stall_texts(180)), stall_texts(180))
 stamp("home-front", 60); item(182, mover="team-back", writer="home-front")
 p, h = sent_to_front(lambda: ladder_tell(182))
-check("13d ladder: …Oliver there and the item touched by the agent: one fyi line for its next turn, no turn", p == [] and h == 1, (p, h)); held.take(U["home-front"]); unstamp("home-front")
+check("13d ladder: …Oliver there and the item touched by the agent: one fyi line for its next turn, no turn", p == [] and h == 1, (p, h))
+check("13d ladder: …a notice filed for its next turn says so on the item's History", any("filed for its next turn" in t for t in stall_texts(182)) and not any("was told to decide" in t for t in stall_texts(182)), stall_texts(182))
+held.take(U["home-front"]); unstamp("home-front")
 p, h = sent_to_front(lambda: ladder_tell(181))
 check("13d ladder: an item that waits on his decision keeps the kind of its tag: pushed with Oliver away", len(p) == 1 and "has had no write from its background mover" in p[0][1], (p, h))
+check("13d ladder: …and a notice that started the agent's turn says it was told", any("team-back is live" in t and "was told to decide on a nudge or a different mover" in t for t in stall_texts(181)), stall_texts(181))
 p, h = sent_to_front(lambda: _ladder.ladder_main_tell("home-front", [("a180", "a180 line"), ("a181", "a181 line")], {}))
 check("13d ladder: a list with one such item in it is pushed (one of them is his)", len(p) == 1 and "2 items have had no write" in p[0][1], (p, h))
 

@@ -134,7 +134,9 @@ def _also_reached(meta: dict[str, Any]) -> list[tuple[str, bool]]:
 def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str = "", handed: str = "") -> list[str]:
     """Push the answer to the item's mover (holder, never the creator) and to every session named in its needs, one line each, through the owner-notice
     path (tell_woken). A front-agent mover's line carries the mark a front agent takes. After a Done or a note on his step (`then` is who the item moved to) the then-mover is told too,
-    in its own line: the step he did and "it's yours now". After a decision that handed the item to its stored then-mover (`handed`) the same: its line ends "It's yours now". → the session ids told."""
+    in its own line: the step he did and "it's yours now". After a decision that handed the item to its stored then-mover (`handed`) the same: its line ends "It's yours now". A line that carries his words (a pick, a note, a Done with
+    its note) is pushed to a front agent as ever; the bare hand-over of a Done with no note is a progress notice (telling.tell_own_move) when the item holds nothing for him: filed for its next turn, or archived with him away.
+    → the session ids told: one the front gate archived is left out, so its next write is still told his answer."""
     meta = item.get("metadata") or {}
     owner, project = _telling.holder(item), str(meta.get("project") or "")
     verb = "answered" if rec.get("kind") == "decision" else "commented on"
@@ -160,12 +162,16 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     told: list[str] = []
     if judge and rec.get("applied"):      # the server read his note and applied it (note_read.py): the then-mover is told what was done instead of being asked to judge the note
         judge = ". " + str(rec["applied"])
+    bare = bool(then) and not str(rec.get("text") or "").strip()      # a Done with no note: the hand-over line carries none of his words, only that the item is the then-mover's now
+    tried: list[str] = []      # every session a line was sent to, held or not: one line each, and the ones he is in conversation with (below) are not sent it twice
     def tell(sid: str, text: str, yours: bool = False) -> None:
-        if yours:      # the line that hands the item over ("It's yours now"): to a front agent it is a progress notice when the item holds nothing for him (telling.own_move_kind), filed for its next turn; his relayed words keep their kind
+        if yours and bare:      # the bare hand-over ("It's yours now" and nothing of his): to a front agent it is a progress notice when the item holds nothing for him (telling.own_move_kind), filed for its next turn. A line that carries his words (a pick, a note, a Done with its note) keeps its kind and starts a turn as ever
             _telling.tell_own_move(gid, sid, text, tag="answer", items={gid: item})
         else:
-            _telling.tell_woken(gid, sid, text, tag="answer")
-        told.append(sid)
+            _telling.tell_kind("", gid, sid, text, tag="answer")      # the tag's own kind (exempt); tell_kind also clears the gate's last verdict, read just below
+        tried.append(sid)
+        if _telling.gate_result()[0] != "held":      # the front gate archived it: nobody was told, so the session is not on the answer's record (it is told his answer at its next write) and the reply does not name it
+            told.append(sid)
     if owner:
         oid = _session_id(owner)
         front = _telling.front_keeper(owner, project)[0]
@@ -174,13 +180,13 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
         tell(oid, f"{_FOR_OWNER} {base}" if front else base, yours=mine)
     for s in _needs_sessions(meta):
         sid = _session_id(s)
-        if sid and sid not in told:
+        if sid and sid not in tried:
             tell(sid, to_then(line) if sid == thenid else line, yours=sid == thenid)
-    if thenid and thenid not in told:          # the then-mover is neither the mover nor in needs (a stored `then`): it is told, and its write settles the answer
+    if thenid and thenid not in tried:          # the then-mover is neither the mover nor in needs (a stored `then`): it is told, and its write settles the answer
         tell(thenid, to_then(line), yours=True)
-    if not told:
+    if not tried:
         print(f"answer: {gid} has no mover and names no session to tell", file=sys.stderr, flush=True)
-    seen, handed_to = list(told), list(told)
+    seen, handed_to = list(tried), list(told)
     for s, is_contact in _also_reached(meta):     # the item's contact and the front agents he is talking to now: his answer is a held line for their next turn, never a turn of its own
         sid = _session_id(s)
         if sid and sid not in seen:

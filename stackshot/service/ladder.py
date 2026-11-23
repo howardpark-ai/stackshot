@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import datetime as dt
 import sys
+import time
 from typing import Any
 
 from stackshot.core import config as _cfg
@@ -135,19 +136,40 @@ def ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "list
         before = float(rec.get("main_at") or 0)      # when -main was told about this silence last, if it was
         told = _hooks().when_words(dt.datetime.fromtimestamp(before, _hooks().zone())) if before else ""
         data = {"subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told}
-        _stall.note(meta, now, f"{_session_label(who)} is live but wrote nothing to it for {span}: " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else why))
-        _writes.save(gid, item, note="ladder: " + (f"{_session_label(to)} told that its mover is silent" if to else "its mover is silent, " + ("it is the -main agent itself" if itself else "no -main agent to tell")))
+        if not to:      # with a -main agent the History line is written after the send (`ladder_main_log`): the front gate may archive the notice, and the line says what became of it
+            _stall.note(meta, now, f"{_session_label(who)} is live but wrote nothing to it for {span}: {why}")
+            _writes.save(gid, item, note="ladder: its mover is silent, " + ("it is the -main agent itself" if itself else "no -main agent to tell"))
     if to:
         line = f"{_gh.shown(gid)} \"{data['subject']}\" ({data['project']}): mover {data['mover']}, no write since {since} ({span})" + (f", told before {told}" if told else "")
         if rows is not None and info is not None:
             rows.append((to, gid, line)); info[gid] = data
         else:
-            ladder_main_tell(to, [(gid, line)], {gid: data})
+            ladder_main_tell(to, [(gid, line)], {gid: data}, now)
     print(f"ladder: {gid} {who} is live and silent after the look: " + (f"{to} told" if to else "it is the -main agent itself, so no one above it is told" if itself else "no -main agent to tell"), file=sys.stderr, flush=True)
     return _ladder.MAIN
 
 
-def ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, dict[str, str]]") -> None:
+def ladder_main_log(to: str, gids: "list[str]", info: "dict[str, dict[str, str]]", how: tuple[str, str], now: float) -> None:
+    """The History line of each item the notice to the -main agent `to` was about, written after the send and worded by what the front gate did with it (`how` = `telling.gate_result()`, or ("held", "") for a send that raised): told as ever, filed for the
+    agent's next turn (it starts none), or archived because nobody is there (the news stays on the item). Never raises: a line that cannot be written does not undo the send."""
+    label = _session_label(to)
+    ask = "to decide on a nudge or a different mover"
+    said = (f"{label} was told {ask}" if not how[0] else f"{label} was sent the request {ask}, filed for its next turn (it starts no turn of its own)" if how[0] == "fyi"
+            else f"{label} was not sent the request {ask}: nobody is there to read it, so the news stays on the item" if how[1] else f"{label} was not sent the request {ask}: the send failed")
+    for g in gids:
+        try:
+            with _writes.ITEM_LOCK:
+                item = _load(g)
+                if item.get("status") != "open":
+                    continue
+                d = info.get(g) or {}
+                _stall.note(item.setdefault("metadata", {}), now, (f"{d['mover']} is live but wrote nothing to it for {d['span']}: " if d.get("mover") and d.get("span") else "its mover is live and silent: ") + said)
+                _writes.save(g, item, note="ladder: " + (f"{label} told that its mover is silent" if not how[0] else f"{label}'s notice about its silent mover filed for its next turn" if how[0] == "fyi" else f"{label} not told that its mover is silent"))
+        except Exception as e:  # noqa: BLE001
+            print(f"ladder: {g} History line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+
+
+def ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, dict[str, str]]", now: float | None = None) -> None:
     """ONE notice to the -main agent `to` for the items (gid, line) of silent live background movers that came due together. It goes through the gate as a progress notice (tag "stall", `telling.tell_own_move`) when no item in it holds something for the owner, so it rides the -main agent's next turn and starts none; one that
     does (an item waiting on his decision or his step) keeps the kind of its tag, exempt, and starts a turn. Unmarked either way (the gate reads the kind, not the first line), and it says how to stop the repeats. A lone item reads as a sentence about that item, several as a list."""
     gids = [g for g, _l in items]
@@ -163,7 +185,12 @@ def ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, d
         tail = (f"\nDecide for each whether it needs a nudge or a different mover: message its mover, or hand the item on (update mover=<session>). If you do nothing each stays with its mover. {stop}"
                 f"→ {_inst.BOARD_URL}")
         text = head + "\n" + "\n".join("- " + l for _g, l in items) + tail
-    _telling.tell_own_move(",".join(gids), _hooks().session_id(to) or to, text, tag="stall")      # the mover is live and nobody else is asked: with nothing for the owner on the items, a progress notice, filed for the -main agent's next turn
+    how = ("held", "")      # a send that raises told nobody
+    try:
+        _telling.tell_own_move(",".join(gids), _hooks().session_id(to) or to, text, tag="stall")      # the mover is live and nobody else is asked: with nothing for the owner on the items, a progress notice, filed for the -main agent's next turn
+        how = _telling.gate_result()
+    finally:
+        ladder_main_log(to, gids, info, how, time.time() if now is None else now)      # what became of it, on each item's History
 
 
 def laddered(gid: str, who: str, now: float, at: float | None = None) -> bool:
