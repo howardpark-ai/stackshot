@@ -1,7 +1,7 @@
 """foryou.py: the For you list's file: one small JSON file in the state dir (<state>/for-you.json), read and written atomically under a lock of its own.
 
 The rules of the list (the kinds of row, what a row holds, how many are kept, the keys, the flags, what the client API returns) are notify/foryou.py's, on the plain dict the file holds, and read no clock;
-this module is what reads and writes the file and the clock: `rows`, `add`, `has_key`, `mark_seen`, `seen`, `resolve`, `row_by_id`, `slack_result`, `slack_pending`, `mark_slacked`, `flag`, `flags`,
+this module is what reads and writes the file and the clock: `rows`, `add`, `raise_urgent`, `has_key`, `mark_seen`, `seen`, `resolve`, `row_by_id`, `slack_result`, `slack_pending`, `mark_slacked`, `flag`, `flags`,
 `set_flag` and `payload`, which the saves (service/foryou_events.py), the Slack hook (service/foryou_slack.py), the routes and the board's render call.
 
 A file that does not parse is moved aside to for-you.json.bad-<epoch> and the list starts empty (ids go on growing). Stdlib only; the server and the renderer share these functions."""
@@ -93,6 +93,16 @@ def add(*, key: str, kind: str, gid: str = "", item: str = "", project: str = ""
     with _LOCK:
         d = _load()
         row = _fy.add(d, key=key, kind=kind, gid=gid, item=item, project=project, what=what, url=url, urgent=urgent, ts=when, now=time.time())
+        if row is not None:
+            _save(d)
+        return row
+
+
+def raise_urgent(key: str, ts: float | None = None) -> dict[str, Any] | None:
+    """The row of `key` that is on the list and not urgent becomes urgent (the due date of an item that has turned to the owner's move after its row was made) → the row, else None (see notify/foryou.raise_urgent)."""
+    with _LOCK:
+        d = _load()
+        row = _fy.raise_urgent(d, key, time.time() if ts is None else float(ts))
         if row is not None:
             _save(d)
         return row

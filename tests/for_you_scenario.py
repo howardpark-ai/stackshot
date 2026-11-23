@@ -8,7 +8,7 @@ session leaves); the writer's reply says it is a row; a
 close without his words on an item he does not watch makes no row (the old quiet line); a muted item makes no row; a Watch flag
 adds an item that is not watched; an item with his board answer is watched by default; needs=decision makes a decision row (also
 on an item with no words), which goes when he answers on the board (his own answer makes no row); a reopen and a failed check
-make a row; a due date within 24 h makes one urgent row per due date, posted once to Slack (stubbed), not again, and a due date
+make a row; a due date within 24 h makes one row per due date, urgent and posted once to Slack (stubbed) only while the item is his move (needs=decision), a row without the post for an item an agent moves, one parked on a date, one waiting on an outside party and one held, which a later pass raises to urgent and posts once when the item turns to him (never twice, never after he marked it seen), and a due date
 long past, an unwatched item and a muted one make none; a failed release message makes NO row but is still delivered as a message to the project; a
 for-you.json from before this (a release_failed row) loads without the stale row and the next write removes it; the board's For you section (newest first, link, time in the instance timezone, a seen form) is built but the board page hides it behind ui_render._SHOW_FOR_YOU (Sun Oct 25th 2026), an item
 page the Watch / Mute control; the watch and seen routes refuse a visitor who is not signed in, a wrong token and a foreign
@@ -297,7 +297,13 @@ ZONE = dt.timezone(dt.timedelta(hours=ZONE_HOURS))
 def due_item(i, days, **meta):
     d = (dt.datetime.fromtimestamp(now0, ZONE) + dt.timedelta(days=days)).strftime("%Y-%m-%d")
     item(i, **{"due": d}, **meta); return d
-d_soon = due_item(30, 0, said=SAID); due_item(31, 0); due_item(32, 0, said=SAID); due_item(33, 10, said=SAID); due_item(34, -10, said=SAID); due_item(35, -0, answers=ANS)
+DECISION = {"needs": ["decision"], "ask": ASK}                      # needs=decision: he is the mover, the item stands in his Your move list
+d_soon = due_item(30, 0, said=SAID, **DECISION); due_item(31, 0); due_item(32, 0, said=SAID, **DECISION); due_item(33, 10, said=SAID, **DECISION); due_item(34, -10, said=SAID, **DECISION); due_item(35, -0, answers=ANS, **DECISION)
+due_item(36, 0, said=SAID)                                          # an agent moves it (the fixture's default mover)
+due_item(37, 0, said=SAID, mover="Oliver", until=ABY)               # parked on a date: he is named, but the item waits, so it is no move of his
+due_item(38, 0, said=SAID, needs=["external"], mover="Oliver", party="the vendor", chase=ABY)      # waits on an outside party
+due_item(39, 0, said=SAID)                                          # an agent's move now; turns to him below
+due_item(40, 0, said=SAID)                                          # an agent's move now; he marks its row seen, then it turns to him
 fy.set_flag("a32", "mute")
 end30 = _wt.due_epoch(d_soon)
 slack.clear(); fyev._FORYOU_LAST[0] = 0.0
@@ -309,6 +315,8 @@ check("a due date ending in 10 h on a watched item: one urgent due row", made.co
 check("…an unwatched item with a due date makes none, nor a muted one", not due("a31") and not due("a32"), rows())
 check("…a due date 10 days off and one 10 days past make none (the first pass after a deploy must not raise every old overdue item)", not due("a33") and not due("a34"))
 check("…an item with his board answer and a near due date is watched: a row", len(due("a35")) == 1)
+check("an item an agent moves, one parked on a date and one waiting on an outside party each get their due row on the list, not urgent, and no post",
+      all(len(due(g)) == 1 and not due(g)[0]["urgent"] and not due(g)[0]["slacked"] and due(g)[0]["what"].startswith("due ") for g in ("a36", "a37", "a38", "a39", "a40")) and {"a36", "a37", "a38"} <= set(made), (made, rows()))
 check("…each urgent row was posted to Slack once, with the text and the link", len(slack) == 2 and all(s.startswith("[stackshot] For you (urgent): ") and "/items/" in s for s in slack) and all(r["slacked"] for r in (due("a30")[0], due("a35")[0])), (slack, due("a30")))
 fyev._FORYOU_LAST[0] = 0.0; made2 = fyev._foryou_tick(end30 - 10 * 3600 + 3600); fyslack._foryou_slack_wait()
 check("the next pass makes no second row and posts nothing again", made2 == [] and len(due("a30")) == 1 and len(slack) == 2, (made2, slack))
@@ -317,6 +325,24 @@ check("an hour after the due date's end the same due date still has its one row 
 check("a pass within five minutes of the last does nothing", fyev._foryou_tick(end30 - 10 * 3600) == [])
 fy.seen(str(due("a30")[0]["id"])); fyev._FORYOU_LAST[0] = 0.0; made4 = fyev._foryou_tick(end30 - 10 * 3600 + 3600)
 check("a due row he marked seen does not come back for the same due date", made4 == [] and not due("a30"), (made4, due("a30")))
+
+# the move changes inside the window: the row made without the post is raised once, and a seen or an urgent one is left alone
+slack.clear()
+fy.seen(str(due("a40")[0]["id"]))
+item(39, said=SAID, due=d_soon, **DECISION); item(40, said=SAID, due=d_soon, **DECISION); item(36, said=SAID, due=d_soon, mover="Oliver", until=ABY)
+fyev._FORYOU_LAST[0] = 0.0; made5 = fyev._foryou_tick(end30 - 10 * 3600 + 7200); fyslack._foryou_slack_wait()
+r39 = due("a39")
+check("an item that turns to his move after its due row was made: the same row is urgent now and posted once", made5 == ["a39"] and len(r39) == 1 and r39[0]["urgent"] and r39[0]["slacked"] and len(slack) == 1 and "due " in slack[0], (made5, r39, slack))
+check("…a row he marked seen is not raised or made again, whoever moves the item", not due("a40") and "a40" not in made5, (made5, due("a40")))
+check("…an item that turns to a wait or stays an agent's gets no post", not due("a36")[0]["urgent"] and not due("a37")[0]["urgent"] and not due("a38")[0]["urgent"], rows())
+fyev._FORYOU_LAST[0] = 0.0; made6 = fyev._foryou_tick(end30 - 10 * 3600 + 10800); fyslack._foryou_slack_wait()
+check("the pass after that raises nothing and posts nothing again", made6 == [] and len(slack) == 1 and due("a39")[0]["id"] == r39[0]["id"] and due("a39")[0]["ts"] == r39[0]["ts"], (made6, slack))
+item(39, said=SAID, due=d_soon, mover="osprey-x"); fyev._FORYOU_LAST[0] = 0.0; made7 = fyev._foryou_tick(end30 - 10 * 3600 + 14400); fyslack._foryou_slack_wait()
+check("an urgent row stays as it is when the item leaves his move: urgent, posted, not posted again", made7 == [] and due("a39")[0]["urgent"] and due("a39")[0]["slacked"] and len(slack) == 1, (made7, due("a39"), slack))
+item(39, said=SAID, due=d_soon, **DECISION); fyev._FORYOU_LAST[0] = 0.0; made8 = fyev._foryou_tick(end30 - 10 * 3600 + 18000); fyslack._foryou_slack_wait()
+check("…and when it turns to him again the row is not raised a second time", made8 == [] and len(slack) == 1 and len(due("a39")) == 1, (made8, slack))
+fy.set_flag("a36", "mute"); item(36, said=SAID, due=d_soon, **DECISION); fyev._FORYOU_LAST[0] = 0.0; made9 = fyev._foryou_tick(end30 - 10 * 3600 + 21600); fyslack._foryou_slack_wait()
+check("a muted item that turns to his move is not raised: no post", made9 == [] and not due("a36")[0]["urgent"] and len(slack) == 1, (made9, due("a36"), slack))
 
 # ---- 6. a failed release makes no row: the message still goes on to the project
 slack.clear(); n_before = len(rows()); pub1 = pub[0]
