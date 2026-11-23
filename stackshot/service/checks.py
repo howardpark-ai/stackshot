@@ -40,7 +40,7 @@ from stackshot.service import telling as _telling
 from stackshot.service import wakes as _wakes
 from stackshot.service import writes as _writes
 from stackshot.service.checks_hooks import hooks as _hooks
-from stackshot.service.store import _load, _path
+from stackshot.service.store import _load, _load_open, _path
 from stackshot.waits import watchers as _watch
 
 
@@ -427,12 +427,14 @@ def check_tick(now: float | None = None) -> list[str]:
     seen_refs: set[str] = set()
     for gid, _p in _item_files():
         try:
-            it = _load(gid)
+            it = _load_open(gid)
         except Exception:
+            continue
+        if it is None:
             continue
         meta = it.get("metadata") or {}
         check = " ".join(str(meta.get("check") or "").split())
-        if it.get("status") != "open" or not check:
+        if not check:
             continue
         keep = {"met": check} if (st["items"].get(gid) or {}).get("met") == check else {}     # the waiting note was written for this check: a pass that cannot tell (an error, a race) keeps the record, only a clean "not met" resets it
         try:

@@ -102,8 +102,8 @@ def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, 
     projects: dict[str, str] = {}
     for gid, _p in _item_files():
         try:
-            it = _svcstore._load(gid)
-            if it.get("status") != "open":
+            it = _svcstore._load_open(gid)
+            if it is None:
                 continue
             meta = it.get("metadata") or {}
             cl = _steps.view(meta, keeper=str(meta.get("owner") or ""))

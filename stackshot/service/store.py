@@ -8,7 +8,9 @@ server.py imports `_load`, `_path`, `_shown_ids`, `_legacy_hold` and `_legacy_ne
 from __future__ import annotations
 
 import json
+import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +42,44 @@ def _load(gid: str) -> dict[str, Any]:
     _legacy_needs(it)
     _ip.read_through(it)                     # metadata.project is the page the item's project id points at now (a moved or renamed page keeps its items)
     return it
+
+
+# The minute passes read every item file to find the few that are open (96% of a store is closed). A file read as not open is remembered by what the file system says about it
+# (modification time in ns, size, inode), so the next pass skips it with a `stat` and no parse: a write replaces the file (new inode, new time) and the entry no longer matches.
+# A file written in the last _RACY_NS is never remembered: a second write in the same clock tick of the same size would look the same (git's "racy" case).
+_CLOSED: dict[str, tuple[int, int, int]] = {}
+_CLOSED_MAX = 50_000
+_RACY_NS = 200_000_000
+
+
+def _remembered_closed(p: Path, st: os.stat_result) -> bool:
+    """Has a read found the item file `p` closed, and is it as it was then (`st` is its `stat` now)?"""
+    return _CLOSED.get(str(p)) == (st.st_mtime_ns, st.st_size, st.st_ino)
+
+
+def _remember_closed(p: Path, st: os.stat_result) -> None:
+    """`st` is the `stat` of `p` taken before a read that found it closed: remember it, unless the file is only just written (see _RACY_NS)."""
+    if time.time_ns() - st.st_mtime_ns > _RACY_NS:
+        if len(_CLOSED) >= _CLOSED_MAX:
+            _CLOSED.clear()
+        _CLOSED[str(p)] = (st.st_mtime_ns, st.st_size, st.st_ino)
+
+
+def _load_open(gid: str) -> dict[str, Any] | None:
+    """`_load(gid)` when the item is open (a held one is open), None for any other status: the form of `it = _load(gid)` followed by `if it.get("status") != "open": continue`, which every
+    scan of the store makes. An item that cannot be read raises as `_load` does. A closed item whose file has not changed since a read that found it closed is answered None from its `stat` alone."""
+    p = _path(gid)
+    try:
+        st = os.stat(p)
+    except OSError:
+        return _load(gid)                    # absent or unreadable: `_load` says so, in its own words
+    if _remembered_closed(p, st):
+        return None
+    it = _load(gid)
+    if it.get("status") == "open":
+        return it
+    _remember_closed(p, st)
+    return None
 
 
 def _legacy_needs(item: dict[str, Any]) -> bool:

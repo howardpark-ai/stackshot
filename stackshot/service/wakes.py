@@ -40,7 +40,7 @@ from stackshot.router import routing as _routing
 from stackshot.service import telling as _telling
 from stackshot.service import watching as _watching
 from stackshot.service import writes as _writes
-from stackshot.service.store import _legacy_hold, _load
+from stackshot.service.store import _legacy_hold, _load, _load_open, _remember_closed, _remembered_closed
 from stackshot.service.wake_hooks import hooks as _hooks
 from stackshot.waits import held as _held
 from stackshot.waits import until_write as _uw
@@ -125,15 +125,19 @@ def wake_rows() -> list[tuple[str, Path, dict[str, Any], dt.datetime]]:
 def wake_row(gid: str, p: Path) -> tuple[str, Path, dict[str, Any], dt.datetime] | None:
     """One item file as wake_rows reads it: (gid, path, item, the moment its wake falls due), or None when it is not an open item with a readable wake."""
     try:
+        st = os.stat(p)
+        if _remembered_closed(p, st):    # read as closed before and not written since: not read again (service/store.py)
+            return None
         with open(p, encoding="utf-8") as f:
             it = json.load(f)
     except Exception:
         return None
     _legacy_hold(it)                    # a file from before the migration counts as held
+    if it.get("status") != "open":      # a closed item has no wake: the project it reads through is not looked up for it
+        _remember_closed(p, st)
+        return None
     _ip.read_through(it)
     meta = it.get("metadata") or {}
-    if it.get("status") != "open":
-        return None
     if _watch.watches(it):               # a watched wait comes due at its own moment (a wake, a relay's ask-by day, a backstop), the watchers' pass acts on it
         ep = _watch.next_moment(meta)
         until = _watching.WATCH_BACKOFF.get(gid, 0.0)           # a turn that failed is not looked at again before its back-off ends, even when the failure could not be written to the item
@@ -564,10 +568,10 @@ def anchor_pass() -> list[str]:
         store = {}
     for gid, _p in _item_files():
         try:
-            it = _load(gid)
+            it = _load_open(gid)
         except Exception:
             continue
-        if it.get("status") != "open":
+        if it is None:
             continue
         wm = it.get("metadata") or {}
         proj = str(wm.get("project") or "")

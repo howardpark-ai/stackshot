@@ -212,11 +212,13 @@ def _phase_sweep() -> list[str]:
     stamped: list[str] = []
     for gid, _p in _item_files():
         try:
-            it = _svcstore._load(gid)
+            it = _svcstore._load_open(gid)
         except Exception:  # noqa: BLE001  — a file that vanished or does not read is left to the pass that owns it
             continue
+        if it is None:
+            continue
         meta = it.get("metadata")
-        if it.get("status") != "open" or not isinstance(meta, dict):
+        if not isinstance(meta, dict):
             continue
         swept += 1
         try:

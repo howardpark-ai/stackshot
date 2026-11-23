@@ -14,6 +14,7 @@ from urllib.parse import quote
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg  # stackshot.toml: paths, fleet, scopes, the Machines panel, branding
 from stackshot.core import legacy_owner as _lo   # an old version of an item (from the store's history) read as the current code reads it: History only, never written back
+from stackshot.web import item_history as _ihist   # the commits of an item's file in the store's git, kept per item (item_history.py)
 from stackshot.fleet import fleet as _fleet   # the session and machine view, and the one rule for a session's presence (running / present)
 from stackshot.router import routing as _routing   # the routing log: what came in per project and how it was ruled (the pilot)
 from stackshot.model import option_labels as _ol   # the letter an option's label repeats from its badge, dropped on read (option_labels.py)
@@ -1254,13 +1255,9 @@ class Board:
         def git(*args, inp=None):
             return subprocess.run(["git", "-C", d, *args], input=inp, capture_output=True, timeout=10)
         try:
-            lg = git("log", "--follow", "--name-only", "--format=%x01%H%x09%ct", "--", rel)
-            if lg.returncode: return []
-            commits = []
-            for chunk in lg.stdout.decode("utf-8", "replace").split("\x01")[1:]:
-                head, _, rest = chunk.partition("\n"); sha, _, ct = head.partition("\t")
-                path = next((x.strip() for x in rest.splitlines() if x.strip()), "")      # the file's path at that commit (a rename is followed)
-                if sha and path: commits.append((sha, int(ct or 0), path))
+            got = _ihist.commits(d, rel)              # git log --follow, kept per item with the HEAD it was read at (item_history.py)
+            if got is None: return []
+            commits = list(got)      # newest first
             commits.reverse(); out = []
             if commits:
                 buf = git("cat-file", "--batch", inp="".join(f"{sha}:{path}\n" for sha, _c, path in commits).encode()).stdout; i = 0

@@ -29,7 +29,7 @@ from stackshot.model.needs import _after_of, _waits_decision
 from stackshot.router import routing as _routing
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
-from stackshot.service.store import _legacy_hold, _load
+from stackshot.service.store import _legacy_hold, _load, _load_open
 from stackshot.service.wake_hooks import hooks as _hooks
 from stackshot.waits import event_waits as _ew
 from stackshot.waits import wait_list as _wl
@@ -266,8 +266,8 @@ def watch_pass(now: float | None = None, wout: dict[str, list[tuple[str, dict[st
         try:
             if WATCH_BACKOFF.get(gid, 0.0) > now:
                 continue
-            it = _load(gid)
-            if not _watch.watches(it):
+            it = _load_open(gid)
+            if it is None or not _watch.watches(it):
                 continue
             meta = it.get("metadata") or {}
             if _wl.valid(meta):                       # a wait on a list: the lines the clock ends (a date that came, an item that closed unseen) are marked first, then the group is judged
@@ -449,7 +449,9 @@ def watch_anchor_notice(project: str, url: str, n: dict[str, Any], at: float, ho
         held_by = []
     for gid, _p in _item_files():
         try:
-            it = _load(gid)
+            it = _load_open(gid)                 # a wait is a watcher's only while its item is open (`watches`)
+            if it is None:
+                continue
             m = it.get("metadata") or {}
             if _watch.watches(it) and _watch.stored_kind(m) == _wl.LIST:          # a wait on a list: every open anchor line on this anchor that the notice answers is marked (a notice that does not answer the line's event, as for a single wait, is not its arrival)
                 if not _wl.lines_for_anchor(m, url, same_anchor) or (str(m.get("project") or "") != project and project not in held_by) or at <= watch_floor(it):
@@ -494,8 +496,8 @@ def watch_refresh_asks(now: float | None = None) -> list[str]:
     done: list[str] = []
     for gid, _p in _item_files():
         try:
-            it = _load(gid)
-            if it.get("status") != "open" or _watch.refreshed(it.get("metadata") or {}, today) is None:      # a cheap read first; the item is read again under the lock
+            it = _load_open(gid)
+            if it is None or _watch.refreshed(it.get("metadata") or {}, today) is None:      # a cheap read first; the item is read again under the lock
                 continue
             with _writes.ITEM_LOCK:
                 it = _load(gid)
