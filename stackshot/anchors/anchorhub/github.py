@@ -1,4 +1,4 @@
-"""anchorhub.github — GitHub through the gh CLI: issues and PRs (comments, state, CI), a repo's releases, a repo's notifications."""
+"""anchorhub.github — GitHub through the gh CLI: issues and PRs (comments, state, CI), a repo's releases, a repo's notifications (a user's token only: an App token's are skipped and shown as needing a user sign-in)."""
 import json, os, re, subprocess, threading, time, zlib
 from .core import Hub, Transient, _anc, _cfg, _events, _merges, _ts, guarded_loop, log, now_iso, now_iso_at
 from stackshot.core import ghbudget as _gb   # the host's one hourly ledger of GitHub calls, shared with the stackshot server (a locked file under <state>/github)
@@ -18,6 +18,7 @@ RECHECK_SLOW = 3600   # s; hourly until the number has been missing for RECHECK_
 RECHECK_SLOW_FOR = 86400   # s
 RECHECK_DAILY = 86400   # s
 PER_ANCHOR_ETAGS = 6  # ETags kept in the saved file per anchor (pull request, check runs of the newest commit, issue: three in use)
+APP_TOKEN = re.compile(r"Resource not accessible by integration", re.I)   # what GitHub answers an App's installation token for a call only a person's token may make
 def run(hub: Hub):
     etags: dict[str, str] = {}
     # the ETags survive a restart, so the first pass after one is answered 304 (free) for every anchor that did not change, not a full 200 (counted)
@@ -60,15 +61,25 @@ def run(hub: Hub):
         counted(r)
         if r.returncode: raise RuntimeError(r.stderr.strip()[:120])
         return json.loads(r.stdout)
-    try: me = gh("/user", capped=False)["login"]      # counted, never held: a spent cap must not read as "gh not authenticated" and turn the receiver off
-    except subprocess.TimeoutExpired: raise Transient("gh api /user timed out")
-    except Exception as e:
-        # gh says "error connecting to api.github.com" when the network is down (DNS down at boot, which would be logged as "not
-        # authenticated" and never retried): that is a Transient, tried again by start_receiver. Anything else (HTTP 401, not logged
-        # in, no gh) is the credential: off, as before.
-        if re.search(r"error connecting|githubstatus|could not resolve|timed? ?out|connection (refused|reset)|HTTP 5\d\d", str(e), re.I):
-            raise Transient(str(e).replace("\n", " ")[:120])
-        log.warning("github: gh not authenticated (%s) — receiver off", str(e)[:80]); return
+    def start_check():
+        """The start check → (the login whose own activity is not news, whether the token is a GitHub App's). `gh api /user` answers for a person's login. An App's installation token
+        (the bot a server box's `gh` runs as) is answered 403 "Resource not accessible by integration" there and for the notifications, though it reads repositories and pull requests
+        fine; `gh api /rate_limit` answers for any token that is accepted, so a 403 of that kind on /user is followed by a probe of /rate_limit and a token that passes it is usable.
+        The App's own login cannot be read cheaply (`gh api /app` takes a JWT, not the installation token), so it is the `[anchor_hub] github_login` setting; unset, there is no login, the
+        self-activity filter is off (every event, the bot's own included, is news) and one log line says so. Every failure here is raised as a Transient: start_receiver tries the start again
+        (5 s doubling to 5 min) until it passes, whatever the cause, a network that is down and a login that is not made yet alike, so a receiver is never left off until the next restart."""
+        def failed(e):
+            if isinstance(e, subprocess.TimeoutExpired): return Transient("gh api timed out")
+            # gh says "error connecting to api.github.com" when the network is down (DNS down at boot): the network's own words; anything else (HTTP 401, not logged in, no gh) is the credential, retried the same way
+            return Transient(str(e).replace("\n", " ")[:120] if re.search(r"error connecting|githubstatus|could not resolve|timed? ?out|connection (refused|reset)|HTTP 5\d\d", str(e), re.I)
+                             else "gh not authenticated (%s)" % str(e).replace("\n", " ")[:80])
+        try: return gh("/user", capped=False)["login"], False      # counted, never held: a spent cap must not read as "gh not authenticated" and turn the receiver off
+        except Exception as e:
+            if not APP_TOKEN.search(str(e)): raise failed(e)
+        try: gh("/rate_limit", capped=False)
+        except Exception as e: raise failed(e)
+        return str(_cfg.get("anchor_hub", "github_login") or "").strip(), True
+    me, app_token = start_check()
     def split(a_id): repo, n = a_id[7:].rsplit("#", 1); return repo, n
     def html_of(api_url):
         """An API URL of an issue or PR → its github.com page."""
@@ -86,7 +97,9 @@ def run(hub: Hub):
     def res(a_id):
         ent = resolved.get(a_id); cached = dict(ent["info"]) if ent and isinstance(ent.get("info"), dict) else None
         if a_id.endswith("@notifications"):
-            repo = a_id[7:-14]; path = f"/repos/{repo}/notifications?all=true&per_page=50"
+            repo = a_id[7:-14]
+            if app_token: return {"title": f"{repo.split('/')[1]} notifications", "url": f"https://github.com/notifications?query=repo%3A{repo.replace('/', '%2F')}", "seen": None}      # an App token cannot read them (the call is a 403): not asked
+            path = f"/repos/{repo}/notifications?all=true&per_page=50"
             try: ns, tag = cached_get(a_id, path)
             except Exception: ns, tag = [], None
             if ns is None and cached: return cached                      # 304: as last time
@@ -107,7 +120,7 @@ def run(hub: Hub):
         except Exception as e:
             if not re.search(r"HTTP 4(04|10)", str(e)): return {"url": f"https://github.com/{repo}/issues/{n}"}    # not a refusal: tried again
             resolved.pop(a_id, None)
-            return {"title": f"{repo}#{n}", "url": f"https://github.com/{repo}/issues/{n}", "unreadable": f"GitHub shows {me} no issue or pull request there"}
+            return {"title": f"{repo}#{n}", "url": f"https://github.com/{repo}/issues/{n}", "unreadable": f"GitHub shows {me or 'this token'} no issue or pull request there"}
         if i is None and cached: return cached                           # 304: nothing changed since the last resolution, which is saved
         if i is None: i, tag = gh(path), None                            # a 304 with nothing saved to answer it from cannot happen (no validator was sent); read in full if it does
         learn(repo, i.get("repository"))
@@ -171,7 +184,9 @@ def run(hub: Hub):
     hub.savers["github"] = snapshot
     hub.resolvers["github"] = res                          # last: the resolver reads `state` and the saved resolutions, which are restored above
     with hub.lock: hub.status["github"] = {"user": me, "since": now_iso()}; hub.push["github"] = {"mode": f"poll · {GHPOLL // 60} min"}
-    log.info("github: ready as %s", me)
+    if not app_token: log.info("github: ready as %s", me)
+    elif me: log.info("github: ready with an App token (GET /user is refused to it), as %s: that login's own activity is not news", me)
+    else: log.info("github: ready with an App token (GET /user is refused to it) and no [anchor_hub] github_login: the token's own activity is not told apart, so every event is news")
     def release(a_id):
         """Latest published release (drafts and prereleases excluded by the endpoint). The first observation
         seeds silently; a changed tag_name is one notice. A repo with no release yet (404) is seeded as none."""
@@ -445,17 +460,20 @@ def run(hub: Hub):
     hub.hold("github", FIRST_PASS)                         # the first pass after a start reads every anchor: the board counts no age until it ends or this time is up
     hub.gh_state = {"ci": ci_st, "state": state, "etags": etags, "news": thread_news, "committed": committed, "resolved": resolved}      # for inspection and tests
     capped_now = [False]                                                # the cap warning is logged when the state changes, not every pass
+    notif_said = [False]                                                # the skipped notification anchors are logged once for the run, not every pass
     passes = [0]                                                        # polls made since the receiver started (the finished anchors' turn is counted by it)
     def one_pass():
         with hub.lock: ids = [k for k in hub.bindings if k.startswith("github:")]
-        skipped = False
+        skipped = False; user_only = 0                              # user_only: the notification anchors an App token cannot read (counted, not asked)
         for a_id in ids:
             if held() > 0:                                          # the hourly read cap is spent: the rest of this pass reads nothing; the next pass looks again
                 skipped = True; break
             adopt(state, a_id); adopt(ci_st, a_id)           # before release, notifications, ci and the issue read look at either
             touched.clear()
             if a_id.endswith("@releases"): release(a_id)
-            elif a_id.endswith("@notifications"): notifications(a_id)   # CI: GitHub's own ci_activity
+            elif a_id.endswith("@notifications"):
+                if app_token: user_only += 1                          # the user's notifications API is closed to an App token (403): skipped, and said once below
+                else: notifications(a_id)                             # CI: GitHub's own ci_activity
             elif (mode := how(a_id, passes[0])) != "skip": watch(a_id, with_ci=mode == "full")
             settle(a_id)
         passes[0] += 1
@@ -467,7 +485,11 @@ def run(hub: Hub):
             if capped_now[0]: log.info("github: the hourly cap on reads has room again; polling resumes")
             capped_now[0] = False
             with hub.lock: hub.status.setdefault("github", {})["last_pass"] = time.time()
-            hub.health("github", True)                              # a finished poll pass is GitHub's real check
+            # The skipped anchors are no failure and no error count: the receiver is healthy, and its status line (the `error` field, which a healthy report leaves
+            # as a note: the card shows it on hover) says they wait for a user's sign-in. The log says it once.
+            note = f"{user_only} notification anchor{'s' if user_only != 1 else ''} not read: they need a user sign-in (an App token cannot read them)" if user_only else None
+            if note and not notif_said[0]: notif_said[0] = True; log.info("github: %s", note)
+            hub.health("github", True, note)                        # a finished poll pass is GitHub's real check
     def loop():
         # A pass that raises (a status file that could not be written, a bug) is logged and the next pass runs: the poll thread never ends on one.
         # The pause is on the dot: every poll fires at :00 s (conditional GETs: unchanged issues cost nothing); time.sleep is looked up at each call.
