@@ -326,5 +326,11 @@ board_url`, or no `cryptography` package on the server (the signature library it
 call's `sender` is the key's label or starts with it and a `-`; a key revoked after the pass was given fails the next call. A pass whose call is not the form's (for `post project-agent`: a `sender` the key does not cover, including a session
 id) is 403, never the session-id branch of that verb. A call with neither a valid token nor a valid pass is 401.
 
+**`stackshot/fleet/client.py` with a pass.** When the environment variable `STACKSHOT_CLIENT_PASS` holds a value (blanks around it are dropped; unset, empty or only blanks changes nothing), `client.get` and `client.post`
+send it as `Authorization: Bearer <value>` in place of the machine token for that process's calls, and do not read `<secrets>/client.token`. The caller sets it on the form's calls only (`post project-agent`,
+`post project-agent-rename`, `post project-agent-retire`), after trading its claim at `POST /keys/pass`; a pass opens nothing else, and a read or write the server does not open to a pass answers 401 or 403 as for any other
+caller. The client sends the value as it is, whether or not it starts with `ssp_`, and leaves every decision to the server. It never prints, logs or writes the value: an error text of the client has it taken out
+(`<pass>`), and a failure to build the request with it says only that detail is withheld while `STACKSHOT_CLIENT_PASS` is in use. A pass lasts 10 minutes, so the caller trades again and sets the variable again for a later call.
+
   `tool-text`: client calls only, no MCP tool changes. Code: `stackshot/fleet/caller_keys.py` (the files), `stackshot/service/caller_pass.py` (enroll, claim, pass, the gate), the routes in
   `stackshot/web/routes/client_api.py`; tests: `tests/caller_keys_scenario.py`.

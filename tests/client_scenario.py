@@ -32,6 +32,7 @@ def check(name, cond, got=None):
 
 # ---- 1. minting
 from stackshot.fleet import client
+_real_urlopen = client.urllib.request.urlopen   # a later block patches it with an in-process app; the pass checks below talk to a real stub server
 path = client.mint("box-far"); tok = open(path).read().strip()
 d = json.loads((T / "secrets/clients.json").read_text())
 check("the server keeps the token's hash, not the token", d["box-far"]["sha256"] == hashlib.sha256(tok.encode()).hexdigest() and tok not in (T / "secrets/clients.json").read_text(), d)
@@ -682,6 +683,72 @@ _WHAT_TABLE = [
 ]
 check("client_post: the `what` -> handlers table of the dispatcher is the one it had in server.py (%d branches)" % len(_WHAT_TABLE), _what_table(_rt_client._client_post) == _WHAT_TABLE, _what_table(_rt_client._client_post))
 check("client_post: an unknown `what` is a 404 naming the writes there are, and the dispatcher is no name of server", _rt_client._client_post("home", "no-such-write", {})[0] == 404 and not hasattr(server, "_client_post"), _rt_client._client_post("home", "no-such-write", {}))
+
+# ---- 6. $STACKSHOT_CLIENT_PASS: a caller's pass goes as the Bearer of a get and a post in place of the machine token (docs/client-contract.md, *A caller's own key*)
+import http.server, io as _pio, threading, contextlib
+client.urllib.request.urlopen = _real_urlopen
+_seen = []                                           # (method, path, Authorization header) of every request the stub got
+class _Stub(http.server.BaseHTTPRequestHandler):
+    def _answer(self):
+        auth = self.headers.get("Authorization", ""); _seen.append((self.command, self.path, auth))
+        n = int(self.headers.get("Content-Length") or 0)
+        if n: self.rfile.read(n)
+        if auth == "Bearer tok-from-file-e0": code, body = 200, b'{"ok": true, "machine": "box-e0"}'
+        else: code, body = 401, json.dumps({"error": "unauthorized: " + auth}).encode()   # a server that echoes the header: the client must still not print the pass
+        self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+    do_GET = do_POST = _answer
+    def log_message(self, *a): pass
+_srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Stub); _thr = threading.Thread(target=_srv.serve_forever, daemon=True); _thr.start()
+_env0 = {k: os.environ.get(k) for k in ("STACKSHOT_URL", client.PASS_ENV)}; _tokfile0 = pathlib.Path(client.TOKEN)
+try:
+    os.environ["STACKSHOT_URL"] = f"http://127.0.0.1:{_srv.server_address[1]}"
+    _tokfile0.parent.mkdir(parents=True, exist_ok=True); _tokfile0.write_text("tok-from-file-e0\n")
+    def _cli(*argv):
+        out, err = _pio.StringIO(), _pio.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err): rc = client.main(["client.py", *argv])
+        return rc, out.getvalue(), err.getvalue()
+    PASSV = "ssp_e1"
+    os.environ.pop(client.PASS_ENV, None); _seen.clear()
+    st, body = client.get("whoami"); sp, bp = client.post("project-agent-retire", {"project": "alpha", "name": "x"})
+    check("pass: unset, a get and a post send the machine token from the file", st == 200 and sp == 200 and [a for _, _, a in _seen] == ["Bearer tok-from-file-e0"] * 2, (st, sp, _seen))
+    for label, val in (("empty", ""), ("blanks only", "   ")):
+        os.environ[client.PASS_ENV] = val; _seen.clear()
+        st, body = client.get("whoami"); sp, bp = client.post("project-agent-retire", {"project": "alpha", "name": "x"})
+        check(f"pass: {label}, the token file value is sent, as when unset", st == 200 and sp == 200 and [a for _, _, a in _seen] == ["Bearer tok-from-file-e0"] * 2, (st, sp, _seen))
+    os.environ[client.PASS_ENV] = PASSV; _seen.clear()
+    st, body = client.get("whoami"); sp, bp = client.post("project-agent-retire", {"project": "alpha", "name": "x"})
+    check("pass: set, a get sends it as the Bearer in place of the token file", _seen[:1] == [("GET", "/client/whoami", "Bearer " + PASSV)], _seen)
+    check("pass: set, a post sends it as the Bearer in place of the token file", _seen[1:] == [("POST", "/client/project-agent-retire", "Bearer " + PASSV)], _seen)
+    os.environ[client.PASS_ENV] = "  " + PASSV + " \n"; _seen.clear(); client.get("whoami")
+    check("pass: blanks around the value are dropped, as around a token read from the file", [a for _, _, a in _seen] == ["Bearer " + PASSV], _seen)
+    os.environ[client.PASS_ENV] = PASSV; os.remove(_tokfile0); _seen.clear()
+    st, body = client.get("whoami"); sp, bp = client.post("project-agent-retire", {"project": "alpha", "name": "x"})
+    check("pass: set, the token file is not read (a box with no token still sends the pass)", st == 401 and sp == 401 and "no token" not in body and [a for _, _, a in _seen] == ["Bearer " + PASSV] * 2, (st, sp, body, _seen))
+    _tokfile0.write_text("tok-from-file-e0\n")
+    # the pass never reaches a text the client prints or returns, on a 401 from a server that even echoes the header
+    for val in (PASSV, "not-a-pass-e2"):                                   # a value that does not start with ssp_ is sent as it is and is kept out of every text as well
+        os.environ[client.PASS_ENV] = val; _seen.clear()
+        st, body = client.get("whoami"); sp, bp = client.post("project-agent-retire", {"project": "alpha", "name": "x"})
+        rc1, o1, e1 = _cli("get", "whoami"); rc2, o2, e2 = _cli("post", "project-agent-retire", "alpha", "x", "--sender", "k")
+        check(f"pass: {val[:4]}... is sent as it is, and a 401 comes back as 401", st == 401 and sp == 401 and all(a == "Bearer " + val for _, _, a in _seen) and len(_seen) == 4, (st, sp, _seen))
+        check(f"pass: {val[:4]}... is in no returned text, stdout or stderr of a 401 (get and post, API and command line)",
+              val not in body and val not in json.dumps(bp) and all(val not in t for t in (o1, e1, o2, e2)) and rc1 != 0 and rc2 != 0 and "<pass>" in body, (body, bp, o1, e1, o2, e2))
+    # a value the transport refuses (a line break inside it) and a server that is not there: no text repeats it
+    os.environ[client.PASS_ENV] = "ssp_e3\nX-Extra: e3"; _seen.clear()
+    st, body = client.get("whoami"); sp, bp = client.post("project-agent-retire", {"project": "alpha", "name": "x"})
+    rc1, o1, e1 = _cli("get", "whoami"); rc2, o2, e2 = _cli("post", "project-agent-retire", "alpha", "x")
+    check("pass: a value the transport refuses is not sent, answers [0], and no text repeats any part of it",
+          st == 0 and sp == 0 and not _seen and all("e3" not in str(t) and "ssp_" not in str(t) for t in (body, bp, o1, e1, o2, e2)) and rc1 != 0 and rc2 != 0 and "withheld" in body, (st, sp, body, bp, o1, e1, o2, e2))
+    os.environ[client.PASS_ENV] = PASSV; os.environ["STACKSHOT_URL"] = "http://127.0.0.1:9"                 # nothing listens: not reached
+    st, body = client.get("whoami", timeout=3); sp, bp = client.post("project-agent-retire", {"project": "alpha", "name": "x"}, timeout=3)
+    check("pass: a server that is not reached answers [0] and its text does not repeat the pass", st == 0 and sp == 0 and PASSV not in body and PASSV not in str(bp), (st, sp, body, bp))
+finally:
+    _srv.shutdown(); _srv.server_close(); _thr.join(5)
+    for k, v in _env0.items():
+        if v is None: os.environ.pop(k, None)
+        else: os.environ[k] = v
+    with contextlib.suppress(FileNotFoundError): os.remove(_tokfile0)
+
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": client scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))
