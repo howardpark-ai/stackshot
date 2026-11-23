@@ -38,7 +38,8 @@ _ROLE_LABEL = {_anc.NAME_ROLE: "keeper", "front": "front agent", "back": "backgr
 
 def _sessions_listing(q: str = "", now: float | None = None) -> str:
     """The sessions tool's answer. A session the view holds as gone is listed while it is still expected back (gone for less
-    than the grace, "not running now") or while an open board item names it as mover ("not running", kept for its items);
+    than the grace, "not running now") or while an open board item names it as mover ("not running", kept for its items); a
+    session the fleet tool marks asleep (no process, its pane stays, a message wakes it) is listed as "sleeping" for as long as it is;
     a retired session nobody's item names is left out, though its identity stays in the view for the board (the owner
     identity apart from presence). `now` is for tests."""
     states = _machine_states()
@@ -56,7 +57,7 @@ def _sessions_listing(q: str = "", now: float | None = None) -> str:
             row = _fleet.read(L, "sessions").get(str(m.get("master_session") or "")) or {}
             nm = m.get("master") or row.get("name") or str(m.get("master_session"))[:8]
             live = _lv.idle_live(row)    # a gone row is held as last known through a relaunch, not running now
-            line += f" · {OPERATOR}: {nm} ({'live, ' + (row.get('url') or 'no link now') if live else 'not running'})"
+            line += f" · {OPERATOR}: {nm} ({'live, ' + (row.get('url') or 'no link now') if live else 'sleeping' if _lv.sleeping(row) else 'not running'})"
         out.append(line)
     try:
         roles = _anc.file_roles()                    # each session's role and the project it holds it in, as roles.json has it: a one-session project's only session reads front; the gates keep session_roles()
@@ -90,7 +91,10 @@ def _sessions_listing(q: str = "", now: float | None = None) -> str:
     for sid, v in _sessions_index().items():
         if not v.get("name") or (q and q not in v["name"].lower()):
             continue
-        if _lv.running(v):
+        if _lv.sleeping(v):                       # no process, its pane stays: a message wakes it
+            at = _lv.ts(_lv.sleeping(v))
+            tag = f" · sleeping{f' since {dt.datetime.fromtimestamp(at, ZONE):%m-%d %H:%M %Z}' if at else ''} (asleep until a message wakes it)"
+        elif _lv.running(v):
             tag = ""
         elif _lv.present(v, now):                 # gone for less than the grace: a pane being relaunched, or just retired
             tag = " · not running now (relaunching, or retired; shown as last known)"

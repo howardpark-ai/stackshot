@@ -102,25 +102,27 @@ def inbox_flag_tick(now: float | None = None) -> list[str]:
     groups: dict[str, list[dict[str, Any]]] = {}
     for it in late:
         groups.setdefault(str(it.get("name") or it.get("to")), []).append(it)
-        print(f"inbox: line {it['id']} for {it.get('name') or it.get('to')} (from {it.get('from') or '?'}, put {at(float(it['ts']))} {_cfg.tz_abbr()}) has waited {int(it['age'] // 60)} min though the session runs: {it['why']}",
+        print(f"inbox: line {it['id']} for {it.get('name') or it.get('to')} (from {it.get('from') or '?'}, put {at(float(it['ts']))} {_cfg.tz_abbr()}) has waited {int(it['age'] // 60)} min though the session {'is asleep' if it.get('asleep') else 'runs'}: {it['why']}",
               file=sys.stderr, flush=True)
     told: list[str] = []
     senders: dict[str, list[str]] = {}
+    slept: dict[str, list[bool]] = {}          # per sender: whether each of its lines waits for a session that is asleep (its wake is late), not one that runs
     for target, its in groups.items():
         for it in its:
             m = re.match(r"[A-Za-z0-9][\w.-]*", str(it.get("from") or ""))
             if m and m.group(0) in running and m.group(0) != target:
                 senders.setdefault(m.group(0), []).append(f"to {target} ({at(float(it['ts']))} {_cfg.tz_abbr()}): {it['why']}")
+                slept.setdefault(m.group(0), []).append(bool(it.get("asleep")))
     for who, lines in senders.items():
         shown = lines[:INBOX_FLAG_LINES] + ([f"+{len(lines) - INBOX_FLAG_LINES} more"] if len(lines) > INBOX_FLAG_LINES else [])
-        inbox_flag_send(who, f"[stackshot] {len(lines)} of your message(s) {'is' if len(lines) == 1 else 'are'} still in the server's inbox after {mins:g} min, though the session {'runs' if len(lines) == 1 else 'run'}: "
+        inbox_flag_send(who, f"[stackshot] {len(lines)} of your message(s) {'is' if len(lines) == 1 else 'are'} still in the server's inbox after {mins:g} min, though the session {('is' if len(lines) == 1 else 'are') + ' asleep' if all(slept[who]) else 'runs' if len(lines) == 1 else 'run'}: "
                               + "; ".join(shown) + (f". {keeper} has been told." if keeper and keeper != who else "."))
         told.append(who)
     if keeper:
         parts = [f"{len(its)} line(s) for {target}, from " + ", ".join(sorted({str(i.get('from') or '?') for i in its})) + f" (the oldest put {at(min(float(i['ts']) for i in its))} {_cfg.tz_abbr()}): {its[0]['why']}" for target, its in groups.items()]
         parts = parts[:INBOX_FLAG_LINES] + ([f"+{len(parts) - INBOX_FLAG_LINES} more session(s)"] if len(parts) > INBOX_FLAG_LINES else [])
-        inbox_flag_send(keeper, f"[stackshot] Lines are waiting in the server's inbox for running sessions (more than {mins:g} min): " + "; ".join(parts)
-                                 + ". Usual causes: two sessions carrying one name, a puller that is not taking them (a line held on purpose, by a relaunch hold or a pause, is not reported). They are in the inbox until a puller takes them; nothing is lost.")
+        inbox_flag_send(keeper, f"[stackshot] Lines are waiting in the server's inbox for running or sleeping sessions (more than {mins:g} min): " + "; ".join(parts)
+                                 + ". Usual causes: two sessions carrying one name, a puller that is not taking them, a sleeping session whose wake is late (a line held on purpose, by a relaunch hold or a pause, is not reported). They are in the inbox until a puller takes them; nothing is lost.")
         told.append(keeper)
     else:
         print("inbox: nobody to tell about the waiting lines ([fleet] operator_session is unset or retired with no keeper)", file=sys.stderr, flush=True)

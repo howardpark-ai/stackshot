@@ -10,7 +10,7 @@ view holds the server's own clients alone: the fleet-state store and the merge w
 link excepted: it is the fleet tool's, see "Session links" below).
 
 machine.json   {letter, fleet, claude, checked, master, master_session, online: {ok, since}, source[, setup, updates, stackshot]}   (below)
-sessions.json  {uuid: {name, url, seen, machine[, previous_name, renamed_at, status, gone]}}   (url: the fleet tool's link, below)
+sessions.json  {uuid: {name, url, seen, machine[, previous_name, renamed_at, status, gone, sleeping]}}   (url: the fleet tool's link, below; sleeping: its mark of a sleeper, below)
 The files are rewritten only when a fact changes (the times alone never do it), because a new mtime republishes the board.
 
 Identity apart from presence (without it a pane relaunch would leave the board drawing owners as raw
@@ -22,6 +22,10 @@ for session_ttl_hours) is marked `gone` and stays as it was last seen. Readers t
 between its /exit and its resume); past that it is an identity record, never mistaken for a live one, and a live session
 reusing its name wins. A record gone longer than session_horizon_days is forgotten, unless an open board item still
 names it as owner (its uuid or its name), so the store cannot grow without bound while the board never loses an owner.
+A sleeper is neither: the fleet tool puts a session that has been idle for a while to sleep (its process ends, its pane stays, a line addressed
+to it wakes it) and marks its row in the links store below with `sleeping`, the ISO time it went to sleep. Such a session is in no puller's poll,
+so a row with a non-empty `sleeping` is kept from `gone`, from the hook TTL and from the horizon for as long as the mark is there, and the view's row
+carries `sleeping`; stackshot only reads the mark, never writes it and never wakes anyone. When the mark goes the normal rules start from that moment.
 The CLI's own placeholder names (nameSource auto or collision, or a name of its shape "<os user>-<2 hex>" whatever nameSource
 came with it, before a /rename) never displace a name on record.
 
@@ -390,7 +394,8 @@ def checkin(machine: str, sessions: list[dict[str, Any]], facts: dict[str, Any] 
             now: float | None = None) -> dict[str, Any]:
     """A puller's poll: the machine is alive, and these are the sessions live on it. The list replaces what the server knew
     of that machine unless `partial` (a puller told to serve only some): a session not on it is marked gone and stays as
-    last known (its identity; a pane between its /exit and its resume during a recycle comes back under the same id)."""
+    last known (its identity; a pane between its /exit and its resume during a recycle comes back under the same id). A session
+    the fleet tool's store marks asleep (`sleeping`: no process, its pane stays) is in no poll and is not marked gone for it."""
     now = time.time() if now is None else now
     with _locked():
         st = load(); m = _machine(st, machine)
@@ -411,7 +416,7 @@ def checkin(machine: str, sessions: list[dict[str, Any]], facts: dict[str, Any] 
         if not partial:
             for u, s in st["sessions"].items():
                 if s.get("machine") == m["letter"] and u not in keep:
-                    s.setdefault("gone", _iso(now))
+                    s.setdefault("gone", _iso(now))      # (_expire, below, lifts it again from a sleeper: no process to poll is no sign it is gone)
         _expire(st, now)
         _write(STATE, st); _materialize(st, now); flag_lag(st)
         return dict(m)
@@ -497,10 +502,14 @@ def _expire(st: dict[str, Any], now: float) -> None:
     """Presence expires, identity stays. A session on a machine with no puller behind it (hooks only) with no sign of life
     for TTL is marked gone, like one its puller stopped reporting (checkin). Once an hour, a record gone longer than
     HORIZON is forgotten — unless an open board item names it as owner, by uuid or by name, because the board must still
-    draw that owner."""
+    draw that owner. A session the fleet tool's store marks asleep (`sleeping_sessions`) is neither marked gone nor forgotten: it
+    stays present until the mark goes."""
     live = {m["letter"] for m in st["machines"].values() if _lv.puller_online(m, now)}
-    for s in st["sessions"].values():
-        if s.get("machine") not in live and not s.get("gone") and _lv.hook_session_expired(s.get("seen"), now):
+    asleep = sleeping_sessions()
+    for u, s in st["sessions"].items():
+        if u in asleep:                       # asleep, not gone: never expired while the store marks it, and a stamp set before the mark was read is lifted; when the mark goes, the normal rules start from that moment
+            s.pop("gone", None); s["seen"] = _iso(now)      # its sign of life is the mark itself: `seen` follows it, so a hook-only sleeper that wakes or loses its mark starts its TTL from that moment
+        elif s.get("machine") not in live and not s.get("gone") and _lv.hook_session_expired(s.get("seen"), now):
             s["gone"] = _iso(now)
     if now - _ts(st.get("pruned")) < PRUNE_EVERY:
         return
@@ -522,7 +531,7 @@ def sessions_on(machine: str) -> dict[str, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------- session links, from the fleet tool
-_LINKS: dict[str, Any] = {"dir": None, "sig": None, "map": {}}           # the last read of the fleet tool's store, kept while no file in it changes
+_LINKS: dict[str, Any] = {"dir": None, "sig": None, "map": {}, "sleep": {}}           # the last read of the fleet tool's store, kept while no file in it changes
 _LINKS_WARNED: list[str] = [""]                                          # the problem last logged, so it is logged once and again only when it changes
 
 
@@ -547,7 +556,7 @@ def session_links() -> dict[str, str]:
     raises."""
     d = _links_dir()
     if d is None:
-        _LINKS.update(dir=None, sig=None, map={}); _links_warn(""); return {}
+        _LINKS.update(dir=None, sig=None, map={}, sleep={}); _links_warn(""); return {}
     try:
         files = sorted(p for p in d.glob("*/sessions.json") if len(p.parent.name) == 1)
         sig = tuple((str(p), st.st_ino, st.st_mtime_ns, st.st_size) for p, st in ((p, p.stat()) for p in files))
@@ -555,10 +564,10 @@ def session_links() -> dict[str, str]:
         files, sig = [], None; _links_warn(f"{d} not readable ({type(e).__name__}); sessions are named without a link")
     if not sig:
         if sig is not None: _links_warn(f"no <letter>/sessions.json under {d}; sessions are named without a link")
-        _LINKS.update(dir=str(d), sig=None, map={}); return {}
+        _LINKS.update(dir=str(d), sig=None, map={}, sleep={}); return {}
     if _LINKS["dir"] == str(d) and _LINKS["sig"] == sig:
         return _LINKS["map"]
-    out: dict[str, str] = {}; bad = []; junk = []
+    out: dict[str, str] = {}; zz: dict[str, str] = {}; bad = []; junk = []
     for p in files:
         try:
             rows = json.load(open(p, encoding="utf-8"))
@@ -566,6 +575,8 @@ def session_links() -> dict[str, str]:
         except Exception:
             bad.append(p.parent.name); continue
         for u, row in rows.items():
+            if _lv.sleeping(row):                                      # the fleet tool's mark of a session put to sleep (its process ended, its pane stays): read here, never written
+                zz.setdefault(str(u).strip().lower(), _lv.sleeping(row))
             url = row.get("url") if isinstance(row, dict) else None
             if not isinstance(url, str) or not url.strip():
                 continue
@@ -575,8 +586,15 @@ def session_links() -> dict[str, str]:
             out.setdefault(str(u).strip().lower(), url)
     _links_warn("; ".join(x for x in (f"unreadable sessions.json under {d} for {', '.join(bad)}, its sessions named without a link" if bad else "",
                                       f"skipped {len(junk)} url(s) that are not http(s) under {d} ({', '.join(junk[:5])}), named without a link" if junk else "") if x))
-    _LINKS.update(dir=str(d), sig=sig, map=out)
+    _LINKS.update(dir=str(d), sig=sig, map=out, sleep=zz)
     return out
+
+
+def sleeping_sessions() -> dict[str, str]:
+    """transcript uuid (lowercased) → the time it went to sleep (the `sleeping` ISO string, as the fleet tool wrote it), for every session the store marks asleep: its process has ended while its
+    pane stays, and a line addressed to it wakes it. Read with the links (one file read, never raises); only a non-empty string counts, and a session that wakes has no key."""
+    session_links()
+    return dict(_LINKS.get("sleep") or {})
 
 
 # ---------------------------------------------------------------------------- the view every reader uses
@@ -596,6 +614,7 @@ def _view(st: dict[str, Any], now: float) -> dict[str, tuple[dict[str, Any], dic
     operator = str(_cfg.get("fleet", "operator_session") or "")        # the one way to name the operator session
     out: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     links = session_links()
+    asleep = sleeping_sessions()
     for name, m in st["machines"].items():
         L = m["letter"]; on = _lv.puller_online(m, now)
         rows = {}
@@ -604,6 +623,8 @@ def _view(st: dict[str, Any], now: float) -> dict[str, tuple[dict[str, Any], dic
                 continue
             r = {k: s[k] for k in ("name", "seen", "machine", "previous_name", "renamed_at", "status", "gone", "stopped") if s.get(k) is not None}
             r.setdefault("name", "")
+            if u.strip().lower() in asleep:                   # asleep: present, never gone (a stamp left from before the mark was read is not shown), with the time it went to sleep
+                r.pop("gone", None); r["sleeping"] = asleep[u.strip().lower()]
             r["url"] = links.get(u.strip().lower(), "")       # the fleet tool's link (the map's keys are lowercased) for this transcript id, whatever the bridge does; none → the plain name
             rows[u] = r
         mj: dict[str, Any] = {"letter": L, "fleet": m.get("fleet") or name, "claude": m.get("claude") or "", "master": "", "master_session": "",
