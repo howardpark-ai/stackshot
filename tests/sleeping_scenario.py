@@ -46,6 +46,9 @@ from stackshot.router import routing
 from stackshot.web import server          # installs the hooks the message relay reads
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.service import messaging as _messaging
+from stackshot.service import fleet_events as fleetev
+from stackshot.fleet import inbox
+from stackshot.core import config as cfg
 from stackshot.service import telling
 from stackshot.web import publish as _web_publish
 from fastmcp.exceptions import ToolError
@@ -91,6 +94,8 @@ check("liveness reads the row: NAP asleep, running, present; the ones gone are n
 # the store marks NAP2 only now: its gone stamp (T0 + 1 h) predates the mark. A tick alone (no poll) lifts it.
 links({NAP: iso(T0 + 300), NAP2: iso(T0 + 7000), **BAD})
 check("before the tick: NAP2's record still carries the old gone stamp", st()[NAP2].get("gone") == iso(T0 + 3600), st()[NAP2])
+cl.setup_result(HOST, True, now=T0 + 7100)          # a write that rebuilds the view without the expiry pass: the old stamp is not shown on a row the store marks asleep
+check("…and the view does not show it (a write that only rebuilds the view)", "gone" not in rd()[NAP2] and rd()[NAP2].get("sleeping") == iso(T0 + 7000), rd()[NAP2])
 cl.tick(now=T0 + 7200)
 v = rd()
 check("a tick after the mark appears lifts the old gone stamp from the record and the view shows the sleeper (no gone, its time)", "gone" not in st()[NAP2] and "gone" not in v[NAP2] and v[NAP2]["sleeping"] == iso(T0 + 7000), (st()[NAP2], v[NAP2]))
@@ -130,6 +135,9 @@ check("session_down: a sleeper is not down (not for an old error, not for a sile
 check("idle_live: a sleeper has no turn to count idle time from (not live), a running pane is", not LV.idle_live(S) and not LV.idle_live(SG) and LV.idle_live({"name": "n"}) and not LV.idle_live(G) and not LV.idle_live(None))
 check("fleet.by_name: a sleeper's name resolves to it (as a running session's does)", fl.by_name({NAP: v[NAP], OLD: v[OLD]}, NOW0) == {"work-osprey-nap": NAP, "work-osprey-old": OLD}
       and fl.by_name({NAP: v[NAP], OLD: v[OLD]}, NOW0, present_only=True) == {"work-osprey-nap": NAP}, fl.by_name({NAP: v[NAP], OLD: v[OLD]}, NOW0, present_only=True))
+dup = {"u1": {"name": "dup", "sleeping": past}, "u2": {"name": "dup"}, "u3": {"name": "dup2", "sleeping": past}, "u4": {"name": "dup2", "gone": iso(NOW0 - 60)}}
+check("fleet.by_name: a name a sleeper and a gone namesake carry resolves to the sleeper (running beats gone); a name a sleeper and a running pane both carry resolves to nobody, as two running namesakes do (kept: a follow-up)",
+      fl.by_name(dup, NOW0) == {"dup2": "u3"}, fl.by_name(dup, NOW0))
 
 # ---- 3. a message to a sleeper, and to a pane gone as long
 page = lambda name, sess, **kw: {"title": name, "name": name, "org": "home", "tags": [], "type": "project", "session": sess, "status": "active", "board": [], "board_row": False, "updated": 1, "mirror": f"https://example.invalid/{name}", **kw}
@@ -191,6 +199,34 @@ check("the mark gone from NAP2: it is marked gone from that check-in, its row ca
 ls = _wt_sessions._sessions_listing("", now=NOW0 + 20).split("\n")
 check("sessions tool: the pane just gone is the plain 'not running now'; the sleeper still sleeping", any(l.startswith("- work-osprey-nap2 ") and l.endswith("not running now (relaunching, or retired; shown as last known)") for l in ls)
       and any(l.startswith("- work-osprey-nap ") and " · sleeping since " in l for l in ls), [l for l in ls if "nap" in l])
+check("the mark's session keeps `seen` with it: the check-in that found the mark gone left NAP's `seen` at that moment, NAP2's at the last one while it was marked (a hook-only sleeper's TTL starts there, not from 40 days ago)",
+      st()[NAP]["seen"] == iso(NOW0 + 10) and st()[NAP2]["seen"] == iso(NOW0) and not LV.hook_session_expired(st()[NAP2]["seen"], NOW0 + 10) and LV.hook_session_expired(iso(T0), NOW0 + 10), (st()[NAP]["seen"], st()[NAP2]["seen"]))
+# the operator line of the sessions tool
+cfg.CFG.setdefault("fleet", {})["operator_session"] = "work-osprey-nap"
+cl.tick(now=NOW0 + 12)
+ls = _wt_sessions._sessions_listing("", now=NOW0 + 20).split("\n")
+check("sessions tool: the operator line of a machine whose operator sleeps says sleeping, not 'not running'", any(f"{_wt_sessions.OPERATOR}: work-osprey-nap (sleeping)" in l for l in ls), [l for l in ls if "operator" in l])
+cl.checkin(HOST, [rec(OLD)], now=NOW0 + 15)          # OLD runs again: the pane that runs, beside the sleeper
+cfg.CFG["fleet"]["operator_session"] = "work-osprey-old"; cl.tick(now=NOW0 + 16)
+ls = _wt_sessions._sessions_listing("", now=NOW0 + 20).split("\n")
+check("sessions tool: …and a running operator reads live with its link", any(f"{_wt_sessions.OPERATOR}: work-osprey-old (live, https://term.example/#s=work-osprey-old)" in l for l in ls), [l for l in ls if "operator" in l])
+cfg.CFG["fleet"]["operator_session"] = ""
+# a line that waits in the inbox: flagged for a sleeper as well (a wake that stalls must show), in its own words
+tn = time.time()
+i_nap = inbox.put("work-osprey-nap", "a line for the sleeper", "msg", now=tn - 900, sender="work-osprey-old (00000003…)")
+i_old = inbox.put("work-osprey-old", "a line for the pane that runs", "msg", now=tn - 900, sender="work-osprey-nap (00000001…)")
+its = {str(i["id"]): i for i in inbox._items()}; idx = _sr._sessions_index()
+check("inbox: a line for a sleeper counts as alive (kept in the overdue flag), asleep says so; the line for the pane that runs is not asleep", inbox.alive(its[i_nap], idx) and inbox.asleep(its[i_nap], idx) and inbox.alive(its[i_old], idx) and not inbox.asleep(its[i_old], idx), (i_nap, i_old))
+check("inbox: why names the sleeper as asleep and not yet woken; the pane that runs keeps the old words", "asleep and has not been woken yet" in inbox.why(its[i_nap], idx) and "no puller has asked for it" in inbox.why(its[i_old], idx) and "asleep" not in inbox.why(its[i_old], idx), (inbox.why(its[i_nap], idx), inbox.why(its[i_old], idx)))
+sent = []
+fleetev.inbox_flag_send = lambda to, text: sent.append((to, text)); fleetev.fleet_builder = lambda: "work-keeper"
+fleetev.INBOX_FLAG_LAST[0] = 0.0; fleetev.INBOX_FLAG_START[0] = 0.0
+told = fleetev.inbox_flag_tick(now=tn)
+txt = dict(sent)
+check("flag pass: both lines are flagged (the sleeper's is not hidden), each sender told, and the keeper", sorted(told) == ["work-keeper", "work-osprey-nap", "work-osprey-old"], (told, sent))
+check("flag pass: the sender of the sleeper's line is told the session is asleep and not yet woken, never 'runs'", "though the session is asleep" in txt.get("work-osprey-old", "") and "asleep and has not been woken yet" in txt.get("work-osprey-old", "") and "runs" not in txt.get("work-osprey-old", ""), txt.get("work-osprey-old"))
+check("flag pass: the sender of the other line still reads 'runs' and the old reason", "though the session runs" in txt.get("work-osprey-nap", "") and "no puller has asked for it" in txt.get("work-osprey-nap", ""), txt.get("work-osprey-nap"))
+check("flag pass: the keeper's line says running or sleeping sessions and names a late wake among the causes", "running or sleeping sessions" in txt.get("work-keeper", "") and "a sleeping session whose wake is late" in txt.get("work-keeper", ""), txt.get("work-keeper"))
 cl.checkin(HOST, [rec(NAP)], now=NOW0 + 30)
 links()
 cl.checkin(HOST, [rec(NAP)], now=NOW0 + 40)

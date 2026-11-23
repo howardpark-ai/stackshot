@@ -426,6 +426,14 @@ def alive(it: dict[str, Any], idx: dict[str, dict[str, Any]] | None = None) -> b
     return any(_lv.running(r) and _lv.machine_online_ok(fleet.read(str(r.get("machine") or ""), "machine")) for _u, r in _rows_for(it, idx))
 
 
+def asleep(it: dict[str, Any], idx: dict[str, dict[str, Any]] | None = None) -> bool:
+    """Is the session this line waits for asleep (liveness.sleeping): every running row of it is a sleeper, and there is one. A sleeper takes no poll: the fleet tool wakes it for a line,
+    so a line that waits long for one is a wake that is late or failed, not a session that runs and does not ask."""
+    idx = _index() if idx is None else idx
+    run = [r for _u, r in _rows_for(it, idx) if _lv.running(r)]
+    return bool(run) and all(_lv.sleeping(r) for r in run)
+
+
 def deliberate(it: dict[str, Any]) -> str:
     """Why this line waits on purpose, '' when it does not: a hold on its session (another tool's relaunch hold in held-<src>.txt, a reboot's resume in held-resume-<src>.txt), or its source paused
     (paused-<src>.json) without a release for it. These are known waits, sala's own watch frees a hold a dead relaunch left after 10 minutes: the flag leaves them alone."""
@@ -442,14 +450,16 @@ def deliberate(it: dict[str, Any]) -> str:
 
 def why(it: dict[str, Any], idx: dict[str, dict[str, Any]] | None = None, now: float | None = None) -> str:
     """The likeliest reason this line still waits, in words, for the flag: a lease no puller confirmed, several running sessions carrying the name, else that no
-    puller has asked for it (a deliberate hold or pause is no case for the flag, `deliberate`; named here for a caller that asks)."""
+    puller has asked for it (a deliberate hold or pause is no case for the flag, `deliberate`; named here for a caller that asks). A session that is asleep (`asleep`) is named as such: asleep, not yet woken."""
     now = time.time() if now is None else now
     idx = _index() if idx is None else idx
     if deliberate(it):
         return deliberate(it)
     if _leases().get(str(it.get("id")), 0.0) > now:
         return "it was handed to a puller that has not confirmed it yet"
-    rows = [(u, r) for u, r in _rows_for(it, idx) if _lv.running(r)]
+    if asleep(it, idx):                     # kept in the flag on purpose: a wake that stalls for long must show, in its own words
+        return "the session is asleep and has not been woken yet: the wake that a waiting line starts is late or has failed, and the line waits in the inbox until it comes"
+    rows =[(u, r) for u, r in _rows_for(it, idx) if _lv.running(r)]
     pid = str(it.get("pid") or "")
     if _by_id(pid):
         carrying =[(u, r) for u, r in _carrier_rows(pid, idx) if _lv.running(r)]
@@ -485,7 +495,7 @@ def new_overdue(older_than: float, now: float | None = None, idx: dict[str, dict
             if iid in keep or age < older_than or str(it.get("from") or "") in skip_from or deliberate(it) or not alive(it, idx):
                 continue
             keep[iid] = now
-            out.append({**it, "name": shown(it), "age": age, "why": why(it, idx, now)})
+            out.append({**it, "name": shown(it), "age": age, "why": why(it, idx, now), "asleep": asleep(it, idx)})
         if keep != done:
             tmp = DIR / ".flagged.json.tmp"
             json.dump(keep, open(tmp, "w", encoding="utf-8")); os.replace(tmp, DIR / "flagged.json")

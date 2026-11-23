@@ -10,7 +10,7 @@ view holds the server's own clients alone: the fleet-state store and the merge w
 link excepted: it is the fleet tool's, see "Session links" below).
 
 machine.json   {letter, fleet, claude, checked, master, master_session, online: {ok, since}, source[, setup, updates, stackshot]}   (below)
-sessions.json  {uuid: {name, url, seen, machine[, previous_name, renamed_at, status, gone]}}   (url: the fleet tool's link, below)
+sessions.json  {uuid: {name, url, seen, machine[, previous_name, renamed_at, status, gone, sleeping]}}   (url: the fleet tool's link, below; sleeping: its mark of a sleeper, below)
 The files are rewritten only when a fact changes (the times alone never do it), because a new mtime republishes the board.
 
 Identity apart from presence (without it a pane relaunch would leave the board drawing owners as raw
@@ -22,6 +22,10 @@ for session_ttl_hours) is marked `gone` and stays as it was last seen. Readers t
 between its /exit and its resume); past that it is an identity record, never mistaken for a live one, and a live session
 reusing its name wins. A record gone longer than session_horizon_days is forgotten, unless an open board item still
 names it as owner (its uuid or its name), so the store cannot grow without bound while the board never loses an owner.
+A sleeper is neither: the fleet tool puts a session that has been idle for a while to sleep (its process ends, its pane stays, a line addressed
+to it wakes it) and marks its row in the links store below with `sleeping`, the ISO time it went to sleep. Such a session is in no puller's poll,
+so a row with a non-empty `sleeping` is kept from `gone`, from the hook TTL and from the horizon for as long as the mark is there, and the view's row
+carries `sleeping`; stackshot only reads the mark, never writes it and never wakes anyone. When the mark goes the normal rules start from that moment.
 The CLI's own placeholder names (nameSource auto or collision, or a name of its shape "<os user>-<2 hex>" whatever nameSource
 came with it, before a /rename) never displace a name on record.
 
@@ -390,7 +394,8 @@ def checkin(machine: str, sessions: list[dict[str, Any]], facts: dict[str, Any] 
             now: float | None = None) -> dict[str, Any]:
     """A puller's poll: the machine is alive, and these are the sessions live on it. The list replaces what the server knew
     of that machine unless `partial` (a puller told to serve only some): a session not on it is marked gone and stays as
-    last known (its identity; a pane between its /exit and its resume during a recycle comes back under the same id)."""
+    last known (its identity; a pane between its /exit and its resume during a recycle comes back under the same id). A session
+    the fleet tool's store marks asleep (`sleeping`: no process, its pane stays) is in no poll and is not marked gone for it."""
     now = time.time() if now is None else now
     with _locked():
         st = load(); m = _machine(st, machine)
@@ -409,10 +414,9 @@ def checkin(machine: str, sessions: list[dict[str, Any]], facts: dict[str, Any] 
                 keep.add(str(rec.get("uuid") or rec.get("sessionId")).lower())
         keep = {u for u in keep if (st["sessions"].get(u) or {}).get("machine") == m["letter"]}
         if not partial:
-            asleep = sleeping_sessions()                          # a sleeper has no process to poll: it is not gone while the store marks it asleep (the wake brings it back)
             for u, s in st["sessions"].items():
-                if s.get("machine") == m["letter"] and u not in keep and u not in asleep:
-                    s.setdefault("gone", _iso(now))
+                if s.get("machine") == m["letter"] and u not in keep:
+                    s.setdefault("gone", _iso(now))      # (_expire, below, lifts it again from a sleeper: no process to poll is no sign it is gone)
         _expire(st, now)
         _write(STATE, st); _materialize(st, now); flag_lag(st)
         return dict(m)
@@ -504,7 +508,7 @@ def _expire(st: dict[str, Any], now: float) -> None:
     asleep = sleeping_sessions()
     for u, s in st["sessions"].items():
         if u in asleep:                       # asleep, not gone: never expired while the store marks it, and a stamp set before the mark was read is lifted; when the mark goes, the normal rules start from that moment
-            s.pop("gone", None)
+            s.pop("gone", None); s["seen"] = _iso(now)      # its sign of life is the mark itself: `seen` follows it, so a hook-only sleeper that wakes or loses its mark starts its TTL from that moment
         elif s.get("machine") not in live and not s.get("gone") and _lv.hook_session_expired(s.get("seen"), now):
             s["gone"] = _iso(now)
     if now - _ts(st.get("pruned")) < PRUNE_EVERY:

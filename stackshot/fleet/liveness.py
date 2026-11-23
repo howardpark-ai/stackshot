@@ -170,9 +170,7 @@ def pane_dead(row: Any, now: float | None = None) -> str:
     Gone on a machine that is asleep, or one with no puller to tell (online.ok not true): it cannot be told from a pane that is merely away, so it still takes a message (queued
     or inboxed, as before). An unreadable `gone` stamp counts as long gone, for a time not known."""
     from stackshot.fleet import fleet as _fleet  # noqa: PLC0415 — fleet.py imports this module
-    if sleeping(row):      # asleep: the pane stays and a line wakes it, however long it has slept
-        return ""
-    gone = gone_for(row, now)
+    gone = gone_for(row, now)                  # 0.0 for a sleeper: its pane stays and a line wakes it, however long it has slept
     if gone < dead_after():
         return ""
     on = _fleet.read(str((row or {}).get("machine") or ""), "machine").get("online")
