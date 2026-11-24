@@ -19,7 +19,7 @@ The runner's signals to and from a process that does not share its memory are fi
 writes its status file (heartbeat, tick, pass count: `beat`), `status()` and `watchdog()` read that file when this process has no runner of its own, and `record_server_start()` keeps the server's start for the inbox flag. In the server with its own runner nothing reads a file back
 (a process's own files are skipped) and the behavior is what it was.
 
-Where the runner runs is `[runner] process` (config.runner_process, restart-only, read once by `start()`): "inline" (the default) is the thread above; "unit" starts none here and `stackshot minute` (web/minute.py) runs it. Exactly one process runs it, by the flock
+Where the runner runs is `[runner] process` (config.runner_process, restart-only, read once by `start()`): "unit" (the default, when the setting is not set) starts none here and `stackshot minute` (web/minute.py) runs it; "inline" is the thread above, the choice for a host with no minute unit. Exactly one process runs it, by the flock
 `<paths.state>/minute/runner.lock` (core/runner_files.py): an inline `start()` takes it before it starts its runner thread, and a server that finds it held by another process starts no runner, says so on stderr and goes on serving. A process
 with no runner of its own (a "unit" server, an inline one that was refused) reports `minute runner not running (...)` in `status()["message"]` while no live process beats the status file, and the watchdog tells the builder once, after the server has been up for
 `runner.STALL_AFTER`, when no process has a fresh heartbeat. The publish loop and the watchdog run in the server either way.
@@ -297,8 +297,13 @@ def start() -> list[str]:
     with _RETRY:
         MODE[0], STARTED[0], ABSENT[0], WAITING[0] = mode, time.time(), "", False
         if mode == "unit":
-            ABSENT[0] = 'runs in its own process: [runner] process = "unit"; start `stackshot minute`'
-            print('stackshot: minute set: runner not started here: [runner] process = "unit", the process `stackshot minute` runs it', file=sys.stderr, flush=True)
+            if _cfg.runner_process_is_default():     # not set: the default applies, so a host with no minute unit learns here what to do (the watchdog says it again if no process beats the status file)
+                ABSENT[0] = 'runs in its own process: [runner] process is not set, so the default "unit" applies; start `stackshot minute` (`./install.sh units --start` installs stackshot-minute.service), or set [runner] process = "inline" and restart the server to run it here'
+                print('stackshot: minute set: runner not started here: [runner] process is not set, so the default "unit" applies and the process `stackshot minute` runs it; a host with no stackshot-minute.service '
+                      'runs no minute passes until `./install.sh units --start` installs it, or [runner] process = "inline" is set (then restart the server)', file=sys.stderr, flush=True)
+            else:
+                ABSENT[0] = 'runs in its own process: [runner] process = "unit"; start `stackshot minute`'
+                print('stackshot: minute set: runner not started here: [runner] process = "unit", the process `stackshot minute` runs it', file=sys.stderr, flush=True)
         else:
             got = _files.lock_take()
             if got.state == "held":

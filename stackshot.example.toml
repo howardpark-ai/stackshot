@@ -296,10 +296,11 @@ debounce_seconds = 5
 every_minutes = 10                                  # the server's own timer, on the dot
 
 [runner]                                            # where the minute set's runner runs; see docs/server-passes.md
-process = "inline"                                  # "inline": a thread of the server, as it always was. "unit": the server starts no runner and the process `stackshot minute` runs it. Exactly one process runs the runner
-                                                    # (a flock on <paths.state>/minute/runner.lock): a server with "inline" that finds it held starts none, says so, and tries the lock again every minute, and `stackshot minute` refuses while this is "inline". Restart-only,
-                                                    # read once at a start by the server and by `stackshot minute`; any other value reads as "inline". `./install.sh units` installs stackshot-minute.service only with "unit"
-                                                    # (never on a standby, where one installed earlier is removed); back to "inline": run `./install.sh units` (it removes the unit) and restart the server
+process = "unit"                                    # "unit" (the default, also when this line is absent): the server starts no runner and the process `stackshot minute` runs it (stackshot-minute.service, which `./install.sh units` installs). "inline": a thread of the
+                                                    # server: the choice for a host with no minute unit (no systemd user manager, or one that never runs `./install.sh units`); with "unit" and no unit the minute passes do not run, and the server says so
+                                                    # at its start. Exactly one process runs the runner (a flock on <paths.state>/minute/runner.lock): a server with "inline" that finds it held starts none, says so, and tries the lock again every
+                                                    # minute, and `stackshot minute` refuses while this is "inline". Restart-only, read once at a start by the server and by `stackshot minute`; a value that is set and is neither reads as "inline".
+                                                    # `./install.sh units` installs stackshot-minute.service at "unit" (never on a standby, where one installed earlier is removed); back to "inline": run `./install.sh units` (it removes the unit) and restart the server
 
 [locks]                                             # the locks around the whole-file stores (the item, the For you and Landed lists, the held hand-back lines, the page-debt ledger, the pending answers, the machine anchors, the anchors file, the wake pass, the stall record); see docs/server-passes.md
 cross_process = true                                # true: each is also a flock on <paths.state>/<name>.lock, so a second process that writes the same files takes turns with the server (about 10 microseconds a hold);

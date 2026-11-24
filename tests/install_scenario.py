@@ -57,7 +57,9 @@ def conf(name, account_id="", enabled="false", scope=None, client=None, audit=No
     if at is not None:
         lit = "[" + ", ".join(f'"{x}"' for x in at) + "]" if isinstance(at, list) else f'"{at}"'    # a string or a list of them, as the config has it
         t, n = re.subn(r'(?m)^at = (?:"[^"]*"|\[[^\]\n]*\])', lambda m: f'at = {lit}', t); assert n == 1
-    if runner is not None:                   # [runner] process
+    if runner == "-":                        # [runner] process left out: the setting is not set, so the default applies
+        t, n = re.subn(r'(?m)^process = "[^"]*"[^\n]*\n', "", t); assert n == 1
+    elif runner is not None:                 # [runner] process
         t, n = re.subn(r'(?m)^process = "[^"]*"', lambda m: f'process = "{runner}"', t); assert n == 1   # the example has one key of that name
     if project is not None:
         t, n = re.subn(r'(?m)^project = "[^"]*"', f'project = "{project}"', t); assert n == 1
@@ -372,7 +374,8 @@ def minute_calls(calls): return [c for c in calls if "stackshot-minute" in c]
 EXISTING = ["stackshot.service", "stackshot-reload.service", "stackshot-reload.path", "stackshot-portal-sync.service", "anchor-hub.service", "stackshot-puller.service"] + AUD
 # the same config file in both modes (the unit text carries its path), so the other units' bytes can be compared
 mc = conf("m-cfg.toml", account_id="0123abcd", enabled="true", audit="true")
-check("the example's [runner] process is inline", re.search(r'(?m)^process = "inline"', toml) is not None)
+check("the fixtures' [runner] process is inline (tests/_instance.py sets it, so the cases below start from the server running the runner), and the example config itself ships \"unit\", the default",
+      re.search(r'(?m)^process = "inline"', toml) is not None and re.search(r'(?m)^process = "unit"', pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")) is not None)
 rc, before_default, _ = render_out(mc, env=UENV)
 before = {n: render_out(mc, n, env=UENV)[1] for n in EXISTING + ["stackshot.service.d-portal-sync.conf"]}
 rc, defl, _ = render(mc, env=UENV)
@@ -450,6 +453,23 @@ check("units at unit: it is enabled, and neither started nor restarted without -
       and not any(re.search(r"\b(start|restart|stop)\b.*stackshot-minute", c) for c in calls) and (T / "sudo-called").exists() is False, calls)
 rc, out, calls = units(UC, env=mhome(2))
 check("units at unit, twice: unchanged the second time", rc == 0 and f"{MIN}: unchanged" in out and "installed" not in out.replace("not installed", ""), out[-500:])
+# the default: [runner] process not set (the key left out, or an empty value) is "unit" -- the unit is rendered, installed and enabled as at an explicit "unit", and a standby still gets none
+for k, (label, how) in enumerate((("the key left out", "-"), ("an empty value", ""))):
+    DC = conf(f"m-dc{k}.toml", account_id="0123abcd", enabled="true", audit="true", runner=how)      # the same config as m-cfg.toml, but for the setting
+    rc, ddefl, _ = render(DC, env=UENV)
+    check(f"default ({label}): the default render is the inline one plus the minute unit, last, as at an explicit unit", rc == 0 and ddefl == mdefl, ddefl)
+    rc, out, calls = units(DC, env=mhome(90 + k))
+    check(f"default ({label}): units installs the minute unit and enables it, started by nothing here, and every call is the user manager's", rc == 0 and (mdir(90 + k) / MIN).is_file()
+          and (mdir(90 + k) / MIN).read_text() == render_out(DC, MIN, env=mhome(90 + k))[1] and f"{MIN}: installed" in out and "--user enable --quiet stackshot-minute.service" in calls
+          and not any(re.search(r"\b(start|restart|stop)\b.*stackshot-minute", c) for c in calls) and all(c.startswith("--user ") for c in calls), (out[-500:], calls))
+    rc, out, calls = units(DC, "--start", env=mhome(90 + k))
+    check(f"default ({label}): units --start restarts the minute unit through the user manager, after the server", rc == 0 and f"--user restart {MIN}" in calls and calls.index("--user restart stackshot.service") < calls.index(f"--user restart {MIN}"), (calls, out[-300:]))
+    rc, out, calls = units(DC, env=mhome(92 + k, STACKSHOT_READ_ONLY="1"))
+    check(f"default ({label}) on a standby: no minute unit, said so, no call for it", rc == 0 and not (mdir(92 + k) / MIN).exists() and not minute_calls(calls)
+          and f'{MIN}: skipped ([runner] process is "unit", but this box is a read-only standby)' in out, (out[-400:], calls))
+units(DC, env=mhome(94))
+rc, out, calls = units(conf("m-dci.toml", account_id="0123abcd", enabled="true", runner="inline"), env=mhome(94))
+check("a box on the default whose setting is then put at inline: the unit goes (stopped, disabled, removed), as it always did", rc == 0 and not (mdir(94) / MIN).exists() and "--user disable --now --quiet stackshot-minute.service" in calls, (out[-400:], calls))
 rc, out, calls = units(UC, "--start", env=mhome(2))
 i_srv, i_min = (calls.index(f"--user restart {n}") if f"--user restart {n}" in calls else -1 for n in ("stackshot.service", MIN))
 check("units --start at unit: the minute unit is restarted through the user manager, after the server, the reload path and anchor-hub", rc == 0 and 0 <= i_srv < i_min

@@ -197,7 +197,7 @@ def _start_facts() -> dict[str, Any]:
     except Exception:  # noqa: BLE001  — a start with no head is still a start
         pass
     try:
-        out["mode"] = str(_cfg.get("runner", "process") or "inline").strip().lower()
+        out["mode"] = _cfg.runner_process()
     except Exception:  # noqa: BLE001
         pass
     return out

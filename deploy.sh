@@ -33,7 +33,7 @@
 #                            stackshot/web/tools/text/*.md (the tools' text files, read at import by web/tools/textfile.py)
 #   stackshot-minute.service whatever restarts stackshot.service for its code or data (it imports the server's modules: the same files, but not the unit files of the server and of its reload watcher),
 #                            install.sh, or its unit; and only when that unit is installed, the instance's config still says [runner] process = "unit" (install.sh installs it only then and
-#                            removes it at "inline") and the box is not a read-only standby (install.sh removes it there too: units/scope.sh standby()), so at "inline", the default, it is never in the plan
+#                            removes it at "inline") and the box is not a read-only standby (install.sh removes it there too: units/scope.sh standby()), so at "inline" (set in the config: "unit" is the default) it is never in the plan
 #                            nor restarted. A config that cannot be read counts as "unit" (a restart is harmless, a missing runner is not; install.sh decides). A restart is preceded by `systemctl --user reset-failed`: past its start
 #                            limit a plain restart is refused, and under set -e that would stop the deploy before the hub, the puller and the health check (reset-failed exits 1 for a unit that is not failed, hence the `|| true`). It restarts right after the server
 #                            (it waits for /healthz only at its own start). A rollback reads the same map, with the exception above for a commit from before the unit. A unit this very deploy installs for the first time is started
