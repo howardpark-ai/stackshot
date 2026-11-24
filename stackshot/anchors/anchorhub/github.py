@@ -1,4 +1,4 @@
-"""anchorhub.github — GitHub through the gh CLI: issues and PRs (comments, state, CI), a repo's releases, a repo's notifications (read with a person's token: the one `gh` runs as when it is a person's, else the token in the file `[anchor_hub] notifications_token_file` names, used for that one endpoint; with an App token and no such file they are not bound, so never read, counted or noted)."""
+"""anchorhub.github — GitHub through the gh CLI: issues and PRs (comments, state, CI), a repo's releases, a repo's notifications (read with a person's token: the one `gh` runs as when it is a person's, else the token in the file `[anchor_hub] notifications_token_file` names, used for that one endpoint; with an App token and no such file they are not read or counted, and each is said unreadable, naming that setting)."""
 import json, os, re, stat, subprocess, threading, time
 from datetime import datetime, timezone
 from .core import Hub, Transient, _anc, _cfg, _events, _merges, _ts, guarded_loop, log, now_iso, now_iso_at
@@ -32,8 +32,16 @@ NOTIF_SETTING = "[anchor_hub] notifications_token_file"   # the setting that nam
 NOTIF_REFUSED_WHY = f"notifications token refused by GitHub; replace the file named by {NOTIF_SETTING}"
 NOTIF_REFUSED = re.compile(r"HTTP(?:/\d(?:\.\d)?)? 40[13]\b|Bad credentials", re.I)   # what GitHub answers a token it will not take
 NOTIF_WAIT = re.compile(r"rate limit|abuse|secondary", re.I)   # a 403 that is a wait, not a refusal
-NOTIF_WHY_STARTS = ("notifications are not read:", "notifications token refused")   # how the reasons it says on an anchor begin: it takes back only those
+NOTIF_OFF_WHY = f"notifications are not read: no token is set for them ({NOTIF_SETTING}) and the token the reader runs as is an App's, which GitHub does not answer the notifications for"   # said on a repo's notification anchors while the reader declines to bind them
+REFUSED_READ = re.compile(r"HTTP(?:/\d(?:\.\d)?)? 40[13]\b|Bad credentials|Resource not accessible by integration", re.I)   # what GitHub answers a read its token may not make
+REFUSED_WHY = "GitHub refuses the reader's token access to it"   # the reason said on an issue, pull request or releases anchor whose read was refused (HTTP 401 or 403 that is no rate limit), with the code after it
+WHY_STARTS = ("notifications are not read:", "notifications token refused", REFUSED_WHY, "GitHub shows ")   # how the reasons the poll says on an anchor begin: it takes back only those
 NOTIF_TOKEN_MAX = 4096   # bytes of the token file that are read
+def refusal_why(e):
+    """The reason a read's error says the anchor cannot be read (one line), or "" for an error that is no refusal (a rate limit or abuse wait, the network, GitHub's own error, anything unsaid)."""
+    t = str(e)
+    if NOTIF_WAIT.search(t) or not REFUSED_READ.search(t): return ""
+    return f"{REFUSED_WHY} (HTTP {'401' if re.search(r'HTTP(?:/\d(?:\.\d)?)? 401\b|Bad credentials', t, re.I) else '403'})"
 def scrub(text, token): return str(text).replace(token, "***") if token else str(text)      # an error text never carries a token
 class TooManyChanges(Exception): """A repo's list of changed issues runs past LIST_PAGES pages."""
 def zulu(t: float) -> str: return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")      # GitHub's time form (a `since` parameter, an `updated_at`)
@@ -48,6 +56,8 @@ def run(hub: Hub):
     # change that arrives meanwhile is a 200 after the restart and is reported. A 304 needs no body: what the answer would have said is in the saved state.
     failed: list[bool] = [False]                            # set when the look at the anchor in hand failed for a reason that is not the anchor's (a refusal, GitHub's error, a network): it is then not counted as read, and a catch-up tries it again
     touched: list[str] = []                                # the conditional paths read for the anchor being looked at
+    errs: list[str] = []                                   # the error texts of the failed reads of the anchor itself (an issue or pull request's issue read, a releases read) in the look in hand (the poll thread alone): what says, after the look, that GitHub refused the anchor
+    nothing: list[bool] = [False]                          # the anchor's issue read answered "not found" in the look in hand
     committed: dict[str, dict[str, str]] = {}              # anchor id → {path: ETag} as of its last finished look: what is saved
     resolved: dict[str, dict] = {}                         # anchor id → {path, etag, info}: the board's label, answered from here on a 304
     looked: dict[str, float] = {}                          # anchor id → when the poll last finished with it (a finished anchor that is skipped counts). Saved with the ETags and dropped with them when the login changes: an anchor that is not here has not been read under this login, and is what a catch-up still has to do
@@ -123,9 +133,13 @@ def run(hub: Hub):
         except Exception as e: raise failed(e)
         return str(_cfg.get("anchor_hub", "github_login") or "").strip(), True
     me, app_token = start_check()
+    def notfound_why(): return f"GitHub shows {me or 'this token'} no issue or pull request there"
+    def read_why(e):
+        """Why a read that failed with `e` leaves an issue or pull request anchor unreadable (one line), "" when the failure says nothing of the anchor (a rate limit, the network, GitHub's own error): a 404 or 410 is that nothing is there for this token, a 401 or a 403 that is no rate limit is a refusal."""
+        return notfound_why() if GONE.search(str(e)) else refusal_why(e)
     # The notifications are the one read the App token cannot make. `[anchor_hub] notifications_token_file` names a file with a classic personal token that has the `notifications` scope and nothing else; it is
     # used for that endpoint alone, every other read keeps the token `gh` holds. The file is looked at on every use (its size, time and mode are the cache's key), so a replaced file is taken up without a restart.
-    # It counts only when it is a regular file, readable by its owner alone (mode 600 or stricter), holding one word. Unset: as before (an App token does not bind the notification anchors, a person's reads them).
+    # It counts only when it is a regular file, readable by its owner alone (mode 600 or stricter), holding one word. Unset: a person's token reads the notification anchors as before; an App token cannot, so they are not read and each says so on its status (NOTIF_OFF_WHY).
     # Set but not usable, or refused by GitHub (401, or a 403 that is no rate limit): the notification anchors are not read, and their status says why (never the token); a refused token is not asked again
     # until the file changes.
     tok_cache: dict = {"sig": None, "token": None, "why": ""}
@@ -163,10 +177,11 @@ def run(hub: Hub):
             sts = hub.status.setdefault("anchors", {})
             if why:
                 st = sts.setdefault(a_id, {"last": None}); u = st.get("unreadable")
-                if not u or u.get("why") != why: st["unreadable"] = {"since": now_iso(), "tries": 1, "why": why, "next": time.time() + 60}
+                if not u: st["unreadable"] = {"since": now_iso(), "first": time.time(), "tries": 1, "why": why, "next": time.time() + 60}
+                else: u["why"] = why      # still unreadable, now for another reason: one stretch of time, its removal clock and its warning stand
                 return
             st = sts.get(a_id) or {}; u = st.get("unreadable")
-            if u and str(u.get("why") or "").startswith(NOTIF_WHY_STARTS):
+            if u and str(u.get("why") or "").startswith(WHY_STARTS):
                 if u.get("warned"): u["next"] = 0      # the keeper was told: the next rescan reads it again and says it can be read
                 else: del st["unreadable"]
     def notif_anchors():
@@ -197,7 +212,7 @@ def run(hub: Hub):
             nstate, ntok, nwhy, nsig = notif_access()
             named = {"title": f"{repo.split('/')[1]} notifications", "url": f"https://github.com/notifications?query=repo%3A{repo.replace('/', '%2F')}", "seen": None}
             if nstate == "bad": return {**named, "unreadable": nwhy}
-            if app_token and nstate == "off": return named      # an App token cannot read them (the call is a 403) and no token of their own is set: not asked
+            if app_token and nstate == "off": return {**named, "unreadable": NOTIF_OFF_WHY}      # an App token cannot read them (the call is a 403) and no token of their own is set: not asked, and said on the anchor
             path = f"/repos/{repo}/notifications?all=true&per_page=50"
             try: ns, tag = cached_get(a_id, path, ntok)
             except Exception as e:
@@ -210,18 +225,22 @@ def run(hub: Hub):
         if a_id.endswith("@releases"):
             repo = a_id[7:-9]; path = f"/repos/{repo}/releases/latest"
             try: rl, tag = cached_get(a_id, path)
-            except Exception: rl, tag = {}, None
+            except Exception as e:
+                if refusal_why(e): return {"title": f"{repo.split('/')[1]} releases", "url": f"https://github.com/{repo}/releases", "unreadable": refusal_why(e)}
+                rl, tag = {}, None
             if rl is None and cached: return cached
             pub = (rl or {}).get("published_at")
             return keep(a_id, path, tag, {"title": f"{repo.split('/')[1]} releases", "url": f"https://github.com/{repo}/releases", "seen": now_iso_at(_ts(pub)) if pub else None})
         repo, n = split(a_id)
-        if cached and (state.get(_anc.anchor_id(a_id) or a_id) or {}).get("state") == "closed": return cached      # a finished anchor is not asked again at start-up; the poll drops this when it sees it change
+        with hub.lock: said = bool(((hub.status.get("anchors") or {}).get(a_id) or {}).get("unreadable"))
+        if cached and not said and (state.get(_anc.anchor_id(a_id) or a_id) or {}).get("state") == "closed": return cached      # a finished anchor is not asked again at start-up (one that is said unreadable is: it is read for real); the poll drops this when it sees it change
         path = f"/repos/{repo}/issues/{n}"
         try: i, tag = cached_get(a_id, path)
         except Exception as e:
-            if not GONE.search(str(e)): return {"url": f"https://github.com/{repo}/issues/{n}"}    # not a refusal: tried again
+            why = read_why(e)
+            if not why: return {"url": f"https://github.com/{repo}/issues/{n}"}    # not a refusal: tried again
             resolved.pop(a_id, None)
-            return {"title": f"{repo}#{n}", "url": f"https://github.com/{repo}/issues/{n}", "unreadable": f"GitHub shows {me or 'this token'} no issue or pull request there"}
+            return {"title": f"{repo}#{n}", "url": f"https://github.com/{repo}/issues/{n}", "unreadable": why}
         if i is None and cached: return cached                           # 304: nothing changed since the last resolution, which is saved
         if i is None: i, tag = gh(path), None                            # a 304 with nothing saved to answer it from cannot happen (no validator was sent); read in full if it does
         learn(repo, i.get("repository"))
@@ -334,7 +353,7 @@ def run(hub: Hub):
         try: r = gh(f"/repos/{repo}/releases/latest", conditional=True)
         except Exception as e:
             if "404" in str(e) or "Not Found" in str(e): state.setdefault(a_id, {"tag": None}); return
-            log.warning("github %s: %s", a_id, str(e)[:120]); failed[0] = True
+            log.warning("github %s: %s", a_id, str(e)[:120]); failed[0] = True; errs.append(str(e))
             if "rate limit" in str(e).lower() or "403" in str(e): hub.hold("github", BACKOFF); time.sleep(BACKOFF)
             return
         if r is None: return                                  # 304: unchanged
@@ -628,7 +647,9 @@ def run(hub: Hub):
         try:
             try: i = gh(f"/repos/{repo}/issues/{n}", conditional=True)
             except Exception as e:
+                if not gone_404(e): errs.append(str(e))      # the issue read itself failed: what says, after the look, that GitHub refused the anchor (a failed CI or comment read does not: the anchor is read)
                 if gone_404(e):
+                    nothing[0] = True
                     issue_gone.add(a_id)      # nothing under this number (yet): the pull request read leaves it alone until the issue read finds something
                     if a_id in state: suspect.setdefault(a_id, time.time())      # …and one that was read before may be gone for good: when it first showed is kept, and the server's anchor sweep is told only once another read of the repository has answered since (repos_record)
                 raise
@@ -679,7 +700,7 @@ def run(hub: Hub):
         first, and starts another only while `paced()` allows, so it never takes more than CATCHUP_SHARE of the hour's reads; the rest wait for the next pass, and a catch-up the hour's reads cannot yet
         finish is shown on the card as healthy, with a note of how far it is. The anchors already read are looked at in every pass, the one read longest ago first, whatever the catch-up has left."""
         # GitHub answers the user's notifications API only to a person's sign-in (an App's installation token is refused it with a 403, always), so with an App token a repo's `@notifications` anchor can only be read with the
-        # token of `[anchor_hub] notifications_token_file`: with none set it is not bound here, so it costs no call, no count and no note on the card. A person's token binds them as ever. A file that is set but not usable
+        # token of `[anchor_hub] notifications_token_file`: with none set it is not read here, so it costs no call, no count and no note on the card, and each anchor says on its own status why it is not read. A person's token binds them as ever. A file that is set but not usable
         # (or whose token GitHub refused) leaves them unbound too, and their status says why.
         nstate, _, nwhy, _ = notif_access()
         if (nstate, nwhy) != notif_said[0]:
@@ -688,7 +709,7 @@ def run(hub: Hub):
             elif nstate == "ok": log.info("github: the notification anchors are read with the token of %s", NOTIF_SETTING)
         notif_on = nstate == "ok" or (nstate == "off" and not app_token)
         with hub.lock: ids = [k for k in hub.bindings if k.startswith("github:") and (notif_on or not k.endswith("@notifications"))]
-        for k in notif_anchors(): flag(k, nwhy if nstate == "bad" else None)
+        for k in notif_anchors(): flag(k, nwhy if nstate == "bad" else NOTIF_OFF_WHY if nstate == "off" and app_token else None)      # an unusable file, a refused token and a declined bind alike: the anchor is said unreadable from the first pass that would have bound it
         # never read first (as bound), then by when each was last read, the longest ago first; within each, an anchor whose looks keep failing goes behind the ones that do not (sorted() is stable: the order bound is kept)
         ids = sorted((a for a in ids if a not in looked), key=fails) + sorted((a for a in ids if a in looked), key=lambda a: (fails(a), looked[a]))
         pass_ids.clear(); plan.clear(); listed[0] = False
@@ -703,13 +724,17 @@ def run(hub: Hub):
             if retry.get(a_id, (0, 0.0))[1] > t0: continue      # its looks keep failing: not before its time (it reads as unread, or as it was, meanwhile)
             if (a_id not in looked or catching(a_id)) and (paced_out or paced() > 0):   # not read yet (or a finished anchor the fallback has still to read), and the catch-up has had its share of the hour: it waits for room, and the anchors already read go on
                 paced_out = True; continue
-            touched.clear(); failed[0] = False; asked = True
+            touched.clear(); errs.clear(); nothing[0] = False; failed[0] = False; asked = True
             if a_id.endswith("@releases"): release(a_id)
             elif a_id.endswith("@notifications"): notifications(a_id)      # CI: GitHub's own ci_activity
             elif (mode := how(a_id)) == "wait": continue          # its repo's list could not be read: nothing is known of it, so it is not read and not marked read
             elif mode != "skip": watch(a_id, with_ci=mode == "full")
             else: asked = False
             settle(a_id)
+            if not a_id.endswith("@notifications") and asked:      # a refused read (or a number with nothing under it) is said on the anchor, a read that went through takes it back: the anchors service's own retry then decides whether it counts (two refusals, minutes apart)
+                why = next((w for w in (refusal_why(e) for e in errs) if w), "") if failed[0] else notfound_why() if nothing[0] else ""
+                if why: flag(a_id, why)
+                elif not failed[0]: flag(a_id, None)
             if failed[0]: bad.append(a_id)                      # a look that failed is not a read: the anchor stays unread (or keeps its old turn) and is tried again
             else:
                 looked[a_id] = time.time(); retry.pop(a_id, None); answered = answered or asked

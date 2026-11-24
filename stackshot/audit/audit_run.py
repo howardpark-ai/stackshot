@@ -93,6 +93,7 @@ HERE = _paths.ROOT
 from stackshot.audit import audit as _audit  # noqa: E402
 from stackshot.waits import dated_wait as _dw  # noqa: E402
 from stackshot.core import config as _cfg  # noqa: E402
+from stackshot.core.lines import MSG_MAX  # noqa: E402  — the message tool's cap
 from stackshot.model import model as _model  # noqa: E402
 from stackshot.model import states as _states  # noqa: E402
 from stackshot.model import steps as _steps  # noqa: E402
@@ -110,7 +111,6 @@ ONCE = ("event-missing",)    # a finding of these categories is sent once and ne
 REMIND_TRIES = 3             # a ten-minute pass sends an unanswered finding this many times (first send and reminders), then once to the builder as unmoved, then (a finding that went to a builder) once to the project's -main agent (split_sent)
 TIGHTEN_SHARE = 0.20          # a run that flags more than this share of the open items trips a tightening review
 FAIL_STOP = 3                 # model calls in a row that fail (no answer) end the calls of the run
-MSG_MAX = 4000
 # what the message tool says when a message goes to a front agent without the mark (service/messaging.py `_gate_front`)
 FRONT_REFUSAL = "is a front agent of"
 CHECKS_MODEL = ("next-done", "wrong-needs", "ask-missing", "unneeded-escalation", "older-than-page", "obsolete-wait", "why-not-now", "goal-unclear")
@@ -859,11 +859,11 @@ def line_of(f: dict[str, Any]) -> str:
     return f"{f['id']} · {f['category']} · " + (f"{t}, no answer · " if t else "") + f"{_clip(f['detail'], 260)} · {_clip(f.get('fix'), 160)}"
 
 
-HELD_DETAIL, HELD_FIX = 75, 35      # a held line is cut at held.LINE_MAX (260) after the sender's lead and the head: a finding's line has about 145 characters of its own, so detail and fix are clipped to fit it whole
+HELD_DETAIL, HELD_FIX = 75, 35      # a finding's held line stays one short line (about 145 characters of its own besides the sender's lead and the head): detail and fix are clipped for that, and the message log and the item keep the whole finding
 
 
 def held_line_of(f: dict[str, Any]) -> str:
-    """One finding as a line of a held note for a front agent: `line_of` clipped to what a held line holds. The server's own test for a message that asks nothing reads `needs: decision` as the person's mark and would
+    """One finding as a line of a held note for a front agent: `line_of` clipped to one short line. The server's own test for a message that asks nothing reads `needs: decision` as the person's mark and would
     refuse the fyi, and two fixes say it ("take needs: decision off the item"), so the note writes it without the colon. The message log and the item's History keep the whole finding."""
     n = f.get("tries")
     t = (_TRY[n] if isinstance(n, int) and n < len(_TRY) else "a later try") if isinstance(n, int) and n > 1 else ""

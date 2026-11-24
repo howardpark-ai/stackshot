@@ -186,8 +186,8 @@ def install_early(host: Any) -> None:
                            his_items=lambda subject: _front_turn.his_items(subject),
                            want_background=lambda project, kind: _background_want.want_background(project, kind),
                            front_words=lambda target, who, text: _sibling_words.held_words(who, target, text),
-                           front_fyi=lambda target, text, gid="", nid="", log=True, kind="fyi": _telling.front_fyi(      # the items the ruling names, then the items the text names (the message tool's own list)
-                               target, text, ",".join(dict.fromkeys([*str(gid).replace(",", " ").split(), *([] if kind == "page-owed" else _agent_names._item_refs(text))])), nid, log, kind))      # a page-owed line names no item to write a board line on: the owed list is the board's record of it
+                           front_fyi=lambda target, text, gid="", nid="", log=True, kind="fyi", whole=False: _telling.front_fyi(      # the items the ruling names, then the items the text names (the message tool's own list)
+                               target, text, ",".join(dict.fromkeys([*str(gid).replace(",", " ").split(), *([] if kind == "page-owed" else _agent_names._item_refs(text))])), nid, log, kind, whole=whole))      # a page-owed line names no item to write a board line on: the owed list is the board's record of it
 
     _queued.configure(is_front=lambda who, project: _telling.front_keeper(who, project, True)[0])      # the board's rendering asks the same question the passes' environment answers
 

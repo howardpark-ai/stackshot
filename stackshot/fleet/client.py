@@ -267,6 +267,12 @@ runs on every box.
                                 characters). The server works out the source (router notice, stackshot message, background-agent hand-back, front peer, script, other), the project and the day in its own timezone; the first catch
                                 of an hour for one pane and sender sends the project's builder one held word that starts no turn. Prints "ok" (or "duplicate") and exits 0; 1 and the reason on stderr when refused (400 a field), not
                                 reached ([0]) or misused (usage). The counts per source and day are the audit's `catches` report.
+  client.py post agent-state --file <path>
+                                for the fleet's session manager: push which registered agents are busy and which idle, the whole fleet in one JSON file that REPLACES the server's last snapshot
+                                (`POST /client/agent-state`, machine token; the body is {"schema": 1, "written": <epoch s>, "agents": {<name>: {...}}}). The file's bytes go to the server exactly as they are
+                                (never parsed or re-encoded here). A file that is missing, unreadable, not a regular file (a folder, a pipe, a device; a link to a regular file is read) or over 1,000,000 bytes is refused here with one line and exit 1, and nothing is sent; an empty --file value is a usage error. Prints the server's answer,
+                                {"ok": true, "agents": N}, and exits 0; any other answer prints the server's one-line reason on stderr and exits 1, as does a server that is not reached ([0]), no token, or a misuse
+                                (usage on stderr).
   client.py post item-open <marker> --project <key|id|slug> --subject "<action and object>" --mover <agent> --step "<agent>: <what it does>" --line "<fact>" [--line "<fact>" ...] [--sender <label>]
                                 for a timer's script that finds work for a project's background agent (a project that lists none is a front-only project: the item is filed with its -main agent): open ONE board item for it and print its id (exit 0). <marker> = <kind>:<what> (for example
                                 test_trim:stackshot), the item's mark: while an item with that marker is open on the same project a repeat call prints the same id and files nothing; once it is closed a call files a new item. A project holds at most 10 open items filed by this route: past it a new marker is refused until one closes. --mover must be a
@@ -442,7 +448,7 @@ import os as _os, sys as _sys
 if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py): the checkout must be importable
     _here = _os.path.dirname(_os.path.abspath(__file__))
     _sys.path[:] = [_os.path.dirname(_os.path.dirname(_here))] + [p for p in _sys.path if _os.path.abspath(p or ".") != _here]
-import datetime, getpass, glob, hashlib, json, os, secrets, socket, sys, urllib.error, urllib.parse, urllib.request
+import datetime, getpass, glob, hashlib, json, os, re, secrets, socket, stat, sys, urllib.error, urllib.parse, urllib.request
 
 from stackshot.core import config as _cfg
 from stackshot.core import retired_inputs as _retired
@@ -538,17 +544,17 @@ def get(what: str, key: str = "", timeout: float = 10.0, **extra: str) -> tuple[
     except Exception as e: return 0, _fail(e, pas)
 
 
-def post(what: str, body: dict, timeout: float = 20.0):
+def post(what: str, body: dict, timeout: float = 20.0, raw: bytes | None = None):
     """One write to the server with this machine's token (or, when $STACKSHOT_CLIENT_PASS is set, with that pass) → (HTTP status, the decoded JSON answer, or the text when it is not
-    JSON). 0 = the server could not be reached."""
+    JSON). 0 = the server could not be reached. `raw`: the body's bytes, sent exactly as they are in place of `body` (never parsed or encoded again)."""
     pas = _pass(); tok = pas
     if not pas:
         try: tok = open(TOKEN, encoding="utf-8").read().strip()
         except Exception: return 401, f"no token on this machine ({TOKEN}): mint one on the server box and provision it"
-    req = urllib.request.Request(f"{server_url()}/client/{what}", data=json.dumps(body).encode(), method="POST",
+    req = urllib.request.Request(f"{server_url()}/client/{what}", data=json.dumps(body).encode() if raw is None else raw, method="POST",
                                  headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json", "User-Agent": "stackshot-client"})
-    def dec(raw: bytes):
-        text = _scrub(raw.decode("utf-8", "replace"), pas)
+    def dec(answer: bytes):
+        text = _scrub(answer.decode("utf-8", "replace"), pas)
         try: return json.loads(text)
         except Exception: return text
     try:
@@ -1133,6 +1139,55 @@ def catch(argv: list[str], timeout: float = 20.0, text: str | None = None) -> in
     print("duplicate" if d.get("duplicate") else "ok"); return 0
 
 
+AGENT_STATE_USAGE = "usage: client.py post agent-state --file <path>     (the file is the snapshot's JSON body, at most 1,000,000 bytes)"
+AGENT_STATE_MAX = 1_000_000     # the server's limit for the body (stackshot/service/agent_state.py MAX_BYTES): a larger file is refused here, before anything is sent
+
+
+def _one_line(text: str, tok: str = "", limit: int = 900) -> str:
+    """`text` as one line: the secret `tok` taken out, every control character (a newline in a path, an escape) and every run of blanks collapsed to one space, cut at `limit`."""
+    return " ".join(re.sub(r"[\x00-\x1f\x7f-\x9f]+", " ", _scrub(str(text), tok)).split())[:limit]
+
+
+def _secret() -> str:
+    """What this process sends as its Bearer, for taking it out of a text: the pass when $STACKSHOT_CLIENT_PASS is set, else this machine's token ("" when there is none)."""
+    pas = _pass()
+    if pas: return pas
+    try: return open(TOKEN, encoding="utf-8").read().strip()
+    except Exception: return ""
+
+
+def agent_state(argv: list[str], timeout: float = 60.0) -> int:
+    """`post agent-state --file <path>`: the fleet's session manager pushes which registered agents are busy and which idle, the whole fleet in one JSON file that REPLACES the last snapshot
+    (`POST /client/agent-state`). The file's bytes go to the server as they are, never parsed here. Prints the server's answer ({"ok": true, "agents": N}) and exits 0; 1 and one line on stderr
+    for a file that is missing, unreadable, not a regular file (a folder, a pipe, a device) or over the limit (nothing is sent), a refusal (the server's reason), a server that is not reached ([0]) or a
+    misuse (usage). A path or a server text in that line has control characters collapsed and this machine's token taken out."""
+    opt = _opts(argv, ("file",), AGENT_STATE_USAGE)
+    if opt is None: return 1
+    if not opt.get("file", "").strip(): print(AGENT_STATE_USAGE, file=sys.stderr); return 1
+    path, sec = opt["file"], _secret()
+    def refuse(why: str) -> int: print(_one_line(f"stackshot: agent state not sent: {path} {why}", sec), file=sys.stderr); return 1
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)      # non-blocking: a pipe with no writer opens at once instead of waiting for one
+    except OSError as e: return refuse(f"is not readable ({type(e).__name__})")
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode): return refuse("is not a regular file")
+        chunks, left = [], AGENT_STATE_MAX + 1
+        while left > 0:
+            chunk = os.read(fd, min(left, 1 << 20))
+            if not chunk: break
+            chunks.append(chunk); left -= len(chunk)
+        data = b"".join(chunks)
+    except OSError as e: return refuse(f"is not readable ({type(e).__name__})")
+    finally: os.close(fd)
+    if len(data) > AGENT_STATE_MAX: return refuse(f"is over the {AGENT_STATE_MAX}-byte limit")
+    status, d = post("agent-state", {}, timeout, raw=data)
+    if status != 200 or not isinstance(d, dict):
+        err = d.get("error") if isinstance(d, dict) else None
+        reason = _one_line(err, sec) if err else _one_line(d if isinstance(d, str) else json.dumps(d, ensure_ascii=False, default=str), sec, 200)      # no `error` key: the body's first 200 characters
+        print(_one_line(f"stackshot: agent state not sent [{status}] {reason}", sec), file=sys.stderr); return 1
+    print(json.dumps(d, ensure_ascii=False)); return 0
+
+
 JOB_FAILED_USAGE = "usage: client.py job-failed <unit> <host> <ISO-Z time of the failing run, 2026-11-23T02:15:00Z> <project: a page key, a scope/project label, or - for none>"
 JOB_OK_USAGE = "usage: client.py job-ok <unit> <host> <ISO-Z time of the successful run, 2026-11-23T02:15:00Z>"
 
@@ -1418,6 +1473,9 @@ def main(argv: list[str]) -> int:
     if cmd == "post" and len(argv) > 2 and argv[2] == "catch":
         try: return catch(argv[3:])
         except Exception as e: print(f"stackshot: catch not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
+    if cmd == "post" and len(argv) > 2 and argv[2] == "agent-state":
+        try: return agent_state(argv[3:])
+        except Exception as e: print(f"stackshot: agent state not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
     if cmd == "post" and len(argv) > 2 and argv[2] == "item-open":
         try: return item_open(argv[3:])
         except Exception as e: print(f"stackshot: item not opened ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1

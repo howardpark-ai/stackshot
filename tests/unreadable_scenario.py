@@ -46,6 +46,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
 from stackshot.anchors.anchorhub import core
+from stackshot.github import ghsync
 from stackshot.anchors import anchors as anc; from stackshot.router import routing
 T0 = 1790798400.0                      # 2026-10-01 00:00 in the instance timezone (Asia/Dubai, UTC+4: 2026-09-30 20:00 UTC)
 clock = types.SimpleNamespace(t=T0)
@@ -77,29 +78,40 @@ check("a network error is not a refusal", "unreadable" not in st[dr] and not st[
 n = len(calls); scan(30)
 check("not asked again before a minute has passed", calls[n:].count(gm) == 0 and calls[n:].count(dr) == 1, calls[n:])     # the unnamed Drive file is tried each pass, as ever
 
-# ---- 2. still refused a minute later: one notice, recorded for the router to rule (every project is the router's since), delivered to no session
+# ---- 2. refused a minute later: counted, nothing told, no removal clock (two refusals must be at least five minutes apart)
 from stackshot.router import router_live as live
 st = scan(60)
+check("second refusal a minute later: counted, but no warning and no removal clock yet", len(routing.read("projects/alpha")) == 0 and st[gm]["unreadable"]["tries"] == 2 and not st[gm]["unreadable"].get("warned")
+      and "at" not in st[gm]["unreadable"] and st[gm]["unreadable"]["first"] == T0 and not out, (st[gm], out))
+check("the first refusal's time is the epoch of the clock-to-be (`first`), apart from the written `since`", st[gm]["unreadable"]["since"] and abs(st[gm]["unreadable"]["first"] - T0) < 1, st[gm])
+
+# ---- 3. the tries thin out; two refusals at least five minutes apart start the clock and tell the keeper, once
+asked = []; at_seen = []; told_at = []
+for t in range(90, 8 * 3600, 30):
+    n = len(calls); st = scan(t)
+    if gm in calls[n:]: asked.append(t)
+    if not at_seen and st[gm].get("unreadable", {}).get("at"): at_seen.append(t)
+    if not told_at and routing.read("projects/alpha"): told_at.append(t)
 w = [o for o in out if "Gmail anchor" in o[2]]
 log = routing.read("projects/alpha")
-check("second refusal: one warning", len(log) == 1 and st[gm]["unreadable"]["tries"] == 2 and st[gm]["unreadable"].get("warned"), (log, st[gm]))
-check("…held for the router: nothing is delivered to the project's keeper or to the item's owner", not w and log[0].get("live") is True and not log[0].get("to"), (w, log))
-txt0 = live.stashed(log[0]["id"]) or ""
-check("…that says why, what follows and what to do (the notice's full text is kept for the router)", "anchor-hub cannot read it: the thread is in none of the mailboxes the hub reads (x@example.com). No notice will come from it" in txt0
-      and "remove the anchor and add it again" in txt0 and txt0.startswith("[anchor] Gmail anchor of projects/alpha: ") and f"→ {GM}" in txt0, txt0)
-check("…recorded in the routing log with its id and whom the anchor is for", log[0]["who"] == "anchor-hub" and log[0]["anchor"] == gm and log[0]["pilot"] is True and log[0]["id"], log)
-
-# ---- 3. the tries thin out, and nothing is said twice
-asked = []
-for t in range(90, 8 * 3600, 30):
-    n = len(calls); scan(t)
-    if gm in calls[n:]: asked.append(t)
 check("asked again at doubling intervals: 2, 4, 8 … minutes after the last try", asked[:6] == [180, 420, 900, 1860, 3780, 7620], asked)
 check("…never more often than every 6 hours in the end", all(b - a2 <= 21600 for a2, b in zip(asked, asked[1:])) and len(asked) <= 9, asked)
-check("one warning in eight hours, not one per try", len(routing.read("projects/alpha")) == 1 and not [o for o in out if "Gmail anchor" in o[2]], (routing.read("projects/alpha"), out))
+check("the removal clock starts on the second refusal at least five minutes after the first (the fourth try, at 7 minutes: 3 minutes was too soon), and the keeper is told at that very moment",
+      at_seen == [420] and told_at == [420] and st[gm]["unreadable"]["at"] == T0 + 420 and core.UNREADABLE_CONFIRM == 300, (at_seen, told_at, st[gm]["unreadable"]))
+check("one warning: one record in the routing log, none delivered to a session", len(log) == 1 and st[gm]["unreadable"]["tries"] >= 4 and st[gm]["unreadable"].get("warned"), (log, st[gm]))
+check("…held for the router: nothing is delivered to the project's keeper or to the item's owner", not w and log[0].get("live") is True and not log[0].get("to"), (w, log))
+txt0 = live.stashed(log[0]["id"]) or ""
+check("…that says why, what follows and what to do (the notice's full text is kept for the router)", "the anchors service cannot read it: the thread is in none of the mailboxes the hub reads (x@example.com). No notice will come from it" in txt0
+      and "remove the anchor and add it again" in txt0 and txt0.startswith("[anchor] Gmail anchor of projects/alpha: ") and f"→ {GM}" in txt0, txt0)
+check("…and that it is removed after 7 days unreadable, with the call that puts it back (scoped to the item it was, written as a person writes its id)",
+      "If it stays unreadable for 7 days it is removed from projects/alpha; the call that puts it back: " in txt0 and f'anchors(project="projects/alpha", add=["{GM}"], items={json.dumps([ghsync.shown("a1")])})' in txt0, txt0)
+check("…recorded in the routing log with its id and whom the anchor is for", log[0]["who"] == "anchor-hub" and log[0]["anchor"] == gm and log[0]["pilot"] is True and log[0]["id"], log)
+check("one warning in eight hours, not one per try (the warning goes only with the clock's start)", len(routing.read("projects/alpha")) == 1 and not [o for o in out if "Gmail anchor" in o[2]], (routing.read("projects/alpha"), out))
 
 # ---- 4. a refusal on another project (home-beta's page, which has no agent of its own): held for the router too, not delivered to its keeper
-state["drive"] = "refused"; t = 8 * 3600; scan(t); st = scan(t + 60)
+state["drive"] = "refused"; t = 8 * 3600
+for dt in range(0, 1200, 30): st = scan(t + dt)
+t += 1200
 d = [o for o in out if "Drive anchor" in o[2]]
 lb = routing.read("projects/beta")
 check("another project: one warning, held for the router, delivered to nobody (the keeper and the item's owner get nothing)", len(lb) == 1 and not d and lb[0].get("live") is True and lb[0]["anchor"] == dr
@@ -111,13 +123,13 @@ check("after a restart the anchor is still marked and was not warned about again
 
 # ---- 6. the listing and the board say so
 txt = anc.fmt(anc.load()["projects/alpha"], st)
-check("anchors listing: the readable one by name, the other marked with the reason", '— Slack #general' in txt and re.search(r"UNREADABLE by anchor-hub since 20\d\d-\d\d-\d\d \d\d:\d\d:\d\d \+04: the thread is in none of the mailboxes", txt), txt)
+check("anchors listing: the readable one by name, the other marked with the reason", '— Slack #general' in txt and re.search(r"UNREADABLE by the anchors service since 20\d\d-\d\d-\d\d \d\d:\d\d:\d\d \+04: the thread is in none of the mailboxes", txt), txt)
 from stackshot.web.ui import render as ui_render
 now = datetime.datetime.fromtimestamp(clock.t, core.ZONE)
 try:
     b = ui_render.Board(str(T / "store"), now=now)
     state_, parts = b.watch("projects/alpha"); pagehtml = b.routing_html("projects/alpha")
-    check("board: the watch light is red and says why", state_ == "bad" and any("1 unreadable by anchor-hub" in x for x in parts), (state_, parts))
+    check("board: the watch light is red and says why", state_ == "bad" and any("1 unreadable by the anchors service" in x for x in parts), (state_, parts))
     check("board: the routing page marks the anchor with the reason", '>unreadable</span>' in pagehtml and "none of the mailboxes" in pagehtml, pagehtml[:300])
 except Exception as e:
     check("board renders", False, repr(e))
@@ -128,6 +140,19 @@ for dt in range(0, 7 * 3600, 600): st = scan(t + 120 + dt)
 c = [n for n in routing.read("projects/alpha") if n["id"] != log[0]["id"]]
 check("readable again: one notice that the warning no longer holds (held for the router), mark cleared, name known", len(c) == 1 and c[0].get("live") is True and 'anchor-hub can read it now (Gmail "Meeting notes")' in (live.stashed(c[0]["id"]) or "")
       and not [o for o in out[n_out:] if "Gmail anchor" in o[2]] and "unreadable" not in st[gm] and st[gm]["label"] == 'Gmail "Meeting notes"', (c, st[gm]))
+
+# ---- 7b. a second episode: the clock started over, and the keeper is told again only because the anchor was read ok in between
+def told(): return [n for n in routing.read("projects/alpha") if "stays unreadable" in (live.stashed(n["id"]) or "")]
+n_told = len(told()); t2 = t + 120 + 7 * 3600 + 600
+state["gmail"] = "refused"; hub.status["anchors"][gm]["title"] = ""      # a named anchor is looked at again by the source's poll (flag()), here by the rescan: its title forgotten
+for dt in range(0, 1200, 30): st = scan(t2 + dt)
+check("second episode: after an ok read in between, the clock starts anew and the keeper is told again (twice in all)", len(told()) == n_told + 1 == 2 and st[gm]["unreadable"]["at"] > T0 + t + 120 + 7 * 3600, (n_told, len(told()), st[gm]["unreadable"]))
+at2 = st[gm]["unreadable"]["at"]; n_log = len(routing.read("projects/alpha"))
+for dt in range(1200, 3 * 86400, 600): st = scan(t2 + dt)
+check("…and never again while it stays unreadable (days of refusals: the clock is not restarted, nothing more is said)", len(routing.read("projects/alpha")) == n_log and st[gm]["unreadable"]["at"] == at2 and st[gm]["unreadable"]["tries"] > 4, (st[gm], n_log))
+state["gmail"] = "ok"
+for dt in range(3 * 86400, 3 * 86400 + 7 * 3600, 600): st = scan(t2 + dt)
+check("…read ok again: the record is gone (a refusal of a later day starts a new count)", "unreadable" not in st[gm], st[gm])
 
 # ---- 8. an event from an unreadable anchor brings its next try forward
 state["drive"] = "refused"; st = json.load(open(core.STATUS))["anchors"]

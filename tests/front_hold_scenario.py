@@ -544,9 +544,9 @@ fresh(); n0 = len(pushes()); out = msg(DUOM, "can you look at the export page?",
 check("7h: two background agents and no builder: the message tool names the first by one order (duo-a), not the first listed", out.startswith("Refused") and "message(to='duo-a'" in out and "duo-b" not in out, out)
 fresh(); n0 = len(pushes()); n = recp("the release is live", key="projects/duo"); res = act2(n, DUOM, key="projects/duo")
 check("7i: …and the router names the same one", res["ruling"] == "passed" and res["target"] == DUOA and len(reach(DA, n0)) == 1 and reach(DB, n0) == [], (res, pushes()[n0:]))
-# a held pass is not cut silently
+# a held pass of a session's message is whole (a status line is one line cut at held.LINE_MAX; tests/held_scenario.py has the cut above held.WHOLE_MAX)
 fresh(); long_ = " ".join(f"word{i}" for i in range(120)); n = recp(long_, key="projects/solo", who="work-osprey-main (aaaaaaaa…)"); res = act2(n, SOLO, key="projects/solo"); text_ = held.take(E, SOLO)
-check("7j: a held router pass longer than a held line is cut with a note naming the sender and the notice, the start of the text kept", res["ruling"] == "held" and long_[:80] in text_ and n["id"] in text_ and "work-osprey-main" in text_ and "cut" in text_ and text_.count("word") < 110, (res, text_))
+check("7j: a held router pass longer than a status line is held whole, every word of it, with no cut note", res["ruling"] == "held" and len(long_) > held.LINE_MAX and long_ in text_ and "cut" not in text_ and "left out" not in text_ and text_.count("word") == 120, (res, text_))
 fresh(); n = recp("the release is live", key="projects/solo", who="work-osprey-main (aaaaaaaa…)"); act2(n, SOLO, key="projects/solo"); text_ = held.take(E, SOLO)
 check("7k: …a pass that fits is held whole, with no cut note", "the release is live" in text_ and "cut" not in text_ and n["id"] not in text_, text_)
 # an answer for a closed item is not written onto it

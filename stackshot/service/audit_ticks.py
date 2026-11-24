@@ -2,7 +2,7 @@
 
 The audit decides in audit/ (the pure halves: audit_checks, audit_run, hourly, busy_tell, hand_idle, silence, subagent_tie) and the server writes and sends: this module is the writing half, run by the minute set
 (service/runner.py) through its table. The ten-minute filing pass (`_filing_tick`), the dates pass (`_dates_tick`, with the expected-time look `_dates_expected_tick` and the For you list's due-date look it opens),
-the minute wait-loop walk (`_loop_tick`), the archive sweep (`_archive_tick`) and the audit tick (`_silence_tick`: the hourly audit line `_hourly_tick`, the idle hand-over `_hand_idle_tick`, the long-busy message `_busy_tell_tick`) are here, and the
+the minute wait-loop walk (`_loop_tick`), the archive sweep (`_archive_tick`) and the audit tick (`_silence_tick`: the hourly audit line `_hourly_tick`, the idle hand-over `_hand_idle_tick`, the long-busy message `_busy_tell_tick`, the anchors' daily pass `_anchor_daily_tick`) are here, and the
 balancer (`_balance_tick`, its own minute tick) with the reads it shares: `_silence_env`, the environment every audit pass is built with; `_queue_map`, who is queued behind another item, kept `_QUEUE_TTL` seconds in
 `_QUEUE_CACHE`; `_agent_state` and `_mover_subagents`, a mover's busy or idle and its running subagents as the fleet's session manager last pushed them (service/agent_state.py); and `_BALANCE_LOGGED`, the stderr lines the balancer throttles.
 
@@ -19,6 +19,7 @@ import time
 from typing import Any, Callable
 
 from stackshot.anchors import anchors as _anc
+from stackshot.anchors import groundskeeper as _gk
 from stackshot.core import config as _cfg
 from stackshot.core import instance as _inst
 from stackshot.core import readonly as _ro
@@ -32,6 +33,7 @@ from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import _registry
 from stackshot.router import router as _router
 from stackshot.service import agents as _agents
+from stackshot.service import fleet_events as _fleetev
 from stackshot.service import foryou_events as _fyev
 from stackshot.service import handoff as _handoff
 from stackshot.service import item_read as _item_read
@@ -135,9 +137,27 @@ def _queue_map(now: "float | None" = None, items: "dict[str, dict[str, Any]] | N
     return out
 
 
+def _anchor_daily_tell(text: str) -> None:
+    """The daily anchor pass's one line to the audit's builder (`[audit] builder`, the session the runner's watchdog tells too), through the inbox flag's sender. Nobody is named here: with no builder set, a stderr line."""
+    to = _cfg.audit_builder()
+    if not to:
+        print("audit: the daily anchor pass removed anchors and no builder is set to be told", file=sys.stderr, flush=True)
+        return
+    _fleetev.inbox_flag_send(to, text)
+
+
+def _anchor_daily_tick(now: float | None = None) -> "dict[str, Any] | None":
+    """The anchors' daily pass (anchors/groundskeeper.py: the sweep over the whole store with a daily cap, a report of what looks wrong, the files kept within bounds), at most once a calendar day of the instance's timezone; the builder is told only when it removed
+    something, and the board is published then. → the pass's result, None when it did nothing."""
+    out = _gk.run(now, tell=_anchor_daily_tell)
+    if out and out.get("removed"):
+        _hooks().publish()
+    return out
+
+
 def _silence_tick() -> "dict[str, Any] | None":
-    """The ten-minute audit tick (the name is the runner's key and stays): the hourly audit line (`_hourly_tick`), then the hand-over of the items it found idle (`_hand_idle_tick`), then the one message about an item whose lines have only said "busy" for hours (`_busy_tell_tick`). Each is switched by
-    its own `[audit]` key and stands still when off. Stands still when the audit is off or runs in agent mode. One that raises never stops the other; the first error is printed."""
+    """The ten-minute audit tick (the name is the runner's key and stays): the hourly audit line (`_hourly_tick`), then the hand-over of the items it found idle (`_hand_idle_tick`), then the one message about an item whose lines have only said "busy" for hours (`_busy_tell_tick`), then the anchors' daily pass (`_anchor_daily_tick`, once a day). Each is switched by
+    its own `[audit]` key and stands still when off (the daily pass has no key of its own: it follows the audit's own switch and mode). Stands still when the audit is off or runs in agent mode. One that raises never stops the other; the first error is printed."""
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
     try:
@@ -152,6 +172,10 @@ def _silence_tick() -> "dict[str, Any] | None":
         _busy_tell_tick()
     except Exception as e:  # noqa: BLE001  — the lines above have run
         print(f"audit: long busy stretches not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    try:
+        _anchor_daily_tick()
+    except Exception as e:  # noqa: BLE001  — the lines above have run
+        print(f"audit: the daily anchor pass not run: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return None
 
 

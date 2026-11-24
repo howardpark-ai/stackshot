@@ -1,4 +1,4 @@
-"""anchor_sweep.py: anchors that clean up after themselves. Four rules end an anchor without anyone removing it; each is a small function of its own, and `sweep` applies them to the whole store.
+"""anchor_sweep.py: anchors that clean up after themselves. Five rules end an anchor without anyone removing it; each is a small function of its own, and `sweep` applies them to the whole store.
 
   1. items   An item closes (completed, dropped, superseded): it no longer keeps an anchor alive. An anchor entry scoped to items, none of which is open any more, is removed, whatever its
              kind. A project-wide entry (no item scope) is never touched by this rule. An item whose file is gone counts as closed (stat says "not there": FileNotFoundError or NotADirectoryError, nothing else); one that cannot be read or looked at (a
@@ -10,10 +10,15 @@
              repository was read fine, so a token that lost its access to a repository is not taken for a deleted issue), is removed, item-scoped entries too. Only what the reader saved says so:
              nothing is asked of GitHub here, and the reader must have looked at the anchor itself after it marked the repository or the issue.
   4. page    A page that is closed or archived (its status is one of [project_scopes] retired_statuses) takes its anchors with it.
+  5. unreadable  An anchor the anchors service has not been able to read for [anchor_hub] unreadable_days days (7 when unset) is removed. The service starts that clock itself (`unreadable.at` in its status
+             file, anchors/anchorhub/core.py) only after the anchor was refused on two reads at least five minutes apart, and clears it the moment the anchor reads again; its keeper was told when it started. Only what the
+             status file says counts, and only while that file is young (15 minutes): a status that is old, missing or unreadable removes nothing. An entry younger than those days since it was added (or added again) stays, and so does one an open item waits on (the sparing below).
+             It acts on an anchor of any kind the service reads, not on GitHub's alone.
+             When at least 5 anchors are unreadable in one status read and they are more than half of all the anchors it reports on (a revoked or expired token does that), it removes nothing in that tick and says so once in the routing log.
 
 Rules 2 and 3 read the anchors reader's saved position (its cursors file, key "github", with "github_repos" for what the reader learned of a repository), through `Reader`. They act only
 while that file is young and the reader has looked at the anchor lately (a reader that is down knows nothing new), and they spare an anchor an open item waits on: its `wait_anchor`, an open anchor
-line of a wait on a list, in any form of the same issue or pull request (`anchor_key`, the comparison of service/watching.anchor_key), and an anchor scoped to a parked open item. Where the position is missing or old they remove nothing. An item file that cannot be parsed may hold a wait nobody can read: the sweep then takes every anchor for in use, and rules 2 and 3 remove nothing, until the file is readable.
+line of a wait on a list, in any form of the same issue or pull request (`anchor_key`, the comparison of service/watching.anchor_key), and an anchor scoped to a parked open item. Where the position is missing or old they remove nothing. An item file that cannot be parsed may hold a wait nobody can read: the sweep then takes every anchor for in use, and rules 2, 3 and 5 remove nothing, until the file is readable.
 
 Every removal is written to the routing log of the page that held the entry (a log-only line ruled `archived` by `stackshot (auto)`), and the line carries the call that puts the anchor back:
 anchors(project=..., add=[...], items=[...]). A call too long for the log's 300 characters is kept whole in <paths.state>/anchor-removed.jsonl, which also holds every removal's line, and the log line says so.
@@ -22,7 +27,7 @@ nothing), is the one function every caller uses (the events below and the ten-mi
 remove at most so many entries in one call (the tick's `[anchor_hub] sweep_per_tick`: a large first removal is spread over ticks).
 
 Called from: an item's close (`on_close`: rule 1, for the entries scoped to the item that closed, in the reply of the close), an item's reopening (`reopen_note`: the restore lines of what its close ended), a
-project's archiving (project_verbs.archive: rule 4) and its reopening (`page_reopen_note`), and the minute runner's ten-minute set (`sweep_tick`: all four, at most `sweep_per_tick` entries).
+project's archiving (project_verbs.archive: rule 4) and its reopening (`page_reopen_note`), and the minute runner's ten-minute set (`sweep_tick`: all five, at most `sweep_per_tick` entries).
 Stdlib, anchors.py, anchor_scope.py, router/routing.py, github/ghsync.py and fleet/inbox.py (the reader's state folder) only; the waits of the open items are read through waits/wait_list.py and waits/waiting.py
 at the first question."""
 from __future__ import annotations
@@ -50,10 +55,14 @@ QUIET_S = QUIET_DAYS * 86400
 GONE_S = 86400                       # a read of an issue that was found once must have answered "not found" this long before the entry goes
 FRESH_S = 6 * 3600                   # the reader's saved position, and its last look at an anchor, must be this young for rules 2 and 3 to act
 PER_TICK = 50                        # the most entries one tick of the ten-minute set removes ([anchor_hub] sweep_per_tick)
+STATUS_FRESH_S = 900                 # the reader's status file must be this young for rule 5 to act (the reader writes it every minute)
+MASS_MIN = 5                         # rule 5 holds back everything in a tick where at least this many anchors are unreadable...
+MASS_SHARE = 0.5                     # ...and they are more than this share of all the anchors the reader reports on: a revoked or expired token (or a fault of the service) makes every GitHub anchor unreadable at once, and removing a whole list a week later for a fault that is not the anchors' would lose them all
+unreadable_days = _anc.unreadable_days    # [anchor_hub] unreadable_days: 7 when the setting is absent, no whole number or below 1
 LINE_MAX = 300                       # what the routing log keeps of a line's text (routing.record)
 REMOVED = "anchor-removed.jsonl"     # in <paths.state>: one line per removed entry, whole
 REOPEN_DAYS = 30                     # how far back a reopening looks for the lines of what its close ended
-RULES = ("items", "quiet", "repo", "pages")
+RULES = ("items", "quiet", "repo", "pages", "unreadable")
 AUTO = _routing.AUTO_RULER
 
 
@@ -71,6 +80,8 @@ class Reading:
     gone_since: float | None = None      # when its read first answered "not found", after it had been read once and another anchor of its repository was read fine
     archived_since: float | None = None  # when the reader first saw its repository archived
     status: dict[str, Any] = field(default_factory=dict)
+    unreadable_since: float | None = None   # when the reader's two reads, minutes apart, both refused it (status["unreadable"]["at"]); None while it reads or the clock has not started
+    unreadable_why: str = ""             # the one line it said why
 
 
 def _epoch(v: Any) -> float | None:
@@ -97,12 +108,14 @@ class Reader:
     """A read-only view of what the anchors reader saved: its position file's "github" part (the state of each issue and pull request anchor, and when each was last looked at) and "github_repos"
     (the repositories it saw archived, the anchors it found gone), and its status file. Built from the files (`Reader.load`) or from dicts (a test's). Reads nothing from GitHub."""
 
-    def __init__(self, cursors: Any = None, saved_at: float | None = None, status: Any = None):
+    def __init__(self, cursors: Any = None, saved_at: float | None = None, status: Any = None, status_at: float | None = None):
         cur = cursors if isinstance(cursors, dict) else {}
         gh = cur.get("github") if isinstance(cur.get("github"), dict) else {}
         extra = cur.get("github_repos") if isinstance(cur.get("github_repos"), dict) else {}
         canon = lambda k: _anc.anchor_id(str(k)) or str(k)        # the saved keys are the reader's own spelling: a [github.moved] name is read as its current one
         self.saved_at = saved_at
+        self.status_at = status_at
+        self.history_since = str(status.get("history_since") or "") if isinstance(status, dict) else ""       # when the status file's unbroken record began, as the service wrote it (a time in the instance zone)
         self._state = {canon(k): v for k, v in (gh.get("state") or {}).items() if isinstance(v, dict)} if isinstance(gh.get("state"), dict) else {}
         self._looked = {canon(k): _epoch(v) for k, v in (gh.get("looked") or {}).items()} if isinstance(gh.get("looked"), dict) else {}
         self._gone = {canon(k): _epoch(v) for k, v in (extra.get("gone") or {}).items()} if isinstance(extra.get("gone"), dict) else {}
@@ -120,12 +133,25 @@ class Reader:
             except (OSError, ValueError):
                 return None, None
         cursors, at = read("cursors.json")
-        status, _ = read("status.json")
-        return cls(cursors, at, status)
+        status, sat = read("status.json")
+        return cls(cursors, at, status, sat)
 
     def fresh(self, now: float) -> bool:
         """Is the saved position young enough to be believed?"""
         return self.saved_at is not None and 0 <= now - self.saved_at <= FRESH_S
+
+    def status_fresh(self, now: float) -> bool:
+        """Is the status file young enough to be believed (rule 5)? One that is missing, cannot be read or is older than STATUS_FRESH_S is not."""
+        return self.status_at is not None and 0 <= now - self.status_at <= STATUS_FRESH_S
+
+    def unreadable_counts(self) -> tuple[int, int]:
+        """(anchors whose removal clock runs, all anchors the status file reports on), as that one status read says."""
+        bad = 0
+        for sx in self._status.values():
+            ux = sx.get("unreadable") if isinstance(sx, dict) else None
+            if isinstance(ux, dict) and _epoch(ux.get("at")) and " ".join(str(ux.get("why") or "").split()):
+                bad += 1
+        return bad, len(self._status)
 
     def reading(self, anchor: str) -> Reading:
         st = self._state.get(anchor)
@@ -133,9 +159,11 @@ class Reader:
         done = st.get("state") == "closed" and "#" in anchor
         repo = _repo_of(anchor)
         sx = self._status.get(anchor)
+        ux = sx.get("unreadable") if isinstance(sx, dict) else None
         return Reading(anchor=anchor, known=bool(st), finished=done, updated=_epoch(st.get("updated")),
                        looked=self._looked.get(anchor), gone_since=self._gone.get(anchor), archived_since=self._archived.get(repo) if repo else None,
-                       status=dict(sx) if isinstance(sx, dict) else {})
+                       status=dict(sx) if isinstance(sx, dict) else {},
+                       unreadable_since=_epoch(ux.get("at")) if isinstance(ux, dict) else None, unreadable_why=" ".join(str(ux.get("why") or "").split())[:200] if isinstance(ux, dict) else "")
 
 
 def _looked_after(r: Reading, mark: float, now: float) -> bool:
@@ -331,6 +359,32 @@ def rule_repo(store: Any, reader: Reader, now: float, spared: Callable[[str, dic
     return hits
 
 
+def rule_unreadable(store: Any, reader: Reader, now: float, spared: Callable[[str, dict[str, Any]], bool] = lambda p, e: False, days: int | None = None,
+                    held: list[Hit] | None = None) -> list[Hit]:
+    """Rule 5: an entry the reader has not been able to read for `days` days ([anchor_hub] unreadable_days), counted from `unreadable.at` in the reader's status, which the reader sets only after two refused reads minutes
+    apart and takes away when the anchor reads. Acts only on a young status file; an entry added (or added again) less than `days` days ago stays, and so does one an open item waits on.
+    When the unreadable anchors of that one status read are MASS_MIN or more and more than MASS_SHARE of all it reports on, nothing is removed: the hits are put in `held` (when given) for the caller to say so."""
+    hits = []
+    if not reader.status_fresh(now):
+        return hits
+    span = (unreadable_days() if days is None else int(days)) * 86400
+    for page, i, e in _entries(store):
+        aid = _anc.anchor_id(_anc.split_fragment(e["url"])[0]) or ""
+        r = reader.reading(aid) if aid else None
+        if r is None or not r.unreadable_since or not r.unreadable_why or now - r.unreadable_since < span:
+            continue
+        if e["added"] and now - e["added"] < span:
+            continue
+        if not spared(page, e):
+            hits.append(Hit(page, e, "unreadable", f"unreadable for {int((now - r.unreadable_since) // 86400)} days: {r.unreadable_why}", i))
+    bad, total = reader.unreadable_counts()
+    if hits and bad >= MASS_MIN and bad > total * MASS_SHARE:
+        if held is not None:
+            held.extend(hits)
+        return []
+    return hits
+
+
 def rule_pages(store: Any, reg: dict[str, Any]) -> list[Hit]:
     """Rule 4: every entry of a page whose status is a retired one. A page the registry does not list is left alone (a registry that could not be read lists nothing)."""
     from stackshot.projects import projects as _prj
@@ -381,7 +435,7 @@ def _waiters() -> Callable[[str, dict[str, Any]], bool]:
             key = "unparsed:" + ",".join(failed)
             if key not in _SAID:       # one line the first time this process meets this set of files, as the unknown items are told
                 _SAID.add(key)
-                print(f"anchor sweep: {len(failed)} item file(s) could not be read ({', '.join(failed[:5])}{', ...' if len(failed) > 5 else ''}), so rules 2 and 3 remove nothing while that holds", file=sys.stderr, flush=True)
+                print(f"anchor sweep: {len(failed)} item file(s) could not be read ({', '.join(failed[:5])}{', ...' if len(failed) > 5 else ''}), so rules 2, 3 and 5 remove nothing while that holds", file=sys.stderr, flush=True)
         for t in found:
             if t.get("status") == "completed":
                 continue
@@ -423,7 +477,7 @@ def sweep(now: float | None = None, *, rules: Iterable[str] = RULES, reader: Rea
     now = time.time() if now is None else float(now)
     rules = tuple(rules)
     status = _status_fn()
-    rd = (reader or Reader.load()) if ("quiet" in rules or "repo" in rules) else None
+    rd = (reader or Reader.load()) if ("quiet" in rules or "repo" in rules or "unreadable" in rules) else None
     rg = (_anc.registry() if reg is None else reg) if "pages" in rules else None
     store = _anc.load()
     if not store:
@@ -438,6 +492,11 @@ def sweep(now: float | None = None, *, rules: Iterable[str] = RULES, reader: Rea
         hits += rule_repo(store, rd, now, waiting)
     if rg and "pages" in rules:
         hits += rule_pages(store, rg)
+    if rd is not None and "unreadable" in rules:
+        held: list[Hit] = []
+        hits += rule_unreadable(store, rd, now, waiting, held=held)
+        if held:
+            _say_held(held, rd.unreadable_counts())
     mine, seen = [], set()
     for h in hits:
         if (h.page, h.idx) in seen:
@@ -496,6 +555,16 @@ def _record(o: dict[str, Any]) -> str:
     except Exception as e:  # noqa: BLE001
         print(f"anchor sweep: record of {o['url']} not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""
+
+
+def _say_held(held: list[Hit], counts: tuple[int, int]) -> None:
+    """One line, once for the run, on the routing log of the page of the first entry rule 5 held back: why nothing was removed. Never raises."""
+    try:
+        bad, total = counts
+        why = f"anchor removal held back: {bad} of {total} anchors cannot be read at once (a revoked or expired token looks like this), so rule 5 removed nothing; {len(held)} entries were due"
+        _routing.record_auto(held[0].page, "archived", why, kind="anchor", label="anchor removal held back", who=AUTO, text=why)
+    except Exception as e:  # noqa: BLE001
+        print(f"anchor sweep: log line for the held-back removals not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
 def _log(o: dict[str, Any]) -> None:

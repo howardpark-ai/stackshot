@@ -336,6 +336,7 @@ def part_app_token():
            f"{RP}/issues/28": issue(28, "someone", "2026-11-02T00:00:00Z", "2026-11-03T00:00:00Z")}
     for i in range(7): GHD[f"/repos/example-owner/repo{i}/notifications?all=true&per_page=50"] = []
     USER = {"login": "example-owner"}
+    DENY: dict[str, str] = {}      # path → the error text gh answers it with (a test sets and clears it)
     mode = {"user": "app"}      # "app": /user is refused as an App token's; "person": /user answers; "401": /user answers a bad credential; "down": every call fails as the network does
     calls: list[str] = []; rate_denied = [False]
     NTOK = "ghp_notif_0123456789abcdefghijklmnopqrstu"; NTOK2 = "ghp_notif2_replacement_0123456789abcdefghijk"      # the tokens of the notifications file in the tests below (made-up strings)
@@ -358,10 +359,14 @@ def part_app_token():
                 if notif_deny[0] == "403": return fail(f"gh: Forbidden (HTTP 403) for {tok}")
                 if notif_deny[0] == "limit": return fail(f"gh: API rate limit exceeded (HTTP 403) for {tok}")
             elif mode["user"] != "person": return fail("gh: Resource not accessible by integration (HTTP 403)")
+        if path in DENY: return fail(DENY[path])
         if path not in GHD: return fail("gh: Not Found (HTTP 404)")
         body = json.dumps(GHD[path]); return types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")
     class _Stop(Exception): pass
-    def _no_sleep(s): raise _Stop()
+    wait_over = [False]      # a test that lets the reader's ten-minute wait after a 403 pass at once
+    def _no_sleep(s):
+        if wait_over[0] and s == ghr.BACKOFF: return
+        raise _Stop()
     caught: list = []
     ghr.subprocess = types.SimpleNamespace(run=_fake_gh, TimeoutExpired=subprocess.TimeoutExpired)
     ghr.threading = types.SimpleNamespace(Thread=lambda target, daemon=True: types.SimpleNamespace(start=lambda: caught.append(target)))
@@ -415,8 +420,12 @@ def part_app_token():
         NA = [notif(i) for i in range(7)]
         h3 = fresh([PR, *NA], "app"); del calls[:]
         infos = [h3.resolvers["github"](a) for a in NA]; info = infos[-1]
-        check("notifications: an App token's resolver names a notification anchor without a call (no 403 asked for)", not [c for c in calls if "/notifications" in c] and info["title"] == "repo6 notifications" and "unreadable" not in info, (calls, info))
+        check("notifications: an App token's resolver names a notification anchor without a call (no 403 asked for), and says it is not read, naming the setting",
+              not [c for c in calls if "/notifications" in c] and info["title"] == "repo6 notifications" and "[anchor_hub] notifications_token_file" in info.get("unreadable", "") and "App" in info["unreadable"], (calls, info))
         one_pass(); one_pass()
+        wh3 = [((h3.status["anchors"].get(a) or {}).get("unreadable") or {}).get("why") for a in NA]
+        check("notifications: ...and from the first pass that would have bound them, each one's status is not ok with that one line and the time the reader first saw it",
+              len(set(wh3)) == 1 and wh3[0] == ghr.NOTIF_OFF_WHY and "\n" not in wh3[0] and all(h3.status["anchors"][a]["unreadable"]["tries"] == 1 and h3.status["anchors"][a]["unreadable"]["first"] > 0 and not h3.status["anchors"][a]["unreadable"].get("at") for a in NA), wh3)
         check("notifications: two passes read the pull request and no notification list", not [c for c in calls if "/notifications" in c] and f"{RP}/pulls/26" in calls, calls)
         check("notifications: with an App token they are not bound: no log line about them at all (not the old 'not read' line naming the user sign-in)", not logged(r"notification anchors? not read") and not logged(r"user sign-in") and not logged(r"not read"), records)
         rc = h3.status["receivers"]["github"]
@@ -472,7 +481,17 @@ def part_app_token():
             # unset: as before (an App token binds none of them, a person's reads them with the token the CLI holds)
             WithNotif.file = ""
             hu = go([PR, notif(0)], "app", 2)
-            check("unset: with an App token the notification anchors are not read and not flagged, as before", not ncalls() and why_of(hu, notif(0)) is None and hu.status["receivers"]["github"]["error"] is None, (calls, hu.status["receivers"]))
+            check("unset: with an App token the notification anchors are not read (no call, a clean card), and each says so: not ok, the line names the setting", not ncalls() and SET in (why_of(hu, notif(0)) or "") and why_of(hu, notif(0)) == ghr.NOTIF_OFF_WHY
+                  and hu.status["receivers"]["github"]["error"] is None, (calls, hu.status["receivers"]))
+            hup0 = go([PR, notif(0)], "person")
+            check("unset: with a person's token they are read and are ok (nothing said on them)", why_of(hup0, notif(0)) is None and len(ncalls()) == 1, (calls, hup0.status["anchors"]))
+            WithNotif.file = str(tf); put(NTOK); hok = go([PR, notif(0)], "app", 1)
+            check("a usable file under an App token: read, ok, nothing said on the anchor", len(ncalls()) == 1 and why_of(hok, notif(0)) is None and "unreadable" not in hok.status["anchors"].get(notif(0), {}), (calls, hok.status["anchors"]))
+            WithNotif.file = ""; hs = fresh([PR, notif(0)], "app"); one_pass(); WithNotif.file = str(tf); one_pass()
+            check("…declined first, then a usable file: the same anchor's line is taken back by the pass that reads it", why_of(hs, notif(0)) is None and len(ncalls()) >= 1, (hs.status["anchors"].get(notif(0)), ncalls()))
+            WithNotif.file = ""; hw = fresh([PR, notif(0)], "app"); one_pass(); hw.status["anchors"][notif(0)]["unreadable"].update(at=1.0, warned="x"); WithNotif.file = str(tf); one_pass()
+            check("…a record whose clock ran and whose keeper was told is not deleted behind the keeper's back: the next rescan reads it at once (next = 0) and says it can be read", why_of(hw, notif(0)) == ghr.NOTIF_OFF_WHY and hw.status["anchors"][notif(0)]["unreadable"]["next"] == 0, hw.status["anchors"].get(notif(0)))
+            WithNotif.file = ""
             hup = go([PR, notif(0)], "person")
             check("unset: a person's token reads them with the CLI's own token (none of ours)", len(ncalls()) == 1 and [t_ for _p, t_ in nenv()] == [None], gh_env)
 
@@ -509,6 +528,41 @@ def part_app_token():
             check("403 for the rate limit: no refusal and no line on the anchor (a failed look, tried again as any look is)", why_of(h9, notif(0)) is None and len(ncalls()) >= 2 and "ghp_" not in everything(h9), (ncalls(), h9.status["anchors"]))
         finally:
             ghr._cfg = real_cfg; notif_deny[0] = ""
+
+        # ---- 3c. an issue or pull request the reader cannot read is said so, with the reason; a failure that is no refusal says nothing
+        ISS = f"{RP}/issues/28"; PULL = f"{RP}/pulls/28"; WHYS = ghr.REFUSED_WHY
+        def anchor_u(h, a=PERSON_ISSUE): return (h.status["anchors"].get(a) or {}).get("unreadable") or {}
+        for label, text, want in (("401", "gh: Bad credentials (HTTP 401)", "HTTP 401"), ("403", "gh: Resource not accessible by integration (HTTP 403)", "HTTP 403"),
+                                  ("403 forbidden", "gh: Forbidden (HTTP 403)", "HTTP 403"), ("404", "gh: Not Found (HTTP 404)", "no issue or pull request there")):
+            hx = fresh([PERSON_ISSUE], "person"); DENY[ISS] = text; info = hx.resolvers["github"](PERSON_ISSUE)
+            check(f"unreadable: a {label} on an issue read makes the resolver say it, in one line", want in info.get("unreadable", "") and "\n" not in info["unreadable"], info)
+        hx = fresh([PERSON_ISSUE], "person")
+        for label, text in (("a rate limit's 403", "gh: API rate limit exceeded (HTTP 403)"), ("a secondary limit's 403", "gh: You have exceeded a secondary rate limit (HTTP 403)"),
+                            ("GitHub's 500", "gh: Server Error (HTTP 500)"), ("the network", "error connecting to api.github.com")):
+            DENY[ISS] = text; info = hx.resolvers["github"](PERSON_ISSUE)
+            check(f"unreadable: {label} is no refusal: the resolver says nothing of the anchor (it is asked again)", "unreadable" not in info and not ghr.refusal_why(text), info)
+        DENY.clear()
+        hp1 = fresh([PERSON_ISSUE], "person"); DENY[ISS] = "gh: Bad credentials (HTTP 401)"; one_pass(); u1 = dict(anchor_u(hp1))
+        check("poll: a refused issue read is said on the anchor by the pass: not ok, the reason, one try, the time first seen, and no removal clock yet",
+              u1.get("why", "").startswith(WHYS) and "HTTP 401" in u1["why"] and u1.get("tries") == 1 and u1.get("first", 0) > 0 and "at" not in u1 and not u1.get("warned"), u1)
+        one_pass(); u2 = anchor_u(hp1)
+        check("poll: …the next refused pass says it again without starting over (one record: the same first time, still one try)", u2.get("first") == u1["first"] and u2.get("tries") == 1 and u2.get("why") == u1["why"], u2)
+        DENY.clear(); one_pass()
+        check("poll: …a read that goes through takes the line back (the keeper had not been told: no record is left)", not anchor_u(hp1) and "unreadable" not in hp1.status["anchors"].get(PERSON_ISSUE, {}), hp1.status["anchors"].get(PERSON_ISSUE))
+        wait_over[0] = True
+        try:
+            hp3 = fresh([PERSON_ISSUE], "person"); DENY[ISS] = "gh: Forbidden (HTTP 403)"; one_pass(); u3 = dict(anchor_u(hp3))
+            DENY[ISS] = "gh: API rate limit exceeded (HTTP 403)"; hp3b = fresh([PERSON_ISSUE], "person"); DENY[ISS] = "gh: API rate limit exceeded (HTTP 403)"; one_pass()
+        finally: wait_over[0] = False
+        check("poll: a 403 that is no rate limit is said too, a rate limit's 403 is not (a wait, not a refusal)", "HTTP 403" in u3.get("why", "") and not anchor_u(hp3b), (u3, anchor_u(hp3b)))
+        DENY.clear(); hp4 = fresh([PERSON_ISSUE], "person"); DENY[ISS] = "gh: Not Found (HTTP 404)"; one_pass(); u4 = dict(anchor_u(hp4))
+        check("poll: an issue read that answers 'not found' is said on the anchor as the resolver says it (not promoted to gone: that is the sweep's rule 3, a day later and only when the rest of the repository still reads)",
+              u4.get("why") == hp4.resolvers["github"](PERSON_ISSUE)["unreadable"] and "no issue or pull request there" in u4["why"], (u4, hp4.resolvers["github"](PERSON_ISSUE)))
+        DENY.clear(); hp5 = fresh([PERSON_ISSUE], "person"); DENY[ISS] = "gh: Server Error (HTTP 500)"; one_pass(); one_pass()
+        check("poll: a failure that is no refusal (GitHub's 500) says nothing on the anchor", not anchor_u(hp5), anchor_u(hp5))
+        DENY.clear(); hp6 = fresh([PERSON_ISSUE], "person"); DENY[PULL] = "gh: Resource not accessible by integration (HTTP 403)"; one_pass()
+        check("poll: a refused CI read (the pull request's own path) leaves an anchor whose issue reads fine alone: the anchor is read, so it is not said unreadable", not anchor_u(hp6), anchor_u(hp6))
+        DENY.clear()
 
         # ---- 4. the retry of a failed start check, through start_receiver (as the service starts it)
         def started(first_fails, kind):

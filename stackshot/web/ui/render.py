@@ -2244,7 +2244,7 @@ class Board:
         span = lambda m: "an hour" if m == 60 else f"{m // 60} hours" if m % 60 == 0 else f"{m} minutes"
         pl = lambda n, w: f"{n} {w}{'' if n == 1 else 's'}"
         state = ("bad" if bad else "wait" if c["waiting"] else "ok" if (n_anch or c["in"] or c["pending"]) else "none")
-        parts = [pl(n_anch, "anchor") + " watched" + (f", {bad} unreadable by anchor-hub" if bad else ""),
+        parts = [pl(n_anch, "anchor") + " watched" + (f", {bad} unreadable by the anchors service" if bad else ""),
                  pl(c["in"], "notice") + " in the last 24 hours"]
         if c["waiting"] > 0: parts.append(f"{c['waiting']} unruled past {span(mins('waiting_minutes', 60))}")
         return state, parts

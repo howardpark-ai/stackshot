@@ -6,6 +6,8 @@ neither half reads. A reader of a one-record-per-line file uses `newline_lines` 
 """
 from __future__ import annotations
 
+MSG_MAX = 4000          # the message tool's length limit, in characters: the tool refuses a longer text, its text states it, and a held message (waits/held.py) arrives whole up to it
+
 
 def newline_lines(text: str) -> list[str]:
     """The lines of `text`, cut at "\\n" only. For text with no other line separator this is what `text.splitlines()` returns: no empty last element for a

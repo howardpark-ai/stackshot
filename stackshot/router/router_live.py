@@ -346,7 +346,7 @@ def _front_fyi(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, cx
         body = _body(n)
         if _person_words(n, ln, body) or _held._owner_mark().search(body) or not _is_front(target, root, cx):
             return "", ""
-        return fn(target, body, str(ln.get("item") or ""), n["id"], False) or ("", "")      # log=False: the router's own ruling is the routing-log line
+        return fn(target, _held_text(n, body), str(ln.get("item") or ""), n["id"], False, whole=True) or ("", "")      # log=False: the router's own ruling is the routing-log line; whole: a session's message keeps its words and line breaks
     except Exception:  # noqa: BLE001
         return "", ""
 
@@ -509,14 +509,15 @@ def _sender_name(n: dict[str, Any]) -> str:
     return "" if "(a script on" in who else re.split(r" \(", who, maxsplit=1)[0].strip()
 
 
+def _held_where(n: dict[str, Any]) -> str:
+    """Where the words a cut held message left out are: the notice, which keeps its whole text (the closing note of a cut names it and its sender)."""
+    return f"notice {n['id']}, from {_sender_name(n) or str(n.get('who') or 'a sender')}"
+
+
 def _held_text(n: dict[str, Any], body: str) -> str:
-    """The words a held pass carries to the front gate: the whole text while it fits one held line (held.LINE_MAX), else its start and a closing note naming the sender and the notice
-    (its whole text is in the notice), so a line that was cut says so and says where the rest is."""
-    one = " ".join(str(body or "").split())
-    if len(one) <= _held.LINE_MAX:
-        return body
-    note = f" … (cut: the whole text is in notice {n['id']}, from {_sender_name(n) or str(n.get('who') or 'a sender')})"
-    return one[:max(0, _held.LINE_MAX - len(note))].rstrip() + note
+    """The words a held pass of a session's message carries to the front gate: all of them, with their line breaks, while they fit held.WHOLE_MAX (the message tool's limit and the room for the label); above it the text
+    is cut at a line or word boundary and closed with a note that says how many characters were left out and names the notice and its sender (the notice keeps the whole text)."""
+    return _held.cut_whole(_held.keep_whole(body), _held.WHOLE_MAX, _held_where(n))
 
 
 def _is_session_message(n: dict[str, Any], body: str) -> bool:
@@ -860,7 +861,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
             elif act_ in ("items", "hold"):
                 verdict_ = "fyi"
                 if act_ == "hold":
-                    verdict_, _why = _HOOKS["front_fyi"](target, _held_text(n, _body(n)), str(ln.get("item") or ""), n["id"], False) or ("", "")      # log=False: the router's own ruling is the routing-log line
+                    verdict_, _why = _HOOKS["front_fyi"](target, _held_text(n, _body(n)), str(ln.get("item") or ""), n["id"], False, whole=True) or ("", "")      # log=False: the router's own ruling is the routing-log line
                 if verdict_ == "fyi":
                     held_for = target
                     ruling, target = "held", ""
@@ -869,7 +870,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                 # a gate that could not file it (the agent's hook cannot fetch held lines, or the gate failed): delivered as before, marked, never dropped for want of a place to hold it
         if ruling == "passed" and prior.get("status") != "delivered":      # a pass that asks nothing of a background agent is held for its next turn
             hk = _hold_kind(n, ln, target, cx)
-            if hk and _held.add(_held.key_of(target), hk, _body(n), sender=str(n.get("who") or ""), gid=str(ln.get("item") or ""), nid=n["id"]):
+            if hk and _held.add(_held.key_of(target), hk, _body(n), sender=str(n.get("who") or ""), gid=str(ln.get("item") or ""), nid=n["id"], whole=(hk == "fyi"), where=_held_where(n)):
                 held_for = target
                 ruling, target, reason = "held", "", _held.reason(hk)
                 base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold=hk)
@@ -892,7 +893,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                 base.update(target=arg_t, reason=f"{reason} (not for the person: passed to {arg_t}, whose work it is, not to {target}: he is not talking with {target} and has not asked it to tell him about this)")
                 target, reason = arg_t, base["reason"]
                 hk = _hold_kind(n, ln, target, cx)
-                if hk and _held.add(_held.key_of(target), hk, _body(n), sender=str(n.get("who") or ""), gid=str(ln.get("item") or ""), nid=n["id"]):
+                if hk and _held.add(_held.key_of(target), hk, _body(n), sender=str(n.get("who") or ""), gid=str(ln.get("item") or ""), nid=n["id"], whole=(hk == "fyi"), where=_held_where(n)):
                     held_for = target
                     ruling, target, reason = "held", "", _held.reason(hk)
                     base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold=hk)
