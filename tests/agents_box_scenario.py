@@ -233,6 +233,33 @@ check("a file larger than max_file_bytes is left out of the copy, and said", not
 check("an oversize file is no outage: the box does not count as down", not ab.down() and not ab._STATE["logged"] and any(lv == "ERROR" and "max_file_bytes" in l for lv, l in zip(levels, logs)), (ab.down(), ab._STATE, logs))
 setbox(max_file_bytes=None)
 
+# ---- a second process of the server's box starts its own copy of a folder the first one reads: the first one's files stay (the registry read empty for the length of a call, and a notice went to a session instead of being held)
+import threading
+regd = pathlib.Path(HOME_LOCAL, ".local/state/regtest"); PATS = ("*/sessions.json",)
+fresh(); put(".local/state/regtest/a/sessions.json", '{"one": 1}', 1700000100)
+d = ab.mirror_dir(regd, PATS, keep=True); f = d / "a/sessions.json"
+check("a second process: the first one's copy is made", f.exists() and json.loads(f.read_text()) == {"one": 1}, list(d.rglob("*")))
+ab._SPECS.clear(); mode("slow"); setbox(timeout=4)                    # a new process: its module state is empty; the box takes a second to answer
+seen = []; th = threading.Thread(target=lambda: ab.mirror_dir(regd, PATS, keep=True)); th.start()
+for _ in range(6): time.sleep(0.15); seen.append(f.exists())
+th.join(); mode("ok")
+check("a second process: while it makes its own copy the first one's file is there for every reader (not removed at its start)", all(seen) and th.is_alive() is False, seen)
+check("a second process: its copy leaves the file as the box has it", json.loads(f.read_text()) == {"one": 1})
+put(".local/state/regtest/a/sessions.json", '{"one": 2}', 1700000200)
+(d / "b").mkdir(mode=0o700); (d / "b/sessions.json").write_text("{}"); (d / "b/sessions.json").chmod(0o600)                  # a file an earlier run left that the box does not have
+ab._SPECS.clear(); settle(); ab.mirror_dir(regd, PATS, keep=True)
+check("a new process's first good copy replaces what is there and removes a file the box does not have", json.loads(f.read_text()) == {"one": 2} and not (d / "b/sessions.json").exists(), (f.read_text(), list(d.rglob("*"))))
+ab._SPECS.clear(); mode("down"); ab.mirror_dir(regd, PATS, keep=True)
+check("a new process while the box does not answer: a kept copy (the registry, the links) stays for every reader", f.exists() and json.loads(f.read_text()) == {"one": 2})
+try: ab.require_copy(regd, PATS, what="the fixture registry"); raised = None
+except ab.BoxError as e: raised = str(e)
+check("…and a check that must not go by an old copy still refuses it (this process made none)", raised is not None and "no copy" in raised, raised)
+fresh(); put(".claude/sessions/1.json", json.dumps(alive), 1700000100); d2 = ab.mirror_dir(reg, ("*.json",), pid_key="pid")
+check("a copy that is not kept: made once", (d2 / "1.json").exists())
+ab._SPECS.clear(); mode("down"); d2 = ab.mirror_dir(reg, ("*.json",), pid_key="pid")
+check("a new process while the box does not answer: a copy that is not kept (pane liveness) is not read from a copy of unknown age", not (d2 / "1.json").exists(), list(d2.glob("*")))
+fresh()
+
 # ================================================================ 5. the stores the fleet tool keeps
 fresh()
 UU = "11111111-2222-4333-8444-555555555555"
@@ -254,6 +281,7 @@ stamp_ = str(int(time.time()))         # taken once: a second boundary between t
 put(f".local/state/stackshot/prompts/{sid}", f"{stamp_}\n")
 pd = ab.prompts_dir()
 check("prompt stamps: the box's stamp file is read from the copy", (pd / sid).read_text().split()[0] == stamp_ and [f.name for f in pd.iterdir()] == [sid], list(pd.iterdir()))
+import shutil; shutil.rmtree(T / "state/agentbox", ignore_errors=True)      # no copy of an earlier run is there (a copy another run left is served for a kept file: the check on a second process above)
 fresh(); mode("down")
 check("the store, the lane record and the stamps of a box that refuses: no file, no raise", clients.session_links() == {} and checks.lane_record("agent-one")[1] != "" and not list(ab.prompts_dir().glob("*")))
 

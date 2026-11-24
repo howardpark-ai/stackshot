@@ -486,11 +486,7 @@ def _spec(root: str, patterns: tuple[str, ...], pid_key: str) -> _Spec:
                 rel = root.replace("~", "_home", 1) if root.startswith("~") else root
                 hk = re.sub(r"[^A-Za-z0-9._-]", "_", h)
                 local = _mirror_root() / hk / rel.lstrip("/")
-                for pat in patterns:                             # a copy left by an earlier run is of an age nobody knows: start empty, so a box that does not answer is never read from it
-                    for f in local.glob(pat):
-                        if f.is_file():
-                            f.unlink(missing_ok=True)
-                s = _SPECS[key] = _Spec(root, patterns, pid_key, local)
+                s = _SPECS[key] = _Spec(root, patterns, pid_key, local)       # a copy left by another run is not removed here: the folder is shared with every process of this box (a short-lived one starts at every push), and what one of them removed the others read as absent. See _unproven
     return s
 
 
@@ -561,6 +557,7 @@ def _refresh(s: _Spec) -> None:
         return
     if down() or (s.err and now - s.at < _num("retry_seconds", RETRY_SECONDS)):
         _expire(s, now)                              # the box is known down (for any directory) or this copy just failed: what is held is served, nothing is waited for
+        _unproven(s)
         return
     first = s.ok is None and not s.err
     if not s.lock.acquire(blocking=first, timeout=_num("timeout", TIMEOUT) + 6 if first else -1):
@@ -571,6 +568,7 @@ def _refresh(s: _Spec) -> None:
             return
         if down():                                   # the copy ahead of this one found the box down
             _drop(s, now)
+            _unproven(s)
             return
         try:
             out = _call({"mode": "mirror", "root": s.root, "patterns": list(s.patterns), "pid_key": s.pid_key, "cap": int(_num("max_file_bytes", MAX_FILE_BYTES))}, f"cannot copy {s.root}")
@@ -582,6 +580,7 @@ def _refresh(s: _Spec) -> None:
             s.at = time.monotonic()
             s.err = str(e) if isinstance(e, BoxError) else str(_err(f"cannot copy {s.root}: the box's answer is not readable ({e.__class__.__name__})"))
             _drop(s, s.at)
+            _unproven(s)
             return
         s.skipped = [str(r) for r in (data.get("skipped") or [])]
         for rel in s.skipped:
@@ -590,6 +589,31 @@ def _refresh(s: _Spec) -> None:
         s.err, s.ok, s.at, s.dropped = "", time.monotonic(), time.monotonic(), False
     finally:
         s.lock.release()
+
+
+def _on_disk(s: _Spec) -> set[str]:
+    """The files of the copy's folder this copy's patterns name now, relative to it (whoever wrote them: any process of this box shares the folder)."""
+    out: set[str] = set()
+    for pat in s.patterns:
+        try:
+            out.update(str(f.relative_to(s.local)) for f in s.local.glob(pat) if f.is_file())
+        except OSError:
+            pass
+    return out
+
+
+def _unproven(s: _Spec) -> None:
+    """This process has made no good copy yet and cannot now (the box does not answer): a file another run left in the folder is of an age nobody knows, so a copy that reads as unknown
+    when absent (pane liveness, prompt stamps, the lane record) is removed rather than read from. A `keep` copy (the registry, the links, the lane names) is served as it is, as it is from its last
+    good copy for as long as the box is silent; a check that must not go by an old one asks `require_copy`, which counts only this process's own good copy. Once per copy."""
+    if s.ok is not None or s.keep or s.dropped:
+        return
+    s.dropped = True
+    for rel in sorted(_on_disk(s)):
+        try:
+            (s.local / rel).unlink()
+        except OSError:
+            pass
 
 
 def _expire(s: _Spec, now: float) -> None:
@@ -677,7 +701,7 @@ def _store(s: _Spec, files: dict[str, Any]) -> None:
             new.add(rel)
         except (OSError, ValueError, TypeError, IndexError) as e:
             _note(f"{s.root}/{rel}: not written to the copy ({e.__class__.__name__})")
-    for rel in s.files - new:
+    for rel in (s.files | _on_disk(s)) - new:                    # what this copy held and what another run left: neither stays when the box no longer has it
         try:
             (s.local / rel).unlink()
         except OSError:
