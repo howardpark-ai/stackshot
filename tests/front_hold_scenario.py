@@ -757,7 +757,7 @@ check("6f: …that a notice that is no session's message keeps the decision-only
       and "or whose step is his. An audit" not in docs["router.md"], "")
 check("6g: the docs and the message tool's text say both rules: the item must be named (an open item of his), and a sibling front agent's quoted words (Acked-by) hold it for the next turn", "The two rules compose" in docs["handoffs.md"] and "Acked-by" in docs["handoffs.md"]
       and "an open item of his" in tt and "Acked-by" in tt and "held for its next turn" in tt, "")
-check("6c: the message tool's text says what a front agent hears and where the rest goes", "background agent" in tt and "board item" in tt, tt[:200])
+check("6c: the message tool's text says what a front agent hears and where the rest goes", "background agent (none: held)" in tt and "marked or not, is held" in tt, tt[:200])
 
 # ---- 7. a refused message call is logged with its target, the refusal's kind and its text (service/messaging.py Refused, core/call_log.py, web/middleware.py _RefusalLog)
 import contextlib, io, types
