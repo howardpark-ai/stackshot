@@ -93,7 +93,9 @@ _IS_NOTE = re.compile(r"\b(?:is|are|was|it's)\s+(?:(?:only|just|purely|merely|si
 _EMPH_UNDERSCORE = re.compile(r"(?<![A-Za-z0-9])_(?=[A-Za-z0-9])|(?<=[A-Za-z0-9])_(?![A-Za-z0-9_])")
 _ITEM_ID = r"(?:[a-z][a-z-]*#|[a-z])\d{1,6}"
 _LEAD_ID = re.compile(r"(?:\A|[\n.!?:])[ \t]*" + _ITEM_ID + r"[ \t]*\Z", re.IGNORECASE)     # a plain item id before the phrase is no words of the sentence
-_LINE_LEAD = re.compile(r"\A(?:[ \t]*(?:[" + re.escape(_EMPHASIS) + r"]+|[" + re.escape(_BULLETS) + r"](?=\s|\Z)|\(?\d{1,3}[.)]|\[\d{1,3}\]|" + _ITEM_ID + r"[:.,;]?))*[ \t]*\Z", re.IGNORECASE)      # all that stands before the phrase on its line is a list marker, a number, an item id or emphasis: "- ", "1) ", "(1) ", "a12: ", "**"
+_LEAD_BULLETS = "".join(c for c in _BULLETS if c not in _EMPHASIS)      # a list marker that is not also an emphasis mark: "*" is read as emphasis wherever it stands, so it takes no second branch of its own (two ways to read one "*" made a line of them match in exponentially many ways before it failed)
+_LEAD_ITEM = r"(?:[a-z][a-z-]*#|[a-z])(?:\d{1,6}(?!\d)[:.,;]?|\d{2,6}\)|\d{7,9}[.)])"      # an item id in a line's lead, as ONE reading of a digit run: "a12", "a12:", "a12." or, as the old pattern also read it, an id with up to six digits whose last digits are a number with its stop ("a12)", "a1234567.")
+_LINE_LEAD = re.compile(r"\A(?:[ \t]*(?:[" + re.escape(_EMPHASIS) + r"]|[" + re.escape(_LEAD_BULLETS) + r"](?=\s|\Z)|\(?\d{1,3}[.)]|\[\d{1,3}\]|" + _LEAD_ITEM + r"))*[ \t]*\Z", re.IGNORECASE)      # all that stands before the phrase on its line is a list marker, a number, an item id or emphasis: "- ", "1) ", "(1) ", "a12: ", "**". Every alternative starts with a character of its own and reads a run in one way only, so the match is linear in the line (no nested quantifier whose parts overlap)
 _FROM_YOU = re.compile(r"(?:(?:from|by|for)\s+(?:you|him|" + re.escape(OWNER) + r")|on\s+your\s+part)\b[ \t]*", re.IGNORECASE)      # "no action needed from you": the phrase's own tail, no condition on it
 
 
@@ -102,7 +104,7 @@ def _own_no_actions(text: str) -> "list[re.Match[str]]":
       it opens a sentence, a line or a list item, after a list marker, a number, an item id or markdown emphasis ("FYI the build is live", "**FYI** ...", "- no action needed", "1) FYI ...", "a12: FYI ..."), what follows it being the note;
       it is a clause set off by a comma, semicolon, bracket or dash that ends there: the text ends, or punctuation comes, or only a tail "from you" / "from <owner>" / "on your part" ("the build is live, no action needed from you", "merged (FYI)", "a1 (merged) - no action needed");
       it is what the sentence says it is and ends there ("this is only an FYI").
-    A phrase inside a clause ("sending it as an fyi so it waits"), one that something follows in the same clause ("no action needed until Friday"), one after a quote mark, in a quoted line or in the middle of a code span, or one that is asked ("no action needed?")
+    A phrase inside a clause ("sending it as an fyi so it waits"), a clause phrase that something follows in the same clause ("merged, no action needed until Friday"; a phrase that opens a sentence counts whatever follows it), one after a quote mark, in a quoted line or in the middle of a code span, or one that is asked ("no action needed?")
     is no statement of the sender's: the text is a request or a description that happens to use the word."""
     text = _EMPH_UNDERSCORE.sub(" ", text.translate(_QUOTES))      # an underscore that is emphasis ("_FYI_") reads as a space; one inside a word ("my_fyi_mode") stays
     found = []
@@ -753,10 +755,17 @@ def _front_fyi_name(to: str, raw: str, idx: dict[str, dict[str, Any]]) -> str:
         return ""
 
 
+# The retired names `_sent_instead` has met inside the pass-on that is running (`_message_body`): a message passed to the project's background agent that turns out retired went to its project instead, and the pass-on's reply and call-log mark say so.
+_REDIRECTED: "contextvars.ContextVar[list[str] | None]" = contextvars.ContextVar("message_redirected", default=None)
+
+
 def _sent_instead(name: str, why: str, project: str, raw: str, sender: str, auth: str, origin: str, fyi: bool) -> str:
     """A message to a retired session (or a name no pane has) goes to the project it belongs to, as a message to the page key (the router rules it); the sender's reply says so in front of the usual
     answer ("held for the router — the router rules notice <id> …"), so it knows the receiver is retired and where the message went."""
     got = _message(project, raw, sender, auth, origin, fyi)
+    seen = _REDIRECTED.get()
+    if seen is not None:
+        seen.append(name)          # a pass-on in progress (`_message_body`) learns that its agent was retired
     return f"{name!r} is retired ({why}), so this went to its project {project!r} instead — {got}"
 
 
@@ -812,6 +821,8 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
         _want_for_front(to, idx, sender, auth, bool(origin))      # a want for a background agent when its front agent's project has none, whatever the gate or the fyi path then does with the message
         reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender)     # a front agent is given a turn only by what needs the person: the rest is passed to its builder, written onto an item, held, or refused (_gate_front)
         if isinstance(reported, _Pass):          # not for the person: the project's background agent takes it, and the reply says so
+            moved: list[str] = []          # filled by `_sent_instead` when the agent is retired: the message then went to its project, never to the agent
+            moved_token = _REDIRECTED.set(moved)
             try:
                 got = _message(reported.to, raw, sender, auth, origin, fyi, question, False)      # no handover naming: the text was not a hand-over of an item, so the agent is named in no item's needs and no mover is told
             except ToolError as e:
@@ -821,9 +832,15 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
                     raise reported.refusal from e
                 reported = _Hold(f"{reported.to}, the project's background agent, could not take it ({_clip_line(str(e), 120)})", reported.project, "", "unmarked-not-for-owner")
             else:
+                if moved:          # the agent is retired: the push reached no live agent, the router has the message (held for it), and the reply says no more than that
+                    _handled("unmarked-not-for-owner", "held")
+                    return (f"Not for {OWNER}, so {reported.front}, which takes only what {OWNER} has to do, did not get it, and the project's background agent {reported.to} could not take it: {got.rstrip().rstrip('.')}. "
+                            f"To reach {reported.front}, put {_FOR_OWNER} on the first line and name an open item of his.")
                 _handled("unmarked-not-for-owner", "passed-on")
                 return (f"Not for {OWNER}, so it went to {reported.to}, the project's background agent, instead of {reported.front}, which takes only what {OWNER} has to do and did not get it: {got.rstrip().rstrip('.')}. "
                         f"To reach {reported.front}, put {_FOR_OWNER} on the first line and name an open item of his.")
+            finally:
+                _REDIRECTED.reset(moved_token)
         if isinstance(reported, _Hold):
             hold_why, hold_project, hold_tail, hold_kind, reported = reported.why, reported.project, reported.tail, reported.kind, None
         if reported:

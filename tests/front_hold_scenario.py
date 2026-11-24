@@ -764,10 +764,13 @@ import contextlib, io, types
 from stackshot.core import call_log as _CL
 from stackshot.web import middleware as _wmw
 def call_rows(): return list(_CL.read(0, time.time() + 60))
+LAST_OUT = ""
 def logged(to, text, sender, name="message", **kw):
     """A message call as the tool makes it, run through the server's refusal log → (the call log's new row, the ToolError it ended in or None). The log line on stderr is swallowed."""
     n_ = len(call_rows())
-    async def nxt(ctx): return _messaging._message(to, text, sender, **kw)
+    async def nxt(ctx):
+        global LAST_OUT
+        LAST_OUT = _messaging._message(to, text, sender, **kw); return LAST_OUT      # the reply of the last call, for the tests that read what the sender was told
     ctx = types.SimpleNamespace(message=types.SimpleNamespace(name=name, arguments={"to": to, "text": text, "sender": sender}))
     err = None
     with contextlib.redirect_stderr(io.StringIO()):
@@ -1008,6 +1011,43 @@ for name_, text_ in (("asked", "no action needed?"), ("a question that quotes it
                      ("in a quote block", "> FYI the build is live"), ("inside a code span", "set the mode to `fyi` for this"), ("a curly quote", chr(0x201C) + "no action needed" + chr(0x201D)), ("inside the sentence", "the export, sent as an fyi so it waits, is late")):
     check(f"10c2: the phrase finder does not read {name_} as a note ({text_!r})", _own(text_) == [], _own(text_))
 check("10c3: _without_no_action takes the tail 'from you' out with its phrase (it would read as somebody named to act), and keeps the rest", _messaging._without_no_action("merged, no action needed from you.").replace(" ", "") == "merged,.", repr(_messaging._without_no_action("merged, no action needed from you.")))
+# a long run of emphasis or list marks before a phrase is read in linear time (a nested quantifier whose parts overlap read each run in exponentially many ways before the match failed: 2^n, and the GIL stalled the whole server)
+import signal
+class _TooSlow(Exception): pass
+def _own_timed(t, hard=2.0):
+    """(the phrases `_own_no_actions` finds, seconds taken); (None, seconds) when it was still running after `hard` seconds (an alarm interrupts the regex engine, so a slow pattern fails this test and does not hang it)."""
+    def _alarm(*_): raise _TooSlow()
+    old = signal.signal(signal.SIGALRM, _alarm); signal.setitimer(signal.ITIMER_REAL, hard); t0 = time.perf_counter()
+    try: return [m.group(0) for m in _messaging._own_no_actions(t)], time.perf_counter() - t0
+    except _TooSlow: return None, time.perf_counter() - t0
+    finally: signal.setitimer(signal.ITIMER_REAL, 0); signal.signal(signal.SIGALRM, old)
+_LEADS = (("star", "*"), ("underscore", "_"), ("tilde", "~"), ("backtick", "`"), ("star pairs", "**"), ("star and space", "* "), ("dash and space", "- "), ("item ids with a stop", "a123. "), ("numbers", "12. "), ("star, underscore, space", "*_ "))
+_AFTER = ("FYI the build is live", "x FYI the build is live", "the build is live, no action needed from you", "x no action needed", "Please look at it, sending it as an fyi so it waits")
+slow, differ = [], []
+for lname_, unit_ in _LEADS:
+    for after_ in _AFTER:
+        if len(slow) >= 3: break          # a slow pattern is shown by its first few cases: the rest is not waited for
+        short_, _t = _own_timed(unit_ * 3 + after_)
+        for n_ in (40, 200, 3900):
+            if len(slow) >= 3: break
+            long_, took_ = _own_timed(unit_ * (n_ // len(unit_)) + after_)
+            if long_ is None or took_ >= 0.5: slow.append((lname_, n_, after_[:12], round(took_, 2), long_ is None))
+            elif long_ != short_: differ.append((lname_, n_, after_[:12], long_, short_))
+check("10j1: a lead of 40, 200 or 3900 characters of emphasis marks, bullets, numbers or item ids before a phrase (or before other text) is read in under half a second", not slow, slow[:6])
+check("10j2: …and gives the answer its short form gives (the length of the lead changes nothing)", not differ, differ[:4])
+check("10j3: …and the short forms are the ones the finder reads: a lead before a phrase is a note, before other text is none",
+      _own("*** FYI the build is live") == ["FYI"] and _own("_ _ _ no reply needed") == ["no reply needed"] and _own("a123. a123. a123. FYI the build is live") == ["FYI"] and _own("*** x FYI the build is live") == [] and _own("a123. a123. x FYI") == [],
+      (_own("*** FYI the build is live"), _own("a123. a123. a123. FYI the build is live"), _own("*** x FYI the build is live")))
+_many, _took = _own_timed("FYI " * 975); _many2, _took2 = _own_timed("done.\nFYI " * 400)
+check("10j4: a message full of phrases (up to the message limit) is read in under a second too", _many is not None and _took < 1.0 and _many2 is not None and _took2 < 1.0 and len(_many2) == 400, (_took, _took2, len(_many2 or [])))
+_lead = lambda t: bool(_messaging._LINE_LEAD.match(t))
+check("10j5: the lead's digit runs read as the old pattern read them (an id with a stop or a bracket after its digits, a number after an id), and a run no reading takes is no lead",
+      all(_lead(t) for t in ("a12)", "a1234567.", "a12 3.", "(1) a12:", "x" + chr(35) + "123456789.", "a12(3)", "a123. a123. a123.", "* * a1 - 2) _")) and not any(_lead(t) for t in ("a1234567890.", "a1234567", "a12 3", "ab12", "a1234567)x", "-- ")),
+      [(t, _lead(t)) for t in ("a12)", "a1234567.", "a12 3.", "a1234567890.", "a1234567", "a12 3", "ab12", "-- ")])
+# an item id that follows other words of an earlier sentence still leads the phrase (`_LEAD_ID`: "Done. a12 FYI ..."), and one that follows words in the same sentence does not
+check("10j6: a phrase after a plain item id that opens its own sentence is a note, whatever came before in the text ('Done. a12 FYI ...', 'merged!\nx#12 no action needed')",
+      _own("Done. a12 FYI the build is live") == ["FYI"] and _own("It is merged! x" + chr(35) + "12 no action needed") == ["no action needed"] and _own("Merged, tested: a12 for the record") == ["for the record"], (_own("Done. a12 FYI the build is live"), _own("Merged, tested: a12 for the record")))
+check("10j7: …and one that follows an item id in the middle of a sentence is none ('see a12 FYI later')", _own("Please see a12 FYI later") == [] and _own("The build of a12 no action needed") == [], (_own("Please see a12 FYI later"), _own("The build of a12 no action needed")))
 for name_, text_ in (("a clause with its tail", "a1: the build is live, no action needed from you"), ("a clause with the owner's name", "a1: merged; no action needed from Oliver"), ("bold at the start", "**FYI** a1 is merged"), ("a code span at the start", "`FYI` a1 is merged"),
                      ("a bullet", chr(0x2022) + " FYI a1 is merged"), ("a number", "(1) FYI a1 is merged"), ("a bracket and a dash", "a1 (merged) " + chr(0x2014) + " no action needed from you"), ("a curly apostrophe", "a1 is merged, it" + chr(0x2019) + "s an FYI")):
     fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\n" + text_, BACK); settle()
@@ -1100,6 +1140,31 @@ n_ = len(call_rows())
 st_, body_ = _rt_client._client_post(MACH, "message", {"to": FRONT, "text": "the PR is merged, the suites pass.", "sender": "deploy-watch"}); settle()
 new = call_rows()[n_:]
 check("10i3: …a script's note is held for the front agent and counted the same way (`held`)", st_ == 200 and len(new) == 1 and new[0].get("outcome") == "handled" and new[0].get("how") == "held" and new[0].get("kind") == "no-action-note", (st_, body_, new))
+
+# the project's background agent is retired: the pass-on reached no live agent, so the reply does not say it went there and the call is counted as held
+gate_open(); fresh(); n0 = len(pushes())
+_dead_real = _messaging._dead_recipient
+def _builder_retired(to, cands, idx):
+    if to == BACK or any(r.get("name") == BACK for r in cands): raise _messaging._Retired(f"Refused: {BACK!r} cannot receive this (a retired name-line session, its pane gone)", BACK, KEY, "a retired name-line session, its pane gone")
+    return _dead_real(to, cands, idx)
+_messaging._dead_recipient = _builder_retired
+try: row_, err_ = logged(FRONT, "can you look at the export page when you have a minute?", "home-beta"); out = LAST_OUT; settle()
+finally: _messaging._dead_recipient = _dead_real
+check("10k1: a pass-on whose background agent is retired does not say it went to that agent: the reply says the agent could not take it and that it is retired", err_ is None and out.startswith("Not for Oliver, so work-osprey-main, which takes only what Oliver has to do, did not get it")
+      and f"went to {BACK}," not in out and "is retired" in out and f"put {mark()} on the first line" in out, out)
+check("10k2: …and the call is counted as handled by being held (never `passed-on`), with the kind of the refusal it replaced", row_ is not None and row_["ok"] is True and row_.get("outcome") == "handled" and row_.get("how") == "held" and row_.get("kind") == "unmarked-not-for-owner", row_)
+fresh(); gate_open(); row_, err_ = logged(FRONT, "can you look at the export page when you have a minute?", "home-beta"); settle()
+check("10k3: …while the same message with a live agent is still passed on, and counted so", err_ is None and LAST_OUT.startswith("Not for Oliver, so it went to work-osprey-x") and row_.get("how") == "passed-on", (LAST_OUT, row_))
+
+# a call that ends in a refusal never carries a handled mark, whatever fixes it holds (core/call_log.py `record`)
+_hmark = [(_CL.HANDLED + "unmarked-not-for-owner:passed-on", "")]
+n_ = len(call_rows()); _CL.record("message", False, sender="home-beta", why="Refused: no", fixes=_hmark, to=FRONT, kind="no-session", text="hello"); refused_row = call_rows()[n_:]
+check("10l1: a refused message call that holds a handled mark is logged as refused: no `outcome`, no `how`, its own kind", len(refused_row) == 1 and refused_row[0]["ok"] is False and "outcome" not in refused_row[0] and "how" not in refused_row[0] and refused_row[0].get("kind") == "no-session", refused_row)
+n_ = len(call_rows()); _CL.record("message", True, sender="home-beta", fixes=_hmark, to=FRONT); done_row = call_rows()[n_:]
+check("10l2: …and one that went through with it is a handled call (the control)", len(done_row) == 1 and done_row[0]["ok"] is True and done_row[0].get("outcome") == "handled" and done_row[0].get("how") == "passed-on" and done_row[0].get("kind") == "unmarked-not-for-owner", done_row)
+n_ = len(call_rows()); _CL.record("update", True, item="a1", sender="home-beta", fixes=_hmark); other_row = call_rows()[n_:]
+check("10l3: …and a handled mark on another tool's call counts for nothing", not other_row or ("outcome" not in other_row[0] and "how" not in other_row[0]), other_row)
+
 fresh()
 
 fresh()
