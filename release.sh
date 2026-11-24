@@ -1258,7 +1258,7 @@ q_write() {   # the array q, replaced whole; no file when it is empty
     printf '%s\n' "${q[@]}" > "$QUEUE.$$" && mv -f "$QUEUE.$$" "$QUEUE" || { rm -f "$QUEUE.$$"; say "could not write the release queue $QUEUE"; return 1; }
 }
 q_started_list() { grep -E '^[0-9]+$' "$QUEUE.started" 2>/dev/null; return 0; }   # the PRs whose release the queue started and has not handed off yet
-q_is_started() { [ -n "${1:-}" ] && q_started_list | grep -qx "$1"; }
+q_is_started() { [ -n "${1:-}" ] && q_started_list | grep -x "$1" >/dev/null; }   # grep reads the list to the end (not -q): under pipefail a grep that stops at its match could end the writer with SIGPIPE
 q_mark_started() { echo "$1" >> "$QUEUE.started"; }
 q_unmark_started() {   # PR $1 is not one the queue is running (any more)
     [ -f "$QUEUE.started" ] || return 0
@@ -1659,7 +1659,7 @@ print(s + (" " + oid if oid else ""))' 2>/dev/null
     if [ ${#addprs[@]} -gt 0 ]; then
         for m in "${addprs[@]}"; do mqh_set "$m"; done   # before the add: from here the old path refuses these PRs
         out="$(timeout "$MQ_ON_ADD_TIMEOUT" salamander mq add "${addprs[@]}" --repo "$REPO" 2>&1 4>&- 6>&- 7>&- 8>&- 9>&-)"; rc=$?
-        if [ $rc -ne 0 ] || printf '%s\n' "$out" | grep -q '^salamander mq: '; then
+        if [ $rc -ne 0 ] || printf '%s\n' "$out" | grep '^salamander mq: ' >/dev/null; then
             wait_abort "mq add" "salamander mq add ${addprs[*]} $([ $rc -eq 124 ] && echo "took more than ${MQ_ON_ADD_TIMEOUT}s" || echo "exited $rc"): $(printf '%s' "$out" | tail -n 2 | tr '\n' ' ' | cut -c1-300)"
         else
             gsay "merge queue: PRs ${addprs[*]} handed over in one call ($(printf '%s' "$out" | tail -n 1 | cut -c1-160 | mq_plain)); waiting for each"
@@ -1676,7 +1676,7 @@ print(s + (" " + oid if oid else ""))' 2>/dev/null
                     out="$(timeout $((slice + 30)) salamander mq wait "$m" --repo "$REPO" --timeout "$slice" 2>&1 4>&- 6>&- 7>&- 8>&- 9>&-)"; rc=$?
                     line="$(printf '%s\n' "$out" | grep -m1 -E '^PR [0-9]+[ :]' | cut -c1-300)"   # the verdict line: a line before it on stderr (the driver started again) is not it
                     [ -n "$line" ] || line="$(printf '%s\n' "$out" | head -n 1 | cut -c1-300)"
-                    if printf '%s\n' "$out" | grep -q '^salamander mq: '; then   # salamander's own error (a host file, a state file), not a verdict on the PR, even at exit 1
+                    if printf '%s\n' "$out" | grep '^salamander mq: ' >/dev/null; then   # salamander's own error (a host file, a state file), not a verdict on the PR, even at exit 1
                         wait_abort "mq wait" "salamander mq wait $m: $(printf '%s' "$out" | grep '^salamander mq: ' | head -n 1 | cut -c1-300)"; break 2
                     fi
                     case $rc in
@@ -1694,7 +1694,7 @@ print(s + (" " + oid if oid else ""))' 2>/dev/null
                            case $ar in 0) ;; 2) unk+=("$m"); unk_why="${unk_why:+$unk_why; }PR #$m: $(printf '%s' "${line:-no reason given}" | mq_plain)" ;;   # unresolved, not failed: it may be merged. Handled with the stop of the queue below (kept first in the release queue, its marker kept, not dropped)
                                        *) member_fail "$m" "merge queue" "the queue did not merge PR #$m: ${line:-no reason given}" ;; esac
                            break ;;   # "pull request is merged": the queue merged it in an earlier push, it is on main
-                        2) if printf '%s' "$out" | grep -q 'gave up waiting'; then   # this slice ran out: is the queue still able to merge?
+                        2) if printf '%s' "$out" | grep 'gave up waiting' >/dev/null; then   # this slice ran out: is the queue still able to merge?
                                st="$(timeout 30 salamander mq status --json --repo "$REPO" 2>/dev/null 4>&- 6>&- 7>&- 8>&- 9>&-)" || st=""
                                why_q="$(printf '%s' "$st" | python3 -c '
 import json, sys
@@ -1703,7 +1703,7 @@ print(("paused: " + str(p.get("reason", ""))) if p else ("blocked: " + str(b.get
                                [ -z "$why_q" ] || { wait_abort "mq" "the merge queue is $why_q, so PR #$m cannot be merged"; break 2; }
                                continue
                            fi
-                           if printf '%s' "$out" | grep -q 'the queue is blocked'; then wait_abort "mq" "the merge queue is blocked ($(printf '%s' "$line" | mq_plain)), so PR #$m cannot be merged"; break 2; fi
+                           if printf '%s' "$out" | grep 'the queue is blocked' >/dev/null; then wait_abort "mq" "the merge queue is blocked ($(printf '%s' "$line" | mq_plain)), so PR #$m cannot be merged"; break 2; fi
                            wait_abort "mq wait" "salamander mq wait $m: $line"; break 2 ;;
                         *) wait_abort "mq wait" "salamander mq wait $m exited $rc ($(printf '%s' "$line" | mq_plain)): not a verdict the release can use"; break 2 ;;
                     esac
@@ -2157,9 +2157,9 @@ case "${1:-}" in
         [ -n "$pr" ] || { echo "no release yet"; exit 0; }
         echo "unit stackshot-release-$pr: $(systemctl --user is-active "stackshot-release-$pr.service" 2>/dev/null || echo finished)"
         tail -n 15 "$LOGDIR/pr-$pr.log" 2>/dev/null; exit 0 ;;
-    --run-group) shift; [ $# -ge 2 ] && ! printf '%s\n' "$@" | grep -qvE '^[0-9]+$' && [ -z "$(printf '%s\n' "$@" | sort | uniq -d)" ] || { echo "usage: release.sh --run-group <pr> <pr> [<pr>...]  (two or more different PR numbers)" >&2; exit 2; }; run_group "$@"; exit $? ;;   # the steps themselves (what the group's unit runs; THE MERGE QUEUE, ON)
+    --run-group) shift; [ $# -ge 2 ] && ! printf '%s\n' "$@" | grep -vE '^[0-9]+$' >/dev/null && [ -z "$(printf '%s\n' "$@" | sort | uniq -d)" ] || { echo "usage: release.sh --run-group <pr> <pr> [<pr>...]  (two or more different PR numbers)" >&2; exit 2; }; run_group "$@"; exit $? ;;   # the steps themselves (what the group's unit runs; THE MERGE QUEUE, ON)
     --group)   # mode on: the PRs the release queue holds, released as one group through the merge queue (what the queue starts when two or more wait). Starts the unit and returns at once, as `release.sh N` does
-        shift; [ $# -ge 2 ] && ! printf '%s\n' "$@" | grep -qvE '^[0-9]+$' && [ -z "$(printf '%s\n' "$@" | sort | uniq -d)" ] || { echo "usage: release.sh --group <pr> <pr> [<pr>...]  (two or more different PR numbers; needs the merge queue in mode on)" >&2; exit 2; }
+        shift; [ $# -ge 2 ] && ! printf '%s\n' "$@" | grep -vE '^[0-9]+$' >/dev/null && [ -z "$(printf '%s\n' "$@" | sort | uniq -d)" ] || { echo "usage: release.sh --group <pr> <pr> [<pr>...]  (two or more different PR numbers; needs the merge queue in mode on)" >&2; exit 2; }
         [ $# -le "$MQ_HANDOFF_MAX" ] || { echo "release.sh --group: $# PRs are more than one hand-off ($MQ_HANDOFF_MAX at most, release.sh's own number): hand over $MQ_HANDOFF_MAX at most" >&2; exit 2; }
         if systemctl --user is-active --quiet "stackshot-release-$1.service" 2>/dev/null; then echo "release of PR #$1 is already running (release.sh --status $1)"; exit 1; fi
         systemd-run --user --quiet --collect --unit "stackshot-release-$1" -p WorkingDirectory="$HERE" \

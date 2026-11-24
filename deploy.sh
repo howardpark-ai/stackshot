@@ -165,7 +165,7 @@ plan=""; [ $server = 1 ] && plan="$plan stackshot.service"; [ $minute = 1 ] && m
 echo "restarts:${plan:- none}"
 if [ $swap = 1 ]; then echo "note: stackshot-minute.service is installed but [runner] process reads \"inline\": install.sh removes it, and the server restarts in this deploy, since one started at \"unit\" runs no runner of its own"; fi
 if [ $MINUTE_DROP = 1 ]; then echo "note: $target predates stackshot-minute.service, whose removal this deploy runs first (install.sh minute-off): its own deploy.sh knows nothing of it, and the older server's runner starts with its restart"; fi
-if [ -n "$ROLLBACK" ] && [ -z "$FROM" ] && ! $G show "$NEW:deploy.sh" 2>/dev/null | grep -q DEPLOY_ROLLED_BACK_FROM; then
+if [ -n "$ROLLBACK" ] && [ -z "$FROM" ] && ! $G show "$NEW:deploy.sh" 2>/dev/null | grep DEPLOY_ROLLED_BACK_FROM >/dev/null; then   # not grep -q: it stops at its first match, git show then gets SIGPIPE on the rest of the file, and pipefail turns that into a false refusal; so grep reads to the end
     echo "deploy refused: the deploy.sh of $target predates the rollback's second step; roll back by hand" >&2; exit 1
 fi
 [ $DRY = 1 ] && exit 0
