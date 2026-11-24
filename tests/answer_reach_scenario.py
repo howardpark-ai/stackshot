@@ -17,6 +17,7 @@ Fixture data, no live store, no network, no tmux: the push is a fake script that
  11  after his answer the project's builder moves an item whose needs name a front agent (the front agent stays in needs and is handed a held line, never a push); a project with no builder, a builder that cannot take the item,
      a stored then that is the front agent, and a comment, keep what they had or follow the same rule
  12  his answer or his step starts the turn of the front agent that moves the item next (a pick, a Done with no note, a Done with a note, a note on the step), him away or there; a front agent that only keeps up with the item stays on a held line
+ 13  the shape of an incident (a pick on an item whose then is a front agent that is also its contact, a builder in the project): one line that starts the front agent's turn, none held
 
     tests/run-suite answer_reach        → exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, subprocess
@@ -446,6 +447,27 @@ item(128, mover="Oliver", state="your-step", step=STEP, needs=["demo-lead"], con
 out, got, kept = answer("a128", "", "", "done")
 check("12 a front agent that only keeps up with the item (its contact, or named in needs while the builder moves it) stays on a held line: no push", out == "done" and "demo-main" not in got and "did his step on a128" in kept.get("demo-main", "") and "demo-lead" not in got and "did his step on a128" in kept.get("demo-lead", ""), (out, got, kept))
 check("12 ...and the builder that moves the item is pushed it", len(got.get("demo-builder", [])) == 1 and "It's yours now" in got["demo-builder"][0], got)
+
+# ================================================================ 13. the shape of an incident: a pick on an item whose then is a front agent that is also its contact, in a project with a builder
+# A decision with options; the stored then is a front agent that is also the item's contact; the project has a builder; the front agent's own step is first in next and his step comes after it. His pick hands the item to
+# the front agent: it is pushed one line that starts its turn (never an fyi or a held line, and no second line for the contact that is the same session). Whether the line then reaches the pane is the inbox's business (a hold
+# on the session's inbox keeps every line, this one too; the answer's own delivery cannot see it).
+NEXT13 = "demo-lead: remove the thing and check it is gone, then give Oliver the pairing step\nOliver: pair the phone again"
+for who in FRONTS: unstamp(who)
+item(130, mover="Oliver", then="demo-lead", contact="demo-lead", needs=["decision"], ask=ASK, options=OPTS, next=NEXT13)
+out, got, kept = answer("a130", "Ship", "", "answer")
+meta = rd(130)["metadata"]
+check("13 a pick on an item whose then is a front agent that is also its contact, with a builder in the project: the front agent moves the item, and is pushed exactly one line, 'It's yours now', marked for him",
+      out == "decision" and meta.get("mover") == "demo-lead" and len(got.get("demo-lead", [])) == 1 and "It's yours now" in got["demo-lead"][0] and got["demo-lead"][0].startswith("[for Oliver] "), (out, meta, got, kept))
+check("13 ...no held line for it as the contact (the same session is not told twice), and the builder, not named, is told nothing", "demo-lead" not in kept and "demo-builder" not in got, (got, kept))
+check("13 ...the pending answer lists the front agent", told_record(130) == [U["demo-lead"]], told_record(130))
+item(131, mover="Oliver", then="demo-lead", contact="demo-lead", state="your-step", step=STEP, needs=["decision", "demo-builder"], ask=ASK, options=OPTS, next=NEXT13)      # the ask stands beside his step
+out, got, kept = answer("a131", "Ship", "", "answer")
+check("13 the same with his own step open beside the ask (state your-step): the front agent is pushed one line and none is held for it", out == "decision" and len(got.get("demo-lead", [])) == 1 and "demo-lead" not in kept, (out, rd(131)["metadata"], got, kept))
+stamp("demo-lead", 60); item(132, mover="Oliver", then="demo-lead", contact="demo-lead", needs=["decision"], ask=ASK, options=OPTS, next=NEXT13)
+out, got, kept = answer("a132", "Ship", "", "answer")
+check("13 ...also with him there at its pane: one push, no held line", out == "decision" and len(got.get("demo-lead", [])) == 1 and "demo-lead" not in kept, (out, got, kept))
+unstamp("demo-lead")
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)
