@@ -299,11 +299,12 @@ def fake_run(argv, *a, **k):
     return real_run(argv, *a, **k)
 subprocess.run = fake_run
 try:
-    out = _messaging._message(S["main"], _wt_text._FOR_OWNER + " hello", "home-sparrow-docs")
+    (T / "store/a/500.json").write_text(json.dumps({"id": "500", "subject": "[home] hello", "description": "A thing. It lives here. Done when done.", "status": "open", "metadata": {"owner": "home-sparrow-docs", "then": "home-sparrow-docs", "needs": "decision", "project": "projects/sparrow"}, "updated": 1.0}))      # a marked message must name an open item of his
+    out = _messaging._message(S["main"], _wt_text._FOR_OWNER + " a500 hello", "home-sparrow-docs")
     to_arg = sent[-1][sent[-1].index("--from") + 2]
     check("message to a sala id: push.py is handed the sala id as written (the inbox stores the permanent id; push.py turns it into the session's name as the address)", to_arg == S["main"] and out.startswith("delivered"), (sent[-1][:5], out))
     sent.clear()
-    out = _messaging._message("home-sparrow-docs", _wt_text._FOR_OWNER + " hello back", S["main"])
+    out = _messaging._message("home-sparrow-docs", _wt_text._FOR_OWNER + " a500 hello back", S["main"])
     check("message from a sala id: accepted as the sender, labelled by name", out.startswith("delivered") and "home-sparrow-main" in sent[-1][sent[-1].index("--from") + 1], (sent, out))
 finally:
     subprocess.run = real_run

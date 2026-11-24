@@ -4,7 +4,7 @@ reach (cloud → pane, cloud → cloud, another machine → the server box); on 
 Right calls (to = the target's session id (cse_… for a cloud/Cowork
 session, the transcript UUID for a pane), its pane name, or projects/<slug>): ask a front agent (a session {{OWNER}}
 talks to; the sessions tool shows each role) for input {{OWNER}} must give: message(to="widgets-main", sender="my-x",
-text="{{FOR_OWNER}}\nDecide whether the export ships on Friday; I would ship it."); a plain result (a build is done,
+text="{{FOR_OWNER}}\nboard#N: decide whether the export ships on Friday; I would ship it."); a plain result (a build is done,
 it is live, an FYI): message(to="projects/widgets", sender="my-x", text="PR 12 is live", fyi=true), or put it on the
 item (update, complete); a question to a background agent, the id cited only for context:
 message(to="widgets-builder", sender="my-x", text="Does `board#N` need the export in the nightly run?"); a hand-off of
@@ -13,7 +13,7 @@ message(to="widgets-builder", sender="my-x", text="board#N: the design is done, 
 then names that agent in the item's needs, unless that would leave the item with a second mover (another session
 already moves it, or it waits on a decision): the reply says so in one line: hand the item over with
 update(mover=<agent>), which tells the new mover itself. An item id cited only for context, not handed over, goes in backticks, since a plain-word id names the receiver on that item. A front agent is given a turn only by what {{OWNER}} has to do: its
-message carries {{FOR_OWNER}} on its first line (except fyi=true, below) and starts a turn only while he talks with that agent or has it in tell_him of an item it names; else it goes to that item's builder or is refused, unless a sibling front agent quotes his words on a line `Acked-by: "<verbatim>" (time, session <name>)`, checked as said is: then it is held for its next turn. A background agent's hand-back, a done, taken or no-action note, is tested first and is never an answer: written onto the item it names, else refused. Any other unmarked message is delivered only as
+message carries {{FOR_OWNER}} on its first line (except fyi=true, below) and names, as a plain word, an open item of his (needs hold decision, or the step is his, or he asked it to tell him about it); naming none, it is held for the agent's next turn and starts none: put his step on an item and name it. It starts a turn only while he talks with that agent or has it in tell_him of an item it names; else it goes to that item's builder or is refused, unless a sibling front agent quotes his words on a line `Acked-by: "<verbatim>" (time, session <name>)`, checked as said is: then it is held for its next turn. A background agent's hand-back, a done, taken or no-action note, is tested first and is never an answer: written onto the item it names, else refused. Any other unmarked message is delivered only as
 the answer to a question it wrote to you, while he is in that conversation (30 minutes); later
 it goes onto the item it names, else is held; so is a front peer's or the background agent's own. Any other is refused, naming
 the project's background agent (none: held). A front agent marks a question with question=true; only a reply to it, within a day, is an answer; a `?` marks nothing. A done, taken or
@@ -46,7 +46,7 @@ relaunch hold or a pause, is not reported
 Who gets it: a session name or id, or projects/<slug>, which the router rules.
 
 ## param text
-The message, at most {{MSG_MAX}} characters. To a front agent its first line is {{FOR_OWNER}}, then what is needed; a
+The message, at most {{MSG_MAX}} characters. To a front agent its first line is {{FOR_OWNER}}, then the item's plain id and what is needed; a
 plain result goes to projects/<slug> or onto the item.
 
 ## param sender

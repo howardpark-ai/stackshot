@@ -213,14 +213,14 @@ rep = _messaging._message(A, f"{MK} a1 and a2: both merged", "osprey-x"); settle
 check("1b: …by the front agent's transcript id too, and two items get a line each", rep.startswith("Not delivered") and "a1, a2" in rep and [g for g, _ in saved[s0 + 1:]] == ["a1", "a2"], (rep, saved[s0 + 1:]))
 check("1c: a builder's sender given as its transcript id is a builder too", _messaging._message("osprey-main", f"{MK} a3: merged", X).startswith("Not delivered"))
 p0, s0 = len(pushes()), len(saved)
-NEG = (("a question mark", f"{MK} a1: PR 18 is live. Merge it?"), ("a question mark ending a URL", f"{MK} a1: merged, log at https://x.example/log?"),
-       ("needs: decision", f"{MK} a1: needs: decision on the wording"), ("an opening instruction", f"{MK} Take a1"),
-       ("an ask word", f"{MK} a1: PR 18 is live. Please look at the page."), ("awaiting a merge", f"{MK} a1: PR 18 awaits your merge"),
-       ("a request for review", f"{MK} a1: ready for Oliver's review"), ("a decision word", f"{MK} a1: two options for the page; I recommend A"),
-       ("a step only he can take", f"{MK} a1: you need to log in on box-c, then it runs"), ("a fact without an ask word", f"{MK} a1: the deploy broke the site; rolled back"),
-       ("a Japanese ask", f"{MK} a1: 承認をお願いします"), ("a Japanese need", f"{MK} a1: 実装が終わり、確認が必要です"),
-       ("a plan", f"{MK} a1: merged. I deploy after the suites pass."), ("a prose sentence that is no status shape", f"{MK} a1: the footer line stays."),
-       ("a fenced block", f"{MK} a1: merged\n```\nsudo systemctl restart x\n```"))
+NEG = (("a question mark", f"{MK} a41: PR 18 is live. Merge it?"), ("a question mark ending a URL", f"{MK} a41: merged, log at https://x.example/log?"),
+       ("needs: decision", f"{MK} a41: needs: decision on the wording"), ("an opening instruction", f"{MK} Take a41"),
+       ("an ask word", f"{MK} a41: PR 18 is live. Please look at the page."), ("awaiting a merge", f"{MK} a41: PR 18 awaits your merge"),
+       ("a request for review", f"{MK} a41: ready for Oliver's review"), ("a decision word", f"{MK} a41: two options for the page; I recommend A"),
+       ("a step only he can take", f"{MK} a41: you need to log in on box-c, then it runs"), ("a fact without an ask word", f"{MK} a41: the deploy broke the site; rolled back"),
+       ("a Japanese ask", f"{MK} a41: 承認をお願いします"), ("a Japanese need", f"{MK} a41: 実装が終わり、確認が必要です"),
+       ("a plan", f"{MK} a41: merged. I deploy after the suites pass."), ("a prose sentence that is no status shape", f"{MK} a41: the footer line stays."),
+       ("a fenced block", f"{MK} a41: merged\n```\nsudo systemctl restart x\n```"))
 for name, text in NEG:
     rep = _messaging._message("osprey-main", text, "osprey-x"); settle()
     check(f"1d negative: a builder's message with {name} still reaches the front agent", rep.startswith("delivered"), (rep, text))
@@ -228,29 +228,29 @@ check(f"…all {len(NEG)} were pushed to osprey-main and none was written onto t
 p0, s0 = len(pushes()), len(saved)
 rep = _messaging._message("osprey-main", f"{MK} a7: PR 18 is live", "osprey-x"); settle()
 check("1d2 negative: a plain report on an item that waits on his decision (needs: decision) is delivered", rep.startswith("delivered") and len(to("osprey-main", p0)) == 1 and not [x for x in saved[s0:] if "reported to" in x[1]], (rep, saved[s0:]))
-rep = _messaging._message("osprey-main", f"{MK} a8: PR 18 is live", "osprey-x"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a8 a41: PR 18 is live", "osprey-x"); settle()
 check("…and one on an item whose needs name the front agent is delivered", rep.startswith("delivered") and len(to("osprey-main", p0)) == 2 and not [x for x in saved[s0:] if "reported to" in x[1]], (rep, saved[s0:]))
 rep = _messaging._message("osprey-front2", f"{MK} a8: PR 18 is live", "osprey-x"); settle()
 check("…but a8 names osprey-main alone, so the same report to the other front agent is held", rep.startswith("Not delivered") and saved[-1][0] == "a8", (rep, saved[-1:]))
 rep = _messaging._message("osprey-main", f"{MK} a1 and a7: PR 18 is live", "osprey-x"); settle()
 check("…a report naming two items is delivered when either waits on him", rep.startswith("delivered"), rep)
 p0, s0 = len(pushes()), len(saved)
-rep = _messaging._message("osprey-main", f"{MK} the build is live, the suites pass", "osprey-x"); settle()
-check("1e negative: a report that names no item is delivered (nowhere to put it)", rep.startswith("delivered") and len(to("osprey-main", p0)) == 1 and not [x for x in saved[s0:] if "reported to" in x[1]], (rep, saved[s0:]))
-rep = _messaging._message("osprey-main", f"{MK} `a1` is live", "osprey-x"); settle()
-check("…an id in backticks names nothing (the cited-for-context form): delivered", rep.startswith("delivered"), rep)
-rep = _messaging._message("osprey-main", f"{MK} a1, a2, a3 and a4 are all merged", "osprey-x"); settle()
-check("…a report naming four items is delivered (it is not about one thing)", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], (rep, saved[s0:]))
-rep = _messaging._message("osprey-main", f"{MK} board#{BID_A} is merged", "osprey-x"); settle()
-check("…an id that names no item names nothing: delivered", rep.startswith("delivered"), rep)
+rep = why(lambda: _messaging._message("osprey-main", f"{MK} the build is live, the suites pass", "osprey-x")); settle()
+check("1e negative: a report that names no item is not written anywhere (nowhere to put it) and, naming no item of his, starts no turn (this suite wires no hold, so it is refused, as a message the hold cannot take is)", (rep.startswith("Refused: osprey-main is a front agent") and "could not be held" in rep) and len(to("osprey-main", p0)) == 0 and not [x for x in saved[s0:] if "reported to" in x[1]], (rep, saved[s0:]))
+rep = why(lambda: _messaging._message("osprey-main", f"{MK} `a1` is live", "osprey-x")); settle()
+check("…an id in backticks names nothing (the cited-for-context form): no turn, no item of his is named", (rep.startswith("Refused: osprey-main is a front agent") and "could not be held" in rep), rep)
+rep = why(lambda: _messaging._message("osprey-main", f"{MK} a1, a2, a3 and a4 are all merged", "osprey-x")); settle()
+check("…a report naming four items is not written onto them (it is not about one thing) and none is his: no turn", (rep.startswith("Refused: osprey-main is a front agent") and "could not be held" in rep) and not [x for x in saved[s0:] if "reported to" in x[1]], (rep, saved[s0:]))
+rep = why(lambda: _messaging._message("osprey-main", f"{MK} board#{BID_A} is merged", "osprey-x")); settle()
+check("…an id that names no item names nothing: no turn, no item of his is named", (rep.startswith("Refused: osprey-main is a front agent") and "could not be held" in rep), rep)
 p0, s0 = len(pushes()), len(saved)
-rep = _messaging._message("osprey-main", f"{MK} a1 is merged", "home-beta"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a41 is merged", "home-beta"); settle()
 check("1f negative: the same report from a session that is no background agent is delivered as before", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
-rep = _messaging._message("osprey-main", f"{MK} a1 is merged", "osprey-front2"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a41 is merged", "osprey-front2"); settle()
 check("…and from another front agent", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
 rep = _messaging._message("osprey-x", "a1 is merged, the suites pass", "home-beta"); settle()
 check("…a message to a background agent is never held back", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
-rep = _messaging._message("osprey-main", f"{MK} a1 is live", "nightly-job", origin="testbox"); settle()
+rep = _messaging._message("osprey-main", f"{MK} a41 is live", "nightly-job", origin="testbox"); settle()
 check("…a script's message (origin) is not a builder's", rep.startswith("delivered") and not [x for x in saved[s0:] if "reported to" in x[1]], rep)
 rep = _messaging._message("osprey-main", f"{MK} a1: Done (010cc0d), the unit is live. Taken.", "osprey-x"); settle()
 check("1f2: a builder's marked 'Done (sha)' / 'Taken' note on an item is written onto it, not delivered", rep.startswith("Not delivered: written onto a1"), rep)

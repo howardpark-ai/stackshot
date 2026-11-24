@@ -72,6 +72,7 @@ def publish(pages=None, **changes):
 publish()
 RECORD = {"schema": 1, "ids": {}, "pending_agents": {}, "marks": {}}
 (T / "store/project-record.json").write_text(json.dumps(RECORD))
+(T / "store/a/50.json").write_text(json.dumps({"id": "50", "subject": "[home] export page", "description": "A thing. It lives here. Done when done.", "status": "open", "metadata": {"owner": "home-beta", "then": "home-beta", "needs": "decision", "project": "projects/solo"}, "updated": 1.0}))      # an item that waits on his decision: a marked message must name one
 NAMES = ("solo-main", "other-main", "other-desk", "third-main", "alpha-main", "alpha-builder", "duo-main", "home-beta", "side-main", "comp-main", "slackonly-bot", "kept-main", "solo")
 U = {n: "%08x-0000-4000-8000-%012x" % (i, i) for i, n in enumerate(NAMES, 1)}
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
@@ -275,7 +276,7 @@ def by_name(label, text, want, sender="home-beta", starts=None, **kw):
     reset(enabled=False); r_off = msg(SOLO, text, sender, **kw)
     check(f"3j: the message tool, {label}: {'a want is recorded' if want else 'no want'}, and the reply is the one the switch off gives",
           n_on == ([SOLO_KEY] if want else []) and r_on == r_off and (starts is None or r_on.startswith(starts)) and not STATE.exists(), (r_on, n_on, r_off))
-by_name("a marked message the person is not with the agent for (refused, nothing held)", f"{_messaging._FOR_OWNER}\nplease look at the export page", True, starts="Refused")
+by_name("a marked message the person is not with the agent for (refused, nothing held)", f"{_messaging._FOR_OWNER} a50\nplease look at the export page", True, starts="Refused")
 by_name("a marked message that says nothing is needed from him (refused as a note)", f"{_messaging._FOR_OWNER}\nthe export page is fine, no action needed", True, starts="Refused")
 by_name("a done or no-action note with no mark (refused: write it on the item)", "the export page is fine, no action needed", True, starts="Refused")
 by_name("a message with needs: decision away from the first line (refused: the mark goes on the first line)", "the export page reads fine\nit now needs: decision", True, starts="Refused")
@@ -306,7 +307,7 @@ AUDIT_ID, BETA_ID = U["audit"], U["home-beta"]
 check("3q0: the fixture's audit agent is a session of the fleet under the configured audit agent's name (the session id below is its)", _messaging._sr._sessions_index().get(AUDIT_ID, {}).get("name") == _cfg.audit_agent() != "", _messaging._sr._sessions_index().get(AUDIT_ID))
 by_name("the audit agent's own session by its SESSION ID, unmarked", "the export page reads fine", False, sender=AUDIT_ID)
 by_name("…the same, an fyi", "the export page reads fine", False, fyi=True, sender=AUDIT_ID)
-by_name("…the same, marked for the person (refused as it always was)", f"{_messaging._FOR_OWNER}\nthe export page needs a date", False, sender=AUDIT_ID, starts="Refused")
+by_name("…the same, marked for the person, naming an item of his (refused as it always was)", f"{_messaging._FOR_OWNER} a50\nthe export page needs a date", False, sender=AUDIT_ID, starts="Refused")
 by_name("the session id of a session that is no audit (a home session), unmarked, still records a want", "the export page reads fine", True, sender=BETA_ID)
 by_name("…the same, an fyi", "the export page reads fine", True, fyi=True, sender=BETA_ID)
 routed("the audit agent's session by bare id on the router path (a notice's who is an id)", SOLO_KEY, TXT, "", False, "archived", ln=CALL, who=AUDIT_ID)
@@ -374,7 +375,7 @@ try:
     FJ.write_text(json.dumps(rows_)); MJ.write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": True, "since": datetime.datetime.fromtimestamp(time.time() - 48, datetime.timezone.utc).isoformat().replace("+00:00", "Z")}}))
     reset(); r_dead = msg(SOLO, "the export page reads fine", "home-beta"); k_dead = keys()
     reset(); r_dead_fyi = msg(SOLO, "the export page reads fine", "home-beta", fyi=True); k_dead_fyi = keys()
-    reset(); r_dead_marked = msg(SOLO, f"{_messaging._FOR_OWNER}\nplease look at the export page", "home-beta"); k_dead_marked = keys()
+    reset(); r_dead_marked = msg(SOLO, f"{_messaging._FOR_OWNER} a50\nplease look at the export page", "home-beta"); k_dead_marked = keys()
 finally:
     FJ.write_text(FJ0); MJ.write_text(MJ0)
 check("3l: a message to a front agent whose pane is long gone is refused as the tool always refused it, and records none", r_dead.startswith("Refused: 'solo-main' cannot receive this") and k_dead == [], (r_dead, k_dead))
