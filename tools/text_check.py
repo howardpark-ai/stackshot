@@ -11,7 +11,8 @@ of the lines they return, all from the snapshot at the PR's head) and the diff o
 
 Also takes --repo (default: this checkout), --exact (compare --base itself, not its fork point with --head) and, for the size caps, --max-diff-chars and
 --max-text-chars. The affected tools are those whose function changed (`@mcp.tool(name=…)`) or that list a changed function among their output helpers
-(HELPERS in tool_text.py), the same watch `touched` keeps. The diff is cut to 60,000 characters and the tools' text to 165,000, and the cut is said in the pack.
+(HELPERS in tool_text.py), the same watch `touched` keeps. The diff is cut to 60,000 characters and the cut is said in the pack; the tools' text is kept to 165,000 by leaving out whole tools, which the pack names (a tool is cut
+in the middle only when it alone is longer than the cap).
 Standard library only: no dependency, no lock, no network."""
 from __future__ import annotations
 
@@ -30,9 +31,10 @@ sys.path.insert(0, str(HERE))
 import tool_text as tt   # noqa: E402
 
 MAX_DIFF = 60_000
-# The snapshot of every tool together is large. A cap below it would cut a tool's parameters off, and the reader would then
-# call them missing (a false alarm). 165,000 holds all tools with room to grow (raised from 150,000 when the update and create tools gained the until parameter, which left no room under the old cap,
-# and from 160,000 when the message tool gained the question parameter, which the old cap left 4 characters of room for).
+# The cap bounds ONE reading pack (the snapshot entries of the tools a change reaches), not the total of the twelve tools: what does not fit is left out whole and
+# named (fit_text), so the total growing past the cap fails nothing. What the cap must hold is the biggest single tool, uncut, at most 90% of the cap (a little room for it to grow), so that a
+# reader never takes a cut-off tool for a tool with missing parameters (tests/text_pack_scenario.py checks every tool alone). History: 150,000, then 160,000, then
+# 165,000, each raise made while the cap still bounded the total.
 MAX_TEXT = 165_000
 CONTEXT = 6                                                   # lines of context around each hunk
 
@@ -165,12 +167,37 @@ def fit_diff(root: Path, mb: str, head: str, changed: list[str], limit: int) -> 
     return text or "[no diff of the watched files]\n"
 
 
+def _as_json(entries: dict[str, Any]) -> str:
+    return json.dumps(entries, indent=1, sort_keys=True, ensure_ascii=False)
+
+
 def fit_text(snapshot: dict[str, Any], tools: list[str], limit: int) -> str:
-    """The affected tools' snapshot entries as indented JSON, cut to `limit` characters (the cut is said)."""
-    present = {t: (snapshot.get("tools") or {}).get(t, "(not in the snapshot)") for t in tools}
-    text = json.dumps(present, indent=1, sort_keys=True, ensure_ascii=False)
-    if len(text) > limit:
-        text = text[:limit] + f"\n[tool text cut at {limit} characters]"
+    """The affected tools' snapshot entries as indented JSON within `limit` characters (counted in characters, never bytes; a negative limit counts as 0), cut at tool
+    boundaries: whole tools are kept in sorted order while the JSON stays within the limit, and a tool that does not fit is left out whole and named in one plain line
+    after it (with where its text is and how to raise the limit), so a reader never takes a cut-off tool for a tool with missing parameters. A pack that fits is the
+    JSON alone, with no notice. The one case cut inside a tool: when no tool fits alone, the first tool in sorted order is cut at the limit and the notice names it,
+    while the others are named as left out. With no tool at all, an empty object that does not fit the limit is cut the same way and the notice names no tool."""
+    limit = max(limit, 0)
+    present = {t: (snapshot.get("tools") or {}).get(t, "(not in the snapshot)") for t in sorted(set(tools))}
+    text = _as_json(present)
+    if len(text) <= limit:
+        return text
+    if not present:
+        return text[:limit] + f"\n[tool text cut at {limit} characters]"
+    kept: dict[str, Any] = {}
+    left: list[str] = []
+    for name, entry in present.items():
+        if len(_as_json({**kept, name: entry})) <= limit:
+            kept[name] = entry
+        else:
+            left.append(name)
+    if kept:
+        text = _as_json(kept)
+    else:
+        name = left.pop(0)
+        text = _as_json({name: present[name]})[:limit] + f"\n[tool text cut at {limit} characters: {name}]"
+    if left:
+        text += f"\n[tools left out to fit {limit} characters (their text is in {tt.SNAPSHOT_REL}; --max-text-chars raises the limit for one run): {', '.join(left)}]"
     return text
 
 
