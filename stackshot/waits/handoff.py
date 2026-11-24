@@ -362,6 +362,7 @@ class Step:
     via: str = ""
     sender: str = ""         # who handed it to `frm` (told, one line, when it is a session)
     why_short: str = ""
+    keep_frm: bool = False   # a move that leaves `frm` named in `needs` after the new mover (a front agent that hands its own step on stays told of the item); the writer drops `frm` from `needs` otherwise
 
 
 def _minutes_text(m: float) -> str:

@@ -123,7 +123,7 @@ NOT_THERE = lambda who: False
 def tp(m=0, states=None, age=0.0, snap_=None, present=NOT_THERE, **kw):
     """One tick of the pick-up `m` minutes after now0, the snapshot as `snap` builds it; `present` None reads the owner's prompt stamps as the server does. → the ids a turn was started for."""
     t = at(m)
-    return audit_ticks_svc._front_pickup_tick(now=t, snap=snap(t, states, age) if snap_ is None else snap_, present=present, wait=True, **kw)
+    return audit_ticks_svc._front_pickup_tick(now=t, snap=snap(t, states, age) if snap_ is None else snap_, present=present, **kw)
 class _Err:
     def __enter__(self): self.old, self.buf = sys.stderr, io.StringIO(); sys.stderr = self.buf; return self
     def __exit__(self, *a): sys.stderr = self.old
@@ -248,24 +248,43 @@ check("7 a name no page lists: nothing is started", tp(0, states={"ghost": "idle
 wipe(); put(1, mover="b-main", project="projects/beta", act=120, nxt="b-main: ship it")
 check("7 a front agent of its own project is started (the control)", tp(0) == ["a1"] and sent[0][1] == U["b-main"])
 
-# ================================================================ 8. a delivery that fails sets no mark
+# ================================================================ 8. a delivery that fails: a half-hour backoff, not a retry every ten minutes
+BACKOFF_MARK = lambda m: at(m) - FP.GAP + FP.FAIL_BACKOFF      # the mark a failed delivery leaves: it blocks for FAIL_BACKOFF from the send
+check("8 the backoff is half an hour, under the hour", FP.FAIL_BACKOFF == 1800.0 and FP.FAIL_BACKOFF < FP.GAP)
 wipe(); put(1, act=120); outcome["ok"] = False
 with _Err() as e8:
     got8 = tp(0)
-check("8 a delivery that fails starts nothing and sets no mark (the record is taken back), one line says so", got8 == [] and len(sent) == 1 and marks() == {} and "not delivered" in e8.text, (got8, marks(), e8.text))
+check("8 a delivery that fails starts nothing, is not counted or logged as told, and leaves the half-hour backoff mark; one line says it was not delivered", got8 == [] and len(sent) == 1 and marks() == {"a1": BACKOFF_MARK(0)}
+      and "not delivered" in e8.text and "told of its own step" not in e8.text, (got8, marks(), e8.text))
 outcome["ok"] = True
-check("8 the next tick tries again, and the mark is set when it is delivered", tp(10) == ["a1"] and marks() == {"a1": at(10)} and len(sent) == 2)
+check("8 10 and 29 minutes later it is not tried (a push that keeps failing is not retried every ten minutes), 30 minutes later it is, and the delivery sets the full mark", tp(10) == [] and tp(29) == [] and len(sent) == 1
+      and tp(30) == ["a1"] and marks() == {"a1": at(30)} and len(sent) == 2, (sent, marks()))
+wipe(); put(1, act=120); outcome["ok"] = False
+tp(0); tp(30); tp(60)
+check("8 a push that fails every time is sent at 0, 30 and 60 minutes, three sends in an hour and a half, not nine", len(sent) == 3, len(sent))
 wipe(); put(1, act=120); outcome["none"] = True
-check("8 a stand-in that returns no sending thread (a notice that was held or had no owner) sets no mark either", tp(0) == [] and marks() == {})
+check("8 a stand-in that returns no sending thread (a notice that was held or had no owner) starts nothing and backs off the same way", tp(0) == [] and marks() == {"a1": BACKOFF_MARK(0)} and tp(10) == [])
 outcome["none"] = False
 wipe(); put(1, act=120); outcome["raise"] = True
 with _Err() as e8b:
     got8b = tp(0)
 outcome["raise"] = False
-check("8 a send that raises sets no mark, one line says so, and the next tick tries again", got8b == [] and marks() == {} and len(e8b.pickup_lines) == 1 and tp(10) == ["a1"], (got8b, e8b.text))
+check("8 a send that raises starts nothing, one line says so, backs off, and the next try is at 30 minutes", got8b == [] and marks() == {"a1": BACKOFF_MARK(0)} and len(e8b.pickup_lines) == 1 and tp(10) == [] and tp(30) == ["a1"], (got8b, e8b.text))
 wipe(); put(1, act=120); put(2, mover="b-main", project="projects/beta", act=120, nxt="b-main: ship it"); outcome["ok"] = False
 tp(0); outcome["ok"] = True
-check("8 the mark of a failed delivery is the item's own: the other agent's item is started", tp(10) == ["a1", "a2"] and set(marks()) == {"a1", "a2"})
+check("8 a failed delivery's backoff is the item's own: another item is not held back by it", tp(10) == [] and tp(30) == ["a1", "a2"] and set(marks()) == {"a1", "a2"})
+wipe(); put(1, act=120); put(2, mover="b-main", project="projects/beta", act=120, nxt="b-main: ship it"); outcome["ok"] = True
+real_tell = telling.tell_woken
+def tell_one_fails(gid, owner, note, tag="wake", result=None):
+    th = real_tell(gid, owner, note, tag=tag, result=result)
+    if result is not None and owner == U["a-main"]: result.update(ok=False, why="the pane is gone")
+    return th
+telling.tell_woken = tell_one_fails
+with _Err() as e8d:
+    try: got8d = tp(0)
+    finally: telling.tell_woken = real_tell
+check("8 the ids returned and the 'told' line are for the lines that were delivered only: one of two failed, one id and one line", got8d == ["a2"] and e8d.text.count("told of its own step") == 1 and "a2 idle front agent b-main told" in e8d.text and "a1 front pick-up not delivered" in e8d.text, (got8d, e8d.text))
+
 wipe(); put(1, act=120)
 real_write = FP.write_marks
 def no_write(m): raise OSError("disk full")
@@ -303,7 +322,7 @@ real_snap = AS.snapshot
 def boom_snap(): raise OSError("agent-state.json is unreadable")
 AS.snapshot = boom_snap
 with _Err() as e10:
-    try: got10 = audit_ticks_svc._front_pickup_tick(now=at(0), present=NOT_THERE, wait=True)
+    try: got10 = audit_ticks_svc._front_pickup_tick(now=at(0), present=NOT_THERE)
     finally: AS.snapshot = real_snap
 check("10 a snapshot that cannot be read starts nothing, one line", got10 == [] and sent == [] and len(e10.pickup_lines) == 1, e10.text)
 wipe(); put(1, act=120)
@@ -315,7 +334,7 @@ real_reader = audit_ticks_svc._owner_present_reader
 def boom_reader(now): raise OSError("stamps unreadable")
 audit_ticks_svc._owner_present_reader = boom_reader
 with _Err() as e10:
-    try: got10 = audit_ticks_svc._front_pickup_tick(now=at(0), snap=snap(at(0)), wait=True)
+    try: got10 = audit_ticks_svc._front_pickup_tick(now=at(0), snap=snap(at(0)))
     finally: audit_ticks_svc._owner_present_reader = real_reader
 check("10 a presence reader that cannot read starts nothing, one line", got10 == [] and sent == [] and len(e10.pickup_lines) == 1, e10.text)
 def boom_present(who): raise OSError("stamp unreadable")
@@ -361,7 +380,7 @@ check("11 with the other two passes off the pick-up still runs", tp(0) == ["a1"]
 wipe(); put(1, act=120); put(2, status="completed", outcome="done", act=10)
 marks_file().write_text(json.dumps({"schema": 1, "marks": {"a2": at(-5), "a9": at(-5), "a7": at(-90)}}))      # a closed item's mark, a missing item's, an old one
 tp(0)
-check("12 the record is pruned when it is written: a closed item's, a missing item's and an expired mark go, the new one is in", marks() == {"a1": at(0)}, marks())
+check("12 the record is pruned when it is written: a closed item's and an expired mark go, the new one is in, and the mark of an item this tick's list does not hold stays until it expires (an item that could not be read this tick is not started for twice in an hour)", marks() == {"a1": at(0), "a9": at(-5)}, marks())
 wipe(); put(1, act=120); marks_file().write_text(json.dumps({"schema": 1, "marks": {"a1": at(0) + 5 * H}}))
 check("12 a mark dated more than an hour ahead of the clock is torn: the item is started", tp(0) == ["a1"])
 wipe(); put(1, act=120); marks_file().write_text(json.dumps({"schema": 1, "marks": {"a1": at(0) + 20 * MIN}}))
@@ -369,7 +388,7 @@ check("12 a mark dated 20 minutes ahead (a clock a little off) still blocks", tp
 wipe(); put(1, act=120)
 check("12 marked_recently, pure: an hour is the edge, ahead beyond an hour is torn, a non-number is none", FP.marked_recently({"a": 100.0}, "a", 100.0 + 3599) and not FP.marked_recently({"a": 100.0}, "a", 100.0 + 3600)
       and not FP.marked_recently({"a": 100.0 + 3601}, "a", 100.0) and FP.marked_recently({"a": 100.0 + 3600}, "a", 100.0) and not FP.marked_recently({"a": "x"}, "a", 5.0) and not FP.marked_recently({}, "a", 5.0))
-check("12 unmark takes back only the mark it wrote (a later one stays)", (FP.mark("a1", 500.0), FP.unmark("a1", 499.0), FP.read_marks().get("a1"))[2] == 500.0 and FP.unmark("a1", 500.0) is True and "a1" not in FP.read_marks())
+check("12 unmark changes only the mark it wrote (a later one stays), and into a half-hour backoff, not none", (FP.mark("a1", 500.0), FP.unmark("a1", 499.0), FP.read_marks().get("a1"))[2] == 500.0 and FP.unmark("a1", 500.0) is True and FP.read_marks().get("a1") == 500.0 - FP.GAP + FP.FAIL_BACKOFF and FP.marked_recently(FP.read_marks(), "a1", 500.0 + FP.FAIL_BACKOFF - 1) and not FP.marked_recently(FP.read_marks(), "a1", 500.0 + FP.FAIL_BACKOFF))
 
 # ================================================================ 13. the tick
 wipe(); put(1, act=120); _cfg.CFG["audit"]["hourly_line"] = False
@@ -388,23 +407,119 @@ audit_ticks_svc._silence_tick()
 check("13 the audit tick in agent mode does nothing at all", sent == [])
 _cfg.CFG["audit"]["mode"] = "script"
 order = []
-real_hi, real_fp, real_bt = audit_ticks_svc._hand_idle_tick, audit_ticks_svc._front_pickup_tick, audit_ticks_svc._busy_tell_tick
+real_hi, real_fo, real_fp, real_bt = audit_ticks_svc._hand_idle_tick, audit_ticks_svc._front_handon_tick, audit_ticks_svc._front_pickup_tick, audit_ticks_svc._busy_tell_tick
+audit_ticks_svc._front_handon_tick = lambda *a, **k: order.append("handon") or []
 audit_ticks_svc._hand_idle_tick = lambda *a, **k: order.append("hand_idle") or []
 audit_ticks_svc._front_pickup_tick = lambda *a, **k: (order.append("pickup"), (_ for _ in ()).throw(RuntimeError("the pick-up failed")))[0]
 audit_ticks_svc._busy_tell_tick = lambda *a, **k: order.append("busy_tell") or []
 with _Err() as e13:
     try: audit_ticks_svc._silence_tick()
-    finally: audit_ticks_svc._hand_idle_tick, audit_ticks_svc._front_pickup_tick, audit_ticks_svc._busy_tell_tick = real_hi, real_fp, real_bt
-check("13 the audit tick runs it after the idle hand-over and before the busy tell, and a pick-up that raises stops nothing (one line)", order == ["hand_idle", "pickup", "busy_tell"] and "idle front agents not picked up" in e13.text, (order, e13.text))
+    finally: audit_ticks_svc._hand_idle_tick, audit_ticks_svc._front_handon_tick, audit_ticks_svc._front_pickup_tick, audit_ticks_svc._busy_tell_tick = real_hi, real_fo, real_fp, real_bt
+check("13 the audit tick runs it after the idle hand-over and the front hand-on and before the busy tell, and a pick-up that raises stops nothing (one line)", order == ["hand_idle", "handon", "pickup", "busy_tell"] and "idle front agents not picked up" in e13.text, (order, e13.text))
 # the probe end to end: the real tick, the snapshot as the route stores it, an idle front agent, an item of its own
 wipe(); put(1, act=50)
-body = snap(time.time()); code, resp = agent_state_svc.post("machine-a", body)
+body = snap(time.time(), {"a-back": "busy"});      # the project's background agent is in a turn: no one is free, so the item is the pick-up's (a free one would take it, audit_front_handon)
+code, resp = agent_state_svc.post("machine-a", body)
 check("13 the fixture: the route stores the snapshot", code == 200, (code, resp))
 audit_ticks_svc._silence_tick()
 check("13 the probe: an item on an idle front agent gets its turn started by the audit tick, once, naming the item and its step", len(to("a-main")) == 1 and "[home] item 1" in to("a-main")[0][2] and '"do the thing"' in to("a-main")[0][2], sent)
 audit_ticks_svc._silence_tick()
 check("13 …and the tick after it starts nothing more (the mark)", len(to("a-main")) == 1 and set(marks()) == {"a1"}, (sent, marks()))
 check("13 the owner is never told: every recipient is a session", all(x[1] in U.values() for x in sent) and not any(x[1] in ("Oliver", "") for x in sent))
+
+# ================================================================ 14. the review's findings: a partial index, a read that failed for now, the pane word, a stamp from the future, one turn per agent, the re-read, the roles
+class PartialIdx(dict):
+    unreadable = ["b"]      # a machine whose sessions.json could not be read when the index was built (sessions_registry._sessions_index sets it)
+wipe(); put(1, act=120); stamp("a-main", 5)
+_fleet_sessions_registry._sessions_index = lambda: PartialIdx({u: {"name": n} for n, u in U.items()})
+with _Err() as e14:
+    try: got14 = tp(0, present=None)
+    finally: _fleet_sessions_registry._sessions_index = real_index
+check("14 a partial fleet index (a machine's sessions.json not read) starts nothing, one line says so: a pane on that machine has no row, so no stamp would be found", got14 == [] and sent == [] and len(e14.pickup_lines) == 1 and "partial" in e14.text and "b" in e14.text, (got14, e14.text))
+wipe(); put(1, act=120)
+class WholeIdx(dict):
+    unreadable = []
+_fleet_sessions_registry._sessions_index = lambda: WholeIdx({u: {"name": n} for n, u in U.items()})
+try: got14 = tp(0, present=None)
+finally: _fleet_sessions_registry._sessions_index = real_index
+check("14 an index with no unreadable machine is whole (the control)", got14 == ["a1"], got14)
+# a transient OSError on the record is not a torn record
+wipe(); put(1, act=120); marks_file().write_text(json.dumps({"schema": 1, "marks": {"a9": at(-5)}})); keep_text = marks_file().read_text()
+real_read_text = pathlib.Path.read_text
+def read_text_fails(self, *a, **k):
+    if self.name == "front-pickup.json": raise PermissionError("busy for now")
+    return real_read_text(self, *a, **k)
+pathlib.Path.read_text = read_text_fails
+with _Err() as e14b:
+    try: got14b = tp(0)
+    finally: pathlib.Path.read_text = real_read_text
+check("14 a record that cannot be read for now (an OSError) starts nothing, one line says so, and is NOT set aside: the file is where it was, unchanged", got14b == [] and sent == [] and len(e14b.pickup_lines) == 1 and marks_file().read_text() == keep_text and not (T / "state/front-pickup.json.torn").exists(), (got14b, e14b.text))
+check("14 …and the next tick, the read working again, starts the item and keeps the other mark", tp(10) == ["a1"] and marks() == {"a1": at(10), "a9": at(-5)}, marks())
+wipe(); put(1, act=120); marks_file().write_bytes(b"\xff\xfe not text")
+with _Err() as e14c:
+    got14c = tp(0)
+check("14 a record that is no text at all is torn: set aside, nothing is started", got14c == [] and (T / "state/front-pickup.json.torn").exists() and not marks_file().exists() and len(e14c.pickup_lines) == 1, (got14c, e14c.text))
+# the pane word
+def snap_pane(word):
+    s = snap(at(0)); s["agents"]["a-main"]["pane"] = word; return s
+for word in ("shell", "sleeping", "turn", ""):
+    wipe(); put(1, act=120)
+    check(f"14 a front agent the snapshot calls idle but whose pane word is '{word}' starts nothing (a line to such a pane is queued, not a turn)", tp(0, snap_=snap_pane(word)) == [] and sent == [], (word, sent))
+wipe(); put(1, act=120)
+check("14 the pane word `idle` starts it (the control)", tp(0, snap_=snap_pane("idle")) == ["a1"])
+# a stamp from the future
+wipe(); put(1, act=120); stamp("a-main", -1)      # dated one minute ahead of the clock: clocks a little apart
+check("14 a prompt stamp dated ahead of the clock (clock skew) is the owner just now: present, nothing is started", tp(0, present=None) == [] and sent == [])
+wipe(); put(1, act=120); stamp("a-main", -5 * 3600)
+check("14 …a stamp hours ahead too (fail closed)", tp(0, present=None) == [] and sent == [])
+wipe(); put(1, act=120); stamp("a-main", telling.presence_minutes() + 1)
+check("14 …and a stamp older than the window is absent (the control)", tp(0, present=None) == ["a1"])
+# the notices' own presence test is asked too
+wipe(); put(1, act=120)
+real_present = audit_ticks_svc._front_turn.present
+audit_ticks_svc._front_turn.present = lambda who: True
+try: got14 = tp(0, present=None)
+finally: audit_ticks_svc._front_turn.present = real_present
+check("14 `front_turn.present` (the notices' own test, which needs the pane on this box) saying present starts nothing even with no stamp", got14 == [] and sent == [], got14)
+# one turn per agent per tick, with room under the cap
+wipe(); put(1, act=120, nxt="a-main: first"); put(2, act=120, nxt="a-main: second"); put(3, mover="b-main", project="projects/beta", act=120, nxt="b-main: other")
+check("14 two due items of one agent and one of another, under the cap of three: the first item of each agent only (the second waits for the next tick)", tp(0) == ["a1", "a3"] and [x[1] for x in sent] == [U["a-main"], U["b-main"]], sent)
+# the item is read again before the send
+wipe(); put(1, act=120); stale = NR.load_all(None)
+put(1, act=120, status="completed", outcome="done")
+check("14 an item closed since the pass read it is not told (the item is read again before the send)", tp(0, items=stale) == [] and sent == [] and marks() == {})
+wipe(); put(1, act=120); stale = NR.load_all(None)
+put(1, act=120, nxt="Oliver: approve it")
+check("14 …nor one whose first step has become the owner's", tp(0, items=stale) == [] and sent == [])
+wipe(); put(1, act=120, status="completed", outcome="done"); closed_items = NR.load_all(None)
+check("14 `due` on a closed item is None", FP.due(closed_items, "a1", now0, lambda w, p: True, lambda w: True, lambda w: False, lambda a, b: a == b, {}) is None)
+# a retired role, a role of another project, a name with no row
+real_roles = audit_ticks_svc._anc.session_roles
+real_fk = audit_ticks_svc._telling.front_keeper
+audit_ticks_svc._telling.front_keeper = lambda who, project="", **k: (True, "")      # the server's own answer says front: only the role row decides here
+try:
+    audit_ticks_svc._anc.session_roles = lambda *a, **k: {"a-main": {"role": "front", "project": "projects/alpha"}}
+    check("14 a front agent listed on the item's project is front (the control)", audit_ticks_svc._front_of_project("a-main", "projects/alpha") is True)
+    audit_ticks_svc._anc.session_roles = lambda *a, **k: {"a-main": {"role": "front", "project": "projects/alpha", "retired": True}}
+    check("14 a retired front agent is no front agent", audit_ticks_svc._front_of_project("a-main", "projects/alpha") is False)
+    audit_ticks_svc._anc.session_roles = lambda *a, **k: {"a-main": {"role": "back", "project": "projects/alpha"}}
+    check("14 a background agent is no front agent", audit_ticks_svc._front_of_project("a-main", "projects/alpha") is False)
+    audit_ticks_svc._anc.session_roles = lambda *a, **k: {"a-main": {"role": "front", "project": "projects/beta"}}
+    check("14 a front agent of another project is not the item's", audit_ticks_svc._front_of_project("a-main", "projects/alpha") is False)
+    audit_ticks_svc._anc.session_roles = lambda *a, **k: {"a-main": {"role": "front", "project": "projects/alpha"}}
+    check("14 an item with no project has no front agent", audit_ticks_svc._front_of_project("a-main", "") is False)
+    audit_ticks_svc._anc.session_roles = lambda *a, **k: {}
+    check("14 a name the role map does not hold is no front agent", audit_ticks_svc._front_of_project("a-main", "projects/alpha") is False)
+    audit_ticks_svc._telling.front_keeper = lambda who, project="", **k: (False, "")
+    audit_ticks_svc._anc.session_roles = lambda *a, **k: {"a-main": {"role": "front", "project": "projects/alpha"}}
+    check("14 the server's own answer (front_keeper) saying no wins over a role row", audit_ticks_svc._front_of_project("a-main", "projects/alpha") is False)
+finally:
+    audit_ticks_svc._anc.session_roles = real_roles; audit_ticks_svc._telling.front_keeper = real_fk
+# a torn busy-stretch record
+for label, rec, started in (("not a record", "x", True), ("an `at` that is no number", {"at": "yesterday"}, True), ("an `at` dated hours ahead", {"at": now0 + 5 * H}, True), ("an `at` that is a boolean", {"at": True}, True),
+                            ("an `at` ten minutes ago", {"at": now0 - 10 * MIN}, False), ("an `at` two hours ago", {"at": now0 - 2 * H}, True)):
+    wipe(); put(1, act=120, busy_tell=rec)
+    check(f"14 a busy-stretch record that is {label}: {'started' if started else 'nothing is started'}", (tp(0) == ["a1"]) is started, (rec, sent))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
