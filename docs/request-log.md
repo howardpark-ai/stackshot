@@ -25,7 +25,7 @@ The server writes one JSON line for every HTTP request it answers, plus a line w
 | `caller` | The machine a client token belongs to (a name the server holds), or the `sender` of an accepted call to a tool the server has, when it is a lower-case label of letters, digits and hyphens (up to 61 characters), the shape of a session's own name; otherwise `anon`. A call the tool layer refused, a made-up tool name and any other `sender` text are `anon`. |
 | `err` | For an exception: its type and where it was raised, `<type> at <module>:<function>:<line>`, and nothing it says. For a 5xx the app answered with no exception: `status <n>`. |
 
-A start line is `{"kind":"start","pid":...,"head":"<short commit>","mode":"inline"}` (`mode` is where the minute runner runs, `[runner] process`); a clean stop is `{"kind":"stop","pid":...}`.
+A start line is `{"kind":"start","pid":...,"head":"<short commit>","mode":"unit"}` (`mode` is where the minute runner runs, `[runner] process` as the server reads it: `unit` at the default, or `inline`); a clean stop is `{"kind":"stop","pid":...}`.
 
 ## What is never written
 

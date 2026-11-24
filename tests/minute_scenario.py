@@ -315,6 +315,23 @@ try:
     check("3 start default: a host with no unit says nothing in the grace of its start, then tells the builder once that no process has reported, with the default and both ways out in the text",
           w_early == "" and w_late == "told" and w_again == "noted" and len(sent_d) == 1 and "no process has reported since this server started" in sent_d[0][1] and "[runner] process is not set" in sent_d[0][1]
           and "./install.sh units --start" in sent_d[0][1] and '[runner] process = "inline"' in sent_d[0][1] and "[runner] process is not set" in err_w.getvalue(), (w_early, w_late, w_again, sent_d, err_w.getvalue()))
+    # …and the same on a host a hand update left with a status file of an earlier run (a dead pid, an old heartbeat): the stall report says its process is gone AND why this server has no runner of its own
+    sent_g = []; fleetev.inbox_flag_send = lambda to, text: sent_g.append((to, text))
+    _cfg.CFG["audit"] = {**real_aud_d, "builder": "demo-builder"}
+    gone_kid = subprocess.Popen([sys.executable, "-c", "pass"]); gone_kid.wait(30)
+    try:
+        wipe(); runner_svc.RUNNER_STALL[0] = False
+        start_with(None)
+        now_g = time.time()
+        put(F.STATUS, json.dumps({"pid": gone_kid.pid, "heartbeat": now_g - 900, "last_round": now_g - 900, "started": now_g - 5000, "current": "", "rounds": 7, "ticks": [], "enabled": True, "mode": "runner"}))
+        runner_svc.STARTED[0] = now_g - 400
+        with stderr_lines() as err_g:
+            w_gone = runner_svc.watchdog()
+    finally:
+        fleetev.inbox_flag_send = real_send_d; _cfg.CFG["audit"] = real_aud_d; runner_svc.RUNNER_STALL[0] = False
+    check("3 start default: a stale status file of a dead process: the builder's message says the process is gone and carries the default and both ways out; so does the stderr line",
+          w_gone == "told" and len(sent_g) == 1 and "its process is gone" in sent_g[0][1] and "[runner] process is not set" in sent_g[0][1] and "./install.sh units --start" in sent_g[0][1]
+          and '[runner] process = "inline"' in sent_g[0][1] and "its process is gone" in err_g.getvalue() and "[runner] process is not set" in err_g.getvalue(), (w_gone, sent_g, err_g.getvalue()))
     wipe()
 
     hold = spawn_lock()

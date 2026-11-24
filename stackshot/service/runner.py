@@ -239,11 +239,12 @@ def watchdog(now: float | None = None) -> str:
         return "noted"
     RUNNER_STALL[0] = True
     mins = max(0.0, now - float(ref or now)) / 60.0
-    print(f"{label}: stalled: no round has completed for {mins:.0f} min ({'no process has reported since this server started; ' + absent() if unseen else 'its process is gone' if gone else 'a tick is blocking the one thread'}); the builder is told once", file=sys.stderr, flush=True)
+    elsewhere = f"; this server has no runner of its own: {absent()}" if rn is None and not unseen and absent() else ""     # a status file another run left (a dead pid, an old heartbeat): the words of why this process has no runner, the default and its fixes, are said here too
+    print(f"{label}: stalled: no round has completed for {mins:.0f} min ({'no process has reported since this server started; ' + absent() if unseen else ('its process is gone' if gone else 'a tick is blocking the one thread') + elsewhere}); the builder is told once", file=sys.stderr, flush=True)
     to = _cfg.audit_builder()
     if not to:
         return "nobody"
-    where = f"no process has reported since this server started ({absent()}), so the minute runner is not running" if unseen else "its process is gone" if gone else (("it is stuck in the tick " + cur) if cur else "no tick is running, so the loop itself is stuck")
+    where = f"no process has reported since this server started ({absent()}), so the minute runner is not running" if unseen else ("its process is gone" if gone else (("it is stuck in the tick " + cur) if cur else "no tick is running, so the loop itself is stuck")) + elsewhere
     last = f"this server started at {dt.datetime.fromtimestamp(float(ref), _pages.zone_now().tzinfo):%a %H:%M %Z}" if unseen else f"its last round ended at {dt.datetime.fromtimestamp(float(ref), _pages.zone_now().tzinfo):%a %H:%M %Z}"
     _fleetev.inbox_flag_send(to, f"[stackshot] The minute set's runner has completed no round for {mins:.0f} min ({last}): "
                                  f"{where}, and no wake, anchor, event wait or hand-off runs meanwhile (GET /audit/status has each tick's last_run). "

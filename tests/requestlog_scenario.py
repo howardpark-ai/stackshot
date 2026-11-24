@@ -207,6 +207,16 @@ check("streaming: all of it arrives", b"".join(chunks) == b"onetwo", chunks)
 check("streaming: ms is the whole stream and bytes its size", st and st[0]["ms"] >= 300 and st[0]["bytes"] == 6 and st[0]["status"] == 200, st)
 ev = [x for x in recs if x.get("kind")]
 check("events: a start line at the server's start with the pid and the mode", ev and ev[0]["kind"] == "start" and ev[0]["pid"] == os.getpid() and ev[0].get("mode") == "inline", ev)
+from stackshot.core import config as _cfg_rl
+_real_runner = _cfg_rl.CFG.get("runner"); _modes = {}
+for _label, _val in (("not set", None), ("empty", {"process": ""}), ("unit", {"process": "unit"}), ("inline", {"process": "inline"}), ("a misspelling", {"process": "daemon"})):
+    if _val is None: _cfg_rl.CFG.pop("runner", None)
+    else: _cfg_rl.CFG["runner"] = _val
+    _modes[_label] = WR._start_facts().get("mode")
+if _real_runner is None: _cfg_rl.CFG.pop("runner", None)
+else: _cfg_rl.CFG["runner"] = _real_runner
+check("events: the start line's mode is where the runner runs as the server reads the setting: \"unit\" when it is not set (the default) or empty, what is set when it is \"unit\" or \"inline\", \"inline\" for a misspelling",
+      _modes == {"not set": "unit", "empty": "unit", "unit": "unit", "inline": "inline", "a misspelling": "inline"}, _modes)
 check("events: a stop line at a clean shutdown, last", ev and ev[-1]["kind"] == "stop" and ev[-1]["pid"] == os.getpid() and recs[-1]["kind"] == "stop", recs[-1])
 
 # ------------------------------------------------------------------ 6 the MCP endpoint, through the tool layer
