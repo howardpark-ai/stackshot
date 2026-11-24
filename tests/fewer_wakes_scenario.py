@@ -257,10 +257,11 @@ check("1f2: a builder's marked 'Done (sha)' / 'Taken' note on an item is written
 rep = _messaging._message("osprey-main", f"{MK} a1: the watch is stopped and the item is closed", "osprey-x"); settle()
 check("…and so is '<thing> is stopped and the item is closed'", rep.startswith("Not delivered: written onto a1"), rep)
 rep = _messaging._message("osprey-main", "a1 is merged", "osprey-x"); settle()
-check("1g: an unmarked report from a builder that names an item is written onto it (no turn), one that names none is refused, and a marked 'no action needed' is still refused, builder or not",
-      rep.startswith("Not delivered: written onto a1") and why(lambda: _messaging._message("osprey-main", "the build is merged", "osprey-x")).startswith("Refused: osprey-main is a front agent")
-      and why(lambda: _messaging._message("osprey-main", "a1 is merged", "home-beta")).startswith("Refused: osprey-main is a front agent")
-      and "says nothing is needed from him ('no action needed')" in why(lambda: _messaging._message("osprey-main", f"{MK} a1 is merged, no action needed", "osprey-x")))
+g_none, g_peer = (why(lambda: _messaging._message("osprey-main", t_, w_)) for t_, w_ in (("the build is merged", "osprey-x"), ("a1 is merged", "home-beta")))
+s0 = len(saved); g_marked = _messaging._message("osprey-main", f"{MK} a1 is merged, no action needed", "osprey-x"); settle()
+check("1g: an unmarked report from a builder that names an item is written onto it (no turn); one that names none and one from any other sender start no turn either (this suite wires no hold, so each is refused, as a message the hold cannot take is); a builder's marked 'no action needed' report is written onto its item too",
+      rep.startswith("Not delivered: written onto a1") and all(r_.startswith("Refused: osprey-main is a front agent") and "could not be held" in r_ for r_ in (g_none, g_peer))
+      and g_marked.startswith("Not delivered: written onto a1") and saved[s0:] and saved[-1][0] == "a1", (g_none[:60], g_peer[:60], g_marked[:200]))
 # a message to a project that opens "For <front agent>"
 p0, s0 = len(pushes()), len(saved); n0 = len(routing.read("projects/alpha"))
 rep = _messaging._message("projects/alpha", "For osprey-main, a2: PR 24 is live, the suites pass.", "osprey-x"); settle()

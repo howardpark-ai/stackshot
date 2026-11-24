@@ -575,9 +575,9 @@ check("builder: alpha's builder, none for gamma (-main only), none for a page wi
       and _agents._builder_agent("projects/alpha") == "work-osprey-x")
 check("message gate: an unmarked message to a front agent is sent to the project, where the router rules it (no keeper named)",
       "the project, where the router rules it (to='projects/alpha')" in _messaging._project_takes("projects/alpha") and "steward" not in _messaging._project_takes("projects/alpha"), _messaging._project_takes("projects/alpha"))
-try: _messaging._message("work-osprey-main", "unmarked", "home-beta"); e = ""
+try: e = _messaging._message("work-osprey-main", "unmarked", "home-beta")
 except ToolError as x: e = str(x)
-check("…and the refusal says so: it names the project's background agent", e.startswith("Refused: work-osprey-main is a front agent") and "background agent, work-osprey-x" in e and "steward" not in e, e)
+check("…and the reply says so: it went to the project's background agent", e.startswith("Not for ") and "went to work-osprey-x, the project's background agent" in e and "steward" not in e, e)
 out = _wt_anchors._anchors("projects/alpha", who="home-beta")
 check("anchors: the list names the router and the keeper, not the retired name-line session", "alpha anchors (router: rules this project; keeper: work-osprey-x" in out.replace("projects/", "") and "steward:" not in out.splitlines()[0], out.splitlines()[0])
 cfg(live=False)

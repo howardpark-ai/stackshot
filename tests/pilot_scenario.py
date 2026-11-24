@@ -2867,23 +2867,35 @@ def why(fn):
     except ToolError as e: return str(e)
 n0 = len(wait_push(0)); MK = _wt_text._FOR_OWNER
 (T / "store/a/900.json").write_text(json.dumps({"id": "900", "subject": "[home] vendor choice", "description": "A thing. It lives here. Done when done.", "status": "open", "metadata": {"owner": A, "then": A, "needs": "decision", "project": "projects/alpha"}, "updated": 1.0}))      # an item that waits on his decision: a marked message must name one
-r = why(lambda: _messaging._message("work-osprey-main", "can you look at the vendor thread?", "home-gamma"))
-check("an unmarked message to a front agent is refused, naming the mark and the project's background agent",
-      r == f"Refused: work-osprey-main is a front agent of projects/alpha, a session {_core_instance.OWNER} talks to, and this message is not for {_core_instance.OWNER}, so it goes to the project's background agent, "
-           f"work-osprey-x (message(to='work-osprey-x', …)). Put {MK} on the first line only if {_core_instance.OWNER} has something to do here.", r)
-check("…by its transcript id too, and nothing was delivered", why(lambda: _messaging._message(A, "unmarked", "home-gamma")).startswith("Refused: work-osprey-main is a front agent")
-      and len(wait_push(0)) == n0)
-check("…and the mark below the first line does not count", why(lambda: _messaging._message("work-osprey-main", f"a status line\n{MK} decide this", "home-beta")).startswith("Refused:"))
-check("…nor does a script's message get past it", why(lambda: _messaging._message("work-osprey-main", "run finished", "nightly-job", origin="testbox")).startswith("Refused:"))
+from stackshot.waits import held as _held_g; _held_g.mark_client(A, "work-osprey-main")      # the rollout gate: its hook fetches held lines (a message the gate cannot hand to the background agent is held for the next turn)
+OW = _core_instance.OWNER; _held_g.take(A, "work-osprey-main")
+r = _messaging._message("work-osprey-main", "can you look at the vendor thread?", "home-gamma"); pp = wait_push(n0 + 1)
+check("an unmarked message to a front agent goes to the project's background agent, and the reply says what was done, why and how to reach the front agent",
+      r.startswith(f"Not for {OW}, so it went to work-osprey-x, the project's background agent, instead of work-osprey-main, which takes only what {OW} has to do and did not get it: delivered")
+      and r.endswith(f"To reach work-osprey-main, put {MK} on the first line and name an open item of his.") and pp[-1][0] == "work-osprey-x" and "vendor thread" in pp[-1][1] and len(pp) == n0 + 1, (r, pp[-1:]))
+n0 = len(wait_push(0))
+r = _messaging._message(A, "unmarked", "home-gamma"); pp = wait_push(n0 + 1)
+check("...by its transcript id too: it went to the background agent, and the front agent got nothing", r.startswith("Not for ") and pp[-1][0] == "work-osprey-x" and not [m for m in pp[n0:] if m[0] in ("work-osprey-main", A)], (r, pp[n0:]))
+n0 = len(wait_push(0))
+r = why(lambda: _messaging._message("work-osprey-main", f"a status line\n{MK} decide this", "home-beta"))
+check("...and the mark below the first line does not count: it is still refused, naming the first line", r.startswith("Refused:") and "on the message's first line" in r and len(wait_push(0)) == n0, r)
+n0 = len(wait_push(0))
+r = _messaging._message("work-osprey-main", "the nightly export has a few rows", "nightly-job", origin="testbox"); pp = wait_push(n0 + 1)
+check("...a script's message goes the same way", r.startswith("Not for ") and pp[-1][0] == "work-osprey-x", (r, pp[-1:]))
 _fs = _messaging._telling.front_sender
 _messaging._telling.front_sender = lambda who: str(who) == "work-peer-main" or _fs(who)      # a sender that is itself a front agent (of a project of the same kind)
+n0 = len(wait_push(0))
 try:
-    r = why(lambda: _messaging._message("work-osprey-main", "can you look at the vendor thread?", "work-peer-main"))
+    r = _messaging._message("work-osprey-main", "can you look at the vendor thread?", "work-peer-main")
 finally:
     _messaging._telling.front_sender = _fs
-check("a front agent's unmarked message to a peer front agent is refused as any is, naming the project's background agent",
-      r.startswith("Refused: work-osprey-main is a front agent of projects/alpha") and "background agent, work-osprey-x" in r, r)
-check("…a sender that is no front agent (the refusal above) is told no such form", "For work-osprey-main," not in why(lambda: _messaging._message("work-osprey-main", "can you look?", "home-beta")))
+pp = wait_push(n0 + 1)
+check("a front agent's unmarked message to a peer front agent (one the roles do not list) goes to the background agent as any message not for him does", r.startswith("Not for ") and pp[-1][0] == "work-osprey-x", (r, pp[n0:]))
+_held_g.take(A, "work-osprey-main")
+n0 = len(wait_push(0))
+r = _messaging._message("work-osprey-main", "can you look?", "home-beta"); pp = wait_push(n0 + 1)
+check("...a sender that is no front agent is told no such form", "For work-osprey-main," not in r and r.startswith("Not for "), r)
+n0 = len(wait_push(0))
 res = _messaging._message("work-osprey-main", f"\n  \n{MK} a900: vendor A or B? the keeper recommends A", "home-beta"); pp = wait_push(n0 + 1)
 check("a marked message (first non-empty line) to a front agent is delivered", res.startswith("delivered") and pp[-1][0] == "work-osprey-main" and MK in pp[-1][1], pp[-1:])
 res = _messaging._message("work-osprey-x", "sweep the inbox", "home-beta"); pp = wait_push(n0 + 2)
@@ -2892,18 +2904,20 @@ res = _messaging._message("work-osprey", "a plain line for the keeper", "home-be
 check("a message to the keeper by name is unaffected", res.startswith("delivered") and pp[-1][0] == "work-osprey", pp[-1:])
 res = _messaging._message("projects/alpha", "a plain line for the project", "home-beta"); pp = wait_push(n0 + 3)
 check("a message to the project page is held for the router, unaffected: nobody is messaged", res.startswith("held for the router") and len(pp) == n0 + 3, (res, pp[-1:]))
-# a marked message that says nothing is needed from him is refused too, and sent to the keeper
+# a marked message that says nothing is needed from him is a note: held for the next turn, never a turn
 n0 = len(wait_push(0)); NOT = _messaging._NOT_FOR_OWNER
 check("gate: the phrase list is short and fixed", NOT == (f"nothing needed from {_core_instance.OWNER}", f"nothing for {_core_instance.OWNER}", "no action needed", f"no action for {_core_instance.OWNER}",
                                                        "no decision needed", "nothing to decide", "FYI", "for your information", "for the record", "no reply needed"), NOT)
+PRESENT[0] = False      # the gate files a message for the agent's next turn (front_verdict: a message always rides it); with the person talking to the agent it would send it as a turn
 for ph in NOT:
-    r = why(lambda: _messaging._message("work-osprey-main", f"{MK} a900: the build is live. {ph}, the rest is on the page.", "home-beta"))
-    check(f"gate: a marked message to a front agent that says {ph!r} is refused, naming the phrase and the project",
-          r.startswith(f"Refused: work-osprey-main is a front agent of projects/alpha and {MK} marks only what {_core_instance.OWNER} has to do; "
-                       f"this says nothing is needed from him ({ph!r}): write it on the board item it concerns, or say nothing."), r)
-r = why(lambda: _messaging._message(A, f"{MK} a900\nthe release is live: NO ACTION NEEDED.", "home-beta"))
-check("gate: …without regard to case, on a later line, and by its transcript id", r.startswith("Refused: work-osprey-main is a front agent") and "('NO ACTION NEEDED')" in r, r)
-check("gate: nothing was delivered by the refusals", len(wait_push(0)) == n0)
+    r = _messaging._message("work-osprey-main", f"{MK} the build is live. {ph}, the rest is on the page.", "home-beta")      # names no item of his: a note that names one (a900) is a real ask and is delivered
+    check(f"gate: a marked message to a front agent that says {ph!r} is held for its next turn, the reply naming the phrase and saying it starts no turn",
+          r.startswith(f"held for work-osprey-main's next turn ({MK} marks only what {_core_instance.OWNER} has to do, and this says nothing is needed from him ({ph!r}) and names no open item of his, so it starts no turn)"), r)
+r = _messaging._message(A, f"{MK} the zebra page\nthe release is live: NO ACTION NEEDED.", "home-beta")
+check("gate: ...without regard to case, on a later line, and by its transcript id", r.startswith("held for ") and "('NO ACTION NEEDED')" in r, r)
+hl = _held_g.take(A, "work-osprey-main")
+check("gate: nothing was delivered by the holds, and the lines wait for the agent's next turn", len(wait_push(0)) == n0 and hl.count("the build is live") + hl.count("the release is live") >= 1 and MK in hl, (len(wait_push(0)), n0, hl[:900]))
+PRESENT[0] = True
 res = _messaging._message("work-osprey-main", f"{MK} a900 Decide: is the satisfying option A or B? · Recommend: A · Stakes: a month · By: Fri", "home-beta"); pp = wait_push(n0 + 1)
 check("gate: a marked message with something to decide is delivered (a phrase inside a word does not count)", res.startswith("delivered") and pp[-1][0] == "work-osprey-main", (res, pp[-1:]))
 res = _messaging._message("work-osprey-x", "the build is live, no action needed", "home-beta"); pp = wait_push(n0 + 2)

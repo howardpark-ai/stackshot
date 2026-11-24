@@ -261,7 +261,7 @@ check("3d: the message tool's front gate holds a message to a front agent of a p
 reset(); r_ = msg(SOLO, "can you look at the export page when you have a minute?", "alpha-main")
 check("3e: a peer front agent's message to it is held and records none", r_.startswith("held for solo-main's next turn") and keys() == [], (r_, keys()))
 reset(); r_ = msg("alpha-main", "can you look at the export page when you have a minute?", "home-beta")
-check("3f: a message to a front agent of a project WITH a builder is refused (naming the builder) and records none", r_.startswith("Refused") and "alpha-builder" in r_ and keys() == [], (r_, keys()))
+check("3f: a message to a front agent of a project WITH a builder goes to the builder, the reply saying so, and records none", r_.startswith("Not for ") and "alpha-builder" in r_ and "delivered" in r_ and keys() == [], (r_, keys()))
 reset(); r_ = msg(SOLO, "the export page reads fine", "home-beta", fyi=True); n_on = keys()
 reset(enabled=False); r_off = msg(SOLO, "the export page reads fine", "home-beta", fyi=True)
 check("3g: an fyi by name to a front agent of a project with no background agent is filed for its next turn, records the want, and the reply is the one the switch off gives",
@@ -277,8 +277,8 @@ def by_name(label, text, want, sender="home-beta", starts=None, **kw):
     check(f"3j: the message tool, {label}: {'a want is recorded' if want else 'no want'}, and the reply is the one the switch off gives",
           n_on == ([SOLO_KEY] if want else []) and r_on == r_off and (starts is None or r_on.startswith(starts)) and not STATE.exists(), (r_on, n_on, r_off))
 by_name("a marked message the person is not with the agent for (refused, nothing held)", f"{_messaging._FOR_OWNER} a50\nplease look at the export page", True, starts="Refused")
-by_name("a marked message that says nothing is needed from him (refused as a note)", f"{_messaging._FOR_OWNER}\nthe export page is fine, no action needed", True, starts="Refused")
-by_name("a done or no-action note with no mark (refused: write it on the item)", "the export page is fine, no action needed", True, starts="Refused")
+by_name("a marked message that says nothing is needed from him (held as a note)", f"{_messaging._FOR_OWNER}\nthe export page is fine, no action needed", True, starts="held for solo-main")
+by_name("a done or no-action note with no mark (held as a note)", "the export page is fine, no action needed", True, starts="held for solo-main")
 by_name("a message with needs: decision away from the first line (refused: the mark goes on the first line)", "the export page reads fine\nit now needs: decision", True, starts="Refused")
 by_name("the person's own message (refused: no mark; he is no session)", "the export page reads fine", False, sender=_messaging.OWNER, starts="Refused")
 _messaging.MSG_LOG.unlink(missing_ok=True); log_row(SOLO, "home-beta", 5)
