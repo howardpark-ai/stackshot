@@ -696,7 +696,8 @@ def handoff_write_move(item: dict[str, Any], st: "_ho.Step", now: float) -> None
     alive = st.via != "orphan" or _hooks().model_of({**item, "gid": st.gid}).state == _model.ALIVE       # read before the fields change
     meta = dict(item.get("metadata") or {})
     keep = [x for x in _needs_of(meta) if x.lower() in _NEEDS_KINDS or not (ho_same(x, st.frm) or ho_same(x, st.to))]
-    _needs_store(meta, _canon_needs([st.to, *keep]))
+    after = [st.frm] if st.keep_frm and st.frm and not ho_same(st.frm, st.to) else []      # the front agent that handed its step on stays named, behind the new mover (`keep_frm`)
+    _needs_store(meta, _canon_needs([st.to, *keep, *after]))
     for key in (("mover", "then", _model.LEGACY_PICKER_KEY) if st.via == "orphan" else ("mover",)):      # the minute pass has only ever followed the stored mover; the audit's hand-over also follows `then` and a post-wake mover
         if meta.get(key) and st.frm and ho_same(meta[key], st.frm):
             meta[key] = st.to

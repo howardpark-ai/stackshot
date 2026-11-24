@@ -38,6 +38,15 @@ def _refusal_line(tool: str, args: Any, err: BaseException) -> str:
     return f"refused: {tool} item={item or '-'} sender={sender or '-'}: {reason}"
 
 
+def _message_fields(args: dict[str, Any], err: BaseException) -> dict[str, str]:
+    """call_log.record's `to`, `kind` and `text` for a refused message call (service/messaging.py `refusal_fields`); {} when they cannot be read, so the refusal is still counted."""
+    try:
+        from stackshot.service import messaging as _messaging  # noqa: PLC0415 — only a refused message needs it
+        return _messaging.refusal_fields(args.get("to"), args.get("text"), err)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _written_item(tool: str, args: dict[str, Any], result: Any) -> str:
     """The store id of the item a counted write was about: its item_id argument, or for a create the id the reply names ("created board#N …"); "" when there is none."""
     try:
@@ -72,7 +81,8 @@ class _RefusalLog(_MW):
                 print(_refusal_line(name, args, e), file=sys.stderr, flush=True)
                 a = args if isinstance(args, dict) else {}
                 item_ = a.get("item_id")
-                _calls.record(name, False, item=item_, sender=a.get("sender"), why=str(e), call=_calls._h(a.get("subject"))[:8] if name == "create" and not str(item_ or "").strip() else "")
+                more = _message_fields(a, e) if name == "message" else {}          # a refused message keeps its target, the refusal's kind and its text (the one call whose arguments are logged)
+                _calls.record(name, False, item=item_, sender=a.get("sender"), why=str(e), call=_calls._h(a.get("subject"))[:8] if name == "create" and not str(item_ or "").strip() else "", **more)
             except Exception as le:  # noqa: BLE001  — a log line is never worth losing the refusal
                 print(f"mcp refusal log failed: {le}", file=sys.stderr, flush=True)
             raise

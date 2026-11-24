@@ -37,7 +37,7 @@ Not run by the server, so not routed: `[fleet] recycle_when_idle` and `notice_cm
 
 ## What is read on the agents' box
 
-A directory the server read is read from a local copy instead: one ssh call (a small program on the box that globs, reads and returns the files) refreshes everything one reader needs at most every `cache_seconds`, files whose time and size did not change are not rewritten, and every file is moved into place whole. The reader's code is the code it was.
+A directory the server read is read from a local copy instead: one ssh call (a small program on the box that globs, reads and returns the files) refreshes everything one reader needs at most every `cache_seconds`, files whose time and size did not change are not rewritten, and every file is moved into place whole. The reader's code is the code it was. The folder of a copy is shared by every process of the server's box (the server, the process that reads the anchors, the puller, and a push script that starts and ends at every delivery): a process that starts removes nothing from it, and its first good copy replaces the files and removes the ones the box no longer has. What a process removed at its start the others read as absent for as long as its own call took: the session registry read empty, and a notice for a page's keeper was delivered to the session instead of being held for the router. A process that starts while the box does not answer reads a kept copy (the registry, the links, the lane names) as it stands, and removes a copy that reads as unknown when absent (pane liveness, prompt stamps, the lane record) rather than read from a copy of an age nobody knows; `require_copy` counts only a copy this process made.
 
 - The fleet tool's store, `[client] session_links`: `<letter>/sessions.json` (the links) and `<letter>/session-registry.json` (the permanent ids), one call for both.
 - The lane record, `[client] lanes_file`, with `lane-default` beside it, and the lane-names file (`STACKSHOT_LANE_NAMES`, else its default path).
@@ -67,7 +67,7 @@ one body, `POST /client/agent-state` with the machine token of every `/client` w
 
 It is unknown, never idle, whenever the snapshot cannot say: none was ever pushed, the file does not read, the newest is older than 15 minutes (`agent_state.MAX_AGE_S`: three pushes missed), the agent is not in it, its entry
 was not read (`read` false) or its state is unknown. An unknown mover gets the audit's unknown line (`audit_unknown`): nothing is flagged and nothing is handed on. So an agent on another box than the server reads right as soon
-as the manager there pushes, and reads unknown, never idle, while it does not. Nothing here is a setting: the server needs no name of the agents' box for it and `[agents_box]` is not read for it.
+as the manager there pushes, and reads unknown, never idle, while it does not. Nothing here is a setting: the server needs no name of the agents' box for it and `[agents_box]` is not read for it. The same snapshot is what lets the audit hand an idle front agent's own open step to a free background agent of its project, and, where none is free, start the front agent's own turn ([the ladder page](stall-and-ladder.md)): only a fresh, read `idle` (for a background agent to take an item, or a front agent to be started) counts, and the prompt stamps it checks for the owner's presence are the ones copied from this box (`prompts_dir` above); a stamp folder it cannot read starts nothing.
 
 ## Not routed
 

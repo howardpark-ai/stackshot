@@ -196,6 +196,34 @@ check("a retired sole agent of a page is refused to the sender, naming the page 
 res = _messaging._message("work-osprey-x", "to a live agent", "home-beta")
 check("a live name is sent to as before (nothing readdressed)", res.startswith("delivered") or res.startswith("inbox") or res.startswith("queued"), res)
 
+# ---- 5a. a refusal of the relay names its kind, and the call log keeps it with the target and the text (service/messaging.py Refused, web/middleware.py _RefusalLog)
+import asyncio, types
+from stackshot.core import call_log as _CL
+from stackshot.web import middleware as _wmw
+def logged(to, text, sender="home-beta", **kw):
+    """A message call as the tool makes it, through the server's refusal log → (the call log's new row, the ToolError it ended in)."""
+    n_ = len(list(_CL.read(0, time.time() + 60)))
+    async def nxt(ctx): return _messaging._message(to, text, sender, **kw)
+    ctx = types.SimpleNamespace(message=types.SimpleNamespace(name="message", arguments={"to": to, "text": text, "sender": sender}))
+    err = None
+    with contextlib.redirect_stderr(io.StringIO()):
+        try: asyncio.run(_wmw._RefusalLog().on_call_tool(ctx, nxt))
+        except ToolError as x: err = x
+    new = list(_CL.read(0, time.time() + 60))[n_:]
+    return (new[-1] if new else None), err
+for label, to, kind, said in (("a retired name no project takes", "zz-lone-old", "dead-recipient", "nobody takes this"), ("the retired sole agent of a page", "work-solo-main", "no-receiver", "to a sole agent"),
+                              ("a name no heartbeat has seen", "work-osprey-fresh", "no-session", "a question for a pane that may be running")):
+    row, err = logged(to, said)
+    check(f"kind: {label} is refused as `{kind}` and the row keeps the target, the kind and the text", err is not None and err.kind == kind and row is not None and row["ok"] is False and row["kind"] == kind and row["to"] == to
+          and row["text"] == said and row["sender"] == "home-beta", (err, row))
+live_x = _sr._sessions_index()[RUN["x"]]
+dead_x = dict(live_x, gone=gone_iso(7200))
+try: _messaging._dead_recipient(uid(14), [dead_x], {uid(14): dead_x, RUN["x"]: live_x}); e = None
+except ToolError as x: e = x
+check("kind: a dead pane's id whose name has a pane running under another id is refused as `session-id-use-name`, naming the name", e is not None and e.kind == "session-id-use-name" and "address it by name, to='work-osprey-x'" in str(e), e)
+row, err = logged("work-osprey-old", "a script's line", "a-nightly-script", origin="a")
+check("kind: …a retired name that its project takes is no refusal: it goes to the page (the plain row of a call that went through, no error)", row is not None and row["ok"] is True and "kind" not in row and err is None, (row, err))
+
 # ---- 5b. the message tool says nothing about a name it cannot see: an empty, partial or unreadable view of the fleet is no proof of a retired name, so the refusal stands as before
 def refused_unseen(to, sender="home-beta", **kw):
     a, m = len(routed("projects/alpha")), len(sock_sent)
