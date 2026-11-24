@@ -11,8 +11,8 @@ the anchors of merged or closed GitHub issues and pull requests after 14 days wi
 closed or archived pages: each removal is logged with the call that puts it back).
 
 Store: board-data/anchors.json  {"<project key>": [{"url": …, "items": [ids] | null, "added": ts, "by": who}, …]},
-written only by the stackshot server (this module), read by anchor-hub (bindings) and the board (render).
-Stdlib only: imported by server.py and by anchor-hub (anchorhub/core.py).
+written only by the stackshot server (this module), read by the anchors service (bindings) and the board (render).
+Stdlib only: imported by server.py and by the anchors service (anchorhub/core.py).
 """
 from __future__ import annotations
 import os as _os, sys as _sys
@@ -29,6 +29,7 @@ import signal
 import subprocess
 import tempfile
 import time
+from datetime import datetime
 from typing import Any
 
 from stackshot.core import agentbox as _ab  # noqa: E402  (the agents' box over ssh, when [agents_box] ssh names one)
@@ -952,6 +953,28 @@ def remove(store: dict, project: str, urls: list[str]) -> list[dict[str, Any]]:
     return lst
 
 
+UNREADABLE_DAYS_MAX = 3650           # the most [anchor_hub] unreadable_days counts: a larger number would only push the removal day beyond what a date can show
+UNREADABLE_DAYS = 7                  # an anchor the anchors service has not been able to read for this many days is removed by the anchor sweep ([anchor_hub] unreadable_days)
+
+
+def unreadable_days() -> int:
+    """[anchor_hub] unreadable_days: how many days an anchor stays on its page while the anchors service cannot read it; 7 when the setting is absent, no whole number or below 1; at most 3650."""
+    v = _cfg.get("anchor_hub", "unreadable_days", default=UNREADABLE_DAYS)
+    return min(v, UNREADABLE_DAYS_MAX) if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else UNREADABLE_DAYS
+
+
+def _removal_note(u: dict[str, Any]) -> str:
+    """The end of an unreadable anchor's line once its removal clock runs (`at`, the epoch the anchors service confirmed it could not read it): the day it is removed if it still cannot be read."""
+    at = u.get("at")
+    if isinstance(at, bool) or not isinstance(at, (int, float)) or at <= 0:
+        return ""
+    try:
+        day = datetime.fromtimestamp(at + unreadable_days() * 86400, _cfg.tz()).strftime('%Y-%m-%d')
+    except (ValueError, OverflowError, OSError):      # a clock too far out for a date: the listing goes on without it
+        return ""
+    return f" (removed on {day} if it still cannot be read)"
+
+
 def fmt(entries: list[dict[str, Any]], status: dict[str, dict[str, Any]] | None = None, boxes: dict[str, str] | None = None) -> str:
     """A project's anchors, one per line. With anchor-hub's per-anchor status (status.json "anchors") each line also says
     what the anchors service made of it: its name there, or that the anchors service cannot read it and why. With `boxes` ({label: address} of the mailboxes the
@@ -961,7 +984,7 @@ def fmt(entries: list[dict[str, Any]], status: dict[str, dict[str, Any]] | None 
         st = (status or {}).get(aid) or {}
         u = st.get("unreadable")
         if u:
-            return f" — UNREADABLE by anchor-hub since {u.get('since')} {_cfg.tz_abbr()}: {u.get('why')}" + ("" if u.get("warned") else " (being asked once more before the keeper is warned)")
+            return f" — UNREADABLE by the anchors service since {u.get('since')} {_cfg.tz_abbr()}: {u.get('why')}" + (_removal_note(u) if u.get("warned") else " (being asked once more before the keeper is warned)")
         if boxes and gmail_query(aid) is not None:
             return f" — Gmail {gmail_title(aid, boxes)}"
         return f" — {st['label']}" if st.get("title") else ""

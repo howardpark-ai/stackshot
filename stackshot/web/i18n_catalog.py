@@ -762,7 +762,7 @@ CATALOG: dict[str, str] = {
     "item.work": "Work",
     "item.when.no_change_since": "no change since {when}",
     "item.when.unreadable": "unreadable",
-    "item.when.unreadable_tip": "anchor-hub cannot read it since {since} {tz}: {why}",
+    "item.when.unreadable_tip": "the anchors service cannot read it since {since} {tz}: {why}",
     "item.when.quiet": "quiet",
     "item.when.poll": " · poll",
     "item.log.field.next": "next",

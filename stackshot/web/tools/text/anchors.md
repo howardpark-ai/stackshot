@@ -57,11 +57,16 @@ the ones scoped to that item; an item whose file cannot be read is not taken for
 GitHub issue or PR that is merged or closed is removed 14 days after its last activity (a new comment or a reopening
 starts the 14 days again); an anchor on an archived repository, or on an issue or PR that GitHub has answered "not
 found" for a day while the rest of its repository still reads, is removed; and every anchor of a page that is closed
-or archived goes with it. An anchor an open item waits on (its wait_anchor or an open line of its list wait, in any form
+or archived goes with it. An anchor the anchors service cannot read is listed as UNREADABLE with the reason (a refusal,
+a 401 or a 403 that is no rate limit; a 404 for an issue or PR that is not yet taken for deleted; a repo root's
+notifications while no usable token for them is set): once two reads at least five minutes apart were both refused,
+the project's keeper is told once, and the anchor is removed 7 days after that by default (the config key unreadable_days under
+[anchor_hub]), unless it can be read again before, which also ends the count; a rate limit or a network error never
+starts it, and when most anchors become unreadable at once (a revoked token does that) none is removed for it until they read again. An anchor an open item waits on (its wait_anchor or an open line of its list wait, in any form
 of the same issue or PR) or that is scoped to a parked open item is kept by the GitHub rules (the 14 days and the
-archived or gone repository); a project-wide anchor is never removed because an item closed. One ten-minute round
+archived or gone repository) and by the unreadable rule; a project-wide anchor is never removed because an item closed. One ten-minute round
 removes by default 50 anchors, set by the config key sweep_per_tick under [anchor_hub]; the rest go in the next rounds. Adding an anchor that is already
-there again counts as adding it now: the 14 days start over. Each removal is a line on the project's
+there again counts as adding it now: the 14 days, and the 7 days of an unreadable one, start over. Each removal is a line on the project's
 routing log that carries the call that puts the anchor back, anchors(project=…, add=[url], items=[…]), project-wide
 when every item it was scoped to is closed (an item that is not open, closed or unreadable, cannot be named in the call and is left out of it); a call too long for the log line is whole
 in the state folder's anchor-removed.jsonl, and the line says so. When an item or a project is reopened, its reply
