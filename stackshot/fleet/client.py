@@ -1502,7 +1502,7 @@ def main(argv: list[str]) -> int:
         if len(a) != 2 or not sender or opt["--release"] not in ("", "green", "red") or (fyi and asks):
             print("usage: client.py message <to> <text | -> --sender <label> [--fyi | --question] [--release green|red --pr <PR url>]\n"
                   "  --fyi: the message asks nothing of its receiver (news, a result). A background agent or a front agent gets it with its next turn, not a turn of its own, "
-                  "and a front agent needs no mark on the first line for it; a front agent whose hook cannot fetch held lines does not get it, and the call fails (exit 1); without --fyi a message to a front agent is delivered only when it is marked for the person; any other is refused naming the project's background agent.\n"
+                  "and a front agent needs no mark on the first line for it; a front agent whose hook cannot fetch held lines does not get it, and the call fails (exit 1); without --fyi a message to a front agent that is marked for the person and names an open item of his is delivered as a turn only while he talks with that agent, else written onto the item and starts no turn; any other goes to the project's background agent.\n"
                   "  --question: a front agent asks the session it writes to something; only a reply to a message sent with it is an answer. Not with --fyi, and not in the owner's own name."); return 1
         text = sys.stdin.read() if a[1] == "-" else a[1]
         status, body = message(a[0], text, sender, release=opt["--release"], pr=opt["--pr"], fyi=fyi, question=asks)

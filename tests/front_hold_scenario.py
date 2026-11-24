@@ -14,6 +14,10 @@ Covers (messaging._gate_front / answer_route / asked_by / router_answer, router_
   5. A staged message of each kind under a temp store: nothing starts a turn at the held ones, the held store hands each over at the next turn once, two passes from one sender are two lines (the store folds
      only a repeated notice id), a full store keeps the newest, and an agent whose hook cannot fetch held lines is not given the pass: marked for the router, refused for the tool.
 
+  11. A marked message that names an open item of his, to a front agent he is not talking with (no turn warranted), is written onto each open item it names as a History line from the sender and starts no turn (the same words once, however many senders; a script gets status 200);
+     held for the agent's next turn when no item can take it (closed, unwritable, more than three named); with the hold off it is still written, and refused only when it cannot be (section 7). The call log counts it as handled, once, and never as refused.
+  12. A `to` page key spelled another way (case, `-` for `/`, a leading `projects/`) is read as the one registry page it matches and counted as a correction (`page-key`); none or two or more matches stay refused, naming the nearest keys; nothing goes to a page it only resembles.
+
     tests/run-suite front_hold   -> exit 0 / 1"""
 import asyncio, datetime, importlib, inspect, json, logging, os, pathlib, re, sys, threading, time
 
@@ -202,7 +206,7 @@ check("1d4b: …and one that names a closed item that still carries needs: decis
 fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na16: sign the export form when you have a minute", "home-beta"); settle()
 check("1d5: a marked message naming a step that is his (a16: your-step, no decision in needs) is a turn while he is talking with the agent", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, (out, pushes()[n0:]))
 unstamp(A); fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na16: sign the export form when you have a minute", "home-beta"); settle()
-check("1d6: …and with him away, and no ask of his, it is refused (the item is his, but no turn is warranted), not held", out.startswith("Refused") and "starts no turn" in out and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
+check("1d6: …and with him away, and no ask of his, it starts no turn (the item is his, but no turn is warranted): it is written onto the item, not refused and not held", out.startswith("Not delivered: written onto a16") and "starts no turn" in out and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
 # a fixed no-action phrase counts only as the message's own statement: the word "fyi" inside a request (a delivery mode described) is no note
 REQ = "a16: Please fix the delivery of the export form; sending it as an fyi so it waits for your next turn."
 fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\n" + REQ, "home-beta"); settle(); unstamp(A)
@@ -690,15 +694,15 @@ fresh(); no_log(); n0 = len(pushes()); out = tres("trio-main", WORDS); settle()
 check("8a: a sibling front agent's marked message quoting his words is held for the sibling's next turn, starts no turn, and the reply says so", out.startswith("held for trio-side's next turn") and reach(TS, n0) == [] and reach(TX, n0) == [] and held.count(TS) == 1, out)
 check("8b: …the held line carries the message with his quoted words", QUOTE in str(held.take(TS, "trio-side")), "")
 fresh(); n0 = len(pushes()); out = tres("trio-main", NOWORDS); settle()
-check("8c: the same message with no quoted words is turned away as today: refused, nothing held, nothing sent", out.startswith("Refused") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+check("8c: the same message with no quoted words starts no turn either, and nothing holds it: written onto the item it names, nothing held, nothing sent", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0 and reach(TS, n0) == [], out)
 fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\na14: Oliver told me to give you the export.\n" + f'Acked-by: "{QUOTE} and more he never said" (just now, session trio-main)'); settle()
-check("8d: words that are not in his message in the transcript are no words: refused as today", out.startswith("Refused") and held.count(TS) == 0, out)
+check("8d: words that are not in his message in the transcript are no words: written onto the item as without them, nothing held", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0, out)
 fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\na14: Oliver told me to give you the export.\n" + 'Acked-by: "an old order of the second desk" (long ago, session trio-main)'); settle()
-check("8e: his words older than the wake cap are no words: refused as today", out.startswith("Refused") and held.count(TS) == 0, out)
+check("8e: his words older than the wake cap are no words: written onto the item as without them, nothing held", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0, out)
 fresh(); n0 = len(pushes()); out = tres("trio-x", WORDS); settle()
-check("8f: a background agent's message quoting words is unchanged: refused, nothing held", out.startswith("Refused") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+check("8f: a background agent's message quoting words is no sibling's: it is written onto the item like any marked message with no turn warranted, nothing held", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0 and reach(TS, n0) == [], out)
 fresh(); n0 = len(pushes()); out = tres("solo-main", WORDS); settle()
-check("8g: another project's front agent's message quoting words is unchanged: refused, nothing held", out.startswith("Refused") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+check("8g: another project's front agent's message quoting words is no sibling's: written onto the item, nothing held", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0 and reach(TS, n0) == [], out)
 fresh(); n0 = len(pushes()); out = tres("trio-main", WORDS, to="trio-x"); settle()
 check("8h: a message to the project's background agent is not this rule's: delivered as before, nothing held", out.startswith("delivered") and held.count(TS) == 0 and held.count(TX) == 0, out)
 fresh(); stamp(TS, 5); n0 = len(pushes()); out = tres("trio-main", WORDS); settle(); unstamp(TS)
@@ -733,7 +737,7 @@ check("8s2: …the quoted words being valid, the reply says to name the item bei
 fresh(); n0 = len(pushes()); out = tres("trio-main", NOITEM.replace("\nOliver told", "\n`a14` Oliver told")); settle()
 check("8t: …also when the item is only written in backticks (that names none), the quoted words notwithstanding", out.startswith("held for trio-side's next turn") and "must name an open item of his" in out and held.count(TS) == 1, out)
 fresh(); n0 = len(pushes()); out = tres("trio-main", NOWORDS); settle()
-check("8u: naming an item of his without his words is main's refusal still (the item rule is met, no turn is warranted, no words hold it): refused, nothing held", out.startswith("Refused") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+check("8u: naming an item of his without his words (the item rule is met, no turn is warranted, no words hold it): written onto the item, nothing held", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0 and reach(TS, n0) == [], out)
 fresh(); stamp(TS, 5); n0 = len(pushes()); out = tres("trio-main", NOITEM); settle(); unstamp(TS)
 check("8v: a quote of his words with no item named is no turn even while he is talking with the sibling (the item rule holds first): held, nothing pushed", out.startswith("held for trio-side's next turn") and reach(TS, n0) == [] and held.count(TS) == 1, out)
 fresh(); n0 = len(pushes()); n = recp(WORDS, key=TRK, kind="message", who="trio-main (cccccccc…)"); res = act2(n, "trio-side", key=TRK)
@@ -756,7 +760,7 @@ check("6e: docs/router.md says a session's message needs him only by naming an o
 check("6f: …that a notice that is no session's message keeps the decision-only reading, and that an item he asked the agent to tell him about counts", "does not widen to an item whose step is his" in docs["router.md"] and "(its `tell_him`)" in docs["router.md"]
       and "or whose step is his. An audit" not in docs["router.md"], "")
 check("6g: the docs and the message tool's text say both rules: the item must be named (an open item of his), and a sibling front agent's quoted words (Acked-by) hold it for the next turn", "The two rules compose" in docs["handoffs.md"] and "Acked-by" in docs["handoffs.md"]
-      and "an open item of his" in tt and "Acked-by" in tt and "held for its next turn" in tt, "")
+      and "an open item of his" in tt and "Acked-by" in tt and "has it held" in tt, "")
 check("6c: the message tool's text says what a front agent hears and where the rest goes", "background agent (none: held)" in tt and "marked or not, is held" in tt, tt[:200])
 
 # ---- 7. a refused message call is logged with its target, the refusal's kind and its text (service/messaging.py Refused, core/call_log.py, web/middleware.py _RefusalLog)
@@ -840,11 +844,16 @@ try:
     site("unmarked, not for the person, hold off and no builder to pass it to", "unmarked-not-for-owner", SOLO, "can you look at the export page when you have a minute?", "home-beta")
     site("marked, says nothing is needed, hold off", "marked-no-action-phrase", FRONT, mark() + "\nthe build is done, no action needed.", BACK)
     site("marked, no item of his, hold off", "marked-no-item-of-his", FRONT, mark() + "\nDecide whether the export ships on Friday.", "home-beta")
+    unstamp(A)
+    _save_real = _messaging._writes.save
+    def _save_boom(*a, **k): raise RuntimeError("the store would not take the write")
+    _messaging._writes.save = _save_boom
+    try: site("marked, names his item, no turn warranted, hold off and the item cannot be written", "marked-no-turn", FRONT, mark() + "\na16: sign the export form when you have a minute", "home-beta")
+    finally: _messaging._writes.save = _save_real
 finally:
     if _notices is None: _cfg.CFG["router"].pop("hold_notices", None)
     else: _cfg.CFG["router"]["hold_notices"] = _notices
 unstamp(A)
-site("marked, names his item, no turn warranted", "marked-no-turn", FRONT, mark() + "\na16: sign the export form when you have a minute", "home-beta")
 # the hold and the delivery
 _front_fyi = telling.front_fyi
 telling.front_fyi = lambda *a, **k: ("", "no hook")
@@ -879,12 +888,13 @@ with contextlib.redirect_stderr(buf_):
 row = call_rows()[-1]
 check("7 a refusal that is no relay site (a plain ToolError) is logged as `unclassified`, and the journal line on stderr carries no message text", row["kind"] == "unclassified" and row["text"] == "words" and "words" not in buf_.getvalue() and buf_.getvalue().startswith("refused: message item=- sender=home-beta"), (row, buf_.getvalue()))
 check("7 every refusal site of the relay is a `Refused` with a kind of its own: no bare ToolError is raised in messaging.py", not re.findall(r"raise ToolError\(", pathlib.Path(STACK, "stackshot/service/messaging.py").read_text(encoding="utf-8")), None)
-kinds_ = re.findall(r'raise Refused\("([a-z-]+)"', pathlib.Path(STACK, "stackshot/service/messaging.py").read_text(encoding="utf-8"))
+kinds_ = re.findall(r'(?:raise|return) Refused\("([a-z-]+)"', pathlib.Path(STACK, "stackshot/service/messaging.py").read_text(encoding="utf-8"))
 check("7 …and no two sites share a kind", len(kinds_) == len(set(kinds_)) and len(kinds_) >= 23, kinds_)
 
 # ---- 9. the replay: a week's front-gate refusals (57 message calls of the week before this change, kept here as neutral fixtures of the same shapes, no real names), run through the new gate and the server's own call log
 # Per kind of the old refusal: K1 (15, the unmarked-message-to-a-front-agent rule that was already gone) goes through; K2 (17, unmarked, not for the person), K3 (7, a done, taken or no-action note) and K4 (2, a marked message with a no-action phrase) are handled and told;
-# K5 (10, marked, names his item, no turn warranted), K6 (4, a page key that names no page) and K7 (2, an id no session has) stay refused, and the weekly count shows the first three as handled and these as refused.
+# K5 (10, marked, names his item, no turn warranted) is written onto the item and told, and counted as handled too; K6 here (4, a page key that names no page of this fixture's registry, none of them spelled like a page it has) and K7 (2, an id no session has) stay refused, and the weekly count shows the handled ones as handled and these as refused.
+# The spellings of a page key that do resolve are section 12.
 from stackshot.tools import refusal_report as _RR
 def replay(to, text, sender, **kw):
     """One message call through the server's refusal log → (the call log's new row, the refusal or None, the reply the sender got)."""
@@ -951,14 +961,14 @@ check("9 replay K4 (marked, a no-action phrase): the phrase inside a sentence is
       ok_row(k4a) and k4a[0].get("outcome") == "handled" and k4a[0].get("kind") == "marked-no-action-phrase" and k4a[0].get("how") == "judged-on-items" and k4a[2].startswith("delivered") and "inside a sentence, which is not read as saying nothing is needed from Oliver, so it was judged on the items it names." in k4a[2] and k4a[5] == 1, (k4a[0], k4a[2][:300]))
 check("9 replay K4: …a background agent's marked report that says nothing is needed is written onto the item it names, no turn, the row says `handled` and `written-on-item`",
       ok_row(k4b) and k4b[0].get("outcome") == "handled" and k4b[0].get("kind") == "marked-no-action-phrase" and k4b[0].get("how") == "written-on-item" and k4b[2].startswith("Not delivered: written onto a1") and k4b[5] == 0, (k4b[0], k4b[2][:300]))
-check("9 replay K5 (marked, his item, no turn warranted): unchanged, all 10 still refused as `marked-no-turn`, nothing delivered or held for the front agent",
-      all(r[1] is not None and getattr(r[1], "kind", "") == "marked-no-turn" and r[0]["ok"] is False and r[0]["kind"] == "marked-no-turn" and "outcome" not in r[0] and r[5] == 0 for r in out9["K5"]), [(getattr(r[1], "kind", None), str(r[1])[:80]) for r in out9["K5"]])
-check("9 replay K6 (a page key that names no page): unchanged, all 4 still refused as `unknown-page-key`", all(r[1] is not None and getattr(r[1], "kind", "") == "unknown-page-key" and r[0]["ok"] is False and r[0]["kind"] == "unknown-page-key" and "outcome" not in r[0] for r in out9["K6"]), [(getattr(r[1], "kind", None), str(r[1])[:80]) for r in out9["K6"]])
+check("9 replay K5 (marked, his item, no turn warranted): all 10 handled and told: written onto the item it names, the row says `handled`, the old kind and `written-on-item`, the reply says the front agent reads it there, nothing delivered to the front agent",
+      all(ok_row(r) and r[0].get("outcome") == "handled" and r[0].get("kind") == "marked-no-turn" and r[0].get("how") == "written-on-item" and r[2].startswith("Not delivered: written onto a1") and "reads it there" in r[2] and r[5] == 0 for r in out9["K5"]), [(r[0], r[2][:100]) for r in out9["K5"] if not ok_row(r)])
+check("9 replay K6 (a page key that names no page of this registry): all 4 still refused as `unknown-page-key`", all(r[1] is not None and getattr(r[1], "kind", "") == "unknown-page-key" and r[0]["ok"] is False and r[0]["kind"] == "unknown-page-key" and "outcome" not in r[0] for r in out9["K6"]), [(getattr(r[1], "kind", None), str(r[1])[:80]) for r in out9["K6"]])
 check("9 replay K7 (an id no session has): unchanged, both still refused as `unknown-transcript-id`", all(r[1] is not None and getattr(r[1], "kind", "") == "unknown-transcript-id" and r[0]["ok"] is False and r[0]["kind"] == "unknown-transcript-id" and "outcome" not in r[0] for r in out9["K7"]), [(getattr(r[1], "kind", None), str(r[1])[:80]) for r in out9["K7"]])
 st9 = _RR.message_stats([r[0] for k in out9 for r in out9[k] if r[0] is not None])
-check("9 replay: the weekly count of these 57 calls: 57 calls, 16 refused (K5 10, K6 4, K7 2), and the handled ones counted as handled and never as refused",
-      st9["calls"] == 57 and st9["refused"] == 16 and dict(st9["kinds"]) == {"marked-no-turn": 10, "unknown-page-key": 4, "unknown-transcript-id": 2}
-      and sum(st9["handled"].values()) >= 21 and st9["handled"][("unmarked-not-for-owner", "passed-on")] >= 17 and st9["handled"][("marked-no-action-phrase", "judged-on-items")] == 1 and st9["handled"][("marked-no-action-phrase", "written-on-item")] == 1, (st9["calls"], st9["refused"], dict(st9["kinds"]), dict(st9["handled"])))
+check("9 replay: the weekly count of these 57 calls: 57 calls, 6 refused (K6 4, K7 2), and the handled ones (K5's 10 among them) counted as handled and never as refused",
+      st9["calls"] == 57 and st9["refused"] == 6 and dict(st9["kinds"]) == {"unknown-page-key": 4, "unknown-transcript-id": 2} and st9["handled"][("marked-no-turn", "written-on-item")] == 10
+      and sum(st9["handled"].values()) >= 31 and st9["handled"][("unmarked-not-for-owner", "passed-on")] >= 17 and st9["handled"][("marked-no-action-phrase", "judged-on-items")] == 1 and st9["handled"][("marked-no-action-phrase", "written-on-item")] == 1, (st9["calls"], st9["refused"], dict(st9["kinds"]), dict(st9["handled"])))
 
 # ---- 10. the review of this change: a real ask beside a no-action phrase, the forms of a note, the pass-on's side effects, a sibling builder, and the cases the mutants showed untested
 def delivered_ask(out, n0, phrase, items=("a14",)):
@@ -977,7 +987,7 @@ for name_, text_, phrase_ in ASKS:
 fresh(); stamp(A, 5); row_, err_ = logged(FRONT, mark() + "\n" + ASKS[0][1], "home-beta"); unstamp(A); settle()
 check("10a6: …and the call log counts it as handled (`marked-no-action-phrase`, `judged-on-items`), not as a refusal", err_ is None and row_ is not None and row_["ok"] is True and row_.get("kind") == "marked-no-action-phrase" and row_.get("outcome") == "handled" and row_.get("how") == "judged-on-items", row_)
 fresh(); unstamp(A); n0 = len(pushes()); out = msg(FRONT, mark() + "\n" + ASKS[0][1], "home-beta"); settle()
-check("10a7: …with him away it is the old no-turn refusal of a marked message (the phrase makes no difference: nothing is held, nothing delivered)", out.startswith("Refused") and "starts no turn" in out and reach(A, n0) == [] and held.count(A) == 0, out)
+check("10a7: …with him away it starts no turn, as any marked message (the phrase makes no difference: it is written onto the item, nothing is held, nothing delivered)", out.startswith("Not delivered: written onto a14") and "starts no turn" in out and reach(A, n0) == [] and held.count(A) == 0, out)
 # a marked note that names none is a note: held, with a reply that says what to do (name the item or take the phrase out), never the line about the mark it already has
 fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\na1: Decide whether the export ships on Friday. FYI option B costs 40 USD.", "home-beta"); settle(); unstamp(A)
 check("10b1: a marked message whose only item is none of his (a1), with a phrase, is held as a note, the reply saying it names no open item of his, to name one or take the phrase out, and never to put the mark on its first line",
@@ -1164,6 +1174,124 @@ n_ = len(call_rows()); _CL.record("message", True, sender="home-beta", fixes=_hm
 check("10l2: …and one that went through with it is a handled call (the control)", len(done_row) == 1 and done_row[0]["ok"] is True and done_row[0].get("outcome") == "handled" and done_row[0].get("how") == "passed-on" and done_row[0].get("kind") == "unmarked-not-for-owner", done_row)
 n_ = len(call_rows()); _CL.record("update", True, item="a1", sender="home-beta", fixes=_hmark); other_row = call_rows()[n_:]
 check("10l3: …and a handled mark on another tool's call counts for nothing", not other_row or ("outcome" not in other_row[0] and "how" not in other_row[0]), other_row)
+
+
+# ---- 11. a marked message that names an open item of his, to a front agent he is not talking with: written onto the item (a History line from the sender), no turn, told; held when no item can take it (messaging._written_unwoken)
+SAVES: list = []
+_save_orig = _messaging._writes.save
+def _save_count(gid, *a, **k): SAVES.append(gid); return _save_orig(gid, *a, **k)
+_messaging._writes.save = _save_count
+def written_rows(shown): return [x for x in mlog() if x.get("outcome") == f"written onto {shown}, not delivered"]
+K5_TEXT = mark() + "\na14: the retest needs your pick between the two lanes; I would take the first."
+fresh(); no_log(); unstamp(A); SAVES.clear(); n0 = len(pushes()); out = msg(FRONT, K5_TEXT, "home-beta"); settle()
+check("11a: a marked message naming an open item of his (a14), he not talking with the agent: written onto a14 as a History line from the sender, and the reply says the front agent reads it there and that it starts no turn",
+      out.startswith("Not delivered: written onto a14 as a History line from home-beta, and work-osprey-main, the front agent, reads it there. It starts no turn, because Oliver is not talking with work-osprey-main now and has not asked it to tell him about this."), out)
+check("11b: …one save of the item, one row of the message log (sender, item, the words), nothing pushed to the front agent or its builder, nothing held", SAVES == ["a14"] and len(written_rows("a14")) == 1 and written_rows("a14")[0]["from"] == "home-beta" and "pick between the two lanes" in written_rows("a14")[0]["text"]
+      and reach(A, n0) == [] and reach(X, n0) == [] and held.count(A) == 0, (SAVES, mlog()[-2:], pushes()[n0:]))
+out2 = msg(FRONT, K5_TEXT, BACK); settle()
+check("11c: the same words from another sender for the same item are one History line: no second save, no second row, the reply still tells the sender where they are", out2.startswith("Not delivered: written onto a14 already") and "reads it there" in out2 and SAVES == ["a14"] and len(written_rows("a14")) == 1 and reach(A, n0) == [], (out2, SAVES))
+out3 = msg(FRONT, K5_TEXT + " Also the second lane is cheaper.", BACK); settle()
+check("11d: …other words for the same item are a line of their own", out3.startswith("Not delivered: written onto a14 as a History line from work-osprey-x") and SAVES == ["a14", "a14"] and len(written_rows("a14")) == 2, (out3, SAVES))
+out4 = msg(FRONT, mark() + "\na16: please sign the export form when you can.", "home-beta"); settle()
+check("11e: another item of his (a16, a step of his) is written onto that item: its own save and row", out4.startswith("Not delivered: written onto a16 as a History line") and SAVES[-1] == "a16" and len(written_rows("a16")) == 1, (out4, SAVES))
+fresh(); no_log(); SAVES.clear(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na14 and a16: both need your word, in this order.", "home-beta"); settle()
+check("11f: two open items named: written onto both, one save of each, one row for the pair", out.startswith("Not delivered: written onto a14, a16 as a History line") and sorted(SAVES) == ["a14", "a16"] and len(written_rows("a14, a16")) == 1 and reach(A, n0) == [], (out, SAVES))
+fresh(); no_log(); SAVES.clear(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na14: the retest needs your pick.", "Oliver"); settle()
+check("11g: his own message is no part of this: it is delivered as a turn, nothing written onto the item", out.startswith("delivered") and len(reach(A, n0)) == 1 and SAVES == [], (out, SAVES))
+stamp(A, 5); fresh(); no_log(); SAVES.clear(); n0 = len(pushes()); out = msg(FRONT, K5_TEXT, "home-beta"); settle(); unstamp(A)
+check("11h: while he is talking with the agent it is a turn as before: delivered, nothing written onto the item", out.startswith("delivered") and len(reach(A, n0)) == 1 and SAVES == [] and written_rows("a14") == [], (out, SAVES))
+# the counts: a handled call that went through, counted once, never as refused
+fresh(); no_log(); unstamp(A); SAVES.clear()
+row_, err_ = logged(FRONT, K5_TEXT, "home-beta"); settle()
+st_ = _RR.message_stats([row_])
+check("11i: the call log counts it as handled (`marked-no-turn`, `written-on-item`), a call that went through, with its sender and target", err_ is None and row_ is not None and row_["ok"] is True and row_.get("kind") == "marked-no-turn" and row_.get("outcome") == "handled" and row_.get("how") == "written-on-item"
+      and row_.get("sender") == "home-beta" and row_.get("to") == FRONT, row_)
+check("11j: …and the weekly count has it once among the handled calls and never among the refused", st_["calls"] == 1 and st_["refused"] == 0 and dict(st_["handled"]) == {("marked-no-turn", "written-on-item"): 1} and not st_["kinds"], dict(st_))
+row_, err_ = logged(FRONT, K5_TEXT, BACK); settle()
+check("11k: the same words from a second sender are one line and still one handled call (the call is handled all the same)", err_ is None and row_.get("outcome") == "handled" and row_.get("how") == "written-on-item" and len(written_rows("a14")) == 1 and SAVES == ["a14"], (row_, SAVES))
+# a script's message, through the client route: status 200, the reply says it is written
+fresh(); no_log(); SAVES.clear(); gate_open(); n_ = len(call_rows())
+st_, body_ = _rt_client._client_post(MACH, "message", {"to": FRONT, "text": mark() + "\na16: the form step is for you; the second form is not ready.", "sender": "deploy-watch"}); settle()
+new = call_rows()[n_:]
+check("11l: a script's marked message naming an open item of his, no turn warranted: status 200 and the reply says it is written onto the item (it was a 400)", st_ == 200 and "written onto a16" in str(body_.get("result", "")) and SAVES == ["a16"], (st_, body_, SAVES))
+check("11m: …its call-log row is a handled call, from the script, counted as the tool's is", len(new) == 1 and new[0].get("ok") is True and new[0].get("sender") == "deploy-watch" and new[0].get("kind") == "marked-no-turn" and new[0].get("outcome") == "handled" and new[0].get("how") == "written-on-item", new)
+# when no item can take it: held for the agent's next turn (and never lost)
+def save_boom(*a, **k): raise RuntimeError("the store would not take the write")
+fresh(); no_log(); SAVES.clear(); _messaging._writes.save = save_boom; n0 = len(pushes())
+try: row_, err_ = logged(FRONT, K5_TEXT, "home-beta"); out = LAST_OUT; settle()
+finally: _messaging._writes.save = _save_count
+check("11n: an item that cannot be written (the save fails): the message is held for the agent's next turn, starts none, and the reply says so", out.startswith("held for work-osprey-main's next turn") and "no open item it names could take it" in out
+      and held.count(A) == 1 and reach(A, n0) == [] and "pick between the two lanes" in held.take(A, FRONT), out)
+check("11o: …the call log counts it as handled by being held (`marked-no-turn`, `held`), not as refused", err_ is None and row_ is not None and row_["ok"] is True and row_.get("kind") == "marked-no-turn" and row_.get("outcome") == "handled" and row_.get("how") == "held", row_)
+fresh(); no_log(); gate_open(); n_ = len(call_rows()); _messaging._writes.save = save_boom
+try: st_, body_ = _rt_client._client_post(MACH, "message", {"to": FRONT, "text": K5_TEXT, "sender": "deploy-watch"}); settle()
+finally: _messaging._writes.save = _save_count
+new = call_rows()[n_:]
+check("11p: a script's message whose item cannot be written is held with status 200, the reply saying it is held", st_ == 200 and str(body_.get("result", "")).startswith("held for work-osprey-main's next turn") and held.count(A) == 1 and len(new) == 1 and new[0].get("how") == "held", (st_, body_, new))
+fresh(); no_log(); SAVES.clear(); n0 = len(pushes())
+_names_real = _front_turn_mod.names_his
+_front_turn_mod.names_his = lambda *a, **k: True          # the gate proved an item of his, but by the time of the write it is closed (a15 is completed): nothing can take it
+try: out = msg(FRONT, mark() + "\na15: the old retest needs your pick.", "home-beta"); settle()
+finally: _front_turn_mod.names_his = _names_real
+check("11q: a named item that is closed takes no line: held for the agent's next turn, nothing saved", out.startswith("held for work-osprey-main's next turn") and SAVES == [] and held.count(A) == 1 and reach(A, n0) == [], (out, SAVES))
+fresh(); no_log(); SAVES.clear(); n0 = len(pushes())
+out = msg(FRONT, mark() + "\na14 a16 a1 a2: four items, all for the pick.", "home-beta"); settle()
+check("11r: more items than a report may name (3) are one thing no item can carry: held for the agent's next turn, not written as one History line from the sender", out.startswith("held for work-osprey-main's next turn") and not [x for x in mlog() if str(x.get("outcome", "")).startswith("written onto") and x.get("from") == "home-beta"] and held.count(A) == 1 and reach(A, n0) == [], (out, SAVES))
+# the hold switch: with it off, an item that can take the message still does (nothing is held for it); with it off and no item, the refusal stands (section 7)
+fresh(); no_log(); SAVES.clear(); n0 = len(pushes()); _notices11 = _cfg.CFG["router"].get("hold_notices"); _cfg.CFG["router"]["hold_notices"] = False
+try: out = msg(FRONT, K5_TEXT, "home-beta"); settle()
+finally:
+    if _notices11 is None: _cfg.CFG["router"].pop("hold_notices", None)
+    else: _cfg.CFG["router"]["hold_notices"] = _notices11
+check("11s: with the hold off an item that can take the message still does: written onto it, nothing held", out.startswith("Not delivered: written onto a14") and SAVES == ["a14"] and held.count(A) == 0, (out, SAVES))
+_messaging._writes.save = _save_orig
+fresh(); no_log()
+
+# ---- 12. a `to` page key spelled another way is read as the one page it matches, counted as a correction; none or two or more matches stay refused, naming the nearest keys (messaging._resolve_page_key)
+G, G2 = "abcdabcd-abcd-4bcd-8bcd-abcdabcdabcd", "dcbadcba-dcba-4cba-8cba-dcbadcbadcba"
+_pj = json.loads((T / "store/projects.json").read_text())
+_sj = json.loads((T / "fleet/a/sessions.json").read_text())
+def _page(front):
+    return {"title": "P", "name": "P", "org": "home", "tags": [], "type": "project", "session": front, "status": "active", "board": [], "board_row": False, "updated": 1, "mirror": "https://example.invalid/p", "agents": {front: "Oliver's point of contact"}, "back_agents": {}}
+_pj_real, _sj_real, _dirs_real = json.dumps(_pj), json.dumps(_sj), list(_cfg.CFG.get("pages", {}).get("dirs", ["projects"]))
+for key_, front_, uuid_ in (("infra/gizmo", "gen-main", G), ("infra/dual", "dual-main", G2), ("projects/infra-dual", "dual-main", G2), ("projects/infra-solo", "solo2-main", G2)):
+    _pj["pages"][key_] = _page(front_); _sj[uuid_] = {"name": front_, "machine": "a", "url": "", "seen": "x"}
+(T / "store/projects.json").write_text(json.dumps(_pj)); (T / "fleet/a/sessions.json").write_text(json.dumps(_sj))
+_cfg.CFG.setdefault("pages", {})["dirs"] = ["projects", "infra"]
+def pushed_to(n0): return sorted({x[0] for x in pushes()[n0:]})
+try:
+    reg12 = set(_messaging._anc.registry())
+    check("12 fixture: the registry holds the pages these checks spell another way, and the page dirs name `infra`", {"infra/gizmo", "infra/dual", "projects/infra-dual", "projects/infra-solo"} <= reg12 and "infra" in _cfg.page_dirs(), sorted(reg12))
+    for name_, spelled, key_, who_ in (("`projects/` and `-` for `/`", "projects/infra-gizmo", "infra/gizmo", "gen-main"), ("`projects/` and `/` as written", "projects/infra/gizmo", "infra/gizmo", "gen-main"),
+                                       ("the directory and the slug in other case", "INFRA/Gizmo", "infra/gizmo", "gen-main"), ("the directory `Projects/` in other case and `-`", "Projects/Infra-Gizmo", "infra/gizmo", "gen-main"),
+                                       ("the other way round: `infra/solo` for `projects/infra-solo`", "infra/solo", "projects/infra-solo", "solo2-main")):
+        fresh(); no_log(); n0 = len(pushes())
+        row_, err_ = logged(spelled, "the pages moved, a plain note: please read the new page", "home-beta"); out = LAST_OUT; settle()
+        check(f"12a {name_}: `{spelled}` is read as `{key_}` and the message goes there, nowhere else", err_ is None and f"agent of {key_} it fits" in out and out.endswith(f"`{spelled}` is `{key_}`; sent there."), (out, pushes()[n0:]))
+        check(f"12b …the reply's last line says what was written and which page it went to, and the call log counts a correction (`page-key`), a call that went through, never a refusal",
+              err_ is None and row_ is not None and row_["ok"] is True and row_.get("fix") == ["page-key"] and "kind" not in row_ and "outcome" not in row_ and row_.get("sender") == "home-beta", row_)
+    st_ = _RR.tally([row_])
+    check("12c: the weekly report counts the correction once among the server's corrections and the call among the calls that went through", dict(st_["fixes"]) == {"page-key": 1} and st_["messages"]["calls"] == 1 and st_["messages"]["refused"] == 0 and not st_["messages"]["kinds"], (dict(st_["fixes"]), dict(st_["messages"])))
+    fresh(); no_log(); n0 = len(pushes()); row_, err_ = logged("infra/gizmo", "the pages moved, a plain note: please read the new page", "home-beta"); settle()
+    check("12d: a key written as the registry has it is no correction: no note, no fix in the call log", err_ is None and "agent of infra/gizmo it fits" in LAST_OUT and "sent there" not in LAST_OUT and row_ is not None and "fix" not in row_ and "kind" not in row_, (LAST_OUT, row_))
+    fresh(); no_log(); n0 = len(pushes()); row_, err_ = logged("Projects/Infra/Dual", "the pages moved, a plain note", "home-beta"); settle()
+    check("12e: two keys that read alike (`infra/dual` and `projects/infra-dual`) stay refused as `unknown-page-key`, the refusal lists both, and nothing is delivered to either",
+          err_ is not None and getattr(err_, "kind", "") == "unknown-page-key" and "infra/dual" in str(err_) and "projects/infra-dual" in str(err_) and "more than one page" in str(err_) and pushes()[n0:] == []
+          and row_ is not None and row_["ok"] is False and row_.get("kind") == "unknown-page-key" and "fix" not in row_, (str(err_), row_, pushes()[n0:]))
+    fresh(); no_log(); n0 = len(pushes()); row_, err_ = logged("projects/infra-gizma", "the pages moved, a plain note", "home-beta"); settle()
+    check("12f: a key with a slip in it (no match) stays refused, naming the nearest keys, and nothing is delivered", err_ is not None and getattr(err_, "kind", "") == "unknown-page-key" and "The nearest page keys: " in str(err_) and "infra/gizmo" in str(err_) and pushes()[n0:] == [] and row_["ok"] is False, (str(err_), pushes()[n0:]))
+    near_ = str(err_).split("The nearest page keys: ")[1].split(", ") if "The nearest page keys: " in str(err_) else []
+    check("12g: …the nearest keys are at most three", 1 <= len(near_) <= 3, near_)
+    fresh(); no_log(); n0 = len(pushes()); row_, err_ = logged("projects/zzzzzzzz", "the pages moved, a plain note", "home-beta"); settle()
+    check("12h: a key that is near nothing is refused with no list of keys", err_ is not None and getattr(err_, "kind", "") == "unknown-page-key" and "nearest" not in str(err_) and "names no project page" in str(err_) and pushes()[n0:] == [], (str(err_), pushes()[n0:]))
+    check("12i: the spelling of a page this registry does not have, and of one it has under another directory (`projects/gizmo` for `infra/gizmo`), is no match: refused, never delivered to a page it only resembles", all(
+          (lambda e: e is not None and getattr(e, "kind", "") == "unknown-page-key")(logged(k_, "a plain note", "home-beta")[1]) for k_ in ("projects/gizmo", "projects/infra", "projects/")), "")
+    fresh(); no_log(); n0 = len(pushes())
+    st_, body_ = _rt_client._client_post(MACH, "message", {"to": "projects/infra-gizmo", "text": "the pages moved, a plain note: please read the new page", "sender": "deploy-watch"}); settle()
+    check("12j: a script's message to a key spelled another way is read the same: status 200, the reply says which page it went to", st_ == 200 and str(body_.get("result", "")).endswith("`projects/infra-gizmo` is `infra/gizmo`; sent there.") and "agent of infra/gizmo it fits" in str(body_.get("result", "")), (st_, body_, pushes()[n0:]))
+finally:
+    (T / "store/projects.json").write_text(_pj_real); (T / "fleet/a/sessions.json").write_text(_sj_real); _cfg.CFG["pages"]["dirs"] = _dirs_real
+fresh(); no_log()
 
 fresh()
 

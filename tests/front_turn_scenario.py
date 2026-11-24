@@ -366,9 +366,9 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     n_log0 = len(log_rows())
     out_n, push_n, hd_n = send("home-front", f"{MARK} a32: the vendor wants a yes on the quote today")
     rows_n = log_rows()[n_log0:]
-    check("4 a message marked for him, to a front agent he is not talking with and did not ask about a32: no turn and nothing held: refused, naming team-back, whose item a32 is", out_n.startswith("REFUSED") and not push_n and hd_n == 0
-          and "starts no turn" in out_n and "nothing is held" in out_n and "team-back" in out_n and "not talking with" in out_n, (out_n[:500], push_n, hd_n))
-    check("4 …and the refused message is in the message log, its row saying it was not delivered", any("not delivered" in str(r.get("outcome")) and r.get("to") == "home-front" and "a32" in str(r.get("text")) for r in rows_n), rows_n)
+    check("4 a message marked for him, to a front agent he is not talking with and did not ask about a32: no turn, nothing pushed or held: it is written onto a32 and the reply says the front agent reads it there", out_n.startswith("Not delivered: written onto a32") and not push_n and hd_n == 0
+          and "reads it there" in out_n and "starts no turn" in out_n and "not talking with home-front" in out_n, (out_n[:500], push_n, hd_n))
+    check("4 …and the message log has a row saying it was written onto a32 and not delivered", any(r.get("outcome") == "written onto a32, not delivered" and r.get("from") == "home-peer" and "a32" in str(r.get("text")) for r in rows_n), rows_n)
     h_n2 = held_row()
     out_n2, push_n2, hd_n2 = send("home-front", f"{MARK} the vendor wants a yes on the quote today")
     took_n2 = held.take("home-front")
@@ -384,7 +384,7 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     check("4 …a30 named, no turn at all, though he is talking with home-front: held, not delivered", out_n3.startswith("held for home-front's next turn") and not push_n3 and "a30" in took_n3
           and out_n4.startswith("held for home-front's next turn") and not push_n4 and "a30" in took_n4, (out_n3[:300], push_n3, out_n4[:300], push_n4))
     out_o, push_o, hd_o = send("home-front", f"{MARK} a35: the vendor wants a yes on the quote today")
-    check("4 …about a35, which home-front only observes: refused too (an old observer asked nothing)", out_o.startswith("REFUSED") and not push_o and hd_o == 0, (out_o[:300], push_o))
+    check("4 …about a35, which home-front only observes: no turn either (an old observer asked nothing), written onto the item", out_o.startswith("Not delivered: written onto a35") and not push_o and hd_o == 0, (out_o[:300], push_o))
     out_f = _messaging._message("home-front", "a32: the PR is merged, nothing for you to do", "team-back", fyi=True); settle()
     took_f = held.take("home-front")
     check("4 …while an fyi message keeps its own path (held for the next turn, asks nothing, starts no turn)", " · fyi · " in took_f and "they asked nothing of you" in took_f, (out_f[:200], took_f))
@@ -397,13 +397,13 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     out_s, push_s, hd_s = send("home-front", f"{MARK} a32: the vendor wants a yes on the quote today", sender="Oliver")
     check("4 …a message from him himself is always a turn", not out_s.startswith("held") and not out_s.startswith("REFUSED") and len(push_s) == 1, (out_s[:300], push_s))
     out_sc, push_sc, hd_sc = send("home-front", f"{MARK} a32: the vendor wants a yes on the quote today", sender="deploy-watch", origin="box-a")
-    check("4 a script's marked message (no sender session) to the front agent is tested like any other, no exemption: refused, nothing delivered, nothing held", out_sc.startswith("REFUSED") and not push_sc and hd_sc == 0, (out_sc[:300], push_sc))
+    check("4 a script's marked message (no sender session) to the front agent is tested like any other, no exemption: no turn, written onto the item it names (the same words as above, so no second line), nothing pushed or held, and it is no refusal", out_sc.startswith("Not delivered: written onto a32") and "already" in out_sc and not push_sc and hd_sc == 0, (out_sc[:300], push_sc))
     out_b, push_b, hd_b = send("team-back", "a32: please look at the vendor quote", sender="home-peer")
     check("4 a message to a background agent is delivered as before", not out_b.startswith("held") and not out_b.startswith("REFUSED") and any(x[0] == "team-back" and "[stackshot message]" in x[1] for x in push_b), (out_b[:300], push_b))
     # a marked message names an open item of his: a step that is his (a47), a parked call he picks up (a48); his own message and a script's; a read that fails; the hold switch
     out_st, push_st, hd_st = send("home-front", f"{MARK} a47: sign the vendor form, please")
     took_st = held.take("home-front")
-    check("4 a marked message naming a step that is his (a47, your-step) is a turn only when warranted like any other: with no presence and no ask it is refused (the item is his, no turn), not held", out_st.startswith("REFUSED") and "starts no turn" in out_st and not push_st and hd_st == 0 and took_st == "", (out_st[:400], push_st, hd_st))
+    check("4 a marked message naming a step that is his (a47, your-step) is a turn only when warranted like any other: with no presence and no ask it is written onto the item (the item is his, no turn), not held", out_st.startswith("Not delivered: written onto a47") and "starts no turn" in out_st and not push_st and hd_st == 0 and took_st == "", (out_st[:400], push_st, hd_st))
     stamp("home-front", 60)
     out_st2, push_st2, hd_st2 = send("home-front", f"{MARK} a47: sign the vendor form, please")
     out_pk, push_pk, hd_pk = send("home-front", f"{MARK} a48: the parked call is back with you")
@@ -532,7 +532,7 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     finally:
         front_turn.warranted = _real_warranted
     unstamp("home-front")
-    check("7 …and an exception in the message gate refuses the message too (nothing delivered, nothing held), the sender is told", out_xx.startswith("REFUSED") and not push_xx and hd_xx == 0, (out_xx[:300], push_xx, hd_xx))
+    check("7 …and an exception in the message gate starts no turn either (a presence that cannot be read counts as none): nothing pushed or held, the message is written onto the item and the sender is told", out_xx.startswith("Not delivered: written onto a32") and not push_xx and hd_xx == 0, (out_xx[:300], push_xx, hd_xx))
 
     # the edges of the guards
     _real_load, loaded = front_turn._load, []

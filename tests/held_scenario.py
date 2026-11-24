@@ -496,8 +496,8 @@ present(True); fresh(); n0 = len(pushes()); out = _messaging._message("work-ospr
 check("6h: a marked message to it, while he is talking with it, is delivered as it would be without the flag (it asks something)", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, out)
 fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-main", "[for Oliver] a14 pick a or b", "home-beta"); settle()
 check("6h2 control: …and without the flag the same", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, out)
-present(False); fresh(); n0 = len(pushes()); out = why(lambda: _messaging._message("work-osprey-main", "[for Oliver] a14 pick a or b", "home-beta", fyi=True))
-check("6h3: …and while he is not, it is refused, never held (the flag changes nothing: a marked message needs him)", out.startswith("Refused") and "nothing is held" in out and reach(A, n0) == [] and held.count(A) == 0, out)
+present(False); fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-main", "[for Oliver] a14 pick a or b", "home-beta", fyi=True); settle()
+check("6h3: …and while he is not, it is written onto the item it names, never held and no turn (the flag changes nothing: a marked message needs him)", out.startswith("Not delivered: written onto a14") and reach(A, n0) == [] and held.count(A) == 0, out)
 fresh(); n0 = len(pushes()); out = why(lambda: _messaging._message("work-osprey-main", "it now needs: decision", "home-beta", fyi=True))
 check("6h3: an fyi that says needs: decision is no fyi: refused without the mark, as without the flag", out.startswith("Refused") and reach(A, n0) == [] and held.count(A) == 0, out)
 
