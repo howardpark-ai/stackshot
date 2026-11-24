@@ -213,6 +213,11 @@ def fix_long_step(step: str) -> tuple[str, list[str]]:
     return got
 
 
+def long_step_skipped(step: str) -> str:
+    """Why a one-line step over the step limit was not split into lines ("" when it was, or it is no case for it): the words that go beside its refusal, so the writer knows the server tried."""
+    return _ss.skipped(step, _step_line_room())
+
+
 def say_long_step(step: str, lines: list[str], added: int) -> None:
     """The reply's line for a long step that was split into `lines` (call_log.fixed, kind step-split): what was done, or, when `added` is 0 (the summary and every one of its lines are on the item already: the same step
     sent again), that nothing was added."""

@@ -7,7 +7,8 @@ the board draws; it never refuses and never drops a word.
 WHEN A TEXT IS SPLIT (`actions`). SPLIT_OVER characters, one line and not already structured (a numbered or fenced step is the writer's own shape and is kept), with at least two clauses. An action is a
 clause cut at the end of a sentence or at a semicolon (bullet_text._clauses: never inside a link, a naked URL, a code span or a parenthesis, nor after an abbreviation or a number), at the
 numbered items written inline (`1) … 2) …`, the numbers dropped, the list draws its own), and, for a clause still over the line limit on its own, at its last comma or colon that leaves the piece within
-it (bullet_text._soft_units), else at a space. A text under SPLIT_OVER, or one action, is left as written, and so is one that is no step but a document: a text over SPLIT_MAX characters, or one that would
+it (bullet_text._soft_units), else at a space. A text under SPLIT_OVER, or one action, is left as written, and so is one with a piece no cut brings within the line limit (a word, a link's words or a code span
+longer than a line; a naked URL is no such piece), and one that is no step but a document: a text over SPLIT_MAX characters, or one that would
 make more than MAX_ACTIONS actions, is never split (the old limits then judge it as they did before; a split of a page of text into hundreds of lines is no help to a reader and costs the item lock its time).
 An inline `1)` is an item only where a list can start: at the start of the text or after the end of a sentence or a colon (`Pick plan 1) basic or 2) pro` is no list), and a clause with no letter or digit in it (a stray `;` or `.`)
 is no action.
@@ -101,12 +102,13 @@ def _wrap(clause: str, limit: int) -> list[str]:
     return [*out, rest] if rest else out
 
 
-def actions(text: Any, line_max: int) -> list[str]:
-    """The actions of a text read as one line: [] when it is to be left as written (under SPLIT_OVER, structured, or one action), else the actions in order, each at most `line_max`
-    characters, every word of the text in them (only a closing full stop or semicolon, an inline item's number and the spaces between clauses are gone)."""
+def _plan(text: Any, line_max: int) -> tuple[list[str], str]:
+    """(the actions, why none): the actions of `actions`, or [] with the reason when the text is left as written for its size (a sentence for a person: `skipped`); "" when it is short, structured or one action."""
     t = _steps.clean(text)
-    if len(t) <= SPLIT_OVER or len(t) > SPLIT_MAX or _sc.structured(str(text or "")) or line_max < 20:
-        return []
+    if len(t) <= SPLIT_OVER or _sc.structured(str(text or "")) or line_max < 20:
+        return [], ""
+    if len(t) > SPLIT_MAX:
+        return [], f"the server splits a step into lines only up to {SPLIT_MAX} characters, and this one runs {len(t)}"
     clauses: list[str] = []
     for part in _inline_items(t):
         for clause, _gap in _bt._clauses(part):
@@ -115,13 +117,27 @@ def actions(text: Any, line_max: int) -> list[str]:
             if c and _RX_WORD.search(c):
                 clauses.append(c)
     if len(clauses) < 2:            # one sentence is one action however long: it is never cut mid-sentence (a line over the limit is judged by the next-line rules as before)
-        return []
+        return [], ""
     out: list[str] = []
     for c in clauses:
         out.extend(_wrap(c, line_max))
         if len(out) > MAX_ACTIONS:      # past the cap: left as written (cheap to say early: a long text never gets the whole of its pieces made)
-            return []
-    return out
+            return [], f"the server splits a step into at most {MAX_ACTIONS} lines, and this one would make more"
+    if any(_bt.visible_len(x) > line_max for x in out):      # a word, a link's words or a code span that no cut can bring within a line (a naked URL reads as nothing, so it never counts): the lines would be refused, naming a line the writer did not write
+        return [], f"a word, a link or a code span in it is longer than a line of next ({line_max} characters), so the server could not cut it into lines"
+    return out, ""
+
+
+def actions(text: Any, line_max: int) -> list[str]:
+    """The actions of a text read as one line: [] when it is to be left as written (under SPLIT_OVER, over SPLIT_MAX, structured, one action, more than MAX_ACTIONS, or with a piece that cannot be
+    brought within `line_max`), else the actions in order, each at most `line_max` characters, every word of the text in them (only a closing full stop or semicolon, an inline item's number and the
+    spaces between clauses are gone)."""
+    return _plan(text, line_max)[0]
+
+
+def skipped(text: Any, line_max: int) -> str:
+    """Why a text over SPLIT_OVER was left as written for its size or for a piece that cannot be cut ("" when it is split, short, structured or one action): said beside the refusal of the text."""
+    return _plan(text, line_max)[1]
 
 
 def summary_of(first: str, more: int) -> str:

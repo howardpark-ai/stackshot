@@ -726,12 +726,14 @@ def update_unlocked(
     reword, step = _server_step_reworded(item_was, reword, step)      # a reword of the line the server keeps from step= is the new step text, as the same call would give it
     step_lines: list[str] = []
     step_long = ""         # the step as the writer sent it, when it is split below
+    split_note = ""        # why a long step was left as written (the refusal of it says so)
     if step.strip() and step.strip().lower() not in h.ask_none and _writes.session_next():      # a session's write only: a script's step (item sync, the terminal rows) is stored as it is made
         step_long = _states.step_text(step)
         step, step_lines = _fg.fix_long_step(step_long)      # a long chain of actions becomes a short summary and one line of next per action (the reply says so); a short, numbered or one-action step is as written
         if not step_lines:
+            split_note = _fg.long_step_skipped(step_long)      # a step over the limit that stays as written is refused as ever: the refusal says why it was not split
             step_long = ""
-    state_st, state_given, step_withdrawn = fc.call(_gates.gate_state_args, {"expected_by": expected_by, "expected_reason": expected_reason, "step": step, "supplies": supplies}, default=("", {}, False))   # a bad value is refused before anything is written
+    state_st, state_given, step_withdrawn = fc.call(_gates.gate_state_args, {"expected_by": expected_by, "expected_reason": expected_reason, "step": step, "supplies": supplies}, split_note=split_note, default=("", {}, False))   # a bad value is refused before anything is written
     draft_set, clear_draft = fc.call(_gates.gate_draft_args, draft, clear_draft, default=("", clear_draft))   # a bad draft is refused before anything is written
     list_end_words = _list_end_words(waits, wake, clear_wake, meta)      # read on the item as it stands, before the write changes it
     n_wait_args = fc.count
@@ -931,8 +933,11 @@ def update_unlocked(
                 fc.add(f_, text=True)
         item["description"] = description
     open_keys = {_steps.key(s["text"]) for s in _steps.view(item_was.get("metadata"), keeper=keeper_was) if s["status"] == _steps.OPEN} if (was != "completed" or reopening) else set()      # the open steps as the item stood
+    was_meta = item_was.get("metadata") or {}
+    group = {k for k in was_meta.get("step_lines") or [] if isinstance(k, str)} if str(was_meta.get("step") or "").strip() else set()      # the keys of the lines the stored step was split into: they belong to it only while it is stored
+    gone_keys = (open_keys & group) - {_steps.key(x) for x in step_lines} if group and not closing and (step_withdrawn or state_given.get("step")) else set()      # the step is replaced (by a long or a short one) or withdrawn: the open lines of its old split go with it (a done one stays)
     if step_lines and not closing:      # the actions of a long step: lines of next that open with his name, at the end of the sender's own lines (the summary is the step)
-        own_text = _nl.text_of(meta, next_writer, keeper_was, _handoff.ho_same)
+        own_text = "\n".join(e for e in _steps.split(_nl.text_of(meta, next_writer, keeper_was, _handoff.ho_same)) if _steps.key(e) not in gone_keys)      # …and none of the old split's lines the write drops
         have = open_keys | {_steps.key(x) for x in _steps.split(next)}
         added = _with_lines(next, own_text, step_lines, have, next_drop or clear_next)
         _fg.say_long_step(step_long, step_lines, sum(1 for ln in step_lines if _steps.key(ln) not in have))
@@ -971,12 +976,24 @@ def update_unlocked(
         fc.call(_gates.gate_close_steps, gid, steps_old, _steps.others_open(steps_old, lambda w: not w or _handoff.ho_same(w, next_writer), {*done_ix, *drop_ix}, lambda nm: _handoff.ho_same(nm, next_writer)))
     elif closing and steps_old and marks_bad and (_writes.session_next() or _writes.close_tool()):
         fc.skip("the check that a close leaves no other session's step open", "it reads the steps this call marks, which are refused above")
+    if gone_keys and steps_on and not marks_bad:
+        gone = [i for i, s_ in enumerate(steps_old) if s_["status"] == _steps.OPEN and _steps.key(s_["text"]) in gone_keys and i not in drop_ix and i not in done_ix]
+        drop_ix.extend(gone)
+        if gone:
+            marks = state_change = True      # the lines leave next with their writers, as a dropped=[n] of the same lines would
+            _calls.fixed("step-split-dropped", f"the {len(gone)} open line{'' if len(gone) == 1 else 's'} of next that the old step was split into {'was' if len(gone) == 1 else 'were'} dropped with it ({'withdrawn' if step_withdrawn else 'replaced'})", fields=["step"])
+    if step_withdrawn or state_given.get("step"):
+        if step_lines:
+            meta["step_lines"] = [_steps.key(x) for x in step_lines]      # the lines this step was split into: replaced or withdrawn with it
+        else:
+            meta.pop("step_lines", None)
     if step_lines and steps_on and not closing and not marks_bad:      # the long step sent as a line of his already (a session wrote `<owner>: <the step>` before): its actions replace it, so it is dropped, never left open beside them
         long_k, rec_was = _steps.key(_hs.line_of(step_long)), _hs.recorded(item_was.get("metadata") or {})
         for i, s_ in enumerate(steps_old):
             if s_["status"] == _steps.OPEN and _steps.key(s_["text"]) == long_k and not (rec_was and _hs.same_line(s_["text"], rec_was)) and i not in drop_ix and i not in done_ix:      # the server's own line for the old step is made again from the new step on every save
                 drop_ix.append(i)
-                _calls.fixed("step-split", f"step {i + 1} ({OWNER}'s line with the whole long step) was dropped: its {len(step_lines)} actions are lines of next now", fields=["step"])
+                marks = state_change = True
+                _calls.fixed("step-split-dropped", f"step {i + 1} ({OWNER}'s line with the whole long step) was dropped: its {len(step_lines)} actions are lines of next now", fields=["step"])
     reword_note = ""
     bad_rw: set[int] = set()       # the steps whose new words are refused: they are not applied below
     his_rw: dict[int, str] = {}    # the steps of his this call rewords: done as drop plus add below, never in place

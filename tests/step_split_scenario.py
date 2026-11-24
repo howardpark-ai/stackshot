@@ -185,7 +185,19 @@ JUNK = "Open the page and read the notice that is shown there at the top of it. 
 jk = SS.actions(JUNK, LINE_ROOM)
 check("1b a clause of marks only (`;`, `.`) is no action: every action holds a word, none is dropped with one", len(jk) >= 2 and all(re.search(r"\w", x) for x in jk) and words(" ".join(jk)) == words(JUNK), jk)
 check("1b a line that is not his (another actor's, or none) is not split by split_line", SS.split_line("home-agent: " + LONG, LINE_ROOM) is None and SS.split_line(LONG, LINE_ROOM) is None and SS.split_line("Oliver: " + LONG, LINE_ROOM) is not None, None)
-check("1b the two kinds of fix invite no resend (call_log.NO_RESEND), and the reply line does not say to send again", {"step-split", "step-reworded"} <= set(_CL.NO_RESEND) and "send it again" not in _CL.reply_note([("step-split", "x"), ("step-reworded", "y")]), _CL.NO_RESEND)
+check("1b the two kinds of fix invite no resend (call_log.NO_RESEND), and the reply line does not say to send again", {"step-split", "step-split-dropped", "step-reworded"} <= set(_CL.NO_RESEND) and "send it again" not in _CL.reply_note([("step-split", "x"), ("step-split-dropped", "z"), ("step-reworded", "y")]), _CL.NO_RESEND)
+
+UNB = "Open the page now. " + "x" * 215 + " is the code to copy there."
+check("1b L1: a text with a word longer than a line (and a second sentence) is left as written, and says why", 111 <= len(UNB) <= 300 and SS.actions(UNB, LINE_ROOM) == [] and "longer than a line" in SS.skipped(UNB, LINE_ROOM), (len(UNB), SS.skipped(UNB, LINE_ROOM)))
+LBL = "Read [" + "label " * 35 + "](http://x.example/p) at once. Then tell the session what it said there."
+check("1b L1: …a link whose words are longer than a line is no exception", 111 <= len(LBL) and SS.actions(LBL, LINE_ROOM) == [], (len(LBL), SS.actions(LBL, LINE_ROOM)))
+NUR = "Open the page now. Read http://x.example/" + "a" * 230 + " and say so to the session there."
+nu = SS.actions(NUR, LINE_ROOM)
+check("1b L1: …but a naked URL longer than a line is exempt (it counts for nothing): the text is split, every word kept", len(nu) >= 2 and all(len(x) <= LINE_ROOM or "http://" in x for x in nu) and words(" ".join(nu)) == words(NUR), nu)
+CSPAN = "Do it first. Run `" + "x" * 220 + "` and report back to the session."
+check("1b L2: a clause held up by a code span longer than a line is not cut at the spaces around it: the text is left as written, and says why", 111 <= len(CSPAN) <= 300 and SS.actions(CSPAN, LINE_ROOM) == [] and "code span" in SS.skipped(CSPAN, LINE_ROOM), (len(CSPAN), SS.actions(CSPAN, LINE_ROOM)))
+check("1b L3: skipped says nothing for a text that is split, a short one and a one-action one", SS.skipped(LONG, LINE_ROOM) == "" and SS.skipped("short one. and two.", LINE_ROOM) == "" and SS.skipped("please read this and decide " * 10, LINE_ROOM) == "", None)
+check("1b L3: …and names the size and the action count", "2000 characters" in SS.skipped(para(16), LINE_ROOM) and "at most 20 lines" in SS.skipped(sent(21), LINE_ROOM), (SS.skipped(para(16), LINE_ROOM), SS.skipped(sent(21), LINE_ROOM)))
 
 # ---- 2. step= through update
 r, fx = send(lambda: upd(1, step=LONG))
@@ -238,12 +250,105 @@ item(43, next="home-agent: build it\nOliver: " + LONG)
 r, fx = send(lambda: upd(43, step=LONG))
 check("2 a long step on an item that holds `<owner>: <the step>` as an open line: that line is dropped, the summary and the seven actions are open, no copy of the whole step stays open",
       ("dropped", "Oliver: " + LONG) in his(43) and OPEN("Oliver: " + LONG) not in his(43) and len(his_open(43)) == 8 and all(x in his_open(43) for x in lines), (r, st(43)))
+check("2 …and the reply says that line was dropped", any(k == "step-split-dropped" and "whole long step" in t for k, t in fx), fx)
 r, fx = send(lambda: upd(43, step=LONG))
 check("2 …sent again it adds nothing (still eight open lines of his) and says so", len(his_open(43)) == 8 and [k for k, _ in fx] == ["step-split"] and "nothing was added" in fx[0][1], (st(43), fx))
 # a step of more than a page: left as written, so the old refusal answers, at once
 item(44)
 t0 = time.time(); r, fx = send(lambda: upd(44, step=("Do the next thing there now. " * 2000)))
 check("2 a step of 56 KB is no split (no thousands of lines): the old limit refuses it, at once, and the item is as it was", isinstance(r, ToolError) and "step at most" in str(r) and mt(44)["next"] == "home-agent: build it" and time.time() - t0 < 5, (str(r)[:200], mt(44)["next"]))
+
+# a step over the limit that the server could not split is refused as ever, and the refusal says why
+item(49)
+BIGSTEP = para(16)
+r, fx = send(lambda: upd(49, step=BIGSTEP))
+check("2 L3: a step of more than 2000 characters is refused as before, and the refusal says the server did not split it, and why", isinstance(r, ToolError) and "step at most" in str(r) and "did not split it into lines of next" in str(r) and "2000 characters" in str(r), str(r)[:400])
+r, fx = send(lambda: upd(49, step=UNB))
+check("2 L1: a step of 111 to 300 characters with a word longer than a line is stored as written, no line added, the refusal of a long line of next is not made", mt(49).get("step") == UNB and mt(49)["next"].count("Oliver:") == 1 and not isinstance(r, ToolError), (r, mt(49)))
+
+# ---- 2b. the lines of a split belong to the step: replacing or withdrawing the step takes them
+ACTS_B = ["Read the notice on the main page", "Write down the code it shows there", "Send the code to the session in a note", "Check that the session confirms it works", "Open the second page from the list", "Tell the session what the second page says"]
+LONG_B = ". ".join(ACTS_B) + "."
+sum_b, lines_b = SS.split_step(LONG_B, LINE_ROOM)
+def opened(i): return his_open(i)
+item(50)
+upd(50, step=LONG)
+r, fx = send(lambda: upd(50, step=LONG_B))
+check("2b a second long step replaces the first as a whole: the old summary line and the old seven action lines are dropped, the new summary and its six lines are open (7 open lines of his)",
+      sorted(opened(50)) == sorted([f"Oliver: {sum_b}", *lines_b]) and all(("dropped", x) in his(50) for x in lines), (r, st(50)))
+check("2b …and the reply says in one line that the old lines were dropped with it", any(k == "step-split-dropped" and "dropped with it (replaced)" in t for k, t in fx), fx)
+check("2b …the board's list for his step is the six actions of the new step", [first for first, _rest in ui_render.Board(str(T / "store")).your_steps(ui_render.Board(str(T / "store")).item("a50"))] == ACTS_B, None)
+item(51)
+upd(51, step=LONG)
+r, fx = send(lambda: upd(51, step="check that the box answers and say so"))
+check("2b a short step after a split replaces the whole group: only the short step's line is open", opened(51) == ["Oliver: check that the box answers and say so"] and mt(51).get("step") == "check that the box answers and say so" and "step_lines" not in mt(51), (r, st(51), mt(51)))
+item(52)
+upd(52, step=LONG)
+r, fx = send(lambda: upd(52, step="none"))
+check("2b step=none after a split withdraws the step and every open line of it: no line of his is open, the state is gone, the agent's own line stays",
+      opened(52) == [] and mt(52).get("state") != "your-step" and not mt(52).get("step") and "home-agent: build it" in mt(52)["next"] and "step_lines" not in mt(52) and not any(x in mt(52)["next"] for x in ACTS), (r, st(52), mt(52)))
+check("2b …and the reply says the lines were dropped with the step (withdrawn)", any(k == "step-split-dropped" and "dropped with it (withdrawn)" in t for k, t in fx), fx)
+item(53)
+upd(53, step=LONG)
+d_ = rd(53); m_ = d_["metadata"]
+for e_ in m_["steps"]:
+    if e_["text"] == lines[1]: e_["status"], e_["by"], e_["at"] = "done", "Oliver", now
+m_["next"] = "\n".join(x for x in m_["next"].splitlines() if x != lines[1])
+(T / "store/a/53.json").write_text(json.dumps(d_))
+r, fx = send(lambda: upd(53, step=LONG_B))
+check("2b a line of the old split that is done stays done when the step is replaced, the open ones go", ("done", lines[1]) in his(53) and ("dropped", lines[0]) in his(53) and ("dropped", lines[1]) not in his(53), st(53))
+item(62)
+upd(62, step=LONG)
+d_ = rd(62); m_ = d_["metadata"]
+for e_ in m_["steps"]:
+    if e_["text"] == lines[1]: e_["status"], e_["by"], e_["at"] = "done", "Oliver", now
+m_["next"] = "\n".join(x for x in m_["next"].splitlines() if x != lines[1]) + "\n" + lines[1]      # the line done, and the same words written again as an open line
+(T / "store/a/62.json").write_text(json.dumps(d_))
+r, fx = send(lambda: upd(62, step=LONG_B))
+check("2b the done line stays done when an open line of the same words is dropped with the old step (a line is told apart by its status, not only by its words)", ("done", lines[1]) in his(62) and ("dropped", lines[1]) in his(62) and opened(62).count(lines[1]) == 0, (r, st(62)))
+item(54)
+upd(54, step=LONG)
+r, fx = send(lambda: upd(54, step=LONG))
+check("2b the same long step sent again drops nothing", len(opened(54)) == 8 and not any(k == "step-split-dropped" for k, t in fx), (st(54), fx))
+# his answer, a close and a hand-over settle the whole group
+from stackshot.service import answer as answer_svc
+item(55)
+upd(55, step=LONG)
+r = answer_svc._answer("a55", "", "", "done")
+check("2b his Done ticks the summary line and every action line: none of his is open, all eight are done", opened(55) == [] and len([1 for s_, t_ in his(55) if s_ == "done"]) == 8, (r, st(55)))
+item(56)
+upd(56, step=LONG)
+from stackshot.web.tools import complete as _wt_complete
+r = _wt_complete.stackshot_complete("a56", outcome="dropped", reason="no longer wanted", outcome_text="- It was dropped, nobody wants it", sender="home-agent")
+check("2b a close settles the group: none of his lines is open and the record of the split goes with the step", opened(56) == [] and "step_lines" not in mt(56) and not mt(56).get("step"), (r, st(56), mt(56)))
+item(57)
+upd(57, step=LONG)
+r, fx = send(lambda: upd(57, mover="home-agent", step="none"))
+check("2b a hand-over to the agent with the step withdrawn leaves no line of his open", not isinstance(r, ToolError) and opened(57) == [], (r, st(57)))
+
+# a script's create and update (item sync, the terminal rows) store a long line of his whole; a session's write splits it
+from stackshot.service import create as _create_svc
+LONG2 = "Open the page and read the notice. Copy the code it shows. Paste it into the form and send it. Then tell the session what happened there."
+check("2c the fixture is a long line of his of 135 characters or so with four actions", 120 <= len(LONG2) <= 180 and len(SS.actions(LONG2, LINE_ROOM)) == 4, len(LONG2))
+gid_s, _rs = _create_svc.create_item(subject="[home] script made", description=DESC, project="projects/alpha", owner=OWNER, next="home-agent: build it\nOliver: " + LONG2, needs="home-agent", by="home-agent")
+check("2c a create that is no session's (a script's) stores a long line of his as one line, whole", _service_store._load(gid_s)["metadata"]["next"].splitlines() == ["home-agent: build it", "Oliver: " + LONG2], _service_store._load(gid_s)["metadata"]["next"])
+gid_t = _wt_create.stackshot_create(subject="[home] session made", description=DESC, project="projects/alpha", needs="home-agent", next="home-agent: build it\nOliver: " + LONG2, sender="home-agent")
+check("2c …a session's create of the same line splits it", len(_service_store._load(re.match(r"created (\S+)", gid_t).group(1))["metadata"]["next"].splitlines()) == 5, gid_t)
+item(58)
+_update_svc._update("a58", next="home-agent: build it\nOliver: " + LONG2, sender="home-agent")
+check("2c an update that is no session's stores a long line of his as one line, whole", mt(58)["next"].splitlines() == ["home-agent: build it", "Oliver: " + LONG2], mt(58)["next"])
+item(61)
+r, fx = send(lambda: upd(61, next="home-agent: build it\nOliver: " + LONG2))
+check("2c …and a session's update of the same line splits it into its four actions", len(mt(61)["next"].splitlines()) == 5 and [k for k, _ in fx] == ["step-split"], (r, mt(61)["next"]))
+item(59, next="home-agent: build it\nOliver: look at the page first")
+_update_svc._update("a59", reword={2: "Oliver: " + LONG2}, sender="home-agent")
+check("2c …and so does the new words of a reword of his line from a script: one new line, whole", his_open(59) == ["Oliver: " + LONG2], st(59))
+# the server's own line for the stored step is remade, never dropped by hand: the step stored whole by a script, then sent by a session
+item(60)
+_update_svc._update("a60", step=LONG, sender="home-agent")
+r, fx = send(lambda: upd(60, step=LONG))
+check("2c a session sends the long step that the item stores already (the server's own line for it): that line is dropped once, by the remake, and the reply does not claim a line of his was dropped",
+      sorted(his_open(60)) == sorted([f"Oliver: {summary}", *lines]) and sum(1 for k, t in fx if k == "step-split-dropped") == 0 and his(60).count(("dropped", "Oliver: " + LONG)) == 1, (st(60), fx))
 
 # ---- 3. long lines of his in next
 LONGLINE = "Oliver: " + LONG

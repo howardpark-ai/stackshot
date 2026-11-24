@@ -33,7 +33,8 @@ replaces ask_by, still accepted for now. Beside waits it is the list's backstop 
 
 ## param NEXT_CREATE
 The checklist, one step per line, each opening with who takes it: next="my-x: open the PR" (or several lines with \n).
-Results and PRs go on the project page, never in next.
+Results and PRs go on the project page, never in next. A line opening with `{{OWNER}}:` over {{STEP_SPLIT_OVER}} characters
+with several actions is split into one line per action (not one over {{STEP_SPLIT_MAX}} characters or {{STEP_SPLIT_ACTIONS}} actions).
 
 ## param ASK_PARAM_NEW
 The one line a needs=decision item carries, all four parts in this order, joined by " · ", no line break, at most 240

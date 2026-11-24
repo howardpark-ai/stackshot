@@ -62,7 +62,7 @@ the agent that had it, takes it after his Done); step is a short summary, and a 
 {{STEP_SPLIT_OVER}} characters with several actions (sentences, semicolons, `1) … 2) …`) is split into a summary of at most {{STEP_SUMMARY_MAX}}
 characters and one line of next per action that opens with `{{OWNER}}:`, which the board draws as his list (the reply says
 so, no word is lost; send the summary and the lines yourself to choose the words); a long `{{OWNER}}:` line of next with
-several actions is split the same way (a text over {{STEP_SPLIT_MAX}} characters or with more than {{STEP_SPLIT_ACTIONS}} actions is not split); step="none" withdraws it; supplies=<one line: what the item it waits
+several actions is split the same way (never over {{STEP_SPLIT_MAX}} characters or {{STEP_SPLIT_ACTIONS}} actions, or with a word or code span longer than a line: a step over its limit is refused, saying why); a new step or step="none" drops the old split's open lines; step="none" withdraws it; supplies=<one line: what the item it waits
 after gives this one>, with after=["board#N"], sets the item blocked on that item. Each is refused without what it
 needs, with what to add; a close drops both. Checks: a next that opens with {{OPEN_LIST}} under an agent's state is
 noted; the third bare re-park in a row is refused; a next may be marked stale; needs=decision again within 60 min of
