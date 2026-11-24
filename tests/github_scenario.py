@@ -57,6 +57,9 @@ the user's notifications; `gh api /rate_limit` works for any accepted token. Wha
      line says so; with a person's token, /user's login as before and the setting is not used.
   3. The `@notifications` anchors: GitHub answers the notifications API only to a user's sign-in, so with an App token they can never be read: they are not bound to the poll
      (no call, not even to name them, no counted read, no log line), and the receiver's status stays healthy with no note about them on the card; with a person's token they are read as before.
+  3b. `[anchor_hub] notifications_token_file`: a file with a personal token (mode 600) lets the notification anchors be read under an App token: that endpoint, and only it, is read with the token (in the
+     environment of the `gh` call, never in its arguments); a file that is unset reads as before, one that is missing, empty or not mode 600 leaves the anchors unread with a status line naming the setting, and a
+     401 on the endpoint is asked once, not every pass, until the file changes; the token is in no log line, status, saved position or error text.
   4. The start check is tried again: through start_receiver, a failed check (the network, a login not made yet, a refused credential: a Transient whatever the cause) is
      retried with a backoff until it passes, and the retry stops at the start.
 
@@ -335,8 +338,11 @@ def part_app_token():
     USER = {"login": "example-owner"}
     mode = {"user": "app"}      # "app": /user is refused as an App token's; "person": /user answers; "401": /user answers a bad credential; "down": every call fails as the network does
     calls: list[str] = []; rate_denied = [False]
-    def _fake_gh(args, capture_output=True, text=True, timeout=30):
+    NTOK = "ghp_notif_0123456789abcdefghijklmnopqrstu"; NTOK2 = "ghp_notif2_replacement_0123456789abcdefghijk"      # the tokens of the notifications file in the tests below (made-up strings)
+    gh_env: list = []; notif_deny = [""]      # (path, the GH_TOKEN the call carried or None, whether a token was in its arguments) of every call; how the endpoint answers a token it was given: "" (it takes NTOK and NTOK2) | "401" | "403" | "limit"
+    def _fake_gh(args, capture_output=True, text=True, timeout=30, env=None):
         a = [x for x in args[2:] if x != "-i" and x != "-H" and not x.startswith("If-None-Match")]; path = a[0]; cond = "-i" in args; calls.append(path)
+        gh_env.append((path, (env or {}).get("GH_TOKEN"), any("ghp_" in str(x) for x in args)))
         def fail(msg): return types.SimpleNamespace(returncode=1, stdout="", stderr=msg)
         if mode["user"] == "down": return fail("error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com")
         if path == "/user":
@@ -345,7 +351,13 @@ def part_app_token():
             else: return fail("gh: Resource not accessible by integration (HTTP 403)")
             return types.SimpleNamespace(returncode=0, stdout=body, stderr="")
         if path == "/rate_limit" and rate_denied[0]: return fail("HTTP 401: Bad credentials (https://api.github.com/rate_limit)")
-        if "/notifications" in path and mode["user"] != "person": return fail("gh: Resource not accessible by integration (HTTP 403)")
+        if "/notifications" in path:
+            tok = (env or {}).get("GH_TOKEN")
+            if tok is not None:      # a token of its own: the answers GitHub gives a personal token (the error texts carry the token, to see them struck out)
+                if notif_deny[0] == "401" or tok not in (NTOK, NTOK2): return fail(f"gh: Bad credentials (HTTP 401) for {tok}")
+                if notif_deny[0] == "403": return fail(f"gh: Forbidden (HTTP 403) for {tok}")
+                if notif_deny[0] == "limit": return fail(f"gh: API rate limit exceeded (HTTP 403) for {tok}")
+            elif mode["user"] != "person": return fail("gh: Resource not accessible by integration (HTTP 403)")
         if path not in GHD: return fail("gh: Not Found (HTTP 404)")
         body = json.dumps(GHD[path]); return types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")
     class _Stop(Exception): pass
@@ -418,6 +430,85 @@ def part_app_token():
         hh = core.Hub(); hh.write_status = lambda: None; hh.health("x", True, "a note"); hh.health("y", True); hh.health("z", False, "boom"); hh.health("w", False)
         r = hh.status["receivers"]
         check("health: a healthy report keeps its note in `error`, no note stays None, a failure keeps its error or says 'check failed'", (r["x"]["error"], r["y"]["error"], r["z"]["error"], r["w"]["error"]) == ("a note", None, "boom", "check failed") and r["x"]["ok"] is True, r)
+
+        # ---- 3b. the notification anchors read with the token of `[anchor_hub] notifications_token_file`
+        class WithNotif:      # the config as the module sees it, with the setting pointed at a file (the file is read on every use, so a test changes it between passes)
+            file = ""
+            def __getattr__(self, k): return getattr(real_cfg, k)
+            def get(self, *a, **kw): return WithNotif.file if a[:2] == ("anchor_hub", "notifications_token_file") else real_cfg.get(*a, **kw)
+        tf = pathlib.Path(tmp, "notifications-token")
+        def put(token, mode=0o600):
+            tf.unlink(missing_ok=True); fd = os.open(str(tf), os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode); os.write(fd, token.encode()); os.close(fd); os.chmod(str(tf), mode)
+        SET = "[anchor_hub] notifications_token_file"
+        NP = lambda i: f"/repos/example-owner/repo{i}/notifications?all=true&per_page=50"
+        THREAD = {"id": "t1", "updated_at": "2026-11-20T00:00:00Z", "reason": "ci_activity", "subject": {"type": "CheckSuite", "url": "", "title": "CI"}, "repository": {"id": 7}}
+        def ncalls(): return [c for c in calls if "/notifications" in c]
+        def nenv(): return [(p_, t_) for p_, t_, _a in gh_env if "/notifications" in p_]
+        def everything(h):      # all the places the hub writes to or shows: the log, the status file's content, the saved read position, the anchors' status
+            return "\n".join(records) + json.dumps(h.status, default=str) + json.dumps(h.savers["github"](), default=str, sort_keys=True)
+        def why_of(h, a): return ((h.status["anchors"].get(a) or {}).get("unreadable") or {}).get("why")
+        def go(binds, user="app", passes=1):
+            h = fresh(binds, user); del gh_env[:]
+            for _ in range(passes): one_pass()
+            return h
+        ghr._cfg = WithNotif()
+        try:
+            put(NTOK + "\n"); WithNotif.file = str(tf); notif_deny[0] = ""; GHD[NP(0)] = []
+            h5 = fresh([PR, notif(0), notif(1)], "app"); evs = []; h5.emit = evs.append; del gh_env[:]; r0, c0 = ghr._gb.count("r"), len(calls); one_pass()
+            check("own token: under an App token the notification anchors are bound and their lists are read", sorted(ncalls()) == sorted([NP(0), NP(1)]), calls)
+            check("own token: …each notifications read carries the file's token in its environment (GH_TOKEN), and no call carries it in its arguments", len(nenv()) == 2 and all(t_ == NTOK for _p, t_ in nenv()) and not any(a_ for _p, _t, a_ in gh_env), gh_env)
+            check("own token: …and no other read carries it: the repository, the pull request and the issues are read with the token the CLI holds", not [p_ for p_, t_, _a in gh_env if t_ is not None and "/notifications" not in p_] and f"{RP}/pulls/26" in calls, gh_env)
+            check("own token: …every read, those of the notifications included, is one in the shared ledger", ghr._gb.count("r") - r0 == len(calls) - c0 and len(calls) - c0 >= 5, (ghr._gb.count("r") - r0, len(calls) - c0))
+            GHD[NP(0)] = [THREAD]; one_pass(); GHD[NP(0)] = [{**THREAD, "updated_at": "2026-11-21T00:00:00Z"}]; one_pass()
+            check("own token: …a thread's update is news: one event on the notification anchor (its second update, worded the same, is not another)", [(e.anchor, e.who) for e in evs if e.etype == "ci_activity"] == [(notif(0), "CI")], [(e.anchor, e.etype) for e in evs])
+            rc5 = h5.status["receivers"]["github"]
+            check("own token: …the card reads clean and neither notification anchor is flagged", rc5["ok"] is True and rc5["error"] is None and why_of(h5, notif(0)) is None and why_of(h5, notif(1)) is None, h5.status)
+            info5 = h5.resolvers["github"](notif(0))
+            check("own token: …the resolver names the anchor from a read with the token", "unreadable" not in info5 and info5["title"] == "repo0 notifications" and all(t_ == NTOK for _p, t_ in nenv()), (info5, nenv()))
+            check("own token: …the token is in no log line, status, saved position or anchor status", NTOK not in everything(h5) and "ghp_" not in everything(h5), None)
+            hp5 = go([PR, notif(0)], "person")
+            check("own token: a person's token reads them with the file's token too (the setting chooses the token for that endpoint)", [t_ for _p, t_ in nenv()] == [NTOK], nenv())
+
+            # unset: as before (an App token binds none of them, a person's reads them with the token the CLI holds)
+            WithNotif.file = ""
+            hu = go([PR, notif(0)], "app", 2)
+            check("unset: with an App token the notification anchors are not read and not flagged, as before", not ncalls() and why_of(hu, notif(0)) is None and hu.status["receivers"]["github"]["error"] is None, (calls, hu.status["receivers"]))
+            hup = go([PR, notif(0)], "person")
+            check("unset: a person's token reads them with the CLI's own token (none of ours)", len(ncalls()) == 1 and [t_ for _p, t_ in nenv()] == [None], gh_env)
+
+            # a file that is not usable: not read, flagged with a line that names the setting, and read again once it is fixed (no restart)
+            WithNotif.file = str(tf)
+            def empty_file(): tf.unlink(missing_ok=True); tf.write_text(""); tf.chmod(0o600)
+            for label, mk, want in (("mode 644", lambda: put(NTOK, 0o644), "mode 600"), ("mode 660", lambda: put(NTOK, 0o660), "mode 600"), ("mode 604", lambda: put(NTOK, 0o604), "mode 600"),
+                                    ("empty", empty_file, "empty"), ("blank", lambda: put("\n  \n"), "empty"), ("missing", lambda: tf.unlink(missing_ok=True), "does not exist"), ("two words", lambda: put(NTOK + " " + NTOK), "single token")):
+                mk(); hb = go([PR, notif(0), notif(1)], "app", 2); w = why_of(hb, notif(0)); blob = everything(hb)
+                check(f"file {label}: the notification anchors are not read, the pull request still is", not ncalls() and f"{RP}/pulls/26" in calls, calls)
+                check(f"file {label}: …each one's status is not ok with one line that names the setting", bool(w) and SET in w and want in w and "\n" not in w and why_of(hb, notif(1)) == w and bool(hb.status["anchors"][notif(0)]["unreadable"]["since"]), (w, hb.status["anchors"]))
+                check(f"file {label}: …the card is not turned off by it (no failed look), and the log names it once, without the token", hb.status["receivers"]["github"]["ok"] is True and len(logged(r"notifications are not read")) == 1 and "ghp_" not in blob, records)
+                check(f"file {label}: …the resolver says the same, in the same words", hb.resolvers["github"](notif(0)).get("unreadable") == w, hb.resolvers["github"](notif(0)))
+            put(NTOK, 0o644); hb = go([PR, notif(0)], "app"); tf.chmod(0o600); del gh_env[:]; one_pass()
+            check("file fixed: made mode 600, it is taken up at the next pass with no restart: read with the token, and the line on the anchor is gone", len(ncalls()) >= 1 and why_of(hb, notif(0)) is None and [t_ for _p, t_ in nenv()] == [NTOK], (nenv(), hb.status["anchors"].get(notif(0))))
+            put(NTOK2); GHD[NP(0)] = [{**THREAD, "id": "t2"}]; del gh_env[:]; one_pass()
+            check("file replaced: the next read carries the new file's token", [t_ for _p, t_ in nenv()] == [NTOK2], nenv())
+
+            # a refusal: asked once, flagged, not asked again until the file changes
+            put(NTOK); notif_deny[0] = "401"; GHD[NP(0)] = []
+            h7 = go([PR, notif(0), notif(1)], "app", 1); first = (dict(h7.gh_state["retry"]), notif(0) in h7.gh_state["looked"])      # after the first pass alone: a refusal is an answer, so the look counts as made
+            for _ in range(3): one_pass()
+            check("401: the endpoint is asked once, not every pass and not once per anchor", len(ncalls()) == 1, ncalls())
+            check("401: …both notification anchors read not ok, with a short reason that says the token was refused and names the setting", all((why_of(h7, a) or "").startswith("notifications token refused") and SET in why_of(h7, a) for a in (notif(0), notif(1))), h7.status["anchors"])
+            check("401: …it is no failed look (no retry wait, the card stays up) and one log line says it", h7.status["receivers"]["github"]["ok"] is True and first == ({}, True) and not h7.gh_state["retry"] and len(logged(r"refused the notifications token")) == 1 and len(logged(r"notifications token refused")) == 0, (first, h7.gh_state["retry"], records))
+            check("401: …the token is in no log line, status, saved position or error text, although GitHub's error text carried it", NTOK not in everything(h7) and "ghp_" not in everything(h7), [r_ for r_ in records if "ghp_" in r_])
+            n7 = len(ncalls()); r7 = h7.resolvers["github"](notif(0)).get("unreadable") or ""
+            check("401: …the resolver says so and makes no call", r7.startswith("notifications token refused") and len(ncalls()) == n7, (r7, ncalls()))
+            put(NTOK2); notif_deny[0] = ""; del gh_env[:]; one_pass()
+            check("401: …a replaced file is asked again, and read once accepted: the lines are gone", len(nenv()) == 2 and why_of(h7, notif(0)) is None and why_of(h7, notif(1)) is None and {t_ for _p, t_ in nenv()} == {NTOK2}, (nenv(), h7.status["anchors"]))
+            put(NTOK); notif_deny[0] = "403"; h8 = go([notif(0), notif(1)], "app", 2)
+            check("403: a 403 that is no rate limit is a refusal too: asked once, not ok, no token shown", len(ncalls()) == 1 and (why_of(h8, notif(1)) or "").startswith("notifications token refused") and "ghp_" not in everything(h8), (ncalls(), h8.status["anchors"]))
+            notif_deny[0] = "limit"; h9 = go([notif(0)], "app", 2)
+            check("403 for the rate limit: no refusal and no line on the anchor (a failed look, tried again as any look is)", why_of(h9, notif(0)) is None and len(ncalls()) >= 2 and "ghp_" not in everything(h9), (ncalls(), h9.status["anchors"]))
+        finally:
+            ghr._cfg = real_cfg; notif_deny[0] = ""
 
         # ---- 4. the retry of a failed start check, through start_receiver (as the service starts it)
         def started(first_fails, kind):

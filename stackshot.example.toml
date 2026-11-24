@@ -492,6 +492,10 @@ self_emails = []                                    # the owner's own edits and 
 slack_team = ""                                     # permalink host when Slack's auth_test carries no url
 github_login = ""                                   # the login whose own GitHub activity is not news, when `gh api /user` is refused (the token is a GitHub App's: the bot's login, e.g. "my-app[bot]").
                                                     # Empty: with a person's token its login is read as before; with an App token nothing is told apart and every event is news
+notifications_token_file = ""                       # a file holding a classic personal token with the `notifications` scope and nothing else (mode 600, one word), e.g. "~/.config/stackshot/notifications-token":
+                                                    # the token the `github:<owner/repo>@notifications` anchors are read with, for that one endpoint (GitHub answers it to a person's sign-in only, never to an App's token).
+                                                    # Every other read keeps the token `gh` holds. Empty: with an App token those anchors are not read, with a person's token they are read with it.
+                                                    # A file that is not mode 600 or stricter, empty, or whose token GitHub refuses leaves them unread, and each one's status says so. Read on every use: no restart
 slack_allow_self_channels = []                      # Slack channel ids where the owner's own posts and edits are delivered (bots' posts stay dropped);
                                                     # elsewhere the hub's own user is not news. A list, or one comma- or whitespace-separated string
 direct = {}                                         # anchor id → one session: each event on it goes at once and whole (up to 4,000 chars, with its ts and
