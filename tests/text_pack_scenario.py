@@ -3,7 +3,8 @@
 a throwaway repository. No network.
 
 Covers: a change that touches nothing gives the `nothing to read` line; what the pack holds (the affected tools' snapshot text, the diff, the changed functions,
-whether the PR changed the snapshot); the diff cut to its cap with the hunks of the changed tools kept first and the cut said; the command line (the `run` command that
+whether the PR changed the snapshot); the diff cut to its cap with the hunks of the changed tools kept first and the cut said; the tool text cut at tool boundaries (whole
+tools kept in sorted order, the ones left out named, nothing cut mid-tool) and the cap checked per tool, never as the total of the real snapshot's twelve tools; the command line (the `run` command that
 called a model is gone); the real server's tool names and helpers; and that no workflow job calls a model or signs in to AWS (the model job, the OIDC sign-in and the
 AWS variables are gone, the deterministic jobs stay) and that CONTRIBUTING, the README and the docs say so.
 
@@ -119,14 +120,85 @@ check("the unlimited diff is large and a capped one stays within the cap plus it
 check("…the hunk that overlaps the changed tool function is kept first, and the cut is said", "b=2, c=None" in cut and "1 of 2 hunks omitted to fit the size limit" in cut, cut[-300:])
 user = pack(H_BIG, max_diff=3_000, max_text=500)
 check("the whole pack is bounded by the caps (diff, tool text) plus a fixed frame", len(user) < 3_000 + 500 + 1_500, len(user))
-check("the tool text is cut at its cap and says so", "[tool text cut at 50 characters]" in tc.fit_text(SNAP, ["x"], 50) and "[tool text cut" not in tc.fit_text(SNAP, ["x"], 50_000))
+check("the tool text is cut at its cap and says so, naming the tool, when even the first tool alone is longer than the cap", "[tool text cut at 50 characters: x]" in tc.fit_text(SNAP, ["x"], 50) and "[tool text cut" not in tc.fit_text(SNAP, ["x"], 50_000))
 _real = json.loads(pathlib.Path(STACK, "tests", "tool_text.snapshot.json").read_text(encoding="utf-8"))
-_all = tc.fit_text(_real, sorted(_real["tools"]), tc.MAX_TEXT)
-_total = len(tc.fit_text(_real, sorted(_real["tools"]), 10 ** 9))     # the uncut size: `_all` stops at the cap, so it cannot say how far past it the text is
-_fix = (f"the {len(_real['tools'])} tools' text is {_total} characters as JSON, and the cap MAX_TEXT in tools/text_check.py is {tc.MAX_TEXT}. "
-        "A branch behind main can fail on a total that main has already shrunk: merge main first with `gh pr update-branch <N>` (N is the PR's number), "
-        "then run `tests/run-suite text_pack` again. Only when it still fails on a branch that has main in it is the text itself too long: shorten it, or raise MAX_TEXT")
-check("the real snapshot, all tools together, fits under MAX_TEXT uncut (growth past it fails here, not as a cut-off tool a reader takes for missing)", len(_real["tools"]) > 5 and "[tool text cut" not in _all and len(_all) < tc.MAX_TEXT, _fix)
+_RT = sorted(_real["tools"])
+_alone = {t: len(tc.fit_text(_real, [t], 10 ** 9)) for t in _RT}               # each tool's own size as JSON, uncut
+_big = max(_alone, key=_alone.get)
+_total = sum(_alone.values())
+
+# the cap bounds one pack, not the twelve tools together: so what is checked is each tool alone, never their sum
+def _notice(text):
+    return "[tool text cut" in text or "[tools left out" in text
+check("every one of the real snapshot's tools fits the cap alone, uncut (a tool whose own text passes MAX_TEXT is cut off in its pack: trim that tool's text, in stackshot/web/tools/text/<module>.md, then run `python3 tools/tool_text.py update`)",
+      len(_RT) > 5 and all(_alone[t] <= tc.MAX_TEXT for t in _RT),
+      {t: f"{_alone[t]} characters alone, the cap MAX_TEXT in tools/text_check.py is {tc.MAX_TEXT}" for t in _RT if _alone[t] > tc.MAX_TEXT})
+check(f"the biggest tool of the real snapshot is under half the cap, so the cap holds one tool with real headroom (measured: {_big} is {_alone[_big]} of {tc.MAX_TEXT} characters, {100 * _alone[_big] // tc.MAX_TEXT}%)",
+      2 * _alone[_big] < tc.MAX_TEXT, f"{_big} is {_alone[_big]} characters alone and the cap MAX_TEXT is {tc.MAX_TEXT}: trim that tool's text (stackshot/web/tools/text/<module>.md, then `python3 tools/tool_text.py update`) or raise MAX_TEXT")
+check("the pack of any one tool of the real snapshot is uncut and names nothing left out", all(not _notice(tc.fit_text(_real, [t], tc.MAX_TEXT)) and json.loads(tc.fit_text(_real, [t], tc.MAX_TEXT)) == {t: _real["tools"][t]} for t in _RT))
+
+def _parts(text):
+    """(the JSON part parsed, the tools named as left out, the notice lines) of a pack's tool text."""
+    body, _, rest = text.partition("\n[")
+    notes = ("[" + rest).split("\n") if rest else []
+    left = [n for line in notes if line.startswith("[tools left out to fit ") for n in line.rstrip("]").split(": ", 1)[1].split(", ")]
+    try:
+        return json.loads(body), left, notes
+    except ValueError:                                         # a tool cut in the middle: the kept part is no JSON; the checks fail on it, they do not crash
+        return {"<the kept part is not valid JSON>": body[-60:]}, left, notes
+
+# a tool that grows by 50,000 characters: here the biggest, which sorts last, so it is the one left out of the all-tools pack and the others stay whole
+_grown = {**_real, "tools": {**_real["tools"], _big: {**_real["tools"][_big], "description": _real["tools"][_big]["description"] + "x" * 50_000}}}
+_kept, _left, _notes = _parts(tc.fit_text(_grown, _RT, tc.MAX_TEXT))
+check(f"{_big} (the biggest tool) grown by 50,000 characters: the pack of all tools does not fail, every other tool is in it whole, and the tool left out is named by the one line",
+      _total + 50_000 > tc.MAX_TEXT and _left == [_big] and _kept == {t: _real["tools"][t] for t in _RT if t != _big} and len(_notes) == 1, (_left, sorted(_kept), _notes))
+check(f"{_big} grown by 50,000 characters is still read in a pack of its own, uncut", not _notice(tc.fit_text(_grown, [_big], tc.MAX_TEXT)) and json.loads(tc.fit_text(_grown, [_big], tc.MAX_TEXT)) == {_big: _grown["tools"][_big]})
+_bad = []
+for _t in _RT:                                                                # 50,000 characters more in any one tool: whole tools only, each tool in the JSON or named, none both, none neither
+    _g = {**_real, "tools": {**_real["tools"], _t: {**_real["tools"][_t], "description": _real["tools"][_t]["description"] + "x" * 50_000}}}
+    try:
+        _k, _l, _n = _parts(tc.fit_text(_g, _RT, tc.MAX_TEXT))
+    except ValueError as e:
+        _bad.append((_t, "not valid JSON", str(e))); continue
+    if sorted(set(_k) | set(_l)) != _RT or set(_k) & set(_l) or any(_k[o] != _g["tools"][o] for o in _k) or len(_n) != (1 if _l else 0):
+        _bad.append((_t, sorted(_k), _l))
+    if any(tc.fit_text(_g, [o], tc.MAX_TEXT) != tc.fit_text(_real, [o], tc.MAX_TEXT) for o in _RT if o != _t):
+        _bad.append((_t, "another tool's own pack changed"))
+check("50,000 more characters in any one tool: the pack of all tools holds whole tools only (valid JSON), names the ones it leaves out, and no other tool's own pack changes", not _bad, _bad)
+
+# the cut order on a fixture: whole tools, sorted, the left-out ones named, valid JSON for the rest
+def _fx(**sizes):
+    return {"format": 1, "tools": {n: {"description": "d" * k, "parameters": {}} for n, k in sizes.items()}}
+_f1 = _fx(alpha=200, bravo=200, delta=200, gamma=200, hotel=200)
+_lim = len(tc.fit_text(_f1, ["alpha", "bravo"], 10 ** 9))
+_out = tc.fit_text(_f1, ["hotel", "bravo", "gamma", "alpha", "delta"], _lim)       # handed in unsorted
+_k, _l, _n = _parts(_out)
+check("a small limit on a fixture keeps whole tools in sorted order whatever order they are handed in (alpha, bravo), and names the others, sorted, in one line",
+      list(_k) == ["alpha", "bravo"] and _k == {n: _f1["tools"][n] for n in ("alpha", "bravo")} and _l == ["delta", "gamma", "hotel"] and _out.endswith(f"\n[tools left out to fit {_lim} characters: delta, gamma, hotel]") and _out.count("\n[") == 1, _out[-300:])
+check("the limit is inclusive: at exactly the pack's size there is no notice, one character less leaves the last tool out", not _notice(tc.fit_text(_f1, ["alpha", "bravo"], _lim)) and _parts(tc.fit_text(_f1, ["alpha", "bravo"], _lim - 1))[1] == ["bravo"])
+_f2 = _fx(alpha=10, bravo=5000, charlie=10)
+_k, _l, _n = _parts(tc.fit_text(_f2, ["alpha", "bravo", "charlie"], 1000))
+check("a tool too long to fit is left out whole and named, and the small tools after it are still kept (no tool is cut in the middle: the kept part is valid JSON of whole entries)", list(_k) == ["alpha", "charlie"] and _k["alpha"] == _f2["tools"]["alpha"] and _k["charlie"] == _f2["tools"]["charlie"] and _l == ["bravo"] and "[tool text cut" not in "".join(_n), (_k, _l, _n))
+_out = tc.fit_text(_f2, ["bravo"], 1000)
+check("a single tool longer than the limit alone is the one tool cut inside, with the notice naming it", _out.startswith('{\n "bravo"') and _out.endswith("\n[tool text cut at 1000 characters: bravo]") and len(_out) < 1000 + 60 and "left out" not in _out, _out[-120:])
+_out = tc.fit_text(_f2, ["bravo", "charlie"], 1000)
+_k, _l, _n = _parts(tc.fit_text(_f2, ["bravo", "charlie"], 1000))
+check("...but with a tool that fits beside it, the long one is left out whole and named, never cut (the cut is for a pack where nothing fits)", list(_k) == ["charlie"] and _l == ["bravo"] and "[tool text cut" not in "".join(_n), (_k, _l, _n))
+_out = tc.fit_text(_fx(bravo=5000, delta=5000), ["delta", "bravo"], 1000)
+check("when nothing fits, the first tool (sorted) is the one cut, naming it, and the other is named as left out", _out.endswith("\n[tool text cut at 1000 characters: bravo]\n[tools left out to fit 1000 characters: delta]"), _out[-160:])
+check("a pack that fits is the sorted JSON alone: no notice, the same text as before", tc.fit_text(_f1, ["gamma", "alpha"], 10 ** 6) == json.dumps({n: _f1["tools"][n] for n in ("alpha", "gamma")}, indent=1, sort_keys=True, ensure_ascii=False) and tc.fit_text(_f1, [], 10) == "{}")
+check("a tool not in the snapshot is read as `(not in the snapshot)` and counts as a whole tool", _parts(tc.fit_text(_f1, ["alpha", "nosuch"], 10 ** 6))[0]["nosuch"] == "(not in the snapshot)")
+
+# a total far over the cap with each tool within it: no failure, the pack says what it left out
+_f3 = _fx(**{f"tool{i:02d}": 20_000 for i in range(12)})
+_k, _l, _n = _parts(tc.fit_text(_f3, sorted(_f3["tools"]), tc.MAX_TEXT))
+check("twelve tools of 20,000 characters (240,000, far over the cap, each far under it): the pack is within the cap, whole, and names the tools it left out",
+      len(tc.fit_text(_f3, sorted(_f3["tools"]), tc.MAX_TEXT).partition("\n[")[0]) <= tc.MAX_TEXT and sorted(_k) + _l == sorted(_f3["tools"]) and 0 < len(_l) < 12 and all(_k[t] == _f3["tools"][t] for t in _k), (len(_k), _l))
+# ...and through build_pack, on a branch whose snapshot is that large
+H_FAT = variant("fat", get=GET.replace('return "mover: " + a', 'return "keeper: " + a'), snap={"format": 1, "tools": {n: {"description": "d" * 50_000, "parameters": {}} for n in ("complete", "create", "get", "update")}})
+user = pack(H_FAT)
+_k, _l, _n = _parts(user.split("=== tool text (the snapshot at the head) ===\n", 1)[1].split("\n\n=== diff", 1)[0])
+check("a pack through build_pack on a tool-text change whose five tools total over the cap does not fail: whole tools, the rest named", "Tools the change reaches: brief, complete, create, get, update\n" in user and set(_k) | set(_l) == {"brief", "complete", "create", "get", "update"} and _l and "(not in the snapshot)" in user and f"to fit {tc.MAX_TEXT} characters" in user, (sorted(_k), _l))
 check("a deleted file or an unreadable revision gives an empty-diff note, not a crash", "no diff" in tc.fit_diff(R, "0" * 40, "1" * 40, ["stackshot/web/server.py:stackshot_x"], 1000))
 
 # ================================================================= 4. the command line
