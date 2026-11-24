@@ -19,7 +19,7 @@ The runner's signals to and from a process that does not share its memory are fi
 writes its status file (heartbeat, tick, pass count: `beat`), `status()` and `watchdog()` read that file when this process has no runner of its own, and `record_server_start()` keeps the server's start for the inbox flag. In the server with its own runner nothing reads a file back
 (a process's own files are skipped) and the behavior is what it was.
 
-Where the runner runs is `[runner] process` (config.runner_process, restart-only, read once by `start()`): "inline" (the default) is the thread above; "unit" starts none here and `stackshot minute` (web/minute.py) runs it. Exactly one process runs it, by the flock
+Where the runner runs is `[runner] process` (config.runner_process, restart-only, read once by `start()`): "unit" (the default, when the setting is not set) starts none here and `stackshot minute` (web/minute.py) runs it; "inline" is the thread above, the choice for a host with no minute unit. Exactly one process runs it, by the flock
 `<paths.state>/minute/runner.lock` (core/runner_files.py): an inline `start()` takes it before it starts its runner thread, and a server that finds it held by another process starts no runner, says so on stderr and goes on serving. A process
 with no runner of its own (a "unit" server, an inline one that was refused) reports `minute runner not running (...)` in `status()["message"]` while no live process beats the status file, and the watchdog tells the builder once, after the server has been up for
 `runner.STALL_AFTER`, when no process has a fresh heartbeat. The publish loop and the watchdog run in the server either way.
@@ -239,11 +239,12 @@ def watchdog(now: float | None = None) -> str:
         return "noted"
     RUNNER_STALL[0] = True
     mins = max(0.0, now - float(ref or now)) / 60.0
-    print(f"{label}: stalled: no round has completed for {mins:.0f} min ({'no process has reported since this server started; ' + absent() if unseen else 'its process is gone' if gone else 'a tick is blocking the one thread'}); the builder is told once", file=sys.stderr, flush=True)
+    elsewhere = f"; this server has no runner of its own: {absent()}" if rn is None and not unseen and absent() else ""     # a status file another run left (a dead pid, an old heartbeat): the words of why this process has no runner, the default and its fixes, are said here too
+    print(f"{label}: stalled: no round has completed for {mins:.0f} min ({'no process has reported since this server started; ' + absent() if unseen else ('its process is gone' if gone else 'a tick is blocking the one thread') + elsewhere}); the builder is told once", file=sys.stderr, flush=True)
     to = _cfg.audit_builder()
     if not to:
         return "nobody"
-    where = f"no process has reported since this server started ({absent()}), so the minute runner is not running" if unseen else "its process is gone" if gone else (("it is stuck in the tick " + cur) if cur else "no tick is running, so the loop itself is stuck")
+    where = f"no process has reported since this server started ({absent()}), so the minute runner is not running" if unseen else ("its process is gone" if gone else (("it is stuck in the tick " + cur) if cur else "no tick is running, so the loop itself is stuck")) + elsewhere
     last = f"this server started at {dt.datetime.fromtimestamp(float(ref), _pages.zone_now().tzinfo):%a %H:%M %Z}" if unseen else f"its last round ended at {dt.datetime.fromtimestamp(float(ref), _pages.zone_now().tzinfo):%a %H:%M %Z}"
     _fleetev.inbox_flag_send(to, f"[stackshot] The minute set's runner has completed no round for {mins:.0f} min ({last}): "
                                  f"{where}, and no wake, anchor, event wait or hand-off runs meanwhile (GET /audit/status has each tick's last_run). "
@@ -297,8 +298,13 @@ def start() -> list[str]:
     with _RETRY:
         MODE[0], STARTED[0], ABSENT[0], WAITING[0] = mode, time.time(), "", False
         if mode == "unit":
-            ABSENT[0] = 'runs in its own process: [runner] process = "unit"; start `stackshot minute`'
-            print('stackshot: minute set: runner not started here: [runner] process = "unit", the process `stackshot minute` runs it', file=sys.stderr, flush=True)
+            if _cfg.runner_process_is_default():     # not set: the default applies, so a host with no minute unit learns here what to do (the watchdog says it again if no process beats the status file)
+                ABSENT[0] = 'runs in its own process: [runner] process is not set, so the default "unit" applies; start `stackshot minute` (`./install.sh units --start` installs stackshot-minute.service), or set [runner] process = "inline" and restart the server to run it here'
+                print('stackshot: minute set: runner not started here: [runner] process is not set, so the default "unit" applies and the process `stackshot minute` runs it; a host with no stackshot-minute.service '
+                      'runs no minute passes until `./install.sh units --start` installs it, or [runner] process = "inline" is set (then restart the server)', file=sys.stderr, flush=True)
+            else:
+                ABSENT[0] = 'runs in its own process: [runner] process = "unit"; start `stackshot minute`'
+                print('stackshot: minute set: runner not started here: [runner] process = "unit", the process `stackshot minute` runs it', file=sys.stderr, flush=True)
         else:
             got = _files.lock_take()
             if got.state == "held":

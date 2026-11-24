@@ -9,7 +9,7 @@ needs it; the in-memory form stays and is what the process that holds it reads, 
   status.json     the runner's record: its pid, its heartbeat, the tick it is in and the same record `Runner.status()` gives, so the server's watchdog and `GET /audit/status` can read a runner that is not theirs.
   server-start.json  the server's pid and start time, so a runner that restarts alone keeps the server's start for the inbox flag's first-pass delay instead of taking its own.
   runner.lock     the one lock that says which process runs the runner (a flock, not a signal): `lock_take` takes it without waiting and keeps it for the life of the process, the kernel frees it when the process dies; the file
-                  holds the holder's pid for a message. Exactly one process runs the runner: the server when `[runner] process` is "inline", `stackshot minute` when it is "unit". The read-only standby takes none.
+                  holds the holder's pid for a message. Exactly one process runs the runner: the server when `[runner] process` is "inline", `stackshot minute` when it is "unit" (the default). The read-only standby takes none.
 
 A file written by this very process is never read back as another process's: what a process holds in memory is the truth for it (a suite that resets the in-memory form never meets a file it left behind).
 Every reader tolerates a missing, empty, torn or odd file (it reads as "nothing there") and never raises; a writer is a failed write and a stderr line, at most one a minute, never an exception. The read-only
