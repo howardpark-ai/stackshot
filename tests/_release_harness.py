@@ -584,9 +584,7 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
             if e.get("RT_WARMMODE") == "hang":
                 if (d / "warm.pid").exists(): break
             elif re.search(r"suitemap warm \w+: (done|stopped after|the command failed|no |.* not on PATH|that commit|the checkout|another warm)", wl):
-                # the line is written before the unit cleans up (an EXIT trap removes the checkout): wait for the checkout to be gone and for the command to be gone too, so what a scenario reads is the end state, never a moment before it
-                pid = (d / "warm.pid").read_text().strip() if (d / "warm.pid").exists() else ""
-                if not any(x.is_dir() for x in (d / "releases").glob("suitemap-warm.*")) and not (pid and os.path.exists(f"/proc/{pid}")): break
+                if _warm_gone(d): break
             time.sleep(0.05)
     for ph in pheld: ph.close()
     if grabber: done.set(); grabber.join()
@@ -621,13 +619,18 @@ def scenario(name, *pos, **kw):
     if not _ra: _ra.append(_runahead.make(_scenario))
     return _ra[0].call(name, pos, kw) if _ra[0] else _scenario(name, *pos, **kw)
 
+def _warm_gone(d):
+    """the index build's unit logs how the command ended and only then removes its checkout (an EXIT trap): the checkout is gone and the command's process has ended, so what a scenario reads is the end state, never a moment before it"""
+    pid = (d / "warm.pid").read_text().strip() if (d / "warm.pid").exists() else ""
+    return not any(x.is_dir() for x in (d / "releases").glob("suitemap-warm.*")) and not (pid and os.path.exists(f"/proc/{pid}"))
+
 def warm_finish(s, secs=30):
-    """a scenario with RT_WARMMODE=hang: let the command end (warm.release), wait for the unit's log to say how, and read the build's files again: (the unit's log, the command's lines, the scratch folders left)"""
+    """a scenario with RT_WARMMODE=hang: let the command end (warm.release), wait for the unit's log to say how and for its checkout and the command to be gone, and read the build's files again: (the unit's log, the command's lines, the scratch folders left)"""
     d = s["dir"]; (d / "warm.release").write_text("")
     wl = ""
     for _ in range(int(secs * 20)):
         wl = "".join(l.read_text() for l in sorted((d / "releases").glob("suitemap-warm-*.log")))
-        if re.search(r"suitemap warm \w+: (done|the command failed)", wl): break
+        if re.search(r"suitemap warm \w+: (done|the command failed)", wl) and _warm_gone(d): break
         time.sleep(0.05)
     return wl, (d / "warm.log").read_text().splitlines() if (d / "warm.log").exists() else [], sorted(x.name for x in (d / "releases").glob("suitemap-warm.*") if x.is_dir())
 
