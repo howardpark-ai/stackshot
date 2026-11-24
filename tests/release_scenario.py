@@ -520,6 +520,9 @@ if [ "$1" = fetch ] && [ -n "${{RT_FETCH_FAILS:-}}" ]; then   # the first RT_FET
   [ $n -gt "$RT_FETCH_FAILS" ] || {{ echo "error: fetching ref refs/remotes/origin/main failed: incorrect old value provided" >&2; exit 1; }}
 fi
 if [ "$1" = ls-tree ] && [ -n "${{RT_LSTREE_FAILS:-}}" ]; then echo "fatal: injected failure" >&2; exit 128; fi
+if [ "$1" = show ] && [ -n "${{RT_SHOW_LONG:-}}" ]; then   # the file, a pause, then 400 KB more: a reader that stops at its first match closes the pipe on this writer, as one on a long file does
+  {shutil.which("git")} "$@"; sleep 1; head -c 400000 /dev/zero | tr '\\0' x; exit
+fi
 exec {shutil.which("git")} "$@"
 '''); (dp / "bin/git").chmod(0o755)
 def deploy(to=None, fetch_fails=None):
@@ -603,6 +606,10 @@ g("reset", "-q", "--hard", c7, cwd=bx)
 rc, out, head = rollback(c0)
 check("deploy.sh DEPLOY_ROLLBACK=1 to a commit whose deploy.sh predates the second step: refused before anything moves, HEAD unmoved",
       rc == 1 and head == c7 and "predates the rollback's second step" in out, (rc, out))
+rc, out, head = rollback(cs[2], extra={"RT_SHOW_LONG": "1"})
+check("deploy.sh DEPLOY_ROLLBACK=1 when `git show` of the target's deploy.sh keeps writing for a second after the marker line (400 KB more): the marker is found, no false \"predates\" refusal, the rollback goes through (the check reads the whole file, so the pipe is never closed on git show)",
+      rc == 0 and head == cs[2] and "predates the rollback's second step" not in out and f"rolling back {c7[:7]} to {cs[2][:7]}" in out, (rc, out))
+g("reset", "-q", "--hard", c7, cwd=bx)
 (bx / ".claude").mkdir(); (bx / ".claude/settings.local.json").write_text("{}\n")   # what this box has: an untracked directory no commit knows
 rc, out, head = rollback(cs[2])
 check("deploy.sh DEPLOY_ROLLBACK=1 with an untracked file outside the target tree (.claude/): runs, goes back to the target, the file survives, what it takes out is listed",
