@@ -708,6 +708,7 @@ def part_client():
         "question -> _question_svc._question",
         "terminal-prompt -> _terminal_prompt_svc._terminal_prompt",
         "job-gap -> _job_gap._jobgap_post",
+        "catch -> _catches._catch_post",
         "item-open -> _item_open._itemopen_post",
         "item-sync -> _item_sync._itemsync_post",
         "job-failed -> _job_alert._jobalert_failed_post",

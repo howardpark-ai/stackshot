@@ -1,6 +1,6 @@
 """client_api.py: the client API, /client/...: what a machine's puller and a session's hooks call (write, for-you seen, item watch and the read calls of /client/{what}).
 
-`_client_post` is the POST dispatcher of /client/{what}: one branch per `what`, each handing the body to the service that does the work (service/recycle.py, released.py, question.py, terminal_prompt.py, job_gap.py, job_alert.py, item_open.py and the others) and answering (status, JSON).
+`_client_post` is the POST dispatcher of /client/{what}: one branch per `what`, each handing the body to the service that does the work (service/recycle.py, released.py, question.py, terminal_prompt.py, job_gap.py, job_alert.py, item_open.py, catches.py and the others) and answering (status, JSON).
 It is the surface's: it names the services and the status codes, and writes nothing itself. A suite that replaces a function of one of those services sets it on that module and calls `_client_post` here.
 
 A caller may hold a key of its own instead of a machine token (service/caller_pass.py): `POST /keys/enroll` and `POST /keys/pass` (no token) enroll a key and trade a signed claim for a pass, and the form's calls
@@ -32,6 +32,7 @@ from stackshot.router import page_debt as _page_debt
 from stackshot.service import agent_names as _agent_names
 from stackshot.service import background_want as _background_want
 from stackshot.service import caller_pass as _caller_pass
+from stackshot.service import catches as _catches
 from stackshot.service import contacts as _contacts
 from stackshot.service import event_waits as _evwaits
 from stackshot.service import foryou as _fy
@@ -254,6 +255,8 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         return _terminal_prompt_svc._terminal_prompt(machine, body)
     if what == "job-gap":       # sala: a gap in a scheduled job is one item per (timer, code), moved by the owning repo's builder (client.py post job-gap open | clear)
         return _job_gap._jobgap_post(machine, body)
+    if what == "catch":         # a front agent's hook: a turn that signed off with a no-ask phrase after a trigger-started turn is one line of the catch log (client.py post catch)
+        return _catches._catch_post(machine, body)
     if what == "item-open":     # a script opens one board item for a background agent of a project, once per marker while it is open (client.py post item-open)
         return _item_open._itemopen_post(machine, body)
     if what == "item-sync":     # a script keeps one item for the person in step with a condition: open, refresh, close by its marker (client.py post item-sync)
@@ -349,7 +352,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         else:
             _clients.seen(machine, uuid)
         return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")}, digest=_messaging.digest_fyi, on_filed=_handoff.handoff_acked)}
-    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
+    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
 
 
 async def client_write(request: Request):

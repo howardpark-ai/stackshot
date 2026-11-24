@@ -259,6 +259,14 @@ runs on every box.
                                 "<label> via a script on <machine>". The row owes no page. The server runs the create tool's own checks (subject prefix, description and next gates,
                                 project page, GitHub mirror), except the guard on alarming words. Exit 0 · 1 and the reason on stderr when refused (400 a check, 409 no front agent
                                 to file under), not reached ([0]) or misused (usage).
+  client.py post catch (- | --hook <name> --id <id> --t <ISO time with offset> --pane <session> --kind <kind> [--sender <raw sender>] [--outcome <text>] [--first <text>])
+                                for a front agent's hook: a turn that signed off with a no-ask phrase after a turn a trigger started is one "catch" in the server's catch log. `-` reads the fields
+                                as one JSON object on stdin ({"hook","id","t","pane","kind","sender","outcome","first"}, all text; a flag given as well wins). hook = the hook's name, id = the catch's own id
+                                (a replay of an id with the same t is safe: it prints "duplicate" and writes nothing more), t = when it happened, ISO 8601 with an offset or Z (from Jan 1st 2020 to two days ahead), pane = the front agent that signed off, kind = how the
+                                turn that began it was started (notice, message, script, ...), sender = that turn's raw sender, outcome = what the hook did, first = the first words of the reply (clipped to 200
+                                characters). The server works out the source (router notice, stackshot message, background-agent hand-back, front peer, script, other), the project and the day in its own timezone; the first catch
+                                of an hour for one pane and sender sends the project's builder one held word that starts no turn. Prints "ok" (or "duplicate") and exits 0; 1 and the reason on stderr when refused (400 a field), not
+                                reached ([0]) or misused (usage). The counts per source and day are the audit's `catches` report.
   client.py post item-open <marker> --project <key|id|slug> --subject "<action and object>" --mover <agent> --step "<agent>: <what it does>" --line "<fact>" [--line "<fact>" ...] [--sender <label>]
                                 for a timer's script that finds work for a project's background agent (a project that lists none is a front-only project: the item is filed with its -main agent): open ONE board item for it and print its id (exit 0). <marker> = <kind>:<what> (for example
                                 test_trim:stackshot), the item's mark: while an item with that marker is open on the same project a repeat call prints the same id and files nothing; once it is closed a call files a new item. A project holds at most 10 open items filed by this route: past it a new marker is refused until one closes. --mover must be a
@@ -1095,6 +1103,32 @@ def job_gap(argv: list[str], timeout: float = 60.0) -> int:
     return 0
 
 
+CATCH_USAGE = ('usage: client.py post catch - < catch.json     (one JSON object: hook, id, t, pane, kind, and sender, outcome, first)\n'
+               '       client.py post catch --hook <name> --id <id> --t <ISO time with offset> --pane <session> --kind <kind> [--sender <raw sender>] [--outcome <text>] [--first <text>]')
+
+
+def catch(argv: list[str], timeout: float = 20.0, text: str | None = None) -> int:
+    """`post catch -` (the fields as one JSON object on stdin) or `post catch --hook H --id I --t T --pane P --kind K [--sender S] [--outcome O] [--first F]` (a flag wins over the JSON): a hook's catch of a turn that
+    signed off with a no-ask phrase after a trigger-started turn, sent to the server's catch log -> exit 0 and "ok" or "duplicate" on stdout; 1 and the reason on stderr when refused, not reached or misused."""
+    a = list(argv)
+    from_stdin = "-" in a
+    a = [x for x in a if x != "-"]
+    opt = _opts(a, ("hook", "id", "t", "pane", "kind", "sender", "outcome", "first"), CATCH_USAGE)
+    if opt is None: return 1
+    body: dict = {}
+    if from_stdin:
+        try: body = json.loads(sys.stdin.read() if text is None else text)
+        except ValueError: print("the JSON on stdin does not parse: send one object\n" + CATCH_USAGE, file=sys.stderr); return 1
+        if not isinstance(body, dict): print("the JSON on stdin is not an object\n" + CATCH_USAGE, file=sys.stderr); return 1
+    body.update(opt)
+    if not all(isinstance(body.get(k), str) and body[k].strip() for k in ("hook", "id", "t", "pane", "kind")):
+        print("hook, id, t, pane and kind are required, as text\n" + CATCH_USAGE, file=sys.stderr); return 1
+    status, d = post("catch", body, timeout)
+    if status != 200 or not isinstance(d, dict):
+        print(f"stackshot: catch not recorded [{status}] {d.get('error') if isinstance(d, dict) else d}"[:1200], file=sys.stderr); return 1
+    print("duplicate" if d.get("duplicate") else "ok"); return 0
+
+
 JOB_FAILED_USAGE = "usage: client.py job-failed <unit> <host> <ISO-Z time of the failing run, 2026-11-23T02:15:00Z> <project: a page key, a scope/project label, or - for none>"
 JOB_OK_USAGE = "usage: client.py job-ok <unit> <host> <ISO-Z time of the successful run, 2026-11-23T02:15:00Z>"
 
@@ -1377,6 +1411,9 @@ def main(argv: list[str]) -> int:
     if cmd == "post" and len(argv) > 2 and argv[2] == "job-gap":
         try: return job_gap(argv[3:])
         except Exception as e: print(f"stackshot: job gap not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
+    if cmd == "post" and len(argv) > 2 and argv[2] == "catch":
+        try: return catch(argv[3:])
+        except Exception as e: print(f"stackshot: catch not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
     if cmd == "post" and len(argv) > 2 and argv[2] == "item-open":
         try: return item_open(argv[3:])
         except Exception as e: print(f"stackshot: item not opened ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
