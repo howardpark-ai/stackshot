@@ -6,7 +6,10 @@ The server writes one line per call of a counted write tool (create, update, com
     {"t": …, "tool": "update", "ok": true, "fix": ["wake", "item-id"]}                           it went through after the server corrected a field itself (see `fixed`)
     {"t": …, "tool": "update", "ok": false, "item": "board#N", "sender": "my-x", "why": "…"}    the server refused it (the ToolError's text, whitespace folded, clipped)
 
-`tools/refusal_report.py` reads these lines for its weekly report. The call's other arguments are never logged: a description, a draft or a said line stays out.
+`tools/refusal_report.py` reads these lines for its weekly report. The call's other arguments are never logged: a description, a draft or a said line stays out. The one exception is a refused message call, which also keeps
+what it was about, so refusals can be told apart later (the message tool's text is a record its sender may want back, and a refusal leaves no other copy of it):
+
+    {"t": …, "tool": "message", "ok": false, "item": "", "sender": "my-x", "why": "…", "to": "other-y", "kind": "marked-no-turn", "text": "…"}      to: the target as the sender wrote it; kind: the refusal site's slug (service/messaging.py `Refused`); text: the message as a delivered row keeps it, clipped to TEXT_MAX
 
     {"t": …, "tool": "update", "ok": true, "bounce": ["wake_park"]}                             it went through and the writer sent a fix of the server's back (see `bounces`)
 
@@ -29,9 +32,12 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from stackshot.core import config as _cfg
+from stackshot.core.lines import MSG_MAX, newline_lines
 
 COUNTED = ("create", "update", "complete", "confirm", "message")      # the write tools whose calls are counted
 WHY_MAX = 300                                                         # characters of a refusal's text kept
+TEXT_MAX = MSG_MAX                                                    # characters of a refused message's text kept: the message tool's own limit, so a message it takes is kept whole
+TO_MAX = 80                                                           # characters of a refused message's target kept
 
 BOUNCE = "bounce:"            # a fix kind written as BOUNCE + kind is a bounce-back, not a fix (`bounced`)
 NO_RESEND = frozenset({"description-bullet", "step-none", "his-step-settled", "step-none-applied", "said-text", "step-kept", "subject-cut", "work-cut", "ask-by-day", "description-url", "wait-basis-dropped", "description-goal"})   # fixes whose reply line does not invite a resend: the field sent again as written would be refused, fixed the same, change nothing, or be settled the same way (each line says how to change it)
@@ -247,9 +253,10 @@ def _file(now: float) -> Path:
     return _cfg.state("calls") / (dt.datetime.fromtimestamp(now, _cfg.tz()).strftime("%Y-%m") + ".jsonl")
 
 
-def record(tool: str, ok: bool, *, item: str = "", sender: str = "", why: str = "", fixes: list[tuple[str, str]] | None = None, call: str = "", now: float | None = None) -> None:
+def record(tool: str, ok: bool, *, item: str = "", sender: str = "", why: str = "", fixes: list[tuple[str, str]] | None = None, call: str = "", to: str = "", kind: str = "", text: str = "", now: float | None = None) -> None:
     """Append the line of one call. Never raises: a log line is not worth a lost reply. A call that went through with a fix or a bounce-back also names its item and sender (a later diff of the
-    writer's text is then explainable); a refused create has no item, so `call` (a short digest of what it was about) tells one refused create from another."""
+    writer's text is then explainable); a refused create has no item, so `call` (a short digest of what it was about) tells one refused create from another. A refused message call names its target (`to`), the refusal's
+    kind slug (`kind`) and the message (`text`, newlines kept, clipped to TEXT_MAX), each only when given."""
     if tool not in COUNTED:
         return
     t = time.time() if now is None else now
@@ -269,6 +276,13 @@ def record(tool: str, ok: bool, *, item: str = "", sender: str = "", why: str = 
             row["call"] = re.sub(r"\s+", "", str(call))[:16]
         why = re.sub(r"\s+", " ", str(why or "")).strip()
         row["why"] = why if len(why) <= WHY_MAX else why[:WHY_MAX - 1].rstrip() + "…"
+        if to:
+            row["to"] = re.sub(r"\s+", " ", str(to)).strip()[:TO_MAX]
+        if kind:
+            row["kind"] = re.sub(r"[^a-z0-9-]+", "-", str(kind).lower()).strip("-")[:40]
+        if text and str(text).strip():
+            body = str(text).strip()
+            row["text"] = body if len(body) <= TEXT_MAX else body[:TEXT_MAX - 1].rstrip() + "…"
     try:
         p = _file(t)
         with _LOCK:
@@ -290,7 +304,7 @@ def read(since: float, until: float) -> Iterator[dict[str, Any]]:
     for name in months:
         p = _cfg.state("calls") / f"{name}.jsonl"
         try:
-            lines = p.read_text(encoding="utf-8").splitlines()
+            lines = newline_lines(p.read_text(encoding="utf-8"))          # a refused message's text may hold a character `splitlines` cuts at (core/lines.py)
         except OSError:
             continue
         for ln in lines:
