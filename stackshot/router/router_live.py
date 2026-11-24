@@ -715,6 +715,33 @@ def _fallback_or_hold(n: dict[str, Any], key: str, root: str, cx: "_router.Conte
     return None
 
 
+def _nowhere(ln: dict[str, Any]) -> bool:
+    """Is this the ruling of a person's message that has nobody to go to (a pass with no target: the page lists no live background agent and no front agent)? It is never made a line: `_act` would archive a pass with no target."""
+    return bool(ln.get("person")) and ln.get("ruling") == "passed" and not str(ln.get("target") or "").strip()
+
+
+def rehome_person(cx: "_router.Context") -> int:
+    """A held `person` line of an agent that is gone now (retired after the line was held; a surface agent) is moved to the page's live background agent, else its contact front agent, so a person's message is
+    never left on a session nobody reads. → how many lines moved. One page's agents at a time; never raises."""
+    moved = 0
+    try:
+        for page in list(cx.reg):
+            front, back = cx.agents(page)
+            for nm in dict.fromkeys([*front, *back]):
+                if not cx.gone(nm):
+                    continue
+                rows = [r for r in _held._read(_held._file(_held.key_of(nm))) if r.get("kind") == "person"]
+                dest = cx.live_background(page) or cx.contact(page) if rows else ""
+                if not dest or dest == nm:
+                    continue
+                for r in rows:
+                    if _held.add(_held.key_of(dest), "person", str(r.get("text") or ""), sender=str(r.get("from") or ""), gid=str(r.get("gid") or ""), nid=str(r.get("nid") or ""), whole=True) and _held.ack(nm, ids=[str(r["id"])]):
+                        moved += 1
+    except Exception as e:  # noqa: BLE001
+        print(f"router live: re-homing a gone agent's person lines failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+    return moved
+
+
 def _judge(root: str, rows: list[tuple[str, dict[str, Any]]], cx: "_router.Context", runner: Any, since: float,
            offered: dict[str, list[str]] | None = None) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """The router's own ruling for each notice of the project's batch (router.py's rules in code, then its thin call): → (lines as the
@@ -762,7 +789,9 @@ def _judge(root: str, rows: list[tuple[str, dict[str, Any]]], cx: "_router.Conte
                 stats["retry"] += 1      # not even a hold could be made: no line, so the notice stays unruled and the next tick judges it again
             else:
                 lines.append(ln)
-    return lines, stats
+    placed = [x for x in lines if not _nowhere(x)]
+    stats["retry"] += len(lines) - len(placed)      # a person's message with nobody to hold it for (no live background agent, no front agent): no line, so it stays unruled and the next tick judges it again, never archived
+    return placed, stats
 
 
 def add_timeline(slug: str, date: str, summary: str, detail: str, request_id: str) -> str:
@@ -867,6 +896,8 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                 why = f"delivery to {tried if rerouted else target} failed {MAX_TRIES} times" if target else "no target"
                 target, reason = main, f"passed to {main}: {why} ({reason})"
                 base["source"] = "fallback"
+            if not target and ln.get("person"):               # a person's message is never archived, not even for want of an agent: left unruled, tried again at the next tick (_judge makes no such line: this is the backstop)
+                return {**base, "status": "error", "error": "a person's message with nobody to hold it for: the page lists no live background agent and no front agent; left unruled for the next tick"}
             if not target:                                    # no -main agent anywhere (the page, its hub and the scope's general agent list none): archived, with the reason, never dropped and never handed to a session that is gone
                 ruling, reason = "archived", f"no agent can take it: the page and its hub list no user-facing agent and the scope's general -main agent ([router] general_*) is on no page ({reason})"
                 base["source"] = "fallback"
@@ -1083,6 +1114,7 @@ def tick(now: float | None = None, runner: Any = None) -> dict[str, int]:
         if not groups:
             return out
         cx = _router.Context()
+        rehome_person(cx)      # a held person line of an agent that retired since is moved to a live agent of its page
         cap = int(_router._num("max_notices", 25, 1))
         try:
             twins, offered, ruled_twins = _twin_plan(groups, last, cx)

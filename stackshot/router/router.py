@@ -30,7 +30,7 @@ else that is somebody's message, and a notice whose author kind is unknown) is n
 one already ruled passed or held, the follower of one event's single ruling, and the log-only copy of a ruling made elsewhere): one that names the owner, asks a question or replies in a watched thread is passed
 (gate-person) to the scoped item's one mover, else to the page's background agent, and to a front agent only as a held line and only when it needs the owner; one nothing places goes to the thin call,
 whose archive, drop or merge answer, a failed or timed-out call and a clamp are all overridden into a hold for the page's background agent (a page with none: a held line for its contact front agent), the
-`person` hold kind. A bare laugh, ack or positive reaction of a person (trivial_of) is read and recorded as archived with its reason (gate-trivial), passed to no agent and no turn, and wakes no wait. One event on
+`person` hold kind. A bare laugh, ack or positive reaction of a person (trivial_of) is read and recorded as archived with its reason (gate-trivial), passed to no agent and no turn, and wakes no wait, unless an open item hangs on its anchor: an ack there is the answer to what the item waits for and goes on as a person's message. One event on
 an anchor several pages hold is ruled once (router_live.tick): every holding page is offered to the gate and to the call, and the ruling goes to the page it is about. A ruling of a person's notice, whatever it
 is, wakes an item that waits on the anchor (person_wakes), not only a passed or merged one.
 
@@ -294,6 +294,11 @@ class Context:
     def live_background(self, root: str) -> str:
         """The project's background agent a message that is no need of the person goes to (anchors.background_agent: the builder first), skipping an agent that is gone (gone); "" when none is left."""
         return next((n for _c, _o, n in _anc.background_ranked(root, self.reg) if not self.gone(n)), "")
+
+    def contact(self, root: str) -> str:
+        """The page's contact front agent (main_agent) a held line may go to: "" when it is gone (retired), since nobody would read the line. A person's message with neither a live background agent nor a contact is held by no one: it stays unruled."""
+        main = self.main_agent(root)
+        return "" if self.gone(main) else main
 
     def name_of(self, session: str) -> str:
         """A session id or name → the pane name it goes by."""
@@ -1087,13 +1092,14 @@ def _single_thread(n: dict[str, Any]) -> bool:
 
 def person_hold_line(n: dict[str, Any], key: str, root: str, cx: Context, why: str, *, source: str = "code", rule: str = "gate-person", call: str = "", note: str = "") -> dict[str, Any]:
     """The ruling for a person's message nothing placed: held for the page's background agent (the one the message tool uses, anchors.background_agent, skipping one that is gone: a retired session or a surface agent,
-    whose held lines nobody reads), never archived. A page with no such agent holds it for its contact front agent (a held line for its next turn, which starts none: router_live._act). `why` is what the gate or the call found."""
+    whose held lines nobody reads), never archived. A page with no such agent holds it for its contact front agent (a held line for its next turn, which starts none: router_live._act), unless that one is gone too:
+    the line then has no target, and router_live._judge leaves the notice unruled for the next tick (counted in `retry`), never archived. `why` is what the gate or the call found."""
     aroot = _import_live().agent_root(root, cx.reg)
     back = cx.live_background(aroot)
     if back:
         return _line(n, key, root, source=source, rule=rule, ruling="passed", target=back, call=call, note=note, hold="person", person=True,
                      reason=f"{why}: a person's message is never archived, so it is held for {back}, the page's background agent")
-    main = cx.main_agent(aroot)
+    main = cx.contact(aroot)
     return _line(n, key, root, source=source, rule=rule, ruling="passed", target=main, call=call, note=note, person=True,
                  reason=f"{why}: a person's message is never archived, so it is held for {main or 'nobody'}, the page's contact agent (the page lists no background agent that is still running)")
 
@@ -1106,7 +1112,7 @@ def _his_move(t: dict[str, Any]) -> bool:
 
 def person_place(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[str, Any] | None:
     """Where a person's message that the gate can place goes, or None (the thin call picks). It is placed when it names the owner (or is a direct message, which is his), asks a question (a question mark), or
-    replies in a thread the page watches (a Slack thread reply, a mail, a pull request or issue comment, a Notion page's comment). Who gets it: the mover of the one open item the anchor is scoped to (more or fewer
+    replies in a thread the page watches (a Slack thread reply, a mail, a pull request or issue comment, a Notion page's comment), or is a bare ack on an anchor an open item hangs on. Who gets it: the mover of the one open item the anchor is scoped to (more or fewer
     than one: the page's background agent); a mover that is a front agent only when the message needs the owner (the text says [for <owner>] or needs: decision, the item waits on his decision or is his own move, or it names him and asks),
     else the background agent that does the item's work, else the page's background agent; a page with no background agent holds it for its contact front agent. A pass to a front agent is a held line that
     starts no turn (router_live._act)."""
@@ -1114,7 +1120,8 @@ def person_place(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[st
     named = names_owner(text) or str(n.get("anchor") or "").startswith("slack:D")
     asks = asks_question(text)
     thread = bool(n.get("thread")) or (_single_thread(n) and (anchor_type(n) != "github" or bool(_MESSAGE_ETYPES & set(_etypes(n)))))
-    if not (named or asks or thread):
+    acks = bool(trivial_of(n)) and _anchor_busy(key, n, cx)      # a bare ack on an anchor an open item hangs on: the answer to what the item waits for (trivial_rule leaves it to this path)
+    if not (named or asks or thread or acks):
         return None
     aroot = _import_live().agent_root(root, cx.reg)
     front, back = cx.agents(aroot)
@@ -1124,17 +1131,17 @@ def person_place(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[st
     mover = "" if (item and _his_move(item)) else (cx.agent_of(_anc.mover_of(item), aroot) if item else "")      # an item that is his own move has no agent mover (mover_of names its stand-in, the builder)
     mover = "" if cx.gone(mover) else mover      # a mover that is gone (retired) reads no held line: the pick falls to the doer, the page's background agent or the contact front agent
     shown_id = cx.shown(item["gid"]) if item else ""
-    what = "names " + _cfg.owner() if named else "asks a question" if asks else "replies in a thread the page watches"
+    what = "names " + _cfg.owner() if named else "asks a question" if asks else "replies in a thread the page watches" if thread else "acks on an anchor an open item hangs on"
     page_back = cx.live_background(aroot)
     if mover and mover in back:
         target, how = mover, f"the mover of {shown_id}"
     elif needs:
-        target = mover if mover in front else cx.main_agent(aroot)
+        target = mover if mover in front else cx.contact(aroot)
         how = f"the mover of {shown_id}, a front agent, as a held line (it needs {_cfg.owner()})" if mover in front else f"the contact front agent, as a held line (it needs {_cfg.owner()})"
     else:
         doer = item_doer(item, aroot, cx) if item else ""
         doer = "" if cx.gone(doer) else doer
-        target = doer or page_back or cx.main_agent(aroot)
+        target = doer or page_back or cx.contact(aroot)
         how = f"{doer}, who does the work of {shown_id}" if doer else f"the page's background agent {page_back}" if page_back else f"the contact front agent {target}, as a held line (the page lists no background agent that is still running)"
     if not target or target.lower() == str(n.get("who") or "").strip().lower():      # nobody to hand it to, or the agent wrote it itself: never passed back to its own sender (the rules after the gate route it)
         return None
@@ -1143,11 +1150,12 @@ def person_place(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[st
 
 
 def trivial_rule(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[str, Any] | None:
-    """A person's anchor notice that is only a laugh, an ack or an emoji (trivial_kind) is read and recorded as an archived notice, with its reason ("trivial: laughter"): never passed, never a turn of its own. A burst of two or more folded messages is never trivial (trivial_of)."""
+    """A person's anchor notice that is only a laugh, an ack or an emoji (trivial_kind) is read and recorded as an archived notice, with its reason ("trivial: laughter"): never passed, never a turn of its own. A burst of two or more folded messages is never trivial (trivial_of).
+    Not where an open item hangs on the anchor (_anchor_busy: scoped to one, or a wait names it): an ack there is the person's answer to what the item waits for, so it goes the ordinary person path (person_place) to the item's mover."""
     if not person_notice(n):
         return None
     k = trivial_of(n)
-    if not k:
+    if not k or _anchor_busy(key, n, cx):
         return None
     return _line(n, key, root, source="code", rule="gate-trivial", ruling="archived", person=True, reason=f"trivial: {k}: read and recorded by the router, passed to no agent")
 
@@ -1210,7 +1218,7 @@ def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[d
 def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The rules in code, in order (code_rule's guard follows). `peers` = the project key's
     notices, for the repeat rule. The rules, in order:
-      gate-trivial  (after `image`) a person's bare laugh, ack or emoji (trivial_kind): archived with its reason, read and recorded, never passed.
+      gate-trivial  (after `image`) a person's bare laugh, ack or emoji (trivial_kind): archived with its reason, read and recorded, never passed; not on an anchor an open item hangs on (_anchor_busy): there it goes on as a person's message.
       gate-machine  (after anchor-work) machine news (machine_reason: a bot's post, a CI result, a routine pull request or issue event, the owner's own edit of a document): archived by rule with its reason,
                     unless it is for the owner or an open item hangs on its anchor (then the rules below act, as before, so the item's wait ends).
       gate-person   (after gate-machine) a person's message (person_notice) that names the owner, asks a question or replies in a watched thread: passed to the scoped item's one mover when it is a background agent, else to

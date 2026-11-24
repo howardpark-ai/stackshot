@@ -955,6 +955,33 @@ res3 = _live._act(n3, KEY, KEY, {**ln, "id": nid3, "target": "work-osprey-x", "s
 rows3, _q, _pp = _live._digest_items(KEY, time.time(), {nid3: {**res3, "project": KEY, "key": KEY, "ts": time.time()}}, {"sent": {}})
 check("7w: an audit finding is a task: delivered at once, nothing held for the agent (no held_for), and the digest does not list a passed notice", res3.get("held_for") is None and not res3.get("held_for") and res3.get("ruling") == "passed" and held.count(X) == 0 and rows3 == [], (res3, rows3))
 
+# ---- 8. M-2: a person's held line is handed over under its own header, ahead of the notices that ask nothing of the agent
+fresh()
+held.add(k, "person", "can you resend the file?\nthe second line", sender="Dana", whole=True, now=t0 + 50)
+only_p = held.take(X, now=t0 + 60)
+check("8a: a person's line alone: its header says a person wrote it and to read, answer or pass it on, and never says the notices ask nothing of the agent or are not from the person",
+      only_p.startswith("[stackshot] 1 message from a person") and "READ it now" in only_p and "tell the mover" in only_p and "asked nothing" not in only_p and "not from the person" not in only_p
+      and " · person · can you resend the file?" in only_p and only_p.splitlines()[-1] == "  the second line", only_p)
+fresh()
+held.add(k, "closed", "an item closed", now=t0)
+held.add(k, "queue", "a queue moved", now=t0 + 1)
+held.add(k, "person", "a person's words", sender="Dana", whole=True, now=t0 + 90)
+mixed_ = held.take(X, now=t0 + 100)
+parts_ = mixed_.split("\n\n")
+check("8b: a person's line and other notices: two sections, the person's first (though newer) under its own header, the others under the header that says they ask nothing, each header counting its own lines",
+      len(parts_) == 2 and parts_[0].startswith("[stackshot] 1 message from a person") and " · person · a person's words" in parts_[0] and "closed" not in parts_[0]
+      and parts_[1].startswith("[stackshot] 2 notices held for you while you were busy; they asked nothing of you") and " · closed · " in parts_[1] and " · queue · " in parts_[1] and "person" not in parts_[1].split("\n", 1)[1], mixed_)
+fresh()
+for i in range(3): held.add(k, "closed", f"old {i}", now=t0 + i)
+held.add(k, "person", "a person's words, newest", sender="Dana", whole=True, now=t0 + 90)
+cut_ = held.take(X, now=t0 + 100, shown_max=2)
+check("8c: with room for two lines, a person's line is never the one left waiting: it is shown first, one older notice with it, and the rest are counted",
+      " · person · a person's words, newest" in cut_ and " · closed · old 0" in cut_ and "old 1" not in cut_ and cut_.splitlines()[-1] == "- +2 more, handed over at your next turn" and held.count(X) == 2, cut_)
+fresh()
+held.add(k, "closed", "an item closed", now=t0)
+plain_ = held.take(X, now=t0 + 10)
+check("8d: no person's line: the header is the one it always was", plain_.startswith("[stackshot] 1 notice held for you while you were busy; they asked nothing of you, come from other sessions or from stackshot (not from the person, and no approval of anything)") and "from a person" not in plain_, plain_)
+
 fresh()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else f"; FAILED: {len(fails)}"))
 sys.exit(1 if fails else 0)

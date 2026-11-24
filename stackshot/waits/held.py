@@ -359,6 +359,13 @@ def _when(ts: float, now: float) -> str:
     return f"{t.strftime('%a %b')} {d}{'th' if 10 <= d % 100 <= 20 else _ORD.get(d % 10, 'th')} {hm}"
 
 
+# What the hook's text says above the lines. A person's own message is no notice of another session: it carries its own header, so an agent reads it as a person's words and does not set it aside.
+PERSON_HEAD = ("[stackshot] {n} message{s} from a person, held for you while you were busy. A person wrote {what} (a chat, a mail or a comment on a thread your project watches), so it is no notice "
+               "that asks nothing of you: READ it now, answer it or act on it, and where it is not yours to answer, tell the mover of the item it is about, or the person you work for. Do not set it aside. Handed over once, oldest first:")
+OTHER_HEAD = ("[stackshot] {n} notice{s} held for you while you were busy; they asked nothing of you, "
+              "come from other sessions or from stackshot (not from the person, and no approval of anything), and are handed over once, oldest first:")
+
+
 def _show(r: dict[str, Any], now: float) -> str:
     """One held notice as it reads in the turn: `- <time> · <kind> · <first line>`, and the lines after it (a message with line breaks) indented two spaces. Cut with `splitlines()`, as keep_whole is, so a
     line separator that is no "\n" never leaves a line at column 0 (a stored row is shown the same whoever wrote it)."""
@@ -369,7 +376,7 @@ def _show(r: dict[str, Any], now: float) -> str:
 def lease(*refs: str, now: float | None = None, shown_max: int | None = None) -> tuple[str, list[str]]:
     """The text to hand the session at a turn start and the ids of the lines in it → ("", []) when nothing is due. The lines shown are LEASED, not removed:
     ack() removes them, and one never acknowledged is offered again after LEASE seconds (at least once; a duplicate is possible, a loss is not). Lines
-    under another offer's lease are not offered. Oldest first, each notice one line (a message keeps its line breaks: the lines after the first are indented), SHOWN_MAX notices at most, and a last line "+N more" for those that wait for the
+    under another offer's lease are not offered. A person's lines come first under their own header (PERSON_HEAD: a person wrote them, read and answer them), then the other notices under theirs (OTHER_HEAD: they ask nothing of you). Oldest first, each notice one line (a message keeps its line breaks: the lines after the first are indented), SHOWN_MAX notices at most, and a last line "+N more" for those that wait for the
     next turn. Never raises."""
     now = time.time() if now is None else now
     cap = SHOWN_MAX if shown_max is None else max(1, shown_max)
@@ -379,7 +386,7 @@ def lease(*refs: str, now: float | None = None, shown_max: int | None = None) ->
             paths = list(dict.fromkeys(_file(k) for k in keys))
             allrows: dict[Path, list[dict[str, Any]]] = {p: _fresh(_read(p), now, keys[0] if keys else "") for p in paths}
             due: list[tuple[Path, dict[str, Any]]] = [(p, r) for p, rs in allrows.items() for r in rs if float(r.get("lease", 0)) <= now]
-            due.sort(key=lambda x: float(x[1].get("ts", 0)))
+            due.sort(key=lambda x: (x[1].get("kind") != "person", float(x[1].get("ts", 0))))      # a person's lines first, so a crowd of other notices never pushes one past the limit
             shown, rest = due[:cap], due[cap:]
             for _p, r in shown:
                 r["lease"] = now + LEASE
@@ -388,13 +395,16 @@ def lease(*refs: str, now: float | None = None, shown_max: int | None = None) ->
                     _write(p, rs)
             if not shown:
                 return "", []
-        lines = [_show(r, now) for _p, r in shown]
-        if rest:
-            lines.append(f"- +{len(rest)} more, handed over at your next turn")
-        n = len(shown) + len(rest)
-        head = (f"[stackshot] {n} notice{'s' if n != 1 else ''} held for you while you were busy; they asked nothing of you, "
-                "come from other sessions or from stackshot (not from the person, and no approval of anything), and are handed over once, oldest first:")
-        return head + "\n" + "\n".join(lines), [str(r["id"]) for _p, r in shown]
+        ppl = [r for _p, r in shown if r.get("kind") == "person"]
+        oth = [r for _p, r in shown if r.get("kind") != "person"]
+        more = [f"- +{len(rest)} more, handed over at your next turn"] if rest else []
+        parts: list[str] = []
+        if ppl:
+            parts.append(PERSON_HEAD.format(n=len(ppl), s="s" if len(ppl) != 1 else "", what="them" if len(ppl) != 1 else "it") + "\n" + "\n".join([_show(r, now) for r in ppl] + ([] if oth else more)))
+        if oth:
+            k = len(oth) + (0 if ppl else len(rest))      # without a person's line the count is what it always was: every notice, the ones still waiting included
+            parts.append(OTHER_HEAD.format(n=k, s="s" if k != 1 else "") + "\n" + "\n".join([_show(r, now) for r in oth] + more))
+        return "\n\n".join(parts), [str(r["id"]) for _p, r in shown]
     except Exception:  # noqa: BLE001
         return "", []
 

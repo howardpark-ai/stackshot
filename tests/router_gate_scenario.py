@@ -291,13 +291,16 @@ res, pushed2, ncalls2 = tick()
 fc, sc = first["projects/delta"], second["projects/charlie"]
 check("a twin that comes in after the first was ruled follows that ruling (merged, one-ruling), with no second delivery or call", lv(sc["id"])["rule"] == "one-ruling" and lv(sc["id"])["ruling"] == "merged" and fc["id"] in lv(sc["id"])["reason"] and pushed2 == [] and ncalls2 == 0, (lv(sc["id"]), pushed2))
 
-# ---- 9. an item that waits on an anchor wakes on any ruling of a person's notice, not on a trivial one
+# ---- 9. an item that waits on an anchor wakes on any ruling of a person's notice, a bare ack on that anchor included (an ack where no item hangs is archived: section 4)
 def held_items(): return [bool(_service_store._load(g)["metadata"].get("hold")) for g in ("a4", "a5")]
 CALLS.clear(); PUSHED.clear()
 check("setup: both items wait", held_items() == [True, True], held_items())
 t_triv = one("slack:C0000000005", "Dana", "ok")
 res, pushed, ncalls = tick()
-check("a trivial notice on the anchor archives and wakes nobody", lv(t_triv["id"])["rule"] == "gate-trivial" and held_items() == [True, True], held_items())
+check("an ack on an anchor two open items wait on is no trivial notice: it goes the person path to the page's background agent and wakes both items",
+      lv(t_triv["id"])["rule"] == "gate-person" and lv(t_triv["id"])["ruling"] in ("held", "passed") and lv(t_triv["id"])["target"] == BACK and held_items() == [False, False], (lv(t_triv["id"]), held_items()))
+for g in ("a4", "a5"): item(int(g[1:]), "projects/alpha", "al-main", hold=True)
+held.take("al-builder")
 w1 = one("slack:C0000000005", "Dana", "the vendor sent the signed file")
 PLAN.update({w1["id"]: {"ruling": "archived", "target": "", "reason": "nothing in it", "for_owner": False}})
 res, pushed, ncalls = tick()
@@ -450,6 +453,92 @@ check("a judging that fails with a failing fallback does not escape the tick: th
       and lv(l2c["id"])["rule"] == "gate-person", (raised, [x for x in lines() if x["id"] == l2a["id"]]))
 check("…and the one of a page with no background agent stays unruled for the next tick, which rules it (held for the contact front agent)", not rec(l2b["id"], "projects/bravo").get("ruling") and (tick(), lv(l2b["id"]))[1]["held_for"] == "br-main", rec(l2b["id"], "projects/bravo"))
 held.take("al-builder")
+# ---- 17. M-1: a bare ack on an anchor an open item hangs on is no trivial notice: it goes the person path to the item's mover; where no item hangs it is still recorded and passed to nobody
+CALLS.clear(); PUSHED.clear(); FYI.clear(); PLAN.clear(); held.take("al-builder"); held.take("al-docs")
+_anchors = json.loads((T / "store/anchors.json").read_text())
+_anchors["projects/alpha"].append(add("https://github.com/example-owner/repo/pull/9", ["a1"]))      # a pull request the builder's item hangs on
+(T / "store/anchors.json").write_text(json.dumps(_anchors))
+core._ROUTES["github:example-owner/repo#9"] = [{"project": "projects/alpha", "session": "al-name", "target": "for al-builder", "pilot": True, "filter": ""}]
+ack_mail = one("gmail:" + "a" * 16, "Dana", "ok", kind="gmail")
+ack_pr = one("github:example-owner/repo#9", "Dana", "+1", kind="github", etype="comment")
+ack_free = [one("slack:C0000000001", "Dana", t_) for t_ in ("thx", "Thanks!", UP)]
+res, pushed, ncalls = tick()
+check("M-1: an ack ('ok') on a mail the builder's open item is scoped to goes the person path to that item's mover, not the archive",
+      lv(ack_mail["id"])["rule"] == "gate-person" and lv(ack_mail["id"])["target"] == "al-builder" and lv(ack_mail["id"])["ruling"] in ("held", "passed") and rec(ack_mail["id"])["ruling"] in ("held", "passed"), (lv(ack_mail["id"]), rec(ack_mail["id"])))
+check("M-1: a '+1' on a builder's pull request an open item hangs on is no trivial notice either: it is passed to the item's mover",
+      lv(ack_pr["id"])["rule"] != "gate-trivial" and lv(ack_pr["id"])["ruling"] != "archived" and rec(ack_pr["id"])["ruling"] in ("held", "passed"), (lv(ack_pr["id"]), rec(ack_pr["id"])))
+check("M-1: an ack on an anchor no open item hangs on is still read and recorded as archived (gate-trivial) and passed to nobody",
+      all(lv(x["id"])["rule"] == "gate-trivial" and lv(x["id"])["ruling"] == "archived" and rec(x["id"])["ruling"] == "archived" for x in ack_free) and not any(x["id"] in t_ for x in ack_free for _, t_ in pushed), [lv(x["id"]) for x in ack_free])
+check("M-1: _anchor_busy reads the mail anchor as busy and the free Slack anchor as not", router._anchor_busy("projects/alpha", {"anchor": "gmail:" + "a" * 16}, router.Context()) and not router._anchor_busy("projects/alpha", {"anchor": "slack:C0000000001"}, router.Context()), None)
+held.take("al-builder"); held.take("al-docs")
+
+# ---- 18. L-1: a person's message with no live background agent and a retired contact agent is never archived: unruled, counted as a retry, ruled when an agent is back
+from stackshot.fleet import sessions_registry as _sr
+DEAD2 = {"br-main"}; _sr_ret2 = _sr.retired; _sr.retired = lambda x: str(x) in DEAD2
+try:
+    CALLS.clear(); PUSHED.clear(); FYI.clear(); PLAN.clear()
+    nb1 = one("slack:C0000000002", "Dana", "can the shop move the meeting to Friday?")
+    nb2 = one("slack:C0000000002", "Dana", "the shop changed the delivery slot")      # nothing places it: the call (it says archived)
+    res, pushed, ncalls = tick()
+    check("L-1: a person's message of a page whose only agent has retired is neither ruled nor archived: no line, no routing ruling, no turn, counted as a retry",
+          all(not [l for l in lines() if l["id"] == x["id"] and l.get("status") == "ruled"] and not rec(x["id"], "projects/bravo").get("ruling") for x in (nb1, nb2)) and res.get("retry", 0) >= 2 and not any(x[0] == "br-main" for x in pushed) and not FYI, (res, [x for x in lines() if x["id"] in (nb1["id"], nb2["id"])]))
+    DEAD2.clear()
+    res, pushed, ncalls = tick()
+    check("…and when the contact agent is there again the next tick holds both for it, never archived", all(lv(x["id"])["ruling"] == "held" and lv(x["id"])["held_for"] == "br-main" and rec(x["id"], "projects/bravo")["ruling"] == "held" for x in (nb1, nb2)), [lv(x["id"]) for x in (nb1, nb2)])
+    DEAD2.add("br-main")
+    nb3 = one("slack:C0000000002", "Dana", "is the shop open on Sunday?")
+    cx_none = router.Context(); cx_none.main_agent = lambda root: ""      # a page that lists no agent at all
+    backstop = live._act(nb3, "projects/bravo", "projects/bravo", {"id": nb3["id"], "ruling": "passed", "target": "", "reason": "x", "person": True, "rule": "gate-person"}, cx_none, {})
+    check("L-1: the act step itself never archives a person's pass that has no target: an error line, and the notice stays unruled", backstop["status"] == "error" and backstop["ruling"] != "archived" and not rec(nb3["id"], "projects/bravo").get("ruling"), backstop)
+finally: _sr.retired = _sr_ret2
+held.take("br-main")
+res, pushed, ncalls = tick(); held.take("br-main")
+
+# ---- 19. L-2: a held person line of an agent that retired after the hold is moved to the page's live background agent, else its contact agent, at the next tick
+held.take("al-builder"); held.take("al-docs"); held.take("al-main")
+held.add(held.key_of("al-builder"), "person", "a person's words, held before the builder retired", sender="Dana", nid="rh-1", whole=True)
+held.add(held.key_of("al-builder"), "closed", "an item closed", nid="rh-2")
+DEAD3 = {"al-builder"}; _sr.retired = lambda x: str(x) in DEAD3
+try:
+    moved1 = live.rehome_person(router.Context())
+    docs_has, builder_left = held.count("al-docs"), [r["kind"] for r in held._read(held._file(held.key_of("al-builder")))]
+    DEAD3.add("al-docs")
+    held.add(held.key_of("al-docs"), "person", "a second person's message", sender="Dana", nid="rh-3", whole=True)
+    moved2 = live.rehome_person(router.Context())
+    main_has = held.take("al-main")
+finally: _sr.retired = _sr_ret2
+check("L-2: a person line held for a retired background agent moves to the page's other live background agent (the other kinds stay: nobody asked for them); with that one gone too, to the contact agent",
+      moved1 == 1 and docs_has == 1 and builder_left == ["closed"] and moved2 == 2 and "a second person's message" in main_has and "held before the builder retired" in main_has and held.count("al-docs") == 0, (moved1, docs_has, builder_left, moved2, main_has))
+check("L-2: nothing moves when no agent is gone", live.rehome_person(router.Context()) == 0, None)
+held.add(held.key_of("al-builder"), "person", "a person's words, held before the next tick", sender="Dana", nid="rh-4", whole=True)
+one("slack:C0000000001", "Dana", "the vendor confirmed Monday")      # any notice: the tick that rules it re-homes first
+DEAD3 = {"al-builder"}; _sr.retired = lambda x: str(x) in DEAD3
+try: res, pushed, ncalls = tick()
+finally: _sr.retired = _sr_ret2
+check("L-2: the tick itself re-homes it (before it rules), so a line never waits for an agent that is not coming back", not [r for r in held._read(held._file(held.key_of("al-builder"))) if r["kind"] == "person"] and "held before the next tick" in held.take("al-docs"), held._read(held._file(held.key_of("al-builder"))))
+held.take("al-builder"); held.take("al-docs"); held.take("al-main")
+
+# ---- 20. L-3: a surface agent is never a place for a held line; a burst is a bot's only when every event it folds is; a repeat prefers an earlier one that reached somebody
+cxs = router.Context()
+cxs.reg = {**cxs.reg, "projects/echo": {**cxs.reg["projects/alpha"], "agents": {"ec-main": "contact", "ec-slack": "builds and answers the Slack app", "ec-eng": "keeps the pages"}, "back_agents": {"ec-slack": "builds and answers the Slack app", "ec-eng": "keeps the pages"},
+                                        "surface_agents": {"ec-slack": "slack"}}}
+cxs._surface = None
+check("L-3: a surface agent is gone (no hook of it reads held lines) and is skipped as the page's background agent, the live one after it is chosen; a contact agent is not gone",
+      cxs.gone("ec-slack") and not cxs.gone("ec-eng") and not cxs.gone("ec-main") and not cxs.gone("") and cxs.live_background("projects/echo") == "ec-eng", (cxs.gone("ec-slack"), cxs.live_background("projects/echo")))
+def burst(bots):
+    ev_ = core.Event(anchor="slack:C0000000001", kind="slack", title="#x", who="Dana", text="the last one", url="https://u/burst-" + "".join(map(str, map(int, bots))), bot=bots[-1])
+    hub.send_burst("slack:C0000000001", "al-name", {"count": len(bots), "first": time.time(), "last_at": time.time(), "label": "slack:C0000000001", "last": ev_, "kind": "slack", "etypes": [], "whos": [], "texts": [], "bots": list(bots)})
+    return routing.read("projects/alpha")[-1]
+mixed, allbot = burst([True, False]), burst([True, True])
+check("L-3: a follow-up that folds a bot's post and a person's is a person's (bot false); one that folds only bots' posts is a bot's", not mixed.get("bot") and allbot.get("bot") is True, (mixed.get("bot"), allbot.get("bot")))
+nowx = time.time(); cx_ = router.Context(); _real_code = router._code_rule
+mk2 = lambda i, ts, **kw: {"id": i, "ts": ts, "kind": "anchor", "anchor": "slack:C0000000001", "who": "Dana", "text": "can you check the April numbers?", "url": "https://u/rp2", "label": "Slack", "ekind": "slack", **kw}
+try:
+    router._code_rule = lambda key, n, root, cx_x, peers: {"id": n["id"], "key": key, "project": root, "kind": "anchor", "ts": nowx, "source": "code", "rule": "repeat", "ruling": "dropped", "target": "", "reason": "a stub", "for_owner": False, "item": "", "call": "", "label": "", "text": "", "note": ""}
+    rep_two = router.code_rule("projects/alpha", mk2("f3", nowx), "projects/alpha", cx_, [mk2("f1", nowx - 120, ruling="archived"), mk2("f2", nowx - 60, ruling="passed")])
+    rep_one = router.code_rule("projects/alpha", mk2("f3", nowx), "projects/alpha", cx_, [mk2("f2", nowx - 60, ruling="passed"), mk2("f1", nowx - 120, ruling="archived")])
+finally: router._code_rule = _real_code
+check("L-3: of several identical earlier messages the repeat rule looks at one that reached somebody (passed), whatever their order: the repeat is dropped", rep_two["ruling"] == "dropped" and rep_one["ruling"] == "dropped", (rep_two, rep_one))
 if os.environ.get("ROUTER_GATE_STAGED"):      # the staged dry run: one line per path, as the live tick ruled each notice above (tests/run-suite router_gate with ROUTER_GATE_STAGED=1)
     for path, nid in (("machine: a bot's post", m_bot), ("machine: a routine pull request event", m_pr), ("machine: the owner's own document edit", m_own), ("machine: a CI result", m_ci),
                       ("machine, for the owner (strong text): not archived", m_strong), ("machine, on an anchor an item hangs on: not archived", m_busy),
@@ -459,7 +548,7 @@ if os.environ.get("ROUTER_GATE_STAGED"):      # the staged dry run: one line per
                       ("unplaceable, call timed out", f1), ("unplaceable, answer did not parse", f2), ("a record with no author kind", old),
                       ("no background agent, unplaceable", b1), ("no background agent, placed", b2), ("no background agent, front gate cannot file it", b3), ("a person's picture", img),
                       ("two pages, one anchor: ruled page", pair["projects/charlie"]["id"] and pair["projects/charlie"]), ("two pages, one anchor: the follower", pair["projects/delta"]),
-                      ("trivial: a run of laughter jamo", triv[0]), ("trivial: haha, in a thread", triv[1]), ("trivial: :thumbsup:", triv[3]), ("trivial: an emoji", triv[4]), ("trivial: ok", t_triv), ("a person's notice the call archived (wake)", w1), ("an identical repeat", r2)):
+                      ("trivial: a run of laughter jamo", triv[0]), ("trivial: haha, in a thread", triv[1]), ("trivial: :thumbsup:", triv[3]), ("trivial: an emoji", triv[4]), ("an ack on an anchor items wait on", t_triv), ("a person's notice the call archived (wake)", w1), ("an identical repeat", r2)):
         nid = nid["id"] if isinstance(nid, dict) else nid
         l = lv(nid)
         print(f"STAGED {path:<58} rule={l.get('rule') or '-':<13} ruling={l['ruling']:<8} target={l.get('target') or l.get('held_for') or '-':<10} hold={l.get('hold') or '-':<7} source={l.get('source')}")
