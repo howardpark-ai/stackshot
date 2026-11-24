@@ -284,8 +284,9 @@ def _idset(who: str, idx: dict[str, dict[str, Any]]) -> set[str]:
 
 def asked_by(front: str, sender: str, idx: dict[str, dict[str, Any]], now: float | None = None) -> bool:
     """Was `sender` asked something, within ASKED_LOOKBACK_HOURS, by the front agent itself? A question another agent of the project put to the sender is that agent's, and its answer goes back to it. The one signal the relay already keeps for it: a row of the message log (`MSG_LOG`, one line
-    per message sent through the message tool) whose `from` is the front agent, whose `to` is the sender, that was delivered (not a failed or timed-out send) and whose text holds a question mark. A message that went to a page key or to nobody logs no
-    such row, so an answer to one is not known as an answer: it is held or sent to the builder as any other. False on any doubt."""
+    per message sent through the message tool) whose `from` is the front agent, whose `to` is the sender, that was delivered (not a failed or timed-out send) and that the front agent marked as a question (`question=true`, logged as `"question": true`).
+    Only that mark makes a message a question: a question mark in its text, in quoted words or in a URL, makes none, and a row written before the mark existed has no field, so a reply to it takes the ordinary path (builder or held) for the day
+    it would have counted. A message that went to a page key or to nobody logs no such row, so an answer to one is not known as an answer: it is held or sent to the builder as any other. False on any doubt."""
     try:
         me = _idset(sender, idx)
         if not me:
@@ -307,7 +308,7 @@ def asked_by(front: str, sender: str, idx: dict[str, dict[str, Any]], now: float
             if at < floor:
                 break
             if (str(d.get("from") or "").strip().casefold() in peers and str(d.get("to") or "").strip().casefold() in me
-                    and "?" in str(d.get("text") or "") and str(d.get("outcome") or "").startswith(("delivered", "queued", "inbox"))):      # a question that reached the sender: a handover, a status line or a failed send asks nothing, so the sender's later note is no answer
+                    and d.get("question") is True and str(d.get("outcome") or "").startswith(("delivered", "queued", "inbox"))):      # a marked question that reached the sender: a handover, a status line or a failed send asks nothing, so the sender's later note is no answer
                 return True
         return False
     except Exception:  # noqa: BLE001  — no signal, no answer
@@ -576,14 +577,15 @@ def _sent_instead(name: str, why: str, project: str, raw: str, sender: str, auth
     return f"{name!r} is retired ({why}), so this went to its project {project!r} instead — {got}"
 
 
-def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False) -> str:
+def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False, question: bool = False) -> str:
     """`origin` = the machine, when the sender is a script there and not a session (POST /client/message): the envelope
     says so, and that it cannot be answered. `fyi`: the sender marks a message that asks nothing. To a background agent it is held and
     handed over with the agent's next turn (hold_notice, kind fyi) instead of starting one; to a project it is recorded with the mark, so the router holds it
     when it passes it to a background agent; to a front agent (no mark on its first line) it goes through the front gate (telling.front_fyi): held for the agent's next turn, or, when its
     hook cannot fetch held lines, not passed on; it starts no turn either way. A script's fyi (`origin` set) takes the same way: the held line names it as a script on that machine (a script's message cannot be
     answered), and where a session gets the reply "not passed on" a script gets a refusal (HTTP 400), since it reads the status and not the sentence. The sender being the person the instance works for, or the text carrying the mark or needs: decision, makes it an ordinary message (to a front agent: delivered or
-    refused exactly as without the flag, a script's included)."""
+    refused exactly as without the flag, a script's included). `question`: a front agent marks a message that asks the person it writes to something; the log row carries the mark, and only a reply to such a row is an answer (asked_by). It is
+    refused beside `fyi` (a message that asks nothing) and from the person himself (his messages are no question to a session)."""
     # g7 → for what is delivered and logged only: the gates, the length cap and the handover's naming
     # read the text as the sender wrote it (`raw`), so a message is refused, passed and names items exactly as it did before
     to, raw, sender = to.strip(), text.strip(), sender.strip()
@@ -600,6 +602,11 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
     if len(raw) > _hooks().msg_max():
         raise ToolError(f"Refused: message longer than {_hooks().msg_max()} characters — put the long form somewhere both sessions can read (a gbrain page, a file in the repo) and send the pointer")
     idx = _sr._sessions_index()
+    if question:
+        if _model.is_owner(sender):
+            raise ToolError(f"Refused: question=true is for a front agent's question to the session it writes to; {OWNER}'s own messages carry no such mark")
+        if fyi:
+            raise ToolError("Refused: question=true and fyi=true together: a question asks something and an fyi asks nothing; send it with one of them")
     fyi = bool(fyi) and not _model.is_owner(sender)
     hold_why = hold_project = ""            # why a message to a front agent that is no fyi is held for its next turn all the same (_gate_front's _Hold)
     front_fyi = bool(fyi) and not re.match(_cfg.page_dirs_re() + "/", to) and bool(_front_fyi_name(to, raw, idx))      # an fyi for a front agent is not refused for its missing mark: the front gate below takes it
@@ -694,7 +701,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                 MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
                 with open(MSG_LOG, "a", encoding="utf-8") as f:
                     f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": auth, "to": to, "outcome": outcome_,
-                                        "error": "", "text": text, **({"fyi": True} if fyi else {})}, ensure_ascii=False) + "\n")
+                                        "error": "", "text": text, **({"fyi": True} if fyi else {}), **({"question": True} if question else {})}, ensure_ascii=False) + "\n")
             except Exception:  # noqa: BLE001
                 pass
             if filed:
@@ -748,7 +755,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
         with open(MSG_LOG, "a", encoding="utf-8") as f:
             # a notice held for the router reached no session: log the page key it was addressed to, never the retired name-line session's name
-            f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": auth, "to": key if held else to, "outcome": outcome, "error": err, "text": text, **({"fyi": True} if fyi else {})}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": auth, "to": key if held else to, "outcome": outcome, "error": err, "text": text, **({"fyi": True} if fyi else {}), **({"question": True} if question else {})}, ensure_ascii=False) + "\n")
     except Exception:
         pass
     if not origin and not held:
