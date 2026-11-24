@@ -8,7 +8,7 @@ What it pins, each as a scenario on the real code (1, 3 and 4 fail on the code b
      with 60 bound anchors and 300 saved entries a pass asks anchor_id a few hundred times (it asked tens of thousands of times), and the entry saved under
      the old name still moves to the id the bindings use, in the state and in the CI state.
   2. A merged pull request's look is as it was (the branch does not change it): its pull request and check runs are read at each of its looks, whatever its issue answers, so a
-     check that finishes late or is re-run on it is seen.
+     check that finishes late or is re-run on it is seen. Its looks are the passes in which its repository's list of changed issues shows it changed (after the one pass of a repository's first start).
   3. The watch on the bindings' folders asks watchdog for the four kinds of change the handler counts (modified, created, deleted, moved), so a read of
      the store (open, read, close) reaches no handler; a write still sets the flag, as before.
   4. A paused or held queue is not flushed by a process (push.py answers exit 5 and does nothing), a queue that is not held is, and a lifted hold flushes at the next
@@ -18,13 +18,12 @@ Part `restart` - anchor-hub's GitHub reads across a restart (a restart used to s
 reads that hit the hourly cap and cut the pass short, so the board showed anchor-hub's github row as "error") - a fake GitHub that counts
 its calls and answers ETags like GitHub (a 200 with an ETag, a 304 for a matching If-None-Match), the real hub and receiver, no network.
 
-Covers: the first start (nothing saved) reads each anchor in full; a warm pass costs no counted read; the read position is saved with its ETags, the
+Covers: the first start (nothing saved) reads each anchor in full; a warm pass costs no counted read but the repository's list, asked for once; the read position is saved with its ETags, the
 resolutions of the board's labels and the learnt repository IDs, and the file write is atomic (temp + os.replace; a failed replace leaves the old
-file). A restart with that file costs no counted read but GitHub's /user: every conditional read of an unchanged anchor is a 304, the start-up
+file). A restart with that file costs no counted read but GitHub's /user (and, in its first pass, the repository's list: its ETag is not kept): every conditional read of an unchanged anchor is a 304, the start-up
 rescan names every anchor from the saved resolution (a finished anchor with no call at all), nothing is reported twice. A change during the
 downtime (a comment, a close, a reopening, on open and on finished anchors) is a 200 and is reported, once, with the repository ID. A finished
-(closed or merged) anchor is read once in 10 passes (its CI, its issue and its comments), staggered; a reopening or a late comment is seen within
-10 passes. An ETag is saved only once the pass has finished with its anchor: a save in the middle of a read, or after a comments read that failed,
+(closed or merged) anchor is not read one by one: its repository's list of changed issues is read once per pass, and a late comment, a reopening or a merge after one is read in full in that pass. An ETag is saved only once the pass has finished with its anchor: a save in the middle of a read, or after a comments read that failed,
 leaves the older ETag, so the change is read again after a restart, not answered 304. ETags of another login, and a saved section that is damaged,
 are not used. The first start with the new code over a file from before it (state, no ETags) costs less than a cold one.
 
@@ -47,7 +46,7 @@ each replaces module state of the code under test (the GitHub receiver's subproc
 `--part <name>`), exactly as the three suites did, and the parent adds their check counts. (A check against a real watchdog observer in part `idle` runs only where watchdog is installed; the others do not depend on it.)
 
     tests/run-suite anchorhub_restart        -> exit 0 / 1"""
-import json, os, re, sys, pathlib, logging, types, subprocess, hashlib, zlib, time, threading
+import json, os, re, sys, pathlib, logging, types, subprocess, hashlib, time, threading
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 PARTS = ("idle", "restart", "catchup")
 
@@ -97,8 +96,9 @@ def part_idle():
     def fake_gh(args, capture_output=True, text=True, timeout=30):
         a = [x for x in args[2:] if x != "-i" and x != "-H" and not x.startswith("If-None-Match")]; path = a[0]; cond = "-i" in args; calls.append(path)
         if path == "/user": return types.SimpleNamespace(returncode=0, stdout=json.dumps({"login": "oliver"}), stderr="")
-        if cond and mode["304"] and "-H" in args: return types.SimpleNamespace(returncode=0, stdout="HTTP/2.0 304 Not Modified\n\n", stderr="")
-        if path.endswith("/check-runs?per_page=100"): body = {"check_runs": [{"name": "suites", "status": "completed", "conclusion": "success"}]}
+        if cond and mode["304"] and "-H" in args and "/issues?" not in path: return types.SimpleNamespace(returncode=0, stdout="HTTP/2.0 304 Not Modified\n\n", stderr="")
+        if "/issues?" in path: body = mode.get("list", [])      # the repository's list of changed issues: what a test puts in mode["list"]
+        elif path.endswith("/check-runs?per_page=100"): body = {"check_runs": [{"name": "suites", "status": "completed", "conclusion": "success"}]}
         elif "/pulls/" in path: body = {"head": {"sha": "a" * 40, "ref": "x/y"}, "user": {"login": "oliver"}, "base": {"repo": {"id": 7}}}
         else: body = {"state": "closed", "comments": 0, "updated_at": mode.get("updated", "2026-10-28T00:00:00Z"), "title": "a thing", "html_url": "https://github.com/new/repo/pull/1",
                       "pull_request": {"merged_at": "2026-10-27T00:00:00Z"}}
@@ -113,9 +113,10 @@ def part_idle():
         try: caught[-1]()
         except _Stop: pass
 
-    def new_hub(bound, saved_state, saved_ci):
+    def new_hub(bound, saved_state, saved_ci, position=True):
         h = core.Hub(); h.write_status = lambda: None; h.emit = lambda ev: None; h.bindings = {a: {"s"} for a in bound}
         h.saved = {"github": {"me": "oliver", "state": saved_state, "ci": saved_ci, "looked": {k: 1.0 for k in saved_state}}}      # every saved anchor was read before (an anchor not in `looked` is a catch-up's, read in full whatever its state)
+        if position: h.saved["github"]["lists"] = {"new/repo": {"since": "2026-10-28T00:00:00Z", "at": time.time(), "owed": [], "catch": False}}      # the repository's list position is saved too (without it the first pass is the fallback: every finished anchor is read once)
         caught.clear(); ghr.run(h); return h
 
     CLOSED = {"state": "closed", "comments": 0, "updated": "2026-10-28T00:00:00Z", "pr": True, "merged": True}
@@ -160,23 +161,25 @@ def part_idle():
               and "github:old/repo#9" not in h.gh_state["state"], h.gh_state["state"].get("github:new/repo#9"))
         _cfg.moved_repos = real_moved
 
-        # ---- 2. a merged pull request's look is as it was: its CI first, then the issue, and the CI is read whatever the issue answers
-        n = next(i for i in range(1000) if zlib.crc32(f"github:new/repo#{i}".encode()) % ghr.FINISHED_EVERY == 0)      # an anchor whose turn is the first pass
-        a_id = f"github:new/repo#{n}"
-        h = new_hub([a_id], {a_id: dict(CLOSED)}, {a_id: dict(CI)})
+        # ---- 2. a merged pull request's look is as it was: its CI first, then the issue, and the CI is read whatever the issue answers (a finished anchor is read when its repository's list shows it changed)
+        n = 7; a_id = f"github:new/repo#{n}"
+        def listed(updated): return [{"number": n, "state": "closed", "comments": 0, "updated_at": updated, "pull_request": {"merged_at": "2026-10-27T00:00:00Z"}}]
+        mode["list"] = listed("2026-10-28T00:00:00Z")
+        h = new_hub([a_id], {a_id: dict(CLOSED)}, {a_id: dict(CI)}, position=False)
         mode["304"] = False; calls.clear(); one_pass()
-        check("merged look: its pull request and check runs are read, then the issue",
-              calls[:2] == [f"{RP}/pulls/{n}", f"{RP}/commits/{'a' * 40}/check-runs?per_page=100"] and calls[-1] == f"{RP}/issues/{n}", calls)
-        for _ in range(ghr.FINISHED_EVERY - 1): one_pass()
-        mode["304"] = True; calls.clear(); one_pass()
-        check("…and when the issue answers 304 the pull request and its check runs are read all the same (a check that finishes late or is re-run on a merged pull request is not missed)",
-              f"{RP}/issues/{n}" in calls and f"{RP}/pulls/{n}" in calls and any("check-runs" in c for c in calls), calls)
+        rest = [c for c in calls if "/issues?" not in c]
+        check("merged look: no position is saved for the repository, so the one pass of the fallback reads it: its pull request and check runs, then the issue (after one read of the newest change GitHub shows)",
+              len(calls) == 4 and "/issues?" in calls[0] and rest[:2] == [f"{RP}/pulls/{n}", f"{RP}/commits/{'a' * 40}/check-runs?per_page=100"] and rest[-1] == f"{RP}/issues/{n}", calls)
         calls.clear(); one_pass()
-        check("…and the pass after its turn reads nothing of it", calls == [], calls)
-        for _ in range(ghr.FINISHED_EVERY - 2): one_pass()
-        mode["304"] = False; mode["updated"] = "2026-10-29T00:00:00Z"; calls.clear(); one_pass()
+        check("…the pass after it asks for the list alone and reads nothing of it", len(calls) == 1 and "direction=asc" in calls[0] and "since=2026-10-27T23:59:00Z" in calls[0], calls)
+        mode["list"] = listed("2026-10-29T00:00:00Z"); mode["304"] = True; calls.clear(); one_pass()
+        check("…and when the list shows it changed and the issue answers 304 the pull request and its check runs are read all the same (a check that finishes late or is re-run on a merged pull request is not missed)",
+              f"{RP}/issues/{n}" in calls and f"{RP}/pulls/{n}" in calls and any("check-runs" in c for c in calls), calls)
+        mode["304"] = False; mode["updated"] = "2026-10-29T00:00:00Z"; mode["list"] = listed("2026-10-29T00:00:00Z"); calls.clear(); one_pass()
         check("…the anchor's saved state takes in a change of the issue", h.gh_state["state"][a_id]["updated"] == "2026-10-29T00:00:00Z", h.gh_state["state"][a_id])
-        mode.pop("updated")
+        calls.clear(); one_pass()
+        check("…and once it has, the list showing it again (the overlap before the position) costs it no read", [c for c in calls if "/issues?" not in c] == [], calls)
+        mode.pop("updated"); mode.pop("list")
     finally:
         _cfg.moved_repos = real_moved; ghr._anc.anchor_id = real_anchor_id
 
@@ -281,15 +284,15 @@ def part_restart():
     CLOSED_ISSUES, OPEN_ISSUE = (13, 14, 15), 17
     PRS = (OPEN_PR, MERGED, CLOSED_PR, MERGED2, MERGED3)
     ALL = PRS + CLOSED_ISSUES + (OPEN_ISSUE,)
-    FINISHED = (MERGED, MERGED2, MERGED3) + CLOSED_ISSUES                      # merged pull requests and closed issues: looked at once in 10 passes
-    CLOSED = FINISHED + (CLOSED_PR,)                                          # …and a closed pull request that is not merged: still read every pass (it can be reopened and merged)
+    FINISHED = (MERGED, MERGED2, MERGED3) + CLOSED_ISSUES                      # merged pull requests and closed issues: read when the repository's list shows them changed
+    CLOSED = FINISHED + (CLOSED_PR,)                                          # …and a closed pull request that is not merged: the same (a reopening and a merge after it show in the list)
     aid = lambda n: f"github:o/r#{n}"
     (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"https://github.com/o/r/{'pull' if n in PRS else 'issues'}/{n}", "items": None, "added": 1, "by": "t"} for n in ALL]}))
     (T / "store/next-id").write_text("10")
     # ---- a fake GitHub: one repository o/r (ID 7), ETags like GitHub's (the hash of the answer), every call logged
     class Fake:
         def __init__(self):
-            self.login = "oliver"; self.tick = 0; self.issues = {}; self.comments = {}; self.ci = {}; self.fail = set()
+            self.login = "oliver"; self.token = 0; self.tick = 0; self.issues = {}; self.comments = {}; self.ci = {}; self.fail = set(); self.fail_list = False
             for n in ALL:
                 fin = n in CLOSED
                 self.issues[n] = {"number": n, "state": "closed" if fin else "open", "comments": 0, "title": f"thing {n}", "user": {"login": "kim"},
@@ -309,8 +312,15 @@ def part_restart():
             i["comments"] = len(self.comments[n]); i["updated_at"] = max(i["updated_at"], at)
         def set_state(self, n, st):
             i = self.issues[n]; i["state"] = st; i["updated_at"] = self.stamp(); i["closed_at"] = i["updated_at"] if st == "closed" else None; i["closed_by"] = {"login": "kim"} if st == "closed" else None
+        def renew(self): self.token += 1      # an App's installation token is renewed: GitHub honors no ETag of the one before
+        def listing(self, query):
+            """GET /repos/o/r/issues?<query>: the issues and pull requests that match, as GitHub pages them."""
+            q = dict(kv.split("=", 1) for kv in query.split("&")); rows = [dict(i) for i in self.issues.values() if q.get("state", "open") in ("all", i["state"]) and i["updated_at"] >= q.get("since", "")]
+            rows.sort(key=lambda i: (i["updated_at"], i["number"]), reverse=q.get("direction", "desc") == "desc")
+            per = int(q.get("per_page", 30)); page = int(q.get("page", 1)); return rows[(page - 1) * per:page * per]
         def body(self, path):
             if path == "/user": return 200, {"login": self.login}
+            if m := re.fullmatch(r"/repos/o/r/issues\?(.*)", path): return (502, {"message": "Bad Gateway"}) if self.fail_list else (200, self.listing(m.group(1)))
             if (m := re.fullmatch(r"/repos/o/r/issues/(\d+)", path)) and int(m.group(1)) in self.issues: return 200, self.issues[int(m.group(1))]
             if m := re.fullmatch(r"/repos/o/r/issues/(\d+)/comments\?(.*)", path):
                 cs = self.comments[int(m.group(1))]; since = re.search(r"since=([^&]+)", m.group(2))
@@ -326,7 +336,8 @@ def part_restart():
             path = next(x for x in args[2:] if x not in ("-i", "-H") and not x.startswith("If-None-Match"))
             if path in self.fail:
                 self.log.append((path, 500, cond, self.phase)); return types.SimpleNamespace(returncode=1, stdout="", stderr="gh: Server Error (HTTP 500)")
-            code, obj = self.body(path); text_ = json.dumps(obj, sort_keys=True); tag = '"' + hashlib.sha1(text_.encode()).hexdigest()[:16] + '"'
+            code, obj = self.body(path); text_ = json.dumps(obj, sort_keys=True); tag = '"' + str(self.token) + hashlib.sha1(text_.encode()).hexdigest()[:16] + '"'
+            if code == 502: self.log.append((path, 502, cond, self.phase)); return types.SimpleNamespace(returncode=1, stdout="", stderr="gh: Bad Gateway (HTTP 502)")
             if code == 200 and cond and inm == tag:
                 self.log.append((path, 304, cond, self.phase)); return types.SimpleNamespace(returncode=0, stdout="HTTP/2.0 304 Not Modified\n\n", stderr="")
             self.log.append((path, code, cond, self.phase))
@@ -376,12 +387,13 @@ def part_restart():
     cold_start = len(F.counted("cold-start"))
     passes(1, phase="cold-pass1"); cold1 = len(F.counted("cold-pass1"))
     check("cold start: GET /user, then the start-up rescan names each of the 9 anchors (its issue, and one comments page for the 3 that have comments)", cold_start == 1 + 9 + 3, [c[0] for c in F.counted("cold-start")])
-    check("cold first pass: a pull request costs 3 reads (pull, check runs, issue), an issue 2 (the pull request 18 it is not, the issue): 5×3 + 4×2", cold1 == 5 * 3 + 4 * 2, [c[0] for c in F.counted("cold-pass1")])
+    check("cold first pass: a pull request costs 3 reads (pull, check runs, issue), an issue 2 (the pull request it is not, the issue): 5×3 + 4×2 (no anchor has a saved state yet, so no list is asked for)", cold1 == 5 * 3 + 4 * 2, [c[0] for c in F.counted("cold-pass1")])
     check("…nothing is reported (a first sight seeds)", not events, events)
     st0 = status(); labels0 = {a: st0[a]["label"] for a in st0}
     check("…the board names every anchor", len(labels0) == 9 and all(f'thing {a.rsplit("#", 1)[1]}' in l for a, l in labels0.items()), labels0)
     passes(2, phase="warm"); warm = F.counted("warm")
-    check("warm passes: no counted read (every conditional read is a 304; the finished anchors are mostly not read at all)", not warm, [c[0] for c in warm])
+    check("warm passes: two counted reads, both of the repository's list (the first warm pass makes its position, the fallback: the newest change GitHub shows; the second asks for the list for the first time); every other read is a 304",
+          [c[0].split("?")[0] for c in warm] == ["/repos/o/r/issues"] * 2 and "direction=desc&per_page=1" in warm[0][0] and "direction=asc" in warm[1][0], [c[0] for c in warm])
     check("…the open pull request is read (as 304) every pass", len(F.calls("warm", is_issue(OPEN_PR))) == 3 * 2 and all(c[1] == 304 for c in F.calls("warm", is_issue(OPEN_PR))), F.calls("warm", is_issue(OPEN_PR)))
     check("the cold run's ledger agrees: the reads GitHub counted are the fake's non-304 answers", _gb.count("r") == len(F.counted()), (_gb.count("r"), len(F.counted())))
 
@@ -411,20 +423,16 @@ def part_restart():
     st1 = status()
     check("…every anchor is named exactly as before", {a: st1[a]["label"] for a in st1} == labels0, {a: st1[a]["label"] for a in st1})
     passes(1, phase="restart-1-pass1")
-    check("restart, first pass: no counted read, nothing reported (what was read is a 304)", not F.counted("restart-1-pass1") and not events, ([c[0] for c in F.counted("restart-1-pass1")], events))
-    first_read = {n for n in FINISHED if F.calls("restart-1-pass1", is_issue(n))}
-    check("…of the 6 finished anchors only those due in this pass were read (not all of them)", len(first_read) < 6, first_read)
+    check("restart, first pass: one counted read, the repository's list (a list's ETag is not kept over a restart; the position is), nothing reported (what else was read is a 304)",
+          [c[0].split("?")[0] for c in F.counted("restart-1-pass1")] == ["/repos/o/r/issues"] and not events, ([c[0] for c in F.counted("restart-1-pass1")], events))
+    check("…none of the 6 finished anchors was read (the list shows nothing of them that the saved state does not hold)", not [n for n in FINISHED if F.calls("restart-1-pass1", is_issue(n))], [c[0] for c in F.calls("restart-1-pass1")])
 
-    # ---- 4. a finished anchor is read once in 10 passes
+    # ---- 4. a finished anchor is not read one by one: the repository's list is, once per pass
     F.phase = "cadence"; passes(20, phase="cadence")
-    for n in (MERGED2, CLOSED_ISSUES[0]):
-        cs = F.calls("cadence", lambda p, n=n: p == f"/repos/o/r/issues/{n}")
-        check(f"a finished anchor (#{n}) is read twice in 20 passes, as 304s", len(cs) == 2 and all(c[1] == 304 for c in cs), cs)
-    cp = F.calls("cadence", lambda p: p == f"/repos/o/r/pulls/{MERGED2}")
-    check("…and so is its pull request's CI read (not every pass)", len(cp) == 2, cp)
+    check("20 passes: no finished anchor is read at all (no issue, no pull request, no check runs)", not [c for n in FINISHED for c in F.calls("cadence", is_issue(n))], [c[0] for c in F.calls("cadence") if "/issues?" not in c[0]])
+    lst = F.calls("cadence", lambda p: p.startswith("/repos/o/r/issues?"))
+    check("…the repository's list is asked for in every pass, as a 304", len(lst) == 20 and all(c[1] == 304 for c in lst), [(c[0], c[1]) for c in lst][:3])
     check("…an open one is read every pass", len(F.calls("cadence", lambda p: p == "/repos/o/r/issues/17")) == 20, len(F.calls("cadence", lambda p: p == "/repos/o/r/issues/17")))
-    stag = {k: sum(1 for n in FINISHED if (k + zlib.crc32(aid(n).encode())) % 10 == 0) for k in range(10)}
-    check("…they are staggered over the 10 passes, not all in one", max(stag.values()) < 6 and sum(stag.values()) == 6, stag)
     check("…and nothing was reported meanwhile", not events and not F.counted("cadence"), (events, F.counted("cadence")))
     hub2.persist()
 
@@ -439,13 +447,14 @@ def part_restart():
     got = {(e[0], e[1]) for e in events}
     check("…the comment and the CI failure on the open pull request and the comment and close on the open issue are reported in the first pass",
           (aid(OPEN_PR), "comment") in got and (aid(OPEN_PR), "ci_failed") in got and (aid(OPEN_ISSUE), "comment") in got and (aid(OPEN_ISSUE), "issue_closed") in got, events)
+    check("…and so are the late comment on the merged pull request and the reopening of the closed one, which the repository's list showed (finished anchors, read only for that)", (aid(MERGED), "comment") in got and (aid(CLOSED_PR), "pr_reopened") in got, events)
     check("…the repository ID learnt before the restart is on the event (it is saved with the position)", all(e[4] == 7 for e in events), events)
-    unchanged = [c for c in F.counted("restart-2-pass1") if not (is_issue(OPEN_PR)(c[0]) or is_issue(OPEN_ISSUE)(c[0]) or is_issue(MERGED)(c[0]) or is_issue(CLOSED_PR)(c[0]))]
-    check("…and the unchanged anchors cost nothing in it", not unchanged, [c[0] for c in unchanged])
+    unchanged = [c for c in F.counted("restart-2-pass1") if not (is_issue(OPEN_PR)(c[0]) or is_issue(OPEN_ISSUE)(c[0]) or is_issue(MERGED)(c[0]) or is_issue(CLOSED_PR)(c[0]) or c[0].startswith("/repos/o/r/issues?"))]
+    check("…and the unchanged anchors cost nothing in it (the repository's list is the one read that is not an anchor's)", not unchanged, [c[0] for c in unchanged])
     passes(10, phase="restart-2-late")
     got = [(e[0], e[1]) for e in events]
-    check("…the late comment on the merged pull request is reported once, within 10 passes", got.count((aid(MERGED), "comment")) == 1, events)
-    check("…the reopening of the closed pull request is reported once, within 10 passes", got.count((aid(CLOSED_PR), "pr_reopened")) == 1, events)
+    check("…the late comment on the merged pull request is reported once", got.count((aid(MERGED), "comment")) == 1 , events)
+    check("…the reopening of the closed pull request is reported once", got.count((aid(CLOSED_PR), "pr_reopened")) == 1, events)
     check("…and nothing is reported twice", len(got) == len(set(got)), events)
     passes(3, phase="restart-2-after")
     pl = F.calls("restart-2-after", lambda p: p == f"/repos/o/r/issues/{CLOSED_PR}")
@@ -489,6 +498,7 @@ def part_restart():
     except Exception as e: ok_ = False; print(repr(e))
     check("a damaged ETag section is not used and does not stop the receiver: everything is read in full", ok_ and len(F.counted("damaged")) > 1 + 2, [c[0] for c in F.counted("damaged")])
     doc = json.loads(good); del doc["github"]["etags"]; del doc["github"]["resolved"]; del doc["github"]["repo_ids"]; del doc["github"]["me"]
+    doc["github"].pop("lists", None)                                                               # a file from before the list position was kept
     for v in doc["github"]["state"].values(): v.pop("merged", None); v.pop("pr", None)           # a file from before: the state did not keep whether an anchor is a merged pull request
     closed_now = sorted(a for a, v in doc["github"]["state"].items() if v["state"] == "closed")
     open(core.CURSORS, "w").write(json.dumps(doc))
@@ -503,14 +513,21 @@ def part_restart():
     check("…and the state now says which are merged pull requests", {a: (v["pr"], v["merged"]) for a, v in saved_state(hub10).items() if v["state"] == "closed"}.get(aid(MERGED)) == (True, True) and all("merged" in v and "pr" in v for v in saved_state(hub10).values()), saved_state(hub10))
     hub10.persist()
     hub11 = boot("after-upgrade"); passes(1, phase="after-upgrade-pass1")
-    check("…and the restart after it costs /user only", [c[0] for c in F.counted("after-upgrade")] == ["/user"] and not F.counted("after-upgrade-pass1"), [c[0] for c in F.counted("after-upgrade") + F.counted("after-upgrade-pass1")])
+    check("…and the restart after it costs /user only to start", [c[0] for c in F.counted("after-upgrade")] == ["/user"], [c[0] for c in F.counted("after-upgrade")])
+    fb = F.calls("after-upgrade-pass1"); n_ev = len(events)
+    check("…its first pass is the fallback of a file with no list position: the newest change GitHub shows is read first, then each of the 7 finished anchors in full once (its issue, and for a pull request its CI)",
+          any("direction=desc&per_page=1" in c[0] for c in fb) and all(any(is_issue(int(a.rsplit("#", 1)[1]))(c[0]) for c in fb) for a in closed_now), [c[0] for c in fb])
+    passes(1, phase="after-upgrade-pass2"); passes(1, phase="after-upgrade-pass3")
+    check("…and from then on it is the list alone: one counted read (its first), then none", [c[0].split("?")[0] for c in F.counted("after-upgrade-pass2")] == ["/repos/o/r/issues"] and not F.counted("after-upgrade-pass3") and len(events) == n_ev,
+          [c[0] for c in F.counted("after-upgrade-pass2") + F.counted("after-upgrade-pass3")])
+    hub11.persist()
 
-    # ---- 10. a pull request closed, reopened and merged: nothing is lost to the 10-pass turn of finished anchors
+    # ---- 10. a pull request closed, reopened and merged: nothing is lost to the list
     def kinds(a, since): return [e[1] for e in events[since:] if e[0] == aid(a)]
     n_ev = len(events); F.set_state(OPEN_PR, "closed"); passes(1, phase="cycle-1")
-    check("a pull request closed (not merged) is reported, and is not a finished anchor: it is read in every pass", "pr_closed" in kinds(OPEN_PR, n_ev), events[n_ev:])
+    check("a pull request closed (not merged) is reported", "pr_closed" in kinds(OPEN_PR, n_ev), events[n_ev:])
     passes(3, phase="cycle-2")
-    check("…read as 304s, its issue every pass", len(F.calls("cycle-2", lambda p: p == "/repos/o/r/issues/1")) == 3, F.calls("cycle-2", lambda p: p == "/repos/o/r/issues/1"))
+    check("…and is finished from then on: not read in 3 passes (the list shows nothing the saved state does not hold)", not F.calls("cycle-2", is_issue(OPEN_PR)), F.calls("cycle-2", is_issue(OPEN_PR)))
     n_ev = len(events); F.set_state(OPEN_PR, "open"); passes(1, phase="cycle-3")
     check("…its reopening is seen in the next pass", kinds(OPEN_PR, n_ev) == ["pr_reopened"], events[n_ev:])
     def merge(n):
@@ -518,7 +535,7 @@ def part_restart():
     n_ev = len(events); merge(OPEN_PR); passes(1, phase="cycle-4")
     check("…and its merge too", kinds(OPEN_PR, n_ev) == ["pr_merged"], events[n_ev:])
     n_ev = len(events); passes(12, phase="cycle-5")
-    check("a merged pull request is a finished anchor now: read in 1 or 2 of 12 passes, nothing reported", 1 <= len(F.calls("cycle-5", lambda p: p == "/repos/o/r/issues/1")) <= 2 and not events[n_ev:], (F.calls("cycle-5", lambda p: p == "/repos/o/r/issues/1"), events[n_ev:]))
+    check("a merged pull request is a finished anchor now: not read in 12 passes, nothing reported", not F.calls("cycle-5", is_issue(OPEN_PR)) and not events[n_ev:], (F.calls("cycle-5", is_issue(OPEN_PR)), events[n_ev:]))
     n_ev = len(events); F.set_state(CLOSED_PR, "closed"); passes(1, phase="cycle-6")      # #3 was reopened earlier (section 5): closed again, not merged
     F.set_state(CLOSED_PR, "open"); merge(CLOSED_PR); passes(1, phase="cycle-7")              # reopened and merged between two looks
     check("a pull request closed, then reopened and merged between two looks, is reported as merged (the state stays 'closed', the merge is what changed)", kinds(CLOSED_PR, n_ev) == ["pr_closed", "pr_merged"], events[n_ev:])
@@ -533,7 +550,8 @@ def part_restart():
           not [p for p in etg if re.match(r"/repos/o/r/(issues|pulls)/(17|13|5)(?:/|\?|$)", p) or p.startswith(f"/repos/o/r/commits/{5:040x}/")] and "/repos/o/r/issues/1" in etg and "/repos/o/r/issues/14" in etg, sorted(etg))
     passes(1, phase="no-state-pass1")
     c20 = F.calls("no-state-pass1", lambda p: p == "/repos/o/r/issues/17"); c1 = F.calls("no-state-pass1", lambda p: p == "/repos/o/r/issues/1")
-    check("…the first look at the one with no state is a full read (a 200) that seeds it, and the others go on as 304s", [c[1] for c in c20] == [200] and all(c[1] == 304 for c in c1), (c20, c1))
+    check("…the first look at the one with no state is a full read (a 200) that seeds it, and no other anchor is read (all the others are finished, and the list shows nothing of them)",
+          [c[1] for c in c20] == [200] and not [c for c in F.calls("no-state-pass1") if not (c[0].startswith("/repos/o/r/issues?") or is_issue(OPEN_ISSUE)(c[0]) or is_issue(MERGED3)(c[0]))], (c20, c1, [c[0] for c in F.calls("no-state-pass1")]))
     check("…and it is seeded (state saved again, nothing reported)", aid(OPEN_ISSUE) in saved_state(hub12) and not events[n_ev:], events[n_ev:])
 
     # ---- 12. a green head saved before a restart: the key comes back from the file as a list, and a head read again (no ETag) is not reported as new
@@ -623,21 +641,35 @@ def part_catchup():
     def clear_ledger(): _cfg.state("github", _gb.LEDGER_NAME).unlink(missing_ok=True)
 
 
-    # ---- a fake GitHub: N open issues of one repository (no pull request under any number), an ETag per login (like GitHub's: a token is answered 304 only for its own ETag), every call logged
+    # ---- a fake GitHub: N open issues of one repository (no pull request under any number), an ETag per token (like GitHub's: an ETag is answered 304 only for the token it was given; `renew()` is the hourly renewal of an
+    # App's installation token, the login the same), the repository's list of issues (state, since, sort, direction, per_page, page, as GitHub answers it), every call logged
     MORE = 6      # anchors 13 to 18 exist on the fake too: a test binds them later
     class Fake:
         def __init__(self):
-            self.login = "oliver"; self.user = "ok"; self.log = []; self.reset()
-        def reset(self):
-            """Every number an open issue, no pull request, no failing path."""
-            self.status = {}; self.fail = set(); self.prs = set()
-            self.issues = {n: {"state": "open", "comments": 0, "title": f"thing {n}", "user": {"login": "kim"}, "html_url": f"https://github.com/o/r/issues/{n}",
-                               "created_at": "2026-10-20T00:00:00Z", "updated_at": "2026-10-25T00:00:00Z", "closed_at": None} for n in range(1, N + MORE + 1)}
+            self.login = "oliver"; self.user = "ok"; self.log = []; self.token = 0; self.tick = 0; self.reset()
+        def reset(self, total=None):
+            """Every number an open issue, no pull request, no failing path (`total` numbers; N + MORE when none is given)."""
+            self.status = {}; self.fail = set(); self.prs = set(); self.fail_list = False; self.comments = {}
+            self.issues = {n: {"number": n, "state": "open", "comments": 0, "title": f"thing {n}", "user": {"login": "kim"}, "html_url": f"https://github.com/o/r/issues/{n}",
+                               "created_at": "2026-10-20T00:00:00Z", "updated_at": "2026-10-25T%02d:%02d:%02dZ" % (n * 10 // 3600, n * 10 // 60 % 60, n * 10 % 60), "closed_at": None} for n in range(1, (total or N + MORE) + 1)}      # each changed ten seconds after the one before
+        def renew(self): self.token += 1      # GitHub honors no ETag of the token before it
+        def stamp(self): self.tick += 1; return "2026-10-26T%02d:%02d:%02dZ" % (self.tick // 3600, self.tick // 60 % 60, self.tick % 60)
+        def touch(self, n): self.issues[n]["updated_at"] = self.stamp(); return self.issues[n]
         def make_pr(self, n, merged=False):
             """Number n is a pull request: open, or merged (and so finished)."""
             self.prs.add(n); i = self.issues[n]; i["pull_request"] = {"merged_at": "2026-10-20T00:00:00Z" if merged else None}
             if merged: self.close(n)
         def close(self, n): self.issues[n]["state"] = "closed"; self.issues[n]["closed_at"] = "2026-10-20T00:00:00Z"
+        def comment(self, n, body="a word"):
+            """A comment on number n: its count and its update time move."""
+            i = self.touch(n); self.comments.setdefault(n, []).append({"user": {"login": "kim"}, "body": body, "html_url": f"https://github.com/o/r/issues/{n}#c{len(self.comments.get(n, []))}", "created_at": i["updated_at"]})
+            i["comments"] = len(self.comments[n])
+        def reopen(self, n): i = self.touch(n); i["state"] = "open"; i["closed_at"] = None
+        def listing(self, query):
+            """GET /repos/o/r/issues?<query>: the issues and pull requests that match, as GitHub pages them."""
+            q = dict(kv.split("=", 1) for kv in query.split("&")); rows = [dict(i) for i in self.issues.values() if q.get("state", "open") in ("all", i["state"]) and i["updated_at"] >= q.get("since", "")]
+            rows.sort(key=lambda i: (i["updated_at"], i["number"]), reverse=q.get("direction", "desc") == "desc")
+            per = int(q.get("per_page", 30)); page = int(q.get("page", 1)); return rows[(page - 1) * per:page * per]
         def gh(self, args, capture_output=True, text=True, timeout=30):
             cond = "-i" in args
             inm = next((args[k + 1][len("If-None-Match: "):] for k, x in enumerate(args) if x == "-H"), None)
@@ -650,13 +682,18 @@ def part_catchup():
             if path in self.fail: return fail(500, "gh: Server Error (HTTP 500)")
             if path in self.status: return fail(*self.status[path])
             obj = None
-            if (m := re.fullmatch(r"/repos/o/r/issues/(\d+)", path)) and int(m.group(1)) in self.issues: obj = self.issues[int(m.group(1))]
+            if m := re.fullmatch(r"/repos/o/r/issues\?(.*)", path):
+                if self.fail_list: return fail(502, "gh: Bad Gateway (HTTP 502)")
+                obj = self.listing(m.group(1))
+            elif (m := re.fullmatch(r"/repos/o/r/issues/(\d+)", path)) and int(m.group(1)) in self.issues: obj = self.issues[int(m.group(1))]
+            elif (m := re.fullmatch(r"/repos/o/r/issues/(\d+)/comments\?since=([^&]+)&per_page=\d+", path)) and int(m.group(1)) in self.issues:
+                obj = [c for c in self.comments.get(int(m.group(1)), []) if c["created_at"] >= m.group(2)]
             elif (m := re.fullmatch(r"/repos/o/r/pulls/(\d+)", path)) and int(m.group(1)) in self.prs:
                 k = int(m.group(1)); obj = {"head": {"sha": f"sha{k}", "ref": f"br{k}", "repo": {"full_name": "o/r"}}, "base": {"repo": {"full_name": "o/r", "id": 77}}, "user": {"login": "kim"}}
             elif (m := re.fullmatch(r"/repos/o/r/commits/sha(\d+)/check-runs\?per_page=100", path)) and int(m.group(1)) in self.prs:
                 obj = {"check_runs": [{"name": "unit", "status": "completed", "conclusion": "success", "completed_at": "2026-10-20T00:00:00Z"}]}
             if obj is None: return fail(404, "gh: Not Found (HTTP 404)")      # a pull request read of any number that is none lands here: no pull request is under it
-            text_ = json.dumps(obj, sort_keys=True); tag = '"' + self.login + "-" + hashlib.sha1(text_.encode()).hexdigest()[:12] + '"'
+            text_ = json.dumps(obj, sort_keys=True); tag = '"' + self.login + str(self.token) + "-" + hashlib.sha1(text_.encode()).hexdigest()[:12] + '"'
             if cond and inm == tag:
                 self.log.append((path, 304, inm)); return types.SimpleNamespace(returncode=0, stdout="HTTP/2.0 304 Not Modified\n\n", stderr="")
             self.log.append((path, 200, inm)); return types.SimpleNamespace(returncode=0, stdout=(f"HTTP/2.0 200 OK\netag: {tag}\n\n" + text_) if cond else text_, stderr="")
@@ -820,7 +857,7 @@ def part_catchup():
     worst = 0; red = []; same = []; hours = 0
     while hours < 10 and len(h.gh_state["looked"]) < N:
         hours += 1
-        for _ in range(12):      # a pass a minute for a while: every finished anchor's turn (one in FINISHED_EVERY passes) falls inside it
+        for _ in range(12):      # a pass a minute for a while
             reads, paths, (v, api, word) = run_pass()
             worst = max(worst, _gb.count("r")); same.append(set(h.gh_state["looked"]) == really_read(n0))
             if not (v["ok"] is True and word == ("healthy ✓", "ok") and "cap" not in (v.get("error") or "")): red.append((hours, v))
@@ -830,7 +867,7 @@ def part_catchup():
     check("…the card never reads error or 'reads held by the hourly cap' on the way: healthy with a note each pass", not red, red)
     check("…the catch-up finishes as the ledger expires (within a few hours), every anchor read, and the note is gone", len(h.gh_state["looked"]) == N and hours <= 6 and not (card()[0].get("error")), (hours, len(h.gh_state["looked"]), card()[0]))
     reads, paths, (v, api, word) = run_pass()
-    check("…afterwards the finished anchors cost nothing (their turns are 304s), whatever the pass", reads == 0 and v["ok"] is True, (reads, v))
+    check("…afterwards the finished anchors cost nothing (no read of any of them; the repository's list is the only call that can be a counted one), whatever the pass", reads <= 1 and [p for p in paths if "/issues?" not in p] == [] and v["ok"] is True, (reads, paths, v))
     check("…and none of it is reported as news", not events, events)
 
     # ---- 11. a 410 (a deleted issue) is an answer like a 404; another failure that stays is not
@@ -900,6 +937,101 @@ def part_catchup():
         try: shown = card()[0]["ok"] in (True, False)      # the pass ended in a report to the card (the loop's guard would have logged a crash and written none)
         except Exception as e: shown = False; err = err or repr(e)
         check(f"read_budget {b}: a pass starts at most the anchors the budget holds and does not raise", err is None and shown, err)
+
+    # ---- the finished anchors of a repository are read through its list of changed issues: 518 anchors, 27 open, the rest merged pull requests (even numbers) and closed issues (odd)
+    TOTAL, OPENN = 518, 27
+    def fleet(total=TOTAL, open_n=OPENN):
+        F.reset(total)
+        for n in range(open_n + 1, total + 1):
+            if n % 2 == 0: F.make_pr(n, merged=True)
+            else: F.close(n)
+        return [f"github:o/r#{n}" for n in range(1, total + 1)]
+    def read_nums(paths, above=OPENN):
+        """The numbers above `above` that a call of `paths` read (an issue, a pull request, its check runs)."""
+        rx = re.compile(r"/repos/o/r/(?:issues|pulls)/(\d+)|/repos/o/r/commits/sha(\d+)/")
+        return sorted({int(g) for p in paths for m in [rx.match(p)] if m for g in m.groups() if g and int(g) > above})
+    lists = lambda paths: [p for p in paths if "/issues?" in p]
+    def started(order):
+        """A first start over the fleet, then the passes that bring its read position to rest: the first look, the fallback (the position), the first list, a pass that costs nothing."""
+        set_budget(100000); clear_ledger(); drop_cursors(); F.login = "oliver"; F.token = 0; del events[:]
+        h = boot(order); costs = [run_pass()[0] for _ in range(4)]; return h, costs
+
+    # ---- 16. a token renewed: the finished anchors cost nothing, whatever their number
+    ids = fleet(); h, costs = started(ids)
+    check("518 anchors, first start: the first look reads every anchor in full; the pass after it is the fallback (the repository's newest change is read, each finished anchor again with its ETags: 304s); then the list's first read; then nothing",
+          costs[0] > TOTAL and costs[1:] == [1, 1, 0], costs)
+    ent = h.gh_state["lists"]["o/r"]
+    check("…the repository's position is made, and nothing is owed any more", ent["owed"] == set() and ent["catch"] is False and ent["since"].startswith("2026-"), ent)
+    F.renew(); reads, paths, (v, api, word) = run_pass()
+    check(f"the token is renewed (GitHub honors none of the ETags): the pass costs the list read and the {OPENN} open anchors, not the {TOTAL - OPENN} finished ones", reads == 1 + OPENN and not read_nums(paths) and len(lists(paths)) == 1, (reads, read_nums(paths), lists(paths)))
+    check("…and the card is healthy with no note", v["ok"] is True and not v.get("error"), v)
+    reads, paths, _ = run_pass()
+    check("…the pass after it costs nothing (the list and the open anchors answer 304 for the new token)", reads == 0 and not read_nums(paths), (reads, read_nums(paths)))
+
+    # ---- 17. a comment on a merged pull request: that anchor alone is read
+    n_ev = len(events); F.comment(50)
+    reads, paths, _ = run_pass()
+    check("a comment on a merged pull request: only that anchor is read, in full (the list, its issue, its comments, its pull request and its check runs: 5 counted reads, the ETags of its pull request and CI being of the token before) and it is reported", read_nums(paths) == [50] and reads == 5 and h.gh_state["state"][ids[49]]["comments"] == 1 and len(events) > n_ev, (reads, read_nums(paths), len(events) - n_ev))
+    n_ev = len(events); reads, paths, _ = run_pass()
+    check("…and the pass after it reads no anchor and reports nothing (the list shows it again for the overlap, and its saved state already holds the comment)", read_nums(paths) == [] and reads <= 1 and len(events) == n_ev, (reads, read_nums(paths)))
+    reads, paths, _ = run_pass()
+    check("…then nothing at all", reads == 0 and not read_nums(paths), (reads, read_nums(paths)))
+
+    # ---- 18. a reopening returns the anchor to full watching, and a merge after it is the finished anchor's again
+    F.reopen(60); reads, paths, _ = run_pass()
+    check("a merged pull request reopened: it is read in that pass and the state says open", read_nums(paths) == [60] and h.gh_state["state"][ids[59]]["state"] == "open", (read_nums(paths), h.gh_state["state"][ids[59]]))
+    reads, paths, _ = run_pass(); reads2, paths2, _ = run_pass()
+    check("…and in every pass after it (its issue, its pull request, its check runs: 304s), as an open anchor is", read_nums(paths) == [60] and read_nums(paths2) == [60] and reads <= 1 and reads2 == 0, (reads, reads2, read_nums(paths), read_nums(paths2)))
+    F.close(60); F.touch(60); reads, paths, _ = run_pass()
+    check("…closed again, it is read once more and is a finished anchor again", read_nums(paths) == [60] and h.gh_state["state"][ids[59]]["state"] == "closed" and h.gh_state["state"][ids[59]]["merged"] is True, (read_nums(paths), h.gh_state["state"][ids[59]]))
+    run_pass(); reads, paths, _ = run_pass()
+    check("…and cost nothing in the passes after it", reads == 0 and not read_nums(paths), (reads, read_nums(paths)))
+
+    # ---- 19. a failed list read keeps the position, reads and marks nothing, and is asked for again
+    before = dict(h.gh_state["lists"]["o/r"]); lk = dict(h.gh_state["looked"]); F.fail_list = True; F.comment(70)
+    reads, paths, (v, api, word) = run_pass(); reads2, paths2, _ = run_pass()
+    check("a list read that fails (a 502): it is asked for again in the next pass, and no finished anchor is read in either", len(lists(paths)) == 1 and len(lists(paths2)) == 1 and not read_nums(paths) and not read_nums(paths2), (lists(paths), lists(paths2), read_nums(paths), read_nums(paths2)))
+    check("…the position stays where it was", h.gh_state["lists"]["o/r"]["since"] == before["since"] and h.gh_state["lists"]["o/r"]["at"] == before["at"], (h.gh_state["lists"]["o/r"], before))
+    check("…no finished anchor is marked read in them", all(h.gh_state["looked"][a] == lk[a] for a in ids[OPENN:]), [a for a in ids[OPENN:] if h.gh_state["looked"][a] != lk[a]][:3])
+    F.fail_list = False; reads, paths, _ = run_pass()
+    check("…and when GitHub answers the list again the change is read (the one anchor)", read_nums(paths) == [70] and h.gh_state["state"][ids[69]]["comments"] == 1, (read_nums(paths), h.gh_state["state"][ids[69]]))
+    run_pass(); run_pass()
+
+    # ---- 20. a position that is absent, or older than a day, or a file from before positions were kept: one fallback pass over the finished anchors, then the list
+    for how_ in ("absent", "old", "from before"):
+        h.persist(); doc = json.load(open(core.CURSORS)); g = doc["github"]
+        if how_ == "absent": g["lists"].pop("o/r")
+        elif how_ == "old": g["lists"]["o/r"]["at"] -= 2 * 86400
+        else: g.pop("lists")
+        open(core.CURSORS, "w").write(json.dumps(doc))
+        h = boot(ids); reads, paths, (v, api, word) = run_pass(); reads2, paths2, _ = run_pass(); reads3, paths3, _ = run_pass()
+        check(f"a position {how_}: the first pass reads the repository's newest change, then each of the {TOTAL - OPENN} finished anchors once (304s with the saved ETags), so none is lost", len(lists(paths)) == 1 and "direction=desc&per_page=1" in lists(paths)[0] and read_nums(paths) == list(range(OPENN + 1, TOTAL + 1)), (how_, lists(paths), len(read_nums(paths))))
+        check("…the pass after it is the list alone, and no finished anchor is read in it or after", len(lists(paths2)) == 1 and "direction=asc" in lists(paths2)[0] and not read_nums(paths2) and not read_nums(paths3), (lists(paths2), read_nums(paths2)[:3], read_nums(paths3)[:3]))
+        check("…and the card is healthy with no note", v["ok"] is True and not v.get("error") and not card()[0].get("error"), v)
+
+    # ---- 21. a restart over a saved position goes on from it
+    h.persist(); saved_since = json.load(open(core.CURSORS))["github"]["lists"]["o/r"]["since"]
+    h2 = boot(ids); reads, paths, _ = run_pass()
+    check("a restart: the position comes back from the file, and the first pass asks for the list from it (60 s before) and for nothing of a finished anchor",
+          h2.gh_state["lists"]["o/r"]["since"] == saved_since and len(lists(paths)) == 1 and f"since={ghr.zulu(ghr._ts(saved_since) - ghr.LIST_OVERLAP)}" in lists(paths)[0] and "direction=asc" in lists(paths)[0] and not read_nums(paths), (h2.gh_state["lists"], lists(paths)))
+    F.comment(120); run_pass(); h2.persist(); F.comment(130)
+    h3 = boot(ids); reads, paths, _ = run_pass()
+    check("…a change while it was down is read in the first pass, and only that anchor", read_nums(paths) == [130] and h3.gh_state["state"][ids[129]]["comments"] == 1, (read_nums(paths),))
+
+    # ---- 22. more than a page of changes: the list is paged, each changed anchor read once
+    for n in range(OPENN + 1, OPENN + 151): F.touch(n)
+    reads, paths, _ = run_pass()
+    check("150 changes at once: the list is read in two pages (the first conditional, the second not), and each of the 150 anchors is read", len(lists(paths)) == 2 and "page=2" in lists(paths)[1] and "&page=" not in lists(paths)[0] and read_nums(paths) == list(range(OPENN + 1, OPENN + 151)), (lists(paths), len(read_nums(paths))))
+    reads, paths, _ = run_pass()
+    check("…and none of them again in the next pass", not read_nums(paths), len(read_nums(paths)))
+
+    # ---- 23. an anchor the list showed changed, whose read then fails, is not lost: it stays owed, over the next pass and over a restart, though the position has gone past it
+    F.comment(190); F.status = {"/repos/o/r/issues/190": (500, "gh: Server Error (HTTP 500)")}; F.issues[200]["updated_at"] = "2026-10-27T12:00:00Z"      # #200 changed hours after #190
+    reads, paths, _ = run_pass(); ent = h3.gh_state["lists"]["o/r"]
+    check("a changed finished anchor whose read fails (a 500) is not marked read, and is owed still while the position has gone past it (to the change of #200, read meanwhile)",
+          ids[189] in ent["owed"] and ids[199] not in ent["owed"] and ent["since"] == "2026-10-27T12:00:00Z" and h3.gh_state["state"][ids[189]]["comments"] == 0 and h3.gh_state["state"][ids[199]]["updated"] == "2026-10-27T12:00:00Z", (ent, h3.gh_state["state"][ids[189]]))
+    h3.persist(); F.status = {}; h4 = boot(ids); reads, paths, _ = run_pass()
+    check("…a restart, with GitHub answering again: its first pass reads that anchor, and only it (the owed anchors are saved with the position)", read_nums(paths) == [190] and h4.gh_state["state"][ids[189]]["comments"] == 1 and h4.gh_state["lists"]["o/r"]["owed"] == set(), (read_nums(paths), h4.gh_state["lists"]["o/r"]))
 
     return ran, fails
 
