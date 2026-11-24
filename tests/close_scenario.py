@@ -169,8 +169,13 @@ def part_close():
     # ---- 4. superseded, by an open item and by a completed one
     _wt_complete.stackshot_complete("a2", outcome="superseded", reason="merged into a3", outcome_text="- Merged into a3, which carries the work", superseded_by="A3")
     check("superseded by an open item: stored, normalised", rd(2)["metadata"].get("superseded_by") == "a3" and rd(2)["metadata"].get("outcome") == "superseded", rd(2)["metadata"])
-    _wt_complete.stackshot_complete("a4", outcome="superseded", reason="reworded as a1", outcome_text="- Reworded as a1", superseded_by="a1")
+    AN4 = "https://github.com/o/r/pull/44"; AN2 = "https://github.com/o/r/pull/45"
+    (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": AN4, "items": ["a4"], "added": 1.0, "by": "t"}, {"url": AN2, "items": ["a3"], "added": 1.0, "by": "t"}]}))
+    out4 = _wt_complete.stackshot_complete("a4", outcome="superseded", reason="reworded as a1", outcome_text="- Reworded as a1", superseded_by="a1")
     check("superseded by a completed item is fine", rd(4)["metadata"].get("superseded_by") == "a1", rd(4)["metadata"])
+    left4 = json.loads((T / "store/anchors.json").read_text())
+    check("a close ends the anchors scoped to it only, and its reply lists them with the call that puts one back (the anchor of an open item stays)",
+          [e["url"] for e in left4.get("projects/alpha", [])] == [AN2] and AN4 in out4 and f'anchors(project="projects/alpha", add=["{AN4}"])' in out4, (left4, out4))
     snap("a2 a4 superseded")
 
     # ---- 5. reopening
@@ -179,6 +184,8 @@ def part_close():
     m = rd(4)["metadata"]
     check("reopening drops outcome, outcome_text, reason and superseded_by and takes the new next",
           rd(4)["status"] == "open" and not any(k in m for k in ("outcome", "outcome_text", "reason", "superseded_by")) and rd(4)["description"] == DESC and m.get("next", "").split("\n")[0] == "Oliver: pick it up again", m)      # the server's step of his follows it on the list
+    check("a reopening's reply carries one line naming the call that puts the anchor its close ended back, scoped to the item again",
+          f'anchors(project="projects/alpha", add=["{AN4}"], items=["{__import__("stackshot.github.ghsync", fromlist=["x"]).shown("a4")}"])' in out and out.count("anchors that ended when") == 1, out)
     snap("a4 reopened")
     _wt_complete.stackshot_complete("a4", outcome="dropped", reason="not needed after all", outcome_text="- Not needed after all")
     check("a reopened item closes again", rd(4)["metadata"].get("outcome") == "dropped", rd(4)["metadata"])

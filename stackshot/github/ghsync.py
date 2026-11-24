@@ -1676,18 +1676,19 @@ def _move_anchors(store: Path, old: str, new: str) -> int:
     f = store / "anchors.json"
     if not f.exists():
         return 0
-    try:
-        d = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return 0
-    if not isinstance(d, dict):
-        return 0
-    k = 0
-    for entries in d.values():
-        for e in entries if isinstance(entries, list) else []:
-            if isinstance(e, dict) and isinstance(e.get("items"), list) and old in e["items"]:
-                e["items"] = sorted({new if g == old else g for g in e["items"]}); k += 1
-    if k:
-        tmp = f.with_name(f".{f.name}.tmp")
-        tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8"); os.replace(tmp, f)
-    return k
+    with _xlock.XLock("anchors"):           # the anchors lock (anchors.LOCK is this lock; this module is below it): the read, the rewrite and the replace of the file are one hold, as the sweep's and the anchors tool's are; the re-key's own item-lock holds are over by now, and nothing is taken while this one is held
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return 0
+        if not isinstance(d, dict):
+            return 0
+        k = 0
+        for entries in d.values():
+            for e in entries if isinstance(entries, list) else []:
+                if isinstance(e, dict) and isinstance(e.get("items"), list) and old in e["items"]:
+                    e["items"] = sorted({new if g == old else g for g in e["items"]}); k += 1
+        if k:
+            tmp = f.with_name(f".{f.name}.tmp")
+            tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8"); os.replace(tmp, f)
+        return k

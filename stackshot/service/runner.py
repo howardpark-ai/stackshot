@@ -7,7 +7,7 @@ starts the three threads the server keeps for them (the runner's, the publish lo
 
 The order of the table is the order of the work: (1) the events that end a wait, then the phase sweep (the stored phase brought up to the clock), (2) the balancer (an item not started or queued for ten
 minutes moves before the hand-off tick would remind its mover) and the hand-off tick, (3) the answers, (4) the fleet's clocks and the wait-loop walk (a ring of items that wait on each other, once a minute); then the ten-minute set: (5) the filing pass, the dates pass, the wake
-catch-up, the silence tick and the archive tick. `board=True` marks a tick that reads items: it is skipped while the migration's pass holds the board.
+catch-up, the silence tick, the archive tick and the anchor sweep (anchors/anchor_sweep.py: the anchors that have ended are removed). `board=True` marks a tick that reads items: it is skipped while the migration's pass holds the board.
 
 The wake pass, the anchor pass, the wake catch-up, the wake wait and the event waits are imported from service/wakes.py and service/event_waits.py, the hand-off tick from service/handoff.py, the clients' tick and the inbox flag from service/fleet_events.py and the stall pass from service/stall_tick.py,
 and called directly. What stays in server.py is the other tick functions (the phase sweep, the done check, the step proof, the answers, the registry sync, the page-debt fallback) and the publish; the balancer and the filing, dates, silence and
@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from stackshot.anchors import anchor_sweep as _anchor_sweep
 from stackshot.core import config as _cfg
 from stackshot.core import runner as _minute
 from stackshot.core import runner_files as _files
@@ -153,6 +154,7 @@ def ticks() -> "list[_minute.Tick]":
         T("wake_catchup", lambda: _wakes.minute_wake_catchup(), "tenmin", "tenmin", board=True),
         T("silence_tick", lambda: _hooks().silence_tick(), "tenmin", "tenmin", board=True),
         T("archive_tick", lambda: _hooks().archive_tick(), "tenmin", "tenmin", board=True),
+        T("anchor_sweep", lambda: _anchor_sweep.sweep_tick() and _hooks().publish(), "tenmin", "tenmin", board=True),
     ]
 
 

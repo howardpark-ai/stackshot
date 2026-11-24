@@ -1,7 +1,7 @@
 """xlock.py: a re-entrant lock that also keeps other processes out, for the stores a second process may write.
 
 Every lock around a whole-file store (the item lock, the For you list, the Landed list, the held hand-back lines, the page-debt ledger, the pending answers, the machine anchors, the wake pass,
-the stall record) was a thread lock, so it only ever kept the threads of one process from reading, changing and rewriting the same file at once. `XLock` keeps what those locks did and adds a flock on a
+the stall record, the anchors file) was a thread lock, so it only ever kept the threads of one process from reading, changing and rewriting the same file at once. `XLock` keeps what those locks did and adds a flock on a
 small file of its own in the state dir (`<paths.state>/<name>.lock`, never in the store, which is committed), so a second process that writes the same files takes turns with the server.
 
 It is a drop-in for the `threading.RLock` it replaces: a context manager, `acquire(blocking=True, timeout=-1)`, `release()` and `_is_owned()`, re-entrant in a thread (a writer that holds it calls another that takes it again). In front of the flock sits a thread
@@ -25,7 +25,7 @@ The lock file is opened after the front lock is taken (a thread that only waits 
 
 Order. The locks that nest are always taken in one order, so two processes never wait on each other: the wake pass (`wake`) first, then the item lock (`item`), then the pending answers (`answers`), then
 the For you list (`for-you`), the Landed list (`landed`) and the held hand-back lines (`handback-held`); the page-debt ledger (`ledger`) and the stall record (`stall`) are taken after the item lock, and the machine
-anchors (`machine-anchors`) alone. No path takes the wake pass while it holds the item lock (the order is wake, then item; with `strict` on a lock out of order raises, and a recorder in tests/xlock_scenario.py fails on item before wake, on answers before item and on any pair taken in both orders). A new `XLock` that nests with these takes its place in that order and in docs/server-passes.md."""
+anchors (`machine-anchors`) alone. The anchors file (`anchors`: the anchors tool, an anchor wait, the anchor sweep and an item's re-key take it round their read, change and save) is outside the order too: it is taken after the item lock where both are held (the sweep at a close, a wait, a re-key), no path takes the item lock while holding it, and none holds it across a publish. No path takes the wake pass while it holds the item lock (the order is wake, then item; with `strict` on a lock out of order raises, and a recorder in tests/xlock_scenario.py fails on item before wake, on answers before item and on any pair taken in both orders). A new `XLock` that nests with these takes its place in that order and in docs/server-passes.md."""
 from __future__ import annotations
 
 import errno

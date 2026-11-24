@@ -63,7 +63,7 @@ def anchor_scope(store: Any, gid: str, project: str = "", *, wide: bool = False)
     """The anchors that count for item `gid`, from every project's page, each once: a copy of the entry with `page` (the page that holds it; the item's own
     `project` first), `pages` (every page that holds it), `scoped` (named by an `items` list; False only for a project-wide anchor of `project`'s own page that
     `wide=True` lists) and `items`. Without `wide` only the anchors that name the item come back: those are what makes an outside item an anchor wait, what
-    holds a hold and what a completion asks the keeper about; with `wide` the project's project-wide anchors are listed too (a reading of the item, not a test)."""
+    holds a hold; with `wide` the project's project-wide anchors are listed too (a reading of the item, not a test)."""
     gid, project = str(gid or "").strip(), str(project or "").strip()
     found: dict[str, dict[str, Any]] = {}
     if not gid:
@@ -102,18 +102,4 @@ def scoped_map(store: Any) -> dict[str, list[str]]:
             continue
         keys[g].add(k)
         out.setdefault(g, []).append(url)
-    return out
-
-
-def completion_due(store: Any, gid: str, all_items: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
-    """[(page, entry)] of the anchors scoped to `gid` whose other listed items are all completed (or gone): the ones the keeper of the page that holds each should
-    judge now that `gid` closed. Per page, not merged: the page keeps its anchor, so each page's keeper is asked about its own."""
-    open_ids = {t["gid"] for t in all_items if t.get("status") != "completed"}
-    gid = str(gid or "").strip()
-    out = []
-    for page in _pages(store):
-        for e in clean_entries(store.get(page)):
-            scope = e["items"] or []
-            if gid in scope and not (set(scope) - {gid}) & open_ids:
-                out.append((page, e))
     return out

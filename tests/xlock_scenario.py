@@ -40,6 +40,8 @@ surface the callers and the suites use and adds a flock on `<state>/<name>.lock`
   28 hardening     a notice that raises never keeps the ones after it from being sent (a release after a close, the wake pass, an anchor release, the flush of a pass), a failed save keeps its own error and its watcher messages; the answer that
                    drops an item releases its dependents whatever its delivery did; the escalation pass keeps the record of a send that raised; a step notice stands as told only once sent; the re-key finds a dependent that moved
                    since the scan; the lock file's descriptor is closed on an interrupt inside the open
+  29 anchors       the anchors lock round the re-key's rewrite of the anchors file (`_move_anchors`): another process's hold blocks it, and the read and the replace are one hold; the order (section 19) is the item
+                   lock, then the anchors lock, and nothing is taken while the anchors lock is held. The anchor wait's own hold (wait_fixes) is pinned in tests/wait_end_scenario.py
 
     tests/run-suite xlock        -> exit 0 / 1"""
 import ast, contextlib, errno, fcntl, io, json, os, re, signal, subprocess, sys, pathlib, threading, time
@@ -694,6 +696,8 @@ try:
     check("19 order: the recorder sees the documented order (the wake lock, then the item lock), so it records something", ("wake", "item") in EDGES, sorted(EDGES))
     check("19 order: no pass takes the wake lock while holding the item lock (the order is wake, then item)", ("item", "wake") not in EDGES, sorted(EDGES))
     check("19 order: no two locks are taken in both orders", not any((b, a) in EDGES for a, b in EDGES), sorted(EDGES))
+    check("19 order: the close's anchor sweep takes the anchors lock while the item lock is held (the order is the item lock, then the anchors lock), so the recorder sees that edge", ("item", "anchors") in EDGES, sorted(EDGES))
+    check("19 order: no pass takes the item lock, or any other lock, while holding the anchors lock (the anchors lock is the innermost one)", not any(a == "anchors" for a, _ in EDGES), sorted(EDGES))
 
     # ---- 20. the notices of the wake pass, a release after a close and an anchor release go out after the item lock is let go: no send, push, subprocess or connection under it
     import socket
@@ -1106,7 +1110,7 @@ try:
                     six = json.loads((store / "a/6.json").read_text()); six["status"] = "completed"; (store / "a/6.json").write_text(json.dumps(six))
             self.real.acquire(); return self.real
         def __exit__(self, *e): self.real.release()
-    swap(ghsync, "_xlock", types.SimpleNamespace(XLock=lambda name: HookLock(xlock.XLock(name))))
+    swap(ghsync, "_xlock", types.SimpleNamespace(XLock=lambda name: HookLock(xlock.XLock(name)) if name == "item" else xlock.XLock(name)))      # only the item lock is watched: the anchors lock the re-key takes for its rewrite of the anchors file is not one of its holds
     try: new = ghsync.rekey(store, "a7", 88); err = None
     except Exception as e: new, err = None, f"{type(e).__name__}: {e}"
     unswap()
@@ -1372,7 +1376,7 @@ try:
                 if on_scan_end and state["armed"] and not state["calls"]:
                     state["calls"] = 1; move_dependent()
                 return json.loads(*a, **k)
-        swap(ghsync, "_xlock", types.SimpleNamespace(XLock=lambda name: HookLock2(xlock.XLock(name))))
+        swap(ghsync, "_xlock", types.SimpleNamespace(XLock=lambda name: HookLock2(xlock.XLock(name)) if name == "item" else xlock.XLock(name)))
         if on_scan_end:
             (store / "a/6.json").unlink()       # not there for the first scan
             swap(ghsync, "json", JsonProxy())
@@ -1394,6 +1398,30 @@ try:
         check("28 re-key (a dependent moved into a folder the scan had not listed): the scan is made again while an item file came or went during it, and finds the item", err is None and new and after6 == [new] and not old_left, (err, new, after6, old_left))
     finally:
         unswap(); rekey_clean()
+
+    # ---- 29. the anchors lock round the re-key's rewrite of the anchors file (ghsync._move_anchors): another process's hold of it blocks the rewrite, and the read and the replace are one hold
+    anc_p = T / "store/anchors.json"
+    MOVE_ANCHORS = {"projects/none": [{"url": "https://example.invalid/m", "items": ["a1"], "added": 1.0, "by": "t"}]}
+    anc_p.write_text(json.dumps(MOVE_ANCHORS))
+    ok = blocks_then_runs("anchors", lambda: ghsync._move_anchors(T / "store", "a1", "a9"), lambda: "a9" in anc_p.read_text(), "j5")
+    check("29 re-key anchors: `_move_anchors` waits for another process's hold of the anchors lock, then rewrites the entry scoped to the old id", ok[0] and ok[1] and "err" not in ok[2] and ok[2].get("r") == 1, ok)
+    anc_p.write_text(json.dumps(MOVE_ANCHORS)); seen, taken = [], []
+    real_rt, real_rp, real_acq29 = pathlib.Path.read_text, os.replace, xlock.XLock.acquire
+    def rt29(self, *a, **k):
+        if self.name == "anchors.json": seen.append(("read", xlock.holds("anchors")))
+        return real_rt(self, *a, **k)
+    def rp29(src, dst, *a, **k):
+        if os.path.basename(str(dst)) == "anchors.json": seen.append(("replace", xlock.holds("anchors")))
+        return real_rp(src, dst, *a, **k)
+    def acq29(self, *a, **k):
+        ok_ = real_acq29(self, *a, **k)
+        if ok_ and self.name == "anchors": taken.append(1)
+        return ok_
+    pathlib.Path.read_text, os.replace, xlock.XLock.acquire = rt29, rp29, acq29
+    try: moved = ghsync._move_anchors(T / "store", "a1", "a9")
+    finally: pathlib.Path.read_text, os.replace, xlock.XLock.acquire = real_rt, real_rp, real_acq29
+    check("29 re-key anchors: the read of the anchors file and its replace are each made with the anchors lock held, and in one hold (taken once)", moved == 1 and seen == [("read", True), ("replace", True)] and len(taken) == 1, (moved, seen, taken))
+    anc_p.write_text("{}")
 
     # ---- the lock file's descriptor is closed on any way out of the open, an interrupt inside `os.set_inheritable` included (a leaked descriptor would hold the flock past its hold)
     real_si = os.set_inheritable

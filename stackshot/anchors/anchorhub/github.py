@@ -67,8 +67,13 @@ def run(hub: Hub):
     # a notification thread's `repository`, a pull request's `base.repo`, an issue's `repository` when GitHub includes it. A release answer has none
     # (its event gets the ID only once another call on the same repo has seen it); an event with no ID is matched by name, as before.
     repo_ids: dict[str, int] = {}
+    archived: dict[str, float] = {}                        # repo (lower case) → when a read first showed it archived (`archived` on the repository object): saved as github_repos, read by the server's anchor sweep (anchors/anchor_sweep.py)
+    gone: dict[str, float] = {}                            # anchor id → when the read of an issue or pull request that had been read before first answered "not found" (a deleted repository or issue) AND another read of the same repository has answered since (the token still has access, so the 404 is about this number and not about the token); dropped by the next read that finds it, and by the anchor's leaving the bindings. Saved as github_repos
+    suspect: dict[str, float] = {}                         # anchor id → when the read of an anchor that had been read before first answered "not found" (memory only): it becomes `gone` once `repo_ok` shows a later read of the repository that was not a 404
+    repo_ok: dict[str, float] = {}                         # repo (lower case) → when a read of an issue or pull request under it last got an answer that was not "not found" (a 304 counts): the token still reaches the repository
     def learn(repo, obj):
         if isinstance(obj, dict) and isinstance(obj.get("id"), int) and not isinstance(obj.get("id"), bool) and obj["id"] > 0: repo_ids[repo.lower()] = obj["id"]
+        if isinstance(obj, dict) and isinstance(obj.get("archived"), bool): archived.setdefault(repo.lower(), time.time()) if obj["archived"] else archived.pop(repo.lower(), None)
     def rid(repo): return repo_ids.get(repo.lower(), 0)
     def held():
         """Seconds until the hourly read cap has room (0 = it has): the cap is the ledger's, shared with the server (ghbudget.py, [github] read_budget)."""
@@ -301,6 +306,22 @@ def run(hub: Hub):
                 "etags": {a: dict(per) for a, per in list(committed.items()) if (_anc.anchor_id(a) or a) in bound and per},
                 "resolved": {a: dict(e) for a, e in list(resolved.items()) if (_anc.anchor_id(a) or a) in bound}}
     hub.savers["github"] = snapshot
+    for k, t in ((hub.saved.get("github_repos") or {}).get("archived") or {}).items():      # what the server's anchor sweep reads of a repository: kept across a restart, and a login change does not drop it
+        if isinstance(t, (int, float)) and not isinstance(t, bool) and t > 0: archived[str(k).lower()] = float(t)
+    for k, t in ((hub.saved.get("github_repos") or {}).get("gone") or {}).items():
+        if isinstance(t, (int, float)) and not isinstance(t, bool) and t > 0: gone[_anc.anchor_id(k) or k] = float(t)
+    def repos_record():
+        """What the anchor sweep reads of the repositories (github_repos). A mark is kept only while an anchor of its repository is bound: the marks of a repository nothing watches any more are forgotten (an archived repository
+        or a gone number that gets an anchor again is learned afresh by a read, never taken from an old mark), and a suspected anchor is promoted to `gone` only when a read of its repository that was not a 404 came at or after its first 404."""
+        with hub.lock: bound = {_anc.anchor_id(k) or k for k in hub.bindings if k.startswith("github:")}
+        repos = {re.split(r"[#@]", a[7:], maxsplit=1)[0].lower() for a in bound}
+        for r in [r for r in list(archived) if r not in repos]: archived.pop(r, None)
+        for d in (gone, suspect):
+            for a in [a for a in list(d) if a not in bound]: d.pop(a, None)
+        for a, t in list(suspect.items()):
+            if a in state and "#" in a and repo_ok.get(split(a)[0].lower(), 0.0) >= t: gone.setdefault(a, t)
+        return {"archived": dict(archived), "gone": {a: t for a, t in list(gone.items()) if a in state}}
+    hub.savers["github_repos"] = repos_record
     hub.resolvers["github"] = res                          # last: the resolver reads `state` and the saved resolutions, which are restored above
     with hub.lock: hub.status["github"] = {"user": me, "since": now_iso()}; hub.push["github"] = {"mode": f"poll · {GHPOLL // 60} min"}
     if not app_token: log.info("github: ready as %s", me)
@@ -607,9 +628,11 @@ def run(hub: Hub):
         try:
             try: i = gh(f"/repos/{repo}/issues/{n}", conditional=True)
             except Exception as e:
-                if gone_404(e): issue_gone.add(a_id)      # nothing under this number (yet): the pull request read leaves it alone until the issue read finds something
+                if gone_404(e):
+                    issue_gone.add(a_id)      # nothing under this number (yet): the pull request read leaves it alone until the issue read finds something
+                    if a_id in state: suspect.setdefault(a_id, time.time())      # …and one that was read before may be gone for good: when it first showed is kept, and the server's anchor sweep is told only once another read of the repository has answered since (repos_record)
                 raise
-            issue_gone.discard(a_id)
+            repo_ok[repo.lower()] = time.time(); issue_gone.discard(a_id); gone.pop(a_id, None); suspect.pop(a_id, None)
             if i is None: return                         # 304: nothing changed
             learn(repo, i.get("repository"))
             st = state.get(a_id)
