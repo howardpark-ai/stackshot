@@ -115,6 +115,7 @@ class Reader:
         canon = lambda k: _anc.anchor_id(str(k)) or str(k)        # the saved keys are the reader's own spelling: a [github.moved] name is read as its current one
         self.saved_at = saved_at
         self.status_at = status_at
+        self.history_since = str(status.get("history_since") or "") if isinstance(status, dict) else ""       # when the status file's unbroken record began, as the service wrote it (a time in the instance zone)
         self._state = {canon(k): v for k, v in (gh.get("state") or {}).items() if isinstance(v, dict)} if isinstance(gh.get("state"), dict) else {}
         self._looked = {canon(k): _epoch(v) for k, v in (gh.get("looked") or {}).items()} if isinstance(gh.get("looked"), dict) else {}
         self._gone = {canon(k): _epoch(v) for k, v in (extra.get("gone") or {}).items()} if isinstance(extra.get("gone"), dict) else {}
