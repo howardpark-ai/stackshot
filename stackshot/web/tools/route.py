@@ -6,6 +6,7 @@ import time
 from fastmcp.exceptions import ToolError
 
 from stackshot.fleet.sessions_registry import _session_label
+from stackshot.router import router as _router
 from stackshot.router import routing as _routing
 from stackshot.service.store import _load
 from stackshot.web.auth import oauth as _oauth
@@ -45,7 +46,8 @@ def _route(notice: str, ruling: str, to: str = "", reason: str = "", sender: str
         raise ToolError(f"Refused: no notice {notice!r} in the routing log — the id is the last word of the notice you received (\"notice a1b2c3\")")
     except ValueError as e:
         raise ToolError(f"Refused: {e}")
-    rel = _anchor_release(project, n, by=sender) if ruling in ("passed", "merged") else []   # a held item that waited on this anchor comes back
+    wakes = _router.person_wakes(n) or (_router.person_wakes(n, True) and _router._anchor_busy(project, n, _router.Context()))      # a person's message wakes an item that waits on its anchor on any ruling, a bare laugh or ack only where an open item hangs on the anchor
+    rel = _anchor_release(project, {**n, "person_wake": True} if wakes else n, by=sender) if ruling in ("passed", "merged") or wakes else []   # a held item that waited on this anchor comes back
     _publish()
     return (f"ruled {n['id']} ({project}): {n.get('ruling') or ruling}" + (f" to {to.strip()}" if to.strip() else "") + (f" — {n.get('reason')}" if n.get("reason") else "") + f".\n{n.get('label', '')}: {n.get('text', '')}"
             + _route_released(rel))

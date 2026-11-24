@@ -122,7 +122,7 @@ def run(hub: Hub):
                 delta = f"ts {ts}; {len(ot):,}→{len(nt):,} chars; files {len(of)}→{len(nf)}" + (f", added {', '.join(added)}" if added else "")
                 hub.event(f"slack:{cid}", {"title": chan(cid), "who": user(new["user"]) if new.get("user") else (new.get("username") or "bot"),
                                            "text": f"({delta}) " + clip(nt, 300, ts), "url": url, "ts": ts,
-                                           "full": nt + (f"\n[files added: {', '.join(added)}]" if added else ""), "meta": ids(new, ts)}, kind="slack-edit")
+                                           "full": nt + (f"\n[files added: {', '.join(added)}]" if added else ""), "meta": ids(new, ts), "bot": is_bot(new)}, kind="slack-edit")
                 return
             if sub not in (None, "file_share", "thread_broadcast"): return
             if bot_on_direct(cid, ev): return
@@ -134,7 +134,7 @@ def run(hub: Hub):
             txt = clip(ev.get("text") or "", 140, ts) + (f" [files: {', '.join(files)}]" if files else "")
             hub.event(f"slack:{cid}", {"title": chan(cid), "who": user(ev["user"]) if ev.get("user") else (ev.get("username") or "bot"),
                                        "text": txt, "url": url, "ts": ts,
-                                       "full": (ev.get("text") or "") + (f"\n[files: {', '.join(files)}]" if files else ""), "meta": ids(ev)})
+                                       "full": (ev.get("text") or "") + (f"\n[files: {', '.join(files)}]" if files else ""), "meta": ids(ev), "bot": is_bot(ev)})
     client = SocketModeClient(app_token=env["SLACK_APP_TOKEN"].strip(), web_client=web)
     client.socket_mode_request_listeners.append(handle)
     try: client.connect()
@@ -167,7 +167,7 @@ def run(hub: Hub):
                 txt = (m.get("text") or "").replace("\n", " ")
                 hub.event(f"slack:{cid}", {"title": chan(cid), "who": user(m["user"]) if m.get("user") else (m.get("username") or "bot"),
                                            "text": "(caught up) " + txt[:140] + ("…" if len(txt) > 140 else ""), "url": url, "ts": m["ts"],
-                                           "full": m.get("text") or "", "meta": {**ids(m), "caught_up": True}}); n += 1
+                                           "full": m.get("text") or "", "meta": {**ids(m), "caught_up": True}, "bot": is_bot(m)}); n += 1
         return n
     last_catch = [time.time()]
     def watch_pass():

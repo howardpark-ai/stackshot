@@ -152,31 +152,30 @@ time.sleep(0.3)
 msgs = [n for n in routing.read("projects/alpha") if n["kind"] == "message" and not n.get("log_only")]
 m_a2, m_a4, m_a5, m_two, m_none = (next(n["id"] for n in msgs if t in n["text"]) for t in ("a2 today", "a4 and", "a5 needs", "a2 with a1", "next release"))
 before = routing_bytes(); pushes = push_log.read_text() if push_log.exists() else ""
-fake("good", json.dumps([{"id": i, "ruling": "merged", "target": "", "reason": f"canned {i}", "for_owner": False} for i in (n_chat, n_multi, n_board, m_a4, m_a5, m_two, m_none)]))
+fake("good", json.dumps([{"id": i, "ruling": "merged", "target": "", "reason": f"canned {i}", "for_owner": False} for i in (n_chat, n_board, m_a4, m_a5, m_two, m_none)]))
 out = H.tick()
-check("one call for alpha, one for gamma; the rest settled in code; the two the answers left out are kept for one more try", out == {"coded": 5, "called": 9, "calls": 2, "fallback": 0, "retry": 2}, out)
+check("one call for alpha, one for gamma; the rest settled in code (the gate placed the gmail thread notices); the two people's notices the answers left out are held at once, no second try", out == {"coded": 6, "called": 8, "calls": 2, "fallback": 2, "retry": 0}, out)
 cl = calls(); cr = {c["project"]: c for c in router._read(router.calls_path())}
-check("a notice the answer left out has no shadow line on the first try, and its try is counted", n_repeat1 not in shadow() and n_other not in shadow() and json.loads(router.attempts_path().read_text()) == {n_repeat1: 1, n_other: 1}, (router.attempts_path().read_text(), set(shadow())))
+check("a person's notice the answer left out is held at once for the page's background agent (a fallback line), with no try counted", n_repeat1 in shadow() and n_other in shadow() and (not router.attempts_path().exists() or json.loads(router.attempts_path().read_text()) == {}), (set(shadow()),))
 out = H.tick()
-check("the second try: both are called again and, left out again, passed to -main", out == {"coded": 0, "called": 2, "calls": 2, "fallback": 2, "retry": 0}, out)
-check("…and the count of tries is gone with them", json.loads(router.attempts_path().read_text()) == {})
+check("the second tick has nothing left: no call, no second try", out == {"coded": 0, "called": 0, "calls": 0, "fallback": 0, "retry": 0}, out)
 sh = shadow()
 rule = lambda i: (sh[i]["source"], sh[i]["rule"], sh[i]["ruling"], sh[i]["target"]) if i in sh else None
 check("rule auto: a notice ruled by stackshot (auto) keeps its ruling, no call", rule(n_auto) == ("code", "auto", "merged", ""), rule(n_auto))
-check("rule anchor-item: an anchor scoped to one open item → its owner, naming the item", rule(n_scoped) == ("code", "anchor-item", "passed", "work-osprey-main") and sh[n_scoped]["item"] == "a1", sh.get(n_scoped))
+check("rule gate-person: a person's reply in the gmail thread an open item hangs on → the page's background agent (the item's mover is a front agent and the message does not need Oliver), naming the item", rule(n_scoped) == ("code", "gate-person", "passed", "work-osprey-x") and sh[n_scoped]["item"] == "a1", sh.get(n_scoped))
 check("rule anchor-item on a sub-page anchor → its item's owner", rule(n_sub) == ("code", "anchor-item", "passed", "work-osprey-x") and sh[n_sub]["project"] == "projects/alpha" and sh[n_sub]["key"] == "projects/alpha/sub", sh.get(n_sub))
-check("an anchor scoped to two open items, for two owners, is not a rule: the call takes it", sh[n_multi]["source"] in ("call", "fallback") and sh[n_multi]["call"], sh.get(n_multi))
+check("an anchor scoped to two open items, for two owners: the gate places a person's reply in that thread for the page's background agent, the call does not take it", rule(n_multi) == ("code", "gate-person", "passed", "work-osprey-x") and not sh[n_multi]["call"], sh.get(n_multi))
 check("rule message-item: a message naming one open item → its owner", rule(m_a2) == ("code", "message-item", "passed", "work-osprey-x") and sh[m_a2]["item"] == "a2", sh.get(m_a2))
 check("a message naming a completed item, the keeper's item, two items or none goes to the call", all(sh[i]["source"] in ("call", "fallback") for i in (m_a4, m_a5, m_two, m_none)), [sh.get(i) for i in (m_a4, m_a5, m_two, m_none)])
-check("rule repeat: the same anchor notice within an hour → dropped, the first one is not", rule(n_repeat2) == ("code", "repeat", "dropped", "") and sh[n_repeat1]["rule"] == "" and n_repeat1 in sh, (sh.get(n_repeat1), sh.get(n_repeat2)))
+check("rule repeat: the same anchor notice within an hour, judged in the same batch as the first (whose ruling is not known yet), is held for the background agent, not dropped; the first is not a repeat", rule(n_repeat2) == ("code", "gate-person", "passed", "work-osprey-x") and "not ruled passed or held" in sh[n_repeat2]["reason"] and sh[n_repeat1]["rule"] == "" and n_repeat1 in sh, (sh.get(n_repeat1), sh.get(n_repeat2)))
 check("a board notice goes to the call (page debts are not a rule)", sh[n_board]["source"] in ("call", "fallback"), sh.get(n_board))
 check("a notice not recorded for the router (pilot false) is not judged", n_beta not in sh and all(d["project"] != "projects/beta" for d in sh.values()))
 check("every pilot notice is judged once", {n_scoped, n_chat, n_repeat1, n_repeat2, n_multi, n_sub, n_board, n_auto, n_other, m_a2, m_a4, m_a5, m_two, m_none} <= set(sh), set(sh))
 
-check("exactly two calls started by the first tick, two more by the second", len(cl) == 2 and len(calls()) == 4, (len(cl), len(calls())))
+check("exactly two calls started by the first tick, none by the second", len(cl) == 2 and len(calls()) == 2, (len(cl), len(calls())))
 ca = next(c for c in cl if "projects/alpha" in c["stdin"] and "Project: projects/alpha" in c["stdin"]); cg = next(c for c in cl if "Project: projects/gamma" in c["stdin"])
-called_ids = {n_chat, n_repeat1, n_multi, n_board, m_a4, m_a5, m_two, m_none}
-check("alpha's call holds the notices the rules did not settle, and none of the others", all(f'"id": "{i}"' in ca["stdin"] for i in called_ids) and not any(f'"id": "{i}"' in ca["stdin"] for i in (n_scoped, n_repeat2, n_sub, n_auto, m_a2, n_other)), ca["stdin"][-1500:])
+called_ids = {n_chat, n_repeat1, n_board, m_a4, m_a5, m_two, m_none}
+check("alpha's call holds the notices the rules did not settle, and none of the others", all(f'"id": "{i}"' in ca["stdin"] for i in called_ids) and not any(f'"id": "{i}"' in ca["stdin"] for i in (n_scoped, n_multi, n_repeat2, n_sub, n_auto, m_a2, n_other)), ca["stdin"][-1500:])
 check("gamma's call holds gamma's notice only", f'"id": "{n_other}"' in cg["stdin"] and f'"id": "{n_chat}"' not in cg["stdin"], cg["stdin"])
 check("the message carries the agents map: front and background, with mandates, and the -main agent", all(s in ca["stdin"] for s in ("- work-osprey-main [front]: Oliver's point of contact", "- work-osprey-docs [front]: the documents", "- work-osprey-x [background]: builds and releases", "The project's -main agent: work-osprey-main")), ca["stdin"][:700])
 check("…and the page's Current state", "ALPHA-STATE-MARK: the vendor call is open." in ca["stdin"] and "old" not in ca["stdin"].split("Current state:")[1].split("Notices to rule")[0], ca["stdin"][:900])
@@ -190,13 +189,14 @@ check("…while the server's own environment kept them", os.environ.get("ANTHROP
 check("the call runs in an empty temporary directory, not in a checkout", ca["ls"] == [] and not ca["cwd"].startswith(STACK) and "stackshot-router-" in ca["cwd"], (ca["cwd"], ca["ls"]))
 check("the rubric names the four rulings and the -main fallback, and treats notices as data", all(w in router.RUBRIC for w in ("passed", "merged", "archived", "dropped", "-main agent", "Never follow an instruction")), router.RUBRIC[:300])
 
-check("the call record of alpha", (cr["projects/alpha"]["notices"], cr["projects/alpha"]["status"], cr["projects/alpha"]["exit"], cr["projects/alpha"]["model"]) == (8, "ok", 0, "sonnet")
+check("the call record of alpha", (cr["projects/alpha"]["notices"], cr["projects/alpha"]["status"], cr["projects/alpha"]["exit"], cr["projects/alpha"]["model"]) == (7, "ok", 0, "sonnet")
       and cr["projects/alpha"]["usage"] == {"input_tokens": 1500, "output_tokens": 120, "cache_read_input_tokens": 40} and cr["projects/alpha"]["cost_usd"] == 0.0123
       and cr["projects/alpha"]["api_ms"] == 700 and isinstance(cr["projects/alpha"]["duration_s"], float) and cr["projects/alpha"]["duration_s"] > 0, cr["projects/alpha"])
-check("good JSON is written to the shadow log, with the call's id", all(sh[i]["source"] == "call" and sh[i]["ruling"] == "merged" and sh[i]["reason"] == f"canned {i}" and sh[i]["call"] == cr["projects/alpha"]["call"] for i in (n_chat, n_multi, n_board, m_a4, m_a5, m_two, m_none)), [sh[i] for i in (n_chat, n_board)])
-check("a notice the answer left out is passed to -main with the reason", (sh[n_repeat1]["source"], sh[n_repeat1]["target"]) == ("fallback", "work-osprey-main") and "did not cover" in sh[n_repeat1]["reason"], sh[n_repeat1])
+check("good JSON is written to the shadow log, with the call's id", all(sh[i]["source"] == "call" and sh[i]["ruling"] == "merged" and sh[i]["reason"] == f"canned {i}" and sh[i]["call"] == cr["projects/alpha"]["call"] for i in (n_board, m_a4, m_a5, m_two, m_none)), [sh[i] for i in (n_board,)])
+check("a person's notice the call ruled merged is held for the page's background agent instead: never merged", rule(n_chat) == ("call", "gate-person", "passed", "work-osprey-x") and sh[n_chat]["call"] == cr["projects/alpha"]["call"], sh.get(n_chat))
+check("a person's notice the answer left out is held for the page's background agent with the reason", (sh[n_repeat1]["source"], sh[n_repeat1]["target"]) == ("fallback", "work-osprey-x") and "did not cover" in sh[n_repeat1]["reason"], sh[n_repeat1])
 check("gamma's notice, left out of the answer, is passed to its -main agent", (sh[n_other]["source"], sh[n_other]["ruling"], sh[n_other]["target"]) == ("fallback", "passed", "work-gamma-main") and "did not cover" in sh[n_other]["reason"], sh[n_other])
-check("a call's record counts what it ruled, what fell back and what waits for one more try", (cr["projects/gamma"]["ruled"], cr["projects/gamma"]["fallback"], cr["projects/gamma"]["retry"]) == (0, 0, 1) and cr["projects/alpha"]["ruled"] == 7 and cr["projects/alpha"]["retry"] == 1, cr)
+check("a call's record counts what it ruled, what fell back and what waits for one more try", (cr["projects/gamma"]["ruled"], cr["projects/gamma"]["fallback"], cr["projects/gamma"]["retry"]) == (0, 1, 0) and cr["projects/alpha"]["ruled"] == 6 and cr["projects/alpha"]["fallback"] == 1 and cr["projects/alpha"]["retry"] == 0, cr)
 check("the router wrote nothing to the routing log and delivered nothing", routing_bytes() == before and (push_log.read_text() if push_log.exists() else "") == pushes)
 check("the shadow log is the router's own file under the state dir", H.shadow_path() == T / "state/router/shadow.jsonl" and H.shadow_path().exists())
 
@@ -214,16 +214,19 @@ txt = "On testbox (Linux).\n```json\n" + json.dumps([
 fake("good", txt); out = H.tick(); sh = shadow()
 check("a tolerant parse: a prose line and a code fence around the JSON are fine", sh[nf[0]]["source"] == "call", sh[nf[0]])
 check("a passed target is matched to the agent's own spelling; for_owner is kept", (sh[nf[0]]["ruling"], sh[nf[0]]["target"], sh[nf[0]]["for_owner"]) == ("passed", "work-osprey-docs", True), sh[nf[0]])
-check("a target that is no agent → -main, with the reason", (sh[nf[1]]["source"], sh[nf[1]]["target"]) == ("fallback", "work-osprey-main") and "nobody-here" in sh[nf[1]]["reason"], sh[nf[1]])
-check("a ruling that is not one of the four → -main", (sh[nf[2]]["source"], sh[nf[2]]["target"]) == ("fallback", "work-osprey-main") and "ignored" in sh[nf[2]]["reason"], sh[nf[2]])
-check("a dropped notice carries no target", (sh[nf[3]]["ruling"], sh[nf[3]]["target"]) == ("dropped", ""), sh[nf[3]])
-check("a notice the answer does not name has no line on the first try", nf[4] not in sh and out["retry"] == 1, out)
+check("a target that is no agent → a person's message is held for the background agent, with the reason", (sh[nf[1]]["source"], sh[nf[1]]["target"]) == ("fallback", "work-osprey-x") and "nobody-here" in sh[nf[1]]["reason"], sh[nf[1]])
+check("a ruling that is not one of the four → held for the background agent", (sh[nf[2]]["source"], sh[nf[2]]["target"]) == ("fallback", "work-osprey-x") and "ignored" in sh[nf[2]]["reason"], sh[nf[2]])
+check("a person's notice the call dropped is held for the background agent, never dropped", (sh[nf[3]]["source"], sh[nf[3]]["ruling"], sh[nf[3]]["target"]) == ("call", "passed", "work-osprey-x"), sh[nf[3]])
+check("a person's notice the answer does not name is held at once, no second try", out["retry"] == 0 and sh[nf[4]]["source"] == "fallback" and "did not cover" in sh[nf[4]]["reason"] and sh[nf[4]]["target"] == "work-osprey-x" and sh[nf[4]]["for_owner"] is False, (out, sh.get(nf[4])))
+bd = rec("projects/alpha", "board", "completed: [home] item 9", label="board a9", who="work-osprey-main", target="for work-osprey-main")
+fake("good", json.dumps([])); out = H.tick(); sh = shadow()
+check("a notice that is not a person's (a board notice) the answer does not name has no line on the first try, one try counted", bd not in sh and out["retry"] == 1 and json.loads(router.attempts_path().read_text()).get(bd) == 1, out)
 out = H.tick(); sh = shadow()
-check("…and goes to -main on the second", sh[nf[4]]["source"] == "fallback" and "did not cover" in sh[nf[4]]["reason"] and sh[nf[4]]["for_owner"] is True, sh[nf[4]])
+check("…and goes to -main on the second", sh[bd]["source"] == "fallback" and "(second try)" in sh[bd]["reason"] and sh[bd]["for_owner"] is True and sh[bd]["target"] == "work-osprey-main", sh.get(bd))
 
 # ---- 5. a call that fails: everything in the batch goes to -main, with the reason
 def failing(mode, status, why, timeout=20, text=""):
-    nid = rec("projects/alpha", "anchor", f"new message from Ivy: {mode}", anchor="slack:C0000000001", target="project-wide", who="Ivy")
+    nid = rec("projects/alpha", "board", f"completed: [home] item 7 ({mode})", label="board a7", who="work-osprey-main", target="for work-osprey-main")
     fake(mode, text); router_cfg(timeout_seconds=timeout); before_n = len(calls()); t0 = time.time(); H.tick(); took = time.time() - t0
     c1 = router._read(router.calls_path())[-1]
     check(f"{mode}: the first failure is recorded as {status} and leaves the notice unjudged, with its try counted", c1["status"] == status and c1["notices"] == 1 and c1["retry"] == 1 and c1["fallback"] == 0 and c1["ruled"] == 0
@@ -246,12 +249,12 @@ try: os.kill(pid, 0); alive = True
 except OSError: alive = False
 check("timeout: the process was killed", not alive, pid)
 router_cfg(command=[str(T / "no-such-command")])
-nid = rec("projects/alpha", "anchor", "new message from Jo: no command", anchor="slack:C0000000001", target="project-wide", who="Jo"); H.tick(); H.tick()
+nid = rec("projects/alpha", "board", "completed: [home] item 7 (no command)", label="board a7", who="work-osprey-main", target="for work-osprey-main"); H.tick(); H.tick()
 c = router._read(router.calls_path())[-1]
 check("a command that cannot start (the shell reports 127) is a failed call, and the notice goes to -main", c["status"] == "exit" and c["exit"] == 127 and shadow()[nid]["source"] == "fallback", c)
 
 # a first failure followed by a good answer: the notice is judged by the call, nothing falls back
-router_cfg(); fake("garbage"); nid = rec("projects/alpha", "anchor", "new message from Mo: fails once", anchor="slack:C0000000001", target="project-wide", who="Mo"); H.tick()
+router_cfg(); fake("garbage"); nid = rec("projects/alpha", "board", "completed: [home] item 7 (fails once)", label="board a7", who="work-osprey-main", target="for work-osprey-main"); H.tick()
 check("garbage once: unjudged, one try counted", nid not in shadow() and json.loads(router.attempts_path().read_text()) == {nid: 1})
 fake("echo"); out = H.tick()
 check("…then a good answer: the call rules it, no fallback, the count is cleared", shadow()[nid]["source"] == "call" and out["fallback"] == 0 and json.loads(router.attempts_path().read_text()) == {}, (shadow()[nid], out))
@@ -278,7 +281,7 @@ res = _wt_route._route(n_board, "merged", reason="keeper: page updated", sender=
 n_in = {n["id"]: n for n in routing.read("projects/alpha")}
 check("the keeper's rulings are the keeper's own: ruled_by, no router line in the routing log", n_in[n_chat]["ruled_by"] == "work-osprey" and n_in[n_chat]["ruling"] == "merged"
       and not any("router" in json.dumps(l) for l in (json.loads(x) for p_ in routing.DIR.glob("*.jsonl") for x in p_.read_text().splitlines())), n_in[n_chat])
-check("the router's own ruling on that notice is still its own", shadow()[n_chat]["ruling"] == "merged" and shadow()[n_chat]["source"] == "call")
+check("the router's own ruling on that notice is still its own", shadow()[n_chat]["ruling"] == "passed" and shadow()[n_chat]["source"] == "call")
 check("a notice the router judged and the keeper has not is still pending for the keeper", routing.counts(["projects/alpha"])["pending"] >= 1 and "ruling" not in n_in[m_none], routing.counts(["projects/alpha"]))
 
 # ---- 9. the rules that follow the keepers' reviews: compare counts equal outcomes (1a), item work (1b), page pass, wake, watch, quiet hour (1c)
@@ -385,7 +388,7 @@ check("hand-back: an item handed back to its owner alone (the mark) is passed to
       ln(hb1) == ("code", "hand-back", "passed", "work-osprey-main", False) and sh[hb1]["item"] == "a1" and "work-osprey-main alone" in sh[hb1]["reason"] and sh[hb2]["source"] == "call" and sh[hb3]["source"] == "call", (sh.get(hb1), sh.get(hb2), sh.get(hb3)))
 check("watch: an anchor notice on a watched anchor is passed to the named agent, for Oliver", ln(wa) == ("code", "watch", "passed", "work-gamma-main", True), sh.get(wa))
 check("watch and quiet hour: none by default in code (the instance names its own in [[router.watch]] and [[router.quiet]])", router.WATCH == {} and router.QUIET == {} and router.watch_map() == {} and router.quiet_map() == {}, (router.WATCH, router.QUIET, router.watch_map(), router.quiet_map()))
-check("quiet hour: a non-urgent Drive anchor notice (or one for the agent) is archived for one digest, never for Oliver", ln(q1) == ("code", "quiet", "archived", "", False) and ln(q5) == ("code", "quiet", "archived", "", False), (sh.get(q1), sh.get(q5)))
+check("quiet hour: a non-urgent Drive anchor notice is archived for one digest, never for Oliver; a person's mail (q5) is never archived: the gate passes it to the background agent", ln(q1) == ("code", "quiet", "archived", "", False) and ln(q5) == ("code", "gate-person", "passed", "work-osprey-x", False), (sh.get(q1), sh.get(q5)))
 check("quiet hour: an urgent one, one marked [for Oliver] and a non-Drive one pass as normal (the call)", all(sh[i]["source"] == "call" for i in (q2, q6, q4)), [sh.get(i) for i in (q2, q6, q4)])
 check("quiet hour: a notice that only names Oliver (a weak signal) is archived for the digest, not passed", ln(q3) == ("code", "quiet", "archived", "", False) and sh[q3]["reason"].startswith("archived for the digest: "), sh.get(q3))
 check("these rules started no call of their own: one call for alpha's nine other notices, none for delta or gamma", len(calls()) - n0 == 1 and (out["coded"], out["called"], out["calls"]) == (26, 9, 1), (len(calls()) - n0, out))
@@ -434,8 +437,8 @@ check("govern: a pass to a background agent stands", ln(g3) == ("call", "", "pas
 check("govern: dropped/merged/archived on a notice that says needs: decision or [for Oliver] (a strong signal) becomes a pass to -main, for Oliver",
       all(ln(i) == ("call", "clamp", "passed", "work-osprey-main", True) and "ruled it" in sh[i]["reason"] for i in (g4, g6)), [sh.get(i) for i in (g4, g6)])
 check("govern: dropped/merged on a notice that only names Oliver (a weak signal) becomes archived for the digest, not a pass", ln(g5) == ("call", "clamp", "archived", "", False) and sh[g5]["reason"].startswith("archived for the digest: "), sh.get(g5))
-check("govern: dropped on an anchor notice of an item that waits on a decision → the item's mover, for Oliver (whether it starts a turn is router_live's gate: while he talks with the agent, or his ask)", ln(g7) == ("call", "clamp", "passed", "work-osprey-main", True) and sh[g7]["item"] == "a8", sh.get(g7))
-check("govern: merged on it → the same pass, never silent", ln(g7m) == ("call", "clamp", "passed", "work-osprey-main", True) and sh[g7m]["item"] == "a8", sh.get(g7m))
+check("govern: a person's reply in the thread of an item that waits on a decision never reaches the call: the gate passes it to the item's mover (the builder), who raises it, naming the item", ln(g7) == ("code", "gate-person", "passed", "work-osprey-x", False) and sh[g7]["item"] == "a8", sh.get(g7))
+check("govern: a second reply in it → the same pass, never silent", ln(g7m) == ("code", "gate-person", "passed", "work-osprey-x", False) and sh[g7m]["item"] == "a8", sh.get(g7m))
 check("govern: a call ruling dropped that the call itself marks for Oliver is a pass too", ln(g12) == ("call", "clamp", "passed", "work-osprey-main", True), sh.get(g12))
 check("govern: a pass to the notice's own sender is merged", ln(g8) == ("call", "clamp", "merged", "", False), sh.get(g8))
 check("govern: no builder, no need for Oliver → a pass to a front agent is archived for the digest, not merged", ln(g9) == ("call", "clamp", "archived", "", False) and sh[g9]["reason"].startswith("archived for the digest: "), sh.get(g9))
@@ -468,7 +471,7 @@ im2 = rec("projects/alpha", "anchor", "<@U0000000002> [files: a.docx, b.png]", a
 im3 = rec("projects/alpha", "anchor", "please decide which draft [files: draft.docx]", anchor="slack:C0000000001", target="project-wide", who="Sam")
 im4 = rec("projects/alpha", "message", "[files added: x.png]", who="home-beta")
 fake("echo", default={"ruling": "merged", "reason": "echo"}); n0 = len(calls()); H.tick(); sh = shadow(); cl = calls()[n0:]
-check("image: a notice that is only a file marker (and a mention) is archived in code, reason 'image not read'", all(ln(i)[:4] == ("code", "image", "archived", "") and sh[i]["reason"].startswith("image not read") for i in (im1, im2, im4)), [sh.get(i) for i in (im1, im2, im4)])
+check("image: a person's notice that is only a file marker (and a mention) is held in code for the background agent, never archived (reason 'image not read'); a message that is not a person's notice is archived", all(ln(i)[:4] == ("code", "image", "passed", "work-osprey-x") and sh[i]["reason"].startswith("image not read") for i in (im1, im2)) and ln(im4)[:4] == ("code", "image", "archived", "") and sh[im4]["reason"].startswith("image not read"), [sh.get(i) for i in (im1, im2, im4)])
 check("image: it is not sent to the call; a notice with words and a file is", all(f'"id": "{i}"' not in c["stdin"] for c in cl for i in (im1, im2, im4)) and any(f'"id": "{im3}"' in c["stdin"] for c in cl) and sh[im3]["source"] == "call", sh.get(im3))
 check("image: the same by the rule's own test", router.attachment_only("[files: image.png]") and not router.attachment_only("ok [files: a.png]") and not router.attachment_only("no files here") and not router.attachment_only(""))
 

@@ -106,7 +106,7 @@ ln = rule(notice("f2", text=T_a, anchor="slack:C0000000001", target="for example
 check("a target of `for <agent>` on the notice makes no difference to a filtered anchor", ln and ln["rule"] == "anchor-work" and ln["target"] == "example-docs-builder", ln)
 
 # repeat within an hour (as anchor-builder), a different text or an hour later is not a repeat
-first = notice("r1", text=T_a, ts=1000.0)
+first = notice("r1", text=T_a, ts=1000.0, ruling="passed")      # the earlier one reached the work agent: only then is a repeat of it dropped
 ln = rule(notice("r2", text=T_a, ts=1100.0), peers=[first])
 check("an identical repeat within an hour is dropped", ln and (ln["rule"], ln["ruling"], ln["target"]) == ("repeat", "dropped", "") and "r1" in ln["reason"], ln)
 ln = rule(notice("r3", text=T_b, ts=1100.0), peers=[first])
@@ -135,9 +135,11 @@ check("a lead that names one background agent other than -main passes to it (fro
 old = router.Context(); old.reg = {k: {x: y for x, y in e.items() if x != "lead_agents"} for k, e in old.reg.items()}
 fell("a registry that has no lead_agents (not rebuilt yet) falls through to today's rules", rule(notice("u12", text=T_a), c=old))
 
-# ---- 4. an image-only notice on the filtered anchor stays held by `image`
+# ---- 4. an image-only notice on the filtered anchor stays with `image`: a person's is held for the page's background agent (a person's message is never archived), a bot's is archived
 ln = rule(notice("i1", text="[files: image.png]"))
-check("an image-only notice on a filtered anchor is archived by image, not passed", ln and (ln["rule"], ln["ruling"], ln["target"]) == ("image", "archived", ""), ln)
+check("an image-only notice of a person on a filtered anchor is held for the page's background agent by image, never archived, never passed to the work agent", ln and (ln["rule"], ln["ruling"], ln["target"], ln.get("hold")) == ("image", "passed", "example-docs-notes", "person"), ln)
+ln = rule(notice("i2", text="[files: image.png]", bot=True))
+check("an image-only notice of a bot on a filtered anchor is archived by image, not passed", ln and (ln["rule"], ln["ruling"], ln["target"]) == ("image", "archived", ""), ln)
 
 # ---- 5. the live act delivers the pass to the work agent and rules the notice
 sent = []
