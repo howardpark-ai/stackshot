@@ -2551,7 +2551,7 @@ class Board:
                     rl = _gh.refile_line(pm, m)        # "Refile itself": the server moved it to its owner's project
                     ev.append(("project", e(rl) if rl else _t("item.log.project", old=e(proj(prev)), new=f"<b>{e(proj(v))}</b>")))
                 if prev.get("subject") != v.get("subject"): ev.append(("edit", _t("item.log.subject_edited", old=e(prev.get('subject') or ''))))
-                who_ = " ".join(str(v.get("written_by") or "").split())
+                who_ = shown_ref(" ".join(str(v.get("written_by") or "").split()))
                 for te in _work.tag_events(pm, m):          # a step's status line set, moved or cleared: folded under the step's one line (below), not a line of its own
                     g = groups.get(te["key"])
                     if g is None or g["closed"]:
@@ -2593,7 +2593,7 @@ class Board:
                         try: at = float(a.get("ts") or 0) or None
                         except (TypeError, ValueError): at = None
                         ev.append(("comment", _t("item.log.gh_comment", owner=e(_OWNER), where=where, text=e(t)), at))
-            who = " ".join(str(v.get("written_by") or "").split())          # the revision's author (model.py: every save records it); older revisions carry none
+            who = shown_ref(" ".join(str(v.get("written_by") or "").split()))          # the revision's author (model.py: every save records it); older revisions carry none
             chg = [x for x in ev if x[0] != "comment"]
             if not merge:                                                    # one entry per change, as before (item_events)
                 out += [(vi, j, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": x[0], "html": x[1], "who": who, "what": _ip.plain(x[1]), "comment": x[0] == "comment"}) for j, x in enumerate(ev)]
@@ -2819,7 +2819,7 @@ class Board:
             st = x["status"]; fmt = self.cmd_step if st == _steps.OPEN else (lambda t_, g_, f_: f_(t_, g_))      # a command block (with Copy) only on a step still to do
             subs = "".join(f"<li class=\"icode\"><div class=\"md\">{self.md_html(s_, r['gid'])}</div></li>" if _ip.is_fence(s_) else f"<li>{fmt(s_, r['gid'], self.md_line)}</li>" for s_ in nl.subs)
             body = fmt(nl.text, r['gid'], self.md_line) if nl.text else ''
-            who = e(str(x.get("by") or "")); when_ = e(self.when(float(x["at"]))) if x.get("at") else ""
+            who = e(shown_ref(str(x.get("by") or ""))); when_ = e(self.when(float(x["at"]))) if x.get("at") else ""
             stamp = " · ".join(b_ for b_ in ((f"<b>{_t('item.stamp.done') if st == _steps.DONE else _t('item.stamp.dropped')}</b>" + (" " + _t("item.by", who=who) if who else "")), when_) if b_)      # the verb opens the byline, done and dropped alike
             word = {_steps.OPEN: _t("item.step.todo"), _steps.DONE: _t("item.step.done"), _steps.DROPPED: _t("item.step.dropped")}[st]
             glyph = {_steps.OPEN: "", _steps.DONE: "✓", _steps.DROPPED: "×"}[st]

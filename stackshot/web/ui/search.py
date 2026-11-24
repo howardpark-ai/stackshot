@@ -26,6 +26,7 @@ from urllib.parse import urlencode
 
 from stackshot.core import config as _cfg
 from stackshot.core import readonly as _ro
+from stackshot.fleet import sessions_registry as _sr   # a stored session id is shown as the session's name
 from stackshot.web import i18n as _i18n
 from stackshot.web import search as _s
 from stackshot.web.search import (KINDS, LIMIT, MAX_Q, MIN_CHARS, REQUEST_ITEMS, TITLES, _corrupt, building, query, rebuild, standby_index, sync, terms)   # noqa: F401  — query and terms stay importable from here
@@ -359,6 +360,7 @@ def _row(board: Any, R: Any, h: dict[str, Any], snip: str, ws: list[str], state_
             bits = [esc(_i18n.t("search.hist", what=h["sub"] or _i18n.t("search.change"))), esc(board.when(h["t"])) if h["t"] else "", proj]
         else:
             by = r.get("written_by")
+            by = (_sr.display_name(str(by)) or by) if by else by
             bits = [esc(_i18n.t("search.updated_by", who=by)) if by else "", esc(board.when(h["t"])) if h["t"] else "", proj]
         subj = board.bare(r.get("subject") or "")
         return _ui.row(tag_html=kt + " " + _ui.tag(state_of[r["gid"]]), href=R.item_href(r), rid=R.rid(r), title=subj, title_html=_hl(subj, ws), age_html=age,

@@ -1426,7 +1426,7 @@ class Board:
                         try: at = float(a.get("ts") or 0) or None
                         except (TypeError, ValueError): at = None
                         ev.append(("comment", f"{e(_OWNER)} commented {where}: “{e(t)}”", at))
-            who = " ".join(str(v.get("written_by") or "").split())          # the revision's author (model.py: every save records it); older revisions carry none
+            who = shown_ref(" ".join(str(v.get("written_by") or "").split()))          # the revision's author (model.py: every save records it); older revisions carry none
             chg = [x for x in ev if x[0] != "comment"]
             if not merge:                                                    # one entry per change, as before (item_events)
                 out += [(vi, j, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": x[0], "html": x[1], "who": who, "what": _ip.plain(x[1]), "comment": x[0] == "comment"}) for j, x in enumerate(ev)]

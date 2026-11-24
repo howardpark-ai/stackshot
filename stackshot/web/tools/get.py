@@ -228,7 +228,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         cl = _steps.view(m, closed=item.get("status") == "completed")
         if any(x["status"] != _steps.OPEN for x in cl):
             def _cl_line(i: int, x: dict[str, Any]) -> str:
-                who = f" · {x['by']}" if x.get("by") else ""
+                who = f" · {_shown_ref(str(x['by']))}" if x.get("by") else ""
                 when = f" · {_rmod.when_words(dt.datetime.fromtimestamp(float(x['at']), _wttext.ZONE))}" if x.get("at") else ""
                 return f"{i}. [{x['status']}{who}{when}] {_clip_line(_steps.first_line(x['text']), 110)}"
             out.append("checklist:\n" + "\n".join(_cl_line(i, x) for i, x in enumerate(cl, 1)))

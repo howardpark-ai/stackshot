@@ -173,6 +173,18 @@ put_registry(); sr.reset(); sr.resolve(S["main"]); SALA.write_text("{torn", enco
 clock[0] += sr.STALE - 5; put_registry(); sr.reset(); sr.resolve(S["main"]); SALA.write_text("{torn", encoding="utf-8"); os.utime(SALA, ns=(8, 8)); clock[0] += 10; sr.reset()
 check("stale window: a good read in between starts a new window", sr.resolve(S["main"]) == S["main"])
 sr.time = real_time; sr.reset(); put_registry()
+# a permanent id keeps the name it last had: a read that fails, or an empty registry, never leaves the bare id as a label or a mark's writer
+sr.STALE = 0; sr.reset(); put_registry(); sr.resolve(S["main"])      # one good read, and no grace for the next failed one
+SALA.write_text("{torn", encoding="utf-8"); os.utime(SALA, ns=(9, 9)); sr.reset()
+check("last name: a failed read after a good one still names the id (display_name and the label)", sr.resolve(S["main"]) is None and sr.display_name(S["main"]) == "home-sparrow-main"
+      and sr._session_label(S["main"]) == "home-sparrow-main" and sr._session_label(S["main"].upper()) == "home-sparrow-main", (sr.display_name(S["main"]), sr._session_label(S["main"])))
+SALA.unlink(); sr.reset()
+check("last name: …and an empty listing (the registry gone)", not sr.available() and sr.display_name(S["main"]) == "home-sparrow-main" and sr._session_label(S["main"]) == "home-sparrow-main", sr._session_label(S["main"]))
+check("last name: …but no name is made up for an id, a name or a transcript no read held", sr.display_name(uid(999)) is None and sr.display_name("nobody") is None
+      and sr.display_name("home-sparrow-main") is None and sr._session_label(uid(999)) == uid(999))
+put_registry([r_ if r_["id"] != S["main"] else {**r_, "name": "home-sparrow-renamed"} for r_ in ROWS]); sr.reset(); sr.resolve(S["main"]); SALA.unlink(); sr.reset()
+check("last name: a rename read before the failure is the name kept", sr.display_name(S["main"]) == "home-sparrow-renamed", sr.display_name(S["main"]))
+sr.STALE = 1800.0; put_registry(); sr.reset()
 bad = [row("main", "home-sparrow-main", transcripts=["main_a"]), {**row("eng", "site-builder"), "transcripts": "abc", "aliases": "xyz"}, {**row("docs", "home-sparrow-docs"), "transcripts": [7, None, {"id": 5}, "x"]}, "junk", 5]
 SALA.write_text(json.dumps({"schema": 1, "machine": "a", "sessions": {**{r_["id"]: r_ for r_ in bad if isinstance(r_, dict)}, "junk": "junk", "5": 5}}), encoding="utf-8"); os.utime(SALA, ns=(5, 5))
 check("rows of the wrong shape (transcripts or aliases not a list, junk rows) are tolerated", sr.resolve("site-builder") == S["eng"] and sr.transcripts(S["eng"]) == [] and sr.resolve("xyz") is None
@@ -246,6 +258,16 @@ check("rename: the stored item did not change", hashlib.sha256(_service_store._p
 check("rename: get shows the new name", "mover: home-sparrow-lead" in _wt_get.stackshot_get(g1), _wt_get.stackshot_get(g1))
 check("rename: the web page shows the new name, the board.md the new name", "home-sparrow-lead" in ui_render.Board(str(_core_store.STORE)).item_html(g1) and "home-sparrow-lead" in _rmod.render(str(_core_store.STORE), "full"))
 check("rename: the item page never shows the bare id", S["main"] not in ui_render.Board(str(_core_store.STORE)).item_html(g1))
+gm = create("home-sparrow-docs").split()[1]; it = item(gm)      # marks stored with a permanent id (a write made during a bad registry read), shown as the session's name
+it["metadata"]["next"] = "home-sparrow-docs: still to do"
+it["metadata"]["steps"] = [{"text": "home-sparrow-docs: checked step", "status": "done", "by": S["eng"], "at": 1000.0}, {"text": "home-sparrow-docs: dropped step", "status": "dropped", "by": S["main"], "at": 1001.0},
+                           {"text": "home-sparrow-docs: ghost step", "status": "done", "by": "ghost-session", "at": 1002.0}, {"text": "home-sparrow-docs: still to do", "status": "open"}]
+writes.save(gm, it)
+gm_get = _wt_get.stackshot_get(gm)
+check("a mark stored with an id: get shows the session's name, never the id", "[done · site-builder ·" in gm_get and "[dropped · home-sparrow-lead ·" in gm_get and S["eng"] not in gm_get and S["main"] not in gm_get, gm_get)
+check("a mark by a name no session carries is shown as stored", "[done · ghost-session ·" in gm_get, gm_get)
+gm_page = ui_render.Board(str(_core_store.STORE)).item_html(gm)
+check("a mark stored with an id: the item page shows the name too", "site-builder" in gm_page and S["eng"] not in gm_page and S["main"] not in gm_page and "ghost-session" in gm_page)
 check("rename: the owner is still the same session by its old name and by its id (comparisons by sala id)", sr._same_sess("home-sparrow-main", meta(g1)["owner"]) and sr._same_sess("home-sparrow-lead", meta(g1)["owner"]) and sr._session_label(meta(g1)["owner"]) == "home-sparrow-lead")
 check("rename: the client API lists the item for the session by its new name, its old name, its id and its first transcript", all(
       g1 in {i["gid"] for i in json.loads(client_reads_svc._client_items(k)[2])["items"]} for k in ("home-sparrow-lead", "home-sparrow-main", S["main"], Tr["main_a"], Tr["main_b"])))
@@ -510,7 +532,7 @@ it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = S["m
 
 # ---- 9. a registry that disappears again: everything reads as stored, nothing raises
 SALA.unlink()
-check("registry gone: get shows the stored value", "mover: " + S["main"] in _wt_get.stackshot_get(mig["name"]) or "mover: home-sparrow-main" in _wt_get.stackshot_get(mig["name"]), _wt_get.stackshot_get(mig["name"]))
+check("registry gone: get shows the stored value or the name the id last had", "mover: " + S["main"] in _wt_get.stackshot_get(mig["name"]) or "mover: home-sparrow-main" in _wt_get.stackshot_get(mig["name"]), _wt_get.stackshot_get(mig["name"]))
 check("registry gone: the client API still lists the item for the id (the stored form)", mig["name"] in {i["gid"] for i in json.loads(client_reads_svc._client_items(S["main"])[2])["items"]})
 check("registry gone: the web page still renders", "<html" in ui_render.Board(str(_core_store.STORE)).item_html(mig["name"]).lower())
 

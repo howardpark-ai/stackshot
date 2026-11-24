@@ -23,6 +23,7 @@ an owner pointing at a finished transcript. This module is the one lookup that t
                      current name, its permanent id or a transcript id. An old name (an alias, a retired row's) stays just that name, so a hold on it
                      never reaches the session that carries the id under another name
 
+A permanent id's last known name is kept in memory (`_NAMES`) across all of that, and `display_name` falls back to it.
 The file is read again only when it changes (inode, mtime, size). A file that stops reading (torn, mid-rewrite) is served from its last good
 read for up to STALE seconds (30 minutes, counted from the first failed read), then dropped; a file that is missing, or reads but is another schema, is not stood in for. With no
 registry every lookup is None, so nothing downstream changes from what it did before the registry existed. Never raises.
@@ -64,6 +65,7 @@ class _Reg:
 
 
 _CACHE: dict[str, Any] = {"dir": None, "sig": None, "reg": _Reg(), "at": -1e9}
+_NAMES: dict[str, str] = {}           # permanent id → the name its row carried at the last read that held it; kept across a failed read, an empty registry and the end of the stale window, so a name once known is never shown as the bare id
 _GOOD: dict[str, list[Any]] = {}      # path → [its rows at the last good read, monotonic time of the FIRST failed read since (None while it reads)]: stands in while the file does not read
 
 
@@ -127,6 +129,8 @@ def _build(files: list[Path]) -> _Reg:
                 als = row.get("aliases") if isinstance(row.get("aliases"), list) else []
                 row = {**row, "id": sid, "transcripts": trs, "aliases": als}
                 reg.rows[sid] = row
+                if _text(row.get("name")):
+                    _NAMES[sid] = _text(row.get("name"))
                 for t in trs:
                     tid = _text(t.get("id") if isinstance(t, dict) else t).lower()
                     if tid:
@@ -273,9 +277,13 @@ def _row(x: Any) -> dict[str, Any] | None:
 
 
 def display_name(x: Any) -> str | None:
-    """The current name of the session x resolves to; None when it resolves to none (the caller shows what is stored)."""
+    """The current name of the session x resolves to; None when it resolves to none (the caller shows what is stored). A permanent id the registry does not give at this moment (a failed or empty read) still has the name it had at the last read that held it, so
+    a mark or a label written during a bad read never carries the bare id."""
     r = _row(x)
-    return (_text(r.get("name")) or None) if r else None
+    if r:
+        return _text(r.get("name")) or None
+    s = _text(x)
+    return (_NAMES.get(s) or _NAMES.get(s.lower())) if s else None      # a permanent id the registry does not give now (a read that failed, an empty listing): the name it had when last read
 
 
 def transcripts(x: Any) -> list[str]:
