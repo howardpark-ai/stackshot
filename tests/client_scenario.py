@@ -807,6 +807,96 @@ def part_client():
             else: os.environ[k] = v
         with contextlib.suppress(FileNotFoundError): os.remove(_tokfile0)
 
+    # ---- 7. `post agent-state --file <path>`: the fleet's session manager pushes its snapshot with the script client. A stub server stands for the route (this branch does not need the route's code);
+    #         it answers as the route's contract says: 200 {"ok": true, "agents": N}, 400 with a one-line reason, 401 as plain text.
+    _got = []                                            # (path, Authorization, Content-Type, body bytes) of every request the stub got
+    _mode = {"v": "ok"}
+    class _AgentStub(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0); raw = self.rfile.read(n) if n else b""
+            _got.append((self.path, self.headers.get("Authorization", ""), self.headers.get("Content-Type", ""), raw))
+            if _mode["v"] == "ok":
+                try: cnt = len(json.loads(raw)["agents"])
+                except Exception: cnt = 0
+                code, body, ctype = 200, json.dumps({"ok": True, "agents": cnt}).encode(), "application/json"
+            elif _mode["v"] == "bad": code, body, ctype = 400, json.dumps({"error": "schema must be 1"}).encode(), "application/json"
+            elif _mode["v"] == "multi": code, body, ctype = 400, json.dumps({"error": "agent 'x' is no object\nand a second line"}).encode(), "application/json"
+            else: code, body, ctype = 401, b"unauthorized: a machine token is required (Authorization: Bearer ...)", "text/plain"
+            self.send_response(code); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+        def log_message(self, *a): pass
+    _asrv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _AgentStub); _athr = threading.Thread(target=_asrv.serve_forever, daemon=True); _athr.start()
+    _aenv = {k: os.environ.get(k) for k in ("STACKSHOT_URL", client.PASS_ENV)}; _atok = pathlib.Path(client.TOKEN); _adir = T / "agent-state-files"; _adir.mkdir(exist_ok=True)
+    try:
+        os.environ["STACKSHOT_URL"] = f"http://127.0.0.1:{_asrv.server_address[1]}"; os.environ.pop(client.PASS_ENV, None)
+        _atok.parent.mkdir(parents=True, exist_ok=True); _atok.write_text("tok-agent-e7\n")
+        def _acli(*argv):
+            out, err = _pio.StringIO(), _pio.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err): rc = client.main(["client.py", *argv])
+            return rc, out.getvalue(), err.getvalue()
+        def _afile(name, data):
+            p = _adir / name; p.write_bytes(data); return str(p)
+        def _one_line(text): return text.endswith("\n") and text.count("\n") == 1
+        # a body with spacing and key order a re-encode would change, and characters outside ASCII (escapes only in this source)
+        _body = ('{"schema" : 1,\n  "written":1700000000, "agents":{"caf\u00e9-main":{"state":"busy","why":"caf\u00e9 \u2013 \u4e2d\u6587 \U0001F600","since":1,"pane":"turn","read":true,"subagents":[]},\n'
+                 '  "b":{"state":"idle","since":2,"why":"","pane":"idle","read":true}}}\n').encode("utf-8")
+        _mode["v"] = "ok"; _got.clear()
+        rc, out, err = _acli("post", "agent-state", "--file", _afile("good.json", _body))
+        check("agent-state: a good file is POSTed to /client/agent-state with the machine token and its bytes unchanged",
+              rc == 0 and len(_got) == 1 and _got[0][0] == "/client/agent-state" and _got[0][1] == "Bearer tok-agent-e7" and _got[0][2] == "application/json" and _got[0][3] == _body, (rc, out, err, _got[:1]))
+        check("agent-state: the server's 200 JSON is printed on stdout, nothing on stderr, exit 0", json.loads(out) == {"ok": True, "agents": 2} and out.count("\n") == 1 and err == "", (out, err))
+        _blob = b"\xff\xfe\x00 not json, not utf-8 \r\n \x80\x81 {"; _got.clear()
+        rc, out, err = _acli("post", "agent-state", "--file", _afile("blob.bin", _blob))
+        check("agent-state: the file is never parsed or decoded: a body that is no JSON and no UTF-8 reaches the server byte for byte", rc == 0 and [g[3] for g in _got] == [_blob], (rc, err, _got))
+        _full = b"x" * 1_000_000; _got.clear()
+        rc, out, err = _acli("post", "agent-state", "--file", _afile("full.json", _full))
+        check("agent-state: a file of exactly 1,000,000 bytes is sent whole", rc == 0 and [g[3] for g in _got] == [_full], (rc, err, [len(g[3]) for g in _got]))
+        _got.clear()
+        rc, out, err = _acli("post", "agent-state", "--file", _afile("over.json", b"x" * 1_000_001))
+        check("agent-state: a file of 1,000,001 bytes is refused with one line on stderr and exit 1, and nothing is sent", rc == 1 and not _got and out == "" and _one_line(err) and "limit" in err, (rc, out, err, _got))
+        _got.clear()
+        rc, out, err = _acli("post", "agent-state", "--file", str(_adir / "no-such-file.json"))
+        check("agent-state: a missing file is refused with one line on stderr and exit 1, and nothing is sent", rc == 1 and not _got and out == "" and _one_line(err) and "no-such-file" in err, (rc, out, err, _got))
+        _got.clear()
+        rc, out, err = _acli("post", "agent-state", "--file", str(_adir))
+        check("agent-state: a path that cannot be read as a file (a folder) is refused the same way, nothing sent", rc == 1 and not _got and out == "" and _one_line(err), (rc, out, err, _got))
+        _locked = _afile("locked.json", _body); os.chmod(_locked, 0)
+        _got.clear()
+        if os.access(_locked, os.R_OK): check("agent-state: (running as a user that reads a mode 000 file: that check is skipped)", True)
+        else:
+            rc, out, err = _acli("post", "agent-state", "--file", _locked)
+            check("agent-state: an unreadable file (mode 000) is refused with one line on stderr and exit 1, nothing sent", rc == 1 and not _got and out == "" and _one_line(err), (rc, out, err, _got))
+        for label, argv in (("no --file", ["post", "agent-state"]), ("--file with no value", ["post", "agent-state", "--file"]), ("a stray argument", ["post", "agent-state", "--file", str(_adir / "good.json"), "extra"]), ("an unknown option", ["post", "agent-state", "--path", str(_adir / "good.json")])):
+            _got.clear(); rc, out, err = _acli(*argv)
+            check(f"agent-state: {label} is a usage error on stderr, exit 1, nothing sent", rc == 1 and not _got and out == "" and "usage: client.py post agent-state --file <path>" in err, (rc, out, err, _got))
+        _got.clear(); rc, out, err = _acli("post", "no-such-what", "--file", str(_adir / "good.json"))
+        check("agent-state: any other <what> after `post` is a usage error (the module's usage, exit 1) and nothing is sent", rc == 1 and not _got and "post agent-state --file <path>" in out, (rc, out, err, _got))
+        _mode["v"] = "bad"; _got.clear()
+        rc, out, err = _acli("post", "agent-state", "--file", str(_adir / "good.json"))
+        check("agent-state: a 400 prints the server's reason as one line on stderr, nothing on stdout, exit 1", rc == 1 and len(_got) == 1 and out == "" and _one_line(err) and "schema must be 1" in err and "400" in err, (rc, out, err))
+        _mode["v"] = "multi"; rc, out, err = _acli("post", "agent-state", "--file", str(_adir / "good.json"))
+        check("agent-state: a reason of several lines is still one line on stderr", rc == 1 and out == "" and _one_line(err) and "no object" in err and "second line" in err, (rc, out, err))
+        _mode["v"] = "unauth"; _got.clear()
+        rc, out, err = _acli("post", "agent-state", "--file", str(_adir / "good.json"))
+        check("agent-state: a 401 (plain text) is exit 1 with its reason on stderr and nothing on stdout", rc == 1 and len(_got) == 1 and out == "" and _one_line(err) and "401" in err and "machine token" in err, (rc, out, err))
+        _mode["v"] = "ok"; os.remove(_atok); _got.clear()
+        rc, out, err = _acli("post", "agent-state", "--file", str(_adir / "good.json"))
+        check("agent-state: with no token on the machine nothing is sent, one line on stderr, exit 1", rc == 1 and not _got and out == "" and _one_line(err) and "no token" in err, (rc, out, err, _got))
+        _atok.write_text("tok-agent-e7\n")
+        _dead = socket.socket(); _dead.bind(("127.0.0.1", 0)); _deadport = _dead.getsockname()[1]; _dead.close()      # a port nothing listens on
+        os.environ["STACKSHOT_URL"] = f"http://127.0.0.1:{_deadport}"; _got.clear()
+        rc, out, err = _acli("post", "agent-state", "--file", str(_adir / "good.json"))
+        check("agent-state: a connection refused is one line on stderr, nothing on stdout, exit 1", rc == 1 and not _got and out == "" and _one_line(err) and "[0]" in err, (rc, out, err))
+        os.environ["STACKSHOT_URL"] = f"http://127.0.0.1:{_asrv.server_address[1]}"; _got.clear()
+        _run = subprocess.run([sys.executable, client.__file__, "post", "agent-state", "--file", str(_adir / "good.json")], capture_output=True, text=True, timeout=60, env=dict(os.environ))
+        check("agent-state: run as a script (python3 stackshot/fleet/client.py post agent-state --file <path>) it posts the same bytes, prints the JSON and exits 0",
+              _run.returncode == 0 and json.loads(_run.stdout) == {"ok": True, "agents": 2} and [g[3] for g in _got] == [_body], (_run.returncode, _run.stdout, _run.stderr, _got))
+    finally:
+        _asrv.shutdown(); _asrv.server_close(); _athr.join(5)
+        for k, v in _aenv.items():
+            if v is None: os.environ.pop(k, None)
+            else: os.environ[k] = v
+        with contextlib.suppress(FileNotFoundError): os.remove(_atok)
+        import shutil as _sh; _sh.rmtree(_adir, ignore_errors=True)
 
     import shutil; shutil.rmtree(tmp, ignore_errors=True)
 

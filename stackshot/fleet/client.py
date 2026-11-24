@@ -267,6 +267,12 @@ runs on every box.
                                 characters). The server works out the source (router notice, stackshot message, background-agent hand-back, front peer, script, other), the project and the day in its own timezone; the first catch
                                 of an hour for one pane and sender sends the project's builder one held word that starts no turn. Prints "ok" (or "duplicate") and exits 0; 1 and the reason on stderr when refused (400 a field), not
                                 reached ([0]) or misused (usage). The counts per source and day are the audit's `catches` report.
+  client.py post agent-state --file <path>
+                                for the fleet's session manager: push which registered agents are busy and which idle, the whole fleet in one JSON file that REPLACES the server's last snapshot
+                                (`POST /client/agent-state`, machine token; the body is {"schema": 1, "written": <epoch s>, "agents": {<name>: {...}}}). The file's bytes go to the server exactly as they are
+                                (never parsed or re-encoded here). A file that is missing, unreadable or over 1,000,000 bytes is refused here with one line and exit 1, and nothing is sent. Prints the server's answer,
+                                {"ok": true, "agents": N}, and exits 0; any other answer prints the server's one-line reason on stderr and exits 1, as does a server that is not reached ([0]), no token, or a misuse
+                                (usage on stderr).
   client.py post item-open <marker> --project <key|id|slug> --subject "<action and object>" --mover <agent> --step "<agent>: <what it does>" --line "<fact>" [--line "<fact>" ...] [--sender <label>]
                                 for a timer's script that finds work for a project's background agent (a project that lists none is a front-only project: the item is filed with its -main agent): open ONE board item for it and print its id (exit 0). <marker> = <kind>:<what> (for example
                                 test_trim:stackshot), the item's mark: while an item with that marker is open on the same project a repeat call prints the same id and files nothing; once it is closed a call files a new item. A project holds at most 10 open items filed by this route: past it a new marker is refused until one closes. --mover must be a
@@ -538,17 +544,17 @@ def get(what: str, key: str = "", timeout: float = 10.0, **extra: str) -> tuple[
     except Exception as e: return 0, _fail(e, pas)
 
 
-def post(what: str, body: dict, timeout: float = 20.0):
+def post(what: str, body: dict, timeout: float = 20.0, raw: bytes | None = None):
     """One write to the server with this machine's token (or, when $STACKSHOT_CLIENT_PASS is set, with that pass) → (HTTP status, the decoded JSON answer, or the text when it is not
-    JSON). 0 = the server could not be reached."""
+    JSON). 0 = the server could not be reached. `raw`: the body's bytes, sent exactly as they are in place of `body` (never parsed or encoded again)."""
     pas = _pass(); tok = pas
     if not pas:
         try: tok = open(TOKEN, encoding="utf-8").read().strip()
         except Exception: return 401, f"no token on this machine ({TOKEN}): mint one on the server box and provision it"
-    req = urllib.request.Request(f"{server_url()}/client/{what}", data=json.dumps(body).encode(), method="POST",
+    req = urllib.request.Request(f"{server_url()}/client/{what}", data=json.dumps(body).encode() if raw is None else raw, method="POST",
                                  headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json", "User-Agent": "stackshot-client"})
-    def dec(raw: bytes):
-        text = _scrub(raw.decode("utf-8", "replace"), pas)
+    def dec(answer: bytes):
+        text = _scrub(answer.decode("utf-8", "replace"), pas)
         try: return json.loads(text)
         except Exception: return text
     try:
@@ -1133,6 +1139,28 @@ def catch(argv: list[str], timeout: float = 20.0, text: str | None = None) -> in
     print("duplicate" if d.get("duplicate") else "ok"); return 0
 
 
+AGENT_STATE_USAGE = "usage: client.py post agent-state --file <path>     (the file is the snapshot's JSON body, at most 1,000,000 bytes)"
+AGENT_STATE_MAX = 1_000_000     # the server's limit for the body (stackshot/service/agent_state.py MAX_BYTES): a larger file is refused here, before anything is sent
+
+
+def agent_state(argv: list[str], timeout: float = 60.0) -> int:
+    """`post agent-state --file <path>`: the fleet's session manager pushes which registered agents are busy and which idle, the whole fleet in one JSON file that REPLACES the last snapshot
+    (`POST /client/agent-state`). The file's bytes go to the server as they are, never parsed here. Prints the server's answer ({"ok": true, "agents": N}) and exits 0; 1 and one line on stderr
+    for a file that is missing, unreadable or over the limit (nothing is sent), a refusal (the server's reason), a server that is not reached ([0]) or a misuse (usage)."""
+    opt = _opts(argv, ("file",), AGENT_STATE_USAGE)
+    if opt is None: return 1
+    if not opt.get("file"): print(AGENT_STATE_USAGE, file=sys.stderr); return 1
+    path = opt["file"]
+    try:
+        with open(path, "rb") as f: data = f.read(AGENT_STATE_MAX + 1)
+    except OSError as e: print(f"stackshot: agent state not sent: {path} is not readable ({type(e).__name__})", file=sys.stderr); return 1
+    if len(data) > AGENT_STATE_MAX: print(f"stackshot: agent state not sent: {path} is over the {AGENT_STATE_MAX}-byte limit", file=sys.stderr); return 1
+    status, d = post("agent-state", {}, timeout, raw=data)
+    if status != 200 or not isinstance(d, dict):
+        print(" ".join(f"stackshot: agent state not sent [{status}] {d.get('error') if isinstance(d, dict) else d}".split())[:900], file=sys.stderr); return 1
+    print(json.dumps(d, ensure_ascii=False)); return 0
+
+
 JOB_FAILED_USAGE = "usage: client.py job-failed <unit> <host> <ISO-Z time of the failing run, 2026-11-23T02:15:00Z> <project: a page key, a scope/project label, or - for none>"
 JOB_OK_USAGE = "usage: client.py job-ok <unit> <host> <ISO-Z time of the successful run, 2026-11-23T02:15:00Z>"
 
@@ -1418,6 +1446,9 @@ def main(argv: list[str]) -> int:
     if cmd == "post" and len(argv) > 2 and argv[2] == "catch":
         try: return catch(argv[3:])
         except Exception as e: print(f"stackshot: catch not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
+    if cmd == "post" and len(argv) > 2 and argv[2] == "agent-state":
+        try: return agent_state(argv[3:])
+        except Exception as e: print(f"stackshot: agent state not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
     if cmd == "post" and len(argv) > 2 and argv[2] == "item-open":
         try: return item_open(argv[3:])
         except Exception as e: print(f"stackshot: item not opened ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1

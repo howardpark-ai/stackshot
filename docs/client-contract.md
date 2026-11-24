@@ -351,3 +351,13 @@ caller. The client sends the value as it is, whether or not it starts with `ssp_
 
   `tool-text`: client calls only, no MCP tool changes. Code: `stackshot/fleet/caller_keys.py` (the files), `stackshot/service/caller_pass.py` (enroll, claim, pass, the gate), the routes in
   `stackshot/web/routes/client_api.py`; tests: `tests/client_scenario.py` (its caller_keys part).
+
+## Pushing the agent state with the script client
+
+The fleet's session manager pushes its snapshot of which registered agents are busy and which idle (`POST /client/agent-state`) with the script client, from a file it has written:
+
+```
+stackshot/fleet/client.py post agent-state --file <path>      # prints the server's {"ok": true, "agents": N}, exit 0
+```
+
+The file is the whole body and goes to the server byte for byte, never parsed or re-encoded by the client, with this machine's token. A file that is missing, unreadable or over 1,000,000 bytes (the server's limit) is refused with one line on stderr and exit 1, and nothing is sent. Any answer but 200 prints the server's one-line reason on stderr and exits 1, as does a server that is not reached (`[0]`) or a machine with no token. Code: `stackshot/fleet/client.py`; tests: `tests/client_scenario.py` (its client part).
