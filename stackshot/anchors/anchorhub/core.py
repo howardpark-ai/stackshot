@@ -498,11 +498,11 @@ class Hub:
                     if rs and all(r["pilot"] for r in rs): logged.append((s, rs)); continue
                 p = self.pending.get((ev.anchor, s))
                 if p is None:
-                    self.pending[(ev.anchor, s)] = {"first": time.time(), "last_at": time.time(), "count": 0, "label": ev.label, "last": ev, "kind": ev.kind, "etypes": [], "whos": [], "texts": []}
+                    self.pending[(ev.anchor, s)] = {"first": time.time(), "last_at": time.time(), "count": 0, "label": ev.label, "last": ev, "kind": ev.kind, "etypes": [], "whos": [], "texts": [], "bots": []}
                     deliver.append((s, notice(ev)))
                 else:
                     p["count"] += 1; p["last"] = ev; p["last_at"] = time.time()
-                    p.setdefault("etypes", []).append(ev.etype); p.setdefault("whos", []).append(ev.who); p.setdefault("texts", []).append(ev.text)
+                    p.setdefault("etypes", []).append(ev.etype); p.setdefault("whos", []).append(ev.who); p.setdefault("texts", []).append(ev.text); p.setdefault("bots", []).append(ev.bot)
         for s, rs in logged: self.log_routine(ev, s, rs, why)
         for s, text in deliver: self.send(ev.anchor, s, text, ev, ev.text)
 
@@ -585,6 +585,7 @@ class Hub:
                     gist = f"{p['count']} more, earlier: " + " | ".join(extra) + f" | the last: {ev.text}"
                     if "other" not in types: types.append("other")
                 ev = replace(ev, etype="+".join(types), who=", ".join(whos) or ev.who)
+            if p.get("bots"): ev = replace(ev, bot=all(p["bots"]))      # a follow-up is a bot's only when every event it folds is (the gate reads a mixed burst as a person's)
         except Exception as e:      # the follow-up is never lost for the router's sake: sent as before
             log.warning("burst %s: %s; sent as before", anchor, str(e)[:120]); ev, gist = p["last"], f"{p['count']} more, the last: {p['last'].text}"
         self.send(anchor, session, follow_up(p), ev, gist)
@@ -623,7 +624,8 @@ class Hub:
             live = r["pilot"] and self.holds(r["project"], session)      # live router: the router rules it, the keeper is not told
             try:
                 nid = _routing.record(r["project"], kind="anchor", to="" if live else session, label=ev.label, who=ev.who, text=gist, url=ev.url,
-                                      target=r["target"], pilot=r["pilot"], anchor=anchor, live=bool(live), head=getattr(ev, "head", ""), author=getattr(ev, "author", ""), etype=getattr(ev, "etype", ""))
+                                      target=r["target"], pilot=r["pilot"], anchor=anchor, live=bool(live), head=getattr(ev, "head", ""), author=getattr(ev, "author", ""), etype=getattr(ev, "etype", ""),
+                                      ekind=getattr(ev, "kind", ""), bot=bool(getattr(ev, "bot", False)), thread=bool((getattr(ev, "meta", None) or {}).get("thread_ts")))
             except Exception as e: log.warning("routing log %s: %s", r["project"], str(e)[:120]); kept += 1; continue
             if live: held.append(nid); _live.stash(nid, text); continue
             kept += 1

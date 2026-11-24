@@ -234,7 +234,7 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     p0 = len(pushes()); live.tick(); settle()
     check("2 …and the same notice while he is talking with home-front is a turn", rule_of(n_dec2["id"])["ruling"] == "passed" and len(pushes_to("home-front", n_dec2["id"])) == 1, (rule_of(n_dec2["id"]), pushes()[p0:]))
     unstamp("home-front")
-    # an anchor notice on an anchor scoped to two items that wait on his decision; the call drops it: the router's clamp turns it into a pass to its mover, which the gate then rules
+    # a person's reply on an anchor scoped to two items that wait on his decision: the read-first gate places it before any call (the call's answer here is never read), for the page's background agent: never dropped, never archived, no front turn
     def anchor_notice(text, url, gist):
         hub.send("gmail:1111111111111111", "home-name", f"[anchor] Gmail thread: {text} → {url}", ev(url=url), gist)
         return routing.read("projects/alpha")[-1]
@@ -242,8 +242,8 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     fake(answer([(n_anc["id"], "dropped", "", False)]))
     p0 = len(pushes()); h0 = held_row(); live.tick(); settle()
     ra = rule_of(n_anc["id"]); la = routed(n_anc["id"])
-    check("2 the call drops an anchor notice on an item that waits on his decision, he is not there: it is no bare drop and no turn: not delivered to home-front, not held for it; ruled archived (a33's mover is the front agent: no builder)",
-          not [x for x in pushes()[p0:] if x[0] in ("home-front", F)] and held_row() == h0 and ra["ruling"] == "archived" and (la.get("reason") or "").startswith("archived: front agent home-front"),
+    check("2 a person's reply on an anchor scoped to two items that wait on his decision, he is not there: no drop, no archive, no turn: the gate passes it to the page's background agent team-back, nothing delivered to home-front, not held for it",
+          not [x for x in pushes()[p0:] if x[0] in ("home-front", F)] and held_row() == h0 and ra["ruling"] == "passed" and ra.get("ruled_to") == "team-back" and la.get("rule") == "gate-person",
           (ra, la, pushes()[p0:]))
     stamp("home-front", 60)
     n_anc2 = anchor_notice("another reply", "https://mail.google.com/y", "another reply")
@@ -251,13 +251,13 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     p0 = len(pushes()); live.tick(); settle()
     ra2 = rule_of(n_anc2["id"]); la2 = routed(n_anc2["id"])
     unstamp("home-front")
-    check("2 …the same drop while he is talking with home-front is still a turn, for the agent that holds the decision: passed to home-front, never dropped", ra2["ruling"] == "passed" and ra2.get("ruled_to") == "home-front"
-          and len(pushes_to("home-front", n_anc2["id"])) == 1, (ra2, la2, pushes()[p0:]))
+    check("2 …the same reply while he is talking with home-front goes the same way: the gate's pass to team-back, no turn for home-front", ra2["ruling"] == "passed" and ra2.get("ruled_to") == "team-back"
+          and not pushes_to("home-front", n_anc2["id"]), (ra2, la2, pushes()[p0:]))
     n_anc3 = anchor_notice("a third reply", "https://mail.google.com/z", "a third reply")
     fake(answer([(n_anc3["id"], "merged", "", False)]))
     p0 = len(pushes()); h0 = held_row(); live.tick(); settle()
     ra3 = rule_of(n_anc3["id"])
-    check("2 the call MERGES such a notice, he is not there: never silent, never held for the front agent: not delivered to it, archived", ra3["ruling"] == "archived" and not [x for x in pushes()[p0:] if x[0] in ("home-front", F)] and held_row() == h0, (ra3, pushes()[p0:]))
+    check("2 a third reply, a call that would merge it is never asked: never silent, never held for the front agent: passed to team-back", ra3["ruling"] == "passed" and ra3.get("ruled_to") == "team-back" and not [x for x in pushes()[p0:] if x[0] in ("home-front", F)] and held_row() == h0, (ra3, pushes()[p0:]))
     fake("[]")
 
     # ================================================================ 3. what is gated now, and what is not

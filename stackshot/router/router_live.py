@@ -14,8 +14,12 @@ notice is recorded in the routing log as usual but with `"live": true` and no re
 the session would have read is kept in <state>/router/held/<id>.json (stash), and nothing is pushed.
 
 ACT. tick() (a thread of the server, loop()) takes the unruled live-held notices of each live project and judges them with
-router.py's own code: its rules in code (code_rule), then one thin call per project (call_project). A notice whose call failed
-or was left out stays held, undelivered, for one more try at the next tick (router.py's attempts file); the second failure is a pass to the -main agent (fallback_line). Then it acts on each:
+router.py's own code: its rules in code (code_rule, among them the read-first gate: machine news archived by rule, a person's message passed where router.person_place says, a trivial
+one read and recorded), then one thin call per project (call_project). One event on an anchor several pages hold is ruled once (_twin_plan: the page it is about is ruled, the others follow, rule one-ruling).
+A notice whose call failed or was left out stays held, undelivered, for one more try at the next tick (router.py's attempts file); the second failure is a pass to the -main agent (fallback_line).
+A person's message (router.person_notice) is never archived, dropped or merged, and is not tried twice: whatever the call or a rule would have done, it is held for the page's background agent
+(router.person_hold_line, hold kind `person`) at once; a pass of one to a front agent is a held line for that agent's next turn (the front_fyi path, kind `person`: person_front in _act), never a turn, and is
+delivered as before, marked, only when the held store cannot file it or the rule is a standing watch. Then it acts on each:
   passed   delivered to the target the way a pass is delivered (push.py, the pane inbox), then ruled with
            routing.rule(id, "passed", to=target, by="stackshot (router)"). The text opens with "[for <owner>]" only when the target
            is a front agent and the pass carries a real need of the person (_must_see: for a message a session wrote, only a named open item of his (one whose needs include a decision or whose step is his, or one he asked the agent to tell him about), written as a plain word; for any other notice the ruling's for_owner, his words, a hand-back, the mark or
@@ -42,8 +46,8 @@ page's agents (`hub:` line: agent_root), else (2) the general -main agent of its
 [router] general_<scope> (an agent name, or a page key whose -main agent is used; a page that lists no front agent but has a `display-name:` line gives its name-line session), else the default scope's. Router.Context.agents gives such a page that one agent, nobody else of the general page.
 A page's `display-name:` line is only its name now: it decides nothing.
 
-DIGEST. The router archives what no agent should be interrupted for (the page pass, a page's quiet hours, what the call is unsure of,
-an image it could not read), so an archived notice reaches nobody at once. An archived notice owes nothing, and what is for the owner lives in
+DIGEST. The router archives what no agent should be interrupted for (the page pass, a page's quiet hours, machine news, a bare laugh or ack, an image it could not read; never a
+person's message the call is unsure of: that is held for the page's background agent), so an archived notice reaches nobody at once. An archived notice owes nothing, and what is for the owner lives in
 stackshot's For you list, not in a front agent's turn. digest_tick() (the same thread as the live tick) therefore does not deliver a
 digest of archived notices: once a day per live project, from [router] digest_hour on (default 9, the instance timezone; a server down at
 that hour does it when it is back the same day), it writes one entry listing every notice ruled `archived` since the last digest, each as id,
@@ -601,7 +605,7 @@ def _hold_kind(n: dict[str, Any], ln: dict[str, Any], target: str, cx: "_router.
     try:
         if ln.get("rule") == "audit-owners":          # a finding is a task for its mover, never "asked nothing of you": it wakes a builder
             return ""
-        kind = str(n.get("hold") or "")
+        kind = str(ln.get("hold") or n.get("hold") or "")      # the ruling's own (the read-first gate's `person`: a person's message nothing placed, held for the background agent) before the sender's
         if not kind or not target:
             return ""
         body = _body(n)
@@ -683,12 +687,14 @@ def trace(nid: str) -> dict[str, Any]:
 
 
 # ----------------------------------------------------------------------------- the tick
-def _judge(root: str, rows: list[tuple[str, dict[str, Any]]], cx: "_router.Context", runner: Any, since: float) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def _judge(root: str, rows: list[tuple[str, dict[str, Any]]], cx: "_router.Context", runner: Any, since: float,
+           offered: dict[str, list[str]] | None = None) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """The router's own ruling for each notice of the project's batch (router.py's rules in code, then its thin call): → (lines as the
     judging returns them, {"called": notices sent to a call, "calls": 0 or 1, "retry": notices left for one more try}). A notice
     whose call failed or was left out has no line on its first try: it stays held, undelivered, and is judged again at the next tick
     (router.py's attempts file); the second failure is the fallback line, a pass to -main. An
-    exception anywhere passes every notice that has no line to the -main agent with the reason (no retry)."""
+    exception anywhere passes every notice that has no line to the -main agent with the reason (no retry; a person's message is held for the page's background agent instead, router.fallback_line).
+    `offered` = notice id → the other pages that hold its anchor (tick's twin plan), shown to the call."""
     lines: list[dict[str, Any]] = []
     todo = []
     stats = {"called": 0, "calls": 0, "retry": 0}
@@ -705,7 +711,7 @@ def _judge(root: str, rows: list[tuple[str, dict[str, Any]]], cx: "_router.Conte
         if todo:
             attempts = _router._load_attempts()
             before = dict(attempts)
-            got, rec = _router.call_project(agent_root(root, cx.reg), todo, cx, runner, attempts)
+            got, rec = _router.call_project(agent_root(root, cx.reg), todo, cx, runner, attempts, offered)
             _router._append(_router.calls_path(), rec)
             if attempts != before:       # merge into the file as it is now: another pass may have saved its own meanwhile
                 cur = _router._load_attempts()
@@ -845,7 +851,19 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                 _note(res, root, n["id"])
                 return res
         unmarked_front = False         # a pass to a front agent that goes unmarked: an answer to the agent's own question, while the person is in that conversation
-        if ruling == "passed" and prior.get("status") != "delivered" and base.get("source") != "fallback":      # a pass to a front agent with no need of the person: not marked, not a turn for him
+        person_front = False           # a person's message passed to a front agent (the read-first gate: a need of the owner, or a page with no background agent)
+        if ruling == "passed" and ln.get("person") and ln.get("rule") != "watch" and prior.get("status") != "delivered" and target and _is_front(target, aroot, cx):
+            person_front = True        # a person's message is never archived by a front gate: it is filed as a held line for the agent's next turn (the same front gate, which starts no turn), or delivered as before when it cannot be filed; a standing [[router.watch]] is his own explicit ask, so it keeps its delivery
+            try:
+                fn_p = _HOOKS["front_fyi"]
+                verdict_p = (fn_p(target, _held_text(n, _body(n)), str(ln.get("item") or ""), n["id"], False, kind="person", whole=True) or ("", ""))[0] if fn_p and _held.enabled() else ""
+            except Exception:  # noqa: BLE001
+                verdict_p = ""
+            if verdict_p == "fyi":
+                held_for = target
+                ruling, target, reason = "held", "", f"held: a person's message, {reason} (rides {held_for}'s next turn, starts none)"
+                base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold="person")
+        if ruling == "passed" and prior.get("status") != "delivered" and base.get("source") != "fallback" and not person_front:      # a pass to a front agent with no need of the person: not marked, not a turn for him
             act_, arg_ = _front_route(n, ln, target, aroot, cx)
             nameless = "the message names no open item of his; " if _is_session_message(n, _body(n)) and act_ in ("background", "archived", "hold") and not _must_see(n, ln, _body(n), cx, target) else ""      # a session's message reaches here with no item of his named, except a sibling's quoted words (held with one named): the reason line says so only for the first
             if act_ == "deliver":
@@ -870,7 +888,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                 # a gate that could not file it (the agent's hook cannot fetch held lines, or the gate failed): delivered as before, marked, never dropped for want of a place to hold it
         if ruling == "passed" and prior.get("status") != "delivered":      # a pass that asks nothing of a background agent is held for its next turn
             hk = _hold_kind(n, ln, target, cx)
-            if hk and _held.add(_held.key_of(target), hk, _body(n), sender=str(n.get("who") or ""), gid=str(ln.get("item") or ""), nid=n["id"], whole=(hk == "fyi"), where=_held_where(n)):
+            if hk and _held.add(_held.key_of(target), hk, _body(n), sender=str(n.get("who") or ""), gid=str(ln.get("item") or ""), nid=n["id"], whole=(hk in ("fyi", "person")), where=_held_where(n)):
                 held_for = target
                 ruling, target, reason = "held", "", _held.reason(hk)
                 base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold=hk)
@@ -885,7 +903,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                     ruling, target = ("held" if held_for else "archived"), ""      # filed for the agent's next turn, or told to no one (its hook cannot fetch held lines): only the first is held
                     reason = _held.reason(hold_as) if verdict == "fyi" else f"archived: front agent, {why} ({hold_as})"
                     base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold=hold_as)
-        if ruling == "passed" and prior.get("status") != "delivered" and not unmarked_front:      # a pass to a front agent starts a turn only when he is with it and it needs him, or he asked it to tell him about the subject
+        if ruling == "passed" and prior.get("status") != "delivered" and not unmarked_front and not person_front:      # a pass to a front agent starts a turn only when he is with it and it needs him, or he asked it to tell him about the subject
             verdict_t, arg_t = _front_turn_gate(n, ln, target, aroot, cx)
             if verdict_t == "background" and base.get("source") == "fallback" and arg_t == tried:      # the fallback after the background agent's own deliveries failed: back to it it never goes, so a pass that meets neither case is logged
                 verdict_t, arg_t = "archived", f"the background agent {tried} could not be reached, and he is not talking with {target} and has not asked it to tell him about this"
@@ -893,7 +911,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                 base.update(target=arg_t, reason=f"{reason} (not for the person: passed to {arg_t}, whose work it is, not to {target}: he is not talking with {target} and has not asked it to tell him about this)")
                 target, reason = arg_t, base["reason"]
                 hk = _hold_kind(n, ln, target, cx)
-                if hk and _held.add(_held.key_of(target), hk, _body(n), sender=str(n.get("who") or ""), gid=str(ln.get("item") or ""), nid=n["id"], whole=(hk == "fyi"), where=_held_where(n)):
+                if hk and _held.add(_held.key_of(target), hk, _body(n), sender=str(n.get("who") or ""), gid=str(ln.get("item") or ""), nid=n["id"], whole=(hk in ("fyi", "person")), where=_held_where(n)):
                     held_for = target
                     ruling, target, reason = "held", "", _held.reason(hk)
                     base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold=hk)
@@ -924,7 +942,10 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
         done = _HOOKS["after_rule"]
         if done:
             try:
-                done(key, {**ruled, "front_held": True} if isinstance(ruled, dict) and ruling == "held" and base.get("hold") == "fyi" and base.get("held_for") else {**ruled, "front_gate": True} if isinstance(ruled, dict) and ruling == "archived" and base.get("front_gate") else ruled)      # front_held: the front agent has the line for its next turn, so a hold that waited on this anchor is released, as by a pass
+                after = {**ruled, "front_held": True} if isinstance(ruled, dict) and ruling == "held" and base.get("hold") == "fyi" and base.get("held_for") else {**ruled, "front_gate": True} if isinstance(ruled, dict) and ruling == "archived" and base.get("front_gate") else ruled      # front_held: the front agent has the line for its next turn, so a hold that waited on this anchor is released, as by a pass
+                if isinstance(after, dict) and _router.person_wakes(n):
+                    after = {**after, "person_wake": True}      # a person's message (not a bare laugh or ack) wakes an item that waits on its anchor, whatever the ruling was
+                done(key, after)
             except Exception as e:  # noqa: BLE001
                 base["error"] = f"after-rule: {type(e).__name__}: {str(e)[:100]}"
         _note(base, root, n["id"])
@@ -933,8 +954,74 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
         return {**base, "status": "error", "outcome": "", "error": f"{type(e).__name__}: {str(e)[:140]}"}
 
 
+TWIN_WINDOW = 30.0      # seconds: the notices one event makes for the pages that hold its anchor are recorded within moments of one another
+
+
+def _twin_sig(n: dict[str, Any]) -> tuple[str, str, str, str]:
+    a = str(n.get("anchor") or "")
+    return (_anc.anchor_id(a) or a, str(n.get("who") or "").strip().lower(), " ".join(str(n.get("text") or "").split()), str(n.get("url") or ""))
+
+
+def _about(key: str, n: dict[str, Any], root: str, cx: "_router.Context") -> int:
+    """How much a notice is about this page: the anchor is scoped to one open item of it (4), to several (3), plus one when the page's own name is in the notice's words."""
+    items = _router._anchor_items(key, n, cx)
+    low = " ".join(str(n.get(f) or "") for f in ("text", "label", "url")).lower()
+    slug = root.rsplit("/", 1)[-1].lower()
+    return (4 if len(items) == 1 else 3 if items else 0) + (1 if slug and slug in low else 0)
+
+
+def _twin_plan(groups: dict[str, list[tuple[str, dict[str, Any]]]], last: dict[str, dict[str, Any]], cx: "_router.Context") -> tuple[dict[str, tuple[str, str, str]], dict[str, dict[str, list[str]]], dict[str, tuple[str, str, str]]]:
+    """One event, one ruling. An anchor notice on an anchor several pages hold is recorded once for each of them (the anchor listener), with the same sender, text and link a moment apart, and used to be ruled once on each page. Now
+    the notices of one event are found and one of them is ruled by the gate and the call: the one for the page it is about (_about; the first recorded on a tie), and the call is shown the other pages (`offered`) and may
+    name their agents. The others follow it (router.twin_line), once it is ruled. A notice that comes in after its twin was ruled follows that ruling.
+    → (twin id → (the ruled notice's id, its page, its key), page → {notice id → the other pages that hold its anchor}, twin id → the same for a twin already ruled earlier). Notices already delivered are never twins."""
+    cands = [(root, key, n) for root, rows in groups.items() for key, n in rows
+             if n.get("kind") == "anchor" and n.get("anchor") and last.get(n["id"], {}).get("status") != "delivered"]
+    buckets: dict[tuple[str, str, str, str], list[tuple[str, str, dict[str, Any]]]] = {}
+    for c in cands:
+        buckets.setdefault(_twin_sig(c[2]), []).append(c)
+    twins: dict[str, tuple[str, str, str]] = {}
+    offered: dict[str, dict[str, list[str]]] = {}
+    used: set[str] = set()
+    for cs in buckets.values():
+        cs.sort(key=lambda c: (float(c[2].get("ts", 0)), c[1]))
+        for j, first in enumerate(cs):
+            if first[2]["id"] in used:
+                continue
+            cluster, keys = [first], {first[1]}
+            for other in cs[j + 1:]:
+                if other[2]["id"] not in used and other[1] not in keys and float(other[2].get("ts", 0)) - float(first[2].get("ts", 0)) <= TWIN_WINDOW:
+                    cluster.append(other)
+                    keys.add(other[1])
+            if len(cluster) < 2:
+                continue
+            used.update(c[2]["id"] for c in cluster)
+            _i, best = max(enumerate(cluster), key=lambda t: (_about(t[1][1], t[1][2], t[1][0], cx), -t[0]))
+            rest = [c for c in cluster if c is not best]
+            others = sorted({c[0] for c in rest if c[0] != best[0]})
+            if others:
+                offered.setdefault(best[0], {})[str(best[2]["id"])] = others
+            for c in rest:
+                twins[str(c[2]["id"])] = (str(best[2]["id"]), best[0], best[1])
+    ruled: dict[str, tuple[str, str, str]] = {}
+    for root, key, n in cands:
+        if str(n["id"]) in used:
+            continue
+        sig = _twin_sig(n)
+        for k2 in _router.anchor_holders(n, cx):
+            if k2 == key or str(n["id"]) in ruled:
+                continue
+            for m in _routing.read(k2, since=float(n.get("ts", 0)) - TWIN_WINDOW - 1):
+                if (m.get("kind") == "anchor" and m.get("id") != n["id"] and m.get("ruling") in ("passed", "merged", "held", "archived", "dropped") and _twin_sig(m) == sig
+                        and abs(float(m.get("ts", 0)) - float(n.get("ts", 0))) <= TWIN_WINDOW
+                        and not (_router.person_notice(n) and m["ruling"] in ("archived", "dropped"))):      # a person's message never follows an archive
+                    ruled[str(n["id"])] = (str(m["id"]), _anc.pilot_root(k2) or k2, k2)
+                    break
+    return twins, offered, ruled
+
+
 def tick(now: float | None = None, runner: Any = None) -> dict[str, int]:
-    """One pass over every project's unruled held notices → {"coded", "called", "calls", "fallback", "passed", "ruled", "errors", "stuck", "notes"}."""
+    """One pass over every project's unruled held notices → {"coded", "called", "calls", "fallback", "passed", "ruled", "errors", "stuck", "notes"}. The notices of one event on an anchor several pages hold are ruled once (_twin_plan)."""
     now = time.time() if now is None else now
     with _LOCK:
         out = {"coded": 0, "called": 0, "calls": 0, "fallback": 0, "retry": 0, "passed": 0, "ruled": 0, "errors": 0, "stuck": 0, "notes": 0}
@@ -952,12 +1039,22 @@ def tick(now: float | None = None, runner: Any = None) -> dict[str, int]:
             return out
         cx = _router.Context()
         cap = int(_router._num("max_notices", 25, 1))
+        try:
+            twins, offered, ruled_twins = _twin_plan(groups, last, cx)
+        except Exception as e:  # noqa: BLE001  (an extra: a failure in it rules every notice on its own page, as before)
+            print(f"router live: twin plan failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+            twins, offered, ruled_twins = {}, {}, {}
+        followers = {**twins, **ruled_twins}       # notices that follow another's ruling: not judged here
+        results: dict[str, dict[str, Any]] = {}
+        later: list[tuple[str, str, dict[str, Any]]] = []
         for root, rows in sorted(groups.items()):
             rows.sort(key=lambda r: float(r[1].get("ts", 0)))
             ready = [(k, n) for k, n in rows if last.get(n["id"], {}).get("status") == "delivered"]       # delivered, ruling to finish
             fresh = [(k, n) for k, n in rows if last.get(n["id"], {}).get("status") != "delivered"]
             batch = fresh[:cap]
-            got, st = _judge(root, batch, cx, runner, since) if batch else ([], {"called": 0, "calls": 0, "retry": 0})
+            later += [(root, k, n) for k, n in batch if str(n["id"]) in followers]
+            batch = [(k, n) for k, n in batch if str(n["id"]) not in followers]
+            got, st = _judge(root, batch, cx, runner, since, offered.get(root)) if batch else ([], {"called": 0, "calls": 0, "retry": 0})
             lines = {x["id"]: x for x in got}
             for k, n in ready:
                 p = last[n["id"]]
@@ -969,6 +1066,7 @@ def tick(now: float | None = None, runner: Any = None) -> dict[str, int]:
                 prior = last.get(n["id"], {})
                 res = _act(n, key, root, ln, cx, prior)
                 _log(res)
+                results[str(n["id"])] = res
                 if res.get("stage") == "rule" and int(prior.get("rule_tries", 0)) + 1 >= MAX_TRIES:     # the ruling could not be written three times: stuck, never judged again
                     _log({**{k: res[k] for k in ("id", "project", "key", "kind", "ruling", "target", "label", "text") if k in res}, "ts": time.time(),
                           "status": "stuck", "reason": f"could not be ruled: the ruling could not be written to the routing log {MAX_TRIES} times ({res.get('error', '')[:120]})",
@@ -981,6 +1079,24 @@ def tick(now: float | None = None, runner: Any = None) -> dict[str, int]:
                 out["fallback"] += ln.get("source") == "fallback"
                 out["coded"] += ln.get("source") == "code"
             out["called"] += st["called"]; out["calls"] += st["calls"]; out["retry"] += st["retry"]
+        for root, key, n in later:      # the notices of one event that follow the ruling of the one for the page it is about (or of one ruled at an earlier tick)
+            nid = str(n["id"])
+            rid, rroot, rkey = followers[nid]
+            if nid in ruled_twins:
+                m = _routing.lookup(rid, rkey)
+                ruling, how = (str(m[1].get("ruling") or "merged"), str(m[1].get("ruled_to") or m[1].get("ruling"))) if m else ("merged", "ruled earlier")
+            else:
+                r = results.get(rid)
+                if not r or r.get("status") != "ruled":
+                    continue      # the ruled one is not ruled yet (its call is tried again, or its delivery failed): this one waits for it
+                ruling, how = str(r.get("ruling") or "merged"), f"{r.get('ruling')} {r.get('target') or r.get('held_for') or ''}".strip()
+            ln = _router.twin_line(n, key, root, rid, rroot, ruling, how)
+            res = _act(n, key, root, ln, cx, last.get(nid, {}))
+            _log(res)
+            out["errors"] += res["status"] == "error"
+            out["ruled"] += res["status"] == "ruled"
+            out["coded"] += 1
+            out["notes"] += bool(res.get("noted"))
         return out
 
 

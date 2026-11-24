@@ -288,17 +288,17 @@ ln = _router.code_rule(KEY, notice("n1"), KEY, cx, [])
 check("2a: a CI notice on the PR scoped to board#<a>'s anchor passes to the builder (anchor-ci), with the item, not to the item's keeper", ln and ln["rule"] == "anchor-ci" and ln["ruling"] == "passed"
       and ln["target"] == "osprey-x" and ln["item"] == "a40" and not ln["for_owner"], ln)
 ln = _router.code_rule(KEY, notice("n1a", who="kim", text="commented: why this?", etype="comment"), KEY, cx, [])
-check("2a2: a person's notice on the same anchor is build-side news: anchor-item passes it to the builder, who moves the item, with the item", ln and ln["rule"] == "anchor-item"
+check("2a2: a person's notice on the same anchor is build-side news: the read-first gate (gate-person, a question) passes it to the builder, who moves the item, with the item", ln and ln["rule"] == "gate-person"
       and ln["target"] == "osprey-x" and ln["item"] == "a40" and not ln["for_owner"], ln)
 ln = _router.code_rule(KEY, notice("n1b", who="example-owner", text="commented: why this?"), KEY, cx, [])
-check("2a3: …but Oliver's own notice (his login as the sender) stays with the item's keeper", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-main", ln)
+check("2a3: …but Oliver's own notice (his login as the sender) is a person's message too: the gate passes it to the builder, not to a front agent (it needs nothing of Oliver)", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-x", ln)
 ln = _router.code_rule(KEY, notice("n2", head="osprey-x/fewer-front-wakes"), KEY, cx, [])
 check("2b: a notice whose PR head branch is the builder's (<builder>/<topic>) passes to the builder, with the branch in the reason", ln and ln["rule"] == "anchor-builder" and ln["ruling"] == "passed"
       and ln["target"] == "osprey-x" and ln["item"] == "a40" and not ln["for_owner"] and "osprey-x/fewer-front-wakes" in ln["reason"], ln)
 for what, head in (("a person's branch", "oliver/topic"), ("a front agent's branch", "osprey-main/topic"), ("the main branch", "main"), ("a subagent's worktree branch", "worktree-agent-ab12cd"),
                    ("no slash", "osprey-x"), ("the builder's name as a longer word", "osprey-xray/topic")):
     ln = _router.code_rule(KEY, notice("n3", head=head, who="example-owner", text="commented: why this?"), KEY, cx, [])
-    check(f"2c negative: {what} ({head}) is not anchor-builder's: Oliver's own notice on it goes to the item's keeper", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-main", ln)
+    check(f"2c negative: {what} ({head}) is not anchor-builder's: Oliver's own notice on it goes to the builder by the gate", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-x", ln)
     ln = _router.code_rule(KEY, notice("n3c", head=head), KEY, cx, [])
     check("…a CI notice on it is not anchor-builder's, but anchor-ci passes it to the builder", ln and ln["rule"] == "anchor-ci" and ln["target"] == "osprey-x", ln)
 ln = _router.code_rule(KEY, notice("n4", head="osprey-x/topic", text="[for Oliver] he commented: do it this way"), KEY, cx, [])
@@ -325,12 +325,12 @@ for what, extra in (("an etype ci_failed", {"etype": "ci_failed"}), ("an etype c
     ln = _router.code_rule(KEY, notice("j4", **extra), KEY, cx, [])
     check(f"2m: the marker: {what} → anchor-ci", ln and ln["rule"] == "anchor-ci" and ln["target"] == "osprey-x", ln)
 ln = _router.code_rule(KEY, notice("j5", etype="comment"), KEY, cx, [])
-check("2n negative: a comment by a user whose login is CI is a person's notice: not anchor-ci's but anchor-item's (build-side, to the builder)", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-x", ln)
-for what, extra in (("a CI result with a comment joined to it", {"etype": "ci_failed+comment", "who": "kim, CI"}), ("a CI result joined to an unclassified event", {"etype": "ci_failed+other"})):
+check("2n negative: a comment by a user whose login is CI is a person's notice: not anchor-ci's but the gate's (build-side, to the builder)", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-x", ln)
+for what, extra, want in (("a CI result with a comment joined to it", {"etype": "ci_failed+comment", "who": "kim, CI"}, ("gate-person", "osprey-x")), ("a CI result joined to an unclassified event", {"etype": "ci_failed+other"}, ("anchor-item", "osprey-main"))):
     ln = _router.code_rule(KEY, notice("j5b", **extra), KEY, cx, [])
-    check(f"2n negative: {what} is neither anchor-ci's nor on the build-side whitelist: it stays with the item's keeper", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-main", ln)
+    check(f"2n negative: {what} is neither anchor-ci's nor on the build-side whitelist: {'the gate passes it to the builder' if want[0] == 'gate-person' else 'the gate cannot place it (no message in the burst): it stays with the item keeper'}", ln and (ln["rule"], ln["target"]) == want, ln)
 ln = _router.code_rule(KEY, notice("j6", who="kim", text="failed on 010ec0d: 1 of 5 checks — suites", etype="comment"), KEY, cx, [])
-check("2o negative: a notice from a person, not CI, on the same anchor goes by anchor-item", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-x", ln)
+check("2o negative: a notice from a person, not CI, on the same anchor goes by the gate (gate-person)", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-x", ln)
 ln = _router.code_rule(KEY, notice("j7", head="osprey-x/topic"), KEY, cx, [])
 check("2p: a CI notice on the builder's own branch is still anchor-builder's (it runs first)", ln and ln["rule"] == "anchor-builder" and ln["target"] == "osprey-x", ln)
 for what, text in (("[for Oliver]", "[for Oliver] failed on 010ec0d: 1 of 5 checks"), ("needs: decision", "failed on 010ec0d — needs: decision")):
@@ -358,11 +358,11 @@ def bs(nid, anchor, **kw): return notice(nid, who=kw.pop("who", "kim"), target=k
 for what, anc_, item_, want_t in (("an item with no mover stored", "github:example-owner/stackshot#4", "a40", "osprey-x"), ("an item the builder moves (its mover is stored)", "github:example-owner/stackshot#14", "a42", "osprey-x"),
                                   ("an item a front agent moves: the builder, not that front agent", "github:example-owner/stackshot#16", "a43", "osprey-x")):
     ln = _router.code_rule(KEY, bs("n1", anc_, target="for " + {"a42": "osprey-x", "a43": "osprey-front2"}.get(item_, "osprey-main")), KEY, cx, [])
-    check(f"2v: a comment by someone else on {what} goes to {want_t}, with {item_}", ln and (ln["rule"], ln["ruling"], ln["target"], ln["item"]) == ("anchor-item", "passed", want_t, item_), ln)
+    check(f"2v: a comment by someone else on {what} goes to {want_t}, with {item_}", ln and (ln["rule"], ln["ruling"], ln["target"], ln["item"]) == ("gate-person", "passed", want_t, item_), ln)
 for what, text, et in (("a merge", "merged it", "pr_merged"), ("a review", "approved", "review"), ("a review comment", "nit on line 3", "review_comment"), ("a push", "pushed 2 commits", "pr_synchronize"),
                        ("an issue closed", "closed it", "issue_closed"), ("a merge with a comment", "merged it, thanks", "pr_merged+comment")):
     ln = _router.code_rule(KEY, bs("n2", "github:example-owner/stackshot#4", text=text, etype=et), KEY, cx, [])
-    check(f"2w: {what} ({et}) on an item's anchor goes to the builder", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-x", ln)
+    check(f"2w: {what} ({et}) on an item's anchor goes to the builder (a review or comment is a person's message: the gate; a state change: anchor-item)", ln and ln["rule"] == ("gate-person" if et in ("review", "review_comment", "pr_merged+comment") else "anchor-item") and ln["target"] == "osprey-x", ln)
 check("2w2: a release on a repository's @releases anchor is the builder's too (the whitelist's anchor form)", _router.build_side_target(cx.index["a40"], bs("n3", "github:example-upstream/tool@releases", etype="", text="released 1.2"), KEY, cx) == "osprey-x")
 # the BLOCKER: the whitelist. @notifications reasons and anything unclassified (etype empty), a mixed or unclassified burst, a CI type: not build-side news, the keeper keeps it
 for what, who_ in (("review requested", "review requested"), ("mentioned you", "mentioned you"), ("assigned to you", "assigned to you"), ("a security alert", "security alert"),
@@ -372,21 +372,22 @@ for what, who_ in (("review requested", "review requested"), ("mentioned you", "
 for what, et in (("an unclassified burst (other)", "other"), ("a comment folded with an unclassified event", "comment+other"), ("a CI type", "ci_failed"), ("an unknown type", "star")):
     check(f"2w4 negative: {what} ({et}) is not build-side news", _router.build_side_target(cx.index["a40"], bs("v2x", "github:example-owner/stackshot#4", etype=et, who="kim"), KEY, cx) == "")
 ln = _router.code_rule(KEY, bs("v3", "github:example-owner/stackshot#12"), KEY, cx, [])
-check("2x negative: an item that waits on his decision (needs: decision): the keeper of record keeps the notice", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-main" and ln["item"] == "a7", ln)
+check("2x negative: an item that waits on his decision (needs: decision): the gate passes it to the front mover as a held line, for Oliver", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-main" and ln["item"] == "a7" and ln["for_owner"] is True, ln)
 ln = _router.code_rule(KEY, bs("v4", "github:example-owner/stackshot#13"), KEY, cx, [])
-check("…an item that is his to move (mover Oliver) too", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-main" and ln["item"] == "a41", ln)
+check("…an item that is his to move (mover Oliver) too", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-main" and ln["item"] == "a41" and ln["for_owner"] is True, ln)
 ln = _router.code_rule(KEY, bs("v5", "github:example-owner/stackshot#4", text="[for Oliver] can you look at this?"), KEY, cx, [])
-check("…a notice that says it is for Oliver too", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-main", ln)
+check("…a notice that says it is for Oliver too", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-main" and ln["for_owner"] is True, ln)
 ln = _router.code_rule(KEY, bs("v6", "github:example-owner/stackshot#4", text="needs: decision on the wording"), KEY, cx, [])
-check("…and one with needs: decision", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-main", ln)
+check("…and one with needs: decision", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-main" and ln["for_owner"] is True, ln)
 for what, text in (("an @-mention of his login", "@example-owner can you look?"), ("an @-mention of him", "@Oliver can you look?"), ("his name", "Oliver, is this what you meant?"), ("AE", "AE asked for this"),
                    ("a decision word (a weak signal)", "this is the decision we took"), ("a Japanese decision word", "決定をお願いします")):
     ln = _router.code_rule(KEY, bs("v6b", "github:example-owner/stackshot#4", text=text), KEY, cx, [])
-    check(f"2x2 negative: a comment that names him ({what}) stays with the keeper", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-main", ln)
+    asks_ = "?" in text      # the gate: names him and asks → a front agent as a held line; names him without asking (a weak signal) → the background agent, who raises it
+    check(f"2x2 negative: a comment that names him ({what}) goes by the gate: {'a held line for the front agent, for Oliver' if asks_ else 'the builder'}", ln and ln["rule"] == "gate-person" and ln["target"] == ("osprey-main" if asks_ else "osprey-x") and ln["for_owner"] is asks_, ln)
 ln = _router.code_rule(KEY, bs("v6c", "github:example-owner/stackshot#4", text="why this?", who="kim, example-owner"), KEY, cx, [])
-check("2x3 negative: a burst whose senders (comma-joined) include Oliver stays with the keeper", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-main", ln)
+check("2x3 negative: a burst whose senders (comma-joined) include Oliver is a person's question too: the gate passes it to the builder", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-x", ln)
 ln = _router.code_rule(KEY, bs("v6d", "github:example-owner/stackshot#4", text="why this?", who="kim, lee"), KEY, cx, [])
-check("…and a burst of other people goes to the builder", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-x", ln)
+check("…and a burst of other people goes to the builder", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-x", ln)
 had_gh = "github" in _cfg.CFG; had_ol = had_gh and "owner_login" in _cfg.CFG["github"]; was_ol = _cfg.CFG["github"].get("owner_login") if had_gh else None
 try:
     plain = _router._is_owner_name("Example-Owner") and not _router._is_owner_name("kim") and not _router._is_owner_name("")
@@ -403,7 +404,7 @@ check("2y negative: a notice the builder wrote itself is not passed back to it (
 ln = _router.code_rule(KEY, bs("v8", "github:example-owner/stackshot#4", ts=1000.0), KEY, cx, [bs("v8p", "github:example-owner/stackshot#4", ts=900.0)])
 check("2z: an identical build-side notice within the hour is dropped, not passed twice", ln and ln["rule"] == "repeat" and ln["ruling"] == "dropped", ln)
 ln = _router.code_rule(KEY, bs("v9", "github:example-owner/stackshot#4"), KEY, cx_nb, [])
-check("2z2 negative: a project with no builder passes it to the item's keeper as today", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-main", ln)
+check("2z2 negative: a project with no builder passes it to the contact front agent (the item's keeper) as a held line", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-main", ln)
 check("2z3 negative: an anchor that is not GitHub's (a Slack message is a person's, maybe Oliver's) stays with the keeper", _router.build_side_target(cx.index["a40"], bs("v10", "slack:C0000000001"), KEY, cx) == "")
 check("…and a GitHub one is the builder's", _router.build_side_target(cx.index["a40"], bs("v11", "github:example-owner/stackshot#4"), KEY, cx) == "osprey-x")
 # 2y: an anchor held by ANOTHER project's page (a keeper there) and scoped to one open item of this project, whose mover is this project's front agent: the notice's target
@@ -499,8 +500,8 @@ rows_ = burst(gev("kim", "first", "pr_synchronize"), gev("lee", "why this?", "co
 check("2i2: a comment, then a CI result, then the tick: the follow-up is one notice whose event type is the burst's, comment+ci_failed, and whose senders are both",
       len(rows_) == 2 and rows_[1].get("etype") == "comment+ci_failed" and rows_[1].get("who") == "lee, CI" and rows_[1]["text"].startswith("2 more, the last: failed on"), rows_)
 n_ = {**rows_[1], "kind": "anchor"}
-check("…the router does not read it as a CI notice (so anchor-ci does not take it) and it is not on the build-side whitelist: the item's keeper has it", not _router.is_ci_notice(n_) and not _router.is_build_news(n_)
-      and (lambda r: r and r["rule"] == "anchor-item" and r["target"] == "osprey-main")(_router.code_rule(KEY, n_, KEY, cx, [])), n_)
+check("…the router does not read it as a CI notice (so anchor-ci does not take it) and it is not on the build-side whitelist: it holds a person's comment, so the gate passes it to the builder", not _router.is_ci_notice(n_) and not _router.is_build_news(n_)
+      and (lambda r: r and r["rule"] == "gate-person" and r["target"] == "osprey-x")(_router.code_rule(KEY, n_, KEY, cx, [])), n_)
 rows_ = burst(gev("kim", "first", "pr_synchronize"), gev("lee", "@example-owner can you look?", "comment"), gev("CI", "failed on abc1234: 1 of 5 checks — suites", "ci_failed"))
 check("2i3: a burst whose earlier text names Oliver carries that text in the recorded gist, so the router checks the combined text", len(rows_) == 2 and rows_[1]["text"].startswith("2 more, earlier: @example-owner can you look? | the last: failed on")
       and rows_[1].get("etype") == "comment+ci_failed+other" and not _router.is_build_news({**rows_[1], "kind": "anchor"}), rows_)

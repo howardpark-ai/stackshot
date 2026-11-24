@@ -475,7 +475,7 @@ def release_after(gid: str, outcome: str, superseded_by: str, writer: str, reaso
 def anchor_release(project: str, n: dict[str, Any], by: str = "", only_watched: bool = False) -> list[str]:
     """A notice from an
     anchor scoped to a held open item releases its hold when the project's keeper passed or merged it (never when it dropped
-    it), or, in a project with no keeper, when it arrived. Only a notice newer than the item's last state change counts: one
+    it; a router ruling of a person's message in any way, a bare laugh or ack excepted, counts: `person_wake`), or, in a project with no keeper, when it arrived. Only a notice newer than the item's last state change counts: one
     that came before the park was in front of whoever parked it; and the release moves the clocks, so a notice releases once.
     The hold and its wake go, an open `after` stays (the item still waits on that). → the gids released.
     A routine event on the fleet's own PR (the turn rule's third build) is logged with no recipient and ruled
@@ -490,7 +490,7 @@ def anchor_release(project: str, n: dict[str, Any], by: str = "", only_watched: 
         at = float(n.get("ruled_at") or n.get("ts") or 0)
         how = f"was logged and ruled {n['ruling']} by {_routing.AUTO_RULER} (a routine event on the fleet's own pull request)"
     elif stew:
-        if n.get("ruling") not in ("passed", "merged") and not n.get("front_held") and not n.get("front_gate"):
+        if n.get("ruling") not in ("passed", "merged") and not n.get("front_held") and not n.get("front_gate") and not n.get("person_wake"):      # person_wake: a person's message (not a bare laugh or ack) wakes an item that waits on its anchor on any ruling
             return []
         at = float(n.get("ruled_at") or n.get("ts") or 0)
         how = f"was {'held for the front agent' if n.get('front_held') else 'logged, no turn of the front agent owed' if n.get('front_gate') else n['ruling']} by {_session_label(by) or _session_label(stew) or 'the project keeper'}"
