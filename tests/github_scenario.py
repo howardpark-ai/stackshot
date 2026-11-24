@@ -55,8 +55,8 @@ the user's notifications; `gh api /rate_limit` works for any accepted token. Wha
      /rate_limit does not start it (a person's login is not an App's).
   2. `me`, the login whose own activity is not news: the setting `[anchor_hub] github_login` for an App token; with no setting, none (the filter is off) and one log
      line says so; with a person's token, /user's login as before and the setting is not used.
-  3. The `@notifications` anchors: with an App token they are not read (no call, not even to name them), skipped with one log line for the whole run, and the receiver's
-     status stays healthy with a note that they need a user sign-in, never a failure; with a person's token they are read as before.
+  3. The `@notifications` anchors: GitHub answers the notifications API only to a user's sign-in, so with an App token they can never be read: they are not bound to the poll
+     (no call, not even to name them, no counted read, no log line), and the receiver's status stays healthy with no note about them on the card; with a person's token they are read as before.
   4. The start check is tried again: through start_receiver, a failed check (the network, a login not made yet, a refused credential: a Transient whatever the cause) is
      retried with a backoff until it passes, and the retry stops at the start.
 
@@ -406,14 +406,15 @@ def part_app_token():
         check("notifications: an App token's resolver names a notification anchor without a call (no 403 asked for)", not [c for c in calls if "/notifications" in c] and info["title"] == "repo6 notifications" and "unreadable" not in info, (calls, info))
         one_pass(); one_pass()
         check("notifications: two passes read the pull request and no notification list", not [c for c in calls if "/notifications" in c] and f"{RP}/pulls/26" in calls, calls)
-        check("notifications: skipped with ONE log line for the whole run, naming the count and the user sign-in", len(logged(r"notification anchors? not read")) == 1 and "7 notification anchors" in logged(r"not read")[0] and "user sign-in" in logged(r"not read")[0], records)
+        check("notifications: with an App token they are not bound: no log line about them at all (not the old 'not read' line naming the user sign-in)", not logged(r"notification anchors? not read") and not logged(r"user sign-in") and not logged(r"not read"), records)
         rc = h3.status["receivers"]["github"]
-        check("notifications: the receiver's status stays healthy (ok, not a failure) and carries the note that they need a user sign-in",
-              rc["ok"] is True and "7 notification anchors" in (rc["error"] or "") and "user sign-in" in rc["error"], rc)
-        h3.bindings = {PR: {"sess"}}; one_pass(); rc = h3.status["receivers"]["github"]
-        check("notifications: with none bound the note is gone (a healthy report with no note)", rc["ok"] is True and rc["error"] is None, rc)
+        check("notifications: the receiver's card reads clean: healthy, no note at all (nothing about a user sign-in)", rc["ok"] is True and rc["error"] is None, rc)
+        n_calls = len(calls); h3.bindings = {a: {"sess"} for a in NA}; one_pass(); rc = h3.status["receivers"]["github"]
+        check("notifications: with only notification anchors bound (an App token) a pass makes no call at all and the card still reads clean", len(calls) == n_calls and rc["ok"] is True and rc["error"] is None, (calls[n_calls:], rc))
         h3p = fresh([PR, notif(0)], "person"); one_pass()
         check("notifications: a person's token reads them as before, and no note", any("/notifications" in c for c in calls) and h3p.status["receivers"]["github"]["error"] is None and not logged(r"not read"), (calls, h3p.status["receivers"]))
+        h3q = fresh([PR, *NA], "person"); one_pass()
+        check("notifications: …all seven are bound with a person's token: each one's list is read in the pass", sorted(c for c in calls if "/notifications" in c) == sorted(f"/repos/example-owner/repo{i}/notifications?all=true&per_page=50" for i in range(7)), calls)
         hh = core.Hub(); hh.write_status = lambda: None; hh.health("x", True, "a note"); hh.health("y", True); hh.health("z", False, "boom"); hh.health("w", False)
         r = hh.status["receivers"]
         check("health: a healthy report keeps its note in `error`, no note stays None, a failure keeps its error or says 'check failed'", (r["x"]["error"], r["y"]["error"], r["z"]["error"], r["w"]["error"]) == ("a note", None, "boom", "check failed") and r["x"]["ok"] is True, r)
@@ -2252,7 +2253,7 @@ def _fake_gh(args, capture_output=True, text=True, timeout=30):
     a = [x for x in args[2:] if x != "-i" and x != "-H" and not x.startswith("If-None-Match")]; path = a[0]; cond = "-i" in args; calls.append(path); call_args.append(list(args))
     if path in FAILS: return types.SimpleNamespace(returncode=1, stdout="", stderr="gh: Server Error (HTTP 500)")
     if cond and ghcli["304"] and "-H" in args and path != "/user": return types.SimpleNamespace(returncode=0, stdout="HTTP/2.0 304 Not Modified\n\n", stderr="")     # a 304 only for a validator that was sent
-    body = json.dumps(GHD[path]); return types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")
+    body = json.dumps(GHD.get(path.split("?")[0] + "?list", []) if "/issues?" in path else GHD[path]); return types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")      # a repository's list of changed issues: what a test puts under `<repo>/issues?list`, else none changed
 class _Stop(Exception): pass
 def _no_sleep(s): raise _Stop()
 caught = []; _sub, _thr, _tim = ghr.subprocess, ghr.threading, ghr.time

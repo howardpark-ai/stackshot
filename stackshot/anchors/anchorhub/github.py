@@ -1,5 +1,6 @@
-"""anchorhub.github — GitHub through the gh CLI: issues and PRs (comments, state, CI), a repo's releases, a repo's notifications (a user's token only: an App token's are skipped and shown as needing a user sign-in)."""
-import json, os, re, subprocess, threading, time, zlib
+"""anchorhub.github — GitHub through the gh CLI: issues and PRs (comments, state, CI), a repo's releases, a repo's notifications (a user's token only: an App token's are not bound, so never read, counted or noted)."""
+import json, os, re, subprocess, threading, time
+from datetime import datetime, timezone
 from .core import Hub, Transient, _anc, _cfg, _events, _merges, _ts, guarded_loop, log, now_iso, now_iso_at
 from stackshot.core import ghbudget as _gb   # the host's one hourly ledger of GitHub calls, shared with the stackshot server (a locked file under <state>/github)
 
@@ -7,7 +8,10 @@ GHPOLL = 60   # s; conditional GETs — a 304 does not count against the API bud
 FIRST_PASS = 600   # s; how long the first pass after a start may take before the board counts the silence (announced with hub.hold, cleared by the pass's own check)
 BACKOFF = 600   # s; the wait after GitHub refuses a read for its rate limit (announced to the board with hub.hold, so it is not shown stale)
 COMMIT_DOWNTIME = 600   # s; a pull request last looked at longer ago than this (or never) was missed by the hub: a new head found then is stamped at its committer date, a new head found live at the time it was seen
-FINISHED_EVERY = 10   # a closed or merged anchor is looked at once in this many passes (staggered by anchor), not every pass
+LIST_OVERLAP = 60   # s; a repo's list of changed issues is asked from this long before the newest change it showed, so a change at the boundary is not missed (an anchor whose saved state already matches the list is not read again for it)
+LIST_MAX_AGE = 86400   # s; a repo's list position not brought up to date for longer than this is not trusted: the repo's finished anchors are read in full once, then the list is used again
+LIST_PER_PAGE = 100   # issues in a page of the list (GitHub's largest)
+LIST_PAGES = 30   # pages one list read may take; more is a change too large to page through: the position is dropped and the finished anchors are read in full once
 LATE_MERGE_S = _events.FLOOR_H * 3600   # s; an anchor first read on a pull request that merged this recently still writes the merge line (the event log's own window: older is no news)
 LATE_TRIES = 3   # a late merge line that cannot be written is tried again on the next pass this many times in all; then the anchor is seeded without it (each try is a counted read of the issue)
 LATE_SKEW = 120   # s; how far ahead of the hub's clock a merge time may be and still be read as now (GitHub's clock against this one); further ahead is a torn time and writes nothing
@@ -24,6 +28,11 @@ RETRY_FIRST = 4 * GHPOLL   # s; the wait after that, doubled by each further fai
 RETRY_MAX = 3600   # s
 GONE = re.compile(r"HTTP(?:/\d(?:\.\d)?)? 4(?:04|10)\b|Not Found|\bGone\b")   # what GitHub answers for a number with nothing under it, for good: 404, or 410 for a deleted issue (the answer to the question, not a failed look)
 APP_TOKEN = re.compile(r"Resource not accessible by integration", re.I)   # what GitHub answers an App's installation token for a call only a person's token may make
+class TooManyChanges(Exception): """A repo's list of changed issues runs past LIST_PAGES pages."""
+def zulu(t: float) -> str: return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")      # GitHub's time form (a `since` parameter, an `updated_at`)
+def finished(st) -> bool:
+    """A saved state of a closed issue or pull request (merged or not) whose kind is known: what can still happen to it is a late comment or a reopening, and either moves the repo's list of changed issues."""
+    return isinstance(st, dict) and st.get("state") == "closed" and "merged" in st
 def run(hub: Hub):
     etags: dict[str, str] = {}
     # the ETags survive a restart, so the first pass after one is answered 304 (free) for every anchor that did not change, not a full 200 (counted)
@@ -34,7 +43,18 @@ def run(hub: Hub):
     touched: list[str] = []                                # the conditional paths read for the anchor being looked at
     committed: dict[str, dict[str, str]] = {}              # anchor id → {path: ETag} as of its last finished look: what is saved
     resolved: dict[str, dict] = {}                         # anchor id → {path, etag, info}: the board's label, answered from here on a 304
-    looked: dict[str, float] = {}                          # anchor id → when the poll last finished with it (a finished anchor's turn that is skipped counts). Saved with the ETags and dropped with them when the login changes: an anchor that is not here has not been read under this login, and is what a catch-up still has to do
+    looked: dict[str, float] = {}                          # anchor id → when the poll last finished with it (a finished anchor that is skipped counts). Saved with the ETags and dropped with them when the login changes: an anchor that is not here has not been read under this login, and is what a catch-up still has to do
+    # A finished anchor (a closed issue or pull request) is not read one by one. Each pass asks each repo that has one for the issues and pull requests changed since the last pass (one list read,
+    # whatever the number of anchors), and reads in full only the finished anchors that list shows changed: a comment, a reopening, a merge. A token that GitHub renews (an App's installation token
+    # lasts an hour) makes every ETag useless, and the list is the one read of a repo that does not depend on one. `cursors` is that position, saved with the rest:
+    # repo (lower case) → {"since": the `updated_at` of the newest change the list showed, "at": when the hub last had the list answered, "owed": the anchors still to be read in full because the list showed them changed
+    # (or, after a fallback, because nothing is known of them since the position was made), "catch": that fallback is under way (its reads are paced like a catch-up's)}. A repo with no position, or one older
+    # than LIST_MAX_AGE, gets the fallback: the position is made first (the newest change GitHub shows), then every finished anchor of the repo is read in full once; after that the list is used.
+    cursors: dict[str, dict] = {}
+    list_tags: dict[str, dict[str, str]] = {}              # repo → the ETag of the list's first page (memory only: a list that answers 304 is the one the position already took in)
+    plan: dict[str, dict] = {}                             # repo → this pass's list: {"ok": it was read (or no list is needed), "items": {issue number: what the list showed}}
+    pass_ids: dict[str, dict[str, str]] = {}               # repo → {issue number: the bound anchor id}, for the issue and pull request anchors of this pass
+    listed = [False]                                       # a list read was answered in this pass
     # GitHub's numeric repository ID (repository.id) survives a transfer to another owner; the anchor's owner/name does not. IDs are learnt from the
     # responses that carry one, by the repo name the anchor uses, and put on every event as repo_id (Event.repo_id, matched by [pilot] own_repos):
     # a notification thread's `repository`, a pull request's `base.repo`, an issue's `repository` when GitHub includes it. A release answer has none
@@ -190,6 +210,15 @@ def run(hub: Hub):
                 if isinstance(v, int) and not isinstance(v, bool) and v > 0: repo_ids[str(k).lower()] = v
         except Exception as e:
             log.warning("github: saved ETags not used (%s)", str(e)[:80]); committed.clear(); etags.clear(); resolved.clear(); looked.clear()
+    # the repos' list positions do not depend on the login (the saved state they go with is kept for any login): an entry that does not read as expected is dropped, and its repo gets the fallback
+    try:
+        for r, ent in (sv.get("lists") or {}).items():
+            ow = ent.get("owed", []) if isinstance(ent, dict) else None
+            if (isinstance(ow, list) and all(isinstance(x, str) for x in ow) and isinstance(ent.get("since"), str) and _ts(ent["since"]) > 0
+                    and isinstance(ent.get("at"), (int, float)) and not isinstance(ent.get("at"), bool) and ent["at"] >= 0):
+                cursors[str(r).lower()] = {"since": ent["since"], "at": float(ent["at"]), "owed": {_anc.anchor_id(x) or x for x in ow}, "catch": bool(ent.get("catch"))}
+    except Exception as e:
+        log.warning("github: saved list positions not used (%s)", str(e)[:80]); cursors.clear()
     def settle(a_id):
         """The look at `a_id` is finished: the ETags it read (and still holds: a read that failed after its 200 dropped its ETag) are what is saved for it."""
         per = committed.setdefault(a_id, {})
@@ -201,6 +230,7 @@ def run(hub: Hub):
         """The saved read position (each list() / dict() below is one step under the GIL, the poll thread goes on meanwhile). Only watched anchors keep ETags and resolutions."""
         with hub.lock: bound = {_anc.anchor_id(k) or k for k in hub.bindings if k.startswith("github:")}
         return {"state": state, "ci": ci_st, "me": me, "repo_ids": dict(repo_ids),
+                "lists": {r: {"since": e["since"], "at": e["at"], "owed": sorted(e["owed"]), "catch": e["catch"]} for r, e in list(cursors.items())},
                 "looked": {a: t for a, t in list(looked.items()) if (_anc.anchor_id(a) or a) in bound},
                 "etags": {a: dict(per) for a, per in list(committed.items()) if (_anc.anchor_id(a) or a) in bound and per},
                 "resolved": {a: dict(e) for a, e in list(resolved.items()) if (_anc.anchor_id(a) or a) in bound}}
@@ -395,19 +425,78 @@ def run(hub: Hub):
         """What is saved of an issue or pull request between looks (`merged` and `pr`, kept to tell a finished anchor from a closed pull request that can still be reopened and merged)."""
         pr = i.get("pull_request")
         return {"state": i["state"], "comments": i["comments"], "updated": i["updated_at"], "pr": bool(pr), "merged": bool((pr or {}).get("merged_at"))}
-    def how(a_id, passno):
-        """how an anchor is looked at in this pass → "skip" | "issue" | "full". A FINISHED anchor — a merged pull request or a closed issue (what can still happen
-        to it is a late comment, or a closed issue's reopening) — is looked at (CI, issue, comments) once in FINISHED_EVERY passes, staggered
-        by anchor so they do not all fall on one pass: a reopening or a late comment is seen within that many passes (10 minutes), and a restart does not read all
-        of them at once. A closed pull request that is not merged is not finished (it can be reopened and merged inside the window, which must be a pr_merged),
-        nor is an anchor with no saved state (read now and seeded). One saved before `merged` was kept (state without it) is read as an issue only, once, to learn it."""
+    def owes(a_id):
+        """Whether a list may owe the anchor a full read: its saved state is of a finished anchor, or there is none (an open anchor is read every pass anyway)."""
+        st = state.get(a_id)
+        return st is None or finished(st)
+    def list_read(repo, key, since):
+        """The issues and pull requests of `repo` changed since `since` (less LIST_OVERLAP), the oldest change first, paged through gh() → ({number: issue}, the ETags of the first page); the issues are None when the
+        first page answers 304 (the list is what the last whole read showed). The first page is read conditionally, the others are not (a 304 of the first says nothing of a later page when the list ran on)."""
+        q = f"/repos/{repo}/issues?state=all&since={zulu(_ts(since) - LIST_OVERLAP)}&sort=updated&direction=asc&per_page={LIST_PER_PAGE}"
+        tags = dict(list_tags.get(key) or {}); out: dict[int, dict] = {}
+        for page in range(1, LIST_PAGES + 1):
+            got = gh(q if page == 1 else f"{q}&page={page}", conditional=page == 1, tags=tags if page == 1 else None)
+            if got is None: return None, tags
+            if not isinstance(got, list): raise ValueError("the list of issues was not answered as a list")
+            for it in got:
+                if isinstance(it, dict) and isinstance(it.get("number"), int): out[it["number"]] = it
+            if len(got) < LIST_PER_PAGE: return out, tags
+        raise TooManyChanges(f"more than {LIST_PAGES * LIST_PER_PAGE} issues changed")
+    def list_plan(repo):
+        """The list of `repo` for this pass, read once (the first finished anchor of the repo that is looked at asks for it) → {"ok", "items"}. With a position younger than LIST_MAX_AGE it is one list read
+        from the position on, and the anchors the list shows (those bound) are owed a full read. With none, or an old one, it is the fallback: the position is made from the newest change GitHub shows (before any
+        anchor is read, so a read of an anchor is never older than the position), and every issue and pull request anchor of the repo that may be finished is owed a full read, paced like a catch-up. A read that
+        fails (not an answer GitHub could give: a 5xx, a refusal, the cap) leaves the position as it was and the repo's finished anchors unread, not marked read: the next pass asks again."""
+        key = repo.lower(); p = plan.get(key)
+        if p is not None: return p
+        plan[key] = p = {"ok": False, "items": {}}
+        now = time.time(); cur = cursors.get(key); mine = pass_ids.get(key, {})
+        try:
+            if cur is None or now - cur["at"] > LIST_MAX_AGE:
+                top = gh(f"/repos/{repo}/issues?state=all&sort=updated&direction=desc&per_page=1")
+                if not isinstance(top, list): raise ValueError("the newest issue was not answered as a list")
+                since = str(top[0].get("updated_at") or "") if top and isinstance(top[0], dict) else ""
+                cursors[key] = {"since": since if _ts(since) > 0 else zulu(now), "at": now, "owed": {a for a in mine.values() if owes(a)}, "catch": True}
+                list_tags.pop(key, None)
+            else:
+                items, tags = list_read(repo, key, cur["since"])
+                owed, since = set(cur["owed"]), cur["since"]
+                if items is not None:
+                    p["items"] = {str(n): it for n, it in items.items()}
+                    owed |= {a for n, a in mine.items() if n in p["items"] and owes(a)}
+                    newest = max((it.get("updated_at") for it in items.values()), key=lambda z: _ts(z) if isinstance(z, str) else 0.0, default=None)
+                    if isinstance(newest, str) and _ts(newest) > _ts(since): since = newest
+                cursors[key] = {"since": since, "at": now, "owed": owed & set(mine.values()), "catch": cur["catch"]}      # one replacement: the minute's snapshot sees it before or after, never half of it
+                list_tags[key] = tags
+            p["ok"] = True; listed[0] = True
+        except Exception as e:
+            log.warning("github %s: issue list: %s", repo, str(e)[:120]); list_tags.pop(key, None)
+            if isinstance(e, TooManyChanges): cursors.pop(key, None)      # too much to page through: the fallback is cheaper, and asked for at the next pass
+            if "rate limit" in str(e).lower(): hub.hold("github", BACKOFF); time.sleep(BACKOFF)
+        return p
+    def catching(a_id):
+        """Whether the anchor's read is the fallback's (a finished anchor of a repo with no usable list position, or one still owed its read by the fallback): paced like a catch-up's."""
+        if a_id.endswith("@releases") or a_id.endswith("@notifications"): return False
+        e = cursors.get(split(a_id)[0].lower())
+        if e is None or time.time() - e["at"] > LIST_MAX_AGE: return finished(state.get(a_id))
+        return bool(e["catch"] and a_id in e["owed"])
+    def how(a_id):
+        """how an anchor is looked at in this pass → "skip" | "issue" | "full" | "wait". A FINISHED anchor — a closed issue or pull request, merged or not (what can still happen to it is a late
+        comment, a reopening, a merge after one) — is read (CI, issue, comments) only when its repo's list shows it changed (its saved state differs from what the list shows of it) or a read of it is
+        still owed (list_plan); otherwise it costs nothing. An anchor not in `looked` (a catch-up: the first start, a change of login) is read, never skipped: the pacing in one_pass lets it through as a read to be paid for,
+        and a skip would put it in `looked` unread. "wait": the repo's list could not be read, so nothing is known of the anchor: not read, not marked read, asked for again next pass. An anchor with no saved state is read now
+        and seeded, and one saved before `merged` was kept (state without it) is read as an issue only, once, to learn it."""
         st = state.get(_anc.anchor_id(a_id) or a_id) or {}
         if st.get("state") != "closed": return "full"
         if "merged" not in st: return "issue"
-        if not (st["merged"] or not st["pr"]): return "full"
-        # An anchor not in `looked` (a catch-up: the first start, a change of login) is read, never skipped: the pacing in one_pass lets it through as a read to be paid for, and a skip would put it in `looked` unread, so its turn
-        # (within FINISHED_EVERY passes) would read it in full, unpaced, past the allowance.
-        return "full" if a_id not in looked or (passno + zlib.crc32(a_id.encode())) % FINISHED_EVERY == 0 else "skip"
+        repo, n = split(a_id); p = list_plan(repo)
+        if a_id not in looked: return "full"
+        if not p["ok"]: return "wait"
+        it = p["items"].get(n)
+        if it is not None:
+            try: return "skip" if snap(it) == st else "full"
+            except Exception: return "full"      # a list entry that does not say what the saved state needs: the anchor is read itself
+        return "full" if a_id in cursors[repo.lower()]["owed"] else "skip"
     late_failed: dict[str, int] = {}                  # anchor id → tries of its late merge line that failed (memory only: a restart gives a few more, no more)
     def logged_merge(repo, n):
         """Which logs hold this pull request's merge already (written by another anchor on it, the repository's notifications, an earlier try or start)? → (merge log, event log). Each is read from its start: a merge found late is rare.
@@ -487,11 +576,9 @@ def run(hub: Hub):
             etags.pop(f"/repos/{repo}/issues/{n}", None)         # a read that failed after the issue's 200 (the comments, refused by the cap or GitHub) is made again next pass, not answered 304
             if "rate limit" in str(e).lower() or "403" in str(e): hub.hold("github", BACKOFF); time.sleep(BACKOFF)
     hub.hold("github", FIRST_PASS)                         # the first pass after a start reads every anchor: the board counts no age until it ends or this time is up
-    hub.gh_state = {"ci": ci_st, "state": state, "etags": etags, "news": thread_news, "committed": committed, "resolved": resolved, "looked": looked}      # for inspection and tests
+    hub.gh_state = {"ci": ci_st, "state": state, "etags": etags, "news": thread_news, "committed": committed, "resolved": resolved, "looked": looked, "lists": cursors}      # for inspection and tests
     capped_now = [False]                                                # the cap warning is logged when the state changes, not every pass
     catching_now = [False]                                              # the catch-up is logged when it begins and when it ends, not every pass
-    notif_said = [False]                                                # the skipped notification anchors are logged once for the run, not every pass
-    passes = [0]                                                        # polls made since the receiver started (the finished anchors' turn is counted by it)
     retry: dict[str, tuple[int, float]] = {}                            # anchor id → (looks that failed in a row, when it is tried next): memory only, a restart gives each a few more tries
     hub.gh_state["retry"] = retry
     def fails(a_id): return retry.get(a_id, (0, 0.0))[0]
@@ -499,34 +586,41 @@ def run(hub: Hub):
         """One poll over every anchor. A CATCH-UP (a first start, a change of login, anchors bound for the first time: every anchor not in `looked`) reads anchors in turn, the ones never read
         first, and starts another only while `paced()` allows, so it never takes more than CATCHUP_SHARE of the hour's reads; the rest wait for the next pass, and a catch-up the hour's reads cannot yet
         finish is shown on the card as healthy, with a note of how far it is. The anchors already read are looked at in every pass, the one read longest ago first, whatever the catch-up has left."""
-        with hub.lock: ids = [k for k in hub.bindings if k.startswith("github:")]
+        # GitHub answers the user's notifications API only to a person's sign-in (an App's installation token is refused it with a 403, always), so with an App token a repo's `@notifications` anchor can never be read: it is
+        # not bound here, so it costs no call, no count and no note on the card. A person's token binds them as ever.
+        with hub.lock: ids = [k for k in hub.bindings if k.startswith("github:") and not (app_token and k.endswith("@notifications"))]
         # never read first (as bound), then by when each was last read, the longest ago first; within each, an anchor whose looks keep failing goes behind the ones that do not (sorted() is stable: the order bound is kept)
         ids = sorted((a for a in ids if a not in looked), key=fails) + sorted((a for a in ids if a in looked), key=lambda a: (fails(a), looked[a]))
-        skipped = False; user_only = 0; paced_out = False           # user_only: the notification anchors an App token cannot read (counted, not asked); paced_out: no anchor not yet read is started in this pass
+        pass_ids.clear(); plan.clear(); listed[0] = False
+        for a_id in ids:
+            if not (a_id.endswith("@releases") or a_id.endswith("@notifications")): repo, n = split(a_id); pass_ids.setdefault(repo.lower(), {})[n] = a_id
+        skipped = False; paced_out = False                          # paced_out: no anchor not yet read is started in this pass
         t0 = time.time(); bad: list[str] = []; answered = False     # bad: the anchors whose look failed in this pass; answered: a look in it that GitHub answered (a failure of every look is an outage, and no anchor's)
         for a_id in ids:
             if held() > 0:                                          # the hourly read cap is spent: the rest of this pass reads nothing; the next pass looks again
                 skipped = True; break
             adopt(state, a_id); adopt(ci_st, a_id); adopt(looked, a_id)           # before release, notifications, ci and the issue read look at either
             if retry.get(a_id, (0, 0.0))[1] > t0: continue      # its looks keep failing: not before its time (it reads as unread, or as it was, meanwhile)
-            if a_id not in looked and (paced_out or paced() > 0):   # not read yet, and the catch-up has had its share of the hour: it waits for room, and the anchors already read go on
+            if (a_id not in looked or catching(a_id)) and (paced_out or paced() > 0):   # not read yet (or a finished anchor the fallback has still to read), and the catch-up has had its share of the hour: it waits for room, and the anchors already read go on
                 paced_out = True; continue
             touched.clear(); failed[0] = False; asked = True
             if a_id.endswith("@releases"): release(a_id)
-            elif a_id.endswith("@notifications"):
-                if app_token: user_only += 1; asked = False           # the user's notifications API is closed to an App token (403): skipped, and said once below
-                else: notifications(a_id)                             # CI: GitHub's own ci_activity
-            elif (mode := how(a_id, passes[0])) != "skip": watch(a_id, with_ci=mode == "full")
+            elif a_id.endswith("@notifications"): notifications(a_id)      # CI: GitHub's own ci_activity
+            elif (mode := how(a_id)) == "wait": continue          # its repo's list could not be read: nothing is known of it, so it is not read and not marked read
+            elif mode != "skip": watch(a_id, with_ci=mode == "full")
             else: asked = False
             settle(a_id)
             if failed[0]: bad.append(a_id)                      # a look that failed is not a read: the anchor stays unread (or keeps its old turn) and is tried again
             else:
                 looked[a_id] = time.time(); retry.pop(a_id, None); answered = answered or asked
-        for a_id in bad:                                        # every failed look is counted (an anchor that failed goes behind those that did not); the wait between tries starts only in a pass in which GitHub answered another look: if it answered none, it may be down, and the anchors are tried again next pass
+                if not (a_id.endswith("@releases") or a_id.endswith("@notifications")) and (ent := cursors.get(split(a_id)[0].lower())):
+                    ent["owed"].discard(a_id)                   # read in full (or shown unchanged by the list): no longer owed
+                    if not ent["owed"]: ent["catch"] = False
+        answered = answered or listed[0]                        # a list that GitHub answered is a look too
+        for a_id in bad:                                       # every failed look is counted (an anchor that failed goes behind those that did not); the wait between tries starts only in a pass in which GitHub answered another look: if it answered none, it may be down, and the anchors are tried again next pass
             n = fails(a_id) + 1; retry[a_id] = (n, t0 + min(RETRY_MAX, RETRY_FIRST * 2 ** (n - RETRY_AFTER)) if answered and n >= RETRY_AFTER else 0.0)
         for a_id in [a for a in retry if a not in ids]: del retry[a_id]      # no longer bound
-        passes[0] += 1
-        if skipped:                                                 # a pass the cap cut short is not a finished check
+        if skipped:                                                # a pass the cap cut short is not a finished check
             msg = f"reads held by the hourly cap, resume in {_gb.held_words(held())}"
             if not capped_now[0]: log.warning("github: %s; this pass is cut short", msg)
             capped_now[0] = True; hub.health("github", False, msg)
@@ -534,10 +628,6 @@ def run(hub: Hub):
             if capped_now[0]: log.info("github: the hourly cap on reads has room again; polling resumes")
             capped_now[0] = False
             with hub.lock: hub.status.setdefault("github", {})["last_pass"] = time.time()
-            # The skipped anchors are no failure and no error count: the receiver is healthy, and its status line (the `error` field, which a healthy report leaves
-            # as a note: the card shows it on hover) says they wait for a user's sign-in. The log says it once.
-            user_note = f"{user_only} notification anchor{'s' if user_only != 1 else ''} not read: they need a user sign-in (an App token cannot read them)" if user_only else None
-            if user_note and not notif_said[0]: notif_said[0] = True; log.info("github: %s", user_note)
             # A catch-up is no failure either: the anchors it has not reached wait for the hour's reads, and the note says how far it is (it is gone once every anchor has been read).
             # An anchor whose looks keep failing is no part of it (it would read "n-1 of n" for good): it is said apart, as tried less often.
             unread = [a for a in ids if a not in looked]; stuck = [a for a in ids if retry.get(a, (0, 0.0))[1] > 0]; open_ = [a for a in unread if a not in stuck]
@@ -546,7 +636,7 @@ def run(hub: Hub):
             if catch_note and not catching_now[0]: log.info("github: %s; it keeps the hour's reads under %d%% of the budget and goes on as they expire", catch_note, round(CATCHUP_SHARE * 100))
             elif not catch_note and catching_now[0]: log.info("github: caught up: every anchor that can be read has been read")
             catching_now[0] = bool(catch_note)
-            hub.health("github", True, "; ".join(n for n in (catch_note, stuck_note, user_note) if n) or None)      # a finished poll pass is GitHub's real check
+            hub.health("github", True, "; ".join(n for n in (catch_note, stuck_note) if n) or None)      # a finished poll pass is GitHub's real check
     def loop():
         # A pass that raises (a status file that could not be written, a bug) is logged and the next pass runs: the poll thread never ends on one.
         # The pause is on the dot: every poll fires at :00 s (conditional GETs: unchanged issues cost nothing); time.sleep is looked up at each call.

@@ -3539,8 +3539,9 @@ wait_push(0)
 G48 = {}; caught48 = []
 def _gh48(args, capture_output=True, text=True, timeout=30):
     a = [x for x in args[2:] if x != "-i"]; path = a[0]; cond = "-i" in args
-    if path not in G48: return _types.SimpleNamespace(returncode=1, stdout="", stderr="gh: Not Found (HTTP 404)")
-    body = json.dumps(G48[path])
+    if "/issues?" in path: body = json.dumps(G48.get(path.split("?")[0] + "?list", []))      # a repository's list of changed issues: whatever the test put under `<repo>/issues?list`
+    elif path not in G48: return _types.SimpleNamespace(returncode=1, stdout="", stderr="gh: Not Found (HTTP 404)")
+    else: body = json.dumps(G48[path])
     return _types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")
 bref = lambda n: f"board#{n}"      # a board id as a body writes it, built here so a fixture number is never a literal board id
 class _Stop48(Exception): pass
@@ -3588,11 +3589,12 @@ try:
           {(e.anchor, e.etype): (e.meta or {}).get("refs") for e in evs1 + evs2 if e.etype in ("pr_merged", "comment", "review")} == {(AH48, "pr_merged"): [bref(9233)], (A48, "pr_merged"): [bref(9235)], (A48, "comment"): None, (AH48, "review"): None}, [(e.anchor, e.etype, e.meta) for e in evs1 + evs2])
     check("receiver: a later event on the same repo keeps the ID it learnt", {e.repo_id for e in evs2} == {ID_A48}, [e.repo_id for e in evs2])
     G48[f"{R}/issues/116"] = {**G48[f"{R}/issues/116"], "state": "open", "updated_at": "2026-03-05T04:00:00Z", "pull_request": {"merged_at": None}}
-    for _k in range(10):                                           # a merged PR is looked at once in 10 passes, so a reopen is seen within 10
+    G48[f"{R}/issues?list"] = [{"number": 116, "state": "open", "comments": 0, "updated_at": "2026-03-05T04:00:00Z", "pull_request": {"merged_at": None}}]      # the repository's list shows the reopening
+    for _k in range(10):                                           # a merged PR is read when its repository's list shows it changed (the first look at the list is the fallback, which reads it), so a reopen is seen in the first pass
         pass48()
         if evs48: break
     got3 = [(e.anchor, e.etype) for e in evs48]; evs48.clear()
-    check("receiver: a reopen is tagged pr_reopened (delivered), seen within 10 passes", got3 == [(A48, "pr_reopened")], got3)
+    check("receiver: a reopen is tagged pr_reopened (delivered), seen when the repository's list shows it", got3 == [(A48, "pr_reopened")], got3)
 finally:
     ghr.subprocess, ghr.threading, ghr.time = _gsub, _gthr, _gtime
 # the receiver's real events through the pilot hub: the merges and the CI pass logged, the rest delivered

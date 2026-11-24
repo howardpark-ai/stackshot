@@ -42,7 +42,7 @@ not used (GitHub answers an ETag only for the token that was given it), and neit
 the poll starts such an anchor only while the hour's ledger (the server's reads in it too) holds fewer than two thirds of `read_budget` (`CATCHUP_SHARE` in `anchorhub/github.py`);
 the check is made before each anchor, so one pass can pass the line by what one anchor costs, a handful of reads, and never by more. The rest wait for the next pass, anchors never read first,
 and go on as the hour's oldest reads expire; at the same time the anchors already read are looked at in every pass, the one read longest ago first, so a long catch-up delays no news on them. A merged pull request or a closed issue
-that has not been read under this login is no exception: it is read in full and paced like the others (its usual once-in-ten-passes turn applies only after that first read). The catch-up itself therefore never holds more than the line
+that has not been read under this login is no exception: it is read in full and paced like the others (the list applies only after that first read). The catch-up itself therefore never holds more than the line
 (give or take one anchor's reads), and a third of the budget stays for the server's own reads and for changes found on the anchors already read, which are not paced. That is not a failure: the `github` card stays healthy, and its hover note says how far the catch-up is
 (`catching up: 230 of 489 anchors read`), until every anchor has been read and the note goes. The card reads `error` only for a real failure: the cap itself spent (by the server's reads, say),
 not our own pacing; a credential GitHub refuses, which keeps the receiver off and retried. A look that fails (GitHub's error, a refusal, the cap spent in the middle of it, a read of the pull request or of its check runs that fails) is not counted as read:
@@ -51,10 +51,16 @@ and after the third failure in a row is tried at growing intervals (4 minutes, d
 and they leave the `catching up` count. A pass in which every look fails is no anchor's failure (GitHub or the network may be down): none of them is put on the longer interval. The tries are kept in memory only: a restart gives each a few more. The start-up rescan's reads of each anchor's board label are not paced. An anchor's ETags are not used either when the saved state has no entry for the anchor (or, for an issue or pull request, no CI state): its first look is a
 full read that seeds it. The start-up rescan names an anchor from its saved resolution (a conditional read of its issue, a `304`), and does not ask one that is
 closed or merged at all, so the board's label of a finished anchor (its title, its last-activity age) can stay as it was until the next restart after the
-anchor changes; the poll drops that saved label when it sees the anchor change. A finished anchor, a merged pull request or a closed issue (its CI, issue and
-comments), is read once in 10 passes (10 minutes), staggered by anchor so they do not fall on one pass, instead of every pass: a reopening or a late comment is
-seen within 10 passes. A closed pull request that is not merged is not finished (it can be reopened and merged, which must be reported): it is read every pass,
-as a `304`; a merge that follows a reopening between two looks is reported as a merge. A restart with the ETags saved costs one counted read (GET /user) and
+anchor changes; the poll drops that saved label when it sees the anchor change. A finished anchor, a closed issue or pull request (merged or not), is not read one by one.
+GitHub ties an ETag to the token it was given, and an App's installation token is renewed every hour, so after each renewal every conditional read of a finished anchor (its CI, issue and
+comments: three reads) would be a full, counted `200` again. Instead each pass asks each repository that has a finished anchor for the issues and pull requests changed since the last pass:
+one list read (`GET /repos/<repo>/issues?state=all&since=…&sort=updated&direction=asc&per_page=100`, paged when more than 100 changed; the first page is conditional, so a repository that did not change
+costs nothing), whatever the number of anchors. A finished anchor the list does not show costs no read; one it shows with a state, comment count or `updated_at` that differs from the saved one (a late comment,
+a reopening, a merge after one) is read in full in that pass (CI, issue, comments), so a reopened pull request is watched in every pass again and a merge that follows a reopening between two looks is reported as a merge.
+The repository's position (the newest `updated_at` the list showed, asked from 60 s before it, so a change at the boundary is not missed) is saved in `cursors.json` with the anchors still owed a full read, so a list shown changed
+and a read that then failed is not lost to a restart. A list read that fails leaves the position where it was and the repository's finished anchors unread and not marked read; the next pass asks again. A repository with no
+position (a file from before this, a first start), or one not brought up to date for a day, gets a fallback once: the position is made from the newest change GitHub shows, then each finished anchor of the repository is read in
+full once (paced like a catch-up), and from then on the list is used; a change too large to page through (more than 3,000 issues) drops the position the same way. A restart with the ETags saved costs one counted read (GET /user) and
 the reads of what changed; the first start with this code over a file from before it (state but no ETags, and no record of which anchors are merged pull
 requests) runs the rescan in full once, reads the open anchors in full, and reads each closed one once as an issue only (no CI), which learns whether it is finished.
 The inbound half (phase 3): with the mirror on, a reader thread polls the repo's comments every `[github] poll_seconds` (60 by
