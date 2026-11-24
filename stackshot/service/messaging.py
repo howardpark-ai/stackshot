@@ -584,7 +584,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
     when it passes it to a background agent; to a front agent (no mark on its first line) it goes through the front gate (telling.front_fyi): held for the agent's next turn, or, when its
     hook cannot fetch held lines, not passed on; it starts no turn either way. A script's fyi (`origin` set) takes the same way: the held line names it as a script on that machine (a script's message cannot be
     answered), and where a session gets the reply "not passed on" a script gets a refusal (HTTP 400), since it reads the status and not the sentence. The sender being the person the instance works for, or the text carrying the mark or needs: decision, makes it an ordinary message (to a front agent: delivered or
-    refused exactly as without the flag, a script's included). `question`: a front agent marks a message that asks the person it writes to something; the log row carries the mark, and only a reply to such a row is an answer (asked_by). It is
+    refused exactly as without the flag, a script's included). `question`: a front agent marks a message that asks the session it writes to something; the log row carries the mark, and only a reply to such a row is an answer (asked_by). It is
     refused beside `fyi` (a message that asks nothing) and from the person himself (his messages are no question to a session)."""
     # g7 → for what is delivered and logged only: the gates, the length cap and the handover's naming
     # read the text as the sender wrote it (`raw`), so a message is refused, passed and names items exactly as it did before

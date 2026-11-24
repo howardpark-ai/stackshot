@@ -42,7 +42,7 @@ Covers:
 The two parts set up two different instances (a base config with a fleet of sessions and a store; one with a board address, the owner changed, and the form's host token), and the code under test reads its config and keeps module state at import: so each part runs in a process of its own (this file started again with `--part <name>`), exactly as the two suites did, and the parent adds their check counts.
 
     tests/run-suite client        -> exit 0 / 1"""
-import os, subprocess, sys
+import contextlib as _cl, os, subprocess, sys
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 PARTS = ("client", "caller_keys")
 
@@ -347,7 +347,8 @@ def part_client():
         st, body = client.get("page-ts", "projects/alpha"); check("client.get passes the key", st == 200 and json.loads(body)["key"] == "projects/alpha", (st, body))
         # the write verb: a script's message, over HTTP and through client.py
         sent = []
-        _messaging._message = lambda to, text, sender, auth="", origin="": (sent.append((to, text, sender, auth, origin)), "delivered → x — arrives as a labelled [stackshot message] turn")[1] if sender else (_ for _ in ()).throw(ToolError("Refused: sender is required"))
+        sent_kw = []      # the flags (fyi, question) each call to the message path carried
+        _messaging._message = lambda to, text, sender, auth="", origin="", **kw: (sent.append((to, text, sender, auth, origin)), sent_kw.append(kw), "delivered → x — arrives as a labelled [stackshot message] turn")[2] if sender else (_ for _ in ()).throw(ToolError("Refused: sender is required"))
         r = c.post("/client/message", json={"to": "projects/alpha", "text": "hello", "sender": "nightly-job"}); check("http: a message without a token → 401", r.status_code == 401 and not sent, r.status_code)
         r = c.post("/client/message", json={"to": "projects/alpha", "text": "hello", "sender": "nightly-job"}, headers=H)
         check("http: a message with a machine token goes through the message path, marked with the machine", r.status_code == 200 and r.json()["result"].startswith("delivered") and sent == [("projects/alpha", "hello", "nightly-job", "machine:box-far", "box-far")], (r.text, sent))
@@ -363,6 +364,18 @@ def part_client():
         st, body = client.message("projects/alpha", "from the client", "size-watch"); check("client.message sends with this machine's token and returns the server's answer", st == 200 and body.startswith("delivered") and sent[-1] == ("projects/alpha", "from the client", "size-watch", f"machine:{me}", me), (st, body, sent[-1]))
         st, body = client.message("projects/alpha", "x", ""); check("client.message hands back a refusal's reason", st == 400 and "sender is required" in body, (st, body))
         check("client.py message needs a label", client.main(["client.py", "message", "projects/alpha", "hi"]) == 1 and client.main(["client.py", "message", "projects/alpha", "hi", "--sender", "nightly-job"]) == 0 and sent[-1][1:3] == ("hi", "nightly-job"), sent[-1])
+        st, body = client.message("projects/alpha", "is it ready?", "size-watch", question=True); check("client.message with question=True carries it through POST /client/message to the message path, and fyi is not set", st == 200 and sent_kw[-1] == {"question": True}, (st, body, sent_kw[-1]))
+        st, body = client.message("projects/alpha", "fyi only", "size-watch", fyi=True); check("client.message with fyi=True carries only fyi (unchanged)", st == 200 and sent_kw[-1] == {"fyi": True}, sent_kw[-1])
+        st, body = client.message("projects/alpha", "plain", "size-watch"); check("client.message without a flag sends neither mark", st == 200 and sent_kw[-1] == {}, sent_kw[-1])
+        r = c.post("/client/message", json={"to": "projects/alpha", "text": "q", "sender": "nightly-job", "question": "yes"}, headers=H); check("http: only a question of true marks the message (a string does not)", r.status_code == 200 and sent_kw[-1] == {}, (r.text, sent_kw[-1]))
+        n_sent = len(sent)
+        check("client.py message --question marks the message as a question (exit 0)", client.main(["client.py", "message", "projects/alpha", "is it ready?", "--sender", "nightly-job", "--question"]) == 0 and len(sent) == n_sent + 1 and sent_kw[-1] == {"question": True}, (sent[-1], sent_kw[-1]))
+        n_sent = len(sent); out_ = io.StringIO()
+        with _cl.redirect_stdout(out_): rc_ = client.main(["client.py", "message", "projects/alpha", "is it ready?", "--sender", "nightly-job", "--question", "--fyi"])
+        check("client.py message --question beside --fyi is a usage error (exit 1), nothing sent", rc_ == 1 and len(sent) == n_sent and "usage: client.py message" in out_.getvalue(), (rc_, out_.getvalue()[:200]))
+        out_ = io.StringIO()
+        with _cl.redirect_stdout(out_): client.main(["client.py", "message", "projects/alpha"])
+        check("client.py message usage text names --question and that it does not go with --fyi", "--question" in out_.getvalue() and "Not with --fyi" in out_.getvalue(), out_.getvalue()[:300])
         # ---- a SendMessage handover a box's hook reports (pages.py touch → POST /client/handover) names the background agent
         _reg46, _a1 = (T / "store/projects.json").read_text(), (T / "store/a/1.json").read_text()
         rg = json.loads(_reg46); rg["pages"]["projects/alpha"].update(agents={"sparrow-main": "front", "sparrow-bg": "back"}, back_agents={"sparrow-bg": "back"}); (T / "store/projects.json").write_text(json.dumps(rg))

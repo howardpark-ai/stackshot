@@ -263,6 +263,16 @@ no_log(); fresh(); n0 = len(pushes()); out = tool(BACK, "is the export ready for
 check("2w: question=true from the person himself is refused in one line, nothing sent or logged", out.startswith("Refused") and "question=true" in out and "\n" not in out and pushes()[n0:] == [] and mlog() == [], (out, mlog()))
 no_log(); fresh(); n0 = len(pushes()); out = tool(BACK, "is the export ready for review?", FRONT, question=False); settle()
 check("2x: question=false (the default) is as before: delivered, the row without the mark", out.startswith("delivered") and "question" not in [x for x in mlog() if x.get("to") == BACK][0], (out, mlog()))
+no_log(); fresh(); n0 = len(pushes()); st_, body_ = _rt_client._client_post(MACH, "message", {"to": BACK, "text": "is the export ready for review?", "sender": FRONT, "question": True}); settle(); row = [x for x in mlog() if x.get("from") == FRONT and x.get("to") == BACK]
+check("2y: a script's question (POST /client/message with question=true) is delivered and its log row carries the mark", st_ == 200 and str(body_.get("result", "")).startswith("delivered") and len(row) == 1 and row[0].get("question") is True, (st_, body_, row))
+stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "yes, the export is ready for review", BACK); settle()
+check("2y1: …and a reply to it is an answer (delivered while the person is in that conversation), as for the tool's mark", out.startswith("delivered") and len(reach(A, n0)) == 1, (out, pushes()[n0:]))
+no_log(); fresh(); n0 = len(pushes()); st_, body_ = _rt_client._client_post(MACH, "message", {"to": BACK, "text": "is the export ready for review?", "sender": FRONT, "question": "yes"}); settle(); row = [x for x in mlog() if x.get("from") == FRONT and x.get("to") == BACK]
+check("2y2: only a body value of true marks a script's question (a string does not): the row carries no mark", st_ == 200 and len(row) == 1 and "question" not in row[0], (st_, body_, row))
+no_log(); fresh(); n0 = len(pushes()); st_, body_ = _rt_client._client_post(MACH, "message", {"to": BACK, "text": "is the export ready for review?", "sender": FRONT, "question": True, "fyi": True}); settle()
+check("2z: a script's question beside fyi is refused (400) with the tool's own line, nothing sent or logged", st_ == 400 and "question=true and fyi=true" in str(body_.get("error", "")) and pushes()[n0:] == [] and mlog() == [], (st_, body_, mlog()))
+no_log(); fresh(); n0 = len(pushes()); st_, body_ = _rt_client._client_post(MACH, "message", {"to": BACK, "text": "is the export ready for review?", "sender": "Oliver", "question": True}); settle()
+check("2z1: a script's question in the person's own name is refused (400), nothing sent or logged", st_ == 400 and "question=true" in str(body_.get("error", "")) and pushes()[n0:] == [] and mlog() == [], (st_, body_, mlog()))
 no_log()
 
 # a background agent's hand-back is tested BEFORE the answer rule: a question the front agent put to it makes a hand-back no answer
