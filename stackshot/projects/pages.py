@@ -1391,7 +1391,7 @@ def describe(key, v, strict=False):
     if _cfg.page_flavor() == "gbrain" or not kb.default:    # a second brain's page is written through gbrain only (its copy here is read-only)
         how = ((f"in the second brain {kb.name}, through its own gbrain connector: " if not kb.default else "") + f"(a dated line: the gbrain connector's add_timeline_entry; any other edit: get_page with section or grep (the smallest read that shows the text to change; a whole read only for a rewrite or a change spanning the page), then edit_page "
                f"with expected_revision (the read's revision) and edits [{{old_text, new_text}}]; put_page only for a whole rewrite; "
-               f"never edit or git inside the brain mirror). " + PAGE_COPY_LAG + " ")
+               f"never edit or git inside the brain mirror). " + (PAGE_COPY_LAG + " " if kb.default and _cfg.page_flavor() == "gbrain" else ""))     # the lag is the first brain's mirror's; a second brain's copy is kept by another process
     else:
         if reads_local():
             how = f"(edit {plain_page_path(key)} (its Current state, and a dated line under its Timeline), commit and push). "

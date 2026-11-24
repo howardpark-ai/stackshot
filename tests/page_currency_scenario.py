@@ -412,6 +412,23 @@ finally:
 check("lag note: the refusal of a write past the grace says the check follows GitHub about every 5 minutes, and to retry", lag_ref.startswith("Refused: you owe a project-page update") and lag_ref.count(LAG) == 1, lag_ref)
 check("lag note: the gate's line says it too, once", lag_nag.count(LAG) == 1, lag_nag)
 check("lag note: no mirror in play (plain pages, a file written at once): neither text carries it", "Refused: you owe" in plain_ref and LAG not in plain_ref and LAG not in plain_nag, (plain_ref, plain_nag))
+# the lag is the first brain's mirror's: a second brain's copy is kept in sync by another process, so its key never gets the sentence (either flavor)
+SIDE = "projects/sidekey"; D7 = {"ts": int(time.time()), "task": "s7"}
+p._cfg.CFG["brains"] = [{"name": "side", "path": str(T / "side"), "slugs": [SIDE]}]; p._brains._WARNED.clear()
+try:
+    nag_side = {}
+    for fl in ("plain", "gbrain"):
+        p._cfg.CFG["pages"]["flavor"] = fl
+        nag_side[fl] = (p.describe(SIDE, D7), p.describe("projects/beta", D7))
+finally:
+    p._cfg.CFG.pop("brains", None); p._brains._WARNED.clear(); p._cfg.CFG["pages"]["flavor"] = "plain"
+check("lag note: a second brain's key under the plain flavor gets the second-brain wording and no lag sentence",
+      "in the second brain side" in nag_side["plain"][0] and LAG not in nag_side["plain"][0], nag_side["plain"][0])
+check("lag note: a second brain's key under the gbrain flavor gets the second-brain wording and no lag sentence",
+      "in the second brain side" in nag_side["gbrain"][0] and LAG not in nag_side["gbrain"][0], nag_side["gbrain"][0])
+check("lag note: the first brain's key, with a second brain configured and the gbrain flavor, still carries it once",
+      nag_side["gbrain"][1].count(LAG) == 1 and "in the second brain" not in nag_side["gbrain"][1], nag_side["gbrain"][1])
+check("lag note: the first brain's key under the plain flavor has none, with a second brain configured too", LAG not in nag_side["plain"][1], nag_side["plain"][1])
 # F4: the keeper's injection follows the flavor; gbrain's wording is today's, byte for byte
 saved_ex = p.excerpts; p.excerpts = lambda keys, total: "<EXCERPTS>"
 inj = p.inject_text(B, "home-beta", ["projects/beta"])

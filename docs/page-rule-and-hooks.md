@@ -8,7 +8,8 @@ description, next, needs, status or due) records a debt against the writing sess
 the page is newer than the write. Where pages are written through gbrain, the check reads a copy of the pages that follows
 GitHub about every 5 minutes (a timer outside this repository does the sync), so an edit made in the last few minutes shows
 after the next sync: the `nag` line and the refusal of a write past the grace say so, and the session retries after the
-sync instead of treating it as a broken mirror. On each machine, `stackshot/projects/pages.py` runs as four Claude Code hooks: `touch` (PostToolUse on
+sync instead of treating it as a broken mirror (a second brain's copy is kept in sync by another process, so the sentence
+is not added for its pages). On each machine, `stackshot/projects/pages.py` runs as four Claude Code hooks: `touch` (PostToolUse on
 the connector's write tools) remembers the write, `nag` (UserPromptSubmit) reminds the session at every prompt while the
 page is owed, `check` (Stop) runs the board check below, and `keeper` (SessionStart) shows a page's keeper the current
 state of its pages. The Stop hook asks nothing about pages: the end-of-turn page question (`Page: no change, <reason>`)
