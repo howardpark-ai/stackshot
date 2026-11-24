@@ -41,7 +41,7 @@ UU = lambda i: f"{i:08x}-0000-4000-8000-{i:012x}"
 page = lambda name, sess, **kw: {"title": name, "name": name, "org": "home", "tags": [], "type": "project", "session": sess, "status": "active", "board": [], "board_row": False, "updated": 1, "mirror": f"https://example.invalid/{name}", **kw}
 AL = {"al-main": "Oliver's point of contact", "al-builder": "builds, merges and releases the code", "al-docs": "keeps the pages and the documents"}
 (T / "store/projects.json").write_text(json.dumps({"pages": {
-    "projects/alpha": page("Alpha", "al-name", agents=AL, back_agents={k: AL[k] for k in ("al-builder", "al-docs")}),
+    "projects/alpha": page("Alpha", "al-name", agents=AL, back_agents={k: AL[k] for k in ("al-builder", "al-docs")}, lead_agents=["al-docs"]),
     "projects/bravo": page("Bravo", "br-name", agents={"br-main": "Oliver's point of contact"}),
     "projects/charlie": page("Charlie", "ch-name", agents={"ch-main": "the contact", "ch-eng": "builds the charlie code"}, back_agents={"ch-eng": "builds the charlie code"}),
     "projects/delta": page("Delta", "de-name", agents={"de-main": "the contact", "de-eng": "builds the delta code"}, back_agents={"de-eng": "builds the delta code"})}}))
@@ -102,9 +102,9 @@ for anchor, rs in {"slack:C0000000001": [("projects/alpha", "al-name")], "slack:
     core._ROUTES[anchor] = [{"project": p, "session": s, "target": tgt, "pilot": True, "filter": ""} for p, s in rs]
 SESSION = {"projects/alpha": "al-name", "projects/bravo": "br-name", "projects/charlie": "ch-name", "projects/delta": "de-name"}
 
-def post(anchor, who, text, kind="slack", bot=False, etype="", thread=False, sessions=None):
+def post(anchor, who, text, kind="slack", bot=False, etype="", thread=False, sessions=None, head=""):
     """One event on an anchor, sent to the (anchor, session) pairs bound to it like the hub does → the notices it made, one per page: {project key: notice}."""
-    ev = types.SimpleNamespace(label=anchor, who=who, url="https://u/" + str(len(ran)), kind=kind, bot=bot, etype=etype, meta={"thread_ts": "1.5"} if thread else {}, head="", author="", text=text)
+    ev = types.SimpleNamespace(label=anchor, who=who, url="https://u/" + str(len(ran)), kind=kind, bot=bot, etype=etype, meta={"thread_ts": "1.5"} if thread else {}, head=head, author="", text=text)
     out = {}
     for r in core._ROUTES[anchor]:
         if sessions and r["session"] not in sessions: continue
@@ -114,7 +114,10 @@ def post(anchor, who, text, kind="slack", bot=False, etype="", thread=False, ses
 def one(anchor, who, text, **kw): return list(post(anchor, who, text, **kw).values())[0]
 def rec(i, key="projects/alpha"): return next(n for n in routing.read(key) if n["id"] == i)
 def lines(): return router._read(live.live_path())
-def lv(i): return [l for l in lines() if l["id"] == i and l.get("status") == "ruled"][-1]
+class _NoLine(dict):
+    """What lv() gives for a notice with no ruling line: every field reads None, so a check on it fails by name instead of the run stopping on an IndexError."""
+    def __missing__(self, k): return None
+def lv(i): return ([l for l in lines() if l["id"] == i and l.get("status") == "ruled"] or [_NoLine()])[-1]
 CALLS, PLAN = [], {}
 def runner(prompt):
     """The 'call': answers what PLAN says for each notice id of the prompt (default: archived)."""
@@ -657,6 +660,135 @@ check("anchor-item, build-side, builder retired: it is held for the page's other
 check("anchor-item, build-side, every background agent retired: it is held for the page's contact agent (a held line, no turn started)",
       lv(b_c["id"])["rule"] == "anchor-item" and lv(b_c["id"])["ruling"] == "held" and lv(b_c["id"])["held_for"] == "al-main" and not any(t in ("al-builder", "al-docs") for t, _ in pb_c), (lv(b_c["id"]), pb_c))
 held.take("al-builder"); held.take("al-docs"); held.take("al-main")
+
+# ---- 26. a person's message is never passed to an agent that is gone, by ANY rule that names a target: anchor-builder, anchor-work, watch, anchor-item, the gate and the thin call (live_place_line)
+_anchors = json.loads((T / "store/anchors.json").read_text())
+_anchors["projects/alpha"] += [add("https://x.slack.com/archives/C0000000020#mention=ship"), add("https://x.slack.com/archives/C0000000021")]
+(T / "store/anchors.json").write_text(json.dumps(_anchors))
+for _a in ("slack:C0000000020", "slack:C0000000021"): core._ROUTES[_a] = [{"project": "projects/alpha", "session": "al-name", "target": "project-wide", "pilot": True, "filter": ""}]
+router.WATCH[("projects/alpha", "slack:C0000000021")] = "al-docs"
+import itertools; _U = itertools.count(1000)
+DEADR = set(); _sr.retired = lambda x: str(x) in DEADR
+ALL3 = {"al-builder", "al-docs", "al-main"}
+def rc(dead, mk, plan=None):
+    DEADR.clear(); DEADR.update(dead)
+    CALLS.clear(); PUSHED.clear(); FYI.clear(); PLAN.clear(); [held.take(a_) for a_ in sorted(ALL3)]
+    x = mk()
+    if plan: PLAN[x["id"]] = plan
+    res_, pushed_, ncalls_ = tick()
+    return x, pushed_
+def parked_of(x): return [l for l in lines() if l["id"] == x["id"] and l.get("status") == "parked"]
+def class_checks(name, rule, tgt, other, mk, plan=None, source="code", live_rule=None, held_rule=None):
+    held_rule = held_rule or rule
+    try:
+        x1, p1 = rc(set(), mk, plan); x2, p2 = rc({tgt}, mk, plan); x3, p3 = rc({"al-builder", "al-docs"}, mk, plan); x4, p4 = rc(ALL3, mk, plan)
+    finally: DEADR.clear()
+    check(f"{name}: the target live: the rule passes it there, as before", lv(x1["id"])["rule"] == (live_rule if live_rule is not None else rule) and lv(x1["id"])["target"] == tgt and lv(x1["id"])["source"] == source and lv(x1["id"])["ruling"] in ("held", "passed"), lv(x1["id"]))
+    check(f"{name}: the target retired: held for the page's other live background agent, nothing pushed to the retired one",
+          lv(x2["id"])["rule"] == held_rule and lv(x2["id"])["ruling"] == "held" and lv(x2["id"])["held_for"] == other and not any(t == tgt for t, _ in p2), (lv(x2["id"]), p2))
+    check(f"{name}: every background agent retired: held for the page's contact agent, a held line that starts no turn",
+          lv(x3["id"])["rule"] == held_rule and lv(x3["id"])["ruling"] == "held" and lv(x3["id"])["held_for"] == "al-main" and not any(t in ("al-builder", "al-docs") for t, _ in p3), (lv(x3["id"]), p3))
+    check(f"{name}: every agent of the page retired: parked, never ruled and never sent to anyone",
+          len(parked_of(x4)) == 1 and not [l for l in lines() if l["id"] == x4["id"] and l.get("status") == "ruled"] and not rec(x4["id"]).get("ruling") and not p4, (parked_of(x4), p4))
+    tick(); PUSHED.clear(); [held.take(a_) for a_ in sorted(ALL3)]      # the parked one is ruled once its agents are back: no notice of this section is left for a later one
+try:
+    class_checks("anchor-builder (a pull request on a builder's branch)", "anchor-builder", "al-builder", "al-docs", lambda: one("github:example-owner/repo#8", "Dana", f"the change looks right {next(_U)}", kind="github", etype="comment", head="al-builder/topic"))
+    class_checks("anchor-work (an anchor with a mention filter, the page's work agent)", "anchor-work", "al-docs", "al-builder", lambda: one("slack:C0000000020", "Dana", f"the file shipped {next(_U)}"))
+    class_checks("watch (a standing watch on an anchor)", "watch", "al-docs", "al-builder", lambda: one("slack:C0000000021", "Dana", f"the file moved {next(_U)}"), held_rule="gate-person")      # a watch keeps its own delivery, so a person's message the watch cannot deliver is a gate-person line
+    class_checks("anchor-item (an anchor scoped to an item, its mover)", "anchor-item", "al-builder", "al-docs", lambda: one("slack:C0000000010", "Dana", f"the file is ready {next(_U)}"))
+    class_checks("the thin call (it names an agent that is gone)", "gate-person", "al-builder", "al-docs", lambda: one("slack:C0000000001", "Dana", f"the vendor confirmed a new date {next(_U)}"),
+                 plan={"ruling": "passed", "target": "al-builder", "reason": "the builder should read it", "for_owner": False}, source="call", live_rule="")
+finally: del router.WATCH[("projects/alpha", "slack:C0000000021")]; _sr.retired = _sr_ret2
+held.take("al-builder"); held.take("al-docs"); held.take("al-main")
+
+# ---- 27. one event on two pages, the page it is about has nobody alive: the other page's agent takes it (the leader is chosen among the pages with a live place; a follower never waits for a parked leader)
+DEAD9 = {"ch-main", "ch-eng"}; _sr.retired = lambda x: str(x) in DEAD9
+_real_plan = live._twin_plan
+try:
+    CALLS.clear(); PUSHED.clear(); FYI.clear(); PLAN.clear(); held.take("de-eng"); held.take("de-main")
+    ev = post("slack:C0000000009", "Dana", "can the charlie export wait for the delta numbers?")
+    res, pushed, ncalls = tick(); res2, pushed2, ncalls2 = tick()
+    ch_n, de_n = ev["projects/charlie"], ev["projects/delta"]
+    check("one event on two pages, the page it is about (a scoped item) has no live agent: the other page's agent is the leader and takes it (never left unruled)",
+          lv(de_n["id"])["ruling"] in ("held", "passed") and lv(de_n["id"])["held_for" if lv(de_n["id"])["ruling"] == "held" else "target"] == "de-eng" and not parked_of(de_n), (lv(de_n["id"]), parked_of(de_n)))
+    check("…the notice of the dead page follows that ruling (it is not parked behind it), and nothing was pushed to a retired agent",
+          lv(ch_n["id"])["rule"] == "one-ruling" and not parked_of(ch_n) and not any(t in DEAD9 for t, _ in pushed + pushed2) and res["retry"] == 0, (lv(ch_n["id"]), parked_of(ch_n), res))
+    held.take("de-eng"); held.take("de-main")
+    # a plan that makes the dead page the leader anyway (the safety net): the follower rules itself, and the leader is parked
+    PUSHED.clear(); FYI.clear()
+    ev2 = post("slack:C0000000009", "Dana", "will the charlie export reach the delta shop on Friday?")
+    ch2, de2 = ev2["projects/charlie"], ev2["projects/delta"]
+    live._twin_plan = lambda g, l, c: ({str(de2["id"]): (str(ch2["id"]), "projects/charlie", "projects/charlie")}, {}, {})
+    res3, pushed3, ncalls3 = tick(); res4, pushed4, ncalls4 = tick()
+    check("a follower whose leader is parked (no live agent on its page) rules itself: the live page's notice is ruled, the dead page's stays parked, once",
+          lv(de2["id"])["rule"] != "one-ruling" and lv(de2["id"])["ruling"] in ("held", "passed") and len(parked_of(ch2)) == 1 and not [l for l in lines() if l["id"] == ch2["id"] and l.get("status") == "ruled"] and res3["retry"] == 1 and res4["retry"] == 0,
+          (lv(de2["id"]), parked_of(ch2), res3, res4))
+    live._twin_plan = _real_plan; held.take("de-eng"); held.take("de-main")
+    # a follower on a dead page, its live leader (the delta notice) ruled: it follows, it is not parked
+    PUSHED.clear(); FYI.clear()
+    ev3 = post("slack:C0000000009", "Dana", "is the delta quote final?")
+    ch3, de3 = ev3["projects/charlie"], ev3["projects/delta"]
+    live._twin_plan = lambda g, l, c: ({str(ch3["id"]): (str(de3["id"]), "projects/delta", "projects/delta")}, {}, {})
+    res5, pushed5, ncalls5 = tick()
+    check("a follower on a dead page whose leader is live follows the leader's ruling, and is not parked", lv(ch3["id"])["rule"] == "one-ruling" and not parked_of(ch3) and lv(de3["id"])["ruling"] in ("held", "passed"), (lv(ch3["id"]), parked_of(ch3), lv(de3["id"])))
+finally: live._twin_plan = _real_plan; _sr.retired = _sr_ret2
+held.take("de-eng"); held.take("de-main")
+DEAD9.clear(); tick(); PUSHED.clear(); held.take("de-eng"); held.take("de-main"); held.take("ch-eng"); held.take("ch-main")
+
+# ---- 28. the lows of round 4: a bare ack goes where its own page has an item waiting (not another page's); a person's line on a retired agent is re-homed on every tick and to any live agent of the page; one `stranded` line when there is none; anchor-item and the gate agree on the item's doer
+item(40, "projects/bravo", "br-main", wait_anchor="slack:C0000000009")      # another page's item waits on the same anchor too
+x_ack = post("slack:C0000000009", "Dana", "ok", sessions=("de-name",))["projects/delta"]
+res, pushed, ncalls = tick()
+(T / "store/a/40.json").unlink()
+check("an ack on a page where no item hangs on the anchor (another page's item does) is read as trivial: archived, passed to nobody", lv(x_ack["id"])["rule"] == "gate-trivial" and lv(x_ack["id"])["ruling"] == "archived" and not pushed, (lv(x_ack["id"]), pushed))
+x_ack2 = post("slack:C0000000009", "Dana", "ok", sessions=("ch-name",))["projects/charlie"]
+res, pushed, ncalls = tick()
+check("…and on the page whose item is scoped to the anchor it is the answer the item waits for: the ordinary person path", lv(x_ack2["id"])["rule"] != "gate-trivial" and lv(x_ack2["id"])["ruling"] in ("held", "passed"), lv(x_ack2["id"]))
+held.take("ch-eng"); held.take("ch-main")
+
+T_OLD2 = time.time() - 7200
+FETCH2 = {"fo-c", "fo-main"}; _real_fetch = held.can_fetch; held.can_fetch = lambda t, now=None: t in FETCH2
+cxf = router.Context(); cxf.reg = {**cxf.reg, "projects/foxtrot": {**cxf.reg["projects/alpha"], "agents": {"fo-main": "contact", "fo-a": "builds", "fo-b": "keeps the pages", "fo-c": "reviews"}, "back_agents": {"fo-a": "builds", "fo-b": "keeps the pages", "fo-c": "reviews"}}}
+DEAD10 = {"fo-a"}; _sr.retired = lambda x: str(x) in DEAD10
+try:
+    for _k in ("fo-a", "fo-b", "fo-c", "fo-main"): held.take(_k)
+    held.add(held.key_of("fo-a"), "person", "a person's words for a builder that retired", sender="Dana", nid="rh-7", whole=True, now=T_OLD2)
+    mv1 = live.rehome_person(cxf); left1 = [k for k in ("fo-b", "fo-c", "fo-main") if held.count(k)]
+    FETCH2.clear(); FETCH2.add("fo-b")      # the other order: whichever of the two live background agents is ranked first, the one that fetches gets it
+    for _k in ("fo-b", "fo-c", "fo-main"): held.take(_k)
+    held.add(held.key_of("fo-a"), "person", "a second person's words for a builder that retired", sender="Dana", nid="rh-8", whole=True, now=T_OLD2)
+    mv2 = live.rehome_person(cxf); left2 = [k for k in ("fo-b", "fo-c", "fo-main") if held.count(k)]
+    for _k in ("fo-b", "fo-c", "fo-main"): held.take(_k)
+    FETCH2.clear()      # no live agent of the page fetches held lines: the line stays, one `stranded` line says so, and only once
+    held.add(held.key_of("fo-a"), "person", "a third person's words, nobody to take them", sender="Dana", nid="rh-9", whole=True, now=T_OLD2)
+    mv3 = live.rehome_person(cxf); mv3b = live.rehome_person(cxf)
+    stranded = [l for l in lines() if l.get("status") == "stranded" and "nobody to take them" in l["text"]]
+finally: _sr.retired = _sr_ret2; held.can_fetch = _real_fetch
+check("L-2/L-3: a person's line of a retired agent goes to the first live agent of its page that fetches held lines, whichever of the page's background agents that is (not only the top-ranked one and the contact agent)",
+      mv1 == 1 and left1 == ["fo-c"] and mv2 == 1 and left2 == ["fo-b"], (mv1, left1, mv2, left2))
+check("L-3: with no live agent that fetches held lines the line stays and one `stranded` line says so, once, however many ticks look at it", mv3 == 0 and mv3b == 0 and held.count("fo-a") == 1 and len(stranded) == 1 and "gone" in stranded[0]["reason"], (mv3, mv3b, held.count("fo-a"), stranded))
+for _k in ("fo-a", "fo-b", "fo-c", "fo-main"): held.take(_k)
+held.add(held.key_of("al-builder"), "person", "a person's words, held before the builder retired (no notice comes in)", sender="Dana", nid="rh-10", whole=True)
+_real_projects = live._routing.projects; live._routing.projects = lambda: []      # no unruled notice anywhere: the tick has nothing to judge
+DEAD11 = {"al-builder"}; _sr.retired = lambda x: str(x) in DEAD11
+try: res_empty = tick()
+finally: live._routing.projects = _real_projects; _sr.retired = _sr_ret2
+check("L-2: a tick with no notice to judge still re-homes a person's line of a retired agent", not [r for r in held._read(held._file(held.key_of("al-builder"))) if r["kind"] == "person"] and held.count("al-docs") == 1, (res_empty, held.count("al-docs")))
+held.take("al-builder"); held.take("al-docs"); held.take("al-main")
+
+_anchors = json.loads((T / "store/anchors.json").read_text()); _anchors["projects/alpha"].append(add("https://x.slack.com/archives/C0000000022", ["a2"])); (T / "store/anchors.json").write_text(json.dumps(_anchors))
+core._ROUTES["slack:C0000000022"] = [{"project": "projects/alpha", "session": "al-name", "target": "for al-main", "pilot": True, "filter": ""}]
+item(2, "projects/alpha", "al-main", next="al-docs: review the draft")      # a front agent moves it, the pages' agent does the work (its first next line)
+DEAD12 = {"al-main"}; _sr.retired = lambda x: str(x) in DEAD12
+try:
+    CALLS.clear(); PUSHED.clear(); FYI.clear(); PLAN.clear()
+    q_ = one("slack:C0000000022", "Dana", "is the draft ready for the review?"); s_ = one("slack:C0000000022", "Dana", "the draft is ready for the review")
+    res, pushed, ncalls = tick()
+finally: _sr.retired = _sr_ret2; item(2, "projects/alpha", "al-main")
+check("L-5: a question (the gate) and a statement (anchor-item) on an item's anchor, its front mover retired, go to the same live agent with the same item: the one that does the item's work",
+      lv(q_["id"])["rule"] == "gate-person" and lv(s_["id"])["rule"] == "anchor-item" and lv(q_["id"])["target"] == lv(s_["id"])["target"] == "al-docs" and lv(q_["id"])["item"] == lv(s_["id"])["item"] == "a2", (lv(q_["id"]), lv(s_["id"])))
+held.take("al-builder"); held.take("al-docs"); held.take("al-main")
+
 
 if os.environ.get("ROUTER_GATE_STAGED"):      # the staged dry run: one line per path, as the live tick ruled each notice above (tests/run-suite router_gate with ROUTER_GATE_STAGED=1)
     for path, nid in (("machine: a bot's post", m_bot), ("machine: a routine pull request event", m_pr), ("machine: the owner's own document edit", m_own), ("machine: a CI result", m_ci),

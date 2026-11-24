@@ -6,4 +6,4 @@ then one thin call), so call this to overrule a wrong ruling. `notice` = the id 
 session. Right call: route(notice="a1b2c3", ruling="passed", to="my-x", reason="belongs to the export work",
 sender="my-x"). Call it once per notice, after acting on it; call it again to overrule an earlier ruling. The
 project's routing page (behind its number in the board's anchors column) lists every notice with its ruling and
-reason, and the board flags notices left without a ruling for over an hour. A held item that waits on the notice's anchor is released by a passed or merged ruling, and by any ruling of a person's message (a bare laugh or ack excepted).
+reason, and the board flags notices left without a ruling for over an hour. A held item that waits on the notice's anchor is released by a passed or merged ruling, and by any ruling of a person's message (a bare laugh or ack on that anchor is one too).

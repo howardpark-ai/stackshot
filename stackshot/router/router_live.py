@@ -720,9 +720,10 @@ def _nowhere(ln: dict[str, Any]) -> bool:
     return bool(ln.get("person")) and ln.get("ruling") == "passed" and not str(ln.get("target") or "").strip()
 
 
-def rehome_person(cx: "_router.Context") -> int:
-    """A held `person` line of an agent that is gone now (retired after the line was held; a surface agent) is moved to the page's live background agent, else its contact front agent, so a person's message is
-    never left on a session nobody reads. → how many lines moved. One page's agents at a time; never raises."""
+def rehome_person(cx: "_router.Context", last: dict[str, dict[str, Any]] | None = None) -> int:
+    """A held `person` line of an agent that is gone now (retired after the line was held; a surface agent) is moved to the first live agent of its page whose hook fetches held lines (the page's live background
+    agents in rank, then its front agents), so a person's message is never left on a session nobody reads, and it keeps the time it was first held. A line with no such agent stays where it is, and one `stranded` line
+    in live.jsonl says so, once per line. → how many lines moved. One page's agents at a time; never raises."""
     moved = 0
     try:
         for page in list(cx.reg):
@@ -733,8 +734,15 @@ def rehome_person(cx: "_router.Context") -> int:
                 rows = [r for r in _held._read(_held._file(_held.key_of(nm))) if r.get("kind") == "person"]
                 if not rows:
                     continue
-                dest = next((d for d in (cx.live_background(page), cx.contact(page)) if d and d != nm and _held.can_fetch(d)), "")      # a destination whose hook never fetches held lines would strand the line
+                dest = next((d for d in cx.live_places(page) if d != nm and _held.can_fetch(d)), "")      # a destination whose hook never fetches held lines would strand the line
                 if not dest:
+                    last = _last() if last is None else last
+                    for r in rows:
+                        sid = f"stranded-{r['id']}"
+                        if sid not in last:
+                            _log({"id": sid, "ts": time.time(), "project": page, "kind": "stranded", "status": "stranded", "label": "", "text": _router._clean(r.get("text"), 120),
+                                  "reason": f"a person's line held for {nm}, who is gone, and the page has no live agent whose hook fetches held lines: it stays where it is"})
+                            last[sid] = {"status": "stranded"}
                     continue
                 for r in rows:
                     if _held.add(_held.key_of(dest), "person", str(r.get("text") or ""), sender=str(r.get("from") or ""), gid=str(r.get("gid") or ""), nid=str(r.get("nid") or ""), now=float(r.get("ts") or 0) or None, whole=True) and _held.ack(nm, ids=[str(r["id"])]):
@@ -744,17 +752,22 @@ def rehome_person(cx: "_router.Context") -> int:
     return moved
 
 
-def _park_people(root: str, fresh: list[tuple[str, dict[str, Any]]], last: dict[str, dict[str, Any]], cx: "_router.Context", out: dict[str, int]) -> list[tuple[str, dict[str, Any]]]:
+def _no_place(root: str, cx: "_router.Context") -> bool:
+    """Has the page no live place for a person's message: no live background agent and no live front agent?"""
+    aroot = agent_root(root, cx.reg)
+    return not (cx.live_background(aroot) or cx.contact(aroot))
+
+
+def _park_people(root: str, fresh: list[tuple[str, dict[str, Any]]], last: dict[str, dict[str, Any]], cx: "_router.Context", out: dict[str, int], followers: Any = ()) -> list[tuple[str, dict[str, Any]]]:
     """A page with no live place for a person's message (no live background agent, no live front agent) parks the person notices of its batch: they are left out of the batch (so they never use the cap that
     a later notice of the page needs) and out of the model call, and one `parked` line says so, once per notice (counted once in `retry`). Each tick looks again cheaply, and a notice is judged as any other the
-    tick an agent is back. → the batch without them. Never raises."""
+    tick an agent is back. A notice that follows the ruling of another page's twin of it (`followers`) is not parked: it takes that page's ruling. → the batch without them. Never raises."""
     try:
-        aroot = agent_root(root, cx.reg)
-        if cx.live_background(aroot) or cx.contact(aroot):
+        if not _no_place(root, cx):
             return fresh
         keep: list[tuple[str, dict[str, Any]]] = []
         for key, n in fresh:
-            if not _router.person_notice(n):
+            if not _router.person_notice(n) or str(n["id"]) in followers:
                 keep.append((key, n))
             elif last.get(n["id"], {}).get("status") != "parked":
                 _log({"id": n["id"], "ts": time.time(), "project": root, "key": key, "kind": n.get("kind"), "status": "parked", "label": n.get("label", ""), "text": _router._clean(n.get("text"), 120),
@@ -1032,7 +1045,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
             try:
                 after = {**ruled, "front_held": True} if isinstance(ruled, dict) and ruling == "held" and base.get("hold") == "fyi" and base.get("held_for") else {**ruled, "front_gate": True} if isinstance(ruled, dict) and ruling == "archived" and base.get("front_gate") else ruled      # front_held: the front agent has the line for its next turn, so a hold that waited on this anchor is released, as by a pass
                 if isinstance(after, dict) and _router.person_wakes(n, _router._anchor_busy(key, n, cx)):
-                    after = {**after, "person_wake": True}      # a person's message (a bare laugh or ack only where no item hangs on the anchor) wakes an item that waits on it, whatever the ruling was (a held line for a front agent too)
+                    after = {**after, "person_wake": True}      # a person's message (a bare laugh or ack too, where an item hangs on the anchor) wakes an item that waits on it, whatever the ruling was (a held line for a front agent too)
                 done(key, after)
             except Exception as e:  # noqa: BLE001
                 base["error"] = f"after-rule: {type(e).__name__}: {str(e)[:100]}"
@@ -1084,7 +1097,7 @@ def _twin_plan(groups: dict[str, list[tuple[str, dict[str, Any]]]], last: dict[s
             if len(cluster) < 2:
                 continue
             used.update(c[2]["id"] for c in cluster)
-            _i, best = max(enumerate(cluster), key=lambda t: (_about(t[1][1], t[1][2], t[1][0], cx), -t[0]))
+            _i, best = max(enumerate(cluster), key=lambda t: (not _no_place(t[1][0], cx), _about(t[1][1], t[1][2], t[1][0], cx), -t[0]))      # a page with somebody to take it first: a leader that is parked would leave the others waiting
             rest = [c for c in cluster if c is not best]
             others = sorted({c[0] for c in rest if c[0] != best[0]})
             if others:
@@ -1134,24 +1147,25 @@ def tick(now: float | None = None, runner: Any = None) -> dict[str, int]:
             for n in _routing.read(key, since=since):
                 if n.get("live") and n.get("pilot") and n.get("kind") in KINDS and not n.get("ruling") and last.get(n["id"], {}).get("status") not in ("steward", "ruled", "stuck"):     # "steward": a status written by the earlier rollback (a notice handed to a project session); old routing lines still carry it
                     groups.setdefault(root, []).append((key, n))
+        cx = _router.Context()
+        rehome_person(cx, last)      # a held person line of an agent that retired since is moved to a live agent of its page, whether a notice came in or not
         if not groups:
             return out
-        cx = _router.Context()
-        rehome_person(cx)      # a held person line of an agent that retired since is moved to a live agent of its page
         cap = int(_router._num("max_notices", 25, 1))
         try:
             twins, offered, ruled_twins = _twin_plan(groups, last, cx)
         except Exception as e:  # noqa: BLE001  (an extra: a failure in it rules every notice on its own page, as before)
             print(f"router live: twin plan failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             twins, offered, ruled_twins = {}, {}, {}
-        followers = {**twins, **ruled_twins}       # notices that follow another's ruling: not judged here
+        parked_ids = {str(n["id"]) for root, rows in groups.items() if _no_place(root, cx) for _k, n in rows if _router.person_notice(n) and last.get(n["id"], {}).get("status") != "delivered"}
+        followers = {nid: v for nid, v in {**twins, **ruled_twins}.items() if v[0] not in parked_ids}       # notices that follow another's ruling: not judged here (but not one whose ruled twin is parked: that one never will be ruled, so this one rules itself)
         results: dict[str, dict[str, Any]] = {}
         later: list[tuple[str, str, dict[str, Any]]] = []
         for root, rows in sorted(groups.items()):
             rows.sort(key=lambda r: float(r[1].get("ts", 0)))
             ready = [(k, n) for k, n in rows if last.get(n["id"], {}).get("status") == "delivered"]       # delivered, ruling to finish
             fresh = [(k, n) for k, n in rows if last.get(n["id"], {}).get("status") != "delivered"]
-            fresh = _park_people(root, fresh, last, cx, out)
+            fresh = _park_people(root, fresh, last, cx, out, followers)
             batch = fresh[:cap]
             later += [(root, k, n) for k, n in batch if str(n["id"]) in followers]
             batch = [(k, n) for k, n in batch if str(n["id"]) not in followers]

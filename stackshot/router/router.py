@@ -302,6 +302,12 @@ class Context:
             return main
         return next((a for a in self.agents(root)[0] if not self.gone(a)), "")      # the -main agent is retired: any other front agent that is live
 
+    def live_places(self, root: str) -> list[str]:
+        """Every agent of the page a held line may go to, in the order person_hold_line prefers them: the live background agents (ranked, the builder first), then the live front agents (the -main agent first)."""
+        back = [n for _c, _o, n in _anc.background_ranked(root, self.reg) if not self.gone(n)]
+        front = [a for a in [self.main_agent(root), *self.agents(root)[0]] if a and not self.gone(a)]
+        return list(dict.fromkeys([*back, *front]))
+
     def name_of(self, session: str) -> str:
         """A session id or name → the pane name it goes by."""
         s = str(session or "").strip()
@@ -1064,10 +1070,13 @@ def anchor_holders(n: dict[str, Any], cx: Context) -> list[str]:
 
 
 def _anchor_busy(key: str, n: dict[str, Any], cx: Context) -> bool:
-    """Does an open item hang on this anchor: it is scoped to one on a page that holds it, or an item's wait names it (`wait_anchor`, or an anchor line of a wait on a list)? Machine news on such an anchor is
+    """Does an open item of this notice's page hang on this anchor: it is scoped to one on that page, or the wait of one of its items names it (`wait_anchor`, or an anchor line of a wait on a list)? Machine news on such an anchor is
     left to the rules before the gate, as before: they pass or merge it, which is what ends an item's wait."""
     aid = _anc.anchor_id(str(n.get("anchor") or "")) or str(n.get("anchor") or "")
+    page = _anc.pilot_root(key) or key
     for k in anchor_holders(n, cx):
+        if (_anc.pilot_root(k) or k) != page:
+            continue      # another page's item hangs on this anchor: it is that page's notice that is the answer to it; this page has nothing waiting
         for e in cx.anchors.get(k, []):
             if (_anc.anchor_id(_anc.split_fragment(e.get("url", ""))[0]) or "") == aid and any(g in cx.index and cx.index[g].get("status") != "completed" for g in (e.get("items") or [])):
                 return True
@@ -1075,6 +1084,9 @@ def _anchor_busy(key: str, n: dict[str, Any], cx: Context) -> bool:
         if t.get("status") == "completed":
             continue
         meta = t.get("metadata") or {}
+        proj = str(meta.get("project") or "")
+        if proj and (_anc.pilot_root(proj) or proj) != page:
+            continue      # an item of another page that waits on this anchor is that page's
         w = str(meta.get("wait_anchor") or "")
         if w and (_anc.anchor_id(_anc.split_fragment(w)[0]) or w) == aid:
             return True
@@ -1093,18 +1105,37 @@ def _single_thread(n: dict[str, Any]) -> bool:
     return bool(re.fullmatch(r"gmail:[0-9a-f]+", a) or (a.startswith("github:") and "#" in a and "@" not in a) or a.startswith("notion:"))
 
 
-def person_hold_line(n: dict[str, Any], key: str, root: str, cx: Context, why: str, *, source: str = "code", rule: str = "gate-person", call: str = "", note: str = "") -> dict[str, Any]:
-    """The ruling for a person's message nothing placed: held for the page's background agent (the one the message tool uses, anchors.background_agent, skipping one that is gone: a retired session or a surface agent,
+def person_hold_line(n: dict[str, Any], key: str, root: str, cx: Context, why: str, *, source: str = "code", rule: str = "gate-person", call: str = "", note: str = "", item: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The ruling for a person's message nothing placed: given the one open item its anchor is scoped to (`item`), the agent that does that item's work when it is live (item_doer, as person_place picks it), else
+    held for the page's background agent (the one the message tool uses, anchors.background_agent, skipping one that is gone: a retired session or a surface agent,
     whose held lines nobody reads), never archived. A page with no such agent holds it for its contact front agent (a held line for its next turn, which starts none: router_live._act), unless that one is gone too:
     the line then has no target, and router_live._judge leaves the notice unruled for the next tick (counted in `retry`), never archived. `why` is what the gate or the call found."""
     aroot = _import_live().agent_root(root, cx.reg)
+    shown_id = cx.shown(item["gid"]) if item else ""
+    doer = item_doer(item, aroot, cx) if item else ""
+    doer = "" if cx.gone(doer) else doer
+    if doer:
+        return _line(n, key, root, source=source, rule=rule, ruling="passed", target=doer, item=shown_id, call=call, note=note, person=True,
+                     reason=f"{why}: a person's message is never sent to an agent that is gone, so it goes to {doer}, who does the work of {shown_id}")
     back = cx.live_background(aroot)
     if back:
-        return _line(n, key, root, source=source, rule=rule, ruling="passed", target=back, call=call, note=note, hold="person", person=True,
+        return _line(n, key, root, source=source, rule=rule, ruling="passed", target=back, item=shown_id, call=call, note=note, hold="person", person=True,
                      reason=f"{why}: a person's message is never archived, so it is held for {back}, the page's background agent")
     main = cx.contact(aroot)
-    return _line(n, key, root, source=source, rule=rule, ruling="passed", target=main, call=call, note=note, person=True,
+    return _line(n, key, root, source=source, rule=rule, ruling="passed", target=main, item=shown_id, call=call, note=note, person=True,
                  reason=f"{why}: a person's message is never archived, so it is held for {main or 'nobody'}, the page's contact agent (the page lists no background agent that is still running)")
+
+
+def live_place_line(ln: dict[str, Any], n: dict[str, Any], key: str, root: str, cx: Context) -> dict[str, Any]:
+    """The one guard every pass of a person's message goes through (code_rule for the rules in code, call_line for the call's answer and its clamps): a pass to an agent that is gone (retired, or a surface agent whose
+    hook reads no held lines) is never delivered to it. It is redone by person_hold_line: the live agent that does the item's work, else the page's live background agent, else its live contact agent, else a line with no target,
+    which router_live leaves unruled and counts like any message with nobody to hold it. Any other line comes back as it was, so no rule needs a check of its own; the caller has read person_notice."""
+    t = str(ln.get("target") or "")
+    if ln.get("ruling") != "passed" or not t or not cx.gone(t):
+        return ln
+    items = _anchor_items(key, n, cx) if n.get("kind") == "anchor" else []
+    return person_hold_line(n, key, root, cx, f"rule {ln.get('rule') or 'the call'} would have passed it to {t}, who is gone", source=str(ln.get("source") or "code"), rule="gate-person" if ln.get("rule") in ("", "watch", None) else str(ln["rule"]),      # a watch keeps its delivery in router_live._act: a pass it cannot make is the gate's
+                            call=str(ln.get("call") or ""), note=str(ln.get("note") or ""), item=items[0] if len(items) == 1 else None)
 
 
 def _his_move(t: dict[str, Any]) -> bool:
@@ -1214,6 +1245,7 @@ def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[d
     elif ln["ruling"] in ("archived", "dropped", "merged") and ln.get("rule") not in ("gate-trivial", "auto"):
         return person_hold_line(n, key, root, cx, f"rule {ln.get('rule') or '?'} would have ruled it {ln['ruling']}", rule=str(ln.get("rule") or "gate-person"))
     if ln["ruling"] == "passed":
+        ln = live_place_line(ln, n, key, root, cx)
         ln["person"] = True
     return ln
 
@@ -1266,8 +1298,7 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
                     a project page that configures quiet-hour archiving goes to its work agent, not into the quiet-hour archive). It fires once the page registry is rebuilt
                     with the pages' `lead_agents` (publish.py's pass, pages.cmd_registry); until then it falls through.
       anchor-item   an anchor notice on an anchor scoped to exactly one open item, whose mover is the one the notice is for:
-                    passed to that mover, so it goes onto the item (a person's message whose mover, or build-side agent, is gone goes instead
-                    to the page's live background agent, else its live contact agent, else it stays unruled: person_hold_line). Since (a front mover
+                    passed to that mover, so it goes onto the item. Since (a front mover
                     gets a turn only for what may need him) a GitHub anchor's build-side notice (is_build_news, a whitelist by event type: every
                     type is comment, review, review_comment, pr_* or issue_*, or the anchor is `@releases`; a notice with no type on another
                     anchor, such as a `@notifications` reason, stays) on an item whose mover is a front agent goes to the item's mover
@@ -1397,12 +1428,8 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
                         rp = _same_anchor_repeat(n, peers)
                         if rp:
                             return _line(n, key, root, source="code", rule="repeat", ruling="dropped", reason=f"a repeat of notice {rp['id']} (same anchor, sender, text and link, within an hour)")
-                        if person_notice(n) and cx.gone(bt):      # a person's message is never sent to a retired agent: the page's live agent takes it (person_hold_line), or it stays unruled
-                            return person_hold_line(n, key, root, cx, f"the anchor is scoped to {shown(t['gid'])}, whose build-side agent {bt} is gone", rule="anchor-item")
                         return _line(n, key, root, source="code", rule="anchor-item", ruling="passed", target=bt, item=shown(t["gid"]),
                                      reason=f"the anchor is scoped to {shown(t['gid'])}, whose mover {owner} is a front agent: build-side news goes to {bt}, who moves the item")
-                    if person_notice(n) and cx.gone(owner):
-                        return person_hold_line(n, key, root, cx, f"the anchor is scoped to {shown(t['gid'])}, whose mover {owner} is gone", rule="anchor-item")
                     return _line(n, key, root, source="code", rule="anchor-item", ruling="passed", target=owner, item=shown(t["gid"]),
                                  reason=f"the anchor is scoped to {shown(t['gid'])}: it goes onto that item, for its mover {owner}")
         for p in peers:
@@ -1678,6 +1705,7 @@ def call_line(a: dict[str, Any], n: dict[str, Any], key: str, root: str, cx: Con
     if ln["ruling"] in ("archived", "dropped", "merged") and ln.get("rule") != "repeat":
         return person_hold_line(n, key, root, cx, f"the call ruled it {ln['ruling']} ({_clean(a.get('reason'), 110) or ln['reason'][:110]})", source="call", rule="gate-person", call=call, note=str(ln.get("note") or ""))
     if ln["ruling"] == "passed":
+        ln = live_place_line(ln, n, key, root, cx)
         ln["person"] = True
     return ln
 
