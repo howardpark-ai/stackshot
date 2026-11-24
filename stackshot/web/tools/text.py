@@ -7,6 +7,7 @@ from pydantic import Field
 
 from stackshot.core import config as _cfg
 from stackshot.core.instance import NAME, OWNER
+from stackshot.core.lines import MSG_MAX      # re-exported: server.py and the tools read it from here
 from stackshot.model import draft as _draft, step_commands as _sc
 from stackshot.waits import event_waits as _ew, waiting as _wt
 from stackshot.web import render as _rmod
@@ -150,4 +151,3 @@ _POST_WAKE_PARAM = Annotated[str, Field(description=_T.param("POST_WAKE"))]
 _CONTACT_PARAM = Annotated[str, Field(description=_T.param("CONTACT"))]
 _OUTCOME_TEXT_PARAM = Annotated[str, Field(description=_T.param("OUTCOME_TEXT"))]
 
-MSG_MAX = 4000

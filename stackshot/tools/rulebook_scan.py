@@ -58,6 +58,7 @@ from typing import Any, Callable
 HERE = Path(__file__).resolve().parent
 CHECKOUT = HERE.parents[1]
 from stackshot.core import config as _cfg  # noqa: E402
+from stackshot.core.lines import MSG_MAX  # noqa: E402,F401  — the message tool's cap
 
 KEEPER = "my-keeper"
 NO_FILES_NOTE = "no [[rulebook_scan.files]] table in [rulebook_scan]: nothing is scanned"
@@ -65,7 +66,6 @@ DEFAULT_HELP_VERBS = ["op"]
 SALA_LIB = "~/salamander/lib"          # sala's code: lib/<verb>.sh holds each verb; a flag found there is a help-text gap, not a stale mention
 SALA_KEEPER = "my-sala-keeper"
 SENDER = "stackshot rulebook scan"
-MSG_MAX = 4000            # server.py's cap on a message
 NOTE_MAX = 3600           # what a note keeps of it: the list is cut with a count, never the framing
 LINE_CAP = 300            # a finding's stale text, shortened
 

@@ -733,7 +733,7 @@ def _front_held_log(gid: str, owner: str, kind: str, reason: str, note: str, fil
         print(f"front gate: {gid} not logged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
-def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = "", log: bool = True, held_kind: str = "fyi", board: bool = True) -> bool:
+def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = "", log: bool = True, held_kind: str = "fyi", board: bool = True, whole: bool = False) -> bool:
     """the one gate every item notice passes in tell_woken. → True when the notice was handled here (held, or filed as an fyi line) and must not be pushed. False: send it as ever.
     Not gated: a recipient that is no front agent, a kind of "exempt" (his board answer relayed, a hand-off, a migration, a recycle, a notice that asks the mover to act and holds something for him: a notice that asks the agent to act on
     its own move and holds nothing for him is told by its sender as "progress", `tell_own_move`, and is gated like any progress notice). The [for <owner>]
@@ -743,7 +743,8 @@ def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = 
     `nid`: the router notice this is the pass of, so a pass retried after its ruling failed to write holds the line once (held.add is idempotent on it).
     `log`: False when the caller writes the routing-log line itself (the router's own ruling), so one notice leaves one line there.
     `held_kind`: the kind the held line is filed under (held.KINDS): an fyi, or a page-owed notice the router passes.
-    `board`: False leaves the item's History line out (only the routing-log line is written), for a notice to a front agent the item is not about."""
+    `board`: False leaves the item's History line out (only the routing-log line is written), for a notice to a front agent the item is not about.
+    `whole`: the note is a session's message, held with all its words and line breaks (held.add whole=True); False is a status notice, one line cut at held.LINE_MAX."""
     kind = kind or FRONT_TAG_KIND.get(tag, "progress")
     FRONT_HINT.result = ("", "")
     if kind == "exempt" or not front_sender(owner):
@@ -754,7 +755,7 @@ def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = 
             return False
         fyi_ok = verdict == "fyi" and _held.enabled() and _held.can_fetch(owner)
         if fyi_ok:
-            fyi_ok = _held.add(_held.key_of(owner), held_kind, note, sender=NAME, gid=gid, nid=nid)
+            fyi_ok = _held.add(_held.key_of(owner), held_kind, note, sender=NAME, gid=gid, nid=nid, whole=whole)
         if verdict == "fyi" and not fyi_ok:
             why = "its hook cannot fetch held lines, and a new turn is not worth it"
         reason = f"held: front agent, rides {OWNER}'s next turn (fyi, {kind})" if fyi_ok else f"archived: front agent, {why} ({kind})"
@@ -769,12 +770,12 @@ def front_gate(gid: str, owner: str, note: str, tag: str, kind: str, nid: str = 
         return False
 
 
-def front_fyi(agent: str, note: str, gid: str = "", nid: str = "", log: bool = True, held_kind: str = "fyi", board: bool = True) -> tuple[str, str]:
+def front_fyi(agent: str, note: str, gid: str = "", nid: str = "", log: bool = True, held_kind: str = "fyi", board: bool = True, whole: bool = False) -> tuple[str, str]:
     """An fyi for a front agent (a message its sender marked as asking nothing, sent through the message tool or passed by the router) through the front gate, the one path a notice
     for a front agent takes: it rides the agent's next turn and starts none, or is held when its hook cannot fetch held lines. `gid`: the items the message names (comma-separated), each
     of which gets its board line. → ("fyi", "") filed for its next turn, ("held", why) nobody is told (logged `archived`), ("", "") the gate did not handle it (a recipient that is no front agent, or the
-    gate failed): the caller does what it did before. `held_kind`: "page-owed" for a page-owed notice the router passes (same gate, same path; the line is filed under that kind). `board`: see `front_gate`."""
-    if not front_gate(gid, agent, note, "message", "message", nid, log, held_kind, board):
+    gate failed): the caller does what it did before. `held_kind`: "page-owed" for a page-owed notice the router passes (same gate, same path; the line is filed under that kind). `board`, `whole`: see `front_gate` (`whole` is True for a session's message, False for a status line the server wrote)."""
+    if not front_gate(gid, agent, note, "message", "message", nid, log, held_kind, board, whole):
         return "", ""
     return gate_result()
 
@@ -1691,17 +1692,18 @@ def _hold_project(target: str, gid: str = "") -> str:
         return ""
 
 
-def hold_notice(target: str, text: str, kind: str, *, gid: str = "", project: str = "", sender: str = "", asks: bool = False, owner_words: bool = False) -> bool:
+def hold_notice(target: str, text: str, kind: str, *, gid: str = "", project: str = "", sender: str = "", asks: bool = False, owner_words: bool = False, whole: bool = False) -> bool:
     """THE decision point for a notice this server delivers itself. A notice to a BACKGROUND agent that asks nothing of it
     is not pushed as a new turn: it is held (held.py, server-side) and handed over with the agent's next turn, and the routing log says so with the reason
     "held: asks nothing (kind)". The sender names the kind (held.KINDS) and what it knows: `asks` (the agent is named in needs, moves the item, is handed it, its wait
     ends), `owner_words` (the notice carries his words); held.decide answers, and anything unsure is delivered. A front agent, a kind the code does not know, a
-    notice marked for the owner and a failure here all deliver as before. → True when the notice was held (the caller sends nothing). Never raises."""
+    notice marked for the owner and a failure here all deliver as before. `whole`: the text is a session's message (the message tool's fyi), held with all its words and line breaks
+    (held.add whole=True); False is a status notice, one line cut at held.LINE_MAX. → True when the notice was held (the caller sends nothing). Never raises."""
     h = _hooks()
     try:
         if not kind or not target or not _held.decide(kind, is_background=bool(h.back_agent(target)), text=text, owner_words=owner_words, asks=asks, target=target):
             return False
-        if not _held.add(_held.key_of(target), kind, text, sender=sender or NAME, gid=gid):
+        if not _held.add(_held.key_of(target), kind, text, sender=sender or NAME, gid=gid, whole=whole):
             return False
         try:
             proj = project or _hold_project(target, gid)

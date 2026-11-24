@@ -187,7 +187,7 @@ def _clean(body: dict[str, Any]) -> tuple[dict[str, str], tuple[int, dict[str, A
     return got, None
 
 
-FYI_FIRST = 40          # characters of the reply's first words in the held line: a held line is cut at 260 (waits/held.py LINE_MAX) with its own prefix (`[stackshot message] from <sender>: `), so the words must come early and short
+FYI_FIRST = 40          # characters of the reply's first words in the held line: the line is a short note with its own prefix (`[stackshot message] from <sender>: `), not the reply; the pane has the reply
 
 
 def _plain(text: Any) -> str:
