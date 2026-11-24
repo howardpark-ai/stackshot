@@ -680,7 +680,7 @@ def update_unlocked(
         kinds = _needs_kinds(meta)
         if agent.strip().lower() in h.ask_none:
             _needs_store(meta, _canon_needs(kinds))
-        elif (got_agent := fc.call(_gates.gate_needs_session, agent, proj_for, own_for, _model.norm_who(meta.get("then")))) is not None:
+        elif (got_agent := fc.call(_gates.gate_needs_session, agent, proj_for, own_for, _model.norm_who(meta.get("then")), sender.strip(), _gates.lazy_said(said, sender.strip()))) is not None:
             _needs_store(meta, _canon_needs([*kinds, got_agent], _anc.names()))
     state_st, state_given, step_withdrawn = fc.call(_gates.gate_state_args, {"expected_by": expected_by, "expected_reason": expected_reason, "step": step, "supplies": supplies}, default=("", {}, False))   # a bad value is refused before anything is written
     draft_set, clear_draft = fc.call(_gates.gate_draft_args, draft, clear_draft, default=("", clear_draft))   # a bad draft is refused before anything is written

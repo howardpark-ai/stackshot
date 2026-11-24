@@ -58,6 +58,7 @@ from stackshot.service import writes as _writes
 from stackshot.service import telling as _telling
 from stackshot.service import background_want as _background_want
 from stackshot.service import front_turn as _front_turn
+from stackshot.service import sibling_words as _sibling_words
 from stackshot.service import store as _svcstore
 from stackshot.service import create as _create_svc
 from stackshot.service import gates as _gates
@@ -183,6 +184,7 @@ def install_early(host: Any) -> None:
                            front_answer=lambda target, who, text, nid="": _messaging.router_answer(target, who, text, nid),
                            front_turn=lambda target, subject, needs=True: _front_turn.warranted(target, subject, needs),
                            want_background=lambda project, kind: _background_want.want_background(project, kind),
+                           front_words=lambda target, who, text: _sibling_words.held_words(who, target, text),
                            front_fyi=lambda target, text, gid="", nid="", log=True, kind="fyi": _telling.front_fyi(      # the items the ruling names, then the items the text names (the message tool's own list)
                                target, text, ",".join(dict.fromkeys([*str(gid).replace(",", " ").split(), *([] if kind == "page-owed" else _agent_names._item_refs(text))])), nid, log, kind))      # a page-owed line names no item to write a board line on: the owed list is the board's record of it
 
@@ -317,6 +319,7 @@ def install_late() -> None:
         load_or_none=_late_in(_item_read, "_load_or_none"),
         model_of=_late_in(_item_read, "_model_of"),
         old_wait_off=_late_in(_item_read, "_old_wait_off"),
+        owner_quote_on=_late_in(_owner_words, "_owner_quote_on"),
         page_io=_late_in(_projects_svc, "_page_io"),
         publish=_late_in(_pubmod, "_publish"),
         recovery_role=lambda: _pane_recovery._RECOVERY_ROLE,
@@ -519,6 +522,7 @@ def install_late() -> None:
         open_item_named=_late_in(_item_read, "_open_item_named"),
         outcomes=OUTCOMES,
         own_repo=_late_in(_relsvc, "_own_repo"),
+        owner_quote_on=_late_in(_owner_words, "_owner_quote_on"),
         owner_words_on=_late_in(_owner_words, "_owner_words_on"),
         parse_wake=lambda *a, **k: _wakes.parse_wake(*a, **k),
         relaunch=_RELAUNCH,

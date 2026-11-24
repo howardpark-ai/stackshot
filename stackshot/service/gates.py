@@ -104,6 +104,7 @@ class Hooks:
     open_item_named: Callable[..., Any]
     outcomes: Any            # how an item may end (owner_words.OUTCOMES)
     own_repo: Callable[..., Any]
+    owner_quote_on: Callable[..., Any]
     owner_words_on: Callable[..., Any]
     parse_wake: Callable[..., Any]
     relaunch: Any            # the sentence a refused close ends with (owner_words._RELAUNCH)
@@ -132,6 +133,48 @@ def _hooks() -> Hooks:
     if _hooks_ is None:
         raise RuntimeError("the gates have no hooks installed (web/wiring.py installs them, called from web/server.py at its import)")
     return _hooks_
+
+
+def lazy_said(said: Any, sender: str) -> Callable[[], list[dict[str, Any]]]:
+    """The entries of a write's `said` as `gate_said` reads them (checked against the transcript), read once and only when asked, for the checks that come before the item lock: a `said` the gate refuses is
+    no words here ([]); the write's own gate under the lock then refuses the write with its text."""
+    memo: list[list[dict[str, Any]]] = []
+    def get() -> list[dict[str, Any]]:
+        if not memo:
+            try:
+                memo.append(gate_said(said, str(sender or "").strip(), "", dry=True))
+            except Exception:  # noqa: BLE001  — refused words are no words; the write's own check says why
+                memo.append([])
+        return memo[0]
+    return get
+
+
+def _front_sibling(sender: str, key: str, project: str) -> bool:
+    """Is `sender` a live front agent of the item's project, and `key` another live front agent of it (`key` as the roles list it)? False for the sender itself, for a background agent, another project's session, a
+    session no page lists, a retired one, and on a failing roles read."""
+    try:
+        h = _hooks()
+        s = str(sender or "").strip()
+        if not s or not project:
+            return False
+        nm = _anc.names()
+        roles, skey = h.role_of(s, nm)
+        return bool(skey) and skey != key and _bl.front_siblings(roles.get(skey), roles.get(key), project)
+    except Exception:  # noqa: BLE001  — the rule is an extra: a failed read leaves today's path
+        return False
+
+
+def sibling_quote(said_l: list[dict[str, Any]]) -> str:
+    """The owner's words in a write's checked `said` entries, read the way the wake cap reads them (owner_words._owner_quote_on: an Acked-by checked against a transcript, a message no older than [waiting] cap_days; a board answer is none of this
+    write's `said`): his sentence, or "" when there are none."""
+    if not said_l:
+        return ""
+    return _hooks().owner_quote_on({}, said_l, _wt.cap_days())[1]
+
+
+def _sibling_pointer(key: str, verb: str = "update") -> str:
+    """The one clause a front agent that names a sibling front agent without the owner's words is given: what to send to hand it over on his order (`verb`: the call it is, update or create)."""
+    return f"to hand it to {key} on {OWNER}'s order, send the {verb} again with said=[Acked-by …] quoting his words with the time"
 
 
 def _front_mover_case(field: str, value: str, sender: str, project: str, current: str = "") -> "tuple[str, str, list[str], str] | None":
@@ -219,18 +262,25 @@ def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]", pr
                      + (f"; for a check or an answer only {key} can give, {via}." if via else "."))
 
 
-def fix_front_mover(field: str, value: str, sender: str, project: str, current: str, meta: "dict[str, Any] | None") -> "tuple[str, str, list[tuple[str, str, str]]]":
+def fix_front_mover(field: str, value: str, sender: str, project: str, current: str, meta: "dict[str, Any] | None", said_l: "Callable[[], list[dict[str, Any]]] | None" = None, verb: str = "update") -> "tuple[str, str, list[tuple[str, str, str]]]":
     """The front-mover rule as a fix (server_fixes.FRONT_MOVER): a mover, then or post_wake_mover that another session sets to a front agent becomes the project's builder, since the front agent gets
     no hand-off notice. → (the value to use, the note for the reply, the fixes to record on the item: (fix, token, History line), a line of "" = take the mark off). The value is the one sent when it is
     no case (_front_mover_case), or when the server already substituted this very value on this item for this very sender less than a day ago and the sender sends it again: the mover's no, kept as sent with a note, and the server leaves that
     field alone (another session, or the same one after a day, is substituted as a new case). With no builder to substitute (front-only), a `mover`, `then` or `post_wake_mover` goes through when
     `front_handover_ok` says so (the target is a live front agent of the item's project, the sender a live session some project page lists, of any project); a `mover` target is told by a hand-off
-    notice, a `then` or `post_wake_mover` target by the owner's answer or the wake (no write tells it, as before)."""
+    notice, a `then` or `post_wake_mover` target by the owner's answer or the wake (no write tells it, as before).
+    One case goes before all of that: the sender is a live front agent of the item's project and the value another live front agent of it (a sibling), and `said_l` (`lazy_said`: the write's `said`, checked) carries the
+    owner's words (`sibling_quote`, the wake cap's reading). The value is then kept as sent, builder or none, with a note; the hand-off record carries his quoted words and its notice (handoff_notify) tells the sibling. With no
+    such words a sibling's swap note says how to send them (`verb`: the call, update or create, the note names)."""
     h = _hooks()
     case = _front_mover_case(field, value, sender, project, current)
     if case is None:
         return value, "", []
     key, proj, builder, _hub = case
+    sib = _front_sibling(sender, key, project)
+    if sib and sibling_quote(said_l() if said_l else []):
+        return value, (f"\n(note: {field}={key} is kept as you sent it, on {OWNER}'s words in said; {key} is a front agent of {proj}, and "
+                       + (f"is told it is handed the item)" if field == "mover" else "if the item keeps it, the owner's answer or the wake hands it the item and tells it)")), []
     token = f"{field}={key}"
     by, now = h.session_id(sender) or sender, time.time()
     hit = _sf.marked_by(meta, _sf.FRONT_MOVER, token, by, now)       # the substitution was this session's, within a day: its second send is the mover's no
@@ -244,7 +294,9 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
         raise _front_mover_refusal(field, case, project, sender)
     via = _for_peer(key, proj)
     return builder[0], (f"\n(fixed: {field}={key} is a user-facing agent of {proj} and gets no hand-off notice from another session, so {field}={builder[0]}, the project's builder, was used instead. "
-                        f"If {key} really is who should take it, send {field}={key} again: the server then keeps it as sent" + (f"; for a check or an answer only {key} can give, {via}" if via else "") + ")"), \
+                        f"If {key} really is who should take it, send {field}={key} again: the server then keeps it as sent"
+                        + (f"; {_sibling_pointer(key, verb)}, and {key} is told" if sib else "")      # a sibling's second send passes as before, but only the owner's words get it told
+                        + (f"; for a check or an answer only {key} can give, {via}" if via else "") + ")"), \
         [(_sf.FRONT_MOVER, _sf.bind(token, by, now), f"{field} {key} → {builder[0]}: {key} is a user-facing agent and gets no hand-off notice from another session; sending {field}={key} again keeps it as sent")]
 
 
@@ -297,11 +349,12 @@ def gate_front_step(gid: str, item: dict[str, Any], before: list[dict[str, Any]]
         print(f"front-step gate: {gid or 'a new item'} not judged ({e.__class__.__name__}: {e}); the write passes", file=sys.stderr, flush=True)
 
 
-def gate_needs_session(name: str, project: str, owner: str, also: str = "") -> str:
+def gate_needs_session(name: str, project: str, owner: str, also: str = "", by: str = "", said_l: "Callable[[], list[dict[str, Any]]] | None" = None, verb: str = "update") -> str:
     """A session name for an item's needs → the name stored. Allowed: the item's mover itself; a background agent (or the name-line
     session of a one-session page, which no agents map retires) of any project (anchors.session_roles, which roles.json builds on); the keeper of
     the item's own page (a sub-page's `agent:`). Refused: another user-facing agent (its part is its own item, linked with after=), a retired
-    name-line session (of a page that lists user-facing agents), and a session no page names."""
+    name-line session (of a page that lists user-facing agents), and a session no page names. One exception to the user-facing refusal: `by`, the writer of `agent=`, a live front agent of the item's project, naming another one (a sibling)
+    with the owner's words in `said_l` (`lazy_said`, read as `sibling_quote` reads them): the sibling is stored; without them the refusal ends with how to send them."""
     h = _hooks()
     name = name.strip()
     nm = _anc.names()
@@ -312,12 +365,16 @@ def gate_needs_session(name: str, project: str, owner: str, also: str = "") -> s
     roles, key = h.role_of(name, nm)
     hub, stew, back, front, keeper = h.hub_sessions(project)
     if key and roles[key]["role"] == "front":
+        sib = _front_sibling(by, key, project)
+        if sib and sibling_quote(said_l() if said_l else []):      # a front agent hands the item to a sibling on the owner's words: stored as sent, the hand-off notice tells it
+            return h.store_ref(key)
+        ptr = _sibling_pointer(key, verb) if sib else ""
         if _anc.front_only(project) and _bl.front_of(roles[key], project):      # no builder: the peer's part is a hand-over (mover=) or its own item
             raise ToolError(f"Refused: {key} is a front agent of {roles[key]['project']}, and needs names a background agent or this project's keeper" + (f" ({keeper})" if keeper else f", which {hub or 'the project'} lacks") + ". "
-                            f"To hand {key} the item set mover={key} (it is told); for its part of a plan open its own item and link it with after=[{key}'s item].")
+                            f"To hand {key} the item set mover={key} (it is told); for its part of a plan open its own item and link it with after=[{key}'s item]." + (f" {ptr[:1].upper()}{ptr[1:]}." if ptr else ""))
         raise ToolError(f"Refused: {key} is a user-facing agent of {roles[key]['project']}, and needs names a background agent "
                         f"of any project, or this project's keeper; a user-facing agent's part is its own item, linked with after=[{key}'s item]. "
-                        f"For {hub}: {', '.join(x for x in dict.fromkeys([stew, *back]) if x) or 'no background agent named'}")
+                        f"For {hub}: {', '.join(x for x in dict.fromkeys([stew, *back]) if x) or 'no background agent named'}" + (f"; {ptr}" if ptr else ""))
     if key and roles[key].get("retired"):           # the name-line session of a page that lists user-facing agents: its pane is gone, nothing may be sent to it
         raise ToolError(f"Refused: {key} is the retired name-line session of {roles[key]['project']} (its notices go to the project's keeper), and needs names a session that can act. "
                         f"For {hub}: {', '.join(x for x in dict.fromkeys([keeper, *back]) if x) or 'no background agent named'}")

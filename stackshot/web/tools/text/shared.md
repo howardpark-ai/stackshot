@@ -168,9 +168,8 @@ of a create is recorded as its creator). Optional fields, stored as given (each 
 goal=<the end-state in one sentence, what {{OWNER}} would ask "is it done?" about>; mover=<who moves the item: on
 an alive item now, on a waiting item whoever takes it when the wait ends; {{OWNER}}, a session name or the project's
 background agent; a front agent (a session {{OWNER}} talks to) only by
-itself: a create or update from another session that sets mover to one gets the project's builder instead, and the
-reply and History say so (send it again to keep it; with no builder it is refused, except to a front
-agent of the item's project from a session a page lists: mover= tells it)>; then=<who takes it
+itself: a create or update from another session that sets mover to one gets the project's builder instead (see
+the mover parameter)>; then=<who takes it
 after {{OWNER}}'s answer or step; it stands only while he moves the item, and on an item a session moves or
 waits on it is dropped with a note in the reply: to hand an item on, set mover=<session>; then=<front agent> from
 another session gets the builder the same way>;
@@ -332,8 +331,10 @@ Who moves the item now: {{OWNER}}, a session name or id, or the project's backgr
 is who takes the item when the wait ends. A front agent (a session
 {{OWNER}} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets
 mover=<front agent> gets the project's builder instead (the reply and History say so; send it again to keep it;
-with no builder it is refused, except from a session a project page lists to a front agent of the item's own project:
-mover= tells the agent, then and post_wake_mover leave it to the answer or the wake). On an update that sets no needs, the
+with no builder it is refused, except from a listed session to a front agent of the item's own project: mover= tells it,
+the others leave it to the answer or the wake). A front agent of the item's project may
+hand it to a sibling front agent on {{OWNER}}'s words: said=[Acked-by …] keeps the sibling in mover, then,
+post_wake_mover or agent as sent, and mover and agent tell it. On an update that sets no needs, the
 session needs names for the mover it replaces is swapped for the new one.
 
 ## param THEN

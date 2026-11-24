@@ -197,8 +197,9 @@ def stackshot_update(
             meta_ = {}      # an unknown item is _update's to refuse
         proj_ = project or str(meta_.get("project") or "")
         vals = {"mover": mover, "then": then, "post_wake_mover": post_wake_mover}
+        words_ = _gates.lazy_said(said, sender)
         for f_, v_ in list(vals.items()):
-            vals[f_], n_, fx_ = _gates.fix_front_mover(f_, v_, sender, proj_, str(meta_.get(f_) or ""), meta_)    # a front agent gets no hand-off notice: another session's value becomes the project's builder and the reply says so; the value the item already holds changes nothing; the same value sent again is kept as sent
+            vals[f_], n_, fx_ = _gates.fix_front_mover(f_, v_, sender, proj_, str(meta_.get(f_) or ""), meta_, words_)    # a front agent gets no hand-off notice: another session's value becomes the project's builder and the reply says so; the value the item already holds changes nothing; the same value sent again is kept as sent; a sibling front agent of the project, with the owner's words in said, is kept as sent and told
             fix_note += n_; fixes += fx_
         mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
     list_in = _wlw.passed(waits) and not _wlw.clearing(waits)      # a wait on a list: its date is the backstop, read as an anchor or item wait's is, and it names its blockers (the lines)

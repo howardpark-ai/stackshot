@@ -8,6 +8,8 @@ holds their pure parts (the server supplies what needs the project registry):
   handover_allowed(sender, target, front_only, item_project)  may a session name a front agent in `mover=` (a hand-over), `then=` or `post_wake_mover=`: the project the item is filed under is front-only and the target is a
                                         live front agent of it (listed on that page or a page above it); the sender is any live session some project page lists, front or background,
                                         of any project
+  front_siblings(sender, target, item_project)  both rows are live front agents of the project the item is filed under (a front agent handing the item to a sibling, which the owner's words in `said` allow whatever
+                                        builders the project has)
 
 A project with no agents map (a one-session page) counts as having no builder too, but it lists no front agent, so neither rule finds a session to name there and the old fallback stands.
 
@@ -27,6 +29,12 @@ def front_of(row: dict[str, Any] | None, item_project: str) -> bool:
     page = str(row.get("project") or "").strip().strip("/")
     proj = str(item_project or "").strip().strip("/")
     return bool(page) and (proj == page or proj.startswith(page + "/"))
+
+
+def front_siblings(sender: dict[str, Any] | None, target: dict[str, Any] | None, item_project: str) -> bool:
+    """Are the session-roles rows `sender` and `target` both live front agents of the project an item is filed under (`front_of` for each)? The caller has already told the two rows apart (two names of one session
+    are not siblings). The case in which a front agent may hand an item to its sibling on the owner's words; unlike `handover_allowed` it holds whether or not the project has a builder."""
+    return front_of(sender, item_project) and front_of(target, item_project)
 
 
 def next_named_step(meta: dict[str, Any], keeper: str = "") -> str:

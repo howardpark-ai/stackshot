@@ -13,23 +13,22 @@ message(to="widgets-builder", sender="my-x", text="board#N: the design is done, 
 then names that agent in the item's needs, unless that would leave the item with a second mover (another session
 already moves it, or it waits on a decision): the reply says so in one line: hand the item over with
 update(mover=<agent>), which tells the new mover itself. An item id cited only for context, not handed over, goes in backticks, since a plain-word id names the receiver on that item. A front agent is given a turn only by what {{OWNER}} has to do: its
-message carries {{FOR_OWNER}} on its first line (except fyi=true, below) and starts a turn only while he talks with that agent or has it in tell_him of an item it names; else it goes to that item's builder or is refused. A background agent's hand-back, a done, taken or no-action note, is tested first and is never an answer: written onto the item it names, else refused. Any other unmarked message is delivered only as
+message carries {{FOR_OWNER}} on its first line (except fyi=true, below) and starts a turn only while he talks with that agent or has it in tell_him of an item it names; else it goes to that item's builder or is refused, unless a sibling front agent quotes his words on a line `Acked-by: "<verbatim>" (time, session <name>)`, checked as said is: then it is held for its next turn. A background agent's hand-back, a done, taken or no-action note, is tested first and is never an answer: written onto the item it names, else refused. Any other unmarked message is delivered only as
 the answer to a question it wrote to you, while he is in that conversation (30 minutes); later
 it goes onto the item it names, else is held; so is a front peer's or the background agent's own. Any other is refused, naming
-the project's background agent (none: held). A front agent marks a question for the session it writes to with question=true; only a reply to it, within a day, is an answer; a `?` in the text, quoted words or a URL marks nothing. A done, taken or
+the project's background agent (none: held). A front agent marks a question with question=true; only a reply to it, within a day, is an answer; a `?` marks nothing. A done, taken or
 no-action note (a plain status report, nothing needed from {{OWNER}}, FYI, no reply needed, …), marked or not, is refused: write it on the board item (update, complete) or say nothing. A background agent's
 message to a front agent (marked, or a project message that opens For <front agent>) that names one to three board
 items is held back only when it clearly reads as a plain status report: the reply then begins 'Not
 delivered: written onto <item> as a History line ...' and the message sits on the item. It reads as a plain status report only when every sentence says done, live, merged, released, deployed, closed, opened, fixed, passes, green, recorded, unchanged, complete, finished, removed or retired (taken only as a sentence of its own, stopped only as 'is stopped'), and the text has no question mark (a URL's included), no prose in a code span, no plan (will, if, when, then), no person or front agent named to act, no opening yes or no and no word of trouble, lack, negation, waiting or asking (failed, blocked, need, must, review, ready, decide, please, not, yet, still, nothing, none, except, only, partly ...). A fixed no-action phrase skips only the status words. Everything else is delivered (the reply begins 'delivered'), and so is a
 message whose item waits on a decision (needs: decision) or names the front agent in its needs. A move to
 needs=decision reaches {{OWNER}} on the board, not through a message. A merge-queue group number ("group g7",
-"[g7]") names no item. Long content goes on a page or into a repo, with the pointer in the message.
+"[g7]") names no item.
 A message that asks nothing of its recipient is sent with fyi=true (news, a result, a status it need not act on): a
 background agent gets it with the first turn it takes, once (the reply begins 'held for <agent>'s next turn'), and it
 names the agent in no item's needs, so send it again without fyi if it does ask; to a project it is held the same way
 when the router passes it to an agent; to a front agent it is held for that agent's next
-turn, needs no {{FOR_OWNER}} and starts no turn (the reply begins 'not passed on' when its hook
-cannot fetch held lines); a message that carries {{FOR_OWNER}} or needs: decision is delivered or refused whatever the
+turn, needs no {{FOR_OWNER}} and starts no turn ('not passed on' when its hook cannot fetch held lines); a message that carries {{FOR_OWNER}} or needs: decision is delivered or refused whatever the
 flag says. A message to a retired session goes to its project for the router to rule, the reply beginning
 `'<name>' is retired (<why>), so this went to its project …`; it is refused only when no other agent of a project can take it. A message to
 a project is answered `held for the router — the router rules notice <id> …`, ending `get(item_id="<id>") shows its

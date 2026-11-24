@@ -26,6 +26,7 @@ class Hooks:
     load_or_none: Callable[..., Any]  # item_read._load_or_none
     model_of: Callable[..., Any]  # item_read._model_of
     old_wait_off: Callable[..., Any]  # item_read._old_wait_off
+    owner_quote_on: Callable[..., Any]  # owner_words._owner_quote_on
     page_io: Callable[..., Any]  # server._page_io
     publish: Callable[..., Any]  # web.publish._publish
     recovery_role: Callable[[], Any]  # pane_recovery._RECOVERY_ROLE

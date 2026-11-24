@@ -245,7 +245,7 @@ def create_item(
     opts = fc.call(h.gate_options, options)
     needs_l = fc.call(_gates.gate_needs, needs, project, owner, default=[]) if (needs if isinstance(needs, list) else needs.strip()) and str(needs).strip().lower() not in h.ask_none else []
     if agent.strip() and agent.strip().lower() not in h.ask_none:    # the older form writes the session into needs
-        if (got_agent := fc.call(_gates.gate_needs_session, agent, project, owner)) is not None:
+        if (got_agent := fc.call(_gates.gate_needs_session, agent, project, owner, "", owner, _gates.lazy_said(said, owner), "create")) is not None:      # `by` the creator: a live front agent of the project handing the item to a sibling on his words in `said` (as update does)
             needs_l = _canon_needs([*_needs_kinds({"needs": needs_l}), got_agent], _anc.names())
     obs = fc.call(_gates.gate_observers, observers, default=[]) if (observers if isinstance(observers, list) else observers.strip()) and str(observers).strip().lower() not in h.ask_none else []
     aft = fc.call(_gates.gate_after, after, default=[]) if (after if isinstance(after, list) else after.strip()) and str(after).strip().lower() not in h.ask_none else []

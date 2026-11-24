@@ -31,19 +31,21 @@ for pat, rep in ((r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]'), 
                  (r'(?m)^allowed_emails = \[[^\]]*\]', 'allowed_emails = ["oliver@example.org"]'), (r'(?m)^ui_open = true', 'ui_open = false')):
     toml, n = re.subn(pat, rep, toml); assert n == 1, pat
 toml, n = re.subn(r"(?m)^require_marks = true", "require_marks = false", toml); assert n == 1
+toml, n = re.subn(r'(?m)^transcripts = .*$', f'transcripts = ["{tmp}/transcripts"]', toml); assert n == 1   # never the host's transcripts
 (T / "stackshot.toml").write_text(toml, encoding="utf-8")
 (T / "RULES.md").write_text("# rules\n\n" + "- a rule the connector serves, long enough to count as a rulebook.\n" * 20, encoding="utf-8")
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
-for d in ("store/a", "fleet/a", "state/demo-one", "state/site", "secrets", "touch", "repo", "brain/projects"): (T / d).mkdir(parents=True)
+for d in ("store/a", "fleet/a", "state/demo-one", "state/site", "secrets", "touch", "repo", "brain/projects", "transcripts/-x"): (T / d).mkdir(parents=True)
 S, A, X, B, D = ("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333",
                  "44444444-4444-4444-8444-444444444444", "66666666-6666-4666-8666-666666666666")
 E = "77777777-7777-4777-8777-777777777777"
 C, M, DA, DB = ("88888888-8888-4888-8888-888888888888", "99999999-9999-4999-8999-999999999999", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+TM, TS, TX = ("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")      # trio: two front agents and a builder
 (T / "state/site/favicon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"/>')
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a", "url": "", "seen": "x"} for u, n in
                                                       ((S, "work-osprey"), (A, "work-osprey-main"), (X, "work-osprey-x"), (B, "home-beta"), (D, "work-osprey-docs"), (E, "solo-main"),
-                                                                                       (C, "comp-main"), (M, "duo-main"), (DA, "duo-a"), (DB, "duo-b"))}))
+                                                                                       (C, "comp-main"), (M, "duo-main"), (DA, "duo-a"), (DB, "duo-b"), (TM, "trio-main"), (TS, "trio-side"), (TX, "trio-x"))}))
 AGENTS = {"work-osprey-main": "Oliver's point of contact", "work-osprey-x": "builds, merges and releases the code", "work-osprey-docs": "keeps the pages"}
 (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {
     "title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project", "session": "work-osprey", "status": "active", "board": [], "board_row": False,
@@ -53,7 +55,10 @@ AGENTS = {"work-osprey-main": "Oliver's point of contact", "work-osprey-x": "bui
     "projects/comp": {"title": "Comp", "name": "Comp", "org": "home", "tags": [], "type": "project", "session": "comp", "status": "active", "board": [], "board_row": False, "hub": "projects/alpha",
     "updated": 1, "mirror": "https://example.invalid/comp", "agents": {"comp-main": "Oliver's point of contact"}, "back_agents": {}},      # a component page of alpha with no background agent of its own
     "projects/duo": {"title": "Duo", "name": "Duo", "org": "home", "tags": [], "type": "project", "session": "duo", "status": "active", "board": [], "board_row": False,
-    "updated": 1, "mirror": "https://example.invalid/duo", "agents": {"duo-main": "Oliver's point of contact", "duo-b": "tidies the notes", "duo-a": "tidies the pages"}, "back_agents": {"duo-b": "tidies the notes", "duo-a": "tidies the pages"}}}}))      # two background agents, neither builds or merges: duo-b is listed first
+    "updated": 1, "mirror": "https://example.invalid/duo", "agents": {"duo-main": "Oliver's point of contact", "duo-b": "tidies the notes", "duo-a": "tidies the pages"}, "back_agents": {"duo-b": "tidies the notes", "duo-a": "tidies the pages"}},
+    "projects/trio": {"title": "Trio", "name": "Trio", "org": "home", "tags": [], "type": "project", "session": "trio", "status": "active", "board": [], "board_row": False,
+    "updated": 1, "mirror": "https://example.invalid/trio", "agents": {"trio-main": "Oliver's point of contact", "trio-side": "Oliver's second desk", "trio-x": "builds, merges and releases the code"},
+    "back_agents": {"trio-x": "builds, merges and releases the code"}}}}))      # two background agents, neither builds or merges: duo-b is listed first
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n# Alpha\n\n## Current state\n\nALPHA-STATE.\n\n<!-- timeline -->\n- 2026-10-01 | old\n")
 DESC = "- A thing\n- It lives here\n- Finished when it works"
 now0 = time.time()
@@ -109,10 +114,10 @@ KEY = "projects/alpha"
 MACH = "home-test"
 def gate_open():
     """The rollout gate: the builder's and the page keeper's hooks have fetched held lines (held.mark_client), and the machine holds their sessions."""
-    held.mark_client(X, "work-osprey-x"); held.mark_client(D, "work-osprey-docs"); held.mark_client(A, "work-osprey-main"); held.mark_client(E, "solo-main"); held.mark_client(C, "comp-main"); held.mark_client(M, "duo-main")
-for u_, n_ in ((X, "work-osprey-x"), (A, "work-osprey-main"), (D, "work-osprey-docs"), (B, "home-beta"), (E, "solo-main"), (C, "comp-main"), (M, "duo-main"), (DA, "duo-a"), (DB, "duo-b")): _clients.register(MACH, {"uuid": u_, "name": n_})
+    held.mark_client(X, "work-osprey-x"); held.mark_client(D, "work-osprey-docs"); held.mark_client(A, "work-osprey-main"); held.mark_client(E, "solo-main"); held.mark_client(C, "comp-main"); held.mark_client(M, "duo-main"); held.mark_client(TM, "trio-main"); held.mark_client(TS, "trio-side"); held.mark_client(TX, "trio-x")
+for u_, n_ in ((X, "work-osprey-x"), (A, "work-osprey-main"), (D, "work-osprey-docs"), (B, "home-beta"), (E, "solo-main"), (C, "comp-main"), (M, "duo-main"), (DA, "duo-a"), (DB, "duo-b"), (TM, "trio-main"), (TS, "trio-side"), (TX, "trio-x")): _clients.register(MACH, {"uuid": u_, "name": n_})
 gate_open()
-def ids(session): return {X: ("work-osprey-x", X), A: ("work-osprey-main", A), D: ("work-osprey-docs", D), E: ("solo-main", E), B: ("home-beta", B), C: ("comp-main", C), M: ("duo-main", M), DA: ("duo-a", DA), DB: ("duo-b", DB)}[session]
+def ids(session): return {X: ("work-osprey-x", X), A: ("work-osprey-main", A), D: ("work-osprey-docs", D), E: ("solo-main", E), B: ("home-beta", B), C: ("comp-main", C), M: ("duo-main", M), DA: ("duo-a", DA), DB: ("duo-b", DB), TM: ("trio-main", TM), TS: ("trio-side", TS), TX: ("trio-x", TX)}[session]
 def reach(session, since): return [x for x in pushes()[since:] if x[0] in ids(session)]
 def hold_lines(): return [n for n in routing.read(KEY) if n.get("ruling") == "held" and str(n.get("reason", "")).startswith("held: asks nothing")]
 def gone(*refs): return held.take(*refs)
@@ -157,7 +162,7 @@ def recp(text, key=KEY, **kw):
     _live.stash(nid, text)
     return next(n for n in routing.read(key) if n["id"] == nid)
 def pushed(text): return [x for x in pushes() if text in x[1]]
-pane("work-osprey-main", A); pane("solo-main", E); pane("comp-main", C); pane("duo-main", M)
+pane("work-osprey-main", A); pane("solo-main", E); pane("comp-main", C); pane("duo-main", M); pane("trio-main", TM); pane("trio-side", TS)
 FRONT, BACK, SOLO = "work-osprey-main", "work-osprey-x", "solo-main"
 
 # ---- 1. the message tool, to a front agent
@@ -515,6 +520,57 @@ for name, text in (("an item page link", f"the release is live, see {BOARD}/item
                    ("a board id", f"the release is live, see board#{NUM}")):
     check(f"7r: a pass naming a decision item by {name} stays marked", _live._item_waits_decision({}, {}, text, cxx) is True, text)
 check("7s: …and one naming an item that waits on no decision does not", _live._item_waits_decision({}, {}, f"the release is live, see {BOARD}/items/a1 and A1 and #1", cxx) is False)
+
+# ---- 8. a front agent's marked message to a sibling front agent that quotes the owner's words (sibling_words): held for the sibling's next turn, not turned away to the builder
+TR, TRK = "projects/trio", "projects/trio"
+M_OK, M_OLD = "aaaaaaaa-aaaa-4aaa-8aaa-000000000001", "aaaaaaaa-aaaa-4aaa-8aaa-000000000002"
+QUOTE = "hand the export to the second desk"
+stamp_now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+(T / f"transcripts/-x/{TM}.jsonl").write_text("\n".join(json.dumps(e) for e in (
+    {"type": "user", "uuid": M_OK, "timestamp": stamp_now, "origin": {"kind": "human"}, "message": {"role": "user", "content": f"Oliver here: {QUOTE}, please"}},
+    {"type": "user", "uuid": M_OLD, "timestamp": "2020-01-01T00:00:00.000Z", "origin": {"kind": "human"}, "message": {"role": "user", "content": "an old order of the second desk, long before the cap"}})) + "\n", encoding="utf-8")
+LINE = f'Acked-by: "{QUOTE}" (just now, session trio-main)'
+WORDS = mark() + "\nOliver told me to give you the export.\n" + LINE
+NOWORDS = mark() + "\nOliver told me to give you the export."
+tres = lambda who, text, to="trio-side": msg(to, text, who)
+def tlines(): return [x for x in pushes()]
+for u_ in (TS, TM, TX): unstamp(u_)
+
+fresh(); no_log(); n0 = len(pushes()); out = tres("trio-main", WORDS); settle()
+check("8a: a sibling front agent's marked message quoting his words is held for the sibling's next turn, starts no turn, and the reply says so", out.startswith("held for trio-side's next turn") and reach(TS, n0) == [] and reach(TX, n0) == [] and held.count(TS) == 1, out)
+check("8b: …the held line carries the message with his quoted words", QUOTE in str(held.take(TS, "trio-side")), "")
+fresh(); n0 = len(pushes()); out = tres("trio-main", NOWORDS); settle()
+check("8c: the same message with no quoted words is turned away as today: refused, nothing held, nothing sent", out.startswith("Refused") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\nOliver told me to give you the export.\n" + f'Acked-by: "{QUOTE} and more he never said" (just now, session trio-main)'); settle()
+check("8d: words that are not in his message in the transcript are no words: refused as today", out.startswith("Refused") and held.count(TS) == 0, out)
+fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\nOliver told me to give you the export.\n" + 'Acked-by: "an old order of the second desk" (long ago, session trio-main)'); settle()
+check("8e: his words older than the wake cap are no words: refused as today", out.startswith("Refused") and held.count(TS) == 0, out)
+fresh(); n0 = len(pushes()); out = tres("trio-x", WORDS); settle()
+check("8f: a background agent's message quoting words is unchanged: refused, nothing held", out.startswith("Refused") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+fresh(); n0 = len(pushes()); out = tres("solo-main", WORDS); settle()
+check("8g: another project's front agent's message quoting words is unchanged: refused, nothing held", out.startswith("Refused") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+fresh(); n0 = len(pushes()); out = tres("trio-main", WORDS, to="trio-x"); settle()
+check("8h: a message to the project's background agent is not this rule's: delivered as before, nothing held", out.startswith("delivered") and held.count(TS) == 0 and held.count(TX) == 0, out)
+fresh(); stamp(TS, 5); n0 = len(pushes()); out = tres("trio-main", WORDS); settle(); unstamp(TS)
+check("8i: when he is talking with the sibling now the message starts its turn as before (the front-turn rule allows it): delivered, not held", out.startswith("delivered") and len(reach(TS, n0)) == 1 and held.count(TS) == 0, out)
+fresh(); n0 = len(pushes()); out = tres("trio-main", LINE.replace('Acked-by: "', 'Suggested-by: "') + "\nplease look at the export when you can."); settle()
+check("8j: an unmarked message is held for a peer front as before, with or without his words (this rule changes nothing there)", out.startswith("held for trio-side's next turn") and held.count(TS) == 1, out)
+
+# the router: a pass of the same message to the sibling
+fresh(); n0 = len(pushes()); n = recp(WORDS, key=TRK, kind="message", who="trio-main (cccccccc…)"); res = act2(n, "trio-side", key=TRK)
+check("8k: the router holds a sibling front agent's pass that quotes his words: ruled held, unmarked, no turn, not sent to the builder", res["ruling"] == "held" and res["marked"] is False and reach(TS, n0) == [] and reach(TX, n0) == [] and held.count(TS) == 1, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = recp(NOWORDS, key=TRK, kind="message", who="trio-main (cccccccc…)"); res = act2(n, "trio-side", key=TRK)
+check("8l: …the same pass with no quoted words is not held: it goes to the builder or is archived as before, and the sibling gets nothing", res["ruling"] != "held" and held.count(TS) == 0 and reach(TS, n0) == [], (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = recp(WORDS, key=TRK, kind="message", who="trio-x (eeeeeeee…)"); res = act2(n, "trio-side", key=TRK)
+check("8m: …a background agent's pass quoting words is not held by this rule", res["ruling"] != "held" and held.count(TS) == 0 and reach(TS, n0) == [], (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = recp(WORDS, key=TRK, kind="message", who="solo-main (77777777…)"); res = act2(n, "trio-side", key=TRK)
+check("8n: …nor another project's front agent's", res["ruling"] != "held" and held.count(TS) == 0 and reach(TS, n0) == [], (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = recp(WORDS.replace('Oliver told me to give you the export.', 'Oliver told me to give you the export. (a board note, not a message)'), key=TRK, kind="board", who="trio-main (cccccccc…)"); res = act2(n, "trio-side", key=TRK)
+check("8o: …and a board notice is not a message: not held by this rule", res["ruling"] != "held" and held.count(TS) == 0, (res, pushes()[n0:]))
+fresh(); stamp(TS, 5); n0 = len(pushes()); n = recp(WORDS, key=TRK, kind="message", who="trio-main (cccccccc…)"); res = act2(n, "trio-side", key=TRK); unstamp(TS)
+check("8p: the router's counterpart of 8i: when he is talking with the sibling now, the pass that quotes his words is a turn as the message tool has it: ruled passed, marked, sent to the sibling, nothing held", res["ruling"] == "passed" and res["marked"] is True and len(reach(TS, n0)) == 1 and held.count(TS) == 0 and reach(TX, n0) == [], (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = recp(WORDS, key=TRK, kind="message", who="trio-main (cccccccc…)"); res = act2(n, "trio-side", key=TRK)
+check("8q: …and the same pass right after, with him no longer there (no presence stamp): held, as in 8k", res["ruling"] == "held" and res["marked"] is False and reach(TS, n0) == [] and held.count(TS) == 1, (res, pushes()[n0:]))
 
 # ---- 6. the text
 docs = {p: (pathlib.Path(STACK) / "docs" / p).read_text() for p in ("router.md", "handoffs.md")}

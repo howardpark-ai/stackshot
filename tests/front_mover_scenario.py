@@ -1,5 +1,9 @@
 """Scenario test for: a front agent is never made an item's mover by another session — fixture data, no live store, no network.
 
+Also covers the sibling hand-over: a live front agent of the item's project may hand an item to another live front agent of it (mover, then, post_wake_mover, agent) when the write carries the owner's words in
+`said`, checked as the wake cap checks them; the value then stays as sent and the sibling is told by the hand-off notice, which states who handed it over and his quoted words. With no words (none, or words the
+check refuses) the swap or refusal stays and ends with one clause on how to send them; a background agent, another project's session, a target that is no front agent of the project and a project with no builder are as before.
+
 Covers: the server sends a front agent (a user-facing agent on a project's agents map) no hand-off notice, so create and update refuse a write that sets mover, or then
 (which becomes the mover after the owner's answer), to a front agent when the sender is a different session. The refusal says the front agent gets no notice, names the
 project's builder to hand build work to, and says to send a check or an answer only it can give as a message to the page key with `For <agent>,` on its first line. Allowed as before: a front agent naming itself, the
@@ -20,9 +24,10 @@ toml, n = re.subn(r'(?m)^transcripts = .*$', f'transcripts = ["{tmp}/transcripts
 (T / "stackshot.toml").write_text(toml, encoding="utf-8")
 (T / "RULES.md").write_text("# rules\n\n" + "- a rule the connector serves, long enough to count as a rulebook.\n" * 20, encoding="utf-8")
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
-for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects"): (T / d).mkdir(parents=True)
+for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects", "transcripts/-x"): (T / d).mkdir(parents=True)
 MAIN, SIDE, BUILD, REVIEW, ECHO = "home-delta-main", "home-delta-desk", "home-delta-builder", "home-delta-review", "home-echo-main"
-U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate((MAIN, SIDE, BUILD, REVIEW, ECHO), 1)}
+GMAIN, GDESK = "home-golf-main", "home-golf-desk"
+U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate((MAIN, SIDE, BUILD, REVIEW, ECHO, GMAIN, GDESK), 1)}
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a", "url": "", "seen": "x"} for n, u in U.items()}))
 page = lambda **kw: {"title": "T", "name": "T", "org": "home", "tags": [], "type": "project", "session": "", "status": "active", "board": [], "board_open": 0, **kw}
@@ -30,6 +35,7 @@ page = lambda **kw: {"title": "T", "name": "T", "org": "home", "tags": [], "type
     "projects/delta": page(title="Delta", name="Delta", agents={MAIN: "front", SIDE: "answers questions", BUILD: "builds it", REVIEW: "reviews it"},
                            back_agents={BUILD: "builds it", REVIEW: "reviews it"}),
     "projects/echo": page(title="Echo", name="Echo", agents={ECHO: "front"}),
+    "projects/golf": page(title="Golf", name="Golf", agents={GMAIN: "front", GDESK: "front, answers questions"}),
     "projects/foxtrot": page(title="Foxtrot", name="Foxtrot", agents={"home-foxtrot-main": "front", "home-foxtrot-watch": "watches the clock"}, back_agents={"home-foxtrot-watch": "watches the clock"})}}))
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
@@ -59,7 +65,8 @@ from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._refuse_if_owing = lambda debtor: None
-telling.tell_woken = lambda *a, **k: None
+told = []
+telling.tell_woken = lambda gid, owner, note, tag="wake", **k: told.append((gid, owner, note, tag))
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 SID = _web_page_debts._session_id
 OWNER = _core_instance.OWNER
@@ -235,6 +242,177 @@ check("tool text: the post_wake_mover parameter of create and update carries the
 _cdecl = _wt_create._CREATE_DESC
 check("tool text: create's own description says another session's front-agent mover, then or post_wake_mover gets the builder",
       "a create from another session that sets mover or then (or post_wake_mover, the old name of mover) to a front agent gets the project's builder instead" in _cdecl, _cdecl[:300])
+
+# ---- a front agent hands an item to a sibling front agent of its project on the owner's words (said, checked as the wake cap checks it)
+import datetime as _dt
+def call(fn):
+    """the tool's reply, or the refusal's text when it refuses (a mutant that breaks the rule fails a check, it does not end the suite)"""
+    try:
+        return fn()
+    except Exception as e:  # noqa: BLE001
+        return str(e)
+M_OK, M_OLD = "aaaaaaaa-aaaa-4aaa-8aaa-000000000001", "aaaaaaaa-aaaa-4aaa-8aaa-000000000002"
+QUOTE = "hand all of these to the desk agent"
+stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+(T / f"transcripts/-x/{U[MAIN]}.jsonl").write_text("\n".join(json.dumps(e) for e in (
+    {"type": "user", "uuid": M_OK, "timestamp": stamp, "origin": {"kind": "human"}, "message": {"role": "user", "content": f"{OWNER} here: {QUOTE}, please"}},
+    {"type": "user", "uuid": M_OLD, "timestamp": "2020-01-01T00:00:00.000Z", "origin": {"kind": "human"}, "message": {"role": "user", "content": "an old order, long before the cap"}})) + "\n", encoding="utf-8")
+SAID = [{"tag": "Acked-by", "quote": QUOTE, "msg": M_OK, "session": U[MAIN]}]
+BADMSG = [{"tag": "Acked-by", "quote": QUOTE, "msg": "bbbbbbbb-bbbb-4bbb-8bbb-000000000009", "session": U[MAIN]}]      # no such message in the transcript: the check refuses it
+OLD = [{"tag": "Acked-by", "quote": "an old order", "msg": M_OLD, "session": U[MAIN]}]      # his message, but older than the cap: no words behind a wait
+POINTER = f"to hand it to {SIDE} on {OWNER}'s order, send the update again with said=[Acked-by …] quoting his words with the time"
+STRANGER2 = "home-stranger"
+def to(user):
+    return [t for t in told if t[1] == U[user] and t[3] == "handoff"]
+def kept(reply, field, front):
+    return f"{field}={front} is kept as you sent it, on {OWNER}'s words in said" in reply and "(fixed:" not in reply and "was used instead" not in reply
+
+put(50, mover=MAIN)
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a50", sender=MAIN, mover=SIDE, next=f"{SIDE}: take it from here", said=SAID))
+m50 = rd(50)["metadata"]
+check("sibling: mover=<sibling front> with the owner's words stays as sent, with a note that says so", kept(r, "mover", SIDE) and telling.holder(rd(50)) == SIDE and m50.get("mover") == SIDE, (r, m50.get("mover")))
+check("sibling: nothing is substituted and no front-mover mark is left on the item", "front_mover" not in json.dumps(m50.get("server_fixed") or ""), m50.get("server_fixed"))
+n50 = to(SIDE)
+check("sibling: the sibling is told by the hand-off notice, which names who handed it over and quotes his words", len(n50) == 1 and f"handed to you by {MAIN}" in n50[0][2] and f"{OWNER}'s words" in n50[0][2] and QUOTE in n50[0][2], told)
+check("sibling: the reply says the sibling has been told, and the hand-off record keeps his words", f"{SIDE} has been told" in r and QUOTE in str((m50.get("handoff") or {}).get("words")), (r, m50.get("handoff")))
+check("sibling: his words are stored on the item as a checked said entry", any(e.get("tag") == "Acked-by" and e.get("checked") for e in (m50.get("said") or [])), m50.get("said"))
+
+# then and post_wake_mover: kept as sent; the answer or the wake hands the item over and tells it (as for a front-only project)
+put(51, mover=OWNER, needs=["decision"], ask="Decide: a or b - Recommend: a - Stakes: none - By: no date", then=REVIEW, state="your-call")
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a51", sender=MAIN, then=SIDE, said=SAID))
+check("sibling: then=<sibling front> with the owner's words stays as sent", kept(r, "then", SIDE) and rd(51)["metadata"].get("then") == SIDE, (r, rd(51)["metadata"].get("then")))
+put(52, mover=BUILD)
+r = call(lambda: _wt_update.stackshot_update(item_id="a52", sender=MAIN, post_wake_mover=SIDE, said=SAID))
+check("sibling: post_wake_mover=<sibling front> with the owner's words stays as sent", kept(r, "post_wake_mover", SIDE), r)
+
+# agent= (the older form: the session named in needs)
+put(53, mover=MAIN, needs=[MAIN])
+told.clear()
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a53", sender=MAIN, agent=SIDE, next=f"{SIDE}: take it from here", said=SAID))
+check("sibling: agent=<sibling front> with the owner's words is accepted and the item moves to it", r == "" and telling.holder(rd(53)) == SIDE and any(SIDE in str(x) or U[SIDE] in str(x) for x in (rd(53)["metadata"].get("needs") or [])), (r, rd(53)["metadata"].get("needs"), telling.holder(rd(53))))
+check("sibling: agent=: the sibling is told, with the hand-off notice and his words", len(to(SIDE)) == 1 and QUOTE in to(SIDE)[0][2], told)
+put(54, mover=MAIN, needs=[MAIN])
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a54", sender=MAIN, agent=SIDE, next=f"{SIDE}: take it from here"))
+check("sibling: agent=<sibling front> with no words is refused as before, and the refusal ends with the one clause on how to send them", r.startswith("Refused:") and "is a user-facing agent of" in r and r.count(POINTER) == 1 and telling.holder(rd(54)) == MAIN, r)
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a54", sender=MAIN, agent=SIDE, next=f"{SIDE}: take it from here", said=BADMSG))
+check("sibling: agent= with words the check refuses is refused, with the pointer, and the said refusal comes too", r.startswith("Refused:") and POINTER in r and "no message" in r, r)
+put(55, mover=BUILD, needs=[BUILD])
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a55", sender=BUILD, agent=SIDE, next=f"{SIDE}: take it", said=SAID))
+check("sibling: agent=<front> by a background agent is refused as before, with no pointer", r.startswith("Refused:") and "is a user-facing agent of" in r and "said=[Acked-by" not in r, r)
+
+# a create carries the words too
+told.clear()
+r = call(lambda: _wt_create.stackshot_create(subject="[home] handed to the desk", description=DESC, project="projects/delta", sender=MAIN, mover=SIDE, next=f"{SIDE}: look at it", said=SAID))
+g = r.split()[1]
+check("sibling: a create with the owner's words keeps mover=<sibling front>, and the sibling is told with his words", r.startswith("created") and telling.holder(rd(g)) == SIDE and kept(r, "mover", SIDE) and len(to(SIDE)) == 1 and QUOTE in to(SIDE)[0][2], (r, told))
+told.clear()
+r = call(lambda: _wt_create.stackshot_create(subject="[home] handed to the desk, no words", description=DESC, project="projects/delta", sender=MAIN, mover=SIDE, next=f"{BUILD}: look at it"))
+check("sibling: a create with no words gets the builder and the create's pointer", telling.holder(rd(r.split()[1])) == BUILD and "send the create again with said=[Acked-by …]" in r and not to(SIDE), (r, told))
+
+# no words: today's swap, with the one clause; the clause is there for mover, then and post_wake_mover alike
+put(56, mover=BUILD)
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a56", sender=MAIN, mover=SIDE, next=f"{BUILD}: check it"))
+check("sibling, no said: mover goes to the builder as before and the note ends with the pointer", fixed(r, SIDE) and telling.holder(rd(56)) == BUILD and r.count(POINTER) == 1 and POINTER in next(ln for ln in r.splitlines() if ln.startswith("(fixed:")), r)
+check("sibling, no said: nobody is told", not to(SIDE), told)
+put(57, mover=OWNER, needs=["decision"], ask="Decide: a or b - Recommend: a - Stakes: none - By: no date", then=REVIEW, state="your-call")
+r = call(lambda: _wt_update.stackshot_update(item_id="a57", sender=MAIN, then=SIDE))
+check("sibling, no said: then goes to the builder as before, with the pointer", fixed(r, SIDE, "then") and rd(57)["metadata"].get("then") == BUILD and POINTER in r, r)
+put(58, mover=BUILD)
+r = call(lambda: _wt_update.stackshot_update(item_id="a58", sender=MAIN, post_wake_mover=SIDE))
+check("sibling, no said: post_wake_mover goes to the builder as before, with the pointer", fixed(r, SIDE, "post_wake_mover") and POINTER in r, r)
+# said the check refuses: as no said (the swap note carries the pointer; the write's own said check then refuses the write as a whole)
+put(59, mover=BUILD)
+was = (T / "store/a/59.json").read_bytes()
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a59", sender=MAIN, mover=SIDE, next=f"{BUILD}: check it", said=BADMSG))
+check("sibling, said that fails the check (a message not in the transcript): the write is refused, nothing is stored, nobody is told", r.startswith("Refused:") and "no message" in r and telling.holder(rd(59)) == BUILD and not to(SIDE) and (T / "store/a/59.json").read_bytes() == was, r)
+r = call(lambda: _wt_update.stackshot_update(item_id="a59", sender=MAIN, mover=SIDE, next=f"{BUILD}: check it", said=OLD))
+check("sibling, words older than the cap (a checked message that is no words behind a wait): as no said, the swap and the pointer", fixed(r, SIDE) and POINTER in r and telling.holder(rd(59)) == BUILD and not to(SIDE), r)
+put(68, mover=BUILD)
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a68", sender=MAIN, mover=SIDE, next=f"{BUILD}: check it", said=f"{OWNER} here: {QUOTE}, please"))
+check("sibling, said as plain text: found in the sender's transcript by its quote, it is his checked words (the plain form is the same check)", kept(r, "mover", SIDE) and telling.holder(rd(68)) == SIDE and len(to(SIDE)) == 1, (r, told))
+put(69, mover=BUILD)
+told.clear()
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a69", sender=MAIN, mover=SIDE, next=f"{BUILD}: check it", said=f"{OWNER} here: a sentence nobody typed"))
+check("sibling, said as plain text found in no transcript: not kept as sent, nobody told", "kept as you sent it, on" not in r and telling.holder(rd(69)) == BUILD and not to(SIDE), r)
+
+# the unit: fix_front_mover with the words handed as a callable
+from stackshot.service import gates as _gates
+chk = [{"tag": "Acked-by", "quote": QUOTE, "checked": True, "ts": time.time(), "msg": M_OK}]
+unchk = [{"tag": "Acked-by", "quote": QUOTE, "checked": False, "ts": time.time(), "msg": M_OK}]
+sug = [{"tag": "Suggested-by", "quote": QUOTE, "checked": True, "ts": time.time(), "msg": M_OK}]
+for label, got, want_kept in (("a checked Acked-by", chk, True), ("an unchecked one", unchk, False), ("a checked Suggested-by", sug, False), ("none", [], False)):
+    v, note, fx = _gates.fix_front_mover("mover", SIDE, MAIN, "projects/delta", "", {}, lambda got=got: got)
+    check(f"fix_front_mover: {label} -> " + ("kept as sent, no fix recorded" if want_kept else "swapped to the builder"), (v == SIDE and not fx) if want_kept else (v == BUILD and len(fx) == 1 and POINTER in note), (v, note, fx))
+v, note, fx = _gates.fix_front_mover("mover", SIDE, MAIN, "projects/delta", "", {}, None)
+check("fix_front_mover: no words handed at all is the swap", v == BUILD and POINTER in note, (v, note))
+
+# who may: a background agent, another project's session, a target that is no front agent of the project, a builderless project
+put(60, mover=BUILD)
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a60", sender=REVIEW, mover=SIDE, next=f"{BUILD}: check it", said=SAID))
+check("sibling, sender a background agent: swapped to the builder as before, with no pointer and nobody told", fixed(r, SIDE) and "said=[Acked-by" not in r and telling.holder(rd(60)) == BUILD and not to(SIDE), r)
+put(61, mover=BUILD)
+r = call(lambda: _wt_update.stackshot_update(item_id="a61", sender=ECHO, mover=SIDE, next=f"{BUILD}: check it", said=SAID))
+check("sibling, sender another project's front agent: swapped to the builder as before, with no pointer and nobody told", fixed(r, SIDE) and "said=[Acked-by" not in r and telling.holder(rd(61)) == BUILD and not to(SIDE), r)
+put(62, mover=BUILD)
+r = call(lambda: _wt_update.stackshot_update(item_id="a62", sender=MAIN, mover=ECHO, next=f"{BUILD}: check it", said=SAID))
+check("sibling, target another project's front agent: swapped to the builder as before, with no pointer", fixed(r, ECHO) and "said=[Acked-by" not in r and telling.holder(rd(62)) == BUILD, r)
+put(63, mover=MAIN)
+r = call(lambda: _wt_update.stackshot_update(item_id="a63", sender=MAIN, mover=BUILD, next=f"{BUILD}: build it", said=SAID))
+check("sibling, target a background agent: a plain hand-off, no front-mover note", telling.holder(rd(63)) == BUILD and "kept as you sent it" not in r and "(fixed:" not in r, r)
+put(64, mover=BUILD)
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a64", sender=STRANGER2, mover=SIDE, next=f"{BUILD}: check it", said=SAID))
+check("sibling, sender no page lists: the swap as before, no pointer", "said=[Acked-by" not in r and telling.holder(rd(64)) == BUILD, r)
+
+# a project with no builder: without words nothing changes (a listed session hands to a front agent, told by the notice, no pointer); with words the notice carries them
+put(65, project="projects/golf", mover=GMAIN)
+told.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a65", sender=GMAIN, mover=GDESK, next=f"{GDESK}: take it"))
+check("builderless sibling, no said: kept as sent with the old note, no pointer, the sibling is told with no quoted words", "has no builder, so mover=" in r and "said=[Acked-by" not in r and telling.holder(rd(65)) == GDESK and len(to(GDESK)) == 1 and "words" not in to(GDESK)[0][2], (r, told))
+put(66, project="projects/golf", mover=GMAIN)
+told.clear()
+(T / f"transcripts/-x/{U[GMAIN]}.jsonl").write_text(json.dumps({"type": "user", "uuid": "cccccccc-cccc-4ccc-8ccc-000000000001", "timestamp": stamp, "origin": {"kind": "human"}, "message": {"role": "user", "content": f"{OWNER} here: {QUOTE}, please"}}) + "\n", encoding="utf-8")
+r = call(lambda: _wt_update.stackshot_update(item_id="a66", sender=GMAIN, mover=GDESK, next=f"{GDESK}: take it", said=[{"tag": "Acked-by", "quote": QUOTE, "msg": "cccccccc-cccc-4ccc-8ccc-000000000001", "session": U[GMAIN]}]))
+check("builderless sibling, with words: kept as sent, and the notice carries his words", telling.holder(rd(66)) == GDESK and len(to(GDESK)) == 1 and QUOTE in to(GDESK)[0][2], (r, told))
+
+# the second identical send: unchanged (kept as sent, the old note, nothing more told, no pointer)
+put(67, mover=BUILD)
+told.clear()
+r1 = call(lambda: _wt_update.stackshot_update(item_id="a67", sender=MAIN, mover=SIDE, next=f"{BUILD}: check it"))
+r2 = call(lambda: _wt_update.stackshot_update(item_id="a67", sender=MAIN, mover=SIDE, next=f"{BUILD}: check it"))
+check("second identical send of a sibling front mover with no words: kept as sent with the old note and no pointer, nobody told", telling.holder(rd(67)) == SIDE and "kept as you sent it: " in r2 and "said=[Acked-by" not in r2 and not to(SIDE), (r2, told))
+
+# an item that already carries his words from an earlier save: a later hand-off to a sibling with no words of its own save quotes none of them (the record keeps only the entries the very save added)
+GSAID = [{"tag": "Acked-by", "quote": QUOTE, "msg": "cccccccc-cccc-4ccc-8ccc-000000000001", "session": U[GMAIN]}]
+put(72, project="projects/golf", mover=GMAIN)
+told.clear()
+r1 = call(lambda: _wt_update.stackshot_update(item_id="a72", sender=GMAIN, mover=GDESK, next=f"{GDESK}: take it", said=GSAID))
+check("earlier words: the first hand-off (with his words) quotes them and leaves them on the item", telling.holder(rd(72)) == GDESK and len(to(GDESK)) == 1 and QUOTE in to(GDESK)[0][2] and len(rd(72)["metadata"].get("said") or []) == 1, (r1, told))
+told.clear()
+r2 = call(lambda: _wt_update.stackshot_update(item_id="a72", sender=GDESK, mover=GMAIN, next=f"{GMAIN}: take it back"))
+check("earlier words: a later hand-off to a sibling with no words in its own save is told with no quoted words, and its record keeps none", telling.holder(rd(72)) == GMAIN and len(to(GMAIN)) == 1 and QUOTE not in to(GMAIN)[0][2]
+      and not (rd(72)["metadata"].get("handoff") or {}).get("words") and len(rd(72)["metadata"].get("said") or []) == 1, (r2, told, rd(72)["metadata"].get("handoff")))
+# the same where the project has a builder: an item that carries his words from an earlier save, then two sends with no words (the first goes to the builder, the second is kept as sent, the old way: no notice, no words)
+put(73, mover=BUILD, said=m50["said"])
+told.clear()
+r1 = call(lambda: _wt_update.stackshot_update(item_id="a73", sender=MAIN, mover=SIDE, next=f"{BUILD}: check it"))
+check("earlier words: the first send with no words of its own goes to the builder, nobody is told", fixed(r1, SIDE) and telling.holder(rd(73)) == BUILD and not to(SIDE), (r1, told))
+r2 = call(lambda: _wt_update.stackshot_update(item_id="a73", sender=MAIN, mover=SIDE, next=f"{BUILD}: check it"))
+check("earlier words: the second identical send is kept as sent and the sibling is told none of the earlier words, nor does the record keep them",
+      telling.holder(rd(73)) == SIDE and QUOTE not in " ".join(t[2] for t in to(SIDE)) and not (rd(73)["metadata"].get("handoff") or {}).get("words"), (r2, told, rd(73)["metadata"].get("handoff")))
+
+# a create with agent=<sibling front>: the older form carries the words too, and with none the refusal ends with the pointer
+told.clear()
+r = call(lambda: _wt_create.stackshot_create(subject="[home] agent form with words", description=DESC, project="projects/delta", sender=MAIN, mover=MAIN, agent=SIDE, next=f"{MAIN}: look at it", said=SAID))
+check("create agent=<sibling front> with the owner's words is accepted and names the sibling in needs", r.startswith("created") and any(SIDE in str(x) or U[SIDE] in str(x) for x in (rd(r.split()[1])["metadata"].get("needs") or [])), r)
+r = call(lambda: _wt_create.stackshot_create(subject="[home] agent form without words", description=DESC, project="projects/delta", sender=MAIN, mover=MAIN, agent=SIDE, next=f"{MAIN}: look at it"))
+check("create agent=<sibling front> with no words is refused as before, and the refusal ends with the pointer", r.startswith("Refused:") and "is a user-facing agent of" in r and "send the create again with said=[Acked-by" in r, r)
+r = call(lambda: _wt_create.stackshot_create(subject="[home] agent form by a background agent", description=DESC, project="projects/delta", sender=BUILD, mover=BUILD, agent=SIDE, next=f"{BUILD}: look at it", said=SAID))
+check("create agent=<sibling front> by a background agent is refused as before, with no pointer", r.startswith("Refused:") and "said=[Acked-by" not in r, r)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()

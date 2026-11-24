@@ -48,6 +48,7 @@ from stackshot.service import agent_names as _agent_names
 from stackshot.service import background_want as _want
 from stackshot.service import front_turn as _front_turn
 from stackshot.service import fleet_events as _fleetev
+from stackshot.service import sibling_words as _sibling_words
 from stackshot.service import handoff as _handoff
 from stackshot.service import store as _svcstore
 from stackshot.service import telling as _telling
@@ -436,6 +437,8 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     if rep:
         return rep
     if not (sender.strip() and _model.is_owner(sender)) and not _turn_warranted(name, text):      # the mark needs him, but a turn is warranted only when he is talking with this agent now or asked it to tell him about the subject
+        if sname and _sibling_words.held_words(sender, name, text):      # a sibling front agent quoting his words (an Acked-by line, checked as the wake cap checks): held for the next turn, no turn started
+            return _Hold(f"{sname} is a front agent of {project} and quotes {OWNER}'s words, so its message to {name} rides {name}'s next turn", project)
         builder = _builder_named(text, roles, sname)
         why = f"{OWNER} is not talking with {name} now and has not asked it to tell him about this"
         _log_not_delivered(sender, to, text, f"not delivered: {why}")
