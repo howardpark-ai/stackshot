@@ -821,6 +821,10 @@ def part_client():
                 code, body, ctype = 200, json.dumps({"ok": True, "agents": cnt}).encode(), "application/json"
             elif _mode["v"] == "bad": code, body, ctype = 400, json.dumps({"error": "schema must be 1"}).encode(), "application/json"
             elif _mode["v"] == "multi": code, body, ctype = 400, json.dumps({"error": "agent 'x' is no object\nand a second line"}).encode(), "application/json"
+            elif _mode["v"] == "echo400": code, body, ctype = 400, json.dumps({"error": "bad token " + self.headers.get("Authorization", "").split()[-1]}).encode(), "application/json"
+            elif _mode["v"] == "echotext": code, body, ctype = 502, ("upstream said: " + self.headers.get("Authorization", "")).encode(), "text/plain"
+            elif _mode["v"] == "noerror": code, body, ctype = 404, json.dumps({"detail": "x" * 250 + "TAIL-" + "y" * 300, "n": 1}).encode(), "application/json"
+            elif _mode["v"] == "list": code, body, ctype = 404, b"[1, 2,\n 3]", "application/json"
             else: code, body, ctype = 401, b"unauthorized: a machine token is required (Authorization: Bearer ...)", "text/plain"
             self.send_response(code); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
         def log_message(self, *a): pass
@@ -878,6 +882,51 @@ def part_client():
         _mode["v"] = "unauth"; _got.clear()
         rc, out, err = _acli("post", "agent-state", "--file", str(_adir / "good.json"))
         check("agent-state: a 401 (plain text) is exit 1 with its reason on stderr and nothing on stdout", rc == 1 and len(_got) == 1 and out == "" and _one_line(err) and "401" in err and "machine token" in err, (rc, out, err))
+        # -- what the file is: only a regular file is read (a pipe with no writer must not hang the client); a link to one is read
+        import signal as _sig
+        class _Hung(BaseException): pass
+        def _guarded(*argv, secs=8):
+            """Run the client with an alarm: a call that blocks is cut off (and reported) instead of hanging the suite."""
+            def _fire(*a): raise _Hung()
+            old = _sig.signal(_sig.SIGALRM, _fire); _sig.alarm(secs)
+            try: return (*_acli(*argv), False)
+            except _Hung: return 1, "", "", True
+            finally: _sig.alarm(0); _sig.signal(_sig.SIGALRM, old)
+        _fifo = str(_adir / "pipe.json"); os.mkfifo(_fifo)
+        try:
+            _got.clear(); rc, out, err, hung = _guarded("post", "agent-state", "--file", _fifo)
+            check("agent-state: a named pipe with no writer is refused at once (not a regular file), one line, exit 1, nothing sent", not hung and rc == 1 and not _got and out == "" and _one_line(err) and "not a regular file" in err, (hung, rc, out, err, _got))
+        finally: os.remove(_fifo)
+        _got.clear(); rc, out, err, hung = _guarded("post", "agent-state", "--file", str(_adir))
+        check("agent-state: a folder is refused as not a regular file, one line, nothing sent", not hung and rc == 1 and not _got and out == "" and _one_line(err) and "not a regular file" in err, (rc, out, err, _got))
+        if os.path.exists("/dev/zero"):
+            _got.clear(); rc, out, err, hung = _guarded("post", "agent-state", "--file", "/dev/zero")
+            check("agent-state: a device (/dev/zero) is refused as not a regular file, one line, nothing sent", not hung and rc == 1 and not _got and out == "" and _one_line(err) and "not a regular file" in err, (rc, out, err, _got))
+        _mode["v"] = "ok"; _lnk = _adir / "link.json"; os.symlink(str(_adir / "good.json"), _lnk); _got.clear()
+        rc, out, err, hung = _guarded("post", "agent-state", "--file", str(_lnk))
+        check("agent-state: a link to a regular file is read and sent as the file's own bytes", rc == 0 and [g[3] for g in _got] == [_body] and err == "", (rc, out, err, _got))
+        # -- one line whatever the path holds: control characters collapse, the token is never echoed
+        for label, name in (("a newline", "a\nb.json"), ("an escape and a tab", "a\x1b[31m\tb.json"), ("a carriage return and a NUL-free bell", "a\r\x07b.json")):
+            _got.clear(); rc, out, err = _acli("post", "agent-state", "--file", str(_adir / name))
+            check(f"agent-state: a missing path with {label} in it still gives one line on stderr, exit 1, nothing sent", rc == 1 and not _got and out == "" and _one_line(err) and not any(c in err[:-1] for c in "\r\x07\x1b\t"), (rc, out, err, _got))
+        _dnl = _adir / "dir\nwith newline"; _dnl.mkdir(); _got.clear(); rc, out, err = _acli("post", "agent-state", "--file", str(_dnl))
+        check("agent-state: a folder with a newline in its name is refused in one line", rc == 1 and not _got and _one_line(err) and "not a regular file" in err, (rc, out, err, _got))
+        # -- an empty --file value is a usage error, like a missing one
+        for label, val in (("empty", ""), ("blank", "  ")):
+            _got.clear(); rc, out, err = _acli("post", "agent-state", "--file", val)
+            check(f"agent-state: a {label} --file value is a usage error on stderr, exit 1, nothing sent", rc == 1 and not _got and out == "" and "usage: client.py post agent-state --file <path>" in err, (rc, out, err, _got))
+        # -- the machine token is never printed: not from a server text that echoes it, not from a path that holds it
+        _good = str(_adir / "good.json")
+        for mode, code in (("echo400", "400"), ("echotext", "502")):
+            _mode["v"] = mode; _got.clear(); rc, out, err = _acli("post", "agent-state", "--file", _good)
+            check(f"agent-state: a {code} answer that echoes the machine token never lets it reach stderr or stdout", rc == 1 and len(_got) == 1 and _one_line(err) and code in err and "tok-agent-e7" not in err + out, (rc, out, err))
+        _mode["v"] = "ok"; _got.clear(); rc, out, err = _acli("post", "agent-state", "--file", str(_adir / "gone-tok-agent-e7.json"))
+        check("agent-state: a not-readable path that holds the machine token is refused without printing the token", rc == 1 and not _got and _one_line(err) and "gone-" in err and "tok-agent-e7" not in err + out, (rc, out, err))
+        # -- a non-200 answer with no `error` key: the status and the start of the body, never `None`
+        _mode["v"] = "noerror"; _got.clear(); rc, out, err = _acli("post", "agent-state", "--file", _good)
+        check("agent-state: a 404 JSON answer with no `error` prints the status and the first 200 characters of the body on one line", rc == 1 and out == "" and _one_line(err) and "[404]" in err and "None" not in err and "detail" in err and "TAIL-" not in err and len(err) < 400, (rc, out, err))
+        _mode["v"] = "list"; _got.clear(); rc, out, err = _acli("post", "agent-state", "--file", _good)
+        check("agent-state: a 404 answer that is a JSON list prints its text on one line", rc == 1 and _one_line(err) and "[404]" in err and "[1, 2, 3]" in err and "None" not in err, (rc, out, err))
         _mode["v"] = "ok"; os.remove(_atok); _got.clear()
         rc, out, err = _acli("post", "agent-state", "--file", str(_adir / "good.json"))
         check("agent-state: with no token on the machine nothing is sent, one line on stderr, exit 1", rc == 1 and not _got and out == "" and _one_line(err) and "no token" in err, (rc, out, err, _got))
