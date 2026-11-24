@@ -1,8 +1,8 @@
 """audit_ticks.py: the ten-minute audit ticks and the minute balancer, the server's own half of the audit.
 
-The audit decides in audit/ (the pure halves: audit_checks, audit_run, hourly, busy_tell, hand_idle, silence, subagent_tie) and the server writes and sends: this module is the writing half, run by the minute set
+The audit decides in audit/ (the pure halves: audit_checks, audit_run, hourly, busy_tell, hand_idle, front_pickup, silence, subagent_tie) and the server writes and sends: this module is the writing half, run by the minute set
 (service/runner.py) through its table. The ten-minute filing pass (`_filing_tick`), the dates pass (`_dates_tick`, with the expected-time look `_dates_expected_tick` and the For you list's due-date look it opens),
-the minute wait-loop walk (`_loop_tick`), the archive sweep (`_archive_tick`) and the audit tick (`_silence_tick`: the hourly audit line `_hourly_tick`, the idle hand-over `_hand_idle_tick`, the long-busy message `_busy_tell_tick`) are here, and the
+the minute wait-loop walk (`_loop_tick`), the archive sweep (`_archive_tick`) and the audit tick (`_silence_tick`: the hourly audit line `_hourly_tick`, the idle hand-over `_hand_idle_tick`, the idle front agent's turn `_front_pickup_tick`, the long-busy message `_busy_tell_tick`) are here, and the
 balancer (`_balance_tick`, its own minute tick) with the reads it shares: `_silence_env`, the environment every audit pass is built with; `_queue_map`, who is queued behind another item, kept `_QUEUE_TTL` seconds in
 `_QUEUE_CACHE`; `_agent_state` and `_mover_subagents`, a mover's busy or idle and its running subagents as the fleet's session manager last pushed them (service/agent_state.py); and `_BALANCE_LOGGED`, the stderr lines the balancer throttles.
 
@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import datetime as dt
 import sys
+import threading
 import time
 from typing import Any, Callable
 
 from stackshot.anchors import anchors as _anc
+from stackshot.core import agentbox as _ab
 from stackshot.core import config as _cfg
 from stackshot.core import instance as _inst
 from stackshot.core import readonly as _ro
@@ -33,6 +35,7 @@ from stackshot.projects.project_registry import _registry
 from stackshot.router import router as _router
 from stackshot.service import agents as _agents
 from stackshot.service import foryou_events as _fyev
+from stackshot.service import front_turn as _front_turn
 from stackshot.service import handoff as _handoff
 from stackshot.service import item_read as _item_read
 from stackshot.service import ladder as _laddersvc
@@ -136,7 +139,7 @@ def _queue_map(now: "float | None" = None, items: "dict[str, dict[str, Any]] | N
 
 
 def _silence_tick() -> "dict[str, Any] | None":
-    """The ten-minute audit tick (the name is the runner's key and stays): the hourly audit line (`_hourly_tick`), then the hand-over of the items it found idle (`_hand_idle_tick`), then the one message about an item whose lines have only said "busy" for hours (`_busy_tell_tick`). Each is switched by
+    """The ten-minute audit tick (the name is the runner's key and stays): the hourly audit line (`_hourly_tick`), then the hand-over of the items it found idle (`_hand_idle_tick`), then the turn started for an idle front agent with an open step of its own (`_front_pickup_tick`, which rides `[audit] hourly_line`), then the one message about an item whose lines have only said "busy" for hours (`_busy_tell_tick`). Each is switched by
     its own `[audit]` key and stands still when off. Stands still when the audit is off or runs in agent mode. One that raises never stops the other; the first error is printed."""
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
@@ -148,6 +151,10 @@ def _silence_tick() -> "dict[str, Any] | None":
         _hand_idle_tick()
     except Exception as e:  # noqa: BLE001  — handing an idle item on is its own pass: the line above has run
         print(f"audit: idle items not handed on: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    try:
+        _front_pickup_tick()
+    except Exception as e:  # noqa: BLE001  — the busy-stretch tell below is its own pass
+        print(f"audit: idle front agents not picked up: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     try:
         _busy_tell_tick()
     except Exception as e:  # noqa: BLE001  — the lines above have run
@@ -305,6 +312,125 @@ def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         except Exception as e:  # noqa: BLE001
             print(f"audit: {to} not told of the busy stretches: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return done
+
+
+def _front_of_project(who: str, project: str) -> bool:
+    """Is `who` a front agent of `project`: a front agent by the server's own answer (`telling.front_keeper`, the one the hourly line, the idle hand-over and the busy-stretch tell use, which is no for the project's own keeper and for a
+    role map that cannot be read) and, by the role map, one listed (role front, not retired) on that very project? Raises when the roles cannot be read: the pick-up reads that as no."""
+    if not _telling.front_keeper(who, project)[0]:
+        return False
+    roles = _anc.session_roles()
+    row = roles.get(_sr._role_name(roles, who) or "") or {}
+    return row.get("role") == "front" and not row.get("retired") and bool(project) and str(row.get("project") or "").strip("/") == str(project).strip("/")
+
+
+def _owner_present_reader(now: float) -> "Callable[[str], bool]":
+    """`present(who)` for the front pick-up: is the owner in that conversation now? The fleet's index and the stamp folder (the prompt hook's files, or the copy of them from the agents' box) are read once for the pass and
+    raise when they cannot be read: the pick-up then starts nothing, so nothing is started on a guess. The pane's stamp is found by its session id in the fleet's index (a pane on another box than the server's counts), and
+    `front_turn.present` (the notices' own test, which needs the pane on this box) is asked too: either one saying present is present."""
+    idx = _sr._sessions_index()
+    stamps = {f.name for f in _ab.prompts_dir().iterdir() if f.is_file()}
+    limit = _telling.presence_minutes() * 60.0
+
+    def present(who: str) -> bool:
+        ids = {str(k) for k, r in idx.items() if isinstance(r, dict) and _anc.same_session(r.get("name"), who)}
+        own = _hooks().session_id(who)
+        if own:
+            ids.add(str(own))
+        for sid in sorted(ids & stamps):
+            try:
+                ts = float((_ab.prompts_dir() / sid).read_text(encoding="utf-8").strip().split()[0])
+            except (OSError, ValueError, IndexError):
+                continue      # a stamp that cannot be read says nothing here; the notices' own test below still asks
+            if 0 <= now - ts <= limit:
+                return True
+        return _front_turn.present(who)
+    return present
+
+
+def _front_pickup_tick(now: "float | None" = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, snap: Any = None,
+                       front: "Callable[[str, str], bool] | None" = None, present: "Callable[[str], bool] | None" = None, wait: bool = False) -> list[str]:
+    """An idle front agent with an open step of its own gets its turn started (audit/front_pickup.py; no key of its own, it rides `[audit] hourly_line`), run from the ten-minute audit tick after the idle hand-over and before the busy-stretch
+    tell. An open item a front agent of its project moves, whose first open step opens with that agent, that the board shows on an agent (no hold, until, open after, anchor wait or decision), that has been quiet for 45 minutes
+    (`front_pickup.QUIET`), whose agent the last agent-state snapshot says is idle and whose pane the owner is not in, gets ONE line to that agent naming the item and its open steps, through `tell_woken` (tag `stall`, the kind that
+    asks the agent to act and is a turn for a front agent, as the busy-stretch tell sends it): never more than once an hour per item (`<paths.state>/front-pickup.json`, written before the line is sent and taken back when its delivery fails, so a
+    failed delivery sets no mark), one turn per agent and at most `front_pickup.MAX_TURNS_PER_TICK` turns per tick. The idle hand-over and the busy-stretch tell win over it for an item they act on this tick. The item is read again before
+    the send. Any read that fails (the roles, the snapshot, the fleet's index, the stamp folder, the record) logs one line and starts nothing. Stands still while the hourly line is off, in a read-only copy and while the board is paused.
+    `now`, `items`, `env`, `snap`, `front`, `present` are for tests and the tick; `wait` makes the tick wait for each delivery's outcome before it returns (a test). → the ids a turn was started for."""
+    _fp = _hooks().audit_mod("front_pickup")
+    _hourly = _hooks().audit_mod("hourly")
+    _as = _hooks().audit_mod("agent_state")
+    if not _hourly.enabled() or _ro.is_read_only() or _handoff.handoff_paused():
+        return []
+    now = time.time() if now is None else now
+    try:
+        items = items if items is not None else _hooks().next_report_all(None)
+        env = env if env is not None else _silence_env()
+        snap = snap if snap is not None else (_as.snapshot() or {})
+        front = front or _front_of_project
+        present = present or _owner_present_reader(now)
+        marks = _fp.read_marks()
+    except _fp.Unreadable as e:
+        _fp.set_aside()      # a record that is torn is set aside so the next tick starts a clean one (an item may be started for once more)
+        print(f"audit: front pick-up stands still, its record is unreadable ({e}); it was set aside", file=sys.stderr, flush=True)
+        return []
+    except Exception as e:  # noqa: BLE001  — nothing is read, nothing is started
+        print(f"audit: front pick-up stands still, a read failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return []
+    idle = lambda who: _agent_state(who, now, snap).state == _as.IDLE      # noqa: E731  — busy, unknown, stale and missing are all "not idle"
+    skip: set[str] = set()      # the items another pass of this tick acts on: one action per item per tick
+    try:
+        _hi, _bt, _silence = _hooks().audit_mod("hand_idle"), _hooks().audit_mod("busy_tell"), _hooks().audit_mod("silence")
+        if _hi.enabled() and not _handoff.handoff_paused():
+            skip |= {g for g, _r in _hi.due_all(items, now, getattr(env, "is_front", None))}
+        if _bt.enabled():
+            isf = getattr(env, "is_front_or_unread", None) or getattr(env, "is_front", None)
+            skip |= {g for g, _r in _bt.due_all(items, now, isf, _silence.queued(items, now, env), _bt.hours())}
+    except Exception as e:  # noqa: BLE001  — what the other passes act on is not known: nothing is started
+        print(f"audit: front pick-up stands still, the other passes could not be read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return []
+    errors: list[str] = []
+    rows = _fp.pick(_fp.due_all(items, now, front, idle, present, _handoff.ho_same, marks, skip, errors), _handoff.ho_same)
+    if errors:      # one line however many items could not be read
+        print(f"audit: front pick-up: {errors[0]}" + (f" (and {len(errors) - 1} more)" if len(errors) > 1 else ""), file=sys.stderr, flush=True)
+    started: list[str] = []
+    failed: set[str] = set()      # the items whose delivery failed (known once the delivery has ended)
+    settle: list[threading.Thread] = []
+    for gid, row in rows:
+        try:
+            item = _svcstore._load(gid)
+            cur = _fp.due({**items, gid: {**item, "gid": gid}}, gid, now, front, idle, present, _handoff.ho_same, marks, skip)      # read again: the item may have been written, held, closed or handed on since
+            if cur is None or not _handoff.ho_same(cur["mover"], row["mover"]):
+                continue
+            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({row['project']})"
+            text = f"[stackshot] {_fp.words(cur, lead)}.\nNo reply is owed to the audit; nothing here is for {OWNER}. → {_telling.notice_link(gid)}"
+            _fp.mark(gid, now, items)      # before the send, so it is at most once an hour; taken back below when the delivery fails
+            res: dict[str, Any] = {}
+            try:
+                th = _telling.tell_woken(gid, _hooks().session_id(row["mover"]) or row["mover"], text, tag="stall", result=res)
+            except Exception:
+                _fp.unmark(gid, now)
+                raise
+
+            def settle_one(gid: str = gid, th: "threading.Thread | None" = th, res: "dict[str, Any]" = res, who: str = row["mover"]) -> None:
+                if th is not None:
+                    th.join()
+                if th is None or not res.get("ok"):
+                    failed.add(gid)
+                    _fp.unmark(gid, now)      # a failed delivery sets no mark: the next tick tries again
+                    print(f"audit: {gid} front pick-up not delivered to {who}: {res.get('why') or 'no result'}", file=sys.stderr, flush=True)
+            t = threading.Thread(target=settle_one, daemon=True)
+            t.start()
+            settle.append(t)
+            started.append(gid)
+            print(f"audit: {gid} idle front agent {row['mover']} told of its own step", file=sys.stderr, flush=True)
+        except Exception as e:  # noqa: BLE001  — one item never stops the others
+            print(f"audit: {gid} front pick-up not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    if wait:
+        for t in settle:
+            t.join()
+        return [g for g in started if g not in failed]
+    return started
 
 
 def _hand_idle_builders(project: str) -> list[str]:
