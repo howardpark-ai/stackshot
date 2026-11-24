@@ -77,7 +77,20 @@ def _after_reaches(start: list[str], target: str, seen: set[str] | None = None) 
     return False
 
 
+def _lines_follow_step(meta: dict[str, Any]) -> None:
+    """The record of the lines a long step was split into (`step_lines`) lives only while the step is stored: wherever the step goes, it goes."""
+    if not meta.get("step"):
+        meta.pop("step_lines", None)
+
+
 def _state_apply(meta: dict[str, Any], status: str, st: str, given: dict[str, str], touched: frozenset[str] = frozenset(), withdraw: bool = False) -> str:
+    """`_state_apply_core`, then the record of a split's lines follows the step: whichever way the state code left the step, a stored record with no step goes (one place, not one per return)."""
+    note = _state_apply_core(meta, status, st, given, touched, withdraw)
+    _lines_follow_step(meta)
+    return note
+
+
+def _state_apply_core(meta: dict[str, Any], status: str, st: str, given: dict[str, str], touched: frozenset[str] = frozenset(), withdraw: bool = False) -> str:
     """Keep the stored state `meta` holds true, or set the one a step or supplies stands on (the metadata as this write leaves it; the caller has run every other gate) → a note for the reply.
     No call names a state any more: an item stores alive or waiting directly, and a state word an older item still holds is only read (states.py). A step passed sets your-step and supplies blocked
     (`st`, from gates.gate_state_args), each needing what its state carries in the item as it is stored once this write is applied; the carry fields of the state it replaces go. A write that

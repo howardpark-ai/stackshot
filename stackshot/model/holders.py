@@ -77,7 +77,7 @@ def _state_end(meta: dict[str, Any], *states: str) -> None:
     """The server's own act (a wake that fired, an after link released, an anchor's notice) ends the wait a stored state stood
     on: the state and its carry fields go when the state is one of `states` (none given: whatever it is), and the item reads as derived from its fields."""
     if meta.get("state") in (states or (*_states.STATES, *_states.LEGACY_STATES)):
-        for k in _states.DROP_ON_CLOSE:
+        for k in (*_states.DROP_ON_CLOSE, "step_lines"):      # the record of a split step's lines goes with the step
             meta.pop(k, None)
 
 

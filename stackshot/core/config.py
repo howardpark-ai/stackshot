@@ -732,12 +732,21 @@ def audit_pattern_review() -> str:
 
 
 RUNNER_PROCESSES = ("inline", "unit")
+RUNNER_PROCESS_DEFAULT = "unit"
+
+
+def runner_process_is_default() -> bool:
+    """True when [runner] process is not set (missing, empty or blank): the default, "unit", applies. A value that is set always wins, a misspelt one included (it reads as "inline", see `runner_process`)."""
+    return not str(get("runner", "process") or "").strip()
 
 
 def runner_process() -> str:
-    """[runner] process: where the minute set's runner runs. "inline" (the default) = a thread of the server, started by `server._start_background`, as it always was. "unit" = the server starts no runner and the separate
-    process `stackshot minute` runs it. Restart-only (RESTART_ONLY): a reload keeps the running value in CFG, so a process reads it once, at its start. A value that is neither reads as "inline" (`notes` says so)."""
+    """[runner] process: where the minute set's runner runs. "unit" (the default, when the setting is not set) = the server starts no runner and the separate process `stackshot minute` runs it (stackshot-minute.service,
+    which `./install.sh units` installs and `deploy.sh` restarts). "inline" = a thread of the server, started by `server._start_background`: the choice for a host with no minute unit. A value that is set and is neither
+    reads as "inline" (`notes` says so): a misspelt value never leaves a box with no runner. Restart-only (RESTART_ONLY): a reload keeps the running value in CFG, so a process reads it once, at its start."""
     v = str(get("runner", "process") or "").strip().lower()
+    if not v:
+        return RUNNER_PROCESS_DEFAULT
     return v if v in RUNNER_PROCESSES else "inline"
 
 
@@ -1362,7 +1371,7 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     rn = get("runner", cfg=cfg)
     if isinstance(rn, dict) and "enabled" in rn:
         out.append("[runner] enabled is retired and read by nothing: the minute set's runner is the only path and always starts; drop the line")
-    if isinstance(rn, dict) and "process" in rn and str(rn["process"]).strip().lower() not in RUNNER_PROCESSES:
+    if isinstance(rn, dict) and str(rn.get("process") or "").strip() and str(rn["process"]).strip().lower() not in RUNNER_PROCESSES:     # an empty value is "not set": the default applies, and there is nothing to say
         out.append(f'[runner] process = {rn["process"]!r} is neither "inline" nor "unit", so it is read as "inline": the server runs the minute set\'s runner itself')
     mo = get("model", cfg=cfg)
     if isinstance(mo, dict) and "watchers" in mo:
