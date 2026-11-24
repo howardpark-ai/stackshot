@@ -494,21 +494,28 @@ finally: _sr.retired = _sr_ret2
 held.take("br-main")
 res, pushed, ncalls = tick(); held.take("br-main")
 
-# ---- 19. L-2: a held person line of an agent that retired after the hold is moved to the page's live background agent, else its contact agent, at the next tick
+# ---- 19. L-2: a held person line of an agent that retired after the hold is moved to the page's live background agent, else its contact agent, at the next tick (only to one whose hook fetches held lines; the line keeps its time)
 held.take("al-builder"); held.take("al-docs"); held.take("al-main")
-held.add(held.key_of("al-builder"), "person", "a person's words, held before the builder retired", sender="Dana", nid="rh-1", whole=True)
+T_OLD = time.time() - 3 * 3600
+held.add(held.key_of("al-builder"), "person", "a person's words, held before the builder retired", sender="Dana", nid="rh-1", whole=True, now=T_OLD)
 held.add(held.key_of("al-builder"), "closed", "an item closed", nid="rh-2")
 DEAD3 = {"al-builder"}; _sr.retired = lambda x: str(x) in DEAD3
+FETCH = {"al-docs", "al-main"}; _real_fetch = held.can_fetch; held.can_fetch = lambda t, now=None: t in FETCH
 try:
     moved1 = live.rehome_person(router.Context())
-    docs_has, builder_left = held.count("al-docs"), [r["kind"] for r in held._read(held._file(held.key_of("al-builder")))]
+    docs_rows = held._read(held._file(held.key_of("al-docs"))); builder_left = [r["kind"] for r in held._read(held._file(held.key_of("al-builder")))]
     DEAD3.add("al-docs")
     held.add(held.key_of("al-docs"), "person", "a second person's message", sender="Dana", nid="rh-3", whole=True)
     moved2 = live.rehome_person(router.Context())
-    main_has = held.take("al-main")
-finally: _sr.retired = _sr_ret2
-check("L-2: a person line held for a retired background agent moves to the page's other live background agent (the other kinds stay: nobody asked for them); with that one gone too, to the contact agent",
-      moved1 == 1 and docs_has == 1 and builder_left == ["closed"] and moved2 == 2 and "a second person's message" in main_has and "held before the builder retired" in main_has and held.count("al-docs") == 0, (moved1, docs_has, builder_left, moved2, main_has))
+    main_rows = held._read(held._file(held.key_of("al-main"))); main_has = held.take("al-main"); docs_left = held.count("al-docs")
+    held.add(held.key_of("al-docs"), "person", "a third person's message", sender="Dana", nid="rh-5", whole=True)
+    FETCH.discard("al-main"); moved3 = live.rehome_person(router.Context()); stays3 = held.count("al-docs"); FETCH.add("al-main")      # the contact's hook fetches no held lines: the line stays
+    DEAD3.update({"al-main"}); moved4 = live.rehome_person(router.Context()); stays4 = held.count("al-docs")      # every agent of the page is gone: nowhere to move it
+finally: _sr.retired = _sr_ret2; held.can_fetch = _real_fetch
+check("L-2: a person line held for a retired background agent moves to the page's other live background agent (the other kinds stay: nobody asked for them), keeping its own time; with that one gone too, to the contact agent",
+      moved1 == 1 and len(docs_rows) == 1 and docs_rows[0]["ts"] == T_OLD and builder_left == ["closed"] and moved2 == 2 and "a second person's message" in main_has and "held before the builder retired" in main_has and docs_left == 0 and [r["ts"] for r in main_rows if "builder retired" in r["text"]] == [T_OLD], (moved1, docs_rows[0]["ts"] == T_OLD, builder_left, moved2, "a second person's message" in main_has, "held before the builder retired" in main_has, docs_left))
+check("L-2: a destination whose hook fetches no held lines (the rollout gate) is not chosen, and with every agent of the page gone nothing moves", moved3 == 0 and stays3 == 1 and moved4 == 0 and stays4 == 1, (moved3, stays3, moved4, stays4))
+held.take("al-docs"); held.take("al-builder")
 check("L-2: nothing moves when no agent is gone", live.rehome_person(router.Context()) == 0, None)
 held.add(held.key_of("al-builder"), "person", "a person's words, held before the next tick", sender="Dana", nid="rh-4", whole=True)
 one("slack:C0000000001", "Dana", "the vendor confirmed Monday")      # any notice: the tick that rules it re-homes first
@@ -539,6 +546,118 @@ try:
     rep_one = router.code_rule("projects/alpha", mk2("f3", nowx), "projects/alpha", cx_, [mk2("f2", nowx - 60, ruling="passed"), mk2("f1", nowx - 120, ruling="archived")])
 finally: router._code_rule = _real_code
 check("L-3: of several identical earlier messages the repeat rule looks at one that reached somebody (passed), whatever their order: the repeat is dropped", rep_two["ruling"] == "dropped" and rep_one["ruling"] == "dropped", (rep_two, rep_one))
+# ---- 21. an ack on an anchor an item waits on wakes it when the person path ends in a held line for a front agent (mover a front agent that needs the owner), and through the route tool
+def held2(): return bool(_service_store._load("a2")["metadata"].get("hold"))
+CALLS.clear(); PUSHED.clear(); FYI.clear(); PLAN.clear(); held.take("al-builder"); held.take("al-docs")
+DEAD7 = {"al-builder", "al-docs"}; _sr.retired = lambda x: str(x) in DEAD7      # the page's background agents are gone: its contact agent is the one place left
+item(2, "projects/alpha", "al-main", hold=True)      # a front agent's item on the mail anchor B that waits on a reply, parked
+try:
+    fk = one("gmail:" + "b" * 16, "Dana", "ok", kind="gmail")
+    res, pushed, ncalls = tick()
+    r_fk = (lv(fk["id"]), held2())
+    item(2, "projects/alpha", "al-main", hold=True)
+    fk2 = one("gmail:" + "b" * 16, "Dana", "sounds good, go ahead", kind="gmail")
+    res, pushed, ncalls = tick()
+    r_fk2 = (lv(fk2["id"]), held2())
+finally: _sr.retired = _sr_ret2
+check("a bare ack on a mail a front agent's item waits on, with no background agent left to pass it to, is held for that front agent, and the held line wakes the parked item", r_fk[0]["rule"] == "gate-person" and r_fk[0]["ruling"] == "held" and r_fk[0]["held_for"] == "al-main" and not r_fk[1], r_fk)
+check("…the same as any other reply of the person does (the reply with words wakes it too)", r_fk2[0]["ruling"] == "held" and r_fk2[0]["held_for"] == "al-main" and not r_fk2[1], r_fk2)
+item(2, "projects/alpha", "al-main", hold=True)
+item(2, "projects/alpha", "al-main", hold=True)
+fk3 = one("gmail:" + "b" * 16, "Dana", "thx", kind="gmail")
+_wt_route._route(fk3["id"], "archived", "", "nothing in it", "")
+check("the route tool wakes the parked item on an archived ruling of a bare ack on an anchor the item waits on", not held2(), held2())
+item(2, "projects/alpha", "al-main", hold=True)
+fk4 = one("slack:C0000000001", "Dana", "thx")      # an anchor no item hangs on: a bare ack wakes nothing, as before
+_wt_route._route(fk4["id"], "archived", "", "nothing in it", "")
+check("…and an ack on an anchor no item hangs on wakes nothing", held2() and router.person_wakes(fk4, False) is False and router.person_wakes(fk4, True) is True, held2())
+item(2, "projects/alpha", "al-main"); held.take("al-builder"); held.take("al-docs"); held.take("al-main")
+
+# ---- 22. a person's message on an anchor scoped to an item goes to a LIVE agent: the mover, else the page's live background agent, else its contact agent, else it stays unruled (anchor-item)
+_anchors = json.loads((T / "store/anchors.json").read_text())
+_anchors["projects/alpha"].append(add("https://x.slack.com/archives/C0000000010", ["a1"]))      # a channel scoped to the builder's item
+(T / "store/anchors.json").write_text(json.dumps(_anchors))
+core._ROUTES["slack:C0000000010"] = [{"project": "projects/alpha", "session": "al-name", "target": "for al-builder", "pilot": True, "filter": ""}]
+DEAD4 = set(); _sr.retired = lambda x: str(x) in DEAD4
+def ai_case(words):
+    CALLS.clear(); PUSHED.clear(); FYI.clear(); held.take("al-builder"); held.take("al-docs"); held.take("al-main")
+    x = one("slack:C0000000010", "Dana", words)
+    res_, pushed_, ncalls_ = tick()
+    return x, res_, pushed_, ncalls_
+try:
+    x_a, r_a, p_a, c_a = ai_case("the file is ready")
+    DEAD4.add("al-builder"); x_b, r_b, p_b, c_b = ai_case("the file is ready again")
+    x_b2, r_b2, p_b2, c_b2 = ai_case("ok")
+    DEAD4.add("al-docs"); x_c, r_c, p_c, c_c = ai_case("the file is ready once more")
+    DEAD4.add("al-main"); x_d, r_d, p_d, c_d = ai_case("the file is ready, last time")
+    d_unruled = (not [l for l in lines() if l["id"] == x_d["id"] and l.get("status") == "ruled"], not rec(x_d["id"]).get("ruling"), c_d, r_d.get("retry"), [l for l in lines() if l["id"] == x_d["id"]])
+    DEAD4.clear(); ai_case("a message written while nobody was there is read when somebody is back")
+finally: _sr.retired = _sr_ret2
+check("anchor-item, mover live: a person's message on the channel scoped to the builder's item goes to the builder, as before", lv(x_a["id"])["rule"] == "anchor-item" and lv(x_a["id"])["target"] == "al-builder" and lv(x_a["id"])["ruling"] in ("held", "passed"), lv(x_a["id"]))
+check("anchor-item, mover retired: it goes to the page's live background agent (held for it), and a bare ack on the same page too (passed to it), nothing is pushed to the retired mover",
+      lv(x_b["id"])["rule"] == "anchor-item" and lv(x_b["id"])["ruling"] == "held" and lv(x_b["id"])["held_for"] == "al-docs" and lv(x_b2["id"])["target"] == "al-docs" and any(t == "al-docs" for t, _ in p_b2) and not any(t == "al-builder" for t, _ in p_b + p_b2), (lv(x_b["id"]), lv(x_b2["id"]), p_b2))
+check("anchor-item, every background agent retired: it is held for the page's contact agent (a held line, no turn started)", lv(x_c["id"])["ruling"] == "held" and lv(x_c["id"])["held_for"] == "al-main" and not any(t in ("al-builder", "al-docs", "al-main") for t, _ in p_c), (lv(x_c["id"]), FYI, p_c))
+check("anchor-item, every agent of the page retired: unruled and never sent to anyone (no line, no routing ruling, no model call, counted once)", all(d_unruled[:2]) and d_unruled[2] == 0 and not any(t in ("al-builder", "al-docs", "al-main") for t, _ in p_d), d_unruled)
+check("…and it is ruled like any other the tick an agent is back (the mover, live again)", lv(x_d["id"])["rule"] == "anchor-item" and lv(x_d["id"])["target"] == "al-builder", lv(x_d["id"]))
+held.take("al-builder"); held.take("al-docs"); held.take("al-main")
+
+# ---- 23. a page with no live place for a person's message parks its person notices: no model call, no use of the batch cap that a later notice needs, one line each
+_real_router_cfg = dict(_cfg.CFG["router"]); _cfg.CFG["router"]["max_notices"] = 2
+DEAD5 = {"br-main"}; _sr.retired = lambda x: str(x) in DEAD5
+try:
+    CALLS.clear(); PUSHED.clear(); FYI.clear(); PLAN.clear()
+    st = [one("slack:C0000000002", "Dana", t_) for t_ in ("is the shop open on Monday?", "can the shop change the slot?", "the shop moved the delivery")]
+    bot_late = one("slack:C0000000002", "deploybot", "build 43 finished", bot=True)
+    res1, pushed1, ncalls1 = tick(); res2, pushed2, ncalls2 = tick(); res3, pushed3, ncalls3 = tick()
+    parked_lines = [l for l in lines() if l.get("status") == "parked" and l["id"] in {x["id"] for x in st}]
+    check("L-1/M-3: three parked person notices and a later bot notice with a batch of two: the bot notice is ruled (the parked ones use no place in the batch)", lv(bot_late["id"])["rule"] == "gate-machine" and lv(bot_late["id"])["ruling"] == "archived", [l for l in lines() if l["id"] == bot_late["id"]])
+    check("…no model call is made for a page with no live place for a person's message, on any of the ticks", not CALLS and ncalls1 == ncalls2 == ncalls3 == 0, (len(CALLS), ncalls1, ncalls2, ncalls3))
+    check("…each parked notice is surfaced once (one line each, one count in `retry` the first tick and none after), stays unruled, nothing is pushed or held for the retired contact",
+          len(parked_lines) == 3 and len({l["id"] for l in parked_lines}) == 3 and res1["retry"] == 3 and res2["retry"] == 0 and res3["retry"] == 0 and all(not rec(x["id"], "projects/bravo").get("ruling") for x in st) and not FYI and not pushed1 + pushed2 + pushed3,
+          (len(parked_lines), res1, res2, res3))
+    DEAD5.clear(); res4, pushed4, ncalls4 = tick(); res5, pushed5, ncalls5 = tick()
+    check("…and the ticks after the contact agent is back rule them as any other notice (two a tick), held for it", all(lv(x["id"])["ruling"] == "held" and lv(x["id"])["held_for"] == "br-main" for x in st), [lv(x["id"])["ruling"] for x in st])
+finally: _sr.retired = _sr_ret2; _cfg.CFG["router"].clear(); _cfg.CFG["router"].update(_real_router_cfg)
+held.take("br-main")
+
+# ---- 24. only the contact agent retired: the needs path never picks it, and another live front agent takes its place
+DEAD6 = {"al-main"}; _sr.retired = lambda x: str(x) in DEAD6
+try:
+    CALLS.clear(); PUSHED.clear(); FYI.clear(); held.take("al-builder"); held.take("al-docs")
+    item(2, "projects/alpha", "al-main", needs="decision")
+    nd = one("gmail:" + "b" * 16, "Dana", "Oliver, I need your yes on the draft, can you decide?", kind="gmail")
+    res, pushed, ncalls = tick()
+    item(2, "projects/alpha", "al-main")
+    cxf = router.Context(); cxf.reg = {**cxf.reg, "projects/foxtrot": {**cxf.reg["projects/alpha"], "agents": {"fo-main": "contact", "fo-front": "the second contact", "fo-eng": "keeps the pages"}, "back_agents": {"fo-eng": "keeps the pages"}}}
+    DEAD6.clear(); DEAD6.add("fo-main"); contact_fb = cxf.contact("projects/foxtrot"); DEAD6.add("fo-front"); contact_none = cxf.contact("projects/foxtrot")
+finally: _sr.retired = _sr_ret2
+check("L-1: a message that needs the owner, with the page's only contact agent retired, goes to the page's live background agent, never to the retired contact", lv(nd["id"])["target"] != "al-main" and lv(nd["id"])["held_for"] in ("al-builder", "al-docs") and ("al-main", "person", nd["id"]) not in FYI and not any(t == "al-main" for t, _ in pushed), (lv(nd["id"]), FYI))
+check("L-1: a retired -main agent gives way to another live front agent of the page, and with every front agent gone there is none", contact_fb == "fo-front" and contact_none == "", (contact_fb, contact_none))
+held.take("al-builder"); held.take("al-docs")
+# ---- 25. anchor-item, the build-side branch: a person's comment on a repository's notifications (no thread of its own) scoped to a front agent's item goes to the builder; with the builder retired it goes to a live agent of the page, never to the retired one
+GH9 = "github:example-owner/repo@notifications"
+_anchors = json.loads((T / "store/anchors.json").read_text())
+_anchors["projects/alpha"].append(add(GH9, ["a2"]))
+(T / "store/anchors.json").write_text(json.dumps(_anchors))
+core._ROUTES[GH9] = [{"project": "projects/alpha", "session": "al-name", "target": "for al-main", "pilot": True, "filter": ""}]
+DEAD8 = set(); _sr.retired = lambda x: str(x) in DEAD8
+def bs_case(words):
+    CALLS.clear(); PUSHED.clear(); FYI.clear(); held.take("al-builder"); held.take("al-docs"); held.take("al-main")
+    x = one(GH9, "Dana", words, kind="github", etype="comment")
+    res_, pushed_, ncalls_ = tick()
+    return x, pushed_
+try:
+    b_a, pb_a = bs_case("the change reads fine to me")
+    DEAD8.add("al-builder"); b_b, pb_b = bs_case("the change still reads fine to me")
+    DEAD8.add("al-docs"); b_c, pb_c = bs_case("the change reads fine to me, once more")
+finally: _sr.retired = _sr_ret2
+check("anchor-item, build-side: a person's comment on a repository's notifications scoped to a front agent's item goes to the builder, as before", lv(b_a["id"])["rule"] == "anchor-item" and lv(b_a["id"])["target"] == "al-builder" and lv(b_a["id"])["ruling"] in ("held", "passed"), lv(b_a["id"]))
+check("anchor-item, build-side, builder retired: it is held for the page's other live background agent, nothing is pushed to the retired builder",
+      lv(b_b["id"])["rule"] == "anchor-item" and lv(b_b["id"])["ruling"] == "held" and lv(b_b["id"])["held_for"] == "al-docs" and not any(t == "al-builder" for t, _ in pb_b), (lv(b_b["id"]), pb_b))
+check("anchor-item, build-side, every background agent retired: it is held for the page's contact agent (a held line, no turn started)",
+      lv(b_c["id"])["rule"] == "anchor-item" and lv(b_c["id"])["ruling"] == "held" and lv(b_c["id"])["held_for"] == "al-main" and not any(t in ("al-builder", "al-docs") for t, _ in pb_c), (lv(b_c["id"]), pb_c))
+held.take("al-builder"); held.take("al-docs"); held.take("al-main")
+
 if os.environ.get("ROUTER_GATE_STAGED"):      # the staged dry run: one line per path, as the live tick ruled each notice above (tests/run-suite router_gate with ROUTER_GATE_STAGED=1)
     for path, nid in (("machine: a bot's post", m_bot), ("machine: a routine pull request event", m_pr), ("machine: the owner's own document edit", m_own), ("machine: a CI result", m_ci),
                       ("machine, for the owner (strong text): not archived", m_strong), ("machine, on an anchor an item hangs on: not archived", m_busy),

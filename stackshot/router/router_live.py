@@ -731,15 +731,38 @@ def rehome_person(cx: "_router.Context") -> int:
                 if not cx.gone(nm):
                     continue
                 rows = [r for r in _held._read(_held._file(_held.key_of(nm))) if r.get("kind") == "person"]
-                dest = cx.live_background(page) or cx.contact(page) if rows else ""
-                if not dest or dest == nm:
+                if not rows:
+                    continue
+                dest = next((d for d in (cx.live_background(page), cx.contact(page)) if d and d != nm and _held.can_fetch(d)), "")      # a destination whose hook never fetches held lines would strand the line
+                if not dest:
                     continue
                 for r in rows:
-                    if _held.add(_held.key_of(dest), "person", str(r.get("text") or ""), sender=str(r.get("from") or ""), gid=str(r.get("gid") or ""), nid=str(r.get("nid") or ""), whole=True) and _held.ack(nm, ids=[str(r["id"])]):
+                    if _held.add(_held.key_of(dest), "person", str(r.get("text") or ""), sender=str(r.get("from") or ""), gid=str(r.get("gid") or ""), nid=str(r.get("nid") or ""), now=float(r.get("ts") or 0) or None, whole=True) and _held.ack(nm, ids=[str(r["id"])]):
                         moved += 1
     except Exception as e:  # noqa: BLE001
         print(f"router live: re-homing a gone agent's person lines failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
     return moved
+
+
+def _park_people(root: str, fresh: list[tuple[str, dict[str, Any]]], last: dict[str, dict[str, Any]], cx: "_router.Context", out: dict[str, int]) -> list[tuple[str, dict[str, Any]]]:
+    """A page with no live place for a person's message (no live background agent, no live front agent) parks the person notices of its batch: they are left out of the batch (so they never use the cap that
+    a later notice of the page needs) and out of the model call, and one `parked` line says so, once per notice (counted once in `retry`). Each tick looks again cheaply, and a notice is judged as any other the
+    tick an agent is back. → the batch without them. Never raises."""
+    try:
+        aroot = agent_root(root, cx.reg)
+        if cx.live_background(aroot) or cx.contact(aroot):
+            return fresh
+        keep: list[tuple[str, dict[str, Any]]] = []
+        for key, n in fresh:
+            if not _router.person_notice(n):
+                keep.append((key, n))
+            elif last.get(n["id"], {}).get("status") != "parked":
+                _log({"id": n["id"], "ts": time.time(), "project": root, "key": key, "kind": n.get("kind"), "status": "parked", "label": n.get("label", ""), "text": _router._clean(n.get("text"), 120),
+                      "reason": "a person's message with nobody to hold it for: the page lists no live background agent and no live front agent; left unruled, looked at again at every tick"})
+                out["retry"] += 1
+        return keep
+    except Exception:  # noqa: BLE001
+        return fresh
 
 
 def _judge(root: str, rows: list[tuple[str, dict[str, Any]]], cx: "_router.Context", runner: Any, since: float,
@@ -1008,8 +1031,8 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
         if done:
             try:
                 after = {**ruled, "front_held": True} if isinstance(ruled, dict) and ruling == "held" and base.get("hold") == "fyi" and base.get("held_for") else {**ruled, "front_gate": True} if isinstance(ruled, dict) and ruling == "archived" and base.get("front_gate") else ruled      # front_held: the front agent has the line for its next turn, so a hold that waited on this anchor is released, as by a pass
-                if isinstance(after, dict) and _router.person_wakes(n):
-                    after = {**after, "person_wake": True}      # a person's message (not a bare laugh or ack) wakes an item that waits on its anchor, whatever the ruling was
+                if isinstance(after, dict) and _router.person_wakes(n, _router._anchor_busy(key, n, cx)):
+                    after = {**after, "person_wake": True}      # a person's message (a bare laugh or ack only where no item hangs on the anchor) wakes an item that waits on it, whatever the ruling was (a held line for a front agent too)
                 done(key, after)
             except Exception as e:  # noqa: BLE001
                 base["error"] = f"after-rule: {type(e).__name__}: {str(e)[:100]}"
@@ -1128,6 +1151,7 @@ def tick(now: float | None = None, runner: Any = None) -> dict[str, int]:
             rows.sort(key=lambda r: float(r[1].get("ts", 0)))
             ready = [(k, n) for k, n in rows if last.get(n["id"], {}).get("status") == "delivered"]       # delivered, ruling to finish
             fresh = [(k, n) for k, n in rows if last.get(n["id"], {}).get("status") != "delivered"]
+            fresh = _park_people(root, fresh, last, cx, out)
             batch = fresh[:cap]
             later += [(root, k, n) for k, n in batch if str(n["id"]) in followers]
             batch = [(k, n) for k, n in batch if str(n["id"]) not in followers]

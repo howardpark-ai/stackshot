@@ -296,9 +296,11 @@ class Context:
         return next((n for _c, _o, n in _anc.background_ranked(root, self.reg) if not self.gone(n)), "")
 
     def contact(self, root: str) -> str:
-        """The page's contact front agent (main_agent) a held line may go to: "" when it is gone (retired), since nobody would read the line. A person's message with neither a live background agent nor a contact is held by no one: it stays unruled."""
+        """The page's contact front agent (main_agent) a held line may go to; when that one is gone (retired), the first other front agent that is live; "" when none, since nobody would read the line. A person's message with neither a live background agent nor a contact is held by no one: it stays unruled."""
         main = self.main_agent(root)
-        return "" if self.gone(main) else main
+        if main and not self.gone(main):
+            return main
+        return next((a for a in self.agents(root)[0] if not self.gone(a)), "")      # the -main agent is retired: any other front agent that is live
 
     def name_of(self, session: str) -> str:
         """A session id or name → the pane name it goes by."""
@@ -1049,9 +1051,10 @@ def person_notice(n: dict[str, Any]) -> bool:
     return (str(n.get("kind") or "") == "anchor" and not system_notice(n) and message_like(n) and not machine_reason(n))
 
 
-def person_wakes(n: dict[str, Any]) -> bool:
-    """Does a ruling of this notice, whatever it is, wake an item that waits on its anchor? Yes for a person's message (person_notice) that is not a bare laugh or ack (trivial_of: recorded, never a turn)."""
-    return person_notice(n) and not trivial_of(n)
+def person_wakes(n: dict[str, Any], busy: bool = False) -> bool:
+    """Does a ruling of this notice, whatever it is, wake an item that waits on its anchor? Yes for a person's message (person_notice) that is not a bare laugh or ack (trivial_of: recorded, never a turn), and for
+    one that is when an open item hangs on its anchor (`busy`, _anchor_busy): there it is the answer to what the item waits for, and it went the person path (person_place), whose ruling may be a held line."""
+    return person_notice(n) and (busy or not trivial_of(n))
 
 
 def anchor_holders(n: dict[str, Any], cx: Context) -> list[str]:
@@ -1263,7 +1266,8 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
                     a project page that configures quiet-hour archiving goes to its work agent, not into the quiet-hour archive). It fires once the page registry is rebuilt
                     with the pages' `lead_agents` (publish.py's pass, pages.cmd_registry); until then it falls through.
       anchor-item   an anchor notice on an anchor scoped to exactly one open item, whose mover is the one the notice is for:
-                    passed to that mover, so it goes onto the item. Since (a front mover
+                    passed to that mover, so it goes onto the item (a person's message whose mover, or build-side agent, is gone goes instead
+                    to the page's live background agent, else its live contact agent, else it stays unruled: person_hold_line). Since (a front mover
                     gets a turn only for what may need him) a GitHub anchor's build-side notice (is_build_news, a whitelist by event type: every
                     type is comment, review, review_comment, pr_* or issue_*, or the anchor is `@releases`; a notice with no type on another
                     anchor, such as a `@notifications` reason, stays) on an item whose mover is a front agent goes to the item's mover
@@ -1393,8 +1397,12 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
                         rp = _same_anchor_repeat(n, peers)
                         if rp:
                             return _line(n, key, root, source="code", rule="repeat", ruling="dropped", reason=f"a repeat of notice {rp['id']} (same anchor, sender, text and link, within an hour)")
+                        if person_notice(n) and cx.gone(bt):      # a person's message is never sent to a retired agent: the page's live agent takes it (person_hold_line), or it stays unruled
+                            return person_hold_line(n, key, root, cx, f"the anchor is scoped to {shown(t['gid'])}, whose build-side agent {bt} is gone", rule="anchor-item")
                         return _line(n, key, root, source="code", rule="anchor-item", ruling="passed", target=bt, item=shown(t["gid"]),
                                      reason=f"the anchor is scoped to {shown(t['gid'])}, whose mover {owner} is a front agent: build-side news goes to {bt}, who moves the item")
+                    if person_notice(n) and cx.gone(owner):
+                        return person_hold_line(n, key, root, cx, f"the anchor is scoped to {shown(t['gid'])}, whose mover {owner} is gone", rule="anchor-item")
                     return _line(n, key, root, source="code", rule="anchor-item", ruling="passed", target=owner, item=shown(t["gid"]),
                                  reason=f"the anchor is scoped to {shown(t['gid'])}: it goes onto that item, for its mover {owner}")
         for p in peers:
