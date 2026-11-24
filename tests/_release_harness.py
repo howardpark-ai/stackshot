@@ -583,7 +583,10 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
             wl = "".join(l.read_text() for l in sorted((d / "releases").glob("suitemap-warm-*.log")))
             if e.get("RT_WARMMODE") == "hang":
                 if (d / "warm.pid").exists(): break
-            elif re.search(r"suitemap warm \w+: (done|stopped after|the command failed|no |.* not on PATH|that commit|the checkout|another warm)", wl): break
+            elif re.search(r"suitemap warm \w+: (done|stopped after|the command failed|no |.* not on PATH|that commit|the checkout|another warm)", wl):
+                # the line is written before the unit cleans up (an EXIT trap removes the checkout): wait for the checkout to be gone and for the command to be gone too, so what a scenario reads is the end state, never a moment before it
+                pid = (d / "warm.pid").read_text().strip() if (d / "warm.pid").exists() else ""
+                if not any(x.is_dir() for x in (d / "releases").glob("suitemap-warm.*")) and not (pid and os.path.exists(f"/proc/{pid}")): break
             time.sleep(0.05)
     for ph in pheld: ph.close()
     if grabber: done.set(); grabber.join()
