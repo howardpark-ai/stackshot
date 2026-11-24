@@ -829,7 +829,8 @@ inbox_hold_minutes = 10                             # how long a hold on a sessi
 resume_hold_max_hours = 6                           # how long a key may stay in a reboot's resume file (held-resume-<source>.txt, beside the other hold files) before the server's minute tick lifts it:
                                                     # a resume's hold is otherwise lifted only by a later resume that verifies the key, and a session that came back some other way would wait for good. The age is the time the key
                                                     # was first seen in the file (kept in holds-resume.json beside it); a later resume that finds the key queued and cannot verify it holds it afresh and starts the age again.
-                                                    # Only the hold is lifted, the queued lines stay in the inbox (a journal line names the key and its age). 0 = never lift; a negative value or a non-number is 6.
+                                                    # Only the hold is lifted, the queued lines stay in the inbox (a journal line names the key and its age). 0 = never lift; a negative value, a bool, a word or a number that is not finite is 6 (a number in a string, "2", is read as 2).
+                                                    # A resume more often than this limit keeps a key it finds queued and cannot verify held; the first sweep after an upgrade starts every present key's age.
                                                     # held-<source>.txt (another tool's) is never touched. docs/inbox-holds.md. Server's config. Live
 push_mode = "local"                                 # where push.py (the delivery script, run by scripts) puts a line: "local" (the default) = into this box's own inbox and queue
                                                     # folders, right on the server's box; "server" = send it to the server through the client API's `message` call with this box's token,

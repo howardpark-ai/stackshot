@@ -741,6 +741,71 @@ check("resume tool: …and the sweep lifts both", sorted(holds.sweep_resume()) =
 check("resume tool: a later resume still behaves: with nothing held and nothing queued it writes an empty file", resume()[0] == 0 and lines(HR) == [])
 wipe()
 
+# the lock: the resume's write and the sweep's lift are one step each under the same lock, so while another holder has it neither writes anything, and both go on when it is released
+import threading
+LOCKF = FLAGS / ".holds-api.lock"
+def at_lock(p):
+    """True once the child has the lock file open (it opens it right before it waits for the lock); without /proc a short wait stands in."""
+    try:
+        return any(os.readlink(f"/proc/{p.pid}/fd/{fd}").endswith(".holds-api.lock") for fd in os.listdir(f"/proc/{p.pid}/fd"))
+    except OSError:
+        return False
+def wait_blocked(p):
+    end = time.time() + 60
+    while time.time() < end and p.poll() is None and not at_lock(p): time.sleep(0.02)
+    if not os.path.isdir("/proc"): time.sleep(3)
+    time.sleep(0.3)
+put_file(HR, "r-a\nr-b\n"); iid_a = inbox.put("held-pane", "waits for a resume", "msg", now=time.time(), sender="site-main")
+lk = holds.locked(); lk.__enter__(); locked_now = True
+p = subprocess.Popen([sys.executable, RQ, "resume", "--source", "msg", "--sessions", str(T / "listed-none.txt"), "--wait", "1"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env={**os.environ})
+try:
+    wait_blocked(p)
+    still, mid_hold, mid_seen = p.poll() is None, lines(HR), SEEN()
+    lk.__exit__(None, None, None); locked_now = False
+    out, err = p.communicate(timeout=120)
+finally:
+    if locked_now: lk.__exit__(None, None, None)
+    if p.poll() is None: p.kill(); p.wait()
+check("resume tool: while another holder has the lock it writes nothing and waits", still and mid_hold == ["r-a", "r-b"] and mid_seen is None, (still, mid_hold, mid_seen))
+check("resume tool: …and once the lock is released it writes the hold file and the ages", p.returncode == 0 and lines(HR) == ["held-pane", "r-a", "r-b"] and sorted(SEEN()["msg"]) == ["held-pane", "r-a", "r-b"], (p.returncode, lines(HR), SEEN(), err[-300:]))
+inbox.ack([iid_a]); wipe()
+
+put_file(HR, "r-a\n"); holds.sweep_resume(now=T0)
+lk = holds.locked(); lk.__enter__(); locked_now = True; res = {}
+def lift():
+    try: res["out"] = holds.sweep_resume(now=T0 + H6)
+    except BaseException as e: res["err"] = e
+th = threading.Thread(target=lift, daemon=True); th.start()
+try:
+    th.join(1.5)
+    alive, mid_hold, mid_seen = th.is_alive(), lines(HR), SEEN()
+finally:
+    if locked_now: lk.__exit__(None, None, None)
+    th.join(30)
+check("resume sweep: while another holder has the lock it lifts nothing and waits", alive and mid_hold == ["r-a"] and mid_seen == {"msg": {"r-a": T0}}, (alive, mid_hold, mid_seen))
+check("resume sweep: …and once the lock is released it lifts the key", res.get("out") == ["msg:r-a"] and lines(HR) == [] and SEEN() is None, (res, lines(HR), SEEN()))
+wipe()
+
+# resume_restart: a key whose time is in the file but that left the hold file loses it, a key new to the file gets the time of the call
+put_file(HR, "r-a\nr-b\n"); holds.sweep_resume(now=T0)
+put_file(HR, "r-b\nr-c\n")
+with holds.locked():
+    holds.resume_restart("msg", [], now=T0 + 100)
+check("resume restart: a key that left the file drops its time, a key that stayed keeps it, a new key gets the call's time", SEEN() == {"msg": {"r-b": T0, "r-c": T0 + 100}}, SEEN())
+wipe()
+
+# the lock cannot be taken (its path is a directory): the resume still writes its hold file and exits 0, with one line on stderr, and records no ages
+LOCKF.unlink(missing_ok=True); LOCKF.mkdir()
+try:
+    iid = inbox.put("held-pane", "waits for a resume", "msg", now=time.time(), sender="site-main")
+    put_file(HR, "r-a\n")
+    rc, q, err = resume()
+finally:
+    LOCKF.rmdir()
+check("resume tool: with the lock unusable it still writes the hold file and exits 0", rc == 0 and q.get("held_sessions") == ["held-pane"] and lines(HR) == ["held-pane", "r-a"], (rc, q, lines(HR), err[-300:]))
+check("resume tool: …says so in one line on stderr and records no ages", err.count("without the lock") == 1 and SEEN() is None, (err[-300:], SEEN()))
+inbox.ack([iid]); wipe()
+
 # the setting
 def rsetting(v):
     if v == "unset": cfg.CFG["client"].pop("resume_hold_max_hours", None)

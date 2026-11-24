@@ -406,7 +406,7 @@ def sweep_resume(now: float | None = None) -> list[str]:
     """Lift, from the resume's files (`held-resume-<source>.txt`), the keys that stayed longer than [client] resume_hold_max_hours (default 6; 0 = never): a hold of a reboot's resume is lifted only by a later
     resume that verifies the key, and a key none verifies would hold its session's lines for good. The age is the time the key was first seen in the file (`holds-resume.json`, written here and by the resume's
     own write): a key that leaves the file loses its time, an unreadable times file reads as none (nothing lifted, every age starts now). Only the hold goes: the lines it held stay in the inbox and are delivered
-    at the next take. Never touches `held-<source>.txt` (another tool's) or the API's file. → "kind:key" of each key lifted. Cheap when there is nothing to track: one stat for each file."""
+    at the next take. Never touches `held-<source>.txt` (another tool's) or the API's file. → "kind:key" of each key lifted. Cheap when no resume file exists: with no times file and no resume file the call returns after one stat for each file, without the lock; once a resume has run (its files exist, empty or not) every minute tick takes the lock and reads the files."""
     now = time.time() if now is None else now
     if not (_flags() / RESUME_LEDGER_NAME).exists() and not any(_resume_path(k).exists() for k in _inbox.SOURCES):
         return []

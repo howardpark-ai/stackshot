@@ -16,7 +16,7 @@ longer than [client] resume_hold_max_hours (default 6) since it was first seen t
 queued and cannot verify it holds it afresh, which starts that age again.
 Prints one JSON line; exit 0 when every deliverable queue was delivered.
 """
-import glob, json, os, subprocess, sys
+import contextlib, glob, json, os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
@@ -135,16 +135,21 @@ def main():
     # The read and the write of the file are one step under the lock the server's minute sweep takes to lift a key that stayed past [client] resume_hold_max_hours (inbox_holds.sweep_resume), so
     # neither overwrites the other; a key found queued and not verified is held afresh and starts its age again, a key only kept keeps the age it has.
     hf = os.path.join(A, f"held-resume-{src}.txt")
-    from stackshot.fleet import inbox_holds
-    with inbox_holds.locked():
+    stack = contextlib.ExitStack(); inbox_holds = None       # no lock, no side file: the hold file itself is still written, as it was before the lock existed
+    try:
+        from stackshot.fleet import inbox_holds as _ih
+        stack.enter_context(_ih.locked()); inbox_holds = _ih
+    except Exception as e: print(f"resume: hold file written without the lock: {e.__class__.__name__}: {e}", file=sys.stderr)    # never stops a resume
+    with stack:
         keep = set(held_keys) | {k for k in lines_of(hf) if not deliverable(k)}
         retired = sorted(k for k in keep if not has_row(k, fl))
         dropped = set(retired)
         held_keys = [k for k in held_keys if k not in dropped]
         held = sum(n for k, n in held_by.items() if k not in dropped)
         tmp = hf + ".tmp"; open(tmp, "w").write("".join(k + "\n" for k in sorted(keep - dropped))); os.replace(tmp, hf)
-        try: inbox_holds.resume_restart(src, held_keys)
-        except Exception as e: print(f"resume: ages of the held keys not recorded: {e.__class__.__name__}: {e}", file=sys.stderr)    # never stops a resume
+        if inbox_holds:
+            try: inbox_holds.resume_restart(src, held_keys)
+            except Exception as e: print(f"resume: ages of the held keys not recorded: {e.__class__.__name__}: {e}", file=sys.stderr)    # never stops a resume
     print(json.dumps({"ok": failed == 0, "delivered": delivered, "sessions": len(to), "held": held, "held_sessions": held_keys,
                       "retired_sessions": retired, "failed": failed, "failed_sessions": failed_keys, **extra}))
     return 0 if failed == 0 else 1
