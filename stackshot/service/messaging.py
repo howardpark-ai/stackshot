@@ -28,6 +28,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot.anchors import anchors as _anc
 from stackshot.core import agentbox as _ab
+from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
 from stackshot.core import interp as _interp
 from stackshot.core.instance import NAME, OWNER
@@ -128,11 +129,39 @@ def _project_of_name(name: str, roles: dict[str, Any], idx: dict[str, Any]) -> s
     return _rr.project_of_name(name, roles, lambda k, reg: _telling.stand_in_keeper(k, reg))
 
 
-class _Retired(ToolError):
+class Refused(ToolError):
+    """A refusal of the relay (`_message` and what it calls): a ToolError that carries `kind`, a short slug naming the refusal site (one per `raise Refused(...)`, named for what was refused, never reworded with the text),
+    which the call log keeps beside the target and the message text (`refusal_fields`, call_log.py) so refused messages can be counted by kind and read back later."""
+    kind = "unclassified"
+
+    def __init__(self, kind: str, msg: str) -> None:
+        super().__init__(msg)
+        self.kind = kind
+
+
+class _Retired(Refused):
     """A message to a retired session or one whose pane is gone, when a project page can take it instead: `_message` sends it to that page (`project`) and tells the sender so."""
     def __init__(self, msg: str, name: str, project: str, why: str) -> None:
-        super().__init__(msg)
+        super().__init__("retired-recipient", msg)
         self.name, self.project, self.why = name, project, why
+
+
+def refusal_fields(to: Any, text: Any, err: BaseException) -> dict[str, str]:
+    """What the call log keeps of a refused message call besides its sender and the refusal's text (call_log.record's `to`, `kind`, `text`): the target as the sender wrote it, the refusal's kind (`Refused.kind`; a ToolError
+    from anywhere else is `unclassified`), and the message text as a delivered row keeps it (stripped, a bare item id written as shown; call_log.record clips it). Never raises."""
+    try:
+        return {"to": str(to or ""), "kind": str(getattr(err, "kind", "") or "unclassified"), "text": _svcstore._shown_ids(str(text or "").strip())}
+    except Exception:  # noqa: BLE001 — a log field is never worth a lost refusal
+        return {"to": str(to or ""), "kind": "unclassified", "text": str(text or "").strip()}
+
+
+def count_client_call(to: Any, text: Any, sender: Any, err: BaseException | None = None) -> None:
+    """Count a message call that came through the client route (POST /client/message: a script's), which the tool middleware never sees: a call that went through is one plain line of the call log, a refused one the same line a refused
+    message tool call leaves (sender, the refusal's text, target, kind and the message). Never raises."""
+    if err is None:
+        _calls.record("message", True)
+    else:
+        _calls.record("message", False, sender=str(sender or ""), why=str(err), **refusal_fields(to, text, err))
 
 
 def _dead_recipient(to: str, cands: list[dict[str, Any]], idx: dict[str, dict[str, Any]]) -> None:
@@ -154,17 +183,17 @@ def _dead_recipient(to: str, cands: list[dict[str, Any]], idx: dict[str, dict[st
             return
         why = whys[0]
     if name and idx.get(to) is cands[0] and any(r.get("name") == name and r is not cands[0] and _lv.running(r) for r in idx.values()):
-        raise ToolError(f"Refused: the session with id {to!r} cannot receive this ({why}), but a pane named {name!r} is running under another id: address it by name, to={name!r}.")
+        raise Refused("session-id-use-name", f"Refused: the session with id {to!r} cannot receive this ({why}), but a pane named {name!r} is running under another id: address it by name, to={name!r}.")
     proj = _project_of_name(name, roles, idx)
     if proj:
         refused = (f"Refused: {name!r} cannot receive this ({why}), so a message to it would sit in the queue and never arrive. "
                    f"Send it to {_project_takes(proj)} instead: message(to={proj!r}, …).")
         if _rr.takes_other(proj, name):
             raise _Retired(refused, name, proj, why)      # the router can pass it to another agent of the page: `_message` sends it there
-        raise ToolError(refused)                          # the page's only agent is this one: no receiver, the refusal goes back to the sender
+        raise Refused("no-receiver", refused)                          # the page's only agent is this one: no receiver, the refusal goes back to the sender
     live = sorted({str(r.get("name")) for r in idx.values() if r.get("name") and _lv.present(r)})
     near = difflib.get_close_matches(name, live, n=3, cutoff=0.6)
-    raise ToolError(f"Refused: {name!r} cannot receive this ({why}), so a message to it would sit in the queue and never arrive, and no project page that reaches someone else could be told for it "
+    raise Refused("dead-recipient", f"Refused: {name!r} cannot receive this ({why}), so a message to it would sit in the queue and never arrive, and no project page that reaches someone else could be told for it "
                     f"(a project is addressed as to=projects/<slug>). " + (f"Did you mean {', '.join(near)}? " if near else "") + f"Panes right now: {', '.join(live) or 'none'}.")
 
 
@@ -399,7 +428,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     goes = (f"the project's background agent, {back} (message(to={back!r}, …))" if back and not same else f"the project, where the router rules it (to={project!r})")
     if _FOR_OWNER not in first:
         if (sender.strip() and _model.is_owner(sender)) or _held._owner_mark().search(text):
-            raise ToolError(f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and it takes what is for {OWNER} only with {_FOR_OWNER} on the message's first line. "
+            raise Refused("mark-not-first-line", f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and it takes what is for {OWNER} only with {_FOR_OWNER} on the message's first line. "
                             f"Put {_FOR_OWNER} on the first line if this is for {OWNER}; anything else goes to {goes} instead.")
         front = tuple(n for n, r in roles.items() if r.get("role") == "front")
         done_note = (f"Refused: {name} is a front agent of {project} and takes no done, taken or no-action note: write it on the board item it concerns (update or complete), or say nothing.")
@@ -410,7 +439,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
                 rep_ = _builder_report(name, text, sender, idx, roles, noted=said_nothing)
                 if rep_:
                     return rep_
-                raise ToolError(done_note)
+                raise Refused("no-action-note-from-builder", done_note)
         kind, arg = answer_route(name, project, sender, text, idx, roles) if sender.strip() else ("", "")
         if kind == "deliver":
             return None
@@ -419,7 +448,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
         if kind == "hold" and _held.enabled():
             return _Hold(arg, project)
         if _NOT_FOR_OWNER_RE.search(text) or _reports.is_report(text, front):
-            raise ToolError(done_note)
+            raise Refused("no-action-note", done_note)
         peer_ = bool(sname) and roles.get(sname, {}).get("role") == "front" and sname.casefold() != name.casefold()      # a front agent's message to a peer front agent: the channel between them
         if _held.enabled():
             if peer_:
@@ -428,12 +457,12 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
                 return _Hold(f"{sname} is the project's background agent, so it cannot go back to it", project)
             if not back:
                 return _Hold(f"{project} has no background agent", project)
-        raise ToolError(f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and this message is not for {OWNER}, so it goes to {goes}. "      # with the hold switched off nothing can hold it
+        raise Refused("unmarked-not-for-owner", f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and this message is not for {OWNER}, so it goes to {goes}. "      # with the hold switched off nothing can hold it
                         f"Put {_FOR_OWNER} on the first line only if {OWNER} has something to do here.")
     # The mark is for what he has to do; a marked message that says nothing is needed from him (_NOT_FOR_OWNER, in the text after the mark) is a note
     m = _NOT_FOR_OWNER_RE.search("\n".join([first.split(_FOR_OWNER, 1)[1], *lines[at + 1:]]))
     if m:
-        raise ToolError(f"Refused: {name} is a front agent of {project} and {_FOR_OWNER} marks only what {OWNER} has to do; this says nothing is needed from him ({m.group(0)!r}): write it on the board item it concerns, or say nothing. "
+        raise Refused("marked-no-action-phrase", f"Refused: {name} is a front agent of {project} and {_FOR_OWNER} marks only what {OWNER} has to do; this says nothing is needed from him ({m.group(0)!r}): write it on the board item it concerns, or say nothing. "
                         f"If {OWNER} does have something to do here, say what it is and leave that phrase out.")
     rep = (_builder_report(name, text, sender, idx, roles) if sender.strip() else "")
     if rep:
@@ -444,7 +473,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
                        if sname and _sibling_words.held_words(sender, name, text) else "")      # his quoted words are valid: the message is a hand-off, and the one thing missing is the item handed over
             return _Hold(f"{_FOR_OWNER} must name an open item of his (a board item whose needs hold decision, or whose step is his), and this names none", project,
                          handing or f"Put his step on an item (update: needs=decision with an ask, or mover={OWNER}), and name that item in the message by its plain id; a plain report goes on the item it concerns.")
-        raise ToolError(f"Refused: {name} is a front agent of {project}, and {_FOR_OWNER} must name an open item of {OWNER}'s (a board item whose needs hold decision, or whose step is his); this names none, so it starts no turn there. "
+        raise Refused("marked-no-item-of-his", f"Refused: {name} is a front agent of {project}, and {_FOR_OWNER} must name an open item of {OWNER}'s (a board item whose needs hold decision, or whose step is his); this names none, so it starts no turn there. "
                         "Put his step on an item (update: needs=decision with an ask) and name it by its plain id, or put what happened on the item it concerns.")
     if not (sender.strip() and _model.is_owner(sender)) and not _turn_warranted(name, text):      # the mark needs him, but a turn is warranted only when he is talking with this agent now or asked it to tell him about the subject
         if sname and _sibling_words.held_words(sender, name, text):      # a sibling front agent quoting his words (an Acked-by line, checked as the wake cap checks): held for the next turn, no turn started
@@ -452,7 +481,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
         builder = _builder_named(text, roles, sname)
         why = f"{OWNER} is not talking with {name} now and has not asked it to tell him about this"
         _log_not_delivered(sender, to, text, f"not delivered: {why}")
-        raise ToolError(f"Refused: {name} is a front agent of {project}, and {why}, so it starts no turn there and nothing is held for its next turn. "
+        raise Refused("marked-no-turn", f"Refused: {name} is a front agent of {project}, and {why}, so it starts no turn there and nothing is held for its next turn. "
                         + (f"It names an item that {builder} works on: send it there (message(to={builder!r}, …)). " if builder else f"Put it on the board item it concerns, or send it to {goes}. ")
                         + "The message is in the message log.")
     return None
@@ -605,19 +634,19 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
     to = _sr.delivery(to)                           # step B: a permanent session id addresses its session by the name it has now
     text = _svcstore._shown_ids(raw)
     if not sender:
-        raise ToolError("Refused: sender is required — your own session id (cse_… for a cloud/Cowork session, the transcript UUID for a pane) or your pane name, the same value you pass as sender to the board tools")
+        raise Refused("no-sender", "Refused: sender is required — your own session id (cse_… for a cloud/Cowork session, the transcript UUID for a pane) or your pane name, the same value you pass as sender to the board tools")
     if not to:
-        raise ToolError("Refused: to is required — the target session's id (cse_… / transcript UUID) or its pane name")
+        raise Refused("no-target", "Refused: to is required — the target session's id (cse_… / transcript UUID) or its pane name")
     if not raw:
-        raise ToolError("Refused: empty message")
+        raise Refused("empty-message", "Refused: empty message")
     if len(raw) > _hooks().msg_max():
-        raise ToolError(f"Refused: message longer than {_hooks().msg_max()} characters — put the long form somewhere both sessions can read (a gbrain page, a file in the repo) and send the pointer")
+        raise Refused("message-too-long", f"Refused: message longer than {_hooks().msg_max()} characters — put the long form somewhere both sessions can read (a gbrain page, a file in the repo) and send the pointer")
     idx = _sr._sessions_index()
     if question:
         if _model.is_owner(sender):
-            raise ToolError(f"Refused: question=true is for a front agent's question to the session it writes to; {OWNER}'s own messages carry no such mark")
+            raise Refused("question-from-owner", f"Refused: question=true is for a front agent's question to the session it writes to; {OWNER}'s own messages carry no such mark")
         if fyi:
-            raise ToolError("Refused: question=true and fyi=true together: a question asks something and an fyi asks nothing; send it with one of them")
+            raise Refused("question-with-fyi", "Refused: question=true and fyi=true together: a question asks something and an fyi asks nothing; send it with one of them")
     fyi = bool(fyi) and not _model.is_owner(sender)
     hold_why = hold_project = hold_tail = ""            # why a message to a front agent that is no fyi is held for its next turn all the same (_gate_front's _Hold)
     front_fyi = bool(fyi) and not re.match(_cfg.page_dirs_re() + "/", to) and bool(_front_fyi_name(to, raw, idx))      # an fyi for a front agent is not refused for its missing mark: the front gate below takes it
@@ -646,11 +675,11 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         key = to.rstrip("/")
         if key.endswith(".md"): key = key[:-3]
         if key not in _anc.registry():
-            raise ToolError(f"Refused: {to!r} names no project page — address a session, or a page key like projects/<slug>")
+            raise Refused("unknown-page-key", f"Refused: {to!r} names no project page — address a session, or a page key like projects/<slug>")
         pilot = bool(_anc.pilot_root(key))
         kept = _telling.stand_in_keeper(key)      # the page's keeper (its builder, else its -main agent; its hub's, else the scope's general one for a page with none): used only when the notice cannot be recorded
         if not kept:
-            raise ToolError(f"Refused: no agent can take a message for {key}: the page and its hub list no user-facing agent, and the scope's general -main agent ([router] general_*) is on no page")
+            raise Refused("no-keeper", f"Refused: no agent can take a message for {key}: the page and its hub list no user-facing agent, and the scope's general -main agent ([router] general_*) is on no page")
         try:
             nid = _routing.record(key, kind="message", to="" if pilot else _session_id(kept), label=f"message to {key}", who=who, text=text, target="project-wide", pilot=pilot, live=pilot,
                                   hold="fyi" if fyi else "")
@@ -676,7 +705,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                 return _sent_instead(to, known, proj, raw, sender, auth, origin, fyi)
             if origin and not proj and known:
                 _log_not_delivered(sender, to, text, f"returned to its sender — {to} is retired ({known}) and no project takes its messages")
-            raise ToolError(f"Refused: no session {to!r} in the heartbeat — " + (f"if it is an agent of {proj}, send to {_project_takes(proj)} (message(to={proj!r}, …)); " if proj else "")
+            raise Refused("no-session", f"Refused: no session {to!r} in the heartbeat — " + (f"if it is an agent of {proj}, send to {_project_takes(proj)} (message(to={proj!r}, …)); " if proj else "")
                             + (f"did you mean {', '.join(near)}? " if near else "") + f"panes right now: {', '.join(live)}; "
                             "a project is addressed by its page key (to=projects/<slug>), a cloud/Cowork session by its cse_… id (a pane started in the last few minutes shows up at its machine's next heartbeat)")
         if rec and not is_key:
@@ -693,7 +722,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         if not rec and not _transcript_here(to):
             # an id no machine reports and no pane here ever had is refused: a queue "until the session comes back" would never end
             # for a claude.ai chat id
-            raise ToolError(f"Refused: {to!r} is not a session stackshot can deliver to — no pane with this transcript id is in any machine's heartbeat, and none "
+            raise Refused("unknown-transcript-id", f"Refused: {to!r} is not a session stackshot can deliver to — no pane with this transcript id is in any machine's heartbeat, and none "
                             f"ever ran on {_fleetev.fleet_names().get(_pub_letter(), 'the server box')}. If it is the id in a claude.ai/chat/… link: a Cowork or cloud session is addressed by its cse_… id, "
                             "which it shows as the sender of its own messages and as the creator of its board items (the sessions tool lists those); until it has done either, "
                             "stackshot cannot reach it. A pane started in the last few minutes on another machine appears at that machine's next heartbeat: address it by name then.")
@@ -702,7 +731,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         verdict, why_ = _telling.front_fyi(to, held_text, ",".join(_agent_names._item_refs(raw)), whole=True)
         if not verdict:
             if front_fyi or hold_why:         # the gate did not take it (the hold is off, or the gate failed): refused, as it was before the hold
-                raise ToolError(f"Refused: {to} is a front agent, and this message is not for {OWNER}, so it starts no turn there; it could not be held for its next turn either. Put it on the board item it concerns "
+                raise Refused("front-not-held", f"Refused: {to} is a front agent, and this message is not for {OWNER}, so it starts no turn there; it could not be held for its next turn either. Put it on the board item it concerns "
                                 f"(update, complete), or send it to the project's page key (to={(hold_project or 'projects/<slug>')!r}), or, when it asks something of {OWNER}, put {_FOR_OWNER} on its first line.")
         else:
             filed = verdict == "fyi"
@@ -720,7 +749,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                 return (f"held for {to}'s next turn {lead_} — it is handed over with the first turn {to} takes, whatever causes it, once, "
                         f"oldest first; an open item it names gets a History line. " + (hold_tail or f"If it does ask something of {OWNER}, send it again without fyi, its first line carrying {_FOR_OWNER}."))
             if origin:          # a script reads the status, not the sentence: an fyi that could not be held is a failure to it, as it was before the gate took a script's fyi
-                raise ToolError(f"Refused: {to} is a front agent whose hook cannot fetch held lines, so an fyi cannot be held for its next turn and nothing was sent to its pane. "
+                raise Refused("script-fyi-not-held", f"Refused: {to} is a front agent whose hook cannot fetch held lines, so an fyi cannot be held for its next turn and nothing was sent to its pane. "
                                 f"An open item the text names has it on its History, and the message log has it. Send it to the project's page key (to=projects/<slug>), which the router rules, "
                                 f"or, when it asks something of {OWNER}, send it without fyi with {_FOR_OWNER} on its first line.")
             return (f"not passed on — {to} is a front agent, {'an fyi' if fyi else 'a message that is not for ' + OWNER} starts no turn there, and the message could not be held for its next turn ({why_}). {to}'s pane was not given it; "
@@ -796,4 +825,4 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         return f"{outcome} — nothing was left in a queue; the line above says where it went" + named
     if outcome.startswith("queued"):
         return f"{outcome} — the session is not live right now; anchor-hub delivers the queue when it comes back{(' (' + err + ')') if err else ''}" + named
-    raise ToolError(f"Delivery failed: {outcome or 'no result'}{(' — ' + err) if err else ''}")
+    raise Refused("delivery-failed", f"Delivery failed: {outcome or 'no result'}{(' — ' + err) if err else ''}")

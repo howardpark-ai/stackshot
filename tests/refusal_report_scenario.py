@@ -89,7 +89,7 @@ def part_refusal_report():
         out = []
         for p in sorted(CALLS.glob("*.jsonl")) if CALLS.exists() else []:
             if month and p.stem != month: continue
-            out += [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+            out += [json.loads(l) for l in CL.newline_lines(p.read_text(encoding="utf-8")) if l.strip()]          # a refused message's text may hold a character `splitlines` cuts at
         return out
     def wipe():
         for p in list(CALLS.glob("*.jsonl")) if CALLS.exists() else []: p.unlink()
@@ -640,6 +640,98 @@ def part_refusal_report():
           "send it again" not in both and "the wake" in both and "the rest is complete as stored" in both and both.startswith("\n(fixed for you: 1 description bullet"), both)
     check("8 reply: two fixes that both invite a resend keep the one general line", CL.reply_note([n_wake, ("subject-prefix", "prefix put")]).endswith("send it again as you want it.)"), None)
     check("8 reply: a step-none and a split, neither inviting a resend, close plainly", "send it again" not in CL.reply_note([n_desc, ("step-none", "step=\"none\" changed nothing")]) and "write that field" not in CL.reply_note([n_desc, ("step-none", "x")]), None)
+
+    # ================================================================ 9. message calls: the row of a refused message, and the report's lines on them
+    from stackshot.service import messaging as _msgs
+    wipe(); reset_open()
+    tx = "first line\nsecond line " + chr(0x2028) + " after a separator"
+    t9 = epoch(2026, 11, 3)
+    CL.record("message", False, sender="a-builder", why="Refused: x", to="  a-main \n", kind="Marked No Turn!", text="\n" + tx + "  ", now=t9)
+    CL.record("message", True, sender="a-builder", to="a-main", kind="marked-no-turn", text="ignored", now=t9 + 1)
+    CL.record("message", False, sender="a-builder", why="Refused: y", to="t" * 200, kind="k", text="w" * (CL.TEXT_MAX + 50), now=t9 + 2)
+    CL.record("message", False, sender="a-builder", why="Refused: z", now=t9 + 3)
+    r9 = lines()
+    check("9 call_log: a refused message keeps its target (folded), its kind (a slug) and its text (stripped, newlines kept)", r9[0]["to"] == "a-main" and r9[0]["kind"] == "marked-no-turn" and r9[0]["text"] == tx and "\n" in r9[0]["text"]
+          and set(r9[0]) == {"t", "tool", "ok", "item", "sender", "why", "to", "kind", "text"}, r9[0])
+    check("9 call_log: …a call that went through keeps none of them (and its row is the plain one)", r9[1] == {"t": int(t9 + 1), "tool": "message", "ok": True}, r9[1])
+    check("9 call_log: …the target is cut at TO_MAX and the text at TEXT_MAX (the message tool's own limit) with an ellipsis", len(r9[2]["to"]) == CL.TO_MAX and len(r9[2]["text"]) == CL.TEXT_MAX and r9[2]["text"].endswith("…") and CL.TEXT_MAX == 4000, (len(r9[2]["to"]), len(r9[2]["text"])))
+    check("9 call_log: …a refused message with no target, kind or text (an old caller) is the row it was", set(r9[3]) == {"t", "tool", "ok", "item", "sender", "why"}, r9[3])
+    got = list(CL.read(t9 - 1, t9 + 10))
+    check("9 call_log: read returns the row whose text holds U+2028 whole (a line is cut at a newline only)", len(got) == 4 and got[0]["text"] == tx, [x.get("text") for x in got])
+    wipe(); reset_open()
+    def refuse(kind):
+        def f(): raise _msgs.Refused(kind, "Refused: for the test")
+        return f
+    run_mw("message", {"to": "a-main", "text": "hello\nworld", "sender": "a-builder"}, refuse("marked-no-turn"))
+    out, err = run_mw("message", {"to": "a-main", "text": "words", "sender": "a-builder"}, lambda: (_ for _ in ()).throw(ToolError("Refused: from elsewhere")))
+    run_mw("update", {"item_id": BID(7), "sender": "a-builder", "to": "NOT-LOGGED", "text": "SECRET-TEXT"}, lambda: (_ for _ in ()).throw(ToolError("Refused: next no longer lists 'a'")))
+    r9 = lines()
+    check("9 middleware: a refused message call is logged with its target, the refusal's kind and its text (newlines kept)", r9[0]["to"] == "a-main" and r9[0]["kind"] == "marked-no-turn" and r9[0]["text"] == "hello\nworld" and r9[0]["sender"] == "a-builder" and r9[0]["item"] == "", r9[0])
+    check("9 middleware: …a ToolError that is none of the relay's sites is `unclassified`, with the text all the same", r9[1]["kind"] == "unclassified" and r9[1]["text"] == "words", r9[1])
+    check("9 middleware: …and no other tool logs a target or a text: an update's refusal is the row it was", set(r9[2]) == {"t", "tool", "ok", "item", "sender", "why"} and "SECRET" not in json.dumps(r9[2]), r9[2])
+    wipe()
+
+    # the report on a fixture week: message calls, kinds, streaks, resends
+    ms = lambda ts: dt.datetime.fromtimestamp(ts, dt.timezone.utc).isoformat(timespec="seconds")
+    def msg_ok(n, day_, hour=9):
+        for i in range(n): CL.record("message", True, now=epoch(day_.year, day_.month, day_.day, hour, i % 60))
+    def msg_ref(day_, hh, mm, ss, sender, to, kind, text=""):
+        CL.record("message", False, sender=sender, why="Refused: for the test", to=to, kind=kind, text=text, now=epoch(day_.year, day_.month, day_.day, hh, mm) + ss)
+    d = lambda k: mon + dt.timedelta(days=k)
+    EXPORT = "The export job finished and all suites pass on the main branch today."
+    msg_ok(40, d(0))
+    msg_ref(d(1), 10, 0, 0, "a-builder", "a-main", "unmarked-not-for-owner", EXPORT)
+    msg_ref(d(1), 10, 0, 20, "a-builder", "a-main", "unmarked-not-for-owner", "export job finished, all suites pass on main today")
+    msg_ref(d(1), 10, 10, 0, "a-builder", "a-main", "no-action-note", "Taken, nothing more to do here.")
+    msg_ref(d(2), 9, 0, 0, "b-builder", "c-main", "marked-no-turn", "Ship the hotfix to the staging box before the demo starts.")
+    msg_ref(d(2), 11, 0, 0, "b-builder", "c-main", "marked-no-turn", "Ship the hotfix to the staging box before the demo starts.")
+    msg_ref(d(3), 12, 0, 0, "b-builder", "d-main", "no-session", "Please look at the nightly numbers.")
+    msg_ref(d(4), 15, 0, 0, "c-builder", "a-main", "unknown-page-key", "Review the release notes before the Friday meeting, please.")
+    CL.record("message", False, sender="x-script", why="Refused: older", now=epoch(d(5).year, d(5).month, d(5).day, 9))       # a row from before kinds were logged
+    msg_ok(20, d(-7)); msg_ref(d(-6), 9, 0, 0, "a-builder", "a-main", "no-session", "a text"); msg_ref(d(-6), 9, 1, 0, "a-builder", "a-main", "no-session", "another text entirely")
+    (T / "state/messages.jsonl").write_text("".join(json.dumps(x) + "\n" for x in (
+        {"t": ms(epoch(d(1).year, d(1).month, d(1).day, 10, 0) + 30), "from": "a-builder", "to": "projects/a", "outcome": "held for the router", "text": "export job finished, all suites pass on main today"},
+        {"t": ms(epoch(d(2).year, d(2).month, d(2).day, 9, 5)), "from": "b-builder", "to": "c-main", "outcome": "delivered → c-main", "text": "Ship the hotfix to the staging box before the demo starts."},
+        {"t": ms(epoch(d(2).year, d(2).month, d(2).day, 11, 3)), "from": "b-builder", "to": "c-main", "outcome": "not delivered: not talking now", "text": "Ship the hotfix to the staging box before the demo starts."},       # a refusal's own row: no resend
+        {"t": ms(epoch(d(4).year, d(4).month, d(4).day, 17, 0)), "from": "c-builder", "to": "a-main", "outcome": "delivered → a-main", "text": "Review the release notes before the Friday meeting, please."},       # two hours later: too late
+        {"t": ms(epoch(d(3).year, d(3).month, d(3).day, 12, 20)), "from": "someone-else", "to": "d-main", "outcome": "delivered → d-main", "text": "Please look at the nightly numbers."})) + "not json\n{\"t\": 1}\n",
+        encoding="utf-8")
+    cur9, prev9 = RR.collect(mon)
+    ms9 = cur9["messages"]
+    check("9 stats: message calls and refusals of the week (40 through, 8 refused), by kind, a row with no kind as `not recorded`", ms9["calls"] == 48 and ms9["refused"] == 8 and dict(ms9["kinds"]) == {"unmarked-not-for-owner": 2, "marked-no-turn": 2, "no-action-note": 1, "no-session": 1, "unknown-page-key": 1, "not recorded": 1}, ms9)
+    check("9 stats: …the week before is its own", prev9["messages"]["calls"] == 22 and prev9["messages"]["refused"] == 2, prev9["messages"])
+    check("9 stats: one streak: a-builder refused three times on a-main within 10 minutes (two refusals of one sender 2 hours apart are none); it is also of the report's own rule (3 within 15 minutes)",
+          ms9["streaks"] == [{"sender": "a-builder", "to": "a-main", "n": 3, "kind": "unmarked-not-for-owner", "tight": True}] and ms9["streak_refusals"] == 3 and ms9["tight"] == 1, ms9["streaks"])
+    check("9 stats: sent again within an hour by the same sender: the first refusal by the second (same target), the second by a message to the page (another target), a later one's own words by a delivered message to the same target; "
+          "a refusal's own row in the message log, a message of another sender, one 2 hours later and a line that does not parse count for nothing", ms9["resent"] == {"same": 2, "other": 1}, ms9["resent"])
+    text9 = RR.build(mon, cur9, prev9, top=3)
+    check("9 report: the message line says calls refused of all, with the share and the week before", "- message calls: 8 of 48 refused (16.7%); the week before 2 of 22 (9.1%)" in text9, text9)
+    check("9 report: …the kinds, top N then the rest", "- the kinds of message refusals: unmarked-not-for-owner 2 (25%) · marked-no-turn 2 (25%) · " in text9 and "3 in other kinds" in text9, text9)
+    check("9 report: …the streak line names the sender, the target, the count and the kind, and how many are of the report's own rule",
+          "- repeated message refusals (one sender refused 2 times or more on one target, each within 60 minutes of the one before): 1 streak holds 3 of 8 refusals (37.5%), 1 of them 3 refusals or more within 15 minutes (a-builder to a-main 3 (unmarked-not-for-owner))" in text9, text9)
+    check("9 report: …and the resends: 3 of 8, 2 to the same target and 1 to another", "- message refusals sent again within 60 minutes (the same sender, a similar text): 3 of 8 (37.5%), 2 to the same target and 1 to another" in text9, text9)
+    check("9 report: message calls are no longer in the one-line `other writes refused`, and the create/update sections are as they were (no repeated refusals line: message rows have no item)",
+          "other writes refused" not in text9 and "repeated refusals (one writer" not in text9 and "create and update: 0 of 0 calls refused" in text9, text9)
+    mon_ = RR.tally(list(CL.read(*RR.week_bounds(mon))))
+    check("9 tally: with no delivered messages given there are no resends by a delivered message (the later refusals still count)", mon_["messages"]["resent"] == {"same": 1, "other": 0}, mon_["messages"]["resent"])
+    wipe(); (T / "state/messages.jsonl").unlink()
+    add("complete", False, 2, mon + dt.timedelta(days=1), "Refused: x", sender="home-front"); msg_ref(d(1), 10, 0, 0, "a-builder", "a-main", "no-session", "a text")
+    c9, p9 = RR.collect(mon)
+    t9_ = RR.build(mon, c9, p9)
+    check("9 report: a week with a refused message and no message log: one message line and its kinds, no streak or resend line; `other writes refused` keeps the other tools", "- message calls: 1 of 1 refused (100.0%); no message calls the week before" in t9_ and "kinds of message refusals: no-session 1 (100%)" in t9_
+          and "repeated message refusals" not in t9_ and "sent again" not in t9_ and "other writes refused: complete 2 of 2" in t9_, t9_)
+    wipe(); add("update", True, 5, mon + dt.timedelta(days=1))
+    c9, p9 = RR.collect(mon)
+    check("9 report: a week with no message call has no message line", "message" not in RR.build(mon, c9, p9), RR.build(mon, c9, p9))
+    wipe(); msg_ok(3, d(1))
+    c9, p9 = RR.collect(mon)
+    t9_ = RR.build(mon, c9, p9)
+    check("9 report: message calls and none refused: the one line, no kinds", "- message calls: 0 of 3 refused (0.0%)" in t9_ and "kinds of message refusals" not in t9_, t9_)
+    for a_, b_, want in (("The export job finished", "the  EXPORT job finished", True), ("", "", False), ("abc", "", False), ("The export job finished and all suites pass on the main branch today.", "Taken, nothing more to do here.", False),
+                         ("Ship the hotfix to the staging box before the demo starts.", "ship the hotfix to staging before the demo", True)):
+        check(f"9 similar: {a_[:30]!r} / {b_[:30]!r} is {want}", RR.similar(a_, b_) is want, (RR.similar(a_, b_), a_, b_))
+    check("9 const: the message streak is 2 within an hour, a resend an hour and a ratio of one half, as named constants", (RR.MSG_STREAK_MIN, RR.MSG_STREAK_WINDOW, RR.RESEND_WINDOW, RR.SIMILAR) == (2, 3600, 3600, 0.5), None)
+    wipe()
 
     return ran, fails
 

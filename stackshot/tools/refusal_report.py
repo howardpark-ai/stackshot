@@ -4,7 +4,7 @@ Reads the call log the server keeps (call_log.py: one line per create, update, c
 `<paths.state>/calls/<YYYY-MM>.jsonl`) and reports, for one calendar week Monday to Sunday in the instance timezone: how many create and update calls
 were refused of how many, the share, the week before it, the kinds of refusal that make most of them, the sessions that were refused most, and what the
 server corrected instead of refusing (a bare item number, a wake with seconds or an offset, a subject with no scope prefix, a long description bullet split at its sentence ends or, for one clause, at a comma, colon, dash or parenthesis,
-a step left out of next kept open, a subject or a status line cut at its last word that fits, an ask-by with a time of day cut to its day, a bare address in a description written as a link, the server's own fixes of a wait), and how many of those fixes the writer sent back (call_log.bounces; of the fixes of the kinds that have the check, call_log.CHECKED), and the streaks: one writer refused STREAK_MIN (3) times or more on one call (the same tool and item) with each refusal within STREAK_WINDOW (15 minutes) of the one before, counted by kind and listed first, since a streak marks a gap in the tool text. One more line, when the week or the one before it had any: the wait loops the minute walk found (audit/wait_loops.py: items that wait on each other), counted from its log. Tokenless: no model call.
+a step left out of next kept open, a subject or a status line cut at its last word that fits, an ask-by with a time of day cut to its day, a bare address in a description written as a link, the server's own fixes of a wait), and how many of those fixes the writer sent back (call_log.bounces; of the fixes of the kinds that have the check, call_log.CHECKED), and the streaks: one writer refused STREAK_MIN (3) times or more on one call (the same tool and item) with each refusal within STREAK_WINDOW (15 minutes) of the one before, counted by kind and listed first, since a streak marks a gap in the tool text. Message calls have lines of their own (the message tool and the client route's script messages, `_message_lines`): the calls refused of all with the week before, the refusals by the kind slug the call log keeps (`service/messaging.py` `Refused`; `not recorded` for a line from before kinds were logged), the streaks of one sender refused MSG_STREAK_MIN (2) times or more on one target within MSG_STREAK_WINDOW (an hour) of the one before, how many of them also meet the rule above (3 within 15 minutes), and the refusals sent again within RESEND_WINDOW (an hour) with a similar text by the same sender (`similar`: difflib ratio of at least SIMILAR, 0.5), to the same target or another, looked for in the later refusals and in the delivered messages of the message log (`messages.jsonl`, `delivered`). One more line, when the week or the one before it had any: the wait loops the minute walk found (audit/wait_loops.py: items that wait on each other), counted from its log. Tokenless: no model call.
 
     refusal_report.py run [--dry-run] [--force] [--week YYYY-MM-DD]
     audit.py refusals [--dry-run] [--force] [--week YYYY-MM-DD]       the same, from the audit's own entry point (the timer's unit runs it after the audit run)
@@ -29,6 +29,7 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
 
 import collections
 import datetime as dt
+import difflib
 import json
 import os
 import sys
@@ -40,6 +41,7 @@ HERE = Path(__file__).resolve().parent
 CHECKOUT = HERE.parents[1]
 from stackshot.core import call_log as _cl  # noqa: E402
 from stackshot.core import config as _cfg  # noqa: E402
+from stackshot.core.lines import newline_lines  # noqa: E402
 
 SENDER = "stackshot refusal report"
 HEADLINE = ("create", "update")          # the calls the share is measured on
@@ -47,6 +49,12 @@ TOP_DEFAULT = 6
 SENDERS_TOP = 5
 STREAK_WINDOW = 15 * 60                  # seconds: a refusal joins a streak when the writer's last refusal on the same call was no more than this long before it
 STREAK_MIN = 3                           # a streak is this many refusals or more: a writer refused again and again on one call has hit a gap in its instructions (the tool text)
+MSG_STREAK_WINDOW = 3600                 # seconds: a refused message joins a message streak when the same sender's last refusal to the same target was no more than this long before it
+MSG_STREAK_MIN = 2                       # a message streak is this many refusals or more (a message names no item the log could key on: the pair of sender and target is the call)
+RESEND_WINDOW = 3600                     # seconds: a message of the same sender that comes this soon after a refusal, with a similar text, is the refused message sent again
+SIMILAR = 0.5                            # difflib ratio of the two texts (case and spacing folded, the first SIMILAR_CHARS characters) from which one is the other sent again
+SIMILAR_CHARS = 1000
+NO_KIND = "not recorded"                 # a refused message of a week before kinds were logged
 
 
 def settings() -> dict[str, Any]:
@@ -112,8 +120,109 @@ def streaks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def tally(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """The counts of a list of call lines: {"calls": {tool: n}, "refused": {tool: n}, "kinds": Counter, "senders": Counter, "fixes": Counter, "bounces": Counter, "streaks": Counter (streaks by kind), "streak_refusals": Counter (the refusals they hold, by kind), "first": epoch of the first line or None}."""
+def _runs(got: list[dict[str, Any]], window: float, minimum: int) -> list[list[dict[str, Any]]]:
+    """The runs in `got` (rows sorted by time): each row within `window` seconds of the one before it, kept when it holds `minimum` rows or more."""
+    out: list[list[dict[str, Any]]] = []
+    run_: list[dict[str, Any]] = []
+    for r in [*got, None]:
+        if r is not None and run_ and r["t"] - run_[-1]["t"] <= window:
+            run_.append(r)
+            continue
+        if len(run_) >= minimum:
+            out.append(run_)
+        run_ = [r] if r is not None else []
+    return out
+
+
+def _fold(text: Any) -> str:
+    return " ".join(str(text or "").casefold().split())
+
+
+def similar(a: Any, b: Any) -> bool:
+    """Is one message the other sent again: the texts equal once case and spacing are folded, or the difflib ratio of their first SIMILAR_CHARS characters at least SIMILAR (deterministic; an empty text is similar to nothing)."""
+    x, y = _fold(a)[:SIMILAR_CHARS], _fold(b)[:SIMILAR_CHARS]
+    if not x or not y:
+        return False
+    if x == y:
+        return True
+    m = difflib.SequenceMatcher(None, x, y, autojunk=False)
+    return m.real_quick_ratio() >= SIMILAR and m.quick_ratio() >= SIMILAR and m.ratio() >= SIMILAR
+
+
+def message_stats(rows: list[dict[str, Any]], sent: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """What the call lines say of the message calls: {"calls", "refused", "kinds": Counter (by `kind`, NO_KIND for a line from before kinds were logged),
+    "streaks": [{"sender", "to", "n", "kind": the kind most of its refusals are (the later one on a tie), "tight": it holds STREAK_MIN refusals or more within STREAK_WINDOW, the report's own rule}] (one sender refused MSG_STREAK_MIN times or more on one target,
+    each refusal within MSG_STREAK_WINDOW of the one before it; a message names no item the log could key on, so the pair of sender and target is the call), "streak_refusals": the refusals they hold, "tight": how many of the streaks are tight,
+    "resent": {"same": refusals sent again to the same target, "other": sent again to another target}}. A refusal is sent again when, within RESEND_WINDOW after it, the same sender's message reads as its text (`similar`): a later refusal in `rows`
+    or a message in `sent` (the delivered messages [{"t", "from", "to", "text"}], from `delivered`); each refusal counts once, under the first such message. A line with no target or no text (from before they were logged) is in no streak and no resend."""
+    calls = refused = 0
+    kinds: collections.Counter = collections.Counter()
+    refs: list[dict[str, Any]] = []
+    for r in rows:
+        if str(r.get("tool") or "") != "message":
+            continue
+        calls += 1
+        if r.get("ok") is False:
+            refused += 1
+            kinds[str(r.get("kind") or "") or NO_KIND] += 1
+            refs.append(r)
+    pair: dict[tuple[str, str], list[dict[str, Any]]] = collections.defaultdict(list)
+    for r in refs:
+        if str(r.get("to") or "").strip():
+            pair[(_fold(r.get("sender") or "-"), _fold(r.get("to")))].append(r)
+    runs: list[dict[str, Any]] = []
+    held = tight = 0
+    for got in pair.values():
+        got.sort(key=lambda r: r["t"])
+        close = _runs(got, STREAK_WINDOW, STREAK_MIN)
+        for run_ in _runs(got, MSG_STREAK_WINDOW, MSG_STREAK_MIN):
+            ks = [str(x.get("kind") or "") or NO_KIND for x in run_]
+            most = collections.Counter(ks)
+            is_tight = any(c[0] in run_ for c in close)
+            runs.append({"sender": str(run_[0].get("sender") or "-"), "to": str(run_[0].get("to")), "n": len(run_), "kind": [k for k in ks if most[k] == max(most.values())][-1], "tight": is_tight})
+            held += len(run_)
+            tight += is_tight
+    heard = [{"t": float(r["t"]), "from": _fold(r.get("sender") or "-"), "to": _fold(r.get("to")), "text": r.get("text")} for r in refs if str(r.get("to") or "").strip() and r.get("text")]
+    heard += [{"t": float(x["t"]), "from": _fold(x.get("from") or "-"), "to": _fold(x.get("to")), "text": x.get("text")} for x in sent or []]
+    heard.sort(key=lambda x: x["t"])
+    resent = {"same": 0, "other": 0}
+    for r in refs:
+        if not (str(r.get("to") or "").strip() and r.get("text")):
+            continue
+        who, to = _fold(r.get("sender") or "-"), _fold(r.get("to"))
+        for x in heard:
+            if x["t"] <= r["t"] or x["t"] - r["t"] > RESEND_WINDOW:
+                continue
+            if x["from"] == who and similar(r["text"], x["text"]):
+                resent["same" if x["to"] == to else "other"] += 1
+                break
+    runs.sort(key=lambda x: (-x["n"], x["sender"], x["to"]))
+    return {"calls": calls, "refused": refused, "kinds": kinds, "streaks": runs, "streak_refusals": held, "tight": tight, "resent": resent}
+
+
+def delivered(since: float, until: float) -> list[dict[str, Any]]:
+    """The messages the relay passed on, from the message log (`<paths.state>/messages.jsonl`, service/messaging.py MSG_LOG) with since <= t < until: [{"t": epoch, "from", "to", "text"}] of the rows whose outcome says delivered, queued, inbox or held
+    (a row for a message that reached no one, as a front agent's refusal leaves, is the refused call, which the call log already has). A line that does not parse is skipped; no log reads as none."""
+    try:
+        lines = newline_lines(_cfg.state("messages.jsonl").read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return []
+    out: list[dict[str, Any]] = []
+    for ln in lines:
+        try:
+            d = json.loads(ln)
+            at = dt.datetime.fromisoformat(str(d["t"]))
+            at = at if at.tzinfo else at.replace(tzinfo=dt.timezone.utc)
+            if since <= at.timestamp() < until and str(d.get("outcome") or "").startswith(("delivered", "queued", "inbox", "held")):
+                out.append({"t": at.timestamp(), "from": d.get("from"), "to": d.get("to"), "text": d.get("text")})
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+    return out
+
+
+def tally(rows: list[dict[str, Any]], sent: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The counts of a list of call lines: {"calls": {tool: n}, "refused": {tool: n}, "kinds": Counter, "senders": Counter, "fixes": Counter, "bounces": Counter, "streaks": Counter (streaks by kind), "streak_refusals": Counter (the refusals they hold, by kind), "first": epoch of the first line or None,
+    "messages": message_stats(rows, sent)}. `sent` is the delivered messages of the week and the hour after it (`delivered`), where the resends of refused messages are looked for."""
     calls: collections.Counter = collections.Counter()
     refused: collections.Counter = collections.Counter()
     kinds: collections.Counter = collections.Counter()
@@ -141,7 +250,7 @@ def tally(rows: list[dict[str, Any]]) -> dict[str, Any]:
     for x in runs:
         held[x["kind"]] += x["n"]
     return {"calls": dict(calls), "refused": dict(refused), "kinds": kinds, "senders": senders, "fixes": fixes, "bounces": bounces, "first": first,
-            "streaks": collections.Counter(x["kind"] for x in runs), "streak_refusals": held}
+            "streaks": collections.Counter(x["kind"] for x in runs), "streak_refusals": held, "messages": message_stats(rows, sent)}
 
 
 def _share(refused: int, calls: int) -> str:
@@ -150,6 +259,30 @@ def _share(refused: int, calls: int) -> str:
 
 def _headline(t: dict[str, Any]) -> tuple[int, int]:
     return sum(t["refused"].get(x, 0) for x in HEADLINE), sum(t["calls"].get(x, 0) for x in HEADLINE)
+
+
+def _message_lines(cur: dict[str, Any], prev: dict[str, Any], top: int) -> list[str]:
+    """The report's lines on message calls (tally's "messages"): the calls and refusals with the week before, the refusals by kind, the streaks (one sender refused MSG_STREAK_MIN times or more on one target within MSG_STREAK_WINDOW, and how many of them are
+    of the report's own rule, STREAK_MIN within STREAK_WINDOW), and the refusals sent again within RESEND_WINDOW. [] for a week with no message call."""
+    m, p = cur.get("messages") or {}, prev.get("messages") or {}
+    if not m.get("calls"):
+        return []
+    n, r = m["calls"], m["refused"]
+    out = [f"- message calls: {r:,} of {n:,} refused ({_share(r, n)})" + (f"; the week before {p['refused']:,} of {p['calls']:,} ({_share(p['refused'], p['calls'])})" if p.get("calls") else "; no message calls the week before")]
+    if not r:
+        return out
+    shown = m["kinds"].most_common(top)
+    out.append("- the kinds of message refusals: " + " · ".join(f"{k} {v:,} ({v / r * 100:.0f}%)" for k, v in shown)
+               + (f" · {r - sum(v for _, v in shown):,} in other kinds" if r > sum(v for _, v in shown) else ""))
+    if m["streaks"]:
+        k = len(m["streaks"])
+        out.append(f"- repeated message refusals (one sender refused {MSG_STREAK_MIN} times or more on one target, each within {MSG_STREAK_WINDOW // 60} minutes of the one before): {k:,} streak{'s' if k != 1 else ''} hold{'s' if k == 1 else ''} {m['streak_refusals']:,} of {r:,} refusals ({_share(m['streak_refusals'], r)}), "
+                   f"{m['tight']:,} of them {STREAK_MIN} refusals or more within {STREAK_WINDOW // 60} minutes (" + " · ".join(f"{x['sender']} to {x['to']} {x['n']:,} ({x['kind']})" for x in m["streaks"][:top])
+                   + (f" · {len(m['streaks']) - top:,} more" if len(m["streaks"]) > top else "") + ")")
+    again = m["resent"]["same"] + m["resent"]["other"]
+    if again:
+        out.append(f"- message refusals sent again within {RESEND_WINDOW // 60} minutes (the same sender, a similar text): {again:,} of {r:,} ({_share(again, r)}), {m['resent']['same']:,} to the same target and {m['resent']['other']:,} to another")
+    return out
 
 
 def build(monday: dt.date, cur: dict[str, Any], prev: dict[str, Any], *, top: int = TOP_DEFAULT) -> str:
@@ -165,9 +298,10 @@ def build(monday: dt.date, cur: dict[str, Any], prev: dict[str, Any], *, top: in
         before = f"; the week before {sum(prev['streaks'].values()):,} holding {sum(prev['streak_refusals'].values()):,} of {sum(prev['refused'].values()):,}" if prev.get("streaks") else ""
         lines.append(f"- repeated refusals (one writer refused {STREAK_MIN} times or more on one call within {STREAK_WINDOW // 60} minutes, a gap in the tool text): {total:,} streaks hold {held:,} of {every:,} refusals ({_share(held, every)}){before}"
                      + " (" + " · ".join(f"{k} {v:,} holding {cur['streak_refusals'][k]:,}" for k, v in cur["streaks"].most_common(top)) + ")")
-    others = [(t, cur["refused"].get(t, 0), c) for t, c in sorted(cur["calls"].items()) if t not in HEADLINE and cur["refused"].get(t, 0)]
+    others = [(t, cur["refused"].get(t, 0), c) for t, c in sorted(cur["calls"].items()) if t not in HEADLINE and t != "message" and cur["refused"].get(t, 0)]          # message has its own lines below
     if others:
         lines.append("- other writes refused: " + " · ".join(f"{t} {x:,} of {c:,}" for t, x, c in others))
+    lines += _message_lines(cur, prev, top)
     if r:
         lines.append("- the kinds of create and update refusals: " + " · ".join(f"{k} {v:,} ({v / r * 100:.0f}%)" for k, v in cur["kinds"].most_common(top)))
         rest = sum(cur["kinds"].values()) - sum(v for _, v in cur["kinds"].most_common(top))
@@ -194,7 +328,8 @@ def build(monday: dt.date, cur: dict[str, Any], prev: dict[str, Any], *, top: in
 def collect(monday: dt.date) -> tuple[dict[str, Any], dict[str, Any]]:
     a, b = week_bounds(monday)
     p, _ = week_bounds(monday - dt.timedelta(days=7))
-    cur, prev = tally(list(_cl.read(a, b))), tally(list(_cl.read(p, a)))
+    sent = delivered(p, b + RESEND_WINDOW)          # the delivered messages of both weeks and the hour after: a refusal at the end of a week is sent again after it
+    cur, prev = tally(list(_cl.read(a, b)), sent), tally(list(_cl.read(p, a)), sent)
     from stackshot.audit import wait_loops as _loops  # noqa: PLC0415
     cur["loops"], prev["loops"] = _loops.log_count(a, b), _loops.log_count(p, a)      # rings of items that wait on each other, found by the minute walk
     return cur, prev

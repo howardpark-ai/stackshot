@@ -704,6 +704,99 @@ check("6g: the docs and the message tool's text say both rules: the item must be
       and "an open item of his" in tt and "Acked-by" in tt and "held for its next turn" in tt, "")
 check("6c: the message tool's text says what a front agent hears and where the rest goes", "background agent" in tt and "board item" in tt, tt[:200])
 
+# ---- 7. a refused message call is logged with its target, the refusal's kind and its text (service/messaging.py Refused, core/call_log.py, web/middleware.py _RefusalLog)
+import contextlib, io, types
+from stackshot.core import call_log as _CL
+from stackshot.web import middleware as _wmw
+def call_rows(): return list(_CL.read(0, time.time() + 60))
+def logged(to, text, sender, name="message", **kw):
+    """A message call as the tool makes it, run through the server's refusal log → (the call log's new row, the ToolError it ended in or None). The log line on stderr is swallowed."""
+    n_ = len(call_rows())
+    async def nxt(ctx): return _messaging._message(to, text, sender, **kw)
+    ctx = types.SimpleNamespace(message=types.SimpleNamespace(name=name, arguments={"to": to, "text": text, "sender": sender}))
+    err = None
+    with contextlib.redirect_stderr(io.StringIO()):
+        try: asyncio.run(_wmw._RefusalLog().on_call_tool(ctx, nxt))
+        except ToolError as e: err = e
+    new = call_rows()[n_:]
+    return (new[-1] if new else None), err
+def site(name, kind, to, text, sender, **kw):
+    """One refusal site: the call is refused with `kind`, and the row keeps the target as written, that kind, the sender, the refusal's own text and the message as a delivered row keeps it (a bare id written as shown)."""
+    row, err = logged(to, text, sender, **kw)
+    body = _service_store._shown_ids(text.strip())
+    want_text = body if len(body) <= _CL.TEXT_MAX else body[:_CL.TEXT_MAX - 1].rstrip() + "…"
+    check(f"7 {name}: refused as `{kind}`, the row keeps the target, the kind, the sender and the text",
+          err is not None and getattr(err, "kind", "") == kind and row is not None and row["ok"] is False and row["tool"] == "message" and row.get("kind") == kind and row.get("to", "") == to.strip()[:80] and row["sender"] == sender
+          and " ".join(str(err).split())[:100] == row["why"][:100] and row.get("text", "") == want_text and row["item"] == "",
+          (kind, getattr(err, "kind", None), err, row))
+    return row
+fresh(); no_log(); unstamp(A); n0 = len(pushes())
+site("no sender", "no-sender", FRONT, "a note", "")
+site("no target", "no-target", "", "a note", "home-beta")
+row = site("empty message", "empty-message", FRONT, "   \n ", "home-beta")
+check("7 empty message: the row has no text field (nothing was said)", row is not None and "text" not in row, row)
+row = site("message too long", "message-too-long", FRONT, "x" * 4100, "home-beta")
+check("7 message too long: the text is kept up to the message limit and clipped with an ellipsis", row is not None and len(row["text"]) == _CL.TEXT_MAX and row["text"].endswith("…") and _CL.TEXT_MAX == 4000, row and len(row.get("text", "")))
+site("question from the person", "question-from-owner", BACK, "is it done?", "Oliver", question=True)
+site("question and fyi", "question-with-fyi", BACK, "is it done?", "home-beta", question=True, fyi=True)
+site("page key that names no page", "unknown-page-key", "projects/nowhere", "hello there", "home-beta")
+site("name no heartbeat has", "no-session", "nobody-here-at-all", "hello there", "home-beta")
+site("transcript id no machine has", "unknown-transcript-id", "12345678-1234-4234-8234-123456789012", "hello there", "home-beta")
+_keeper = telling.stand_in_keeper
+telling.stand_in_keeper = lambda *a, **k: ""
+try: site("page with no keeper", "no-keeper", KEY, "hello there", "home-beta")
+finally: telling.stand_in_keeper = _keeper
+# the front agent's gate, one site each
+site("owner's unmarked message", "mark-not-first-line", FRONT, "a plain note from the person", "Oliver")
+site("builder's done note", "no-action-note-from-builder", FRONT, "the PR is merged, the suites pass.", BACK)
+site("peer's done note", "no-action-note", FRONT, "the PR is merged, the suites pass.", "home-beta")
+site("unmarked, not for the person", "unmarked-not-for-owner", FRONT, "can you look at the export page when you have a minute?", "home-beta")
+site("marked, says nothing is needed", "marked-no-action-phrase", FRONT, mark() + "\nthe build is done, no action needed.", BACK)
+_notices = _cfg.CFG["router"].get("hold_notices")
+_cfg.CFG["router"]["hold_notices"] = False
+try: site("marked, no item of his, hold off", "marked-no-item-of-his", FRONT, mark() + "\nDecide whether the export ships on Friday.", "home-beta")
+finally:
+    if _notices is None: _cfg.CFG["router"].pop("hold_notices", None)
+    else: _cfg.CFG["router"]["hold_notices"] = _notices
+unstamp(A)
+site("marked, names his item, no turn warranted", "marked-no-turn", FRONT, mark() + "\na16: sign the export form when you have a minute", "home-beta")
+# the hold and the delivery
+_front_fyi = telling.front_fyi
+telling.front_fyi = lambda *a, **k: ("", "no hook")
+try: site("fyi the front gate could not hold", "front-not-held", FRONT, "just so you know", "home-beta", fyi=True)
+finally: telling.front_fyi = _front_fyi
+_push = telling.PUSH
+telling.PUSH = [sys.executable, "-c", "print('boom')"]
+try: site("push that answers nothing deliverable", "delivery-failed", BACK, "hello there", "home-beta")
+finally: telling.PUSH = _push
+# the client route (a script's message): the same row, and a plain row for a call that went through
+held.clients_file().unlink(missing_ok=True)
+n_ = len(call_rows())
+st_, body_ = _rt_client._client_post(MACH, "message", {"to": SOLO, "text": "the PR is merged, the export is next", "sender": "deploy-watch"})
+new = call_rows()[n_:]
+check("7 client route: a script's refused message is logged as the tool's is (sender, why, target, kind, text)", st_ == 400 and len(new) == 1 and new[0]["ok"] is False and new[0]["tool"] == "message" and new[0]["sender"] == "deploy-watch"
+      and new[0]["kind"] == "script-fyi-not-held" and new[0]["to"] == SOLO and new[0]["text"] == "the PR is merged, the export is next" and new[0]["why"].startswith("Refused: " + SOLO), (st_, body_, new))
+gate_open(); fresh()
+n_ = len(call_rows())
+st_, body_ = _rt_client._client_post(MACH, "message", {"to": BACK, "text": "a script reports", "sender": "deploy-watch"}); settle()
+new = call_rows()[n_:]
+check("7 client route: a script's message that went through is one plain row", st_ == 200 and new == [{"t": new[0]["t"], "tool": "message", "ok": True}] if new else False, (st_, body_, new))
+st_, body_ = _rt_client._client_post(MACH, "message", {"to": "nobody-here-at-all", "text": "a script reports", "sender": "deploy-watch"})
+new = call_rows()[n_:]
+check("7 client route: …and a refusal elsewhere in the relay (no such session) is logged the same way", st_ == 400 and new[-1]["kind"] == "no-session" and new[-1]["to"] == "nobody-here-at-all" and new[-1]["text"] == "a script reports", (st_, new))
+# what the log does not keep, and what a refusal from outside the relay is called
+async def _plain(ctx): raise ToolError("Refused: from elsewhere")
+ctx_ = types.SimpleNamespace(message=types.SimpleNamespace(name="message", arguments={"to": BACK, "text": "words", "sender": "home-beta"}))
+buf_ = io.StringIO()
+with contextlib.redirect_stderr(buf_):
+    try: asyncio.run(_wmw._RefusalLog().on_call_tool(ctx_, _plain))
+    except ToolError: pass
+row = call_rows()[-1]
+check("7 a refusal that is no relay site (a plain ToolError) is logged as `unclassified`, and the journal line on stderr carries no message text", row["kind"] == "unclassified" and row["text"] == "words" and "words" not in buf_.getvalue() and buf_.getvalue().startswith("refused: message item=- sender=home-beta"), (row, buf_.getvalue()))
+check("7 every refusal site of the relay is a `Refused` with a kind of its own: no bare ToolError is raised in messaging.py", not re.findall(r"raise ToolError\(", pathlib.Path(STACK, "stackshot/service/messaging.py").read_text(encoding="utf-8")), None)
+kinds_ = re.findall(r'raise Refused\("([a-z-]+)"', pathlib.Path(STACK, "stackshot/service/messaging.py").read_text(encoding="utf-8"))
+check("7 …and no two sites share a kind", len(kinds_) == len(set(kinds_)) and len(kinds_) >= 23, kinds_)
+
 fresh()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else f"; FAILED: {len(fails)}"))
 sys.exit(1 if fails else 0)
