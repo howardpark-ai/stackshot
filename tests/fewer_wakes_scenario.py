@@ -90,6 +90,15 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
+def history(i):
+    """The item's History lines the server wrote (the board's "front" events), from two stubbed revisions: the item before its front_quiet log and as it is now."""
+    from stackshot.web.ui import render as ui_render
+    now_ = rd(i)
+    before = json.loads(json.dumps(now_)); before["metadata"].pop("front_quiet", None)
+    bd = ui_render.Board(str(T / "store")); row = bd.item(f"a{i}")
+    bd.item_versions = lambda r: [(now0 - 500, before), (now0 - 400, now_)]
+    evs, _more = bd.item_events(row)
+    return [x[2] for x in evs if x[1] == "front"]
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import reports
 from stackshot.router import router as _router
@@ -205,12 +214,17 @@ rep = _messaging._message("osprey-main", f"{MK} a1: PR 18 is live and the suites
 check("1a: a builder's marked message that only reports on an item is not delivered: the reply says so and names the item and the writer", rep.startswith("Not delivered: written onto")
       and "written onto a1 as a History line from osprey-x, because osprey-main is a front agent" in rep and "send it again saying what" in rep, rep)
 check("…it is on the item as the server's note (History), without the mark, naming sender and receiver; nothing was pushed", len([x for x in saved[s0:] if "reported to" in x[1]]) == 1 and saved[-1][0] == "a1"
-      and saved[-1][1] == "osprey-x reported to osprey-main (not sent to it: a plain status report): a1: PR 18 is live and the suites pass. The step is merged." and len(pushes()) == p0, (saved[s0:], pushes()[p0:]))
-check("…the item itself is unchanged (a filing note: no clock moves, no field; the stored phase every save of an open item writes apart)", {k: v for k, v in rd(1)["metadata"].items() if k != "phase"} == {"owner": A, "mover": A, "project": "projects/alpha", "next": "the next step"} and rd(1)["updated"] == now0 - 3600, rd(1))
+      and saved[-1][1] == "osprey-x reported to osprey-main: a1: PR 18 is live and the suites pass. The step is merged." and len(pushes()) == p0, (saved[s0:], pushes()[p0:]))
+check("…the item itself is unchanged but for the History line (a filing note: no clock moves, no other field; the stored phase every save of an open item writes apart)", {k: v for k, v in rd(1)["metadata"].items() if k not in ("phase", "front_quiet")} == {"owner": A, "mover": A, "project": "projects/alpha", "next": "the next step"} and rd(1)["updated"] == now0 - 3600, rd(1))
+check("1a2: …and the line is really on the item (read back from the store: metadata.front_quiet.log holds the report, the sender and the receiver in front of the words), and the board's History shows it as the server's note",
+      [x["text"] for x in rd(1)["metadata"]["front_quiet"]["log"]] == ["osprey-x reported to osprey-main: a1: PR 18 is live and the suites pass. The step is merged."] and history(1) == ["stackshot: osprey-x reported to osprey-main: a1: PR 18 is live and the suites pass. The step is merged."], (rd(1)["metadata"].get("front_quiet"), history(1)))
 msgs = [json.loads(l) for l in _messaging.MSG_LOG.read_text().splitlines()]
 check("…the messages log says written onto the item, not delivered", msgs and msgs[-1]["from"] == "osprey-x" and msgs[-1]["outcome"] == "written onto a1, not delivered", msgs[-1:])
 rep = _messaging._message(A, f"{MK} a1 and a2: both merged", "osprey-x"); settle()
 check("1b: …by the front agent's transcript id too, and two items get a line each", rep.startswith("Not delivered") and "a1, a2" in rep and [g for g, _ in saved[s0 + 1:]] == ["a1", "a2"], (rep, saved[s0 + 1:]))
+item(44, status="completed")      # a closed item: a report cannot be written onto it
+rep = why(lambda: _messaging._message("osprey-main", f"{MK} a44: merged and live", "osprey-x")); settle()
+check("1b2: a report naming only a closed item is not written anywhere and no write is claimed: it is not taken for written (the line has no item to stand on)", not rep.startswith("Not delivered: written onto") and "front_quiet" not in rd(44)["metadata"], (rep, rd(44)["metadata"]))
 check("1c: a builder's sender given as its transcript id is a builder too", _messaging._message("osprey-main", f"{MK} a3: merged", X).startswith("Not delivered"))
 p0, s0 = len(pushes()), len(saved)
 NEG = (("a question mark", f"{MK} a41: PR 18 is live. Merge it?"), ("a question mark ending a URL", f"{MK} a41: merged, log at https://x.example/log?"),

@@ -76,6 +76,8 @@ item(10, owner=A); item(11)
 item(12, owner=A, after=["a9"]); item(13, owner=A); item(14, owner=A, needs=["decision"]); item(15, owner=A, status="completed")
 item(17, owner=A, status="completed", needs=["decision"])      # a closed item that still carries the need: it is nobody's to act on
 item(16, owner=A, mover="Oliver", state="your-step", step="sign the export form")      # a step that is his, not a decision: the model reads him as its mover
+item(30, owner=A, needs=["decision"], project="projects/trio")      # an open item of his in another project (trio): a front agent of alpha never writes onto it
+item(31, owner=A, needs=["decision"], project="projects/trio")      # a second one, for the trio front agents' own writes
 (T / "store/next-id").write_text("100")
 push_log = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(push_log)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
@@ -129,6 +131,18 @@ def reach(session, since): return [x for x in pushes()[since:] if x[0] in ids(se
 def hold_lines(): return [n for n in routing.read(KEY) if n.get("ruling") == "held" and str(n.get("reason", "")).startswith("held: asks nothing")]
 def gone(*refs): return held.take(*refs)
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
+def qlog(i):
+    """The History lines written onto an item (metadata.front_quiet.log), oldest first: what a write of a message onto the item leaves on it."""
+    return [x["text"] for x in ((rd(i)["metadata"].get("front_quiet") or {}).get("log") or [])]
+def history(i):
+    """The item's History as the board shows it, from two stubbed revisions (the item before its front_quiet log and as it is now): the lines the board prints as `stackshot: <line>`."""
+    from stackshot.web.ui import render as ui_render
+    now_ = rd(i)
+    before = json.loads(json.dumps(now_)); before["metadata"].pop("front_quiet", None)
+    bd = ui_render.Board(str(T / "store")); row = bd.item(f"a{i}")
+    bd.item_versions = lambda r: [(now0 - 500, before), (now0 - 400, now_)]
+    evs, _more = bd.item_events(row)
+    return [x[2] for x in evs if x[1] == "front"]
 def why(fn):
     try: fn(); return ""
     except ToolError as e: return str(e)
@@ -302,6 +316,8 @@ check("2c: …the same answer at 31 minutes is not delivered: held through the f
 fresh(); n0 = len(pushes()); out = msg(FRONT, "a1: the slides are ready as well", BACK); settle()
 rows_ = [x for x in mlog() if "written onto" in str(x.get("outcome")) and "slides" in x.get("text", "")]
 check("2d: at 31 minutes an answer that names an open item is written onto the item, not delivered or held", out.startswith("Not delivered: written onto") and reach(A, n0) == [] and held.count(A) == 0 and len(rows_) == 1, (out, rows_))
+check("2d2: …and the line is really on the item (its History log: the sender and the receiver, then the words), and the board's History shows it as the server's note",
+      qlog(1)[-1:] == ["work-osprey-x answered work-osprey-main: a1: the slides are ready as well"] and history(1)[-1:] == ["stackshot: " + qlog(1)[-1]], (qlog(1), history(1)))
 fresh(); n0 = len(pushes()); out = msg(FRONT, "a14: the slides are ready as well", BACK); settle()
 check("2e: …an item that waits on the person's decision is not written onto: the answer is held", out.startswith("held for work-osprey-main's next turn") and held.count(A) == 1 and reach(A, n0) == [], out)
 fresh(); unstamp(A); n0 = len(pushes()); out = msg(FRONT, "the export is ready as well", BACK); settle()
@@ -685,6 +701,7 @@ stamp_now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%
 LINE = f'Acked-by: "{QUOTE}" (just now, session trio-main)'
 WORDS = mark() + "\na14: Oliver told me to give you the export.\n" + LINE      # a14 waits on his decision: the message names an open item of his, so main's sibling rules are what decide it
 NOWORDS = mark() + "\na14: Oliver told me to give you the export."
+TRIO_NOWORDS = mark() + "\na30: Oliver told me to give you the export."      # the same, naming an open item of his in trio's own project: it can be written onto
 NOITEM = mark() + "\nOliver told me to give you the export.\n" + LINE      # his quoted words, but no item of his named: this branch's item rule holds it first
 tres = lambda who, text, to="trio-side": msg(to, text, who)
 def tlines(): return [x for x in pushes()]
@@ -693,16 +710,16 @@ for u_ in (TS, TM, TX): unstamp(u_)
 fresh(); no_log(); n0 = len(pushes()); out = tres("trio-main", WORDS); settle()
 check("8a: a sibling front agent's marked message quoting his words is held for the sibling's next turn, starts no turn, and the reply says so", out.startswith("held for trio-side's next turn") and reach(TS, n0) == [] and reach(TX, n0) == [] and held.count(TS) == 1, out)
 check("8b: …the held line carries the message with his quoted words", QUOTE in str(held.take(TS, "trio-side")), "")
-fresh(); n0 = len(pushes()); out = tres("trio-main", NOWORDS); settle()
-check("8c: the same message with no quoted words starts no turn either, and nothing holds it: written onto the item it names, nothing held, nothing sent", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0 and reach(TS, n0) == [], out)
-fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\na14: Oliver told me to give you the export.\n" + f'Acked-by: "{QUOTE} and more he never said" (just now, session trio-main)'); settle()
-check("8d: words that are not in his message in the transcript are no words: written onto the item as without them, nothing held", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0, out)
-fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\na14: Oliver told me to give you the export.\n" + 'Acked-by: "an old order of the second desk" (long ago, session trio-main)'); settle()
-check("8e: his words older than the wake cap are no words: written onto the item as without them, nothing held", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0, out)
-fresh(); n0 = len(pushes()); out = tres("trio-x", WORDS); settle()
-check("8f: a background agent's message quoting words is no sibling's: it is written onto the item like any marked message with no turn warranted, nothing held", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0 and reach(TS, n0) == [], out)
-fresh(); n0 = len(pushes()); out = tres("solo-main", WORDS); settle()
-check("8g: another project's front agent's message quoting words is no sibling's: written onto the item, nothing held", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+fresh(); n0 = len(pushes()); out = tres("trio-main", TRIO_NOWORDS); settle()
+check("8c: the same message with no quoted words starts no turn either, and nothing holds it: written onto the item it names, nothing held, nothing sent", out.startswith("Not delivered: written onto a30") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\na30: Oliver told me to give you the export.\n" + f'Acked-by: "{QUOTE} and more he never said" (just now, session trio-main)'); settle()
+check("8d: words that are not in his message in the transcript are no words: written onto the item as without them, nothing held", out.startswith("Not delivered: written onto a30") and held.count(TS) == 0, out)
+fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\na30: Oliver told me to give you the export.\n" + 'Acked-by: "an old order of the second desk" (long ago, session trio-main)'); settle()
+check("8e: his words older than the wake cap are no words: written onto the item as without them, nothing held", out.startswith("Not delivered: written onto a30") and held.count(TS) == 0, out)
+fresh(); n0 = len(pushes()); out = tres("trio-x", WORDS.replace("a14", "a31")); settle()
+check("8f: a background agent's message quoting words is no sibling's: it is written onto the item like any marked message with no turn warranted, nothing held", out.startswith("Not delivered: written onto a31") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+fresh(); n0 = len(pushes()); out = tres("solo-main", WORDS.replace("a14", "a30")); settle()
+check("8g: another project's front agent's message quoting words is no sibling's: written onto the item, nothing held", out.startswith("Not delivered: written onto a30") and held.count(TS) == 0 and reach(TS, n0) == [], out)
 fresh(); n0 = len(pushes()); out = tres("trio-main", WORDS, to="trio-x"); settle()
 check("8h: a message to the project's background agent is not this rule's: delivered as before, nothing held", out.startswith("delivered") and held.count(TS) == 0 and held.count(TX) == 0, out)
 fresh(); stamp(TS, 5); n0 = len(pushes()); out = tres("trio-main", WORDS); settle(); unstamp(TS)
@@ -736,8 +753,8 @@ check("8s: the same message naming no item of his is held by the item rule: held
 check("8s2: …the quoted words being valid, the reply says to name the item being handed over (an open item of his) by its plain id, not only to put his step on an item", "Name the item you are handing over" in out and "an open item of his" in out and "plain id" in out, out)
 fresh(); n0 = len(pushes()); out = tres("trio-main", NOITEM.replace("\nOliver told", "\n`a14` Oliver told")); settle()
 check("8t: …also when the item is only written in backticks (that names none), the quoted words notwithstanding", out.startswith("held for trio-side's next turn") and "must name an open item of his" in out and held.count(TS) == 1, out)
-fresh(); n0 = len(pushes()); out = tres("trio-main", NOWORDS); settle()
-check("8u: naming an item of his without his words (the item rule is met, no turn is warranted, no words hold it): written onto the item, nothing held", out.startswith("Not delivered: written onto a14") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+fresh(); n0 = len(pushes()); out = tres("trio-main", TRIO_NOWORDS.replace("a30", "a31")); settle()
+check("8u: naming an item of his without his words (the item rule is met, no turn is warranted, no words hold it): written onto the item, nothing held", out.startswith("Not delivered: written onto a31") and held.count(TS) == 0 and reach(TS, n0) == [], out)
 fresh(); stamp(TS, 5); n0 = len(pushes()); out = tres("trio-main", NOITEM); settle(); unstamp(TS)
 check("8v: a quote of his words with no item named is no turn even while he is talking with the sibling (the item rule holds first): held, nothing pushed", out.startswith("held for trio-side's next turn") and reach(TS, n0) == [] and held.count(TS) == 1, out)
 fresh(); n0 = len(pushes()); n = recp(WORDS, key=TRK, kind="message", who="trio-main (cccccccc…)"); res = act2(n, "trio-side", key=TRK)
@@ -848,7 +865,7 @@ try:
     _save_real = _messaging._writes.save
     def _save_boom(*a, **k): raise RuntimeError("the store would not take the write")
     _messaging._writes.save = _save_boom
-    try: site("marked, names his item, no turn warranted, hold off and the item cannot be written", "marked-no-turn", FRONT, mark() + "\na16: sign the export form when you have a minute", "home-beta")
+    try: site("marked, names his item, no turn warranted, hold off and the item cannot be written", "marked-no-turn", FRONT, mark() + "\na16: sign the export form when you have a minute, the second copy", "home-beta")
     finally: _messaging._writes.save = _save_real
 finally:
     if _notices is None: _cfg.CFG["router"].pop("hold_notices", None)
@@ -1183,6 +1200,7 @@ def _save_count(gid, *a, **k): SAVES.append(gid); return _save_orig(gid, *a, **k
 _messaging._writes.save = _save_count
 def written_rows(shown): return [x for x in mlog() if x.get("outcome") == f"written onto {shown}, not delivered"]
 K5_TEXT = mark() + "\na14: the retest needs your pick between the two lanes; I would take the first."
+K5_FRESH = K5_TEXT + " Words no item has had yet."      # an item whose newest line already says the words is not saved again, so a write that must fail needs words it has not had
 fresh(); no_log(); unstamp(A); SAVES.clear(); n0 = len(pushes()); out = msg(FRONT, K5_TEXT, "home-beta"); settle()
 check("11a: a marked message naming an open item of his (a14), he not talking with the agent: written onto a14 as a History line from the sender, and the reply says the front agent reads it there and that it starts no turn",
       out.startswith("Not delivered: written onto a14 as a History line from home-beta, and work-osprey-main, the front agent, reads it there. It starts no turn, because Oliver is not talking with work-osprey-main now and has not asked it to tell him about this."), out)
@@ -1218,13 +1236,13 @@ check("11m: …its call-log row is a handled call, from the script, counted as t
 # when no item can take it: held for the agent's next turn (and never lost)
 def save_boom(*a, **k): raise RuntimeError("the store would not take the write")
 fresh(); no_log(); SAVES.clear(); _messaging._writes.save = save_boom; n0 = len(pushes())
-try: row_, err_ = logged(FRONT, K5_TEXT, "home-beta"); out = LAST_OUT; settle()
+try: row_, err_ = logged(FRONT, K5_FRESH, "home-beta"); out = LAST_OUT; settle()
 finally: _messaging._writes.save = _save_count
 check("11n: an item that cannot be written (the save fails): the message is held for the agent's next turn, starts none, and the reply says so", out.startswith("held for work-osprey-main's next turn") and "no open item it names could take it" in out
       and held.count(A) == 1 and reach(A, n0) == [] and "pick between the two lanes" in held.take(A, FRONT), out)
 check("11o: …the call log counts it as handled by being held (`marked-no-turn`, `held`), not as refused", err_ is None and row_ is not None and row_["ok"] is True and row_.get("kind") == "marked-no-turn" and row_.get("outcome") == "handled" and row_.get("how") == "held", row_)
 fresh(); no_log(); gate_open(); n_ = len(call_rows()); _messaging._writes.save = save_boom
-try: st_, body_ = _rt_client._client_post(MACH, "message", {"to": FRONT, "text": K5_TEXT, "sender": "deploy-watch"}); settle()
+try: st_, body_ = _rt_client._client_post(MACH, "message", {"to": FRONT, "text": K5_FRESH, "sender": "deploy-watch"}); settle()
 finally: _messaging._writes.save = _save_count
 new = call_rows()[n_:]
 check("11p: a script's message whose item cannot be written is held with status 200, the reply saying it is held", st_ == 200 and str(body_.get("result", "")).startswith("held for work-osprey-main's next turn") and held.count(A) == 1 and len(new) == 1 and new[0].get("how") == "held", (st_, body_, new))
@@ -1244,6 +1262,79 @@ finally:
     if _notices11 is None: _cfg.CFG["router"].pop("hold_notices", None)
     else: _cfg.CFG["router"]["hold_notices"] = _notices11
 check("11s: with the hold off an item that can take the message still does: written onto it, nothing held", out.startswith("Not delivered: written onto a14") and SAVES == ["a14"] and held.count(A) == 0, (out, SAVES))
+# what the write leaves on the item (a History line, read back from the store and from the board's History), whom it reaches, and what the reply claims
+for i_ in range(32, 40): item(i_, owner=A, needs=["decision"])      # open items of his in the home project, one for each check below
+def age_log(hours):
+    """Make every row of the message log `hours` older (its time stamp moved back): the dedupe window is read from it."""
+    rows = mlog()
+    for r in rows: r["t"] = (datetime.datetime.fromisoformat(r["t"]) - datetime.timedelta(hours=hours)).isoformat(timespec="seconds")
+    _messaging.MSG_LOG.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+fresh(); no_log(); unstamp(A); SAVES.clear(); n0 = len(pushes())
+out = msg(FRONT, mark() + "\na32: the retest needs your pick between the two lanes; I would take the first.", "home-beta"); settle()
+check("11t: the line is on the item itself (read back from the store): one History line, the sender and the receiver, then the words without the mark, and the board's History shows it as the server's note",
+      out.startswith("Not delivered: written onto a32 as a History line from home-beta") and qlog(32) == ["home-beta wrote to work-osprey-main: a32: the retest needs your pick between the two lanes; I would take the first."]
+      and history(32) == ["stackshot: " + qlog(32)[0]] and mark() not in qlog(32)[0], (out, qlog(32), history(32)))
+check("11t2: …saved once, and the item is otherwise as it was (still open, still waiting on his decision)", SAVES == ["a32"] and rd(32)["metadata"].get("needs") == ["decision"] and rd(32)["status"] == "open", (SAVES, rd(32)["metadata"]))
+def k5_lines(i): return [t for t in qlog(i) if t.startswith("home-beta wrote to ")]      # the lines of this kind of write on an item (a held message leaves the gate's own board line, which is another)
+no_log(); out = msg(FRONT, mark() + "\na32: the retest needs your pick between the two lanes; I would take the first.", "home-beta"); settle()
+check("11t3: the same words from the same sender, with no record of them in the message log, are still one line on the item (its newest line says it): the reply still says it is written, and it is not saved again",
+      out.startswith("Not delivered: written onto a32 as a History line from home-beta") and len(qlog(32)) == 1 and SAVES == ["a32"], (out, qlog(32), SAVES))
+long_ = "the retest needs your pick " + "and a very long account of both lanes " * 20
+fresh(); no_log(); out = msg(FRONT, mark() + "\na33: " + long_, "home-beta"); settle()
+check("11t4: a long message is one line cut to what an item keeps of one (360 characters), ending in an ellipsis, with the sender and the receiver in front of it", len(qlog(33)) == 1 and len(qlog(33)[0]) <= 360 and qlog(33)[0].endswith("…") and "\n" not in qlog(33)[0]
+      and qlog(33)[0].startswith("home-beta wrote to work-osprey-main: a33: the retest needs your pick"), qlog(33))
+# whom it reaches: the items of his in the agent's own project, and no other
+fresh(); no_log(); SAVES.clear(); a1_before, a30_before = list(qlog(1)), list(qlog(30)); n0 = len(pushes())
+out = msg(FRONT, mark() + "\na34 and a1: the second lane is cheaper, pick one.", "home-beta"); settle()
+check("11u: an open item named beside his that is not his (a1) is not written onto: only a34 gets the line, and the reply names a34 alone", out.startswith("Not delivered: written onto a34 as a History line from home-beta") and not re.search(r"\ba1\b", out)
+      and len(qlog(34)) == 1 and qlog(1) == a1_before and SAVES == ["a34"] and len(written_rows("a34")) == 1 and not written_rows("a34, a1") and reach(A, n0) == [], (out, qlog(34), qlog(1), SAVES))
+fresh(); no_log(); SAVES.clear(); n0 = len(pushes())
+out = msg(FRONT, mark() + "\na35 and a30: the second lane is cheaper, pick one.", "home-beta"); settle()
+check("11v: an item of his in another project (a30, trio's) named beside one of his own is not written onto: only a35 gets the line, and the reply names a35 alone", out.startswith("Not delivered: written onto a35 as a History line from home-beta") and not re.search(r"\ba30\b", out)
+      and len(qlog(35)) == 1 and qlog(30) == a30_before and SAVES == ["a35"], (out, qlog(35), qlog(30), SAVES))
+fresh(); no_log(); SAVES.clear(); n0 = len(pushes())
+out = msg(FRONT, mark() + "\na30: the second lane is cheaper, pick one.", "home-beta"); settle()
+check("11w: naming only an item of another project, though it is his: nothing is written, and no write is claimed: held for the agent's next turn as when no item can take it", out.startswith("held for work-osprey-main's next turn") and "no open item it names could take it" in out
+      and "written onto" not in out and k5_lines(30) == [] and not [x for x in mlog() if str(x.get("outcome", "")).startswith("written onto")] and held.count(A) == 1 and reach(A, n0) == [], (out, SAVES, qlog(30)))
+fresh(); no_log(); SAVES.clear(); n0 = len(pushes()); _notices11w = _cfg.CFG["router"].get("hold_notices"); _cfg.CFG["router"]["hold_notices"] = False
+try: out = msg(FRONT, mark() + "\na30: the second lane is cheaper, pick one, again.", "home-beta"); settle()
+finally:
+    if _notices11w is None: _cfg.CFG["router"].pop("hold_notices", None)
+    else: _cfg.CFG["router"]["hold_notices"] = _notices11w
+check("11w2: …and with the hold off it falls through to the refusal that applied before the write was made (`marked-no-turn`): nothing written, nothing held", out.startswith("Refused") and "starts no turn" in out and k5_lines(30) == [] and not [x for x in mlog() if str(x.get("outcome", "")).startswith("written onto")] and held.count(A) == 0, (out, SAVES))
+fresh(); no_log(); SAVES.clear(); n0 = len(pushes()); a1_before = list(qlog(1))
+_names_real = _front_turn_mod.names_his
+_front_turn_mod.names_his = lambda *a, **k: True          # the gate proved an item of his by some other way (an ask to be told); the item named is nobody's of his
+try: out = msg(FRONT, mark() + "\na1: the second lane is cheaper, pick one, once more.", "home-beta"); settle()
+finally: _front_turn_mod.names_his = _names_real
+check("11x: an item that is not his is never written onto even when the gate let the message through: held, nothing saved", out.startswith("held for work-osprey-main's next turn") and k5_lines(1) == [] and "written onto" not in out and not [x for x in mlog() if str(x.get("outcome", "")).startswith("written onto")] and held.count(A) == 1, (out, SAVES, qlog(1)))
+# a write that fails for one of two items: the reply names the one it stands on, and nothing claims the other
+def save_flaky(gid, *a, **k):
+    if gid == "a37": raise RuntimeError("the store would not take this one")
+    return _save_count(gid, *a, **k)
+fresh(); no_log(); SAVES.clear(); _messaging._writes.save = save_flaky; n0 = len(pushes())
+try: out = msg(FRONT, mark() + "\na36 and a37: both need your word, in this order.", "home-beta"); settle()
+finally: _messaging._writes.save = _save_count
+check("11y: one of two items cannot be saved: the reply and the message log name the item written (a36) and not the other (a37), whose History has no line", out.startswith("Not delivered: written onto a36 as a History line from home-beta") and not re.search(r"\ba37\b", out)
+      and len(qlog(36)) == 1 and qlog(37) == [] and len(written_rows("a36")) == 1 and not written_rows("a36, a37") and held.count(A) == 0, (out, qlog(36), qlog(37), [x.get("outcome") for x in mlog()]))
+# the write path itself leaves a closed item alone, and answers "" when no item took the line
+fresh(); no_log(); SAVES.clear()
+none_ = _messaging._write_on_items(FRONT, "home-beta", "home-beta", "a15 and a38: words", "a15 and a38: words", ["a15"], "", "home-beta wrote to work-osprey-main: a15 words", "because")
+some_ = _messaging._write_on_items(FRONT, "home-beta", "home-beta", "a15 and a38: words", "a15 and a38: words", ["a15", "a38"], "", "home-beta wrote to work-osprey-main: a15 and a38 words", "because")
+check("11z: a closed item takes no line (a15: nothing saved, no line, no claim: the reply is empty), and beside an open one the reply names the open one only", none_ == "" and some_.startswith("Not delivered: written onto a38 as a History line from home-beta") and "a15" not in some_
+      and qlog(15) == [] and len(qlog(38)) == 1 and SAVES == ["a38"] and [x.get("outcome") for x in mlog()] == ["written onto a38, not delivered"], (none_, some_, qlog(15), qlog(38), SAVES))
+# the same words, written once within a day: the window is 24 hours, read from the message log
+fresh(); no_log(); SAVES.clear(); T39 = mark() + "\na39: pick the date for the review."
+msg(FRONT, T39, "home-beta"); settle(); age_log(23); out = msg(FRONT, T39, BACK); settle()
+check("11z2: the same words 23 hours later from another sender are the earlier line: the reply says so, nothing more is written", out.startswith("Not delivered: written onto a39 already") and len(qlog(39)) == 1 and SAVES == ["a39"], (out, qlog(39), SAVES))
+age_log(2); out = msg(FRONT, T39, BACK); settle()
+check("11z3: …and 25 hours later they are no longer the same message: a line of their own, from the second sender", out.startswith("Not delivered: written onto a39 as a History line from work-osprey-x") and len(qlog(39)) == 2 and qlog(39)[1].startswith("work-osprey-x wrote to work-osprey-main: a39:"), (out, qlog(39)))
+# one project is its hub's: a front agent of a component page (comp, whose hub is alpha) is written for an item of the hub's project, and the front agent of the hub for an item filed under the component's page
+item(40, owner=A, needs=["decision"]); item(41, owner=A, needs=["decision"], project="projects/comp")
+fresh(); no_log(); SAVES.clear(); unstamp(C); out = msg("comp-main", mark() + "\na40: pick the lane.", "home-beta"); settle()
+check("11z4: a front agent of a component page is written for an open item of his in its hub's project (a40, alpha's): the page's hub is the project", out.startswith("Not delivered: written onto a40 as a History line from home-beta") and qlog(40) == ["home-beta wrote to comp-main: a40: pick the lane."], (out, qlog(40)))
+fresh(); no_log(); SAVES.clear(); out = msg(FRONT, mark() + "\na41: pick the lane.", "home-beta"); settle()
+check("11z5: …and the front agent of the hub for one filed under the component's page (a41)", out.startswith("Not delivered: written onto a41 as a History line from home-beta") and qlog(41) == ["home-beta wrote to work-osprey-main: a41: pick the lane."], (out, qlog(41)))
 _messaging._writes.save = _save_orig
 fresh(); no_log()
 
@@ -1256,6 +1347,7 @@ def _page(front):
 _pj_real, _sj_real, _dirs_real = json.dumps(_pj), json.dumps(_sj), list(_cfg.CFG.get("pages", {}).get("dirs", ["projects"]))
 for key_, front_, uuid_ in (("infra/gizmo", "gen-main", G), ("infra/dual", "dual-main", G2), ("projects/infra-dual", "dual-main", G2), ("projects/infra-solo", "solo2-main", G2)):
     _pj["pages"][key_] = _page(front_); _sj[uuid_] = {"name": front_, "machine": "a", "url": "", "seen": "x"}
+for key_ in ("infra/quad", "projects/infra-quad", "projects/infra/quad", "Infra/Quad"): _pj["pages"][key_] = _page("quad-main")      # four keys that read alike: a refusal lists three of them
 (T / "store/projects.json").write_text(json.dumps(_pj)); (T / "fleet/a/sessions.json").write_text(json.dumps(_sj))
 _cfg.CFG.setdefault("pages", {})["dirs"] = ["projects", "infra"]
 def pushed_to(n0): return sorted({x[0] for x in pushes()[n0:]})
@@ -1278,6 +1370,14 @@ try:
     check("12e: two keys that read alike (`infra/dual` and `projects/infra-dual`) stay refused as `unknown-page-key`, the refusal lists both, and nothing is delivered to either",
           err_ is not None and getattr(err_, "kind", "") == "unknown-page-key" and "infra/dual" in str(err_) and "projects/infra-dual" in str(err_) and "more than one page" in str(err_) and pushes()[n0:] == []
           and row_ is not None and row_["ok"] is False and row_.get("kind") == "unknown-page-key" and "fix" not in row_, (str(err_), row_, pushes()[n0:]))
+    for exact_ in ("infra/dual", "projects/infra-dual"):
+        fresh(); no_log(); n0 = len(pushes()); row_, err_ = logged(exact_, "the pages moved, a plain note", "home-beta"); settle()
+        check(f"12e2: `{exact_}` is a key the registry has as written, though it folds to the same spelling as another key (`infra/dual` and `projects/infra-dual`): it is no refusal and no correction, the message goes to that page",
+              err_ is None and row_ is not None and row_["ok"] is True and "fix" not in row_ and "kind" not in row_ and f"agent of {exact_} it fits" in LAST_OUT and "sent there" not in LAST_OUT, (exact_, str(err_), LAST_OUT, row_))
+    fresh(); no_log(); n0 = len(pushes()); row_, err_ = logged("INFRA/QUAD", "the pages moved, a plain note", "home-beta"); settle()
+    listed_ = str(err_).split("It fits more than one page: ")[1].split("; write the one you mean")[0].split(", ") if "It fits more than one page: " in str(err_) else []
+    check("12e3: more than three keys that read alike (four here): refused as `unknown-page-key`, the refusal lists three of them (in order) and not the fourth, and nothing is delivered",
+          err_ is not None and getattr(err_, "kind", "") == "unknown-page-key" and len(listed_) == 3 and listed_ == sorted(["infra/quad", "projects/infra-quad", "projects/infra/quad", "Infra/Quad"])[:3] and pushes()[n0:] == [] and row_["ok"] is False, (str(err_), listed_))
     fresh(); no_log(); n0 = len(pushes()); row_, err_ = logged("projects/infra-gizma", "the pages moved, a plain note", "home-beta"); settle()
     check("12f: a key with a slip in it (no match) stays refused, naming the nearest keys, and nothing is delivered", err_ is not None and getattr(err_, "kind", "") == "unknown-page-key" and "The nearest page keys: " in str(err_) and "infra/gizmo" in str(err_) and pushes()[n0:] == [] and row_["ok"] is False, (str(err_), pushes()[n0:]))
     near_ = str(err_).split("The nearest page keys: ")[1].split(", ") if "The nearest page keys: " in str(err_) else []
