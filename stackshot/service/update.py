@@ -935,10 +935,16 @@ def update_unlocked(
     open_keys = {_steps.key(s["text"]) for s in _steps.view(item_was.get("metadata"), keeper=keeper_was) if s["status"] == _steps.OPEN} if (was != "completed" or reopening) else set()      # the open steps as the item stood
     was_meta = item_was.get("metadata") or {}
     group = {k for k in was_meta.get("step_lines") or [] if isinstance(k, str)} if str(was_meta.get("step") or "").strip() else set()      # the keys of the lines the stored step was split into: they belong to it only while it is stored
-    gone_keys = (open_keys & group) - {_steps.key(x) for x in step_lines} if group and not closing and (step_withdrawn or state_given.get("step")) else set()      # the step is replaced (by a long or a short one) or withdrawn: the open lines of its old split go with it (a done one stays)
+    step_same = bool(group) and not step_lines and bool(state_given.get("step")) and _states.clean(state_given.get("step")) == _states.clean(was_meta.get("step"))      # the stored summary sent again: not a new step, so nothing of its split goes
+    gone_keys = (open_keys & group) - {_steps.key(x) for x in step_lines} if group and not closing and not step_same and (step_withdrawn or state_given.get("step")) else set()      # the step is replaced (by a long or a short one) or withdrawn: the open lines of its old split go with it (a done one stays)
+    if step_same and not closing:
+        _calls.fixed("step-split", "the step is the one the item holds already: the lines of next it was split into stay as they are, nothing was changed", fields=["step"])
+    if gone_keys and next.strip():      # a next sent back whole still lists the old split's lines: they leave with the step, so the call is not refused over them
+        next = "\n".join(e for e in _steps.split(next) if _steps.key(e) not in gone_keys)
     if step_lines and not closing:      # the actions of a long step: lines of next that open with his name, at the end of the sender's own lines (the summary is the step)
         own_text = "\n".join(e for e in _steps.split(_nl.text_of(meta, next_writer, keeper_was, _handoff.ho_same)) if _steps.key(e) not in gone_keys)      # …and none of the old split's lines the write drops
-        have = open_keys | {_steps.key(x) for x in _steps.split(next)}
+        done_of_group = {_steps.key(x["text"]) for x in _steps.view(item_was.get("metadata"), keeper=keeper_was) if x["status"] == _steps.DONE} & group      # an action of the split that was ticked done stays done: it is not made open again
+        have = open_keys | done_of_group | {_steps.key(x) for x in _steps.split(next)}
         added = _with_lines(next, own_text, step_lines, have, next_drop or clear_next)
         _fg.say_long_step(step_long, step_lines, sum(1 for ln in step_lines if _steps.key(ln) not in have))
         if added != next:
@@ -982,7 +988,7 @@ def update_unlocked(
         if gone:
             marks = state_change = True      # the lines leave next with their writers, as a dropped=[n] of the same lines would
             _calls.fixed("step-split-dropped", f"the {len(gone)} open line{'' if len(gone) == 1 else 's'} of next that the old step was split into {'was' if len(gone) == 1 else 'were'} dropped with it ({'withdrawn' if step_withdrawn else 'replaced'})", fields=["step"])
-    if step_withdrawn or state_given.get("step"):
+    if (step_withdrawn or state_given.get("step")) and not step_same:
         if step_lines:
             meta["step_lines"] = [_steps.key(x) for x in step_lines]      # the lines this step was split into: replaced or withdrawn with it
         else:

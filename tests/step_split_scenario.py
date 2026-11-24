@@ -310,12 +310,59 @@ item(54)
 upd(54, step=LONG)
 r, fx = send(lambda: upd(54, step=LONG))
 check("2b the same long step sent again drops nothing", len(opened(54)) == 8 and not any(k == "step-split-dropped" for k, t in fx), (st(54), fx))
+# the stored summary sent again is not a new step: nothing of the split goes, and the reply says nothing was changed
+def same_step_case(i, name, call):
+    item(i)
+    upd(i, step=LONG)
+    keys_was = list(mt(i)["step_lines"])
+    r, fx = send(lambda: call(i, mt(i)["step"]))
+    check(f"2b {name}: the eight open lines of his stay open, nothing is dropped, the record of the split is as it was",
+          not isinstance(r, ToolError) and len(opened(i)) == 8 and not any(k == "step-split-dropped" for k, t in fx) and mt(i).get("step_lines") == keys_was and len(keys_was) == 7, (r, st(i), fx, mt(i).get("step_lines")))
+    check(f"2b {name}: …and the reply says nothing was changed", any(k == "step-split" and "nothing was changed" in t or k == "step-split" and "nothing was added" in t for k, t in fx), fx)
+same_step_case(70, "the stored summary sent again", lambda i, s: upd(i, step=s))
+same_step_case(71, "the stored summary sent again with trailing spaces", lambda i, s: upd(i, step=s + "   \n "))
+same_step_case(72, "the stored summary sent again with the whole next sent back", lambda i, s: upd(i, step=s, next=mt(i)["next"]))
+same_step_case(73, "the original long text sent again", lambda i, s: upd(i, step=LONG))
+item(74)
+upd(74, step=LONG)
+r, fx = send(lambda: upd(74, step="check that the box answers and say so", next=mt(74)["next"]))
+check("2b a different step still drops the old lines, also when next is sent back whole with them (their lines leave with the step, the call is not refused)",
+      not isinstance(r, ToolError) and opened(74) == ["Oliver: check that the box answers and say so"] and any(k == "step-split-dropped" for k, t in fx), (r, st(74), fx))
+item(75)
+upd(75, step=LONG)
+r, fx = send(lambda: upd(75, step=LONG_B, next=mt(75)["next"]))
+check("2b a long step replaced by another long one, with next sent back whole (still listing the old lines), is not refused: the old lines are dropped and the new ones are open",
+      not isinstance(r, ToolError) and sorted(opened(75)) == sorted([f"Oliver: {sum_b}", *lines_b]), (r, st(75), fx))
+# an action of the split that was ticked done stays done when the same long step is sent again
+item(76)
+upd(76, step=LONG)
+d_ = rd(76); m_ = d_["metadata"]
+for e_ in m_["steps"]:
+    if e_["text"] == lines[1]: e_["status"], e_["by"], e_["at"] = "done", "Oliver", now
+m_["next"] = "\n".join(x for x in m_["next"].splitlines() if x != lines[1])
+(T / "store/a/76.json").write_text(json.dumps(d_))
+r, fx = send(lambda: upd(76, step=LONG))
+check("2b the same long step sent again after one action was ticked done does not open that action again", not isinstance(r, ToolError) and ("done", lines[1]) in his(76) and lines[1] not in opened(76) and len(opened(76)) == 7, (r, st(76)))
+# a record of a split with no step stored (an item as an older write left it) drops nothing
+item(77)
+upd(77, step=LONG)
+d_ = rd(77); m_ = d_["metadata"]
+m_.pop("step", None); m_.pop("state", None)
+(T / "store/a/77.json").write_text(json.dumps(d_))
+r, fx = send(lambda: upd(77, step="check that the box answers and say so"))
+check("2b a record of a split with no step stored belongs to no step: a step written then drops none of the open lines", not isinstance(r, ToolError) and all(x in opened(77) for x in lines) and not any(k == "step-split-dropped" for k, t in fx), (r, st(77), fx))
+# a state change that takes the step away takes the record of its lines with it
+item(78)
+upd(78, step=LONG)
+r, fx = send(lambda: upd(78, supplies="a kit from the seller", after=["a1"], ask_by=time.strftime("%Y-%m-%d", time.gmtime(now + 10 * 86400))))
+check("2b a write that moves the item to blocked takes the stored step away, and the record of its split with it", not isinstance(r, ToolError) and not mt(78).get("step") and "step_lines" not in mt(78), (r, mt(78)))
 # his answer, a close and a hand-over settle the whole group
 from stackshot.service import answer as answer_svc
 item(55)
 upd(55, step=LONG)
 r = answer_svc._answer("a55", "", "", "done")
 check("2b his Done ticks the summary line and every action line: none of his is open, all eight are done", opened(55) == [] and len([1 for s_, t_ in his(55) if s_ == "done"]) == 8, (r, st(55)))
+check("2b …and the record of the split goes with the step: no step_lines is left after his Done", "step_lines" not in mt(55) and not mt(55).get("step"), mt(55))
 item(56)
 upd(56, step=LONG)
 from stackshot.web.tools import complete as _wt_complete
