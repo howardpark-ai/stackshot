@@ -15,6 +15,9 @@ and expires: after `minutes` (1 to 1440, else [client] inbox_hold_minutes, 10; t
 died and never released leaves nothing held for good. Holding again is a refresh. A key in the other tool's file or the resume's is listed with `origin` file or resume; it is never expired
 or touched here, and a release that names it says so (`held_elsewhere`):
 that tool lifts its own holds.
+The one exception is the resume's file, and only by age: a key that has stayed in `held-resume-<source>.txt` longer than [client] resume_hold_max_hours (default 6; 0 = never) is taken out of it
+by sweep_resume() (the same minute tick), so a hold of a resume cannot outlast its purpose when no later resume verifies the key. The age is the time the key was first seen in the file, kept in
+holds-resume.json beside it (written by the sweep, and by the resume when it re-holds a key, which restarts that key's age). Only the hold is lifted: the queued lines stay in the inbox.
 Stdlib only, as inbox.py."""
 from __future__ import annotations
 
@@ -33,6 +36,8 @@ from stackshot.fleet import inbox as _inbox
 
 log = logging.getLogger("stackshot.inbox")
 LEDGER_NAME = "holds-api.json"       # {"<kind>": {"<key>": {"since": epoch, "expires": epoch | 0}}} in the state's anchor-hub folder: the times of the keys in the API's own files
+RESUME_LEDGER_NAME = "holds-resume.json"   # {"<kind>": {"<key>": epoch the key was first seen in held-resume-<kind>.txt}} beside it: the ages of the resume file's keys (the file itself carries none)
+RESUME_MAX_HOURS = 6.0               # a key stays in the resume's file this long at most, unless a later resume holds it again
 MAX_KEYS = 20
 MAX_KEY = 200
 MAX_MINUTES = 1440.0                 # a hold lasts a day at most
@@ -79,6 +84,25 @@ def default_minutes() -> float:
     if not math.isfinite(m) or m < 0:
         return DEFAULT_MINUTES
     return min(m, MAX_MINUTES)
+
+
+def resume_max_hours() -> float:
+    """[client] resume_hold_max_hours as a number of hours: how long a key may stay in the resume's file (`held-resume-<source>.txt`) before the sweep lifts it; 0 = never (the operator's own choice);
+    a value that is negative, not a finite number or a bool is the default (6)."""
+    import math
+    v = _cfg.get("client", "resume_hold_max_hours", default=RESUME_MAX_HOURS)
+    try:
+        h = RESUME_MAX_HOURS if isinstance(v, bool) else float(v)
+    except (TypeError, ValueError):
+        return RESUME_MAX_HOURS
+    if not math.isfinite(h) or h < 0:
+        return RESUME_MAX_HOURS
+    return h
+
+
+def locked() -> "_locked":
+    """The lock the sweep and the resume's own write of `held-resume-<source>.txt` share (the resume's tool takes it around its read-modify-write, so the sweep's lift and a resume's hold cannot overwrite each other)."""
+    return _locked()
 
 
 def _ledger() -> dict[str, dict[str, dict[str, float]]]:
@@ -291,6 +315,123 @@ def sweep(now: float | None = None) -> list[str]:
     for g in gone:
         log.warning("inbox: hold %s expired (made through the client API and never released): taken out of its file", g)
     return gone
+
+
+def _resume_seen() -> dict[str, dict[str, float]]:
+    """When each key of the resume's files was first seen there: {kind: {key: epoch}}. No file → {}. A file that is not of the shape this module writes → LedgerError; any other failed read is raised as it is."""
+    try:
+        with open(_flags() / RESUME_LEDGER_NAME, encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except ValueError as e:
+        raise LedgerError(f"{RESUME_LEDGER_NAME} is not JSON: {e}") from e
+    if not isinstance(d, dict):
+        raise LedgerError(f"{RESUME_LEDGER_NAME} is not a JSON object")
+    out: dict[str, dict[str, float]] = {}
+    try:
+        for kind, rows in d.items():
+            if kind in _inbox.SOURCES:
+                if not isinstance(rows, dict):
+                    raise ValueError(f"{kind} is not a table of times")
+                if any(isinstance(v, bool) for v in rows.values()):
+                    raise ValueError(f"{kind} has a time that is a bool")
+                out[kind] = {str(k): float(v) for k, v in rows.items()}
+    except (TypeError, ValueError) as e:
+        raise LedgerError(f"{RESUME_LEDGER_NAME} has a row that is not a time: {e}") from e
+    return out
+
+
+def _resume_seen_to_write() -> dict[str, dict[str, float]]:
+    """The first-seen times, for a call that saves them back (the caller holds the lock). A file that cannot be read as times reads as none (fail safe: nothing is lifted by an age that is not known, every
+    key present starts its age now) with a log line, and is removed so the log is not repeated every minute. Any other failure is raised."""
+    try:
+        return _resume_seen()
+    except LedgerError as e:
+        log.error("inbox: %s: read as no times; the resume file's keys start their age now", e)
+        try:
+            (_flags() / RESUME_LEDGER_NAME).unlink()
+        except OSError:
+            pass
+        return {}
+
+
+def _save_resume_seen(d: dict[str, dict[str, float]]) -> None:
+    p = _flags() / RESUME_LEDGER_NAME
+    d = {k: v for k, v in d.items() if v}
+    if not d:
+        try:
+            p.unlink()
+        except OSError:
+            pass
+        return
+    tmp = _flags() / f".{RESUME_LEDGER_NAME}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _norm(d: dict[str, dict[str, float]]) -> str:
+    return json.dumps({k: v for k, v in d.items() if v}, sort_keys=True)
+
+
+def _resume_path(kind: str):
+    return _flags() / _inbox.held_files(kind)[1]
+
+
+def resume_restart(kind: str, restart: list[str] | set[str], now: float | None = None) -> None:
+    """For the resume's tool, called with `locked()` held right after it wrote `held-resume-<kind>.txt`: the keys in `restart` (the ones this resume found queued and could not verify, so it holds them
+    afresh) start their age again; every other key of the file keeps its first-seen time, a key new to the file gets `now`, and a time whose key has left the file is dropped."""
+    now = time.time() if now is None else now
+    led = _resume_seen_to_write()
+    rows = led.setdefault(kind, {})
+    present = _read(_resume_path(kind))
+    for k in restart:
+        rows.pop(k, None)
+    for k in present:
+        rows.setdefault(k, now)
+    for k in [k for k in rows if k not in present]:
+        rows.pop(k)
+    _save_resume_seen(led)
+
+
+def sweep_resume(now: float | None = None) -> list[str]:
+    """Lift, from the resume's files (`held-resume-<source>.txt`), the keys that stayed longer than [client] resume_hold_max_hours (default 6; 0 = never): a hold of a reboot's resume is lifted only by a later
+    resume that verifies the key, and a key none verifies would hold its session's lines for good. The age is the time the key was first seen in the file (`holds-resume.json`, written here and by the resume's
+    own write): a key that leaves the file loses its time, an unreadable times file reads as none (nothing lifted, every age starts now). Only the hold goes: the lines it held stay in the inbox and are delivered
+    at the next take. Never touches `held-<source>.txt` (another tool's) or the API's file. → "kind:key" of each key lifted. Cheap when there is nothing to track: one stat for each file."""
+    now = time.time() if now is None else now
+    if not (_flags() / RESUME_LEDGER_NAME).exists() and not any(_resume_path(k).exists() for k in _inbox.SOURCES):
+        return []
+    limit = resume_max_hours() * 3600.0
+    gone: list[tuple[str, str, float]] = []
+    with _locked():
+        led = _resume_seen_to_write()
+        before = _norm(led)
+        for kind in _inbox.SOURCES:
+            rows = led.setdefault(kind, {})
+            present = _read(_resume_path(kind))
+            for k in present:
+                rows.setdefault(k, now)
+            dead = [k for k in present if limit > 0 and now - rows[k] >= limit]
+            if dead:
+                _write(_resume_path(kind), [k for k in present if k not in dead])
+                gone += [(kind, k, now - rows[k]) for k in dead]
+            for k in [k for k in rows if k in dead or k not in present]:
+                rows.pop(k)
+        if _norm(led) != before:
+            _save_resume_seen(led)
+    for kind, k, age in gone:
+        log.warning("inbox: resume hold %s:%s lifted after %.1f hours (no later resume verified it; the longest a resume's hold lasts is %g hours): taken out of its file, its queued lines stay in the inbox",
+                    kind, k, age / 3600.0, limit / 3600.0)
+    return [f"{kind}:{k}" for kind, k, _ in gone]
 
 
 def listing(key: str = "", now: float | None = None) -> dict[str, Any]:

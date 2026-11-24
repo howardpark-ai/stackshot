@@ -77,7 +77,7 @@ check("classify: a front agent's mark before the head is read", sn.classify("[fo
 check("classify: the items it names, once each, as shown", sn.classify(ended(1, 2)) == ("wake", [f"{B}1", f"{B}2"]), sn.classify(ended(1, 2)))
 check("classify: an item it is only queued behind is not what it is about", sn.classify(f"[stackshot] {B}7 woke (wake 2026-11-07): still after {B}1, {B}9, out of the queue until it closes")[1] == [f"{B}7"])
 check("classify: a message another session wrote is no notice (even with the same words)", sn.classify("[stackshot message] from box-a-main\n" + stall(1))[0] == "")
-check("classify: an anchor notice and plain text are no notice", sn.classify("[anchor] 2 queued while you were away") == ("", []) and sn.classify("hello") == ("", []))
+check("classify: an anchor notice and plain text are no notice", sn.classify("[anchor] 2 queued earlier") == ("", []) and sn.classify("hello") == ("", []))
 
 # ================================================================= 2. the screen
 def screened(rows, rec=(BUILDER,), **kw):
@@ -160,7 +160,7 @@ qrows(BUILDER, [(stall(1), 3), (stall(2), 2), (woke(3), 2), (stall(1), 1), (your
 rc = push.flush(BUILDER)
 text = sent[-1] if sent else ""
 check("flush: the queue is delivered", rc == 0 and len(sent) == 1, (rc, sent))
-check("flush: …as one turn of what is still true: the newest stall notice and the session's message", text.startswith("[stackshot] 2 queued while you were away:\n") and text.count(stall(1)) == 1 and f"please look at {B}2" in text, text)
+check("flush: …as one turn of what is still true: the newest stall notice and the session's message", text.startswith("[stackshot] 2 queued earlier:\n") and text.count(stall(1)) == 1 and f"please look at {B}2" in text, text)
 check("flush: …without the closed item's, the parked item's, the older duplicate's and the over-age line", f"{B}2 item" not in text and f"{B}3" not in text and "is yours now" not in text, text)
 check("flush: the queue file is gone once sent", not (Q / f"{BUILDER}.jsonl").exists())
 sent.clear()

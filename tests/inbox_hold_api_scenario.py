@@ -2,7 +2,7 @@
 
 The rule: a fleet tool on another box cannot write the server's held-<source>.txt files, so it holds and releases through the client API (POST /client/inbox-hold, inbox-release), lists
 holds (GET inbox-holds) and asks whether a line waits for a session (GET inbox-waiting). The calls write their own file, held-api-<source>.txt, which the server honours with the others (inbox.take skips a held key), a hold made by the
-call expires when its time is up, and the files another tool writes (held-<source>.txt, the reboot's resume's) are only read, never written. push.py sends through the server's `message` call when [client]
+call expires when its time is up, and the file another tool writes (held-<source>.txt) is only read, never written; the reboot's resume's file is lifted from only by age (part 12). push.py sends through the server's `message` call when [client]
 push_mode (or $ANCHOR_PUSH_MODE) says the server is not on this box, and keeps writing the local folders by default.
 
     tests/run-suite inbox_hold_api        → exit 0 / 1"""
@@ -70,7 +70,7 @@ holds.hold([NAME], ["msg"], 10, now=T0 + 500)
 check("hold again is a refresh: the time moves", holds.sweep(now=T0 + 700) == [] and AP("msg") == [NAME])
 gone = holds.sweep(now=T0 + 500 + 601)
 check("sweep: past the time the key goes from the API's file, and only that key", gone == [f"msg:{NAME}"] and AP("msg") == [] and lines("held-msg.txt") == ["by-hand"], (gone, AP("msg"), lines("held-msg.txt")))
-check("sweep: a key of another tool and the resume file are never expired", lines("held-resume-msg.txt") == ["resumed"] and holds.sweep(now=T0 + 10**7) == [] and lines("held-msg.txt") == ["by-hand"])
+check("sweep: the API's sweep never expires a key of another tool or of the resume file (the resume file has its own, age-bound sweep_resume, part 12)",lines("held-resume-msg.txt") == ["resumed"] and holds.sweep(now=T0 + 10**7) == [] and lines("held-msg.txt") == ["by-hand"])
 holds.hold([NAME], ["msg"], 0, now=T0)
 check("hold with 0 minutes: no end, never swept", holds.sweep(now=T0 + 10**7) == [] and AP("msg") == [NAME] and [r["expires"] for r in holds.listing(NAME)["holds"]] == [None] and holds.hold([NAME], ["msg"], 0, now=T0)["expires"] is None)
 rel = holds.release([NAME, "by-hand"], ["msg"])
@@ -491,7 +491,7 @@ check("push.paused: nothing held, nothing paused", push.paused("pp-key") is Fals
 
 # ================================================================= 10. a hold always ends: the time is saved before the key, a lost times file is not a permanent hold, the setting is clamped, the API refuses 0 and caps the keys
 def wipe():            # what this module makes in the folder (held-*, the times and their leftovers); the folder's other files are other tools'
-    for f in [*FLAGS.glob("held-*"), *FLAGS.glob("holds-api.json*"), *FLAGS.glob(".*.tmp"), *FLAGS.glob("w.txt")]:
+    for f in [*FLAGS.glob("held-*"), *FLAGS.glob("holds-api.json*"), *FLAGS.glob("holds-resume.json*"),*FLAGS.glob(".*.tmp"), *FLAGS.glob("w.txt")]:
         if f.is_dir(): f.rmdir()
         else: f.unlink()
 wipe()
@@ -647,6 +647,129 @@ try:
         check(f"push server mode: the server's {status} {out[:20]!r} → exit {want}", rc == want, rc)
 finally:
     client.message = real_msg
+
+# ================================================================= 12. a resume's hold cannot outlast its purpose: held-resume-<source>.txt is bound by [client] resume_hold_max_hours (default 6), through sweep_resume only
+HR = "held-resume-msg.txt"; SEEN = lambda: json.loads((FLAGS / holds.RESUME_LEDGER_NAME).read_text()) if (FLAGS / holds.RESUME_LEDGER_NAME).exists() else None
+H6 = 6 * 3600.0
+class _Cap(logging.Handler):
+    def __init__(self): super().__init__(); self.lines = []
+    def emit(self, r): self.lines.append(r.getMessage())
+def journal(fn):
+    """The log lines of the inbox logger while fn runs (the suite switches logging off)."""
+    cap = _Cap(); lg = logging.getLogger("stackshot.inbox"); lg.addHandler(cap); logging.disable(logging.NOTSET)
+    try: return fn(), cap.lines
+    finally: lg.removeHandler(cap); logging.disable(logging.CRITICAL)
+wipe()
+check("resume sweep: the default is six hours", holds.resume_max_hours() == 6.0 and holds.RESUME_MAX_HOURS == 6.0)
+check("resume sweep: with nothing in the resume's files it makes no file", holds.sweep_resume(now=T0) == [] and not (FLAGS / holds.RESUME_LEDGER_NAME).exists())
+put_file(HR, "r-a\nr-b\n")
+check("resume sweep: a key seen for the first time starts its age, nothing is lifted", holds.sweep_resume(now=T0) == [] and SEEN() == {"msg": {"r-a": T0, "r-b": T0}} and lines(HR) == ["r-a", "r-b"], SEEN())
+check("resume sweep: just under the age the key stays, its time unchanged", holds.sweep_resume(now=T0 + H6 - 1) == [] and lines(HR) == ["r-a", "r-b"] and SEEN()["msg"]["r-a"] == T0)
+put_file(HR, "r-a\nr-b\nr-c\n")
+holds.sweep_resume(now=T0 + H6 - 0.5)
+out, jl = journal(lambda: holds.sweep_resume(now=T0 + H6))
+check("resume sweep: past the age the old keys are lifted, the newer key stays, and the sweep says which", out == ["msg:r-a", "msg:r-b"] and lines(HR) == ["r-c"] and sorted(SEEN()["msg"]) == ["r-c"], (out, lines(HR), SEEN()))
+check("resume sweep: a journal line names each key and its age", len(jl) == 2 and "msg:r-a" in jl[0] and "6.0 hours" in jl[0] and "msg:r-b" in jl[1] and "queued lines stay" in jl[0], jl)
+check("resume sweep: the third key, first seen half a second later, is not lifted a minute later", holds.sweep_resume(now=T0 + H6 + 60) == [] and lines(HR) == ["r-c"])
+out = holds.sweep_resume(now=T0 + H6 + H6)
+check("resume sweep: …it goes when its own age is up, the file is left empty and the times file is removed", out == ["msg:r-c"] and lines(HR) == [] and SEEN() is None, (out, lines(HR), SEEN()))
+wipe()
+
+# only the hold goes: the queued line stays in the inbox and is handed out at the next take
+iid = inbox.put(NAME, "a line a resume held", "msg", now=T0, sender="site-main")
+put_file(HR, NAME + "\n"); holds.sweep_resume(now=T0)
+check("resume sweep: while the key is held its line is not handed out", inbox.take({SID: NAME}, only_src="msg", now=T0 + 5) == [] and inbox.waiting("msg").get(NAME) == 1)
+check("resume sweep: past the age the key is lifted and the queued line is still in the inbox", holds.sweep_resume(now=T0 + H6) == [f"msg:{NAME}"] and inbox.waiting("msg").get(NAME) == 1, inbox.waiting("msg"))
+tk = inbox.take({SID: NAME}, only_src="msg", now=T0 + H6 + 1)
+check("resume sweep: …and it is handed out whole at the next take, no line lost", len(tk) == 1 and tk[0]["ids"] == [iid] and "a line a resume held" in tk[0]["text"], tk)
+inbox.ack([iid]); wipe()
+
+# another tool's files are never touched, whatever their age; the API's own keys keep their own times
+put_file("held-msg.txt", "mgr-1\n"); put_file("held-hub.txt", "mgr-hub\n"); put_file(HR, "r-a\n"); put_file("held-resume-hub.txt", "r-hub\n")
+holds.hold(["own-1"], ["msg", "hub"], 0, now=T0)
+others = ("held-msg.txt", "held-hub.txt", "held-api-msg.txt", "held-api-hub.txt", holds.LEDGER_NAME); b0 = snap(*others)
+holds.sweep_resume(now=T0)
+out = holds.sweep_resume(now=T0 + 10**7)
+check("resume sweep: another tool's files and the API's files and times keep their bytes and mtime", snap(*others) == b0, (snap(*others), b0))
+check("resume sweep: both sources' resume files are bound, each key lifted from its own", sorted(out) == ["hub:r-hub", "msg:r-a"] and lines(HR) == [] and lines("held-resume-hub.txt") == [] and AP("msg") == ["own-1"], (out, lines(HR)))
+holds.release(["own-1"], ["msg", "hub"]); wipe()
+
+# a key that left the file loses its time (a resume lifted it), and a key that comes back starts afresh
+put_file(HR, "r-a\nr-b\n"); holds.sweep_resume(now=T0)
+put_file(HR, "r-b\n"); holds.sweep_resume(now=T0 + 3600)
+check("resume sweep: a key that left the file loses its time", SEEN() == {"msg": {"r-b": T0}}, SEEN())
+put_file(HR, "r-a\nr-b\n"); out = holds.sweep_resume(now=T0 + H6)
+check("resume sweep: a key that came back is a new key with a new age; the one that stayed is lifted", out == ["msg:r-b"] and lines(HR) == ["r-a"] and SEEN() == {"msg": {"r-a": T0 + H6}}, (out, lines(HR), SEEN()))
+put_file(HR, ""); holds.sweep_resume(now=T0 + H6 + 1)
+check("resume sweep: the times file is removed when no key is tracked", SEEN() is None, mine())
+wipe()
+
+# an unreadable times file reads as no times: nothing lifted that time, every key starts its age then
+for junk in (b"not json", b"[]", b'{"msg": []}', b'{"msg": {"r-a": "soon"}}', b'{"msg": {"r-a": true}}', b"\xff\xfe"):
+    put_file(HR, "r-a\n"); (FLAGS / holds.RESUME_LEDGER_NAME).write_bytes(junk)
+    out, jl = journal(lambda: holds.sweep_resume(now=T0 + 10**7))
+    check(f"resume sweep: a times file {junk!r} lifts nothing, the key starts its age now, the file is replaced", out == [] and lines(HR) == ["r-a"] and SEEN() == {"msg": {"r-a": T0 + 10**7}} and any("no times" in x for x in jl), (out, SEEN(), jl))
+    check(f"resume sweep: …and the key goes when that new age is up {junk!r}", holds.sweep_resume(now=T0 + 10**7 + H6) == ["msg:r-a"] and SEEN() is None)
+    wipe()
+
+# a later resume holds a key afresh (it found it queued and could not verify it): the age starts again; a key it only keeps keeps its age
+put_file(HR, "r-seen\nr-kept\n"); holds.sweep_resume(now=T0)
+with holds.locked():
+    holds.resume_restart("msg", ["r-seen"], now=T0 + 5 * 3600)
+check("resume restart: a key held afresh starts its age again, a key only kept keeps the age it had", SEEN() == {"msg": {"r-seen": T0 + 5 * 3600, "r-kept": T0}}, SEEN())
+out = holds.sweep_resume(now=T0 + H6 + 60)
+check("resume restart: …so the kept key is lifted at six hours and the re-held one lives on", out == ["msg:r-kept"] and lines(HR) == ["r-seen"], (out, lines(HR)))
+wipe()
+
+# the real resume tool: a key it finds queued and cannot verify is held afresh and starts its age again; a key it only keeps does not
+(T / "listed-none.txt").write_text("")
+def resume():
+    r = subprocess.run([sys.executable, RQ, "resume", "--source", "msg", "--sessions", str(T / "listed-none.txt"), "--wait", "1"], capture_output=True, text=True, env={**os.environ})
+    return r.returncode, json.loads(r.stdout or "{}"), r.stderr
+iid = inbox.put("held-pane", "waits for a resume", "msg", now=time.time(), sender="site-main")
+rc, q, err = resume()
+check("resume tool: it holds the queued unverified key and records the key's age", rc == 0 and q.get("held_sessions") == ["held-pane"] and lines(HR) == ["held-pane"] and abs(SEEN()["msg"]["held-pane"] - time.time()) < 60, (rc, q, err[-300:], SEEN()))
+led = SEEN(); led["msg"]["held-pane"] = time.time() - 7 * 3600; (FLAGS / holds.RESUME_LEDGER_NAME).write_text(json.dumps(led))
+rc, q, err = resume()
+check("resume tool: a second resume that finds the key queued holds it afresh: its age starts again", rc == 0 and lines(HR) == ["held-pane"] and abs(SEEN()["msg"]["held-pane"] - time.time()) < 60, (rc, q, err[-300:], SEEN()))
+check("resume tool: …so the sweep keeps it", holds.sweep_resume() == [] and lines(HR) == ["held-pane"])
+inbox.ack([iid])
+put_file(HR, "held-pane\nkept-only\n"); led = {"msg": {"held-pane": time.time() - 7 * 3600, "kept-only": time.time() - 7 * 3600}}; (FLAGS / holds.RESUME_LEDGER_NAME).write_text(json.dumps(led))
+rc, q, err = resume()
+check("resume tool: keys it only keeps (nothing queued, nothing verified) keep their age", rc == 0 and lines(HR) == ["held-pane", "kept-only"] and SEEN()["msg"]["held-pane"] < time.time() - 6.9 * 3600 and SEEN()["msg"]["kept-only"] < time.time() - 6.9 * 3600, (rc, q, err[-300:], lines(HR), SEEN()))
+check("resume tool: …and the sweep lifts both", sorted(holds.sweep_resume()) == ["msg:held-pane", "msg:kept-only"] and lines(HR) == [] and SEEN() is None, (lines(HR), SEEN()))
+check("resume tool: a later resume still behaves: with nothing held and nothing queued it writes an empty file", resume()[0] == 0 and lines(HR) == [])
+wipe()
+
+# the setting
+def rsetting(v):
+    if v == "unset": cfg.CFG["client"].pop("resume_hold_max_hours", None)
+    else: cfg.CFG["client"]["resume_hold_max_hours"] = v
+    return holds.resume_max_hours()
+rclamp = {k: rsetting(v) for k, v in {"unset": "unset", "neg": -1, "word": "soon", "bool": True, "nan": float("nan"), "inf": float("inf"), "zero": 0, "str": "2", "frac": 0.5, "none": None}.items()}
+check("resume_max_hours: unset, negative, a word, a bool, nan, inf, None → 6; 0 stays 0 (never lifted); a number in a string counts", rclamp == {"unset": 6.0, "neg": 6.0, "word": 6.0, "bool": 6.0, "nan": 6.0, "inf": 6.0, "zero": 0.0, "str": 2.0, "frac": 0.5, "none": 6.0}, rclamp)
+cfg.CFG["client"]["resume_hold_max_hours"] = 1
+put_file(HR, "s-1\n"); holds.sweep_resume(now=T0)
+check("resume sweep: the setting is the age (1 hour)", holds.sweep_resume(now=T0 + 3599) == [] and holds.sweep_resume(now=T0 + 3600) == ["msg:s-1"])
+cfg.CFG["client"]["resume_hold_max_hours"] = 0
+put_file(HR, "s-2\n"); holds.sweep_resume(now=T0)
+check("resume sweep: with the setting at 0 nothing is ever lifted", holds.sweep_resume(now=T0 + 10**9) == [] and lines(HR) == ["s-2"])
+cfg.CFG["client"].pop("resume_hold_max_hours"); wipe()
+
+# the minute tick runs it, and a failure of it never stops the tick
+ticks = []; real = (fe._clients.tick, fe._inbox_holds.sweep, fe._inbox_holds.sweep_resume, fe.inbox_flag_tick)
+try:
+    fe._clients.tick = lambda: ticks.append("clients"); fe._inbox_holds.sweep = lambda: ticks.append("sweep"); fe._inbox_holds.sweep_resume = lambda: (ticks.append("resume"), 1 / 0); fe.inbox_flag_tick = lambda: ticks.append("flag")
+    with contextlib.redirect_stderr(io.StringIO()): fe.clients_tick()
+finally:
+    fe._clients.tick, fe._inbox_holds.sweep, fe._inbox_holds.sweep_resume, fe.inbox_flag_tick = real
+check("the minute tick calls the resume sweep after the API's, and the flag pass still runs when it fails", ticks == ["clients", "sweep", "resume", "flag"], ticks)
+
+# docs and example config
+ex = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"); cf = pathlib.Path(STACK, "docs/configuration-integrations.md").read_text(encoding="utf-8")
+doc = pathlib.Path(STACK, "docs/inbox-holds.md").read_text(encoding="utf-8"); puller = pathlib.Path(STACK, "docs/puller-and-inbox.md").read_text(encoding="utf-8")
+check("docs: the setting and its side file are documented in the example config, the configuration page, the hold page and the puller page",
+      "resume_hold_max_hours = 6" in ex and "`client.resume_hold_max_hours` | `6`" in cf and "`client.resume_hold_max_hours` | `6`" in doc and "holds-resume.json" in doc and "holds-resume.json" in puller and "resume_hold_max_hours" in puller)
 
 # the docs say what the code does
 doc = pathlib.Path(STACK, "docs/inbox-holds.md").read_text(encoding="utf-8"); puller = pathlib.Path(STACK, "docs/puller-and-inbox.md").read_text(encoding="utf-8")

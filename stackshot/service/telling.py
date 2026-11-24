@@ -1767,7 +1767,7 @@ def tell_woken(gid: str, owner: str, note: str, tag: str = "wake", result: "dict
     def run() -> None:
         try:
             r = subprocess.run([*_interp.resilient(PUSH), "--from", NAME, owner, note], capture_output=True, text=True, timeout=110,
-                               env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg", "ANCHOR_PUSH_KIND": kind})      # push.py stores the kind on the queued line: the "N queued while you were away" digest never files an exempt one
+                               env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg", "ANCHOR_PUSH_KIND": kind})      # push.py stores the kind on the queued line: the "N queued earlier" digest never files an exempt one
             out = (r.stdout.strip().splitlines() or [""])[-1]
             err = (r.stderr.strip().splitlines() or [""])[-1]
             if result is not None:

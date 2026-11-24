@@ -11,7 +11,9 @@ not on this box at all (a cloud cse_… session, a pane on another machine: the 
 is held: its key goes to <state>/anchor-hub/held-resume-<source>.txt (this file is the resume's own: the fleet tool writes
 held-<source>.txt, and neither writer touches the other's file; stackshot reads the union of the two), and the line stays queued until a
 later resume lists it. A key no session row names anywhere (neither a fleet heartbeat nor the session registry) is a retired session: it is
-left out of the file and listed as retired_sessions. A key an earlier resume held and this one did not verify nor find queued stays held.
+left out of the file and listed as retired_sessions. A key an earlier resume held and this one did not verify nor find queued stays held, but not for good: the server's minute sweep lifts a key that stayed in the file
+longer than [client] resume_hold_max_hours (default 6) since it was first seen there (inbox_holds.sweep_resume; the queued lines stay in the inbox), and a resume that finds the key
+queued and cannot verify it holds it afresh, which starts that age again.
 Prints one JSON line; exit 0 when every deliverable queue was delivered.
 """
 import glob, json, os, subprocess, sys
@@ -130,13 +132,19 @@ def main():
     extra = {"waiting": ib["waiting"], "waiting_sessions": ib["waiting_sessions"]}
     # The resume's own hold file only (held-<src>.txt is the fleet tool's). It keeps a key an earlier resume held that this run neither
     # verified nor found queued, so a hold is never lost for want of a queued line; a key no session row names is retired and is not kept.
+    # The read and the write of the file are one step under the lock the server's minute sweep takes to lift a key that stayed past [client] resume_hold_max_hours (inbox_holds.sweep_resume), so
+    # neither overwrites the other; a key found queued and not verified is held afresh and starts its age again, a key only kept keeps the age it has.
     hf = os.path.join(A, f"held-resume-{src}.txt")
-    keep = set(held_keys) | {k for k in lines_of(hf) if not deliverable(k)}
-    retired = sorted(k for k in keep if not has_row(k, fl))
-    dropped = set(retired)
-    held_keys = [k for k in held_keys if k not in dropped]
-    held = sum(n for k, n in held_by.items() if k not in dropped)
-    tmp = hf + ".tmp"; open(tmp, "w").write("".join(k + "\n" for k in sorted(keep - dropped))); os.replace(tmp, hf)
+    from stackshot.fleet import inbox_holds
+    with inbox_holds.locked():
+        keep = set(held_keys) | {k for k in lines_of(hf) if not deliverable(k)}
+        retired = sorted(k for k in keep if not has_row(k, fl))
+        dropped = set(retired)
+        held_keys = [k for k in held_keys if k not in dropped]
+        held = sum(n for k, n in held_by.items() if k not in dropped)
+        tmp = hf + ".tmp"; open(tmp, "w").write("".join(k + "\n" for k in sorted(keep - dropped))); os.replace(tmp, hf)
+        try: inbox_holds.resume_restart(src, held_keys)
+        except Exception as e: print(f"resume: ages of the held keys not recorded: {e.__class__.__name__}: {e}", file=sys.stderr)    # never stops a resume
     print(json.dumps({"ok": failed == 0, "delivered": delivered, "sessions": len(to), "held": held, "held_sessions": held_keys,
                       "retired_sessions": retired, "failed": failed, "failed_sessions": failed_keys, **extra}))
     return 0 if failed == 0 else 1
