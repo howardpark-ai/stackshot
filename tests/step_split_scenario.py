@@ -343,6 +343,41 @@ m_["next"] = "\n".join(x for x in m_["next"].splitlines() if x != lines[1])
 (T / "store/a/76.json").write_text(json.dumps(d_))
 r, fx = send(lambda: upd(76, step=LONG))
 check("2b the same long step sent again after one action was ticked done does not open that action again", not isinstance(r, ToolError) and ("done", lines[1]) in his(76) and lines[1] not in opened(76) and len(opened(76)) == 7, (r, st(76)))
+# a different long step that holds the same words as an action that was ticked done opens every one of its own actions
+LONG_C = ". ".join([ACTS_B[0], ACTS[1], ACTS_B[2], ACTS_B[3]]) + "."
+sum_c, lines_c = SS.split_step(LONG_C, LINE_ROOM)
+def settle(i, line, how):       # the line of his marked done or dropped on the item (as a tick or a drop leaves it), and gone from next
+    d_ = rd(i); m_ = d_["metadata"]
+    for e_ in m_["steps"]:
+        if e_["text"] == line: e_["status"], e_["by"], e_["at"] = how, "Oliver", now
+    m_["next"] = "\n".join(x for x in m_["next"].splitlines() if x != line)
+    (T / f"store/a/{i}.json").write_text(json.dumps(d_))
+item(80)
+upd(80, step=LONG)
+settle(80, lines[1], "done")
+r, fx = send(lambda: upd(80, step=LONG_C))
+check("2b a different long step that holds the same words as a done action opens all four of its own actions (the done line stays done, the record lists four keys, all four open)",
+      not isinstance(r, ToolError) and len(lines_c) == 4 and lines[1] in lines_c and sorted(opened(80)) == sorted([f"Oliver: {sum_c}", *lines_c]) and ("done", lines[1]) in his(80) and len(mt(80)["step_lines"]) == 4, (r, st(80), fx))
+check("2b …and the reply does not say a line was on the item already", not any(k == "step-split" and "already" in t for k, t in fx), fx)
+# a dropped action stays dropped when the same long step is sent again, as a done one stays done
+item(81)
+upd(81, step=LONG)
+settle(81, lines[2], "dropped")
+r, fx = send(lambda: upd(81, step=LONG))
+check("2b the same long step sent again does not open an action that was dropped", not isinstance(r, ToolError) and ("dropped", lines[2]) in his(81) and lines[2] not in opened(81) and len(opened(81)) == 7, (r, st(81), fx))
+# the stored summary sent with clear_next=true: every line is wiped, the record goes, and the reply does not say nothing changed
+item(82)
+upd(82, step=LONG)
+r, fx = send(lambda: upd(82, step=mt(82)["step"], clear_next=True))
+check("2b the stored summary sent with clear_next=true wipes the lines, the record of the split goes, and the reply does not say nothing was changed",
+      not isinstance(r, ToolError) and not any(x in mt(82).get("next", "").splitlines() for x in lines) and "step_lines" not in mt(82) and not any(k == "step-split" and "nothing was changed" in t for k, t in fx), (mt(82).get("next"), mt(82).get("step_lines"), fx))
+# a stored step_lines with a step and no state: any write that settles the state takes the record with the step
+item(83)
+upd(83, step=LONG)
+d_ = rd(83); d_["metadata"].pop("state", None)
+(T / "store/a/83.json").write_text(json.dumps(d_))
+r, fx = send(lambda: upd(83, next="home-agent: build it, then check it"))
+check("2b a write on an item whose step stands with no state stored takes the step away, and the record of its split with it", not isinstance(r, ToolError) and not mt(83).get("step") and "step_lines" not in mt(83), (r, mt(83)))
 # a record of a split with no step stored (an item as an older write left it) drops nothing
 item(77)
 upd(77, step=LONG)

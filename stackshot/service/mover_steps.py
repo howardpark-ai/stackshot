@@ -84,6 +84,13 @@ def _lines_follow_step(meta: dict[str, Any]) -> None:
 
 
 def _state_apply(meta: dict[str, Any], status: str, st: str, given: dict[str, str], touched: frozenset[str] = frozenset(), withdraw: bool = False) -> str:
+    """`_state_apply_core`, then the record of a split's lines follows the step: whichever way the state code left the step, a stored record with no step goes (one place, not one per return)."""
+    note = _state_apply_core(meta, status, st, given, touched, withdraw)
+    _lines_follow_step(meta)
+    return note
+
+
+def _state_apply_core(meta: dict[str, Any], status: str, st: str, given: dict[str, str], touched: frozenset[str] = frozenset(), withdraw: bool = False) -> str:
     """Keep the stored state `meta` holds true, or set the one a step or supplies stands on (the metadata as this write leaves it; the caller has run every other gate) → a note for the reply.
     No call names a state any more: an item stores alive or waiting directly, and a state word an older item still holds is only read (states.py). A step passed sets your-step and supplies blocked
     (`st`, from gates.gate_state_args), each needing what its state carries in the item as it is stored once this write is applied; the carry fields of the state it replaces go. A write that
@@ -104,7 +111,6 @@ def _state_apply(meta: dict[str, Any], status: str, st: str, given: dict[str, st
             return ""
         for k in ("step", *(["state"] if was == "your-step" else [])):
             meta.pop(k, None)
-        _lines_follow_step(meta)
         return "\n(step withdrawn: the item is no longer in his step" + ("; its state your-step is gone" if was == "your-step" else "") + ")"
     today = _pages.zone_now().date()
     new = st or was
@@ -112,7 +118,6 @@ def _state_apply(meta: dict[str, Any], status: str, st: str, given: dict[str, st
         for k in _states.CARRY_FIELDS:                    # a leftover field with no state to own it (the retired inputs' fields stay for the readers)
             if k not in _states.RETIRED_INPUT_FIELDS:
                 meta.pop(k, None)
-        _lines_follow_step(meta)
         return ""
     if not st and not given and not (set(touched) & set(_states.STANDS_ON[new])):
         return ""                                        # the state stays as stored; nothing this write touched can unseat it
@@ -123,7 +128,6 @@ def _state_apply(meta: dict[str, Any], status: str, st: str, given: dict[str, st
             meta.pop(k, None)
     for k, v in given.items():
         meta[k] = v
-    _lines_follow_step(meta)
     meta["state"] = new
     probs = _states.problems(meta, new, today, check_dates=bool(st) and new != was)
     if probs:
@@ -131,7 +135,6 @@ def _state_apply(meta: dict[str, Any], status: str, st: str, given: dict[str, st
             raise ToolError(f"Refused: {'step' if st == 'your-step' else 'supplies'} needs {'; '.join(probs)}. Add {'it' if len(probs) == 1 else 'them'} to this write")
         for k in ("state", *[x for x in own if x not in _states.RETIRED_INPUT_FIELDS]):      # party, chase, end and proof stay for the readers
             meta.pop(k, None)
-        _lines_follow_step(meta)
         return f"\n(stored state {new} dropped: the item no longer stands on {_holders._STATE_STANDS_ON[new] or 'what it was written for'}; it reads from its fields)"
     if new != was:
         return f"\n(state {was + ' → ' if was else ''}{new}" + (f"; dropped {', '.join(dropped)} of the old state" if dropped else "") + ")"
