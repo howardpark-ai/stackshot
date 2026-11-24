@@ -291,11 +291,13 @@ runs on every box.
                                 (--reason is one line, cut to [close] reason_max; the default says the script saw the condition gone), ticks his open step and says so in the history, and leaves the item open (ticking nothing) while another writer's step is open on it (a script may refresh with a line saying the condition cleared; the close completes once the others are done, or the agent that holds the item completes it). --sender is the script's own label (default client.py): one word of at most 60
                                 characters, never the person's name. The server files it through the create tool's own code (its subject and next gates, project page, GitHub mirror; the description's line count and length are the route's own pre-checks), and the row owes no page and tells no session. Exit 0 · 1 and the reason on stderr when
                                 refused (400 a check, 404 no such project, 409 no front agent to file under), not reached ([0]), misused (usage) or when the project record cannot be read right now (503, nothing filed).
-  client.py message <to> <text> --sender <label>
+  client.py message <to> <text> --sender <label> [--fyi | --question]
                                 for a script: send a message the way a session's `message` tool does. <to> = a session's
                                 name or id, or a page key (projects/<slug>), which reaches that project (its router rules
                                 it) and is recorded in its routing log; <text> = the message, or - to read it from stdin; <label> =
                                 the script's own name (nightly-job, size-watch). Exit 0 delivered or queued · 1 refused or failed.
+                                --question: a front agent asks the session it writes to something; only a reply to it is an
+                                answer. Not with --fyi, and not in the owner's own name.
                                 --release green --pr <PR url> (release.sh after a clean deploy): to a pilot project's page, the
                                 result is logged, not delivered, and ruled merged by `stackshot (auto)`; the open items anchored
                                 to the PR get a comment, and it stays on the routing page.
@@ -573,17 +575,19 @@ def held_ack(uuid: str, ids: list[str], timeout: float = 3.0) -> bool:
     return status == 200
 
 
-def message(to: str, text: str, sender: str, timeout: float = 130.0, release: str = "", pr: str = "", fyi: bool = False) -> tuple[int, str]:
+def message(to: str, text: str, sender: str, timeout: float = 130.0, release: str = "", pr: str = "", fyi: bool = False, question: bool = False) -> tuple[int, str]:
     """Send a message through the server with this machine's token → (HTTP status, the server's answer or its refusal).
     0 = the server could not be reached. The server delivers before it answers, which can take seconds. `release` = green
     (release.sh's result after a clean deploy; `pr` its PR's URL): the server logs it in the project's routing log and rules it
     itself instead of delivering it (it stays on the routing page); any other value is delivered as before. `fyi` = the message asks nothing: a background or a front agent gets it with its next turn
     and no turn of its own (a front agent needs no mark on the first line for it, as for a session's fyi). A front agent whose hook cannot fetch held lines does not get it:
-    the server refuses (status 400), so the answer is a failure, never a delivery."""
+    the server refuses (status 400), so the answer is a failure, never a delivery. `question` = a front agent asks the session it writes to something: only a reply to a message sent with it is an answer
+    (the server refuses it beside `fyi` and from the owner's own name)."""
     body = {"to": to, "text": text, "sender": sender}
     if release: body["release"] = release
     if pr: body["pr"] = pr
     if fyi: body["fyi"] = True
+    if question: body["question"] = True
     status, d = post("message", body, timeout)
     return status, (str(d.get("result") or d.get("error") or d) if isinstance(d, dict) else str(d))
 
@@ -1431,16 +1435,19 @@ def main(argv: list[str]) -> int:
         opt = {}
         fyi = "--fyi" in a
         a = [x for x in a if x != "--fyi"]
+        asks = "--question" in a
+        a = [x for x in a if x != "--question"]
         for f in ("--sender", "--release", "--pr"):
             opt[f] = a.pop(a.index(f) + 1) if f in a and a.index(f) + 1 < len(a) else ""
             a = [x for x in a if x != f]
         sender = opt["--sender"]
-        if len(a) != 2 or not sender or opt["--release"] not in ("", "green", "red"):
-            print("usage: client.py message <to> <text | -> --sender <label> [--fyi] [--release green|red --pr <PR url>]\n"
+        if len(a) != 2 or not sender or opt["--release"] not in ("", "green", "red") or (fyi and asks):
+            print("usage: client.py message <to> <text | -> --sender <label> [--fyi | --question] [--release green|red --pr <PR url>]\n"
                   "  --fyi: the message asks nothing of its receiver (news, a result). A background agent or a front agent gets it with its next turn, not a turn of its own, "
-                  "and a front agent needs no mark on the first line for it; a front agent whose hook cannot fetch held lines does not get it, and the call fails (exit 1); without --fyi a message to a front agent is delivered only when it is marked for the person; any other is refused naming the project's background agent."); return 1
+                  "and a front agent needs no mark on the first line for it; a front agent whose hook cannot fetch held lines does not get it, and the call fails (exit 1); without --fyi a message to a front agent is delivered only when it is marked for the person; any other is refused naming the project's background agent.\n"
+                  "  --question: a front agent asks the session it writes to something; only a reply to a message sent with it is an answer. Not with --fyi, and not in the owner's own name."); return 1
         text = sys.stdin.read() if a[1] == "-" else a[1]
-        status, body = message(a[0], text, sender, release=opt["--release"], pr=opt["--pr"], fyi=fyi)
+        status, body = message(a[0], text, sender, release=opt["--release"], pr=opt["--pr"], fyi=fyi, question=asks)
         print(body if status == 200 else f"[{status}] {body}"); return 0 if status == 200 else 1
     if cmd == "mint" and len(argv) > 2:
         try: path = mint(argv[2])

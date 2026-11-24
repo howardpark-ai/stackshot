@@ -214,7 +214,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         # No For you row for a failed release: release.sh's raw text told him nothing he could act on and stayed after the fix.
         # The builder gets the message below; he hears of a failure through the item it serves.
         try:
-            return 200, {"result": _messaging._message(to, text, sender, f"machine:{machine}", machine, **({"fyi": True} if body.get("fyi") is True else {}))}
+            return 200, {"result": _messaging._message(to, text, sender, f"machine:{machine}", machine, **({"fyi": True} if body.get("fyi") is True else {}), **({"question": True} if body.get("question") is True else {}))}
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "handover":      # a box's PostToolUse hook saw a SendMessage to a background agent that names an item (pages.py touch)
