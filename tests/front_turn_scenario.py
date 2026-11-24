@@ -8,12 +8,13 @@ data, no live store, no network, never the real `claude` (a fake script answers 
 Fixture: projects/alpha (a front agent, home-front, and a builder, team-back); items a30 to a40.
 
   0  the record: what the second case reads (`tell_him`), and what it does not (`observers`, a closed item, a background agent's listing); the request is written only with his words
-  1  staged through the router's real entry: marked notices for home-front: while he is talking with it (case 1), about an item he asked it to tell him about (case 2), and the rest: about a builder's item (goes to
-     the builder, unmarked), about no item (archived), about an item it only observes (archived: an old observer asked nothing); nothing is held for the front agent in any of them
+  1  staged through the router's real entry: marked messages for home-front that name an item of his: while he is talking with it (case 1), about an item he asked it to tell him about (case 2), and the rest: about a builder's item (goes to
+     the builder, unmarked), about an item it only observes (archived: an old observer asked nothing); one that names no item of his is routed like an unmarked message (to the builder); nothing is held for the front agent in any of them
   2  a notice on an item that waits on his decision: no presence and no request: archived; while he is there: a turn; the call's drop or merge of an anchor notice on such an item is still a turn while he is there, else archived
   3  what no longer escapes the gate: a hand-back, a fallback pass, an audit batch finding (a finding never needs him: his ask warrants it, and a split batch tells the other recipient), a wake of a decision item;
      what does: a background agent's notice, a standing watch of the config, a retry of a pass already delivered; a presence that cannot be read counts as none
-  4  the message tool: a message carrying the person's mark starts a turn only in the same two cases; otherwise it is refused (a script's too), naming the builder, and the refusal is in the message log
+  4  the message tool: a message carrying the person's mark must name an open item of his (needs hold decision, or his step: `front_turn.his_items`), else it is held for the agent's next turn and starts none (a script's too; his own is exempt; a read that fails
+     counts as none; refused with the hold off); naming one, it starts a turn only in the same two cases, otherwise it is refused, naming the builder, and the refusal is in the message log; the router's message of a session needs him by the same test
   5  the item notices' gate: a close of an item the agent has in `tell_him` is told with no presence, staged through the real close; an observer that asked nothing is not told
   6  the request: written only with his words (refused without `said`, with an unchecked entry, with a kind acted one), honored while he is away, keyed to its item (not another subject), taken back without words;
      the old `observers` start no turn
@@ -80,8 +81,9 @@ def part_front_turn():
     def item(i, status="open", mover="team-back", **meta):
         (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "A thing. It lives here. Done when done.", "status": status,
                                                           "metadata": {"owner": F, "mover": mover, "project": "projects/alpha", **meta}, "updated": 1.0, "state_updated": 1.0}))
-    item(30); item(31, tell_him=["home-front"]); item(32); item(33, needs=["decision"], mover="home-front"); item(34, needs=["decision"]); item(35, observers=["home-front"], mover="home-front"); item(36, observers=["team-back"])
+    item(30); item(31, tell_him=["home-front"]); item(32, needs=["decision"]); item(33, needs=["decision"], mover="home-front"); item(34, needs=["decision"]); item(35, observers=["home-front"], mover="home-front", needs=["decision"]); item(36, observers=["team-back"])      # a marked message names an open item of his (needs decision), else it is held / not a turn: a30, a36 and the rest are the builder's own work
     item(37, status="completed", tell_him=["home-front"]); item(38, mover="home-front"); item(39, mover="home-front", tell_him=["home-front"]); item(40, mover="home-front")
+    item(49, status="completed", needs=["decision"]); item(47, mover="Oliver", state="your-step", step="sign the vendor form"); item(48, mover="Oliver", hold=True, wake="2099-01-01")      # a step that is his, and a call parked with him as the one who picks it up
     item(41, tell_him=["home-other"])      # he asked another front agent about it, not home-front
     item(60, mover="home-peer", project="projects/solo", observers=["solo-front"], tell_him=["solo-front"]); item(61, mover="home-peer", project="projects/solo")
     item(62, mover="home-peer", project="projects/solo", observers=["solo-front"])
@@ -163,6 +165,29 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
           and not front_turn.asked("home-front", ["a41"]) and front_turn.asked("home-other", ["a41"]), None)
     check("0 …unless the notice is about the closed item's own close (`closed`): then a37's request matches", front_turn.asked("home-front", ["a37"], closed=True) and not front_turn.asked("home-front", ["a30"], closed=True), None)
 
+    check("0 his_items: an open item whose needs hold decision is his (a33, a32), whatever its mover; so is one whose step is his (a47: your-step, the model reads him as the mover) and a parked one he picks up (a48)",
+          front_turn.his_items(["a33"]) == ["a33"] and front_turn.his_items("a32, a47 a48") == ["a32", "a47", "a48"], (front_turn.his_items(["a33"]), front_turn.his_items("a32, a47 a48")))
+    check("0 …a builder's item (a30, a36) or the front agent's own work (a38, a40) is not his; neither is a closed one (a37, nor a49, which still carries needs: decision), one that does not exist or a subject that is no item id",
+          front_turn.his_items(["a30", "a36", "a38", "a40", "a37", "a49", "a999", "../a33", "33", "A33", ""]) == [] and front_turn.his_items([]) == [], front_turn.his_items(["a30", "a36", "a38", "a40", "a37", "a999"]))
+    _real_load_h, _real_model_of = front_turn._load, None
+    def _boom_load(g): raise OSError("the store cannot be read")
+    front_turn._load = _boom_load
+    try: unreadable = front_turn.his_items(["a33", "a47"])
+    finally: front_turn._load = _real_load_h
+    from stackshot.service import item_read as _item_read_h
+    _real_model_of = _item_read_h._model_of
+    def _boom_model(i): raise RuntimeError("the model cannot read it")
+    _item_read_h._model_of = _boom_model
+    try: unmodeled = front_turn.his_items(["a47", "a48"])
+    finally: _item_read_h._model_of = _real_model_of
+    check("0 …a read that fails (the store, the model) counts as no item of his: [] and no exception, so what depends on it fails closed", unreadable == [] and unmodeled == [] and front_turn.his_items(["a33"]) == ["a33"], (unreadable, unmodeled))
+    _item_read_h._model_of = _boom_model
+    try: plain_dec = front_turn.his_items(["a33", "a47", "a32"])
+    finally: _item_read_h._model_of = _real_model_of
+    check("0 …but a model that cannot be derived hides no plain needs: decision item (a33, a32 stay his; a47, whose step only the model reads, drops out)", plain_dec == ["a33", "a32"], plain_dec)
+    check("0 names_his: an item of his (a33) or one he asked this agent to tell him about (a31: a builder moves it, no decision, no step of his) is named; a builder's item (a30), one asked of another agent (a41) and a closed one (a37) are not",
+          front_turn.his_items(["a31"]) == [] and front_turn.names_his("home-front", ["a31"]) and front_turn.names_his("home-front", "a33") and not front_turn.names_his("home-front", ["a30"])
+          and not front_turn.names_his("home-front", ["a41"]) and not front_turn.names_his("home-front", ["a37"]) and not front_turn.names_his("home-front", []) and front_turn.names_his("home-other", ["a41"]), None)
     def routed(i): return next((l for l in lines() if l["id"] == i), {})
     def held_row(who="home-front"): return held.count(who)
 
@@ -170,7 +195,7 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     # case 1: he is talking with home-front now (his prompt in its pane a minute ago); the notice needs him
     stamp("home-front", 60)
     check("1 presence: his prompt in home-front's pane a minute ago puts it among the fronts he is talking with", telling.present_fronts() == ["home-front"] and front_turn.present("home-front"), telling.present_fronts())
-    n_c1 = stage(f"For home-front: {MARK} a30: the vendor wants a yes on the quote today")
+    n_c1 = stage(f"For home-front: {MARK} a33: the vendor wants a yes on the quote today")
     p0 = len(pushes()); h0 = held_row(); res = live.tick(); settle()
     check("1 case 1 (needs him, and he is talking with it now): a turn: delivered to home-front, marked for him, ruled passed", rule_of(n_c1["id"])["ruling"] == "passed" and rule_of(n_c1["id"])["ruled_to"] == "home-front"
           and len(pushes_to("home-front", n_c1["id"])) == 1 and pushes_to("home-front", n_c1["id"])[0][1].startswith(MARK) and held_row() == h0, (rule_of(n_c1["id"]), pushes()[p0:]))
@@ -191,9 +216,9 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
           not pushes_to("home-front", n_no["id"]) and held_row() == h0 and rn["ruling"] == "passed" and rn.get("ruled_to") == "team-back" and "not for the person" in (ln_no.get("reason") or "")
           and not [x for x in pushes_to("team-back", n_no["id"]) if x[1].startswith(MARK)], (rn, ln_no, pushes()[p0:]))
     rx = rule_of(n_none["id"]); ln_x = routed(n_none["id"])
-    check("1 neither case, about no item at all: nothing to send it to: ruled archived (a row of the digest), nothing delivered, nothing held for the front agent, and its live line is unmarked",
-          rx["ruling"] == "archived" and not pushes_to("home-front", n_none["id"]) and held_row() == h0 and ln_x.get("ruling") == "archived" and ln_x.get("marked") is False and not ln_x.get("held_for")
-          and "not delivered, not held" in (ln_x.get("reason") or ""), (rx, ln_x))
+    check("1 a marked message about no item at all names no open item of his: no turn, nothing held for the front agent; it is routed as an unmarked one is: to team-back, unmarked, and the reason says it names no open item of his",
+          rx["ruling"] == "passed" and rx.get("ruled_to") == "team-back" and not pushes_to("home-front", n_none["id"]) and held_row() == h0 and ln_x.get("marked") is False and not ln_x.get("held_for")
+          and "names no open item of his" in (ln_x.get("reason") or "") and not [x for x in pushes_to("team-back", n_none["id"]) if x[1].startswith(MARK)], (rx, ln_x))
     ro = rule_of(n_obs["id"])
     check("1 an item the agent only observes (a35: observers hear a close, they asked nothing) is no request: no turn, archived (its mover is the front agent itself: no builder)",
           ro["ruling"] == "archived" and not pushes_to("home-front", n_obs["id"]) and held_row() == h0, (ro, pushes()[p0:]))
@@ -344,15 +369,27 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     check("4 a message marked for him, to a front agent he is not talking with and did not ask about a32: no turn and nothing held: refused, naming team-back, whose item a32 is", out_n.startswith("REFUSED") and not push_n and hd_n == 0
           and "starts no turn" in out_n and "nothing is held" in out_n and "team-back" in out_n and "not talking with" in out_n, (out_n[:500], push_n, hd_n))
     check("4 …and the refused message is in the message log, its row saying it was not delivered", any("not delivered" in str(r.get("outcome")) and r.get("to") == "home-front" and "a32" in str(r.get("text")) for r in rows_n), rows_n)
+    h_n2 = held_row()
     out_n2, push_n2, hd_n2 = send("home-front", f"{MARK} the vendor wants a yes on the quote today")
-    check("4 …about no item: refused too, naming the project's background agent as the address", out_n2.startswith("REFUSED") and not push_n2 and hd_n2 == 0 and "team-back" in out_n2, (out_n2[:500], push_n2))
+    took_n2 = held.take("home-front")
+    check("4 …a marked message that names no open item of his is held for the agent's next turn and starts none: the sender's reply says why and what to do, the held store has its words, nothing is pushed",
+          out_n2.startswith("held for home-front's next turn") and not push_n2 and hd_n2 == h_n2 + 1 and "must name an open item of his" in out_n2 and "names none" in out_n2 and "starts no turn" in out_n2
+          and "plain id" in out_n2 and "the vendor wants a yes on the quote today" in took_n2, (out_n2[:600], push_n2, hd_n2, took_n2))
+    check("4 …and its row in the message log says it was held for the next turn", any(str(r.get("outcome")).startswith("held for its next turn") and r.get("to") == "home-front" and "vendor wants a yes" in str(r.get("text")) for r in log_rows()), log_rows()[-2:])
+    out_n3, push_n3, hd_n3 = send("home-front", f"{MARK} a30: the vendor wants a yes on the quote today")
+    took_n3 = held.take("home-front")
+    stamp("home-front", 60)
+    out_n4, push_n4, hd_n4 = send("home-front", f"{MARK} a30: the vendor wants a yes on the quote today")
+    took_n4 = held.take("home-front"); unstamp("home-front")
+    check("4 …a30 named, no turn at all, though he is talking with home-front: held, not delivered", out_n3.startswith("held for home-front's next turn") and not push_n3 and "a30" in took_n3
+          and out_n4.startswith("held for home-front's next turn") and not push_n4 and "a30" in took_n4, (out_n3[:300], push_n3, out_n4[:300], push_n4))
     out_o, push_o, hd_o = send("home-front", f"{MARK} a35: the vendor wants a yes on the quote today")
     check("4 …about a35, which home-front only observes: refused too (an old observer asked nothing)", out_o.startswith("REFUSED") and not push_o and hd_o == 0, (out_o[:300], push_o))
     out_f = _messaging._message("home-front", "a32: the PR is merged, nothing for you to do", "team-back", fyi=True); settle()
     took_f = held.take("home-front")
     check("4 …while an fyi message keeps its own path (held for the next turn, asks nothing, starts no turn)", " · fyi · " in took_f and "they asked nothing of you" in took_f, (out_f[:200], took_f))
     out_2, push_2, hd_2 = send("home-front", f"{MARK} a31: the vendor wants a yes on the quote today")
-    check("4 …the same about a31, which he asked home-front to tell him about: a turn: delivered, nothing held", not out_2.startswith("held") and not out_2.startswith("REFUSED") and len(push_2) == 1 and hd_2 == 0, (out_2[:300], push_2, hd_2))
+    check("4 …the same about a31, which he asked home-front to tell him about (it is no decision and no step of his, a builder moves it): it names an item the agent was asked about, so a turn is warranted: delivered, nothing held", not out_2.startswith("held") and not out_2.startswith("REFUSED") and len(push_2) == 1 and hd_2 == 0, (out_2[:300], push_2, hd_2))
     stamp("home-front", 60)
     out_1, push_1, hd_1 = send("home-front", f"{MARK} a32: the vendor wants a yes on the quote today")
     check("4 …and about a32 while he is talking with home-front: a turn too", not out_1.startswith("held") and not out_1.startswith("REFUSED") and len(push_1) == 1 and hd_1 == 0, (out_1[:300], push_1, hd_1))
@@ -363,6 +400,55 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     check("4 a script's marked message (no sender session) to the front agent is tested like any other, no exemption: refused, nothing delivered, nothing held", out_sc.startswith("REFUSED") and not push_sc and hd_sc == 0, (out_sc[:300], push_sc))
     out_b, push_b, hd_b = send("team-back", "a32: please look at the vendor quote", sender="home-peer")
     check("4 a message to a background agent is delivered as before", not out_b.startswith("held") and not out_b.startswith("REFUSED") and any(x[0] == "team-back" and "[stackshot message]" in x[1] for x in push_b), (out_b[:300], push_b))
+    # a marked message names an open item of his: a step that is his (a47), a parked call he picks up (a48); his own message and a script's; a read that fails; the hold switch
+    out_st, push_st, hd_st = send("home-front", f"{MARK} a47: sign the vendor form, please")
+    took_st = held.take("home-front")
+    check("4 a marked message naming a step that is his (a47, your-step) is a turn only when warranted like any other: with no presence and no ask it is refused (the item is his, no turn), not held", out_st.startswith("REFUSED") and "starts no turn" in out_st and not push_st and hd_st == 0 and took_st == "", (out_st[:400], push_st, hd_st))
+    stamp("home-front", 60)
+    out_st2, push_st2, hd_st2 = send("home-front", f"{MARK} a47: sign the vendor form, please")
+    out_pk, push_pk, hd_pk = send("home-front", f"{MARK} a48: the parked call is back with you")
+    check("4 …while he is talking with home-front a marked message naming a47, or a48 (parked, he picks it up), is delivered: a turn, nothing held", not out_st2.startswith(("held", "REFUSED")) and len(push_st2) == 1 and hd_st2 == 0
+          and not out_pk.startswith(("held", "REFUSED")) and len(push_pk) == 1 and hd_pk == 0, (out_st2[:300], push_st2, out_pk[:300], push_pk))
+    out_q, push_q, hd_q = send("home-front", f"{MARK} `a33` needs your yes on the quote")
+    took_q = held.take("home-front")
+    out_ds, push_ds, hd_ds = send("home-front", f"{MARK} a33: the vendor wants a yes on the quote today", sender="Oliver")
+    out_ow, push_ow, hd_ow = send("home-front", f"{MARK} a note for the page, no item", sender="Oliver")
+    check("4 …an id in backticks names no item, so a marked message that cites a33 only that way is held, even with him there", out_q.startswith("held for home-front's next turn") and not push_q and "needs your yes" in took_q, (out_q[:300], push_q, took_q))
+    check("4 …his own marked message is exempt: delivered with no item named", not out_ow.startswith(("held", "REFUSED")) and len(push_ow) == 1 and hd_ow == 0, (out_ow[:300], push_ow, hd_ow))
+    out_scn, push_scn, hd_scn = send("home-front", f"{MARK} the vendor wants a yes on the quote today", sender="deploy-watch", origin="box-a")
+    took_scn = held.take("home-front")
+    check("4 …a script's marked message that names no item is held like a session's (no exemption), nothing pushed", out_scn.startswith("held for home-front's next turn") and not push_scn and "the vendor wants a yes" in took_scn, (out_scn[:300], push_scn, took_scn))
+    _real_load_t = front_turn._load
+    front_turn._load = _boom_load
+    try:
+        out_re, push_re, hd_re = send("home-front", f"{MARK} a33: the vendor wants a yes on the quote today")
+    finally:
+        front_turn._load = _real_load_t
+    took_re = held.take("home-front")
+    check("4 …a read of the item that fails counts as no item of his: held, never delivered, though he is talking with the agent", out_re.startswith("held for home-front's next turn") and not push_re and "a33" in took_re, (out_re[:300], push_re, took_re))
+    _cfg.CFG["router"]["hold_notices"] = False
+    out_hs, push_hs, hd_hs = send("home-front", f"{MARK} the vendor wants a yes on the quote today")
+    _cfg.CFG["router"].pop("hold_notices")
+    check("4 …with the hold switched off nothing can hold it: refused in one line that names the rule, nothing held or pushed", out_hs.startswith("REFUSED") and "must name an open item of" in out_hs and "plain id" in out_hs and not push_hs and hd_hs == 0 and "\n" not in out_hs, (out_hs[:400], push_hs, hd_hs))
+    unstamp("home-front")
+
+    # the router: a message a session wrote needs him only by naming an open item of his; the model call's for_owner guess and a mark in its text are no source (any other kind of notice keeps them)
+    stamp("home-front", 30)
+    n_g1 = rec("the vendor quote is ready for a look", kind="message", who="home-peer (33333333…)"); p0 = len(pushes()); h0 = held_row(); res_g1 = act(n_g1, for_owner=True); settle()
+    n_g2 = rec(f"{MARK} the vendor wants a yes on the quote today", kind="message", who="home-peer (33333333…)"); res_g2 = act(n_g2, for_owner=False); settle()
+    n_g3 = rec("a33: the vendor wants a yes on the quote today", kind="message", who="home-peer (33333333…)"); res_g3 = act(n_g3, for_owner=False); settle()
+    n_g4 = rec("a47: sign the vendor form", kind="message", who="home-peer (33333333…)"); res_g4 = act(n_g4, for_owner=False); settle()
+    n_g5 = rec("the vendor quote is ready for a look", kind="board", who="home-peer (33333333…)"); res_g5 = act(n_g5, for_owner=True); settle()
+    unstamp("home-front")
+    check("4 router: a message with the model's for_owner guess and no item named starts no turn though he is talking with home-front: not delivered or held for it, passed to team-back unmarked, its reason names no open item of his",
+          res_g1["ruling"] == "passed" and res_g1["target"] == "team-back" and res_g1["marked"] is False and not pushes_to("home-front", n_g1["id"]) and "names no open item of his" in res_g1["reason"] and held_row() == h0, (res_g1, pushes()[p0:]))
+    check("4 router: …the mark in its text with no item named does not either", res_g2["target"] == "team-back" and res_g2["marked"] is False and not pushes_to("home-front", n_g2["id"]) and "names no open item of his" in res_g2["reason"], (res_g2, pushes()[p0:]))
+    check("4 router: …one naming an item of his (a33: decision; a47: his step) is a turn while he is there, marked", all(r["ruling"] == "passed" and r["target"] == "home-front" and r["marked"] is True for r in (res_g3, res_g4))
+          and len(pushes_to("home-front", n_g3["id"])) == 1 and len(pushes_to("home-front", n_g4["id"])) == 1, (res_g3, res_g4, pushes()[p0:]))
+    n_g6 = rec("a31: the vendor wants a yes on the quote today", kind="message", who="home-peer (33333333…)"); p6 = len(pushes()); res_g6 = act(n_g6, for_owner=False); settle()
+    check("4 router: …and one naming only an item he asked home-front to tell him about (a31: a builder moves it, no decision, no step of his) is a turn with no presence, marked, as before",
+          res_g6["ruling"] == "passed" and res_g6["target"] == "home-front" and res_g6["marked"] is True and len(pushes_to("home-front", n_g6["id"])) == 1, (res_g6, pushes()[p6:]))
+    check("4 router: …a notice that is no session's message (a board notice) keeps the ruling's for_owner as its signal: marked, a turn while he is there", res_g5["ruling"] == "passed" and res_g5["target"] == "home-front" and res_g5["marked"] is True and len(pushes_to("home-front", n_g5["id"])) == 1, (res_g5, pushes()[p0:]))
 
     # ================================================================ 5. the item notices' gate: a close of an item in its tell_him is told with no presence
     check("5 the gate: a close of a31 (home-front has it in its tell_him) is sent with no presence; of a30 (no ask) and of a35 (only observed) it is not told, since he is not there",
@@ -418,10 +504,10 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     # ================================================================ 7. nothing archived is invisible; a failing gate fails closed; the edges of the guards
     import datetime
     D0 = datetime.datetime.now(_cfg.tz()).replace(hour=12, minute=0, second=0, microsecond=0).timestamp()      # a time after [router] digest_hour, in the instance's timezone
-    ids_arch = [i["id"] for i in (n_none, n_obs, n_dec)]      # the ones the live tick archived
+    ids_arch = [i["id"] for i in (n_obs, n_dec)]      # the ones the live tick archived
     res_d = live.digest_tick(now=D0)
     lg_all = [l for l in lines() if l.get("kind") == "digest_logged" and l.get("group") == "main"]
-    lg_main = [l for l in lg_all if n_none["id"] in l["ids"]]      # the project's own line (a notice of another project's would be on its own)
+    lg_main = [l for l in lg_all if n_obs["id"] in l["ids"]]      # the project's own line (a notice of another project's would be on its own)
     check("7 a pass the gate archives is a row of the digest: every pass of this scenario the live tick archived is listed once, in the main group, and nothing is pushed to an agent for it",
           len(lg_main) == 1 and all(i in lg_main[0]["ids"] for i in ids_arch) and not [x for x in pushes() if "router digest" in x[1]], ([(l.get("project"), l["ids"]) for l in lg_all], lg_main and lg_main[0]["ids"], ids_arch, [x for x in pushes() if "router digest" in x[1]][:1]))
     check("7 …and a later tick the same day lists nothing again", live.digest_tick(now=D0 + 3600)["logged"] == 0 and len([l for l in lines() if l.get("kind") == "digest_logged" and l.get("group") == "main"]) == len(lg_all), None)
@@ -507,7 +593,7 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     n_s1 = rec(f"For home-front: {MARK} a32: please decide today whether to ship", who="team-back"); res_s1 = act(n_s1, rule="test"); settle()
     check("9 a marked notice the builder (the item's mover) wrote about its own item, he absent: archived (a row of the digest), not passed back to team-back, nothing for home-front, nothing held",
           res_s1["ruling"] == "archived" and not pushes_to("team-back", n_s1["id"]) and not pushes_to("home-front", n_s1["id"]) and held_row() == h0, (res_s1, pushes()[p0:]))
-    n_s2 = rec("a32: the vendor quote is ready for review", who="team-back"); res_s2 = act(n_s2, rule="test"); settle()
+    n_s2 = rec("a30: the vendor quote is ready for review", who="team-back"); res_s2 = act(n_s2, rule="test"); settle()
     check("9 …the same from the builder when it asks nothing: its plain word to its front agent is the channel between them (held for its next turn, a known exception, starts no turn): never passed back to team-back, no push to home-front",
           res_s2["ruling"] == "held" and not pushes_to("team-back", n_s2["id"]) and not pushes_to("home-front", n_s2["id"]), (res_s2, pushes()[p0:]))
     stamp("home-front", 30); p0 = len(pushes())

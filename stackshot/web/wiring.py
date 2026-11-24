@@ -183,6 +183,7 @@ def install_early(host: Any) -> None:
                            after_rule=_router_live_after,
                            front_answer=lambda target, who, text, nid="": _messaging.router_answer(target, who, text, nid),
                            front_turn=lambda target, subject, needs=True: _front_turn.warranted(target, subject, needs),
+                           his_items=lambda subject: _front_turn.his_items(subject),
                            want_background=lambda project, kind: _background_want.want_background(project, kind),
                            front_words=lambda target, who, text: _sibling_words.held_words(who, target, text),
                            front_fyi=lambda target, text, gid="", nid="", log=True, kind="fyi": _telling.front_fyi(      # the items the ruling names, then the items the text names (the message tool's own list)

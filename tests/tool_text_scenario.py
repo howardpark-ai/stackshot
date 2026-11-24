@@ -713,7 +713,7 @@ def part_examples():
     # The examples are called through the real function with the text's names swapped for the fixture's. The delivery itself (the hub, a pane) is not under test: a message to a
     # session that is not live is queued, which is a successful reply.
     msg = SNAP["message"]["description"][:CLI_CUT]
-    MSGS = [("ask a front agent", 'to="widgets-main", sender="my-x", text="[for the owner]\\nDecide whether the export ships on Friday; I would ship it."'),
+    MSGS = [("ask a front agent", 'to="widgets-main", sender="my-x", text="[for the owner]\\nboard#N: decide whether the export ships on Friday; I would ship it."'),
             ("a plain result to the project", 'to="projects/widgets", sender="my-x", text="PR 12 is live", fyi=true'),
             ("a question to a background agent (the id in backticks)", 'to="widgets-builder", sender="my-x", text="Does `board#N` need the export in the nightly run?"'),
             ("a hand-off of a done step (the id as a plain word)", 'to="widgets-builder", sender="my-x", text="board#N: the design is done, build the export"')]

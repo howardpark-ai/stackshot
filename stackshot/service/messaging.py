@@ -261,9 +261,10 @@ _LOG_TAIL_BYTES = 800_000      # and no further than this much of its end
 
 class _Hold:
     """What _gate_front returns for a message a front agent is not woken for and nobody is refused: the front gate files it for the agent's next turn (`why`: the reason, for the sender's reply)."""
-    def __init__(self, why: str, project: str = "") -> None:
+    def __init__(self, why: str, project: str = "", tail: str = "") -> None:
         self.why = why
         self.project = project
+        self.tail = tail        # what the sender's reply says to do next, when the generic line (send it again, marked) does not fit
 
 
 def _idset(who: str, idx: dict[str, dict[str, Any]]) -> set[str]:
@@ -374,7 +375,8 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     project (the router rules it) and never reaches this gate. In order:
       marked ([for <owner>] on its first non-empty line): it needs him; unless it says in a fixed phrase that nothing is needed from him (a done, taken or no-ask note): refused, one line;
         a background agent's marked message that only reports on a board item is written onto the item instead (_builder_report);
-        it is delivered, a turn, only when he is talking with that agent now or asked it to tell him about an item the text names (front_turn.warranted; his own message always; a script's is tested too); else it never reaches the agent, not even held: refused, naming the background agent that works a named item (else the project), and logged;
+        it names an open item of his (front_turn.his_items: needs hold decision, or the model reads the step as his; a read that fails counts as none) or one he asked it to tell him about (its tell_him), else it is held for the agent's next turn and starts none (_Hold, its reason says what to put on an item and name; refused when the hold is off); his own message is exempt, a script's is tested too;
+        with such an item named, it is delivered, a turn, only when he is talking with that agent now or asked it to tell him about an item the text names (front_turn.warranted); else it never reaches the agent, not even held: refused, naming the background agent that works a named item (else the project), and logged;
       unmarked, from the person himself or with the mark or needs: decision away from the first line: refused, the mark goes on the first line;
       unmarked, from a background agent, a done, taken or no-ask note (a fixed phrase, or a status report, reports.is_report), tested BEFORE the answer rule below, so a hand-back is never taken for an answer to a question: written onto the item it names (_builder_report),
         else refused, one line: write it on the board item or say nothing;
@@ -436,6 +438,14 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     rep = (_builder_report(name, text, sender, idx, roles) if sender.strip() else "")
     if rep:
         return rep
+    if not (sender.strip() and _model.is_owner(sender)) and not _names_his_item(name, text):      # the mark is explicit, and what it points at is an open item of his: with none named, nothing is his to act on, so no turn
+        if _held.enabled():
+            handing = (f"Name the item you are handing over (an open item of his) by its plain id, or put his step on an item (update: needs=decision with an ask, or mover={OWNER}) and name that. "
+                       if sname and _sibling_words.held_words(sender, name, text) else "")      # his quoted words are valid: the message is a hand-off, and the one thing missing is the item handed over
+            return _Hold(f"{_FOR_OWNER} must name an open item of his (a board item whose needs hold decision, or whose step is his), and this names none", project,
+                         handing or f"Put his step on an item (update: needs=decision with an ask, or mover={OWNER}), and name that item in the message by its plain id; a plain report goes on the item it concerns.")
+        raise ToolError(f"Refused: {name} is a front agent of {project}, and {_FOR_OWNER} must name an open item of {OWNER}'s (a board item whose needs hold decision, or whose step is his); this names none, so it starts no turn there. "
+                        "Put his step on an item (update: needs=decision with an ask) and name it by its plain id, or put what happened on the item it concerns.")
     if not (sender.strip() and _model.is_owner(sender)) and not _turn_warranted(name, text):      # the mark needs him, but a turn is warranted only when he is talking with this agent now or asked it to tell him about the subject
         if sname and _sibling_words.held_words(sender, name, text):      # a sibling front agent quoting his words (an Acked-by line, checked as the wake cap checks): held for the next turn, no turn started
             return _Hold(f"{sname} is a front agent of {project} and quotes {OWNER}'s words, so its message to {name} rides {name}'s next turn", project)
@@ -469,6 +479,15 @@ def _log_not_delivered(sender: str, to: str, text: str, outcome: str) -> None:
             f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender or "a script", "auth": "", "to": to, "outcome": outcome, "error": "", "text": _svcstore._shown_ids(text)}, ensure_ascii=False) + "\n")
     except Exception:  # noqa: BLE001
         pass
+
+
+def _names_his_item(name: str, text: str) -> bool:
+    """front_turn.names_his for the items a message to the front agent `name` names as plain words: an open item that is his to act on, or one he asked `name` to tell him about (its `tell_him`). False on any failure (it fails
+    closed: nothing named is his, so the marked message is held, never delivered on a guess)."""
+    try:
+        return _front_turn.names_his(name, _agent_names._item_refs(text))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _turn_warranted(name: str, text: str) -> bool:
@@ -611,13 +630,13 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         if fyi:
             raise ToolError("Refused: question=true and fyi=true together: a question asks something and an fyi asks nothing; send it with one of them")
     fyi = bool(fyi) and not _model.is_owner(sender)
-    hold_why = hold_project = ""            # why a message to a front agent that is no fyi is held for its next turn all the same (_gate_front's _Hold)
+    hold_why = hold_project = hold_tail = ""            # why a message to a front agent that is no fyi is held for its next turn all the same (_gate_front's _Hold)
     front_fyi = bool(fyi) and not re.match(_cfg.page_dirs_re() + "/", to) and bool(_front_fyi_name(to, raw, idx))      # an fyi for a front agent is not refused for its missing mark: the front gate below takes it
     if not re.match(_cfg.page_dirs_re() + "/", to):
         _want_for_front(to, idx, sender, auth, bool(origin))      # a want for a background agent when its front agent's project has none, whatever the gate or the fyi path then does with the message
         reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender)     # a front agent is given a turn only by what needs the person: the rest is refused, written onto an item, or held (_gate_front)
         if isinstance(reported, _Hold):
-            hold_why, hold_project, reported = reported.why, reported.project, None
+            hold_why, hold_project, hold_tail, reported = reported.why, reported.project, reported.tail, None
         if reported:
             return reported
     elif not origin:
@@ -710,7 +729,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
             if filed:
                 lead_ = "(fyi: it asks nothing, so it starts no turn)" if fyi else f"({hold_why}, so it starts no turn)"
                 return (f"held for {to}'s next turn {lead_} — it is handed over with the first turn {to} takes, whatever causes it, once, "
-                        f"oldest first; an open item it names gets a History line. If it does ask something of {OWNER}, send it again without fyi, its first line carrying {_FOR_OWNER}." + _cut_note(held_text, script=bool(origin)))
+                        f"oldest first; an open item it names gets a History line. " + (hold_tail or f"If it does ask something of {OWNER}, send it again without fyi, its first line carrying {_FOR_OWNER}.") + _cut_note(held_text, script=bool(origin)))
             if origin:          # a script reads the status, not the sentence: an fyi that could not be held is a failure to it, as it was before the gate took a script's fyi
                 raise ToolError(f"Refused: {to} is a front agent whose hook cannot fetch held lines, so an fyi cannot be held for its next turn and nothing was sent to its pane. "
                                 f"An open item the text names has it on its History, and the message log has it. Send it to the project's page key (to=projects/<slug>), which the router rules, "

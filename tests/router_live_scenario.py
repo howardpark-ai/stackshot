@@ -325,7 +325,7 @@ check("no agent and no hub: a notice that cannot be judged (twice) is passed to 
 check("…and it is ruled passed by the router (not left to a keeper) and not taken again", routing.read("projects/delta")[-1].get("ruling") == "passed" and routing.read("projects/delta")[-1].get("ruled_to") == "home-commons-main" and (live.tick() is not None and len(pushes()) == p0 + 1), routing.read("projects/delta")[-1])
 
 # ---- 7b. a pilot root with no agent of its own (projects/example-portal, ops/example-hub) is served by its hub's agents
-_messaging._message("projects/epsilon", "epsilon wants something", "home-beta"); n_e = routing.read("projects/epsilon")[-1]
+_messaging._message("projects/epsilon", "epsilon wants something, see a45", "home-beta"); n_e = routing.read("projects/epsilon")[-1]
 check("a component page (hub: projects/gamma) is held for the router like any pilot root", n_e["live"] is True and live.holds("projects/epsilon", "work-gamma") and live.agent_root("projects/epsilon", a.registry()) == "projects/gamma")
 check("…and its stand-in is its hub's", live.stand_in("projects/epsilon") == "work-gamma-main", live.stand_in("projects/epsilon"))
 fake("good", answer([(n_e["id"], "passed", "work-gamma-main", True)])); p0 = len(pushes()); live.tick(); settle()
@@ -637,12 +637,12 @@ _pil = _cfg.CFG.get("pilot"); _cfg.CFG["pilot"] = {**(_pil or {}), "projects": [
 check("a leftover [pilot] projects list is ignored: every page is the router's", live.is_live("projects/beta") and live.is_live("projects/eta") and a.pilot_root("projects/beta") == "projects/beta" and a.pilot_root("projects/nowhere") == "")
 _cfg.CFG["pilot"] = _pil if _pil is not None else {}
 cfg(live=True)
-p_e = len(pushes()); r_e = _messaging._message("projects/eta", "audit batch for the general page", "home-beta"); n_e = routing.read("projects/eta")
+p_e = len(pushes()); r_e = _messaging._message("projects/eta", "audit batch for the general page (a45 waits on his decision)", "home-beta"); n_e = routing.read("projects/eta")
 check("(d) a message to eta's page key is held for the router, not delivered to the keeper home-eta or to anyone", "router" in r_e, r_e)
 check("(d) …the routing line is live and records no keeper as the recipient; nothing was pushed", n_e and n_e[-1].get("live") is True and n_e[-1]["to"] != "home-eta" and len(pushes()) == p_e, (n_e[-1:] if n_e else n_e, pushes()[p_e:]))
 fake("good", answer([(n_e[-1]["id"], "passed", "home-eta-main", True)])); live.tick(); settle()
 check("(d) …the router passes it to the page's -main agent, marked, ruled by the router", [x[0] for x in pushes()[p_e:]] == ["home-eta-main"] and pushes()[p_e][1].startswith("[for Oliver]") and rule_of(n_e[-1]["id"], "projects/eta")["ruled_to"] == "home-eta-main", (pushes()[p_e:], routing.read("projects/eta")[-1]))
-p_e = len(pushes()); r_e2 = _messaging._message("projects/theta", "hub-keyed", "home-beta"); n_t = routing.read("projects/theta")[-1]
+p_e = len(pushes()); r_e2 = _messaging._message("projects/theta", "hub-keyed, see a45", "home-beta"); n_t = routing.read("projects/theta")[-1]
 fake("good", answer([(n_t["id"], "passed", "home-eta-main", True)])); live.tick(); settle()
 check("(d) a message to a sub-page (theta, hub eta) is held, then reaches the hub's -main agent", n_t.get("live") is True and [x[0] for x in pushes()[p_e:]] == ["home-eta-main"] and "Project: projects/eta" in calls()[-1]["stdin"], (pushes()[p_e:], calls()[-1]["stdin"][:300]))
 p_b = len(pushes()); _messaging._message("projects/beta", "beta has no agent and no hub", "home-eta-main"); n_b = routing.read("projects/beta")[-1]
@@ -1059,8 +1059,9 @@ finally:
 
 # ---- 16. a message whose first line is "For <agent>" reaches that agent, a front agent included (notices a1b2c6 and a1b2c7)
 cfg(live=True); c15 = len(calls())
-_messaging._message("projects/alpha", "For work-osprey-main: you were renamed and your brief is now ~/briefs/alpha-main.md. needs: decision on whether it stays.", "home-beta"); f15 = routing.read("projects/alpha")[-1]
-_messaging._message("projects/epsilon", "For work-gamma-main, from home-beta: the hand-over is ready. needs: decision on who takes it.", "home-beta"); e15 = routing.read("projects/epsilon")[-1]
+item(97, "projects/gamma", A, mover="work-gamma-main", needs=["decision"]); item(95, "projects/alpha", A, needs=["decision"])      # an item of his: a message to a front agent needs him only by naming one (the model call's guess and a mark in its text are no source)
+_messaging._message("projects/alpha", "For work-osprey-main: you were renamed and your brief is now ~/briefs/alpha-main.md. a95 needs a decision on whether it stays.", "home-beta"); f15 = routing.read("projects/alpha")[-1]
+_messaging._message("projects/epsilon", "For work-gamma-main, from home-beta: the hand-over is ready. a97 needs a decision on who takes it.", "home-beta"); e15 = routing.read("projects/epsilon")[-1]
 _messaging._message("projects/alpha", "For work-osprey-nobody: this agent is not on the page.", "home-beta"); u15 = routing.read("projects/alpha")[-1]
 fake("good", answer([(u15["id"], "merged", "", False)])); p15 = len(pushes()); live.tick(); settle(); g15 = pushes()[p15:]
 pf = [x for x in g15 if f15["id"] in x[1]]; pe15 = [x for x in g15 if e15["id"] in x[1]]
@@ -1070,6 +1071,40 @@ check("16: 'For <front agent>' is delivered to that front agent with the mark, r
 check("16: the reason line says it was addressed on its first line", rule_of(f15["id"])["reason"] == "addressed to work-osprey-main on its first line", rule_of(f15["id"]))
 check("16: a component page (hub: projects/gamma) reads its hub's agents: 'For work-gamma-main' reaches it", [x[0] for x in pe15] == ["work-gamma-main"] and rule_of(e15["id"], "projects/epsilon")["ruled_to"] == "work-gamma-main", (pe15, rule_of(e15["id"], "projects/epsilon")))
 check("16: a name the page does not list is not passed by the rule: the call takes it", any(u15["id"] in c["stdin"] for c in calls()[c15:]) and [x for x in lines() if x.get("id") == u15["id"]][-1]["rule"] != "for-agent", [x for x in lines() if x.get("id") == u15["id"]][-1:])
+# (a message naming exactly one item is routed by the code rule to that item's worker; two items go to the call, which is what these test) a message a session wrote needs him only by naming an open item of his: the call's for_owner guess and a mark in its text start no front agent's turn; one naming an item whose needs hold a decision, or whose step is his, does
+item(96, "projects/alpha", A, mover="Oliver", state="your-step", step="sign the vendor form")
+_messaging._message("projects/alpha", "the vendor quote is ready for a look [for Oliver]", "home-beta"); g1 = routing.read("projects/alpha")[-1]
+_messaging._message("projects/alpha", "a95 and a1 need your yes on the vendor quote", "home-beta"); g2 = routing.read("projects/alpha")[-1]
+_messaging._message("projects/alpha", "a96 and a1: the form is ready for you", "home-beta"); g3 = routing.read("projects/alpha")[-1]
+fake("good", answer([(g1["id"], "passed", "work-osprey-main", True), (g2["id"], "passed", "work-osprey-main", True), (g3["id"], "passed", "work-osprey-main", True)])); p16 = len(pushes()); live.tick(); settle(); g16 = pushes()[p16:]
+check("16b: a message with the model call's for_owner guess and a mark in its text but no item named starts no turn of the front agent: it goes to the builder, unmarked, and its reason says it names no open item of his",
+      not [x for x in g16 if g1["id"] in x[1] and x[0] == "work-osprey-main"] and [x[0] for x in g16 if g1["id"] in x[1]] == ["work-osprey-x"] and not [x for x in g16 if g1["id"] in x[1]][0][1].startswith(live._owner_mark())
+      and "names no open item of his" in rule_of(g1["id"])["reason"] and [x for x in lines() if x.get("id") == g1["id"]][-1]["marked"] is False, (g16, rule_of(g1["id"])))
+for g_, what_ in ((g2, "waits on his decision (a95)"), (g3, "whose step is his (a96)")):
+    check(f"16c: …one naming an item that {what_} is delivered to the front agent, marked", [x[0] for x in g16 if g_["id"] in x[1]] == ["work-osprey-main"] and [x for x in g16 if g_["id"] in x[1]][0][1].startswith(live._owner_mark()), ([(x[0], x[1][:200]) for x in g16 if g_["id"] in x[1]], rule_of(g_["id"])))
+cx16 = router.Context(); sess16 = {"kind": "message", "who": "home-beta (11111111…)"}
+check("16d: a notice that is no session's message (a board, anchor or page notice, a message with his words or a hand-back) keeps the decision-only reading: naming an item whose step is his and that waits on no decision (a96) is no need of his",
+      not [k for k in ("board", "anchor", "page") if live._must_see({"kind": k, "who": "home-beta (11111111…)"}, {}, "a96: the form is ready", cx16)] and live._must_see(sess16, {}, "[board] a96: the form is ready", cx16) is False
+      and live._must_see({"kind": "message", "who": "stackshot audit"}, {}, "a96: the form is ready", cx16) is False, [k for k in ("board", "anchor", "page") if live._must_see({"kind": k, "who": "home-beta (11111111…)"}, {}, "a96: the form is ready", cx16)])
+check("16e: …while a message a session wrote naming it is one; naming a decision item (a95) is a need for every kind", live._must_see(sess16, {}, "a96: the form is ready", cx16) is True
+      and all(live._must_see({**sess16, "kind": k}, {}, "a95: decide", cx16) is True for k in ("board", "anchor", "page", "message")))
+LN16 = {"item": "a95"}      # the ruling's `item` reads an id in backticks, in quotes and in "a95's" (router.py _TOKEN); the message tool's gate does not: for a session's message the ruling's item alone names nothing
+check("16f: a session's message whose ruling carries item=a95 but whose text writes it only in backticks or in quotes names no item of his",
+      all(live._item_is_his({}, LN16, t, cx16) is False and live._must_see(sess16, LN16, t, cx16) is False for t in ("see `a95` for context", 'see "a95" for context', "see 'a95' for context", "see `a95`'s form")),
+      [(t, live._item_is_his({}, LN16, t, cx16)) for t in ("see `a95` for context", 'see "a95" for context', "see 'a95' for context")])
+check("16g: …while the same ruling with the item written as a plain word names it; and a notice that is no session's message still takes the ruling's item",
+      all(live._item_is_his({}, LN16, t, cx16) is True for t in ("see a95 for context", "a95: decide", "see a95's form")) and live._must_see({**sess16, "kind": "board"}, LN16, "see `a95` for context", cx16) is True)
+item(94, "projects/alpha", A, mover="work-osprey-x")      # an open item that waits on no decision and whose step is not his: it is his only through his ask to the front agent (the item's tell_him)
+cx16h = router.Context(); _ft16 = live._HOOKS["front_turn"]
+try:
+    live._HOOKS["front_turn"] = lambda target, subject, needs=True: (not needs) and target == "work-osprey-main" and "a94" in [str(i) for i in subject]      # he asked work-osprey-main (and no other agent) to tell him about a94
+    check("16h: a session's message naming an item he asked THIS front agent to tell him about is still must-see (the target branch of _item_is_his), marked and delivered as a turn",
+          live._item_is_his({}, {}, "a94: the form is ready", cx16h, "work-osprey-main") is True and live._must_see(sess16, {}, "a94: the form is ready", cx16h, "work-osprey-main") is True, live._item_is_his({}, {}, "a94: the form is ready", cx16h, "work-osprey-main"))
+    check("16h: ...but not without a target, for another front agent, or when it writes the id in backticks (a94 is no decision item and its step is not his)",
+          live._item_is_his({}, {}, "a94: the form is ready", cx16h) is False and live._item_is_his({}, {}, "a94: the form is ready", cx16h, "work-osprey-docs") is False
+          and live._item_is_his({}, {"item": "a94"}, "see `a94` for context", cx16h, "work-osprey-main") is False and live._must_see(sess16, {}, "a94: the form is ready", cx16h, "work-osprey-docs") is False)
+finally:
+    live._HOOKS["front_turn"] = _ft16
 cfg()
 
 # ---- 17. the interpreter this process runs on is gone (its uv environment deleted under it): a delivery still goes out

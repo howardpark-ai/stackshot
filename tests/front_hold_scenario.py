@@ -2,13 +2,13 @@
 - fixture data, no live store, no network, no server.
 
 Covers (messaging._gate_front / answer_route / asked_by / router_answer, router_live._must_see / _front_route / _act, held.py the store):
-  1. The message tool, to a front agent: a marked message that needs the person is delivered; a message that is no answer to the agent's question is refused naming the project's background agent
+  1. The message tool, to a front agent: a marked message that names an open item of his (needs hold decision, or his step is his) is delivered while he is there; one that names none is held for the next turn and starts none (with the hold off: refused; his own message exempt; a read that fails counts as none); a message that is no answer to the agent's question is refused naming the project's background agent
      (a project with none: held for the next turn, no turn); a done, taken or no-action note is refused in one line, marked or not; the person's own unmarked message is refused without the mark.
   2. An answer to a question the front agent itself wrote to the sender: delivered unmarked while the person's last message to that agent is 30 minutes old or less, and at 31 minutes written onto
      the item it names, else held through the front gate. The signal for "was written to" is the message log (one row per message through the tool, `from` the agent, `to` the sender, within a day) and the row's `question` mark, set by question=true: a question mark in the text is no question.
      A background agent's hand-back (a done, taken or no-action note, a plain status report) is never an answer: it is written onto the item it names, else refused, whatever the front agent asked it before.
   3. fyi=true and a message to a project page or a background agent are as before.
-  4. The router: a pass to a front agent with no need of the person (no ruling for him, no words of his, no hand-back, no mark or needs: decision in the text, no named item waiting on a decision) goes to the
+  4. The router: a pass to a front agent with no need of the person (no ruling for him, no words of his, no hand-back, no mark or needs: decision in the text, no named item of his; for a message a session wrote the ruling's for_owner and the text's mark are no source: only a named item of his counts) goes to the
      project's background agent, unmarked, text intact, the routing log naming the new target; a project with none holds it through the front gate, unmarked, starting no turn; with each need signal it stays
      marked as before; an answer in the conversation reaches the agent unmarked, outside it is written onto the item or held; the fallback pass, an audit finding, an fyi and a page-owed notice are as before.
   5. A staged message of each kind under a temp store: nothing starts a turn at the held ones, the held store hands each over at the next turn once, two passes from one sender are two lines (the store folds
@@ -70,6 +70,8 @@ item(1); item(2, desc=DESC + '\n- Oliver: "ship it"'); item(3); item(4, mover="w
 item(7, owner=A); item(8, after=["a9"]); item(9)
 item(10, owner=A); item(11)
 item(12, owner=A, after=["a9"]); item(13, owner=A); item(14, owner=A, needs=["decision"]); item(15, owner=A, status="completed")
+item(17, owner=A, status="completed", needs=["decision"])      # a closed item that still carries the need: it is nobody's to act on
+item(16, owner=A, mover="Oliver", state="your-step", step="sign the export form")      # a step that is his, not a decision: the model reads him as its mover
 (T / "store/next-id").write_text("100")
 push_log = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(push_log)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
@@ -89,6 +91,7 @@ from stackshot.router import router as _router; from stackshot.router import rou
 from stackshot.web import server
 from stackshot.web.routes import client_api as _rt_client
 from stackshot.service import messaging as _messaging
+from stackshot.service import front_turn as _front_turn_mod
 from stackshot.service import store as _service_store
 from stackshot.fleet import clients as _clients
 from fastmcp.exceptions import ToolError
@@ -173,8 +176,47 @@ fresh(); out = msg(FRONT, "the PR is merged, the suites pass.", BACK); settle()
 check("1b: a done note from a session is refused in one line (write it on the board item or say nothing), nothing sent or held", out.startswith("Refused") and "takes no done, taken or no-action note" in out and "board item" in out and "\n" not in out and reach(A, n0) == [] and held.count(A) == 0, out)
 out = msg(FRONT, mark() + "\nFYI the build is done, no action needed.", BACK); settle()
 check("1c: …and so is a marked note that says nothing is needed from the person", out.startswith("Refused") and "marks only what Oliver has to do" in out and "board item" in out and held.count(A) == 0 and reach(A, n0) == [], out)
-fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", "home-beta"); settle(); unstamp(A)      # a marked message starts a turn only while he is talking with the agent (or asked it about the item): he is, here
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\na14: Decide whether the export ships on Friday.", "home-beta"); settle(); unstamp(A)      # a marked message starts a turn only while he is talking with the agent (or asked it about the item): he is, here
 check("1d: a marked message that needs the person is delivered, as before", out.startswith("delivered") and len(reach(A, n0)) == 1 and reach(A, n0)[0][1].count(mark()) >= 1 and held.count(A) == 0, (out, pushes()[n0:]))
+# the mark must name an open item of his: needs hold decision (a14), or the step is his (a16); else the message is held for the agent's next turn, whoever sent it and whoever is there
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", "home-beta"); settle()
+check("1d2: a marked message that names no item, though he is talking with the agent, is held for its next turn: no turn, the reply gives the reason and what to do, the words are in the held store",
+      out.startswith("held for work-osprey-main's next turn") and "must name an open item of his" in out and "names none" in out and "starts no turn" in out and "plain id" in out and "send it again" not in out
+      and reach(A, n0) == [] and held.count(A) == 1 and "Decide whether the export ships on Friday" in held.take(A, FRONT), (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na1: Decide whether the export ships on Friday.", "home-beta"); settle()
+check("1d3: …so is one that names only an item of an agent's own work (a1: no decision, no step of his), though he is there", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na15: Decide whether the export ships on Friday.", "home-beta"); settle()
+check("1d4: …and one that names a closed item (a15 needs a decision but is closed)", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na17: Decide whether the export ships on Friday.", "home-beta"); settle()
+check("1d4b: …and one that names a closed item that still carries needs: decision (a17): a closed item is no item of his", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na16: sign the export form when you have a minute", "home-beta"); settle()
+check("1d5: a marked message naming a step that is his (a16: your-step, no decision in needs) is a turn while he is talking with the agent", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, (out, pushes()[n0:]))
+unstamp(A); fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na16: sign the export form when you have a minute", "home-beta"); settle()
+check("1d6: …and with him away, and no ask of his, it is refused (the item is his, but no turn is warranted), not held", out.startswith("Refused") and "starts no turn" in out and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", "Oliver"); settle()
+check("1d7: his own marked message is exempt: delivered with no item named", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", "deploy-watch", origin=MACH); settle()
+check("1d8: a script's marked message that names no item is held like a session's: no exemption", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\n`a14` needs a decision on whether the export ships on Friday.", "home-beta"); settle()
+check("1d9: an id in backticks names no item (the tool text says to write it plain): held, though a14 waits on his decision", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
+_real_load_h = _front_turn_mod._load
+def _boom_load(g): raise OSError("the store cannot be read")
+_front_turn_mod._load = _boom_load
+fresh(); n0 = len(pushes())
+try: out = msg(FRONT, mark() + "\na14: Decide whether the export ships on Friday.", "home-beta"); settle()
+finally: _front_turn_mod._load = _real_load_h
+check("1d10: a read of the item that fails counts as no item of his: held, never delivered, though he is talking with the agent", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
+_real_his = _front_turn_mod.his_items
+def _boom_his(subject): raise RuntimeError("the reader itself failed")
+_front_turn_mod.his_items = _boom_his
+fresh(); n0 = len(pushes())
+try: out = msg(FRONT, mark() + "\na14: Decide whether the export ships on Friday.", "home-beta"); settle()
+finally: _front_turn_mod.his_items = _real_his
+check("1d10b: the reader raising outright is no item of his either: held, never delivered, though he is talking with the agent", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
+_cfg.CFG["router"]["hold_notices"] = False
+fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", "home-beta"); settle()
+check("1d11: with the hold switched off nothing can hold it: refused in one line, nothing held or pushed", out.startswith("Refused") and "must name an open item of" in out and "plain id" in out and "\n" not in out and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
+_cfg.CFG["router"].pop("hold_notices"); unstamp(A)
 fresh(); n0 = len(pushes()); out = msg(FRONT, "go on with the export", "Oliver"); settle()
 check("1e: the person's own unmarked message is refused without the mark, as before", out.startswith("Refused") and "first line" in out and reach(A, n0) == [] and held.count(A) == 0, out)
 out = msg(FRONT, "it now needs: decision", BACK); settle()
@@ -231,7 +273,7 @@ for name, kw in (("with no question flag, a question mark in its text all the sa
     check(f"2l2: the front agent's own message {name} is no question: the background agent's later note is held, not delivered", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [], (out, pushes()[n0:]))
 no_log(); fresh(); log_row("work-osprey-x", "work-osprey-docs", 5, text="please take the export task and tell me when it is done", question=False); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
 check("2m: a message from the project's builder that asks nothing makes the sender's later note no answer (the staged test of a plain note to the front agent)", out.startswith("Refused") and reach(A, n0) == [], (out, pushes()[n0:]))
-no_log(); log_row(FRONT, BACK, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", BACK); settle()
+no_log(); log_row(FRONT, BACK, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\na14: Decide whether the export ships on Friday.", BACK); settle()
 check("2k: an answer that needs the person is marked and delivered whatever the conversation", out.startswith("delivered") and len(reach(A, n0)) == 1 and mark() in reach(A, n0)[0][1], (out, pushes()[n0:]))
 
 # the mark makes a question, never a question mark: the message tool's question=true, written to the log row, is the one signal (asked_by)
@@ -367,6 +409,24 @@ for name, text, kw, mut in (("a ruling for the person", "the release is live", {
 # an audit batch finding to a front mover is a task, never a need of his: it starts no turn, even while he is talking with the agent, unless he asked the agent to tell him about the item
 fresh(); stamp(A, 5); n0 = len(pushes()); n = recp("the release is live"); res = act2(n, FRONT, rule="audit-owners"); unstamp(A)
 check("4b3: an audit batch finding to the front agent is archived, not delivered, not held, even while he is talking with it", res["ruling"] == "archived" and reach(A, n0) == [] and held.count(A) == 0, (res, pushes()[n0:]))
+# a message a session wrote needs him only by naming an open item of his: the model call's for_owner guess and a mark or needs: decision in its text are no source (a board or anchor notice keeps them, 4b)
+for name, text, kw in (("the model call's for_owner guess alone", "the release is live", {"for_owner": True}), ("his mark in the text, no item", "the release is live - " + mark() + " pick a or b", {}),
+                       ("needs: decision in the text, no item", "the release is live; it now needs: decision", {}), ("an item of an agent's own work (a1)", "the release is live, see a1", {"for_owner": True}),
+                       ("the ruling's item (a14, a decision item) alone, the text naming none", "the release is live", {"item": "a14"}), ("the ruling's item (a14) alone, the text writing it in backticks", "the release is live, see `a14`", {"item": "a14"})):
+    fresh(); stamp(A, 5); n0 = len(pushes()); n = recp(text, kind="message", who="home-beta (44444444…)"); res = act2(n, FRONT, **kw); unstamp(A)
+    check(f"4b4: a message with {name} starts no turn though he is talking with the agent: not delivered to it, not held for it, passed to the builder unmarked; the reason says it names no open item of his",
+          res["ruling"] == "passed" and res["target"] == BACK and res["marked"] is False and reach(A, n0) == [] and held.count(A) == 0 and len(reach(X, n0)) == 1 and not reach(X, n0)[0][1].startswith(mark())
+          and "names no open item of his" in res["reason"], (res, pushes()[n0:]))
+for name, text, kw in (("a decision item in the text", "the release is live, see a14", {}), ("a decision item in the text and as the ruling's item", "the release is live, see a14", {"item": "a14"}), ("a step that is his (a16), no decision", "the release is live, see a16", {}),
+                       ("a step that is his, with no for_owner guess and no mark", "a16 is waiting for you", {})):
+    fresh(); stamp(A, 5); n0 = len(pushes()); n = recp(text, kind="message", who="home-beta (44444444…)"); res = act2(n, FRONT, **kw); unstamp(A)
+    check(f"4b5: a message naming an open item of his ({name}) is marked and a turn while he is talking with the agent", res["ruling"] == "passed" and res["target"] == FRONT and res["marked"] is True and len(reach(A, n0)) == 1
+          and reach(A, n0)[0][1].startswith(mark()) and reach(X, n0) == [], (res, pushes()[n0:]))
+    fresh(); n0 = len(pushes()); n = recp(text, kind="message", who="home-beta (44444444…)"); res = act2(n, FRONT, **kw)
+    check(f"4b6: …and with him away, not delivered, not held ({name})", reach(A, n0) == [] and held.count(A) == 0 and res.get("held_for") != FRONT, (res, pushes()[n0:]))
+# a message that carries his own words keeps its source
+fresh(); stamp(A, 5); n0 = len(pushes()); n = {**recp("the release is live", kind="message", who="home-beta (44444444…)"), "words": "ship it"}; res = act2(n, FRONT); unstamp(A)
+check("4b7: a message that carries his words keeps them as its source: marked, a turn while he is there", res["ruling"] == "passed" and res["target"] == FRONT and res["marked"] is True and len(reach(A, n0)) == 1, (res, pushes()[n0:]))
 fresh(); n0 = len(pushes()); n = recp("the release is live", key="projects/solo"); res = act2(n, SOLO, key="projects/solo")
 check("4c: a project with no background agent has nobody to take a pass that asks nothing: archived (a row of the digest), not delivered, not held for the front agent",
       res["status"] == "ruled" and res["ruling"] == "archived" and res["marked"] is False and reach(E, n0) == [] and held.count(E) == 0
@@ -473,7 +533,7 @@ check("7c: a front agent's message to a front peer is held for the peer's next t
 fresh(); n0 = len(pushes()); n = recp("can you look at the export page?", kind="message", who="solo-main (77777777…)"); res = act2(n, FRONT)
 check("7d: …and the router holds a pass from a front agent to a front peer the same way: unmarked, no turn, not sent to the builder", res["ruling"] == "held" and res["marked"] is False and reach(X, n0) == [] and reach(A, n0) == []
       and held.count(A) == 1 and "look at the export page" in held.take(A, FRONT), (res, pushes()[n0:]))
-fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", SOLO); settle(); unstamp(A)
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\na14: Decide whether the export ships on Friday.", SOLO); settle(); unstamp(A)
 check("7e: …a front agent's marked message to a peer still needs the person and is delivered", out.startswith("delivered") and len(reach(A, n0)) == 1, out)
 # one choice of background agent, for the message tool and the router alike
 fresh(); n0 = len(pushes()); out = msg(COMP, "can you look at the export page?", "home-beta"); settle()
@@ -514,12 +574,46 @@ out = msg(SOLO, "a note first\n" + mark() + " pick a or b", "home-beta"); settle
 check("7p: the mark past the first line is refused for its place, not held", out.startswith("Refused") and "first line" in out and held.count(E) == 0, out)
 out = msg(SOLO, "a note first\nit now needs: decision", "home-beta"); settle()
 check("7q: needs: decision past the first line is refused for its place, not held", out.startswith("Refused") and "first line" in out and held.count(E) == 0, out)
-# the item a notice names, in every form the board shows it
+# the item a notice names, in every form the board shows it: a notice that is no session's message reads them all (and a decision only), a session's message the forms the message tool reads (and a step of his too)
 NUM = 14; cxx = _router.Context(); cxx.index[f"board#{NUM}"] = cxx.index["a14"]
 for name, text in (("an item page link", f"the release is live, see {BOARD}/items/a14"), ("a capital letter id", "the release is live, see A14"), ("a bare number", f"the release is live, see #{NUM}"),
                    ("a board id", f"the release is live, see board#{NUM}")):
-    check(f"7r: a pass naming a decision item by {name} stays marked", _live._item_waits_decision({}, {}, text, cxx) is True, text)
+    check(f"7r: a notice naming a decision item by {name} stays marked", _live._item_waits_decision({}, {}, text, cxx) is True, text)
 check("7s: …and one naming an item that waits on no decision does not", _live._item_waits_decision({}, {}, f"the release is live, see {BOARD}/items/a1 and A1 and #1", cxx) is False)
+check("7s2: a session's message reads only the forms the message tool reads: a link, a capital letter id and a board id name the item, a bare #14 (a pull request) does not",
+      all(_live._item_is_his({}, {}, t, cxx) is True for t in (f"the release is live, see {BOARD}/items/a14", "the release is live, see A14", f"the release is live, see board#{NUM}"))
+      and _live._item_is_his({}, {}, f"PR #{NUM} merged", cxx) is False and _live._item_is_his({}, {}, f"PR #{NUM} merged, see `a14` and \"a14\" and a14x", cxx) is False)
+LN14 = {"item": "a14"}      # the ruling's `item` reads an id in backticks, in quotes and in "a14's" (router.py _TOKEN), forms the message tool's reader ignores: for a session's message it must not name the item alone
+check("7s4: a session's message whose ruling carries item=a14 but whose text writes it only in backticks or in quotes names no item of his (the tool's own reader names none either)",
+      all(_live._item_is_his({}, LN14, t, cxx) is False and _live._named_items({}, LN14, t, cxx, True) == [] for t in ("see `a14` for context", 'see "a14" for context', "see 'a14' for context", "see `a14`'s form", "see \"a14\" and `a14`")),
+      [(t, _live._item_is_his({}, LN14, t, cxx)) for t in ("see `a14` for context", 'see "a14" for context', "see 'a14' for context")])
+check("7s5: …and with the item written as a plain word (a14's too: the tool's reader takes it) the ruling's item and the text agree: it is his; a notice that is no session's message still takes the ruling's item",
+      all(_live._item_is_his({}, LN14, t, cxx) is True for t in ("see a14 for context", "a14: the export", "see a14's form for context", "(a14) first")) and _live._item_waits_decision({}, LN14, "see `a14` for context", cxx) is True)
+from stackshot.service import agent_names as _agent_names_h
+same_ = [(t, sorted(x["gid"] for x in _live._named_items({}, {}, t, cxx, True)), sorted(_agent_names_h._item_refs(t))) for t in
+         ("see A14 and a16", f"PR #{NUM} merged", "see `a14`", "the \"a14\" suite", "a14x and xa14", f"see {BOARD}/items/a16", "a14's form", "(a14) and [a16]", "a14, a16: both", "merge group g7 split from g7")]
+check("7s3: …and it names the same items as the tool's own reader, text by text", all(r == g for _, r, g in same_), [x for x in same_ if x[1] != x[2]])
+_real_hook = _live._HOOKS["his_items"]
+def _boom_hook(ids): raise RuntimeError("the reader failed")
+_live._HOOKS["his_items"] = _boom_hook
+try: _boom_res = _live._item_is_his({}, {}, f"see {BOARD}/items/a14", cxx); _boom_other = _live._must_see({"kind": "board", "who": "home-beta (11111111…)"}, {}, "see A14", cxx)
+finally: _live._HOOKS["his_items"] = _real_hook
+check("7t: …and a reader that raises names nothing of his (fail closed); a notice that is no session's message does not read it at all (its decision test is the index's)", _boom_res is False and _boom_other is True and _live._item_is_his({}, {}, f"see {BOARD}/items/a14", cxx) is True, (_boom_res, _boom_other))
+# what is a session's message, and what a notice that is none keeps: a decision of his and nothing wider (an item whose step is his, a16, is no signal for it)
+SES = {"kind": "message", "who": "home-beta (11111111…)"}
+check("7u: a session's message naming an item whose step is his (a16, no decision) needs him; naming one that is nobody's of his (a1) does not", _live._must_see(SES, {}, "a16: sign the export form", cxx) is True and _live._must_see(SES, {}, "a1: sign the export form", cxx) is False)
+for kind_, extra_ in (("board", {}), ("anchor", {}), ("page", {}), ("message", {"words": True}), ("message", {"handback": True})):
+    check(f"7v: a {kind_} notice{' with ' + next(iter(extra_)) if extra_ else ''} naming an item whose step is his (a16) and no decision keeps its decision-only reading: not marked unless a signal of its own",
+          _live._must_see({**SES, "kind": kind_, **extra_}, {}, "a16: sign the export form", cxx) is bool(extra_), (kind_, extra_))
+check("7v2: …and his words or a hand-back on a message make it no session's message: marked though it names no item of his (a1)", all(_live._must_see({**SES, **x_}, {}, "a1: ok", cxx) is True for x_ in ({"words": True}, {"handback": True})) and _live._must_see(SES, {}, "a1: ok", cxx) is False)
+check("7w: …a notice that is no session's message naming a decision item (a14) is marked, wherever it names it from the index", all(_live._must_see({**SES, "kind": k_}, {}, "the form for a14", cxx) is True for k_ in ("board", "anchor", "page")))
+check("7x: the server's own `[board]` line and the audit's message are no session's message: a16 is no signal for them, a14 (a decision) is",
+      _live._must_see(SES, {}, "[board] a16 is back with you", cxx) is False and _live._must_see(SES, {}, "[board] a14 waits on you", cxx) is True
+      and _live._must_see({**SES, "who": _cfg.AUDIT_SENDER}, {}, "a16: sign the export form", cxx) is False and _live._must_see({**SES, "who": _cfg.AUDIT_SENDER}, {}, "a14: sign", cxx) is True)
+check("7y: his own message to a project page names no item and is still marked (his words, as at the message tool's gate); a session's is not", _live._must_see({**SES, "who": "Oliver (11111111…)"}, {}, "go on with the export", cxx) is False
+      and _live._must_see({**SES, "who": "Oliver (11111111…)"}, {}, f"{mark()} go on with the export", cxx) is True and _live._must_see(SES, {}, f"{mark()} go on with the export", cxx) is False)
+fresh(); stamp(A, 5); n0 = len(pushes()); n = recp(f"{mark()} pick a or b for the export", kind="message", who="Oliver (11111111…)"); res = act2(n, FRONT); settle(); unstamp(A)
+check("7z: …and the router passes his own marked message to a front agent as it did, marked, a turn while he is there", res["ruling"] == "passed" and res["target"] == FRONT and res["marked"] is True and len(reach(A, n0)) == 1, (res, pushes()[n0:]))
 
 # ---- 8. a front agent's marked message to a sibling front agent that quotes the owner's words (sibling_words): held for the sibling's next turn, not turned away to the builder
 TR, TRK = "projects/trio", "projects/trio"
@@ -530,8 +624,9 @@ stamp_now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%
     {"type": "user", "uuid": M_OK, "timestamp": stamp_now, "origin": {"kind": "human"}, "message": {"role": "user", "content": f"Oliver here: {QUOTE}, please"}},
     {"type": "user", "uuid": M_OLD, "timestamp": "2020-01-01T00:00:00.000Z", "origin": {"kind": "human"}, "message": {"role": "user", "content": "an old order of the second desk, long before the cap"}})) + "\n", encoding="utf-8")
 LINE = f'Acked-by: "{QUOTE}" (just now, session trio-main)'
-WORDS = mark() + "\nOliver told me to give you the export.\n" + LINE
-NOWORDS = mark() + "\nOliver told me to give you the export."
+WORDS = mark() + "\na14: Oliver told me to give you the export.\n" + LINE      # a14 waits on his decision: the message names an open item of his, so main's sibling rules are what decide it
+NOWORDS = mark() + "\na14: Oliver told me to give you the export."
+NOITEM = mark() + "\nOliver told me to give you the export.\n" + LINE      # his quoted words, but no item of his named: this branch's item rule holds it first
 tres = lambda who, text, to="trio-side": msg(to, text, who)
 def tlines(): return [x for x in pushes()]
 for u_ in (TS, TM, TX): unstamp(u_)
@@ -541,9 +636,9 @@ check("8a: a sibling front agent's marked message quoting his words is held for 
 check("8b: …the held line carries the message with his quoted words", QUOTE in str(held.take(TS, "trio-side")), "")
 fresh(); n0 = len(pushes()); out = tres("trio-main", NOWORDS); settle()
 check("8c: the same message with no quoted words is turned away as today: refused, nothing held, nothing sent", out.startswith("Refused") and held.count(TS) == 0 and reach(TS, n0) == [], out)
-fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\nOliver told me to give you the export.\n" + f'Acked-by: "{QUOTE} and more he never said" (just now, session trio-main)'); settle()
+fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\na14: Oliver told me to give you the export.\n" + f'Acked-by: "{QUOTE} and more he never said" (just now, session trio-main)'); settle()
 check("8d: words that are not in his message in the transcript are no words: refused as today", out.startswith("Refused") and held.count(TS) == 0, out)
-fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\nOliver told me to give you the export.\n" + 'Acked-by: "an old order of the second desk" (long ago, session trio-main)'); settle()
+fresh(); n0 = len(pushes()); out = tres("trio-main", mark() + "\na14: Oliver told me to give you the export.\n" + 'Acked-by: "an old order of the second desk" (long ago, session trio-main)'); settle()
 check("8e: his words older than the wake cap are no words: refused as today", out.startswith("Refused") and held.count(TS) == 0, out)
 fresh(); n0 = len(pushes()); out = tres("trio-x", WORDS); settle()
 check("8f: a background agent's message quoting words is unchanged: refused, nothing held", out.startswith("Refused") and held.count(TS) == 0 and reach(TS, n0) == [], out)
@@ -572,11 +667,41 @@ check("8p: the router's counterpart of 8i: when he is talking with the sibling n
 fresh(); n0 = len(pushes()); n = recp(WORDS, key=TRK, kind="message", who="trio-main (cccccccc…)"); res = act2(n, "trio-side", key=TRK)
 check("8q: …and the same pass right after, with him no longer there (no presence stamp): held, as in 8k", res["ruling"] == "held" and res["marked"] is False and reach(TS, n0) == [] and held.count(TS) == 1, (res, pushes()[n0:]))
 
+# the two rules composed (the item rule of this branch first, the sibling's quoted words after it)
+fresh(); no_log(); n0 = len(pushes()); out = tres("trio-main", WORDS); settle()
+check("8r: a sibling's message that quotes valid words and names an open item of his (a14) is held by the sibling rule: the reply names the quoted words as the reason, not the item rule", out.startswith("held for trio-side's next turn") and "quotes Oliver's words" in out
+      and "must name an open item" not in out and reach(TS, n0) == [] and reach(TX, n0) == [] and held.count(TS) == 1, out)
+fresh(); n0 = len(pushes()); out = tres("trio-main", NOITEM); settle()
+check("8s: the same message naming no item of his is held by the item rule: held for the next turn, no turn, nothing to the builder, and the reply tells the sender to put his step on an item and name it by its plain id", out.startswith("held for trio-side's next turn") and "must name an open item of his" in out
+      and "names none" in out and "plain id" in out and "send it again" not in out and reach(TS, n0) == [] and reach(TX, n0) == [] and held.count(TS) == 1 and QUOTE in str(held.take(TS, "trio-side")), out)
+check("8s2: …the quoted words being valid, the reply says to name the item being handed over (an open item of his) by its plain id, not only to put his step on an item", "Name the item you are handing over" in out and "an open item of his" in out and "plain id" in out, out)
+fresh(); n0 = len(pushes()); out = tres("trio-main", NOITEM.replace("\nOliver told", "\n`a14` Oliver told")); settle()
+check("8t: …also when the item is only written in backticks (that names none), the quoted words notwithstanding", out.startswith("held for trio-side's next turn") and "must name an open item of his" in out and held.count(TS) == 1, out)
+fresh(); n0 = len(pushes()); out = tres("trio-main", NOWORDS); settle()
+check("8u: naming an item of his without his words is main's refusal still (the item rule is met, no turn is warranted, no words hold it): refused, nothing held", out.startswith("Refused") and held.count(TS) == 0 and reach(TS, n0) == [], out)
+fresh(); stamp(TS, 5); n0 = len(pushes()); out = tres("trio-main", NOITEM); settle(); unstamp(TS)
+check("8v: a quote of his words with no item named is no turn even while he is talking with the sibling (the item rule holds first): held, nothing pushed", out.startswith("held for trio-side's next turn") and reach(TS, n0) == [] and held.count(TS) == 1, out)
+fresh(); n0 = len(pushes()); n = recp(WORDS, key=TRK, kind="message", who="trio-main (cccccccc…)"); res = act2(n, "trio-side", key=TRK)
+check("8w: the router, an item of his named: the sibling rule holds it (ruled held, unmarked, the reason is the quoted words and does not say no item of his was named), no turn, nothing to the builder", res["ruling"] == "held" and res["marked"] is False and "quotes the owner's words" in str(res.get("reason", "")) + str(res)
+      and "names no open item of his" not in str(res.get("reason", "")) and "names no open item of his" not in str(res)
+      and reach(TS, n0) == [] and reach(TX, n0) == [] and held.count(TS) == 1, (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = recp(NOITEM, key=TRK, kind="message", who="trio-main (cccccccc…)"); res = act2(n, "trio-side", key=TRK)
+check("8x: the router, no item of his named: the message needs nobody, so it is a front agent's word to a peer: held unmarked, no turn, nothing to the builder", res["ruling"] == "held" and res["marked"] is False and reach(TS, n0) == [] and reach(TX, n0) == [] and held.count(TS) == 1
+      and "quotes the owner's words" not in str(res), (res, pushes()[n0:]))
+fresh(); n0 = len(pushes()); n = recp(NOWORDS, key=TRK, kind="message", who="trio-main (cccccccc…)"); res = act2(n, "trio-side", key=TRK)
+check("8y: the router, an item of his named and no words: not held (to the builder or archived as before), the sibling gets nothing", res["ruling"] != "held" and held.count(TS) == 0 and reach(TS, n0) == [], (res, pushes()[n0:]))
+
 # ---- 6. the text
 docs = {p: (pathlib.Path(STACK) / "docs" / p).read_text() for p in ("router.md", "handoffs.md")}
 tt = (pathlib.Path(STACK) / "stackshot/web/tools/text/message.md").read_text()
 check("6a: docs/router.md says the router marks a pass only for a need of the person, and what goes where otherwise", "background agent" in docs["router.md"] and "_must_see" in docs["router.md"] and "is not marked" in docs["router.md"], "")
 check("6b: docs/handoffs.md says the router marks a pass to a front agent only for a real need of the person", "marked only for a real need" in docs["handoffs.md"], "")
+check("6d: the message tool's text says a marked message must name an open item of his and what happens when it names none", "an open item of his" in tt and "held for the agent's next turn and starts none" in tt, tt[:200])
+check("6e: docs/router.md says a session's message needs him only by naming an open item of his, by the message tool's reader", "names an open item of his" in docs["router.md"] and "`front_turn.his_items`" in docs["router.md"], "")
+check("6f: …that a notice that is no session's message keeps the decision-only reading, and that an item he asked the agent to tell him about counts", "does not widen to an item whose step is his" in docs["router.md"] and "(its `tell_him`)" in docs["router.md"]
+      and "or whose step is his. An audit" not in docs["router.md"], "")
+check("6g: the docs and the message tool's text say both rules: the item must be named (an open item of his), and a sibling front agent's quoted words (Acked-by) hold it for the next turn", "The two rules compose" in docs["handoffs.md"] and "Acked-by" in docs["handoffs.md"]
+      and "an open item of his" in tt and "Acked-by" in tt and "held for its next turn" in tt, "")
 check("6c: the message tool's text says what a front agent hears and where the rest goes", "background agent" in tt and "board item" in tt, tt[:200])
 
 fresh()

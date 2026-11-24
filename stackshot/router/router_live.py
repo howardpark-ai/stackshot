@@ -18,8 +18,8 @@ router.py's own code: its rules in code (code_rule), then one thin call per proj
 or was left out stays held, undelivered, for one more try at the next tick (router.py's attempts file); the second failure is a pass to the -main agent (fallback_line). Then it acts on each:
   passed   delivered to the target the way a pass is delivered (push.py, the pane inbox), then ruled with
            routing.rule(id, "passed", to=target, by="stackshot (router)"). The text opens with "[for <owner>]" only when the target
-           is a front agent and the pass carries a real need of the person (_must_see: the ruling's for_owner, his words, a hand-back, the mark or
-           needs: decision in the text, a named item that waits on a decision, an audit finding, the fallback pass): the mark means he must see it, and is never added to get a pass
+           is a front agent and the pass carries a real need of the person (_must_see: for a message a session wrote, only a named open item of his (one whose needs include a decision or whose step is his, or one he asked the agent to tell him about), written as a plain word; for any other notice the ruling's for_owner, his words, a hand-back, the mark or
+           needs: decision in the text, a named item whose needs include a decision, an audit finding, the fallback pass): the mark means he must see it, and is never added to get a pass
            through. Any other pass to a front agent (_front_route) is an answer to the agent's own question (delivered unmarked while the person is in
            that conversation, else written onto the item it names or held), or goes to the project's background agent, unmarked, or, in a project with none, is held
            through the front gate for the agent's next turn. A gate that cannot file it leaves the pass delivered, marked. A delivery to a background agent is unmarked.
@@ -70,7 +70,7 @@ delivered as a turn: _hold_kind is the one decision (held.decide), and the notic
 handed over by the UserPromptSubmit hook), ruled `held` in the routing log with the reason "held: asks nothing (kind)". The kinds the router sees:
 a notice recorded with `hold` (routing.record: a page-owed notice, a message its sender marked fyi) and a batch finding of the audit (rule
 audit-owners, kind audit). A notice that carries the owner's words ([for <owner>], needs: decision, a `words` or `handback` mark, for_owner on the
-ruling), or goes to a front agent, is passed as before, except an fyi and a page-owed notice for a front agent: they go through the front gate and are held for its next turn
+ruling; a message a session wrote counts only by naming an open item of his, and his own message is his words), or goes to a front agent, is passed as before, except an fyi and a page-owed notice for a front agent: they go through the front gate and are held for its next turn
 (_front_fyi, _front_page_owed; the router rules them `held` too), and a pass to a front agent with no need of the person (_front_route, above). [router] hold_notices = false turns the hold off.
 
 CAP. A ruling that cannot be written to the routing log (routing.rule raised) is tried again at the next ticks, three times in all.
@@ -115,7 +115,7 @@ _LOCK = threading.Lock()
 
 # What the server wires in (configure): the front-agent test (telling.front_keeper), the push, the call made after a ruling
 # (the release of a hold that waited on the notice's anchor, the board's republish), and the front gate for an fyi or a page-owed notice (telling.front_fyi). The defaults stand alone, for the tests and the CLI.
-_HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None, "front_fyi": None, "front_answer": None, "front_turn": None, "want_background": None, "front_words": None}      # front_answer: messaging.router_answer, what becomes of an answer to a front agent's own question; front_turn: service/front_turn.warranted, whether a notice may start a turn of a front agent; want_background: service/background_want.want_background, the record that a project with no background agent could use one
+_HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None, "front_fyi": None, "front_answer": None, "front_turn": None, "his_items": None, "want_background": None, "front_words": None}      # his_items: service/front_turn.his_items, which of the named items are open ones of his; front_answer: messaging.router_answer, what becomes of an answer to a front agent's own question; front_turn: service/front_turn.warranted, whether a notice may start a turn of a front agent; want_background: service/background_want.want_background, the record that a project with no background agent could use one; front_words: service/sibling_words.held_words, whether a sibling front agent's message quotes his words
 
 
 def configure(**kw: Any) -> None:
@@ -406,10 +406,30 @@ def _item_refs_loose(text: str) -> set[str]:
     return out
 
 
-def _named_items(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "_router.Context") -> list[dict[str, Any]]:
-    """The board items a notice names (the ruling's `item`, the notice's label, an id, a link or a bare number in its text), each once. [] when it names none or the board cannot be read."""
+def _item_refs_plain(text: str) -> set[str]:
+    """The items a session's message names as the message tool reads them (`model/ids`: an id written as a plain word, never one in code or quotes, never a bare #<number>, never a merge queue's group number), as
+    the board index spells them: the id as written and the store's id for it. No more forms than the tool's own reader (`service/agent_names._item_refs`), so a pull request's `#14` in prose names no item."""
+    from stackshot.model import ids as _ids
+    out: set[str] = set()
+    for m in _ids._ITEM_REF.finditer(_ids._without_mq_groups(_ids._plain_text(text))):
+        ref = m.group(1) or m.group(2) or ""
+        if m.group(2) and ref.isdigit():
+            ref = f"board#{ref}"
+        out.add(ref.lower())
+        try:
+            out.add(_ids._norm_id(ref))
+        except Exception:  # noqa: BLE001      # an id that names no item form: only the form as written is looked up
+            pass
+    return out
+
+
+def _named_items(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "_router.Context", plain: bool = False) -> list[dict[str, Any]]:
+    """The board items a notice names (the ruling's `item`, the notice's label, an id, a link or a bare number in its text), each once. `plain`: only the forms the message tool reads (_item_refs_plain), for a message a
+    session wrote. [] when it names none or the board cannot be read."""
     try:
-        refs = {str(ln.get("item") or "").strip(), *_item_refs_loose(body), *_item_refs_loose(str(n.get("label") or ""))} - {""}
+        read = _item_refs_plain if plain else _item_refs_loose
+        ruled = "" if plain else str(ln.get("item") or "").strip()      # the ruling's `item` reads an id in backticks and in quotes too (router.py _TOKEN): for a session's message only the plain reading counts, which names the same id
+        refs = {ruled, *read(body), *read(str(n.get("label") or ""))} - {""}
         out: dict[str, dict[str, Any]] = {}
         for r in sorted(refs):
             t = cx.index.get(r)
@@ -423,6 +443,18 @@ def _named_items(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "_router.
 def _item_waits_decision(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "_router.Context") -> bool:
     """Does an item the notice names (_named_items) wait on a decision of the person (its needs include `decision`)? False when it names none or the board cannot be read."""
     return any(_router.waits_decision(t) for t in _named_items(n, ln, body, cx))
+
+
+def _item_is_his(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "_router.Context", target: str = "") -> bool:
+    """Does a message a session wrote name (as plain words, _item_refs_plain) an open item that is his to act on: its needs include `decision`, or the model reads its step as his (service/front_turn.his_items, the
+    `his_items` hook)? Or, when `target` is the front agent it is passed to, an item he asked that agent to tell him about (its `tell_him`, the `front_turn` hook): the message tool's own test of what a marked message names.
+    False when it names none, the board cannot be read or no reader is wired: nothing is his on a guess."""
+    try:
+        ids = [str(t.get("gid") or "") for t in _named_items(n, ln, body, cx, True)]
+        fn = _HOOKS["his_items"]
+        return bool((fn and fn(ids)) or (target and ids and _front_warranted(target, ids)))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 _NO_TURN = "he is not talking with it now and has not asked it to tell him about this"
@@ -487,11 +519,24 @@ def _held_text(n: dict[str, Any], body: str) -> str:
     return one[:max(0, _held.LINE_MAX - len(note))].rstrip() + note
 
 
-def _must_see(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "_router.Context") -> bool:
-    """Does a pass to a front agent carry a real need of the person, so that it stays marked and starts a turn? The signals: the ruling's for_owner, his own words on the notice, a hand-back, the mark or
-    needs: decision in the text (_person_words, the held rule's own mark test), a named item whose needs include a decision, and an audit batch finding (rule audit-owners: a task for the agent, its own path).
-    Where the router has no signal the answer is no: a pass with none is not marked."""
-    return bool(_person_words(n, ln, body) or _held._owner_mark().search(body) or ln.get("rule") == "audit-owners" or _item_waits_decision(n, ln, body, cx))
+def _is_session_message(n: dict[str, Any], body: str) -> bool:
+    """Is this notice a message a session wrote: a message notice that carries neither his words nor a hand-back, is not the server's own line about an item, not the audit's and not his own (his message counts as his
+    words, as at the message tool's gate)? Only such a message needs him by naming an item of his."""
+    if str(n.get("kind") or "") != "message" or n.get("words") or n.get("handback") or str(body or "").lstrip().startswith("[board]") or _router._is_owner_name(_sender_name(n)):
+        return False
+    return not (_cfg.is_audit_sender(n.get("who")) or _cfg.is_audit_sender(str(n.get("who") or "").split(" (")[0].strip()))
+
+
+def _must_see(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "_router.Context", target: str = "") -> bool:
+    """Does a pass to a front agent carry a real need of the person, so that it stays marked and starts a turn? A message a session wrote needs him only when it names, as plain words, an open item of his (_item_is_his: its needs
+    include a decision, or its step is his; with `target`, one he asked that agent to tell him about too): the model call's for_owner guess and a mark or `needs: decision` in its text are no source. Every other notice keeps
+    its signals: the ruling's for_owner, his own words, a hand-back, the mark or needs: decision in the text (_person_words, the held rule's own mark test), a named item whose needs include a decision, and an audit batch
+    finding (rule audit-owners: a task for the agent, its own path). Where the router has no signal the answer is no: a pass with none is not marked."""
+    if ln.get("rule") == "audit-owners":
+        return True
+    if _is_session_message(n, body):
+        return _item_is_his(n, ln, body, cx, target)
+    return bool(_person_words(n, ln, body) or _held._owner_mark().search(body) or _item_waits_decision(n, ln, body, cx))
 
 
 def _want_background(n: dict[str, Any], root: str, ln: dict[str, Any], cx: "_router.Context") -> None:
@@ -527,7 +572,7 @@ def _front_route(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, 
         if str(n.get("hold") or "") in ("fyi", "page-owed") or ln.get("rule") == "audit-owners":
             return "", ""
         body = _body(n)
-        if _must_see(n, ln, body, cx):
+        if _must_see(n, ln, body, cx, target):
             if (n.get("kind") == "message" and _HOOKS["front_words"] and _HOOKS["front_turn"] and (sib_ := _sender_name(n)) and sib_.casefold() != str(target).casefold()
                     and not _front_warranted(target, [str(t.get("gid") or "") for t in _named_items(n, ln, body, cx)], True) and _HOOKS["front_words"](target, sib_, body)):      # a sibling front agent's message that quotes his words (sibling_words), while no turn is warranted (he is not talking with the target, he did not ask it about the item: the test _front_turn_gate makes): held, not diverted; a warranted one is delivered as a turn, as before
                 return "hold", f"{sib_} is a front agent of the project and quotes the owner's words, so its message to {target} rides {target}'s next turn"
@@ -801,14 +846,15 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
         unmarked_front = False         # a pass to a front agent that goes unmarked: an answer to the agent's own question, while the person is in that conversation
         if ruling == "passed" and prior.get("status") != "delivered" and base.get("source") != "fallback":      # a pass to a front agent with no need of the person: not marked, not a turn for him
             act_, arg_ = _front_route(n, ln, target, aroot, cx)
+            nameless = "the message names no open item of his; " if _is_session_message(n, _body(n)) and act_ in ("background", "archived", "hold") and not _must_see(n, ln, _body(n), cx, target) else ""      # a session's message reaches here with no item of his named, except a sibling's quoted words (held with one named): the reason line says so only for the first
             if act_ == "deliver":
                 unmarked_front = True
                 base["reason"] = reason = f"{reason} (an answer to {target}'s own question, and the person is in that conversation)"
             elif act_ == "background":
-                base.update(target=arg_, reason=f"{reason} (not for the person: passed to the project's background agent {arg_}, not to {target})")
+                base.update(target=arg_, reason=f"{reason} (not for the person: {nameless}passed to the project's background agent {arg_}, not to {target})")
                 target, reason = arg_, base["reason"]
             elif act_ == "archived":      # no background agent to take it, and nothing here needs him: logged, a row of the digest, not held for the front agent
-                reason = f"archived: front agent {target}, {arg_} (not delivered, not held)"
+                reason = f"archived: front agent {target}, {nameless}{arg_} (not delivered, not held)"
                 ruling, target = "archived", ""
                 base.update(ruling=ruling, target="", reason=reason, marked=False, front_gate=True)
             elif act_ in ("items", "hold"):
@@ -818,7 +864,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                 if verdict_ == "fyi":
                     held_for = target
                     ruling, target = "held", ""
-                    reason = f"written onto the item it names, not delivered: an answer to {held_for}'s question, and the person is not in that conversation" if act_ == "items" else f"held: front agent, {arg_} (rides its next turn, starts none)"
+                    reason = f"written onto the item it names, not delivered: an answer to {held_for}'s question, and the person is not in that conversation" if act_ == "items" else f"held: front agent, {nameless}{arg_} (rides its next turn, starts none)"
                     base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold="fyi")
                 # a gate that could not file it (the agent's hook cannot fetch held lines, or the gate failed): delivered as before, marked, never dropped for want of a place to hold it
         if ruling == "passed" and prior.get("status") != "delivered":      # a pass that asks nothing of a background agent is held for its next turn

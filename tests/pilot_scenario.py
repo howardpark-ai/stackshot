@@ -2863,6 +2863,7 @@ def why(fn):
     try: fn(); return ""
     except ToolError as e: return str(e)
 n0 = len(wait_push(0)); MK = _wt_text._FOR_OWNER
+(T / "store/a/900.json").write_text(json.dumps({"id": "900", "subject": "[home] vendor choice", "description": "A thing. It lives here. Done when done.", "status": "open", "metadata": {"owner": A, "then": A, "needs": "decision", "project": "projects/alpha"}, "updated": 1.0}))      # an item that waits on his decision: a marked message must name one
 r = why(lambda: _messaging._message("work-osprey-main", "can you look at the vendor thread?", "home-gamma"))
 check("an unmarked message to a front agent is refused, naming the mark and the project's background agent",
       r == f"Refused: work-osprey-main is a front agent of projects/alpha, a session {_core_instance.OWNER} talks to, and this message is not for {_core_instance.OWNER}, so it goes to the project's background agent, "
@@ -2880,7 +2881,7 @@ finally:
 check("a front agent's unmarked message to a peer front agent is refused as any is, naming the project's background agent",
       r.startswith("Refused: work-osprey-main is a front agent of projects/alpha") and "background agent, work-osprey-x" in r, r)
 check("…a sender that is no front agent (the refusal above) is told no such form", "For work-osprey-main," not in why(lambda: _messaging._message("work-osprey-main", "can you look?", "home-beta")))
-res = _messaging._message("work-osprey-main", f"\n  \n{MK} vendor A or B? the keeper recommends A", "home-beta"); pp = wait_push(n0 + 1)
+res = _messaging._message("work-osprey-main", f"\n  \n{MK} a900: vendor A or B? the keeper recommends A", "home-beta"); pp = wait_push(n0 + 1)
 check("a marked message (first non-empty line) to a front agent is delivered", res.startswith("delivered") and pp[-1][0] == "work-osprey-main" and MK in pp[-1][1], pp[-1:])
 res = _messaging._message("work-osprey-x", "sweep the inbox", "home-beta"); pp = wait_push(n0 + 2)
 check("a message to a background agent is unaffected", res.startswith("delivered") and pp[-1][0] == "work-osprey-x", pp[-1:])
@@ -2893,18 +2894,18 @@ n0 = len(wait_push(0)); NOT = _messaging._NOT_FOR_OWNER
 check("gate: the phrase list is short and fixed", NOT == (f"nothing needed from {_core_instance.OWNER}", f"nothing for {_core_instance.OWNER}", "no action needed", f"no action for {_core_instance.OWNER}",
                                                        "no decision needed", "nothing to decide", "FYI", "for your information", "for the record", "no reply needed"), NOT)
 for ph in NOT:
-    r = why(lambda: _messaging._message("work-osprey-main", f"{MK} the build is live. {ph}, the rest is on the page.", "home-beta"))
+    r = why(lambda: _messaging._message("work-osprey-main", f"{MK} a900: the build is live. {ph}, the rest is on the page.", "home-beta"))
     check(f"gate: a marked message to a front agent that says {ph!r} is refused, naming the phrase and the project",
           r.startswith(f"Refused: work-osprey-main is a front agent of projects/alpha and {MK} marks only what {_core_instance.OWNER} has to do; "
                        f"this says nothing is needed from him ({ph!r}): write it on the board item it concerns, or say nothing."), r)
-r = why(lambda: _messaging._message(A, f"{MK} the release\nis live: NO ACTION NEEDED.", "home-beta"))
+r = why(lambda: _messaging._message(A, f"{MK} a900\nthe release is live: NO ACTION NEEDED.", "home-beta"))
 check("gate: …without regard to case, on a later line, and by its transcript id", r.startswith("Refused: work-osprey-main is a front agent") and "('NO ACTION NEEDED')" in r, r)
 check("gate: nothing was delivered by the refusals", len(wait_push(0)) == n0)
-res = _messaging._message("work-osprey-main", f"{MK} Decide: is the satisfying option A or B? · Recommend: A · Stakes: a month · By: Fri", "home-beta"); pp = wait_push(n0 + 1)
+res = _messaging._message("work-osprey-main", f"{MK} a900 Decide: is the satisfying option A or B? · Recommend: A · Stakes: a month · By: Fri", "home-beta"); pp = wait_push(n0 + 1)
 check("gate: a marked message with something to decide is delivered (a phrase inside a word does not count)", res.startswith("delivered") and pp[-1][0] == "work-osprey-main", (res, pp[-1:]))
 res = _messaging._message("work-osprey-x", "the build is live, no action needed", "home-beta"); pp = wait_push(n0 + 2)
 check("gate: the same words to a background agent are delivered", res.startswith("delivered") and pp[-1][0] == "work-osprey-x", pp[-1:])
-res = _messaging._message("work-osprey", f"{MK} FYI the build is live, nothing for {_core_instance.OWNER}", "home-beta"); pp = wait_push(n0 + 3)
+res = _messaging._message("work-osprey", f"{MK} a900 FYI the build is live, nothing for {_core_instance.OWNER}", "home-beta"); pp = wait_push(n0 + 3)
 check("gate: …and to the keeper, marked or not", res.startswith("delivered") and pp[-1][0] == "work-osprey", pp[-1:])
 (T / "store/projects.json").write_text(_reg_a)
 
@@ -3093,7 +3094,7 @@ check("auto-name: a handover by another session tells the owner once per item, t
       len(ow) == 2 and all(re.match(r"\[stackshot\] [a-z]\d+ \(mover work-osprey-main, a front agent\) now names work-osprey-x in its needs, handed over by home-beta: \[home\] auto-name test", m[1]) for m in ow)
       and "its keeper work-osprey-bld has been told instead" in res, (ow, res))
 h4 = mk46(); n0 = len(wait_push(0))
-_messaging._message("work-osprey-main", f"{MK} {h4} needs your look", "home-beta"); _messaging._message("work-osprey", f"{h4} for the keeper", "home-beta"); _messaging._message("projects/alpha", f"{h4} for the project", "home-beta"); wait_push(n0 + 3)
+_messaging._message("work-osprey-main", f"{MK} a900 {h4} needs your look", "home-beta"); _messaging._message("work-osprey", f"{h4} for the keeper", "home-beta"); _messaging._message("projects/alpha", f"{h4} for the project", "home-beta"); wait_push(n0 + 3)
 _messaging._message("work-osprey-x", f"{h4} failed its run", "cron", auth="machine:testbox", origin="testbox"); wait_push(n0 + 4); time.sleep(0.3)
 check("auto-name: a message to a front agent, to the keeper or to the project page names nobody; nor does a script's message", "needs" not in rd(h4)["metadata"], rd(h4)["metadata"])
 d1 = mk46(owner="home-beta"); n0 = len(wait_push(0))
