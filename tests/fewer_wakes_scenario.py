@@ -401,7 +401,7 @@ check("2x4: the owner's logins are [github] owner_login (or the token's login th
 check("…and the test left the config as it found it", ("github" in _cfg.CFG) == had_gh and (not had_gh or _cfg.CFG["github"].get("owner_login") == was_ol))
 ln = _router.code_rule(KEY, bs("v7", "github:example-owner/stackshot#4", who="osprey-x"), KEY, cx, [])
 check("2y negative: a notice the builder wrote itself is not passed back to it (the sender-is-target test): the keeper's route as before", ln and ln["rule"] == "anchor-item" and ln["target"] == "osprey-main", ln)
-ln = _router.code_rule(KEY, bs("v8", "github:example-owner/stackshot#4", ts=1000.0), KEY, cx, [bs("v8p", "github:example-owner/stackshot#4", ts=900.0)])
+ln = _router.code_rule(KEY, bs("v8", "github:example-owner/stackshot#4", ts=1000.0), KEY, cx, [bs("v8p", "github:example-owner/stackshot#4", ts=900.0, ruling="passed")])
 check("2z: an identical build-side notice within the hour is dropped, not passed twice", ln and ln["rule"] == "repeat" and ln["ruling"] == "dropped", ln)
 ln = _router.code_rule(KEY, bs("v9", "github:example-owner/stackshot#4"), KEY, cx_nb, [])
 check("2z2 negative: a project with no builder passes it to the contact front agent (the item's keeper) as a held line", ln and ln["rule"] == "gate-person" and ln["target"] == "osprey-main", ln)

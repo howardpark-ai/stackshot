@@ -12,7 +12,7 @@ overridden into a hold for the background agent (the `person` kind), as is a fai
 person's; a project with no background agent holds a person's message for its contact front agent and starts no turn (and never archives it when the gate cannot
 file it); a picture of a person is held; one event on an anchor two pages hold is ruled once, for the page it is about (the call is shown both pages' agents), and
 the other follows, also when it arrives after the first was ruled; an item waiting on an anchor wakes on any ruling of a person's notice (also through the route
-tool), not on a trivial one; the rubric no longer says "when unsure, archive it".
+tool), not on a trivial one; the rubric no longer says "when unsure, archive it"; the held store never drops a person's line and a retired agent is never the target; a repeat is dropped only after a passed or held one; a failing fallback never escapes the tick; the near-misses of a bare laugh (one laugh letter, a thumbs down, a bare mention, a burst) reach an agent.
 
     tests/run-suite router_gate        → exit 0 / 1"""
 import json, os, re, sys, time, pathlib, logging, types
@@ -126,18 +126,40 @@ def tick(r=runner):
 
 # ---- 0. units: the trivial reader (jamo as code points, no literal), the structured machine/person reading
 J = lambda *cp: "".join(chr(c) for c in cp)
-check("trivial: a run of laughter jamo, haha, lol, ok, thanks, +1, an emoji and a :shortcode: are trivial; each is read for its kind",
-      [router.trivial_kind(t) for t in (J(0x314B, 0x314B, 0x314B), "haha", "lol", "ok", "Thanks!", "+1", "\U0001F44D", ":thumbsup:", "<@U123> ok", "...")] == ["laughter", "laughter", "laughter", "ack", "ack", "ack", "emoji", "emoji", "ack", "empty"],
-      [router.trivial_kind(t) for t in (J(0x314B, 0x314B, 0x314B), "haha", "lol", "ok", "Thanks!", "+1", "\U0001F44D", ":thumbsup:", "<@U123> ok", "...")])
+UP, DOWN, CHECK, ARROW, HEART, VS16, CLAP, PARTY, LAUGHING, TONE = (chr(c) for c in (0x1F44D, 0x1F44E, 0x2714, 0x2192, 0x2764, 0xFE0F, 0x1F44F, 0x1F389, 0x1F602, 0x1F3FD))
+LAUGH_K, LAUGH_H, YES_JAMO = 0x314B, 0x314E, 0x3147      # the two laugh letters, and a jamo that is a word (yes)
+KINDS_OF = lambda *ts: [router.trivial_kind(t) for t in ts]
+check("trivial: a run of laughter letters, haha, lol, ok, thanks, +1, a thumbs up and a :shortcode: are trivial; each is read for its kind",
+      KINDS_OF(J(LAUGH_K, LAUGH_K, LAUGH_K), "haha", "lol", "ok", "Thanks!", "+1", UP, ":thumbsup:", "<@U123> ok") == ["laughter", "laughter", "laughter", "ack", "ack", "ack", "emoji", "emoji", "ack"],
+      KINDS_OF(J(LAUGH_K, LAUGH_K, LAUGH_K), "haha", "lol", "ok", "Thanks!", "+1", UP, ":thumbsup:", "<@U123> ok"))
 check("trivial: more than a laugh is not (a question, the owner's name, an ack with a reason, a decision word, a plain yes, no text at all)",
-      not any(router.trivial_kind(t) for t in ("ok?", "ok Oliver", "ok but the vendor moved the date", "haha, that decision is mine", "yes", "", "   ")), [router.trivial_kind(t) for t in ("ok?", "ok Oliver", "ok but the vendor moved the date", "yes", "")])
+      not any(router.trivial_kind(t) for t in ("ok?", "ok Oliver", "ok but the vendor moved the date", "haha, that decision is mine", "yes", "", "   ")), KINDS_OF("ok?", "ok Oliver", "ok but the vendor moved the date", "yes", ""))
+check("trivial (F3a): only the two laugh letters are laughter, mixed or repeated; a jamo that is a word, or one laugh letter alone, is not",
+      KINDS_OF(J(LAUGH_K, LAUGH_H, LAUGH_K), J(LAUGH_H, LAUGH_H), J(LAUGH_K, LAUGH_K) + "~", "ok " + J(LAUGH_K)) == ["laughter"] * 4
+      and not any(KINDS_OF(J(YES_JAMO, YES_JAMO), J(YES_JAMO), J(LAUGH_K), J(0x3161, 0x3161), J(LAUGH_K, YES_JAMO))), KINDS_OF(J(LAUGH_K, LAUGH_H, LAUGH_K), J(YES_JAMO, YES_JAMO), J(LAUGH_K), J(LAUGH_K, YES_JAMO)))
+check("trivial (F3b): the positive reactions (laughing, clapping, a heart with its selector, a thumbs up with a skin tone, a party, :tada:, :+1:) are emoji; a thumbs down, a check mark, an arrow, a lone + or ~ and an unknown :x: are not",
+      KINDS_OF(LAUGHING, CLAP, HEART + VS16, UP + TONE, PARTY + PARTY, ":tada:", ":+1:", UP + " ok", "ok~") == ["emoji", "emoji", "emoji", "emoji", "emoji", "emoji", "emoji", "ack", "ack"]
+      and not any(KINDS_OF(DOWN, ":-1:", CHECK, ARROW, "+", "~", "...", ":x:", UP + DOWN, "ok " + CHECK, "ok " + DOWN)), (KINDS_OF(LAUGHING, CLAP, HEART + VS16, UP + TONE, ":tada:", ":+1:"), KINDS_OF(DOWN, ":-1:", CHECK, ARROW, "+", "~", "...", ":x:")))
+check("trivial (F3c, F3d): a bare mention of someone is a ping, not trivial; a lone ok or okay still is", not any(KINDS_OF("<@U0123ABCD>", "<@U0123ABCD> <@U0456EFGH>", "@dana")) and KINDS_OF("ok", "okay", "Okay.") == ["ack"] * 3, KINDS_OF("<@U0123ABCD>", "ok", "okay"))
+check("trivial (F4): a notice that folds two or more messages is never trivial (the gist shows only the last one); one folded message is read as it is",
+      router.trivial_of({"text": "1 more, the last: thx"}) == "ack" and router.trivial_of({"text": "2 more, the last: thx"}) == "" and router.trivial_of({"text": "5 more, earlier: ok | a plan | the last: ok"}) == ""
+      and router.trivial_of({"text": "thx"}) == "ack" and router.folded({"text": "3 more, the last: x"}) == 3 and router.folded({"text": "3 more, please"}) == 0, None)
 N = lambda **kw: {"id": "x1", "ts": time.time(), "kind": "anchor", "anchor": "slack:C1", "who": "Dana", "text": "the file is ready", **kw}
 check("reading: a notice with no author kind is a person's; a bot flag, a bot login, a CI result, a routine PR event and the owner's own document edit are machine news; a mixed burst is a person's",
-      router.person_notice(N()) and not router.machine_reason(N()) and router.machine_reason(N(bot=True)) and router.machine_reason(N(who="ci-app[bot]")) and router.machine_reason(N(who="CI", etype="ci_failed", anchor="github:o/r#1"))
+      router.person_notice(N()) and not router.machine_reason(N()) and router.machine_reason(N(bot=True)) and router.machine_reason(N(who="ci-app[bot]", anchor="github:o/r#1", etype="comment")) and router.machine_reason(N(who="CI", etype="ci_failed", anchor="github:o/r#1"))
       and router.machine_reason(N(anchor="github:o/r#1", etype="pr_merged")) and router.machine_reason(N(anchor="drive:F", who="Oliver")) and not router.machine_reason(N(anchor="drive:F", who="Dana"))
       and not router.machine_reason(N(anchor="github:o/r#1", etype="ci_passed+comment", who="ci-app[bot], Dana")) and router.person_notice(N(anchor="github:o/r#1", etype="ci_passed+comment", who="ci-app[bot], Dana"))
       and not router.person_notice(N(who=router.SYSTEM_SENDERS[0])) and not router.person_notice(N(anchor="drive:F", who="Dana")), None)
-
+check("reading (F1): a sender whose display name looks like a bot login or CI is a person on a mail, Slack or Notion notice; a GitHub bot login is a machine, and so is any source's own bot flag",
+      all(router.person_notice(N(anchor=a_, who=w_)) and not router.machine_reason(N(anchor=a_, who=w_)) for a_ in ("gmail:" + "d" * 16, "slack:C1", "notion:abc") for w_ in ("deploy[bot]", "CI", "ci-app[bot], other[bot]"))
+      and router.machine_reason(N(anchor="github:o/r#1", who="ci-app[bot]", etype="comment")) and router.machine_reason(N(anchor="gmail:" + "d" * 16, who="Dana", bot=True))
+      and router.machine_reason(N(anchor="github:o/r#1", who="CI")) and not router.is_ci_notice(N(anchor="slack:C1", who="CI")) and router.is_ci_notice(N(anchor="github:o/r#1", who="CI")), None)
+check("reading (F2): the listener's own notice (the system sender, no event kind) is neither person nor machine; a person of that display name with an event kind is a person",
+      router.system_notice(N(who=router.SYSTEM_SENDERS[0])) and not router.person_notice(N(who=router.SYSTEM_SENDERS[0])) and not router.machine_reason(N(who=router.SYSTEM_SENDERS[0]))
+      and not router.system_notice(N(who=router.SYSTEM_SENDERS[0], ekind="slack")) and router.person_notice(N(who=router.SYSTEM_SENDERS[0], ekind="slack")) and not router.machine_reason(N(who=router.SYSTEM_SENDERS[0], ekind="slack", bot=False)), None)
+check("reading: person_wakes is true for a person's message and false for machine news, a laugh and a burst of one is read as it is",
+      router.person_wakes(N()) and not router.person_wakes(N(bot=True)) and not router.person_wakes(N(anchor="github:o/r#1", etype="pr_merged", who="someone")) and not router.person_wakes(N(text="ok"))
+      and router.person_wakes(N(text="2 more, the last: ok")), None)
 # ---- 1. the anchor listener records the marks the gate reads
 n_rec = one("slack:C0000000001", "Dana", "a thread reply from a bot", bot=True, thread=True)
 n_plain = one("slack:C0000000001", "Dana", "a plain post")
@@ -189,7 +211,7 @@ check("a reply in a Slack thread goes to the page's background agent", lv(p_thre
 
 # ---- 4. a trivial message is read and recorded, never passed, never a turn
 CALLS.clear(); PUSHED.clear()
-triv = [one("slack:C0000000001", "Dana", t, thread=th) for t, th in ((J(0x314B, 0x314B, 0x314B), False), ("haha", True), ("ok", False), (":thumbsup:", False), ("\U0001F44D", True))]
+triv = [one("slack:C0000000001", "Dana", t, thread=th) for t, th in ((J(0x314B, 0x314B, 0x314B), False), ("haha", True), ("ok", False), (":thumbsup:", False), (UP, True))]
 not_triv = [one("slack:C0000000001", "Dana", t) for t in ("ok?", "ok, Oliver", "ok but the vendor moved the date")]
 res, pushed, ncalls = tick()
 check("trivial messages are archived by the gate's rule with the reason 'trivial: <kind>', passed to nobody, no call", all(lv(x["id"])["rule"] == "gate-trivial" and lv(x["id"])["ruling"] == "archived" and lv(x["id"])["reason"].startswith("trivial: ") for x in triv), [lv(x["id"]) for x in triv])
@@ -300,6 +322,134 @@ res, pushed, ncalls = tick()
 r2 = one("slack:C0000000001", "Dana", "can you check the invoice numbers for March before the call?")
 res, pushed2, ncalls2 = tick()
 check("an identical repeat of a message within the hour is dropped as a repeat of the first, which was passed", lv(r1["id"])["ruling"] == "passed" and lv(r2["id"])["rule"] == "repeat" and lv(r2["id"])["ruling"] == "dropped" and pushed2 == [], (lv(r1["id"]), lv(r2["id"])))
+# ---- 11. the held store never drops a person's line (age, count, sweep of an untouched file), and a gone agent is never the target
+HK, OLD = "zz-person-hold-test", time.time() - 30 * 86400
+held.add(HK, "closed", "an old closed line", nid="c-old", now=OLD)
+held.add(HK, "person", "a person's words, kept", nid="p-old", now=OLD, whole=True)
+os.utime(held._file(held.key_of(HK)), (OLD, OLD))
+held.add("zz-other-session", "closed", "something else")      # any add sweeps the folder: this file has been untouched for 30 days
+left = [r["text"] for r in held._read(held._file(held.key_of(HK)))]
+check("held (F5): the sweep of a session's untouched file keeps a person's line and drops the expired others", left == ["a person's words, kept"], left)
+for i in range(held.KEEP_MAX + 5): held.add(HK, "closed", f"c{i}", now=time.time())
+rows_ = held._read(held._file(held.key_of(HK)))
+check("held (F5): the count limit never drops a person's line, however old it is: KEEP_MAX other lines and the person's one stay", len(rows_) == held.KEEP_MAX + 1 and rows_[0]["kind"] == "person" and sum(r["kind"] == "closed" for r in rows_) == held.KEEP_MAX, [r["kind"] for r in rows_][:3])
+shown_, ids_ = held.lease(HK, shown_max=held.KEEP_MAX + 5)
+check("held (F5): a person's line past KEEP_DAYS is handed over, not dropped by the age limit", "a person's words, kept" in shown_, shown_[:200])
+held.ack(HK, ids=ids_)
+while held.count(HK): held.take(HK)
+held.take("zz-other-session")
+from stackshot.fleet import sessions_registry as _sr
+DEAD = set(); _sr_retired = _sr.retired; _sr.retired = lambda x: str(x) in DEAD
+try:
+    CALLS.clear(); PUSHED.clear(); FYI.clear(); PLAN.clear(); held.take("al-builder"); held.take("al-docs")
+    DEAD.update({"al-builder"})
+    d1 = one("slack:C0000000001", "Dana", "the quarterly figures moved again")                 # nothing places it: the call (it says archived)
+    d2 = one("gmail:" + "a" * 16, "Dana", "can you resend the file?", kind="gmail")            # an item whose mover is the retired builder
+    res, pushed, ncalls = tick()
+    check("a retired background agent is never the target (F5): an unplaceable person's message is held for the page's next live background agent, one placed on an item its mover was is passed to that agent too",
+          lv(d1["id"])["ruling"] == "held" and lv(d1["id"])["held_for"] == "al-docs" and lv(d2["id"])["target"] == "al-docs" and rec(d2["id"])["ruling"] in ("held", "passed") and not any(x[0] == "al-builder" for x in pushed), (lv(d1["id"]), lv(d2["id"])))
+    held.take("al-docs"); PUSHED.clear(); FYI.clear()
+    DEAD.update({"al-docs"})
+    d3 = one("slack:C0000000001", "Dana", "the quarterly figures moved a third time")
+    d4 = one("gmail:" + "a" * 16, "Dana", "can you resend the file once more?", kind="gmail")
+    res, pushed, ncalls = tick()
+    check("with every background agent gone (F5) the person's message is held for the page's contact front agent as a held line that starts no turn, never archived",
+          all(lv(x["id"])["ruling"] == "held" and lv(x["id"])["held_for"] == "al-main" and rec(x["id"])["ruling"] == "held" and ("al-main", "person", x["id"]) in FYI for x in (d3, d4)) and not any(x[0] == "al-main" for x in pushed), ([lv(x["id"]) for x in (d3, d4)], FYI))
+finally:
+    _sr.retired = _sr_retired; DEAD.clear()
+held.take("al-builder"); held.take("al-docs")
+sr_dir = T / "links"; (sr_dir / "a").mkdir(parents=True)
+(sr_dir / "a" / "session-registry.json").write_text(json.dumps({"schema": 1, "machine": "a", "sessions": {
+    UU(201): {"id": UU(201), "name": "gone-agent", "aliases": ["old-name"], "state": "retired"}, UU(202): {"id": UU(202), "name": "live-agent", "aliases": ["gone-agent"], "state": "live"},
+    UU(203): {"id": UU(203), "name": "other-gone", "state": "retired"}}}))
+_sr_dir = _sr._dir; _sr._dir = lambda: sr_dir; _sr.reset()
+try: got_ = (_sr.retired("other-gone"), _sr.retired("old-name"), _sr.retired("gone-agent"), _sr.retired("live-agent"), _sr.retired("nobody-knows"), _sr.retired(""))
+finally: _sr._dir = _sr_dir; _sr.reset()
+check("the session registry reads a name as retired only when it holds rows for it and none is live (a name a live row also carries, an unknown name and no name are not)", got_ == (True, True, False, False, False, False), got_)
+
+# ---- 12. the person guard around the rules in code, and a repeat's earlier ruling
+cx = router.Context(); now_ = time.time()
+mk = lambda i, ts, **kw: {"id": i, "ts": ts, "kind": "anchor", "anchor": "slack:C0000000001", "who": "Dana", "text": "can you check the March numbers?", "url": "https://u/rp", "label": "Slack", "ekind": "slack", **kw}
+stub = lambda rule, ruling: (lambda key, n, root, cx_, peers: {"id": n["id"], "key": key, "project": root, "kind": "anchor", "ts": now_, "source": "code", "rule": rule, "ruling": ruling, "target": "", "reason": "a stub", "for_owner": False, "item": "", "call": "", "label": "", "text": "", "note": ""})
+_real_code = router._code_rule
+try:
+    wrapped = {}
+    for ruling_ in ("archived", "dropped", "merged"):
+        router._code_rule = stub("quiet", ruling_)
+        wrapped[ruling_] = (router.code_rule("projects/alpha", mk("w1", now_), "projects/alpha", cx, []), router.code_rule("projects/alpha", mk("w2", now_, bot=True), "projects/alpha", cx, []))
+    router._code_rule = stub("gate-trivial", "archived"); trivial_kept = router.code_rule("projects/alpha", mk("w3", now_, text="ok"), "projects/alpha", cx, [])
+    router._code_rule = stub("auto", "merged"); auto_kept = router.code_rule("projects/alpha", mk("w4", now_), "projects/alpha", cx, [])
+    reps = {}
+    router._code_rule = stub("repeat", "dropped")
+    for er in ("passed", "held", "archived", "merged", "dropped", None):
+        reps[er] = router.code_rule("projects/alpha", mk("e2", now_), "projects/alpha", cx, [mk("e1", now_ - 60, **({"ruling": er} if er else {}))])
+    reps["machine"] = router.code_rule("projects/alpha", mk("e2", now_, bot=True), "projects/alpha", cx, [mk("e1", now_ - 60, bot=True)])
+finally: router._code_rule = _real_code
+check("the person guard of code_rule: a rule that would archive, drop or merge a person's message (the quiet-hour archive here) holds it for the page's background agent instead; the same ruling of machine news stands",
+      all(p_["ruling"] == "passed" and p_["hold"] == "person" and p_["target"] == BACK and p_.get("person") is True and m_["ruling"] == ruling_ and m_["rule"] == "quiet" for ruling_, (p_, m_) in wrapped.items()), wrapped)
+check("…and the two exceptions stand: a bare laugh archived by gate-trivial, and the log-only copy of a ruling made elsewhere (auto)", trivial_kept["ruling"] == "archived" and auto_kept["ruling"] == "merged", (trivial_kept, auto_kept))
+check("a repeat of a person's message is dropped only when the earlier one was ruled passed or held; an earlier one archived, merged, dropped or with no ruling makes it a hold for the background agent; machine news repeats as before",
+      all(reps[e]["ruling"] == "dropped" and reps[e]["rule"] == "repeat" for e in ("passed", "held")) and all(reps[e]["ruling"] == "passed" and reps[e]["hold"] == "person" and reps[e]["target"] == BACK for e in ("archived", "merged", "dropped", None))
+      and reps["machine"]["ruling"] == "dropped", {k: (v["ruling"], v.get("hold")) for k, v in reps.items()})
+tl = lambda n_, ruling_: router.twin_line(n_, "projects/delta", "projects/delta", "r1", "projects/charlie", ruling_, "x")["ruling"]
+check("one-ruling: a person's message that follows an archive or a drop is merged into it (never archived or dropped), a bare laugh keeps the archive, machine news follows as before",
+      tl(mk("t1", now_), "archived") == "merged" and tl(mk("t1", now_), "dropped") == "merged" and tl(mk("t1", now_), "passed") == "merged" and tl(mk("t2", now_, text="ok"), "archived") == "archived"
+      and tl(mk("t3", now_, bot=True), "archived") == "archived" and tl(mk("t3", now_, bot=True), "passed") == "merged", None)
+
+# ---- 13. a person's message does not follow an archive of its twin; the twin plan reads each holding page's log once
+CALLS.clear(); PUSHED.clear(); PLAN.clear()
+first = post("slack:C0000000009", "Dana", "will the charlie export be late again?", sessions=("de-name",))
+routing.rule(first["projects/delta"]["id"], "archived", reason="an earlier archive", by="t")
+second = post("slack:C0000000009", "Dana", "will the charlie export be late again?", sessions=("ch-name",))
+res, pushed, ncalls = tick()
+sc2 = second["projects/charlie"]
+check("a person's notice never follows the earlier archive of its twin on the other page: it is ruled on its own, and reaches an agent", lv(sc2["id"])["rule"] == "gate-person" and lv(sc2["id"])["ruling"] in ("passed", "held") and lv(sc2["id"])["target"] == "ch-eng", lv(sc2["id"]))
+evs = [post("slack:C0000000009", "Dana", t_, sessions=("de-name",))["projects/delta"] for t_ in ("is delta point one done?", "is delta point two done?", "is delta point three done?")]
+groups_ = {a.pilot_root("projects/delta"): [("projects/delta", n_) for n_ in evs]}
+reads, _real_read = [], routing.read
+routing.read = lambda project, since=0.0: (reads.append(project), _real_read(project, since))[1]
+try: live._twin_plan(groups_, live._last(), router.Context())
+finally: routing.read = _real_read
+check("the twin plan reads and folds each holding page's routing log once per tick, however many notices it checks (L3)", reads.count("projects/charlie") == 1, reads)
+res, pushed, ncalls = tick()
+
+# ---- 14. F1, F2, F3, F4 through the live tick: the near-misses reach an agent, never the archive
+CALLS.clear(); PUSHED.clear(); PLAN.clear(); held.take("al-builder"); held.take("al-docs")
+sysn = one("slack:C0000000001", router.SYSTEM_SENDERS[0], "the quarterly numbers moved once more")
+botlike = one("slack:C0000000001", "deploy[bot]", "the vendor sent the signed file")
+gh_bot = one("github:example-owner/repo#8", "ci-app[bot]", "left a comment on the pull request", kind="github", etype="comment")
+down, mention = one("slack:C0000000001", "Dana", DOWN), one("slack:C0000000001", "Dana", "<@U0123ABCD>")
+burst, jamo_yes = one("slack:C0000000001", "Dana", "2 more, the last: thx"), one("slack:C0000000001", "Dana", J(YES_JAMO, YES_JAMO))
+check_ = one("slack:C0000000001", "Dana", CHECK)
+res, pushed, ncalls = tick()
+check("F2: a person whose display name is the system sender, with an event kind, is a person: held for the background agent when the call archives it, never archived", lv(sysn["id"])["ruling"] == "held" and lv(sysn["id"])["rule"] == "gate-person" and rec(sysn["id"])["ruling"] == "held", lv(sysn["id"]))
+check("F1: a Slack sender named like a bot login is a person (held, not archived by gate-machine); a GitHub bot login is machine news, archived by rule",
+      lv(botlike["id"])["rule"] != "gate-machine" and lv(botlike["id"])["ruling"] == "held" and lv(gh_bot["id"])["rule"] == "gate-machine" and lv(gh_bot["id"])["ruling"] == "archived", (lv(botlike["id"]), lv(gh_bot["id"])))
+check("F3, F4: a thumbs down, a bare mention, a check mark, a jamo that is a word and a burst of two folded messages are not trivial: each is held for the background agent, none archived",
+      all(lv(x["id"])["rule"] != "gate-trivial" and lv(x["id"])["ruling"] == "held" and rec(x["id"])["ruling"] == "held" for x in (down, mention, check_, jamo_yes, burst)), [(lv(x["id"])["rule"], lv(x["id"])["ruling"]) for x in (down, mention, check_, jamo_yes, burst)])
+held.take("al-builder")
+
+# ---- 15. a machine's archived notice wakes no wait, through the route tool too (person_wakes)
+for g in ("a4", "a5"): item(int(g[1:]), "projects/alpha", "al-main", hold=True)
+mw = one("slack:C0000000005", "deploybot", "build 42 finished", bot=True)
+_wt_route._route(mw["id"], "archived", "", "nothing in it", "")
+check("an archived notice of a bot wakes nothing on its anchor through the route tool (a person's would): both items still wait", held_items() == [True, True], held_items())
+
+# ---- 16. a failing fallback never escapes the tick (L2): a hold for the background agent, else the notice stays unruled for the next tick
+CALLS.clear(); PUSHED.clear(); FYI.clear(); PLAN.clear(); held.take("al-builder")
+l2a = one("slack:C0000000001", "Dana", "the vendor revised the plan again")
+l2b = one("slack:C0000000002", "Dana", "the shop opens late on Friday")
+l2c = post("slack:C0000000009", "Dana", "can the charlie report wait for Monday?")["projects/charlie"]
+_real_cp, _real_fb = router.call_project, router.fallback_line
+def _boom(*a_, **k_): raise RuntimeError("it broke")
+router.call_project, router.fallback_line, raised = _boom, _boom, None
+try: res, pushed, ncalls = tick()
+except Exception as e_: raised = e_
+finally: router.call_project, router.fallback_line = _real_cp, _real_fb
+check("a judging that fails with a failing fallback does not escape the tick: the person's message of a page with a background agent is held for it, a later project is still ruled", raised is None and lv(l2a["id"])["ruling"] == "held" and lv(l2a["id"])["held_for"] == BACK and lv(l2a["id"])["source"] == "fallback"
+      and lv(l2c["id"])["rule"] == "gate-person", (raised, [x for x in lines() if x["id"] == l2a["id"]]))
+check("…and the one of a page with no background agent stays unruled for the next tick, which rules it (held for the contact front agent)", not rec(l2b["id"], "projects/bravo").get("ruling") and (tick(), lv(l2b["id"]))[1]["held_for"] == "br-main", rec(l2b["id"], "projects/bravo"))
+held.take("al-builder")
 if os.environ.get("ROUTER_GATE_STAGED"):      # the staged dry run: one line per path, as the live tick ruled each notice above (tests/run-suite router_gate with ROUTER_GATE_STAGED=1)
     for path, nid in (("machine: a bot's post", m_bot), ("machine: a routine pull request event", m_pr), ("machine: the owner's own document edit", m_own), ("machine: a CI result", m_ci),
                       ("machine, for the owner (strong text): not archived", m_strong), ("machine, on an anchor an item hangs on: not archived", m_busy),

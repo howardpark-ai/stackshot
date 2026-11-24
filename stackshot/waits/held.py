@@ -8,7 +8,8 @@ held here and handed over with the agent's next turn, whatever caused that turn.
               gate as an fyi, `_front_queue_row`, and is filed here under this kind)
   page-owed   the keeper's "the page update is owed" notice (pilot_relay, pilot_relay_many; also what the router passes of such a notice, to a front agent too: through the front gate)
   fyi         a message its sender marked fyi (the message tool's `fyi`)
-  person      a person's anchor notice the router's read-first gate could not place (router.py, rule `gate-person`): held whole for the project's background agent, never archived
+  person      a person's anchor notice the router's read-first gate could not place (router.py, rule `gate-person`): held whole for the project's background agent, never archived, and so never dropped here either:
+              a `person` line is exempt from the age limit (KEEP_DAYS), the count limit (KEEP_MAX) and the sweep of an untouched session's file; only an ack of the agent's hook removes it
 Everything else wakes the agent as before: a notice that names it in needs, hands it an item (mover, hand-off), ends its wait, carries
 the owner's words or asks something; so does the audit's finding for an item's mover (router.py audit-owners): it is a task. When the code is unsure it delivers (decide() answers "" for any kind it does not know).
 
@@ -25,7 +26,7 @@ output is the turn's context), and then acknowledges the ids it printed (a secon
 shows as leased for LEASE seconds and returns their ids; ack() removes them; a line never acknowledged (the hook died before it printed, or
 the answer never arrived) is offered again once the lease runs out. A duplicate is possible, a loss is not. Oldest first, one notice each (a message with its line breaks, the lines after the first indented), at
 most SHOWN_MAX; the rest stay for the next turn and the last line says "+N more". A notice older than KEEP_DAYS is dropped, and a session
-keeps at most KEEP_MAX (the oldest go); each drop is a stderr line. take() = lease + ack at once (a caller that has no hook to wait for).
+keeps at most KEEP_MAX (the oldest go); each drop is a stderr line. A `person` line (a person's message) is never dropped by any of these: it waits until its agent's hook has handed it over. take() = lease + ack at once (a caller that has no hook to wait for).
 
 ONE LINE OR THE WHOLE TEXT. A status notice the server writes (closed, changed, queue, page-owed, an item's notice to a front agent) is one line, folded to one and cut at LINE_MAX. A message a session wrote
 (add(..., whole=True): the message tool's fyi, the router's pass of a message, a queued line filed from a digest) keeps all its words and its line breaks, up to WHOLE_MAX (the message tool's own limit,
@@ -60,8 +61,9 @@ from stackshot.core.lines import MSG_MAX, newline_lines
 
 KINDS = ("closed", "changed", "queue", "page-owed", "fyi", "person")
 SHOWN_MAX = 8               # lines handed over at one turn start; the rest wait for the next turn
-KEEP_MAX = 100              # held lines kept per session; past it the oldest go
-KEEP_DAYS = 7               # a held line older than this is dropped, never handed over
+KEEP_MAX = 100              # held lines kept per session; past it the oldest go (a `person` line is not counted and never goes)
+KEEP_DAYS = 7               # a held line older than this is dropped, never handed over (a `person` line is kept)
+KEEP_ALWAYS = ("person",)   # the kinds no age limit, count limit or sweep removes: a person's message is never lost to one
 LINE_MAX = 260              # characters in one held status line (a text that is not a session's message)
 FRAME_ROOM = 400            # characters a held message may carry beyond the message tool's limit: the sender's label and the framing words the notice adds before the text
 WHOLE_MAX = MSG_MAX + FRAME_ROOM      # characters in one held message: the message tool's own limit (core/lines.py MSG_MAX) and the room for its frame
@@ -274,22 +276,35 @@ def _say(msg: str) -> None:
 
 
 def _fresh(rows: list[dict[str, Any]], now: float, key: str = "") -> list[dict[str, Any]]:
-    """The rows younger than KEEP_DAYS; a drop is a stderr line (a notice that was never handed over must leave a trace)."""
-    keep = [r for r in rows if float(r.get("ts", 0)) >= now - KEEP_DAYS * 86400]
+    """The rows younger than KEEP_DAYS, and every row of a KEEP_ALWAYS kind; a drop is a stderr line (a notice that was never handed over must leave a trace)."""
+    keep = [r for r in rows if r.get("kind") in KEEP_ALWAYS or float(r.get("ts", 0)) >= now - KEEP_DAYS * 86400]
     if len(keep) != len(rows):
         _say(f"{len(rows) - len(keep)} notice{'s' if len(rows) - len(keep) != 1 else ''} for {key or 'a session'} dropped unread: older than {KEEP_DAYS} days")
     return keep
 
 
+def _cap(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows of a session's file kept to KEEP_MAX: the oldest of the others go, and a KEEP_ALWAYS row is neither counted nor dropped. Order is kept."""
+    others = [r for r in rows if r.get("kind") not in KEEP_ALWAYS]
+    drop = {id(r) for r in others[:max(0, len(others) - KEEP_MAX)]}
+    return [r for r in rows if id(r) not in drop]
+
+
 def _sweep(now: float) -> None:
-    """A session's file nothing has touched for KEEP_DAYS (a retired session, a pane renamed away) holds only expired lines: remove it. Caller holds the lock."""
+    """A session's file nothing has touched for KEEP_DAYS (a retired session, a pane renamed away) holds only expired lines: remove it, or, when it holds a KEEP_ALWAYS line, rewrite it with those alone (a person's message
+    stays for whoever reads this file's key next). Caller holds the lock."""
     try:
         for p in dir_().glob("*.jsonl"):
             try:
                 if p.stat().st_mtime < now - KEEP_DAYS * 86400:
-                    n = len(_read(p))
-                    p.unlink()
-                    _say(f"{p.stem}: {n} notice{'s' if n != 1 else ''} dropped unread, the session has not had a turn for {KEEP_DAYS} days")
+                    rows = _read(p)
+                    kept = [r for r in rows if r.get("kind") in KEEP_ALWAYS]
+                    n = len(rows) - len(kept)
+                    if kept:
+                        _write(p, kept)
+                    else:
+                        p.unlink()
+                    _say(f"{p.stem}: {n} notice{'s' if n != 1 else ''} dropped unread, the session has not had a turn for {KEEP_DAYS} days" + (f" ({len(kept)} kept: a person's message is never dropped)" if kept else ""))
             except OSError:
                 pass
     except OSError:
@@ -313,9 +328,10 @@ def add(key: str, kind: str, text: str, sender: str = "", gid: str = "", nid: st
             if nid and any(r.get("nid") == nid for r in rows):
                 return True
             rows.append({"id": secrets.token_hex(3), "ts": now, "kind": kind, "text": line, "from": one_line(sender, 60), "gid": str(gid or "")[:60], "nid": nid})
-            if len(rows) > KEEP_MAX:
-                _say(f"{len(rows) - KEEP_MAX} notice{'s' if len(rows) - KEEP_MAX != 1 else ''} for {key} dropped unread: more than {KEEP_MAX} waiting")
-            _write(p, rows[-KEEP_MAX:])
+            capped = _cap(rows)
+            if len(capped) != len(rows):
+                _say(f"{len(rows) - len(capped)} notice{'s' if len(rows) - len(capped) != 1 else ''} for {key} dropped unread: more than {KEEP_MAX} waiting")
+            _write(p, capped)
         return True
     except Exception:  # noqa: BLE001
         return False

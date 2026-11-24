@@ -106,7 +106,7 @@ ln = rule(notice("f2", text=T_a, anchor="slack:C0000000001", target="for example
 check("a target of `for <agent>` on the notice makes no difference to a filtered anchor", ln and ln["rule"] == "anchor-work" and ln["target"] == "example-docs-builder", ln)
 
 # repeat within an hour (as anchor-builder), a different text or an hour later is not a repeat
-first = notice("r1", text=T_a, ts=1000.0)
+first = notice("r1", text=T_a, ts=1000.0, ruling="passed")      # the earlier one reached the work agent: only then is a repeat of it dropped
 ln = rule(notice("r2", text=T_a, ts=1100.0), peers=[first])
 check("an identical repeat within an hour is dropped", ln and (ln["rule"], ln["ruling"], ln["target"]) == ("repeat", "dropped", "") and "r1" in ln["reason"], ln)
 ln = rule(notice("r3", text=T_b, ts=1100.0), peers=[first])

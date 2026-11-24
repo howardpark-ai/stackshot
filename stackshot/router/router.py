@@ -26,10 +26,11 @@ the first two, and router_live.py is the third (it takes the notices, applies th
 
 THE READ-FIRST GATE (before the thin call, in code_rule: trivial_rule, machine_reason, gate_rule). An anchor notice is read by code first. Machine news (a bot's post, a CI result, a routine pull request or
 issue event, the owner's own edit of a document, told by the notice's structured fields, never by its words) is archived by rule with its reason (gate-machine). A person's message (person_notice: everything
-else that is somebody's message, and a notice whose author kind is unknown) is never archived, dropped or merged: one that names the owner, asks a question or replies in a watched thread is passed
+else that is somebody's message, and a notice whose author kind is unknown) is never archived, dropped or merged, whatever rule or call would have done (the only exceptions: a bare laugh or ack, an identical repeat of
+one already ruled passed or held, the follower of one event's single ruling, and the log-only copy of a ruling made elsewhere): one that names the owner, asks a question or replies in a watched thread is passed
 (gate-person) to the scoped item's one mover, else to the page's background agent, and to a front agent only as a held line and only when it needs the owner; one nothing places goes to the thin call,
 whose archive, drop or merge answer, a failed or timed-out call and a clamp are all overridden into a hold for the page's background agent (a page with none: a held line for its contact front agent), the
-`person` hold kind. A bare laugh, ack or emoji of a person (trivial_kind) is read and recorded as archived with its reason (gate-trivial), passed to no agent and no turn, and wakes no wait. One event on
+`person` hold kind. A bare laugh, ack or positive reaction of a person (trivial_of) is read and recorded as archived with its reason (gate-trivial), passed to no agent and no turn, and wakes no wait. One event on
 an anchor several pages hold is ruled once (router_live.tick): every holding page is offered to the gate and to the call, and the ruling goes to the page it is about. A ruling of a person's notice, whatever it
 is, wakes an item that waits on the anchor (person_wakes), not only a passed or merged one.
 
@@ -204,6 +205,7 @@ class Context:
         self.names = _anc.names()
         self.anchors = _anc.load()
         self._back: dict[str, str] | None = None
+        self._surface: set[str] | None = None
         self.index: dict[str, dict[str, Any]] = {}
         try:
             from stackshot.github import ghsync as _gh
@@ -273,6 +275,25 @@ class Context:
         if self._back is None:
             self._back = {k.lower(): k for k, v in _anc.session_roles(self.reg).items() if v.get("role") == "back"}
         return self._back.get(nm, "")
+
+    def gone(self, name: str) -> bool:
+        """Is an agent no place for a held line: a retired session (the fleet's registry lists it and no live row) or a surface agent (not a session of the fleet: no hook of it reads held lines)? A doubt is never "gone"."""
+        nm = str(name or "").strip()
+        if not nm:
+            return False
+        if self._surface is None:
+            self._surface = {n for e in self.reg.values() if isinstance(e, dict) for n in _anc.surface_agents(e)}
+        if nm in self._surface:
+            return True
+        try:
+            from stackshot.fleet import sessions_registry as _sr
+            return _sr.retired(nm)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def live_background(self, root: str) -> str:
+        """The project's background agent a message that is no need of the person goes to (anchors.background_agent: the builder first), skipping an agent that is gone (gone); "" when none is left."""
+        return next((n for _c, _o, n in _anc.background_ranked(root, self.reg) if not self.gone(n)), "")
 
     def name_of(self, session: str) -> str:
         """A session id or name → the pane name it goes by."""
@@ -797,13 +818,13 @@ def is_ci_notice(n: dict[str, Any]) -> bool:
     """is an anchor notice a CI or check-run result? anchor-hub types each GitHub event at its source (`etype`: ci_failed and ci_passed
     for the check runs of a watched pull request, ci_activity for GitHub's own CI notification thread) and sets `who` to "CI" for those three alone;
     the routing record keeps `etype`. A notice with an etype is CI when every type it reports is a CI one (a comment joined to a CI result is
-    not: a person wrote it); a notice recorded without one (before the record kept it) is CI when its `who` is "CI"."""
+    not: a person wrote it); a notice recorded without one (before the record kept it) is CI when its anchor is GitHub's and its `who` is "CI" (on any other source `who` is a person's own display name)."""
     if str(n.get("kind") or "") != "anchor":
         return False
     types = [t for t in str(n.get("etype") or "").split("+") if t]
     if types:
         return all(t in _CI_ETYPES for t in types)
-    return str(n.get("who") or "").strip() == "CI"
+    return anchor_type(n) == "github" and str(n.get("who") or "").strip() == "CI"
 
 
 def _ci_repeat(n: dict[str, Any], peers: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -817,13 +838,17 @@ def _ci_repeat(n: dict[str, Any], peers: list[dict[str, Any]]) -> dict[str, Any]
 
 
 def _same_anchor_repeat(n: dict[str, Any], peers: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """The earlier notice on the same anchor with the same sender, text and link that came in within REPEAT_WINDOW (the repeat rule's test), else None."""
+    """The earlier notice on the same anchor with the same sender, text and link that came in within REPEAT_WINDOW (the repeat rule's test), else None. When several match, one that was ruled passed or held
+    (_REACHED: it reached somebody) is the one returned, else the first."""
+    first = None
     for p in peers:
         if (p["id"] != n["id"] and p.get("kind") == "anchor" and float(p.get("ts", 0)) < float(n.get("ts", 0))
                 and float(n.get("ts", 0)) - float(p.get("ts", 0)) <= REPEAT_WINDOW
                 and all(p.get(f) == n.get(f) for f in ("anchor", "who", "text", "url")) and n.get("text")):
-            return p
-    return None
+            if str(p.get("ruling") or "") in _REACHED:
+                return p
+            first = first or p
+    return first
 
 
 _FOR_AGENT = re.compile(r"for\s+([\w-]+)", re.I)
@@ -891,20 +916,25 @@ def anchor_work_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers:
 # A person's message is never archived, and machine news is archived by a rule, not by a model's guess. The gate tells the two apart by the notice's STRUCTURED fields (the
 # routing record's `bot`, `ekind`, `thread`, `etype`, `who` and `anchor`, which the anchor listener sets from the source's own data), never by what the text says; a record that carries no author kind
 # (an older one, a source that gives none) is a person's. Only a few things are read from the text: a question mark, the owner's name, and whether it is a bare laugh or ack (trivial_kind).
-_BURST_HEAD = re.compile(r"^\d+ more, (?:earlier: .*\| )?the last: ")
+_BURST_HEAD = re.compile(r"^(\d+) more, (?:earlier: .*\| )?the last: ")
 _STATE_ETYPE = ("pr_", "issue_", "ci_")                  # a pull request's, an issue's or a CI run's state change, by the event's type at its source
 _MESSAGE_ETYPES = frozenset({"comment", "review", "review_comment"})
 _TRIVIAL_WORDS = frozenset({"lol", "haha", "ok", "okay", "k", "thx", "thanks", "plus1"})      # `plus1` stands for "+1" (read before the punctuation is dropped)
 _LAUGH_WORDS = frozenset({"lol", "haha"})
 _LAUGH_RUN = re.compile(r"(?:ha){2,}h?|lo+l|(?:he){2,}h?")   # haha-runs, lol-runs: the same laughter as the words above
-_SHORTCODE = re.compile(r":[a-z0-9_+\-]+:")              # a Slack emoji written as :name:
+_SHORTCODE = re.compile(r":([a-z0-9_+\-]+):")             # a Slack emoji written as :name:
+_LAUGH_LETTERS = frozenset(chr(c) for c in (0x314B, 0x314E))      # the two Hangul letters of a laugh (written as code points, never as a literal): any other jamo is a word
+_POSITIVE_EMOJI = frozenset(chr(c) for c in (0x1F602, 0x1F923, 0x1F606, 0x1F604, 0x1F44F, 0x2764, 0x1F44D, 0x1F389, 0x1F973))      # laughing, clapping, a heart, a thumbs up, a party: the reactions that say nothing more than "fine"
+_POSITIVE_SHORTCODES = frozenset(("thumbsup", "+1", "joy", "rofl", "laughing", "clap", "heart", "tada", "partying_face"))      # the same reactions as Slack writes them
+_SKIN_TONE = re.compile(r"skin-tone-[2-6]")
 _ASK_MARKS = ("?", chr(0xFF1F))                          # the question mark and its full-width form
-SYSTEM_SENDERS = ("anchor-hub",)                         # the anchors service's own notices (an anchor unreadable, removed): neither a person's message nor machine news; the call rules them as before
+SYSTEM_SENDERS = ("anchor-hub",)                         # the sender the listener gives its own notices (an anchor unreadable, removed): neither a person's message nor machine news; the call rules them as before
 
 
-def _is_jamo(c: str) -> bool:
-    """A Hangul compatibility jamo (U+3131 to U+3163): a letter of a bare laugh. Written as code points, never as a literal."""
-    return 0x3131 <= ord(c) <= 0x3163
+def system_notice(n: dict[str, Any]) -> bool:
+    """Is it one of the listener's own notices? Its sender is in SYSTEM_SENDERS and it carries no event kind (`ekind`): the listener's own notices carry none and every real event always does, so a person whose
+    display name equals the system sender is still a person."""
+    return str(n.get("who") or "").strip().lower() in SYSTEM_SENDERS and not str(n.get("ekind") or "")
 
 
 def _gist(n: dict[str, Any]) -> str:
@@ -912,25 +942,56 @@ def _gist(n: dict[str, Any]) -> str:
     return _BURST_HEAD.sub("", str(n.get("text") or "").strip())
 
 
+def folded(n: dict[str, Any]) -> int:
+    """How many later messages the listener folded into this notice (the `N` of its burst head "N more, ... the last: "), 0 for a notice that is no burst."""
+    m = _BURST_HEAD.match(str(n.get("text") or "").strip())
+    return int(m.group(1)) if m else 0
+
+
 def trivial_kind(text: Any) -> str:
-    """"" when the text is more than a bare laugh, ack or emoji, else why it is trivial: "laughter" (a run of jamo, lol, haha), "ack" (ok, okay, k, thx, thanks, +1), "emoji" (only emoji and symbols), "empty" (nothing
-    but punctuation or white space). Mention syntax (`<@U123>`, `@name`), Slack's `:name:` emoji, punctuation, symbols, marks and white space are stripped first; the rest must be empty or only these words. A text that asks
-    (carries a question mark) or names the owner is never trivial: a bare ping of him is a call."""
+    """"" when the text is more than a bare laugh, ack or reaction, else why it is trivial: "laughter" (two or more of the two laugh letters, lol, haha), "ack" (ok, okay, k, thx, thanks, +1), "emoji" (only the
+    positive reactions: laughing, clapping, a heart, a thumbs up, a party, also written as :name:). Mention syntax (`<@U123>`, `@name`) and ASCII or general punctuation are decoration: stripped first, and a text with nothing
+    else (a bare mention, a lone symbol such as + or ~, an ellipsis) is no reaction but a ping or a sign: "". Any other symbol (a thumbs down, a check mark, an arrow, an emoji outside the set) and any other word
+    makes the text more than a reaction. A text that asks (carries a question mark) or names the owner is never trivial: a bare ping of him is a call."""
     t = str(text or "")
     if not t.strip() or any(m in t for m in _ASK_MARKS) or names_owner(t):      # a text with no character at all says nothing about its author's intent: not read as trivial
         return ""
-    shortcode = bool(_SHORTCODE.search(t))
-    t = _SHORTCODE.sub(" ", _MENTION.sub(" ", t))
-    jamo = any(_is_jamo(c) for c in t)
-    t = "".join(" " if _is_jamo(c) else c for c in t).lower().replace("+1", " plus1 ")
-    words = "".join(c if c.isalnum() else " " for c in t).split()
+    emoji = [False]
+    def code(m: "re.Match[str]") -> str:
+        name = m.group(1)
+        if name in _POSITIVE_SHORTCODES:
+            emoji[0] = True
+            return " "
+        return " " if _SKIN_TONE.fullmatch(name) else m.group(0)      # any other :name: stays a word
+    t = _SHORTCODE.sub(code, _MENTION.sub(" ", t))
+    laugh, kept = 0, []
+    for c in t:
+        o = ord(c)
+        if c in _LAUGH_LETTERS:
+            laugh += 1
+            kept.append(" ")
+        elif c in _POSITIVE_EMOJI:
+            emoji[0] = True
+            kept.append(" ")
+        elif o == 0xFE0F or 0x1F3FB <= o <= 0x1F3FF:      # the emoji presentation selector and the skin tones ride on an emoji
+            kept.append(" ")
+        elif c.isspace() or c.isalnum() or o < 128 or unicodedata.category(c)[0] == "P":
+            kept.append(c)
+        else:      # a symbol outside the set: it says something
+            return ""
+    words = "".join(c if c.isalnum() else " " for c in "".join(kept).lower().replace("+1", " plus1 ")).split()
     if any(w not in _TRIVIAL_WORDS and not _LAUGH_RUN.fullmatch(w) for w in words):
         return ""
-    if jamo or any(w in _LAUGH_WORDS or _LAUGH_RUN.fullmatch(w) for w in words):
+    if laugh >= 2 or (laugh == 1 and (words or emoji[0])) or any(w in _LAUGH_WORDS or _LAUGH_RUN.fullmatch(w) for w in words):      # a lone laugh letter is a laugh only beside another reaction
         return "laughter"
     if words:
         return "ack"
-    return "emoji" if shortcode or any(not c.isspace() and unicodedata.category(c)[0] in "SMC" for c in t) else "empty"
+    return "emoji" if emoji[0] else ""
+
+
+def trivial_of(n: dict[str, Any]) -> str:
+    """trivial_kind of a notice's own words, "" for a burst of two or more folded messages: the listener's gist shows only the last of them, and the others are never read as a laugh."""
+    return "" if folded(n) >= 2 else trivial_kind(_gist(n))
 
 
 def anchor_type(n: dict[str, Any]) -> str:
@@ -958,13 +1019,14 @@ def message_like(n: dict[str, Any]) -> bool:
 
 
 def machine_reason(n: dict[str, Any]) -> str:
-    """Why an anchor notice is machine news, "" when it is not. By structured fields only: the source's author flag (`bot`) or every sender a bot's login (ending `[bot]`); a CI result (is_ci_notice);
-    a pull request's, issue's or CI state change by its event type (every type pr_*, issue_* or ci_*; a comment, a review or an unclassified type in the burst makes it a person's); the owner's own edit of a
-    document (a notice that is no message, whose sender is the owner). The anchors service's own notices (SYSTEM_SENDERS) are none of these."""
-    if str(n.get("kind") or "") != "anchor" or str(n.get("who") or "").strip().lower() in SYSTEM_SENDERS:
+    """Why an anchor notice is machine news, "" when it is not. By structured fields only: the source's author flag (`bot`), or on a GitHub anchor alone every sender a bot's login (ending `[bot]`; on any other source `who`
+    is a person's own display name, which no login suffix or "CI" can mark as a machine); a CI result (is_ci_notice); a pull request's, issue's or CI state change by its event type (every type pr_*, issue_* or ci_*; a
+    comment, a review or an unclassified type in the burst makes it a person's); the owner's own edit of a document (a notice that is no message, whose sender is the owner). The listener's own notices (system_notice)
+    are none of these."""
+    if str(n.get("kind") or "") != "anchor" or system_notice(n):
         return ""
     from stackshot.anchors import event_log as _el          # at call time
-    if n.get("bot") is True or _el.only_bots(n.get("who")):
+    if n.get("bot") is True or (anchor_type(n) == "github" and _el.only_bots(n.get("who"))):
         return "its author is a bot"
     if is_ci_notice(n):
         return "a CI result"
@@ -977,14 +1039,14 @@ def machine_reason(n: dict[str, Any]) -> str:
 
 
 def person_notice(n: dict[str, Any]) -> bool:
-    """Is an anchor notice a person's message: it is somebody's message (message_like), and neither machine news (machine_reason) nor the anchors service's own notice. A source that gives no author kind is a person's:
+    """Is an anchor notice a person's message: it is somebody's message (message_like), and neither machine news (machine_reason) nor one of the listener's own notices (system_notice). A source that gives no author kind is a person's:
     the gate never archives an unknown author by rule."""
-    return (str(n.get("kind") or "") == "anchor" and str(n.get("who") or "").strip().lower() not in SYSTEM_SENDERS and message_like(n) and not machine_reason(n))
+    return (str(n.get("kind") or "") == "anchor" and not system_notice(n) and message_like(n) and not machine_reason(n))
 
 
 def person_wakes(n: dict[str, Any]) -> bool:
-    """Does a ruling of this notice, whatever it is, wake an item that waits on its anchor? Yes for a person's message (person_notice) that is not a bare laugh or ack (trivial_kind: recorded, never a turn)."""
-    return person_notice(n) and not trivial_kind(_gist(n))
+    """Does a ruling of this notice, whatever it is, wake an item that waits on its anchor? Yes for a person's message (person_notice) that is not a bare laugh or ack (trivial_of: recorded, never a turn)."""
+    return person_notice(n) and not trivial_of(n)
 
 
 def anchor_holders(n: dict[str, Any], cx: Context) -> list[str]:
@@ -1024,16 +1086,16 @@ def _single_thread(n: dict[str, Any]) -> bool:
 
 
 def person_hold_line(n: dict[str, Any], key: str, root: str, cx: Context, why: str, *, source: str = "code", rule: str = "gate-person", call: str = "", note: str = "") -> dict[str, Any]:
-    """The ruling for a person's message nothing placed: held for the page's background agent (the one the message tool uses, anchors.background_agent), never archived. A page with no background agent holds it for its
-    contact front agent (a held line for its next turn, which starts none: router_live._act). `why` is what the gate or the call found."""
+    """The ruling for a person's message nothing placed: held for the page's background agent (the one the message tool uses, anchors.background_agent, skipping one that is gone: a retired session or a surface agent,
+    whose held lines nobody reads), never archived. A page with no such agent holds it for its contact front agent (a held line for its next turn, which starts none: router_live._act). `why` is what the gate or the call found."""
     aroot = _import_live().agent_root(root, cx.reg)
-    back = _anc.background_agent(aroot, cx.reg)
+    back = cx.live_background(aroot)
     if back:
         return _line(n, key, root, source=source, rule=rule, ruling="passed", target=back, call=call, note=note, hold="person", person=True,
                      reason=f"{why}: a person's message is never archived, so it is held for {back}, the page's background agent")
     main = cx.main_agent(aroot)
     return _line(n, key, root, source=source, rule=rule, ruling="passed", target=main, call=call, note=note, person=True,
-                 reason=f"{why}: a person's message is never archived, so it is held for {main or 'nobody'}, the page's contact agent (the page lists no background agent)")
+                 reason=f"{why}: a person's message is never archived, so it is held for {main or 'nobody'}, the page's contact agent (the page lists no background agent that is still running)")
 
 
 def _his_move(t: dict[str, Any]) -> bool:
@@ -1060,9 +1122,10 @@ def person_place(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[st
     item = items[0] if len(items) == 1 else None
     needs = strong_owner(text) or bool(item and (waits_decision(item) or _his_move(item))) or (named and asks)
     mover = "" if (item and _his_move(item)) else (cx.agent_of(_anc.mover_of(item), aroot) if item else "")      # an item that is his own move has no agent mover (mover_of names its stand-in, the builder)
+    mover = "" if cx.gone(mover) else mover      # a mover that is gone (retired) reads no held line: the pick falls to the doer, the page's background agent or the contact front agent
     shown_id = cx.shown(item["gid"]) if item else ""
     what = "names " + _cfg.owner() if named else "asks a question" if asks else "replies in a thread the page watches"
-    page_back = _anc.background_agent(aroot, cx.reg)
+    page_back = cx.live_background(aroot)
     if mover and mover in back:
         target, how = mover, f"the mover of {shown_id}"
     elif needs:
@@ -1070,8 +1133,9 @@ def person_place(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[st
         how = f"the mover of {shown_id}, a front agent, as a held line (it needs {_cfg.owner()})" if mover in front else f"the contact front agent, as a held line (it needs {_cfg.owner()})"
     else:
         doer = item_doer(item, aroot, cx) if item else ""
+        doer = "" if cx.gone(doer) else doer
         target = doer or page_back or cx.main_agent(aroot)
-        how = f"{doer}, who does the work of {shown_id}" if doer else f"the page's background agent {page_back}" if page_back else f"the contact front agent {target}, as a held line (the page lists no background agent)"
+        how = f"{doer}, who does the work of {shown_id}" if doer else f"the page's background agent {page_back}" if page_back else f"the contact front agent {target}, as a held line (the page lists no background agent that is still running)"
     if not target or target.lower() == str(n.get("who") or "").strip().lower():      # nobody to hand it to, or the agent wrote it itself: never passed back to its own sender (the rules after the gate route it)
         return None
     return _line(n, key, root, source="code", rule="gate-person", ruling="passed", target=target, item=shown_id, person=True, for_owner=bool(needs and target in front),
@@ -1079,10 +1143,10 @@ def person_place(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[st
 
 
 def trivial_rule(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[str, Any] | None:
-    """A person's anchor notice that is only a laugh, an ack or an emoji (trivial_kind) is read and recorded as an archived notice, with its reason ("trivial: laughter"): never passed, never a turn of its own."""
+    """A person's anchor notice that is only a laugh, an ack or an emoji (trivial_kind) is read and recorded as an archived notice, with its reason ("trivial: laughter"): never passed, never a turn of its own. A burst of two or more folded messages is never trivial (trivial_of)."""
     if not person_notice(n):
         return None
-    k = trivial_kind(_gist(n))
+    k = trivial_of(n)
     if not k:
         return None
     return _line(n, key, root, source="code", rule="gate-trivial", ruling="archived", person=True, reason=f"trivial: {k}: read and recorded by the router, passed to no agent")
@@ -1091,7 +1155,8 @@ def trivial_rule(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[st
 def gate_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The read-first gate's sorting of an anchor notice that no rule before it settled, run before the thin call: machine news (machine_reason) is archived with its reason, unless its text is for the owner
     (strong_owner) or an open item hangs on its anchor (_anchor_busy: the rules before the gate ended such a wait by passing or merging); a person's message (person_notice) is passed where person_place says, or None
-    when nothing places it (the call picks, and its worst outcome is a hold for the page's background agent). An identical repeat of a person's message within an hour is dropped. None for any other notice."""
+    when nothing places it (the call picks, and its worst outcome is a hold for the page's background agent). An identical repeat of a person's message within an hour is dropped only when the earlier one was ruled passed or held (code_rule checks it
+    for every rule that drops a repeat); one whose earlier ruling is not known to be that is held. None for any other notice."""
     if str(n.get("kind") or "") != "anchor":
         return None
     why = machine_reason(n)
@@ -1110,20 +1175,32 @@ def gate_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[d
 def twin_line(n: dict[str, Any], key: str, root: str, ruled_id: str, ruled_root: str, ruling: str, how: str) -> dict[str, Any]:
     """The ruling of a notice that is the same event as one already ruled (one event, one ruling): an event on an anchor several pages hold is recorded once for each page, and only one of those notices is
     ruled by the gate and the call (the one for the page it is about); the others follow it. `ruling` = the ruled notice's: archived and dropped stand, anything else (passed, held, merged) is `merged`, the
-    notice's work done by the one ruling (it still releases an item on its page that waits on the anchor). `how` = where the ruled one went, in words."""
+    notice's work done by the one ruling (it still releases an item on its page that waits on the anchor). A person's message is never archived or dropped by following: it is `merged` into the one ruling, except a bare
+    laugh or ack following an archive (trivial_of), which is archived as it is (router_live._twin_plan also never lets it follow an earlier archive or drop). `how` = where the ruled one went, in words."""
+    person = person_notice(n)
     word = ruling if ruling in ("archived", "dropped") else "merged"
-    return _line(n, key, root, source="code", rule="one-ruling", ruling=word, person=person_notice(n),
+    if person and not (word == "archived" and trivial_of(n)):      # a person's message follows an archive only as a bare laugh or ack, and a drop never: it is merged into the one ruling
+        word = "merged"
+    return _line(n, key, root, source="code", rule="one-ruling", ruling=word, person=person,
                  reason=f"one event, one ruling: the same event on an anchor that {ruled_root} holds too was ruled once, as notice {ruled_id} ({_clean(how, 120)})")
+
+
+_REACHED = ("passed", "held")      # the rulings of a person's message that put it before somebody: only a repeat of one of these is dropped
 
 
 def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The ruling line for a notice a rule in code settles, or None (the thin call takes it): _code_rule's rules, with the read-first gate's guard on a person's message (person_notice). A rule that would
-    archive, drop or merge one (the quiet-hour archive, a generic repeat of another source, `auto`) holds it for the page's background agent instead (person_hold_line), except `repeat` (an identical
-    message already passed once) and `gate-trivial` (a bare laugh or ack, read and recorded); a pass of one is marked `person`, which router_live._act reads."""
+    archive, drop or merge one (the quiet-hour archive, a generic repeat of another source) holds it for the page's background agent instead (person_hold_line), except `gate-trivial` (a bare laugh or ack, read
+    and recorded), `auto` (the log-only copy of a ruling already made elsewhere) and `repeat` when the earlier identical message (_same_anchor_repeat) was ruled passed or held: a repeat whose earlier ruling is
+    unknown (unruled, archived, merged, dropped) is held too, so a notice whose twin never reached anybody is not lost. A pass of one is marked `person`, which router_live._act reads."""
     ln = _code_rule(key, n, root, cx, peers)
     if ln is None or not person_notice(n):
         return ln
-    if ln["ruling"] in ("archived", "dropped", "merged") and ln.get("rule") not in ("repeat", "gate-trivial", "auto"):
+    if ln.get("rule") == "repeat" and ln["ruling"] == "dropped":
+        rp = _same_anchor_repeat(n, peers)
+        if rp is None or str(rp.get("ruling") or "") not in _REACHED:
+            return person_hold_line(n, key, root, cx, f"a repeat of notice {rp['id'] if rp else 'an earlier one'}, which was not ruled passed or held", rule="gate-person")
+    elif ln["ruling"] in ("archived", "dropped", "merged") and ln.get("rule") not in ("gate-trivial", "auto"):
         return person_hold_line(n, key, root, cx, f"rule {ln.get('rule') or '?'} would have ruled it {ln['ruling']}", rule=str(ln.get("rule") or "gate-person"))
     if ln["ruling"] == "passed":
         ln["person"] = True
@@ -1421,7 +1498,7 @@ def prompt_for(root: str, rows: list[tuple[str, dict[str, Any]]], cx: Context, o
     if not front and not back:
         lines.append("- (the page lists no agents)")
     lines.append(f"The project's -main agent: {cx.main_agent(root) or '(none)'}")
-    page_back = _anc.background_agent(_import_live().agent_root(root, cx.reg), cx.reg)
+    page_back = cx.live_background(_import_live().agent_root(root, cx.reg))
     lines.append(f"The project's background agent, for a person's message nobody else fits: {page_back or '(none: the -main agent holds it for its next turn)'}")
     other = sorted({r2 for rs in (offered or {}).values() for r2 in rs})
     if other:

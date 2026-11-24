@@ -687,6 +687,24 @@ def trace(nid: str) -> dict[str, Any]:
 
 
 # ----------------------------------------------------------------------------- the tick
+def _fallback_or_hold(n: dict[str, Any], key: str, root: str, cx: "_router.Context", why: str) -> dict[str, Any] | None:
+    """router.fallback_line for a notice the judging failed on, guarded: if the fallback itself raises (reading the notice failed again), a held line for the page's background agent built without reading the notice
+    (hold kind `person`, never an archive); failing that None, and the notice is left unruled for the next tick. Never raises, so one notice can never stall the projects after it."""
+    aroot = agent_root(root, cx.reg)
+    try:
+        return _router.fallback_line(n, key, aroot, cx, why)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        back = cx.live_background(aroot)
+        if back:
+            return _router._line(n, key, aroot, source="fallback", rule="", ruling="passed", target=back, hold="person", person=True,
+                                 reason=f"{why}: held for {back}, the page's background agent (the fallback itself failed)")
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def _judge(root: str, rows: list[tuple[str, dict[str, Any]]], cx: "_router.Context", runner: Any, since: float,
            offered: dict[str, list[str]] | None = None) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """The router's own ruling for each notice of the project's batch (router.py's rules in code, then its thin call): → (lines as the
@@ -726,8 +744,14 @@ def _judge(root: str, rows: list[tuple[str, dict[str, Any]]], cx: "_router.Conte
             stats.update(called=len(todo), calls=1, retry=len(todo) - len(got))
     except Exception as e:  # noqa: BLE001
         have = {x["id"] for x in lines}
-        lines += [_router.fallback_line(n, key, agent_root(root, cx.reg), cx, f"the router failed on it ({type(e).__name__}: {str(e)[:100]})")
-                  for key, n in rows if n["id"] not in have]
+        for key, n in rows:
+            if n["id"] in have:
+                continue
+            ln = _fallback_or_hold(n, key, root, cx, f"the router failed on it ({type(e).__name__}: {str(e)[:100]})")
+            if ln is None:
+                stats["retry"] += 1      # not even a hold could be made: no line, so the notice stays unruled and the next tick judges it again
+            else:
+                lines.append(ln)
     return lines, stats
 
 
@@ -1004,6 +1028,18 @@ def _twin_plan(groups: dict[str, list[tuple[str, dict[str, Any]]]], last: dict[s
             for c in rest:
                 twins[str(c[2]["id"])] = (str(best[2]["id"]), best[0], best[1])
     ruled: dict[str, tuple[str, str, str]] = {}
+    since = min((float(c[2].get("ts", 0)) for c in cands), default=0.0) - TWIN_WINDOW - 1
+    by_sig: dict[str, dict[tuple[str, str, str, str], list[dict[str, Any]]]] = {}      # a holding page's ruled notices by signature: read and folded once per tick, however many notices ask
+
+    def ruled_on(k2: str) -> dict[tuple[str, str, str, str], list[dict[str, Any]]]:
+        if k2 not in by_sig:
+            idx: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+            for m in _routing.read(k2, since=since):
+                if m.get("kind") == "anchor" and m.get("ruling") in ("passed", "merged", "held", "archived", "dropped"):
+                    idx.setdefault(_twin_sig(m), []).append(m)
+            by_sig[k2] = idx
+        return by_sig[k2]
+
     for root, key, n in cands:
         if str(n["id"]) in used:
             continue
@@ -1011,9 +1047,8 @@ def _twin_plan(groups: dict[str, list[tuple[str, dict[str, Any]]]], last: dict[s
         for k2 in _router.anchor_holders(n, cx):
             if k2 == key or str(n["id"]) in ruled:
                 continue
-            for m in _routing.read(k2, since=float(n.get("ts", 0)) - TWIN_WINDOW - 1):
-                if (m.get("kind") == "anchor" and m.get("id") != n["id"] and m.get("ruling") in ("passed", "merged", "held", "archived", "dropped") and _twin_sig(m) == sig
-                        and abs(float(m.get("ts", 0)) - float(n.get("ts", 0))) <= TWIN_WINDOW
+            for m in ruled_on(k2).get(sig, ()):
+                if (m.get("id") != n["id"] and abs(float(m.get("ts", 0)) - float(n.get("ts", 0))) <= TWIN_WINDOW
                         and not (_router.person_notice(n) and m["ruling"] in ("archived", "dropped"))):      # a person's message never follows an archive
                     ruled[str(n["id"])] = (str(m["id"]), _anc.pilot_root(k2) or k2, k2)
                     break
