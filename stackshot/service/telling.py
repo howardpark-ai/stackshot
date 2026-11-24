@@ -7,9 +7,9 @@ for its pane and it touched the item), holds a notice that asks nothing of a bac
 Notices of stackshot's own that ask a front agent nothing never start its turn. Through the gate as an fyi line or a board line: the stall summaries to -main (tag `stall_summary`), the anchors notice of a completed
 item, a script's fyi (the audit's run summary, the server's parked-wait and moved-step lines), a peer's fyi, a machine's check-in told to a front agent for an item that is waiting (on a wake, another item or an outside party:
 `event_waits.machine_anchor_poll` sends it as a `progress` notice, one for each item) and a wake that only leaves a front agent's item in its place in the queue (`wakes._front_queue_row`, held kind `queue`). What asks stays a turn: the audit's findings on an item that waits on him (a decision, a step of his; one on an item that waits on nothing of his goes as an fyi), the page-agent and registry lines, a machine's check-in for an item that is its mover's to do now, a balance notice and the busy-stretch stall notice. So do a wake, a watcher's
-"is yours now", the line of his board answer that hands an item over when it carries none of his words (a Done with no note; a line with his pick or his note keeps its kind), and the ladder's or the recovery's request to a -main agent, when an item in them waits on his decision or is his step (`carries_for_owner`); where nothing in them
+"is yours now", and the ladder's or the recovery's request to a -main agent, when an item in them waits on his decision or is his step (`carries_for_owner`); where nothing in them
 is for him, their sender tells them as `progress` (`tell_own_move`): the notice rides the agent's next turn and starts none. A wake that hands an item to a front agent whose own named step is the item's first open step (or whose
-name is on its ask) is a turn all the same: that step is the work (`tell_own_move(named=True)`, `own_step`).
+name is on its ask) is a turn all the same: that step is the work (`tell_own_move(named=True)`, `own_step`). The line of his board answer that hands an item over is not one of these: his pick, his note or his Done is the work the agent is handed, so it starts the turn of the session that moves the item next, a front agent too, whether or not the item holds anything for him once he has answered (`answer._answer_deliver`, tag `answer`, exempt).
 They moved out of server.py as they were: the same texts, the same sessions told, the same order of events. A name that service/create.py, service/update.py, service/gates.py or server.py calls on this module has lost
 its leading underscore (`_tell_woken` is `tell_woken`); the helpers beside it keep theirs.
 
@@ -418,7 +418,7 @@ PRESENCE_MINUTES = 30.0
 
 
 FRONT_TAG_KIND = {"answer": "exempt", "handoff": "exempt", "migration": "exempt", "recycle": "exempt", "needs": "exempt",
-                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt", "balance": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved. A sender of the own-move ones (wake, watch, the answer line that hands an item over with none of his words (a Done with no note), the stall request to a -main agent) tells a front agent the kind "progress" instead when no item in the notice holds something for the owner (tell_own_move); the tag stays, it names the sender. A wake or watch notice that hands an item to a front agent whose own named step is the item's first open step stays a turn: that step is the work (tell_own_move named=True)
+                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt", "balance": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved. A sender of the own-move ones (wake, watch, the stall request to a -main agent) tells a front agent the kind "progress" instead when no item in the notice holds something for the owner (tell_own_move); the tag stays, it names the sender. A wake or watch notice that hands an item to a front agent whose own named step is the item's first open step stays a turn: that step is the work (tell_own_move named=True)
                    "close": "close", "check": "close",      # a notice's tag names its kind unless the sender passes one
                    "owner": "progress", "observer": "progress",
                    "stall_summary": "progress",
@@ -497,7 +497,7 @@ def own_move_kind(owner: str, gids: str, items: "dict[str, dict[str, Any]] | Non
 
 
 def tell_own_move(gid: str, owner: str, note: str, tag: str = "wake", result: "dict[str, Any] | None" = None, items: "dict[str, dict[str, Any]] | None" = None, named: bool = False) -> "threading.Thread | None":
-    """tell_woken for a notice that asks its agent to act on its own move (a wake or a wait that ended, his answer relayed, a stall request): told to a front agent as a progress notice (`own_move_kind`) when nothing in it
+    """tell_woken for a notice that asks its agent to act on its own move (a wake or a wait that ended, a stall request): told to a front agent as a progress notice (`own_move_kind`) when nothing in it
     is for him, so it rides the agent's next turn and starts none; the tag, which names the sender in the logs, is the caller's. For any other recipient, or an item that holds something for him, it is tell_woken as ever.
     `named`: see `own_move_kind`; a wake's senders pass it, so a front agent whose own named step is the item's work is given a turn."""
     return tell_kind(own_move_kind(owner, gid, items, named), gid, owner, note, tag=tag, **({} if result is None else {"result": result}))

@@ -16,6 +16,7 @@ Fixture data, no live store, no network, no tmux: the push is a fake script that
  10  a contact that is also a front agent he is talking to now is told once
  11  after his answer the project's builder moves an item whose needs name a front agent (the front agent stays in needs and is handed a held line, never a push); a project with no builder, a builder that cannot take the item,
      a stored then that is the front agent, and a comment, keep what they had or follow the same rule
+ 12  his answer or his step starts the turn of the front agent that moves the item next (a pick, a Done with no note, a Done with a note, a note on the step), him away or there; a front agent that only keeps up with the item stays on a held line
 
     tests/run-suite answer_reach        → exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, subprocess
@@ -377,7 +378,7 @@ check("11 ...the builder is told it is its now; the front agent has a held line 
 item(74, project="projects/beta", mover="Oliver", state="your-step", step=STEP, needs=["demo-side"])
 out, got, kept = answer("a74", "", "", "done")
 meta = rd(74)["metadata"]
-check("11 a Done on a project with no builder: the front agent takes the item, as before (no builder is named, and its own-move notice is the front gate's, not a held line of this change)", out == "done" and meta.get("mover") == "demo-side" and "demo-builder" not in names_of(meta) and "demo-builder" not in got, (out, meta, got, kept))
+check("11 a Done on a project with no builder: the front agent takes the item and is pushed the line (no builder is named)", out == "done" and meta.get("mover") == "demo-side" and "demo-builder" not in names_of(meta) and "demo-builder" not in got and len(got.get("demo-side", [])) == 1, (out, meta, got, kept))
 item(75, mover="Oliver", needs=["decision", "demo-lead"], then="demo-lead", ask=ASK, options=OPTS)
 out, got, kept = answer("a75", "Ship", "", "answer")
 meta = rd(75)["metadata"]
@@ -386,7 +387,7 @@ check("11 a then the writer stored is left as written, even when it is the front
 item(79, mover="Oliver", state="your-step", step=STEP, then="demo-lead", needs=["demo-lead"])
 out, got, kept = answer("a79", "", "", "done")
 meta = rd(79)["metadata"]
-check("11 a Done on an item that stores a front agent as its then leaves it as written: the front agent takes the item and is told, the builder is not named", out == "done" and meta.get("mover") == "demo-lead" and "demo-builder" not in names_of(meta) and "demo-builder" not in got, (out, meta, got, kept))
+check("11 a Done on an item that stores a front agent as its then leaves it as written: the front agent takes the item and is pushed the line, the builder is not named", out == "done" and meta.get("mover") == "demo-lead" and "demo-builder" not in names_of(meta) and "demo-builder" not in got and len(got.get("demo-lead", [])) == 1, (out, meta, got, kept))
 item(76, mover="Oliver", then="demo-builder", needs=["decision", "demo-lead"], ask=ASK, options=OPTS)      # the then a write stores now (the builder), the front agent beside it in needs
 out, got, kept = answer("a76", "", "a thought, no decision yet", "comment")
 check("11 a comment (the item stays his): the builder is its then, so the front agent in needs is handed a held line, no push", out == "comment" and "demo-lead" not in got and "commented on a76" in kept.get("demo-lead", "") and len(got.get("demo-builder", [])) == 1, (out, got, kept))
@@ -396,6 +397,55 @@ check("11 a comment on a project with no builder: the front agent in needs is pu
 item(78, project="projects/beta", mover="Oliver", then="demo-solo", needs=["decision", "demo-side"], ask=ASK, options=OPTS)      # another session holds the item (its then), and the front agent is only named in needs
 out, got, kept = answer("a78", "", "a thought, no decision yet", "comment")
 check("11 …also when another session holds the item: with no builder a front agent in needs is not demoted to a held line, as before", out == "comment" and len(got.get("demo-side", [])) == 1 and "demo-side" not in kept, (out, got, kept))
+
+# ================================================================ 12. his answer or his step starts the turn of the front agent that moves the item next
+# The session the item goes to after his answer is told with a line that starts its turn, with him away or there and whether or not the item holds anything for him once he has answered: a pick, a Done with no note,
+# a Done with a note and a note on the step. A front agent is no exception (it was told the bare Done as a line for its next turn, and the item sat unmoved); a front agent that only keeps up with the item stays on a held line.
+def only_front(got, kept, who):
+    """(pushes to `who`, held lines for `who`): a turn starts with a push, a line for its next turn is a held line and no push."""
+    return got.get(who, []), kept.get(who, "")
+def told_record(i): return json.loads((T / "state/answers.json").read_text()).get(f"a{i}", {}).get("told")
+for who in FRONTS: unstamp(who)
+item(120, mover="Oliver", then="demo-lead", needs=["decision"], ask=ASK, options=OPTS)
+out, got, kept = answer("a120", "Ship", "", "answer")
+pushed, held_ = only_front(got, kept, "demo-lead")
+check("12 a pick on an item whose then is a front agent that is not in needs: it moves the item and is pushed the line, with him away", out == "decision" and rd(120)["metadata"].get("mover") == "demo-lead" and len(pushed) == 1 and "It's yours now" in pushed[0] and not held_, (out, got, kept))
+check("12 ...and the pending answer lists it, so its write settles the answer", told_record(120) == [U["demo-lead"]], told_record(120))
+item(121, mover="Oliver", state="your-step", step=STEP, then="demo-lead", needs=["demo-builder"])
+out, got, kept = answer("a121", "", "", "done")
+pushed, held_ = only_front(got, kept, "demo-lead")
+check("12 a Done with no note on an item whose then is a front agent (the item holds nothing for him once his step is done): the front agent is pushed the line that ends 'It's yours now', with him away", out == "done" and rd(121)["metadata"].get("mover") == "demo-lead" and len(pushed) == 1 and "It's yours now" in pushed[0] and not held_, (out, got, kept))
+check("12 ...its own line is not the one the builder in needs gets (that one says the item goes to the front agent)", len(got.get("demo-builder", [])) == 1 and "It's yours now" not in got["demo-builder"][0], got)
+check("12 ...the pending answer lists the front agent, so its write settles the answer and the keeper is not told", U["demo-lead"] in (told_record(121) or []), told_record(121))
+item(122, mover="Oliver", state="your-step", step=STEP, then="demo-lead", needs=["demo-lead"])
+out, got, kept = answer("a122", "", "", "done")
+pushed, held_ = only_front(got, kept, "demo-lead")
+check("12 a Done with no note on an item whose then is a front agent that is named in needs: pushed once", out == "done" and len(pushed) == 1 and not held_ and "It's yours now" in pushed[0], (out, got, kept))
+item(123, project="projects/beta", mover="Oliver", state="your-step", step=STEP, needs=["demo-side"])
+out, got, kept = answer("a123", "", "", "done")
+pushed, held_ = only_front(got, kept, "demo-side")
+check("12 a Done with no note on a project with no builder: the front agent that takes the item is pushed the line, with him away", out == "done" and rd(123)["metadata"].get("mover") == "demo-side" and len(pushed) == 1 and "It's yours now" in pushed[0] and not held_, (out, got, kept))
+stamp("demo-side", 60); item(124, project="projects/beta", mover="Oliver", state="your-step", step=STEP, needs=["demo-side"])
+out, got, kept = answer("a124", "", "", "done")
+pushed, held_ = only_front(got, kept, "demo-side")
+check("12 ...also with him there and the agent not having touched the item: pushed, no line for its next turn", out == "done" and len(pushed) == 1 and not held_, (out, got, kept))
+unstamp("demo-side")
+item(125, mover="Oliver", state="your-step", step=STEP, then="demo-lead", needs=["demo-builder"])
+out, got, kept = answer("a125", "", "did it, the date is 5 Nov", "done")
+pushed, held_ = only_front(got, kept, "demo-lead")
+check("12 a Done with his note on an item whose then is a front agent: pushed with the note, as before", out == "donenote" and len(pushed) == 1 and "did it, the date is 5 Nov" in pushed[0] and not held_, (out, got, kept))
+item(126, mover="Oliver", state="your-step", step=STEP, then="demo-lead", needs=["demo-builder"])
+out, got, kept = answer("a126", "", "not today, ask me Friday", "note")
+pushed, held_ = only_front(got, kept, "demo-lead")
+check("12 a note on his step, with no Done, to a then that is a front agent: pushed, as before", out == "stepreply" and len(pushed) == 1 and "not today, ask me Friday" in pushed[0] and not held_, (out, got, kept))
+item(127, mover="Oliver", state="your-step", step=STEP, then="demo-lead", needs=["demo-builder"], next="demo-lead: carry on after his step")
+out, got, kept = answer("a127", "", "", "done")
+pushed, held_ = only_front(got, kept, "demo-lead")
+check("12 a Done with no note on an item whose open step is the front agent's own: pushed", out == "done" and len(pushed) == 1 and not held_, (out, got, kept))
+item(128, mover="Oliver", state="your-step", step=STEP, needs=["demo-lead"], contact="demo-main")
+out, got, kept = answer("a128", "", "", "done")
+check("12 a front agent that only keeps up with the item (its contact, or named in needs while the builder moves it) stays on a held line: no push", out == "done" and "demo-main" not in got and "did his step on a128" in kept.get("demo-main", "") and "demo-lead" not in got and "did his step on a128" in kept.get("demo-lead", ""), (out, got, kept))
+check("12 ...and the builder that moves the item is pushed it", len(got.get("demo-builder", [])) == 1 and "It's yours now" in got["demo-builder"][0], got)
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)
