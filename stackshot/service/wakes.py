@@ -327,7 +327,7 @@ def wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], 
     rows = [r for r in keep if not _hold_queue_row(sid, r)]       # a wake that leaves the item still after an open item is a place in the queue, nothing to do yet
     if not rows:
         if xtext:
-            _telling.tell_own_move(",".join(xgids), sid, (xmark + " " if xmark else "") + xtext, tag="watch")
+            _telling.tell_own_move(",".join(xgids), sid, (xmark + " " if xmark else "") + xtext, tag="watch", named=True)
         return
     have = {g: it for g, it, *_ in rows}      # the items in hand: a notice for a front agent is a progress notice when none of them holds something for him (telling.own_move_kind)
     batch = os.urandom(3).hex() if len(rows) > 1 else ""
@@ -360,7 +360,7 @@ def wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], 
     allrem = all(r[4] for r in rows)
     ask = "close it, refresh its next, or set an until date" if allrem else "refresh its ask if things moved"
     if not batch:
-        _telling.tell_own_move(", ".join([gids[0], *xgids]), sid, (xmark + " " if xmark else "") + f"[stackshot] {lines[0]}" + (f"; {ask}." if mine else "") + (f"\n{xtext}" if xtext else ""), items=have)
+        _telling.tell_own_move(", ".join([gids[0], *xgids]), sid, (xmark + " " if xmark else "") + f"[stackshot] {lines[0]}" + (f"; {ask}." if mine else "") + (f"\n{xtext}" if xtext else ""), items=have, named=True)
         return
     head = (f"{len(rows)} backstops came due for you:" if allrem else f"{len(rows)} items woke for you:" if not any(r[4] for r in rows)
             else f"{len(rows)} items came due for you (woken, or a backstop came due):")
@@ -368,7 +368,7 @@ def wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], 
     if others:
         text.append("For an item that is not yours: act on it, or pass it to the session that does the work.")
     text.append(("Close each one, refresh its next, or set an until date." if allrem else "Refresh each one's ask if things moved."))
-    _telling.tell_own_move(", ".join([*gids, *xgids]), sid, (xmark + " " if xmark else "") + "\n".join(text) + (f"\n{xtext}" if xtext else ""), items=have)
+    _telling.tell_own_move(", ".join([*gids, *xgids]), sid, (xmark + " " if xmark else "") + "\n".join(text) + (f"\n{xtext}" if xtext else ""), items=have, named=True)
 
 
 def run_notices(fns: "list[Callable[[], Any]]", what: str, raising: bool = True) -> None:

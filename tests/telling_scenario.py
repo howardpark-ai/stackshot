@@ -71,7 +71,7 @@ MOVED = {      # the telling's name here -> the name it had on server.py (a func
     "holder": "_holder", "keeper_words": "_keeper_words", "live_pass": "_live_pass", "mentions_reply": "_mentions_reply", "next_head": "_next_head",
     "no_front": "_no_front", "notice_link": "_notice_link", "notice_to": "_notice_to", "owner_reached": "_owner_reached", "page_keeper": "_page_keeper",
     "pilot_charge": "_pilot_charge", "pilot_keeper": "_pilot_keeper", "pilot_relay": "_pilot_relay", "pilot_relay_many": "_pilot_relay_many",
-    "carries_for_owner": "_carries_for_owner", "own_move_kind": "_own_move_kind", "tell_own_move": "_tell_own_move",
+    "carries_for_owner": "_carries_for_owner", "own_move_kind": "_own_move_kind", "tell_own_move": "_tell_own_move", "own_step": "_own_step", "_own_named": "_own_named",
     "front_role": "_front_role", "_writers_read": "__writers_read", "touched_or_unknown": "_touched_or_unknown", "present_fronts": "_present_fronts", "presence_here": "_presence_here", "presence_minutes": "_presence_minutes", "project_keeper": "_keeper", "push_noted": "_push_noted", "quiet_line": "_quiet",
     "record_undelivered": "_record_undelivered", "stand_in_keeper": "_stand_in_keeper", "tell_check_closed": "_tell_check_closed",
     "tell_close_mentions": "_tell_close_mentions", "tell_close_owner": "_tell_close_owner", "tell_comment": "_tell_comment", "tell_decided": "_tell_decided",
