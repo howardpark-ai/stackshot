@@ -5,7 +5,7 @@ Covers (messaging._gate_front / answer_route / asked_by / router_answer, router_
   1. The message tool, to a front agent: a marked message that needs the person is delivered; a message that is no answer to the agent's question is refused naming the project's background agent
      (a project with none: held for the next turn, no turn); a done, taken or no-action note is refused in one line, marked or not; the person's own unmarked message is refused without the mark.
   2. An answer to a question the front agent itself wrote to the sender: delivered unmarked while the person's last message to that agent is 30 minutes old or less, and at 31 minutes written onto
-     the item it names, else held through the front gate. The signal for "was written to" is the message log (one row per message through the tool, `from` the agent, `to` the sender, within a day).
+     the item it names, else held through the front gate. The signal for "was written to" is the message log (one row per message through the tool, `from` the agent, `to` the sender, within a day) and the row's `question` mark, set by question=true: a question mark in the text is no question.
      A background agent's hand-back (a done, taken or no-action note, a plain status report) is never an answer: it is written onto the item it names, else refused, whatever the front agent asked it before.
   3. fyi=true and a message to a project page or a background agent are as before.
   4. The router: a pass to a front agent with no need of the person (no ruling for him, no words of his, no hand-back, no mark or needs: decision in the text, no named item waiting on a decision) goes to the
@@ -141,12 +141,12 @@ def mlog(): return [json.loads(l) for l in _messaging.MSG_LOG.read_text().splitl
 def mark(): return _messaging._FOR_OWNER
 
 
-def log_row(frm, to, ago_min=1.0, text="a question?", outcome="delivered"):
-    """A row of the message log: `frm` wrote to `to` `ago_min` minutes ago (the signal that a later message from `to` answers it)."""
+def log_row(frm, to, ago_min=1.0, text="a question?", outcome="delivered", question=True):
+    """A row of the message log: `frm` wrote to `to` `ago_min` minutes ago; with `question` it carries the mark a front agent sets with question=true (the signal that a later message from `to` answers it)."""
     _messaging.MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
     t = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=ago_min)).isoformat(timespec="seconds")
     with open(_messaging.MSG_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"t": t, "from": frm, "auth": "", "to": to, "outcome": outcome, "error": "", "text": text}, ensure_ascii=False) + "\n")
+        f.write(json.dumps({"t": t, "from": frm, "auth": "", "to": to, "outcome": outcome, "error": "", "text": text, **({"question": True} if question else {})}, ensure_ascii=False) + "\n")
 def no_log(): _messaging.MSG_LOG.unlink(missing_ok=True)
 def unstamp(uuid): (T / "state/prompts" / uuid).unlink(missing_ok=True)
 def act2(n, target, key=KEY, **ln):
@@ -218,16 +218,52 @@ no_log(); fresh(); log_row(FRONT, BACK, 24 * 60 + 10); log_row("work-osprey-docs
 check("2i5: …and one put just past the lookback does not, the other agent's later question making no difference: held", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [], (out, pushes()[n0:]))
 no_log(); log_row("home-beta", "work-osprey-docs", 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
 check("2j: a question put by an agent of another project does not count", out.startswith("Refused") and reach(A, n0) == [], out)
-for name, kw in (("a handover from an agent of the project that asks nothing", {"text": "please take the export task and tell me when it is done"}), ("a question whose delivery failed", {"outcome": "failed: no such session"})):
+for name, kw in (("a handover from an agent of the project that asks nothing", {"text": "please take the export task and tell me when it is done", "question": False}), ("a question whose delivery failed", {"outcome": "failed: no such session"})):
     no_log(); fresh(); log_row(FRONT, "work-osprey-docs", 5, **kw); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
     check(f"2l: {name} is no question, so the reply is no answer: refused naming the background agent, no turn", out.startswith("Refused") and "message(to='work-osprey-x'" in out and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
-for name, kw in (("with no question mark in its text", {"text": "the export is on your list"}), ("whose delivery failed", {"outcome": "failed: no such session"})):
+for name, kw in (("with no question flag, a question mark in its text all the same", {"text": "is the export on your list?", "question": False}), ("whose delivery failed", {"outcome": "failed: no such session"})):
     no_log(); fresh(); log_row(FRONT, BACK, 5, **kw); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", BACK); settle()
     check(f"2l2: the front agent's own message {name} is no question: the background agent's later note is held, not delivered", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [], (out, pushes()[n0:]))
-no_log(); fresh(); log_row("work-osprey-x", "work-osprey-docs", 5, text="please take the export task and tell me when it is done"); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
+no_log(); fresh(); log_row("work-osprey-x", "work-osprey-docs", 5, text="please take the export task and tell me when it is done", question=False); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
 check("2m: a message from the project's builder that asks nothing makes the sender's later note no answer (the staged test of a plain note to the front agent)", out.startswith("Refused") and reach(A, n0) == [], (out, pushes()[n0:]))
 no_log(); log_row(FRONT, BACK, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", BACK); settle()
 check("2k: an answer that needs the person is marked and delivered whatever the conversation", out.startswith("delivered") and len(reach(A, n0)) == 1 and mark() in reach(A, n0)[0][1], (out, pushes()[n0:]))
+
+# the mark makes a question, never a question mark: the message tool's question=true, written to the log row, is the one signal (asked_by)
+def tool(to, text, sender, **k):
+    try: return _wt_message.stackshot_message(to=to, text=text, sender=sender, **k)
+    except ToolError as e: return str(e)
+def age_last(minutes):
+    """Move the newest row the front agent wrote to the builder back in time by `minutes` (a row written through the tool, aged)."""
+    rows = [json.loads(l) for l in _messaging.MSG_LOG.read_text().splitlines()]
+    row = [r for r in rows if r["from"] == FRONT and r["to"] == BACK][-1]
+    row["t"] = (datetime.datetime.fromisoformat(row["t"]) - datetime.timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    _messaging.MSG_LOG.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+QURL = "see https://example.org/export?page=2 and Oliver's words: \"can this ship?\" for the layout"
+for name, text in (("a question mark in its text", "is the export ready for review?"), ("a quoted URL and quoted words with a question mark", QURL)):
+    no_log(); fresh(); n0 = len(pushes()); out = tool(BACK, text, FRONT); settle(); row = [x for x in mlog() if x.get("from") == FRONT and x.get("to") == BACK]
+    check(f"2n: the message tool sends {name} without question=true: delivered, and its log row carries no question mark of the flag", out.startswith("delivered") and len(row) == 1 and "question" not in row[0], (out, row))
+    stamp(A, 5); n0 = len(pushes()); h0 = held.count(A); out = msg(FRONT, "yes, the export is ready for review", BACK); settle()
+    check(f"2o: …so the reply is no answer (the tool path): held for the agent's next turn, not delivered while the person is in that conversation", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == h0 + 1, (out, pushes()[n0:]))
+    fresh(); stamp(A, 5); n0 = len(pushes()); n = recp("yes, the export is ready", kind="message", who="work-osprey-x (33333333\u2026)"); res = act2(n, FRONT)
+    check(f"2p: …and the router's pass of the reply is no answer either: held, never delivered to the agent", res["ruling"] == "held" and reach(A, n0) == [] and held.count(A) == 1, (res, pushes()[n0:]))
+no_log(); fresh(); n0 = len(pushes()); out = tool(BACK, "is the export ready for review?", FRONT, question=True); settle(); row = [x for x in mlog() if x.get("from") == FRONT and x.get("to") == BACK]
+check("2q: question=true is logged on the row of the delivered message", out.startswith("delivered") and len(row) == 1 and row[0].get("question") is True and row[0]["outcome"].startswith("delivered"), (out, row))
+stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "yes, the export is ready for review", BACK); settle()
+check("2r: …and a reply to it is an answer within the day (the tool path): delivered to the agent, unmarked, while the person is in that conversation", out.startswith("delivered") and len(reach(A, n0)) == 1 and mark() not in reach(A, n0)[0][1], (out, pushes()[n0:]))
+fresh(); stamp(A, 5); n0 = len(pushes()); n = recp("yes, the export is ready", kind="message", who="work-osprey-x (33333333\u2026)"); res = act2(n, FRONT)
+check("2s: …and the router's pass of it (the router path)", res["ruling"] == "passed" and res["target"] == FRONT and res["marked"] is False and len(reach(A, n0)) == 1, (res, pushes()[n0:]))
+age_last(23 * 60 + 50); fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "yes, the export is ready for review", BACK); settle()
+check("2t: the same marked question 23 h 50 min old still makes the reply an answer", out.startswith("delivered") and len(reach(A, n0)) == 1, (out, pushes()[n0:]))
+age_last(30); fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "yes, the export is ready for review", BACK); settle()
+check("2u: …and past the day (24 h 20 min) it does not: held for the next turn, not delivered", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [], (out, pushes()[n0:]))
+no_log(); fresh(); n0 = len(pushes()); out = tool(BACK, "is the export ready for review?", FRONT, question=True, fyi=True); settle()
+check("2v: question=true beside fyi=true is refused in one line, nothing sent or logged", out.startswith("Refused") and "question=true and fyi=true" in out and "\n" not in out and pushes()[n0:] == [] and mlog() == [], (out, mlog()))
+no_log(); fresh(); n0 = len(pushes()); out = tool(BACK, "is the export ready for review?", "Oliver", question=True); settle()
+check("2w: question=true from the person himself is refused in one line, nothing sent or logged", out.startswith("Refused") and "question=true" in out and "\n" not in out and pushes()[n0:] == [] and mlog() == [], (out, mlog()))
+no_log(); fresh(); n0 = len(pushes()); out = tool(BACK, "is the export ready for review?", FRONT, question=False); settle()
+check("2x: question=false (the default) is as before: delivered, the row without the mark", out.startswith("delivered") and "question" not in [x for x in mlog() if x.get("to") == BACK][0], (out, mlog()))
+no_log()
 
 # a background agent's hand-back is tested BEFORE the answer rule: a question the front agent put to it makes a hand-back no answer
 def asked_present(minutes_ago=5):

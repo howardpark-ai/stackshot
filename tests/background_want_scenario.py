@@ -206,7 +206,7 @@ def log_row(frm, to, ago_min):
     _messaging.MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
     import datetime
     t = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=ago_min)).isoformat(timespec="seconds")
-    with open(_messaging.MSG_LOG, "a", encoding="utf-8") as f: f.write(json.dumps({"t": t, "from": frm, "auth": "", "to": to, "outcome": "delivered", "error": "", "text": "is it ready?"}) + "\n")
+    with open(_messaging.MSG_LOG, "a", encoding="utf-8") as f: f.write(json.dumps({"t": t, "from": frm, "auth": "", "to": to, "outcome": "delivered", "error": "", "text": "is it ready?", "question": True}) + "\n")
 _messaging.MSG_LOG.unlink(missing_ok=True); log_row(SOLO, "home-beta", 5); stamp(SOLO, 5)
 routed("an answer to the front agent's own question while he is in that conversation (delivered)", SOLO_KEY, "yes, the export is ready", SOLO, True, "passed")
 unstamp(SOLO)

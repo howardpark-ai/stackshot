@@ -15,7 +15,7 @@ already moves it, or it waits on a decision): the reply says so in one line: han
 update(mover=<agent>), which tells the new mover itself. An item id cited only for context, not handed over, goes in backticks, since a plain-word id names the receiver on that item. A front agent is given a turn only by what {{OWNER}} has to do: its
 message carries {{FOR_OWNER}} on its first line (except fyi=true, below) and starts a turn only while he talks with that agent or has it in tell_him of an item it names; else it goes to that item's builder or is refused. A background agent's hand-back, a done, taken or no-action note, is tested first and is never an answer: written onto the item it names, else refused. Any other unmarked message is delivered only as
 the answer to a question it wrote to you, while he is in that conversation (30 minutes); later
-it goes onto the item it names, else is held; so is a front peer's or the background agent's own. Any other is refused, naming
+it goes onto the item it names, else is held; so is a front peer's or the background agent's own. A front agent marks a question for the person it writes to with question=true; only a reply to such a message, within a day, is an answer. A `?` in the text, in quoted words or in a URL marks nothing. Any other is refused, naming
 the project's background agent (none: held). A done, taken or
 no-action note (a plain status report, nothing needed from {{OWNER}}, FYI, no reply needed, …), marked or not, is refused: write it on the board item (update, complete) or say nothing. A background agent's
 message to a front agent (marked, or a project message that opens For <front agent>) that names one to three board
@@ -56,3 +56,6 @@ Your own session name or id.
 ## param fyi
 True when the message asks nothing of its receiver (news, a result, a status). A background agent or a front agent
 then gets it with its next turn instead of a turn of its own. Default false.
+
+## param question
+True when a front agent asks the one it writes to a question: only a reply to a message sent with it is an answer. Not with fyi. Default false.

@@ -28,8 +28,9 @@ def _message_desc() -> str:
 def stackshot_message(to: Annotated[str, Field(description=_T.param("to"))],
                       text: Annotated[str, Field(description=_T.param("text"))],
                       sender: Annotated[str, Field(description=_T.param("sender"))],
-                      fyi: Annotated[bool, Field(description=_T.param("fyi"))] = False) -> str:
-    out = _message(to, text, sender, auth=_oauth._who(), fyi=fyi)      # `sender` is the caller's own label; `auth` is the signed-in account the server checked, kept in the log
+                      fyi: Annotated[bool, Field(description=_T.param("fyi"))] = False,
+                      question: Annotated[bool, Field(description=_T.param("question"))] = False) -> str:
+    out = _message(to, text, sender, auth=_oauth._who(), fyi=fyi, question=question)      # `sender` is the caller's own label; `auth` is the signed-in account the server checked, kept in the log
     return out + _off_map_note_to(sender, to)       # a message to a project page: the sender may be off that project's map
 
 
