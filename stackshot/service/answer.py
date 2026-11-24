@@ -133,7 +133,8 @@ def _also_reached(meta: dict[str, Any]) -> list[tuple[str, bool]]:
 
 def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str = "", handed: str = "") -> list[str]:
     """Push the answer to the item's mover (holder, never the creator) and to every session named in its needs, one line each, through the owner-notice
-    path (tell_woken). A front-agent mover's line carries the mark a front agent takes. After a Done or a note on his step (`then` is who the item moved to) the then-mover is told too,
+    path (tell_woken). A front-agent mover's line carries the mark a front agent takes. A front agent that is named in needs but neither moves the item nor takes it after the answer (the project's builder does) gets the line held for its
+    next turn (_tell_aside), never the plain send that starts one. After a Done or a note on his step (`then` is who the item moved to) the then-mover is told too,
     in its own line: the step he did and "it's yours now". After a decision that handed the item to its stored then-mover (`handed`) the same: its line ends "It's yours now". A line that carries his words (a pick, a note, a Done with
     its note) is pushed to a front agent as ever; the bare hand-over of a Done with no note is a progress notice (telling.tell_own_move) when the item holds nothing for him: filed for its next turn, or archived with him away.
     → the session ids told: one the front gate archived is left out, so its next write is still told his answer."""
@@ -178,16 +179,22 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
         mine = oid == thenid
         base = to_then(line) if mine else line
         tell(oid, f"{_FOR_OWNER} {base}" if front else base, yours=mine)
+    held: list[str] = []      # front agents named in needs that neither move the item nor take it after this answer: a held line for their next turn (below), never the exempt tell that starts one
     for s in _needs_sessions(meta):
         sid = _session_id(s)
         if sid and sid not in tried:
+            if sid != thenid and _handover._builder_for_front(s, meta):      # a front agent of a project whose live builder can take the item; a builderless project, a dead builder and every other session are told as ever
+                held.append(s)
+                continue
             tell(sid, to_then(line) if sid == thenid else line, yours=sid == thenid)
     if thenid and thenid not in tried:          # the then-mover is neither the mover nor in needs (a stored `then`): it is told, and its write settles the answer
         tell(thenid, to_then(line), yours=True)
-    if not tried:
+    if not tried and not held:
         print(f"answer: {gid} has no mover and names no session to tell", file=sys.stderr, flush=True)
     seen, handed_to = list(tried), list(told)
-    for s, is_contact in _also_reached(meta):     # the item's contact and the front agents he is talking to now: his answer is a held line for their next turn, never a turn of its own
+    reached = _also_reached(meta)
+    reached += [(h, False) for h in held if _session_id(h) not in {_session_id(r) for r, _c in reached}]      # a front agent named in needs hears of it the same way, whether or not it is the contact or present
+    for s, is_contact in reached:     # the item's contact and the front agents he is talking to now: his answer is a held line for their next turn, never a turn of its own
         sid = _session_id(s)
         if sid and sid not in seen:
             seen.append(sid)
@@ -331,6 +338,8 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             rec["step"] = _states.clean(meta.get("step"))
             _pm = dict(meta); _watch.end_wait(_pm)      # who takes it is read with any leftover wait already ended (a stored wait would make the item read as waiting, with no then)
             then = _model.derive({**item, "metadata": _pm}).then
+            if then and not _model.is_owner(then) and not _model.norm_who(meta.get("then")):      # no stored `then`: the default is the first session in needs; a front agent there is not who takes the item after his step, the project's builder is (a builderless project keeps the front agent)
+                then = _handover._builder_for_front(then, meta) or then
             if not then or _model.is_owner(then):      # no default mover and no session in needs: a project with no builder hands it to the session its next open step names, else its contact; else the item goes to its project's keeper at once, as mover
                 then = _holders._builderless_answer_to(meta, str(meta.get("project") or "")) or _telling.auto_mover(_telling.project_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
             if not then or _model.is_owner(then):      # nobody to take it (no default mover, no session in needs, no keeper): not recorded, nothing written

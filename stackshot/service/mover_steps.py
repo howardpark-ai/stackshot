@@ -30,6 +30,7 @@ from stackshot.projects.project_registry import _registry
 from stackshot.service import agents as _agents
 from stackshot.service import item_read as _item_read
 from stackshot.service import store as _svcstore
+from stackshot.service import telling as _telling
 from stackshot.service.save_hooks import hooks as _hooks
 from stackshot.service.store import _path
 from stackshot.waits import wait_list as _wl
@@ -130,8 +131,9 @@ def _state_apply(meta: dict[str, Any], status: str, st: str, given: dict[str, st
 def _owner_then(project: str, mover_before: str, sender: str, next_text: str, needs: list[str]) -> str:
     """Who takes an item after the owner's answer when nobody named it, as an item goes to him. Not the front agent that relayed the
     ask: the agent that does the work. In order: (1) the mover before his step when it is a background agent; (2) the project's builder when it moves the item (a session in needs) or when
-    next names it as the one building (a line `<builder>: …`); (3) the sender when it is a background agent (a builder that files or edits its own decision item is its own then). "" when
-    none (the model's own default then stands: the first session in needs, else nobody, and his answer hands the item to the project's builder, else its -main agent)."""
+    next names it as the one building (a line `<builder>: …`); (3) the sender when it is a background agent (a builder that files or edits its own decision item is its own then);
+    (4) the project's builder when the model's default then would be a front agent (the first session in needs is one): the front agent that relayed the ask stays in needs and hears of his answer, the builder takes the item. "" when
+    none (the model's own default then stands: the first session in needs, else nobody, and his answer hands the item to the project's builder, else its -main agent; a project with no builder keeps the front agent)."""
     if _holders._is_background(mover_before, project):
         return mover_before
     b = _agents._builder_for(project)
@@ -144,6 +146,8 @@ def _owner_then(project: str, mover_before: str, sender: str, next_text: str, ne
             return b
     if _holders._is_background(sender, project):
         return sender
+    if b and needs and _telling.front_sender(needs[0]):      # the default would be the front agent that filed or relayed the item (the first session in needs): the builder takes it after his answer, the front agent stays in needs
+        return b
     return ""
 
 

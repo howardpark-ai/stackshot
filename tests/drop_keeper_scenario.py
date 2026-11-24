@@ -152,6 +152,16 @@ r = _wt_create.stackshot_create(subject="[home] builder's own decision", descrip
 g9 = r.split()[1]
 check("D9: a decision item the builder creates has the builder as its own `then`", rd(g9)["metadata"].get("then") == BUILD, (rd(g9)["metadata"], r[-300:]))
 
+from stackshot.service import mover_steps as _mover_steps
+check("D9: the first session in needs is a front agent and the project has a builder: the builder is the then to store, not the front agent that relayed it", _mover_steps._owner_then("projects/alpha", "", MAIN, "", [MAIN]) == BUILD, _mover_steps._owner_then("projects/alpha", "", MAIN, "", [MAIN]))
+check("D9: ...a project with no builder keeps the front agent (nothing is stored; the model's default stands)", _mover_steps._owner_then("projects/beta", "", BMAIN, "", [BMAIN]) == "", _mover_steps._owner_then("projects/beta", "", BMAIN, "", [BMAIN]))
+check("D9: ...a background agent first in needs is no front agent: nothing is stored, and no session in needs stores none", _mover_steps._owner_then("projects/alpha", "", MAIN, "", [REVIEW]) == "" and _mover_steps._owner_then("projects/alpha", "", MAIN, "", []) == "", None)
+m17 = {"project": "projects/alpha", "needs": [MAIN], "state": "your-step", "step": "Run the one command on the box"}
+note17 = _mover_steps._owner_then_default(None, m17, "open", MAIN, False)
+check("D9: a write that puts such an item on his move stores the builder as then at write time, and the reply note names it", m17.get("then") == BUILD and f"(then {BUILD}" in note17, (m17, note17))
+m18 = {"project": "projects/beta", "needs": [BMAIN], "state": "your-step", "step": "Run the one command on the box"}
+check("D9: ...nothing is stored on a project with no builder", _mover_steps._owner_then_default(None, m18, "open", BMAIN, False) == "" and "then" not in m18, m18)
+
 # ---- 7. D5 (retired): the idle raise and its "Nag again" button are gone; a raise stored before keeps its "Not needed" answer, an ordinary answer to the mover
 check("button: no \"Nag again\" constant or idle options are left in the server: the idle pass raises no question to Oliver", not hasattr(server, "IDLE_RETRY_LABEL") and not hasattr(server, "_idle_options"), None)
 since = time.time() - 600

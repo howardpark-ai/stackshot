@@ -52,18 +52,23 @@ HIM = "00000000-0000-4000-8000-000000000001"
 AGENT = "00000000-0000-4000-8000-000000000002"       # home-agent: a background agent of the project
 FRONT = "00000000-0000-4000-8000-000000000003"       # home-front: its front agent
 KEEP = "00000000-0000-4000-8000-000000000004"
+SOLO = "00000000-0000-4000-8000-000000000005"        # home-solo: the front agent of a project with no builder
 now0 = time.time()
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": True, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now0 - 86400))}}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({HIM: {"name": "home-here", "machine": "a", "seen": now0}, AGENT: {"name": "home-agent", "machine": "a", "seen": now0},
-                                                     FRONT: {"name": "home-front", "machine": "a", "seen": now0}, KEEP: {"name": "home-keeper", "machine": "a", "seen": now0}}))
+                                                     FRONT: {"name": "home-front", "machine": "a", "seen": now0}, KEEP: {"name": "home-keeper", "machine": "a", "seen": now0},
+                                                     SOLO: {"name": "home-solo", "machine": "a", "seen": now0}}))
 (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project",
                                                                                 "session": "home-keeper", "agents": {"home-front": "the front", "home-agent": "builds it"},
-                                                                                "back_agents": {"home-agent": "builds it"}, "status": "active", "board": [], "board_open": 0}}}))
+                                                                                "back_agents": {"home-agent": "builds it"}, "status": "active", "board": [], "board_open": 0},
+                                                              "projects/beta": {"title": "Beta", "name": "Beta", "org": "home", "tags": [], "type": "project", "session": "home-keeper",
+                                                                                "agents": {"home-solo": "the front"}, "back_agents": {}, "status": "active", "board": [], "board_open": 0}}}))
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\ndisplay-name: home-keeper\nagents:\n  home-front: the front\n  background:\n    home-agent: builds it\n---\n\n# Alpha\n\n## Current state\n\nThe quote is open.\n\n<!-- timeline -->\n")
 (T / "store/next-id").write_text("900")
 THREAD = "1a2b3c4d5e6f7a8b"
 OTHER_THREAD = "ffeeddccbbaa9988"
-(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"https://mail.google.com/mail/u/0/#inbox/{THREAD}", "items": ["a101"], "added": now0 - 5000, "by": "t"}]}))
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"https://mail.google.com/mail/u/0/#inbox/{THREAD}", "items": ["a101"], "added": now0 - 5000, "by": "t"}],
+                                                   "projects/beta": [{"url": f"https://mail.google.com/mail/u/0/#inbox/{THREAD}", "items": ["a101"], "added": now0 - 5000, "by": "t"}]}))
 DESC = "A reply is owed. It lives in the mailbox. Done when it is sent."
 SINCE = now0 - 3000           # when a step was made
 MAILTS = now0 - 60            # when the mail went out: after the step
@@ -380,7 +385,10 @@ check("7 name: a lone name of five letters or more is a candidate when it is the
 
 # ---- 8. the front gate, through the real telling path
 reset("on"); item(101, needs=["home-front"]); spool(row("f1", tid=THREAD)); tick()
-check("8 front: a tick whose then-mover is a front agent starts no turn of it: nothing is delivered to it, nothing at all is pushed", not open_steps(101) and last_answer(101).get("via") == "mail" and pushes() == [], pushes())
+check("8 front: a tick whose then-mover is a front agent of a project with a builder hands the item to the builder: the front agent starts no turn and is told nothing, the builder is told once",
+      not open_steps(101) and last_answer(101).get("via") == "mail" and pushes_to(FRONT) == [] and len(pushes_to(AGENT)) == 1 and rd(101)["metadata"].get("mover") == "home-agent", (pushes(), rd(101)["metadata"]))
+reset("on"); item(101, project="projects/beta", needs=["home-solo"]); spool(row("f1b", tid=THREAD)); tick()
+check("8 front: a tick whose then-mover is the front agent of a project with no builder starts no turn of it: nothing is delivered to it, nothing at all is pushed", not open_steps(101) and last_answer(101).get("via") == "mail" and pushes() == [], pushes())
 reset("on"); item(101, needs=["home-agent"]); spool(row("f2", tid=THREAD)); tick()
 bp = pushes_to(AGENT)
 check("8 front: a background agent that holds the item is told, in plain words about what the server did, once", len(bp) == 1 and "server saw a mail" in bp[0][1] and "ticked the step" in bp[0][1], pushes())
@@ -389,7 +397,9 @@ check("8 front: …and a front agent of the project is told nothing", pushes_to(
 reset("on"); item(101, needs=["home-front", "home-agent"]); spool(row("f3", tid=THREAD)); tick()
 check("8 front: with a front agent and a background agent both on the item, only the background agent is told", pushes_to(FRONT) == [] and len(pushes_to(AGENT)) == 1, pushes())
 reset("on"); item(101, needs=["home-front"]); spool(row("f4")); tick()
-check("8 front: a party tick (after a model call) is quiet toward the front agent the same way", not open_steps(101) and pushes() == [], pushes())
+check("8 front: a party tick (after a model call) is quiet toward the front agent the same way", not open_steps(101) and pushes_to(FRONT) == [] and len(pushes_to(AGENT)) == 1, pushes())
+reset("on"); item(101, project="projects/beta", needs=["home-solo"]); spool(row("f4b")); tick()
+check("8 front: …and, on a project with no builder, nothing at all is pushed", not open_steps(101) and pushes() == [], pushes())
 
 # ---- 9. the verdict belongs to the step it was asked for
 def close_item(n):
