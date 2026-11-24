@@ -6,6 +6,8 @@ status report onto the item it names instead of delivering it (`_builder_report`
 agent on the items a handover names (agent_names.py). The helpers are its refusals' and labels' own: `_gate_front`, `_dead_recipient`, `_project_of_name`, `_project_takes`, `_pane_dead`, `_reachable`, `_msg_label`,
 `_CSE_ID`, the phrases that say nothing is needed (`_NOT_FOR_OWNER`, `_NOT_FOR_OWNER_RE`) and the publisher's letter (`_pub_letter`).
 
+Every refusal is a `Refused(kind, text)`, one `kind` slug per refusal site; the call log keeps the kind with the refused call's target and text (`refusal_fields`, `count_client_call` for the client route), and the weekly refusal report counts message refusals by it.
+
 `MSG_LOG`, the file every message is logged to, is this module's alone: a reader takes it here (`messaging.MSG_LOG`), never a copy. A service module: it reads the store, the registry, the fleet's session rows and the
 config, and writes only through `writes.save` and the push. The session id of a name, the board's time zone and the message length cap are the surface's, reached through service/save_hooks.py. A suite that replaces
 a function of the relay (`_message`, `_gate_front`, `_project_of_name`) sets it on this module, and so does one that swaps the log file.
