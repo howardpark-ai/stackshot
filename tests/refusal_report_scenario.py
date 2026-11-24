@@ -857,7 +857,7 @@ def part_catch_report():
     check("…that hour counts as seen (the line was written first): the next catch in it tells no one", a12["told"] == "", a12)
 
     st, a12b = post(t="2026-11-02T18:00:00+04:00", pane=P, sender=SD, first="y" * 200)
-    check("the first words in the line are clipped to 40 characters, so a held line (cut at 260) keeps them", a12b["told"] != "" and "\"" + "y" * 39 + "\u2026\"" in told[-1][1] and "y" * 41 not in told[-1][1] and len(told[-1][1]) <= 260, told[-1][1])
+    check("the first words in the line are clipped to 40 characters, so the held line stays a short note", a12b["told"] != "" and "\"" + "y" * 39 + "\u2026\"" in told[-1][1] and "y" * 41 not in told[-1][1] and len(told[-1][1]) <= 260, told[-1][1])
 
     # the real hold: the same fyi is held for the builder's next turn and starts none
     CA._telling.hold_notice = real_hold

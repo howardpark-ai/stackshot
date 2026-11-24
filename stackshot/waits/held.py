@@ -22,9 +22,15 @@ HOW THEY REACH THE TURN. Every machine's UserPromptSubmit hook (`pages.py nag`, 
 the session's held notices (POST /client/held, the machine's token, the session as the server registered it), prints the answer (the hook's
 output is the turn's context), and then acknowledges the ids it printed (a second POST). At least once, never lost: lease() marks the lines it
 shows as leased for LEASE seconds and returns their ids; ack() removes them; a line never acknowledged (the hook died before it printed, or
-the answer never arrived) is offered again once the lease runs out. A duplicate is possible, a loss is not. Oldest first, one line each, at
+the answer never arrived) is offered again once the lease runs out. A duplicate is possible, a loss is not. Oldest first, one notice each (a message with its line breaks, the lines after the first indented), at
 most SHOWN_MAX; the rest stay for the next turn and the last line says "+N more". A notice older than KEEP_DAYS is dropped, and a session
 keeps at most KEEP_MAX (the oldest go); each drop is a stderr line. take() = lease + ack at once (a caller that has no hook to wait for).
+
+ONE LINE OR THE WHOLE TEXT. A status notice the server writes (closed, changed, queue, page-owed, an item's notice to a front agent) is one line, folded to one and cut at LINE_MAX. A message a session wrote
+(add(..., whole=True): the message tool's fyi, the router's pass of a message, a queued line filed from a digest) keeps all its words and its line breaks, up to WHOLE_MAX (the message tool's own limit,
+MSG_MAX, plus FRAME_ROOM for the sender's label and the framing words): its first line follows the time and the kind, and every line after it is indented two spaces, so the shape stays readable in one turn.
+A text above WHOLE_MAX (the tool refuses one above MSG_MAX, so only a text of another source, or a label of unusual length) is cut at a line or word boundary and ends with a note: how many characters were
+left out and where the rest is (cut_whole). SHOWN_MAX caps the lines of a turn, whole or not.
 
 ROLLOUT GATE. A notice is held only for a session whose hook has fetched held lines (mark_client, recorded when the endpoint is called;
 can_fetch). A machine whose checkout is behind, a cloud session and a session that has not had a turn since the update never fetch, so
@@ -49,13 +55,17 @@ from pathlib import Path
 from typing import Any
 
 from stackshot.core import config as _cfg
-from stackshot.core.lines import newline_lines
+from stackshot.core.lines import MSG_MAX, newline_lines
 
 KINDS = ("closed", "changed", "queue", "page-owed", "fyi")
 SHOWN_MAX = 8               # lines handed over at one turn start; the rest wait for the next turn
 KEEP_MAX = 100              # held lines kept per session; past it the oldest go
 KEEP_DAYS = 7               # a held line older than this is dropped, never handed over
-LINE_MAX = 260              # characters in one held line
+LINE_MAX = 260              # characters in one held status line (a text that is not a session's message)
+FRAME_ROOM = 400            # characters a held message may carry beyond the message tool's limit: the sender's label and the framing words the notice adds before the text
+WHOLE_MAX = MSG_MAX + FRAME_ROOM      # characters in one held message: the message tool's own limit (core/lines.py MSG_MAX) and the room for its frame
+WHERE_MAX = 120             # characters of the place a cut message's rest is named in (the note stays short whatever a caller passes)
+REST_IN = "the message log (ask the sender for it)"      # where the words of a cut message are, when its caller names no better place
 LEASE = 60.0                # s a line handed to a hook stays reserved for it until it acknowledges (then it is offered again)
 CLIENT_DAYS = 30            # a session counts as fetching held lines for this long after its hook last asked
 _ORD = {1: "st", 2: "nd", 3: "rd"}
@@ -152,6 +162,35 @@ def _write(path: Path, rows: list[dict[str, Any]]) -> None:
 def one_line(text: Any, n: int = LINE_MAX) -> str:
     s = " ".join(str(text or "").split())
     return s if len(s) <= n else s[:n - 1].rstrip() + "…"
+
+
+def keep_whole(text: Any) -> str:
+    """A message's text with its words and line breaks as written: every line ending made "\n" (each character `str.splitlines()` breaks a line at: "\r\n", "\r", a vertical tab, a form feed, the
+    separators U+001C to U+001E, U+0085, U+2028 and U+2029, so a reader that cuts the turn with `splitlines()` finds the same lines as the indent), the end of every line and of the text trimmed, blank lines at the start and end dropped."""
+    lines = [ln.rstrip() for ln in str(text or "").splitlines()]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)
+
+
+def cut_whole(text: str, n: int = WHOLE_MAX, where: str = REST_IN) -> str:
+    """`text` whole when it has at most `n` characters. Longer: the note is sized first (with the longest count it can carry) and what is left of `n` is the room for the text. The text is cut at the last
+    line break in the second half of that room, else at the last space in the second half, else at the room's end itself (a break or space in the first half is not used: it would drop most of the text),
+    and closed with a note on a line of its own, never cut inside it: "… (N characters left out; the rest is in <where>)". `where` is shown at most 120 characters long (folded to one line, cut with an
+    ellipsis), so the result is at most `n` characters, the note included, for any `where`."""
+    if len(text) <= n:
+        return text
+    where = one_line(where, WHERE_MAX) or REST_IN
+    room = max(0, n - len(f"\n… ({len(text)} characters left out; the rest is in {where})"))      # sized with the longest count the note can carry
+    head = text[:room]
+    at = head.rfind("\n")
+    if at < room // 2:                  # no line break in the second half of what fits: a word boundary there, else the limit itself
+        sp = max(head.rfind(" "), at)
+        at = sp if sp >= room // 2 else room
+    head = head[:at].rstrip()
+    return head + f"\n… ({len(text) - len(head)} characters left out; the rest is in {where})"
 
 
 # ----------------------------------------------------------------------------- the decision
@@ -254,11 +293,12 @@ def _sweep(now: float) -> None:
         pass
 
 
-def add(key: str, kind: str, text: str, sender: str = "", gid: str = "", nid: str = "", now: float | None = None) -> bool:
+def add(key: str, kind: str, text: str, sender: str = "", gid: str = "", nid: str = "", now: float | None = None, whole: bool = False, where: str = "") -> bool:
     """Hold one notice for the session `key` (key_of). Idempotent on `nid` (a router notice retried after a write failed is held once).
+    `whole`: the text is a session's message, kept with its words and line breaks up to WHOLE_MAX (cut_whole, `where` naming where the rest is when it is cut); otherwise it is folded to one line of at most LINE_MAX.
     → True when stored. Never raises."""
     key = str(key or "").strip()
-    line = one_line(text)
+    line = cut_whole(keep_whole(text), WHOLE_MAX, where or REST_IN) if whole else one_line(text)
     if not key or not line:
         return False
     now = time.time() if now is None else now
@@ -300,10 +340,17 @@ def _when(ts: float, now: float) -> str:
     return f"{t.strftime('%a %b')} {d}{'th' if 10 <= d % 100 <= 20 else _ORD.get(d % 10, 'th')} {hm}"
 
 
+def _show(r: dict[str, Any], now: float) -> str:
+    """One held notice as it reads in the turn: `- <time> · <kind> · <first line>`, and the lines after it (a message with line breaks) indented two spaces. Cut with `splitlines()`, as keep_whole is, so a
+    line separator that is no "\n" never leaves a line at column 0 (a stored row is shown the same whoever wrote it)."""
+    first, *rest = str(r["text"]).splitlines() or [""]
+    return "\n".join([f"- {_when(float(r['ts']), now)} · {r.get('kind', '')} · {first}", *("  " + ln if ln else "" for ln in rest)])
+
+
 def lease(*refs: str, now: float | None = None, shown_max: int | None = None) -> tuple[str, list[str]]:
     """The text to hand the session at a turn start and the ids of the lines in it → ("", []) when nothing is due. The lines shown are LEASED, not removed:
     ack() removes them, and one never acknowledged is offered again after LEASE seconds (at least once; a duplicate is possible, a loss is not). Lines
-    under another offer's lease are not offered. Oldest first, one line each, SHOWN_MAX at most, and a last line "+N more" for those that wait for the
+    under another offer's lease are not offered. Oldest first, each notice one line (a message keeps its line breaks: the lines after the first are indented), SHOWN_MAX notices at most, and a last line "+N more" for those that wait for the
     next turn. Never raises."""
     now = time.time() if now is None else now
     cap = SHOWN_MAX if shown_max is None else max(1, shown_max)
@@ -322,7 +369,7 @@ def lease(*refs: str, now: float | None = None, shown_max: int | None = None) ->
                     _write(p, rs)
             if not shown:
                 return "", []
-        lines = [f"- {_when(float(r['ts']), now)} · {r.get('kind', '')} · {r['text']}" for _p, r in shown]
+        lines = [_show(r, now) for _p, r in shown]
         if rest:
             lines.append(f"- +{len(rest)} more, handed over at your next turn")
         n = len(shown) + len(rest)
