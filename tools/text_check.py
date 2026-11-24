@@ -32,7 +32,7 @@ import tool_text as tt   # noqa: E402
 
 MAX_DIFF = 60_000
 # The cap bounds ONE reading pack (the snapshot entries of the tools a change reaches), not the total of the twelve tools: what does not fit is left out whole and
-# named (fit_text), so the total growing past the cap fails nothing. What the cap must hold is the biggest single tool, uncut and with real room to spare, so that a
+# named (fit_text), so the total growing past the cap fails nothing. What the cap must hold is the biggest single tool, uncut, at most 90% of the cap (a little room for it to grow), so that a
 # reader never takes a cut-off tool for a tool with missing parameters (tests/text_pack_scenario.py checks every tool alone). History: 150,000, then 160,000, then
 # 165,000, each raise made while the cap still bounded the total.
 MAX_TEXT = 165_000
@@ -172,14 +172,18 @@ def _as_json(entries: dict[str, Any]) -> str:
 
 
 def fit_text(snapshot: dict[str, Any], tools: list[str], limit: int) -> str:
-    """The affected tools' snapshot entries as indented JSON within `limit` characters, cut at tool boundaries: whole tools are kept in sorted order while the JSON
-    stays within the limit, and the tools left out are named in one plain line after it, so a reader never takes a cut-off tool for a tool with missing parameters.
-    A pack that fits is the JSON alone, with no notice. The one case cut inside a tool: not even the first tool fits alone; its text is then cut at the limit and the
-    notice names it."""
+    """The affected tools' snapshot entries as indented JSON within `limit` characters (counted in characters, never bytes; a negative limit counts as 0), cut at tool
+    boundaries: whole tools are kept in sorted order while the JSON stays within the limit, and a tool that does not fit is left out whole and named in one plain line
+    after it (with where its text is and how to raise the limit), so a reader never takes a cut-off tool for a tool with missing parameters. A pack that fits is the
+    JSON alone, with no notice. The one case cut inside a tool: when no tool fits alone, the first tool in sorted order is cut at the limit and the notice names it,
+    while the others are named as left out. With no tool at all, an empty object that does not fit the limit is cut the same way and the notice names no tool."""
+    limit = max(limit, 0)
     present = {t: (snapshot.get("tools") or {}).get(t, "(not in the snapshot)") for t in sorted(set(tools))}
     text = _as_json(present)
     if len(text) <= limit:
         return text
+    if not present:
+        return text[:limit] + f"\n[tool text cut at {limit} characters]"
     kept: dict[str, Any] = {}
     left: list[str] = []
     for name, entry in present.items():
@@ -193,7 +197,7 @@ def fit_text(snapshot: dict[str, Any], tools: list[str], limit: int) -> str:
         name = left.pop(0)
         text = _as_json({name: present[name]})[:limit] + f"\n[tool text cut at {limit} characters: {name}]"
     if left:
-        text += f"\n[tools left out to fit {limit} characters: {', '.join(left)}]"
+        text += f"\n[tools left out to fit {limit} characters (their text is in {tt.SNAPSHOT_REL}; --max-text-chars raises the limit for one run): {', '.join(left)}]"
     return text
 
 
