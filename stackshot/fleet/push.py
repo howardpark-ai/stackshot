@@ -34,7 +34,7 @@ Before a queued line is delivered (--flush, and the inbox's hand-out) it passes 
 The inbox: after putting a line there this script waits a few seconds for the machine's confirmation, so the
 answer is still "delivered" when the pane is live, and "inbox" when the line waits for its machine (asleep, or its puller
 down: it goes out when that machine next asks). Cloud sessions are always delivered from here.
-Stdlib only: called by anchor-hub, the stackshot server and the reboot hooks."""
+Stdlib only: called by the anchors service, the stackshot server and the reboot hooks."""
 from __future__ import annotations
 import os as _os, sys as _sys
 if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py): the checkout must be importable

@@ -129,6 +129,7 @@ def _quiet() -> dict[str, int]: return {str(k): int(v) for k, v in (_cfg.get("an
 def _quiet_max() -> int: return int(_cfg.get("anchor_hub", "quiet_max_hold") or 10800)                      # QUIET_MAX, s: a burst that never goes quiet still reports this often
 RESCAN = 60            # s: fallback bindings rescan + queue flush cadence (inotify is the primary trigger)
 RETRY = (60, 21600)    # s: an anchor the hub cannot read is asked for again after 60 s, then at doubling intervals up to 6 h
+UNREADABLE_CONFIRM = 300   # s: an anchor counts as unreadable (its removal clock starts and its keeper is told) once two reads at least this far apart were refused
 HEALTH = 1800          # s; cursor health poll for every push-covered source (catches a dead channel, replays misses)
 HOOK_URL = str(_cfg.get("anchor_hub", "hook_url") or "")
 HOOK_PORT = int(_cfg.get("anchor_hub", "hook_port") or 8010)
@@ -291,6 +292,16 @@ def load_bindings() -> dict[str, set[str]]:
         except Exception as e: log.warning("extra.json unreadable: %s", e)
     return b
 
+def _restore_call(project: str, url: str, entry: dict | None) -> str:
+    """The anchors call that puts an entry back: its url, scoped to the items it was scoped to (written as a person writes an id)."""
+    items = [str(g) for g in (entry or {}).get("items") or []]
+    try:
+        from stackshot.github import ghsync as _gh
+        items = [_gh.shown(g) for g in items]
+    except Exception: pass
+    return f"anchors(project={json.dumps(project)}, add={json.dumps([url])}" + (f", items={json.dumps(items)}" if items else "") + ")"
+
+
 # ---------- state ----------
 def _jsonable(x):
     """Sets and tuples → lists, recursively (cursor persistence)."""
@@ -367,30 +378,36 @@ class Hub:
                 # to the project's keeper, then ever rarer tries, so a source is not asked every pass for what it will not give.
                 if why:
                     u = u or {"since": now_iso(), "tries": 0}
+                    u.setdefault("first", now)           # the epoch of the first refusal (a record kept by an earlier version has none: its first is now)
                     u["why"] = why; u["tries"] += 1; u["next"] = now + min(RETRY[1], RETRY[0] * 2 ** (u["tries"] - 1))
-                    if u["tries"] >= 2 and not u.get("warned"): u["warned"] = now_iso(); warn.append((a, why))
+                    # The removal clock (`at`, an epoch the anchor sweep reads) starts only when the anchor was refused on two reads at least UNREADABLE_CONFIRM seconds apart: a refusal that lasts a minute
+                    # starts nothing. The keeper is told at that moment, once for the whole time the anchor stays unreadable: the record is deleted only when it reads again.
+                    if u["tries"] >= 2 and now - float(u["first"]) >= UNREADABLE_CONFIRM and not u.get("at"): u["at"] = now; u["warned"] = now_iso(); warn.append((a, why))
                     st["unreadable"] = u
                 elif u and title:
                     del st["unreadable"]
                     if u.get("warned"): clear.append((a, st["label"]))
                 elif u: u["next"] = now + RETRY[0]         # neither read nor refused (the network, the service): once more next pass
-        for a, why in warn: self.warn_unreadable(a, f"anchor-hub cannot read it: {why}. No notice will come from it until that changes. "
-                                                    "Fix the access or the link, then remove the anchor and add it again to have it checked at once; or remove it")
+        for a, why in warn: self.warn_unreadable(a, f"the anchors service cannot read it: {why}. No notice will come from it until that changes. "
+                                                    "Fix the access or the link, then remove the anchor and add it again to have it checked at once; or remove it", removal=True)
         for a, label in clear: self.warn_unreadable(a, f"anchor-hub can read it now ({label}); the earlier warning no longer holds")
         self.flush_queues()
         self.write_status()
 
-    def warn_unreadable(self, anchor: str, text: str):
+    def warn_unreadable(self, anchor: str, text: str, removal: bool = False):
         """One notice per project the anchor belongs to, to that project's keeper (the sessions bound to it when the page
-        names none), recorded in the routing log like any notice."""
+        names none), recorded in the routing log like any notice. With `removal` (the warning that starts the removal clock) the line ends with when the
+        anchor is removed and the call that puts it back."""
         store = _anc.load()
         for project in sorted({r["project"] for r in _ROUTES.get(anchor, [])}):
             rs = [r for r in _ROUTES[anchor] if r["project"] == project]
-            url = next((e.get("url") for e in store.get(project, []) if _anc.anchor_id(_anc.split_fragment(e.get("url", ""))[0]) == anchor), anchor)
+            ent = next((e for e in store.get(project, []) if _anc.anchor_id(_anc.split_fragment(e.get("url", ""))[0]) == anchor), None)
+            url = ent.get("url") if ent else anchor
+            tail = f". If it stays unreadable for {_anc.unreadable_days()} days it is removed from {project}; the call that puts it back: {_restore_call(project, url, ent)}" if removal else ""
             stew = _anc.canonical(_anc.name_line(project) or "")
             for s in ([stew] if stew else sorted({r["session"] for r in rs})):
                 r = next((x for x in rs if x["session"] == s), rs[0])
-                line = f"[anchor] {_anc.kind_of(anchor)} anchor of {project}: {text} → {url}"
+                line = f"[anchor] {_anc.kind_of(anchor)} anchor of {project}: {text}{tail} → {url}"
                 held = r["pilot"] and self.holds(project, s)         # live router: recorded for the router to rule, not delivered to the keeper
                 try:
                     nid = _routing.record(project, kind="anchor", to="" if held else s, label=f"{_anc.kind_of(anchor)} anchor", who="anchor-hub", text=text.split(". ")[0], url=url if str(url).startswith("http") else "",

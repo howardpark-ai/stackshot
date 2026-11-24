@@ -461,5 +461,142 @@ del _cfg.CFG["anchor_hub"]["sweep_per_tick"]
 import tomllib
 check("stackshot.example.toml: [anchor_hub] sweep_per_tick is set to the default of 50", tomllib.loads(_instance.base_toml()).get("anchor_hub", {}).get("sweep_per_tick") == 50 == SW.PER_TICK, tomllib.loads(_instance.base_toml()).get("anchor_hub"))
 
+# ---------- rule 5: an anchor the reader cannot read for [anchor_hub] unreadable_days days ----------
+GMU, DRU = "https://mail.google.com/mail/u/0/#all/1111111111111111", "https://docs.google.com/document/d/AAAAAAAAAAAAAAAAAAAAAAAAA"
+aid_gm, aid_dr, aid_iss = AID(GMU), AID(DRU), AID(ISSUE)
+WHY = "the thread is in none of the mailboxes the hub reads (x@example.com)"
+def ux(days, why=WHY, **more): return {"unreadable": {"since": "x", "tries": 5, "why": why, "at": NOW - days * DAY, **more}}
+def ureader(status, status_at=NOW - 60): return SW.Reader({}, NOW - 60, {"anchors": status}, status_at)
+ubase = {P1: [entry(GMU, ["a1"], 1.0), entry(DRU, None, 1.0), entry(WIDE)]}
+def unread(age, **kw): return sorted(h.entry["url"] for h in SW.rule_unreadable(ubase, ureader({aid_gm: ux(age), aid_dr: ux(age)}), NOW, **kw))
+_cfg.CFG.setdefault("anchor_hub", {}).pop("unreadable_days", None)
+check("rule 5: an entry whose anchor has been unreadable for 7 days goes, of any kind (a Gmail thread, a Drive file), project-wide or scoped to an open item; an anchor with no status record never", unread(7) == sorted([GMU, DRU]), unread(7))
+check("rule 5: ...and not a second sooner: 6 days 23 hours 59 minutes stays, 6 days stays, a day stays", unread(7 - 1 / 1440) == [] and unread(6) == [] and unread(1) == [], (unread(7 - 1 / 1440), unread(6)))
+check("rule 5: the reason reads 'unreadable for N days: <why>' with the line the reader gave", [h.why for h in SW.rule_unreadable(ubase, ureader({aid_gm: ux(9)}), NOW)] == [f"unreadable for 9 days: {WHY}"]
+      and all(h.rule == "unreadable" for h in SW.rule_unreadable(ubase, ureader({aid_gm: ux(9)}), NOW)), "")
+check("rule 5: the days are [anchor_hub] unreadable_days: 7 when unset, a whole number of 1 or more otherwise, and 7 for anything else",
+      ANC.unreadable_days() == 7 == ANC.UNREADABLE_DAYS == SW.unreadable_days()
+      and all([_cfg.CFG["anchor_hub"].update(unreadable_days=v) or ANC.unreadable_days() == 7 for v in (0, -3, "x", True, 2.5, None)]), ANC.unreadable_days())
+_cfg.CFG["anchor_hub"]["unreadable_days"] = 10 ** 9
+check("rule 5: a configured number above 3650 days counts as 3650, so the listing's date is always a date", ANC.unreadable_days() == 3650 == ANC.UNREADABLE_DAYS_MAX
+      and "removed on" in ANC.fmt([entry(GMU)], {aid_gm: {"label": "Gmail x", "unreadable": {"since": "s", "why": WHY, "at": NOW, "warned": "x"}}}), ANC.unreadable_days())
+_cfg.CFG["anchor_hub"]["unreadable_days"] = 3
+check("rule 5: ...a configured 3 removes at 3 days and not at 2 days 23 hours", unread(3) == sorted([GMU, DRU]) and unread(3 - 1 / 24) == [] and ANC.unreadable_days() == 3, (unread(3), unread(3 - 1 / 24)))
+check("rule 5: the `days` argument overrides the setting", unread(10, days=14) == [] and unread(14, days=14) == sorted([GMU, DRU]), "")
+del _cfg.CFG["anchor_hub"]["unreadable_days"]
+check("stackshot.example.toml: [anchor_hub] unreadable_days is set to the default of 7", tomllib.loads(_instance.base_toml()).get("anchor_hub", {}).get("unreadable_days") == 7 == ANC.UNREADABLE_DAYS, tomllib.loads(_instance.base_toml()).get("anchor_hub"))
+# what is not known keeps the anchor
+rdx = lambda **kw: SW.rule_unreadable(ubase, ureader({aid_gm: kw.get("rec", {})}, kw.get("status_at", NOW - 60)), NOW)
+check("rule 5: a status record with no clock, an empty record, or a clock that is no usable time keeps the anchor (unknown is not 'unreadable')",
+      rdx(rec={"unreadable": {"since": "x", "tries": 9, "why": WHY}}) == [] and rdx(rec={}) == [] and rdx(rec={"unreadable": {}}) == [] and rdx(rec={"unreadable": None}) == []
+      and all(rdx(rec={"unreadable": {"at": v, "why": WHY}}) == [] for v in ("x", None, True, 0, -5, [], {})) and rdx(rec={"unreadable": "yes"}) == [] and rdx(rec="unreadable") == [], "")
+check("rule 5: a clock with no reason, or a clock in the future, keeps the anchor", rdx(rec={"unreadable": {"at": NOW - 30 * DAY, "why": ""}}) == [] and rdx(rec={"unreadable": {"at": NOW - 30 * DAY}}) == []
+      and rdx(rec={"unreadable": {"at": NOW + 30 * DAY, "why": WHY}}) == [], "")
+old_rec = ux(30)
+check("rule 5: a status file older than 15 minutes, a missing one (no time), or one that was not read removes nothing; a young one does",
+      rdx(rec=old_rec, status_at=NOW - 901) == [] and rdx(rec=old_rec, status_at=None) == [] and rdx(rec=old_rec, status_at=NOW + 600) == [] and len(rdx(rec=old_rec, status_at=NOW - 899)) == 1
+      and SW.rule_unreadable(ubase, SW.Reader(None, None, None), NOW) == [] and SW.rule_unreadable(ubase, SW.Reader({}, NOW, {"anchors": "x"}, NOW), NOW) == [] and SW.rule_unreadable(ubase, SW.Reader({}, NOW, None, NOW), NOW) == [], "")
+check("rule 5: an entry added (or added again) less than 7 days ago stays, however old the clock; one added 8 days ago goes",
+      SW.rule_unreadable({P1: [entry(GMU, None, NOW - 3 * DAY)]}, ureader({aid_gm: ux(30)}), NOW) == [] and SW.rule_unreadable({P1: [entry(GMU, None, NOW - (7 * DAY - 60))]}, ureader({aid_gm: ux(30)}), NOW) == []
+      and len(SW.rule_unreadable({P1: [entry(GMU, None, NOW - 8 * DAY)]}, ureader({aid_gm: ux(30)}), NOW)) == 1, "")
+wait_gm = lambda p, e: e["url"] == GMU
+check("rule 5: an entry the `spared` test names is not removed, the other one still is", [h.entry["url"] for h in SW.rule_unreadable(ubase, ureader({aid_gm: ux(30), aid_dr: ux(30)}), NOW, wait_gm)] == [DRU], "")
+check("Reader.load: the status file's modified time is its freshness, and the clock and reason are read from its record", (lambda r: r.status_fresh(NOW) is False and r.reading(aid_gm).unreadable_since is None)(SW.Reader({}, NOW, {"anchors": {}}, NOW - 2000))
+      and SW.Reader({}, NOW, {"anchors": {aid_gm: ux(8)}}, NOW).reading(aid_gm).unreadable_since == NOW - 8 * DAY and SW.Reader({}, NOW, {"anchors": {aid_gm: ux(8)}}, NOW).reading(aid_gm).unreadable_why == WHY, "")
+_inbox_flags = _inbox.FLAGS
+try:
+    fl = T / "flags"; fl.mkdir(exist_ok=True); _inbox.FLAGS = fl
+    (fl / "cursors.json").write_text("{}"); (fl / "status.json").write_text(json.dumps({"anchors": {aid_gm: ux(8)}}))
+    os.utime(fl / "status.json", (time.time(), time.time())); rl = SW.Reader.load()
+    check("Reader.load: a young status file gives the record; the clock is read as an epoch", rl.status_fresh(time.time()) and rl.reading(aid_gm).unreadable_since == NOW - 8 * DAY, rl.status_at)
+    os.utime(fl / "status.json", (time.time() - 3600, time.time() - 3600))
+    check("Reader.load: an hour-old status file is not fresh, so rule 5 removes nothing from it", not SW.Reader.load().status_fresh(time.time()), "")
+    (fl / "status.json").write_text("{broken"); rb = SW.Reader.load()
+    check("Reader.load: a status file that cannot be read is no status: the anchor stays", not rb.status_fresh(time.time()) and rb.reading(aid_gm).unreadable_since is None, rb.status_at)
+    (fl / "status.json").unlink(); rm = SW.Reader.load()
+    check("Reader.load: a missing status file is no status either", not rm.status_fresh(time.time()), "")
+finally: _inbox.FLAGS = _inbox_flags
+
+# the sweep: the same rule through the store, the lock, the log and the record
+U1, U2 = "https://github.com/o/r/issues/41", "https://github.com/o/r/issues/42"
+aid_u1, aid_u2 = AID(U1), AID(U2)
+URD = ureader({aid_u1: ux(8), aid_u2: ux(8)})
+def unread_went(entry_items=None, status="open", **meta):
+    for f in (T / "store/a").glob("2?.json"): f.unlink()
+    put_item(20, status, **meta)
+    set_store({P1: [entry(U1, entry_items)]})
+    return [o["url"] for o in SW.sweep(NOW, rules=("unreadable",), reader=URD, reg={})] == [U1]
+check("rule 5 in the sweep: with no item waiting on it an anchor unreadable for 8 days goes, and the log line carries the days, the reason and the restore call", unread_went(), "")
+ul = [n for n in lines(P1) if n.get("url") == U1][-1]
+check("rule 5 in the sweep: ...the line is ruled archived by the automatic ruler, says 'unreadable for 8 days: <reason>', and holds the call that puts it back",
+      ul.get("ruling") == "archived" and ul.get("ruled_by") == routing.AUTO_RULER and "(unreadable)" in ul.get("label", "") and f"unreadable for 8 days: {WHY}" in json.dumps(ul)
+      and f'anchors(project="{P1}", add=["{U1}"])' in ul.get("text", ""), ul)
+check("rule 5 in the sweep: an open item's wait_anchor on it spares it, an open anchor line of a list wait too", not unread_went(wait_anchor=U1)
+      and not unread_went(wait_kind="list", wait_mode="any", until="2099-01-01", waits=[{"kind": "anchor", "anchor": U1, "event": "x"}, {"kind": "time", "until": "2099-01-01"}]), "")
+check("rule 5 in the sweep: a wait on the same issue in another form (the pull request spelling) spares it; a wait on another issue does not", not unread_went(wait_anchor="https://github.com/o/r/pull/41")
+      and unread_went(wait_anchor="https://github.com/o/r/issues/43"), "")
+check("rule 5 in the sweep: a closed item's wait spares nothing; an entry scoped to a parked open item is spared, one scoped to an open item that is not on hold goes",
+      unread_went(status="completed", wait_anchor=U1) and not unread_went(["a20"], hold=True, needs=["external"], wake="2099-01-01", next="mv: x") and unread_went(["a20"]) and unread_went(["a20"], status="completed"), "")
+with contextlib.redirect_stderr(io.StringIO()) as err:
+    ANC.items_read = broken_items
+    try: went = unread_went()
+    finally: ANC.items_read = real_items
+check("rule 5 in the sweep: when the items cannot be read the anchor is kept, with a line on stderr", not went and "every anchor is spared" in err.getvalue(), err.getvalue())
+for f in (T / "store/a").glob("2?.json"): f.unlink()
+set_store({P1: [entry(U1), entry(U2)]})
+check("rule 5 in the sweep: with no status at all (a reader that is down) nothing goes", SW.sweep(NOW, rules=("unreadable",), reader=SW.Reader(None, None, None), reg={}) == []
+      and SW.sweep(NOW, rules=("unreadable",), reader=ureader({aid_u1: ux(8)}, None), reg={}) == [] and urls(get_store(), P1) == [U1, U2], get_store())
+check("rule 5 in the sweep: the other rules do not remove it (rules= selects), the default rule set does", SW.sweep(NOW, rules=("items", "quiet", "repo", "pages"), reader=URD, reg={}) == []
+      and [o["url"] for o in SW.sweep(NOW, reader=ureader({aid_u1: ux(8)}), reg={})] == [U1] and urls(get_store(), P1) == [U2], get_store())
+check("rule 5 in the sweep: a second sweep removes nothing more (idempotent)", SW.sweep(NOW, reader=ureader({aid_u1: ux(8)}), reg={}) == [] and urls(get_store(), P1) == [U2], "")
+# the cap and the restore lines
+UCAP = "projects/ucapped"
+uurls = [f"https://github.com/o/r/issues/{500 + i}" for i in range(7)]
+okst = lambda n: {AID(f"https://github.com/o/r/issues/{900 + i}"): {"label": "GitHub issue", "title": "x"} for i in range(n)}      # anchors that read fine: a mass outage is not what this sweep is about
+UCRD = ureader({**{AID(u): ux(9) for u in uurls}, **okst(8)})
+set_store({UCAP: [entry(u, ["a2"] if i % 2 else None, 1.0) for i, u in enumerate(uurls)]})
+_cfg.CFG["anchor_hub"]["sweep_per_tick"] = 3
+ucounts = [len(SW.sweep(NOW, rules=("unreadable",), reader=UCRD, reg={}, limit=SW.per_tick())) for _ in range(4)]
+del _cfg.CFG["anchor_hub"]["sweep_per_tick"]
+ulines = lines(UCAP); urec = [json.loads(x) for x in (T / "state" / SW.REMOVED).read_text(encoding="utf-8").splitlines()]
+check("rule 5 under the per-tick cap: at most sweep_per_tick entries a tick (3, 3, 1, then nothing), each with its log line", ucounts == [3, 3, 1, 0] and UCAP not in get_store() and len(ulines) == 7, (ucounts, len(ulines)))
+check("rule 5: every removal has its restore call in the log line (the items still open kept) and in the record file with the reason",
+      all(f'anchors(project="{UCAP}", add=["{u}"]' in " ".join(n.get("text", "") for n in ulines) for u in uurls)
+      and sorted(r["url"] for r in urec if r["page"] == UCAP) == sorted(uurls) and all(r["rule"] == "unreadable" and r["why"] == f"unreadable for 9 days: {WHY}" for r in urec if r["page"] == UCAP), (len(urec), urec[-1:]))
+# the mass-removal guard: a revoked token makes every anchor unreadable at once, and then nothing is removed
+GP = "projects/guarded"
+gurls = [f"https://github.com/o/r/issues/{700 + i}" for i in range(6)]
+def gstore(): set_store({GP: [entry(u, None, 1.0) for u in gurls]})
+def gsweep(status): return [o["url"] for o in SW.sweep(NOW, rules=("unreadable",), reader=ureader(status), reg={})]
+gstore()
+allbad = {AID(u): ux(9) for u in gurls}
+check("rule 5 guard: every anchor of the status read unreadable (6 of 6): nothing is removed, however old the clocks", SW.rule_unreadable(get_store(), ureader(allbad), NOW) == [] and gsweep(allbad) == [] and urls(get_store(), GP) == gurls, get_store())
+gl = [n for n in lines(GP) if "held back" in json.dumps(n)]
+check("rule 5 guard: ...and the routing log says why once, with the counts, ruled archived by the automatic ruler",
+      len(gl) == 1 and "6 of 6" in json.dumps(gl[0]) and "6 entries were due" in json.dumps(gl[0]) and gl[0].get("ruling") == "archived" and gl[0].get("ruled_by") == routing.AUTO_RULER, gl)
+check("rule 5 guard: 5 of 9 (more than half, at least 5) is held, 5 of 10 (exactly half) is not, 4 of 4 (fewer than 5) is not",
+      gsweep({**{AID(u): ux(9) for u in gurls[:5]}, **okst(4)}) == [] and urls(get_store(), GP) == gurls
+      and len(gsweep({**{AID(u): ux(9) for u in gurls[:5]}, **okst(5)})) == 5 and urls(get_store(), GP) == gurls[5:], get_store())
+gstore()
+check("rule 5 guard: 4 of 4 unreadable (a small store) still removes", len(gsweep({AID(u): ux(9) for u in gurls[:4]})) == 4 and urls(get_store(), GP) == gurls[4:], get_store())
+gstore()
+check("rule 5 guard: with the share below the line (3 of 9 unreadable) the old ones go as before", sorted(gsweep({**{AID(u): ux(9) for u in gurls[:3]}, **okst(6)})) == sorted(gurls[:3]), get_store())
+gstore(); before = len(lines(GP))
+check("rule 5 guard: a mass outage with nothing yet due writes no line", gsweep({AID(u): ux(1) for u in gurls}) == [] and len(lines(GP)) == before, "")
+check("rule 5 guard: a clock that has not started does not count toward the share", gsweep({**{AID(u): {"unreadable": {"since": "x", "why": WHY, "tries": 1}} for u in gurls[:5]}, **{AID(gurls[5]): ux(9)}}) == [gurls[5]], get_store())
+# a status file read through the tick, as the minute runner does
+set_store({P1: [entry(U1, None, 1.0)]})
+try:
+    fl = T / "flags2"; fl.mkdir(exist_ok=True); _inbox.FLAGS = fl
+    (fl / "cursors.json").write_text("{}"); (fl / "status.json").write_text(json.dumps({"anchors": {aid_u1: {"unreadable": {"at": time.time() - 8 * DAY, "why": WHY, "since": "x", "tries": 4}}}}))
+    tick = SW.sweep_tick()
+    check("rule 5 through the minute runner's tick: the reader's own files decide (a young status, a clock 8 days old), and the anchor is gone", [o["url"] for o in tick] == [U1] and P1 not in get_store(), (tick, get_store()))
+finally: _inbox.FLAGS = _inbox_flags
+check("rule 5: an unreadable record whose clock is too far out for a date leaves the day out and the listing still works",
+      (lambda t: "UNREADABLE" in t and "removed on" not in t)(ANC.fmt([entry(GMU)], {aid_gm: {"label": "Gmail x", "unreadable": {"since": "s", "why": WHY, "at": 1e18, "warned": "x"}}})), "")
+check("rule 5: the anchors listing shows the day it ends only once the clock runs, from the setting",
+      "removed on" in ANC.fmt([entry(GMU)], {aid_gm: {"label": "Gmail x", "unreadable": {"since": "2026-01-01 00:00:00 +04", "why": WHY, "at": NOW, "warned": "x"}}})
+      and "removed on" not in ANC.fmt([entry(GMU)], {aid_gm: {"label": "Gmail x", "unreadable": {"since": "2026-01-01 00:00:00 +04", "why": WHY, "tries": 1}}}), ANC.fmt([entry(GMU)], {aid_gm: {"label": "Gmail x", "unreadable": {"since": "s", "why": WHY, "at": NOW}}}))
+
 print(("ok" if not fails else "FAILED") + f": {len(ran) - len(fails)}/{len(ran)} checks")
 sys.exit(1 if fails else 0)

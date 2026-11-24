@@ -1135,7 +1135,7 @@ class Board:
         the start of anchor-hub's unbroken change record."""
         u = st.get("unreadable")
         if u:       # the hub asked the source and was refused: no notice can come from it
-            return f'<span class="aflag" title="{H.escape("anchor-hub cannot read it since " + str(u.get("since")) + " " + _cfg.tz_abbr() + ": " + str(u.get("why")), quote=True)}">unreadable</span>'
+            return f'<span class="aflag" title="{H.escape("the anchors service cannot read it since " + str(u.get("since")) + " " + _cfg.tz_abbr() + ": " + str(u.get("why")), quote=True)}">unreadable</span>'
         when = "quiet"
         if st.get("last"):
             try: when = self.stamp(datetime.datetime.strptime(st["last"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=self.now.tzinfo))
@@ -1191,7 +1191,7 @@ class Board:
         span = lambda m: "an hour" if m == 60 else f"{m // 60} hours" if m % 60 == 0 else f"{m} minutes"
         pl = lambda n, w: f"{n} {w}{'' if n == 1 else 's'}"
         state = ("bad" if bad else "wait" if c["waiting"] else "ok" if (n_anch or c["in"] or c["pending"]) else "none")
-        parts = [pl(n_anch, "anchor") + " watched" + (f", {bad} unreadable by anchor-hub" if bad else ""),
+        parts = [pl(n_anch, "anchor") + " watched" + (f", {bad} unreadable by the anchors service" if bad else ""),
                  pl(c["in"], "notice") + " in the last 24 hours"]
         if c["waiting"] > 0: parts.append(f"{c['waiting']} unruled past {span(mins('waiting_minutes', 60))}")
         return state, parts
