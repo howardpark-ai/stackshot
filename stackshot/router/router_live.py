@@ -115,7 +115,7 @@ _LOCK = threading.Lock()
 
 # What the server wires in (configure): the front-agent test (telling.front_keeper), the push, the call made after a ruling
 # (the release of a hold that waited on the notice's anchor, the board's republish), and the front gate for an fyi or a page-owed notice (telling.front_fyi). The defaults stand alone, for the tests and the CLI.
-_HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None, "front_fyi": None, "front_answer": None, "front_turn": None, "want_background": None}      # front_answer: messaging.router_answer, what becomes of an answer to a front agent's own question; front_turn: service/front_turn.warranted, whether a notice may start a turn of a front agent; want_background: service/background_want.want_background, the record that a project with no background agent could use one
+_HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None, "front_fyi": None, "front_answer": None, "front_turn": None, "want_background": None, "front_words": None}      # front_answer: messaging.router_answer, what becomes of an answer to a front agent's own question; front_turn: service/front_turn.warranted, whether a notice may start a turn of a front agent; want_background: service/background_want.want_background, the record that a project with no background agent could use one
 
 
 def configure(**kw: Any) -> None:
@@ -428,10 +428,10 @@ def _item_waits_decision(n: dict[str, Any], ln: dict[str, Any], body: str, cx: "
 _NO_TURN = "he is not talking with it now and has not asked it to tell him about this"
 
 
-def _front_warranted(agent: str, ids: list[str]) -> bool:
-    """Did he ask the front agent `agent` to tell him about one of the items `ids` (case 2; a finding never needs him, so case 1 does not apply)? False on any failure: nothing is delivered on a guess."""
+def _front_warranted(agent: str, ids: list[str], needs: bool = False) -> bool:
+    """Did he ask the front agent `agent` to tell him about one of the items `ids` (case 2; a finding never needs him, so case 1 does not apply), or, with `needs`, is he talking with it now (case 1)? False on any failure: nothing is delivered on a guess."""
     try:
-        return bool(_HOOKS["front_turn"](agent, [str(i) for i in ids], False))
+        return bool(_HOOKS["front_turn"](agent, [str(i) for i in ids], needs))
     except Exception:  # noqa: BLE001
         return False
 
@@ -520,7 +520,7 @@ def _front_route(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, 
     wired, the switch off, a recipient that is no front agent); ("deliver", "") an answer to a question of the agent's while the person is in that conversation (a message notice from a session the agent itself wrote to: the
     answer hook): delivered to the agent, unmarked; ("items", reply) such an answer while he is not: written onto the item it names, nothing delivered; ("background", name) the project's background agent (its builder,
     else the first listed) takes it, unmarked; ("archived", why) a project with no background agent: nobody is told, the ruling is archived (a row of the digest), nothing is held; ("hold", why) held for the agent's next turn
-    through the front gate: only what is one agent's word to another (an answer outside the conversation that names no item, a peer front agent's message, the background agent's own word), which starts no turn. Never raises."""
+    through the front gate: only what is one agent's word to another (an answer outside the conversation that names no item, a peer front agent's message, the background agent's own word, a sibling front agent's marked message that quotes his words while no turn is warranted: when one is, it is delivered as a turn, `_front_turn_gate`'s own test), which starts no turn. Never raises."""
     try:
         if not _HOOKS["front_fyi"] or not target or not _held.enabled() or not _is_front(target, root, cx):
             return "", ""
@@ -528,6 +528,9 @@ def _front_route(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, 
             return "", ""
         body = _body(n)
         if _must_see(n, ln, body, cx):
+            if (n.get("kind") == "message" and _HOOKS["front_words"] and _HOOKS["front_turn"] and (sib_ := _sender_name(n)) and sib_.casefold() != str(target).casefold()
+                    and not _front_warranted(target, [str(t.get("gid") or "") for t in _named_items(n, ln, body, cx)], True) and _HOOKS["front_words"](target, sib_, body)):      # a sibling front agent's message that quotes his words (sibling_words), while no turn is warranted (he is not talking with the target, he did not ask it about the item: the test _front_turn_gate makes): held, not diverted; a warranted one is delivered as a turn, as before
+                return "hold", f"{sib_} is a front agent of the project and quotes the owner's words, so its message to {target} rides {target}'s next turn"
             return "", ""
         fn = _HOOKS["front_answer"]
         if fn and n.get("kind") == "message":

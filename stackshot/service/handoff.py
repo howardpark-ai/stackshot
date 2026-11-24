@@ -40,6 +40,7 @@ from stackshot.model import item_project as _ip
 from stackshot.model import model as _model
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _GID
+from stackshot.model import said as _said
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_of, _needs_store
 from stackshot.projects import projects as _prj
 from stackshot.service import handoff_cold as _hcold
@@ -47,9 +48,11 @@ from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.handoff_hooks import hooks as _hooks
 from stackshot.service.store import _legacy_hold, _legacy_needs, _load
+from stackshot.waits import builderless as _bl
 from stackshot.waits import handoff as _ho
 from stackshot.waits import stall as _stall
 from stackshot.waits import successor as _succ
+from stackshot.waits import waiting as _wt
 from stackshot.waits import watchers as _watch
 
 
@@ -303,6 +306,8 @@ def handoff_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any
         name, wid = str(item.get("written_by") or ""), str(item.get("written_by_id") or "")
         derive = lambda it: ho_derive({**it, "gid": gid})
         r = _ho.apply(item, before, name, wid, time.time(), derive, ho_same, _session_label, ho_ident)
+        if r and (words := sibling_words(before, item, r)):
+            r["words"] = words      # a front agent's hand-off to a sibling on the owner's words: the record keeps them, and handoff_notify tells the sibling
         fresh = getattr(_telling.HO_STATE, "fresh", None)
         if fresh is None:
             fresh = _telling.HO_STATE.fresh = {}
@@ -311,6 +316,24 @@ def handoff_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any
             fresh[gid] = (str(r.get("to")), r.get("at"))
     except Exception as e:  # noqa: BLE001  — the record is an extra: a write is never failed by it
         print(f"handoff: {gid} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+
+
+def sibling_words(before: dict[str, Any] | None, item: dict[str, Any], r: dict[str, Any]) -> str:
+    """The owner's words behind the hand-off `r` that the save of `item` (out of `before`) just recorded, when one live front agent of the item's project handed it to another (waits/builderless.front_siblings): his sentence, cut to 240
+    characters, from the checked `said` entries this very save added, read as the wake cap reads them (owner_words._owner_quote_on). "" for any other hand-off, a save with no such words, and a failing read."""
+    try:
+        meta = item.get("metadata") or {}
+        project = str(meta.get("project") or "")
+        h = _hooks()
+        roles, skey = h.role_of(str(r.get("from") or ""))
+        _r, tkey = h.role_of(str(r.get("to") or ""))
+        if not project or not skey or not tkey or skey == tkey or not _bl.front_siblings(roles.get(skey), roles.get(tkey), project):
+            return ""
+        fresh = [e for _n, e in _said.new_entries(before.get("metadata") if isinstance(before, dict) else None, meta)]
+        return _clip_line(h.owner_quote_on({}, fresh, _wt.cap_days())[1], 240) if fresh else ""
+    except Exception as e:  # noqa: BLE001  — an extra: a hand-off with no words is told as before
+        print(f"handoff: words of a sibling hand-off not read ({e.__class__.__name__}: {e})", file=sys.stderr, flush=True)
+        return ""
 
 
 def handoff_his_over(gid: str, item: dict[str, Any], author: tuple[str, str] | None = None, quiet: bool = False) -> bool:
@@ -461,7 +484,8 @@ def handoff_text(gid: str, item: dict[str, Any], r: dict[str, Any], again: bool 
         return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {handoff_minutes():g} min: {item.get('subject') or ''} ({meta.get('project') or ''})"
                 + (f"; next: {nxt}" if nxt else "")
                 + f". Start its subagent alongside the current work (or hand it back, sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
-    return (f"[stackshot] {_gh.shown(gid)} is handed to you by {by}" + (" (sent again: your pane restarted before the item was written to)" if again else "")
+    words = _clip_line(str(r.get("words") or ""), 240)      # a front agent's hand-off to a sibling carries the owner's words that allowed it
+    return (f"[stackshot] {_gh.shown(gid)} is handed to you by {by}" + (f", on {OWNER}'s words: \"{words}\"" if words else "") + (" (sent again: your pane restarted before the item was written to)" if again else "")
             + f": {item.get('subject') or ''} ({meta.get('project') or ''})" + (f"; next: {nxt}" if nxt else "")
             + f". Do your part and close it or hand it back (sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
 

@@ -88,8 +88,9 @@ def stackshot_create(
                         f"Say who moves the item with mover=<a session, {OWNER} or the project's background agent>. The item model: {_MODEL_PAGE}.")
     fixes: list[tuple[str, str, str]] = []; fix_note = ""
     vals = {"mover": mover, "then": then, "post_wake_mover": post_wake_mover}
+    words_ = _gates.lazy_said(said, owner)
     for f_, v_ in list(vals.items()):
-        vals[f_], n_, fx_ = _gates.fix_front_mover(f_, v_, owner, project, "", None)       # a front agent gets no hand-off notice: another session's value becomes the project's builder, and the reply says so
+        vals[f_], n_, fx_ = _gates.fix_front_mover(f_, v_, owner, project, "", None, words_, "create")       # a front agent gets no hand-off notice: another session's value becomes the project's builder, and the reply says so
         fix_note += n_; fixes += fx_
     mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
     _gates.gate_self_wait("", owner, next_text=next, mover=mover, needs=needs, after=after, wait_kind=_wlw.judged_as(waits) if _wlw.passed(waits) and not _wlw.clearing(waits) else wait_kind, wait_reason=wait_reason, creating={"subject": subject, "project": project})   # before the item lock: it may ask a model; a list names its blockers (its lines that are not dates)
