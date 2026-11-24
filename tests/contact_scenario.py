@@ -72,7 +72,7 @@ from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 sh = _gh.shown
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 told = []                                              # every notice the server would send: recorded, never sent
 telling.tell_woken = lambda *a, **k: told.append((a, k))
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"

@@ -120,7 +120,7 @@ def part_close():
     from stackshot.web.tools import update as _wt_update
     from stackshot.web.ui import render as ui_render
     _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-    _web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+    _web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
     def refused(name, f, *want):
         try:
             out = f(); check(name, False, out)
@@ -282,7 +282,7 @@ def part_marks():
     from stackshot.service import checks as checks_svc
     from stackshot.service import telling
     _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-    _web_page_debts._refuse_if_owing = lambda debtor: None
+    _web_page_debts._owing_note = lambda debtor: ""
     told: list = []
     telling.tell_woken = lambda gid, owner, note, tag="wake", result=None: told.append((gid, owner, note, tag))
     telling.tell_check_closed = lambda gid, item, label: []
@@ -483,7 +483,7 @@ def part_keeps_description():
     from stackshot.web.tools import get as _wt_get
     from stackshot.web.ui import render as r2
     _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-    _web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+    _web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
     def refused(name, f, *want):
         try:
             out = f(); check(name, False, out)
@@ -649,7 +649,7 @@ def part_own_steps():
     from stackshot.web.tools import complete as _wt_complete
     OWNER = _core_instance.OWNER
     _web_publish._publish = lambda: None
-    _web_page_debts._refuse_if_owing = lambda debtor: None
+    _web_page_debts._owing_note = lambda debtor: ""
 
     MINE, THEIRS = "home-front: build it", "team-back: verify the deploy"
     def item(i, lines=(MINE, THEIRS), writers=None, status="open", **meta):

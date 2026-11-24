@@ -77,7 +77,7 @@ from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import update as _wt_update
 _web_publish._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 BACK = "team-back"
 def bupd(i, **kw):
     if kw.get("wake") or kw.get("until") or kw.get("ask_by") or kw.get("wait_kind"): kw.setdefault("wait_reason", "the vendor replies only after that date")

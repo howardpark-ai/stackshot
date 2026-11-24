@@ -115,7 +115,7 @@ hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 D = lambda t: f"- Goal: {t}\n- It lives here\n- Finished when it works"

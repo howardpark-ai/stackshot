@@ -209,14 +209,12 @@ with contextlib.redirect_stdout(out):
 check("3 the nag says the second brain was not checked and does not block", "second brain not readable" in out.getvalue() and "brain second" in out.getvalue(), out.getvalue())
 OWNER = "bbbbbbbb-0000-4000-8000-000000000002"
 _web_page_debts._owed_save({"projects/beta-one": {OWNER: {"ts": time.time() - 3 * 3600, "item": "s1"}}})
-_cfg.CFG["page_rule"]["mode"] = "refuse"
 brains._WARNED.clear()      # the server is a process of its own: it says so once for its own run
 with stderr() as err:
     d = _web_page_debts._owed_settle(); nag = _web_page_debts._nag(OWNER)
-    try: _web_page_debts._refuse_if_owing(OWNER); refused = ""
-    except Exception as e: refused = str(e)
+    refused = _web_page_debts._owing_note(OWNER)
 check("3 pages owed keep the debt (not settled, not dropped)", "projects/beta-one" in d and "projects/beta-one" in _web_page_debts._owed_load(), d)
-check("3 pages owed neither nag nor refuse for the unreadable brain", "beta-one" not in nag and not refused, (nag, refused))
+check("3 pages owed neither nag nor say a write's line for the unreadable brain", "beta-one" not in nag and not refused, (nag, refused))
 check("3 pages owed report it once", err.getvalue().count("pages owed and the audit's page call skip") == 1, err.getvalue())
 _cfg.CFG.setdefault("router", {}).update(page_debt=True, page_debt_shadow=True)
 _web_page_debts._owed_save({"projects/beta-one": {OWNER: {"ts": time.time() - 3 * 3600, "item": "s1", "moved": True, "debts": [{"item": "s1", "what": "changed", "writer": OWNER}]}}})

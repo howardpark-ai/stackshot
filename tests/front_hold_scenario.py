@@ -111,7 +111,7 @@ def pane(who, uuid):
 def stamp(uuid, minutes_ago):
     p = T / "state/prompts" / uuid; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(f"{time.time() - minutes_ago * 60:.0f}\n")
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-_real_refuse = _web_page_debts._refuse_if_owing; _web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 KEY = "projects/alpha"
 MACH = "home-test"

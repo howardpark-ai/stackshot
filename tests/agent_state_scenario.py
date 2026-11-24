@@ -65,7 +65,7 @@ from stackshot.audit import hourly_log as HL
 from stackshot.core import readonly as _ro
 from stackshot.fleet import client
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.PUSH = [sys.executable, "-c", "pass"]
 sent = []                                                          # every message the server was asked to send: none is expected from this pass
 _messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]

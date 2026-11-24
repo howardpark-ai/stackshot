@@ -79,7 +79,7 @@ from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.web.ui import render as r2
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda *a, **k: None
 upd = lambda i, sender="home-front", **kw: _update_svc._update(f"a{i}", sender=sender, **kw)
 mk = lambda **kw: _wt_create._create(**{"subject": "[home] pick the settings layout", "description": DESC, "project": "projects/alpha", "owner": "home-front",

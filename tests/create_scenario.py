@@ -54,7 +54,7 @@ BORED = {"gate_options": [], "gate_needs": [], "gate_observers": [], "gate_after
          "gate_draft_args": ("", False), "step_proof_set": "", "fallback_wait_date": ("", "", ""), "evwait_gate": "", "then_stands": "", "owner_then_default": "", "lift_ask": "", "ask_owed": "",
          "options_note": "", "actor_note": "", "gate_model": "", "after_open": False, "model_guards_on": True, "pilot_charge": ("", ""), "writer_owes": False, "pilot_relay": "",
          "tell_needed": "", "handoff_notify": "", "machine_note": "", "fmt": "<item>", "said_note": "", "form_notes": "", "similar_note": "", "nag": "", "session_id": None,
-         "gate_ask": None, "gate_contact": "", "wait_alias_gate": None, "project_subject_prefix": "", "writer_charge": ""}
+         "gate_ask": None, "gate_contact": "", "wait_alias_gate": None, "project_subject_prefix": "", "writer_charge": "", "owing_note": ""}
 def hook(name):
     def run(*a, **k):
         LOG.append((name, a, k))
@@ -131,7 +131,7 @@ FLAG_READS = ("session_next", "question", "terminal_row")
 got = names(skip=FLAG_READS)
 check("1 the whole order of a session's create, from the subject gate to the last note of the reply", got == [
     "gate_subject", "gate_recycle_item", "gate_description", "gate_goal", "gate_next", "gate_bare_urls", "gate_options", "session_id", "gate_said", "wait_alias_gate", "gate_model_args",
-    "gate_waits", "contact_default", "gate_draft_args", "refuse_if_owing", "next_put", "gate_step_gap", "evwait_gate", "then_stands", "owner_then_default", "gate_metadata", "lift_ask", "ask_owed", "gate_one_decision", "gate_alternatives",
+    "gate_waits", "contact_default", "gate_draft_args", "owing_note", "next_put", "gate_step_gap", "evwait_gate", "then_stands", "owner_then_default", "gate_metadata", "lift_ask", "ask_owed", "gate_one_decision", "gate_alternatives",
     "gate_open_question", "gate_recommend_stance", "gate_mockup", "gate_own_action", "options_note", "actor_note", "gate_model", "anchor_wait_gate", "gate_owner_step", "model_guards_on",
     "gate_front_step", "record_fixes", "save", "pilot_charge", "owed_mark", "tell_needed", "handoff_notify", "publish", "machine_note", "fmt", "said_note", "form_notes",
     "similar_note", "nag"], got)
@@ -139,7 +139,7 @@ check("1 …and the reply opens with the created line, then the item as get show
 check("1 a create that files the item takes the page debt: the creator is charged for it (the pilot gives no keeper)", called("owed_mark")[0][0] == ("projects/alpha", OWNER, gid), called("owed_mark"))
 gid_s, _ = mk(by="a script (a script on box-a)", subject="[home] a script's item")
 got_s = names(skip=FLAG_READS)
-check("1 a script's create (by=…) skips the goal, the front-agent step and the page-debt checks of a session's write", not {"gate_goal", "gate_front_step", "refuse_if_owing"} & set(got_s), got_s)
+check("1 a script's create (by=…) skips the goal, the front-agent step and the page-debt checks of a session's write", not {"gate_goal", "gate_front_step", "owing_note"} & set(got_s), got_s)
 check("1 …and still runs the gates every create runs, and the save", {"gate_subject", "gate_description", "gate_next", "gate_model", "gate_owner_step", "save"} <= set(got_s), got_s)
 check("1 …and the script's nag is the empty one (no creator to nag)", called("nag")[0][0] == ("",), called("nag"))
 check("1 a script's filing charges no one when the pilot names no keeper (no mark, no relay)", not called("owed_mark") and not called("pilot_relay"), got_s)
@@ -259,7 +259,7 @@ RET.pop("pilot_charge"); RET.pop("writer_owes"); RET.pop("writer_charge"); RET.p
 
 # ---------------------------------------------------------------- 4. refusals
 before_files = files()
-for hook_name in ("gate_subject", "gate_description", "gate_next", "gate_model", "gate_front_step", "refuse_if_owing", "gate_handoff"):
+for hook_name in ("gate_subject", "gate_description", "gate_next", "gate_model", "gate_front_step", "gate_handoff"):
     RAISE[hook_name] = f"Refused: {hook_name}"
     LOG.clear()
     try:
@@ -274,6 +274,12 @@ for hook_name in ("gate_subject", "gate_description", "gate_next", "gate_model",
     check(f"4 a refusal by {hook_name} reaches the caller as it is", out == f"Refused: {hook_name}", out)
     check(f"4 …writes no file, takes no id and remembers no request", files() == before_files and "save" not in names() and f"rid-{hook_name}" not in create._requests(), (files(), before_files, names()))
 check("4 the checks that come after a gate do not run once it refuses (the save, the telling, the publish)", not {"save", "tell_needed", "publish"} & set(names()), names())
+# a page debt never refuses a create: the hook's line goes into the reply, between the telling and the nag, and the item is made
+RET["owing_note"] = "\nThis write went through. Still owed by you: projects/alpha (since s1, 3 h ago); it stays owed until the page's Current state is edited."
+before_ids = set(files())
+gid_o, reply_o = mk(request_id="rid-owing")
+RET.pop("owing_note")
+check("4 a page debt refuses no create: the item is made and the reply carries the hook's line just before the nag", "save" in names() and set(files()) != before_ids and "\nThis write went through. Still owed by you: projects/alpha" in reply_o, reply_o[-300:])
 RAISE["gate_subject"] = "Refused: first"
 try: mk(); stop = None
 except ToolError: stop = names()

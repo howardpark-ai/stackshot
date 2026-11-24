@@ -134,7 +134,7 @@ class Hooks:
     parse_wake: Callable[..., Any]
     publish: Callable[..., Any]
     record_fixes: Callable[..., Any]
-    refuse_if_owing: Callable[..., Any]
+    owing_note: Callable[..., Any]
     said_note: Callable[..., Any]
     session_id: Callable[..., Any]
     wait_alias_gate: Callable[..., Any]
@@ -203,8 +203,7 @@ def create_item(
     mirrored under that name and records it as `filed_by`. The script owes no page, and nobody else is made to answer for its write
     except the page's keeper: the page debt is charged to the keeper of a pilot project's page (the keeper, or a page's own agent that
     is not a front agent) and told to it through the pilot relay, and to no one when the project has none; never to the creator, so a
-    burst of filings cannot get the creator's own board writes refused (_refuse_if_owing is skipped for the script, and the creator's existing debt does not
-    refuse it either). The mover is told nothing (a front agent mover is never messaged about its item, and no session is named in needs here);
+    burst of filings leaves the creator's own page debts as they were (_owing_note is skipped for the script, so the filing's reply says nothing of the creator's debts either). The mover is told nothing (a front agent mover is never messaged about its item, and no session is named in needs here);
     each session the caller names in needs is told once, as for the tool."""
     h = _hooks()
     fc = _faults.current()          # the faults of the form this create finds are kept and refused together (model/faults.py)
@@ -304,8 +303,7 @@ def create_item(
     draft_txt, _ = fc.call(_gates.gate_draft_args, draft, False, default=("", False))             # the verbatim text the owner pastes elsewhere; a create has no state to guard it by (the guard runs when an update sets your-step)
     if anchors:
         fc.add("Refused: anchors belong to the project, not the item — create the item, then anchors(project=<its project>, add=[url…], items=[<its id>]) for a thread about this item, or without items for a project-wide one", text=True)
-    if not by:                             # a script owes no page; the creator's own debt is not its to be refused for
-        fc.call(h.refuse_if_owing, owner)
+    owing = h.owing_note(owner) if not by else ""      # a script owes no page; a session's create is never refused or held for a page debt: the reply says it went through and the page is still owed
     if fc.state_bad:         # the checkpoint: a fault that leaves the stored state open ends the form's checks here; the ones below read the item as this create would store it
         fc.skip("the checks of the item as this create would store it (its mover, the wait's reason and end, the decision, the open step, the hand-off)", "they read what the faults above leave open")
         fc.raise_now()
@@ -420,5 +418,5 @@ def create_item(
         told += (f"\n({why_}, so {_gh.shown(gid)} is a temporary id: the item takes its issue number when {'GitHub has room' if local_held else 'GitHub is back'}, "
                  f"{_gh.shown(gid)} stays as an alias for it, and {_session_label(owner) or 'its mover'} is told the new id)")
     return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_inst.BOARD_URL}) now.\n" + h.fmt(item) + h.said_note(said_l) + proof_note + asked + h.form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + wait_note + machine_note
-                 + then_note + similar_note(gid, subject, str(meta.get("project") or "")) + told + h.nag("" if by else owner))
+                 + then_note + similar_note(gid, subject, str(meta.get("project") or "")) + told + owing + h.nag("" if by else owner))
 

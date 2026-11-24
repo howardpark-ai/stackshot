@@ -109,7 +109,7 @@ from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_ti
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 # section 15's invariant, checked after every save of the run: an OPEN record never names someone but the item's mover (handoff.stale)
 _real_save = writes.save
 INV_BAD = []; INV_SAVES = [0]

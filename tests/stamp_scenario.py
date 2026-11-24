@@ -87,7 +87,7 @@ from stackshot.service import handoff as handoff_svc, foryou_events as fyev
 from stackshot.service import telling
 from stackshot.core import store as _core_store
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
 ST = T / "state/waiting.json"

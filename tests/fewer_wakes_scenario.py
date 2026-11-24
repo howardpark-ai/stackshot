@@ -109,7 +109,7 @@ from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.anchors.anchorhub import core
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 PRESENT = [True]    # a front agent Oliver is typing to now: the gate sends its close line (the held case is in front_quiet_scenario)
 _real_verdict = telling.front_verdict
 telling.front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)

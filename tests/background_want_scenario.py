@@ -97,7 +97,7 @@ from stackshot.service import messaging as _messaging, telling, background_want 
 from stackshot.projects import projects as _prj
 from fastmcp.exceptions import ToolError
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 handoff_svc.CLI_SESSIONS = T / "cli"
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 MACH = "home-test"

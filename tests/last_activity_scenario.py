@@ -115,7 +115,7 @@ from stackshot.model import last_activity as LA, progress as PG, activity as ACT
 from stackshot.anchors import event_log as EL, merge_log as ML
 from stackshot.anchors.anchorhub import core as HUB
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
     """The server's `time` module for the saves below: the clocks are stamped from the server's own clock, which a scenario with a fake `now` must be able to set."""

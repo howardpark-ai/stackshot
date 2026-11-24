@@ -82,7 +82,7 @@ def part_refusal_report():
     from stackshot.service import telling
     from fastmcp.exceptions import ToolError
     _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-    _web_page_debts._refuse_if_owing = lambda debtor: None
+    _web_page_debts._owing_note = lambda debtor: ""
     telling.front_sender = lambda who: False
     CALLS = T / "state/calls"
     def lines(month=None):

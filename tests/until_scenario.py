@@ -249,7 +249,7 @@ check("the basis and the words are read for the date they were given for only", 
 import logging
 logging.disable(logging.INFO)
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 def sitem(i, status="open", **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing\n- It lives here\n- Done when done", "status": status, "updated": now - 10 * DAY,

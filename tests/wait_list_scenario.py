@@ -134,7 +134,7 @@ def part_list():
     from stackshot.service import wakes as wakes_svc, watching as watching_svc, event_waits as evwaits_svc
     from stackshot.service import telling
     _web_publish._publish = lambda: None
-    _web_page_debts._refuse_if_owing = lambda debtor: None
+    _web_page_debts._owing_note = lambda debtor: ""
     SENT: list[tuple[str, str, str, str]] = []
     telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
     NOTES: list[tuple[str, str]] = []                      # the History line of every save the server makes on its own (writes.save's note)
@@ -1027,7 +1027,7 @@ def part_write():
     from stackshot.web.tools import update as _wt_update
     from stackshot.service import telling
     _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-    _web_page_debts._refuse_if_owing = lambda debtor: None
+    _web_page_debts._owing_note = lambda debtor: ""
     telling.front_sender = lambda who: False
     from stackshot.waits import wait_list as WL, wait_list_write as WLW, event_waits as EW
     from stackshot.web.tools import create as _wt_create, get as _wt_get

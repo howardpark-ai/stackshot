@@ -72,7 +72,7 @@ from stackshot.service import telling
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 SENT: list[tuple[str, str, str, str]] = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
 NOTES: list[tuple[str, str]] = []                      # the History line of every save the server makes on its own (writes.save's note)

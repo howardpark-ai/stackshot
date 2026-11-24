@@ -85,7 +85,7 @@ from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import telling
 from stackshot.anchors import event_log as ELOG, merge_log as MLOG
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
 CFGM = _cfg.CFG.setdefault("model", {})

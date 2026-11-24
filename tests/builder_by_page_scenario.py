@@ -56,7 +56,7 @@ from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda *a, **k: None
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 

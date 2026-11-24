@@ -88,7 +88,7 @@ hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
 def _no_claude(*a, **k): raise AssertionError("the real model was called")
 R.run_call = _no_claude
 CALLS = []
