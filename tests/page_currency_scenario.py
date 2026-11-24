@@ -372,6 +372,7 @@ check("flavor gbrain: the nag is today's text, byte for byte", gb == (
       f"(a dated line: the gbrain connector's add_timeline_entry; any other edit: get_page with section or grep (the smallest read that shows the text to change; a whole read only for a rewrite or a change spanning the page), then edit_page "
       f"with expected_revision (the read's revision) and edits [{{old_text, new_text}}]; put_page only for a whole rewrite; "
       f"never edit or git inside the brain mirror). "
+      f"{p.PAGE_COPY_LAG} "
       f"Only if the board edit needed no page change: `python3 {p.HERE}/stackshot/projects/pages.py clear projects/beta`."), gb)
 check("flavor gbrain: the nag names add_timeline_entry, then edit_page, and put_page only for a whole rewrite; no retired script, no push override",
       gb.index("add_timeline_entry") < gb.index("edit_page")
@@ -390,6 +391,27 @@ check("flavor plain: the server's nag and refusal say edit the file",
       _pdebts._page_how() == f"edit {tmp}/brain/<key>.md (its Current state, and a dated line under its Timeline), commit and push"
       and f"({_pdebts._page_how()})" in _pdebts._nag(B), (_pdebts._page_how(), _pdebts._nag(B)))
 _pdebts._owed_save({})
+# the page check reads a copy that follows GitHub about every 5 minutes: the gate's line and the refusal of a write past the grace say so (gbrain flavor), and say it once
+LAG = ("The page check reads a copy of the mirror that follows GitHub about every 5 minutes, so an edit made in the last few minutes shows after the next sync: "
+       "retry then; this is not a broken mirror.")
+check("lag note: the sentence the check's texts carry is fixed", p.PAGE_COPY_LAG == LAG, p.PAGE_COPY_LAG)
+def _late_refusal():
+    _pdebts._owed_save({"projects/gamma": {B: {"ts": time.time() - 4 * 3600, "item": "s9"}}})      # past the grace, and the page (none) is older
+    try: _pdebts._refuse_if_owing(B)
+    except Exception as e: return str(e)
+    return ""
+kept_mode = p._cfg.CFG["page_rule"].get("mode"); p._cfg.CFG["page_rule"]["mode"] = "refuse"
+kept_settle = _pdebts._owed_settle; _pdebts._owed_settle = _pdebts._owed_load      # the fixture's pages were just committed: the ledger is taken as it stands, nothing settles it
+try:
+    p._cfg.CFG["pages"]["flavor"] = "gbrain"
+    lag_ref = _late_refusal(); lag_nag = p.describe("projects/beta", {"ts": int(time.time()), "task": "s7"})
+    p._cfg.CFG["pages"]["flavor"] = "plain"
+    plain_ref = _late_refusal(); plain_nag = p.describe("projects/beta", {"ts": int(time.time()), "task": "s7"})
+finally:
+    _pdebts._owed_settle = kept_settle; p._cfg.CFG["page_rule"]["mode"] = kept_mode; p._cfg.CFG["pages"]["flavor"] = "plain"; _pdebts._owed_save({})
+check("lag note: the refusal of a write past the grace says the check follows GitHub about every 5 minutes, and to retry", lag_ref.startswith("Refused: you owe a project-page update") and lag_ref.count(LAG) == 1, lag_ref)
+check("lag note: the gate's line says it too, once", lag_nag.count(LAG) == 1, lag_nag)
+check("lag note: no mirror in play (plain pages, a file written at once): neither text carries it", "Refused: you owe" in plain_ref and LAG not in plain_ref and LAG not in plain_nag, (plain_ref, plain_nag))
 # F4: the keeper's injection follows the flavor; gbrain's wording is today's, byte for byte
 saved_ex = p.excerpts; p.excerpts = lambda keys, total: "<EXCERPTS>"
 inj = p.inject_text(B, "home-beta", ["projects/beta"])

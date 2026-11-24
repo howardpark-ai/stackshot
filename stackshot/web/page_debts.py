@@ -296,5 +296,6 @@ def _refuse_if_owing(owner: str) -> None:
     if late:
         raise ToolError("Refused: you owe a project-page update — " + ", ".join(f"{k} (since {e.get('item') or 'a board change'}, {_age(e['ts'])} ago)" for k, e in late)
                         + f" — update the page first ({_page_how()}), then retry this write. "
+                        + (_pages.PAGE_COPY_LAG + " " if _cfg.page_flavor() == "gbrain" else "")
                         + (f"As a page keeper your debt settles only when the page's Current state changes: {_KEEPER_WHY}. " if _strict(owner) else "")
                         + f"If that earlier board edit changed no state: `python3 {_HERE}/stackshot/projects/pages.py clear <key>` on the server box.")

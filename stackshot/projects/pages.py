@@ -1373,6 +1373,10 @@ def stale_touches(sid, strict=False, skipped=None):
     save_state(sid, st)
     return out
 
+# The page check reads a copy of the pages that a timer brings up to date from GitHub; the interval is the timer's, not a setting of this repository.
+PAGE_COPY_LAG = ("The page check reads a copy of the mirror that follows GitHub about every 5 minutes, so an edit made in the last few minutes shows after the next sync: "
+                 "retry then; this is not a broken mirror.")
+
 def describe(key, v, strict=False):
     strict = touch_strict(v, strict)
     when = datetime.datetime.fromtimestamp(int(v.get("ts", 0)), zone_now().tzinfo)
@@ -1387,7 +1391,7 @@ def describe(key, v, strict=False):
     if _cfg.page_flavor() == "gbrain" or not kb.default:    # a second brain's page is written through gbrain only (its copy here is read-only)
         how = ((f"in the second brain {kb.name}, through its own gbrain connector: " if not kb.default else "") + f"(a dated line: the gbrain connector's add_timeline_entry; any other edit: get_page with section or grep (the smallest read that shows the text to change; a whole read only for a rewrite or a change spanning the page), then edit_page "
                f"with expected_revision (the read's revision) and edits [{{old_text, new_text}}]; put_page only for a whole rewrite; "
-               f"never edit or git inside the brain mirror). ")
+               f"never edit or git inside the brain mirror). " + PAGE_COPY_LAG + " ")
     else:
         if reads_local():
             how = f"(edit {plain_page_path(key)} (its Current state, and a dated line under its Timeline), commit and push). "
