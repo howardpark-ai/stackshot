@@ -53,7 +53,7 @@ from stackshot.web.tools import message as _wt_message
 from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda *a, **k: None
 OWNER = _core_instance.OWNER
 NOTE = "(note: "

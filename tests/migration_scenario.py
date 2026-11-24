@@ -155,7 +155,7 @@ from stackshot.web.ui import render as ui_render
 from stackshot.tools import migrate_model as MM
 OLIVER = model.owner_display()
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 SENT: list[tuple[str, str, str, str]] = []
 FAIL_PUSH = [False]
 def _tell(gid, owner, note, tag="wake", result=None):

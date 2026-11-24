@@ -99,7 +99,7 @@ from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 from stackshot.core import config as _cfg
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 (T / "fakepush.py").write_text("import sys\nprint('delivered')\n"); telling.PUSH = [sys.executable, str(T / "fakepush.py")]

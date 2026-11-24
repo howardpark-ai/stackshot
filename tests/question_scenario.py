@@ -8,7 +8,7 @@ description cut to the line limit, the given subject (required, no default prefi
 id, key and bare slug, and a sub-page through its hub; a project whose page lists no front agent refused (and one with a front
 agent that is not -main owned by it); the create tool's own checks applying to a script (a bad ask, bad options, a subject with
 no prefix or none, an ask of several decisions, an unknown or ambiguous project, a sender naming Oliver), refused with the tool's own text and
-no item filed; the owner's own page debt not refusing a script's filing; client.py's misuse (usage, exit 1, nothing filed) and its
+no item filed; the owner's own page debt leaving a script's filing as it is; client.py's misuse (usage, exit 1, nothing filed) and its
 failures (no token, a server that does not answer: stderr, exit 1); a request id making a repeat safe (the same id and sender twice: one item, the same id printed; another sender or id: another item); no default subject prefix; and `get answer`: empty before he answers, his latest answer
 after (the chosen option's label and text in one stable line, a comment counting), an unknown item exit 1.
 
@@ -173,18 +173,24 @@ refused("missing ask: 400", 400, "required", ask="")
 st, out = _rt_client._client_post(me, "question", {"project": "alpha", "ask": ASK, "text": BODY, "options": "nope"}); check("options that are not a list: 400", st == 400 and "options" in out["error"], (st, out))
 st, out = _rt_client._client_post(me, "question", {"project": "alpha", "ask": ASK, "text": 5}); check("text that is not a string: 400", st == 400, (st, out))
 
-# ---- 3. the page-debt rules: a script owes no page, the owner is charged none, and its own debt is not the script's to be refused for
+# ---- 3. the page-debt rules: a script owes no page, the owner is charged none, and its own debt is not the script's to be told of
 old = time.time() - 8 * 3600; os.utime(T / "brain/projects/alpha.md", (old, old))     # the page is older than the debt, so nothing settles it
 d = _pdebts._owed_load(); d.setdefault("projects/alpha", {})[_pdebts._session_id("home-sparrow-main")] = {"ts": time.time() - 4 * 3600, "item": "s5"}; _pdebts._owed_save(d)
-debt = tool_says()
-check("fixture: the -main agent owes a page past the grace, so the create tool would refuse its own filing", "you owe a project-page update" in debt, debt)
+debt = _pdebts._owing_note("home-sparrow-main")
+check("fixture: the -main agent owes a page past the grace, so a write of its own would carry the line that the page is still owed", "Still owed by you: projects/alpha" in debt, debt)
+n_before = len(items())
+try: said = _wt_create.stackshot_create(subject="[home] a thing by the session while owing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner="home-sparrow-main", next="home-sparrow-engineer: carry on")
+except Exception as e: said = "RAISED " + repr(e)
+check("…and the session's own create is never refused or held for it: the item is filed and the reply says, in one line, that the write went through and which page is still owed",
+      len(items()) == n_before + 1 and said.startswith("created ") and "\nThis write went through. Still owed by you: projects/alpha (since s5, 4 h ago); it stays owed until the page's Current state is edited" in said, said[-300:])
+d = _pdebts._owed_load(); d.setdefault("projects/alpha", {})[_pdebts._session_id("home-sparrow-main")] = {"ts": time.time() - 4 * 3600, "item": "s5"}; _pdebts._owed_save(d)      # (that create may have charged or settled: the fixture's debt again)
 st, out = q()
 check("…and the script's filing for it still goes through", st == 200, (st, out))
 _pdebts._owed_save({})                                                           # (the page stays older than any new debt, so a reply's settling pass drops none)
 OWNER_ID = _pdebts._session_id("home-sparrow-main")
 def owes(who): return {k: e for k, os_ in _pdebts._owed_load().items() for o, e in os_.items() if o == who}
 for _ in range(3): q()
-check("a burst of script filings leaves the owner owing nothing (so its own board writes are not blocked); the page's keeper carries them", owes(OWNER_ID) == {} and set(_pdebts._owed_load()) <= {"projects/alpha"}, _pdebts._owed_load())
+check("a burst of script filings leaves the owner owing nothing (so its own board writes carry no line about it); the page's keeper carries them", owes(OWNER_ID) == {} and set(_pdebts._owed_load()) <= {"projects/alpha"}, _pdebts._owed_load())
 check("…and the tool's own create by that session, whose keeper is the page's own agent, charges nobody (a project page's keeper is never charged for its own filing; every project is the router's)", (_wt_create.stackshot_create(subject="[home] a thing by the session", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner="home-sparrow-main", next="home-sparrow-engineer: carry on"), owes(OWNER_ID))[1] == {}, owes(OWNER_ID))
 _pdebts._owed_save({})
 # a pilot project: the page's keeper is charged and told, the owner still is not

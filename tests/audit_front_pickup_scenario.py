@@ -77,7 +77,7 @@ from stackshot.web import page_debts as _web_page_debts
 from stackshot.audit import front_pickup as FP, hourly as HR, hand_idle as HI, busy_tell as BT, agent_state as AS
 from stackshot.tools import next_report as NR
 _web_publish._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 _fleet_sessions_registry._sessions_index = lambda: {u: {"name": n} for n, u in U.items()}      # the fleet's index: a pane's session id -> its name (the prompt stamps are named by the id)
 _cfg.CFG["audit"]["pattern_review"] = "off"
 _cfg.CFG["audit"]["mode"] = "script"

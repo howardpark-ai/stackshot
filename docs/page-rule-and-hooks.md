@@ -5,11 +5,11 @@ What this page covers: the page debt a state-changing write records, the four ho
 **The page rule and the client hooks.** Every item names a project page (`projects/<slug>` or `infra/<slug>`) in a
 directory of markdown files with frontmatter. A state-changing write (a create, a complete, or an update of
 description, next, needs, status or due) records a debt against the writing session. The debt settles by itself once
-the page is newer than the write. Where pages are written through gbrain, the check reads a copy of the pages that follows
-GitHub about every 5 minutes (a timer outside this repository does the sync), so an edit made in the last few minutes shows
-after the next sync: the `nag` line and the refusal of a write past the grace say so, and the session retries after the
-sync instead of treating it as a broken mirror (a second brain's copy is kept in sync by another process, so the sentence
-is not added for its pages). On each machine, `stackshot/projects/pages.py` runs as four Claude Code hooks: `touch` (PostToolUse on
+the page is newer than the write. No board write is refused or held for a debt: a session that has owed a page longer than
+`[page_rule] grace_minutes` has its next state-changing write go through, and the reply carries one line that names the page and
+says it is still owed until its Current state is edited and, where pages are written through gbrain, the server's copy of the
+page has caught up (`_owing_note` in `stackshot/web/page_debts.py`). The debt itself stays: it is still in the ledger, in the
+brief and in pages owed, and the audit's page call and the reminders work as before. The check reads a local copy of the pages (a git read, never a call to the notes store), and a copy that a timer pulls only every few minutes lags an edit by that long: the debt then settles when the copy has caught up. On each machine, `stackshot/projects/pages.py` runs as four Claude Code hooks: `touch` (PostToolUse on
 the connector's write tools) remembers the write, `nag` (UserPromptSubmit) reminds the session at every prompt while the
 page is owed, `check` (Stop) runs the board check below, and `keeper` (SessionStart) shows a page's keeper the current
 state of its pages. The Stop hook asks nothing about pages: the end-of-turn page question (`Page: no change, <reason>`)

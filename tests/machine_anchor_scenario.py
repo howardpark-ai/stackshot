@@ -85,7 +85,7 @@ from stackshot.service import event_waits as evwaits_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 SENT: list[tuple[str, str, str, str]] = []
 HINTS: list[str] = []          # the kind the sender hinted the front gate for each notice (telling.tell_kind), aligned with SENT
 telling.tell_woken = lambda gid, owner, note, tag="wake": (SENT.append((gid, owner, note, tag)), HINTS.append(getattr(telling.FRONT_HINT, "kind", "")))

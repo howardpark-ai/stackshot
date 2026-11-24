@@ -263,7 +263,7 @@ for name, call in (("create", lambda: _wt_create.stackshot_create(subject="[home
     except ToolError as e: check(f"the {name} tool still checks the identity", "unknown identity" in str(e), str(e))
 
 # ---- 5b. create refuses an item that only asks for a recycle (after); update's recycle parameter says where a recycle goes
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 for subj in ("[home] Relaunch every pane so the connector's new parameters load", "[home] Recycle the sessions on box-a",
              "[home] Restart all panes after the plugin update", "[home] Load the new skills: re-launch the Claude sessions"):
     try: _wt_create._create(subject=subj, description="- A thing", project="projects/alpha", owner="home-here"); check(f"create refuses {subj!r}", False)

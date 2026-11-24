@@ -372,7 +372,6 @@ check("flavor gbrain: the nag is today's text, byte for byte", gb == (
       f"(a dated line: the gbrain connector's add_timeline_entry; any other edit: get_page with section or grep (the smallest read that shows the text to change; a whole read only for a rewrite or a change spanning the page), then edit_page "
       f"with expected_revision (the read's revision) and edits [{{old_text, new_text}}]; put_page only for a whole rewrite; "
       f"never edit or git inside the brain mirror). "
-      f"{p.PAGE_COPY_LAG} "
       f"Only if the board edit needed no page change: `python3 {p.HERE}/stackshot/projects/pages.py clear projects/beta`."), gb)
 check("flavor gbrain: the nag names add_timeline_entry, then edit_page, and put_page only for a whole rewrite; no retired script, no push override",
       gb.index("add_timeline_entry") < gb.index("edit_page")
@@ -391,44 +390,52 @@ check("flavor plain: the server's nag and refusal say edit the file",
       _pdebts._page_how() == f"edit {tmp}/brain/<key>.md (its Current state, and a dated line under its Timeline), commit and push"
       and f"({_pdebts._page_how()})" in _pdebts._nag(B), (_pdebts._page_how(), _pdebts._nag(B)))
 _pdebts._owed_save({})
-# the page check reads a copy that follows GitHub about every 5 minutes: the gate's line and the refusal of a write past the grace say so (gbrain flavor), and say it once
-LAG = ("The page check reads a copy of the mirror that follows GitHub about every 5 minutes, so an edit made in the last few minutes shows after the next sync: "
-       "retry then; this is not a broken mirror.")
-check("lag note: the sentence the check's texts carry is fixed", p.PAGE_COPY_LAG == LAG, p.PAGE_COPY_LAG)
-def _late_refusal():
-    _pdebts._owed_save({"projects/gamma": {B: {"ts": time.time() - 4 * 3600, "item": "s9"}}})      # past the grace, and the page (none) is older
-    try: _pdebts._refuse_if_owing(B)
-    except Exception as e: return str(e)
-    return ""
-kept_mode = p._cfg.CFG["page_rule"].get("mode"); p._cfg.CFG["page_rule"]["mode"] = "refuse"
+# ---- 6b. a board write is never refused or held for a page debt: it goes through, the debt is kept, and the reply says so in one line
+def _late_debt(ts_ago=4 * 3600, **extra):
+    _pdebts._owed_save({"projects/gamma": {B: {"ts": time.time() - ts_ago, "item": "s9", **extra}}})      # the page (none newer) cannot have settled it
 kept_settle = _pdebts._owed_settle; _pdebts._owed_settle = _pdebts._owed_load      # the fixture's pages were just committed: the ledger is taken as it stands, nothing settles it
 try:
-    p._cfg.CFG["pages"]["flavor"] = "gbrain"
-    lag_ref = _late_refusal(); lag_nag = p.describe("projects/beta", {"ts": int(time.time()), "task": "s7"})
-    p._cfg.CFG["pages"]["flavor"] = "plain"
-    plain_ref = _late_refusal(); plain_nag = p.describe("projects/beta", {"ts": int(time.time()), "task": "s7"})
+    check("owing: there is no refusal any more: the function is gone, a line for the reply is there", not hasattr(_pdebts, "_refuse_if_owing") and hasattr(_pdebts, "_owing_note"))
+    _late_debt()
+    p._cfg.CFG["pages"]["flavor"] = "gbrain"; note_gb = _pdebts._owing_note(B)
+    p._cfg.CFG["pages"]["flavor"] = "plain"; note_pl = _pdebts._owing_note(B)
+    check("owing: a write past the grace goes through (no exception) and its reply gets one line: which page, that the write went through, that the page is still owed and what settles it",
+          note_pl == "\nThis write went through. Still owed by you: projects/gamma (since s9, 4 h ago); it stays owed until the page's Current state is edited."
+          and note_pl.count("\n") == 1, note_pl)
+    check("owing: …and under the gbrain flavor the same line adds that the server's copy of the page has to have caught up",
+          note_gb == note_pl[:-1] + " and the server's copy of the page has caught up." and note_gb.count("\n") == 1, note_gb)
+    check("owing: …the debt is kept as it was (still in the ledger, still in the nag, still in pages owed)",
+          B in _pdebts._owed_load().get("projects/gamma", {}) and "PROJECT PAGE owed by you: projects/gamma" in _pdebts._nag(B) and "projects/gamma" in _pdebts._nag(A), (_pdebts._owed_load(), _pdebts._nag(B)))
+    check("owing: …the nag tells the writer that writes go through, and no longer that the server refuses the next one",
+          "Your board writes go through while it is owed." in _pdebts._nag(B) and "refuses your next board write" not in _pdebts._nag(B), _pdebts._nag(B))
+    check("owing: …the line is for the writer: another session and no session get none",
+          _pdebts._owing_note(A) == "" and _pdebts._owing_note("") == "", (_pdebts._owing_note(A), _pdebts._owing_note("")))
+    _late_debt(ts_ago=60); check("owing: …a debt inside the grace gets none", _pdebts._owing_note(B) == "", _pdebts._owing_note(B))
+    _late_debt(moves=A, what="changed"); check("owing: …a pilot writer's debt (it moves to the keeper) gets none", _pdebts._owing_note(B) == "", _pdebts._owing_note(B))
+    _late_debt(); real_ledger = _pdebts._owed_settle
+    _pdebts._owed_settle = lambda: (_ for _ in ()).throw(RuntimeError("ledger unreadable"))
+    try: said_ = _pdebts._owing_note(B)
+    finally: _pdebts._owed_settle = real_ledger
+    check("owing: …a ledger that cannot be read leaves the line out and fails nothing", said_ == "", said_)
 finally:
-    _pdebts._owed_settle = kept_settle; p._cfg.CFG["page_rule"]["mode"] = kept_mode; p._cfg.CFG["pages"]["flavor"] = "plain"; _pdebts._owed_save({})
-check("lag note: the refusal of a write past the grace says the check follows GitHub about every 5 minutes, and to retry", lag_ref.startswith("Refused: you owe a project-page update") and lag_ref.count(LAG) == 1, lag_ref)
-check("lag note: the gate's line says it too, once", lag_nag.count(LAG) == 1, lag_nag)
-check("lag note: no mirror in play (plain pages, a file written at once): neither text carries it", "Refused: you owe" in plain_ref and LAG not in plain_ref and LAG not in plain_nag, (plain_ref, plain_nag))
-# the lag is the first brain's mirror's: a second brain's copy is kept in sync by another process, so its key never gets the sentence (either flavor)
-SIDE = "projects/sidekey"; D7 = {"ts": int(time.time()), "task": "s7"}
-p._cfg.CFG["brains"] = [{"name": "side", "path": str(T / "side"), "slugs": [SIDE]}]; p._brains._WARNED.clear()
-try:
-    nag_side = {}
-    for fl in ("plain", "gbrain"):
-        p._cfg.CFG["pages"]["flavor"] = fl
-        nag_side[fl] = (p.describe(SIDE, D7), p.describe("projects/beta", D7))
-finally:
-    p._cfg.CFG.pop("brains", None); p._brains._WARNED.clear(); p._cfg.CFG["pages"]["flavor"] = "plain"
-check("lag note: a second brain's key under the plain flavor gets the second-brain wording and no lag sentence",
-      "in the second brain side" in nag_side["plain"][0] and LAG not in nag_side["plain"][0], nag_side["plain"][0])
-check("lag note: a second brain's key under the gbrain flavor gets the second-brain wording and no lag sentence",
-      "in the second brain side" in nag_side["gbrain"][0] and LAG not in nag_side["gbrain"][0], nag_side["gbrain"][0])
-check("lag note: the first brain's key, with a second brain configured and the gbrain flavor, still carries it once",
-      nag_side["gbrain"][1].count(LAG) == 1 and "in the second brain" not in nag_side["gbrain"][1], nag_side["gbrain"][1])
-check("lag note: the first brain's key under the plain flavor has none, with a second brain configured too", LAG not in nag_side["plain"][1], nag_side["plain"][1])
+    _pdebts._owed_settle = kept_settle; p._cfg.CFG["pages"]["flavor"] = "plain"; _pdebts._owed_save({})
+# the debt settles as before: a Current-state edit that reaches the copy drops it
+_late_debt(); _kept_pts, _kept_ct = _pdebts._page_ts, p.ct_changed_since
+_pdebts._page_ts = lambda key: time.time() + 5; p.ct_changed_since = lambda key, ts: True
+try: left = _pdebts._owed_settle()
+finally: _pdebts._page_ts, p.ct_changed_since = _kept_pts, _kept_ct; _pdebts._owed_save({})
+check("owing: …and it settles as before, once the page's Current state has changed in the copy", "projects/gamma" not in left, left)
+# the retry-later sentence is gone: there is no write to retry
+src = "".join(open(os.path.join(STACK, f), encoding="utf-8").read() for f in ("stackshot/projects/pages.py", "stackshot/web/page_debts.py", "stackshot/service/update.py", "stackshot/service/create.py", "docs/page-rule-and-hooks.md"))
+check("owing: the retry-later sentence about the copy's lag is gone from the code and the doc, and nothing says a write is refused for a page debt",
+      not hasattr(p, "PAGE_COPY_LAG") and "retry then" not in src and "not a broken mirror" not in src and "follows GitHub about every 5 minutes" not in src
+      and "then retry this write" not in src and "you owe a project-page update" not in src and "refuses your next board write" not in src, [w for w in ("retry then", "not a broken mirror", "then retry this write", "you owe a project-page update") if w in src])
+for fl in ("plain", "gbrain"):
+    p._cfg.CFG["pages"]["flavor"] = fl; gate_line = p.describe("projects/beta", {"ts": int(time.time()), "task": "s7"}); p._cfg.CFG["pages"]["flavor"] = "plain"
+    check(f"owing: the pane gate's line (flavor {fl}) says nothing of retrying or of a 5-minute copy", "retry" not in gate_line.lower() and "5 minutes" not in gate_line, gate_line)
+_n_mode = _config.notes({"instance": {"owner": "Oliver"}, "page_gate": {"keeper_currency": "keepers"}, "page_rule": {"mode": "refuse"}})
+check("owing: a config that still has [page_rule] mode is told it is retired and read by nothing; one without it is not",
+      len(_n_mode) == 1 and "[page_rule] mode is retired" in _n_mode[0] and not [n for n in _config.notes({"instance": {"owner": "Oliver"}, "page_gate": {"keeper_currency": "keepers"}, "page_rule": {"grace_minutes": 30}}) if "page_rule" in n], _n_mode)
 # F4: the keeper's injection follows the flavor; gbrain's wording is today's, byte for byte
 saved_ex = p.excerpts; p.excerpts = lambda keys, total: "<EXCERPTS>"
 inj = p.inject_text(B, "home-beta", ["projects/beta"])

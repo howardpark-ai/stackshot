@@ -62,7 +62,7 @@ BORED = {"ask_owed": "", "gate_options": None, "gate_needs": [], "gate_observers
          "said_note": "", "parse_check": "", "parse_wake": None, "wake_at": None, "wake_event_set": None, "wait_end_sent_back": None, "store_ref": "", "step_proof_set": "",
          "step_proof_prune": "", "record_fixes": None, "front_sender": False, "contact_fronts": [], "contact_same": False, "fallback_wait_date": ("", "", ""), "date_only_wait": False,
          "basis_put": None, "basis_words": "", "cap_ok_put": None, "cap_ok_drop": None, "check_how": "", "nl_text_without": "", "finishes_own_line": False, "require_marks": None,
-         "owed_mark": None, "refuse_if_owing": None, "push_noted": None, "writer_charge": "", "owner_state_mover_": "", "evwait_preread": None, "close_was_set": None, "lift_ask": "",
+         "owed_mark": None, "owing_note": "", "push_noted": None, "writer_charge": "", "owner_state_mover_": "", "evwait_preread": None, "close_was_set": None, "lift_ask": "",
          "gate_repark": None, "gate_clock_renewal": None, "gate_ask_on_wait": None, "handover": "", "handoffs_in_": [], "anchor_wait_gate": None, "after_open": False, "gate_work_writer": None}
 LISTY = ("gate_subject", "gate_description", "gate_goal", "gate_next", "gate_bare_urls")   # the form gates the update collects (field_gates' `*_faults`): each lists its faults
 def hook(name):
@@ -162,6 +162,17 @@ RET["nag"] = "\n[nag] owed"
 out_n = upd(g1, subject="[home] a renamed item again", sender=OWNER)
 check("1 …and the nag the hook gives is the end of the reply", out_n.endswith("\n[nag] owed"), out_n[-80:])
 RET.pop("nag")
+# a write while its writer has a page owed is never refused or held: the hook's line is read for a state change and ends the reply, before the nag
+RET["owing_note"] = "\nThis write went through. Still owed by you: projects/gamma (since s9, 4 h ago); it stays owed until the page's Current state is edited."; RET["nag"] = "\n[nag] owed"
+STEP_1 = f"{MOVER}: a step for the owing check"
+g1o = put(150)
+out_o = upd(g1o, next=STEP_1, sender=OWNER); n_o = names()
+check("1 a state change while a page is owed goes through: nothing is raised, the item is saved and published", "save" in n_o and "publish" in n_o and out_o.startswith("updated "), n_o)
+check("1 …and its reply carries the line that the page is still owed, before the nag, asked for the writer", out_o.endswith(RET["owing_note"] + "\n[nag] owed") and called("owing_note")[-1][0] == (OWNER,), (out_o[-200:], called("owing_note")))
+g1p = put(151)
+out_p = upd(g1p, subject="[home] a filing change only", sender=OWNER)
+check("1 …a filing change (no state change) gets no such line", "This write went through" not in out_p and not called("owing_note"), (out_p[-200:], called("owing_note")))
+RET["owing_note"] = ""; RET.pop("nag")
 g1b = put(2)
 LOG.clear()
 try: update.update_item(g1b, description="- Goal: Done when it is done\n- Another bullet", sender=OWNER); desc_ok = True

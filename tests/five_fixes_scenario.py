@@ -65,7 +65,7 @@ from stackshot.web.tools import update as _wt_update
 from fastmcp.exceptions import ToolError
 _cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 
 MAIN = "falcon-main"; OTHER = "home-other"; STK = "projects/example"
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"

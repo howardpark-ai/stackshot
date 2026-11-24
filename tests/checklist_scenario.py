@@ -105,7 +105,7 @@ from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 def refused(name, f, *want, i=None):
@@ -496,7 +496,10 @@ refused("reword of position 0", lambda: upd(55, reword={0: "home-agent: x"}), "n
 refused("reword by text that matches no open step: the open ones are listed", lambda: upd(55, reword={"home-agent: nothing like it": "home-agent: x"}), "reword: no open step reads", "3. ", i=55)
 refused("a step in reword and in done", lambda: upd(55, reword={3: "home-agent: other words here"}, done=[3]), "step 3 is in reword and in done or dropped", i=55)
 refused("a step in reword and in dropped", lambda: upd(55, reword={3: "home-agent: other words here"}, dropped=[3]), "in reword and in done or dropped", i=55)
-refused("his step (a line opening with his name) is never reworded", lambda: upd(55, reword={3: "Oliver: some other thing"}), "Oliver's own step", i=55)
+tok = _CL.begin()
+r = upd(55, reword={3: "Oliver: some other thing"}); fx = _CL.end(tok)
+check("his step (a line opening with his name) is reworded as drop plus add, and the reply says so: the old line shows dropped, the new words are an open line at the end",
+      [k for k, _ in fx] == ["step-reworded"] and st(55)[2][0] == "dropped" and st(55)[-1] == OPEN("Oliver: some other thing"), (fx, st(55)))
 refused("another session's step is not reworded by this sender", lambda: upd(53, reword={1: "home-agent: opening move"}), "reword: step 1 is a line of", "only the session that wrote a step rewords it", i=53)
 r = upa(53, reword={1: "home-agent: opening move"})
 check("…the session that wrote it rewords it, and the other writer's line stays", st(53) == [OPEN("home-agent: opening move"), OPEN("home-here: second")] and NL.writers_of(mt(53), mt(53)["owner"]) == [AGENT, OWNER], (st(53), mt(53).get("next_by")))

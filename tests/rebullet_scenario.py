@@ -71,7 +71,7 @@ from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.service import writes
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 raw = lambda i, letter="a": (T / f"store/{letter}/{i}.json").read_text()
 def upd(i, letter="a", **kw): return _update_svc._update(f"{letter}{i}", sender="home-front", **kw)

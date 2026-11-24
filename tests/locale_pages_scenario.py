@@ -451,7 +451,7 @@ def locale_audits_part():
     routing.record("projects/alpha", kind="message", to="", label="", who="alpha-x", text="a note with no one to take it", log_only=True, reason="log only: nothing to deliver", ts=now - 200)
     NEWD = "- The thing works and is in use"
     _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
-    _web_page_debts._refuse_if_owing = lambda debtor: None
+    _web_page_debts._owing_note = lambda debtor: ""
     for i in (2, 3, 4):
         _wt_complete.stackshot_complete(f"a{i}", outcome="done", reason="the change is live", description=NEWD, sender="alpha-x")
     check("the fixture has closes on the Closed list", len(ld.records()) == 3, ld.records())

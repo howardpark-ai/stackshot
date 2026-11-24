@@ -732,12 +732,21 @@ def audit_pattern_review() -> str:
 
 
 RUNNER_PROCESSES = ("inline", "unit")
+RUNNER_PROCESS_DEFAULT = "unit"
+
+
+def runner_process_is_default() -> bool:
+    """True when [runner] process is not set (missing, empty or blank): the default, "unit", applies. A value that is set always wins, a misspelt one included (it reads as "inline", see `runner_process`)."""
+    return not str(get("runner", "process") or "").strip()
 
 
 def runner_process() -> str:
-    """[runner] process: where the minute set's runner runs. "inline" (the default) = a thread of the server, started by `server._start_background`, as it always was. "unit" = the server starts no runner and the separate
-    process `stackshot minute` runs it. Restart-only (RESTART_ONLY): a reload keeps the running value in CFG, so a process reads it once, at its start. A value that is neither reads as "inline" (`notes` says so)."""
+    """[runner] process: where the minute set's runner runs. "unit" (the default, when the setting is not set) = the server starts no runner and the separate process `stackshot minute` runs it (stackshot-minute.service,
+    which `./install.sh units` installs and `deploy.sh` restarts). "inline" = a thread of the server, started by `server._start_background`: the choice for a host with no minute unit. A value that is set and is neither
+    reads as "inline" (`notes` says so): a misspelt value never leaves a box with no runner. Restart-only (RESTART_ONLY): a reload keeps the running value in CFG, so a process reads it once, at its start."""
     v = str(get("runner", "process") or "").strip().lower()
+    if not v:
+        return RUNNER_PROCESS_DEFAULT
     return v if v in RUNNER_PROCESSES else "inline"
 
 
@@ -1344,7 +1353,7 @@ def server_box(cfg: dict[str, Any] | None = None) -> bool | None:
 def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     """Settings problems that do not stop the start but change behaviour silently: one line each, [] when the file is fine. The config
     is exactly one file with no defaults merged in (see the head), so a [page_gate] without keeper_currency means the page rules
-    are off. the old key steward_currency is no longer read, so a file holding only that one lands here too. a file that still carries the retired [runner] enabled, [model] watchers or [router] page_debt_hour is told it can go; the key changes nothing. a [presence] minutes that is
+    are off. the old key steward_currency is no longer read, so a file holding only that one lands here too. a file that still carries the retired [runner] enabled, [model] watchers, [page_rule] mode or [router] page_debt_hour is told it can go; the key changes nothing. a [presence] minutes that is
     not a number above 0 is read as 30 (the default), so it is said here, at the start and on a reload, instead of changing silently. a paused stall pass is named first."""
     out: list[str] = stall_notes(cfg)
     out += keyword_notes(cfg)
@@ -1362,11 +1371,14 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     rn = get("runner", cfg=cfg)
     if isinstance(rn, dict) and "enabled" in rn:
         out.append("[runner] enabled is retired and read by nothing: the minute set's runner is the only path and always starts; drop the line")
-    if isinstance(rn, dict) and "process" in rn and str(rn["process"]).strip().lower() not in RUNNER_PROCESSES:
+    if isinstance(rn, dict) and str(rn.get("process") or "").strip() and str(rn["process"]).strip().lower() not in RUNNER_PROCESSES:     # an empty value is "not set": the default applies, and there is nothing to say
         out.append(f'[runner] process = {rn["process"]!r} is neither "inline" nor "unit", so it is read as "inline": the server runs the minute set\'s runner itself')
     mo = get("model", cfg=cfg)
     if isinstance(mo, dict) and "watchers" in mo:
         out.append("[model] watchers is retired and read by nothing: the waits' watchers always run (a wait with a stored kind is ended by them, never by the old wake pass); drop the line")
+    pr_ = get("page_rule", cfg=cfg)
+    if isinstance(pr_, dict) and "mode" in pr_:
+        out.append("[page_rule] mode is retired and read by nothing: a board write is never refused or held for a page debt (the reply says the page is still owed); drop the line")
     ro = get("router", cfg=cfg)
     if isinstance(ro, dict) and "page_debt_hour" in ro:
         out.append("[router] page_debt_hour is retired and read by nothing: the page-debt call runs with each audit run ([audit] at), no longer from an hour of its own; drop the line")

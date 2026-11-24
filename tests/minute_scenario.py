@@ -1,10 +1,10 @@
 """Scenario test for `stackshot minute`, the minute set's runner as a process of its own (stackshot/web/minute.py, `[runner] process`, the runner's lock in core/runner_files.py, service/runner.py `start`, `status`,
 `watchdog`): a scratch instance, a throwaway state folder and free ports, real OS processes for the server and for `stackshot minute` (started as `python -m stackshot minute`), no network, no live store.
 
-  1  setting   `[runner] process` defaults to "inline" (absent, and in the example config), "unit" is read, any other value reads as "inline" with a note · it is restart-only: a reload keeps the running value and lists it as pending
+  1  setting   `[runner] process` defaults to "unit" (absent, empty or blank, and in the example config), "inline" and "unit" are read, any other value that is set reads as "inline" with a note (a misspelling never leaves a box with no runner) · it is restart-only: a reload keeps the running value and lists it as pending
   2  lock      `runner.lock` in `<state>/minute/`: taken without waiting, kept for the life of the process, a second take in the process is the same hold · a second process is refused and told the holder's pid · the lock is
                freed by `lock_release` (and the file emptied) and by the holder's death (SIGKILL by its pid) · the read-only standby takes none and writes no file · an unusable lock file is an "error" state, never a raise · close-on-exec
-  3  start     the server's start: inline takes the lock BEFORE any thread starts and then starts the runner · a second start in the process reuses it · "unit" starts no runner, takes no lock and says so · inline with the lock held
+  3  start     the server's start: inline takes the lock BEFORE any thread starts and then starts the runner · a second start in the process reuses it · "unit" starts no runner, takes no lock and says so · the same at the default (the setting not set), where the line and the status also say it is not set and name both ways out (`./install.sh units --start`, `process = "inline"`), and the watchdog's one message to the builder carries them · inline with the lock held
                by another process starts no runner, says so on one stderr line with the holder's pid, and still starts the publish loop and the watchdog · the setting is read once per start · `_start_background` in the "unit" mode
                starts every other loop · the standby takes no lock
   4  honesty   `status()` says `minute runner not running (...)` when this process has no runner and no live process beats the status file (unit; lock held elsewhere; a dead pid; a stale heartbeat) and says nothing while one does ·
@@ -143,22 +143,25 @@ try:
     # ---- 1. the setting
     import tomllib
     example = tomllib.loads(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
-    check("1 setting: the example config has `[runner] process = \"inline\"`", (example.get("runner") or {}).get("process") == "inline", example.get("runner"))
-    check("1 setting: the config this suite runs on reads \"inline\" through `runner_process()`", _cfg.get("runner", "process") == "inline" and _cfg.runner_process() == "inline")
+    check("1 setting: the example config has `[runner] process = \"unit\"` (what `stackshot setup` copies: a new install runs the unit)", (example.get("runner") or {}).get("process") == "unit", example.get("runner"))
+    check("1 setting: the config this suite runs on (the example's text through tests/_instance.py, which sets the fixtures to \"inline\") reads \"inline\" through `runner_process()`", _cfg.get("runner", "process") == "inline" and _cfg.runner_process() == "inline")
     real_runner_cfg = _cfg.CFG.get("runner")
-    odd = {}
+    odd, dflt = {}, {}
     for label, val in (("absent", None), ("unit", {"process": "unit"}), ("Unit with spaces", {"process": " Unit "}), ("inline", {"process": "inline"}), ("other word", {"process": "daemon"}), ("empty", {"process": ""}),
                        ("a number", {"process": 3}), ("a list", {"process": ["unit"]}), ("a retired key only", {"enabled": True})):
         if val is None: _cfg.CFG.pop("runner", None)
         else: _cfg.CFG["runner"] = val
-        odd[label] = _cfg.runner_process()
-    check("1 setting: no key reads \"inline\"; \"unit\" (any case, with spaces) reads \"unit\"; anything else reads \"inline\"",
-          odd == {"absent": "inline", "unit": "unit", "Unit with spaces": "unit", "inline": "inline", "other word": "inline", "empty": "inline", "a number": "inline", "a list": "inline", "a retired key only": "inline"}, odd)
+        odd[label] = _cfg.runner_process(); dflt[label] = _cfg.runner_process_is_default()
+    odd["blank"] = (_cfg.CFG.__setitem__("runner", {"process": "   "}), _cfg.runner_process())[1]; dflt["blank"] = _cfg.runner_process_is_default()
+    check("1 setting: no key, an empty or blank value reads \"unit\" (the default); \"unit\" (any case, with spaces) reads \"unit\"; \"inline\" reads \"inline\"; any other value that is set reads \"inline\" (a misspelling never leaves a box with no runner)",
+          odd == {"absent": "unit", "unit": "unit", "Unit with spaces": "unit", "inline": "inline", "other word": "inline", "empty": "unit", "a number": "inline", "a list": "inline", "a retired key only": "unit", "blank": "unit"}, odd)
+    check("1 setting: `runner_process_is_default()` is true for no key, an empty or a blank value and false for every value that is set, a misspelt one included (a setting that is present always wins)",
+          dflt == {"absent": True, "unit": False, "Unit with spaces": False, "inline": False, "other word": False, "empty": True, "a number": False, "a list": False, "a retired key only": True, "blank": True}, dflt)
     _cfg.CFG["runner"] = {"process": "daemon"}
     n_bad = [n for n in _cfg.notes() if "[runner] process" in n]
     _cfg.CFG["runner"] = {"process": "unit"}; n_ok = [n for n in _cfg.notes() if "[runner] process" in n]
     _cfg.CFG["runner"] = {"process": ""}; n_empty = [n for n in _cfg.notes() if "[runner] process" in n]
-    check("1 setting: a value that is neither says so once in config.notes(); \"unit\" says nothing", len(n_bad) == 1 and "'daemon'" in n_bad[0] and "inline" in n_bad[0] and n_ok == [], (n_bad, n_ok, n_empty))
+    check("1 setting: a value that is set and is neither says so once in config.notes(); \"unit\" and an empty value say nothing", len(n_bad) == 1 and "'daemon'" in n_bad[0] and "inline" in n_bad[0] and n_ok == [] and n_empty == [], (n_bad, n_ok, n_empty))
     if real_runner_cfg is None: _cfg.CFG.pop("runner", None)
     else: _cfg.CFG["runner"] = real_runner_cfg
     check("1 setting: it is restart-only: `runner.process` is in RESTART_ONLY", "runner.process" in _cfg.RESTART_ONLY and _cfg._restart_only("runner.process") is not None)
@@ -274,6 +277,62 @@ try:
     st = runner_svc.status()
     check("3 start unit: the status says `minute runner not running`, names the setting, and reports no runner running", st["running"] is False and str(st.get("message", "")).startswith("minute runner not running (runs in its own process: [runner] process = \"unit\"")
           and runner_svc.MODE[0] == "unit", st.get("message"))
+
+    # the default: [runner] process not set. The server starts no runner (the unit runs it), takes no lock, and says on one line what a host with no unit does; an explicit "unit" keeps its own, shorter line
+    for label, setting in (("absent", None), ("empty", ""), ("blank", "   ")):
+        wipe(); F.lock_release()
+        names_, rs, targets, err = start_with(setting)
+        st = runner_svc.status()
+        check(f"3 start default ({label}): no runner thread, no runner made and no lock; the publish loop and the watchdog start", names_ == ["publish", "watchdog"] and rs == [] and not F.lock_held_here() and not MIN.exists()
+              and runner_svc.MODE[0] == "unit", (names_, rs, MIN.exists(), runner_svc.MODE[0]))
+        check(f"3 start default ({label}): one stderr line says the setting is not set, that the default \"unit\" applies, and names both ways out (`./install.sh units --start`, `[runner] process = \"inline\"`)",
+              err.count("\n") == 1 and "[runner] process is not set" in err and 'default "unit" applies' in err and "./install.sh units --start" in err and '[runner] process = "inline"' in err and "restart the server" in err, err)
+        check(f"3 start default ({label}): the status says `minute runner not running`, that the setting is not set, and names both ways out",
+              st["running"] is False and str(st.get("message", "")).startswith("minute runner not running (runs in its own process: [runner] process is not set") and "./install.sh units --start" in st["message"]
+              and '[runner] process = "inline"' in st["message"], st.get("message"))
+    names_, rs, targets, err = start_with("unit")
+    check("3 start default: a setting that is present keeps the shorter line, without the words about a missing setting (an explicit \"unit\" is a decision, not a gap)",
+          "is not set" not in err and "default" not in err and "is not set" not in str(runner_svc.status().get("message", "")) and runner_svc.ABSENT[0] == 'runs in its own process: [runner] process = "unit"; start `stackshot minute`', (err, runner_svc.ABSENT[0]))
+    for label, setting in (("inline", "inline"), ("a misspelling", "daemon")):
+        wipe(); F.lock_release()
+        names_, rs, targets, err = start_with(setting)
+        check(f"3 start explicit ({label}): the server runs the runner itself and holds the lock, as before the default changed; nothing is said of a missing setting", names_[:1] == ["runner"] and len(rs) == 1 and F.lock_held_here()
+              and runner_svc.MODE[0] == "inline" and "is not set" not in err, (names_, err))
+        F.lock_release(); wipe()
+    # the watchdog, on a default server with no unit: after the grace of the start it tells the builder once, and the text carries both ways out
+    sent_d = []; real_send_d = fleetev.inbox_flag_send; fleetev.inbox_flag_send = lambda to, text: sent_d.append((to, text))
+    real_aud_d = dict(_cfg.CFG.get("audit") or {}); _cfg.CFG["audit"] = {**real_aud_d, "builder": "demo-builder"}
+    try:
+        wipe(); runner_svc.RUNNER_STALL[0] = False
+        start_with(None)
+        w_early = runner_svc.watchdog()
+        runner_svc.STARTED[0] = time.time() - 400
+        with stderr_lines() as err_w:
+            w_late = runner_svc.watchdog()
+        w_again = runner_svc.watchdog()
+    finally:
+        fleetev.inbox_flag_send = real_send_d; _cfg.CFG["audit"] = real_aud_d; runner_svc.RUNNER_STALL[0] = False
+    check("3 start default: a host with no unit says nothing in the grace of its start, then tells the builder once that no process has reported, with the default and both ways out in the text",
+          w_early == "" and w_late == "told" and w_again == "noted" and len(sent_d) == 1 and "no process has reported since this server started" in sent_d[0][1] and "[runner] process is not set" in sent_d[0][1]
+          and "./install.sh units --start" in sent_d[0][1] and '[runner] process = "inline"' in sent_d[0][1] and "[runner] process is not set" in err_w.getvalue(), (w_early, w_late, w_again, sent_d, err_w.getvalue()))
+    # …and the same on a host a hand update left with a status file of an earlier run (a dead pid, an old heartbeat): the stall report says its process is gone AND why this server has no runner of its own
+    sent_g = []; fleetev.inbox_flag_send = lambda to, text: sent_g.append((to, text))
+    _cfg.CFG["audit"] = {**real_aud_d, "builder": "demo-builder"}
+    gone_kid = subprocess.Popen([sys.executable, "-c", "pass"]); gone_kid.wait(30)
+    try:
+        wipe(); runner_svc.RUNNER_STALL[0] = False
+        start_with(None)
+        now_g = time.time()
+        put(F.STATUS, json.dumps({"pid": gone_kid.pid, "heartbeat": now_g - 900, "last_round": now_g - 900, "started": now_g - 5000, "current": "", "rounds": 7, "ticks": [], "enabled": True, "mode": "runner"}))
+        runner_svc.STARTED[0] = now_g - 400
+        with stderr_lines() as err_g:
+            w_gone = runner_svc.watchdog()
+    finally:
+        fleetev.inbox_flag_send = real_send_d; _cfg.CFG["audit"] = real_aud_d; runner_svc.RUNNER_STALL[0] = False
+    check("3 start default: a stale status file of a dead process: the builder's message says the process is gone and carries the default and both ways out; so does the stderr line",
+          w_gone == "told" and len(sent_g) == 1 and "its process is gone" in sent_g[0][1] and "[runner] process is not set" in sent_g[0][1] and "./install.sh units --start" in sent_g[0][1]
+          and '[runner] process = "inline"' in sent_g[0][1] and "its process is gone" in err_g.getvalue() and "[runner] process is not set" in err_g.getvalue(), (w_gone, sent_g, err_g.getvalue()))
+    wipe()
 
     hold = spawn_lock()
     names_, rs, targets, err = start_with("inline")

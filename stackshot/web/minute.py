@@ -1,7 +1,7 @@
 """minute.py: `stackshot minute`, the minute set's runner as a process of its own.
 
 With `[runner] process = "unit"` the server starts no runner thread and this process runs the runner instead: the same `Runner` over the same tick table (service/runner.py), the wake file, the hold file and the
-status file the two sides share (core/runner_files.py). With the default, "inline", the server runs the runner as a thread, as it always did, and this process refuses to start.
+status file the two sides share (core/runner_files.py). With `"inline"` set, the server runs the runner as a thread and this process refuses to start; with the setting absent the default is "unit", so this is the process that runs it.
 
 What it does, in order:
   1. installs its signal handlers first (SIGTERM and SIGINT stop it, SIGHUP asks for a config reload): a reload signal that comes while the server's modules are still being imported is kept, never fatal
@@ -152,7 +152,7 @@ def run(stop: threading.Event, hup: threading.Event, ready_poll: float = READY_P
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="stackshot minute", description="Run the minute set's runner as a process of its own (needs [runner] process = \"unit\"; the server then starts none). "
+    ap = argparse.ArgumentParser(prog="stackshot minute", description="Run the minute set's runner as a process of its own (the default, and what [runner] process = \"unit\" says; the server then starts none). "
                                  "Exactly one process runs the runner: a second one, or a server that has it inline, makes this one refuse.")
     ap.add_argument("--ready-poll", type=float, default=READY_POLL, metavar="SECONDS", help=f"seconds between looks at the server's /healthz while it is not up (default {READY_POLL:g})")
     ap.add_argument("--stop-wait", type=float, default=STOP_WAIT, metavar="SECONDS", help=f"seconds a stop signal waits for the round that is running before it abandons the tick (default {STOP_WAIT:g})")
@@ -171,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
             _say("stackshot minute: not started: this is a read-only standby (STACKSHOT_READ_ONLY); it runs no runner and writes nothing")
             return EXIT_STANDBY
         if _cfg.runner_process() != "unit":
-            _say('stackshot minute: not started: [runner] process is "inline", so the server runs the minute set\'s runner itself; set it to "unit" and restart the server to run it here')
+            _say('stackshot minute: not started: [runner] process is "inline", so the server runs the minute set\'s runner itself; set it to "unit" (or remove the line: "unit" is the default) and restart the server to run it here')
             return EXIT_INLINE
         got = _files.lock_take()
         if got.state == "held":

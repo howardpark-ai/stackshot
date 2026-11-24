@@ -98,7 +98,7 @@ for p_ in (T / "store/a").glob("*.json"):       # as a session's write leaves th
     if m_.get("next", "").startswith("home-agent:"):
         m_["next_by"] = [[AGENT, NL.key_of(m_["next"])]]; p_.write_text(json.dumps(j_))
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 def refused(name, f, *want, i=None):

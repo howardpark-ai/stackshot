@@ -1,12 +1,12 @@
 """page_debts.py: the page rule's debts: a board write that changes state owes a project-page update by the session that made it (the ledger `ledger.json` under the state dir, `_owed_load`, `_owed_save`, `_owed_mark`,
-`_owed_settle`), the grace and the slack that settle it (`_grace_min`, `_page_slack`, `_page_ts`), the nag a reply ends with (`_nag`) and the refusal of a write while a debt is past its grace (`_refuse_if_owing`), with the
+`_owed_settle`), the grace and the slack that settle it (`_grace_min`, `_page_slack`, `_page_ts`), the nag a reply ends with (`_nag`) and the line a write's reply carries when the write went through while a debt was past its grace (`_owing_note`), with the
 helpers they read: how a page is written (`_page_how`), a session's stored reference and its shown name (`_session_id`, `_shown_ref`, `_shown_needs`; `_store_ref`, `_same_sess` and `_role_name` are `fleet/sessions_registry.py`'s) and the ledger's one lock (`_OWED_LOCK`).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the page and project
 modules, the registry readers (`service/gates.py`), the session helpers (`fleet/sessions_registry.py`) and the instance settings and text clipping (`core/instance.py`, `model/bullet_text.py`). server.py imports the names its own code reads from here (`_owed_mark` and the others it calls), and the suites and
-scripts read and set every other name on this module. `_refuse_if_owing` has no caller here and is not a name of server.py: the create and update tables look it up on this module when a write runs
-(`_late_in`), and a suite that stubs it (`page_debts._refuse_if_owing = ...`) stubs it here, which reaches every caller. `_page_ts` is called here by `_owed_settle` and by the client API's page-ts answer in server.py, which reads it on this module too: the suites that put a page's time in place of the real one
-set it here, and that reaches both callers. `_HERE` is the checkout's root, read only in the two messages that name the `pages.py clear` command."""
+scripts read and set every other name on this module. `_owing_note` has no caller here and is not a name of server.py: the create and update tables look it up on this module when a write runs
+(`_late_in`), and a suite that stubs it (`page_debts._owing_note = ...`) stubs it here, which reaches every caller. No board write is refused or held for a page debt: the debt stays in the ledger and the write's reply says so. `_page_ts` is called here by `_owed_settle` and by the client API's page-ts answer in server.py, which reads it on this module too: the suites that put a page's time in place of the real one
+set it here, and that reaches both callers. `_HERE` is the checkout's root, read only in the message that names the `pages.py clear` command."""
 from __future__ import annotations
 
 import json
@@ -15,8 +15,6 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any
-
-from fastmcp.exceptions import ToolError
 
 from stackshot import paths as _paths
 from stackshot.anchors import anchors as _anc
@@ -278,24 +276,28 @@ def _nag(owner: str = "") -> str:
         out.append("[nag] PROJECT PAGE owed by you: " + ", ".join(f"{k} ({e.get('item') or 'item'}, {_age(e['ts'])} ago)" for k, e in mine)
                    + f" — a board change that reflects a state change is followed by a page update in the same turn ({_page_how()}). "
                    + (f"As a page keeper your debt settles only when the page's Current state changes: {_KEEPER_WHY}. " if any(_debt_strict(owner, e) for _k, e in mine) else "")
-                   + f"After {_grace_min()} min the server refuses your next board write until the page is newer than the change. "
+                   + "Your board writes go through while it is owed. "
                    + f"Board-only edit that changed no state: `python3 {_HERE}/stackshot/projects/pages.py clear <key>` on the server box.")
     if others:
         out.append("pages owed: " + ", ".join(f"{k} ({_session_label(o)}, {_age(e['ts'])}{', a keeper: settles on a Current-state edit' if _debt_strict(o, e) else ''})" for k, o, e in others))
     return ("\n\n" + "\n".join(out)) if out else ""
 
 
-def _refuse_if_owing(owner: str) -> None:
-    """page_rule.mode = refuse: a session that has owed a page longer than the grace gets its next board write refused."""
-    if _cfg.CFG["page_rule"].get("mode") != "refuse" or not owner:
-        return
-    grace = _grace_min() * 60
-    d = _owed_readable(_owed_settle()); owner = _session_id(owner)
-    late = [(k, e) for k, os_ in d.items() for o, e in os_.items() if _same_sess(o, owner) and time.time() - float(e.get("ts", 0)) > grace
-            and not e.get("moves")]    # a writer's pilot debt moves to the keeper instead (_pilot_fallback_tick)
-    if late:
-        raise ToolError("Refused: you owe a project-page update — " + ", ".join(f"{k} (since {e.get('item') or 'a board change'}, {_age(e['ts'])} ago)" for k, e in late)
-                        + f" — update the page first ({_page_how()}), then retry this write. "
-                        + (_pages.PAGE_COPY_LAG + " " if _cfg.page_flavor() == "gbrain" else "")
-                        + (f"As a page keeper your debt settles only when the page's Current state changes: {_KEEPER_WHY}. " if _strict(owner) else "")
-                        + f"If that earlier board edit changed no state: `python3 {_HERE}/stackshot/projects/pages.py clear <key>` on the server box.")
+def _owing_note(owner: str) -> str:
+    """The one line a write's reply carries when the write went through while its writer had a page owed longer than the grace, else "". A board write is
+    never refused or held for a page debt: the debt stays in the ledger (and in the brief and the pages owed) and settles as before, when the page's Current
+    state is edited and the server's copy of the page has caught up. Read before the write records its own debt."""
+    if not owner:
+        return ""
+    try:
+        grace = _grace_min() * 60
+        d = _owed_readable(_owed_settle()); owner = _session_id(owner)
+        late = [(k, e) for k, os_ in d.items() for o, e in os_.items() if _same_sess(o, owner) and time.time() - float(e.get("ts", 0)) > grace
+                and not e.get("moves")]    # a writer's pilot debt moves to the keeper instead (_pilot_fallback_tick)
+    except Exception:  # noqa: BLE001  — fail-open: a ledger that cannot be read is no reason to fail the write; the note is left out
+        return ""
+    if not late:
+        return ""
+    return ("\nThis write went through. Still owed by you: " + ", ".join(f"{k} (since {e.get('item') or 'a board change'}, {_age(e['ts'])} ago)" for k, e in late)
+            + "; it stays owed until the page's Current state is edited"
+            + (" and the server's copy of the page has caught up." if _cfg.page_flavor() == "gbrain" else "."))

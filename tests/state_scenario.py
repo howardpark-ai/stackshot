@@ -84,7 +84,7 @@ hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False      # kept stubbed: this suite sets a reminder wake on an alive item another session moves, as home-front, to touch a state field; the real front test would refuse it (suite watch covers the rule)
 ST = T / "state/waiting.json"

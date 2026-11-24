@@ -200,7 +200,7 @@ wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.web.ui import render as ui_render
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 def jobs(): return [json.loads(p.read_text()) for p in G.pending()]

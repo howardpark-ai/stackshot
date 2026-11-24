@@ -589,7 +589,7 @@ def part_examples():
     from stackshot.web.tools import text as _wt_text
     from stackshot.web.tools import update as _wt_update
     _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-    _web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+    _web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
     def _no_claude(*a, **k): raise AssertionError("the real model was called")
     R.run_call = _no_claude
     SW._run = lambda message: {"status": "ok", "text": json.dumps({"can_do_now": False, "reason": "the nightly run is still going"})}   # the self-wait check: the step cannot be done now

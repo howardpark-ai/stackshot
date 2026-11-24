@@ -85,7 +85,7 @@ hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 FB = telling.fallback_mover("projects/alpha")      # the project's builder, else its -main agent (here its first front agent): what an item nothing else names is moved by, never its creator
 assert FB == "home-front", FB

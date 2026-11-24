@@ -85,7 +85,7 @@ def live_tools():
     import asyncio
     return {t.name: {"description": (t.description or "").replace("Oliver", "the owner")} for t in asyncio.run(server.mcp.list_tools())}
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda *a, **k: None
 upd = lambda i, sender="home-front", **kw: _update_svc._update(f"a{i}", sender=sender, **kw)
 get = lambda i: _wt_get.stackshot_get(f"a{i}")

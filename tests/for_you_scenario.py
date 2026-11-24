@@ -111,7 +111,7 @@ from stackshot.web.ui import render as ui_render
 from starlette.testclient import TestClient
 from stackshot.web.routes import client_api as _rt_client, ui_api as _rt_ui
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = _rt_answers._publish = _rt_client._publish = _rt_ui._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
 # a front agent is told of a close only while Oliver is there and it touched the item (tests/front_quiet_scenario.py covers the gate). These checks are about the notice's shape and
 # who is named in it, so Oliver is there for every front pane unless a check flips PRESENT; with it off the gate's own verdict is used (this fixture runs no panes: nobody is told).
 PRESENT = [True]

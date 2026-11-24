@@ -25,8 +25,8 @@
 #                                   [portal] account_id is set, anchor-hub.service only when [anchor_hub] enabled = true, and
 #                                   stackshot-audit.{service,timer} only when [audit] enabled = true (the timer enabled and
 #                                   started: it only arms the schedule, the audit, or its cue in mode "agent", runs at [audit] at),
-#                                   and stackshot-minute.service only when [runner] process = "unit" on a box that is not a read-only
-#                                   standby (the minute set's runner as a process of its own; at "inline", the default, it is not installed)
+#                                   and stackshot-minute.service only when [runner] process = "unit" (the default, so unless "inline" is set) on a box that is not a read-only
+#                                   standby (the minute set's runner as a process of its own; "unit" is the default, so it is installed unless [runner] process = "inline" is set)
 #   ./install.sh puller             the puller's user unit alone (a box that only fetches; never sudo)
 #   ./install.sh render [name]      print the rendered unit(s), install nothing (no name: the units `units` would install);
 #                                   the unit directory goes to stderr

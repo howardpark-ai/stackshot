@@ -226,7 +226,7 @@ In any session: call `create` with a subject that starts with one of your prefix
 the data repository has a commit, and a page update is owed for `projects/getting-started`: that is the page
 rule, and `RULES.md` says how it works. By default (`[pilot] writer_owes_page = false`) the page's keeper is
 charged and the router passes it the update; with `writer_owes_page = true` the session that wrote owes it and,
-after `[page_rule] grace_minutes`, its next state-changing write is refused until the page is committed. The
+after `[page_rule] grace_minutes`, the reply of its next state-changing write says the write went through and the page is still owed. The
 owing session's next prompt carries the nag. A project made with no page owes none (see "Adding a project").
 
 ## Adding a project
@@ -385,7 +385,7 @@ Some limits of the check, all on the safe side (a refusal, never a wrong install
 | secrets | `~/.config/stackshot/` (`oauth.env`, `ui-session.key`, `client.token`, `client-tokens/`, `anchor-hub/`) | setup, you, `client mint` |
 | state | `~/.local/state/stackshot/` (ledger, inbox, routing, cimd cache); the services log to journald | the services |
 | data | `~/stackshot-data/` (store, `board.md`, `RULES.md`, `pages/`) | the publisher and you |
-| units | `~/.config/systemd/user/`: `stackshot.service`, `stackshot-reload.service` (reloads the server and anchor-hub when the config file changes: SIGHUP, no restart), `stackshot-reload.path` (the watcher that triggers it), `stackshot-puller.service`, and with their options `stackshot-portal-sync.service`, the portal drop-in `stackshot.service.d/portal-sync.conf`, `anchor-hub.service` and, only with `[runner] process = "unit"` (not on a standby, where one installed earlier is removed), `stackshot-minute.service` (the minute set's runner as a process of its own; [`docs/server-passes.md`](docs/server-passes.md#the-runners-unit) says how to switch and roll back) | `install.sh` via setup |
+| units | `~/.config/systemd/user/`: `stackshot.service`, `stackshot-reload.service` (reloads the server and anchor-hub when the config file changes: SIGHUP, no restart), `stackshot-reload.path` (the watcher that triggers it), `stackshot-puller.service`, and with their options `stackshot-portal-sync.service`, the portal drop-in `stackshot.service.d/portal-sync.conf`, `anchor-hub.service` and, with `[runner] process` at `"unit"` (the default; not on a standby, where one installed earlier is removed), `stackshot-minute.service` (the minute set's runner as a process of its own; [`docs/server-passes.md`](docs/server-passes.md#the-runners-unit) says how to switch and roll back) | `install.sh` via setup |
 | hooks | `~/stackshot/client/hooks/` (in the checkout; `client.sh` for a machine with `--no-puller`) | the repository; `client install` wires them |
 
 A typical deployment is described in [docs/overview.md](docs/overview.md): one server box, further client machines, a gbrain brain as the page store,

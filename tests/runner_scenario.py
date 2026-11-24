@@ -25,7 +25,7 @@ SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="r1-runner-"); T = pathlib.Path(tmp)
 BOARD = "https://board.example.org"
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"), login=True)
+toml = _instance.apply(_instance.base_toml(), login=True)      # the example config's text with [runner] process at "inline" (tests/_instance.py): the server of these cases starts the runner itself
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
@@ -445,11 +445,10 @@ _runners.restore = lambda: None     # the CI runners page makes GitHub calls onc
 
 
 def start_mode(runner_section):
-    """_start_background with the threads faked (so none runs); `runner_section` is put into the config as the stale [runner] table (None: no such table).
+    """_start_background with the threads faked (so none runs); `runner_section` is put into the config as the stale [runner] table, beside `process = "inline"` (None: no stale key).
     → (the names it returned, the targets started, the Runners made, the stderr)."""
     FakeThread.made.clear(); runner_svc.RUNNER[:] = []
-    if runner_section is None: _cfg.CFG.pop("runner", None)
-    else: _cfg.CFG["runner"] = runner_section
+    _cfg.CFG["runner"] = {**(runner_section or {}), "process": "inline"}      # the setting of this suite's config (the default is "unit": the server would start no runner, minute_scenario.py covers that)
     threading.Thread = FakeThread
     try:
         with stderr_lines() as err:
@@ -460,9 +459,9 @@ def start_mode(runner_section):
 
 import tomllib
 example = tomllib.loads(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
-check("4 config: the example config's [runner] section holds `process` only (no `enabled`), and the config the suite runs on reads the same", example.get("runner") == {"process": "inline"} and _cfg.get("runner") == {"process": "inline"}, (example.get("runner"), _cfg.get("runner")))
+check("4 config: the example config's [runner] section holds `process` only (no `enabled`), at the default \"unit\", and the config the suite runs on holds the same key at \"inline\"", example.get("runner") == {"process": "unit"} and _cfg.get("runner") == {"process": "inline"}, (example.get("runner"), _cfg.get("runner")))
 check("4 config: a config without the key has no note about it", not any("[runner]" in n for n in _cfg.notes()), _cfg.notes())
-for label, section in (("absent", None), ("enabled = true", {"enabled": True}), ("enabled = false", {"enabled": False}), ("enabled = \"true\"", {"enabled": "true"})):
+for label, section in (("no retired key", None), ("enabled = true", {"enabled": True}), ("enabled = false", {"enabled": False}), ("enabled = \"true\"", {"enabled": "true"})):
     names_, targets, runners_, err = start_mode(section)
     check(f"4 start with {label}: one Runner is made and its loop is started, named runner, as a daemon", len(runners_) == 1 and runners_[0].loop in targets
           and any(t.target == runners_[0].loop and t.name == "runner" and t.daemon and getattr(t, "started", False) for t in FakeThread.made), (names_, runners_, [getattr(t, "__name__", t) for t in targets]))

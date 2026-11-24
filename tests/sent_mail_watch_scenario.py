@@ -109,7 +109,7 @@ from stackshot.web import answers as answers_mod
 from stackshot.notify import foryou_rows as _fy
 from stackshot.service import telling
 _web_publish._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 
 # the REAL telling path, with only the push script replaced by one that logs what it was asked to deliver (the front gate and the roles are the real ones)
 PUSHLOG = T / "push.log"

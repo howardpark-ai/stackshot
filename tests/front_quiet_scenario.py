@@ -91,7 +91,7 @@ from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]

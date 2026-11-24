@@ -98,8 +98,8 @@ def owner_defs(alias):
 owner_missing = sorted(f"{a}.{n}" for (a, n) in late_owned if (owner_defs(a) is None or n not in owner_defs(a)))
 check("3 every late lookup on an owner module (`_late_in`) names a module the wiring imports and something that module defines", bool(late_owned) and not owner_missing, owner_missing)
 check("3 the publish functions and the page rule's names (its refusal, its owed-writer test, the page debt's marks and readers, the session ids) are looked up on their owner modules (a suite that replaces one there reaches every table), never on the server",
-      {n for (a, n) in late_owned if a == "_pubmod"} == {"_publish", "_publish_now", "_publish_every"} and {n for (a, n) in late_owned if a == "_pdebts"} == {"_refuse_if_owing", "_writer_owes", "_debt_mover", "_grace_min", "_owed_brain_skip", "_owed_load", "_owed_mark", "_owed_readable", "_owed_save", "_owed_settle", "_session_id", "_shown_needs", "_shown_ref"}
-      and not {"_publish", "_publish_now", "_publish_every", "_refuse_if_owing", "_writer_owes"} & set(late_names), (sorted(late_owned), sorted(late_names)))
+      {n for (a, n) in late_owned if a == "_pubmod"} == {"_publish", "_publish_now", "_publish_every"} and {n for (a, n) in late_owned if a == "_pdebts"} == {"_owing_note", "_writer_owes", "_debt_mover", "_grace_min", "_owed_brain_skip", "_owed_load", "_owed_mark", "_owed_readable", "_owed_save", "_owed_settle", "_session_id", "_shown_needs", "_shown_ref"}
+      and not {"_publish", "_publish_now", "_publish_every", "_owing_note", "_writer_owes"} & set(late_names), (sorted(late_owned), sorted(late_names)))
 runner_tab = next((n.value.args[0] for n, t in installs if t == "_runner"), None)
 is_late = lambda v: late_call(v) is not None
 runner_plain = [kw.arg for kw in runner_tab.keywords if not is_late(kw.value)] if isinstance(runner_tab, ast.Call) else ["no table"]

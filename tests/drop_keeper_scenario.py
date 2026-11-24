@@ -63,7 +63,7 @@ from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"

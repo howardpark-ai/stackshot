@@ -208,7 +208,7 @@ from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import text as _wt_text
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 def anchors(**kw): return _wt_anchors._anchors("projects/alpha", who="tester", **kw)
 def stored(): return [e["url"] for e in json.loads((T / "store/anchors.json").read_text()).get("projects/alpha", [])]
 def refuse(name, f, *want):

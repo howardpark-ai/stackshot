@@ -82,7 +82,7 @@ from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 REAL_MERGED_PRS, REAL_GIT_COMMIT = rlive_svc.merged_prs, rlive_svc.git_commit      # before the checks below swap them for tables
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 SENT: list[tuple[str, str, str, str]] = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
 ST = T / "state/waiting.json"

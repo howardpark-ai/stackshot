@@ -25,7 +25,10 @@ EXAMPLE_BASE = pathlib.Path(os.path.abspath(__file__)).with_name("example_base.t
 
 def base_toml() -> str:
     """The example config's text, read through tests/example_base.toml (see the docstring of this file)."""
-    return EXAMPLE_BASE.read_text(encoding="utf-8")
+    text = EXAMPLE_BASE.read_text(encoding="utf-8")
+    # The example ships `[runner] process = "unit"` (the default: the minute unit runs the runner). The suites' servers run it inline, as every suite did before the default changed, so a suite that starts the server's own runner
+    # finds one; the suites about the setting itself (minute, setup, install, release) say what they need on top of this text.
+    return re.sub(r'(?m)^process = "unit"', 'process = "inline"', text, count=1)
 
 # section -> {key: toml value}; a key that is not in its section yet is added right after the header
 SETTINGS = {

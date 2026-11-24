@@ -74,7 +74,7 @@ from stackshot.service import telling
 from stackshot.waits import held
 from stackshot.core import config as _cfg
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 CFG = _cfg.CFG.setdefault("model", {})
 CFG.update(guards=False, pause=False)
 MARK = _wt_text._FOR_OWNER

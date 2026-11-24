@@ -70,7 +70,7 @@ from stackshot.web.tools import get as _wt_get
 from stackshot.service import telling
 from stackshot.service import writes
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 assert _cfg.audit_agent() == AUDIT_AGENT, _cfg.audit_agent()
 AUDIT = [AUDIT_AGENT, "stackshot audit"]
 
