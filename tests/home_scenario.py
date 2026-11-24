@@ -622,6 +622,12 @@ check("home answer: the page carries the item page's own notices (one text per ?
       and _notes["askedback"][1] != render.Board._SENT["askedback"][1] and "pick one" not in _notes["askedback"][1] and "open the item to pick a day" in _notes["askedback"][1]
       and render.Board(str(T / "store")).sent_html({"sent": "stale"}).count("Read it again below") == 1
       and "p.className='isent '+m[0]" in _hj and "textContent" in _hj and "history.replaceState(null,'',location.pathname+location.hash)" in _hj and "innerHTML" not in _hj, _notes.keys())
+check("home answer: the notice of a move from a row is one link to the item (built with DOM calls, a new tab with noopener, at the item page's own address), and a notice with no accepted id stays plain text",
+      "if(lab){var a=document.createElement('a');a.className='isentl';a.setAttribute('href','/items/'+id);a.setAttribute('target','_blank');a.setAttribute('rel','noopener');a.textContent=tx;p.appendChild(a)}else p.textContent=tx;" in _hj
+      and _hj.index("if(id&&/^(?:[a-z]") < _hj.index("if(lab){var a=") and "innerHTML" not in _hj and render.id_href("g48") == "/items/48" and render.id_href("a5") == "/items/a5", _hj)
+check("home answer: the notice's link keeps the notice's colors, takes a pointer and the board's hover underline, and fills the notice's padding; the item page's own notice stays plain text",
+      ".isent a.isentl{display:block;margin:-6px -10px;padding:6px 10px;border-radius:6px;color:inherit;cursor:pointer}.isent a.isentl:hover,.isent a.isentl:focus-visible{text-decoration:underline}" in h
+      and "isentl" not in render.Board(str(T / "store")).sent_html({"sent": "decision"}), None)
 check("the home page's notices say the agent on it has been told, never its owner",
       "the agent on it has been told" in _notes["decision"][1] and "the agent on it has been told" in _notes["comment"][1] and all("owner" not in v[1] for v in _notes.values()), _notes)
 check("the home page carries the notice of a note sent on a step (stepreply), and the script names who takes it and spends both of the row's buttons after a Done or a note",
