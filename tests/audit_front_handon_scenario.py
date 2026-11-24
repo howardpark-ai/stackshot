@@ -423,6 +423,24 @@ check("9 six items due, each with a free background agent: three are handed in a
 t2 = th(10)
 check("9 the next tick takes the rest (a builder that took an item is no longer free: the item of the same project goes to its other agent)", t2 == ["a4", "a5", "a6"] and mover_of(5) == "a-aide" and mover_of(6) == "b-aide", (t2, mover_of(5), mover_of(6)))
 
+def six():
+    wipe()
+    for i, p in enumerate("abcd", 1): put(i, mover=f"{p}-main", project=PROJ[p], act=120, nxt=f"{p}-main: ship it")
+    put(5, act=120, nxt="a-main: and another"); put(6, mover="b-main", project="projects/beta", act=120, nxt="b-main: and another")
+def cap_probe():
+    """The real two-step tick on the six-item fixture: the three over the cap are not the pick-up's at this tick (no turn for a4..a6), and the next tick hands them on."""
+    six(); h, p = tick2(0)
+    ok = h == ["a1", "a2", "a3"] and p == [] and not [x for x in sent if x[3] == "stall"]
+    h2, p2 = tick2(10)
+    return ok and h2 == ["a4", "a5", "a6"] and p2 == [] and not [x for x in sent if x[3] == "stall"]
+check("9 six items due, each with a free background agent: the three over the cap are left for the next tick, never started by the pick-up in the same one, and the next tick hands them on", cap_probe() is True, (sent,))
+def cap_none_free_probe():
+    """An item over the cap whose project has no agent left free (both taken by items before it) is still the pick-up's."""
+    six(); put(7, act=120, nxt="a-main: a seventh")
+    h, p = tick2(0)
+    return h == ["a1", "a2", "a3"] and p == ["a7"] and [x[1] for x in sent if x[3] == "stall"] == [U["a-main"]]
+check("9 …an item over the cap that no background agent is left free for still reaches the pick-up", cap_none_free_probe() is True, (sent,))
+
 # ================================================================ 10. reads that fail
 wipe(); put(1, act=120); before = rd(1)
 real_snap = AS.snapshot

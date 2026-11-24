@@ -496,7 +496,7 @@ def _front_handon_tick(now: "float | None" = None, items: "dict[str, dict[str, A
     idle (fresh, read, state `idle`, as the idle hand-over reads it; busy, unknown, stale, missing are not free), and its pane may exist (`handoff_pane`). The move is the idle hand-over's own write (`_handoff.handoff_exec` -> `handoff_write_move`, `via` orphan): the background
     agent heads `needs`, the hand-off record is made from the server and it is told by the hand-off notice; the front agent stays named in `needs` (`Step.keep_frm`) and the item's contact is not touched. One History line says why and names the mover it left.
     Nobody else is told, and never the owner. With none free (or no background agent in the project) nothing is written and the pick-up has the item. `acted` (an out-set the tick gives) receives every item this pass looked at as handed on or tried to
-    be, so the pick-up leaves it alone in the same tick: never both on one item. At most `hand_idle.MAX_PER_TICK` items per pass. A read that fails (roles, snapshot, fleet index (a partial one included), stamp folder) logs one line and hands nothing on.
+    be, so the pick-up leaves it alone in the same tick: never both on one item. At most `hand_idle.MAX_PER_TICK` items per pass; an item over that cap that a free background agent could take is in `acted` too (left for the next tick, not the pick-up's). A read that fails (roles, snapshot, fleet index (a partial one included), stamp folder) logs one line and hands nothing on.
     `now`, `items`, `env`, `snap`, `front`, `present`, `dead` are for tests and the tick. → the ids handed on."""
     _fh = _hooks().audit_mod("front_handon")
     _hi = _hooks().audit_mod("hand_idle")
@@ -535,8 +535,6 @@ def _front_handon_tick(now: "float | None" = None, items: "dict[str, dict[str, A
     handed: list[str] = []
     builders: dict[str, list[str]] = {}      # per project, read once a pass
     for gid, row in rows:
-        if len(handed) >= _hi.MAX_PER_TICK:
-            break
         try:
             if row["project"] not in builders:
                 builders[row["project"]] = _hand_idle_builders(row["project"])
@@ -544,6 +542,9 @@ def _front_handon_tick(now: "float | None" = None, items: "dict[str, dict[str, A
             if not to:
                 continue      # none free: the item is the pick-up's
             acted.add(gid)      # from here the item is this pass's, whatever happens: the pick-up leaves it alone at this tick
+            if len(handed) >= _hi.MAX_PER_TICK:
+                busy.append(to)      # over the cap: left for the next tick, which hands it on; the agent it would take is spoken for, so a later item with none left free still falls to the pick-up
+                continue
 
             def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due, and still with the front agent it was found with; the stamp goes on the metadata the move saves
                 cur = _fh.due({**items, st.gid: item}, st.gid, now, front, idle, present, _handoff.ho_same, skip)
