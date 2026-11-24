@@ -25,14 +25,14 @@ An item is owed a line when all of these hold, using the shared readings of sile
 
 What the pass verifies, from data the server already holds, and says in the line (`Audit hh:mm: verified …`):
 
-  - the mover's pane is in a turn: the CLI's registry shows it `busy` (read by the server on its own box; a session this box does not run shows nothing). A busy pane says the mover works, not on which item, so it
+  - the mover's pane is in a turn: the fleet's last agent-state snapshot says so (audit/agent_state.py: the fleet's session manager pushes it, the server reads no pane registry of its own; an agent the snapshot cannot give shows nothing). A busy pane says the mover works, not on which item, so it
     verifies an item only when it is the mover's one item on an agent (`alone`: no other open item of the mover is on an agent as the board shows it); a mover with several items has none verified by its pane;
-  - a subagent is running ON THIS ITEM: one of the mover's running subagents, read from the transcript Claude Code keeps on this box, has a description or brief that names the item or a pull request anchored to it
+  - a subagent is running ON THIS ITEM: one of the mover's running subagents, as the same snapshot lists them, has a description or brief that names the item or a pull request anchored to it
     (audit/subagent_tie.py). A step status in progress is no proof (the mover wrote it, and one mover can carry it on several items while one subagent runs), and neither is a busy pane, which says the
     mover works, not on which item: with one subagent running, only the item it is tied to reads verified for it; the mover's other items read idle unless something else verifies them. Two exceptions. A
     front agent's busy pane still verifies each of its items (its items are never handed on, and a stream of idle lines for a session the owner talks to says nothing true). And when the audit cannot tell, the
     item is UNKNOWN, not idle: the mover has a running subagent that is tied to none of its items (a brief that names no item and no pull request, a Build subagent started before its pull request exists), or the
-    mover's subagents could not be read at all (an error, a transcript this box does not hold for a pane in a turn, an idle one or one showing `shell`; a session this box does not run has none). An unknown line (`Audit hh:mm: a subagent of the mover is running, not tied to an item, nothing
+    mover's state or subagents could not be read at all (an error, or no fresh snapshot naming the mover: a snapshot that is missing, older than `agent_state.MAX_AGE_S`, that does not list the mover or did not read it). An unknown line (`Audit hh:mm: a subagent of the mover is running, not tied to an item, nothing
     verified`, kind `audit_unknown`) stamps nothing and is not `audit_idle`, so the row stays as it is and audit/hand_idle.py does not hand the item on while a subagent may be building it;
   - a pull request tied to the item had a CI result, a review, a comment by a person, a merge or a new head commit in the last hour, as `metadata.last_activity` records it (model/last_activity.py).
 
@@ -95,8 +95,8 @@ def idle_marked(meta: dict[str, Any] | None, now: float | None = None) -> bool:
 
 def verified(item: dict[str, Any], meta: dict[str, Any], mover: str, now: float, pane: Callable[[str], str] | None, same: Any = None, tied: Callable[[], bool] | None = None,
              alone: Callable[[], bool] | None = None) -> tuple[list[str], list[str]]:
-    """What the audit can verify about the item now: (all the short phrases, the ones that rest on a recorded event). Both empty: nothing verified. `pane(mover)` → the registry status of the mover's
-    pane ("busy", "idle", "shell", or "" when unknown); one that raises is read as unknown. A busy pane says the mover works, not on which item, so it counts for this item only when `alone()` says it is the
+    """What the audit can verify about the item now: (all the short phrases, the ones that rest on a recorded event). Both empty: nothing verified. `pane(mover)` → the status of the mover's
+    pane ("busy", "idle", "shell", "sleeping", or "" when unknown); one that raises is read as unknown. A busy pane says the mover works, not on which item, so it counts for this item only when `alone()` says it is the
     mover's one item on an agent (None reads as alone: a caller that gives no view of the mover's other items). `tied()` → True when a subagent that is running is tied to THIS item (audit/subagent_tie.py: its description or
     brief names the item or a pull request anchored to it); None, or one that raises, verifies no subagent. A step status in progress is no proof of one (the mover wrote it, and it can sit on several items
     while one subagent runs). A recorded event is one in the past: a record dated ahead of `now` is no event."""
@@ -166,7 +166,7 @@ def text(now: float, what: list[str], recorded: list[str] | None = None) -> str:
 def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None,
         subagents: Callable[[str], list[dict[str, Any]]] | None = None, anchored: dict[str, Any] | None = None, queue: dict[str, str] | None = None) -> dict[str, Any] | None:
     """The line the open item `gid` is owed now (see the module doc), or None. → {"text", "verified" (the phrases), "recorded" (those that rest on a recorded event), "kind" (audit, audit_idle or audit_unknown)}. `env.is_front(name, project)` says who is a front agent (None reads none as front). `queue` is {item: the item it is queued behind} (`silence.queued`, model/queued.py; None reads it here).
-    `subagents(mover)` → the mover's running subagents ([{"text": description and brief, ...}], subagent_tie.running; None reads none; one that raises reads the mover's subagents as unknown), `anchored` {item id: the pull requests ("owner/repo#n") anchored to it}: a subagent counts for the item only when it names
+    `subagents(mover)` → the mover's running subagents ([{"text": description and brief, ...}], as `_mover_subagents` gives them from the agent-state snapshot; None reads none; one that raises reads the mover's subagents as unknown), `anchored` {item id: the pull requests ("owner/repo#n") anchored to it}: a subagent counts for the item only when it names
     the item or one of those pull requests."""
     item = items.get(gid) or {}
     if item.get("status") != "open":

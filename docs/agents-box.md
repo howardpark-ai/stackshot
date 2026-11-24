@@ -1,6 +1,6 @@
 # The agents' box over ssh
 
-What this page covers: running the server on another box than the agents' sessions: the one optional `[agents_box]` setting, what the server then runs and reads on the agents' box over ssh, how a box that does not answer is handled, and what is not routed.
+What this page covers: running the server on another box than the agents' sessions: the one optional `[agents_box]` setting, what the server then runs and reads on the agents' box over ssh, how a box that does not answer is handled, how the audit learns an agent is busy or idle without reading that box, and what is not routed.
 
 By default the server and the agents (the Claude Code panes and the fleet tool that runs them) share one box, and everything the server asks of the agents' side is a local command or a local file. With `[agents_box] ssh = "<host>"` the server may run on a different box: the commands it runs on the agents' side and the files it reads there go through one small module, `stackshot/core/agentbox.py`, over ssh. With the setting unset (the default) the module does nothing: every command and file is local and nothing changes on a single box. The agents' own box ignores the setting when it names that machine (a configuration file read by both boxes: its own name or short name, `localhost`, or a name or address that resolves to a loopback one such as `127.0.0.1`), and the puller never uses it.
 
@@ -41,7 +41,7 @@ A directory the server read is read from a local copy instead: one ssh call (a s
 
 - The fleet tool's store, `[client] session_links`: `<letter>/sessions.json` (the links) and `<letter>/session-registry.json` (the permanent ids), one call for both.
 - The lane record, `[client] lanes_file`, with `lane-default` beside it, and the lane-names file (`STACKSHOT_LANE_NAMES`, else its default path).
-- The CLI's own registry of live panes, `~/.claude/sessions/*.json`. The box drops the rows whose process is gone before it sends them, so a copy holds live panes only (as of the last copy). This feeds the pane's status and idle time, the hand-off checks and the audit.
+- The CLI's own registry of live panes, `~/.claude/sessions/*.json`. The box drops the rows whose process is gone before it sends them, so a copy holds live panes only (as of the last copy). This feeds the pane's status and idle time and the hand-off checks. The audit's reading of an agent as busy or idle is not from it: see *The audit's agent state* below.
 - The prompt stamps, `[agents_box] prompts_dir`, which the presence check reads.
 
 Transcripts are too large to copy. The `said` check (`[said] transcripts`, `<root>/*/<session id>.jsonl`) finds the transcript on the agents' box and has the box return only the lines that can matter; the check on those lines is the same. A session that has no transcript on the box is stored unchecked, as a session whose transcript the server cannot see always was. A box that does not answer is not "no transcript": the write is refused with the reason (and the reason is logged), never stored unchecked without a word. The same holds when the session is given by name and the copy of the session registry that resolves it is missing or older than `registry_max_age`: the write is refused, not stored unchecked. The same lookup answers whether a transcript id was ever a session before a message to it is refused.
@@ -58,11 +58,22 @@ What a reader gets while the box is silent depends on what the copy is for:
 - The session registry, the session links and the lane-names file are kept: they are served from the last good copy however long the box is silent (flagged once in the log as served stale), so a session name keeps resolving. A check that must not go by an old one refuses instead: the `said` check refuses a write when the registry copy was never made (the box has not answered since the server started) or is older than `registry_max_age` (24 hours), saying why, and never stores the quote unchecked; a name the copy does not hold, asked while the box does not answer (or while a copy is being made and its outcome is not yet known: the check waits for it), is refused too, with the plain line that the box could not be reached and to send the call again. The lane record is not kept: it is a copy that stands for `stale_seconds` and is then dropped, so the lane check says it cannot be made rather than answer from an old record.
 - Commands that cannot start report that: a model call is a call that did not start and is retried by its caller, a Slack post counts as not posted and is tried again.
 
+## The audit's agent state
+
+The hourly audit, the idle hand-over and the guard that refuses a park on an item being moved need to know whether the mover is at work: its pane in a turn, or a subagent running. The server does not read that from its own
+box, whichever box the agents are on: no pane registry, no transcript, no ssh and no copy of a transcript. The machine that runs the panes tells it. About every five minutes the fleet's session manager pushes the whole fleet in
+one body, `POST /client/agent-state` with the machine token of every `/client` write ([the client contract](client-contract.md#the-agent-state-the-fleets-session-manager-pushes)), and the server keeps the last one in
+`<paths.state>/agent-state.json`. The server keeps one snapshot, each push replaces all of it, so every sender for a fleet pushes the whole fleet and an agent absent from it reads unknown (fail closed); a push older than the stored one is ignored (a stored snapshot more than five minutes ahead of the server's clock never makes a push count as older; one 0 to 5 minutes ahead does, until the true time reaches it). A `written` of zero or less is refused with 400. When more than one sender pushes, the last accepted push replaces the whole snapshot, so one sender should cover the whole fleet. The audit asks that snapshot for a registered agent's state (`stackshot/audit/agent_state.py`): `busy`, `idle` or `unknown`.
+
+It is unknown, never idle, whenever the snapshot cannot say: none was ever pushed, the file does not read, the newest is older than 15 minutes (`agent_state.MAX_AGE_S`: three pushes missed), the agent is not in it, its entry
+was not read (`read` false) or its state is unknown. An unknown mover gets the audit's unknown line (`audit_unknown`): nothing is flagged and nothing is handed on. So an agent on another box than the server reads right as soon
+as the manager there pushes, and reads unknown, never idle, while it does not. Nothing here is a setting: the server needs no name of the agents' box for it and `[agents_box]` is not read for it.
+
 ## Not routed
 
 These still read the server's own box and, with the setting on, find nothing there; each treats that as it treats a session it cannot see:
 
-- `audit/subagent_tie.py` and `service/pane_recovery.py` (the subagents folder beside a transcript, and a transcript's last error): the audit reads such a mover as unknown, and the puller on the agents' box already reports `stopped` for its own panes.
+- `service/pane_recovery.py` (a transcript's last error): it reads such a pane as unknown, and the puller on the agents' box already reports `stopped` for its own panes. The audit's subagent reading is no longer one of these: it reads no pane and no transcript of its own, only the snapshot and the sessions index's name of an agent (next section).
 - `fleet/push.py` (a pane's socket and the cloud send) and the `stackshot` command line, which keep to the box they run on.
 - `tools/rulebook_scan.py` and `fleet/connectors.py`, which read the rule files, skills and the CLI's configuration of the box they run on.
 - `projects/pages.py`, whose `session_name` fallback reads the live fleet store under the server's own fleet folder and the CLI's registry (`~/.claude/sessions/*.json`) of the box it runs on: with the setting on and nothing there it gives no name, as for a session it cannot see.

@@ -30,6 +30,7 @@ from stackshot.model.ids import _norm_id
 from stackshot.projects import brains as _brains
 from stackshot.router import page_debt as _page_debt
 from stackshot.service import agent_names as _agent_names
+from stackshot.service import agent_state as _agent_state_svc
 from stackshot.service import background_want as _background_want
 from stackshot.service import caller_pass as _caller_pass
 from stackshot.service import catches as _catches
@@ -352,7 +353,9 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         else:
             _clients.seen(machine, uuid)
         return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")}, digest=_messaging.digest_fyi, on_filed=_handoff.handoff_acked)}
-    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
+    if what == "agent-state":   # the fleet's session manager pushes which registered agents are busy and which idle, the whole fleet in one body that replaces the last snapshot (the audit reads it)
+        return _agent_state_svc.post(machine, body)
+    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result | agent-state"}
 
 
 async def client_write(request: Request):
@@ -367,11 +370,30 @@ async def client_write(request: Request):
         return JSONResponse({"error": _PASS_ONLY_FORM}, status_code=403, headers={"Cache-Control": "no-store"})
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
-    try:
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise ValueError
-    except Exception:
+    if what == _agent_state_svc.VERB:       # the one write whose size is capped: a whole fleet in one body, refused over the limit before it is read to the end
+        over = _agent_state_svc.too_large(request.headers.get("content-length"))
+        chunks: list[bytes] = []      # joined once: a running `raw += chunk` copies the whole body at every chunk
+        size = 0
+        if not over:
+            async for chunk in request.stream():
+                chunks.append(chunk)
+                size += len(chunk)
+                over = _agent_state_svc.too_large(size)
+                if over:
+                    break
+        raw = b"".join(chunks)
+        if over:
+            return JSONResponse({"error": over}, status_code=400, headers={"Cache-Control": "no-store"})
+        try:
+            body = json.loads(raw)
+        except Exception:
+            body = None
+    else:
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+    if not isinstance(body, dict):
         return JSONResponse({"error": "the body is a JSON object"}, status_code=400)
     nocache = {"Cache-Control": "no-store"}
     if what == "poll":

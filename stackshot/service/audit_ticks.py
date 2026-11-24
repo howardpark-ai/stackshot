@@ -4,7 +4,7 @@ The audit decides in audit/ (the pure halves: audit_checks, audit_run, hourly, b
 (service/runner.py) through its table. The ten-minute filing pass (`_filing_tick`), the dates pass (`_dates_tick`, with the expected-time look `_dates_expected_tick` and the For you list's due-date look it opens),
 the minute wait-loop walk (`_loop_tick`), the archive sweep (`_archive_tick`) and the audit tick (`_silence_tick`: the hourly audit line `_hourly_tick`, the idle hand-over `_hand_idle_tick`, the long-busy message `_busy_tell_tick`, the anchors' daily pass `_anchor_daily_tick`) are here, and the
 balancer (`_balance_tick`, its own minute tick) with the reads it shares: `_silence_env`, the environment every audit pass is built with; `_queue_map`, who is queued behind another item, kept `_QUEUE_TTL` seconds in
-`_QUEUE_CACHE`; `_mover_subagents`, the running subagents of a mover; and `_BALANCE_LOGGED`, the stderr lines the balancer throttles.
+`_QUEUE_CACHE`; `_agent_state` and `_mover_subagents`, a mover's busy or idle and its running subagents as the fleet's session manager last pushed them (service/agent_state.py); and `_BALANCE_LOGGED`, the stderr lines the balancer throttles.
 
 A service module: it reads the store and writes an item only through `writes.save`, under the item lock. The debounced publish of the board, the session id of a name, the audit's modules and the open items'
 reader of tools/ (audit/ and tools/ sit outside the layers) are the surface's or the audit's, reached through service/save_hooks.py when a pass runs. A suite that replaces one of these sets it on this module
@@ -24,12 +24,10 @@ from stackshot.core import config as _cfg
 from stackshot.core import instance as _inst
 from stackshot.core import readonly as _ro
 from stackshot.core.instance import OWNER
-from stackshot.fleet import liveness as _lv
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model
 from stackshot.model import queued as _queued
-from stackshot.model import said as _said
 from stackshot.projects import project_archive as _archive
 from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import _registry
@@ -181,46 +179,36 @@ def _silence_tick() -> "dict[str, Any] | None":
     return None
 
 
-def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float | None = None) -> "list[dict[str, Any]]":
-    """The running subagents of the session `who` on this box (audit/subagent_tie.running, read from the transcript Claude Code keeps: its `subagents/` folder beside the session's transcript, in the roots `[said] transcripts`), the one
-    the hourly audit ties to an item. A pane in a turn (`busy`), an idle pane and a pane showing `shell` are read: a subagent started in the background, or a pane waiting on background tasks, reads idle between two turns while the subagent runs, and the CLI writes `shell` for a pane whose turn is over but which has a background Bash task running (a live pane: a watch loop or a release wait). For an idle or shell
-    pane only a subagent whose transcript was written within `subagent_tie.RUNNING_S` counts (the `quiet` entries are dropped, and so are the `unreadable` ones whose meta file, `meta_at`, is older than that): a quiet subagent of an
-    idle or shell pane may be left by a recycled or killed pane, while one of a pane in a turn may wait on a long CI or suite run. A session this box does not run gives []: nothing is claimed there. A session registered on this box but not as an interactive pane (a headless
-    session), a registry status this server does not know, a busy, idle or shell pane whose transcript this box does not hold, or one whose registry row names no session raise `subagent_tie.Unreadable`: the audit reads that as unknown,
-    never as idle. So does a session with no row on this box that the fleet's heartbeat holds running (it is on another machine: a mover there must not read idle and be handed on), a sessions index that cannot be read, one that
-    is empty, and one that is partial (a machine's sessions.json that could not be read: `fleet.sessions_unreadable`). Only a session with no row anywhere in a whole index (the heartbeat marks it gone, or holds none) gives []."""
-    _tie = _hooks().audit_mod("subagent_tie")
+def _agent_state(who: str, now: float | None = None, snap: Any = None) -> Any:
+    """The state of the agent `who` as the fleet's session manager last pushed it (audit/agent_state.py `state_of`: busy, idle or unknown with the reason), the one read of a mover's busy or idle the audit makes. The name is tried
+    as written and then as the sessions index labels it (`_sr._session_label`: a session id or an old name; a lookup in the index only). `snap` is a snapshot already read (None reads the file). It reads no pane and no transcript of this box."""
+    _as = _hooks().audit_mod("agent_state")
     try:
-        idx = _sr._sessions_index() if idx is None else idx
-    except Exception as e:  # noqa: BLE001
-        raise _tie.Unreadable(f"the fleet's sessions index cannot be read ({e.__class__.__name__})") from e
-    row = _handoff.handoff_pane_row(who, idx)
-    if row is None:
-        if _handoff.handoff_registered(who, idx):      # a row is there but it is no interactive pane (a headless session, say): this server cannot look into it, which is not the same as the session being gone
-            raise _tie.Unreadable("the session is registered here but is no interactive pane this server can look into")
-        w = str(who or "").strip()
-        names = {x for x in (w, _sr._session_label(w)) if x}
-        rows = [r for r in dict.values(idx) if isinstance(r, dict) and r.get("name") in names]
-        byid = idx.get(w) if w else None
-        if isinstance(byid, dict) and not any(byid is r for r in rows):
-            rows.append(byid)
-        if any(_lv.running(r) for r in rows):      # no row on this box, but the fleet's heartbeat holds the session running: it is on another machine (or its row here is not yet written), and its subagents cannot be read from here
-            raise _tie.Unreadable("the session runs on another machine, whose subagents this server cannot read")
-        if not len(idx):      # an empty index says nothing about this session (the heartbeat was not read, or holds nothing yet): "no row" is not "gone" then
-            raise _tie.Unreadable("the fleet's sessions index is empty")
-        if getattr(idx, "unreadable", None):      # a machine's sessions.json that could not be read leaves its sessions out: this one may be on it
-            raise _tie.Unreadable(f"the fleet's sessions index is partial (machine {', '.join(str(x) for x in idx.unreadable)} not read)")
-        return []      # no row of a live process anywhere in a whole index (local registry or heartbeat; one the heartbeat marks gone is no live session): nothing is claimed for it (idle, as before; the orphan hand-over and the idle hand-over are right to act)
-    st = str(row[1].get("status") or "")
-    if st not in ("busy", "idle", "shell"):
-        raise _tie.Unreadable(f"the pane's registry status is {st or 'missing'}, not one this server knows")
-    sid = str(row[1].get("sessionId") or "")
-    if not sid:
-        raise _tie.Unreadable("the pane's registry row names no session")
-    subs = _tie.running(sid, _said.roots_of(_cfg.get("said", "transcripts")), time.time() if now is None else now)
-    if st in ("idle", "shell"):
-        t = time.time() if now is None else now
-        subs = [s for s in subs if not s.get("quiet") and not (s.get("unreadable") and s.get("meta_at") is not None and t - float(s["meta_at"]) > _tie.RUNNING_S)]      # an idle or shell pane's subagent counts only while it is fresh: a quiet one (a pane that was recycled or killed leaves one behind) and an unreadable one whose meta file is older than that (a meta with no transcript beside it) are dropped; a pane in a turn keeps both (a shell pane is a live one, its turn over while a background Bash task runs)
+        label = _sr._session_label(str(who or ""))
+    except Exception:  # noqa: BLE001  — no label is no alias: the name as written is tried alone
+        label = ""
+    return _as.state_of(who, time.time() if now is None else now, _as.snapshot() if snap is None else snap, (label,) if label else ())
+
+
+def _state_word(who: str, now: float, snap: Any = None) -> str:
+    """"busy" or "idle" when the agent-state snapshot (fresh, naming the agent, read) says so, "" for everything else (no fresh snapshot, the agent not in it, its state not read or unknown): the word a builder's freedom is judged by
+    (audit/hand_idle.py `pick_free`: free only when it says idle; `pick_least`: an idle one wins a tie). It is the snapshot's, never a pane registry's, which this server does not hold for an agent on another box."""
+    st = _agent_state(who, now, snap)
+    return st.state if st.state in ("busy", "idle") else ""
+
+
+def _mover_subagents(who: str, now: float | None = None, snap: Any = None) -> "list[dict[str, Any]]":
+    """The running subagents of the agent `who`, the ones the hourly audit ties to an item (audit/subagent_tie.py), from the last agent-state snapshot (audit/agent_state.py, `POST /client/agent-state`): [] for an agent
+    the snapshot says is idle, the subagents it lists for one it says is busy. An agent that is busy with no pane in a turn and no subagent listed, or whose state the snapshot cannot give (no fresh snapshot, the agent
+    missing from it, its state not read or unknown) raises `subagent_tie.Unreadable` with the reason: the audit reads that as unknown, never as idle. `snap` is a snapshot read already (a pass reads the file once)."""
+    _tie = _hooks().audit_mod("subagent_tie")
+    _as = _hooks().audit_mod("agent_state")
+    st = _agent_state(who, now, snap)
+    if st.state == _as.UNKNOWN:
+        raise _tie.Unreadable(st.why)
+    subs = _as.subagents_of(st)
+    if st.state == _as.BUSY and not subs and st.pane != _as.TURN:
+        raise _tie.Unreadable("the agent is busy but no pane in a turn and no subagent says why")
     return subs
 
 
@@ -229,7 +217,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, on by default), run from the ten-minute audit tick: an open item on an agent with no activity for 45 minutes (`hourly.EVERY`, so the line lands inside the hour), and no audit line in the last
     45 minutes, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one every 45 minutes (`hourly.FAST_GAP`) for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
     `metadata.stall.log`; kind `audit`, `audit_idle` or `audit_unknown`: a line for an item the audit could not tell about, because a running subagent of the mover is tied to no item or the mover's subagents could not be read).
-    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff.handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py, read for a pane in a turn, an idle one or one showing `shell`; a session this box does not run has none: a step status in progress is only the mover's claim and is not read), and a tied pull
+    What is verified is recorded data: the mover's pane in a turn and the subagents it has running, as the fleet's session manager last pushed them (audit/agent_state.py, `POST /client/agent-state`; this server reads no pane registry and no transcript of its own: a mover the snapshot cannot give, because it is stale, missing or unread, is unknown), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
     request's CI result, review, comment, merge or commit in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
     newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
     the server's own bookkeeping (no writer): it does not move the activity clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
@@ -241,20 +229,18 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     now = time.time() if now is None else now
     items = items if items is not None else _hooks().next_report_all(None)
     env = env if env is not None else _silence_env()
-    try:
-        idx = _sr._sessions_index() if (pane is None or subagents is None) else {}
-        idx_ok = True
-    except Exception as e:  # noqa: BLE001  — the pane reads then see this box's registry alone; the subagents read tries the index again and is unknown when it still fails
-        idx, idx_ok = {}, False
-        print(f"audit: sessions index not read for the hourly line: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    snap: dict[str, Any] = {}
+    if pane is None or subagents is None:
+        snap = _hooks().audit_mod("agent_state").snapshot() or {}      # the fleet's last agent-state push, read once for the pass: no snapshot is {}, which reads every agent unknown
     if pane is None:
-        pane = lambda who: _handoff.handoff_status(who, idx)[0]      # noqa: E731  — a pane on another box shows nothing: unknown, so not verified
+        _as = _hooks().audit_mod("agent_state")
+        pane = lambda who: _as.pane_of(_agent_state(who, now, snap))      # noqa: E731  — an agent the snapshot cannot give shows nothing: unknown, so not verified
     if subagents is None:
-        seen: dict[str, Any] = {}      # a mover's subagents are read once a pass, not once an item: a read that failed is kept too (as the exception), so the transcript lookup is not repeated for every item and again under the item lock
+        seen: dict[str, Any] = {}      # a mover's subagents are read once a pass, not once an item: a read that failed is kept too (as the exception), so the lookup is not repeated for every item and again under the item lock
         def subagents(who: str) -> "list[dict[str, Any]]":
             if who not in seen:
                 try:
-                    seen[who] = _mover_subagents(who, idx if idx_ok else None, now)
+                    seen[who] = _mover_subagents(who, now, snap)
                 except Exception as e:  # noqa: BLE001
                     seen[who] = e
             if isinstance(seen[who], Exception):
@@ -361,8 +347,8 @@ def _hand_idle_builders(project: str) -> list[str]:
 def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
                     dead: "Callable[[str], str] | None" = None) -> list[str]:
     """Idle items go to a free builder (audit/hand_idle.py, `[audit] hand_idle`, on by default), run from the ten-minute audit tick right after the hourly line: an open item on an agent whose newest audit line is
-    `idle, nothing verified` and that nothing has moved since goes to the first free builder (a background agent of its own project, never another project's; one whose pane is in no turn on this box and
-    that moves no open item on an agent), by the minute hand-off pass's own write (`_handoff.handoff_exec` → `_handoff.handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
+    `idle, nothing verified` and that nothing has moved since goes to the first free builder (a background agent of its own project, never another project's; one the fleet's last agent-state push says is idle, and
+    that moves no open item on an agent: a builder that is busy, missing from the push or not read is not free), by the minute hand-off pass's own write (`_handoff.handoff_exec` → `_handoff.handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
     from the server and the builder is told. One History line says why and names the mover it left. The project's -main agent gets one message that asks nothing. With no builder free nothing moves: a History
     line says so and -main is told once per item per 24 hours. No message goes to the owner and no step is made for him. At most `hand_idle.MAX_PER_TICK` items are handed on per pass and one per item per 24 hours.
     `now`, `items`, `env`, `status`, `dead` are for tests and the tick. → the ids handed on."""
@@ -378,7 +364,8 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         return []
     if status is None or dead is None:
         idx = _sr._sessions_index()
-        status = status or (lambda who: _handoff.handoff_status(who, idx)[0])
+        snap = _hooks().audit_mod("agent_state").snapshot() or {}      # the fleet's last agent-state push, read once for the pass: none is {}, which reads every agent unknown
+        status = status or (lambda who: _state_word(who, now, snap))
         dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
     busy = _hi.busy_movers(items, now)
     handed: list[str] = []
@@ -508,7 +495,8 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         return []
     if status is None or dead is None:
         idx = _sr._sessions_index()
-        status = status or (lambda who: _handoff.handoff_status(who, idx)[0])
+        snap = _hooks().audit_mod("agent_state").snapshot() or {}      # the fleet's last agent-state push, read once for the pass: none is {}, which reads every agent unknown
+        status = status or (lambda who: _state_word(who, now, snap))
         dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
     load = _hi.load_counts(_hi.busy_movers(items, now), _handoff.ho_same)
     moved: list[str] = []

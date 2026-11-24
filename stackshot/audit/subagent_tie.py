@@ -1,23 +1,26 @@
-"""subagent_tie.py: which running subagent of a mover is at work on WHICH item: the hourly audit's proof that "a subagent is running on it" (audit/hourly.py).
+"""subagent_tie.py: which running subagent of a mover is at work on WHICH item (the tie, used by the hourly audit and the busy-hold guard), and the producer-side rule for which subagents are running (`running`).
 
 A step status in progress (silence.subagent_running) is something the mover wrote: a claim, and one mover can carry it on several items while one subagent runs. The pane being busy is
-the same sort of claim about the mover, not about an item. The audit therefore asks the subagent itself, from the transcript Claude Code keeps on the server's box:
+the same sort of claim about the mover, not about an item. The audit therefore asks the subagent itself: the subagents a mover has running come from the fleet's session manager (audit/agent_state.py: its last
+snapshot, `POST /client/agent-state`), each with its description and the first part of the brief its mover gave it. The audit tick never calls `running`; it ties what the snapshot lists.
+
+THE TIE. `tied(subagents, shown, keys)` says whether one of them is on an item: its description or its brief names the item (its shown id, `board` and `#` and its number, whole: item 12 is not item 123) or a pull request
+anchored to the item (`keys`, "owner/repo#n", by its URL or by `PR n` / `#n`, as merge_tie names a pull request for an item that speaks of its repository). A subagent that names neither is on no item the
+audit can tell. What that means for an item (audit/hourly.py): a subagent tied to another item leaves this one idle (part F, audit/hand_idle.py, hands it on); a running subagent tied to NONE of the mover's
+items (a brief that names no item and no pull request yet, "Build part D") leaves the mover's items UNKNOWN, not idle, since any of them may be what it builds. So does anything that cannot be read: a mover whose state
+the snapshot cannot give (`Unreadable`), a subagent entry the sender could not read (listed with no words).
+
+THE PRODUCER RULE. `running(session, roots, now)` lists a session's subagents that are running as the transcript Claude Code keeps on the box that runs the panes shows them:
 
   <root>/<working-directory folder>/<session uuid>/subagents/agent-<id>.meta.json    {"description": "...", "finished": true once it ended, ...}
   <root>/<working-directory folder>/<session uuid>/subagents/agent-<id>.jsonl        its transcript, the first line the brief the mover gave it
 
-`running(session, roots, now)` lists a session's subagents that are running: no `finished` flag and the transcript written within `RUNNING_S`, or a `finished` flag that only says the subagent is PARKED (see `running`). A subagent whose pane was recycled or killed leaves
-neither a flag nor a later write, so it stops counting after that window (the same 90 minutes the step status is trusted for: silence.SUBAGENT_S). The caller (`service/audit_ticks.py` `_mover_subagents`) asks
-for a pane that is busy, idle or showing `shell` (a subagent started in the background runs while its pane reads idle or shell between turns), and for an idle or shell pane keeps only the subagents written within `RUNNING_S`, not the quiet ones.
+No `finished` flag and the transcript written within `RUNNING_S`, or a `finished` flag that only says the subagent is PARKED (see `running`). A subagent whose pane was recycled or killed leaves neither a flag nor a
+later write, so it stops counting after that window (the same 90 minutes the step status is trusted for: silence.SUBAGENT_S). This half is the rule the session manager (the sender of the agent-state snapshot) calls on the
+box that holds the panes, and the server does not use it for its own audit pass: the sender imports this module and calls `running(session_id, roots, now)` and reads `RUNNING_S`. THESE NAMES ARE A PUBLIC INTERFACE of this module
+(`running`, `RUNNING_S`, and the helpers `running` uses: `pending_tasks`, `read_parent`, `resumes`, `interrupted`, `Unreadable`): a change to one is a change to the sender, made with it (tests/subagent_tie_scenario.py pins them).
 
-`tied(subagents, shown, keys)` says whether one of them is on an item: its description or its brief names the item (its shown id, `board` and `#` and its number, whole: item 12 is not item 123) or a pull request
-anchored to the item (`keys`, "owner/repo#n", by its URL or by `PR n` / `#n`, as merge_tie names a pull request for an item that speaks of its repository). A subagent that names neither is on no item the
-audit can tell. What that means for an item (audit/hourly.py): a subagent tied to another item leaves this one idle (part F, audit/hand_idle.py, hands it on); a running subagent tied to NONE of the mover's
-items (a brief that names no item and no pull request yet, "Build part D") leaves the mover's items UNKNOWN, not idle, since any of them may be what it builds. So does anything that cannot be read: a pane in a turn, idle or showing a shell
-whose transcript this box does not hold, a subagents folder that cannot be listed (`Unreadable`), a subagent whose files cannot be read (listed with no words). A mover whose pane is not on this box
-has no subagent to read: nothing is claimed for it.
-
-Stdlib plus the repo's modules; reads files only."""
+Stdlib plus the repo's modules; `running` and its helpers read files, the tie reads none."""
 from __future__ import annotations
 
 import json
@@ -48,7 +51,8 @@ RESUME_KEYS = ("resumedAgentId", "revivedAgentId")      # `revivedAgentId` on Cl
 
 
 class Unreadable(Exception):
-    """The mover's subagents cannot be told from what this box holds (no transcript for a pane that is busy, idle or showing a shell, the subagents folder cannot be read). The audit reads it as UNKNOWN, never as nothing running."""
+    """The mover's subagents cannot be told: from what the server holds (no fresh agent-state snapshot, an agent it does not name, a state it was not able to read), or from what the producer's box holds (`running`: no
+    transcript of the session there, a subagents folder that cannot be listed). The audit reads it as UNKNOWN, never as nothing running."""
 
 
 def _brief(path: Path) -> str:
