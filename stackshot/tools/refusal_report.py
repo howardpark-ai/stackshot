@@ -150,18 +150,21 @@ def similar(a: Any, b: Any) -> bool:
 
 
 def message_stats(rows: list[dict[str, Any]], sent: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """What the call lines say of the message calls: {"calls", "refused", "kinds": Counter (by `kind`, NO_KIND for a line from before kinds were logged),
+    """What the call lines say of the message calls: {"calls", "refused", "kinds": Counter (by `kind`, NO_KIND for a line from before kinds were logged), "handled": Counter of (kind, how) of the calls the relay handled where it once refused (a line with `outcome: handled`: counted in "calls", never in "refused"),
     "streaks": [{"sender", "to", "n", "kind": the kind most of its refusals are (the later one on a tie), "tight": it holds STREAK_MIN refusals or more within STREAK_WINDOW, the report's own rule}] (one sender refused MSG_STREAK_MIN times or more on one target,
     each refusal within MSG_STREAK_WINDOW of the one before it; a message names no item the log could key on, so the pair of sender and target is the call), "streak_refusals": the refusals they hold, "tight": how many of the streaks are tight,
     "resent": {"same": refusals sent again to the same target, "other": sent again to another target}}. A refusal is sent again when, within RESEND_WINDOW after it, the same sender's message reads as its text (`similar`): a later refusal in `rows`
     or a message in `sent` (the delivered messages [{"t", "from", "to", "text"}], from `delivered`); each refusal counts once, under the first such message. A line with no target or no text (from before they were logged) is in no streak and no resend."""
     calls = refused = 0
     kinds: collections.Counter = collections.Counter()
+    handled: collections.Counter = collections.Counter()
     refs: list[dict[str, Any]] = []
     for r in rows:
         if str(r.get("tool") or "") != "message":
             continue
         calls += 1
+        if r.get("ok") is True and r.get("outcome") == "handled":          # a call the relay handled where it once refused (call_log.handled): it went through, under the kind of the refusal it replaced
+            handled[(str(r.get("kind") or "") or NO_KIND, str(r.get("how") or ""))] += 1
         if r.get("ok") is False:
             refused += 1
             kinds[str(r.get("kind") or "") or NO_KIND] += 1
@@ -197,7 +200,7 @@ def message_stats(rows: list[dict[str, Any]], sent: list[dict[str, Any]] | None 
                 resent["same" if x["to"] == to else "other"] += 1
                 break
     runs.sort(key=lambda x: (-x["n"], x["sender"], x["to"]))
-    return {"calls": calls, "refused": refused, "kinds": kinds, "streaks": runs, "streak_refusals": held, "tight": tight, "resent": resent}
+    return {"calls": calls, "refused": refused, "kinds": kinds, "handled": handled, "streaks": runs, "streak_refusals": held, "tight": tight, "resent": resent}
 
 
 def delivered(since: float, until: float) -> list[dict[str, Any]]:
@@ -262,13 +265,19 @@ def _headline(t: dict[str, Any]) -> tuple[int, int]:
 
 
 def _message_lines(cur: dict[str, Any], prev: dict[str, Any], top: int) -> list[str]:
-    """The report's lines on message calls (tally's "messages"): the calls and refusals with the week before, the refusals by kind, the streaks (one sender refused MSG_STREAK_MIN times or more on one target within MSG_STREAK_WINDOW, and how many of them are
+    """The report's lines on message calls (tally's "messages"): the calls and refusals with the week before, the calls the relay handled instead of refusing by kind, the refusals by kind, the streaks (one sender refused MSG_STREAK_MIN times or more on one target within MSG_STREAK_WINDOW, and how many of them are
     of the report's own rule, STREAK_MIN within STREAK_WINDOW), and the refusals sent again within RESEND_WINDOW. [] for a week with no message call."""
     m, p = cur.get("messages") or {}, prev.get("messages") or {}
     if not m.get("calls"):
         return []
     n, r = m["calls"], m["refused"]
     out = [f"- message calls: {r:,} of {n:,} refused ({_share(r, n)})" + (f"; the week before {p['refused']:,} of {p['calls']:,} ({_share(p['refused'], p['calls'])})" if p.get("calls") else "; no message calls the week before")]
+    h = sum(m.get("handled", {}).values())
+    if h:          # what the relay did instead of refusing, by the kind of refusal it replaced: these calls went through
+        by_kind = collections.Counter()
+        for (k, _how), v in m["handled"].items():
+            by_kind[k] += v
+        out.append(f"- message calls handled instead of refused (passed on, written onto an item or held, the sender told): {h:,} of {n:,} ({_share(h, n)}), " + " · ".join(f"{k} {v:,}" for k, v in by_kind.most_common(top)))
     if not r:
         return out
     shown = m["kinds"].most_common(top)

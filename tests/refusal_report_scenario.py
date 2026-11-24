@@ -731,6 +731,46 @@ def part_refusal_report():
                          ("Ship the hotfix to the staging box before the demo starts.", "ship the hotfix to staging before the demo", True)):
         check(f"9 similar: {a_[:30]!r} / {b_[:30]!r} is {want}", RR.similar(a_, b_) is want, (RR.similar(a_, b_), a_, b_))
     check("9 const: the message streak is 2 within an hour, a resend an hour and a ratio of one half, as named constants", (RR.MSG_STREAK_MIN, RR.MSG_STREAK_WINDOW, RR.RESEND_WINDOW, RR.SIMILAR) == (2, 3600, 3600, 0.5), None)
+
+    # 9h. a message the relay handled where it once refused: a row that went through, with the refusal's kind and what was done; the report counts it as handled, never as refused
+    wipe(); reset_open()
+    def handles(kind, how):
+        def f():
+            CL.handled(kind, how)
+            return "delivered"
+        return f
+    run_mw("message", {"to": "a-main", "text": "hello", "sender": "a-builder"}, handles("unmarked-not-for-owner", "passed-on"))
+    run_mw("message", {"to": "a-main", "text": "again", "sender": "a-builder"}, lambda: "delivered")
+    def handled_then_refused():
+        CL.handled("no-action-note", "held")
+        raise _msgs.Refused("front-not-held", "Refused: for the test")
+    run_mw("message", {"to": "a-main", "text": "late refusal", "sender": "a-builder"}, handled_then_refused)
+    run_mw("update", {"item_id": BID(7), "sender": "a-builder"}, handles("no-action-note", "held"))
+    r9 = lines()
+    check("9h middleware: a message the relay handled where it once refused is a row that went through, keeping the sender, the target, the refusal's kind and what was done",
+          r9[0]["ok"] is True and r9[0]["kind"] == "unmarked-not-for-owner" and r9[0]["outcome"] == "handled" and r9[0]["how"] == "passed-on" and r9[0]["to"] == "a-main" and r9[0]["sender"] == "a-builder" and "fix" not in r9[0] and "bounce" not in r9[0], r9[0])
+    check("9h middleware: …a plain message that went through is the row it was, with no kind and no outcome", "kind" not in r9[1] and "outcome" not in r9[1] and r9[1]["ok"] is True, r9[1])
+    check("9h middleware: …a call that ends in a refusal never carries the handled mark, whatever was marked before it: it is a refusal under the kind that refused it", r9[2]["ok"] is False and r9[2]["kind"] == "front-not-held" and "outcome" not in r9[2] and "how" not in r9[2], r9[2])
+    check("9h middleware: …another tool's call that marks it has no handled row", "outcome" not in r9[3] and "kind" not in r9[3], r9[3])
+    CL.record("message", True, sender="s", to="t", fixes=[("handled:Weird Kind!:Held For Later", "")], now=epoch(2026, 11, 5))
+    r9 = [x for x in lines() if x.get("t") == int(epoch(2026, 11, 5))]
+    check("9h call_log: the kind and the how are folded to slugs", r9 and r9[0]["kind"] == "weird-kind" and r9[0]["how"] == "held-for-later" and CL.handled_of([("handled:k:how", "")]) == ("k", "how") and CL.handled_of([("x", "")]) == ("", ""), r9)
+    wipe()
+    for i in range(30): CL.record("message", True, now=epoch(d(0).year, d(0).month, d(0).day, 9, i))
+    for i in range(6): CL.record("message", True, sender="a-builder", to="a-main", fixes=[("handled:unmarked-not-for-owner:passed-on", "")], now=epoch(d(1).year, d(1).month, d(1).day, 9, i))
+    for i in range(3): CL.record("message", True, sender="a-builder", to="a-main", fixes=[("handled:no-action-note:held", "")], now=epoch(d(2).year, d(2).month, d(2).day, 9, i))
+    CL.record("message", True, sender="a-builder", to="a-main", fixes=[("handled:marked-no-action-phrase:written-on-item", "")], now=epoch(d(3).year, d(3).month, d(3).day, 9, 0))
+    msg_ref(d(4), 12, 0, 0, "b-builder", "c-main", "marked-no-turn", "Ship the hotfix to the staging box before the demo starts.")
+    c9, p9 = RR.collect(mon); m9 = c9["messages"]
+    t9_ = RR.build(mon, c9, p9)
+    check("9h stats: the handled calls are counted by (kind, how), are calls that went through, and none of them is a refusal", m9["calls"] == 41 and m9["refused"] == 1 and dict(m9["handled"]) == {("unmarked-not-for-owner", "passed-on"): 6, ("no-action-note", "held"): 3, ("marked-no-action-phrase", "written-on-item"): 1} and dict(m9["kinds"]) == {"marked-no-turn": 1}, (m9["calls"], m9["refused"], dict(m9["handled"]), dict(m9["kinds"])))
+    check("9h report: the message lines say how many calls were handled instead of refused, by the kind of refusal each replaced, and the refusal share counts none of them", "- message calls: 1 of 41 refused (2.4%)" in t9_ and "- message calls handled instead of refused (passed on, written onto an item or held, the sender told): 10 of 41 (24.4%), unmarked-not-for-owner 6 · no-action-note 3 · marked-no-action-phrase 1" in t9_, t9_)
+    wipe(); msg_ok(4, d(1))
+    c9, p9 = RR.collect(mon); t9_ = RR.build(mon, c9, p9)
+    check("9h report: a week with no handled call has no handled line", "handled instead of refused" not in t9_ and dict(c9["messages"]["handled"]) == {}, t9_)
+    wipe(); CL.record("message", True, sender="a", to="b", fixes=[("handled:no-action-note:held", "")], now=epoch(d(1).year, d(1).month, d(1).day, 9, 0)); CL.record("message", False, sender="a", why="Refused: x", to="b", kind="no-session", text="t", now=epoch(d(1).year, d(1).month, d(1).day, 9, 5))
+    c9, p9 = RR.collect(mon); t9_ = RR.build(mon, c9, p9)
+    check("9h report: a handled call and a refusal in one week: 1 of 2 refused, 1 handled", "- message calls: 1 of 2 refused (50.0%)" in t9_ and "handled instead of refused (passed on, written onto an item or held, the sender told): 1 of 2 (50.0%), no-action-note 1" in t9_, t9_)
     wipe()
 
     return ran, fails
