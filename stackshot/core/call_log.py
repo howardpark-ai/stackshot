@@ -126,7 +126,7 @@ def counted(kind: str, **detail: Any) -> None:
 
 def handled(kind: str, how: str) -> None:
     """The relay handled the message call that is running another way than the sender asked, where it once refused it with `kind` (service/messaging.py `Refused.kind`): `how` says in a word or two what it did (`passed-on`,
-    `written-on-item`, `held`, `delivered-with-note`). The call is logged as one that went through, keeping the kind and `outcome: handled` (`record`), so the weekly count shows it as handled and not as refused. No call running: nothing is recorded."""
+    `written-on-item`, `held`, `judged-on-items`). The call is logged as one that went through, keeping the kind and `outcome: handled` (`record`), so the weekly count shows it as handled and not as refused. No call running: nothing is recorded."""
     fixed(f"{HANDLED}{kind}:{how}", "")
 
 

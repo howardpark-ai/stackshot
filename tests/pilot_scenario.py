@@ -2906,13 +2906,13 @@ check("gate: the phrase list is short and fixed", NOT == (f"nothing needed from 
                                                        "no decision needed", "nothing to decide", "FYI", "for your information", "for the record", "no reply needed"), NOT)
 PRESENT[0] = False      # the gate files a message for the agent's next turn (front_verdict: a message always rides it); with the person talking to the agent it would send it as a turn
 for ph in NOT:
-    r = _messaging._message("work-osprey-main", f"{MK} a900: the build is live. {ph}, the rest is on the page.", "home-beta")
+    r = _messaging._message("work-osprey-main", f"{MK} the build is live. {ph}, the rest is on the page.", "home-beta")      # names no item of his: a note that names one (a900) is a real ask and is delivered
     check(f"gate: a marked message to a front agent that says {ph!r} is held for its next turn, the reply naming the phrase and saying it starts no turn",
-          r.startswith(f"held for work-osprey-main's next turn ({MK} marks only what {_core_instance.OWNER} has to do, and this says nothing is needed from him ({ph!r}), so it starts no turn)"), r)
-r = _messaging._message(A, f"{MK} a900\nthe release is live: NO ACTION NEEDED.", "home-beta")
+          r.startswith(f"held for work-osprey-main's next turn ({MK} marks only what {_core_instance.OWNER} has to do, and this says nothing is needed from him ({ph!r}) and names no open item of his, so it starts no turn)"), r)
+r = _messaging._message(A, f"{MK} the zebra page\nthe release is live: NO ACTION NEEDED.", "home-beta")
 check("gate: ...without regard to case, on a later line, and by its transcript id", r.startswith("held for ") and "('NO ACTION NEEDED')" in r, r)
 hl = _held_g.take(A, "work-osprey-main")
-check("gate: nothing was delivered by the holds, and the lines wait for the agent's next turn", len(wait_push(0)) == n0 and hl.count("the build is live") + hl.count("the release is live") >= 1 and f"{MK} a900" in hl, (len(wait_push(0)), n0, hl[:900]))
+check("gate: nothing was delivered by the holds, and the lines wait for the agent's next turn", len(wait_push(0)) == n0 and hl.count("the build is live") + hl.count("the release is live") >= 1 and MK in hl, (len(wait_push(0)), n0, hl[:900]))
 PRESENT[0] = True
 res = _messaging._message("work-osprey-main", f"{MK} a900 Decide: is the satisfying option A or B? · Recommend: A · Stakes: a month · By: Fri", "home-beta"); pp = wait_push(n0 + 1)
 check("gate: a marked message with something to decide is delivered (a phrase inside a word does not count)", res.startswith("delivered") and pp[-1][0] == "work-osprey-main", (res, pp[-1:]))

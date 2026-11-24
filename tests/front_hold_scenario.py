@@ -151,6 +151,9 @@ def went_to(out, n0, builder_name="work-osprey-x", builder=X, front="work-osprey
     """A message not for the person that the relay passed to the project's background agent and said so: the builder's pane got it, the front agent's pane and held store did not, the reply names both and how to reach the front agent."""
     return (out.startswith(f"Not for Oliver, so it went to {builder_name}, the project's background agent, instead of {front}") and "did not get it" in out and f"put {mark()} on the first line" in out
             and len(reach(builder, n0)) == 1 and reach(front_id, n0) == [] and held.count(front_id) == 0)
+def sib_held(out, n0):
+    """A message from a background agent of the project that is not the one the relay picks (the keeper of the pages): held for the front agent's next turn with no turn, and not passed across to the builder."""
+    return out.startswith("held for work-osprey-main's next turn (work-osprey-docs is a background agent of projects/alpha") and reach(A, n0) == [] and reach(X, n0) == [] and held.count(A) >= 1
 def held_note(out, n0, who="work-osprey-main", ref=A):
     """A done or no-action note the relay held for the front agent's next turn: no turn started, one held line, the reply says it is a note and how to have it written onto an item instead."""
     return out.startswith(f"held for {who}'s next turn (") and "no-action note" in out and "so it starts no turn" in out and "better written on the board item it concerns" in out and reach(ref, n0) == [] and held.count(ref) == 1
@@ -211,9 +214,9 @@ for name, text in (("the word in a later clause of the request", "a16: Please si
                    ("the word in a code span", "a16: Please sign the export form; the delivery mode `fyi` is what held it.")):
     fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\n" + text, "home-beta"); settle(); unstamp(A)
     check(f"1e2: a marked request with {name} is delivered, not taken for a note", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, (out, pushes()[n0:]))
-for text, phrase in (("a16: the export form is signed. FYI.", "FYI"), ("a16: the export form is signed, no action needed", "no action needed"), ("a16: FYI the export form is signed", "FYI"),
-                     ("a16 for the record: the form is signed", "for the record"), ("the form is signed (FYI)\na16", "FYI"), ("a16: the form is signed\n- no decision needed", "no decision needed"),
-                     ("a16: signed - nothing to decide", "nothing to decide")):
+for text, phrase in (("a1: the export form is signed. FYI.", "FYI"), ("a1: the export form is signed, no action needed", "no action needed"), ("a1: FYI the export form is signed", "FYI"),
+                     ("a1 for the record: the form is signed", "for the record"), ("the form is signed (FYI)\na1", "FYI"), ("a1: the form is signed\n- no decision needed", "no decision needed"),
+                     ("a1: signed - nothing to decide", "nothing to decide")):      # a1 is an item of the builder's, none of his: a note that names no item of his is held (one that names a16 or a14 is a real ask, 10a)
     fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\n" + text, "home-beta"); settle(); unstamp(A)
     check(f"1e3: a marked no-action statement ({text!r}) is held for the next turn as a note, the reply quoting {phrase!r}, and starts no turn", out.startswith("held for work-osprey-main's next turn") and f"({phrase!r})" in out and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
 # …unmarked: a front peer's request that uses the word is held for the next turn like any peer's message; its true note is held as a note
@@ -258,6 +261,11 @@ fresh(); n0 = len(pushes())
 try: out = msg(FRONT, mark() + "\na14: Decide whether the export ships on Friday.", "home-beta"); settle()
 finally: _front_turn_mod.his_items = _real_his
 check("1d10b: the reader raising outright is no item of his either: held, never delivered, though he is talking with the agent", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
+_front_turn_mod.his_items = _boom_his
+fresh(); n0 = len(pushes())
+try: out = msg(FRONT, mark() + "\na14: Decide whether the export ships on Friday. FYI option B costs 40 USD.", "home-beta"); settle()
+finally: _front_turn_mod.his_items = _real_his
+check("1d10c: …with a no-action phrase in it the reader raising still means no item of his: the phrase is not taken as left out, the note is held, never delivered as a request, and as the note it is (the hold names the phrase, not the missing item)", out.startswith("held for work-osprey-main's next turn") and "says nothing is needed from him" in out and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
 _cfg.CFG["router"]["hold_notices"] = False
 fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday.", "home-beta"); settle()
 check("1d11: with the hold switched off nothing can hold it: refused in one line, nothing held or pushed", out.startswith("Refused") and "must name an open item of" in out and "plain id" in out and "\n" not in out and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
@@ -295,10 +303,10 @@ check("2e: …an item that waits on the person's decision is not written onto: t
 fresh(); unstamp(A); n0 = len(pushes()); out = msg(FRONT, "the export is ready as well", BACK); settle()
 check("2f: with no stamp of his message at all the person is not in the conversation: held", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, out)
 fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "can you also review the docs page?", "work-osprey-docs"); settle()
-check("2g: a sender the agent never wrote to is no answer, whatever the conversation: passed to the background agent", went_to(out, n0), (out, pushes()[n0:]))
+check("2g: a sender the agent never wrote to is no answer, whatever the conversation: not delivered (a sibling background agent's message is held for the next turn, not passed across)", sib_held(out, n0), (out, pushes()[n0:]))
 no_log(); log_row(FRONT, "work-osprey-docs", 25 * 60); n0 = len(pushes()); out = msg(FRONT, "the docs page looks fine to me", "work-osprey-docs"); settle()
-check("2h: …a question put to the sender more than a day ago is no signal either", went_to(out, n0), (out, pushes()[n0:]))
-no_log(); log_row("work-osprey-docs", "home-beta", 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "home-beta"); settle()
+check("2h: …a question put to the sender more than a day ago is no signal either", sib_held(out, n0), (out, pushes()[n0:]))
+no_log(); fresh(); log_row("work-osprey-docs", "home-beta", 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "home-beta"); settle()
 check("2i: a question put by another agent of the front agent's project is not the front agent's own: no answer, whatever the conversation: passed to the background agent", went_to(out, n0), (out, pushes()[n0:]))
 fresh(); no_log(); log_row("work-osprey-docs", BACK, 300); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", BACK); settle()
 check("2i2: …the background agent's unmarked note after another project agent's question to it is not delivered while the person is present: held for the next turn", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
@@ -309,15 +317,15 @@ check("2i4: the front agent's own question inside the lookback still counts when
 no_log(); fresh(); log_row(FRONT, BACK, 24 * 60 + 10); log_row("work-osprey-docs", BACK, 5); n0 = len(pushes()); out = msg(FRONT, "yes, the export is ready for review", BACK); settle()
 check("2i5: …and one put just past the lookback does not, the other agent's later question making no difference: held", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [], (out, pushes()[n0:]))
 fresh(); no_log(); log_row("home-beta", "work-osprey-docs", 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
-check("2j: a question put by an agent of another project does not count", went_to(out, n0), (out, pushes()[n0:]))
+check("2j: a question put by an agent of another project does not count", sib_held(out, n0), (out, pushes()[n0:]))
 for name, kw in (("a handover from an agent of the project that asks nothing", {"text": "please take the export task and tell me when it is done", "question": False}), ("a question whose delivery failed", {"outcome": "failed: no such session"})):
     no_log(); fresh(); log_row(FRONT, "work-osprey-docs", 5, **kw); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
-    check(f"2l: {name} is no question, so the reply is no answer: passed to the background agent, no turn at the front agent", went_to(out, n0), (out, pushes()[n0:]))
+    check(f"2l: {name} is no question, so the reply is no answer: not delivered, no turn at the front agent (held for the next turn)", sib_held(out, n0), (out, pushes()[n0:]))
 for name, kw in (("with no question flag, a question mark in its text all the same", {"text": "is the export on your list?", "question": False}), ("whose delivery failed", {"outcome": "failed: no such session"})):
     no_log(); fresh(); log_row(FRONT, BACK, 5, **kw); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", BACK); settle()
     check(f"2l2: the front agent's own message {name} is no question: the background agent's later note is held, not delivered", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [], (out, pushes()[n0:]))
 no_log(); fresh(); log_row("work-osprey-x", "work-osprey-docs", 5, text="please take the export task and tell me when it is done", question=False); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, "the docs page reads fine", "work-osprey-docs"); settle()
-check("2m: a message from the project's builder that asks nothing makes the sender's later note no answer (the staged test of a plain note to the front agent)", went_to(out, n0), (out, pushes()[n0:]))
+check("2m: a message from the project's builder that asks nothing makes the sender's later note no answer (the staged test of a plain note to the front agent)", sib_held(out, n0), (out, pushes()[n0:]))
 no_log(); log_row(FRONT, BACK, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\na14: Decide whether the export ships on Friday.", BACK); settle()
 check("2k: an answer that needs the person is marked and delivered whatever the conversation", out.startswith("delivered") and len(reach(A, n0)) == 1 and mark() in reach(A, n0)[0][1], (out, pushes()[n0:]))
 
@@ -948,6 +956,151 @@ st9 = _RR.message_stats([r[0] for k in out9 for r in out9[k] if r[0] is not None
 check("9 replay: the weekly count of these 57 calls: 57 calls, 16 refused (K5 10, K6 4, K7 2), and the handled ones counted as handled and never as refused",
       st9["calls"] == 57 and st9["refused"] == 16 and dict(st9["kinds"]) == {"marked-no-turn": 10, "unknown-page-key": 4, "unknown-transcript-id": 2}
       and sum(st9["handled"].values()) >= 21 and st9["handled"][("unmarked-not-for-owner", "passed-on")] >= 17 and st9["handled"][("marked-no-action-phrase", "judged-on-items")] == 1 and st9["handled"][("marked-no-action-phrase", "written-on-item")] == 1, (st9["calls"], st9["refused"], dict(st9["kinds"]), dict(st9["handled"])))
+
+# ---- 10. the review of this change: a real ask beside a no-action phrase, the forms of a note, the pass-on's side effects, a sibling builder, and the cases the mutants showed untested
+def delivered_ask(out, n0, phrase, items=("a14",)):
+    """A marked real ask that carries a no-action phrase: delivered to the front agent, the reply saying the phrase was left out because of the item of his it names."""
+    return (out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0
+            and out.endswith(f"Its text also says {phrase!r}, which was left out because the message names {', '.join(items)}, an open item of Oliver's, so it was taken as a request."))
+ASKS = (("10a1: a decision with an FYI after it", "a14: Decide whether the export ships on Friday. FYI option B costs 40 USD.", "FYI"),
+        ("10a2: …a no-action sentence after it", "a14: Decide whether the export ships on Friday. No action needed on option C.", "No action needed"),
+        ("10a3: …a phrase first, the ask after it", "a14: no decision needed from you but I need your pick between A and B", "no decision needed"),
+        ("10a4: …a phrase leading the sentence of the ask", "a14: for the record, I need your decision on Friday's export.", "for the record"),
+        ("10a5: …the step of his (a16) beside a phrase", "a16: sign the export form when you have a minute. No action needed on the rest.", "No action needed"))
+for name_, text_, phrase_ in ASKS:
+    for who_ in ("home-beta", BACK):
+        fresh(); no_log(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\n" + text_, who_); settle(); unstamp(A)
+        check(f"{name_} ({who_}): a marked ask that names an open item of his is delivered whatever phrase it carries, the reply saying the phrase was left out", delivered_ask(out, n0, phrase_, ("a16",) if "a16" in text_ else ("a14",)), (out, pushes()[n0:]))
+fresh(); stamp(A, 5); row_, err_ = logged(FRONT, mark() + "\n" + ASKS[0][1], "home-beta"); unstamp(A); settle()
+check("10a6: …and the call log counts it as handled (`marked-no-action-phrase`, `judged-on-items`), not as a refusal", err_ is None and row_ is not None and row_["ok"] is True and row_.get("kind") == "marked-no-action-phrase" and row_.get("outcome") == "handled" and row_.get("how") == "judged-on-items", row_)
+fresh(); unstamp(A); n0 = len(pushes()); out = msg(FRONT, mark() + "\n" + ASKS[0][1], "home-beta"); settle()
+check("10a7: …with him away it is the old no-turn refusal of a marked message (the phrase makes no difference: nothing is held, nothing delivered)", out.startswith("Refused") and "starts no turn" in out and reach(A, n0) == [] and held.count(A) == 0, out)
+# a marked note that names none is a note: held, with a reply that says what to do (name the item or take the phrase out), never the line about the mark it already has
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\na1: Decide whether the export ships on Friday. FYI option B costs 40 USD.", "home-beta"); settle(); unstamp(A)
+check("10b1: a marked message whose only item is none of his (a1), with a phrase, is held as a note, the reply saying it names no open item of his, to name one or take the phrase out, and never to put the mark on its first line",
+      out.startswith("held for work-osprey-main's next turn") and "names no open item of his" in out and "take the no-action phrase out" in out and "plain id" in out and "on its first line" not in out and "send it again" not in out and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\nDecide whether the export ships on Friday. FYI option B costs 40 USD.", "home-beta"); settle(); unstamp(A)
+check("10b2: …and one that names no item at all", out.startswith("held for work-osprey-main's next turn") and "names no open item of his" in out and "on its first line" not in out and reach(A, n0) == [] and held.count(A) == 1, out)
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\na15: Decide whether the export ships on Friday. FYI option B costs 40 USD.", "home-beta"); settle(); unstamp(A)
+check("10b3: …and one that names only a closed item (a15 needs a decision but is closed): a closed item is no item of his", out.startswith("held for work-osprey-main's next turn") and held.count(A) == 1 and reach(A, n0) == [], out)
+fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\na14: Decide whether the export ships on Friday. FYI option B costs 40 USD.", "Oliver"); settle()
+check("10b4: his own marked message with a phrase is refused as before (the phrase is no excuse for a note of his own)", out.startswith("Refused") and "says nothing is needed from him" in out and reach(A, n0) == [] and held.count(A) == 0, out)
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\na1: Decide whether the export ships on Friday, sending this as an fyi so it waits.", "home-beta"); settle(); unstamp(A)
+check("10b5: …and the phrase inside a sentence with no item of his is the old hold, with no mention of a phrase to take out", out.startswith("held for work-osprey-main's next turn") and "must name an open item of his" in out and "take the no-action phrase out" not in out, out)
+_front_turn_real_his = _front_turn_mod.his_items
+_front_turn_mod.his_items = _boom_his
+fresh(); stamp(A, 5); n0 = len(pushes())
+try: out = msg(FRONT, mark() + "\na14: Decide whether the export ships on Friday. FYI option B costs 40 USD.", "home-beta"); settle()
+finally: _front_turn_mod.his_items = _front_turn_real_his; unstamp(A)
+check("10b6: a reader of his items that fails counts as none: the marked note is held, never delivered on a guess", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, out)
+
+# the forms of a note: the common ways a sender writes it, and the ones that are no note
+FORMS = (("a clause after a comma, with its tail", "the build is live, no action needed from you", "no action needed"), ("a clause after a semicolon, with the owner's name", "merged; no action needed from Oliver", "no action needed"),
+         ("a clause after a dash, after a bracket", "a1 (merged) " + chr(0x2014) + " no action needed from you", "no action needed"), ("a tail 'on your part'", "merged, no action needed on your part.", "no action needed"),
+         ("bold", "**FYI** the build is live", "FYI"), ("emphasis and a colon", "_FYI_: the build is live", "FYI"), ("a code span", "`FYI` the build is live", "FYI"), ("a bullet", chr(0x2022) + " FYI the build is live", "FYI"),
+         ("an en dash", chr(0x2013) + " FYI the build is live", "FYI"), ("a number in brackets", "(1) FYI the build is live", "FYI"), ("a number and a bracket", "1) FYI the build is live", "FYI"), ("a number and a stop", "2. no reply needed", "no reply needed"),
+         ("an item id, a dash", "a12 - FYI the build is live", "FYI"), ("an item id in the form with a hash", "x" + chr(35) + "12 - FYI the build is live", "FYI"),
+         ("a curly apostrophe", "it" + chr(0x2019) + "s an FYI", "FYI"), ("a second line, bold", "the build is live\n**No action needed**", "No action needed"), ("a bullet on a later line", "done\n" + chr(0x2022) + " for the record", "for the record"))
+for name_, text_, phrase_ in FORMS:
+    check(f"10c1: the phrase finder reads {name_} as a note ({text_!r})", _own(text_) == [phrase_], _own(text_))
+for name_, text_ in (("asked", "no action needed?"), ("a question that quotes it", 'Why does the page say "no action needed" here?'), ("a question that holds it", "Is it true that no action needed from you?"), ("followed on", "the build is live, no action needed from you until Friday"),
+                     ("followed on, a condition", "merged; no action needed from Oliver unless the suite fails"), ("negated", "it is not true that no action needed"), ("not done", "the export is not done, nothing is blocked"), ("a word inside another", "set my_fyi_mode and the for_the_record_flag"),
+                     ("in a quote block", "> FYI the build is live"), ("inside a code span", "set the mode to `fyi` for this"), ("a curly quote", chr(0x201C) + "no action needed" + chr(0x201D)), ("inside the sentence", "the export, sent as an fyi so it waits, is late")):
+    check(f"10c2: the phrase finder does not read {name_} as a note ({text_!r})", _own(text_) == [], _own(text_))
+check("10c3: _without_no_action takes the tail 'from you' out with its phrase (it would read as somebody named to act), and keeps the rest", _messaging._without_no_action("merged, no action needed from you.").replace(" ", "") == "merged,.", repr(_messaging._without_no_action("merged, no action needed from you.")))
+for name_, text_ in (("a clause with its tail", "a1: the build is live, no action needed from you"), ("a clause with the owner's name", "a1: merged; no action needed from Oliver"), ("bold at the start", "**FYI** a1 is merged"), ("a code span at the start", "`FYI` a1 is merged"),
+                     ("a bullet", chr(0x2022) + " FYI a1 is merged"), ("a number", "(1) FYI a1 is merged"), ("a bracket and a dash", "a1 (merged) " + chr(0x2014) + " no action needed from you"), ("a curly apostrophe", "a1 is merged, it" + chr(0x2019) + "s an FYI")):
+    fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\n" + text_, BACK); settle()
+    check(f"10c4: a background agent's marked report in the form of {name_} is written onto the item, not delivered: no turn", out.startswith("Not delivered: written onto a1") and reach(A, n0) == [] and held.count(A) == 0, (out, pushes()[n0:]))
+    fresh(); n0 = len(pushes()); out = msg(FRONT, mark() + "\n" + text_.replace("a1", "the build"), "home-beta"); settle()
+    check(f"10c5: …and a session's, naming no item, is held as a note, never a turn", out.startswith("held for work-osprey-main's next turn") and reach(A, n0) == [] and held.count(A) == 1, (out, pushes()[n0:]))
+for name_, text_ in (("asked", "a16: Please sign the export form. No action needed?"), ("quoted", 'a16: Please sign the export form; the page says "no action needed", which is wrong.'), ("followed on", "a16: Please sign the export form, no action needed from you until the form is open."),
+                     ("not done", "a16: the export form is not done and nothing is blocked, please sign it")):
+    fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\n" + text_, "home-beta"); settle(); unstamp(A)
+    check(f"10c6: a marked ask that is no note ({name_}) is delivered, as before: it names an item of his and he is there", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg(FRONT, "can you check whether no action needed from you is the right reading of the export page?", "home-beta"); settle()
+check("10c7: an unmarked question that holds the words is no note: passed to the background agent", went_to(out, n0), out)
+
+# the pass-on is no hand-over: it names the builder in no item's needs and tells no mover
+fresh(); n0 = len(pushes()); before3 = (T / "store/a/3.json").read_text(); out = msg(FRONT, "a3 depends on the export page, can you look when you have a minute?", "home-beta"); settle()
+check("10d1: a pass to the background agent of a message that names an open item does not name the agent in the item's needs, and writes nothing on the item (needs, mover and file as they were)",
+      went_to(out, n0) and (T / "store/a/3.json").read_text() == before3 and "named" not in out and not rd(3)["metadata"].get("needs") and rd(3)["metadata"].get("mover") == X, (out, rd(3)["metadata"]))
+check("10d2: …and nothing else was sent: the one push is the message to the builder, no notice to a mover", len(pushes()[n0:]) == 1 and pushes()[n0][0] in ids(X), pushes()[n0:])
+fresh(); n0 = len(pushes()); out = msg(BACK, "a9: the export page is yours to build", "home-beta"); settle()
+check("10d3: a hand-over message sent to the background agent itself still names it on the item (the pass-on is the only message that does not)", out.startswith("delivered") and "(named work-osprey-x in a9's needs" in out or "(did not name work-osprey-x in a9's needs" in out, out)
+fresh(); no_log(); n0 = len(pushes()); out = msg(FRONT, "can you look at the export page?", "home-beta", question=True); settle()
+row_ = [x for x in mlog() if x.get("to") == BACK and "export page" in x.get("text", "")]
+check("10d4: the question mark of a sender (question=true) is kept on the pass-on's row to the builder, as on a direct message", went_to(out, n0) and len(row_) == 1 and row_[0].get("question") is True, (out, row_))
+
+# a sibling background agent is no address for the pass: it is held for the front agent like the builder's own message
+fresh(); n0 = len(pushes()); out = msg(DUOM, "can you look at the export page?", DUOB); settle()
+check("10e1: a message from a background agent of the project that is not the one the relay picks (duo-b, duo-a is the pick) is held for the front agent's next turn, not passed across to its sibling",
+      out.startswith("held for duo-main's next turn") and "is a background agent of projects/duo" in out and reach(DA, n0) == [] and reach(DB, n0) == [] and held.count(M) == 1, (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg(DUOM, "can you look at the export page?", DUOA); settle()
+check("10e2: …and the one the relay picks (duo-a) is held as before: never passed back to itself", out.startswith("held for duo-main's next turn") and "cannot go back to it" in out and reach(DA, n0) == [] and held.count(M) == 1, out)
+_cfg.CFG["router"]["hold_notices"] = False
+fresh(); n0 = len(pushes()); out = msg(DUOM, "can you look at the export page?", DUOB); settle()
+check("10e3: with the hold off, a sibling's message is refused (nothing holds it), not passed across", out.startswith("Refused") and "not for Oliver" in out and reach(DA, n0) == [] and held.count(M) == 0, out)
+fresh(); n0 = len(pushes()); out = msg(FRONT, "can you look at the export page?", BACK); settle()
+check("10e4: …the background agent's own message to its front agent is refused, never passed back to itself (the guard on the sender holds with the hold off)", out.startswith("Refused") and "not for Oliver" in out and reach(X, n0) == [] and reach(A, n0) == [], (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg(FRONT, "can you look at the export page when you have a minute?", "home-beta"); settle()
+check("10e5: …while a message from anyone else is still passed on with the hold off (the pass needs no hold: the agent takes it)", went_to(out, n0), (out, pushes()[n0:]))
+fresh(); n0 = len(pushes()); out = msg(SOLO, "can you look at the export page?", "home-beta"); settle()
+check("10e6: …and with no background agent to pass it to, the hold off leaves the old refusal", out.startswith("Refused") and held.count(E) == 0, out)
+_cfg.CFG["router"].pop("hold_notices")
+
+# a pass that fails: held for the front agent (the sender's push could not go out), the old refusal when nothing can hold it; a push that timed out may have gone out, so it is not held too
+_push_real = telling.PUSH
+telling.PUSH = [sys.executable, "-c", "print('boom')"]
+try:
+    fresh(); n0 = len(pushes()); out = msg(FRONT, "can you look at the export page when you have a minute?", "home-beta"); settle()
+    check("10f1: a pass whose delivery fails is held for the front agent's next turn, the reply saying the builder could not take it", out.startswith("held for work-osprey-main's next turn") and "could not take it" in out and held.count(A) == 1, out)
+    row_, err_ = logged(FRONT, "can you look at the export page when you have a minute?", "home-beta")
+    check("10f2: …and the call log counts it as handled (`unmarked-not-for-owner`, `held`)", err_ is None and row_ is not None and row_.get("outcome") == "handled" and row_.get("kind") == "unmarked-not-for-owner" and row_.get("how") == "held", (row_, err_))
+    _cfg.CFG["router"]["hold_notices"] = False
+    fresh(); out = msg(FRONT, "can you look at the export page when you have a minute?", "home-beta"); settle()
+    row_, err_ = logged(FRONT, "can you look at the export page when you have a minute?", "home-beta")
+    check("10f3: …with the hold off the refusal stands, as the old gate worded it (the message goes to the builder, put the mark on the first line), and it is a refusal in the log", out.startswith("Refused: work-osprey-main is a front agent") and "message(to='work-osprey-x'" in out and held.count(A) == 0
+          and err_ is not None and getattr(err_, "kind", "") == "unmarked-not-for-owner" and row_["ok"] is False, (out, err_))
+    _cfg.CFG["router"].pop("hold_notices")
+finally:
+    telling.PUSH = _push_real
+_run_real = _messaging.subprocess.run
+def _timeout_run(*a, **k): raise _messaging.subprocess.TimeoutExpired(a[0] if a else "push", 110)
+_messaging.subprocess.run = _timeout_run
+try:
+    fresh(); n0 = len(pushes()); out = msg(FRONT, "can you look at the export page when you have a minute?", "home-beta"); settle()
+finally:
+    _messaging.subprocess.run = _run_real
+check("10f4: a push that timed out may have gone out: the failure goes back to the sender as it is, and nothing is held for the front agent too (no double delivery)", out.startswith("Delivery failed: timed out") and held.count(A) == 0, out)
+
+# the reply's notes are set off from what comes before
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\n" + REQ, "home-beta"); settle(); unstamp(A)
+check("10g1: a note at the end of a reply that does not end in a stop follows a full stop and a space", ". Its text uses 'fyi' inside a sentence" in out and out.endswith("so it was judged on the items it names."), out)
+_body_real = _messaging._message_body
+_messaging._message_body = lambda *a, **k: (_messaging._handled("marked-no-action-phrase", "judged-on-items", "A note without a stop"), "held for x's next turn.")[1]
+try: out = _messaging._message(FRONT, "words", "home-beta")
+finally: _messaging._message_body = _body_real
+check("10g2: …a note with no full stop of its own gets one, and a reply that ends in one is followed by a space only", out == "held for x's next turn. A note without a stop.", out)
+
+# the hold files a History line on the item a held note names
+fresh(); before1 = json.dumps(rd(1)["metadata"].get("front_quiet", {})); n0 = len(pushes()); out = msg(FRONT, "a1: the zebra export build is merged, FYI.", "home-beta"); settle()
+check("10h1: a held note that names an open item leaves a History line on it (the board keeps the news whether or not the pane hears it)", held_note(out, n0) and "zebra export build" in json.dumps(rd(1)["metadata"].get("front_quiet", {})) and json.dumps(rd(1)["metadata"].get("front_quiet", {})) != before1, (out, rd(1)["metadata"].get("front_quiet")))
+fresh(); stamp(A, 5); n0 = len(pushes()); out = msg(FRONT, mark() + "\na1: the quokka export is merged, FYI.", "home-beta"); settle(); unstamp(A)
+check("10h2: …a marked note naming an item that is none of his is held and writes its History line too", out.startswith("held for work-osprey-main's next turn") and "quokka export" in json.dumps(rd(1)["metadata"].get("front_quiet", {})), (out, rd(1)["metadata"].get("front_quiet")))
+
+# a script's message through the real client route is counted as handled, with its sender and target, as the tool's is
+held.clients_file().unlink(missing_ok=True); gate_open(); fresh(); n_ = len(call_rows())
+st_, body_ = _rt_client._client_post(MACH, "message", {"to": FRONT, "text": "can you look at the export page when you have a minute?", "sender": "deploy-watch"}); settle()
+new = call_rows()[n_:]
+check("10i1: a script's unmarked message to a front agent, through the client route, is passed on and answers 200 with the pass-on's line", st_ == 200 and str(body_.get("result", "")).startswith("Not for Oliver, so it went to work-osprey-x"), (st_, body_))
+check("10i2: …and its one row is a handled call: the sender, the target, the kind of the refusal it replaced, `handled` and `passed-on`", len(new) == 1 and new[0].get("ok") is True and new[0].get("tool") == "message" and new[0].get("sender") == "deploy-watch" and new[0].get("to") == FRONT
+      and new[0].get("kind") == "unmarked-not-for-owner" and new[0].get("outcome") == "handled" and new[0].get("how") == "passed-on", new)
+n_ = len(call_rows())
+st_, body_ = _rt_client._client_post(MACH, "message", {"to": FRONT, "text": "the PR is merged, the suites pass.", "sender": "deploy-watch"}); settle()
+new = call_rows()[n_:]
+check("10i3: …a script's note is held for the front agent and counted the same way (`held`)", st_ == 200 and len(new) == 1 and new[0].get("outcome") == "handled" and new[0].get("how") == "held" and new[0].get("kind") == "no-action-note", (st_, body_, new))
+fresh()
 
 fresh()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else f"; FAILED: {len(fails)}"))

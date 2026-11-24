@@ -423,3 +423,13 @@ allow = []
 retired = "item it names, else refused"
 use = "item it names, else held for the agent's next turn"
 allow = []
+
+[[term]]
+retired = "opening a sentence or line or closing a clause"
+use = "a fixed phrase counts as the message's own statement when it opens a sentence, a line or a list item, or is a clause that ends there (the text ends, punctuation comes, or only a tail from you follows)"
+allow = []
+
+[[term]]
+retired = "or closing a clause set off by a comma, semicolon, bracket or dash, so a word"
+use = "or a clause set off by a comma, semicolon, bracket or dash that ends there, so a word"
+allow = []

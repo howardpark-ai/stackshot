@@ -65,6 +65,8 @@ from stackshot.waits import reports as _reports
 _FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as web/tools/text.py holds it
 _NOTE_TAIL = (f"A done or no-action note is better written on the board item it concerns (update, complete). "
               f"If it does ask something of {OWNER}, put {_FOR_OWNER} on its first line and name an open item of his.")      # what the reply of a held note says to do next
+_MARKED_NOTE_TAIL = (f"A done or no-action note is better written on the board item it concerns (update, complete). If it does ask something of {OWNER}, take the no-action phrase out, or name the open item of his it is about "
+                     f"(a step of his, or needs=decision) by its plain id: a message that names one is delivered whatever phrase it carries.")      # the same, for a note that already carries the mark: the mark is not what it lacks
 
 
 def _session_id(value: str) -> str:
@@ -81,26 +83,41 @@ _NOT_FOR_OWNER = (f"nothing needed from {OWNER}", f"nothing for {OWNER}", "no ac
                   "nothing to decide", "FYI", "for your information", "for the record", "no reply needed")
 _NOT_FOR_OWNER_RE = re.compile(r"\b(?:" + "|".join(re.escape(p) for p in _NOT_FOR_OWNER) + r")\b", re.IGNORECASE)
 _DASHES = "-" + chr(0x2013) + chr(0x2014)
-_OPENS_STATEMENT = "\n.!?:"            # right after one of these (or at the start, or after a list dash) a phrase opens a statement of its own: what follows it is that statement
+_BULLETS = "*+" + chr(0x2022) + chr(0x2023) + chr(0x25E6) + chr(0x00B7) + _DASHES      # a list marker at the start of a line
+_QUOTES = {0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"'}      # curly quotes read as the plain ones ("it's an FYI" with a typographic apostrophe)
+_OPENS_STATEMENT = "\n.!?:"            # right after one of these (or at the start, or after a list marker) a phrase opens a statement of its own: what follows it is that statement
 _JOINS_STATEMENT = ",;(" + _DASHES      # right after one of these it is a clause of the sentence, an own statement only when it also ends there
 _ENDS_STATEMENT = ".,;:!?)\n" + _DASHES
+_EMPHASIS = "*_~`"                      # markdown emphasis and code marks around a phrase ("**FYI**", "`FYI`") are no words of the sentence
 _IS_NOTE = re.compile(r"\b(?:is|are|was|it's)\s+(?:(?:only|just|purely|merely|simply)\s+)?(?:an?\s+)?\Z", re.IGNORECASE)      # "this is only an FYI": the phrase is what the sentence says it is, an own statement when it ends there
-_LEAD_ID = re.compile(r"(?:\A|[\n.!?:])[ \t]*(?:[a-z][a-z-]*#|[a-z])\d{1,6}[ \t]*\Z", re.IGNORECASE)     # a plain item id before the phrase is no words of the sentence
+_EMPH_UNDERSCORE = re.compile(r"(?<![A-Za-z0-9])_(?=[A-Za-z0-9])|(?<=[A-Za-z0-9])_(?![A-Za-z0-9_])")
+_ITEM_ID = r"(?:[a-z][a-z-]*#|[a-z])\d{1,6}"
+_LEAD_ID = re.compile(r"(?:\A|[\n.!?:])[ \t]*" + _ITEM_ID + r"[ \t]*\Z", re.IGNORECASE)     # a plain item id before the phrase is no words of the sentence
+_LINE_LEAD = re.compile(r"\A(?:[ \t]*(?:[" + re.escape(_EMPHASIS) + r"]+|[" + re.escape(_BULLETS) + r"](?=\s|\Z)|\(?\d{1,3}[.)]|\[\d{1,3}\]|" + _ITEM_ID + r"[:.,;]?))*[ \t]*\Z", re.IGNORECASE)      # all that stands before the phrase on its line is a list marker, a number, an item id or emphasis: "- ", "1) ", "(1) ", "a12: ", "**"
+_FROM_YOU = re.compile(r"(?:(?:from|by|for)\s+(?:you|him|" + re.escape(OWNER) + r")|on\s+your\s+part)\b[ \t]*", re.IGNORECASE)      # "no action needed from you": the phrase's own tail, no condition on it
 
 
 def _own_no_actions(text: str) -> "list[re.Match[str]]":
-    """Each fixed no-action phrase (`_NOT_FOR_OWNER`) in `text` that is the text's own statement, as a match: the phrase opens a sentence, a line or a list item (what follows is the note: "FYI the build is live", "no action needed."),
-    or is a clause set off by a comma, semicolon, bracket or dash that ends there ("the build is live, no action needed", "merged (FYI)"), or is what the sentence says it is and ends there ("this is only an FYI").
-    A phrase inside a clause ("sending it as an fyi so it waits"), after a quote mark, or in a quoted or code-spanned line is no statement of the sender's: the text is a request or a description that happens to use the word."""
+    """Each fixed no-action phrase (`_NOT_FOR_OWNER`) in `text` that is the text's own statement, as a match (curly quotes read as plain ones). The phrase counts when
+      it opens a sentence, a line or a list item, after a list marker, a number, an item id or markdown emphasis ("FYI the build is live", "**FYI** ...", "- no action needed", "1) FYI ...", "a12: FYI ..."), what follows it being the note;
+      it is a clause set off by a comma, semicolon, bracket or dash that ends there: the text ends, or punctuation comes, or only a tail "from you" / "from <owner>" / "on your part" ("the build is live, no action needed from you", "merged (FYI)", "a1 (merged) - no action needed");
+      it is what the sentence says it is and ends there ("this is only an FYI").
+    A phrase inside a clause ("sending it as an fyi so it waits"), one that something follows in the same clause ("no action needed until Friday"), one after a quote mark, in a quoted line or in the middle of a code span, or one that is asked ("no action needed?")
+    is no statement of the sender's: the text is a request or a description that happens to use the word."""
+    text = _EMPH_UNDERSCORE.sub(" ", text.translate(_QUOTES))      # an underscore that is emphasis ("_FYI_") reads as a space; one inside a word ("my_fyi_mode") stays
     found = []
     for m in _NOT_FOR_OWNER_RE.finditer(text):
         before = text[:m.start()].rstrip(" \t")
-        last_line = before.rsplit("\n", 1)[-1].strip()
-        after = text[m.end():].lstrip(" \t")
-        ends = not after or after[0] in _ENDS_STATEMENT
-        if not before or before[-1] in _OPENS_STATEMENT or last_line in ("-", "*") or _LEAD_ID.search(before):
-            found.append(m)
-        elif ends and (before[-1] in _JOINS_STATEMENT or _IS_NOTE.search(before + " ")):
+        bare = before.rstrip(_EMPHASIS).rstrip(" \t")                # the text before the phrase without the emphasis marks that wrap it
+        last_line = before.rsplit("\n", 1)[-1]
+        after = text[m.end():].lstrip(_EMPHASIS + " \t")
+        tail = _FROM_YOU.match(after)
+        rest = after[tail.end():].lstrip(_EMPHASIS + " \t") if tail else after
+        ends = not rest or rest[0] in _ENDS_STATEMENT
+        if not bare or bare[-1] in _OPENS_STATEMENT or _LINE_LEAD.match(last_line) or _LEAD_ID.search(bare):
+            if not rest.startswith("?"):
+                found.append(m)
+        elif ends and (bare[-1] in _JOINS_STATEMENT or _IS_NOTE.search(bare + " ")):
             found.append(m)
     return found
 
@@ -114,8 +131,15 @@ def _without_no_action(text: str) -> str:
     """`text` with each phrase that `_own_no_actions` finds blanked out (the status-shape test reads the rest); a phrase used inside a request stays."""
     out, at = [], 0
     for m in _own_no_actions(text):
-        out += [text[at:m.start()], " "]
-        at = m.end()
+        start, end = m.start(), m.end()
+        while start > at and text[start - 1] in _EMPHASIS:      # the emphasis or code marks around the phrase go with it ("`FYI`" would leave an empty code span)
+            start -= 1
+        while end < len(text) and text[end] in _EMPHASIS:
+            end += 1
+        rest = text[end:]
+        tail = _FROM_YOU.match(text, end + len(rest) - len(rest.lstrip(" \t")))      # "no action needed from you": its tail goes with it, or the "you" would read as somebody named to act
+        out += [text[at:start], " "]
+        at = tail.end() if tail else end
     return "".join(out) + text[at:]
 
 
@@ -507,7 +531,8 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     first = lines[at] if at < len(lines) else ""
     back = background_of(project)
     sname = (_sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or "")) or "") if sender.strip() else ""
-    same = bool(sname and back and sname.casefold() == back.casefold())          # the sender is the background agent itself: it cannot be sent back to itself
+    mine = bool(sname and roles.get(sname, {}).get("role") == "back" and roles[sname].get("project") == project)          # a background agent of this project, whichever of them
+    same = bool(sname and back and (sname.casefold() == back.casefold() or mine))          # the sender is the background agent itself, or one beside it: it is not sent back to itself or across to its sibling
     goes = (f"the project's background agent, {back} (message(to={back!r}, …))" if back and not same else f"the project, where the router rules it (to={project!r})")
     if _FOR_OWNER not in first:
         if (sender.strip() and _model.is_owner(sender)) or _held._owner_mark().search(text):
@@ -542,7 +567,8 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
             if peer_:
                 return _Hold(f"{sname} is a front agent, so its message to {name} rides {name}'s next turn", project)
             if same:
-                return _Hold(f"{sname} is the project's background agent, so it cannot go back to it", project)
+                return _Hold(f"{sname} is the project's background agent, so it cannot go back to it" if sname.casefold() == back.casefold()
+                             else f"{sname} is a background agent of {project}, so its message is not passed across to {back}", project)
             if not back:
                 return _Hold(f"{project} has no background agent", project)
         if back and not same:          # not for the owner, so the project's background agent takes it: `_message` sends it there and says so
@@ -553,6 +579,11 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     # The mark is for what he has to do; a marked message that says nothing is needed from him, in a fixed phrase (_NOT_FOR_OWNER) that is its own statement in the text after the mark, is a note
     marked = "\n".join([first.split(_FOR_OWNER, 1)[1], *lines[at + 1:]])
     m = _own_no_action(marked)
+    ignored, his = None, []
+    if m is not None and not (sender.strip() and _model.is_owner(sender)):
+        his = _his_items_named(text)
+        if his:          # a real ask: the message names an open item of his (a decision, or a step of his), so a no-action phrase beside it does not make it a note: it is delivered, and the reply says the phrase was left out
+            ignored, m = m, None
     if m:
         if not (sender.strip() and _model.is_owner(sender)):
             if sname and roles.get(sname, {}).get("role") == "back":          # a background agent's: written onto the item it names, when it clearly only reports
@@ -561,10 +592,12 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
                     _handled("marked-no-action-phrase", "written-on-item")
                     return rep_
             if _held.enabled():          # a note is nobody's turn: it is handed over with the agent's next one
-                return _Hold(f"{_FOR_OWNER} marks only what {OWNER} has to do, and this says nothing is needed from him ({m.group(0)!r})", project, _NOTE_TAIL, "marked-no-action-phrase")
+                return _Hold(f"{_FOR_OWNER} marks only what {OWNER} has to do, and this says nothing is needed from him ({m.group(0)!r}) and names no open item of his", project, _MARKED_NOTE_TAIL, "marked-no-action-phrase")
         raise Refused("marked-no-action-phrase", f"Refused: {name} is a front agent of {project} and {_FOR_OWNER} marks only what {OWNER} has to do; this says nothing is needed from him ({m.group(0)!r}): write it on the board item it concerns, or say nothing. "
-                        f"If {OWNER} does have something to do here, say what it is and leave that phrase out.")
-    if (word := _NOT_FOR_OWNER_RE.search(marked)) is not None:          # the phrase is used inside a sentence: no note, and the items it names decide
+                        f"If {OWNER} does have something to do here, name the open item of his it is about by its plain id (a message that names one is delivered), or leave that phrase out.")
+    if ignored is not None:
+        _handled("marked-no-action-phrase", "judged-on-items", f"Its text also says {ignored.group(0)!r}, which was left out because the message names {', '.join(_gh.shown(g) for g in his)}, an open item of {OWNER}'s, so it was taken as a request.")
+    elif (word := _NOT_FOR_OWNER_RE.search(marked.translate(_QUOTES))) is not None:          # the phrase is used inside a sentence: no note, and the items it names decide
         _handled("marked-no-action-phrase", "judged-on-items", f"Its text uses {word.group(0)!r} inside a sentence, which is not read as saying nothing is needed from {OWNER}, so it was judged on the items it names.")
     rep = (_builder_report(name, text, sender, idx, roles) if sender.strip() else "")
     if rep:
@@ -610,6 +643,14 @@ def _log_not_delivered(sender: str, to: str, text: str, outcome: str) -> None:
             f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender or "a script", "auth": "", "to": to, "outcome": outcome, "error": "", "text": _svcstore._shown_ids(text)}, ensure_ascii=False) + "\n")
     except Exception:  # noqa: BLE001
         pass
+
+
+def _his_items_named(text: str) -> list[str]:
+    """The open items of his (front_turn.his_items: needs hold decision, or the step is his) that a message names as plain words. [] on any failure: it fails closed, so a marked note is held, never delivered on a guess."""
+    try:
+        return list(_front_turn.his_items(_agent_names._item_refs(text)))
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def _names_his_item(name: str, text: str) -> bool:
@@ -719,18 +760,22 @@ def _sent_instead(name: str, why: str, project: str, raw: str, sender: str, auth
     return f"{name!r} is retired ({why}), so this went to its project {project!r} instead — {got}"
 
 
-def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False, question: bool = False) -> str:
-    """Relay one message (`_message_body` has the rules) → the sender's reply: what became of it, and, where the relay handled it another way than asked where it once refused it (`_handled`), one plain line at the end saying so."""
+def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False, question: bool = False, name_items: bool = True) -> str:
+    """Relay one message (`_message_body` has the rules) → the sender's reply: what became of it, and, where the relay handled it another way than asked where it once refused it (`_handled`), one plain line at the end saying so
+    (each note ends in a full stop, and the reply before it does too). `name_items` false: the handover naming (a background agent named in the needs of the open items the text names) is left out; a message passed on in place of its front agent is no handover."""
     notes: list[str] = []
     token = _NOTES.set(notes)
     try:
-        out = _message_body(to, text, sender, auth, origin, fyi, question)
+        out = _message_body(to, text, sender, auth, origin, fyi, question, name_items)
     finally:
         _NOTES.reset(token)
-    return out + (" " + " ".join(notes) if notes else "")
+    if not notes:
+        return out
+    tail = " ".join(n if n.rstrip().endswith((".", "!", "?")) else n.rstrip() + "." for n in notes)
+    return out + (" " if out.rstrip().endswith((".", "!", "?", ")")) else ". ") + tail
 
 
-def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False, question: bool = False) -> str:
+def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False, question: bool = False, name_items: bool = True) -> str:
     """`origin` = the machine, when the sender is a script there and not a session (POST /client/message): the envelope
     says so, and that it cannot be answered. `fyi`: the sender marks a message that asks nothing. To a background agent it is held and
     handed over with the agent's next turn (hold_notice, kind fyi) instead of starting one; to a project it is recorded with the mark, so the router holds it
@@ -768,14 +813,16 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
         reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender)     # a front agent is given a turn only by what needs the person: the rest is passed to its builder, written onto an item, held, or refused (_gate_front)
         if isinstance(reported, _Pass):          # not for the person: the project's background agent takes it, and the reply says so
             try:
-                got = _message(reported.to, raw, sender, auth, origin, fyi)
+                got = _message(reported.to, raw, sender, auth, origin, fyi, question, False)      # no handover naming: the text was not a hand-over of an item, so the agent is named in no item's needs and no mover is told
             except ToolError as e:
+                if str(e).startswith("Delivery failed: timed out"):          # the push may have gone out all the same: holding it too could deliver it twice, so the failure goes back to the sender as it is
+                    raise
                 if not _held.enabled():          # the agent cannot take it and nothing can hold it: the refusal stands
                     raise reported.refusal from e
                 reported = _Hold(f"{reported.to}, the project's background agent, could not take it ({_clip_line(str(e), 120)})", reported.project, "", "unmarked-not-for-owner")
             else:
                 _handled("unmarked-not-for-owner", "passed-on")
-                return (f"Not for {OWNER}, so it went to {reported.to}, the project's background agent, instead of {reported.front}, which takes only what {OWNER} has to do and did not get it: {got}. "
+                return (f"Not for {OWNER}, so it went to {reported.to}, the project's background agent, instead of {reported.front}, which takes only what {OWNER} has to do and did not get it: {got.rstrip().rstrip('.')}. "
                         f"To reach {reported.front}, put {_FOR_OWNER} on the first line and name an open item of his.")
         if isinstance(reported, _Hold):
             hold_why, hold_project, hold_tail, hold_kind, reported = reported.why, reported.project, reported.tail, reported.kind, None
@@ -927,7 +974,7 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
     if not origin and not held:
         _handoff.handoff_told_text(to, text, outcome, err)      # a message to an item's mover that names the item is a notice about it: its hand-off is delivered, or waits in the inbox
     named = ""
-    if not origin and outcome.startswith(("delivered", "queued", "inbox")):   # a session's handover to a background agent names it on the items the text names
+    if name_items and not origin and outcome.startswith(("delivered", "queued", "inbox")):   # a session's handover to a background agent names it on the items the text names
         try:
             named = _agent_names._name_on_handover(to, raw, sender, idx)   # the sender's own words, as before the rewrite above
         except Exception as e:  # noqa: BLE001  — the message went; a naming that fails is a stderr line, never a failed delivery
