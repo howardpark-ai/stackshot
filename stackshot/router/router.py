@@ -24,8 +24,17 @@ the first two, and router_live.py is the third (it takes the notices, applies th
      a notice the answer does not cover are tried ONCE MORE on the next tick (their notices stay unjudged, the tries are kept in
      <state>/router/attempts.json); only the second failure passes them to -main.
 
+THE READ-FIRST GATE (before the thin call, in code_rule: trivial_rule, machine_reason, gate_rule). An anchor notice is read by code first. Machine news (a bot's post, a CI result, a routine pull request or
+issue event, the owner's own edit of a document, told by the notice's structured fields, never by its words) is archived by rule with its reason (gate-machine). A person's message (person_notice: everything
+else that is somebody's message, and a notice whose author kind is unknown) is never archived, dropped or merged: one that names the owner, asks a question or replies in a watched thread is passed
+(gate-person) to the scoped item's one mover, else to the page's background agent, and to a front agent only as a held line and only when it needs the owner; one nothing places goes to the thin call,
+whose archive, drop or merge answer, a failed or timed-out call and a clamp are all overridden into a hold for the page's background agent (a page with none: a held line for its contact front agent), the
+`person` hold kind. A bare laugh, ack or emoji of a person (trivial_kind) is read and recorded as archived with its reason (gate-trivial), passed to no agent and no turn, and wakes no wait. One event on
+an anchor several pages hold is ruled once (router_live.tick): every holding page is offered to the gate and to the call, and the ruling goes to the page it is about. A ruling of a person's notice, whatever it
+is, wakes an item that waits on the anchor (person_wakes), not only a passed or merged one.
+
 Front agents (the -main agent and the other top-level agents the owner talks to) get a notice live only when it asks them or the owner
-for an action or a decision; what is unsure, off-topic or asks nothing is ARCHIVED: logged in the project's routing log, delivered to no agent.
+for an action or a decision; machine news that asks nothing is ARCHIVED: logged in the project's routing log, delivered to no agent.
 The call's rulings are governed in code (call_line), because a notice's text is data and can talk a model into anything:
 STRONG signals (the text carries [for <owner>] or needs: decision, the notice is an anchor notice of an item waiting on a
 decision, or the call itself marks for_owner) turn a dropped, merged or archived notice into a pass to the item's mover (else -main)
@@ -96,15 +105,16 @@ RUBRIC = f"""You are the router of one project on {_cfg.owner()}'s board (stacks
 Rule every notice with exactly one ruling:
 - passed: an agent should see it now. "target" is that agent's name, copied exactly from the agent list.
 - merged: several notices in the batch say one thing, or it only needs a line in a digest and nobody has to act.
-- archived: it is logged in the project's routing log and reaches no agent. Use it for a notice that is unsure, off-topic or asks nothing of anyone (a status, news with no action in it, a notice you cannot place), and for one that matters later, not now.
-- dropped: nobody needs it: an acknowledgement, bot chatter, an edit with no visible change, a repeat of another notice in the batch.
+- archived: it is logged in the project's routing log and reaches no agent. Use it for machine news that asks nothing of anyone (a status, a report with no action in it) and for one that matters later, not now. Never use it for a notice marked "author": "person", and never for one you cannot place.
+- dropped: nobody needs it: bot chatter, an edit with no visible change, a repeat of another notice in the batch. Never use it for a notice marked "author": "person".
 
 How to judge:
 - A front agent (one {_cfg.owner()} talks to) gets a notice live ONLY when the notice asks that agent or {_cfg.owner()} for an action or a decision (then "for_owner" is true when the ask is {_cfg.owner()}'s). A notice that informs, reports, acknowledges, names {_cfg.owner()} or owns an item on the board asks nothing: it is archived or merged, not passed. Background agents still get the operational notices: in a project with background agents, the one whose mandate covers the work (when no open item's work is in question, below); when none does, the one that builds or maintains (the builder); when the notice needs nobody to act, merged or archived. Never pass an operational notice to a front agent just because it owns a board item.
 - A notice about the work of one of the project's open items (listed in the message, each with its mover) goes to the agent doing that work: the item's "work by" agent when one is shown, else its mover, copied exactly from the agent list; the rule about front agents above still applies to that agent. It is about the item's work when it names the item, or is about its draft, file, pull request or document, or comes from the party the item waits on and answers or comments on that work. A mandate decides a notice only when it is about the work of no listed open item; a topic word in a mandate never outweighs the item's mover. This applies only when the notice asks that agent for something (a decision, a reply, a job, feedback on the work); a notice that only reports activity on a listed item (a subpage or a row added, a release or deploy report, a CI result) is ruled by the rules above, archived or merged, and an item shown with no agent is no reason to pass a notice to anyone.
 - A request to an agent is not made moot by the page's Current state looking as if it were already done: the state may be newer than the notice (compare the notice's "when" with the state's date). Pass the request to the agent whose mandate covers it, unless another notice of this batch is the same request.
 - A page debt (a session left its page update undone and "the page update is yours") goes to the background agent that keeps the page, else to the -main agent.
-- When you are unsure, or the notice is off-topic, archive it. Do not pass it to the -main agent to be safe. Never drop, merge or archive a notice that carries [for {_cfg.owner()}] or says "needs: decision": pass it to the -main agent with "for_owner" true. A notice that only names {_cfg.owner()}, one of his aliases or a decision is not by itself a request: read what it asks.
+- A notice marked "author": "person" is a person's message: it is never archived, dropped or merged. Pass it to the agent that fits it, the mover or the doer of the item it is about, else the background agent whose mandate covers it, else the project's background agent. Pass it to a front agent only when it needs {_cfg.owner()} himself. When you cannot tell who should have it, pass it to the project's background agent named in the message; the message holds it for that agent's next turn. A notice marked "author": "machine" asks nothing and is archived unless its text asks an agent for something. A notice with also_held_by is on an anchor other pages hold too: it is ruled once, for the page it is about, and its target may be an agent of any page listed.
+- Do not pass a notice to the -main agent to be safe. Never drop, merge or archive a notice that carries [for {_cfg.owner()}] or says "needs: decision": pass it to the -main agent with "for_owner" true. A notice that only names {_cfg.owner()}, one of his aliases or a decision is not by itself a request: read what it asks.
 - A notice that is only an image or a file you cannot open is archived, and its reason starts with "image not read". Never drop a notice you could not read.
 - The full text of a notice is given, up to a limit. Read all of it before ruling.
 - "for_owner" is true only when the notice needs {_cfg.owner()} himself: a decision of his, a go-ahead, a step only he can take, a change in what he sees or pays. Otherwise false.
@@ -370,11 +380,16 @@ def line_for_owner(ln: dict[str, Any]) -> bool:
 
 
 def _line(n: dict[str, Any], key: str, root: str, *, source: str, ruling: str, target: str = "", reason: str = "", rule: str = "",
-          item: str = "", for_owner: bool = False, call: str = "", note: str = "") -> dict[str, Any]:
-    return {"id": str(n["id"]), "key": key, "project": root, "kind": str(n.get("kind") or ""), "ts": time.time(),
-            "notice_ts": float(n.get("ts", 0)), "source": source, "rule": rule, "ruling": ruling, "target": target,
-            "reason": _clean(reason), "for_owner": bool(for_owner), "item": item, "call": call,
-            "label": _clean(n.get("label"), 80), "text": _clean(n.get("text"), 200), "note": _clean(note, NOTE_CHARS)}
+          item: str = "", for_owner: bool = False, call: str = "", note: str = "", hold: str = "", person: bool = False) -> dict[str, Any]:
+    ln = {"id": str(n["id"]), "key": key, "project": root, "kind": str(n.get("kind") or ""), "ts": time.time(),
+          "notice_ts": float(n.get("ts", 0)), "source": source, "rule": rule, "ruling": ruling, "target": target,
+          "reason": _clean(reason), "for_owner": bool(for_owner), "item": item, "call": call,
+          "label": _clean(n.get("label"), 80), "text": _clean(n.get("text"), 200), "note": _clean(note, NOTE_CHARS)}
+    if hold:
+        ln["hold"] = hold          # the held kind (held.KINDS) a pass to a background agent is filed under, router_live._hold_kind
+    if person:
+        ln["person"] = True        # a person's message: router_live._act never lets a front gate archive it, and holds a pass to a front agent for its next turn
+    return ln
 
 
 def _anchor_items(key: str, n: dict[str, Any], cx: Context) -> list[dict[str, Any]]:
@@ -872,9 +887,258 @@ def anchor_work_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers:
                  reason=f"filtered anchor ({_clean(flt, 60)}): every notice on it goes to the page's work agent {agent}")
 
 
+# ----------------------------------------------------------------------------- the read-first gate (an anchor notice is read by code before the thin call)
+# A person's message is never archived, and machine news is archived by a rule, not by a model's guess. The gate tells the two apart by the notice's STRUCTURED fields (the
+# routing record's `bot`, `ekind`, `thread`, `etype`, `who` and `anchor`, which anchor-hub sets from the source's own data), never by what the text says; a record that carries no author kind
+# (an older one, a source that gives none) is a person's. Only a few things are read from the text: a question mark, the owner's name, and whether it is a bare laugh or ack (trivial_kind).
+_BURST_HEAD = re.compile(r"^\d+ more, (?:earlier: .*\| )?the last: ")
+_STATE_ETYPE = ("pr_", "issue_", "ci_")                  # a pull request's, an issue's or a CI run's state change, by the event's type at its source
+_MESSAGE_ETYPES = frozenset({"comment", "review", "review_comment"})
+_TRIVIAL_WORDS = frozenset({"lol", "haha", "ok", "okay", "k", "thx", "thanks", "plus1"})      # `plus1` stands for "+1" (read before the punctuation is dropped)
+_LAUGH_WORDS = frozenset({"lol", "haha"})
+_LAUGH_RUN = re.compile(r"(?:ha){2,}h?|lo+l|(?:he){2,}h?")   # haha-runs, lol-runs: the same laughter as the words above
+_SHORTCODE = re.compile(r":[a-z0-9_+\-]+:")              # a Slack emoji written as :name:
+_ASK_MARKS = ("?", chr(0xFF1F))                          # the question mark and its full-width form
+SYSTEM_SENDERS = ("anchor-hub",)                         # the anchors service's own notices (an anchor unreadable, removed): neither a person's message nor machine news; the call rules them as before
+
+
+def _is_jamo(c: str) -> bool:
+    """A Hangul compatibility jamo (U+3131 to U+3163): a letter of a bare laugh. Written as code points, never as a literal."""
+    return 0x3131 <= ord(c) <= 0x3163
+
+
+def _gist(n: dict[str, Any]) -> str:
+    """The notice's own words: the routing gist without anchor-hub's burst head ("3 more, the last: ")."""
+    return _BURST_HEAD.sub("", str(n.get("text") or "").strip())
+
+
+def trivial_kind(text: Any) -> str:
+    """"" when the text is more than a bare laugh, ack or emoji, else why it is trivial: "laughter" (a run of jamo, lol, haha), "ack" (ok, okay, k, thx, thanks, +1), "emoji" (only emoji and symbols), "empty" (nothing
+    but punctuation or white space). Mention syntax (`<@U123>`, `@name`), Slack's `:name:` emoji, punctuation, symbols, marks and white space are stripped first; the rest must be empty or only these words. A text that asks
+    (carries a question mark) or names the owner is never trivial: a bare ping of him is a call."""
+    t = str(text or "")
+    if not t.strip() or any(m in t for m in _ASK_MARKS) or names_owner(t):      # a text with no character at all says nothing about its author's intent: not read as trivial
+        return ""
+    shortcode = bool(_SHORTCODE.search(t))
+    t = _SHORTCODE.sub(" ", _MENTION.sub(" ", t))
+    jamo = any(_is_jamo(c) for c in t)
+    t = "".join(" " if _is_jamo(c) else c for c in t).lower().replace("+1", " plus1 ")
+    words = "".join(c if c.isalnum() else " " for c in t).split()
+    if any(w not in _TRIVIAL_WORDS and not _LAUGH_RUN.fullmatch(w) for w in words):
+        return ""
+    if jamo or any(w in _LAUGH_WORDS or _LAUGH_RUN.fullmatch(w) for w in words):
+        return "laughter"
+    if words:
+        return "ack"
+    return "emoji" if shortcode or any(not c.isspace() and unicodedata.category(c)[0] in "SMC" for c in t) else "empty"
+
+
+def anchor_type(n: dict[str, Any]) -> str:
+    """The source of an anchor notice from its anchor id: slack · gmail · drive · notion · github · "" (unknown)."""
+    a = str(n.get("anchor") or "")
+    return a.split(":", 1)[0] if ":" in a else ""
+
+
+def _etypes(n: dict[str, Any]) -> list[str]:
+    return [t for t in str(n.get("etype") or "").split("+") if t]
+
+
+def message_like(n: dict[str, Any]) -> bool:
+    """Is an anchor notice somebody's message (a Slack post, a mail, a Notion comment, a GitHub comment or review), not a state change (a Drive edit, a Notion edit, a pull request or CI event, a release)? By the
+    anchor's type and the event's kind and type at the source. What the record does not say is read as a message: an unknown is a person's."""
+    t = anchor_type(n)
+    if t == "drive" or str(n.get("ekind") or "") == "notion-edit":
+        return False
+    if t == "github":
+        if str(n.get("anchor") or "").endswith("@releases") or str(n.get("ekind") or "") in ("github-state", "github-release"):
+            return False
+        types = _etypes(n)
+        return not types or bool(_MESSAGE_ETYPES & set(types)) or "other" in types
+    return True
+
+
+def machine_reason(n: dict[str, Any]) -> str:
+    """Why an anchor notice is machine news, "" when it is not. By structured fields only: the source's author flag (`bot`) or every sender a bot's login (ending `[bot]`); a CI result (is_ci_notice);
+    a pull request's, issue's or CI state change by its event type (every type pr_*, issue_* or ci_*; a comment, a review or an unclassified type in the burst makes it a person's); the owner's own edit of a
+    document (a notice that is no message, whose sender is the owner). The anchors service's own notices (SYSTEM_SENDERS) are none of these."""
+    if str(n.get("kind") or "") != "anchor" or str(n.get("who") or "").strip().lower() in SYSTEM_SENDERS:
+        return ""
+    from stackshot.anchors import event_log as _el          # at call time
+    if n.get("bot") is True or _el.only_bots(n.get("who")):
+        return "its author is a bot"
+    if is_ci_notice(n):
+        return "a CI result"
+    types = _etypes(n)
+    if types and all(t.startswith(_STATE_ETYPE) for t in types):
+        return f"a routine pull request or issue event ({'+'.join(types)})"
+    if not message_like(n) and _is_owner_name(n.get("who")):
+        return f"{_cfg.owner()}'s own edit"
+    return ""
+
+
+def person_notice(n: dict[str, Any]) -> bool:
+    """Is an anchor notice a person's message: it is somebody's message (message_like), and neither machine news (machine_reason) nor the anchors service's own notice. A source that gives no author kind is a person's:
+    the gate never archives an unknown author by rule."""
+    return (str(n.get("kind") or "") == "anchor" and str(n.get("who") or "").strip().lower() not in SYSTEM_SENDERS and message_like(n) and not machine_reason(n))
+
+
+def person_wakes(n: dict[str, Any]) -> bool:
+    """Does a ruling of this notice, whatever it is, wake an item that waits on its anchor? Yes for a person's message (person_notice) that is not a bare laugh or ack (trivial_kind: recorded, never a turn)."""
+    return person_notice(n) and not trivial_kind(_gist(n))
+
+
+def anchor_holders(n: dict[str, Any], cx: Context) -> list[str]:
+    """The page keys whose anchors list holds this notice's anchor (the pages an event on it is recorded for), in the store's order."""
+    aid = _anc.anchor_id(str(n.get("anchor") or "")) or str(n.get("anchor") or "")
+    return [k for k, es in cx.anchors.items() if aid and any((_anc.anchor_id(_anc.split_fragment(e.get("url", ""))[0]) or "") == aid for e in es)]
+
+
+def _anchor_busy(key: str, n: dict[str, Any], cx: Context) -> bool:
+    """Does an open item hang on this anchor: it is scoped to one on a page that holds it, or an item's wait names it (`wait_anchor`, or an anchor line of a wait on a list)? Machine news on such an anchor is
+    left to the rules before the gate, as before: they pass or merge it, which is what ends an item's wait."""
+    aid = _anc.anchor_id(str(n.get("anchor") or "")) or str(n.get("anchor") or "")
+    for k in anchor_holders(n, cx):
+        for e in cx.anchors.get(k, []):
+            if (_anc.anchor_id(_anc.split_fragment(e.get("url", ""))[0]) or "") == aid and any(g in cx.index and cx.index[g].get("status") != "completed" for g in (e.get("items") or [])):
+                return True
+    for t in cx.index.values():
+        if t.get("status") == "completed":
+            continue
+        meta = t.get("metadata") or {}
+        w = str(meta.get("wait_anchor") or "")
+        if w and (_anc.anchor_id(_anc.split_fragment(w)[0]) or w) == aid:
+            return True
+        if isinstance(meta.get("waits"), list) and any(isinstance(r, dict) and r.get("anchor") and (_anc.anchor_id(_anc.split_fragment(str(r["anchor"]))[0]) or "") == aid for r in meta["waits"]):
+            return True
+    return False
+
+
+def asks_question(text: Any) -> bool:
+    return any(m in str(text or "") for m in _ASK_MARKS)
+
+
+def _single_thread(n: dict[str, Any]) -> bool:
+    """Is the notice on one watched thread: a Gmail thread (not a search), a GitHub issue or pull request, or a Notion page; its replies are replies in that thread."""
+    a = str(n.get("anchor") or "")
+    return bool(re.fullmatch(r"gmail:[0-9a-f]+", a) or (a.startswith("github:") and "#" in a and "@" not in a) or a.startswith("notion:"))
+
+
+def person_hold_line(n: dict[str, Any], key: str, root: str, cx: Context, why: str, *, source: str = "code", rule: str = "gate-person", call: str = "", note: str = "") -> dict[str, Any]:
+    """The ruling for a person's message nothing placed: held for the page's background agent (the one the message tool uses, anchors.background_agent), never archived. A page with no background agent holds it for its
+    contact front agent (a held line for its next turn, which starts none: router_live._act). `why` is what the gate or the call found."""
+    aroot = _import_live().agent_root(root, cx.reg)
+    back = _anc.background_agent(aroot, cx.reg)
+    if back:
+        return _line(n, key, root, source=source, rule=rule, ruling="passed", target=back, call=call, note=note, hold="person", person=True,
+                     reason=f"{why}: a person's message is never archived, so it is held for {back}, the page's background agent")
+    main = cx.main_agent(aroot)
+    return _line(n, key, root, source=source, rule=rule, ruling="passed", target=main, call=call, note=note, person=True,
+                 reason=f"{why}: a person's message is never archived, so it is held for {main or 'nobody'}, the page's contact agent (the page lists no background agent)")
+
+
+def _his_move(t: dict[str, Any]) -> bool:
+    """Is an item the owner's own move: its stored mover is the owner (the item is his to move, so a reply on its thread needs him)."""
+    m = str((t.get("metadata") or {}).get("mover") or "").strip().lower()
+    return bool(m) and m in (_cfg.owner().lower(), "owner")
+
+
+def person_place(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[str, Any] | None:
+    """Where a person's message that the gate can place goes, or None (the thin call picks). It is placed when it names the owner (or is a direct message, which is his), asks a question (a question mark), or
+    replies in a thread the page watches (a Slack thread reply, a mail, a pull request or issue comment, a Notion page's comment). Who gets it: the mover of the one open item the anchor is scoped to (more or fewer
+    than one: the page's background agent); a mover that is a front agent only when the message needs the owner (the text says [for <owner>] or needs: decision, the item waits on his decision or is his own move, or it names him and asks),
+    else the background agent that does the item's work, else the page's background agent; a page with no background agent holds it for its contact front agent. A pass to a front agent is a held line that
+    starts no turn (router_live._act)."""
+    text = _gist(n)
+    named = names_owner(text) or str(n.get("anchor") or "").startswith("slack:D")
+    asks = asks_question(text)
+    thread = bool(n.get("thread")) or (_single_thread(n) and (anchor_type(n) != "github" or bool(_MESSAGE_ETYPES & set(_etypes(n)))))
+    if not (named or asks or thread):
+        return None
+    aroot = _import_live().agent_root(root, cx.reg)
+    front, back = cx.agents(aroot)
+    items = _anchor_items(key, n, cx)
+    item = items[0] if len(items) == 1 else None
+    needs = strong_owner(text) or bool(item and (waits_decision(item) or _his_move(item))) or (named and asks)
+    mover = "" if (item and _his_move(item)) else (cx.agent_of(_anc.mover_of(item), aroot) if item else "")      # an item that is his own move has no agent mover (mover_of names its stand-in, the builder)
+    shown_id = cx.shown(item["gid"]) if item else ""
+    what = "names " + _cfg.owner() if named else "asks a question" if asks else "replies in a thread the page watches"
+    page_back = _anc.background_agent(aroot, cx.reg)
+    if mover and mover in back:
+        target, how = mover, f"the mover of {shown_id}"
+    elif needs:
+        target = mover if mover in front else cx.main_agent(aroot)
+        how = f"the mover of {shown_id}, a front agent, as a held line (it needs {_cfg.owner()})" if mover in front else f"the contact front agent, as a held line (it needs {_cfg.owner()})"
+    else:
+        doer = item_doer(item, aroot, cx) if item else ""
+        target = doer or page_back or cx.main_agent(aroot)
+        how = f"{doer}, who does the work of {shown_id}" if doer else f"the page's background agent {page_back}" if page_back else f"the contact front agent {target}, as a held line (the page lists no background agent)"
+    if not target or target.lower() == str(n.get("who") or "").strip().lower():      # nobody to hand it to, or the agent wrote it itself: never passed back to its own sender (the rules after the gate route it)
+        return None
+    return _line(n, key, root, source="code", rule="gate-person", ruling="passed", target=target, item=shown_id, person=True, for_owner=bool(needs and target in front),
+                 reason=f"a person's message that {what}: passed to {how}")
+
+
+def trivial_rule(key: str, n: dict[str, Any], root: str, cx: Context) -> dict[str, Any] | None:
+    """A person's anchor notice that is only a laugh, an ack or an emoji (trivial_kind) is read and recorded as an archived notice, with its reason ("trivial: laughter"): never passed, never a turn of its own."""
+    if not person_notice(n):
+        return None
+    k = trivial_kind(_gist(n))
+    if not k:
+        return None
+    return _line(n, key, root, source="code", rule="gate-trivial", ruling="archived", person=True, reason=f"trivial: {k}: read and recorded by the router, passed to no agent")
+
+
+def gate_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The read-first gate's sorting of an anchor notice that no rule before it settled, run before the thin call: machine news (machine_reason) is archived with its reason, unless its text is for the owner
+    (strong_owner) or an open item hangs on its anchor (_anchor_busy: the rules before the gate ended such a wait by passing or merging); a person's message (person_notice) is passed where person_place says, or None
+    when nothing places it (the call picks, and its worst outcome is a hold for the page's background agent). An identical repeat of a person's message within an hour is dropped. None for any other notice."""
+    if str(n.get("kind") or "") != "anchor":
+        return None
+    why = machine_reason(n)
+    if why:
+        if strong_owner(n.get("text")) or _anchor_busy(key, n, cx):
+            return None
+        return _line(n, key, root, source="code", rule="gate-machine", ruling="archived", reason=f"machine news ({why}): archived by rule, no agent needs it")
+    if not person_notice(n):
+        return None
+    rp = _same_anchor_repeat(n, peers)
+    if rp:
+        return _line(n, key, root, source="code", rule="repeat", ruling="dropped", reason=f"a repeat of notice {rp['id']} (same anchor, sender, text and link, within an hour)")
+    return person_place(key, n, root, cx)
+
+
+def twin_line(n: dict[str, Any], key: str, root: str, ruled_id: str, ruled_root: str, ruling: str, how: str) -> dict[str, Any]:
+    """The ruling of a notice that is the same event as one already ruled (one event, one ruling): an event on an anchor several pages hold is recorded once for each page, and only one of those notices is
+    ruled by the gate and the call (the one for the page it is about); the others follow it. `ruling` = the ruled notice's: archived and dropped stand, anything else (passed, held, merged) is `merged`, the
+    notice's work done by the one ruling (it still releases an item on its page that waits on the anchor). `how` = where the ruled one went, in words."""
+    word = ruling if ruling in ("archived", "dropped") else "merged"
+    return _line(n, key, root, source="code", rule="one-ruling", ruling=word, person=person_notice(n),
+                 reason=f"one event, one ruling: the same event on an anchor that {ruled_root} holds too was ruled once, as notice {ruled_id} ({_clean(how, 120)})")
+
+
 def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """The ruling line for a notice a rule in code settles, or None (the thin call takes it). `peers` = the project key's
+    """The ruling line for a notice a rule in code settles, or None (the thin call takes it): _code_rule's rules, with the read-first gate's guard on a person's message (person_notice). A rule that would
+    archive, drop or merge one (the quiet-hour archive, a generic repeat of another source, `auto`) holds it for the page's background agent instead (person_hold_line), except `repeat` (an identical
+    message already passed once) and `gate-trivial` (a bare laugh or ack, read and recorded); a pass of one is marked `person`, which router_live._act reads."""
+    ln = _code_rule(key, n, root, cx, peers)
+    if ln is None or not person_notice(n):
+        return ln
+    if ln["ruling"] in ("archived", "dropped", "merged") and ln.get("rule") not in ("repeat", "gate-trivial", "auto"):
+        return person_hold_line(n, key, root, cx, f"rule {ln.get('rule') or '?'} would have ruled it {ln['ruling']}", rule=str(ln.get("rule") or "gate-person"))
+    if ln["ruling"] == "passed":
+        ln["person"] = True
+    return ln
+
+
+def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The rules in code, in order (code_rule's guard follows). `peers` = the project key's
     notices, for the repeat rule. The rules, in order:
+      gate-trivial  (after `image`) a person's bare laugh, ack or emoji (trivial_kind): archived with its reason, read and recorded, never passed.
+      gate-machine  (after anchor-work) machine news (machine_reason: a bot's post, a CI result, a routine pull request or issue event, the owner's own edit of a document): archived by rule with its reason,
+                    unless it is for the owner or an open item hangs on its anchor (then the rules below act, as before, so the item's wait ends).
+      gate-person   (after gate-machine) a person's message (person_notice) that names the owner, asks a question or replies in a watched thread: passed to the scoped item's one mover when it is a background agent, else to
+                    the item's doer, else to the page's background agent, and to a front agent only as a held line and only when the message needs the owner; one that nothing places goes to the thin call, whose
+                    worst outcome is a hold for the page's background agent (a page with none: a held line for its contact front agent). `image` holds a person's picture the same way.
       auto          already ruled by `stackshot (auto)` or logged without delivery: the turn-rule builds 2 to 4 (a green release,
                     the fleet's own routine PR events) rule those at once; the router copies the ruling.
       page-pass     a message of a job named in [router] page_senders about a page (its text carries `keeper:`): archived, the page pass
@@ -972,8 +1236,14 @@ def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[d
             return _line(n, key, root, source="code", rule="hand-back", ruling="passed", target=owner, item=shown(named[0]["gid"]) if len(named) == 1 else "",
                          reason=f"the item was handed back to its mover {owner} alone: it goes to it")
     if kind in ("anchor", "message") and attachment_only(n.get("text")):
+        if person_notice(n):     # a person's picture or file is never archived: the agent can open what the router cannot
+            return person_hold_line(n, key, root, cx, "image not read: the notice is only a file or an image, which the router cannot read", rule="image")
         return _line(n, key, root, source="code", rule="image", ruling="archived",
                      reason="image not read: the notice is only a file or an image, which the router cannot read; archived for the digest")
+    if kind == "anchor":      # the read-first gate, first half: a person's bare laugh, ack or emoji is read and recorded, never passed (it comes before every rule that passes a notice)
+        tv = trivial_rule(key, n, root, cx)
+        if tv:
+            return tv
     if (kind == "message" and re.match(r"\[release\]", str(n.get("text") or "")) and cx.name_of(str(n.get("who") or "")).strip().lower().endswith("-maintainer")
             and cx.agent_of(str(n.get("who") or ""), root) and not strong_owner(n.get("text"))
             and not re.search(r"\b(?:red|failed|failure|error|rolled back|rollback)\b", str(n.get("text") or ""), re.I)):
@@ -1021,6 +1291,9 @@ def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[d
     aw = anchor_work_rule(key, n, root, cx, peers)
     if aw:
         return aw
+    gt = gate_rule(key, n, root, cx, peers)       # the read-first gate, second half: machine news archived, a person's message placed, before anchor-item and the thin call
+    if gt:
+        return gt
     if kind == "anchor":
         m = re.fullmatch(r"for (.+)", str(n.get("target") or ""))
         owners = [x.strip() for x in m.group(1).split(",")] if m else []
@@ -1074,6 +1347,8 @@ def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[d
 def fallback_line(n: dict[str, Any], key: str, root: str, cx: Context, why: str, call: str = "") -> dict[str, Any]:
     """Step 3: the notice passed to the project's -main agent, with the reason. Marked for <owner>: nobody knows what it is, and
     the one session that cannot be wrong is the one the owner talks to."""
+    if person_notice(n):     # a failed call is no reason to archive or to start a front turn for a person's message: held for the page's background agent
+        return person_hold_line(n, key, root, cx, why, source="fallback", rule="", call=call)
     main = cx.main_agent(root)
     return _line(n, key, root, source="fallback", ruling="passed", target=main, call=call, for_owner=True,
                  reason=f"passed to {main or 'nobody (the page names no front agent)'}: {why}")
@@ -1134,7 +1409,7 @@ def open_items_block(root: str, cx: Context) -> list[str]:
     return lines if mine else []
 
 
-def prompt_for(root: str, rows: list[tuple[str, dict[str, Any]]], cx: Context) -> str:
+def prompt_for(root: str, rows: list[tuple[str, dict[str, Any]]], cx: Context, offered: dict[str, list[str]] | None = None) -> str:
     """The message of one call: the agents, the project's open items (open_items_block), the page's Current state and the notices (JSON, one object each)."""
     from stackshot.projects import pages as _pages
     front, back = cx.agents(root)
@@ -1146,6 +1421,15 @@ def prompt_for(root: str, rows: list[tuple[str, dict[str, Any]]], cx: Context) -
     if not front and not back:
         lines.append("- (the page lists no agents)")
     lines.append(f"The project's -main agent: {cx.main_agent(root) or '(none)'}")
+    page_back = _anc.background_agent(_import_live().agent_root(root, cx.reg), cx.reg)
+    lines.append(f"The project's background agent, for a person's message nobody else fits: {page_back or '(none: the -main agent holds it for its next turn)'}")
+    other = sorted({r2 for rs in (offered or {}).values() for r2 in rs})
+    if other:
+        lines += ["", "Some notices below are on an anchor that other pages hold too (also_held_by): one event is ruled once, for the page it is about, and its target may be an agent of any page listed here:"]
+        for r2 in other:
+            f2, b2 = cx.agents(_import_live().agent_root(r2, cx.reg))
+            lines.append(f"- page {r2}:")
+            lines += [f"  - {k} [front]: {_clean(v, 120)}" for k, v in f2.items()] + [f"  - {k} [background]: {_clean(v, 120)}" for k, v in b2.items()]
     lines.append("Background agents: " + (f"yes (a front agent gets a notice only when it asks it or {_cfg.owner()} for an action or a decision)" if back else "none (the front agents take what needs an agent; a notice that asks nothing is archived)"))
     try:
         items = open_items_block(root, cx)
@@ -1164,6 +1448,12 @@ def prompt_for(root: str, rows: list[tuple[str, dict[str, Any]]], cx: Context) -
         obj = {"id": n["id"], "kind": n.get("kind"), "label": _clean(n.get("label"), 100), "from": _clean(n.get("who"), 80),
                "when": when, "text": full_text(n), "link": _clean(n.get("url"), 200), "for": _clean(n.get("target"), 100),
                "anchor": _clean(n.get("anchor"), 100)}
+        if person_notice(n):
+            obj["author"] = "person"
+        elif machine_reason(n):
+            obj["author"] = "machine"
+        if (offered or {}).get(str(n["id"])):
+            obj["also_held_by"] = list(offered[str(n["id"])])
         lines += [f'<notice id="{n["id"]}">', json.dumps({k: _neutral(v) for k, v in obj.items()}, ensure_ascii=False), "</notice>"]
     lines += ["", "Rule each notice. Answer with the JSON array only."]
     return "\n".join(lines)
@@ -1271,6 +1561,11 @@ def parse_answer(text: str) -> list[dict[str, Any]] | None:
     return None
 
 
+def _retry_notice(attempts: dict[str, int] | None, n: dict[str, Any]) -> bool:
+    """_retry_later for a notice: a person's message (person_notice) is never left unjudged for another try, so a failed or timed-out call holds it for the page's background agent at once (fallback_line)."""
+    return False if person_notice(n) else _retry_later(attempts, str(n["id"]))
+
+
 def _retry_later(attempts: dict[str, int] | None, nid: str) -> bool:
     """Count a failed try of a notice; True while it has one more try coming (the first failure), False once it is the second.
     `attempts` None = no memory (every failure is final)."""
@@ -1280,7 +1575,21 @@ def _retry_later(attempts: dict[str, int] | None, nid: str) -> bool:
     return attempts[nid] < 2
 
 
-def call_line(a: dict[str, Any], n: dict[str, Any], key: str, root: str, cx: Context, call: str) -> dict[str, Any]:
+def call_line(a: dict[str, Any], n: dict[str, Any], key: str, root: str, cx: Context, call: str, offered: tuple[str, ...] | list[str] = ()) -> dict[str, Any]:
+    """The ruling line for one notice from the call's answer `a`: _call_line's, then the read-first gate's last word. A person's message (person_notice) is never archived, dropped or merged, by the call or by
+    any clamp: such a ruling becomes a hold for the page's background agent (person_hold_line), and every pass of one is marked `person`, which router_live._act reads (a pass to a front agent is a held line,
+    never archived by a front gate). `offered` = the other pages that hold the notice's anchor, whose agents the call may name too."""
+    ln = _call_line(a, n, key, root, cx, call, offered)
+    if not person_notice(n):
+        return ln
+    if ln["ruling"] in ("archived", "dropped", "merged") and ln.get("rule") != "repeat":
+        return person_hold_line(n, key, root, cx, f"the call ruled it {ln['ruling']} ({_clean(a.get('reason'), 110) or ln['reason'][:110]})", source="call", rule="gate-person", call=call, note=str(ln.get("note") or ""))
+    if ln["ruling"] == "passed":
+        ln["person"] = True
+    return ln
+
+
+def _call_line(a: dict[str, Any], n: dict[str, Any], key: str, root: str, cx: Context, call: str, offered: tuple[str, ...] | list[str] = ()) -> dict[str, Any]:
     """The ruling line for one notice from the call's answer `a`, governed in code (a notice's text is data and can talk a model
     into a drop):
       - an invalid ruling, a target that is no agent of the project or no reason → -main (fallback_line);
@@ -1297,7 +1606,11 @@ def call_line(a: dict[str, Any], n: dict[str, Any], key: str, root: str, cx: Con
       - a pass to the notice's own sender → merged.
     The call's `note` (one line for the page's timeline, 300 characters at most) rides on the line whatever the ruling."""
     front, back = cx.agents(root)
-    by_name = {k.lower(): k for k in {**front, **back}}
+    extra: dict[str, str] = {}
+    for r2 in offered:                      # a page that holds the same anchor: its agents are named for the call too (one event, one ruling)
+        f2, b2 = cx.agents(_import_live().agent_root(r2, cx.reg))
+        extra.update({**f2, **b2})
+    by_name = {k.lower(): k for k in {**extra, **front, **back}}
     ruling = str(a.get("ruling") or "").strip().lower()
     ruling = _routing.ARCHIVED if ruling == _routing.HELD else ruling      # the call's earlier word for archived; it never holds a notice for a session's next turn
     target = str(a.get("target") or "").strip()
@@ -1359,7 +1672,7 @@ def call_line(a: dict[str, Any], n: dict[str, Any], key: str, root: str, cx: Con
 
 
 def lines_from_answer(answer: list[dict[str, Any]], rows: list[tuple[str, dict[str, Any]]], root: str, cx: Context, call: str,
-                      attempts: dict[str, int] | None = None) -> list[dict[str, Any]]:
+                      attempts: dict[str, int] | None = None, offered: dict[str, list[str]] | None = None) -> list[dict[str, Any]]:
     """One ruling line per notice of the batch that is judged: the call's own ruling (call_line), or the fallback (step 3). A
     notice the answer leaves out has no line on its first try when `attempts` is given: it stays unjudged for the next tick."""
     got: dict[str, dict[str, Any]] = {}
@@ -1371,20 +1684,20 @@ def lines_from_answer(answer: list[dict[str, Any]], rows: list[tuple[str, dict[s
     for key, n in rows:
         a = got.get(str(n["id"]).lower())
         if a is None:
-            if not _retry_later(attempts, str(n["id"])):
-                out.append(fallback_line(n, key, root, cx, "the call's answer did not cover this notice" + (" (second try)" if attempts is not None else ""), call))
+            if not _retry_notice(attempts, n):
+                out.append(fallback_line(n, key, root, cx, "the call's answer did not cover this notice" + (" (second try)" if attempts is not None and not person_notice(n) else ""), call))
             continue
-        out.append(call_line(a, n, key, root, cx, call))
+        out.append(call_line(a, n, key, root, cx, call, (offered or {}).get(str(n["id"]), ())))
     return out
 
 
 def call_project(root: str, rows: list[tuple[str, dict[str, Any]]], cx: Context, runner: Callable[[str], dict[str, Any]] | None = None,
-                 attempts: dict[str, int] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+                 attempts: dict[str, int] | None = None, offered: dict[str, list[str]] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """One thin call for a project's batch → (the ruling lines, the call record). A notice the call failed on or left out has no
     line on its first try (it is tried again on the next tick); the second failure passes it to -main. `attempts` = the tries so
     far by notice id, updated here (None: every failure is final). Writes nothing."""
     cid = secrets.token_hex(3)
-    res = (runner or run_call)(prompt_for(root, rows, cx))
+    res = (runner or run_call)(prompt_for(root, rows, cx, offered))
     status, note, answer = res.get("status", "spawn"), str(res.get("note") or ""), None
     if status == "ok":
         answer = parse_answer(res.get("text", ""))
@@ -1393,9 +1706,9 @@ def call_project(root: str, rows: list[tuple[str, dict[str, Any]]], cx: Context,
     if answer is None:
         why = {"timeout": f"the call timed out ({note})", "exit": f"the call failed ({note})", "error": f"the call reported an error ({note})",
                "spawn": f"the call could not start ({note})"}.get(status, f"the call's answer did not parse ({note})")
-        lines = [fallback_line(n, key, root, cx, why + (" (second try)" if attempts is not None else ""), cid) for key, n in rows if not _retry_later(attempts, str(n["id"]))]
+        lines = [fallback_line(n, key, root, cx, why + (" (second try)" if attempts is not None and not person_notice(n) else ""), cid) for key, n in rows if not _retry_notice(attempts, n)]
     else:
-        lines = lines_from_answer(answer, rows, root, cx, cid, attempts)
+        lines = lines_from_answer(answer, rows, root, cx, cid, attempts, offered)
     if attempts is not None:
         for ln in lines:
             attempts.pop(ln["id"], None)

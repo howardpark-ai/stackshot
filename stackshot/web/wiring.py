@@ -112,8 +112,8 @@ def _late_in(module: Any, name: str) -> Callable[..., Any]:
 def _router_live_after(project: str, n: dict[str, Any]) -> None:
     """After the live router ruled a notice (router_live._act): what _route does after a keeper's ruling. A hold that waited on the
     notice's anchor is released on a passed or merged ruling (never a dropped or archived one, as for a keeper's; except a pass the front gate archived: the
-    event happened, and no turn of a front agent is owed for it), and the board is republished."""
-    if n.get("ruling") in ("passed", "merged") or n.get("front_held") or n.get("front_gate"):
+    event happened, and no turn of a front agent is owed for it, and a person's message, whatever its ruling: `person_wake`, router.person_wakes), and the board is republished."""
+    if n.get("ruling") in ("passed", "merged") or n.get("front_held") or n.get("front_gate") or n.get("person_wake"):
         _wakes.anchor_release(project, n, by=_router_live.BY)
     _pubmod._publish()
 

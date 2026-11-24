@@ -8,6 +8,7 @@ held here and handed over with the agent's next turn, whatever caused that turn.
               gate as an fyi, `_front_queue_row`, and is filed here under this kind)
   page-owed   the keeper's "the page update is owed" notice (pilot_relay, pilot_relay_many; also what the router passes of such a notice, to a front agent too: through the front gate)
   fyi         a message its sender marked fyi (the message tool's `fyi`)
+  person      a person's anchor notice the router's read-first gate could not place (router.py, rule `gate-person`): held whole for the project's background agent, never archived
 Everything else wakes the agent as before: a notice that names it in needs, hands it an item (mover, hand-off), ends its wait, carries
 the owner's words or asks something; so does the audit's finding for an item's mover (router.py audit-owners): it is a task. When the code is unsure it delivers (decide() answers "" for any kind it does not know).
 
@@ -57,7 +58,7 @@ from typing import Any
 from stackshot.core import config as _cfg
 from stackshot.core.lines import MSG_MAX, newline_lines
 
-KINDS = ("closed", "changed", "queue", "page-owed", "fyi")
+KINDS = ("closed", "changed", "queue", "page-owed", "fyi", "person")
 SHOWN_MAX = 8               # lines handed over at one turn start; the rest wait for the next turn
 KEEP_MAX = 100              # held lines kept per session; past it the oldest go
 KEEP_DAYS = 7               # a held line older than this is dropped, never handed over
@@ -262,6 +263,8 @@ def decide(kind: str, *, is_background: bool, text: str = "", owner_words: bool 
 
 def reason(kind: str) -> str:
     """The routing log's reason for a hold."""
+    if kind == "person":
+        return "held: a person's message the router could not place, for the agent's next turn (person)"
     return f"held: asks nothing ({kind})"
 
 
