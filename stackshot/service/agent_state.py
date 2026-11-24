@@ -13,7 +13,7 @@ stores what it was told and reads nothing of the agents' box. Answers 200 `{"ok"
 
 ONE snapshot, the whole fleet. The server keeps a single snapshot and each push replaces ALL of it, so every sender for a fleet pushes the whole fleet; an agent a push leaves out is gone from the snapshot and reads unknown
 (fail closed, audit/agent_state.py). A push whose `written` is OLDER than the stored snapshot's is ignored (200 `{"ok": true, "ignored": "older"}`, the newer one kept: a slow or retried push cannot put the fleet back in
-time); an equal `written` is accepted. A stored `written` more than `AHEAD_S` ahead of the server's clock makes no push "older" (a sender whose clock ran ahead once must not shut the others out). A number that is
+time); an equal `written` is accepted. A stored `written` more than `AHEAD_S` ahead of the server's clock makes no push "older"; one 0 to `AHEAD_S` ahead does, until the true time reaches it (at most about `AHEAD_S` after the fast sender stops). A `written` of zero or less is refused with 400. A number that is
 not finite or is past `NUMBER_MAX` (a huge integer too) and a string holding a lone surrogate are refused with 400, as any malformed body.
 
 The snapshot is ONE file, `<paths.state>/agent-state.json` (mode 0600: it holds the first part of each subagent's brief), written whole to a temporary file and renamed over the old one, so a reader sees the old snapshot or
@@ -162,8 +162,8 @@ def validate(body: Any) -> tuple[dict[str, Any] | None, str]:
     return {"schema": SCHEMA, "written": written, "received": time.time(), "agents": out}, ""
 
 
-def _sweep(folder: Path, keep: Path) -> None:
-    """Remove the leftover temporary files of earlier writes in `folder` that are older than `STALE_TMP_S`: a regular file only (a link is never followed, nor removed), whose name is exactly the writer's temporary name, never `keep`.
+def _sweep(folder: Path) -> None:
+    """Remove the leftover temporary files of earlier writes in `folder` that are older than `STALE_TMP_S`: a regular file only (a link is never followed, nor removed), whose name is exactly the writer's temporary name (the writer's own temporary file does not exist yet when this runs).
     A failure on one file is no failure of the write."""
     try:
         entries = list(os.scandir(folder))
@@ -172,7 +172,7 @@ def _sweep(folder: Path, keep: Path) -> None:
     cut = time.time() - STALE_TMP_S
     for e in entries:
         try:
-            if _TMP.match(e.name) and e.path != str(keep) and e.is_file(follow_symlinks=False) and e.stat(follow_symlinks=False).st_mtime < cut:
+            if _TMP.match(e.name) and e.is_file(follow_symlinks=False) and e.stat(follow_symlinks=False).st_mtime < cut:
                 os.unlink(e.path)
         except OSError:
             continue
@@ -183,7 +183,7 @@ def _write(snap: dict[str, Any]) -> None:
     p = path()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(f".{p.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    _sweep(p.parent, tmp)
+    _sweep(p.parent)
     tmp.unlink(missing_ok=True)      # a leftover of this very name (a reused pid and thread): removed, never written through
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)

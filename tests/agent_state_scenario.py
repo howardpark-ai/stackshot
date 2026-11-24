@@ -11,7 +11,7 @@ it alone. Fixture items in a temporary store, no live store, no network, no mode
      and by an alias; the pane word the hourly line reads; a hand-edited file (a time or a `since` of -Infinity, a huge integer or past the bound) reads unknown and never raises
   1b numbers and text the body cannot be stored with (a huge integer or a time past the bound in `written`, `since` or `at`, a lone surrogate in a name or a text) are 400 with a reason, never 500, the old snapshot kept and no
      temporary file left; a push whose `written` is older than the stored snapshot's is ignored (200 `ignored: older`), an equal one is accepted; the file is mode 0600; a stale temporary file of the writer's own name is swept
-     on a write and nothing else is touched; over HTTP a body of exactly 1,000,000 bytes is stored and one of 1,000,001 is 400
+     on a write and nothing else is touched; 8 threads pushing at once leave the largest `written` stored whole, no reader meets a torn file; over HTTP a body of exactly 1,000,000 bytes is stored and one of 1,000,001 is 400
   4  the hourly audit on it: an idle fresh agent's item gets `audit_idle`; a busy one in a turn is verified (live state only); a subagent whose words name the item ties to it and leaves the mover's other item idle; a stale
      snapshot, a missing agent, a state not read, no file, a torn file and a subagent the sender could not read each write `audit_unknown` (nothing flagged, nothing idle-marked, nothing stamped); a busy agent that says
      neither a turn nor a subagent is unknown
@@ -188,6 +188,43 @@ for q in (fresh_tmp, target, *others): q.unlink()
 link.unlink(); adir.rmdir()
 check("1b …and nothing of the test is left in the state folder but the snapshot", leftovers() == [], leftovers())
 FILE.unlink(missing_ok=True)      # no snapshot dated ahead is left for the checks that follow
+SVC.post("box-far", good({"home-stew": ag("idle", "shell")}))
+# many senders at once: the read of the stored `written` and the replace of the file are one step (the lock), so the last write is never an older one
+import threading, itertools
+FILE.unlink(missing_ok=True)
+SVC.post("box-far", good({"seed": ag()}, written=time.time() - 60))      # a snapshot the poller can read from the first moment
+PUSHES = 100; CBASE = time.time() - 30; CTR = itertools.count(1); ACCEPTED, UNREAD, ERRS, BACK = [], [], [], []; STOP = threading.Event()
+def _pusher(k):
+    try:
+        for _ in range(PUSHES):
+            w = CBASE + next(CTR) * 0.001                                # a shared counter: every push is later than the one before it, but the threads post out of order
+            st_c, out_c = SVC.post("box-far", good({f"t{k}": ag()}, written=w))
+            if st_c != 200: ERRS.append((st_c, out_c))
+            elif "ignored" not in out_c: ACCEPTED.append((w, k))
+            cur_c = SVC.load()                                           # once a push is answered, the stored `written` is that push's or a later one's, never an older one
+            if cur_c is None or cur_c["written"] < w: BACK.append((w, cur_c and cur_c["written"]))
+    except BaseException as e_: ERRS.append(repr(e_))
+def _poller():
+    last = 0.0
+    while not STOP.is_set():
+        cur_p = SVC.load()
+        if cur_p is None: UNREAD.append(time.time())                     # a torn or missing file: a reader must see the old snapshot or the new one
+        else:
+            if cur_p["written"] < last: BACK.append((last, cur_p["written"]))     # the stored `written` only ever rises
+            last = cur_p["written"]
+workers = [threading.Thread(target=_pusher, args=(k,)) for k in range(8)]; poller = threading.Thread(target=_poller)
+SWITCH = sys.getswitchinterval(); sys.setswitchinterval(1e-5)      # the threads change over often, so the window between the read and the replace is hit
+try:
+    poller.start()
+    for w_ in workers: w_.start()
+finally:
+    for w_ in workers: w_.join()
+    STOP.set(); poller.join(); sys.setswitchinterval(SWITCH)
+top = max(ACCEPTED) if ACCEPTED else None
+check("1b 8 threads pushing 100 snapshots each, `written` rising from a shared counter: no push fails, and the stored `written` is the largest accepted one (a later write is never an older snapshot), the whole snapshot of that sender",
+      not ERRS and len(ACCEPTED) >= 1 and top is not None and top[0] == CBASE + 8 * PUSHES * 0.001 and loaded()["written"] == top[0] and set(loaded()["agents"]) == {f"t{top[1]}"}, (ERRS[:3], top, loaded() and loaded()["written"], len(ACCEPTED)))
+check("1b …the stored `written` never went back (not seen by the poller, nor by a sender after its own answered push), no reader met a torn or missing snapshot, and only the snapshot file is left in the state folder", not BACK and not UNREAD and leftovers() == [], (BACK[:3], len(BACK), len(UNREAD), leftovers()))
+FILE.unlink(missing_ok=True)
 SVC.post("box-far", good({"home-stew": ag("idle", "shell")}))
 
 # ================================================================ 2. over HTTP
