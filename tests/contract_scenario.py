@@ -300,7 +300,7 @@ check("…offered again when the lease runs out unconfirmed", len(inbox.take({U(
 check("a confirmed line is gone", inbox.ack([i1]) == 1 and not inbox.exists(i1) and inbox.waiting() == {})
 i2, i3, i4 = inbox.put(U(5), "anchor one", "hub"), inbox.put(U(5), "anchor two", "hub"), inbox.put("work-new", "a message", "msg")
 d = {x["src"]: x for x in inbox.take({U(5): "work-new"})}
-check("several waiting lines of one kind arrive as one turn, kinds apart", d["hub"]["text"] == "[anchor] 2 queued while you were away:\nanchor one\nanchor two" and d["hub"]["ids"] == [i2, i3] and d["msg"]["text"] == "a message", d)
+check("several waiting lines of one kind arrive as one turn, kinds apart", d["hub"]["text"] == "[anchor] 2 queued earlier:\nanchor one\nanchor two" and d["hub"]["ids"] == [i2, i3] and d["msg"]["text"] == "a message", d)
 inbox.ack([i4], failed=[i2, i3])
 check("a failed delivery is offered again shortly, not at once", inbox.take({U(5): "work-new"}) == [] and len(inbox.take({U(5): "work-new"}, now=time.time() + inbox.RETRY + 1)) == 1)
 inbox.ack([i2, i3])
@@ -408,7 +408,7 @@ r2 = subprocess.run([sys.executable, f"{STACK}/stackshot/fleet/push.py", "work-n
 r3 = subprocess.run([sys.executable, f"{STACK}/stackshot/fleet/push.py", "work-new", "an unnamed line"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg"})
 d = inbox.take({U(5): "work-new"}); txt = d[0]["text"] if d else ""; inbox.ack([i for x in d for i in x["ids"]])
 check("push.py --from, $PUSH_FROM and the fallback: each queued item keeps its own sender in the batch",
-      r.returncode == r2.returncode == r3.returncode == 1 and txt.startswith("[stackshot] 3 queued while you were away:\n")
+      r.returncode == r2.returncode == r3.returncode == 1 and txt.startswith("[stackshot] 3 queued earlier:\n")
       and "\nfrom: ops-x\na named line" in txt and "\nfrom: ops-env\nan env-named line" in txt
       and "\nfrom: contract_scenario.py\nan unnamed line" in txt, (txt, r3.stderr[-300:]))
 _fb = [json.loads(ln) for ln in _FBL.read_text().splitlines()[_fb0:]] if _FBL.exists() else []
@@ -424,7 +424,7 @@ sent = []; _send, _resolve = push.send, push.resolve
 push.send = lambda sock, text: sent.append(text) or True; push.resolve = lambda name: "/tmp/sock"
 _src, _q = push.SRC, push.Q; push.SRC, push.Q = "msg", str(q)
 check("the local queue's flush: each item with its sender (a line stored before senders were kept, as it was)",
-      push.flush("ghost-q") == 0 and sent == ["[stackshot] 2 queued while you were away:\nold line\nfrom: ops-y\nnew line"], sent)
+      push.flush("ghost-q") == 0 and sent == ["[stackshot] 2 queued earlier:\nold line\nfrom: ops-y\nnew line"], sent)
 sent.clear()
 check("a socket drop opens with the sender", push.deliver("local-pane", "hello", "ops-z") == 0 and sent == ["from: ops-z\nhello"], sent)
 from stackshot.core import config as _cfgm

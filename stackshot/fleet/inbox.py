@@ -410,7 +410,7 @@ def take(live: dict[str, str], known: set[str] | None = None, only_src: str | No
             lines = [ln for k, ln in enumerate(lines) if k not in set(filed)]
             if not its:
                 continue
-        text = lines[0] if len(its) == 1 else f"{HEAD[src]} {len(its)} queued while you were away:\n" + "\n".join(lines)
+        text = lines[0] if len(its) == 1 else f"{HEAD[src]} {len(its)} queued earlier:\n" + "\n".join(lines)
         res.append({"session": u, "name": live.get(u, ""), "src": src, "ids": [i["id"] for i in its], "text": text})
     return res
 

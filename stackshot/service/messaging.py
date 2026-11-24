@@ -499,7 +499,7 @@ def _turn_warranted(name: str, text: str) -> bool:
 
 
 def digest_fyi(agent: str, lines: list[str], kinds: list[str] | None = None) -> list[int]:
-    """The ruling on a digest, the lines queued for a pane that was away ("N queued while you were away", inbox.take and push.flush): a front agent's turn starts only for what is the person's, so the digest is a turn when
+    """The ruling on a digest, the lines queued for a pane ("N queued earlier", inbox.take and push.flush): a front agent's turn starts only for what is the person's, so the digest is a turn when
     a line carries his mark (the held rule's own test, `[for <owner>]` or needs: decision) and he is talking with that agent now, or when he asked it to tell him about an item a line names (front_turn.warranted, the test a
     marked message passes). Otherwise the lines are filed as fyi lines (telling.front_fyi: held for the agent's next turn, the board line written on the items they name).
     `kinds[i]` is the kind of line i (inbox.kind_of: the front gate's kind stored with the line, "exempt" for the shape of a hand-off, wake or stall notice). A line of an exempt kind (telling.FRONT_TAG_KIND: a hand-off, a

@@ -43,6 +43,10 @@ def clients_tick() -> None:
     except Exception as e:  # noqa: BLE001  — an extra, as the flag is
         print(f"inbox: hold sweep failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     try:
+        _inbox_holds.sweep_resume()   # a key a reboot's resume held and no later resume verified is lifted past [client] resume_hold_max_hours (the lines it held stay in the inbox)
+    except Exception as e:  # noqa: BLE001  — an extra, as the sweep above
+        print(f"inbox: resume hold sweep failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    try:
         inbox_flag_tick()     # its own clock, below; it reads no item, so it goes on while a migration holds the board
     except Exception as e:  # noqa: BLE001  — the flag is an extra: the clients' tick above has run
         print(f"inbox: flag pass failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)

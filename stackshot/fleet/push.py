@@ -406,7 +406,7 @@ def flush(name: str, digest: "_inbox.Digest | None" = None) -> int:
         if not left:
             return 0
         keep = left; items = [_inbox.label(str(e.get("from") or ""), e["text"]) for e in keep]
-    text = f"{head} {len(items)} queued while you were away:\n" + "\n".join(items)
+    text = f"{head} {len(items)} queued earlier:\n" + "\n".join(items)
     if CSE.match(name):                     # a cloud session is retried at most once per rescan; a session that is gone keeps its queue
         ok, _ = cloud_send(name, text)
         if not ok:

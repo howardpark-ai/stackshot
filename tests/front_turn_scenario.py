@@ -20,14 +20,14 @@ Fixture: projects/alpha (a front agent, home-front, and a builder, team-back); i
      the old `observers` start no turn
   7  nothing archived is invisible (a row of the digest); an exception in the gate or in the message gate fails closed (nothing delivered, nothing held); the edges of the guards
 
-Part `front_digest` - the digest a pane is handed when it comes back ("N queued while you were away", inbox.take and push.flush): a front agent's turn starts only for what is the person's, so the digest goes through
+Part `front_digest` - the digest a pane is handed when it comes back ("N queued earlier", inbox.take and push.flush): a front agent's turn starts only for what is the person's, so the digest goes through
 front_turn.warranted (messaging.digest_fyi). Fixture data, no live store, no network, never a real pane.
 
 Fixture: projects/alpha (a front agent, home-front, and a builder, team-back); items 30 (the builder's) and 31 (home-front is in its `tell_him`: he asked it to tell him about it); home-lone, a front agent whose hook
 cannot fetch held lines.
 
   1  no line carries his mark and he is away: no delivery, the lines are removed from the inbox and filed as fyi lines (one each), the board line is written on the item a line names
-  2  the same without the server's hook (`digest` not given): one delivery, "N queued while you were away", the lines stay leased: nothing changes for a caller that has no hook
+  2  the same without the server's hook (`digest` not given): one delivery, "N queued earlier", the lines stay leased: nothing changes for a caller that has no hook
   3  a line carries his mark: a turn while he is talking with that agent now, an fyi while he is not
   4  no line carries his mark and he is there: still an fyi (presence alone is not a need); a line about an item he asked the agent to tell him about is a turn, there or not
   5  what is never filed: the digest of a background agent, of a front agent whose hook cannot fetch held lines, a single line, a hook that fails: handed out as before, no line lost
@@ -712,12 +712,12 @@ def part_front_digest():
     # ---- 2. no hook given: as before
     reset(); ids = put("home-front", *PLAIN)
     tk = take("home-front", digest=None)
-    check("2 without the server's hook: one delivery of the whole digest, as it always was", len(tk) == 1 and tk[0]["text"].startswith("[stackshot] 3 queued while you were away:\n") and tk[0]["ids"] == ids and held.count("home-front") == 0, tk)
+    check("2 without the server's hook: one delivery of the whole digest, as it always was", len(tk) == 1 and tk[0]["text"].startswith("[stackshot] 3 queued earlier:\n") and tk[0]["ids"] == ids and held.count("home-front") == 0, tk)
 
     # ---- 3. a line carries his mark
     reset(); stamp("home-front"); put("home-front", PLAIN[0], f"{MARK} {shown(30)}: sign the form")
     tk = take("home-front")
-    check("3 a line carries his mark and he is talking with that agent now: a turn, the whole digest, nothing filed", len(tk) == 1 and tk[0]["text"].count("queued while you were away") == 1 and MARK in tk[0]["text"] and held.count("home-front") == 0, (tk, held.count("home-front")))
+    check("3 a line carries his mark and he is talking with that agent now: a turn, the whole digest, nothing filed", len(tk) == 1 and tk[0]["text"].count("queued earlier") == 1 and MARK in tk[0]["text"] and held.count("home-front") == 0, (tk, held.count("home-front")))
     reset(); put("home-front", PLAIN[0], f"{MARK} {shown(30)}: sign the form")
     tk = take("home-front")
     check("3 …the same digest while he is away: no turn, both lines filed as fyi lines (the marked one too), none lost", tk == [] and held.count("home-front") == 2 and "sign the form" in held_text() and inbox.waiting() == {}, (tk, held.count("home-front"), inbox.waiting()))
@@ -737,7 +737,7 @@ def part_front_digest():
     # ---- 5. what is never filed
     reset(); put("team-back", *PLAIN)
     tk = take("team-back")
-    check("5 a background agent's digest is handed out as before (the rule is for a front agent's turn)", len(tk) == 1 and tk[0]["text"].count("queued while you were away") == 1 and held.count("team-back") == 0, (tk, held.count("team-back")))
+    check("5 a background agent's digest is handed out as before (the rule is for a front agent's turn)", len(tk) == 1 and tk[0]["text"].count("queued earlier") == 1 and held.count("team-back") == 0, (tk, held.count("team-back")))
     reset(); put("home-lone", *PLAIN)
     tk = take("home-lone")
     check("5 a front agent whose hook cannot fetch held lines gets the digest as a turn: nothing would carry the lines, none is lost", len(tk) == 1 and held.count("home-lone") == 0 and len(tk[0]["ids"]) == 3, (tk, held.count("home-lone")))
@@ -857,7 +857,7 @@ def part_front_digest():
     telling.front_fyi = fyi_failing_at(2)
     try: tk = take("home-front")
     finally: telling.front_fyi = real_fyi
-    check("9 filing line 3 fails: lines 1 and 2 are filed, the third goes out alone as itself (no digest header)", len(tk) == 1 and tk[0]["ids"] == ids[2:] and tk[0]["text"].startswith("from: home-peer") and "queued while you were away" not in tk[0]["text"] and held.count("home-front") == 2, (tk, held.count("home-front")))
+    check("9 filing line 3 fails: lines 1 and 2 are filed, the third goes out alone as itself (no digest header)", len(tk) == 1 and tk[0]["ids"] == ids[2:] and tk[0]["text"].startswith("from: home-peer") and "queued earlier" not in tk[0]["text"] and held.count("home-front") == 2, (tk, held.count("home-front")))
     # push.flush: the same
     reset(); queue("home-front", *LINES)
     telling.front_fyi = fyi_failing_at(1)
