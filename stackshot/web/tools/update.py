@@ -8,7 +8,7 @@ from pydantic import Field
 
 from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
-from stackshot.model import ask_leaves as _askl, model as _model, states as _states, work as _work
+from stackshot.model import ask_leaves as _askl, model as _model, states as _states, step_split as _step_split, work as _work
 from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.service import gates as _gates, wait_fixes as _wait_fixes, writes as _writes
 from stackshot.service.store import _load
@@ -27,7 +27,7 @@ _busy_live = None      # set by register: the server's proof of what of a mover'
 _OPEN_ITEMS = [OWNER, *_ALIASES[:1], "you"]
 _OPEN_LIST = ", ".join(f"{i}:" for i in _OPEN_ITEMS[:-1]) + f" or {_OPEN_ITEMS[-1]}:"
 _T = load_text("update", {
-    "OPEN_LIST": _OPEN_LIST, "WORK_TEXT_MAX": str(_work.TEXT_MAX), "STATE_LINE_MAX": str(_states.LINE_MAX), "P_PLACE_STEP": _P_PLACE_STEP, "P_OLD": _P_OLD,
+    "OPEN_LIST": _OPEN_LIST, "WORK_TEXT_MAX": str(_work.TEXT_MAX), "STATE_LINE_MAX": str(_states.LINE_MAX), "STEP_SPLIT_OVER": str(_step_split.SPLIT_OVER), "STEP_SUMMARY_MAX": str(_step_split.SUMMARY_MAX), "P_PLACE_STEP": _P_PLACE_STEP, "P_OLD": _P_OLD,
     "P_BARE": _P_BARE, "P_EX2": _P_EX2, "BASIS_MAX_WAKE_DAYS": str(_wt.BASIS_MAX_WAKE_DAYS), "TZ_ABBR": str(_cfg.tz_abbr()), "WHEN_IDLE": str(_when_idle()),
     "FLEET_TOOL": str(_fleet_tool())})
 

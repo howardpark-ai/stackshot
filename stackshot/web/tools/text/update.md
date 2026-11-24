@@ -58,7 +58,11 @@ count); or, if the item now waits, park it (hold=true, wake, wait_basis) or use 
 it and handing the item on are not renewals. On a parked item give a new wait_basis; an item on his
 decision cannot be parked. Take a wake from the wait's real schedule (a timer, watch tick, catch-up run) or
 check it live, never a guessed round time. step=<one line> sets the item in his step and makes him the mover (then, or
-the agent that had it, takes it after his Done); step="none" withdraws it; supplies=<one line: what the item it waits
+the agent that had it, takes it after his Done); step is a short summary, and a long one is put right for you: a step over
+{{STEP_SPLIT_OVER}} characters with several actions (sentences, semicolons, `1) … 2) …`) is split into a summary of at most {{STEP_SUMMARY_MAX}}
+characters and one line of next per action that opens with `{{OWNER}}:`, which the board draws as his list (the reply says
+so, no word is lost; send the summary and the lines yourself to choose the words); a long `{{OWNER}}:` line of next with
+several actions is split the same way; step="none" withdraws it; supplies=<one line: what the item it waits
 after gives this one>, with after=["board#N"], sets the item blocked on that item. Each is refused without what it
 needs, with what to add; a close drops both. Checks: a next that opens with {{OPEN_LIST}} under an agent's state is
 noted; the third bare re-park in a row is refused; a next may be marked stale; needs=decision again within 60 min of
@@ -73,8 +77,11 @@ step 1 finished: update(item_id="board#N", sender="my-x", done=[1], next="my-x: 
 step 2 is written again as it stands). An update that replaces or removes (next="none") your lines of next and leaves
 one out unmarked keeps that step open as written and the reply names it (end it with done=[n] or dropped=[n]); another session's lines are never touched by your next. Parameter reword (map, position or
 first-line text → new text) gives an open step of yours new words and keeps its number, place and open state (leave
-next out and the line is changed for you); a line reworded in next alone is a new step, and the old one stays open. A reword is the same action in other words, never the old text with progress added. Refused: a step of
-another session or of his, one already done or dropped, one also in done or dropped, a text of several steps or one
+next out and the line is changed for you); a line reworded in next alone is a new step, and the old one stays open. A reword is the same action in other words, never the old text with progress added. A reword of a step of his
+(a line opening with `{{OWNER}}:`) is done as drop plus add, and the reply says so: the old step is dropped and shows as
+dropped, and the new words are a new step at the end (a long text is split into one line per action, as for step=); a reword of the
+line the server made from step= is taken as the new step text, and one of the line made from an ask is refused with the field to change (ask=). Refused: a step of
+another session, one already done or dropped, one also in done or dropped, a text of several steps or one
 another open step reads; a different action is a new line of next. done and dropped mark any open step, whoever wrote
 it, except a step of his (a line opening with his name) while the item asks him: that one is ticked when he answers,
 and done on it is refused (dropped on it is undone while the item still asks him). The server makes his step itself:
@@ -92,7 +99,7 @@ the item to mark done.
 New words for open steps of your own next: a mapping from a step (1-based position, or the exact text of its first
 line, as done takes them) to its new text, e.g. {"3": "my-x: wait for the new build"}; the step keeps its number and
 stays open, and the new text is one step that opens with who takes it (the rules are under Parameter reword in the
-description).
+description). A step of his is reworded as drop plus add, and the reply says so.
 
 ## param WORK
 The status of your open step, one line per call: {"text": "PR 83 up", "state": "in progress"}. It replaces the status

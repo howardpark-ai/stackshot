@@ -235,6 +235,8 @@ def create_item(
         fc.skip("the check that the description opens with its goal", "it reads the first bullet, which the faults of the description's form above leave unread")
     elif goal_judged and (f_ := _fg.goal_fault(description)):
         fc.add(f_, text=True)
+    if next.strip() and _writes.session_next():
+        next = _fg.fix_long_owner_lines(next, set())       # a line of his that runs long with several actions: one line per action (the reply says so)
     for f_ in _fg.next_faults(next, has_ask=bool(ask.strip()) and ask.strip().lower() not in h.ask_none, session=_writes.session_next()):
         fc.add(f_, text=True)
     ask = "" if ask.strip().lower() in h.ask_none else ask

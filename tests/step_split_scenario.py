@@ -1,0 +1,245 @@
+"""Scenario test for a long step of the owner's put into the shape the board draws, and for a reword of his step done as drop plus add — fixture data, the tools called in-process, no live store, no network.
+
+Covers: step_split (the pure part): a step of about 280 characters with seven actions written as a chain of sentences comes out as a summary of at most 90 characters (the first action and `(+6 more)`) and seven lines that
+open with his name, each within the line limit, every word of the original in them, and the same again from the output (idempotent); a short step, one action, a numbered step and a step with a fenced block are left as they
+are; an inline numbered list (`1) … 2) …`) is cut at its items; a clause over the line limit on its own is cut at a comma and every word stays; nothing is cut inside a code span or after an abbreviation.
+Through update: step=<the long text> stores the summary as the step (your-step) and adds the seven lines to next, written by the sender, beside the server's own line for the summary, and the reply says "split into a summary and 7
+lines"; the board's list for his step (render.your_steps) holds the seven actions; sent again, the same text changes nothing and adds no second set; a short step is untouched and says nothing; a long line of his in next
+(`<owner>: …` with several actions) is split into one line per action and the reply says so, while a line that is an open step already, a line of another actor and one whole command in backticks are left as they are; a create
+with a long line of his splits it. A reword of one of his lines (a line a session wrote) is done as drop plus add, whoever wrote it: the old line shows as dropped, the new words are an open line at the end, the reply says so,
+and a reword whose new words are long and carry several actions splits them as well; a reword of the line the server keeps from step= is the new step text (the line is made again and the old one dropped); a reword of the line the server
+keeps from an ask is refused, naming the ask; done and dropped keep their rules for his step (done is refused); a reword of a session's own line (not his) keeps its rules (another session's line, old words with progress added).
+
+    tests/run-suite step_split        → exit 0 / 1"""
+import json, logging, os, pathlib, re, subprocess, sys, time
+
+SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
+import _scratch, _instance
+tmp = _scratch.mkdtemp(prefix="stepsplittest-"); T = pathlib.Path(tmp)
+BOARD = "https://board.example.org"
+
+
+def write_toml():
+    toml = _instance.apply(_instance.base_toml())
+    toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's session store (session links off)
+    for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
+                     ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
+        toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
+    for pat, rep in ((r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]'), (r'(?m)^board_url = "[^"]*"', f'board_url = "{BOARD}"'),
+                     (r'(?m)^base_url = "[^"]*"', f'base_url = "{BOARD}"'), (r'(?m)^owner = "the owner"', 'owner = "Oliver"'),
+                     (r'(?m)^ui_open = true', 'ui_open = false'), (r'(?m)^sync = false', 'sync = true'), (r'(?m)^issues_repo = ""', 'issues_repo = "o/r"'),
+                     (r'(?m)^api_url = "[^"]*"', 'api_url = "http://127.0.0.1:9"'), (r'(?m)^token_file = ""', f'token_file = "{tmp}/github.token"')):
+        toml, n = re.subn(pat, rep, toml); assert n == 1, pat
+    (T / "stackshot.toml").write_text(toml, encoding="utf-8")
+
+
+write_toml()
+(T / "github.token").write_text("test-token\n")
+(T / "RULES.md").write_text("# rules\n\n" + "- a rule the connector serves, long enough to count as a rulebook.\n" * 20, encoding="utf-8")
+os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
+for d in ("store/a", "fleet/a", "brain/projects", "secrets"): (T / d).mkdir(parents=True)
+OWNER = "00000000-0000-4000-8000-000000000001"
+AGENT = "00000000-0000-4000-8000-000000000002"
+OTHER = "00000000-0000-4000-8000-000000000003"
+now = time.time()
+(T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
+(T / "fleet/a/sessions.json").write_text(json.dumps({OWNER: {"name": "home-here", "machine": "a", "seen": now}, AGENT: {"name": "home-agent", "machine": "a", "seen": now}, OTHER: {"name": "home-other", "machine": "a", "seen": now}}))
+(T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project",
+                                                                                "session": "home-agent", "status": "active", "board": [], "board_open": 0}}}))
+DESC = "- Goal: A thing, finished when it works"
+ASK = "Decide: whether to ship it now · Recommend: ship · Stakes: a day either way · By: no date"
+OPTS = [{"label": "Wait", "line": "Wait for the next release", "recommended": False}, {"label": "Ship", "line": "Ship it now as it is", "recommended": True}]
+def item(i, status="open", **meta):
+    (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item a{i}", "description": DESC, "status": status,
+                                                     "updated": now - 3600, "state_updated": now - 3600, "confirmed": now - 3600,
+                                                     "metadata": {"owner": OWNER, "project": "projects/alpha", "needs": ["home-agent"], "next": "home-agent: build it", **meta}}))
+for i in range(1, 40):
+    item(i)                                                       # items in the agent's hands
+(T / "store/next-id").write_text("60"); (T / "store/anchors.json").write_text("{}")
+(T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
+git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
+git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
+sys.path.insert(0, STACK); logging.disable(logging.INFO)
+fails = []; ran = []
+def check(name, cond, got=None):
+    ran.append(name)
+    if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
+def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
+def mt(i): return rd(i)["metadata"]
+
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import owner_steps as HS
+from stackshot.model import step_split as SS
+from stackshot.model import states as ST
+from stackshot.core import call_log as _CL
+from stackshot.core import config as _cfg
+from stackshot.anchors.anchorhub import core
+os.makedirs(core.ADIR, exist_ok=True)       # the hub's state folder, named by the code's own constant
+from fastmcp.exceptions import ToolError
+from stackshot.web import publish as _web_publish
+from stackshot.web import page_debts as _web_page_debts
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import update as _wt_update
+from stackshot.web.ui import render as ui_render
+from stackshot.service import store as _service_store
+from stackshot.service import telling
+_web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+told = []
+telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
+def refused(name, f, *want, i=None):
+    was = rd(i) if i is not None else None
+    try:
+        out = f(); check(name, False, out)
+    except ToolError as e:
+        check(name, all(w in str(e) for w in want) and (was is None or rd(i) == was), str(e))
+def send(call):
+    """(the reply or the refusal, the fixes the call noted as (kind, line))."""
+    tok = _CL.begin()
+    try: out = call()
+    except ToolError as e: out = e
+    finally: fx = _CL.end(tok)
+    return out, fx
+def upd(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-agent", **kw)
+def upo(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-other", **kw)
+def st(i): return [(x["status"], x["text"]) for x in S.view(mt(i), keeper=OWNER)]
+def his(i): return [(s, t) for s, t in st(i) if t.startswith("Oliver:")]
+def his_open(i): return [t for s, t in his(i) if s == "open"]
+def words(t): return re.findall(r"\w+", t)
+OPEN = lambda t: ("open", t)
+
+# seven actions, written as a chain of sentences: choose among models, compare sellers, pay, get a kit, open a link, meet a deadline, report back (neutral words)
+ACTS = ["Choose one of the three models listed on the item", "Compare the sellers of that model and note the best price", "Pay for it by card", "Order the starter kit from that seller",
+        "Open the setup link that comes with the kit", "Finish the setup before the end of the month", "Tell the session how it went"]
+LONG = ". ".join(ACTS) + "."
+LINE_ROOM = 200
+
+# ---- 1. the pure part
+check("the fixture is the shape of the case: one line of about 280 characters, seven actions", 250 <= len(LONG) <= 300, len(LONG))
+got = SS.split_step(LONG, LINE_ROOM)
+check("1 a chain of seven sentences splits into a summary and seven lines", got is not None and len(got[1]) == 7, got)
+summary, lines = got
+check("1 …the summary is the first action and the count of the rest, within 90 characters, and is no copy of the first line",
+      summary == f"{ACTS[0]} (+6 more)" and len(summary) <= SS.SUMMARY_MAX and summary != lines[0], summary)
+check("1 …each line opens with his name and holds one action, each within the line limit", lines == [f"Oliver: {a}" for a in ACTS] and all(len(x) <= LINE_ROOM + 20 for x in lines), lines)
+check("1 …every word of the original is in the lines, in order (the full stops are all that is gone)", words(LONG) == words(" ".join(S.without_owner(x) for x in lines)), (words(LONG), lines))
+again = SS.split_step(summary, LINE_ROOM)
+check("1 …idempotent: the summary and each line, fed back, split no further", again is None and all(SS.split_line(x, LINE_ROOM) is None for x in lines), (again, lines))
+check("1 a step of 110 characters or fewer is left as written, however many actions", SS.split_step("Do one thing. Do another. And a third.", LINE_ROOM) is None)
+check("1 one action in more than 110 characters is left as written (no sentence end to cut at)", SS.split_step("Open the page " + "and then keep going with the next part of it, " * 3 + "until it is over", LINE_ROOM) is None)
+NUM = "1. Choose one of the three models listed on the item\n2. Compare the sellers of that model and note the best price\n3. Pay for it by card, then order the starter kit from the same seller and finish the setup"
+check("1 a numbered step (the writer's own structure) is kept as it is", SS.split_step(NUM, LINE_ROOM) is None and SS.actions(NUM, LINE_ROOM) == [])
+check("1 a step with a fenced block is kept as it is", SS.split_step("Run this and read the output.\n```\nls -l\n```\nThen tell the session what it printed, and open the link in the kit leaflet. " * 2, LINE_ROOM) is None)
+INL = "Do these in order: 1) choose one of the three models listed on the item 2) compare the sellers of that model and note the best price 3) pay for it by card and order the starter kit from the same seller"
+inl = SS.actions(INL, LINE_ROOM)
+check("1 inline numbered items are cut at their items (the numbers are the list's own), the words before them kept as a first action", inl[0] == "Do these in order:" and len(inl) == 4 and inl[1].startswith("choose one of the three models"), inl)
+CODE = "Run `ls -l. then cd ..` in the box terminal. Read what it prints, e.g. the file names, and tell the session whether the new build is there, as soon as the box answers at all"
+cd = SS.actions(CODE, LINE_ROOM)
+check("1 nothing is cut inside a code span or after an abbreviation (e.g.)", len(cd) == 2 and cd[0] == "Run `ls -l. then cd ..` in the box terminal" and cd[1].startswith("Read what it prints, e.g. the file names"), cd)
+BIG = ("First choose a model from the list on the item, and compare what each seller says about it on their own pages, and write down the price and the delivery time for each of them, "
+       "then pay for the one you picked with a card that works abroad. Second tell the session what you paid.")
+bg = SS.actions(BIG, 100)
+check("1 a clause over the line limit on its own is cut at a comma, every word kept and every piece within the limit", len(bg) >= 4 and all(len(x) <= 100 for x in bg) and words(BIG) == words(" ".join(bg)), bg)
+check("1 one long sentence is one action: it is left as written, never cut mid-sentence", SS.actions("please read this and decide " * 10, LINE_ROOM) == [] and SS.actions(BIG.split(". ")[0], 100) == [], None)
+check("1 the summary of a long first action is cut at a word, with the count, within 90 characters", len(SS.summary_of("word " * 40, 6)) <= 90 and SS.summary_of("word " * 40, 6).endswith(" (+6 more)"), SS.summary_of("word " * 40, 6))
+
+# ---- 2. step= through update
+r, fx = send(lambda: upd(1, step=LONG))
+check("2 step= with the long chain is not refused", not isinstance(r, ToolError), r)
+check("2 …the stored step is the summary, the item reads your-step", mt(1).get("step") == summary and mt(1).get("state") == "your-step", mt(1))
+check("2 …the seven actions are open lines of next that open with his name, written by the sender, after its own line",
+      [t for t in mt(1)["next"].splitlines() if t.startswith("Oliver:") and t != f"Oliver: {summary}"] == lines and mt(1)["next"].splitlines()[0] == "home-agent: build it", mt(1)["next"])
+check("2 …and the server's own line for the summary stands beside them (his step), recorded as the server's", his_open(1)[-1] == f"Oliver: {summary}" or f"Oliver: {summary}" in his_open(1), his(1))
+wr = dict(NL.resolve(mt(1), OWNER))
+check("2 …the lines are the sender's, none of them is the server's", all(wr.get(x) == AGENT for x in lines), wr)
+check("2 …the reply says what was done in one line: split into a summary and 7 lines", [k for k, _ in fx] == ["step-split"] and "split into a summary and 7 lines" in fx[0][1], fx)
+bd = ui_render.Board(str(T / "store"))
+shown = [first for first, _rest in bd.your_steps(bd.item("a1"))]
+check("2 …the board's list for his step is the seven actions, in order (the summary stays in the title)", shown == ACTS, shown)
+r, fx = send(lambda: upd(1, step=LONG))
+check("2 the same long step sent again changes nothing: no second set of lines, the summary's line not doubled", not isinstance(r, ToolError) and mt(1)["next"].count("Oliver:") == 8 and [k for k, _ in fx] in (["step-split"], []), (r, fx, mt(1)["next"]))
+check("2 …(sent again, its next stays the same text)", mt(1)["next"].count("Oliver: " + ACTS[3]) == 1, mt(1)["next"])
+r, fx = send(lambda: upd(2, step="check that the box answers and say so"))
+check("2 a short step is untouched: stored as written, no line added, no fix", mt(2).get("step") == "check that the box answers and say so" and mt(2)["next"].count("Oliver:") == 1 and not fx, (mt(2), fx))
+r, fx = send(lambda: upd(3, step=NUM))
+check("2 a numbered step is stored as written, with no fix", mt(3).get("step") == NUM and not fx, (mt(3).get("step"), fx))
+r, fx = send(lambda: upd(4, step=summary, next=f"home-agent: build it\n" + "\n".join(lines)))
+check("2 a step the writer already split (a summary and its lines in next) is stored as written, no fix, the lines once", mt(4).get("step") == summary and mt(4)["next"].count("Oliver:") == 8 and not fx, (mt(4)["next"], fx))
+r, fx = send(lambda: upd(5, step=LONG, next="home-agent: build it\nhome-agent: test it"))
+check("2 a long step beside a next of the writer's: the lines join that next, after the writer's own lines", mt(5)["next"].splitlines()[:2] == ["home-agent: build it", "home-agent: test it"] and [t for t in mt(5)["next"].splitlines() if t in lines] == lines, (r, mt(5)["next"]))
+r, fx = send(lambda: upd(6, step=LONG, clear_next=True))
+check("2 clear_next beside a long step: the old lines go (dropped), the split lines are the item's next", mt(6)["next"].count("home-agent:") == 0 and all(x in mt(6)["next"].splitlines() for x in lines), (r, mt(6)["next"]))
+check("2 the item's History says the step was split", "split by the server into a summary and 7 lines" in json.dumps(rd(1)), None)
+
+# ---- 3. long lines of his in next
+LONGLINE = "Oliver: " + LONG
+r, fx = send(lambda: upd(7, next="home-agent: build it\n" + LONGLINE))
+check("3 a long line of his in next with seven actions is stored as seven lines, one per action, the other lines as they were",
+      mt(7)["next"].splitlines() == ["home-agent: build it", *lines], (r, mt(7)["next"]))
+check("3 …and the reply says so", [k for k, _ in fx] == ["step-split"] and "split into 7 lines" in fx[0][1], fx)
+r, fx = send(lambda: upd(7, next="home-agent: build it\n" + "\n".join(lines)))
+check("3 the lines fed back change nothing, no fix", mt(7)["next"].splitlines() == ["home-agent: build it", *lines] and not fx, (mt(7)["next"], fx))
+r, fx = send(lambda: upd(8, next="home-agent: build it. Then test it after that and open the pull request once it is green. Then wait for the review and fix what comes back of it"))
+check("3 a long line of the agent's own (not his) is not split here: the next-line rules judge it as before (stored as one line, or refused whole)", not [k for k, _ in fx if k == "step-split"] and (isinstance(r, ToolError) or mt(8)["next"].count("\n") == 0), (r, fx, mt(8)["next"]))
+CMDLINE = "Oliver: `for p in a b; do echo $p; done`"
+r, fx = send(lambda: upd(9, next=f"home-agent: build it\n{CMDLINE}"))
+check("3 a line that is one whole command in backticks is left as it is", f"{CMDLINE}" in mt(9)["next"].splitlines() and not fx, (r, fx))
+r = _wt_create.stackshot_create(subject="[home] do the thing", description=DESC, project="projects/alpha", needs="home-agent", next="home-agent: build it\n" + LONGLINE, sender="home-agent")
+cid = re.match(r"created (\S+)", r).group(1)
+cm = _service_store._load(cid)["metadata"]
+check("3 a create with a long line of his: stored as seven lines, one per action", cm["next"].splitlines() == ["home-agent: build it", *lines], (r, cm["next"]))
+
+# ---- 4. a reword of his step is drop plus add
+item(10, next="home-agent: build it\nOliver: look at the page first\nhome-agent: verify it")
+r, fx = send(lambda: upd(10, reword={2: "Oliver: look at the page and the logs first"}))
+check("4 a reword of a line of his is not refused", not isinstance(r, ToolError), r)
+check("4 …the old line shows as dropped (by the sender) and the new words are an open line at the end",
+      st(10) == [OPEN("home-agent: build it"), ("dropped", "Oliver: look at the page first"), OPEN("home-agent: verify it"), OPEN("Oliver: look at the page and the logs first")], st(10))
+check("4 …next holds the open lines, the new words last", mt(10)["next"].splitlines() == ["home-agent: build it", "home-agent: verify it", "Oliver: look at the page and the logs first"], mt(10)["next"])
+check("4 …the reply says it was done as drop plus add", [k for k, _ in fx] == ["step-reworded"] and "drop plus add" in fx[0][1] and "dropped" in str(r), (fx, r))
+check("4 …the reply carries the dropped step's line too", "(step 2 dropped: Oliver: look at the page first)" in str(r), r)
+item(11, next="home-agent: build it\nOliver: look at the page first")
+(T / "store/a/11.json").write_text(json.dumps({**rd(11), "metadata": {**mt(11), "next_by": [[AGENT, NL.key_of("home-agent: build it")], [OTHER, NL.key_of("Oliver: look at the page first")]]}}))
+r, fx = send(lambda: upd(11, reword={"Oliver: look at the page first": "Oliver: look at the logs first"}))
+check("4 a line of his that another session wrote is reworded the same way (it is dropped and added, as dropped=[n] and a new line would)", not isinstance(r, ToolError) and his(11) == [("dropped", "Oliver: look at the page first"), OPEN("Oliver: look at the logs first")], (r, st(11)))
+item(12, next="home-agent: build it\nOliver: look at the page first")
+r, fx = send(lambda: upd(12, reword={2: "Oliver: look at the page first and then tell the session what you saw there"}))
+check("4 new words that are the old words with more added are no refusal for his line: drop plus add", not isinstance(r, ToolError) and his(12)[0] == ("dropped", "Oliver: look at the page first") and len(his_open(12)) == 1, (r, st(12)))
+item(13, next="home-agent: build it\nOliver: look at the page first")
+r, fx = send(lambda: upd(13, reword={2: "Oliver: " + LONG}))
+check("4 new words that carry seven actions are split into seven lines (drop plus add, then the split)", not isinstance(r, ToolError) and his(13)[0] == ("dropped", "Oliver: look at the page first") and his_open(13) == lines, (r, st(13)))
+check("4 …and the reply says the split and the drop plus add", {k for k, _ in fx} == {"step-split", "step-reworded"}, fx)
+item(14, next="home-agent: build it\nOliver: look at the page first")
+r, fx = send(lambda: upd(14, reword={2: "home-other: look at the page first"}))
+check("4 a reword that gives his line to a session is a hand-on like any new line for that session: the hand-on check still asks for what closes the item, and nothing is written", isinstance(r, ToolError) and "hands a14 to home-other" in str(r) and st(14)[1] == OPEN("Oliver: look at the page first"), (r, st(14)))
+item(15, next="home-agent: build it\nOliver: look at the page first")
+upd(15, step="check the box")
+refused("4 done on the line of his that the server keeps stays refused (only his answer ticks it)", lambda: upd(15, done=["Oliver: check the box"]), "Oliver's", i=15)
+r, fx = send(lambda: upd(15, reword={2: "Oliver: look at the page first"}))
+check("4 a reword to the very words it has changes nothing and says nothing", not isinstance(r, ToolError) and not fx and st(15)[1] == OPEN("Oliver: look at the page first"), (r, fx, st(15)))
+
+# the line the server keeps from step=
+r = upd(16, step="check that the box answers and say so")
+rec = HS.recorded(mt(16))
+check("4 the server's own step line is recorded (the fixture of the next checks)", rec == "Oliver: check that the box answers and say so", rec)
+r, fx = send(lambda: upd(16, reword={"Oliver: check that the box answers and say so": "Oliver: check that the box answers on its own address"}))
+check("4 a reword of the line the server keeps from step= is the new step text: the step reads the new words", not isinstance(r, ToolError) and mt(16).get("step") == "check that the box answers on its own address", (r, mt(16)))
+check("4 …the old line shows as dropped, the new line is open and recorded as the server's, and the reply says it was done as a new step text",
+      ("dropped", "Oliver: check that the box answers and say so") in his(16) and OPEN("Oliver: check that the box answers on its own address") in his(16) and HS.recorded(mt(16)) == "Oliver: check that the box answers on its own address"
+      and [k for k, _ in fx] == ["step-reworded"] and "new step text" in fx[0][1], (st(16), fx))
+r, fx = send(lambda: upd(17, step="check that the box answers and say so"))
+r, fx = send(lambda: upd(17, reword={2: "Oliver: " + LONG}))
+check("4 …a long new text for the server's own line is split like a long step: the step is the summary, the seven actions are lines", not isinstance(r, ToolError) and mt(17).get("step") == summary and all(x in his_open(17) for x in lines), (r, mt(17)))
+upd(18, step="check that the box answers and say so")
+r, fx = send(lambda: upd(18, step="check that the box answers at all", reword={2: "Oliver: other words"}))
+check("4 …a reword beside a step= in one call is refused (two new texts for one step), naming step=", isinstance(r, ToolError) and "step=" in str(r) and mt(18).get("step") == "check that the box answers and say so", r)
+item(19, needs=["decision", "home-agent"], ask=ASK, options=OPTS, next="home-agent: build it")
+upd(19, description=DESC + "\n- more")
+refused("4 a reword of the line the server keeps from an ask is refused, and the refusal names the ask", lambda: upd(19, reword={"Oliver: whether to ship it now": "Oliver: whether to ship it later"}), "own step", "ask=", i=19)
+item(20, next="home-agent: build it\nhome-other: second")
+(T / "store/a/20.json").write_text(json.dumps({**rd(20), "metadata": {**mt(20), "next_by": [[AGENT, NL.key_of("home-agent: build it")], [OTHER, NL.key_of("home-other: second")]]}}))
+refused("4 a reword of another session's line (not his) keeps its refusal", lambda: upd(20, reword={2: "home-other: second, later"}), "reword: step 2 is a line of", "only the session that wrote a step rewords it", i=20)
+item(21, next="home-agent: build it")
+(T / "store/a/21.json").write_text(json.dumps({**rd(21), "metadata": {**mt(21), "next_by": [[AGENT, NL.key_of("home-agent: build it")]]}}))
+refused("4 a reword of a session's own line to its old words with progress added keeps its refusal", lambda: upd(21, reword={1: "home-agent: build it, and it passed on the box"}), "old text with words added", i=21)
+
+print(("ok" if not fails else "FAILED") + f": step_split scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
