@@ -6,8 +6,9 @@ gmail:q: query (optionally scoped to mailboxes: gmail:q@<mailbox>:; its terms: g
 for a scoped item from whichever project's page holds it (anchor_scope.py is the one reader of that: the server, the board and the model guards use it).
 Sessions are derived, never stored on the anchor: the project's name-line session (the page's `display-name:`; pages.py reads it with
 `agent:` and the older `session:` into the registry's `session`) plus the movers of the open items in scope. Completing
-an item changes that set and prompts the keeper about the anchors scoped to it;
-nothing is dropped by a completion.
+an item changes that set, and an anchor scoped to items with none of them open any more is removed (anchor_sweep.py, which also ends
+the anchors of merged or closed GitHub issues and pull requests after 14 days without activity, of archived or deleted repositories and of
+closed or archived pages: each removal is logged with the call that puts it back).
 
 Store: board-data/anchors.json  {"<project key>": [{"url": …, "items": [ids] | null, "added": ts, "by": who}, …]},
 written only by the stackshot server (this module), read by anchor-hub (bindings) and the board (render).
@@ -40,6 +41,7 @@ from stackshot.projects import keeper as _kp  # noqa: E402  (the keeper as a mar
 from stackshot.projects import keeper_reads as _reads  # noqa: E402  (the count of reads that still answer from an old keeper form)
 from stackshot.model import item_project as _iproj  # noqa: E402  (an item's project by its permanent id: the page key it reads through the id)
 from stackshot.core import readonly as _ro  # noqa: E402  (a warm standby copy writes nothing)
+from stackshot.core import xlock as _xlock  # noqa: E402  (the lock that keeps a second process's read-change-save of the store apart from this one's)
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  (the permanent session ids; every lookup is None while there is no registry)
 
 STORE = _cfg.path("paths", "store")
@@ -301,6 +303,9 @@ def split_fragment(url: str) -> tuple[str, str]:
 
 
 # ---------- store ----------
+LOCK = _xlock.XLock("anchors")      # every read-change-save of anchors.json holds it, in the server (the anchors tool, an anchor wait, the sweep) and in `stackshot minute` (the sweep's tick): a thread lock with a flock behind it (core/xlock.py). Taken after the item lock where both are held, and never held across a publish
+
+
 def load() -> dict[str, list[dict[str, Any]]]:
     try:
         d = json.load(open(FILE, encoding="utf-8"))
@@ -343,22 +348,31 @@ def registry() -> dict[str, dict[str, Any]]:
         return {}
 
 
-def items() -> list[dict[str, Any]]:
-    """Every board item with its gid (letter + id) — open and completed."""
-    out = []
+def items_read() -> tuple[list[dict[str, Any]], list[str]]:
+    """(every board item with its gid (letter + id), open and completed; the item files that could not be read or parsed, each as `<letter>/<file>`). `items()` is the first part alone: a caller that must know an
+    item was left out (the anchor sweep, which would otherwise take an unreadable item's wait for no wait) asks for both."""
+    out: list[dict[str, Any]] = []
+    failed: list[str] = []
     for f in glob.glob(str(STORE / "?" / "*.json")):
         name = os.path.basename(f)
         if name in ("machine.json", "sessions.json"):
             continue
         try:
-            t = json.load(open(f, encoding="utf-8"))
+            with open(f, encoding="utf-8") as fh:
+                t = json.load(fh)
         except Exception:
+            failed.append(f"{os.path.basename(os.path.dirname(f))}/{name}")
             continue
         if not isinstance(t, dict) or "id" not in t:
             continue
         t["gid"] = f"{os.path.basename(os.path.dirname(f))}{t['id']}"
         out.append(t)
-    return out
+    return out, sorted(failed)
+
+
+def items() -> list[dict[str, Any]]:
+    """Every board item with its gid (letter + id) — open and completed. An item file that cannot be read is left out (`items_read` names those)."""
+    return items_read()[0]
 
 
 def mover_of(t: dict[str, Any]) -> str:
@@ -910,7 +924,8 @@ def bindings(store: dict | None = None, all_items: list | None = None, reg: dict
 # ---------- edits (the server's tool) ----------
 def add(store: dict, project: str, urls: list[str], scope: list[str] | None, by: str) -> list[dict[str, Any]]:
     """Add URLs (or widen an existing anchor's scope: adding a URL already present with new items unions the items;
-    adding it project-wide makes it project-wide). Returns the project's list."""
+    adding it project-wide makes it project-wide). A URL that is already there is put on again, so its `added` time is now: the anchor sweep's quiet rule counts its 14 days from the later of the
+    issue's last activity and `added`, and an anchor someone has just added again must not go on the next tick. Returns the project's list."""
     lst = store.setdefault(project, [])
     now = time.time()
     for u in urls:
@@ -918,10 +933,12 @@ def add(store: dict, project: str, urls: list[str], scope: list[str] | None, by:
         cur = next((e for e in lst if e.get("url") == u), None) or next((e for e in lst if same_url_key(e.get("url", "")) == same_url_key(u)), None)   # [github.moved]: the old-name entry of the same PR is the one
         if cur is None:
             lst.append({"url": u, "items": sorted(set(scope)) if scope else None, "added": now, "by": by})
-        elif scope and cur.get("items") is not None:
-            cur["items"] = sorted(set(cur["items"]) | set(scope))
-        elif not scope:
-            cur["items"] = None
+        else:
+            if scope and cur.get("items") is not None:
+                cur["items"] = sorted(set(cur["items"]) | set(scope))
+            elif not scope:
+                cur["items"] = None
+            cur["added"] = now
     return lst
 
 

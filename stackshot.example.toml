@@ -299,7 +299,7 @@ process = "inline"                                  # "inline": a thread of the 
                                                     # read once at a start by the server and by `stackshot minute`; any other value reads as "inline". `./install.sh units` installs stackshot-minute.service only with "unit"
                                                     # (never on a standby, where one installed earlier is removed); back to "inline": run `./install.sh units` (it removes the unit) and restart the server
 
-[locks]                                             # the locks around the whole-file stores (the item, the For you and Landed lists, the held hand-back lines, the page-debt ledger, the pending answers, the machine anchors, the wake pass, the stall record); see docs/server-passes.md
+[locks]                                             # the locks around the whole-file stores (the item, the For you and Landed lists, the held hand-back lines, the page-debt ledger, the pending answers, the machine anchors, the anchors file, the wake pass, the stall record); see docs/server-passes.md
 cross_process = true                                # true: each is also a flock on <paths.state>/<name>.lock, so a second process that writes the same files takes turns with the server (about 10 microseconds a hold);
                                                     # false: a thread lock only, as before (the read-only standby never takes the flock either). Restart-only
                                                     # a lock file that cannot be had falls back to the thread lock and says so on stderr; with the environment variable STACKSHOT_XLOCK_STRICT=1 (what tests/run-suite sets) it raises instead,
@@ -517,6 +517,9 @@ sent_mail_watch = "off"                             # a step of the user's to se
 gmail_topics = {}                                   # per account: the Pub/Sub topic in its OAuth client's own Cloud project, "user@example.com" = "projects/<id>/topics/<name>"
 gmail_names = {}                                    # per mailbox, the short name a Gmail anchor scopes itself by: { work = "user@example.com" }; a mailbox with none is scoped by its address and not named in titles; names: letters, digits . _ -; a scope lists them comma-separated, no spaces
 google_oauth_envs = {}                              # stackshot/anchors/anchor_hub_google_auth.py: label → an oauth.env with GOOGLE_OAUTH_CLIENT_ID/SECRET, e.g. { team = "~/.config/example-google/oauth.env" }
+sweep_per_tick = 50                                 # stackshot/anchors/anchor_sweep.py: the most anchor entries one ten-minute tick removes when they have ended (an item scoped to them closed, a merged or closed
+                                                    # GitHub issue or pull request quiet for 14 days, an archived or deleted repository or issue, a closed or archived page); each removal still logs its restore call.
+                                                    # A larger backlog is spread over the next ticks. A whole number of 1 or more; anything else reads as 50. Read at each tick: a reload applies it
 require_sender = false                              # stackshot/fleet/push.py refuses a drop that names no sender (--from or $PUSH_FROM). false (the bridge
                                                     # while callers switch): it is labelled with the calling program's name instead
 
@@ -532,7 +535,8 @@ own_repos = []                                      # private repositories only;
 writer_owes_page = false                            # true = another session's board write is that writer's page update (its Current
                                                     # state; any page write for a next-only change or a park), never refused; still missing after
                                                     # [page_rule] grace_minutes it moves to the project's keeper with the board notice. A close of an item with
-                                                    # anchors scoped to it still tells the keeper, for the anchors. false = the keeper is charged and told at once
+                                                    # anchors scoped to it still sends the keeper that notice, which owes nothing for the anchors: the anchors the close ended
+                                                    # (none of their items open any more) are listed in the close's reply and logged on the routing log (anchors/anchor_sweep.py). false = the keeper is charged and told at once
 never_named = []                                    # background agents the server never names in an item's needs on its own (a handover message that
                                                     # names the item, or the agent's own update or close), for a mandate that never works items, e.g.
                                                     # ["my-audit"] (the daily board audit).

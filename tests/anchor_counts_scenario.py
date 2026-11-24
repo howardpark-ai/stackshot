@@ -5,7 +5,7 @@ Covers: an anchor on another project's page counts, and says which page holds it
 a [github.moved] rename of its repository) counts once, with every page in `pages`, the later `added` and the union of the item lists; an item with no anchor anywhere
 gets nothing; a project-wide anchor counts for no item (and `wide` lists the item's own project's); an anchor scoped to another item does not count; a hand-edited store
 (a page that is no list, an entry that is no dict, an items that is a number, an `added` that is no time, a url that is no string) steps over the junk; scoped_map reads
-the same rule for the whole board in one pass; completion_due asks each page about the anchors it holds; and the readers built on it agree: the server's `_scoped_anchors`
+the same rule for the whole board in one pass; and the readers built on it agree: the server's `_scoped_anchors`
 and the guard pass (model_guards.report) read an anchor held by another page, the migration planner's `scoped`, the board's `scoped_urls` and the hold reasons.
 
     tests/run-suite anchor_counts        → exit 0 / 1"""
@@ -79,14 +79,6 @@ sm = AS.scoped_map(store)
 check("scoped_map: every item's anchors from every page, each once, in the order added", sm == {"a1": [SOLO, DM], "b2": [DM, PR], "c3": [DM]}, sm)
 check("scoped_map agrees with anchor_scope for every item", all(sm[g] == urls(sorted(AS.anchor_scope(store, g), key=lambda e: e["added"] or 0)) or set(sm[g]) == set(urls(AS.anchor_scope(store, g))) for g in sm), sm)
 check("scoped_map: junk is stepped over", AS.scoped_map(junk) == {"a1": ["https://example.invalid/odd"]} and AS.scoped_map(None) == {}, AS.scoped_map(junk))
-
-# ---- a completion asks each page about its own
-items = [{"gid": g, "status": s} for g, s in (("a1", "completed"), ("b2", "open"), ("c3", "open"))]
-due = AS.completion_due(store, "a1", items)
-check("completion_due: an anchor whose other listed items are all closed is asked about, on the page that holds it; one with an open item left is not", [(p, e["url"]) for p, e in due] == [(A, SOLO)], due)
-items2 = [{"gid": g, "status": "completed"} for g in ("a1", "b2", "c3")]
-due2 = AS.completion_due(store, "b2", items2)
-check("completion_due: the same anchor on two pages is asked about on each (each page keeps its own)", [(p, e["url"]) for p, e in due2] == [(B, DM), (B, PR), (C, DM)], due2)
 
 # ---- the readers built on it
 from stackshot.web import server
@@ -225,19 +217,17 @@ rf = ANC.routes(fstore, items, REG["pages"]).get(ANC.anchor_id(URL_C)) or []
 check("...and for an anchor scoped to an item of another project alone, it is a project-wide notice to the keeper (as before), not 'for' that project's mover",
       len(rf) == 1 and rf[0]["session"] == "keep-gamma" and rf[0]["target"] == "project-wide", rf)
 
-# _completion_anchor_prompt (service/update.py): asks each page's keeper about the anchors it holds, the item's own project's page first; the completing keeper is not notified
-sent = []; telling.push_noted = lambda to, note: sent.append((to, note))
+# a close ends the anchors with no open item left in their scope, on every page that holds one (anchor_sweep.on_close, called by the close in service/update.py); each page's own routing log says so
+from stackshot.anchors import anchor_sweep as SW
+from stackshot.router import routing as _routing
 for g, p in (("20", C), ("21", C)): item2(g, p, status="completed", mover="keep-gamma")
-(T / "store/anchors.json").write_text(json.dumps({A: [{"url": SOLO, "items": ["a20"], "added": 1}], B: [{"url": URL_B, "items": ["a20", "a21"], "added": 2}], C: [{"url": URL_C, "items": ["a20"], "added": 3}]}))
-done = json.loads((T / "store/a/20.json").read_text()); done["gid"] = "a20"
-txt = __import__("stackshot.service.update", fromlist=["x"])._completion_anchor_prompt("a20", done)
-deadline = time.time() + 5
-while len(sent) < 2 and time.time() < deadline: time.sleep(0.05)
-pos = {p: txt.find(f"these {p} anchors") for p in (A, B, C)}
-check("completion: every page that holds an anchor scoped to the item is asked about, the item's own project's page first, then the others by key", all(v >= 0 for v in pos.values()) and pos[C] < pos[A] < pos[B], (pos, txt))
-check("...with its own anchors under each", f"- {SOLO}" in txt[pos[A]:pos[B]] and f"- {URL_B}" in txt[pos[B]:] and f"- {URL_C}" in txt[pos[C]:pos[A]] and f"anchors(project={B!r}, remove=[url])" in txt, txt)
-check("...each page's keeper is told, except the one that completed the item", sorted(t for t, _n in sent) == ["keep-alpha"] and "(keeper keep-alpha notified)" in txt and "keep-gamma notified" not in txt and "(keeper " not in txt[pos[B]:], (sent, txt))
-check("...the keeper is told which page's anchors they are", sent and f"{A} anchors scoped to it with no open item left: {SOLO}" in sent[0][1], sent)
+(T / "store/anchors.json").write_text(json.dumps({A: [{"url": SOLO, "items": ["a20"], "added": 1}], B: [{"url": URL_B, "items": ["a20", "a21"], "added": 2}], C: [{"url": URL_C, "items": ["a20"], "added": 3}, {"url": "https://example.invalid/cwide", "items": None, "added": 4}]}))
+txt = SW.on_close("a20")
+left = json.loads((T / "store/anchors.json").read_text())
+check("completion: every page that holds an anchor scoped to the closed items loses it, and each removed url is told in the close's lines", all(u in txt for u in (SOLO, URL_B, URL_C)), txt)
+check("...a project-wide anchor of the same page stays", left == {C: [{"url": "https://example.invalid/cwide", "items": None, "added": 4}]}, left)
+check("...each page's routing log holds one line with the call that puts the anchor back", all(any(f'add=["{u}"]' in (x.get("text") or "") and x.get("ruling") == "archived" for x in _routing.read(p)) for p, u in ((A, SOLO), (B, URL_B), (C, URL_C))),
+      [(p, _routing.read(p)) for p in (A, B, C)])
 
 print(("ok" if not fails else "FAILED") + f": anchor counts scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))
 sys.exit(1 if fails else 0)

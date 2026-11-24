@@ -186,6 +186,7 @@ check("ordinary project: the writer owes, nobody is told", list(owed.get("projec
 res = _update_svc._update("a2", priority="p1", sender="work-osprey-main"); check("a filing edit owes and relays nothing", "charged" not in res and "projects/alpha/sub" not in _web_page_debts._owed_load() and len(wait_push(1)) == 1, res)
 res = _update_svc._update("a2", status="completed", sender="work-osprey-main", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place"); p = wait_push(2)
 check("completion on a sub-page: charged to the root's keeper", list(_web_page_debts._owed_load().get("projects/alpha/sub", {})) == [S] and len(p) == 2 and "a2 completed (done) by work-osprey-main" in p[1][1], p)
+check("…and the anchor scoped to that item, with no open item left in its scope, ended with the close (the others stay)", "projects/alpha/sub" not in a.load() and len(a.load().get("projects/alpha", [])) == 2 and len(a.load().get("projects/beta", [])) == 1, a.load())
 
 # ---- 5. a message addressed to a project: the router rules it (every project since), so it is recorded and held, and delivered to no session here
 from stackshot.router import router_live as _rl
@@ -334,7 +335,7 @@ bd = ui_render.Board(f"{tmp}/store")
 # the watch state of a row: one word per row, the overlay's lines one detail per line
 w_, det = bd.watch("projects/alpha"); c = routing.counts(["projects/alpha", "projects/alpha/sub"])
 check("pilot watch: ok while its notices are fresh; one detail per line (the anchors, the notices of the day)",
-      w_ == "ok" and det[0] == "3 anchors watched" and re.fullmatch(r"\d+ notices? in the last 24 hours", det[1]) and len(det) == 2
+      w_ == "ok" and det[0] == "2 anchors watched" and re.fullmatch(r"\d+ notices? in the last 24 hours", det[1]) and len(det) == 2
       and c["pending"] > 0 and c["waiting"] == 0 and c["escalated"] == 0, (w_, det, c))
 later = ui_render.Board(f"{tmp}/store", now=bd.now + datetime.timedelta(minutes=61)); w_, det = later.watch("projects/alpha"); c2 = later.routing_counts("projects/alpha")
 check("…an hour later the notices still without a ruling turn it to waiting", c2["waiting"] == c["pending"] and w_ == "wait" and f'{c2["waiting"]} unruled past an hour' in det, (w_, det, c2))
@@ -363,7 +364,7 @@ del bd.proj["projects/alpha"]["agents"]
 html = bd.routing_html("projects/alpha")
 check("the page prints the type once, bold, and the title whole as the link — a title that itself opens with the type word is not cut", '<b>Slack</b> <a href="https://x.slack.com/archives/C0000000001" target="_blank" rel="noopener">Slack-talk #alpha</a>' in html, html[html.find("alist"):][:400])
 _anch = html[html.find("<h2>Anchors"):html.find("<h2>Notices")]
-check("page: anchors of the row and its sub-page", _anch.count("<li>") == 3, _anch.count("<li>"))
+check("page: anchors of the row and its sub-page (the sub-page's was scoped to the item that closed)", _anch.count("<li>") == 2, _anch.count("<li>"))
 check("page: pending, a ruling and its reason", 'class="r-pending"' in html and 'class="r-dropped"' in html and "overruled: noise" in html and "for work-osprey-main" in html)
 try: bd.routing_html("projects/nope"); check("unknown project → KeyError", False)
 except KeyError: pass

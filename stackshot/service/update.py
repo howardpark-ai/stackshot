@@ -20,14 +20,13 @@ import inspect
 import json
 import re
 import sys
-import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from fastmcp.exceptions import ToolError
 
-from stackshot.anchors import anchor_scope as _ascope
+from stackshot.anchors import anchor_sweep as _asweep
 from stackshot.anchors import anchors as _anc
 from stackshot.core import agentbox as _ab
 from stackshot.core import call_log as _calls
@@ -1469,7 +1468,7 @@ def update_unlocked(
                 loose = not (description or needs_set or clear_needs or status or due or clear_due)   # only next, after, or the hold and its wake
                 told = _telling.writer_charge(meta.get("project", ""), gid, debtor, stew, what, loose)
                 if item.get("status") == "completed" and was != "completed" and h.scoped_anchors(meta.get("project", ""), gid):
-                    relayed = bool(_telling.pilot_relay(meta.get("project", ""), gid, item, what, debtor, stew, role,   # the keeper's anchor bullet keeps its cue
+                    relayed = bool(_telling.pilot_relay(meta.get("project", ""), gid, item, what, debtor, stew, role,   # the keeper still gets this notice when anchors were scoped to the item; it owes nothing for them: the close's own reply lists the anchors the close ended (anchor_sweep.on_close)
                                                 tail=f"no page update is owed by you ({_session_label(debtor)} writes it); this notice is for the anchors scoped to {_gh.shown(gid)}"))
     h.publish()
     item["gid"] = gid
@@ -1486,10 +1485,12 @@ def update_unlocked(
         if rel:
             told += f"\n({', '.join(rel)} waited on {gid} and {'is' if len(rel) == 1 else 'are'} released: the sessions in {'its' if len(rel) == 1 else 'their'} needs, else the page keeper, have been told)"
         told += _telling.mentions_reply(gid)
+        told += _asweep.on_close(gid, h.publish)      # the anchors scoped to this item that this close left with no open item in their scope end here (rule 1 of anchor_sweep.py), each logged with the call that puts it back
     elif reopening:
         what_ = "was reopened (next: " + (next.strip().splitlines() or [""])[0][:160] + ")"
         t_ = _telling.tell_owner(gid, item, what_, debtor, heard=heard); told += t_; owner_told = owner_told or _telling.owner_reached(t_, relayed)
         told += _telling.tell_observers(gid, item, what_, debtor)                      # observers hear a reopen
+        told += _asweep.reopen_note(gid, str(meta.get("project") or ""))      # the anchors its close ended do not come back: the reply names the restore call on the routing log lines (anchor_sweep.reopen_note)
     elif "decision" in _needs_kinds(meta) and "decision" not in was_needs and item.get("status") == "open":
         t_ = _telling.tell_owner(gid, item, f"now needs {OWNER}'s call" + (f" (ask: {meta['ask']})" if meta.get("ask") else "")
                          + "".join(f"; {ln}" for ln in h.render_option_lines(item)) + ", set", debtor, decision=True, heard=heard)
@@ -1549,30 +1550,6 @@ def update_unlocked(
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
                                                                  ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + wait_note + machine_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(not backstop and (hold or wake or until_wait or after_set or wait_kind.strip() or str(wait_basis or "").strip() or waits))) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + answered_note + named + told + h.nag(debtor))
-
-
-def _completion_anchor_prompt(gid: str, item: dict[str, Any]) -> str:
-    """Completion is the keeper's cue to judge relevance: list the anchors scoped to this item, on whichever project's page holds them, whose other listed items
-    are all closed (anchor_scope.completion_due); each page's keeper is asked about the anchors its own page holds, and told when the completing session is not that keeper."""
-    h = _hooks()
-    m = item.get("metadata") or {}
-    project = str(m.get("project") or "")
-    due = _ascope.completion_due(_anc.load(), gid, _anc.items())
-    if not due:
-        return ""
-    text = ""
-    for page in sorted({p for p, _e in due}, key=lambda p: (p != project, p)):          # the item's own project first
-        urls = [e["url"] for p, e in due if p == page]
-        text += (f"\n[anchors] {gid} was the last open item these {page} anchors were scoped to:\n" + "\n".join(f"- {u}" for u in urls)
-                 + f"\nStill relevant? make one project-wide: anchors(project={page!r}, add=[url]); done with it: anchors(project={page!r}, remove=[url]). Nothing was removed.")
-        stew = _telling.page_keeper(page)          # the page's keeper: a one-session page's own session, not the general -main agent
-        mine = {h.session_id(_telling.holder(item))}
-        if stew and h.session_id(stew) not in mine:          # a keeper completing its own item is not notified (one identity per pane)
-            note = (f"[stackshot] {_gh.shown(gid)} completed by {_session_label(_telling.holder(item)) or 'a session'}; {page} anchors scoped to it with no open item left: "
-                    + ", ".join(urls) + f" — keep one with anchors(project={page!r}, add=[url]) (project-wide) or drop it with remove=[url].")
-            threading.Thread(target=_telling.push_noted, args=(stew, note), daemon=True).start()
-            text += f"\n(keeper {stew} notified)"
-    return text
 
 
 def _handover_by_hand(gid: str, done: list[str]) -> str:
@@ -1640,18 +1617,12 @@ def _update(*args: Any, **kwargs: Any) -> str:
 def complete_item(item_id: str, outcome: str = "", reason: str = "", description: str = "", superseded_by: str = "", sender: str = "", said: list[dict[str, Any]] | str | None = None,
                   outcome_text: str = "") -> str:
     """Close an item with how it ended: the complete tool without its identity and sender checks (the tool's own). It makes the update with status=completed, through `_update` in service/update.py (reached by its hook, so a suite
-    that replaces it there still reaches the close), then adds the prompt about the anchors that were scoped to the item. The fields default to empty so that a pane with an older cached schema gets the refusal
+    that replaces it there still reaches the close). The close ends the anchors it left with no open item in their scope and says so in the reply (update_unlocked, through anchor_sweep.on_close). The fields default to empty so that a pane with an older cached schema gets the refusal
     that says what is missing and how to close through the portal, not a schema error."""
     h = _hooks()
-    gid = _norm_id(item_id)
-    before = _load(gid)
+    _load(_norm_id(item_id))          # an item that does not exist is refused here, before anything is written
     with _writes.close_write():      # the complete tool's own call: the close ticks the sender's own steps only (update_unlocked reads it, as it reads session_next for the update tool's)
-        out = h.update(item_id, description=description, status="completed", sender=sender, outcome=outcome, reason=reason, superseded_by=superseded_by, said=said, outcome_text=outcome_text)
-    try:
-        out += _completion_anchor_prompt(gid, before)
-    except Exception as e:  # never fail a completion over the prompt
-        out += f"\n[anchors] prompt failed: {e}"
-    return out
+        return h.update(item_id, description=description, status="completed", sender=sender, outcome=outcome, reason=reason, superseded_by=superseded_by, said=said, outcome_text=outcome_text)
 
 
 def confirm_item(item_id: str, sender: str = "") -> str:

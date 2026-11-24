@@ -2332,7 +2332,7 @@ check("six processes noting 40 reads and 40 writes each, at once, add up exactly
 
 # ---- anchor-hub's reads go through the same ledger (anchorhub/github.py, the gh CLI): counted, a 304 free, the pass cut short over the cap
 import stackshot.anchors.anchorhub.core as ahc; import stackshot.anchors.anchorhub.github as ghr
-AN = "github:example-owner/stackshot#26"; NA = "github:example-owner/stackshot@notifications"; RP = "/repos/example-owner/stackshot"; calls = []; ghcli = {"304": False}; call_args = []; FAILS = set()
+AN = "github:example-owner/stackshot#26"; NA = "github:example-owner/stackshot@notifications"; RP = "/repos/example-owner/stackshot"; calls = []; ghcli = {"304": False}; call_args = []; FAILS = set(); NOTFOUND = set()
 NPATH = f"{RP}/notifications?all=true&per_page=50"
 def thread(updated): return {"id": "t1", "updated_at": updated, "reason": "comment", "subject": {"type": "Issue", "url": "https://api.github.com/repos/example-owner/stackshot/issues/5", "title": "a thread"}, "repository": {"id": 7}}
 GHD = {"/user": {"login": "example-owner"}, f"{RP}/pulls/26": {"head": {"sha": "a" * 40, "ref": "x/y"}, "user": {"login": "example-owner"}, "base": {"repo": {"id": 7}}},
@@ -2343,6 +2343,7 @@ GHD = {"/user": {"login": "example-owner"}, f"{RP}/pulls/26": {"head": {"sha": "
 def _fake_gh(args, capture_output=True, text=True, timeout=30):
     a = [x for x in args[2:] if x != "-i" and x != "-H" and not x.startswith("If-None-Match")]; path = a[0]; cond = "-i" in args; calls.append(path); call_args.append(list(args))
     if path in FAILS: return types.SimpleNamespace(returncode=1, stdout="", stderr="gh: Server Error (HTTP 500)")
+    if path in NOTFOUND: return types.SimpleNamespace(returncode=1, stdout="", stderr="gh: Not Found (HTTP 404)")
     if cond and ghcli["304"] and "-H" in args and path != "/user": return types.SimpleNamespace(returncode=0, stdout="HTTP/2.0 304 Not Modified\n\n", stderr="")     # a 304 only for a validator that was sent
     body = json.dumps(GHD.get(path.split("?")[0] + "?list", []) if "/issues?" in path else GHD[path]); return types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")      # a repository's list of changed issues: what a test puts under `<repo>/issues?list`, else none changed
 class _Stop(Exception): pass
@@ -2604,6 +2605,49 @@ try:
     check("anchor-hub: the late line's report names the pull request, who closed it, its link and the time it merged",
           len(seen82) == 1 and seen82[0]["title"] == 'stackshot#82 "pr 82"' and seen82[0]["who"] == "alice" and seen82[0]["url"] == "https://github.com/example-owner/stackshot/pull/82" and seen82[0]["etype"] == "pr_merged"
           and abs(ahc._ts(seen82[0]["ts"]) - (time.time() - 2 * LH)) < 5 and "meta" not in seen82[0], seen82)
+    # what the server's anchor sweep reads of a repository and of a vanished anchor (anchors/anchor_sweep.py): "github_repos", saved apart from the reader's own position
+    ghcli["304"] = False; add_pr(90, None, state="open"); GHD[f"{RP}/pulls/90"] = {**GHD[f"{RP}/pulls/26"], "base": {"repo": {"id": 7, "archived": True}}}
+    h90 = fresh_hub([90]); K90 = "github:example-owner/stackshot#90"; pass_of(h90)
+    saved90 = h90.savers["github_repos"]()
+    check("reader: a pull request's base repository that says archived is kept, by repository name and when it was first seen; nothing 'gone' yet",
+          set(saved90["archived"]) == {"example-owner/stackshot"} and abs(saved90["archived"]["example-owner/stackshot"] - time.time()) < 60 and saved90["gone"] == {} and K90 in h90.gh_state["state"], saved90)
+    GHD[f"{RP}/pulls/90"] = {**GHD[f"{RP}/pulls/26"], "base": {"repo": {"id": 7, "archived": False}}}; pass_of(h90)
+    check("reader: the next read that says not archived drops it", h90.savers["github_repos"]()["archived"] == {}, h90.savers["github_repos"]())
+    NOTFOUND.add(f"{RP}/issues/90"); pass_of(h90); pass_of(h90)
+    check("reader: an issue read that had succeeded before and now answers 404 is NOT 'gone' while no other read of the repository has answered since (the token may be what lost the repository)", h90.savers["github_repos"]()["gone"] == {}, h90.savers["github_repos"]())
+    NOTFOUND.discard(f"{RP}/issues/90")
+    add_pr(92, None, state="open"); K92 = "github:example-owner/stackshot#92"; GHD[f"{RP}/pulls/92"] = {**GHD[f"{RP}/pulls/26"], "base": {"repo": {"id": 7, "archived": False}}}
+    h92 = fresh_hub([90, 92]); pass_of(h92); pass_of(h92)
+    NOTFOUND.add(f"{RP}/issues/90"); pass_of(h92); pass_of(h92); first = h92.savers["github_repos"]()["gone"].get(K90)
+    check("reader: …with another anchor of the repository read well since, the 404 is 'gone', with the time it first did, and the anchor that still reads is not", first is not None and abs(first - time.time()) < 60 and K92 not in h92.savers["github_repos"]()["gone"], h92.savers["github_repos"]())
+    pass_of(h92)
+    check("reader: a second 404 keeps the first time (the clock the sweep's day counts from does not restart)", h92.savers["github_repos"]()["gone"].get(K90) == first, h92.savers["github_repos"]())
+    NOTFOUND.discard(f"{RP}/issues/90"); pass_of(h92)
+    check("reader: a read that finds it again clears 'gone'", h92.savers["github_repos"]()["gone"] == {}, h92.savers["github_repos"]())
+    NOTFOUND.update({f"{RP}/issues/90", f"{RP}/issues/92"}); pass_of(h92); pass_of(h92)
+    check("reader: every anchor of the repository answering 404 is no evidence about any of them: nothing is 'gone'", h92.savers["github_repos"]()["gone"] == {}, h92.savers["github_repos"]())
+    NOTFOUND.discard(f"{RP}/issues/92"); pass_of(h92); pass_of(h92)
+    check("reader: …and once one of them reads well again the other, still 404, is 'gone'", set(h92.savers["github_repos"]()["gone"]) == {K90}, h92.savers["github_repos"]())
+    del h92.bindings[K90]
+    check("reader: the 'gone' mark of an anchor that is no longer bound is forgotten", h92.savers["github_repos"]()["gone"] == {}, h92.savers["github_repos"]())
+    h92.bindings[K90] = {OWNER}; pass_of(h92); pass_of(h92)
+    check("reader: …and binding the anchor again does not bring the old time back (a read says it afresh)", set(h92.savers["github_repos"]()["gone"]) == {K90} and h92.savers["github_repos"]()["gone"][K90] > first, h92.savers["github_repos"]())
+    NOTFOUND.discard(f"{RP}/issues/90")
+    add_pr(93, None, state="open"); K93 = "github:example-owner/stackshot#93"; GHD[f"{RP}/pulls/93"] = {**GHD[f"{RP}/pulls/26"], "base": {"repo": {"id": 7, "archived": True}}}
+    h93 = fresh_hub([93]); pass_of(h93)
+    check("reader: an archived mark is saved while an anchor of the repository is bound", set(h93.savers["github_repos"]()["archived"]) == {"example-owner/stackshot"}, h93.savers["github_repos"]())
+    h93.bindings.clear()
+    check("reader: …and forgotten once no anchor of the repository is bound", h93.savers["github_repos"]() == {"archived": {}, "gone": {}}, h93.savers["github_repos"]())
+    h93.bindings[K93] = {OWNER}
+    check("reader: …and binding an anchor of the repository again does not bring the old mark back (only a read of the repository says it again)", h93.savers["github_repos"]()["archived"] == {}, h93.savers["github_repos"]())
+    NOTFOUND.add(f"{RP}/issues/91"); add_pr(91, None, state="open"); h91 = fresh_hub([91]); GHD[f"{RP}/issues/91"] = GHD[f"{RP}/issues/91"]; pass_of(h91)
+    check("reader: an anchor that never answered with an issue is not 'gone' (it has no state: it may not exist yet)", h91.savers["github_repos"]()["gone"] == {}, h91.savers["github_repos"]())
+    NOTFOUND.discard(f"{RP}/issues/91")
+    h90.saved = {"github_repos": {"archived": {"Example-Owner/Stackshot": 123.0, "x/y": "bad"}, "gone": {"github:example-owner/stackshot#90": 456.0, "github:o/r#1": -1}}}
+    del caught[:]; h90b = ahc.Hub(); h90b.write_status = lambda: None; h90b.emit = lambda ev: None; h90b.bindings = {K90: {OWNER}}; h90b.saved = h90.saved; ghr.run(h90b)
+    r90 = h90b.savers["github_repos"]()
+    check("reader: a restart brings back what was saved (a repository name in any case, a time that is a number above zero); a 'gone' mark of an anchor with no saved state is dropped",
+          r90["archived"] == {"example-owner/stackshot": 123.0} and r90["gone"] == {}, r90)
 finally:
     ghr.subprocess, ghr.threading, ghr.time = _sub, _thr, _tim
     ahc.log.removeHandler(_caph)

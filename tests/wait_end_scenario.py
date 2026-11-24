@@ -339,15 +339,45 @@ anchors_before = (T / "store/anchors.json").read_text()
 real_wow = wait_gates_svc._watch_on_write
 def refusing(*a, **k): raise ToolError("Refused: the wait is refused by a later gate")
 wait_gates_svc._watch_on_write = refusing
+# the anchors lock: the anchor wait reads, adds and saves the list in one hold of it, and a refused gate's undo reads and saves it in one hold too (the item lock is held all the while: item, then anchors)
+from stackshot.core import xlock as _xl
+from stackshot.anchors import anchors as _ANC
+EV, GEN = [], [0]
+real_acq, real_load, real_add, real_save = _xl.XLock.acquire, _ANC.load, _ANC.add, _ANC.save
+def acq_rec(self, *a, **k):
+    got = real_acq(self, *a, **k)
+    if got and self.name == "anchors": GEN[0] += 1
+    return got
+def noting(name, real):
+    def f(*a, **k):
+        EV.append((name, _xl.holds("anchors"), _xl.holds("item"), GEN[0])); return real(*a, **k)
+    return f
+def hold_problems():
+    """Every save of the anchors file was made with the anchors lock and the item lock held, and in the same hold as the load before it (the read, the change and the save are one hold)."""
+    bad = []
+    for i, (name, held, item_held, gen) in enumerate(EV):
+        if name == "save":
+            before = [e for e in EV[:i] if e[0] == "load"]
+            if not (held and item_held and before and before[-1][1] and before[-1][3] == gen): bad.append((i, EV[max(0, i - 2):i + 1]))
+        if name == "add" and not (held and item_held): bad.append((i, EV[i]))
+    return bad
+def recording(run):
+    EV.clear(); _xl.XLock.acquire, _ANC.load, _ANC.add, _ANC.save = acq_rec, noting("load", real_load), noting("add", real_add), noting("save", real_save)
+    try: return run()
+    finally: _xl.XLock.acquire, _ANC.load, _ANC.add, _ANC.save = real_acq, real_load, real_add, real_save
 try:
     wipe()
-    r = AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
+    r = recording(lambda: AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING)))
 finally:
     wait_gates_svc._watch_on_write = real_wow
+refused_ev = list(EV)
 check("6 a gate that refuses after the anchor was added leaves the item as it was", not mt(9621).get("wait_kind") and not mt(9621).get("wait_anchor") and not log(9621) and not SF.mark_tokens(mt(9621), SF.WAIT_END), mt(9621))
 check("6 …and the anchors list as it was", json.loads((T / "store/anchors.json").read_text()) == json.loads(anchors_before), (T / "store/anchors.json").read_text())
+check("6 …the add and its undo are two saves of the anchors file, each made with the anchors lock held after the item lock, and each in the one hold with its load (a dropped lock fails here)",
+      [e[0] for e in refused_ev].count("save") == 2 and [e[0] for e in refused_ev].count("add") == 1 and not hold_problems(), (refused_ev, hold_problems()))
 wipe()
-r = AR.filing_pass(now=now + 4 * HOUR, items=store_items(), anchors={}, env=env(**FIXING))
+r = recording(lambda: AR.filing_pass(now=now + 4 * HOUR, items=store_items(), anchors={}, env=env(**FIXING)))
+check("6 …and with the gate working the add is one save, made with the anchors lock held after the item lock, in one hold with its load", [e[0] for e in EV].count("save") == 1 and [e[0] for e in EV].count("add") == 1 and not hold_problems(), (list(EV), hold_problems()))
 check("6 …and with the gate working the same pass sets the wait and the anchor", mt(9621).get("wait_kind") == "anchor"
       and any(e["url"].endswith("/issues/21") for e in json.loads((T / "store/anchors.json").read_text()).get("projects/alpha", [])), (mt(9621), (T / "store/anchors.json").read_text()))
 
@@ -452,7 +482,9 @@ finally:
 check("7 a project-wide anchor already on the list: a refused gate leaves it, and the item as it was", json.loads((T / "store/anchors.json").read_text()) == wide and not mt(9721).get("wait_kind"), mt(9721))
 wipe()
 r = AR.filing_pass(now=now + 4 * HOUR, items=store_items(), anchors={}, env=env(**FIXING))
-check("7 …and the same pass with the gate working sets the anchor wait without adding a second anchor", mt(9721).get("wait_kind") == "anchor" and json.loads((T / "store/anchors.json").read_text()) == wide, (mt(9721), (T / "store/anchors.json").read_text()))
+no_added = lambda d: {p: [{k: v for k, v in e.items() if k != "added"} for e in es] for p, es in d.items()}       # an add of an anchor that is there renews its `added` (anchors.add), and nothing else
+check("7 …and the same pass with the gate working sets the anchor wait without adding a second anchor (the entry that was there stays project-wide, its `added` renewed)", mt(9721).get("wait_kind") == "anchor"
+      and no_added(json.loads((T / "store/anchors.json").read_text())) == no_added(wide), (mt(9721), (T / "store/anchors.json").read_text()))
 
 # a backstop day that would not end the wait is refused, not recorded as a fix
 for p in (T / "store/g").glob("*.json"): p.unlink()

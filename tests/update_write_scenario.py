@@ -318,7 +318,6 @@ check("6 a close the close gate refuses leaves the item open and unsaved", noclo
 # ---------------------------------------------------------------- 7. complete
 g7 = put(11)
 ANCH = []
-real_prompt = update._completion_anchor_prompt
 UPDATES = []
 def fake_update(item_id, **kw):
     UPDATES.append((item_id, kw)); LOG.append(("update", (item_id,), kw))
@@ -326,18 +325,11 @@ def fake_update(item_id, **kw):
     (T / "store" / item_id[0] / f"{item_id[1:]}.json").write_text(json.dumps(stored), encoding="utf-8")
     return "updated by the hook.\n"
 update.install(make_hooks(update=fake_update))
-update._completion_anchor_prompt = lambda gid, item: f"\n[anchors] prompt for {gid} ({item.get('status')})"
 LOG.clear()
 out_c = update.complete_item(g7, outcome="done", reason="it is done", description="", superseded_by="", sender=OWNER, said=None, outcome_text="- done")
 check("7 the complete makes the update through the hook, with status=completed and the fields it was given, the description empty", UPDATES and UPDATES[0][0] == g7 and UPDATES[0][1].get("status") == "completed" and UPDATES[0][1].get("outcome") == "done" and UPDATES[0][1].get("reason") == "it is done"
       and UPDATES[0][1].get("outcome_text") == "- done" and UPDATES[0][1].get("sender") == OWNER and UPDATES[0][1].get("description") == "", UPDATES)
-check("7 …the close is on disk when the hook returns (so the check below reads a different item if the prompt's item were read after the update)", rd(g7)["status"] == "completed", rd(g7).get("status"))
-check("7 …and the anchors prompt is appended to the reply, read from the item as it stood before the close", out_c == f"updated by the hook.\n\n[anchors] prompt for {g7} (open)", out_c)
-update._completion_anchor_prompt = lambda gid, item: (_ for _ in ()).throw(RuntimeError("prompt broke"))
-try: out_c2 = update.complete_item(g7, outcome="done", reason="r", sender=OWNER)
-except Exception as e: out_c2 = f"raised {e!r}"
-check("7 a prompt that fails never fails the close: it is told in the reply", out_c2.endswith("\n[anchors] prompt failed: prompt broke") and out_c2.startswith("updated by the hook."), out_c2)
-update._completion_anchor_prompt = real_prompt
+check("7 …the close is on disk when the hook returns, and the reply is the update's own (the anchors a close ends are told by the update itself, anchor_sweep.on_close)", rd(g7)["status"] == "completed" and out_c == "updated by the hook.\n", (rd(g7).get("status"), out_c))
 UPDATES.clear()
 update.complete_item(g7, sender=OWNER)
 check("7 a complete from a pane with an older tool list (no fields) still makes the update, so its refusal says what is missing", UPDATES and UPDATES[0][1].get("outcome") == "" and UPDATES[0][1].get("status") == "completed", UPDATES)
@@ -546,11 +538,11 @@ imps = [n.module if isinstance(n, ast.ImportFrom) else a.name for n in ast.walk(
 check("11 service/update.py imports nothing from web/", not [m for m in imps if m and m.startswith("stackshot.web")], [m for m in imps if m and m.startswith("stackshot.web")])
 srv = ast.parse(pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8"))
 defs = {n.name for n in srv.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-MOVED = ("_update_unlocked", "_update_locked", "_completion_anchor_prompt", "_handover_by_hand", "_wait_is_bare", "_hands_on", "_retired_note", "_next_names_session", "_wait_refs",
+MOVED = ("_update_unlocked", "_update_locked", "_handover_by_hand", "_wait_is_bare", "_hands_on", "_retired_note", "_next_names_session", "_wait_refs",
          "_stale_wait_notes", "_mark_next_stale", "_handoff_to", "_contact_after_move", "_doing_wait_note", "_fix_loose_reason", "_reads_time_wait")
 check("11 web/server.py defines none of the moved bodies and keeps no copy under their old names", not (defs & set(MOVED)), sorted(defs & set(MOVED)))
 here = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
-check("11 each of them is defined once, in service/update.py (with the public names for the three writes)", {"update_unlocked", "_completion_anchor_prompt", "_handover_by_hand", "_wait_is_bare", "_hands_on", "_retired_note", "_next_names_session", "_wait_refs", "_stale_wait_notes",
+check("11 each of them is defined once, in service/update.py (with the public names for the three writes)", {"update_unlocked", "_handover_by_hand", "_wait_is_bare", "_hands_on", "_retired_note", "_next_names_session", "_wait_refs", "_stale_wait_notes",
       "_mark_next_stale", "_handoff_to", "_contact_after_move", "_doing_wait_note", "_fix_loose_reason", "_reads_time_wait", "update_item", "complete_item", "confirm_item"} <= here, sorted(here))
 _tool_src = {rel: pathlib.Path(STACK, rel).read_text(encoding="utf-8") for rel in ("stackshot/web/server.py", "stackshot/web/tools/complete.py", "stackshot/web/tools/update.py")}
 _tool_src_of = {}

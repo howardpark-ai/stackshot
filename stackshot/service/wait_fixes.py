@@ -253,8 +253,9 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
             if anchor_undo is None:
                 return
             try:
-                if _anc.load() == anchor_undo[1]:
-                    _anc.save(anchor_undo[0])
+                with _anc.LOCK:
+                    if _anc.load() == anchor_undo[1]:
+                        _anc.save(anchor_undo[0])
             except Exception as e:  # noqa: BLE001
                 print(f"wait end: {gid} anchor not taken back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
@@ -279,12 +280,13 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
             elif op == "anchor":
                 url = str(plan.get("url") or "")
                 project = str(meta.get("project") or "")
-                store = _anc.load()
-                if not any(_watching.same_anchor(e["url"], url) for e in _ascope.anchor_scope(store, gid, project)):
-                    before = json.loads(json.dumps(store))
-                    _anc.add(store, project, [url], [gid], by=NAME)
-                    _anc.save(store)
-                    anchor_undo = (before, json.loads(json.dumps(_anc.load())))
+                with _anc.LOCK:          # the read, the add and the save of the list in one hold (the sweep and the anchors tool take it too)
+                    store = _anc.load()
+                    if not any(_watching.same_anchor(e["url"], url) for e in _ascope.anchor_scope(store, gid, project)):
+                        before = json.loads(json.dumps(store))
+                        _anc.add(store, project, [url], [gid], by=NAME)
+                        _anc.save(store)
+                        anchor_undo = (before, json.loads(json.dumps(_anc.load())))
                 meta["wait_anchor"] = url
                 meta["wait_event"] = _clip_line(plan.get("event"), _model.LINE_MAX)
                 waiting_as("anchor")

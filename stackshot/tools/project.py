@@ -236,6 +236,8 @@ def main(argv: list[str]) -> int:
         if m:
             head += f"; page {m.get('key') or '-'}: {m.get('state')}" + (f" ({m['note']})" if m.get("note") else "")
         print(head)
+        if res.get("anchors"):                # a reopening names the anchors its archiving ended and where their restore calls are (anchor_sweep.page_reopen_note)
+            print(res["anchors"])
         if res.get("lines"):                  # agent-add and agent-retire that move the keeper mark say who moves and what each roles.json entry does, as `keeper` does
             print("\n".join(res["lines"]))
     return 0

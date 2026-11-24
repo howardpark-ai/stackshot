@@ -130,8 +130,10 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
                             + (f"; {stale[0]} still holds anchors, which can be listed and removed, not added to" if len(stale) == 1 else ""))
         key = stale[0]
         if remove:
-            _anc.remove(store, key, _gmail_scope_args(remove, _gmail_boxes(), False, [e.get("url", "") for e in store.get(key, [])]))
-            _anc.save(store)
+            with _anc.LOCK:        # read again under the lock the sweep and the anchor wait take: an entry added by another writer since the read above is kept
+                store = _anc.load()
+                _anc.remove(store, key, _gmail_scope_args(remove, _gmail_boxes(), False, [e.get("url", "") for e in store.get(key, [])]))
+                _anc.save(store)
             _publish()
         return (f"{key} names no page any more (renamed or removed): its anchors notify nobody and can only be listed and removed.\n"
                 + _anc.fmt(store.get(key, [])))
@@ -161,12 +163,14 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
     boxes = _gmail_boxes()
     held = [e.get("url", "") for e in store.get(key, [])]
     add, remove = _gmail_scope_args(add, boxes, True, held), _gmail_scope_args(remove, boxes, False, held)
-    if add:
-        _anc.add(store, key, add, scope, by=who)
-    if remove:
-        _anc.remove(store, key, remove)
     if add or remove:
-        _anc.save(store)
+        with _anc.LOCK:            # read again under the lock the sweep and the anchor wait take (anchors.LOCK, across processes): another writer's entry or removal since the read above is kept
+            store = _anc.load()
+            if add:
+                _anc.add(store, key, add, scope, by=who)
+            if remove:
+                _anc.remove(store, key, remove)
+            _anc.save(store)
         _publish()
     with _ma.LOCK:
         mstore = _ma.load()

@@ -255,12 +255,19 @@ check("rename: a name another project has → 409; the same name again changes n
 check("rename: a sub-page key names the top-level project", pv.rename(SUB, "home-sparrow", io=IO)["changed"] is False)
 
 # ---- 7. archive and reopen
+(T / "store/anchors.json").write_text(json.dumps({"projects/delta": [{"url": "https://example.invalid/d1", "items": None, "added": 1.0, "by": "t"}, {"url": "https://example.invalid/d2", "items": ["a9"], "added": 1.0, "by": "t"}],
+                                                  "projects/theta": [{"url": "https://example.invalid/t1", "items": None, "added": 1.0, "by": "t"}]}))
 res = pv.archive(D, by="home-sparrow", why="done for now", io=IO, now="2026-11-05T03:00:00Z")
 check("archive: status archived with who, when, how and why; the page's status follows and a timeline line says so", ents()[D]["status"] == "archived" and ents()[D]["retired"] == {"at": "2026-11-05T03:00:00Z", "by": "home-sparrow", "how": "made", "why": "done for now"}
       and re.search(r"(?m)^status: (archived|closed|done)", text("projects/delta")) is not None and "archived; done for now" in text("projects/delta"), (res["mirror"], text("projects/delta")))
+_left = json.loads((T / "store/anchors.json").read_text())
+check("archive: the page's anchors go with it (project-wide and item-scoped), another project's stay, and the removal is on the page's routing log with its restore call", "projects/delta" not in _left and list(_left) == ["projects/theta"]
+      and any('add=["https://example.invalid/d1"]' in (n.get("text") or "") for n in __import__("stackshot.router.routing", fromlist=["x"]).read("projects/delta")), _left)
 check("archive: said again it changes nothing", pv.archive(D, io=IO)["changed"] is False)
 res = pv.reopen(D, by="home-sparrow", io=IO)
 check("reopen: active again, no retired mark, the page's status follows", ents()[D]["status"] == "active" and "retired" not in ents()[D] and "status: active" in text("projects/delta") and res["mirror"]["state"] == "written", (res["mirror"], text("projects/delta")))
+check("reopen: the result says that the anchors the archiving ended are not back, how many, and that each has its restore call on the routing log",
+      "2 anchors" in str(res.get("anchors") or "") and "https://example.invalid/d1" in str(res.get("anchors") or "") and "projects/delta" in str(res.get("anchors") or ""), res.get("anchors"))
 check("archive: a project with no page archives in the record alone", pv.archive(PL, io=Counting(IO))["mirror"]["state"] == "none" and ents()[PL]["status"] == "archived")
 
 # ---- 8. move-page with a fake runner that does what rename_page.py does to the files
@@ -526,6 +533,10 @@ rc, out, err = tool("stackshot/tools/project.py", "create", "home-clip", "--scop
 check("cli: create with no page makes a project with no page", rc == 0 and any(e.get("name") == "home-clip" and "page" not in e for e in ents().values()), (rc, out[:300], err[:300]))
 rc, out, err = tool("stackshot/tools/project.py", "create", "home-clis", "--scope", "home", "--page", SUB)
 check("cli: create on a sub-page key exits non-zero and says why, nothing written", rc != 0 and "sub-page" in (out + err) and not any(e.get("name") == "home-clis" for e in ents().values()), (rc, out[:300], err[:300]))
+
+pv.archive(D, by="home-sparrow", io=IO)
+rc, out, err = tool("stackshot/tools/project.py", "reopen", D)
+check("cli: reopen prints the note on the anchors its archiving ended (how many and where the restore calls are), not only the one-line result", rc == 0 and "changed" in out and "2 anchors" in out and "projects/delta" in out and "https://example.invalid/d1" in out, (rc, out[:500], err[:300]))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

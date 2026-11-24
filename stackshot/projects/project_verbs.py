@@ -884,8 +884,12 @@ def archive(project: str, *, by: str = "", how: str = "made", why: str = "", io:
 
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
-    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"already": out["already"]}, by=by,
-                   timeline=("archived" + (f"; {why}" if why else "")) if not out["already"] else "", tag="archive")
+    res = _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"already": out["already"]}, by=by,
+                  timeline=("archived" + (f"; {why}" if why else "")) if not out["already"] else "", tag="archive")
+    if not dry and not out["already"]:
+        from stackshot.anchors import anchor_sweep as _asweep       # the archived page's anchors go with it (rule 4 of anchor_sweep.py; logged, and never fails the verb)
+        _asweep.on_page_change()
+    return res
 
 
 def reopen(project: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:
@@ -903,7 +907,13 @@ def reopen(project: str, *, by: str = "", io: Any = None, now: str | None = None
 
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
-    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), by=by, timeline="reopened" if changed else "", tag="reopen")
+    res = _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), by=by, timeline="reopened" if changed else "", tag="reopen")
+    if changed and not dry and res.get("key"):
+        from stackshot.anchors import anchor_sweep as _asweep       # the anchors its archiving ended do not come back: the result names where their restore calls are (anchor_sweep.page_reopen_note)
+        note = _asweep.page_reopen_note(res["key"])
+        if note:
+            res["anchors"] = note
+    return res
 
 
 # ---- the agents map
