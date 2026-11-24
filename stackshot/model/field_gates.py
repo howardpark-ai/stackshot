@@ -22,6 +22,8 @@ from stackshot.model import faults as _faults
 from stackshot.model import model_guards as _mg
 from stackshot.model import next_rules as _nr
 from stackshot.model import nextlines as _nl
+from stackshot.model import step_split as _ss
+from stackshot.model import steps as _steps
 from stackshot.model.bullet_text import _clip_line
 from stackshot.web import render as _rmod
 
@@ -193,6 +195,64 @@ def fix_long_bullets(desc: str, stored: str | None = None) -> tuple[str, str]:
     kept = "no word changed; a spaced dash at a cut is dropped" if soft else "no word changed"
     _calls.fixed("description-bullet", f"{n} description bullet{'' if n == 1 else 's'} over {line_max} characters {'was' if n == 1 else 'were'} split {where} into shorter bullets, {kept}", fields=["description"], stored=new, sent=desc)
     return new, f"description: {n} long bullet{'' if n == 1 else 's'} split by the server {hist}"
+
+
+def _step_line_room() -> int:
+    """The longest action a split puts on a line of next: [metadata.next] line_max (200), or 300 (the step's own line limit) when that refusal is off."""
+    return _next_line_max() or 300
+
+
+def fix_long_step(step: str) -> tuple[str, list[str]]:
+    """A step of his that is a long chain of actions, put into the shape the board draws instead of refused or left unreadable: the step becomes a short summary and each action a line of next that opens with his name
+    (step_split.split_step: split at sentence ends, semicolons and inline numbered items, every word kept; a text of more than SPLIT_MAX characters or more than MAX_ACTIONS actions is left as written).
+    → (the step to store, the lines to add to next); the step as given and no lines when it is short, already structured, or holds one action. Writes nothing and says nothing: the caller says what it did
+    (`say_long_step`) once it knows how many lines it added."""
+    got = _ss.split_step(step, _step_line_room())
+    if got is None:
+        return step, []
+    return got
+
+
+def long_step_skipped(step: str) -> str:
+    """Why a one-line step over the step limit was not split into lines ("" when it was, or it is no case for it): the words that go beside its refusal, so the writer knows the server tried."""
+    return _ss.skipped(step, _step_line_room())
+
+
+def say_long_step(step: str, lines: list[str], added: int, settled: int = 0) -> None:
+    """The reply's line for a long step that was split into `lines` (call_log.fixed, kind step-split): what was done, or, when `added` is 0 (the summary and every one of its lines are on the item already: the same step
+    sent again), that nothing was added. `settled`: how many of the lines were ticked done or dropped before and stay so (they are no open lines on the item, and the reply does not say they are)."""
+    open_n = max(0, len(lines) - added - settled)
+    was = [f"{open_n} of the lines {'was' if open_n == 1 else 'were'} on the item already" if open_n else "", f"{settled} {'was' if settled == 1 else 'were'} done or dropped before and stay so" if settled else ""]
+    was_txt = " and ".join(x for x in was if x)
+    if added:
+        _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {len(lines)} actions, so it was split into a summary and {len(lines)} lines of next that open with {OWNER}'s name, "
+                     "which the board draws as his list; every word is in a line" + ("" if added == len(lines) else f" ({was_txt}, so {added} were added)"), fields=["step", "next"])
+    elif settled:
+        _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {len(lines)} actions: it is stored as a summary, and of its {len(lines)} lines {was_txt}, so nothing was added", fields=["step"])
+    else:
+        _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {len(lines)} actions: it is stored as a summary, and its {len(lines)} lines of next are on the item already, so nothing was added",
+                     fields=["step"])
+
+
+def fix_long_owner_lines(next_: str, known: set[str]) -> str:
+    """The lines of next that open with the owner's name and run long with several actions, one line per action (step_split.split_line), the other lines as they are, and the reply says so (call_log.fixed).
+    A line that is an open step already (`known`: its steps.key) or one whole command in backticks is left as it stands. The text as given when no line is split."""
+    if not next_ or not str(next_).strip():
+        return next_
+    room, out, n_in, n_out = _step_line_room(), [], 0, 0
+    for entry in _nl.split(next_):
+        first = entry.split("\n", 1)[0]
+        parts = None if _steps.key(entry) in known or _owner_command(first) else _ss.split_line(entry, room)
+        if parts:
+            out.extend(parts)
+            n_in, n_out = n_in + 1, n_out + len(parts)
+        else:
+            out.append(entry)
+    if not n_in:
+        return next_
+    _calls.fixed("step-split", f"{n_in} line{'' if n_in == 1 else 's'} of next that open{'s' if n_in == 1 else ''} with {OWNER}'s name held several actions, so {'it was' if n_in == 1 else 'they were'} split into {n_out} lines, "
+                 "one per action; every word is in a line", fields=["next"])
+    return "\n".join(out)
 
 
 def _description_fault(desc: str) -> tuple[str, str, int] | None:

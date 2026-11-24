@@ -501,10 +501,11 @@ def gate_step(item: dict[str, Any], gid: str = "", prior_description: Any = None
         raise ToolError(f"Refused: {_gh.shown(gid) + ': ' if gid else ''}{why}.")
 
 
-def gate_state_args(carry: dict[str, str]) -> tuple[str, dict[str, str], bool]:
+def gate_state_args(carry: dict[str, str], split_note: str = "") -> tuple[str, dict[str, str], bool]:
     """update(step=...) and update(supplies=...): the two fields that still go with a stored state, as the call passes them (whitespace collapsed; a step is checked for its form) → (the state they
     set, the fields passed, whether the step is withdrawn). A step is the your-step state's and supplies the blocked state's, which no call names any more: passing the field sets the state it stood on, "" when the call passes neither.
     step="none" (or clear, -, like needs="none") withdraws the step: the your-step state and his open step line go in that write (the only way out of his step besides his Done, a close or a hold).
+    `split_note` (the update's own: why a long step was not split into lines, step_split.skipped) goes beside the refusal of a step that is too long.
     The other inputs of the old states (state, clear_state, party, chase, end, proof, chase_note) are refused before the tool runs (retired_inputs.py, web/middleware.py _RetiredInputs)."""
     h = _hooks()
     faults: list[str] = []
@@ -517,7 +518,7 @@ def gate_state_args(carry: dict[str, str]) -> tuple[str, dict[str, str], bool]:
     for k, v in given.items():
         if k == "step":
             if _states.step_problem(v):
-                faults.append(f"Refused: {_states.step_problem(v)}")
+                faults.append(f"Refused: {_states.step_problem(v)}" + (f" (the server did not split it into lines of next: {split_note})" if split_note else ""))
         elif len(v) > _states.LINE_MAX:
             faults.append(f"Refused: {k} is one line of at most {_states.LINE_MAX} characters — got {len(v)}")
     if "step" in given and "supplies" in given:
