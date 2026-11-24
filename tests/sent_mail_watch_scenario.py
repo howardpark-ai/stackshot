@@ -350,6 +350,20 @@ reset("on"); item(101, step="send the reply to Jane Roe"); spool(row("x6", tid=T
 tick()
 check("7 mail word: a step with no mail word is no send step, a draft or an anchored thread notwithstanding (the `send` plus thread rule is gone)", calls == [] and len(open_steps(101)) == 1 and not rd(101)["metadata"].get("answers"), counts())
 
+GURL = f"https://mail.google.com/mail/u/0/#all/{THREAD}"
+reset("on"); item(101, step=f"Send the follow-up draft on the thread, in Gmail ({GURL})"); spool(row("g1", tid=THREAD, to=(("Someone Else", "else@example.net"),))); out = tick()
+check("7 gmail: a step whose only mail word is Gmail (with the thread's link in it) is a send step: a mail on the anchored thread ticks it, handed on, with no model call", out == ["a101"] and calls == [] and not open_steps(101) and rd(101)["metadata"].get("state") != "your-step", (out, calls, rd(101)["metadata"]))
+bad = []
+for st in (f"Send the follow-up draft on the thread, in Gmail ({GURL})", "Send the follow-up from Gmail", "gmail the quote to Jane Roe", "Send it by GMAIL"):
+    reset("on"); item(101, step=st)
+    if not MATCH.is_send_step(rd(101)): bad.append(("not a send step", st))
+check("7 gmail: Gmail counts as a mail word wherever it stands in the step, in any case", not bad, bad)
+bad = []
+for st in (f"Send the follow-up draft on the thread ({GURL})", GURL, "Send the follow-up draft [here](https://mail.google.com/mail/u/0/#all/1a2b3c4d5e6f7a8b)", "Send the follow-up in `gmail`", "Reply in Gmail and post it on Slack", "Reply in Gmail, then call Jane Roe", "Reply in Gmail, then tell her on KakaoTalk", "Send the gmailer a note"):
+    reset("on"); item(101, step=st)
+    if MATCH.is_send_step(rd(101)): bad.append(st)
+check("7 gmail: a bare mail.google.com link (or a link label or code span) is no mail word, Gmail beside another channel is no send step, and a word that only contains gmail is none either", not bad, bad)
+
 bad = []
 for st in ("send the Slack message to Jane Roe about the mail", "KakaoTalk\uc73c\ub85c \uc81c\uc778\uc5d0\uac8c \uba54\uc77c \ub0b4\uc6a9 \ubcf4\ub0b4\uae30", "\uce74\uce74\uc624\ud1a1\uc73c\ub85c \uba54\uc77c \ub0b4\uc6a9\uc744 \uc81c\uc778\uc5d0\uac8c \ubcf4\ub0b4\uae30", "call Jane Roe about the mail", "send a text message to Jane Roe about the email",
            "post the mail text to the group chat on Slack", "paste the draft mail into a DM"):

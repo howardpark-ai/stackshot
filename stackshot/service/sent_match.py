@@ -1,6 +1,6 @@
 """sent_match.py: a step of the user's to send a mail ticks itself when a mail he sent fits it (the minute pass `sent_mail_tick`; the setting is `[anchor_hub] sent_mail_watch`: off, count or on).
 
-THE SEND STEP. An open item that stands in your-step with the user as the mover, whose step names a mail (mail, email, e-mail, or the Korean words for mail and email) and no other channel (Slack, KakaoTalk, a text message, a call).
+THE SEND STEP. An open item that stands in your-step with the user as the mover, whose step names a mail (mail, email, e-mail, Gmail, or the Korean words for mail and email) and no other channel (Slack, KakaoTalk, a text message, a call).
 A step to paste or post a text somewhere else is no send step.
 
 THE WATCH FILE. While the setting is count or on and at least one send step is open, the server tells the anchors service (anchors/sent_mail.py: sent-watch.json) to leave each mail the user sends that could fit a step
@@ -69,7 +69,7 @@ _RESULTS: dict[tuple[str, str, str], tuple[str, float]] = {}      # (mail, item,
 _INFLIGHT: dict[tuple[str, str, str], float] = {}                 # (mail, item, step) → when the call was handed to the worker
 _WORKER: dict[str, Any] = {"thread": None, "since": 0.0, "gen": 0}
 
-_MAIL_WORDS = re.compile(r"(?<![A-Za-z0-9_-])(?:e-?mails?|mail(?:s|ed|ing)?)(?![A-Za-z0-9_-])|\uba54\uc77c", re.I)       # ASCII edges: a Korean particle after the word is no part of it; the Korean words are written as code points because no file of the repository holds a Hangul letter
+_MAIL_WORDS = re.compile(r"(?<![A-Za-z0-9_-])(?:e-?mails?|gmail|mail(?:s|ed|ing)?)(?![A-Za-z0-9_-])|\uba54\uc77c", re.I)       # ASCII edges: a Korean particle after the word is no part of it; the Korean words are written as code points because no file of the repository holds a Hangul letter
 _CHANNEL_WORDS = re.compile(r"(?<![A-Za-z0-9_-])(?:slack|kakao ?talk|whatsapp|telegram|sms|text messages?|calls?|calling|phone|dm)(?![A-Za-z0-9_-])|\uce74\uce74\uc624\ud1a1|\uce74\ud1a1|\ubb38\uc790|\uc804\ud654", re.I)
 _NOT_PROSE = re.compile(r"`[^`\n]*`|\]\([^)\s]*\)|https?://\S+")
 _ADDR = re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", re.I)
