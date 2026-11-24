@@ -152,8 +152,8 @@ key = "pages"                                       # projects.json: {"pages": {
 match = ["projects/{value}", "{value}"]
 
 [page_rule]
-mode = "refuse"                                     # nag | refuse: after grace_minutes the debtor's next state-changing write is refused until the page is newer
-grace_minutes = 30
+grace_minutes = 30                                  # a board write is never refused or held for a page debt. A session that has owed a page longer than this is told in the reply of its next write that the write went through and
+                                                    # the page is still owed (the debt stays and settles when the page's Current state is edited); a pilot writer's debt moves to the page's keeper after it
 slack_seconds = 300                                 # a page put up to this long BEFORE the board write counts as the same turn
 
 [page_gate]                                         # the pane-side gate (stackshot/projects/pages.py, hooked on every machine): a page debt is said at the next prompt while it

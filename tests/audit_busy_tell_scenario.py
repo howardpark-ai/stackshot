@@ -100,7 +100,7 @@ from stackshot.audit import hourly_log as HL
 from stackshot.model import last_activity as LA
 from stackshot.tools import next_report as NR
 _web_publish._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
     """The server's `time` module for the saves below: the pass is given its `now`, and the saves stamp from the server's own clock."""

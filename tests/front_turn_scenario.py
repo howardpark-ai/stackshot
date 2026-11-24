@@ -126,7 +126,7 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "d
     from stackshot.anchors.anchorhub import core
     from stackshot.web.tools import complete as _wt_complete
     from stackshot.web import page_debts as _web_page_debts
-    _web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+    _web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
     held.mark_client("home-front")      # the rollout gate: its hook fetches held lines (a notice is held only for such a session)
     held.mark_client("team-back")
     held.mark_client("solo-front")      # the front-only project's agent fetches held lines too, so a hold for it could be filed

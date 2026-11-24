@@ -88,7 +88,7 @@ from starlette.testclient import TestClient
 from stackshot.web.routes import ui_api as _rt_ui
 pub = [0]; _web_publish._publish = _wt_anchors._publish = _wt_route._publish = _rt_answers._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)      # the routes (web/routes/) look the publish up on their own modules
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 NEWD = "- The thing works and is in use"
 for i, who in ((3, "alpha-x"), (4, "alpha-x"), (5, "beta-x")):

@@ -77,7 +77,7 @@ from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 told: list[tuple[str, str, str, str]] = []           # every notice the server sends: (gid(s), recipient, note, tag)
 telling.tell_woken = lambda gid, owner, note, tag="wake", result=None: told.append((gid, owner, note, tag))
 def close_told(since=0): return [t for t in told[since:] if t[3] == "close"]

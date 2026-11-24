@@ -354,3 +354,31 @@ allow = []
 retired = "nothing is remembered across a reload"
 use = "every fold keeps its open state per browser (`_FOLD_JS`)"
 allow = []
+
+# ---- a board write is never refused or held for a page debt: the write goes through, the debt stays, and the reply says in one line that the page is still owed.
+# Retired: the refusal "you owe a project-page update ... then retry this write", the nag's "After N min the server refuses your next board write", the setting `[page_rule] mode` that chose
+# between nag and refuse, and the sentence that told a writer to retry after the page copy's next sync.
+[[term]]
+retired = "you owe a project-page update"
+use = "`This write went through. Still owed by you: <page> (...)`: the reply of a write made while a page is owed; nothing is refused for a page debt"
+allow = []
+
+[[term]]
+retired = "refuses your next board write"
+use = "`Your board writes go through while it is owed.`: no write is refused or held for a page debt"
+allow = []
+
+[[term]]
+retired = "then retry this write"
+use = "nothing: no write is refused for a page debt, so none is retried"
+allow = []
+
+[[term]]
+retired = "retry then; this is not a broken mirror"
+use = "nothing: no write is refused or held for a page debt, so none waits for the check's copy of the pages to catch up"
+allow = []
+
+[[term]]
+retired = "next state-changing write is refused"
+use = "the reply of its next state-changing write says the write went through and the page is still owed"
+allow = []

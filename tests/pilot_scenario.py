@@ -2752,9 +2752,7 @@ check("a later next-only write never loosens it", _web_page_debts._owed_load()["
 res = _update_svc._update("a1", next="a step by someone else", sender="work-osprey-x")
 check("each writer owes its own", sorted(_web_page_debts._owed_load()["projects/alpha"]) == sorted([A, X]) and _web_page_debts._owed_load()["projects/alpha"][X]["settle"] == "any")
 d = _web_page_debts._owed_load(); d["projects/alpha"][A]["ts"] -= 3600; _web_page_debts._owed_save(d)
-try: _web_page_debts._refuse_if_owing(A); ok = True
-except ToolError: ok = False
-check("the writer is never refused for a pilot debt", ok)
+check("a pilot debt past the grace says nothing in a write's reply: it moves to the keeper instead", _web_page_debts._owing_note(A) == "")
 check("the nag says it moves instead", "Still missing after 30 min, it moves to the router" in _web_page_debts._nag(A) and "refuses your next board write" not in _web_page_debts._nag(A), _web_page_debts._nag(A))
 d = _web_page_debts._owed_load(); d["projects/alpha"][A]["ts"] += 3600; _web_page_debts._owed_save(d)
 _web_page_debts._page_ts = lambda key: time.time() + 5           # a timeline line: the page is newer, its Current state is not
@@ -3813,7 +3811,7 @@ finally:
 # session's item, or a non-owner's close, is told to the owner at once). The switch is off for every check above.
 _cfg.CFG["board"]["tell_owner"] = True
 _cfg.CFG["pilot"]["writer_owes_page"] = True     # every page is the router's, so a write would also relay a page-owed notice to the keeper at once; the writer owes it here, and the pushes counted below are the owner notices only
-_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
 Xn = "work-osprey-x"
 def told_owner(to, g):
     """The [board] lines this section's notices put to one session for one item (the pilot relay's own lines start `[board] a1 changed`)."""

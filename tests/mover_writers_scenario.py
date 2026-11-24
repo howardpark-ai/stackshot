@@ -144,7 +144,7 @@ def part_mover_writers():
     from stackshot.web import publish as _web_publish
     from stackshot.web import page_debts as _web_page_debts
     _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-    _web_page_debts._refuse_if_owing = lambda debtor: None
+    _web_page_debts._owing_note = lambda debtor: ""
     SENT = []
     telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
     telling.front_sender = lambda who: False
@@ -614,7 +614,7 @@ def part_picker_one_reader():
     from stackshot.web import publish as _web_publish
     from stackshot.web import page_debts as _web_page_debts
     _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-    _web_page_debts._refuse_if_owing = lambda debtor: None
+    _web_page_debts._owing_note = lambda debtor: ""
     SENT = []
     telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
     telling.front_sender = lambda who: False
@@ -921,7 +921,7 @@ def part_mover_picker():
     from stackshot.service import telling
     from stackshot.web.ui import render as ui_render
     _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-    _web_page_debts._refuse_if_owing = lambda debtor: None
+    _web_page_debts._owing_note = lambda debtor: ""
     SENT = []
     telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
     (T / "state").mkdir(parents=True, exist_ok=True); (T / "state/waiting.json").write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))

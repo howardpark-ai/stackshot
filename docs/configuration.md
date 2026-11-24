@@ -70,8 +70,7 @@ A running process reads the file again without a restart: the server on `systemc
 | `metadata.next.type` | `"string"` | `next` is free text. | |
 | `registries.projects.key` | `"pages"` | The top-level key of `projects.json`, which the publisher writes from `paths.brain`. | |
 | `registries.projects.match` | `["projects/{value}", "{value}"]` | How a bare project value is resolved to a page key, tried in order. | |
-| `page_rule.mode` | `"refuse"` | nag, or refuse: after the grace period the debtor's next state-changing write is refused. | |
-| `page_rule.grace_minutes` | `30` | How long a page debt may stand before refusal. | |
+| `page_rule.grace_minutes` | `30` | How long a page debt may stand before the next write's reply says so: a board write is never refused or held for a page debt, and one made by a session that has owed a page longer than this goes through with one line that names the page and says it is still owed. A pilot writer's debt moves to the page's keeper after it. (`page_rule.mode`, which chose between nag and refuse, is retired and read by nothing: the start note says a file that still has it can drop it.) | |
 | `page_rule.slack_seconds` | `300` | A page put up to this long before the board write counts as the same turn. | |
 | `board_check.mode` | `"off"` | The end-of-turn board check: off, block (a working turn that left the session's open items untouched is asked once to update or confirm them, or to say `Board: no change, <reason>`), or note (the same question said at the next prompt instead of holding the turn). A machine needs a `stackshot/projects/pages.py` with the check (with note mode, for `note`; an older one reads it as off). | |
 | `audit.enabled` | `false` | true: `install.sh` installs and starts the audit's timer, and `POST /audit/now` starts the audit run (or cues the audit agent, in agent mode); false: no timer (one installed earlier is disabled and removed) and a cue is refused. | if used |

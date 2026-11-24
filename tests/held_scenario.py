@@ -111,7 +111,7 @@ def present(on):
     stamp_ = T / "state/prompts" / A
     if on: stamp_.parent.mkdir(parents=True, exist_ok=True); stamp_.write_text(f"{time.time() - 60:.0f}\n")
     else: stamp_.unlink(missing_ok=True)
-_real_refuse = _web_page_debts._refuse_if_owing; _web_page_debts._refuse_if_owing = lambda debtor: None
+_real_note = _web_page_debts._owing_note; _web_page_debts._owing_note = lambda debtor: ""
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 KEY = "projects/alpha"
 MACH = "home-test"
@@ -683,25 +683,19 @@ os.unlink(held.clients_file()); gate_open()
 fresh(); n0 = len(pushes()); n = rec_po(); res = act(n, "work-osprey-main", rule="page-owed")
 check("6b17: a front agent whose hook does not fetch held lines gets no turn for it either: the notice goes to the background agent (the page's owed list is the record, so nothing is dropped)", reach(A, n0) == [] and held.count(A) == 0 and (held.count(X) == 1 or len(reach(X, n0)) == 1), (res, pushes()[n0:]))
 held.mark_client(A, "work-osprey-main")
-# the owed list is the page's own record: a held notice neither settles it nor hides it, and the write refusal still works
-_owed0 = _web_page_debts._owed_load(); _mode0 = _cfg.CFG["page_rule"].get("mode")
+# the owed list is the page's own record: a held notice neither settles it nor hides it, and a write past the grace still says the page is owed
+_owed0 = _web_page_debts._owed_load()
 _page = T / "brain/projects/alpha.md"; _page_st = _page.stat(); os.utime(_page, (time.time() - 86400, time.time() - 86400))      # the page is a day old, so a debt charged now is not settled by it
 try:
     _web_page_debts._owed_save({}); _web_page_debts._owed_mark(KEY, B, "a1")
     fresh(); n = rec_po(); res = act(n, "work-osprey-main", rule="page-owed"); d_ = _web_page_debts._owed_load()
     check("6b18: the owed list still shows the page after its notice was held for the front agent", res["ruling"] == "held" and KEY in d_ and any(e.get("item") == "a1" for e in d_[KEY].values()), (res, d_))
     check("6b19: …and the line of pages owed that a reply carries still names it", "pages owed" in _web_page_debts._nag(A) and KEY in _web_page_debts._nag(A), _web_page_debts._nag(A))
-    _web_page_debts._owed_save({KEY: {o: {**e, "ts": time.time() - 7200} for o, e in d_[KEY].items()}}); _cfg.CFG["page_rule"]["mode"] = "refuse"
-    refused_ = ""
-    try:
-        _real_refuse(B)
-    except ToolError as e:
-        refused_ = str(e)
-    check("6b20: …and the writer who owes it past the grace is still refused ('you owe a project-page update'), whatever the front agent was told", "you owe a project-page update" in refused_ and KEY in refused_, refused_)
+    _web_page_debts._owed_save({KEY: {o: {**e, "ts": time.time() - 7200} for o, e in d_[KEY].items()}})
+    said_ = _real_note(B)
+    check("6b20: …and the writer who owes it past the grace has the line that the write went through and the page is still owed, whatever the front agent was told", "This write went through. Still owed by you: " in said_ and KEY in said_, said_)
 finally:
     _web_page_debts._owed_save(_owed0); os.utime(_page, ns=(_page_st.st_atime_ns, _page_st.st_mtime_ns))
-    if _mode0 is None: _cfg.CFG["page_rule"].pop("mode", None)
-    else: _cfg.CFG["page_rule"]["mode"] = _mode0
 os.unlink(held.clients_file()); gate_open()
 fresh(); out = _messaging._message(KEY, "the release is live", "home-beta"); nn2 = [x for x in routing.read(KEY) if x.get("kind") == "message" and x.get("text", "").endswith("the release is live")][-1]
 check("6l: a message to a project without fyi carries no mark", "hold" not in nn2, nn2)

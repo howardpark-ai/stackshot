@@ -755,7 +755,7 @@ cfg()
 # board answer alone is not his words about the close), by the router, in one line with the mark a front pane takes. Such a close
 # is a row on his For you list and no turn of the front agent: no router notice, no [for Oliver] push, router live or not.
 # Otherwise a front owner hears nothing, as before.
-_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
 NEWD = "- The thing works and is in use"
 def cl(i, sender="work-osprey-x", reason="PR 33 is live", description=NEWD): return _wt_complete.stackshot_complete(f"a{i}", outcome="done", reason=reason, description=description, sender=sender)
 ANS = [{"ts": 1.0, "kind": "decision", "choice": "Go", "via": "board"}]

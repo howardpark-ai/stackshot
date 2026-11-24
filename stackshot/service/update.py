@@ -135,7 +135,7 @@ class Hooks:
     parse_wake: Callable[..., Any]
     publish: Callable[..., Any]
     record_fixes: Callable[..., Any]
-    refuse_if_owing: Callable[..., Any]
+    owing_note: Callable[..., Any]
     release_after: Callable[..., Any]
     render_hold_at: Callable[..., Any]     # web/render.py's hold_at, option_lines, same_ref and when_words (web/ sits above this module)
     render_option_lines: Callable[..., Any]
@@ -854,8 +854,7 @@ def update_unlocked(
         fc.add(f"Refused: reopening {gid} needs a new next: the step that comes now")
     if draft_set and (status or item.get("status")) == "completed":
         fc.add("Refused: a completed item keeps no draft (a close drops it); draft goes with an open item")
-    if state_change:
-        fc.call(h.refuse_if_owing, debtor)
+    owing = h.owing_note(debtor) if state_change else ""      # a write is never refused or held for a page debt: the reply says the write went through and the page is still owed (read here, before this write records its own debt)
     description = _fg.fix_bare_urls(description, str(item_was.get("description") or ""), session=_writes.session_next())       # a bare address in a description becomes a link to itself (the reply says so); next and ask keep the refusal
     for f_ in _fg.bare_url_faults({"description": description, "next": next, "ask": ask}, {"description": item_was.get("description"), "next": meta.get("next"), "ask": ask_was}, session=_writes.session_next()):   # only the fields this call sets; a stored bare URL is no reason to refuse
         fc.add(f_, text=True)
@@ -1549,7 +1548,7 @@ def update_unlocked(
     return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
                                                                  ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + wait_note + machine_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(not backstop and (hold or wake or until_wait or after_set or wait_kind.strip() or str(wait_basis or "").strip() or waits))) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
-            + answered_note + named + told + h.nag(debtor))
+            + answered_note + named + told + owing + h.nag(debtor))
 
 
 def _handover_by_hand(gid: str, done: list[str]) -> str:

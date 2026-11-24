@@ -86,7 +86,7 @@ try:
 except ImportError:                                  # before the change: every check that needs them fails, by name
     PM = FC = None
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 handoff_svc.CLI_SESSIONS = T / "cli"
 hcold_svc.COLD_RUNNER = lambda msg: {"status": "ok", "text": "no json at all here", "duration_s": 0.1, "usage": {}, "note": "stub"}
 PUSHLOG = T / "push.log"

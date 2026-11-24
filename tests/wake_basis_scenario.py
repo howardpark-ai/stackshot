@@ -79,7 +79,7 @@ from stackshot.service import mover_steps as _mover_steps
 from stackshot.service import owner_words as _owner_words
 from stackshot.web.ui import render as ui_render
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 ST = T / "state/waiting.json"
 ST.parent.mkdir(parents=True, exist_ok=True); ST.write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
 mt = lambda i, letter="a": rd(i, letter)["metadata"]

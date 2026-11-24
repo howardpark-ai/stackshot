@@ -226,7 +226,7 @@ In any session: call `create` with a subject that starts with one of your prefix
 the data repository has a commit, and a page update is owed for `projects/getting-started`: that is the page
 rule, and `RULES.md` says how it works. By default (`[pilot] writer_owes_page = false`) the page's keeper is
 charged and the router passes it the update; with `writer_owes_page = true` the session that wrote owes it and,
-after `[page_rule] grace_minutes`, its next state-changing write is refused until the page is committed. The
+after `[page_rule] grace_minutes`, the reply of its next state-changing write says the write went through and the page is still owed. The
 owing session's next prompt carries the nag. A project made with no page owes none (see "Adding a project").
 
 ## Adding a project

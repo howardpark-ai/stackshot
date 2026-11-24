@@ -75,7 +75,7 @@ from stackshot.service import runner as runner_svc
 from stackshot.service import telling
 from stackshot.core import store as _core_store
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
 (T / "state/waiting.json").write_text(json.dumps({"baseline": time.time() - 100 * 86400, "seen": {}, "reported": []}))

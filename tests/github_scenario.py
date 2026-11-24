@@ -203,7 +203,7 @@ def part_repo_id():
     from stackshot.web.ui import render as ui_render
     _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
     _wt.cap_needs_owner = lambda: False
-    _web_page_debts._refuse_if_owing = lambda debtor: None
+    _web_page_debts._owing_note = lambda debtor: ""
     telling.tell_woken = lambda *a, **k: None
     GHC = _cfg.CFG["github"]
 
@@ -866,7 +866,7 @@ from stackshot.core import instance as _core_instance
 from stackshot.web.ui import render as ui_render
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
-_web_page_debts._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
+_web_page_debts._owing_note = lambda debtor: ""        # the page rule is not under test here
 telling.tell_woken = lambda *a, **k: None            # no push.py
 def refused(name, f, *want):
     try:

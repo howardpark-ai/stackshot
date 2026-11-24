@@ -55,7 +55,7 @@ from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import proofs as proofs_svc
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-_web_page_debts._refuse_if_owing = lambda debtor: None
+_web_page_debts._owing_note = lambda debtor: ""
 TOLD = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": TOLD.append((gid, owner, note)) and None      # no push leaves this suite: what would be told is recorded
 

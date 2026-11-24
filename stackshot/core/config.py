@@ -1344,7 +1344,7 @@ def server_box(cfg: dict[str, Any] | None = None) -> bool | None:
 def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     """Settings problems that do not stop the start but change behaviour silently: one line each, [] when the file is fine. The config
     is exactly one file with no defaults merged in (see the head), so a [page_gate] without keeper_currency means the page rules
-    are off. the old key steward_currency is no longer read, so a file holding only that one lands here too. a file that still carries the retired [runner] enabled, [model] watchers or [router] page_debt_hour is told it can go; the key changes nothing. a [presence] minutes that is
+    are off. the old key steward_currency is no longer read, so a file holding only that one lands here too. a file that still carries the retired [runner] enabled, [model] watchers, [page_rule] mode or [router] page_debt_hour is told it can go; the key changes nothing. a [presence] minutes that is
     not a number above 0 is read as 30 (the default), so it is said here, at the start and on a reload, instead of changing silently. a paused stall pass is named first."""
     out: list[str] = stall_notes(cfg)
     out += keyword_notes(cfg)
@@ -1367,6 +1367,9 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     mo = get("model", cfg=cfg)
     if isinstance(mo, dict) and "watchers" in mo:
         out.append("[model] watchers is retired and read by nothing: the waits' watchers always run (a wait with a stored kind is ended by them, never by the old wake pass); drop the line")
+    pr_ = get("page_rule", cfg=cfg)
+    if isinstance(pr_, dict) and "mode" in pr_:
+        out.append("[page_rule] mode is retired and read by nothing: a board write is never refused or held for a page debt (the reply says the page is still owed); drop the line")
     ro = get("router", cfg=cfg)
     if isinstance(ro, dict) and "page_debt_hour" in ro:
         out.append("[router] page_debt_hour is retired and read by nothing: the page-debt call runs with each audit run ([audit] at), no longer from an hour of its own; drop the line")
