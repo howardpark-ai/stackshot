@@ -1,6 +1,6 @@
 """Scenario test for a long busy stretch telling the right agent once (audit/busy_tell.py, service/audit_ticks._busy_tell_tick, run from the ten-minute audit tick after the idle hand-over, `[audit] busy_tell` and `busy_tell_hours`):
 an item on an agent whose hourly audit lines have said only "the mover's pane is in a turn" for about 4 hours, with no other write between them, tells the project's -main agent ONCE; an item a front agent holds with only
-hourly lines for that long tells that front agent itself, once; the owner is never told. Fixture items in a temporary store, a fake clock (the passes are given their `now`), the pane registry replaced by a dict, no live
+hourly lines for that long tells that front agent itself, once; the owner is never told. Fixture items in a temporary store, a fake clock (the passes are given their `now`), the agent state (a mover's pane and subagents, as the audit reads them) replaced by a dict, no live
 store, no network, no model call, no message really sent. The timelines run the real hourly tick and the real busy tick every ten minutes, so the lines the rule reads are the ones the audit writes.
 
   1  the switch and the threshold: the example config documents `busy_tell = true` and `busy_tell_hours = 4`, absent or a TOML true is on, false / the string "true" / 1 are off, the hours read at use (floor 1, garbage reads 4);
@@ -115,12 +115,17 @@ def fake_tell(gid, owner, note, tag="wake", result=None): sent.append((gid, owne
 telling.tell_woken = fake_tell
 _messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append(("message", to, text, "message")), "delivered to " + to)[1]
 fleetev.inbox_flag_send = lambda *a, **k: sent.append(("flag", "", "", "flag"))
-panes = {}; dead = {}                                              # a name -> its pane's registry status; a name -> why it has no pane
+panes = {}; dead = {}                                              # a name -> its pane's status; a name -> why it has no pane
 def fake_status(who, idx=None):
     st = panes.get(who, "")
     if st == "boom": raise OSError("registry unreadable")
     return (st, now0 - 3600) if st else ("", 0.0)
 handoff_svc.handoff_status = fake_status
+def fake_pane(who):
+    """The pane word the hourly line reads for a mover (what the agent-state snapshot would give): the dict's status, unknown ("") when it has none."""
+    st = panes.get(who, "")
+    if st == "boom": raise OSError("agent state unreadable")
+    return st
 handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
 _fleet_sessions_registry._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
 
@@ -156,7 +161,7 @@ def wipe():
 def at(m): return now0 + m * MIN                                    # `m` minutes after the item's last activity in the timelines (act=0)
 def hourly(t):
     CLK.t = t
-    try: return audit_ticks_svc._hourly_tick(now=t, subagents=lambda who: [], anchored={})
+    try: return audit_ticks_svc._hourly_tick(now=t, pane=fake_pane, subagents=lambda who: [], anchored={})
     finally: CLK.t = None
 def tick(t, **kw):
     CLK.t = t
