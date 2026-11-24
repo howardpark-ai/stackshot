@@ -98,7 +98,7 @@ from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
-from stackshot.audit import hourly as HR, hand_idle as HI, silence as SL
+from stackshot.audit import hourly as HR, hand_idle as HI, silence as SL, agent_state as _AS
 from stackshot.waits import stall as ST, handoff as HO
 from stackshot.audit import hourly_log as HL
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -123,6 +123,14 @@ def fake_status(who, idx=None):
     if st == "boom": raise OSError("registry unreadable")
     return (st, now0 - 3600) if st else ("", 0.0)
 handoff_svc.handoff_status = fake_status
+def fake_agent_state(who, now=None, snap=None):
+    """What the agent-state snapshot says of a name (audit/agent_state.py): the dict's `busy` or `idle` is a fresh snapshot naming it; no entry is a snapshot that does not name it (unknown); "boom" is a read that raises."""
+    st = panes.get(who, "")
+    if st == "boom": raise OSError("snapshot unreadable")
+    if st in ("busy", "idle"): return _AS.AgentState(st, "", "turn" if st == "busy" else "idle", now0 - 3600, ())
+    return _AS.AgentState("unknown", "the agent is not in the agent-state snapshot", "", 0.0, ())
+_real_agent_state = audit_ticks_svc._agent_state
+audit_ticks_svc._agent_state = fake_agent_state       # the builders' freedom is the snapshot's word, never this box's pane registry
 handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
 _fleet_sessions_registry._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
 
@@ -432,10 +440,40 @@ def probe_boom():
     got, mv = first_pick(panes={"team-back": "boom", "team-aux": "idle"})
     return got == ["a1"] and mv == "team-aux"
 rule("5 a builder whose pane cannot be read is not free", probe_boom, [(HI, "pick_free", lambda c, busy, status, dead, same, frm="": next((x for x in c if x), ""))])
-def probe_unknown_pane_free():
+def probe_unknown_not_free():
     got, mv = first_pick(panes={})
-    return got == ["a1"] and mv == "team-back"
-check("5 a pane this box does not show (no registry row) reads as not in a turn: the first builder takes it", probe_unknown_pane_free() is True)
+    return got == [] and mover_of(1) == "home-peer" and len(to_main()) == 1 and "no builder was free" in to_main()[0][2]
+rule("5 a builder the agent-state snapshot does not name (no word for it) is not free: nothing moves and -main is told that none was", probe_unknown_not_free,
+     [(HI, "pick_free", lambda c, busy, status, dead, same, frm="": next((x for x in c if x and status(x) != "busy"), ""))])
+# the same through the server's own read of the snapshot file (the fake above replaced by the real `_agent_state`): idle and fresh is free; busy, absent, unknown, not read, a stale snapshot are not
+from stackshot.service import agent_state as _SVC
+def _snap(agents, written_ago=60, schema=1):
+    _SVC.path().write_text(json.dumps({"schema": schema, "written": now0 - written_ago, "received": now0 - written_ago, "agents": agents}))
+def _ent(state, read=True, pane=None): return {"state": state, "since": now0 - 600, "why": "", "pane": pane or ("turn" if state == "busy" else "idle"), "read": read, "subagents": []}
+def real_pick(agents, **kw):
+    audit_ticks_svc._agent_state = _real_agent_state
+    try:
+        wipe(); on(); put(1, act=90); _snap(agents, **kw)
+        got = tick()
+        return got, mover_of(1)
+    finally:
+        audit_ticks_svc._agent_state = fake_agent_state; _SVC.path().unlink(missing_ok=True)
+def probe_snapshot_idle_only():
+    a = real_pick({"team-back": _ent("idle"), "team-aux": _ent("idle")})
+    b = real_pick({"team-back": _ent("busy"), "team-aux": _ent("idle")})
+    c = real_pick({"team-aux": _ent("idle")})                                     # team-back absent from the snapshot
+    d = real_pick({"team-back": _ent("unknown", read=False), "team-aux": _ent("idle")})
+    e = real_pick({"team-back": _ent("unknown"), "team-aux": _ent("idle")})       # a state the sender could not tell
+    f = real_pick({"Team-Back": _ent("idle")})                                   # a name in another case is the same agent
+    return a == (["a1"], "team-back") and b == (["a1"], "team-aux") and c == (["a1"], "team-aux") and d == (["a1"], "team-aux") and e == (["a1"], "team-aux") and f == (["a1"], "team-back")
+rule("5 through the snapshot file: a builder is free only when the fresh snapshot names it and says idle; busy, missing, unread and unknown ones are passed over for the next", probe_snapshot_idle_only,
+     [(HI, "pick_free", lambda c, busy, status, dead, same, frm="": next((x for x in c if x and status(x) != "busy"), ""))])
+def probe_snapshot_none_free():
+    got_ = [real_pick({}), real_pick({"team-back": _ent("busy"), "team-aux": _ent("busy")}), real_pick({"team-back": _ent("idle")}, written_ago=16 * 60),
+            real_pick({"team-back": _ent("idle")}, written_ago=-10 * 60), real_pick({"team-back": _ent("idle")}, schema=2)]
+    return all(x == ([], "home-peer") for x in got_)
+rule("5 …an empty snapshot, one where every builder is busy, one over 15 minutes old, one dated ahead of the clock and one of another schema free nobody: nothing moves", probe_snapshot_none_free,
+     [(HI, "pick_free", lambda c, busy, status, dead, same, frm="": next((x for x in c if x and status(x) != "busy"), ""))])
 def probe_own_mover():
     wipe(); on(); put(1, mover="team-back", act=90); panes["team-back"] = "idle"; panes["team-aux"] = "idle"
     got = tick()

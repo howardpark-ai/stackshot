@@ -14,7 +14,7 @@ tied to the item by three things only (an anchor scoped to the item, an open ste
 unit never counts, and a pull request that none of those names ties nothing (a false negative, never a false refusal). A running unit with a log that has not been written for `RELEASE_FRESH_S`
 is a release that is stuck, so it counts for nothing and the mover is never trapped. Nothing is read from GitHub; no log is read while no unit runs.
 
-Unknown is never a refusal: a mover whose subagents cannot be read (`subagent_tie.Unreadable`: no fresh agent-state snapshot, or none that names the mover), a subagent whose files cannot be read,
+Unknown is never a refusal: a mover whose subagents cannot be read (`subagent_tie.Unreadable`: no fresh agent-state snapshot, or none that names the mover), a subagent entry the sender could not read (listed with no words),
 a running subagent that names no item, and any failure of the check itself all answer "". The callers are injected (`subagents`, `anchored`, `items`) so this module reads no server state and a suite can give
 fakes. Stdlib plus the repo's modules."""
 from __future__ import annotations

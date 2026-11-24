@@ -22,8 +22,9 @@ An item is handed on when all of these hold:
   - if its mover is a front agent, no step of the owner's or of that agent's own is open on it (`_front_step_open`): such an item is the owner's work and is left where it is. An item a front agent moves with no open step of either (the owner has answered and nothing is left to do) is idle like any other and goes to the project's builder;
   - it was not handed on by this pass in the last 24 hours (`DAY`). An item handed on once and idle again after that may be handed again.
 
-A builder is free when it is not the mover of any open item that is on an agent (an item it is to take counts: an untaken hand-off names it as mover) and its pane is not in a turn on this box
-(`status(who) != "busy"`; a pane this box does not run reads as not busy). A name that is known to have no pane (`dead`) or whose status cannot be read is not free. The candidates are the item's project's
+A builder is free when it is not the mover of any open item that is on an agent (an item it is to take counts: an untaken hand-off names it as mover) and the fleet's last agent-state push says
+it is idle (`status(who) == "idle"`: audit/agent_state.py, fresh, naming the builder, its state read; a builder that is busy, missing from the push, not read, or whose push is stale or absent is UNKNOWN or busy, and is not free: the server cannot see a pane
+on another box, so no word is not "idle"). A name that is known to have no pane (`dead`) or whose status cannot be read is not free. The candidates are the item's project's
 background agents, best first, and no other project's (a project's work is built, reviewed and released by its own builder, so a builder of an unrelated project is never a candidate, however idle). With none free, a project with no background agent of its own included, nothing is handed on and -main is told that none was, once per
 item per 24 hours. At most `MAX_PER_TICK` items are handed on in one pass.
 
@@ -179,13 +180,13 @@ def busy_movers(items: dict[str, dict[str, Any]], now: float) -> list[str]:
 
 
 def pick_free(candidates: list[str], busy: list[str], status: Callable[[str], str], dead: Callable[[str], str], same: Callable[[Any, Any], bool], frm: str = "") -> str:
-    """The first of `candidates` that is free (see the module doc), "" when none is. `status(who)` → the pane's registry status ("busy", "idle", "shell", "" unknown); `dead(who)` → why the name has no
+    """The first of `candidates` that is free (see the module doc), "" when none is. `status(who)` → the agent-state snapshot's word for it ("idle" or "busy"; "" when the snapshot cannot say: stale, absent, the agent missing from it, its state not read or unknown); only "idle" is free; `dead(who)` → why the name has no
     pane ("" when it may have one); one that raises leaves the name out. `frm` (the item's present mover) is never picked."""
     for c in candidates:
         if not c or (frm and same(c, frm)) or any(same(c, m) for m in busy):
             continue
         try:
-            if status(c) == "busy" or dead(c):
+            if status(c) != "idle" or dead(c):
                 continue
         except Exception:  # noqa: BLE001
             continue
@@ -372,7 +373,7 @@ def shift(load: dict[str, int], frm: str, to: str, same: Callable[[Any, Any], bo
 def pick_least(candidates: list[str], load: dict[str, int], status: Callable[[str], str], dead: Callable[[str], str], same: Callable[[Any, Any], bool], frm: str = "",
                tried: Iterable[str] = (), front: Callable[[Any, str], bool] | None = None, project: str = "") -> str:
     """The candidate with the fewest open items, "" when none can take the item. Left out: a name with no pane (`dead` says why; one that raises is left out too), the item's own mover (`frm`), any name in `tried`, a front agent.
-    A pane in a turn only breaks a tie between equal loads (an idle one first); then the candidates' order (the project's own first). Never an exclusion for being busy."""
+    A builder that is not idle by the agent-state snapshot (busy, or no word) only loses a tie between equal loads (an idle one first); then the candidates' order (the project's own first). Never an exclusion for being busy."""
     tried = [t for t in tried if t]
     best: tuple[int, int, int] | None = None
     pick = ""
@@ -382,7 +383,7 @@ def pick_least(candidates: list[str], load: dict[str, int], status: Callable[[st
         try:
             if dead(c) or (front is not None and front(c, project)):
                 continue
-            busy = 1 if status(c) == "busy" else 0
+            busy = 0 if status(c) == "idle" else 1
         except Exception:  # noqa: BLE001
             continue
         key = (load_of(load, c, same), busy, i)

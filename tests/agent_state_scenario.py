@@ -8,7 +8,10 @@ it alone. Fixture items in a temporary store, no live store, no network, no mode
   2  over HTTP: no token is 401, a wrong token is 401, a machine token stores (200), a refused body is 400 and the old snapshot stays, a body over the cap is 400 (read no further than the cap) and the old snapshot stays
   3  the reader: busy and idle for a fresh snapshot (the sender's own word is trusted); UNKNOWN, with a reason, for no file, a torn file, another schema, an agent the snapshot does not name, `read` false, a state that
      is unknown, a snapshot just over 15 minutes old (and idle just inside it), one dated more than five minutes ahead of the clock, a snapshot with no time; an idle agent has no subagents; the name is found in any case
-     and by an alias; the pane word the hourly line reads
+     and by an alias; the pane word the hourly line reads; a hand-edited file (a time or a `since` of -Infinity, a huge integer or past the bound) reads unknown and never raises
+  1b numbers and text the body cannot be stored with (a huge integer or a time past the bound in `written`, `since` or `at`, a lone surrogate in a name or a text) are 400 with a reason, never 500, the old snapshot kept and no
+     temporary file left; a push whose `written` is older than the stored snapshot's is ignored (200 `ignored: older`), an equal one is accepted; the file is mode 0600; a stale temporary file of the writer's own name is swept
+     on a write and nothing else is touched; over HTTP a body of exactly 1,000,000 bytes is stored and one of 1,000,001 is 400
   4  the hourly audit on it: an idle fresh agent's item gets `audit_idle`; a busy one in a turn is verified (live state only); a subagent whose words name the item ties to it and leaves the mover's other item idle; a stale
      snapshot, a missing agent, a state not read, no file, a torn file and a subagent the sender could not read each write `audit_unknown` (nothing flagged, nothing idle-marked, nothing stamped); a busy agent that says
      neither a turn nor a subagent is unknown
@@ -133,6 +136,60 @@ SVC.post("box-far", good({"home-peer": ag("busy", "turn")}))
 check("1 a push moves nothing the board's views stand on (the stamp of the items view is the same before and after, and the file is outside the store and the fleet folders)",
       client_reads_svc._board_stamp() == stamp0 and T / "store" not in FILE.parents and T / "fleet" not in FILE.parents, (stamp0, client_reads_svc._board_stamp()))
 
+# ---- 1b. a number or a text the body cannot be stored with is a 400, never a 500; the stored snapshot's order; the file's mode; a stale temporary file
+import stat as _stat
+SVC.post("box-far", good({"home-stew": ag("idle", "shell")}))
+keep = stored()
+HUGE = 10 ** 400                                                    # converting it to a float raises OverflowError
+SUR = json.loads('"\\ud800"')                                       # a lone surrogate as a JSON text can spell it: it parses, and cannot be written as UTF-8
+bad2 = {
+    "a time that is a huge integer": good(written=HUGE), "a negative huge time": good(written=-HUGE), "a time past the bound": good(written=2e12), "a time of 1e400 (infinite when parsed)": json.loads('{"schema": 1, "written": 1e400, "agents": {}}'),
+    "a since that is a huge integer": good({"a": ag(since=HUGE)}), "a since that is not finite": good({"a": ag(since=float("nan"))}), "a subagent time that is a huge integer": good({"a": ag("busy", "turn", subs=[{"at": HUGE}])}),
+    "a subagent time past the bound": good({"a": ag("busy", "turn", subs=[{"at": 2e12}])}),
+    "a lone surrogate in an agent name": good({SUR: ag()}), "a lone surrogate in why": good({"a": ag(why=SUR)}), "a lone surrogate in pane": good({"a": ag(pane=SUR)}),
+    "a lone surrogate in a subagent id": good({"a": ag("busy", "turn", subs=[{"id": SUR}])}), "a lone surrogate in a description": good({"a": ag("busy", "turn", subs=[{"description": "x" + SUR}])}),
+    "a lone surrogate in a brief": good({"a": ag("busy", "turn", subs=[{"brief": "b" + SUR + "b"}])}),
+}
+res2 = {k: SVC.post("box-far", v) for k, v in bad2.items()}
+check("1b each of them answers 400 with one line of reason (no exception, so no 500)", all(s_ == 400 and isinstance(o.get("error"), str) and o["error"] and "\n" not in o["error"] for s_, o in res2.values()), {k: v for k, v in res2.items() if v[0] != 400})
+check("1b …the old snapshot stays, byte for byte, with no temporary file left", stored() == keep and leftovers() == [], leftovers())
+check("1b …a surrogate beyond a text's cap is clipped away with the rest and does not refuse the body; a valid astral character (a surrogate pair in the JSON) is kept whole",
+      SVC.post("box-far", good({"a": ag(why="w" * SVC.WHY_MAX + SUR)}))[0] == 200 and SVC.post("box-far", good({"a": ag(why=json.loads('"\\ud83d\\ude00"'))}))[0] == 200 and loaded()["agents"]["a"]["why"] == "\U0001F600")
+SVC.post("box-far", good({"home-stew": ag("idle", "shell")}))
+oldmask = os.umask(0)
+try: SVC.post("box-far", good({"home-stew": ag("idle", "shell"), "x": ag()}))
+finally: os.umask(oldmask)
+check("1b the snapshot file is mode 0600 (it holds the briefs of subagents), whatever the umask: a new file and a replaced one", _stat.S_IMODE(FILE.stat().st_mode) == 0o600, oct(_stat.S_IMODE(FILE.stat().st_mode)))
+# the order of pushes: one snapshot, a push older than it is ignored, an equal one is accepted
+T0 = time.time()
+SVC.post("box-far", good({"newer": ag()}, written=T0 + 100)); keep = stored()
+st_, out_ = SVC.post("box-far", good({"older": ag()}, written=T0 + 50))
+check("1b a push whose `written` is older than the stored snapshot's is ignored: 200 {ok, ignored: older}, the newer snapshot kept byte for byte, no temporary file", (st_, out_) == (200, {"ok": True, "ignored": "older"}) and stored() == keep and leftovers() == [], (st_, out_))
+st_, out_ = SVC.post("box-far", good({"equal": ag()}, written=T0 + 100))
+check("1b …an equal `written` is accepted (it replaces), and a newer one too", (st_, out_) == (200, {"ok": True, "agents": 1}) and set(loaded()["agents"]) == {"equal"} and SVC.post("box-far", good({"later": ag()}, written=T0 + 101))[0] == 200 and set(loaded()["agents"]) == {"later"})
+SVC.post("box-far", good({"ahead": ag()}, written=time.time() + 3600)); keep = stored()
+st_, out_ = SVC.post("box-far", good({"now": ag()}))
+check("1b …a stored snapshot dated more than five minutes ahead of the server's clock (a sender whose clock ran ahead once) shuts nobody out: a push dated now replaces it", (st_, out_) == (200, {"ok": True, "agents": 1}) and set(loaded()["agents"]) == {"now"}, (st_, out_))
+FILE.write_text("{torn")
+check("1b …a torn stored file is no snapshot to be older than: the push is stored", SVC.post("box-far", good({"x": ag()}, written=5.0))[0] == 200 and set(loaded()["agents"]) == {"x"})
+# a stale temporary file of the writer's own name is swept on a write, and nothing else is touched
+def _tmp_file(name, age_s, text="x"):
+    q = STATE / name; q.write_text(text); os.utime(q, (time.time() - age_s, time.time() - age_s)); return q
+stale = _tmp_file(".agent-state.json.111.222.tmp", 2 * 3600); fresh_tmp = _tmp_file(".agent-state.json.333.444.tmp", 600)
+others = [_tmp_file(n, 2 * 3600) for n in (".agent-state.json.x.tmp", ".agent-state.json.1.2.tmp.bak", "agent-state.json.1.2.tmp", ".agent-state.json.1.tmp", "agent-state.json.old", ".other.5.6.tmp")]
+target = _tmp_file("target-of-link.txt", 2 * 3600, "keep me"); link = STATE / ".agent-state.json.777.888.tmp"; link.symlink_to(target)
+os.utime(link, (time.time() - 2 * 3600,) * 2, follow_symlinks=False)
+adir = STATE / ".agent-state.json.9.9.tmp"; adir.mkdir(); os.utime(adir, (time.time() - 2 * 3600,) * 2)
+SVC.post("box-far", good({"swept": ag()}, written=time.time() + 5))
+check("1b a leftover temporary file of the writer's own name older than an hour is removed by the next write", not stale.exists() and set(loaded()["agents"]) == {"swept"})
+check("1b …a recent one, a file of any other name, a link of that name (never followed, never removed: its target is untouched) and a folder of that name stay",
+      fresh_tmp.exists() and all(q.exists() for q in others) and link.is_symlink() and target.read_text() == "keep me" and adir.is_dir(), [q.name for q in STATE.iterdir()])
+for q in (fresh_tmp, target, *others): q.unlink()
+link.unlink(); adir.rmdir()
+check("1b …and nothing of the test is left in the state folder but the snapshot", leftovers() == [], leftovers())
+FILE.unlink(missing_ok=True)      # no snapshot dated ahead is left for the checks that follow
+SVC.post("box-far", good({"home-stew": ag("idle", "shell")}))
+
 # ================================================================ 2. over HTTP
 from starlette.testclient import TestClient
 tok = open(client.mint("box-far")).read().strip()
@@ -141,6 +198,7 @@ SVC.post("box-far", good({"home-stew": ag("idle", "shell")}))
 keep = stored()
 app = server.mcp.http_app()
 with TestClient(app) as c:
+    LEFT0 = leftovers()      # the token file the mint leaves and whatever the app's start writes in the state folder are no leftover of a push
     r = c.post("/client/agent-state", json=good({"x": ag()}))
     check("2 no token → 401, nothing stored", r.status_code == 401 and stored() == keep, (r.status_code, r.text[:80]))
     r = c.post("/client/agent-state", json=good({"x": ag()}), headers={"Authorization": "Bearer " + "x" * 43})
@@ -156,6 +214,29 @@ with TestClient(app) as c:
     check("2 a body that is no JSON is 400, the old snapshot stays", r.status_code == 400 and stored() == keep, (r.status_code, r.text[:200]))
     r = c.post("/client/agent-state", content=json.dumps(good({"a": ag(why="w" * (SVC.MAX_BYTES + 10))})).encode(), headers=H | {"Content-Type": "application/json"})
     check("2 a body over the cap is 400 naming the limit, and the old snapshot stays", r.status_code == 400 and str(SVC.MAX_BYTES) in r.json()["error"] and stored() == keep, (r.status_code, r.text[:200]))
+    def sized(n):      # a valid body of exactly n bytes: a good snapshot padded with spaces after the JSON
+        b_ = json.dumps(good({"home-peer": ag("busy", "turn")}, written=time.time() + 30)).encode(); assert len(b_) < n; return b_ + b" " * (n - len(b_))
+    r = c.post("/client/agent-state", content=sized(SVC.MAX_BYTES), headers=H | {"Content-Type": "application/json"})
+    check("2 a body of exactly 1,000,000 bytes is stored (200)", r.status_code == 200 and r.json() == {"ok": True, "agents": 1} and set(loaded()["agents"]) == {"home-peer"}, (r.status_code, r.text[:200]))
+    keep = stored()
+    r = c.post("/client/agent-state", content=sized(SVC.MAX_BYTES + 1), headers=H | {"Content-Type": "application/json"})
+    check("2 …one of 1,000,001 bytes is 400 naming the limit, and the old snapshot stays", r.status_code == 400 and str(SVC.MAX_BYTES) in r.json()["error"] and stored() == keep, (r.status_code, r.text[:200]))
+    def sized_chunks(n):
+        b_ = sized(n)
+        for i_ in range(0, n, 50_000): yield b_[i_:i_ + 50_000]
+    r = c.post("/client/agent-state", content=sized_chunks(SVC.MAX_BYTES), headers=H | {"Content-Type": "application/json"})
+    r2 = c.post("/client/agent-state", content=sized_chunks(SVC.MAX_BYTES + 1), headers=H | {"Content-Type": "application/json"})
+    check("2 …also with no Content-Length: a chunked body of exactly 1,000,000 bytes is 200, one of 1,000,001 is 400 naming the limit", r.status_code == 200 and r2.status_code == 400 and str(SVC.MAX_BYTES) in r2.json()["error"], (r.status_code, r2.status_code, r2.text[:100]))
+    keep = stored()
+    huge_int = ('{"schema": 1, "written": ' + "1" + "0" * 400 + ', "agents": {}}').encode()
+    r = c.post("/client/agent-state", content=huge_int, headers=H | {"Content-Type": "application/json"})
+    check("2 a body whose time is a huge integer is 400 with a reason (not 500), the old snapshot stays and no temporary file is left", r.status_code == 400 and r.json().get("error") and stored() == keep and leftovers() == LEFT0, (r.status_code, r.text[:200], leftovers(), LEFT0, stored() == keep))
+    lone = b'{"schema": 1, "written": 1e9, "agents": {"a": {"state": "idle", "since": 1000, "pane": "idle", "read": true, "why": "\\ud800"}}}'.replace(b"1e9", str(time.time() + 60).encode())      # valid but for the lone surrogate (a bare JSON escape)
+    r = c.post("/client/agent-state", content=lone, headers=H | {"Content-Type": "application/json"})
+    check("2 a body with a lone surrogate in a text is 400 with a reason (not 500), the old snapshot stays and no temporary file is left", r.status_code == 400 and r.json().get("error") and stored() == keep and leftovers() == LEFT0, (r.status_code, r.text[:200], leftovers(), LEFT0, stored() == keep))
+    r = c.post("/client/agent-state", json=good({"older": ag()}, written=time.time() - 3600), headers=H)
+    check("2 a push older than the stored snapshot answers 200 {ok, ignored: older} and stores nothing", r.status_code == 200 and r.json() == {"ok": True, "ignored": "older"} and stored() == keep, (r.status_code, r.text[:200]))
+    keep = stored()
     def chunks():
         for _ in range(12): yield b" " * 100_000
     r = c.post("/client/agent-state", content=chunks(), headers=H | {"Content-Type": "application/json"})
@@ -208,6 +289,26 @@ FILE.write_text(json.dumps({"schema": 2, "written": NOW, "agents": {"home-peer2"
 check("3 a file of another schema reads as no snapshot, unknown", AS.snapshot() is None and AS.state_of("home-peer2", NOW)[0] == "unknown")
 FILE.write_text(json.dumps([1]))
 check("3 a file that holds no object reads as no snapshot, unknown", AS.snapshot() is None)
+# a hand-edited file: a time that is not finite, past the bound or a huge integer is no time, and reading it never raises (it reads unknown, as a snapshot with no time)
+def raw_snap(written, entry=None, agent="home-peer"):
+    FILE.write_text(json.dumps({"schema": 1, "written": written, "agents": {agent: entry if entry is not None else ag("busy", "turn")}}))
+def reads(name="home-peer"):
+    try: st_ = AS.state_of(name, NOW); return st_.state, st_.why
+    except BaseException as e_: return "raised", repr(e_)
+res3 = {}
+for label, w in (("-Infinity", float("-inf")), ("Infinity", float("inf")), ("NaN", float("nan")), ("a huge integer", HUGE), ("a negative huge integer", -HUGE), ("past the bound", 2e12)):
+    raw_snap(w); res3[label] = reads()
+check("3 a `written` that is -Infinity, Infinity, NaN, a huge integer or past the bound reads unknown (no time) and never raises", all(v[0] == "unknown" and "no time" in v[1] for v in res3.values()), res3)
+res3b = {}
+for label, sn in (("a huge integer", HUGE), ("-Infinity", float("-inf")), ("Infinity", float("inf")), ("NaN", float("nan")), ("past the bound", 2e12), ("text", "soon")):
+    raw_snap(NOW, ag("busy", "turn", since=sn)); res3b[label] = reads()
+e_null = ag("busy", "turn"); e_null["since"] = None; raw_snap(NOW, e_null); res3b["null"] = reads()
+check("3 a `since` that is -Infinity, a huge integer, NaN, past the bound, text or null reads unknown (that agent only) and never raises", all(v[0] == "unknown" and "since" in v[1] for v in res3b.values()), res3b)
+raw_snap(NOW, ag("busy", "turn", subs=[sub("Build part D", "x", at=HUGE), {"id": "t", "description": "d", "brief": "b", "at": float("-inf")}]), "home-peer")
+try: got3c = [(e_["id"], e_["at"]) for e_ in AS.subagents_of(AS.state_of("home-peer", NOW))]
+except BaseException as e_: got3c = repr(e_)
+check("3 a subagent whose `at` is a huge integer or -Infinity (a hand-edited file) is listed with time 0.0 and nothing raises", got3c == [("s1", 0.0), ("t", 0.0)], got3c)
+check("3 …the same through the reader's own file read, and a fine snapshot beside the damaged one is read as before", (raw_snap(NOW, ag("idle", "idle")), AS.state_of("home-peer", NOW)[0])[1] == "idle")
 FILE.unlink()
 
 # ================================================================ 4. the hourly audit on it
@@ -225,6 +326,7 @@ def BID(n): return "board" + "#" + str(n)
 def clear():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 def push(agents, age=0.0):
+    FILE.unlink(missing_ok=True)      # a push older than the stored snapshot is ignored (1b): a fixture that wants a stale one starts from no file
     st_, _ = SVC.post("box-far", good(agents, written=time.time() - age)); assert st_ == 200
 def run(*ids, **kw):
     """One real pass of the hourly line (no pane and no subagents given: it reads the snapshot), items 1..n of the mover."""
@@ -309,7 +411,9 @@ src = {n: pathlib.Path(STACK, "stackshot", n).read_text(encoding="utf-8") for n 
 imports = {n: re.findall(r"^\s*(?:import|from)\s+([\w.]+)", t, re.M) for n, t in src.items()}
 procs = {n: re.findall(r"\b(?:subprocess|Popen|os\.system|socket\.|paramiko)\b", t) for n, t in src.items()}
 check("5 the reader, the tie and the route's module import no process, socket or ssh module and call none of them", not any(m.split(".")[0] in ("subprocess", "socket", "paramiko", "pty") for ms in imports.values() for m in ms) and not any(procs.values()), (imports, procs))
-check("5 the transcript reader is gone from the tie: it holds `tied`, `tied_to`, `names_item` and `Unreadable`, no `running` or transcript helper", all(hasattr(TIE, n) for n in ("tied", "tied_to", "names_item", "Unreadable")) and not any(hasattr(TIE, n) for n in ("running", "pending_tasks", "read_parent", "interrupted")))
+audit_src = {n: pathlib.Path(STACK, "stackshot", n).read_text(encoding="utf-8") for n in ("audit/hourly.py", "audit/agent_state.py", "audit/busy_hold.py", "audit/hand_idle.py", "service/audit_ticks.py")}
+check("5 the audit's modules call no transcript reader of the tie (`running`, `pending_tasks`, `read_parent`, `interrupted`): the tie keeps them for the sender of the snapshot, whose rule they are (tests/subagent_tie_scenario.py), and the audit only ties what the snapshot lists",
+      all(hasattr(TIE, n) for n in ("tied", "tied_to", "names_item", "Unreadable", "running", "RUNNING_S")) and not any(re.search(r"\b(?:subagent_tie|_tie|TIE)\.(?:running|pending_tasks|read_parent|resumes|interrupted)\b", t) for t in audit_src.values()), [n for n, t in audit_src.items() if re.search(r"\b(?:subagent_tie|_tie|TIE)\.(?:running|pending_tasks|read_parent|resumes|interrupted)\b", t)])
 check("5 the audit's two reads in the service are the snapshot's: `_mover_subagents` and `_agent_state` exist, and the old registry reader of a pane is not what the pass calls", callable(audit_ticks_svc._mover_subagents) and callable(audit_ticks_svc._agent_state))
 for p_ in REG.glob("*.json"): p_.unlink()
 clear(); FILE.unlink(missing_ok=True)

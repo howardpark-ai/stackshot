@@ -99,7 +99,7 @@ from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
-from stackshot.audit import hand_idle as HI, silence as SL
+from stackshot.audit import hand_idle as HI, silence as SL, agent_state as _AS
 from stackshot.waits import stall as ST, handoff as HO
 from stackshot.model import queued as Q, last_activity as LA
 from stackshot.tools import next_report as NR
@@ -125,6 +125,13 @@ def fake_status(who, idx=None):
     if st == "boom": raise OSError("registry unreadable")
     return (st, now0 - 3600) if st else ("", 0.0)
 handoff_svc.handoff_status = fake_status
+def fake_agent_state(who, now=None, snap=None):
+    """What the agent-state snapshot says of a name (audit/agent_state.py): the dict's `busy` or `idle` is a fresh snapshot naming it; no entry is a snapshot that does not name it (unknown); "boom" is a read that raises."""
+    st = panes.get(who, "")
+    if st == "boom": raise OSError("snapshot unreadable")
+    if st in ("busy", "idle"): return _AS.AgentState(st, "", "turn" if st == "busy" else "idle", now0 - 3600, ())
+    return _AS.AgentState("unknown", "the agent is not in the agent-state snapshot", "", 0.0, ())
+audit_ticks_svc._agent_state = fake_agent_state       # the builders' freedom is the snapshot's word, never this box's pane registry
 handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
 _fleet_sessions_registry._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
 
@@ -399,6 +406,10 @@ def probe_tie_idle():
     got = untaken_with_load(idle=("team-aux", "other-back"), busy=("team-back",))
     return got == ["a1"] and mover_of(1) == "team-aux"
 rule("6 equal loads: a pane in a turn only loses the tie, an idle pane first", probe_tie_idle, [(HI, "pick_least", lambda c, load, status, dead, same, frm="", tried=(), front=None, project="": c[0])])
+def probe_tie_unknown():
+    got = untaken_with_load(idle=("team-aux", "other-back"))      # team-back is in no snapshot word: unknown, which is no better than busy in a tie
+    return got == ["a1"] and mover_of(1) == "team-aux"
+rule("6 equal loads: a builder the agent-state snapshot gives no word for loses the tie to one it says is idle (still no exclusion)", probe_tie_unknown, [(HI, "pick_least", lambda c, load, status, dead, same, frm="", tried=(), front=None, project="": c[0])])
 def probe_busy_lower():
     got = untaken_with_load(loads={"team-aux": 1, "other-back": 1}, busy=("team-back",), idle=("team-aux", "other-back"), from_extra=1)
     return got == ["a1"] and mover_of(1) == "team-back"
@@ -656,7 +667,7 @@ rule("10 the balancer ahead of the hand-off tick: an untaken hand-off 10 minutes
 
 # ================================================================ 11. a torn record is not a signal
 def probe_torn_balance():
-    wipe(); on(); put(1, act=15, balance={"at": "yesterday", "count": "x", "none_at": float("nan"), "capped_at": "no", "to": 5}, **ho("home-peer", 12)); panes["team-aux"] = "idle"
+    wipe(); on(); put(1, act=15, balance={"at": "yesterday", "count": "x", "none_at": float("nan"), "capped_at": "no", "to": 5}, **ho("home-peer", 12)); panes["team-aux"] = "idle"; panes["team-back"] = "idle"
     try: got = tick()
     except Exception as e_: return f"raised {e_!r}"
     return got == ["a1"] and mt(1)["balance"]["count"] == 1 and mt(1)["balance"]["to"] == "team-back"
@@ -753,7 +764,7 @@ def probe_needs_only_audit():
     return HI.enabled() is False and tick() == ["a1"]
 check("14 …and it runs with hand_idle and hourly_line off", probe_needs_only_audit() is True)
 def probe_dead_former():
-    wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"; dead["home-peer"] = "a retired session, its pane gone"
+    wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"; panes["team-back"] = "idle"; dead["home-peer"] = "a retired session, its pane gone"
     got = tick()
     return got == ["a1"] and mover_of(1) == "team-back" and told("balance") == [] and "undelivered" not in mt(1)
 rule("14 a former mover whose pane is gone is not sent the disregard notice (nothing is left undelivered on the item that moved)", probe_dead_former, [(handoff_svc, "handoff_pane", lambda who, idx=None: "")])

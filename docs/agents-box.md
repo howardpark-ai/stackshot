@@ -63,7 +63,7 @@ What a reader gets while the box is silent depends on what the copy is for:
 The hourly audit, the idle hand-over and the guard that refuses a park on an item being moved need to know whether the mover is at work: its pane in a turn, or a subagent running. The server does not read that from its own
 box, whichever box the agents are on: no pane registry, no transcript, no ssh and no copy of a transcript. The machine that runs the panes tells it. About every five minutes the fleet's session manager pushes the whole fleet in
 one body, `POST /client/agent-state` with the machine token of every `/client` write ([the client contract](client-contract.md#the-agent-state-the-fleets-session-manager-pushes)), and the server keeps the last one in
-`<paths.state>/agent-state.json`. The audit asks that snapshot for a registered agent's state (`stackshot/audit/agent_state.py`): `busy`, `idle` or `unknown`.
+`<paths.state>/agent-state.json`. The server keeps one snapshot, each push replaces all of it, so every sender for a fleet pushes the whole fleet and an agent absent from it reads unknown (fail closed); a push older than the stored one is ignored. The audit asks that snapshot for a registered agent's state (`stackshot/audit/agent_state.py`): `busy`, `idle` or `unknown`.
 
 It is unknown, never idle, whenever the snapshot cannot say: none was ever pushed, the file does not read, the newest is older than 15 minutes (`agent_state.MAX_AGE_S`: three pushes missed), the agent is not in it, its entry
 was not read (`read` false) or its state is unknown. An unknown mover gets the audit's unknown line (`audit_unknown`): nothing is flagged and nothing is handed on. So an agent on another box than the server reads right as soon
@@ -73,7 +73,7 @@ as the manager there pushes, and reads unknown, never idle, while it does not. N
 
 These still read the server's own box and, with the setting on, find nothing there; each treats that as it treats a session it cannot see:
 
-- `service/pane_recovery.py` (a transcript's last error): it reads such a pane as unknown, and the puller on the agents' box already reports `stopped` for its own panes. The audit's subagent reading is no longer one of these: it reads no transcript and no registry of its own (next section).
+- `service/pane_recovery.py` (a transcript's last error): it reads such a pane as unknown, and the puller on the agents' box already reports `stopped` for its own panes. The audit's subagent reading is no longer one of these: it reads no pane and no transcript of its own, only the snapshot and the sessions index's name of an agent (next section).
 - `fleet/push.py` (a pane's socket and the cloud send) and the `stackshot` command line, which keep to the box they run on.
 - `tools/rulebook_scan.py` and `fleet/connectors.py`, which read the rule files, skills and the CLI's configuration of the box they run on.
 - `projects/pages.py`, whose `session_name` fallback reads the live fleet store under the server's own fleet folder and the CLI's registry (`~/.claude/sessions/*.json`) of the box it runs on: with the setting on and nothing there it gives no name, as for a session it cannot see.

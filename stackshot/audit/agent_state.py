@@ -13,9 +13,10 @@ FAIL CLOSED. A snapshot that is absent, torn, of another schema, older than `MAX
 subagent runs, quiet or unreadable ones included when it counts them; idle: neither), so this module trusts `state` and uses the subagents only for the words a line says and for tying a subagent to an item
 (audit/subagent_tie.py). An idle agent has no subagents here: whatever the entry lists is not running as the sender counts it.
 
-Pure but for reading the one file: no ssh, no registry, no transcript. Stdlib plus the repo's modules."""
+Pure but for reading the one file: no ssh, no pane registry, no transcript (the caller may pass the sessions index's other name of the agent as an alias). Stdlib plus the repo's modules."""
 from __future__ import annotations
 
+import math
 from typing import Any, Iterable, NamedTuple
 
 from stackshot.service import agent_state as _svc
@@ -24,6 +25,7 @@ MAX_AGE_S = 15 * 60.0        # a snapshot written longer ago than this says noth
 SKEW_S = 300.0               # a snapshot dated this far ahead of the clock is a skew of clocks, still read; dated further ahead it is no snapshot
 BUSY, IDLE, UNKNOWN = "busy", "idle", "unknown"
 TURN = "turn"                # the snapshot's word for a pane in a turn
+NUMBER_MAX = 1e12            # a time is epoch seconds: a number past this, or not finite, is no time (a hand-edited file may hold -Infinity or a huge integer; reading one never raises)
 _UNSET: Any = object()
 
 
@@ -38,6 +40,17 @@ class AgentState(NamedTuple):
 def snapshot() -> dict[str, Any] | None:
     """The stored snapshot as the route wrote it, None when there is none that reads."""
     return _svc.load()
+
+
+def _finite(v: Any) -> float | None:
+    """`v` as a float when it is a number that is no bool, finite and no larger than `NUMBER_MAX` in size; else None (a huge integer cannot be converted: OverflowError, read as no number)."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return None
+    try:
+        f = float(v)
+    except OverflowError:
+        return None
+    return f if math.isfinite(f) and abs(f) <= NUMBER_MAX else None
 
 
 def _unknown(why: str) -> AgentState:
@@ -66,10 +79,10 @@ def state_of(name: str, now: float, snap: Any = _UNSET, aliases: Iterable[str] =
         snap = snapshot()
     if not isinstance(snap, dict) or not isinstance(snap.get("agents"), dict):
         return _unknown("the fleet's session manager has sent no agent state the server can read")
-    written = snap.get("written")
-    if not isinstance(written, (int, float)) or isinstance(written, bool) or written != written:
+    written = _finite(snap.get("written"))
+    if written is None:
         return _unknown("the agent-state snapshot has no time")
-    age = now - float(written)
+    age = now - written
     if age > MAX_AGE_S:
         return _unknown(f"the agent-state snapshot is {int(age // 60)} minutes old (over {int(MAX_AGE_S // 60)})")
     if age < -SKEW_S:
@@ -83,8 +96,10 @@ def state_of(name: str, now: float, snap: Any = _UNSET, aliases: Iterable[str] =
     if st not in (BUSY, IDLE):
         return _unknown("the agent's state is unknown" + (f": {a['why']}" if a.get("why") else ""))
     subs = a.get("subagents")
-    since = a.get("since")
-    return AgentState(st, str(a.get("why") or ""), str(a.get("pane") or ""), float(since) if isinstance(since, (int, float)) and not isinstance(since, bool) else 0.0,
+    since = a.get("since", 0)
+    if _finite(since) is None:
+        return _unknown("the agent's entry holds a since that is no time")
+    return AgentState(st, str(a.get("why") or ""), str(a.get("pane") or ""), _finite(since) or 0.0,
                       tuple(s for s in subs if isinstance(s, dict)) if st == BUSY and isinstance(subs, list) else ())
 
 
@@ -102,7 +117,7 @@ def subagents_of(st: AgentState) -> list[dict[str, Any]]:
     out = []
     for s in st.subagents:
         d, b = str(s.get("description") or ""), str(s.get("brief") or "")
-        e: dict[str, Any] = {"id": str(s.get("id") or ""), "description": d, "brief": b, "text": f"{d}\n{b}", "at": float(s.get("at") or 0.0)}
+        e: dict[str, Any] = {"id": str(s.get("id") or ""), "description": d, "brief": b, "text": f"{d}\n{b}", "at": _finite(s.get("at")) or 0.0}
         if s.get("quiet") is True:
             e["quiet"] = True
         if s.get("unreadable") is True:

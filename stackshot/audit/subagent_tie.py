@@ -1,26 +1,290 @@
-"""subagent_tie.py: which running subagent of a mover is at work on WHICH item: the hourly audit's proof that "a subagent is running on it" (audit/hourly.py).
+"""subagent_tie.py: which running subagent of a mover is at work on WHICH item (the tie, used by the hourly audit and the busy-hold guard), and the producer-side rule for which subagents are running (`running`).
 
 A step status in progress (silence.subagent_running) is something the mover wrote: a claim, and one mover can carry it on several items while one subagent runs. The pane being busy is
 the same sort of claim about the mover, not about an item. The audit therefore asks the subagent itself: the subagents a mover has running come from the fleet's session manager (audit/agent_state.py: its last
-snapshot, `POST /client/agent-state`), each with its description and the first part of the brief its mover gave it. This module only ties them.
+snapshot, `POST /client/agent-state`), each with its description and the first part of the brief its mover gave it. The audit tick never calls `running`; it ties what the snapshot lists.
 
-`tied(subagents, shown, keys)` says whether one of them is on an item: its description or its brief names the item (its shown id, `board` and `#` and its number, whole: item 12 is not item 123) or a pull request
+THE TIE. `tied(subagents, shown, keys)` says whether one of them is on an item: its description or its brief names the item (its shown id, `board` and `#` and its number, whole: item 12 is not item 123) or a pull request
 anchored to the item (`keys`, "owner/repo#n", by its URL or by `PR n` / `#n`, as merge_tie names a pull request for an item that speaks of its repository). A subagent that names neither is on no item the
 audit can tell. What that means for an item (audit/hourly.py): a subagent tied to another item leaves this one idle (part F, audit/hand_idle.py, hands it on); a running subagent tied to NONE of the mover's
 items (a brief that names no item and no pull request yet, "Build part D") leaves the mover's items UNKNOWN, not idle, since any of them may be what it builds. So does anything that cannot be read: a mover whose state
 the snapshot cannot give (`Unreadable`), a subagent entry the sender could not read (listed with no words).
 
-Stdlib plus the repo's modules; reads no file."""
+THE PRODUCER RULE. `running(session, roots, now)` lists a session's subagents that are running as the transcript Claude Code keeps on the box that runs the panes shows them:
+
+  <root>/<working-directory folder>/<session uuid>/subagents/agent-<id>.meta.json    {"description": "...", "finished": true once it ended, ...}
+  <root>/<working-directory folder>/<session uuid>/subagents/agent-<id>.jsonl        its transcript, the first line the brief the mover gave it
+
+No `finished` flag and the transcript written within `RUNNING_S`, or a `finished` flag that only says the subagent is PARKED (see `running`). A subagent whose pane was recycled or killed leaves neither a flag nor a
+later write, so it stops counting after that window (the same 90 minutes the step status is trusted for: silence.SUBAGENT_S). This half is the rule the session manager (the sender of the agent-state snapshot) calls on the
+box that holds the panes, and the server does not use it for its own audit pass: the sender imports this module and calls `running(session_id, roots, now)` and reads `RUNNING_S`. THESE NAMES ARE A PUBLIC INTERFACE of this module
+(`running`, `RUNNING_S`, and the helpers `running` uses: `pending_tasks`, `read_parent`, `resumes`, `interrupted`, `Unreadable`): a change to one is a change to the sender, made with it (tests/subagent_tie_scenario.py pins them).
+
+Stdlib plus the repo's modules; `running` and its helpers read files, the tie reads none."""
 from __future__ import annotations
 
+import json
 import re
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Iterable
 
 from stackshot.model import merge_tie as _mt
+from stackshot.model import said as _said
+
+RUNNING_S = 90 * 60.0          # a subagent with no `finished` flag counts as running while its transcript was written within this long
+QUIET_CAP_S = 6 * 3600.0       # …and, for a mover whose pane is in a turn, as running but quiet (`"quiet": True`: it may wait on a long CI or suite run) until its transcript is this old; past it, it is dropped (a recycled pane leaves no flag)
+BRIEF_BYTES = 256 * 1024       # of the first line of its transcript (the brief) at most this many bytes are read
+BRIEF_CHARS = 20000            # and at most this many characters of the brief are kept
+SKEW_S = 300.0                 # a transcript dated this far ahead of the clock is a skew of clocks, still running
+PARKED_S = 90 * 60.0           # a subagent flagged `finished` that waits on a background task of its own counts as running while its transcript was written within this long
+TASK_TAIL_BYTES = 32 * 1024 * 1024    # of a subagent's own transcript at most this much of its end is read to find a background task without an end
+TAIL_BYTES = 8 * 1024 * 1024   # of the session's transcript at most this much of its end is read to find a resume of a subagent and the end notices of background tasks
+LAST_ROW_BYTES = 16 * 1024     # of the end of a subagent's transcript at most this much is read to see whether its last row is an interruption (a longer last row is none)
+RESUME_SLACK_S = 1.0           # a resume dated within this long before the last write of the subagent's meta still counts as newer (the two are stamped by different clocks of one second's grain); a Monitor is read as past its lifetime only this long after it
+TASK_START = re.compile(r"Command running in background with ID: (\w+)|Command (?:did not complete within its \d+s timeout and )?was moved to the background \(ID: (\w+)\)|Monitor started \(task (\w+)")      # what a background Bash or a Monitor answers with: a tool result that OPENS with it (a result that only quotes it, a `cat` of another transcript, is no start)
+TASK_LIFE = re.compile(r"expires in (?:(\d+)h)? ?(?:(\d+)m)? ?(?:(\d+)s)?|timeout (\d+)ms")      # a Monitor's lifetime, in its start text: `expires in 30m`, `expires in 15m 30s`, `expires in 45s`, `timeout 900000ms`; a Monitor with none lasts until its notice or the window
+TASK_NOTE = re.compile(r"<task-id>(\w+)</task-id>((?:(?!<task-id>).){0,1500})", re.S)      # a notice of a task, which ends it only when it carries a `<status>`: a Monitor's per-event notice carries none
+TASK_STOP = re.compile(r'"name":\s*"TaskStop",\s*"input":\s*\{\s*"task_id":\s*"(\w+)"')
+INTERRUPT = re.compile(r"\[Request interrupted by user(?: for tool use)?\]")      # the text of the last row of a subagent that was stopped
+RESUME_KEYS = ("resumedAgentId", "revivedAgentId")      # `revivedAgentId` on Claude Code 2.1.323, both on that version; top-level keys of a user record's `toolUseResult`
 
 
 class Unreadable(Exception):
-    """The mover's subagents cannot be told from what the server holds (no fresh agent-state snapshot, an agent it does not name, a state it was not able to read). The audit reads it as UNKNOWN, never as nothing running."""
+    """The mover's subagents cannot be told: from what the server holds (no fresh agent-state snapshot, an agent it does not name, a state it was not able to read), or from what the producer's box holds (`running`: no
+    transcript of the session there, a subagents folder that cannot be listed). The audit reads it as UNKNOWN, never as nothing running."""
+
+
+def _brief(path: Path) -> str:
+    """The text of the first message of a subagent's transcript (the brief its mover gave it), "" when it cannot be read: a string, or the text blocks of a list. Any failure reads "" (a deeply nested line is a
+    RecursionError, a huge one a MemoryError): the subagent then names nothing it can be tied by, which the audit reads as unknown, not as idle."""
+    try:
+        with open(path, "rb") as f:
+            line = f.readline(BRIEF_BYTES)
+        msg = (json.loads(line).get("message") or {}).get("content")
+    except (Exception, RecursionError):  # noqa: BLE001
+        return ""
+    if isinstance(msg, list):
+        msg = "\n".join(str(b.get("text") or "") for b in msg if isinstance(b, dict))
+    return msg[:BRIEF_CHARS] if isinstance(msg, str) else ""
+
+
+def _tail(path: Path, n: int) -> str:
+    """The last `n` bytes of a file as text (the whole file when it is smaller). OSError when it cannot be read."""
+    with open(path, "rb") as f:
+        size = f.seek(0, 2)
+        f.seek(max(0, size - n))
+        return f.read().decode("utf-8", errors="replace")
+
+
+def _stamp(d: dict[str, Any]) -> float | None:
+    """The time (epoch seconds) a record carries, None when it has none or it cannot be read."""
+    try:
+        return datetime.fromisoformat(str(d.get("timestamp"))).timestamp()
+    except (Exception, RecursionError):  # noqa: BLE001
+        return None
+
+
+def _result_texts(d: dict[str, Any]) -> list[str]:
+    """The text of each tool result of a user record: the string, or the text blocks of a list, of each."""
+    out: list[str] = []
+    c = (d.get("message") or {}).get("content")
+    for b in c if isinstance(c, list) else []:
+        if isinstance(b, dict) and b.get("type") == "tool_result":
+            x = b.get("content")
+            if isinstance(x, list):
+                x = "".join(str(y.get("text") or "") for y in x if isinstance(y, dict))
+            if isinstance(x, str):
+                out.append(x)
+    return out
+
+
+def _notice_texts(d: dict[str, Any]) -> list[str]:
+    """The strings of a record that can be the notice of a background task: the content of a queue record (a notice the session was handed), the prompt of an attachment (a queued command), and a user message's text (a status
+    notice, or a Monitor's expiry event). A tool result is none: it only quotes what a command printed."""
+    t = d.get("type")
+    if t == "queue-operation":
+        c = d.get("content")
+        return [c] if isinstance(c, str) else []
+    if t == "attachment":
+        p = (d.get("attachment") or {}).get("prompt") if isinstance(d.get("attachment"), dict) else None
+        return [p] if isinstance(p, str) else []
+    if t == "user":
+        c = (d.get("message") or {}).get("content")
+        if isinstance(c, str):
+            return [c]
+        return [str(b.get("text") or "") for b in c if isinstance(b, dict) and b.get("type") == "text"] if isinstance(c, list) else []
+    return []
+
+
+def _ending(text: str) -> set[str]:
+    """The task ids a text ends: a task notice carrying a `<status>` (completed, failed, stopped), or a Monitor's expiry or end event. A Monitor's per-event notice carries none and ends nothing."""
+    return {m.group(1) for m in TASK_NOTE.finditer(text) if "<status>" in m.group(2) or "Monitor expired" in m.group(2) or "Monitor ended" in m.group(2)}
+
+
+def _life(text: str) -> float | None:
+    """A Monitor's lifetime in seconds from the opening of its start text, None when it gives none."""
+    m = TASK_LIFE.search(text[:300])
+    if m is None:
+        return None
+    if m.group(4):
+        return int(m.group(4)) / 1000.0
+    h, mi, s = (int(g or 0) for g in m.groups()[:3])
+    return float(h * 3600 + mi * 60 + s) if (h or mi or s) else None
+
+
+def pending_tasks(tp: Path, now: float | None = None) -> set[str]:
+    """The background tasks a subagent started and has no end of in its own transcript: a Bash run in the background (started so, or moved there after its timeout) or a Monitor, whose task id shows in the tool result that
+    OPENS with the start text (a result that only quotes it, a `cat` of another transcript, starts nothing), minus the ids a task notice carrying a `<status>` (completed, failed, stopped), a Monitor's expiry event or a TaskStop ended.
+    A Monitor's per-event notice carries no status and ends nothing. With `now`, a Monitor is also ended when its start (the record's time) plus its lifetime (`expires in 10m`) plus `RESUME_SLACK_S` is past and the transcript was
+    not written after that: its notice may reach only the session's transcript (`read_parent`). A Bash has no lifetime. Only the last `TASK_TAIL_BYTES` are read. An empty set when the file cannot be read."""
+    try:
+        t = _tail(tp, TASK_TAIL_BYTES)
+        at = tp.stat().st_mtime if now is not None else None
+    except (Exception, RecursionError):  # noqa: BLE001
+        return set()
+    started: dict[str, float | None] = {}      # id -> the time its Monitor ends, None for one with no lifetime (or a Bash)
+    ended: set[str] = set()
+    for line in t.split("\n"):      # a record ends at a newline and nowhere else: `splitlines` also cuts at U+2028, U+0085, a form feed and the like, which JSON leaves raw inside a string, and a record cut there is torn
+        if line.startswith('{"type":"api-request'):
+            continue      # a request's copy of the conversation: it quotes records, it is none
+        if "background" in line or "Monitor started" in line:
+            try:
+                d = json.loads(line)
+                texts = _result_texts(d) if d.get("type") == "user" else []
+            except (Exception, RecursionError):  # noqa: BLE001  — a torn line says nothing
+                texts = []
+            for x in texts:
+                m = TASK_START.match(x)
+                if m:
+                    life, ts = (_life(x), _stamp(d)) if m.group(3) else (None, None)
+                    started[next(g for g in m.groups() if g)] = ts + life if life is not None and ts is not None else None
+        if "<task-id>" in line:
+            try:
+                d = json.loads(line)
+                for x in _notice_texts(d):
+                    ended |= _ending(x)
+            except (Exception, RecursionError):  # noqa: BLE001
+                pass
+    ended |= {m.group(1) for m in TASK_STOP.finditer(t)}
+    if at is not None:      # set only when given the clock
+        ended |= {i for i, e in started.items() if e is not None and now > e + RESUME_SLACK_S and at <= e + RESUME_SLACK_S}
+    return set(started) - ended
+
+
+def read_parent(tr: Path) -> tuple[dict[str, float], set[str]]:
+    """What the session's transcript `tr` says of its subagents, read once from its last `TAIL_BYTES`: ({subagent id: the newest time (epoch seconds) of a resume of it}, {the task ids whose end the session was told}).
+    A resume: a SendMessage that woke a subagent answers with `resumedAgentId` (`revivedAgentId` on Claude Code 2.1.323) as a top-level key of the `toolUseResult` of the user record of its result; the same words quoted in a
+    tool output or a message, or in a request's copy of the conversation, are none. An end: the notice of a finished subagent's background task is often written only here (a queue record, an attachment, a user message: see
+    `_notice_texts`), never to the subagent's own transcript. ({}, set()) when the file cannot be read."""
+    out: dict[str, float] = {}
+    ended: set[str] = set()
+    try:
+        for line in _tail(tr, TAIL_BYTES).split("\n"):      # newline only, as above
+            if line.startswith('{"type":"api-request') or not ("AgentId" in line or "<task-id>" in line):
+                continue
+            try:
+                d = json.loads(line)
+            except (Exception, RecursionError):  # noqa: BLE001  — the first line of the tail may be cut: it says nothing
+                continue
+            for x in _notice_texts(d) if "<task-id>" in line else []:
+                ended |= _ending(x)
+            tur = d.get("toolUseResult")
+            if d.get("type") != "user" or not isinstance(tur, dict):
+                continue
+            ts = _stamp(d)
+            if ts is None:
+                continue      # a record with no readable time says nothing
+            for k in RESUME_KEYS:
+                i = tur.get(k)
+                if isinstance(i, str) and i:
+                    out[i] = max(out.get(i, 0.0), ts)
+    except (Exception, RecursionError):  # noqa: BLE001
+        return {}, set()
+    return out, ended
+
+
+def resumes(tr: Path) -> dict[str, float]:
+    """{subagent id: the newest time the session's transcript records a resume of it}: `read_parent`'s first part. {} when the file cannot be read."""
+    return read_parent(tr)[0]
+
+
+def interrupted(tp: Path) -> bool:
+    """Is the last row of a subagent's transcript an interruption (a user row whose text is `[Request interrupted by user]`, or `... for tool use]`)? A subagent that was stopped writes nothing after it, and no flag. Only the last
+    `LAST_ROW_BYTES` are read: a last row longer than that is none. False when the file cannot be read."""
+    try:
+        with open(tp, "rb") as f:
+            size = f.seek(0, 2)
+            f.seek(max(0, size - LAST_ROW_BYTES))
+            raw = f.read()
+        d = json.loads(raw.rstrip(b"\r\n ").split(b"\n")[-1])      # a last row that begins before the part read is cut and is no JSON: False below
+        c = (d.get("message") or {}).get("content")
+        if isinstance(c, list):
+            c = "".join(str(b.get("text") or "") for b in c if isinstance(b, dict) and b.get("type") == "text")
+        return d.get("type") == "user" and isinstance(c, str) and INTERRUPT.fullmatch(c.strip()) is not None
+    except (Exception, RecursionError):  # noqa: BLE001
+        return False
+
+
+def running(session: str, roots: Any, now: float) -> list[dict[str, Any]]:
+    """The running subagents of the session (a transcript uuid) as this box holds them: [{"id", "description", "brief", "text", "at"}], `text` the two together, `at` the transcript's last write. A subagent with no
+    `finished` flag is running when its transcript was written within `RUNNING_S`, and running but quiet (`"quiet": True`) when it is older than that and no older than `QUIET_CAP_S`: a builder waiting on a long CI or suite
+    run writes nothing for a while, and the caller keeps a quiet one for a pane in a turn only (for an idle or shell pane it drops it: a recycled or killed pane leaves one behind), so such a subagent is not dropped there and the mover's items it is not tied to read unknown, not idle. Past the cap it is dropped.
+    [] when the session has no subagents folder or none of them is running. Raises `Unreadable` when the transcript of the session is not on this box or its subagents folder cannot be listed: nothing can be said, and the audit reads that as
+    unknown. A subagent whose files cannot be read (a meta that is not JSON, a transcript that cannot be statted or read) is listed as running with no words (`"unreadable": True`) unless its transcript is known to be
+    old: it may be running, so it ties to no item and the audit reads the mover as unknown. Such an entry carries `"meta_at"`, the meta file's own last write, when that can be read: the caller drops it for an idle or shell pane once it is older than `RUNNING_S` (a meta with no transcript beside it would otherwise keep the mover unknown for good).
+
+    A `finished` flag is not proof that a subagent is done. Claude Code writes `finished: true` into the meta at the end of EVERY turn of a subagent, also when it ends the turn waiting for a background task of its own (a Bash in
+    the background, a Monitor), and drops it only when that task's notice, or a SendMessage, wakes the subagent again: a reviewer can end its turn a dozen times in ten hours while it works. A subagent flagged `finished` therefore
+    still counts as running (the same entry, `quiet` by the same rule) when EITHER its own transcript holds a background task with no end (`pending_tasks`: started by a tool result that opens with the start text, and not a
+    Monitor past its lifetime) and was written within `PARKED_S`, and no notice of that task reached the session's transcript (`read_parent`: the end notice of such a task is often written only there), OR the session's
+    transcript holds a resume of it (`toolUseResult.resumedAgentId`, or `revivedAgentId`) dated no earlier than its meta's last write (the meta's mtime; `RESUME_SLACK_S` allowed): the flag is then about to be dropped, or was
+    not yet. A subagent with NO flag whose last row is `[Request interrupted by user]` (`interrupted`) was stopped: it is dead, not quiet, unless the session's transcript holds a resume of it dated no earlier than that last
+    row (its mtime). The session's transcript is read only for a finished or interrupted subagent, its tail only, once per call; any failure to read either reads as "not parked, not resumed, no notice" (never as
+    unreadable). A subagent that ended for good with a task that never reported reads as parked for up to `PARKED_S`: the smaller error, since the audit then reads unknown, not idle."""
+    path = _said.find_transcript(session, roots)
+    if path is None:
+        raise Unreadable("no transcript of the session on this box")
+    out: list[dict[str, Any]] = []
+    try:
+        metas = sorted((path.parent / path.stem / "subagents").glob("agent-*.meta.json"))
+    except Exception as e:  # noqa: BLE001
+        raise Unreadable(f"the subagents folder cannot be listed ({e.__class__.__name__})") from e
+    parent: list[tuple[dict[str, float], set[str]]] = []      # the session's transcript, read once and only when a finished or interrupted subagent needs it
+
+    def told() -> tuple[dict[str, float], set[str]]:
+        if not parent:
+            parent.append(read_parent(path))
+        return parent[0]
+
+    for mp in metas:
+        aid = mp.name[len("agent-"): -len(".meta.json")]
+        try:
+            tp = mp.with_name(mp.name[: -len(".meta.json")] + ".jsonl")
+            at = tp.stat().st_mtime
+            if not (-SKEW_S <= now - at <= QUIET_CAP_S):
+                continue      # past the cap (a recycled pane leaves no flag), or dated further ahead than a skew of clocks: not running, whatever the meta says
+            meta = json.loads(mp.read_text(encoding="utf-8"))
+            if not isinstance(meta, dict):
+                raise ValueError("meta is not an object")
+            if meta.get("finished") is True:
+                waiting = pending_tasks(tp, now) if now - at <= PARKED_S else set()
+                if waiting:
+                    waiting -= told()[1]      # a notice of its task that reached only the session's transcript ends it
+                if not waiting and told()[0].get(aid, 0.0) < mp.stat().st_mtime - RESUME_SLACK_S:
+                    continue      # finished and neither parked on a task of its own nor resumed since its last write: done
+            elif interrupted(tp) and told()[0].get(aid, 0.0) < at - RESUME_SLACK_S:
+                continue      # stopped by an interruption and not resumed since its last row: dead, not quiet
+            desc, brief = str(meta.get("description") or ""), _brief(tp)
+            out.append({"id": aid, "description": desc, "brief": brief, "text": f"{desc}\n{brief}", "at": at, **({"quiet": True} if now - at > RUNNING_S else {})})
+        except (Exception, RecursionError):  # noqa: BLE001  — any failure on one subagent's files: it may be running, and nothing can be tied to it
+            entry: dict[str, Any] = {"id": aid, "text": "", "at": 0.0, "unreadable": True}
+            try:
+                entry["meta_at"] = mp.stat().st_mtime      # when its meta file was last written: how an idle or shell pane's caller tells an old leftover from a fresh one (no key when the meta cannot be statted: kept)
+            except Exception:  # noqa: BLE001
+                pass
+            out.append(entry)
+    return out
 
 
 def _names_pr(text: str, key: str, bare: bool = True) -> bool:

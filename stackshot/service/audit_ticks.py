@@ -157,13 +157,20 @@ def _silence_tick() -> "dict[str, Any] | None":
 
 def _agent_state(who: str, now: float | None = None, snap: Any = None) -> Any:
     """The state of the agent `who` as the fleet's session manager last pushed it (audit/agent_state.py `state_of`: busy, idle or unknown with the reason), the one read of a mover's busy or idle the audit makes. The name is tried
-    as written and then as the registry labels it (a session id or an old name). `snap` is a snapshot already read (None reads the file). It reads nothing of this box's pane registry or transcripts."""
+    as written and then as the sessions index labels it (`_sr._session_label`: a session id or an old name; a lookup in the index only). `snap` is a snapshot already read (None reads the file). It reads no pane and no transcript of this box."""
     _as = _hooks().audit_mod("agent_state")
     try:
         label = _sr._session_label(str(who or ""))
     except Exception:  # noqa: BLE001  — no label is no alias: the name as written is tried alone
         label = ""
     return _as.state_of(who, time.time() if now is None else now, _as.snapshot() if snap is None else snap, (label,) if label else ())
+
+
+def _state_word(who: str, now: float, snap: Any = None) -> str:
+    """"busy" or "idle" when the agent-state snapshot (fresh, naming the agent, read) says so, "" for everything else (no fresh snapshot, the agent not in it, its state not read or unknown): the word a builder's freedom is judged by
+    (audit/hand_idle.py `pick_free`: free only when it says idle; `pick_least`: an idle one wins a tie). It is the snapshot's, never a pane registry's, which this server does not hold for an agent on another box."""
+    st = _agent_state(who, now, snap)
+    return st.state if st.state in ("busy", "idle") else ""
 
 
 def _mover_subagents(who: str, now: float | None = None, snap: Any = None) -> "list[dict[str, Any]]":
@@ -316,8 +323,8 @@ def _hand_idle_builders(project: str) -> list[str]:
 def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
                     dead: "Callable[[str], str] | None" = None) -> list[str]:
     """Idle items go to a free builder (audit/hand_idle.py, `[audit] hand_idle`, on by default), run from the ten-minute audit tick right after the hourly line: an open item on an agent whose newest audit line is
-    `idle, nothing verified` and that nothing has moved since goes to the first free builder (a background agent of its own project, never another project's; one whose pane is in no turn on this box and
-    that moves no open item on an agent), by the minute hand-off pass's own write (`_handoff.handoff_exec` → `_handoff.handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
+    `idle, nothing verified` and that nothing has moved since goes to the first free builder (a background agent of its own project, never another project's; one the fleet's last agent-state push says is idle, and
+    that moves no open item on an agent: a builder that is busy, missing from the push or not read is not free), by the minute hand-off pass's own write (`_handoff.handoff_exec` → `_handoff.handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
     from the server and the builder is told. One History line says why and names the mover it left. The project's -main agent gets one message that asks nothing. With no builder free nothing moves: a History
     line says so and -main is told once per item per 24 hours. No message goes to the owner and no step is made for him. At most `hand_idle.MAX_PER_TICK` items are handed on per pass and one per item per 24 hours.
     `now`, `items`, `env`, `status`, `dead` are for tests and the tick. → the ids handed on."""
@@ -333,7 +340,8 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         return []
     if status is None or dead is None:
         idx = _sr._sessions_index()
-        status = status or (lambda who: _handoff.handoff_status(who, idx)[0])
+        snap = _hooks().audit_mod("agent_state").snapshot() or {}      # the fleet's last agent-state push, read once for the pass: none is {}, which reads every agent unknown
+        status = status or (lambda who: _state_word(who, now, snap))
         dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
     busy = _hi.busy_movers(items, now)
     handed: list[str] = []
@@ -463,7 +471,8 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         return []
     if status is None or dead is None:
         idx = _sr._sessions_index()
-        status = status or (lambda who: _handoff.handoff_status(who, idx)[0])
+        snap = _hooks().audit_mod("agent_state").snapshot() or {}      # the fleet's last agent-state push, read once for the pass: none is {}, which reads every agent unknown
+        status = status or (lambda who: _state_word(who, now, snap))
         dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
     load = _hi.load_counts(_hi.busy_movers(items, now), _handoff.ho_same)
     moved: list[str] = []

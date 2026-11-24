@@ -10,7 +10,7 @@ items as the hourly audit reads it). Unknown is never a refusal.
 
   1  refuses     a tied live subagent (by the item's id, by an anchored pull request, by its brief when the description names none) refuses a hold and a date alone; the text names the subagent, tells the mover to
                  keep the item in hand with work=, and carries no id of another item
-  2  passes      a subagent tied to ANOTHER item of the mover, none running, a read that is Unreadable or raises, a subagent whose files cannot be read, a running subagent that names no item, a sender that
+  2  passes      a subagent tied to ANOTHER item of the mover, none running, a read that is Unreadable or raises, a subagent entry the sender could not read, a running subagent that names no item, a sender that
                  is not the mover, the owner, the guard off, a closing write, done=, a clear_* of the park, a named blocker (wait_kind, after, needs, ask_by), a hand-off to another session, an item that is
                  not open, an item with no mover, no live callable at all
   3  tool        through the real update tool and the server's own wiring (web/wiring.py: `wiring._busy_live`, `audit_ticks._mover_subagents` replaced by a fake): the refused hold stores nothing; the same write passes once the
@@ -157,7 +157,7 @@ check("1 …but a pull request that is anchored to no item of the mover ties not
 check("1 a brief that names the item ties the subagent when its description names none of the mover's items", refused(gate(live_for([sub("Build part D", brief="the work of @1")]))))
 got = gate(live_for([sub("Build part D", brief="the work of @1")]))
 check("1 …and the words of the refusal are the description (the brief is not quoted)", 'your subagent "Build part D"' in got[1] and "work of" not in got[1], got)
-check("1 a subagent flagged quiet (running, its transcript not written lately) still counts", refused(gate(live_for([sub("Build @1", quiet=True)]))))
+check("1 a subagent flagged quiet (the sender says it runs but has written nothing lately) still counts", refused(gate(live_for([sub("Build @1", quiet=True)]))))
 check("1 a date alone is a wait the write turns into a hold: a wake or an until from the mover is refused too", refused(gate(live_for(BUILD), hold=False, wake=FUT)), gate(live_for(BUILD), hold=False, wake=FUT))
 check("1 a hold with a wake and a reason is the case: refused", refused(gate(live_for(BUILD), wake=FUT)))
 put(5, mover=BACK, hold=True)
@@ -176,8 +176,8 @@ check("2 a read that holds something that is no subagent (None, a string) beside
 check("2 a subagent tied to an item of ANOTHER mover (@3: not the mover's) names no item of this mover: no refusal", ok(gate(live_for([sub("Build @3")]))), gate(live_for([sub("Build @3")])))
 check("2 no subagent running passes", ok(gate(live_for([]))))
 check("2 a subagent that names no item and no pull request is unknown, never a refusal", ok(gate(live_for([sub("Build part D")]))))
-check("2 a subagent whose files cannot be read (listed with no words) passes", ok(gate(live_for([{"id": "x2", "text": "", "at": 0.0, "unreadable": True}]))))
-check("2 an Unreadable read (no transcript on this box, an index that cannot be read) passes", ok(gate(live_for(raises=subagent_tie.Unreadable("no transcript of the session on this box")))))
+check("2 a subagent entry the sender could not read (listed with no words) passes", ok(gate(live_for([{"id": "x2", "text": "", "at": 0.0, "unreadable": True}]))))
+check("2 an Unreadable read (no fresh agent-state snapshot, or none that names the mover) passes", ok(gate(live_for(raises=subagent_tie.Unreadable("no fresh agent-state snapshot names the agent")))))
 check("2 any other error of the read passes, and so does a failure of the check itself", ok(gate(live_for(raises=RuntimeError("boom")))) and ok(gate(live_for(BUILD, items=lambda: 1 / 0))))
 check("2 a `live` that raises passes the write", ok(gate(lambda g, w: 1 / 0)))
 check("2 no `live` callable at all (an app built without one) passes", ok(gate(None)))
@@ -207,7 +207,7 @@ check("2 an item the owner moves is his: the hold is not refused", ok(gate(live_
 
 # ---------------------------------------------------------------- 3. tool
 SUBS = []
-def fake_server_subs(who, idx=None, now=None):
+def fake_server_subs(who, now=None, snap=None):
     if who != BACK: return []
     return SUBS
 def update(i, **kw):
@@ -257,7 +257,7 @@ with patched(audit_ticks_svc, _mover_subagents=fake_server_subs):
         got = update(1, **HOLD)
     check("3 anchors that cannot be read are unknown: the write passes", got[0] == "ok", got)
     put(1, mover=BACK)
-with patched(audit_ticks_svc, _mover_subagents=lambda who, idx=None, now=None: (_ for _ in ()).throw(subagent_tie.Unreadable("no transcript of the session on this box"))):
+with patched(audit_ticks_svc, _mover_subagents=lambda who, now=None, snap=None: (_ for _ in ()).throw(subagent_tie.Unreadable("no fresh agent-state snapshot names the agent"))):
     got = update(1, **HOLD)
     check("3 a mover whose subagents cannot be read (Unreadable) passes through the tool", got[0] == "ok", got)
 put(1, mover=BACK)
@@ -271,7 +271,7 @@ WAITING_NEXT = f"{BACK}: the first nightly run ends overnight; record its counts
 def doing(i): put(i, mover=BACK, needs=[BACK], state="doing")
 def note_of(i, subs=None, raises=None, **kw):
     doing(i)
-    def fake(who, idx=None, now=None):
+    def fake(who, now=None, snap=None):
         if raises is not None: raise raises
         return subs if (subs is not None and who == BACK) else []
     with patched(audit_ticks_svc, _mover_subagents=fake):
@@ -291,7 +291,7 @@ got = note_of(8, [sub("Build @2: the other fix")])
 check("3b …a subagent tied to ANOTHER item of the mover leaves the note as it is", got[0] == "ok" and got[1].count(NOTE) == 1, got)
 got = note_of(8, [sub("Build part D")])
 check("3b …a running subagent that names no item leaves the note as it is (unknown is no reason to drop it)", got[0] == "ok" and got[1].count(NOTE) == 1, got)
-got = note_of(8, raises=subagent_tie.Unreadable("no transcript of the session on this box"))
+got = note_of(8, raises=subagent_tie.Unreadable("no fresh agent-state snapshot names the agent"))
 check("3b …an Unreadable read leaves the note as it is", got[0] == "ok" and got[1].count(NOTE) == 1, got)
 got = note_of(8, raises=RuntimeError("boom"))
 check("3b …any other failure of the read leaves the note as it is", got[0] == "ok" and got[1].count(NOTE) == 1, got)
@@ -312,7 +312,7 @@ def _lock_held():
     """True when the item lock is held (by this thread: the lock is an RLock, so ownership is asked): the proof must run with it free."""
     return writes_mod.ITEM_LOCK._is_owned()
 ASKED = []
-def counting(who, idx=None, now=None):
+def counting(who, now=None, snap=None):
     ASKED.append((who, _lock_held()))
     return [sub("Build @8: the overnight run")] if who == BACK else []
 doing(8)
@@ -329,7 +329,7 @@ with patched(audit_ticks_svc, _mover_subagents=counting):
     update(10, next=WAITING_NEXT)
 check("3b …nor for an item whose stored state is not doing (no note can follow)", ASKED == [], ASKED)
 ASKED.clear(); doing(8)
-with patched(audit_ticks_svc, _mover_subagents=lambda who, idx=None, now=None: ASKED.append((who, _lock_held())) or [sub("Build @2: the other fix")]):
+with patched(audit_ticks_svc, _mover_subagents=lambda who, now=None, snap=None: ASKED.append((who, _lock_held())) or [sub("Build @2: the other fix")]):
     got = update(8, hold=True, wake=FUT, wait_basis=f"the soak window ends {FUT}", next=WAITING_NEXT)
 check("3b …a write that holds is asked once, by the hold's gate: the note cannot follow a hold, so the note's proof is not asked again", got[0] == "ok" and len(ASKED) == 1, (got, ASKED))
 ASKED.clear(); put(18, status="completed", mover=BACK, needs=[BACK], state="doing", outcome="done")
@@ -669,7 +669,7 @@ check("4 a subagent live and no release: the subagent is named", 'your subagent 
 check("4 neither passes", ok(gate(both_for([], anch=A77, units=()))))
 check("4 a subagent tied to another item of the mover and a release tied to this one: the release refuses", RELWORDS(gate(both_for([sub("Build @2: the other fix")], anch=A77))), gate(both_for([sub("Build @2: the other fix")], anch=A77)))
 def broken_subs(gid, mover):
-    return busy_hold.live_work(gid, mover, subagents=lambda who: (_ for _ in ()).throw(subagent_tie.Unreadable("no transcript")), items=lambda: _nr.load_all(None), anchored=lambda: {}, same=_handoff_svc.ho_same, shown=_nr.shown)
+    return busy_hold.live_work(gid, mover, subagents=lambda who: (_ for _ in ()).throw(subagent_tie.Unreadable("no fresh agent-state snapshot")), items=lambda: _nr.load_all(None), anchored=lambda: {}, same=_handoff_svc.ho_same, shown=_nr.shown)
 check("4 a mover whose subagents cannot be read (unknown) still lets a live release speak", RELWORDS(gate(lambda g, w: broken_subs(g, w) or rel_live(anch=A77)(g, w))))
 check("4 …and when neither can be told it passes", ok(gate(lambda g, w: broken_subs(g, w) or rel_live(anch=A77, raises=OSError("x"))(g, w))))
 
@@ -721,7 +721,7 @@ with patched(audit_ticks_svc, _mover_subagents=fake_server_subs), patched(_rlive
         got = update(1, **HOLD)
     check("5 a box where the unit list cannot be had (no systemctl) passes the hold", got[0] == "ok", got)
     reset()
-with patched(audit_ticks_svc, _mover_subagents=lambda who, idx=None, now=None: (_ for _ in ()).throw(subagent_tie.Unreadable("no transcript of the session on this box"))), patched(_rlive, released_anchors=lambda: dict(A77)):
+with patched(audit_ticks_svc, _mover_subagents=lambda who, now=None, snap=None: (_ for _ in ()).throw(subagent_tie.Unreadable("no fresh agent-state snapshot names the agent"))), patched(_rlive, released_anchors=lambda: dict(A77)):
     UNITS_OUT["v"] = units_text(77); logfile(77, QUEUED, age=60.0)
     got = update(1, **HOLD)
     check("5 a mover whose subagents cannot be read (unknown) does not hide a live release through the tool", RELWORDS(got), got)

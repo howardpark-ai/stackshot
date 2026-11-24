@@ -244,7 +244,7 @@ for pane_st in ("idle", "shell", "boom", ""):
     panes["home-peer"] = pane_st
     nothing_fixtures()
     got_n = tick()
-    check(f"1 a pane that is {pane_st or 'not shown on this box'} verifies nothing, and no other signal on items 1 to 7 does: all seven say idle",
+    check(f"1 a pane that is {pane_st or 'not in the snapshot'} verifies nothing, and no other signal on items 1 to 7 does: all seven say idle",
           got_n == ["a1", "a2", "a3", "a4", "a5", "a6", "a7"] and all(lines(i)[-1]["kind"] == "audit_idle" for i in range(1, 8)), [lines(i) for i in range(1, 8)])
 nothing_fixtures()
 check("1 …(another agent's status line, a done one, one older than 90 minutes, a pull request event older than an hour, a step done and a bare update, each on its own item)",
@@ -617,7 +617,7 @@ check("17 a subagent view that cannot be read fails safe: a line is written, it 
       got17c == ["a1", "a2"] and all(lines(i)[0]["kind"] == "audit_unknown" and "could not be read" in lines(i)[0]["text"] and not HR.idle_marked(mt(i)) and "last_activity" not in mt(i) for i in (1, 2)), (got17c, [lines(i) for i in (1, 2)]))
 for i in (1, 2): put(i, mover="home-peer2", act=90)
 tick(subagents=lambda who: [{"id": "x", "text": "", "at": 0.0, "unreadable": True}])
-check("17 a subagent whose own files cannot be read (listed running with no words) ties to nothing: the mover's items read unknown, not idle", all(lines(i)[0]["kind"] == "audit_unknown" for i in (1, 2)), [lines(i) for i in (1, 2)])
+check("17 a subagent entry the sender could not read (listed running with no words) ties to nothing: the mover's items read unknown, not idle", all(lines(i)[0]["kind"] == "audit_unknown" for i in (1, 2)), [lines(i) for i in (1, 2)])
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 put(1, mover="home-peer2", act=90, work=work("in progress", 20, agent="home-peer2"))
 tick(subagents=lambda who: [])

@@ -372,13 +372,16 @@ async def client_write(request: Request):
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
     if what == _agent_state_svc.VERB:       # the one write whose size is capped: a whole fleet in one body, refused over the limit before it is read to the end
         over = _agent_state_svc.too_large(request.headers.get("content-length"))
-        raw = b""
+        chunks: list[bytes] = []      # joined once: a running `raw += chunk` copies the whole body at every chunk
+        size = 0
         if not over:
             async for chunk in request.stream():
-                raw += chunk
-                over = _agent_state_svc.too_large(len(raw))
+                chunks.append(chunk)
+                size += len(chunk)
+                over = _agent_state_svc.too_large(size)
                 if over:
                     break
+        raw = b"".join(chunks)
         if over:
             return JSONResponse({"error": over}, status_code=400, headers={"Cache-Control": "no-store"})
         try:

@@ -166,7 +166,7 @@ def text(now: float, what: list[str], recorded: list[str] | None = None) -> str:
 def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None,
         subagents: Callable[[str], list[dict[str, Any]]] | None = None, anchored: dict[str, Any] | None = None, queue: dict[str, str] | None = None) -> dict[str, Any] | None:
     """The line the open item `gid` is owed now (see the module doc), or None. → {"text", "verified" (the phrases), "recorded" (those that rest on a recorded event), "kind" (audit, audit_idle or audit_unknown)}. `env.is_front(name, project)` says who is a front agent (None reads none as front). `queue` is {item: the item it is queued behind} (`silence.queued`, model/queued.py; None reads it here).
-    `subagents(mover)` → the mover's running subagents ([{"text": description and brief, ...}], subagent_tie.running; None reads none; one that raises reads the mover's subagents as unknown), `anchored` {item id: the pull requests ("owner/repo#n") anchored to it}: a subagent counts for the item only when it names
+    `subagents(mover)` → the mover's running subagents ([{"text": description and brief, ...}], as `_mover_subagents` gives them from the agent-state snapshot; None reads none; one that raises reads the mover's subagents as unknown), `anchored` {item id: the pull requests ("owner/repo#n") anchored to it}: a subagent counts for the item only when it names
     the item or one of those pull requests."""
     item = items.get(gid) or {}
     if item.get("status") != "open":

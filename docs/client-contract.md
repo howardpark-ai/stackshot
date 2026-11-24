@@ -196,7 +196,11 @@ heartbeat (about every five minutes), the whole fleet in one body that REPLACES 
 
 The sender decides the state: busy is a pane in a turn or any running subagent, idle is a pane that is idle, showing a shell or sleeping with no running subagent, unknown (with `read` false) is what it could not tell. The
 subagents are the detail a line says and the audit ties to an item by name. 200 `{"ok": true, "agents": N}`; 400 with a one-line reason for a wrong schema, a body that is no JSON object, an agent entry that is malformed or a body over
-1,000,000 bytes, and the previous snapshot stays; 401 without the machine token; 503 on a read-only standby copy or when the file cannot be written. There is no command-line verb: the sender posts the body itself.
+1,000,000 bytes, and the previous snapshot stays; 401 without the machine token; 503 on a read-only standby copy or when the file cannot be written. The client script posts it: `client.py post agent-state --file <path>`, which sends the file's bytes as the body.
+
+- **One snapshot for the fleet.** The server keeps ONE snapshot and each push replaces all of it, so every sender for a fleet pushes the whole fleet, never a part. An agent absent from the last snapshot reads unknown (fail closed): nothing is flagged and nothing is handed on for it.
+- **An older push is ignored.** A push whose `written` is older than the stored snapshot's changes nothing and answers 200 `{"ok": true, "ignored": "older"}`; an equal or newer one replaces it. A stored snapshot dated more than five minutes ahead of the server's clock does not count for this, so a sender whose clock ran ahead once cannot shut the others out.
+- **Numbers and text.** A time (`written`, `since`, `at`) must be a finite number no larger than 1e12 (a huge integer or a past-the-bound time is 400 with a reason), and no text may hold a lone surrogate (400 as well); the old snapshot stays and no temporary file is left. A body of exactly 1,000,000 bytes is stored, one byte more is 400.
 
 - **One file.** The snapshot is `<paths.state>/agent-state.json` (the body as normalised, with `received`, the server's clock at the push), written whole to a temporary file and renamed over the last one, so a reader never sees half of one. It is
   outside the store and the fleet folders, so a push every few minutes republishes nothing.
