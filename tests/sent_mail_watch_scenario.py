@@ -557,6 +557,26 @@ spool(row("r3", subject="s" * 3000, snip="b" * 3000)); tick()
 m = calls[0]["message"] if calls else ""
 check("13 prompt: the prompt is bounded (a long step, draft, subject and body are cut)", bool(m) and len(m) < 1400, len(m))
 
+# ---- 14. the edges of the mail words: the left edge, and a Korean particle after the word
+bad = []
+for st in ("Send it to Jane Roe by ungmail", "Send the quote by non-gmail", "Send the quote by unmail", "Send it to Jane Roe by _gmail", "Send the quote by pre-mail", "Send it to Jane Roe by 9mail"):
+    reset("on"); item(101, step=st)
+    if MATCH.is_send_step(rd(101)): bad.append(st)
+check("14 left edge: a word that only ends in a mail word (ungmail, non-gmail, unmail, _gmail, pre-mail, 9mail) is no mail word, so the step is no send step", not bad, bad)
+bad = []
+for st in ("Send it to Jane Roe (gmail only)", "Send it to Jane Roe by (Gmail", "Send the quote to Jane Roe by 'mail", "Send the quote to Jane Roe by \"email\"", "Send it to Jane Roe: gmail"):
+    reset("on"); item(101, step=st)
+    if not MATCH.is_send_step(rd(101)): bad.append(st)
+check("14 left edge: a mail word after a bracket, a quote or a colon ((gmail, 'mail, \"email\") is a mail word, so the step is a send step", not bad, bad)
+bad = []
+for particle in ("\uc73c\ub85c", "\ub85c", "\uc744", "\ub97c", "\uc5d0\uc11c", "\uc5d0\uac8c", "\uc774", "\uc758"):
+    for st in (f"Send the quote to Jane Roe, Gmail{particle}", f"Gmail{particle} send the quote to Jane Roe"):
+        reset("on"); item(101, step=st)
+        if not MATCH.is_send_step(rd(101)): bad.append(st)
+check("14 korean particle: the word Gmail directly followed by a Korean particle counts as a mail word, so the step is a send step", not bad, bad)
+reset("on"); item(101, step="Send the quote to Jane Roe by Gmail\uc73c\ub85c"); spool(row("g9", tid=THREAD)); out = tick()
+check("14 korean particle: …and a mail on the thread the item anchors ticks it, with no model call", out == ["a101"] and calls == [] and not open_steps(101), (out, calls, open_steps(101)))
+
 print(f"{len(ran) - len(fails)} of {len(ran)} checks passed" if fails else f"ok: sent-mail watch scenario, {len(ran)} checks")
 settle()
 sys.exit(1 if fails else 0)

@@ -223,7 +223,7 @@ the nightly run takes 9 minutes" (short `- ` bullets, never a paragraph; every l
 {{CLOSE_FORM}}A new or reworded open step that opens with a front agent is refused on an item another session moves:
 open it with the mover's name, or send `For <agent>,` to its project page (a step it already holds stays). With no
 builder there, its front agents may take the item by mover= or a step behind an open step
-(the item moves to it, told, when the step before is done). A wake alone is a wait: the item waits until that date, listed as waiting. Work: Written by the mover or a session named in needs. {{ITEM_FORM}} {{NEXT_FORM}}
+(the item moves to it, told, when the step before is done). A wake alone is a wait: the item waits until that date, listed as waiting. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not: to leave an item again, pass needs without yourself. {{ITEM_FORM}} {{NEXT_FORM}}
 ask="none" clears it (so does clear_ask=true). A write that leaves an ask standing on an item you move or wrote ends
 with a one-line reminder to withdraw the ask if it is wrong or moot; a write that sets an ask shows {{OWNER}}'s
 comments and notes since the item's last ask, so one that already answers it is seen before you ask again. His note on
