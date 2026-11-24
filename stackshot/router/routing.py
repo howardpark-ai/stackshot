@@ -46,7 +46,8 @@ def _append(project: str, line: dict[str, Any]) -> None:
 
 def record(project: str, *, kind: str, to: str, label: str = "", who: str = "", text: str = "", url: str = "", target: str = "",
            pilot: bool = False, anchor: str = "", ts: float | None = None, reason: str = "", log_only: bool = False, batch: str = "",
-           live: bool = False, words: str = "", handback: bool = False, head: str = "", author: str = "", etype: str = "", hold: str = "") -> str:
+           live: bool = False, words: str = "", handback: bool = False, head: str = "", author: str = "", etype: str = "", hold: str = "",
+           ekind: str = "", bot: bool = False, thread: bool = False) -> str:
     """One delivered notice → its id. kind: anchor · board · message. `to` = the session it went to; `target` = the agent it
     is for, or "project-wide" (pilot projects); text = the one-line gist. A line logged without delivery (a log-only direct
     anchor) has `to` empty and says why in `reason`, which the routing page shows in its reason column. `log_only` marks such a line explicitly, `"log_only": true`, so a count of the turns notices
@@ -65,6 +66,9 @@ def record(project: str, *, kind: str, to: str, label: str = "", who: str = "", 
     anchor-builder rule passes a notice on a branch prefixed with a background agent's name to that agent, not to the item's front keeper.
     `etype` (anchor-hub's event type at its source, `ci_failed`, `ci_passed`, `ci_activity`, `comment`, several joined with "+"): the router's
     anchor-ci rule passes a CI notice to the project's builder; a notice recorded without it is read by its `who` ("CI").
+    `ekind`, `bot`, `thread` (the anchor listener, the read-first gate in router.py): the event's kind at its source (`slack`, `slack-edit`, `gmail`, `drive`, `notion`, `notion-edit`, `github`, ...), whether its author is a bot
+    (the source says so: a Slack bot post, a GitHub account of type Bot; every sender of a burst), and whether it is a reply in a thread (a Slack thread reply). They are what the gate tells a machine's news from a person's message by;
+    a record without them has no author kind, which the gate reads as a person's.
     `hold` (held.KINDS): the sender's word that this notice asks nothing of a background agent (a page-owed notice, a message marked fyi).
     The router, when it passes the notice to a background agent, holds it for that agent's next turn instead (router_live._hold_kind); a front agent too, for an fyi and a page-owed notice, through the front gate (router_live._front_fyi, _front_page_owed)."""
     nid = secrets.token_hex(3)
@@ -80,6 +84,9 @@ def record(project: str, *, kind: str, to: str, label: str = "", who: str = "", 
     if author: line["author"] = str(author)[:100]
     if etype: line["etype"] = str(etype)[:80]
     if hold: line["hold"] = str(hold)[:20]
+    if ekind: line["ekind"] = str(ekind)[:20]
+    if bot: line["bot"] = True
+    if thread: line["thread"] = True
     _append(project, line)
     return nid
 

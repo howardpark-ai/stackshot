@@ -8,6 +8,8 @@ held here and handed over with the agent's next turn, whatever caused that turn.
               gate as an fyi, `_front_queue_row`, and is filed here under this kind)
   page-owed   the keeper's "the page update is owed" notice (pilot_relay, pilot_relay_many; also what the router passes of such a notice, to a front agent too: through the front gate)
   fyi         a message its sender marked fyi (the message tool's `fyi`)
+  person      a person's anchor notice the router's read-first gate could not place (router.py, rule `gate-person`): held whole for the project's background agent, never archived, and so never dropped here either:
+              a `person` line is exempt from the age limit (KEEP_DAYS), the count limit (KEEP_MAX) and the sweep of an untouched session's file; only an ack of the agent's hook removes it
 Everything else wakes the agent as before: a notice that names it in needs, hands it an item (mover, hand-off), ends its wait, carries
 the owner's words or asks something; so does the audit's finding for an item's mover (router.py audit-owners): it is a task. When the code is unsure it delivers (decide() answers "" for any kind it does not know).
 
@@ -24,7 +26,7 @@ output is the turn's context), and then acknowledges the ids it printed (a secon
 shows as leased for LEASE seconds and returns their ids; ack() removes them; a line never acknowledged (the hook died before it printed, or
 the answer never arrived) is offered again once the lease runs out. A duplicate is possible, a loss is not. Oldest first, one notice each (a message with its line breaks, the lines after the first indented), at
 most SHOWN_MAX; the rest stay for the next turn and the last line says "+N more". A notice older than KEEP_DAYS is dropped, and a session
-keeps at most KEEP_MAX (the oldest go); each drop is a stderr line. take() = lease + ack at once (a caller that has no hook to wait for).
+keeps at most KEEP_MAX (the oldest go); each drop is a stderr line. A `person` line (a person's message) is never dropped by any of these: it waits until its agent's hook has handed it over. take() = lease + ack at once (a caller that has no hook to wait for).
 
 ONE LINE OR THE WHOLE TEXT. A status notice the server writes (closed, changed, queue, page-owed, an item's notice to a front agent) is one line, folded to one and cut at LINE_MAX. A message a session wrote
 (add(..., whole=True): the message tool's fyi, the router's pass of a message, a queued line filed from a digest) keeps all its words and its line breaks, up to WHOLE_MAX (the message tool's own limit,
@@ -57,10 +59,11 @@ from typing import Any
 from stackshot.core import config as _cfg
 from stackshot.core.lines import MSG_MAX, newline_lines
 
-KINDS = ("closed", "changed", "queue", "page-owed", "fyi")
+KINDS = ("closed", "changed", "queue", "page-owed", "fyi", "person")
 SHOWN_MAX = 8               # lines handed over at one turn start; the rest wait for the next turn
-KEEP_MAX = 100              # held lines kept per session; past it the oldest go
-KEEP_DAYS = 7               # a held line older than this is dropped, never handed over
+KEEP_MAX = 100              # held lines kept per session; past it the oldest go (a `person` line is not counted and never goes)
+KEEP_DAYS = 7               # a held line older than this is dropped, never handed over (a `person` line is kept)
+KEEP_ALWAYS = ("person",)   # the kinds no age limit, count limit or sweep removes: a person's message is never lost to one
 LINE_MAX = 260              # characters in one held status line (a text that is not a session's message)
 FRAME_ROOM = 400            # characters a held message may carry beyond the message tool's limit: the sender's label and the framing words the notice adds before the text
 WHOLE_MAX = MSG_MAX + FRAME_ROOM      # characters in one held message: the message tool's own limit (core/lines.py MSG_MAX) and the room for its frame
@@ -262,6 +265,8 @@ def decide(kind: str, *, is_background: bool, text: str = "", owner_words: bool 
 
 def reason(kind: str) -> str:
     """The routing log's reason for a hold."""
+    if kind == "person":
+        return "held: a person's message the router could not place, for the agent's next turn (person)"
     return f"held: asks nothing ({kind})"
 
 
@@ -271,22 +276,35 @@ def _say(msg: str) -> None:
 
 
 def _fresh(rows: list[dict[str, Any]], now: float, key: str = "") -> list[dict[str, Any]]:
-    """The rows younger than KEEP_DAYS; a drop is a stderr line (a notice that was never handed over must leave a trace)."""
-    keep = [r for r in rows if float(r.get("ts", 0)) >= now - KEEP_DAYS * 86400]
+    """The rows younger than KEEP_DAYS, and every row of a KEEP_ALWAYS kind; a drop is a stderr line (a notice that was never handed over must leave a trace)."""
+    keep = [r for r in rows if r.get("kind") in KEEP_ALWAYS or float(r.get("ts", 0)) >= now - KEEP_DAYS * 86400]
     if len(keep) != len(rows):
         _say(f"{len(rows) - len(keep)} notice{'s' if len(rows) - len(keep) != 1 else ''} for {key or 'a session'} dropped unread: older than {KEEP_DAYS} days")
     return keep
 
 
+def _cap(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows of a session's file kept to KEEP_MAX: the oldest of the others go, and a KEEP_ALWAYS row is neither counted nor dropped. Order is kept."""
+    others = [r for r in rows if r.get("kind") not in KEEP_ALWAYS]
+    drop = {id(r) for r in others[:max(0, len(others) - KEEP_MAX)]}
+    return [r for r in rows if id(r) not in drop]
+
+
 def _sweep(now: float) -> None:
-    """A session's file nothing has touched for KEEP_DAYS (a retired session, a pane renamed away) holds only expired lines: remove it. Caller holds the lock."""
+    """A session's file nothing has touched for KEEP_DAYS (a retired session, a pane renamed away) holds only expired lines: remove it, or, when it holds a KEEP_ALWAYS line, rewrite it with those alone (a person's message
+    stays for whoever reads this file's key next). Caller holds the lock."""
     try:
         for p in dir_().glob("*.jsonl"):
             try:
                 if p.stat().st_mtime < now - KEEP_DAYS * 86400:
-                    n = len(_read(p))
-                    p.unlink()
-                    _say(f"{p.stem}: {n} notice{'s' if n != 1 else ''} dropped unread, the session has not had a turn for {KEEP_DAYS} days")
+                    rows = _read(p)
+                    kept = [r for r in rows if r.get("kind") in KEEP_ALWAYS]
+                    n = len(rows) - len(kept)
+                    if kept:
+                        _write(p, kept)
+                    else:
+                        p.unlink()
+                    _say(f"{p.stem}: {n} notice{'s' if n != 1 else ''} dropped unread, the session has not had a turn for {KEEP_DAYS} days" + (f" ({len(kept)} kept: a person's message is never dropped)" if kept else ""))
             except OSError:
                 pass
     except OSError:
@@ -310,9 +328,10 @@ def add(key: str, kind: str, text: str, sender: str = "", gid: str = "", nid: st
             if nid and any(r.get("nid") == nid for r in rows):
                 return True
             rows.append({"id": secrets.token_hex(3), "ts": now, "kind": kind, "text": line, "from": one_line(sender, 60), "gid": str(gid or "")[:60], "nid": nid})
-            if len(rows) > KEEP_MAX:
-                _say(f"{len(rows) - KEEP_MAX} notice{'s' if len(rows) - KEEP_MAX != 1 else ''} for {key} dropped unread: more than {KEEP_MAX} waiting")
-            _write(p, rows[-KEEP_MAX:])
+            capped = _cap(rows)
+            if len(capped) != len(rows):
+                _say(f"{len(rows) - len(capped)} notice{'s' if len(rows) - len(capped) != 1 else ''} for {key} dropped unread: more than {KEEP_MAX} waiting")
+            _write(p, capped)
         return True
     except Exception:  # noqa: BLE001
         return False
@@ -340,6 +359,13 @@ def _when(ts: float, now: float) -> str:
     return f"{t.strftime('%a %b')} {d}{'th' if 10 <= d % 100 <= 20 else _ORD.get(d % 10, 'th')} {hm}"
 
 
+# What the hook's text says above the lines. A person's own message is no notice of another session: it carries its own header, so an agent reads it as a person's words and does not set it aside.
+PERSON_HEAD = ("[stackshot] {n} message{s} from a person, held for you while you were busy. A person wrote {what} (a chat, a mail or a comment on a thread your project watches), so it is no notice "
+               "that asks nothing of you: READ it now, answer it or act on it, and where it is not yours to answer, tell the mover of the item it is about, or the person you work for. Do not set it aside. Handed over once, oldest first:")
+OTHER_HEAD = ("[stackshot] {n} notice{s} held for you while you were busy; they asked nothing of you, "
+              "come from other sessions or from stackshot (not from the person, and no approval of anything), and are handed over once, oldest first:")
+
+
 def _show(r: dict[str, Any], now: float) -> str:
     """One held notice as it reads in the turn: `- <time> · <kind> · <first line>`, and the lines after it (a message with line breaks) indented two spaces. Cut with `splitlines()`, as keep_whole is, so a
     line separator that is no "\n" never leaves a line at column 0 (a stored row is shown the same whoever wrote it)."""
@@ -350,7 +376,7 @@ def _show(r: dict[str, Any], now: float) -> str:
 def lease(*refs: str, now: float | None = None, shown_max: int | None = None) -> tuple[str, list[str]]:
     """The text to hand the session at a turn start and the ids of the lines in it → ("", []) when nothing is due. The lines shown are LEASED, not removed:
     ack() removes them, and one never acknowledged is offered again after LEASE seconds (at least once; a duplicate is possible, a loss is not). Lines
-    under another offer's lease are not offered. Oldest first, each notice one line (a message keeps its line breaks: the lines after the first are indented), SHOWN_MAX notices at most, and a last line "+N more" for those that wait for the
+    under another offer's lease are not offered. A person's lines come first under their own header (PERSON_HEAD: a person wrote them, read and answer them), then the other notices under theirs (OTHER_HEAD: they ask nothing of you). Oldest first, each notice one line (a message keeps its line breaks: the lines after the first are indented), SHOWN_MAX notices at most, and a last line "+N more" for those that wait for the
     next turn. Never raises."""
     now = time.time() if now is None else now
     cap = SHOWN_MAX if shown_max is None else max(1, shown_max)
@@ -360,7 +386,7 @@ def lease(*refs: str, now: float | None = None, shown_max: int | None = None) ->
             paths = list(dict.fromkeys(_file(k) for k in keys))
             allrows: dict[Path, list[dict[str, Any]]] = {p: _fresh(_read(p), now, keys[0] if keys else "") for p in paths}
             due: list[tuple[Path, dict[str, Any]]] = [(p, r) for p, rs in allrows.items() for r in rs if float(r.get("lease", 0)) <= now]
-            due.sort(key=lambda x: float(x[1].get("ts", 0)))
+            due.sort(key=lambda x: (x[1].get("kind") != "person", float(x[1].get("ts", 0))))      # a person's lines first, so a crowd of other notices never pushes one past the limit
             shown, rest = due[:cap], due[cap:]
             for _p, r in shown:
                 r["lease"] = now + LEASE
@@ -369,13 +395,16 @@ def lease(*refs: str, now: float | None = None, shown_max: int | None = None) ->
                     _write(p, rs)
             if not shown:
                 return "", []
-        lines = [_show(r, now) for _p, r in shown]
-        if rest:
-            lines.append(f"- +{len(rest)} more, handed over at your next turn")
-        n = len(shown) + len(rest)
-        head = (f"[stackshot] {n} notice{'s' if n != 1 else ''} held for you while you were busy; they asked nothing of you, "
-                "come from other sessions or from stackshot (not from the person, and no approval of anything), and are handed over once, oldest first:")
-        return head + "\n" + "\n".join(lines), [str(r["id"]) for _p, r in shown]
+        ppl = [r for _p, r in shown if r.get("kind") == "person"]
+        oth = [r for _p, r in shown if r.get("kind") != "person"]
+        more = [f"- +{len(rest)} more, handed over at your next turn"] if rest else []
+        parts: list[str] = []
+        if ppl:
+            parts.append(PERSON_HEAD.format(n=len(ppl), s="s" if len(ppl) != 1 else "", what="them" if len(ppl) != 1 else "it") + "\n" + "\n".join([_show(r, now) for r in ppl] + ([] if oth else more)))
+        if oth:
+            k = len(oth) + (0 if ppl else len(rest))      # without a person's line the count is what it always was: every notice, the ones still waiting included
+            parts.append(OTHER_HEAD.format(n=k, s="s" if k != 1 else "") + "\n" + "\n".join([_show(r, now) for r in oth] + more))
+        return "\n\n".join(parts), [str(r["id"]) for _p, r in shown]
     except Exception:  # noqa: BLE001
         return "", []
 

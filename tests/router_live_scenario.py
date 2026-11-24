@@ -243,35 +243,36 @@ hub.send("gmail:6666666666666666", "work-osprey", "[anchor] Gmail thread: the ve
 n_hold = routing.read("projects/alpha")[-1]
 hub.send("gmail:7777777777777777", "work-osprey", "[anchor] Gmail thread: out of office reply → https://mail.google.com/y", ev("Gmail anchor", "Vee", "https://mail.google.com/y"), "out of office reply")
 n_hold2 = routing.read("projects/alpha")[-1]
-plan = [(m_quote["id"], "passed", "work-osprey-x", False), (n_hub["id"], "passed", "work-osprey-main", True), (n_board["id"], "passed", "work-osprey-docs", False),
+plan = [(m_quote["id"], "passed", "work-osprey-x", False), (n_board["id"], "passed", "work-osprey-docs", False),
         (nids[0], "dropped", "", False), (nids[1], "archived", "", False)]      # the wake notice is settled by a rule in code (the wake rule: a live wake for the item's mover passes to it)
 fake("good", answer(plan)); p0 = len(pushes())
 res = live.tick()
 rb = {n["id"]: n for n in routing.read("projects/alpha")}
 ca = [c for c in calls() if "Project: projects/alpha" in c["stdin"]]
-check("a tick takes one call for the project's notices the rules in code did not settle (and one for gamma's)", len(ca) == 1 and len(calls()) == 2 and res["retry"] == 1 and all(f'"id": "{i}"' in ca[0]["stdin"] for i, *_ in plan) and f'"id": "{n_hold["id"]}"' not in ca[0]["stdin"], res)
+check("a tick takes one call for the project's notices the rules in code did not settle (and one for gamma's)", len(ca) == 1 and len(calls()) == 2 and res["retry"] == 0 and res["fallback"] == 1 and all(f'"id": "{i}"' in ca[0]["stdin"] for i, *_ in plan) and f'"id": "{n_hold["id"]}"' not in ca[0]["stdin"] and f'"id": "{n_hub["id"]}"' not in ca[0]["stdin"], res)
 settle(); npush = len(pushes()); pp = [x for x in pushes()[p0:] if x[0] != "work-gamma-main"]
 check("passed → delivered to the target, ruled passed by stackshot (router) with the reason and the target", all(rb[i]["ruling"] == "passed" and rb[i]["ruled_by"] == "stackshot (router)" and rb[i]["ruled_to"] == t and rb[i]["reason"] == f"canned {i}"
       for i, r, t, _fh in plan if r == "passed"), [rb[i] for i, r, *_ in plan if r == "passed"])
-to_x = next(x for x in pp if x[0] == "work-osprey-x"); to_main = next(x for x in pp if x[0] == "work-osprey-main" and m_quote["id"] not in x[1] and n_hub["id"] in x[1])
+to_x = next(x for x in pp if x[0] == "work-osprey-x" and m_quote["id"] in x[1]); to_hub = next(x for x in pp if x[0] == "work-osprey-x" and n_hub["id"] in x[1])
 check("a pass to a background agent carries no mark; the notice text and the reason are in it", not to_x[1].startswith("[for Oliver]") and "vendor" in to_x[1] and "canned" in to_x[1] and m_quote["id"] in to_x[1], to_x)
-check("a pass to a front agent for Oliver opens with [for Oliver]", to_main[1].startswith("[for Oliver]") and "Friday" in to_main[1], to_main)
+check("the gate placed a person's question (n_hub) without the call: passed to the page's background agent by gate-person, unmarked, ruled by the router", to_hub[1] and not to_hub[1].startswith("[for Oliver]") and "Friday" in to_hub[1]
+      and rb[n_hub["id"]]["ruling"] == "passed" and rb[n_hub["id"]]["ruled_to"] == "work-osprey-x" and rb[n_hub["id"]]["ruled_by"] == "stackshot (router)" and "asks a question" in rb[n_hub["id"]]["reason"], (to_hub, rb[n_hub["id"]]))
 check("a pass to the agent that keeps the page carries the board notice, unmarked (the default relay says the page update is the keeper's, an ask: it does not hold it)", any(x[0] == "work-osprey-docs" and not x[1].startswith("[for Oliver]") and "completed" in x[1] for x in pp) and rb[n_board["id"]]["ruling"] == "passed" and held.count("work-osprey-docs") == 0, pp)
 check("merged and dropped are ruled and nothing is delivered for them; archived is ruled archived; the mover's own wake is passed to it (never dropped)", (rb[n_wake["id"]]["ruling"], rb[nids[0]]["ruling"], rb[nids[1]]["ruling"]) == ("passed", "dropped", "archived")
       and len([x for x in pp if "router: notice" in x[1]]) == 6 and all(rb[i]["ruled_by"] == "stackshot (router)" for i in (n_wake["id"], nids[0], nids[1])), ([x[0] for x in pp], [rb[i].get("ruling") for i in (n_wake["id"], nids[0], nids[1])]))
 check("the keeper heard none of it but its own wake (it moves the woken item)", [x[1][:60] for x in to_name_line(pushes()[p0:])] == [x[1][:60] for x in to_name_line(pushes()[p0:]) if "a2" in x[1] and "woke" in x[1]] and not to_name_line(pushes()[p0:], "work-gamma"))
 check("every action is a line in live.jsonl: ruled, with the ruling and target", {l["id"] for l in lines() if l["status"] == "ruled"} >= {i for i, *_ in plan}
       and next(l for l in lines() if l["id"] == m_quote["id"])["target"] == "work-osprey-x" and next(l for l in lines() if l["id"] == m_quote["id"])["marked"] is False
-      and next(l for l in lines() if l["id"] == n_hub["id"])["marked"] is True, lines()[:2])
+      and next(l for l in lines() if l["id"] == n_hub["id"])["marked"] is False and next(l for l in lines() if l["id"] == n_hub["id"])["rule"] == "gate-person", lines()[:2])
 check("the rule in code took the anchor notices scoped to one item: passed, no call for them (its mover is a front agent and the notice has no need of Oliver, so the project's background agent takes it)", rb[n_hold["id"]]["ruling"] == "passed" and rb[n_hold["id"]]["ruled_to"] == "work-osprey-x" and rb[n_hold["id"]]["ruled_by"] == "stackshot (router)", rb[n_hold["id"]])
 it6, it7 = _service_store._load("a6"), _service_store._load("a7")
 check("a hold waiting on that anchor is released by the router's passed ruling", not it6["metadata"].get("hold"), it6["metadata"])
 
-check("a notice the call left out (gamma's: the answer was alpha's) stays held on the first try: nothing delivered, nothing ruled, one retry counted", res["retry"] == 1 and not any(x[0] == "work-gamma-main" for x in pushes()[p0:npush])
-      and not routing.read("projects/gamma")[-1].get("ruling") and any(router._load_attempts().values()), (res, router._load_attempts()))
+gp = [x for x in pushes()[p0:npush] if x[0] == "work-gamma-main"]
+check("a person's notice the call left out (gamma's: the answer was alpha's) is held at once, no second try: gamma lists no background agent, so it goes to the contact front agent (no held-line hook here: delivered, marked), ruled passed, no attempts entry",
+      res["retry"] == 0 and res["fallback"] == 1 and len(gp) == 1 and gp[0][1].startswith("[for Oliver]") and routing.read("projects/gamma")[-1].get("ruling") == "passed" and not router._load_attempts(), (res, gp, router._load_attempts()))
 res2 = live.tick(); settle()
-gp = pushes()[npush:]
-check("…and the second try is the fallback: passed to gamma's -main agent, marked, the attempts entry gone", res2["retry"] == 0 and res2["fallback"] == 1 and [x[0] for x in gp] == ["work-gamma-main"] and gp[0][1].startswith("[for Oliver]") and not router._load_attempts(), (res2, gp, router._load_attempts()))
+check("…and the next tick has nothing left for it", res2["retry"] == 0 and res2["fallback"] == 0 and len([x for x in pushes()[npush:] if x[0] == "work-gamma-main"]) == 0, res2)
 n_calls = len(calls()); npush = len(pushes()); res3 = live.tick()
 check("a third tick judges nothing", res3["ruled"] == 0 and len(calls()) == n_calls and len(pushes()) == npush, res3)
 
@@ -291,7 +292,7 @@ fl = next(l for l in lines() if l["id"] == n_fr["id"])
 check("a delivery to a front agent carries [for Oliver] whatever for_owner says (a front pass without it, in a project with no background agent)", [x for x in pushes()[p0:] if x[0] == "work-gamma-main" and n_fr["id"] in x[1]][0][1].startswith("[for Oliver]")
       and fl["for_owner"] is False and fl["marked"] is True and fl["target"] == "work-gamma-main", (fl, pushes()[p0:]))
 check("…and one to a background agent does not (alpha's builder, above)", next(l for l in lines() if l["id"] == m_quote["id"])["marked"] is False)
-check("a dropped ruling is ruled and delivers nothing", rule_of(n_chat["id"])["ruling"] == "dropped" and rule_of(n_chat["id"])["ruled_by"] == "stackshot (router)")
+check("a call's dropped ruling on a person's message is never a drop: it is held for the page's background agent, ruled by the router", rule_of(n_chat["id"])["ruling"] == "held" and rule_of(n_chat["id"])["ruled_by"] == "stackshot (router)" and "person" in rule_of(n_chat["id"])["reason"], rule_of(n_chat["id"]))
 check("the second hold's notice (passed by the rule in code) released its item too", not _service_store._load("a7")["metadata"].get("hold"))
 
 item(6, "projects/alpha", A, hold=True)          # held again, waiting on the Gmail anchor

@@ -14,6 +14,7 @@ an owner pointing at a finished transcript. This module is the one lookup that t
   resolve(x)         a permanent id, a name, an alias or a transcript id → ONE permanent id, or None ("cannot tell"). Never a pick between rows:
                      zero rows, or more than one, is None. For a name or alias, a string that rows both live and retired carry belongs to the
                      live row when exactly one row is live; of several live rows the one whose CURRENT name it is, if only one, else None.
+  retired(x)         True when x is a name the registry holds only on retired rows (nobody reads what is sent to it); False on any doubt
   display_name(x)    the current name of the session x resolves to, or None
   delivery(x)        the address the delivery code understands: a permanent id → the session's current name when that name is this live session's alone,
                      else its latest transcript id; anything else as it came
@@ -262,6 +263,17 @@ def explain(x: Any) -> tuple[str | None, str]:
         live = sum(1 for i in ids if reg.rows[i].get("state") == "live")
         return None, f"ambiguous: {len(ids)} sessions carry the name ({live} live)"
     return None, "a name no registry session carries"
+
+
+def retired(x: Any) -> bool:
+    """Is the session NAME `x` a retired one: the registry holds rows that carry it (as a name or an alias) and none of them is live? False for a name the registry does not know, for a live session and when there is no
+    registry (a doubt is never "gone"). What is sent to a retired session is read by nobody."""
+    s = _text(x)
+    if not s:
+        return False
+    reg = load()
+    ids = reg.by_name.get(s) or ()
+    return bool(ids) and not any(reg.rows[i].get("state") == "live" for i in ids)
 
 
 def row(x: Any) -> dict[str, Any] | None:

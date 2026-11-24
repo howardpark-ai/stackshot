@@ -72,10 +72,8 @@ his answer is refused unless the ask changed. A reply names his answer given sin
 next is a checklist: the item keeps every step in the order written, open, done or dropped, and next holds the open
 steps. A step of yours leaves next only by being marked in the same update: done=[…] when the work was finished,
 dropped=[…] when it is no longer wanted, each entry a step's 1-based position (marked steps count; get lists them
-under `checklist:`) or the exact text of its first line. Example, steps 1 `my-x: build it` and 2 `my-x: test it` open,
-step 1 finished: update(item_id="board#N", sender="my-x", done=[1], next="my-x: test it\nmy-x: open the PR") (the open
-step 2 is written again as it stands). An update that replaces or removes (next="none") your lines of next and leaves
-one out unmarked keeps that step open as written and the reply names it (end it with done=[n] or dropped=[n]); another session's lines are never touched by your next. Parameter reword (map, position or
+under `checklist:`) or the exact text of its first line (the call example is in the description above). An update that
+replaces or removes (next="none") your lines of next and leaves one out unmarked keeps that step open as written and the reply names it (end it with done=[n] or dropped=[n]); another session's lines are never touched by your next. Parameter reword (map, position or
 first-line text → new text) gives an open step of yours new words and keeps its number, place and open state (leave
 next out and the line is changed for you); a line reworded in next alone is a new step, and the old one stays open. A reword is the same action in other words, never the old text with progress added. A reword of a step of his
 (a line opening with `{{OWNER}}:`) is done as drop plus add, and the reply says so: the old step is dropped and shows as
@@ -127,9 +125,7 @@ time of day, in the board timezone (a relay or event wait takes the day alone, Y
 until says. A
 wait on your own item also needs wait_reason (at least {{WAIT_GUARD_REASON_MIN}} characters); a wait with a kept wait_basis
 needs none, and a wake more than {{CAP_DAYS}} days out needs a wait_basis. Moving a wake (or ask_by) later with the
-item otherwise as it was is refused: in the same write mark a step done or dropped, write the next step or a new
-reason, or change what the wait stands on (wait_kind, wait_event, wait_anchor, after; a flip back to an earlier one
-does not count, and a wait_reason does not count).
+item otherwise as it was is refused, as a clock renewal (see the wait text in the description).
 
 ## param ASK_BY
 The old name of until, accepted for now: the day a wait on another item, a relay or an event comes back to someone if
@@ -142,7 +138,7 @@ wait takes the day alone, YYYY-MM-DD: its ask-by day). An item with an until is 
 update that hands the item to another session the date parks nothing, it is the hand-off's backstop and the item stays
 active in the new mover's lane (unless the item carries hold, wait_kind, wait_basis or an after link, in this call or
 stored by an earlier one: then the date stays a wait)); wait_kind goes only beside it (none: it waits on the date
-alone). until="none" drops it. It replaces wake, ask_by and hold with a wake, still accepted for now. Moving it later
+alone). until="none" drops it. Moving it later
 with nothing else changed is refused, as for wake. Beside waits it is the list's backstop day.
 
 ## param NEXT
@@ -190,8 +186,7 @@ step, mover, description or draft are judged, and [model] guards = false skips t
 
 ## param WAIT_BASIS
 The reason a wake (on a relay or event wait, its ask-by day) carries when it parks the item or lies past the cap: one line of 12 to 300 characters that names the
-real date it stands on as YYYY-MM-DD, from the wake day to 30 days after it: hold=true, until="<last day of the
-window, YYYY-MM-DD>", wait_basis="error-log soak ends <that day, YYYY-MM-DD>"; a date outside the board reads the same way, wait_basis="vendor
+real date it stands on as YYYY-MM-DD, from the wake day to 30 days after it: wait_basis="error-log soak ends <that day, YYYY-MM-DD>"; a date outside the board reads the same way, wait_basis="vendor
 reply due <YYYY-MM-DD>" (a wake with no date is refused). Three
 wakes take it, each basis bound to the wake it was given for: a park's wake, a verifying item's wake, and a
 wake more than {{CAP_DAYS}} days out (it lifts the cap for that wake alone, up to {{BASIS_MAX_WAKE_DAYS}} days: a wake
@@ -209,8 +204,7 @@ Retired: refused. Ranks are retired; a call that carries this is refused.
 next replaces only your own lines: every line of next remembers the session whose update wrote it (the sender, or the
 item's creator when the call names none; not the name the line starts with). next=<lines> takes the place of the lines
 you wrote before, where the first of them stood (at the end when you had none) and leaves every other session's lines
-where they are; an open step of yours that the new next leaves out stays open unless marked in the same update (done=[n],
-dropped=[n]; reword gives it new words).
+where they are; a step of yours that it leaves out stays open unless marked (done, dropped, reword).
 next="none" removes only your own lines; clear_next=true wipes every line, whoever wrote it, and with next given the
 wipe comes first and your lines are then set. A line of yours that another session's open line already reads the same
 is not added a second time. A close clears next whoever wrote it.
@@ -230,7 +224,7 @@ the nightly run takes 9 minutes" (short `- ` bullets, never a paragraph; every l
 {{CLOSE_FORM}}A new or reworded open step that opens with a front agent is refused on an item another session moves:
 open it with the mover's name, or send `For <agent>,` to its project page (a step it already holds stays). With no
 builder there, its front agents may take the item by mover= or a step behind an open step
-(the item moves to it, told, when the step before is done). A wake alone is a wait: the item waits until that date, listed as waiting. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not: to leave an item again, pass needs without yourself. {{ITEM_FORM}} {{NEXT_FORM}}
+(the item moves to it, told, when the step before is done). A wake alone is a wait: the item waits until that date. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not: to leave an item again, pass needs without yourself. {{ITEM_FORM}} {{NEXT_FORM}}
 ask="none" clears it (so does clear_ask=true). A write that leaves an ask standing on an item you move or wrote ends
 with a one-line reminder to withdraw the ask if it is wrong or moot; a write that sets an ask shows {{OWNER}}'s
 comments and notes since the item's last ask, so one that already answers it is seen before you ask again. His note on
@@ -312,8 +306,7 @@ soon, for nothing (a flag set before the provision recycled the box too early). 
 a recycle is never an item of its own (create refuses one), and for a change no item covers, {{WHEN_IDLE}};
 {{FLEET_TOOL}} runs a flagged recycle itself, the board shows one "Pane recycle pending for … ({{FLEET_TOOL}} runs
 it)" status line while an open item not parked carries it, and when {{FLEET_TOOL}} reports the recycle done the
-server clears it and tells you to re-read the item and resume. clear_recycle=true takes it off by hand. work: the
-status of your open step (parameter work). A question {{OWNER}} asks on an item (in his answer or a comment on it) is
+server clears it and tells you to re-read the item and resume. clear_recycle=true takes it off by hand. A question {{OWNER}} asks on an item (in his answer or a comment on it) is
 answered by the mover on the item itself: rewrite the description, and the options where it is a pick, the description
 saying it answers his question. His question is never posted with said and never taken as his call; only his
 conclusions are. {{NEEDS_FORM}} {{CHECK_FORM}}check="" changes nothing, and a new check passed replaces the old one.
