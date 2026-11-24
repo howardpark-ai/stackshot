@@ -371,6 +371,38 @@ upd(82, step=LONG)
 r, fx = send(lambda: upd(82, step=mt(82)["step"], clear_next=True))
 check("2b the stored summary sent with clear_next=true wipes the lines, the record of the split goes, and the reply does not say nothing was changed",
       not isinstance(r, ToolError) and not any(x in mt(82).get("next", "").splitlines() for x in lines) and "step_lines" not in mt(82) and not any(k == "step-split" and "nothing was changed" in t for k, t in fx), (mt(82).get("next"), mt(82).get("step_lines"), fx))
+# clear_next wipes every open line: a long step sent with it makes all its lines again, never counts the lines it is about to wipe as there already
+item(84)
+upd(84, step=LONG)
+r, fx = send(lambda: upd(84, step=LONG, clear_next=True))
+check("2b the same long step sent with clear_next=true: the summary and all seven action lines are open after the wipe", not isinstance(r, ToolError) and len(opened(84)) == 8 and all(x in opened(84) for x in lines) and len(mt(84)["step_lines"]) == 7, (r, st(84), fx))
+check("2b …and the reply says the lines were added, never that they were on the item already", any(k == "step-split" and "so it was split" in t and "already" not in t for k, t in fx) and not any("nothing was added" in t for k, t in fx), fx)
+LONG_D = ". ".join([ACTS_B[0], ACTS[1], ACTS[2], ACTS[3]]) + "."
+sum_d, lines_d = SS.split_step(LONG_D, LINE_ROOM)
+item(85)
+upd(85, step=LONG)
+r, fx = send(lambda: upd(85, step=LONG_D, clear_next=True))
+check("2b a different long step that shares three actions with the stored one, sent with clear_next=true: its summary and all four action lines are open (the shared three are made again)",
+      not isinstance(r, ToolError) and len(lines_d) == 4 and sorted(opened(85)) == sorted([f"Oliver: {sum_d}", *lines_d]) and len(mt(85)["step_lines"]) == 4, (r, st(85), fx))
+# a reword beside clear_next is refused (it would wipe the line it rewords), so the lines of a reword are never wiped after being counted as there
+item(86)
+r, fx = send(lambda: upd(86, reword={2: "Oliver: look at the page first"}, clear_next=True))
+check("2b a reword of his line beside clear_next=true is refused, naming clear_next", isinstance(r, ToolError) and "clear_next" in str(r), r)
+# a different long step that shares an action ticked done with the stored one opens it again, a second case (the third action)
+item(87)
+upd(87, step=LONG)
+settle(87, lines[2], "done")
+r, fx = send(lambda: upd(87, step=LONG_D))
+check("2b a different long step that shares a done action (the third of the stored one) opens every one of its four actions again, the done line stays done",
+      not isinstance(r, ToolError) and sorted(opened(87)) == sorted([f"Oliver: {sum_d}", *lines_d]) and ("done", lines[2]) in his(87) and len(mt(87)["step_lines"]) == 4, (r, st(87), fx))
+# the reply does not call a done line one that is on the item already
+item(88)
+upd(88, step=LONG)
+settle(88, lines[1], "done")
+settle(88, lines[2], "dropped")
+r, fx = send(lambda: upd(88, step=LONG))
+check("2b the same long step sent again, with one action done and one dropped, is said to add nothing and to keep those two as they are, not to find all its lines on the item",
+      any(k == "step-split" and "done or dropped before" in t and "nothing was added" in t and "are on the item already, so nothing" not in t for k, t in fx), fx)
 # a stored step_lines with a step and no state: any write that settles the state takes the record with the step
 item(83)
 upd(83, step=LONG)

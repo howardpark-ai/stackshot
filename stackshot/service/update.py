@@ -945,9 +945,9 @@ def update_unlocked(
     if step_lines and not closing:      # the actions of a long step: lines of next that open with his name, at the end of the sender's own lines (the summary is the step)
         own_text = "\n".join(e for e in _steps.split(_nl.text_of(meta, next_writer, keeper_was, _handoff.ho_same)) if _steps.key(e) not in gone_keys)      # …and none of the old split's lines the write drops
         settled = {_steps.key(x["text"]) for x in _steps.view(item_was.get("metadata"), keeper=keeper_was) if x["status"] != _steps.OPEN} & group if {_steps.key(x) for x in step_lines} == group else set()      # the same long step sent again: an action of it that was ticked done or dropped stays so, it is not made open again (another step that holds the same words opens every one of its actions)
-        have = open_keys | settled | {_steps.key(x) for x in _steps.split(next)}
+        have = (set() if clear_next else open_keys) | settled | {_steps.key(x) for x in _steps.split(next)}      # clear_next wipes every open line, so none counts as there already
         added = _with_lines(next, own_text, step_lines, have, next_drop or clear_next)
-        _fg.say_long_step(step_long, step_lines, sum(1 for ln in step_lines if _steps.key(ln) not in have))
+        _fg.say_long_step(step_long, step_lines, sum(1 for ln in step_lines if _steps.key(ln) not in have), sum(1 for ln in step_lines if _steps.key(ln) in settled))
         if added != next:
             next, next_drop, next_touch = added, False, True
             _stall.note(meta, time.time(), f"step: split by the server into a summary and {len(step_lines)} lines of next")
