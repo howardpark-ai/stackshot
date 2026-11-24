@@ -3,7 +3,7 @@
 An item its mover is moving is not paused: a hold says "nothing happens here until ...", which is false while a subagent of the mover builds it. The gate asks this module one question,
 `live_work(gid, mover, ...)`: is a running subagent of `mover` tied to THIS item? It answers with the words the refusal uses (`your subagent "<description>"`), or "" for nothing.
 
-The proof is the one the hourly audit uses (audit/hourly.py, audit/subagent_tie.py): the subagent's own record on this box, a running one whose description (else its brief) names the item or a pull request
+The proof is the one the hourly audit uses (audit/hourly.py, audit/subagent_tie.py): the subagent as the fleet's last agent-state snapshot lists it, a running one whose description (else its brief) names the item or a pull request
 anchored to it, read against every open item the mover has, so a subagent that works on another item of the mover is not tied to this one. Nothing is read from GitHub. A main CI run of an
 anchored pull request and the release queue file are NOT read as proof: the server records the events of a pull request when they end (a CI result, a merge: model/last_activity.py), never that a run is in flight, and an event record is no proof
 of one running, so a refusal on it would rest on a guess; the release script's own unit is the proof of a running release (below).
@@ -14,7 +14,7 @@ tied to the item by three things only (an anchor scoped to the item, an open ste
 unit never counts, and a pull request that none of those names ties nothing (a false negative, never a false refusal). A running unit with a log that has not been written for `RELEASE_FRESH_S`
 is a release that is stuck, so it counts for nothing and the mover is never trapped. Nothing is read from GitHub; no log is read while no unit runs.
 
-Unknown is never a refusal: a mover whose subagents cannot be read (`subagent_tie.Unreadable`, a transcript this box does not hold, a sessions index that cannot be read), a subagent whose files cannot be read,
+Unknown is never a refusal: a mover whose subagents cannot be read (`subagent_tie.Unreadable`: no fresh agent-state snapshot, or none that names the mover), a subagent whose files cannot be read,
 a running subagent that names no item, and any failure of the check itself all answer "". The callers are injected (`subagents`, `anchored`, `items`) so this module reads no server state and a suite can give
 fakes. Stdlib plus the repo's modules."""
 from __future__ import annotations

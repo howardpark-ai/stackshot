@@ -1,6 +1,6 @@
 # The client contract
 
-What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, a gap in a scheduled job, a hook's catch of a turn that signed off with no question, a failed run of a scheduled job, an item a script opens for a background agent, an item a script keeps in step with a condition, and a caller's own key. Back to the [README](../README.md).
+What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, the agent state the fleet's session manager pushes, a gap in a scheduled job, a hook's catch of a turn that signed off with no question, a failed run of a scheduled job, an item a script opens for a background agent, an item a script keeps in step with a condition, and a caller's own key. Back to the [README](../README.md).
 
 A machine where Claude Code runs needs three things from stackshot, and no copy of the config:
 
@@ -182,6 +182,27 @@ Exit 1 prints the reason on stderr (a usage line on misuse). Underneath it is on
   gets no notice of it, and the close is told to no one (the `tell_*` notices return nothing). Otherwise it is the normal write path: `create_item`, then `_update` for the state, and `_update` to close, with every gate.
   The create sets no step, so the state is a second write; if it is refused, the item is closed again as dropped, never left half made.
 - A deploy restarts `stackshot.service` (`stackshot/web/server.py` changed) and `stackshot-puller.service` (`stackshot/fleet/client.py` changed); a session runs `stackshot/fleet/client.py` fresh at each call, so no recycle is needed for it ([docs/session-reload.md](session-reload.md)).
+
+## The agent state the fleet's session manager pushes
+
+The audit needs to know whether a registered agent is busy (its pane in a turn, or a subagent running) or idle, and the server cannot read that where the agents run. The fleet's session manager pushes it, once per run of its
+heartbeat (about every five minutes), the whole fleet in one body that REPLACES the last snapshot. One authenticated write, `POST /client/agent-state`, `Authorization: Bearer <machine token>`, the body
+
+```
+{"schema": 1, "written": <epoch s>,
+ "agents": {"<registered agent name>": {"state": "busy" | "idle" | "unknown", "since": <epoch s>, "why": "<one line>", "pane": "turn" | "idle" | "shell" | "sleeping", "read": true | false,
+                                        "subagents": [{"id", "description", "brief" (its first 2048 characters), "at": <epoch s>, "quiet"?: true, "unreadable"?: true}]}}}
+```
+
+The sender decides the state: busy is a pane in a turn or any running subagent, idle is a pane that is idle, showing a shell or sleeping with no running subagent, unknown (with `read` false) is what it could not tell. The
+subagents are the detail a line says and the audit ties to an item by name. 200 `{"ok": true, "agents": N}`; 400 with a one-line reason for a wrong schema, a body that is no JSON object, an agent entry that is malformed or a body over
+1,000,000 bytes, and the previous snapshot stays; 401 without the machine token; 503 on a read-only standby copy or when the file cannot be written. There is no command-line verb: the sender posts the body itself.
+
+- **One file.** The snapshot is `<paths.state>/agent-state.json` (the body as normalised, with `received`, the server's clock at the push), written whole to a temporary file and renamed over the last one, so a reader never sees half of one. It is
+  outside the store and the fleet folders, so a push every few minutes republishes nothing.
+- **How the audit reads it** (`stackshot/audit/agent_state.py`): `busy` or `idle` only when the snapshot is no older than 15 minutes (`MAX_AGE_S`) and not dated more than five minutes ahead of the clock, names the agent, and its entry has `read` true and a state of busy or idle.
+  Anything else (no snapshot, a torn file, a stale one, an agent it does not list, `read` false, an unknown state) is unknown, never idle: the audit writes its unknown line, flags nothing and hands nothing on. A busy agent's subagents are
+  the ones the entry lists; an idle agent has none. The reader trusts `state` and does not count the subagents again.
 
 ## A gap in a scheduled job
 
