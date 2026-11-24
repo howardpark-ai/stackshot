@@ -39,6 +39,7 @@ allow = [
     "needs the owner (weak signal)",
     "the owner's task board",
     "a state that is the owner's",       # the model text: his state makes him the mover (Oct 28th); here "the owner" is Oliver
+    "Not for the owner, so it went to",       # the message tool's text: the reply a front agent's unmarked message gets when it is passed on to the background agent; here "the owner" is Oliver
     "mover=the owner",
     "the owner's standing rule",
     "the owner's call",
@@ -381,4 +382,44 @@ allow = []
 [[term]]
 retired = "next state-changing write is refused"
 use = "the reply of its next state-changing write says the write went through and the page is still owed"
+
+# ---- the front gate handles what it once refused (the message tool's text, docs/board-and-connector.md, docs/router.md): an unmarked message not for the person goes to the project's background agent, a done or no-action note is held for the next turn
+[[term]]
+retired = "Any other is refused, naming"
+use = "any other unmarked message is passed to the project's background agent, the reply saying so"
+allow = []
+
+[[term]]
+retired = "marked or not, is refused: write it on the board item"
+use = "a done, taken or no-action note starts no turn: it is held for the agent's next turn, the reply saying so"
+allow = []
+
+[[term]]
+retired = "otherwise it is refused in one line"
+use = "otherwise it is held for the agent's next turn and starts none"
+allow = []
+
+[[term]]
+retired = "is refused in one line: write it on the board item or say nothing"
+use = "is held for the agent's next turn and starts none, the reply saying it is a note"
+allow = []
+
+[[term]]
+retired = "Any other message is refused, naming the project's background agent"
+use = "any other message is passed to the project's background agent, the reply saying so"
+allow = []
+
+[[term]]
+retired = "What stays refused from a script: a message to a front agent without fyi"
+use = "a script's message to a front agent without fyi and without the mark goes to the project's background agent, as a session's does"
+allow = []
+
+[[term]]
+retired = "is refused too, by a short fixed list"
+use = "the fixed list of phrases counts only as the message's own statement"
+allow = []
+
+[[term]]
+retired = "item it names, else refused"
+use = "item it names, else held for the agent's next turn"
 allow = []

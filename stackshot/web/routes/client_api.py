@@ -215,12 +215,16 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
                 return 200, {"result": res}
         # No For you row for a failed release: release.sh's raw text told him nothing he could act on and stayed after the fix.
         # The builder gets the message below; he hears of a failure through the item it serves.
+        tok = _messaging.begin_client_call()          # the tool middleware does not see this route: the call's handled mark (call_log.handled) is collected here, as the middleware does for the tool
         try:
             out = _messaging._message(to, text, sender, f"machine:{machine}", machine, **({"fyi": True} if body.get("fyi") is True else {}), **({"question": True} if body.get("question") is True else {}))
         except ToolError as e:
-            _messaging.count_client_call(to, text, sender, e)          # the tool middleware does not see this route: its refusal is logged here, as the tool's is
+            _messaging.count_client_call(to, text, sender, e, token=tok)          # its refusal is logged here, as the tool's is
             return 400, {"error": str(e)}
-        _messaging.count_client_call(to, text, sender)
+        except BaseException:
+            _messaging.end_client_call(tok)
+            raise
+        _messaging.count_client_call(to, text, sender, token=tok)
         return 200, {"result": out}
     if what == "handover":      # a box's PostToolUse hook saw a SendMessage to a background agent that names an item (pages.py touch)
         to, text, sender = (str(body.get(k) or "").strip() for k in ("to", "text", "sender"))

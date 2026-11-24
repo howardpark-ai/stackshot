@@ -1,12 +1,13 @@
 """messaging.py: the message tool's relay between sessions.
 
 `_message` is the one function the message tool, the `message` route of the client API and the passes that send from inside the server (filing, dates) call: it checks the target (a session by name or id, a cloud
-session, a project page), refuses a message nobody can take (a retired or paneless session, a front agent's pane without the owner's mark, a text that says nothing is needed from him), writes a background agent's plain
-status report onto the item it names instead of delivering it (`_builder_report`), pushes the envelope (or holds it for the router when it is addressed to a project), logs it to `MSG_LOG` and names the working
+session, a project page), refuses a message nobody can take (a retired or paneless session, a front agent's pane without the owner's mark), handles a message a front agent's pane is not woken for in the way that fits it and tells the sender (a background agent's
+plain status report is written onto the item it names instead of delivered, `_builder_report`; a message not for the owner goes to the project's background agent, `_Pass`; a done or no-action note is held for the agent's next turn, `_Hold`), pushes the envelope (or holds it for the router when it is addressed to a project), logs it to `MSG_LOG` and names the working
 agent on the items a handover names (agent_names.py). The helpers are its refusals' and labels' own: `_gate_front`, `_dead_recipient`, `_project_of_name`, `_project_takes`, `_pane_dead`, `_reachable`, `_msg_label`,
-`_CSE_ID`, the phrases that say nothing is needed (`_NOT_FOR_OWNER`, `_NOT_FOR_OWNER_RE`) and the publisher's letter (`_pub_letter`).
+`_CSE_ID`, the phrases that say nothing is needed (`_NOT_FOR_OWNER`, `_own_no_actions`) and the publisher's letter (`_pub_letter`).
 
 Every refusal is a `Refused(kind, text)`, one `kind` slug per refusal site; the call log keeps the kind with the refused call's target and text (`refusal_fields`, `count_client_call` for the client route), and the weekly refusal report counts message refusals by it.
+A refusal site that now handles the message keeps its kind: the call goes through, `_handled` marks it in the call log (`outcome: handled`, how), and the reply ends with a line saying what the relay did and why (`_NOTES`).
 
 `MSG_LOG`, the file every message is logged to, is this module's alone: a reader takes it here (`messaging.MSG_LOG`), never a copy. A service module: it reads the store, the registry, the fleet's session rows and the
 config, and writes only through `writes.save` and the push. The session id of a name, the board's time zone and the message length cap are the surface's, reached through service/save_hooks.py. A suite that replaces
@@ -15,6 +16,7 @@ a function of the relay (`_message`, `_gate_front`, `_project_of_name`) sets it 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import difflib
 import json
@@ -61,6 +63,8 @@ from stackshot.waits import held as _held
 from stackshot.waits import reports as _reports
 
 _FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as web/tools/text.py holds it
+_NOTE_TAIL = (f"A done or no-action note is better written on the board item it concerns (update, complete). "
+              f"If it does ask something of {OWNER}, put {_FOR_OWNER} on its first line and name an open item of his.")      # what the reply of a held note says to do next
 
 
 def _session_id(value: str) -> str:
@@ -69,13 +73,50 @@ def _session_id(value: str) -> str:
 
 
 # A front agent's pane wakes only for what the owner has to do; a build hand-back, a
-# result or an FYI goes to the project's keeper. A marked message whose text says, in one of these fixed phrases, that nothing is
-# needed from him is refused (_gate_front). The list is short on purpose: a false refusal costs the sender a retry, a miss costs one
-# wasted turn, so a phrase goes in only when it says plainly that he has nothing to do. Matched whole, without regard to case, in
-# the text after the mark.
+# result or an FYI goes to the project's keeper. A message whose text says, in one of these fixed phrases, that nothing is
+# needed from him is a note, and `_gate_front` does not start a turn for it (it is written onto the item it names, or held for the agent's next turn). The list is short on purpose: a miss costs one
+# wasted turn, so a phrase goes in only when it says plainly that he has nothing to do. Matched whole, without regard to case, and only as the message's own statement (`_own_no_actions`): a word of the list used
+# inside a request ("... sending it as an fyi so it waits for your next turn") says nothing about the person's part and is no note.
 _NOT_FOR_OWNER = (f"nothing needed from {OWNER}", f"nothing for {OWNER}", "no action needed", f"no action for {OWNER}", "no decision needed",
                   "nothing to decide", "FYI", "for your information", "for the record", "no reply needed")
 _NOT_FOR_OWNER_RE = re.compile(r"\b(?:" + "|".join(re.escape(p) for p in _NOT_FOR_OWNER) + r")\b", re.IGNORECASE)
+_DASHES = "-" + chr(0x2013) + chr(0x2014)
+_OPENS_STATEMENT = "\n.!?:"            # right after one of these (or at the start, or after a list dash) a phrase opens a statement of its own: what follows it is that statement
+_JOINS_STATEMENT = ",;(" + _DASHES      # right after one of these it is a clause of the sentence, an own statement only when it also ends there
+_ENDS_STATEMENT = ".,;:!?)\n" + _DASHES
+_IS_NOTE = re.compile(r"\b(?:is|are|was|it's)\s+(?:(?:only|just|purely|merely|simply)\s+)?(?:an?\s+)?\Z", re.IGNORECASE)      # "this is only an FYI": the phrase is what the sentence says it is, an own statement when it ends there
+_LEAD_ID = re.compile(r"(?:\A|[\n.!?:])[ \t]*(?:[a-z][a-z-]*#|[a-z])\d{1,6}[ \t]*\Z", re.IGNORECASE)     # a plain item id before the phrase is no words of the sentence
+
+
+def _own_no_actions(text: str) -> "list[re.Match[str]]":
+    """Each fixed no-action phrase (`_NOT_FOR_OWNER`) in `text` that is the text's own statement, as a match: the phrase opens a sentence, a line or a list item (what follows is the note: "FYI the build is live", "no action needed."),
+    or is a clause set off by a comma, semicolon, bracket or dash that ends there ("the build is live, no action needed", "merged (FYI)"), or is what the sentence says it is and ends there ("this is only an FYI").
+    A phrase inside a clause ("sending it as an fyi so it waits"), after a quote mark, or in a quoted or code-spanned line is no statement of the sender's: the text is a request or a description that happens to use the word."""
+    found = []
+    for m in _NOT_FOR_OWNER_RE.finditer(text):
+        before = text[:m.start()].rstrip(" \t")
+        last_line = before.rsplit("\n", 1)[-1].strip()
+        after = text[m.end():].lstrip(" \t")
+        ends = not after or after[0] in _ENDS_STATEMENT
+        if not before or before[-1] in _OPENS_STATEMENT or last_line in ("-", "*") or _LEAD_ID.search(before):
+            found.append(m)
+        elif ends and (before[-1] in _JOINS_STATEMENT or _IS_NOTE.search(before + " ")):
+            found.append(m)
+    return found
+
+
+def _own_no_action(text: str) -> "re.Match[str] | None":
+    """The first of `_own_no_actions(text)`, else None."""
+    return next(iter(_own_no_actions(text)), None)
+
+
+def _without_no_action(text: str) -> str:
+    """`text` with each phrase that `_own_no_actions` finds blanked out (the status-shape test reads the rest); a phrase used inside a request stays."""
+    out, at = [], 0
+    for m in _own_no_actions(text):
+        out += [text[at:m.start()], " "]
+        at = m.end()
+    return "".join(out) + text[at:]
 
 
 def _pub_letter() -> str:
@@ -157,11 +198,25 @@ def refusal_fields(to: Any, text: Any, err: BaseException) -> dict[str, str]:
         return {"to": str(to or ""), "kind": "unclassified", "text": str(text or "").strip()}
 
 
-def count_client_call(to: Any, text: Any, sender: Any, err: BaseException | None = None) -> None:
-    """Count a message call that came through the client route (POST /client/message: a script's), which the tool middleware never sees: a call that went through is one plain line of the call log, a refused one the same line a refused
-    message tool call leaves (sender, the refusal's text, target, kind and the message). Never raises."""
+def begin_client_call() -> Any:
+    """Start collecting what the relay does with a message call that comes through the client route, as the tool middleware does for the tool (call_log.begin); the token goes to `count_client_call` or `end_client_call`."""
+    return _calls.begin()
+
+
+def end_client_call(token: Any) -> None:
+    """Stop collecting without counting (the call ended in something other than a result or a refusal)."""
+    _calls.end(token)
+
+
+def count_client_call(to: Any, text: Any, sender: Any, err: BaseException | None = None, token: Any = None) -> None:
+    """Count a message call that came through the client route (POST /client/message: a script's), which the tool middleware never sees: a call that went through is one plain line of the call log (with its sender, target and kind
+    and `outcome: handled` when the relay handled it where it once refused: `token` is the one `begin_client_call` gave), a refused one the same line a refused message tool call leaves (sender, the refusal's text, target, kind and the message). Never raises."""
+    try:
+        fixes = _calls.end(token) if token is not None else []
+    except Exception:  # noqa: BLE001 — a token from another context: nothing handled is counted, the call still is
+        fixes = []
     if err is None:
-        _calls.record("message", True)
+        _calls.record("message", True, sender=str(sender or ""), fixes=fixes, to=str(to or ""))
     else:
         _calls.record("message", False, sender=str(sender or ""), why=str(err), **refusal_fields(to, text, err))
 
@@ -270,7 +325,7 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
         if not gids or len(gids) > REPORT_ITEMS_MAX:
             return ""
         front = tuple(n for n, r in roles.items() if r.get("role") == "front")
-        if _reports.report_doubt(_NOT_FOR_OWNER_RE.sub(" ", raw) if noted else raw, front, noted=noted):      # held back only what clearly reads as a status report (reports.py); everything else is delivered
+        if _reports.report_doubt(_without_no_action(raw) if noted else raw, front, noted=noted):      # held back only what clearly reads as a status report (reports.py); everything else is delivered
             return ""
         tid = _session_id(target)
         for gid in gids:                                  # an item that waits on his decision, or names the front agent in its needs, is the front agent's business
@@ -292,10 +347,35 @@ _LOG_TAIL_BYTES = 800_000      # and no further than this much of its end
 
 class _Hold:
     """What _gate_front returns for a message a front agent is not woken for and nobody is refused: the front gate files it for the agent's next turn (`why`: the reason, for the sender's reply)."""
-    def __init__(self, why: str, project: str = "", tail: str = "") -> None:
+    def __init__(self, why: str, project: str = "", tail: str = "", kind: str = "") -> None:
         self.why = why
         self.project = project
         self.tail = tail        # what the sender's reply says to do next, when the generic line (send it again, marked) does not fit
+        self.kind = kind        # the kind of the refusal this hold replaces ("" for a hold that never was a refusal): `_message` counts the message as handled under it once it is filed
+
+
+class _Pass:
+    """What _gate_front returns for a message that is not for the owner and goes to the project's background agent `to` instead of the front agent `front` (a refusal before): `_message` sends it there and tells the sender so.
+    `refusal` is the refusal that stands when the agent cannot take it and no hold can (a `Refused`, not raised here)."""
+    def __init__(self, to: str, front: str, project: str, refusal: "Refused") -> None:
+        self.to, self.front, self.project, self.refusal = to, front, project, refusal
+
+
+# What the relay tells the sender of a message it handled where it once refused (`_handled`): the reply of the call carries these lines at its end (`_message` wraps `_message_body`). Per call, in the caller's context, so a
+# message sent on to another session inside the call keeps its own lines apart.
+_NOTES: "contextvars.ContextVar[list[str] | None]" = contextvars.ContextVar("message_notes", default=None)
+
+
+def _handled(kind: str, how: str, note: str = "") -> None:
+    """The relay handled this message another way than the sender asked, where the gate once refused it (`kind`: that refusal site's slug): count it as handled in the call log (call_log.handled; the call then counts as one that went through,
+    never as refused) and, with `note`, tell the sender in one plain line at the end of the reply. Never raises."""
+    try:
+        _calls.handled(kind, how)
+        got = _NOTES.get()
+        if note and got is not None:
+            got.append(note)
+    except Exception:  # noqa: BLE001 — a log line and a note are never worth a lost message
+        pass
 
 
 def _idset(who: str, idx: dict[str, dict[str, Any]]) -> set[str]:
@@ -401,21 +481,22 @@ def router_answer(front: str, who: str, raw: str, nid: str = "") -> tuple[str, s
         return "", ""
 
 
-def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str = "") -> "str | _Hold | None":
+def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str = "") -> "str | _Hold | _Pass | None":
     """(the owner's decision): a front agent, a session he talks to, hears a peer's message with a turn only when it needs him. A message addressed to a project page goes to the
-    project (the router rules it) and never reaches this gate. In order:
-      marked ([for <owner>] on its first non-empty line): it needs him; unless it says in a fixed phrase that nothing is needed from him (a done, taken or no-ask note): refused, one line;
+    project (the router rules it) and never reaches this gate. What the gate cannot give a turn it handles another way and tells the sender (`_handled`), and it refuses only what nothing can carry. In order:
+      marked ([for <owner>] on its first non-empty line): it needs him; unless it says in a fixed phrase, as its own statement, that nothing is needed from him (`_own_no_actions`: a done, taken or no-ask note): a background agent's is written onto the item it names (_builder_report), any other is held for the agent's next turn (_Hold; refused when the hold is off, and for the person's own);
+        a fixed phrase used inside a sentence is no note: the message goes on, its reply saying so;
         a background agent's marked message that only reports on a board item is written onto the item instead (_builder_report);
         it names an open item of his (front_turn.his_items: needs hold decision, or the model reads the step as his; a read that fails counts as none) or one he asked it to tell him about (its tell_him), else it is held for the agent's next turn and starts none (_Hold, its reason says what to put on an item and name; refused when the hold is off); his own message is exempt, a script's is tested too;
         with such an item named, it is delivered, a turn, only when he is talking with that agent now or asked it to tell him about an item the text names (front_turn.warranted); else it never reaches the agent, not even held: refused, naming the background agent that works a named item (else the project), and logged;
       unmarked, from the person himself or with the mark or needs: decision away from the first line: refused, the mark goes on the first line;
-      unmarked, from a background agent, a done, taken or no-ask note (a fixed phrase, or a status report, reports.is_report), tested BEFORE the answer rule below, so a hand-back is never taken for an answer to a question: written onto the item it names (_builder_report),
-        else refused, one line: write it on the board item or say nothing;
+      unmarked, from a background agent, a done, taken or no-ask note (a fixed phrase as its own statement, or a status report, reports.is_report), tested BEFORE the answer rule below, so a hand-back is never taken for an answer to a question: written onto the item it names (_builder_report),
+        else held for the agent's next turn (_Hold; refused when the hold is off);
       unmarked, an answer to a question the front agent itself put to the sender (answer_route; a hand-back is not one): delivered while he is in that conversation, else written onto the item it names, else held;
-      unmarked, from any other sender, a done, taken or no-ask note (a fixed phrase, or a plain status report): refused, one line: write it on the board item or say nothing;
+      unmarked, from any other sender, a done, taken or no-ask note (a fixed phrase as its own statement, or a plain status report): held for the agent's next turn (_Hold; refused when the hold is off);
       a front agent's message to a peer front agent, or the project's background agent's own: held for the agent's next turn (_Hold), the channel between front agents and the way a builder reaches the front agent;
-      any other unmarked message: refused naming the project's background agent, the address it goes to; a project with none holds it for the agent's next turn (_Hold: telling.front_fyi).
-    → the sender's reply (item-written), a _Hold, or None (deliver it). Raises ToolError for a refusal."""
+      any other unmarked message: passed to the project's background agent (_Pass: `_message` sends it there and tells the sender); a project with none holds it for the agent's next turn (_Hold: telling.front_fyi).
+    → the sender's reply (item-written), a _Hold, a _Pass, or None (deliver it). Raises Refused for a refusal."""
     roles = _anc.session_roles()
     name = _sr._role_name(roles, to, str((idx.get(to) or {}).get("name") or ""))
     if not name or roles[name]["role"] != "front":
@@ -433,14 +514,17 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
             raise Refused("mark-not-first-line", f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and it takes what is for {OWNER} only with {_FOR_OWNER} on the message's first line. "
                             f"Put {_FOR_OWNER} on the first line if this is for {OWNER}; anything else goes to {goes} instead.")
         front = tuple(n for n, r in roles.items() if r.get("role") == "front")
-        done_note = (f"Refused: {name} is a front agent of {project} and takes no done, taken or no-action note: write it on the board item it concerns (update or complete), or say nothing.")
-        if sname and roles.get(sname, {}).get("role") == "back":      # a background agent's hand-back is no answer to a question, whatever the front agent asked it before: it goes onto the item or is refused, before the answer rule
-            said_nothing = bool(_NOT_FOR_OWNER_RE.search(text))
+        done_note = (f"Refused: {name} is a front agent of {project} and takes no done, taken or no-action note: write it on the board item it concerns (update or complete), or say nothing.")      # with the hold switched off nothing can hold a note
+        own = _own_no_action(text)          # a fixed no-action phrase as the text's own statement: a word of the list inside a sentence is no note
+        if sname and roles.get(sname, {}).get("role") == "back":      # a background agent's hand-back is no answer to a question, whatever the front agent asked it before: it goes onto the item or is held, before the answer rule
+            said_nothing = own is not None
             # a fixed no-action phrase skips only the status-shape test: a question, an ask or a word of trouble beside it makes the text no note, and it goes on to the answer rule below
-            if _reports.is_report(_NOT_FOR_OWNER_RE.sub(" ", text) if said_nothing else text, front, noted=said_nothing):
+            if _reports.is_report(_without_no_action(text) if said_nothing else text, front, noted=said_nothing):
                 rep_ = _builder_report(name, text, sender, idx, roles, noted=said_nothing)
                 if rep_:
                     return rep_
+                if _held.enabled():          # no open item can carry it: it rides the agent's next turn and starts none
+                    return _Hold(f"it is a done, taken or no-action note from {sname} and no open item it names can carry it", project, _NOTE_TAIL, "no-action-note-from-builder")
                 raise Refused("no-action-note-from-builder", done_note)
         kind, arg = answer_route(name, project, sender, text, idx, roles) if sender.strip() else ("", "")
         if kind == "deliver":
@@ -449,7 +533,9 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
             return arg
         if kind == "hold" and _held.enabled():
             return _Hold(arg, project)
-        if _NOT_FOR_OWNER_RE.search(text) or _reports.is_report(text, front):
+        if own is not None or _reports.is_report(text, front):
+            if _held.enabled():          # a note is nobody's turn: it is handed over with the agent's next one
+                return _Hold("it is a done, taken or no-action note" + (f" ({own.group(0)!r})" if own is not None else ""), project, _NOTE_TAIL, "no-action-note")
             raise Refused("no-action-note", done_note)
         peer_ = bool(sname) and roles.get(sname, {}).get("role") == "front" and sname.casefold() != name.casefold()      # a front agent's message to a peer front agent: the channel between them
         if _held.enabled():
@@ -459,13 +545,27 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
                 return _Hold(f"{sname} is the project's background agent, so it cannot go back to it", project)
             if not back:
                 return _Hold(f"{project} has no background agent", project)
+        if back and not same:          # not for the owner, so the project's background agent takes it: `_message` sends it there and says so
+            return _Pass(back, name, project, Refused("unmarked-not-for-owner", f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and this message is not for {OWNER}, so it goes to {goes}. "
+                                                                                 f"Put {_FOR_OWNER} on the first line only if {OWNER} has something to do here."))
         raise Refused("unmarked-not-for-owner", f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and this message is not for {OWNER}, so it goes to {goes}. "      # with the hold switched off nothing can hold it
                         f"Put {_FOR_OWNER} on the first line only if {OWNER} has something to do here.")
-    # The mark is for what he has to do; a marked message that says nothing is needed from him (_NOT_FOR_OWNER, in the text after the mark) is a note
-    m = _NOT_FOR_OWNER_RE.search("\n".join([first.split(_FOR_OWNER, 1)[1], *lines[at + 1:]]))
+    # The mark is for what he has to do; a marked message that says nothing is needed from him, in a fixed phrase (_NOT_FOR_OWNER) that is its own statement in the text after the mark, is a note
+    marked = "\n".join([first.split(_FOR_OWNER, 1)[1], *lines[at + 1:]])
+    m = _own_no_action(marked)
     if m:
+        if not (sender.strip() and _model.is_owner(sender)):
+            if sname and roles.get(sname, {}).get("role") == "back":          # a background agent's: written onto the item it names, when it clearly only reports
+                rep_ = _builder_report(name, text, sender, idx, roles, noted=True)
+                if rep_:
+                    _handled("marked-no-action-phrase", "written-on-item")
+                    return rep_
+            if _held.enabled():          # a note is nobody's turn: it is handed over with the agent's next one
+                return _Hold(f"{_FOR_OWNER} marks only what {OWNER} has to do, and this says nothing is needed from him ({m.group(0)!r})", project, _NOTE_TAIL, "marked-no-action-phrase")
         raise Refused("marked-no-action-phrase", f"Refused: {name} is a front agent of {project} and {_FOR_OWNER} marks only what {OWNER} has to do; this says nothing is needed from him ({m.group(0)!r}): write it on the board item it concerns, or say nothing. "
                         f"If {OWNER} does have something to do here, say what it is and leave that phrase out.")
+    if (word := _NOT_FOR_OWNER_RE.search(marked)) is not None:          # the phrase is used inside a sentence: no note, and the items it names decide
+        _handled("marked-no-action-phrase", "judged-on-items", f"Its text uses {word.group(0)!r} inside a sentence, which is not read as saying nothing is needed from {OWNER}, so it was judged on the items it names.")
     rep = (_builder_report(name, text, sender, idx, roles) if sender.strip() else "")
     if rep:
         return rep
@@ -620,6 +720,17 @@ def _sent_instead(name: str, why: str, project: str, raw: str, sender: str, auth
 
 
 def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False, question: bool = False) -> str:
+    """Relay one message (`_message_body` has the rules) → the sender's reply: what became of it, and, where the relay handled it another way than asked where it once refused it (`_handled`), one plain line at the end saying so."""
+    notes: list[str] = []
+    token = _NOTES.set(notes)
+    try:
+        out = _message_body(to, text, sender, auth, origin, fyi, question)
+    finally:
+        _NOTES.reset(token)
+    return out + (" " + " ".join(notes) if notes else "")
+
+
+def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False, question: bool = False) -> str:
     """`origin` = the machine, when the sender is a script there and not a session (POST /client/message): the envelope
     says so, and that it cannot be answered. `fyi`: the sender marks a message that asks nothing. To a background agent it is held and
     handed over with the agent's next turn (hold_notice, kind fyi) instead of starting one; to a project it is recorded with the mark, so the router holds it
@@ -650,13 +761,24 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
         if fyi:
             raise Refused("question-with-fyi", "Refused: question=true and fyi=true together: a question asks something and an fyi asks nothing; send it with one of them")
     fyi = bool(fyi) and not _model.is_owner(sender)
-    hold_why = hold_project = hold_tail = ""            # why a message to a front agent that is no fyi is held for its next turn all the same (_gate_front's _Hold)
+    hold_why = hold_project = hold_tail = hold_kind = ""            # why a message to a front agent that is no fyi is held for its next turn all the same (_gate_front's _Hold), and the kind of refusal that hold replaces
     front_fyi = bool(fyi) and not re.match(_cfg.page_dirs_re() + "/", to) and bool(_front_fyi_name(to, raw, idx))      # an fyi for a front agent is not refused for its missing mark: the front gate below takes it
     if not re.match(_cfg.page_dirs_re() + "/", to):
         _want_for_front(to, idx, sender, auth, bool(origin))      # a want for a background agent when its front agent's project has none, whatever the gate or the fyi path then does with the message
-        reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender)     # a front agent is given a turn only by what needs the person: the rest is refused, written onto an item, or held (_gate_front)
+        reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender)     # a front agent is given a turn only by what needs the person: the rest is passed to its builder, written onto an item, held, or refused (_gate_front)
+        if isinstance(reported, _Pass):          # not for the person: the project's background agent takes it, and the reply says so
+            try:
+                got = _message(reported.to, raw, sender, auth, origin, fyi)
+            except ToolError as e:
+                if not _held.enabled():          # the agent cannot take it and nothing can hold it: the refusal stands
+                    raise reported.refusal from e
+                reported = _Hold(f"{reported.to}, the project's background agent, could not take it ({_clip_line(str(e), 120)})", reported.project, "", "unmarked-not-for-owner")
+            else:
+                _handled("unmarked-not-for-owner", "passed-on")
+                return (f"Not for {OWNER}, so it went to {reported.to}, the project's background agent, instead of {reported.front}, which takes only what {OWNER} has to do and did not get it: {got}. "
+                        f"To reach {reported.front}, put {_FOR_OWNER} on the first line and name an open item of his.")
         if isinstance(reported, _Hold):
-            hold_why, hold_project, hold_tail, reported = reported.why, reported.project, reported.tail, None
+            hold_why, hold_project, hold_tail, hold_kind, reported = reported.why, reported.project, reported.tail, reported.kind, None
         if reported:
             return reported
     elif not origin:
@@ -737,6 +859,8 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
                                 f"(update, complete), or send it to the project's page key (to={(hold_project or 'projects/<slug>')!r}), or, when it asks something of {OWNER}, put {_FOR_OWNER} on its first line.")
         else:
             filed = verdict == "fyi"
+            if filed and hold_kind:          # a hold that replaces a refusal: counted as handled once the message is on the agent's next turn
+                _handled(hold_kind, "held")
             kind_ = "fyi" if fyi else "front agent"
             outcome_ = f"held for its next turn ({kind_})" if filed else f"not passed on ({kind_}: {why_})"
             try:

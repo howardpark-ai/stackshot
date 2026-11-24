@@ -490,8 +490,8 @@ item(11); fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-x"
 check("6f: an fyi names the builder in no item's needs (it asked nothing), where the same words without fyi do", out.startswith("held") and "work-osprey-x" not in str(rd(11)["metadata"].get("needs")) and "named" not in out, out)
 fresh(); out = _messaging._message("work-osprey-x", "done with a11", "home-beta"); settle()
 check("…(the control: without fyi the plain item id names it)", "work-osprey-x" in str(rd(11)["metadata"].get("needs")), rd(11)["metadata"])
-fresh(); n0 = len(pushes()); out = why(lambda: _messaging._message("work-osprey-main", "the PR is merged", "home-beta"))
-check("6g: a plain message to a FRONT agent without the mark is refused by the gate (no flag)", out.startswith("Refused") and "front agent" in out and reach(A, n0) == [], out)
+fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-main", "the PR is merged", "home-beta"); settle()
+check("6g: a plain status note to a FRONT agent without the mark (no flag) is a note for its next turn, never a turn; its hook here cannot fetch held lines, so the reply says it was not passed on and why", out.startswith("not passed on") and "work-osprey-main is a front agent" in out and "hook cannot fetch" in out and reach(A, n0) == [] and held.count(A) == 0, out)
 present(True); fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-main", "[for Oliver] a14 pick a or b", "home-beta", fyi=True); settle()
 check("6h: a marked message to it, while he is talking with it, is delivered as it would be without the flag (it asks something)", out.startswith("delivered") and len(reach(A, n0)) == 1 and held.count(A) == 0, out)
 fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-main", "[for Oliver] a14 pick a or b", "home-beta"); settle()
@@ -558,7 +558,7 @@ check("6t2: the same for a background agent's fyi: whole, and the reply says not
 _cfg.CFG["router"]["hold_notices"] = False
 try:
     fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "home-beta", fyi=True); settle()
-    check("6u: with the hold switch off an fyi to a front agent is refused as without the flag, not 'not passed on' for a reason that is false", out.startswith("Refused") and "hook cannot fetch" not in out and reach(A, n0) == [] and held.count(A) == 0, out)
+    check("6u: with the hold switch off an fyi to a front agent goes to the project's background agent as without the flag (the reply says so), not 'not passed on' for a reason that is false", out.startswith("Not for Oliver, so it went to work-osprey-x") and "hook cannot fetch" not in out and reach(A, n0) == [] and held.count(A) == 0, out)
 finally:
     _cfg.CFG["router"].pop("hold_notices", None)
 fresh(); n0 = len(pushes()); out = _messaging._message("work-osprey-x", "the PR is merged, nothing to do", "home-beta", fyi=True); settle()
@@ -720,11 +720,11 @@ present(True)
 fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "[for Oliver] a14 pick a or b", "home-beta", origin=MACH, fyi=True); settle(); present(False)
 check("6v6 control: a script's MARKED message to a front agent is delivered as before (it asks something): a labeled script turn, nothing held", out.startswith("delivered") and len(reach(A, n0)) == 1 and "a script on home-test" in json.dumps(reach(A, n0)) and "cannot be replied to" in json.dumps(reach(A, n0)) and held.count(A) == 0, (out, pushes()[n0:]))
 fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged", "home-beta", origin=MACH); settle()
-check("6v7 control: a script's message without fyi and without the mark is still refused, nothing held or pushed", out.startswith("Refused") and "front agent" in out and reach(A, n0) == [] and held.count(A) == 0, out)
+check("6v7 control: a script's status note without fyi and without the mark is no turn, as a session's is: held for its next turn, nothing pushed", out.startswith("held for work-osprey-main's next turn (it is a done, taken or no-action note") and reach(A, n0) == [] and held.count(A) == 1, out)
 fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "it now needs: decision", "home-beta", origin=MACH, fyi=True); settle()
 check("6v8 control: a script's fyi that says needs: decision is no fyi: refused without the mark, nothing held", out.startswith("Refused") and reach(A, n0) == [] and held.count(A) == 0, out)
 fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "Oliver", origin=MACH, fyi=True); settle()
-check("6v9 control: a message in the person's own name from a script is no fyi: refused without the mark, nothing held", out.startswith("Refused") and reach(A, n0) == [] and held.count(A) == 0, out)
+check("6v9 control: a message in the person's own name from a script is no fyi: without the mark it goes to the background agent, nothing held for the front agent", out.startswith("Not for Oliver, so it went to work-osprey-x") and reach(A, n0) == [] and held.count(A) == 0, out)
 fresh(); n0 = len(pushes()); out = msg("work-osprey-x", "the PR is merged, nothing to do", "home-beta", origin=MACH, fyi=True); settle()
 check("6v10 control: a script's fyi to a background agent is held as before", out.startswith("held for work-osprey-x's next turn") and reach(X, n0) == [] and held.count(X) == 1 and held.count(A) == 0, out)
 fresh(); n0 = len(pushes()); out = msg("work-osprey-ghost", "the PR is merged", "home-beta", origin=MACH, fyi=True)
@@ -732,7 +732,7 @@ check("6v11 control: a script's fyi to an unknown name is refused as before, not
 _cfg.CFG["router"]["hold_notices"] = False
 try:
     fresh(); n0 = len(pushes()); out = msg("work-osprey-main", "the PR is merged, nothing for you to do", "home-beta", origin=MACH, fyi=True); settle()
-    check("6v12 control: with the hold switch off a script's fyi to a front agent is refused as before, nothing held or pushed", out.startswith("Refused") and reach(A, n0) == [] and held.count(A) == 0, out)
+    check("6v12 control: with the hold switch off a script's fyi to a front agent goes to the background agent, nothing held or pushed to the front agent", out.startswith("Not for Oliver, so it went to work-osprey-x") and reach(A, n0) == [] and held.count(A) == 0, out)
 finally:
     _cfg.CFG["router"].pop("hold_notices", None)
 os.unlink(held.clients_file()); gate_open()

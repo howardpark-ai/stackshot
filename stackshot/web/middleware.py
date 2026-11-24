@@ -109,7 +109,7 @@ class _RefusalLog(_MW):
                     sc = getattr(result, "structured_content", None)
                     if isinstance(sc, dict) and isinstance(sc.get("result"), str):
                         sc["result"] += note
-                _calls.record(name, True, item=gid, sender=who, fixes=fixes)
+                _calls.record(name, True, item=gid, sender=who, fixes=fixes, to=str(a.get("to") or "") if name == "message" else "")      # a message the relay handled where it once refused keeps its target with the kind
             except Exception as le:  # noqa: BLE001
                 print(f"mcp call log failed: {le}", file=sys.stderr, flush=True)
         return result

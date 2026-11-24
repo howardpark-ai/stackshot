@@ -13,6 +13,11 @@ what it was about, so refusals can be told apart later (the message tool's text 
 
     {"t": …, "tool": "update", "ok": true, "bounce": ["wake_park"]}                             it went through and the writer sent a fix of the server's back (see `bounces`)
 
+A message call the relay handled in another way than the sender asked, where it once refused (service/messaging.py `_handled`: passed to the project's background agent, written onto the item it names, held for the front agent's next turn),
+goes through as a line that keeps the refusal site's kind and says so, so the weekly count can show it as handled and not as refused:
+
+    {"t": …, "tool": "message", "ok": true, "item": "", "sender": "my-x", "to": "other-y", "kind": "unmarked-not-for-owner", "outcome": "handled", "how": "passed-on"}
+
 A correction (`fixed`) is a pure fact the server can put right without a judgment: a bare item number read as the board id, a wake with seconds or a UTC offset read as the
 instance time, a subject with no scope prefix given the one its project's scope names. The server stores the corrected field, adds one line to the reply saying what it did
 (`reply_note`), and counts it here. A mover who disagrees sends the field again as they want it and the server leaves it alone.
@@ -40,6 +45,8 @@ TEXT_MAX = MSG_MAX                                                    # characte
 TO_MAX = 80                                                           # characters of a refused message's target kept
 
 BOUNCE = "bounce:"            # a fix kind written as BOUNCE + kind is a bounce-back, not a fix (`bounced`)
+HANDLED = "handled:"          # a fix kind written as HANDLED + refusal kind + ":" + how is a message the relay handled where it once refused (`handled`): it is no fix and has no line in the reply
+HOW_MAX = 40                  # characters of the `how` of a handled message kept
 NO_RESEND = frozenset({"description-bullet", "step-none", "his-step-settled", "step-none-applied", "said-text", "step-kept", "subject-cut", "work-cut", "ask-by-day", "description-url", "wait-basis-dropped", "description-goal"})   # fixes whose reply line does not invite a resend: the field sent again as written would be refused, fixed the same, change nothing, or be settled the same way (each line says how to change it)
 
 _FIXES: contextvars.ContextVar[list[tuple[str, str]] | None] = contextvars.ContextVar("call_log_fixes", default=None)
@@ -115,6 +122,21 @@ def rewind(n: int) -> None:
 def counted(kind: str, **detail: Any) -> None:
     """A fix of the server's own kind (server_fixes.record) whose reply already tells it in its own words: counted in the log, no line added to the reply."""
     fixed(kind, "", **detail)
+
+
+def handled(kind: str, how: str) -> None:
+    """The relay handled the message call that is running another way than the sender asked, where it once refused it with `kind` (service/messaging.py `Refused.kind`): `how` says in a word or two what it did (`passed-on`,
+    `written-on-item`, `held`, `delivered-with-note`). The call is logged as one that went through, keeping the kind and `outcome: handled` (`record`), so the weekly count shows it as handled and not as refused. No call running: nothing is recorded."""
+    fixed(f"{HANDLED}{kind}:{how}", "")
+
+
+def handled_of(fixes: list[tuple[str, str]] | None) -> tuple[str, str]:
+    """(kind, how) of the first handled message among a call's fixes (`handled`), ("", "") when there is none."""
+    for k, _ in fixes or []:
+        if k.startswith(HANDLED):
+            kind, _, how = k[len(HANDLED):].partition(":")
+            return kind, how
+    return "", ""
 
 
 # ---------------------------------------------------------------------------------------------------------------- bounce-backs: the writer undoes or redoes what the server did
@@ -256,21 +278,28 @@ def _file(now: float) -> Path:
 def record(tool: str, ok: bool, *, item: str = "", sender: str = "", why: str = "", fixes: list[tuple[str, str]] | None = None, call: str = "", to: str = "", kind: str = "", text: str = "", now: float | None = None) -> None:
     """Append the line of one call. Never raises: a log line is not worth a lost reply. A call that went through with a fix or a bounce-back also names its item and sender (a later diff of the
     writer's text is then explainable); a refused create has no item, so `call` (a short digest of what it was about) tells one refused create from another. A refused message call names its target (`to`), the refusal's
-    kind slug (`kind`) and the message (`text`, newlines kept, clipped to TEXT_MAX), each only when given."""
+    kind slug (`kind`) and the message (`text`, newlines kept, clipped to TEXT_MAX), each only when given. A message call the relay handled where it once refused (`handled` among `fixes`) goes through with its sender, target (`to`),
+    the kind of the refusal it replaced, `outcome: handled` and `how`."""
     if tool not in COUNTED:
         return
     t = time.time() if now is None else now
     row: dict[str, Any] = {"t": int(t), "tool": tool, "ok": bool(ok)}
     if fixes:
-        made = [k for k, _ in fixes if not k.startswith(BOUNCE)]
+        made = [k for k, _ in fixes if not k.startswith((BOUNCE, HANDLED))]
         back = [k[len(BOUNCE):] for k, _ in fixes if k.startswith(BOUNCE)]
         if made:
             row["fix"] = made
         if back:
             row["bounce"] = back
+    h_kind, h_how = handled_of(fixes) if ok and tool == "message" else ("", "")
     if not ok or fixes:
         row["item"] = re.sub(r"\s+", " ", str(item or "")).strip()[:40]
         row["sender"] = re.sub(r"\s+", " ", str(sender or "")).strip()[:80]
+    if h_kind:          # a message the relay handled where it once refused: the refusal site's kind, the target and what was done, so the weekly count can show it as handled
+        row["to"] = re.sub(r"\s+", " ", str(to or "")).strip()[:TO_MAX]
+        row["kind"] = re.sub(r"[^a-z0-9-]+", "-", h_kind.lower()).strip("-")[:40]
+        row["outcome"] = "handled"
+        row["how"] = re.sub(r"[^a-z0-9-]+", "-", h_how.lower()).strip("-")[:HOW_MAX]
     if not ok:
         if call and not row["item"]:
             row["call"] = re.sub(r"\s+", "", str(call))[:16]
