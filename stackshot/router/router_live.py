@@ -179,9 +179,19 @@ def holds(project: str, session: str, stand_in_too: bool = False) -> bool:
             return False
         nm = _anc.names()
         want = [_anc.notice_name(project)] + ([stand_in(project)] if stand_in_too else [])
-        return any(w and _anc.canonical(session, nm) == _anc.canonical(w, nm) for w in want)
+        return any(w and _same_session(session, w, nm) for w in want)
     except Exception:  # noqa: BLE001
         return False
+
+
+def _same_session(a: str, b: str, nm: dict[str, str]) -> bool:
+    """Do two references (a route's session, a page's notice address) name one session? One canonical form each (anchors.canonical); and, when they differ, the name each stands for now (anchors.display).
+    A route names its session by its permanent id, and the registry that resolves a name to it can read empty for a moment (the copy of it being replaced, a torn read): the page's name then falls
+    to the old rule, a transcript id, and the id and the transcript id differ though they are one session. The registry keeps the name of every id it has read (sessions_registry.display_name), so the id still reads as its name."""
+    if _anc.canonical(a, nm) == _anc.canonical(b, nm):
+        return True
+    da, db = _anc.display(a, nm), _anc.display(b, nm)
+    return bool(da) and da == db
 
 
 def _agents_of(project: str, reg: dict[str, dict[str, Any]], roots: list[str] | None = None) -> tuple[dict[str, str], dict[str, str]]:
