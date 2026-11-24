@@ -142,6 +142,51 @@ check("1 a clause over the line limit on its own is cut at a comma, every word k
 check("1 one long sentence is one action: it is left as written, never cut mid-sentence", SS.actions("please read this and decide " * 10, LINE_ROOM) == [] and SS.actions(BIG.split(". ")[0], 100) == [], None)
 check("1 the summary of a long first action is cut at a word, with the count, within 90 characters", len(SS.summary_of("word " * 40, 6)) <= 90 and SS.summary_of("word " * 40, 6).endswith(" (+6 more)"), SS.summary_of("word " * 40, 6))
 
+# ---- 1b. the boundaries, the caps, the spans, the guards (each one a mutant of the code that must fail a check here)
+def two(n):
+    """A text of exactly n characters with two sentences."""
+    a = "Open the page and read it."
+    return a + " " + "x" * (n - len(a) - 2) + "."
+check("1b the fixture is the length it says", all(len(two(n)) == n for n in (60, 100, 110, 111, 160)), [len(two(n)) for n in (60, 100, 110, 111, 160)])
+check("1b SPLIT_OVER is 110 and the cutoff is its own: a step of 110 characters, or of 60 or 100, is left as written even with two sentences",
+      SS.SPLIT_OVER == 110 and all(SS.split_step(two(n), LINE_ROOM) is None for n in (60, 100, 110)), SS.SPLIT_OVER)
+check("1b …and a step of 111 or of 160 characters is split into its two sentences", all(len(SS.actions(two(n), LINE_ROOM)) == 2 for n in (111, 160)), [SS.actions(two(n), LINE_ROOM) for n in (111, 160)])
+sent = lambda k: " ".join(f"Do thing number {i} now." for i in range(1, k + 1))
+check("1b the fixture of the action cap is a text of many short sentences within SPLIT_MAX", len(sent(21)) < SS.SPLIT_MAX, len(sent(21)))
+check("1b a text of 20 actions is split, of 21 is left as written (MAX_ACTIONS)", SS.MAX_ACTIONS == 20 and len(SS.actions(sent(20), LINE_ROOM)) == 20 and SS.actions(sent(21), LINE_ROOM) == [], (SS.MAX_ACTIONS, len(SS.actions(sent(21), LINE_ROOM))))
+para = lambda n: " ".join(f"Read the part {i} of the long page and write down what it says about the plan, the price, the date and the name of the seller." for i in range(1, n + 1))
+check("1b a text over SPLIT_MAX characters is left as written however few actions it makes; the same text under it is split", SS.SPLIT_MAX == 2000 and len(para(15)) < SS.SPLIT_MAX < len(para(16))
+      and SS.actions(para(16), LINE_ROOM) == [] and len(SS.actions(para(15), LINE_ROOM)) == 15, (len(para(15)), len(para(16))))
+t0 = time.time(); huge = SS.split_step(("Do the next thing there now. " * 2000), LINE_ROOM); el = time.time() - t0
+check("1b a text of 56 KB is left as written, at once (no thousands of lines, no work under the item lock)", huge is None and el < 2, (huge, el))
+BIGCL = "word " * 60000      # 300 KB in one clause with no comma: the space fallback of `_wrap`
+t0 = time.time(); pieces = SS._wrap(BIGCL.strip(), 200); el = time.time() - t0
+check("1b _wrap is linear: a clause of 300 KB is cut in well under 5 seconds, every piece within the limit, every word kept", el < 5 and all(len(x) <= 200 for x in pieces) and words(" ".join(pieces)) == words(BIGCL), (el, len(pieces)))
+LNK = "[the long title of that page](https://example.org/a/page)"
+CSP = "`run the tool with its args`"
+wrap_ok = True; wrap_bad = None
+for pad in range(0, 40):
+    clause = ("a " * pad) + "Read " + LNK + " and then " + CSP + " " + "omega " * 12 + "end"
+    got = SS._wrap(clause, 60)
+    if not (any(LNK in p for p in got) and any(CSP in p for p in got) and words(" ".join(got)) == words(clause)):
+        wrap_ok = False; wrap_bad = (pad, got); break
+check("1b _wrap never cuts inside a link or a code span (a space inside either is no place to cut), every word kept", wrap_ok, wrap_bad)
+check("1b _wrap leaves a link longer than the limit whole on a piece of its own", any("[a link with a very long title that goes past the limit by far](http://x.example/y)" in p for p in SS._wrap("Open this now and then " + "[a link with a very long title that goes past the limit by far](http://x.example/y) and then read what is there", 40)), None)
+PLAN = "Pick plan 1) basic or 2) pro on the pricing page and note what each one costs per month. Then tell the session which one you chose and why that one"
+pl = SS.actions(PLAN, LINE_ROOM)
+check("1b a number in a sentence (`plan 1) basic or 2) pro`) is no list: two sentences, the words of the first whole", len(pl) == 2 and pl[0].startswith("Pick plan 1) basic or 2) pro on the pricing page"), pl)
+AFTER = "Read the notice first. 1) choose one of the three models listed on the item 2) compare the sellers of that model and note the best price 3) pay for it by card"
+af = SS.actions(AFTER, LINE_ROOM)
+check("1b …but a list that starts after the end of a sentence is a list: the numbers dropped, the items cut", af[0] == "Read the notice first" and len(af) == 4 and af[1].startswith("choose one of the three models"), af)
+INCODE = "Run `note: 1) a 2) b` in the box terminal and read what it prints there. Then read [the page: 1) first 2) second](http://x.example/y) and tell the session what it said and when"
+ic = SS.actions(INCODE, LINE_ROOM)
+check("1b inline numbers inside a code span or a link are no list items: the span and the link stay whole in their actions", len(ic) == 2 and "`note: 1) a 2) b`" in ic[0] and "[the page: 1) first 2) second](http://x.example/y)" in ic[1], ic)
+JUNK = "Open the page and read the notice that is shown there at the top of it. ; Then tell the session what it said and wait for the answer to come back.; . Done now"
+jk = SS.actions(JUNK, LINE_ROOM)
+check("1b a clause of marks only (`;`, `.`) is no action: every action holds a word, none is dropped with one", len(jk) >= 2 and all(re.search(r"\w", x) for x in jk) and words(" ".join(jk)) == words(JUNK), jk)
+check("1b a line that is not his (another actor's, or none) is not split by split_line", SS.split_line("home-agent: " + LONG, LINE_ROOM) is None and SS.split_line(LONG, LINE_ROOM) is None and SS.split_line("Oliver: " + LONG, LINE_ROOM) is not None, None)
+check("1b the two kinds of fix invite no resend (call_log.NO_RESEND), and the reply line does not say to send again", {"step-split", "step-reworded"} <= set(_CL.NO_RESEND) and "send it again" not in _CL.reply_note([("step-split", "x"), ("step-reworded", "y")]), _CL.NO_RESEND)
+
 # ---- 2. step= through update
 r, fx = send(lambda: upd(1, step=LONG))
 check("2 step= with the long chain is not refused", not isinstance(r, ToolError), r)
@@ -156,7 +201,7 @@ bd = ui_render.Board(str(T / "store"))
 shown = [first for first, _rest in bd.your_steps(bd.item("a1"))]
 check("2 …the board's list for his step is the seven actions, in order (the summary stays in the title)", shown == ACTS, shown)
 r, fx = send(lambda: upd(1, step=LONG))
-check("2 the same long step sent again changes nothing: no second set of lines, the summary's line not doubled", not isinstance(r, ToolError) and mt(1)["next"].count("Oliver:") == 8 and [k for k, _ in fx] in (["step-split"], []), (r, fx, mt(1)["next"]))
+check("2 the same long step sent again changes nothing: no second set of lines, the summary's line not doubled", not isinstance(r, ToolError) and mt(1)["next"].count("Oliver:") == 8 and [k for k, _ in fx] == ["step-split"] and "nothing was added" in fx[0][1], (r, fx, mt(1)["next"]))
 check("2 …(sent again, its next stays the same text)", mt(1)["next"].count("Oliver: " + ACTS[3]) == 1, mt(1)["next"])
 r, fx = send(lambda: upd(2, step="check that the box answers and say so"))
 check("2 a short step is untouched: stored as written, no line added, no fix", mt(2).get("step") == "check that the box answers and say so" and mt(2)["next"].count("Oliver:") == 1 and not fx, (mt(2), fx))
@@ -168,7 +213,37 @@ r, fx = send(lambda: upd(5, step=LONG, next="home-agent: build it\nhome-agent: t
 check("2 a long step beside a next of the writer's: the lines join that next, after the writer's own lines", mt(5)["next"].splitlines()[:2] == ["home-agent: build it", "home-agent: test it"] and [t for t in mt(5)["next"].splitlines() if t in lines] == lines, (r, mt(5)["next"]))
 r, fx = send(lambda: upd(6, step=LONG, clear_next=True))
 check("2 clear_next beside a long step: the old lines go (dropped), the split lines are the item's next", mt(6)["next"].count("home-agent:") == 0 and all(x in mt(6)["next"].splitlines() for x in lines), (r, mt(6)["next"]))
+item(41, next="home-agent: build it\nhome-agent: test it")
+r, fx = send(lambda: upd(41, step=LONG, next="none"))
+check("2 next=none beside a long step: the split lines are the item's next once each (the old lines the write leaves out are carried over as for any next=none)", not isinstance(r, ToolError) and all(mt(41)["next"].splitlines().count(x) == 1 for x in lines) and mt(41)["next"].count("Oliver:") == 8, (r, mt(41)["next"]))
+def own(i, text):       # an item whose lines of next were written by the sender (the record the server keeps of who wrote which line)
+    item(i, next=text)
+    (T / f"store/a/{i}.json").write_text(json.dumps({**rd(i), "metadata": {**mt(i), "next_by": [[AGENT, NL.key_of(x)] for x in text.splitlines()]}}))
+own(47, "home-agent: build it\nhome-agent: test it")
+r, fx = send(lambda: upd(47, step=LONG, clear_next=True))
+check("2 clear_next beside a long step, on lines the sender wrote: the old lines are gone (dropped), the split lines are the item's next",
+      not isinstance(r, ToolError) and mt(47)["next"].count("home-agent:") == 0 and all(x in mt(47)["next"].splitlines() for x in lines), (r, mt(47)["next"]))
+own(48, "home-agent: build it\nhome-agent: test it")
+r, fx = send(lambda: upd(48, step=LONG, next="none"))
+check("2 next=none beside a long step, on lines the sender wrote: the split lines are in next once each", not isinstance(r, ToolError) and all(mt(48)["next"].splitlines().count(x) == 1 for x in lines), (r, mt(48)["next"]))
 check("2 the item's History says the step was split", "split by the server into a summary and 7 lines" in json.dumps(rd(1)), None)
+
+# a script's write (item sync, the terminal rows) is no session's: a step stays as it is made, no lines are added
+from stackshot.service import update as _update_svc
+item(42, next="home-agent: build it\nOliver: " + LONG)
+_update_svc._update("a42", step=LONG, sender="home-agent")
+check("2 a script's write of a long step (not a tool call) stores it whole and adds no line (the line it holds already stays one)", mt(42).get("step") == LONG and mt(42)["next"].count("Oliver:") == 1 and "(+" not in mt(42)["next"], (mt(42).get("step"), mt(42)["next"]))
+# an item that holds the long step as a line of his already: the split drops it, the actions replace it
+item(43, next="home-agent: build it\nOliver: " + LONG)
+r, fx = send(lambda: upd(43, step=LONG))
+check("2 a long step on an item that holds `<owner>: <the step>` as an open line: that line is dropped, the summary and the seven actions are open, no copy of the whole step stays open",
+      ("dropped", "Oliver: " + LONG) in his(43) and OPEN("Oliver: " + LONG) not in his(43) and len(his_open(43)) == 8 and all(x in his_open(43) for x in lines), (r, st(43)))
+r, fx = send(lambda: upd(43, step=LONG))
+check("2 …sent again it adds nothing (still eight open lines of his) and says so", len(his_open(43)) == 8 and [k for k, _ in fx] == ["step-split"] and "nothing was added" in fx[0][1], (st(43), fx))
+# a step of more than a page: left as written, so the old refusal answers, at once
+item(44)
+t0 = time.time(); r, fx = send(lambda: upd(44, step=("Do the next thing there now. " * 2000)))
+check("2 a step of 56 KB is no split (no thousands of lines): the old limit refuses it, at once, and the item is as it was", isinstance(r, ToolError) and "step at most" in str(r) and mt(44)["next"] == "home-agent: build it" and time.time() - t0 < 5, (str(r)[:200], mt(44)["next"]))
 
 # ---- 3. long lines of his in next
 LONGLINE = "Oliver: " + LONG
@@ -180,6 +255,13 @@ r, fx = send(lambda: upd(7, next="home-agent: build it\n" + "\n".join(lines)))
 check("3 the lines fed back change nothing, no fix", mt(7)["next"].splitlines() == ["home-agent: build it", *lines] and not fx, (mt(7)["next"], fx))
 r, fx = send(lambda: upd(8, next="home-agent: build it. Then test it after that and open the pull request once it is green. Then wait for the review and fix what comes back of it"))
 check("3 a long line of the agent's own (not his) is not split here: the next-line rules judge it as before (stored as one line, or refused whole)", not [k for k, _ in fx if k == "step-split"] and (isinstance(r, ToolError) or mt(8)["next"].count("\n") == 0), (r, fx, mt(8)["next"]))
+item(45, next="home-agent: build it\nOliver: " + LONG)
+r, fx = send(lambda: upd(45, next="home-agent: build it\nOliver: " + LONG))
+check("3 a long line of his that is an open step already is left as it stands (its key is known): one line, no fix", mt(45)["next"].splitlines() == ["home-agent: build it", "Oliver: " + LONG] and not fx, (r, fx, mt(45)["next"]))
+BIGCMD = "Oliver: `echo one. echo two; echo three. echo four; echo five. echo six; echo seven. echo eight; echo nine. echo ten; echo eleven. echo twelve; echo more`"
+item(46)
+r, fx = send(lambda: upd(46, next=f"home-agent: build it\n{BIGCMD}"))
+check("3 a long line that is one whole command in backticks is left as it is, whatever sentence marks are inside", mt(46)["next"].splitlines() == ["home-agent: build it", BIGCMD] and not fx, (r, fx, mt(46)["next"]))
 CMDLINE = "Oliver: `for p in a b; do echo $p; done`"
 r, fx = send(lambda: upd(9, next=f"home-agent: build it\n{CMDLINE}"))
 check("3 a line that is one whole command in backticks is left as it is", f"{CMDLINE}" in mt(9)["next"].splitlines() and not fx, (r, fx))

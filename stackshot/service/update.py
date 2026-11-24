@@ -725,8 +725,12 @@ def update_unlocked(
             _needs_store(meta, _canon_needs([*kinds, got_agent], _anc.names()))
     reword, step = _server_step_reworded(item_was, reword, step)      # a reword of the line the server keeps from step= is the new step text, as the same call would give it
     step_lines: list[str] = []
-    if step.strip() and step.strip().lower() not in h.ask_none:
-        step, step_lines = _fg.fix_long_step(_states.step_text(step))      # a long chain of actions becomes a short summary and one line of next per action (the reply says so); a short, numbered or one-action step is as written
+    step_long = ""         # the step as the writer sent it, when it is split below
+    if step.strip() and step.strip().lower() not in h.ask_none and _writes.session_next():      # a session's write only: a script's step (item sync, the terminal rows) is stored as it is made
+        step_long = _states.step_text(step)
+        step, step_lines = _fg.fix_long_step(step_long)      # a long chain of actions becomes a short summary and one line of next per action (the reply says so); a short, numbered or one-action step is as written
+        if not step_lines:
+            step_long = ""
     state_st, state_given, step_withdrawn = fc.call(_gates.gate_state_args, {"expected_by": expected_by, "expected_reason": expected_reason, "step": step, "supplies": supplies}, default=("", {}, False))   # a bad value is refused before anything is written
     draft_set, clear_draft = fc.call(_gates.gate_draft_args, draft, clear_draft, default=("", clear_draft))   # a bad draft is refused before anything is written
     list_end_words = _list_end_words(waits, wake, clear_wake, meta)      # read on the item as it stands, before the write changes it
@@ -931,6 +935,7 @@ def update_unlocked(
         own_text = _nl.text_of(meta, next_writer, keeper_was, _handoff.ho_same)
         have = open_keys | {_steps.key(x) for x in _steps.split(next)}
         added = _with_lines(next, own_text, step_lines, have, next_drop or clear_next)
+        _fg.say_long_step(step_long, step_lines, sum(1 for ln in step_lines if _steps.key(ln) not in have))
         if added != next:
             next, next_drop, next_touch = added, False, True
             _stall.note(meta, time.time(), f"step: split by the server into a summary and {len(step_lines)} lines of next")
@@ -966,6 +971,12 @@ def update_unlocked(
         fc.call(_gates.gate_close_steps, gid, steps_old, _steps.others_open(steps_old, lambda w: not w or _handoff.ho_same(w, next_writer), {*done_ix, *drop_ix}, lambda nm: _handoff.ho_same(nm, next_writer)))
     elif closing and steps_old and marks_bad and (_writes.session_next() or _writes.close_tool()):
         fc.skip("the check that a close leaves no other session's step open", "it reads the steps this call marks, which are refused above")
+    if step_lines and steps_on and not closing and not marks_bad:      # the long step sent as a line of his already (a session wrote `<owner>: <the step>` before): its actions replace it, so it is dropped, never left open beside them
+        long_k, rec_was = _steps.key(_hs.line_of(step_long)), _hs.recorded(item_was.get("metadata") or {})
+        for i, s_ in enumerate(steps_old):
+            if s_["status"] == _steps.OPEN and _steps.key(s_["text"]) == long_k and not (rec_was and _hs.same_line(s_["text"], rec_was)) and i not in drop_ix and i not in done_ix:      # the server's own line for the old step is made again from the new step on every save
+                drop_ix.append(i)
+                _calls.fixed("step-split", f"step {i + 1} ({OWNER}'s line with the whole long step) was dropped: its {len(step_lines)} actions are lines of next now", fields=["step"])
     reword_note = ""
     bad_rw: set[int] = set()       # the steps whose new words are refused: they are not applied below
     his_rw: dict[int, str] = {}    # the steps of his this call rewords: done as drop plus add below, never in place
@@ -1014,7 +1025,7 @@ def update_unlocked(
             own_kept = "\n".join(e for e in _steps.split(_nl.text_of(meta, next_writer, keeper_was, _handoff.ho_same)) if _steps.key(e) not in gone_k)
             next = _with_lines(next, own_kept, his_added, (open_keys - gone_k) | {_steps.key(x) for x in _steps.split(next)}, next_drop or clear_next)
             next_drop = False
-        proofs =dict(meta["step_proof"]) if isinstance(meta.get("step_proof"), dict) else {}
+        proofs = dict(meta["step_proof"]) if isinstance(meta.get("step_proof"), dict) else {}
         for i, text in reword_ix.items():
             old_text = steps_old[i]["text"]
             _nl.reword(meta, old_text, text, keeper_was, writer=steps_old[i].get("writer") or None)

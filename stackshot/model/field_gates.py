@@ -204,15 +204,24 @@ def _step_line_room() -> int:
 
 def fix_long_step(step: str) -> tuple[str, list[str]]:
     """A step of his that is a long chain of actions, put into the shape the board draws instead of refused or left unreadable: the step becomes a short summary and each action a line of next that opens with his name
-    (step_split.split_step: split at sentence ends, semicolons and inline numbered items, every word kept), and the reply says so (call_log.fixed). → (the step to store, the lines to add to next); the step as given and
-    no lines when it is short, already structured, or holds one action. Writes nothing."""
+    (step_split.split_step: split at sentence ends, semicolons and inline numbered items, every word kept; a text of more than SPLIT_MAX characters or more than MAX_ACTIONS actions is left as written).
+    → (the step to store, the lines to add to next); the step as given and no lines when it is short, already structured, or holds one action. Writes nothing and says nothing: the caller says what it did
+    (`say_long_step`) once it knows how many lines it added."""
     got = _ss.split_step(step, _step_line_room())
     if got is None:
         return step, []
-    summary, lines = got
-    _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {len(lines)} actions, so it was split into a summary and {len(lines)} lines of next that open with {OWNER}'s name, "
-                 "which the board draws as his list; every word is in a line", fields=["step", "next"])
-    return summary, lines
+    return got
+
+
+def say_long_step(step: str, lines: list[str], added: int) -> None:
+    """The reply's line for a long step that was split into `lines` (call_log.fixed, kind step-split): what was done, or, when `added` is 0 (the summary and every one of its lines are on the item already: the same step
+    sent again), that nothing was added."""
+    if added:
+        _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {len(lines)} actions, so it was split into a summary and {len(lines)} lines of next that open with {OWNER}'s name, "
+                     "which the board draws as his list; every word is in a line" + ("" if added == len(lines) else f" ({len(lines) - added} of the lines were on the item already, so {added} were added)"), fields=["step", "next"])
+    else:
+        _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {len(lines)} actions: it is stored as a summary, and its {len(lines)} lines of next are on the item already, so nothing was added",
+                     fields=["step"])
 
 
 def fix_long_owner_lines(next_: str, known: set[str]) -> str:
