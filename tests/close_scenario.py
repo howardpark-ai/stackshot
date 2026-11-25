@@ -59,7 +59,7 @@ def _fixture(prefix, dirs, transcripts=False, marks_off=False, owner=None):
     toml = _instance.apply(_instance.base_toml())
     toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store (session links off)
     if owner is not None:
-        toml, n = re.subn(r'(?m)^owner = "the owner"', f'owner = "{owner}"', toml, count=1); assert n == 1      # a named owner, so `<owner> to …` is a form the model reads (with no [instance] owner the name is not one of the owner's names)
+        toml = _instance.set_person(toml, owner)      # a named owner, so `<owner> to …` is a form the model reads (with no [instance] owner the name is not one of the owner's names)
     for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                      ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
         toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key

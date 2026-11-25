@@ -60,7 +60,7 @@ def part_front_turn():
                      ("timezone", "Asia/Dubai")):
         toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
     toml, n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]', toml); assert n == 1
-    toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml); assert n == 1
+    toml = _instance.set_person(toml)
     toml, n = re.subn(r"(?m)^require_marks = true", "require_marks = false", toml); assert n == 1
     (T / "stackshot.toml").write_text(toml, encoding="utf-8")
     os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet")
@@ -628,7 +628,7 @@ def part_front_digest():
                      ("timezone", "Asia/Dubai")):
         toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
     toml, n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]', toml); assert n == 1
-    toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml); assert n == 1
+    toml = _instance.set_person(toml)
     toml, n = re.subn(r"(?m)^require_marks = true", "require_marks = false", toml); assert n == 1
     (T / "stackshot.toml").write_text(toml, encoding="utf-8")
     os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet", HOME=str(T / "home")); os.environ.pop("STACKSHOT_URL", None)

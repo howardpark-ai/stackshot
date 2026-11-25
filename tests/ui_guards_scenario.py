@@ -106,7 +106,7 @@ def _setup(prefix, *, owner=False, audit=False, rules=False, board=None, extra_d
                      ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
         toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
     toml, n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]', toml); assert n == 1
-    if owner: toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml); assert n == 1
+    if owner: toml = _instance.set_person(toml)
     if audit: toml, n = re.subn(r'(?m)^(\[audit\]\s*#.*\n)enabled = false', r'\1enabled = true', toml, count=1); assert n == 1      # the Audit card (and its button) is drawn
     if board:
         for pat, rep in ((r'(?m)^board_url = "[^"]*"', f'board_url = "{board}"'), (r'(?m)^base_url = "[^"]*"', f'base_url = "{board}"'), (r'(?m)^ui_open = true', 'ui_open = false')):

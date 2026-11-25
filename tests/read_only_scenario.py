@@ -50,8 +50,9 @@ def write_toml(name, hook_port=None, root=None):
     for key, val in (("repo", f"{root}/inst"), ("store", f"{root}/inst/store"), ("markdown", f"{root}/inst/board.md"), ("brain", f"{root}/brain"),
                      ("state", f"{root}/state"), ("secrets", f"{root}/secrets"), ("project_touch", f"{root}/touch"), ("rules", f"{root}/RULES.md"), ("timezone", "Asia/Dubai")):
         toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
+    toml = _instance.set_person(toml)
     for pat, rep in ((r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]'), (r'(?m)^board_url = "[^"]*"', f'board_url = "{BOARD}"'),
-                     (r'(?m)^base_url = "[^"]*"', f'base_url = "{BOARD}"'), (r'(?m)^owner = "the owner"', 'owner = "Oliver"')):
+                     (r'(?m)^base_url = "[^"]*"', f'base_url = "{BOARD}"')):
         toml, n = re.subn(pat, rep, toml); assert n == 1, pat
     if hook_port:
         toml, n = re.subn(r'(?m)^hook_port = \d+', f'hook_port = {hook_port}', toml); assert n == 1, "hook_port"

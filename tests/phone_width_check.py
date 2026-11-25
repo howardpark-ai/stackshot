@@ -51,7 +51,7 @@ tmp = _scratch.mkdtemp(prefix="phonewidth-"); T = pathlib.Path(tmp)
 toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
 toml, n = re.subn(r"(?m)^repos = \[\]", 'repos = ["repo-a", "repo-b"]', toml, count=1); assert n == 1    # the Runners card is drawn per repo
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1)
-toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml, count=1); assert n == 1      # a line of next that opens "Oliver:" is his step (the Your step block draws his lines)
+toml = _instance.set_person(toml)      # a line of next that opens "Oliver:" is his step (the Your step block draws his lines)
 toml = toml.replace('session_view = ""', 'session_view = "https://sala.example.org/#s={name}"', 1); assert "sala.example.org" in toml   # live session names drawn as their sala links
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("timezone", "Asia/Dubai")):

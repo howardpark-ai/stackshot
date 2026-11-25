@@ -22,7 +22,7 @@ for key, val in (("repo", f"{tmp}/store"), ("store", f"{tmp}/store"), ("markdown
     toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
 toml, n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]', toml); assert n == 1
 toml, n = re.subn(r'(?m)^transcripts = .*$', f'transcripts = ["{tmp}/no-such-root", "{tmp}/transcripts"]', toml); assert n == 1
-toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Pat Example"', toml); assert n == 1
+toml = _instance.set_person(toml, "Pat Example")
 (T / "stackshot.toml").write_text(toml, encoding="utf-8")
 (T / "RULES.md").write_text("# rules\n\n" + "- a rule the connector serves, long enough to count as a rulebook.\n" * 20, encoding="utf-8")
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)

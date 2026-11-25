@@ -27,7 +27,7 @@ toml = _instance.apply(_instance.base_toml())
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"), ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"),
                  ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
     toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
-toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml, count=1); assert n == 1
+toml = _instance.set_person(toml)
 toml, n = re.subn(r'(?m)^transcripts = .*$', 'transcripts = ["~/.claude/projects"]', toml); assert n == 1      # the box's own: found there, never here
 toml, n = re.subn(r'(?m)^injected_marker = ""', f'injected_marker = "{MARK}"', toml); assert n == 1
 toml, n = re.subn(r'(?m)^session_links = .*$', 'session_links = "~/.local/state/fleet-store"', toml); assert n == 1

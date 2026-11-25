@@ -24,7 +24,7 @@ names no machine (no fallback to the bash_host or PowerShell), and its link stil
 import json, logging, os, pathlib, re, subprocess, sys, time
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch
+import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="shelllink-"); T = pathlib.Path(tmp)
 BOARD = "https://board.example.org"
 
@@ -33,8 +33,9 @@ toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'sessio
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
     toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
+toml = _instance.set_person(toml)
 for pat, rep in ((r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]'), (r'(?m)^board_url = "[^"]*"', f'board_url = "{BOARD}"'),
-                 (r'(?m)^base_url = "[^"]*"', f'base_url = "{BOARD}"'), (r'(?m)^owner = "the owner"', 'owner = "Oliver"'), (r'(?m)^ui_open = true', 'ui_open = false')):
+                 (r'(?m)^base_url = "[^"]*"', f'base_url = "{BOARD}"'), (r'(?m)^ui_open = true', 'ui_open = false')):
     toml, n = re.subn(pat, rep, toml); assert n == 1, pat
 (T / "stackshot.toml").write_text(toml, encoding="utf-8")
 (T / "RULES.md").write_text("# rules\n\n" + "- a rule the connector serves, long enough to count as a rulebook.\n" * 20, encoding="utf-8")

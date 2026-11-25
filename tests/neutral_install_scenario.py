@@ -14,7 +14,7 @@ refused, a path outside the checkout is refused, the same note twice is one line
     tests/run-suite neutral_install        → exit 0 / 1"""
 import json, os, pathlib, re, shutil, socket, subprocess, sys, time, tomllib, urllib.error, urllib.request
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch
+import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="neutral-"); T = pathlib.Path(tmp)
 fails = []; ran = []
 def check(name, cond, got=None):
@@ -80,7 +80,7 @@ def build(label: str, owner: str | None, port: int) -> dict:
         toml = edit(toml, (rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"'))
     toml = edit(toml, (r"(?m)^git = true", "git = false"), (r"(?m)^latest_lookups = true", "latest_lookups = false"), (r"(?m)^port = 8020", f"port = {port}"),
                 (r"(?m)^every_minutes = 10", "every_minutes = 1440"), (r"(?m)^panel = true", "panel = false"))   # the Runners panel never reads GitHub from this server
-    if owner is not None: toml = edit(toml, (r'(?m)^owner = "the owner"', f'owner = "{owner}"'))
+    if owner is not None: toml = _instance.set_person(toml, owner)
     conf = root / "stackshot.toml"; conf.write_text(toml, encoding="utf-8")
     (root / "RULES.md").write_text("# rules\n\n" + "- a rule the connector serves, long enough to count as a rulebook.\n" * 20, encoding="utf-8")
     agent = "general-alpha-main"
