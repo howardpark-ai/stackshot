@@ -242,6 +242,31 @@ finally:
     if had is None: RECF.unlink()
     else: RECF.write_text(had, encoding="utf-8")
 
+# the FAIL hint of a project id that did not follow its page: `projects rename` runs only on the server box, so off it the hint names the ssh form
+from stackshot.core import config as _cfgmod
+from stackshot.projects import projects as _prjmod
+def _boom(*_a, **_k): raise RuntimeError("boom")
+def id_fail_line(deploy_ssh, tag):
+    """The FAIL line of a stub whose id move failed, with [release] deploy_ssh set to `deploy_ssh` for the run."""
+    had_rel, had_ens = _cfgmod.CFG.get("release"), _prjmod.ensure_ids
+    _cfgmod.CFG["release"] = dict(had_rel or {}, deploy_ssh=deploy_ssh); _prjmod.ensure_ids = _boom
+    try:
+        mk(f"projects/example/{tag}", typ="note"); mv("copy", f"projects/example/{tag}=projects/{tag}")
+        rc, out = mv("stub", f"projects/example/{tag}=projects/{tag}")
+    finally:
+        _prjmod.ensure_ids = had_ens
+        if had_rel is None: _cfgmod.CFG.pop("release", None)
+        else: _cfgmod.CFG["release"] = had_rel
+    return rc, [l for l in out.splitlines() if "FAIL project id" in l]
+rc, lines = id_fail_line("record-host", "hint-off")
+check("id move FAIL off the server box: the hint is the ssh form of `projects rename`, not the local command", rc == 1 and len(lines) == 1 and "run: ssh record-host '~/stackshot/bin/stackshot projects rename projects/example/hint-off projects/hint-off'" in lines[0] and "projects.py" not in lines[0], (rc, lines))
+rc, lines = id_fail_line("host:nowhere", "hint-word")
+check("id move FAIL off the server box with a host word that does not resolve: the hint says on the server box and still names the command", rc == 1 and len(lines) == 1 and "on the server box" in lines[0] and "projects rename projects/example/hint-word projects/hint-word" in lines[0] and "ssh " not in lines[0], (rc, lines))
+rc, lines = id_fail_line(__import__("socket").gethostname(), "hint-here")
+check("id move FAIL on the server host: the hint keeps the local command", rc == 1 and len(lines) == 1 and "projects/projects.py rename projects/example/hint-here projects/hint-here" in lines[0] and "ssh " not in lines[0], (rc, lines))
+rc, lines = id_fail_line("", "hint-one")
+check("id move FAIL on a config that names no server host: the hint keeps the local command", rc == 1 and len(lines) == 1 and "projects/projects.py rename" in lines[0] and "ssh " not in lines[0], (rc, lines))
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": rename scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))
 sys.exit(1 if fails else 0)

@@ -548,10 +548,15 @@ elsewhere = lambda t: re.sub(r'(?m)^deploy_ssh = .*$', 'deploy_ssh = "record-hos
 assert 'deploy_ssh = "record-host"' in elsewhere((T / "stackshot.toml").read_text(encoding="utf-8")), "the test config has no deploy_ssh line to point elsewhere"
 rb = recsha()
 PK = "ssh record-host 'python3 ~/stackshot/stackshot/tools/project.py"
-rc, out, err = tool_cfg(elsewhere, "stackshot/tools/project.py", "page-keeper", "projects/alpha/sub", "--agent", "home-sparrow-main", "--apply")
+rc, out, err = tool_cfg(elsewhere, "stackshot/tools/project.py", "page-keeper", "projects/alpha/sub", "--agent", "home-sparrow-main", "--apply"); err0 = err
 check("off the server box: page-keeper --apply is refused (exit 1), nothing written, and the ssh form that runs it on the record host is named",
       rc == 1 and recsha() == rb and "not the server host" in err and PK + " page-keeper projects/alpha/sub --agent home-sparrow-main --apply'" in err, (rc, out[:200], err[:700]))
 rc, out, err = tool_cfg(elsewhere, "stackshot/tools/project.py", "page-keeper", "projects/alpha/sub", "--agent", "home-sparrow-main")
+check("off the server box: the refusal is worded for the record (where it lives, nothing read or written here), not for the server's units",
+      "deploy_ssh names record-host, where the project record lives" in err0 and "nothing is read or written here" in err0 and "units belong there" not in err0 and "an alias or an address of this box is not recognized" not in err0, err0[:700])
+from stackshot.core import config as _cfgm
+_u = _cfgm.server_host_refusal({"release": {"deploy_ssh": "record-host"}})
+check("install.sh units keeps its own wording: the server's units belong on the named host, an alias of this box is not recognized", "so the server's units belong there (an alias or an address of this box is not recognized: name this box by its hostname)" in _u and "project record" not in _u, _u)
 check("off the server box: a dry run is refused too (it would plan from the old copy)", rc == 1 and "ssh record-host" in err and out == "", (rc, out[:200], err[:400]))
 rc, out, err = tool_cfg(elsewhere, "stackshot/tools/project.py", "show", "home-sparrow")
 check("off the server box: show is refused as well, the record read here may be behind", rc == 1 and "ssh record-host" in err, (rc, out[:200], err[:400]))
