@@ -60,7 +60,7 @@ decision cannot be parked. Take a wake from the wait's real schedule (a timer, w
 check it live, never a guessed round time. step=<one line> sets the item in his step and makes him the mover (then, or
 the agent that had it, takes it after his Done); step is a short summary, and a long one is put right for you: a step over
 {{STEP_SPLIT_OVER}} characters with several actions (sentences, semicolons, `1) … 2) …`) is split into a summary of at most {{STEP_SUMMARY_MAX}}
-characters and one line of next per action that opens with `{{OWNER}}:`, which the board draws as his list (the reply says
+characters and one line of next per action that opens with `{{OWNER}}:`, which the board draws as his list (a lead-in that ends with a colon before `1) … 2) …` is one line with its items as indented `- ` lines under it; the reply says
 so, no word is lost; send the summary and the lines yourself to choose the words); a long `{{OWNER}}:` line of next with
 several actions is split the same way (never over {{STEP_SPLIT_MAX}} characters or {{STEP_SPLIT_ACTIONS}} actions, or with a word or code span longer than a line: a step over its limit is refused, saying why); a new step or step="none" drops the old split's open lines; step="none" withdraws it; supplies=<one line: what the item it waits
 after gives this one>, with after=["board#N"], sets the item blocked on that item. Each is refused without what it

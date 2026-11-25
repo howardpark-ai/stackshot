@@ -256,6 +256,11 @@ def _start_background() -> list[str]:
     except Exception as e:
         print(f"close marks pass failed: {e}", file=sys.stderr, flush=True)
     try:
+        if _migrations._nested_steps_pass():            # a long step once split into flat lines (a lead-in with a colon, its list items each a line) is read as one line with sub-lines; idempotent, so every start runs it
+            _pubmod._publish()
+    except Exception as e:
+        print(f"nested steps pass failed: {e}", file=sys.stderr, flush=True)
+    try:
         if _wakes.wake_pass():                    # items whose wake passed while the server was down are open before the first publish
             _pubmod._publish()
     except Exception as e:

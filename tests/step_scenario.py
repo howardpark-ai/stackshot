@@ -145,6 +145,21 @@ check("2 parts: one command is 'the command below'; a span after a colon at the 
 check("2 parts: structured() is true for a numbered line or a fence, not for prose with a number in it", SC.structured("1. a") and SC.structured("x\n2) b") and SC.structured("```\nx y\n```") and not SC.structured("Step 1. do it") and not SC.structured("run 3. times"), None)
 check("2 parts: an unclosed fence runs to the end; an empty one is dropped", SC.parse("```\nssh -t box-a 'a'")[0].text == "ssh -t box-a 'a'" and SC.parse("```\n```\n1. x")[0].kind == "ol", None)
 
+SUBTXT = "Do these in order:\n1. open the console\n  - press `ssh -t box-a 'uptime'` in the shell\n  - read the output\n2. then say done"
+ps = SC.parse(SUBTXT)
+check("2 sub-items: an indented `- ` line under a numbered item is a sub-item of it (in order), the item after it is the next item of the same list",
+      [p.kind for p in ps] == ["text", "ol"] and [len(it.subs) for it in ps[1].items] == [2, 0] and [x.text for x in ps[1].items[0].subs] == ["press `ssh -t box-a 'uptime'` in the shell", "read the output"] and ps[1].items[1].text == "then say done", ps)
+check("2 sub-items: …the commands of an item include those of its sub-items, in order (commands_of and step_commands read the whole step)", SC.commands_of(SUBTXT) == ["ssh -t box-a 'uptime'"] and [x.text for x in ps[1].items[0].all()] == ["open the console", "press `ssh -t box-a 'uptime'` in the shell", "read the output"], SC.commands_of(SUBTXT))
+ps2 = SC.parse("1. one\n  - sub a\n  - sub b\n  - sub c\n```\nssh -t box-a 'x'\n```\n2. two")
+check("2 sub-items: a fence at the left margin after the sub-lines is the item's own, as before (not a sub-item's), and the next numbered line is the next item",
+      [p.kind for p in ps2] == ["ol"] and len(ps2[0].items) == 2 and len(ps2[0].items[0].subs) == 3 and ps2[0].items[0].fences == ["ssh -t box-a 'x'"] and all(not x.fences for x in ps2[0].items[0].subs), ps2)
+ps3 = SC.parse("1. one\n  - sub a\n    continued here\n  - sub b\n      ```\n      ssh -t box-a 'in-sub'\n      ```\n  - sub c")
+check("2 sub-items: a continuation line joins its sub-item, an indented fence belongs to the sub-item above it, every sub-item stays a sub-item",
+      [p.kind for p in ps3] == ["ol"] and [x.text for x in ps3[0].items[0].subs] == ["sub a continued here", "sub b", "sub c"] and ps3[0].items[0].subs[1].fences == ["ssh -t box-a 'in-sub'"], ps3)
+check("2 sub-items: a `- ` line with no numbered item above it is no sub-item (a plain text line, as before)", [p.kind for p in SC.parse("Do this:\n  - a thing\n  - another")] == ["text"] * 3 and not any(p.items for p in SC.parse("Do this:\n  - a thing")), SC.parse("Do this:\n  - a thing\n  - another"))
+check("2 sub-items: a numbered line under an item, indented deeper, is a sub-item too; one at the same margin is the next item",
+      [len(it.subs) for it in SC.parse("1. one\n   1. inner a\n   2. inner b\n2. two")[0].items] == [2, 0], SC.parse("1. one\n   1. inner a\n   2. inner b\n2. two"))
+
 # ================================================================ 3. the page
 item(10, subject="[home] reauth", **HOW, step=NUMBERED, draft="Hi Kim,\nthe text\n")
 p10 = page(10, answer=BOX)

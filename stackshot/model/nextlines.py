@@ -205,6 +205,12 @@ def prune(meta: dict[str, Any], texts: list[str], keeper: str) -> int:
     return gone
 
 
+def set_rows(meta: dict[str, Any], rows: list[tuple[str, str]]) -> None:
+    """Store `rows` ([(line, writer)], as `resolve` gives them, edited by position) as the item's next: the lines joined, each with its writer pair. For a caller that changes lines by their place, not by their words (`prune` and `reword` take
+    the first line that reads the same, which is not always the one meant when two lines read alike)."""
+    _put(meta, rows, None)
+
+
 def reword(meta: dict[str, Any], old: str, new: str, keeper: str, writer: str | None = None, new_writer: str | None = None) -> bool:
     """Change the text of one line of next in place: the first line that reads `old` (key_of; with `writer`, the first of that writer's), its position and its writer pair kept (with `new_writer`, the line
     becomes that session's: a step the server hands to another session). → whether a line was found. The lines are stored joined (the text a sole writer wrote verbatim keeps its other lines as they were)."""

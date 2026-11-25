@@ -86,6 +86,13 @@ for i, w in ((21, "email\uB85C \uBCF4\uB0B4\uAE30"), (22, "Email\uC744 \uC5F4\uA
     item(i, step="Send the note", draft=MSG, next=f"Oliver: {w}\nhome-agent: check")
 item(24, step="Run the command, then post the note", draft=MSG, next="Oliver:\n```\nuv run x y\n```\nhome-agent: check")      # his only step is a fenced block alone: no line of text to hold the message
 item(25, step="Run the command", draft="uv run x y", next="Oliver:\n```\nuv run x y\n```\nhome-agent: check")        # the draft is that command: drawn once
+# 7: a step that opens a list: the lead-in one line with its items as indented `- ` lines under it, then a closing line, as the server splits `Do these: 1) a 2) b 3) c. Then say done`
+SUB_CMD = "uv run tool.py --check"
+item(26, step="Do these in order: (+1 more)", owner_step="Oliver: Do these in order: (+1 more)",
+     next=f"Oliver: Do these in order:\n  - open the vendor console\n  - run `{SUB_CMD}` in the shell\n  - press Enter\nOliver: Then say done\nhome-agent: check\nOliver: Do these in order: (+1 more)")
+item(27, step="Do these in order: (+1 more)", draft=MSG, owner_step="Oliver: Do these in order: (+1 more)",
+     next="Oliver: Do these in order:\n  - run `uv run tool.py --check` first\n  - in Slack, post the message in the channel\nOliver: Then say done\nhome-agent: check\nOliver: Do these in order: (+1 more)")
+item(28, step="Do these in order:", owner_step="Oliver: Do these in order:", next="Oliver: Do these in order:\n  - open the console\n  - press Enter\nhome-agent: check\nOliver: Do these in order:")    # a lead-in with items and no closing line
 (T / "store/next-id").write_text("30"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
@@ -97,6 +104,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:1200]}" if got is not None else ""))
 
 import stackshot.web.ui.render as ui_render
+from stackshot.model import steps as _S
 
 BOX = lambda i: {"action": f"/items/a{i}/answer", "token": "TOKEN", "sent": ""}
 bd = ui_render.Board(str(T / "store"))
@@ -213,6 +221,29 @@ check("8 home: the same shape on the row: the message is there, collapsed under 
       bool(h24) and "Message to paste" in h24 and h24.count("Hi Sam") == 1 and "&lt;b&gt;Please&lt;/b&gt;" in h24 and "<b>Please</b>" not in h24 and h24.index("uv run x y") < h24.index("Hi Sam"), h24[:1500])
 b25 = block(page(25))
 check("8 page: a draft that is the command shown is not drawn twice", b25.count("uv run x y") == 1 and 'class="draft"' not in b25, b25)
+
+# ---- 7. a step with sub-lines
+p26 = page(26); b26 = block(p26)
+check("7 page: a lead-in with sub-lines is one numbered step of the list (two steps, the lead-in and the closing line), the items a bulleted list inside the first `<li>`, not numbered steps of their own",
+      b26.startswith('<div class="istepnext"><ol class="stepol">') and b26.count("<ol") == 1 and re.fullmatch(r'.*?<li>Do these in order:<ul class="stepsub"><li>open the vendor console</li>.*?</ul></li><li>Then say done</li></ol>.*', b26, re.S) is not None
+      and b26.count('<ul class="stepsub">') == 1 and b26.count("<li>") == 5, b26)
+check("7 page: ...the items stand in order, the command of an item is in its box with Copy under that item, once, inside the item's `<li>`, the sub-list closing after it",
+      re.search(r'<li>run <code>' + re.escape(SUB_CMD) + r'</code> in the shell|<li>run (?:the command below )?in the shell', b26) is not None and b26.count(ec(SUB_CMD)) == 1 and b26.count('<div class="cmd">') == 1 and b26.count('class="b copy"') == 1
+      and b26.index("open the vendor console") < b26.index(ec(SUB_CMD)) < b26.index("press Enter") < b26.index("Then say done"), b26)
+check("7 page: ...the summary line the server keeps and the agent's line are not drawn here; no `- ` or `Oliver:` is left in the text", "Do these in order: (+1 more)" not in b26 and "home-agent" not in b26 and "Oliver:" not in b26 and "- open" not in b26, b26)
+n26 = nextlist(p26)
+check("7 page: Next draws the lead-in and its items as one line of the checklist (the same sub-list, inside one `<li>`): the lead-in once, each item once",
+      n26.count("Do these in order:") == 1 and n26.count("open the vendor console") == 1 and n26.count("press Enter") == 1 and re.search(r'<li class="cl-open">(?:(?!</li>).)*Do these in order:.*?open the vendor console.*?press Enter', n26, re.S) is not None, n26[:1200])
+check("7 page: ...and the lead-in with its sub-lines is one step of the checklist: one open line, one box to tick", len([x for x in _S.view(json.loads((T / "store/a/26.json").read_text())["metadata"], keeper=OWNER) if x["text"].startswith("Oliver: Do these in order:\n")]) == 1, None)
+h26 = page_home[page_home.index('id="task-a-26"'):]      # (row() ends a row at a `</li>` before a `</ul>`, which a sub-list has inside it: take the text up to the next row)
+h26 = h26[:h26.index('id="task-a-', 10)] if 'id="task-a-' in h26[10:] else h26
+sn26 = re.search(r'<div class="istepnext">(.*?)</div>(?=<div class="hask">|</span></div><div class="ir-act">)', h26, re.S)
+check("7 home: the row draws the same block as the item page, sub-list included, byte for byte (the home page is drawn from the same store)", bool(sn26) and sn26.group(0) == b26, (sn26 and sn26.group(0)[-400:], b26[-400:]))
+b27 = block(page(27))
+check("7 page: the draft sits inside the step that names the text to post (the lead-in, after its sub-list), once, collapsed under the same label, and the command of an item stays in its own box",
+      b27.count('class="draft"') + b27.count('class="draft hdraft"') <= 1 and b27.count("Message to paste") == 1 and b27.index('<ul class="stepsub">') < b27.index("Message to paste") < b27.index("Then say done") and b27.count('<div class="cmd">') == 1, b27)
+b28 = block(page(28))
+check("7 page: a lead-in with items and no closing line is a list of one step, with its sub-list", b28.count("<li>") == 3 and b28.startswith('<div class="istepnext"><ol class="stepol"><li>Do these in order:<ul class="stepsub"><li>open the console</li><li>press Enter</li></ul></li></ol>'), b28)
 
 # ---- 6. the summary stays where space is short
 check("6 summary: the step field still holds the summary (the tab title, the Slack notice read it)", json.loads((T / "store/a/1.json").read_text())["metadata"]["step"] == f"Oliver: {S1}", None)

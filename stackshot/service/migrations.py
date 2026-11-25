@@ -39,6 +39,7 @@ from stackshot.model import last_activity_pass as _lact_pass
 from stackshot.model import migration as _mig
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
+from stackshot.model import nested_repair as _nested
 from stackshot.model import next_backfill as _nbf
 from stackshot.model import nextlines as _nl
 from stackshot.model import steps as _steps
@@ -241,6 +242,73 @@ def _close_marks_pass(apply: bool = True) -> list[dict[str, Any]]:
     if apply and out:
         print(f"migrate: close marks: {sum(len(r['steps']) for r in out)} open step(s) of {len(out)} closed item(s) marked "
               f"({sum(len(r['steps']) for r in out if r['status'] == _steps.DONE)} done, {sum(len(r['steps']) for r in out if r['status'] == _steps.DROPPED)} dropped), by {CLOSE_MARKS_BY}", file=sys.stderr, flush=True)
+    return out
+
+
+NESTED_RECORD = "nested_steps.jsonl"          # <state>/migration/: one line per item the pass rewrote, what it held before (the undo record)
+NESTED_RECORD_MAX = 200_000                   # characters of one line of it; an item whose old text is longer is rewritten with a line that says so, not the text
+
+
+def _nested_record(gid: str, m: dict[str, Any]) -> bool:
+    """Append the undo record of an item the nested-steps pass is about to rewrite: one JSON line, the item, the time, and the fields the repair changes as they are now (nested_repair.FIELDS: next, next_by, steps,
+    step_lines, step, owner_step). A line over NESTED_RECORD_MAX characters is not written whole: the line says the old text was too long to keep (the repair then goes on). → False when the record cannot be written
+    (the caller leaves the item as it is)."""
+    row = {"t": time.time(), "gid": gid, "item": _gh.shown(gid), "was": {k: m[k] for k in _nested.FIELDS if k in m}}
+    line = json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(line) > NESTED_RECORD_MAX:
+        line = json.dumps({"t": row["t"], "gid": gid, "item": row["item"], "skipped": f"the old text is {len(line)} characters, over the {NESTED_RECORD_MAX} a record line keeps: not recorded"}, ensure_ascii=False, separators=(",", ":"))
+    try:
+        path = _cfg.state("migration", NESTED_RECORD)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+        return True
+    except Exception:  # noqa: BLE001  — no record, no rewrite
+        return False
+
+
+def _nested_steps_pass(apply: bool = True) -> list[dict[str, Any]]:
+    """an open item whose long step was split into flat lines of next, a lead-in that ends with a colon and each item of its list a line of its own, has the list read in the new shape: the lead-in one line with the items
+    as indented `- ` lines under it, ticked as one step (model/nested_repair.py says which lines, and the one guess). Once per start, before the server serves; idempotent (the merged line has sub-lines and starts no list, so a store
+    already repaired writes nothing); only metadata.next, next_by, steps, step_lines, step and owner_step change (the summary's `(+N more)` follows the lines), the clocks stay (the QUIET write context), no issue mirror job is made and nobody is told.
+    Before an item is rewritten its old fields are appended to `<state>/migration/nested_steps.jsonl` (`_nested_record`, the undo record); an item whose record cannot be written is left as it is and counted in the one stderr line.
+    An item file that is no object, or whose metadata is none, is passed over: one bad item never skips the others. `apply=False` is the dry run (tools/nested_steps_report.py): the same rows, nothing written, no record.
+    → [{gid, item, lead, items, left}] in id order, the lists nested (apply) or that would be."""
+    out: list[dict[str, Any]] = []
+    unrecorded = 0
+    for gid, p in _item_files():
+        try:
+            with open(p, encoding="utf-8") as f:
+                head = json.load(f)
+        except Exception:  # noqa: BLE001  — an unreadable file is not this pass's to judge
+            continue
+        hm = head.get("metadata") if isinstance(head, dict) else None
+        if not isinstance(hm, dict) or head.get("status") != "open" or not hm.get("step_lines") or not str(hm.get("step") or "").strip():
+            continue
+        try:
+            with _writes.ITEM_LOCK:
+                it = _svcstore._load(gid)
+                m = it.get("metadata") if isinstance(it, dict) else None
+                if not isinstance(m, dict) or it.get("status") != "open" or not m.get("step_lines"):
+                    continue
+                keeper = str(m.get("owner") or "")
+                rows = _nested.plan(m, keeper)
+                if not rows:
+                    continue
+                if apply:
+                    if not _nested_record(gid, m):
+                        unrecorded += 1
+                        print(f"migrate: {gid} nested steps not written: the undo record could not be written", file=sys.stderr, flush=True)
+                        continue
+                    _nested.nest(m, keeper)
+                    _writes.save(gid, it, mirror=False, ctx=_writes.QUIET)
+                out.extend({"gid": gid, "item": _gh.shown(gid), "lead": _steps.first_line(lead), "items": [_nested._body(x) for x in items], "left": [_steps.first_line(e) for e in left]} for lead, items, left in rows)
+        except Exception as e:  # noqa: BLE001  — one item never stops the start
+            out[:] = [r for r in out if r["gid"] != gid]
+            print(f"migrate: {gid} nested steps not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    if apply and (out or unrecorded):
+        print(f"migrate: nested steps: {len(out)} list(s) of {len({r['gid'] for r in out})} open item(s) put under their lead-in line ({sum(len(r['items']) for r in out)} lines nested)"
+              + (f", {unrecorded} item(s) left as they are for want of an undo record" if unrecorded else ""), file=sys.stderr, flush=True)
     return out
 
 
