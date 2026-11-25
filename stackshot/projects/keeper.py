@@ -28,6 +28,8 @@ A sub-page a split made carries a `split_from: <page>` line (or a `parent: <page
 the page that line names, whatever the page above it gives, a mark of that page included (a hub that is itself a sub-page with its own mark, or one an `agent:` line keeps, passes its keeper to the pages that were split off it).
 The row carries the page in `split_from`, and `keeper_source` says "split" (not "legacy": the gauge does not count it). The named page is followed through the registry, a chain of splits up to SPLIT_HOPS
 hops; a line that names no page of the registry, a chain that loops or is longer than the bound, or a target that has no keeper, leaves the page to the rules below as if the line were not there.
+A value in another shape (another letter case than the page's key, a `#anchor`, a relative `../x`, a key without its pages dir that is not a bare slug, a YAML list) names no page and reads as no line, silently.
+A page with no line of its own under a page that follows another takes that keeper from above (`reads_split` says which pages a change of the target moves).
 An unnamed sub-page inherits the keeper of the nearest page above it, as it always did. A sub-page with its own mark keeps the registry role it had ("agent": a page an agent keeps as its own working
 document, which is the role every reader of such a page reads) and its row says `page_mark: true`, so `fields` answers "mark" for it; the sub-pages under it do not inherit from it, as they never did
 from an `agent:` page.
@@ -167,6 +169,23 @@ def split_root(key: str, reg: dict) -> str:
             return ""
         chain.append(t)
         cur = t
+
+
+def reads_split(key: str, reg: dict) -> bool:
+    """Does the keeper of the row `key` come through a page that follows another? True when the row follows one itself (split_target), or it is an unnamed sub-page (role "inherited") whose page above it
+    (`above`, as `fields` reads it) does, through any number of unnamed pages: such a page takes the split keeper from above, so it is read again whenever a page that follows another is. Never loops: a page
+    is looked at once, and a chain longer than the registry is cut by that."""
+    seen: set = set()
+    cur = key
+    while cur and cur not in seen:
+        seen.add(cur)
+        if split_target(cur, reg):
+            return True
+        row = reg.get(cur) if isinstance(reg, dict) else None
+        if not (isinstance(row, dict) and row.get("role") == "inherited"):
+            return False
+        cur = above(cur, reg)
+    return False
 
 
 def _lists_agents(key: str, reg: dict) -> bool:

@@ -6,10 +6,12 @@ of a hub in another project (`parent:`); a chain of two splits and the bound on 
 the page above); a page that has its own mark, name line, `agent:` line or agents keeps them; a retired project (only a mark is followed there); a target that has no keeper; the source `split`, which the
 legacy gauge does not count; the pages a mark moves reading their keeper again (a mark laid on a sub-page, a project mark added); the line as the page row records it (`pages.split_line`); and that every
 reader of `session` and `role` (name_line, session_hubs, notice_name, the stand-in, the page keeper, the sessions that keep a page) and the keeper-subpages dry run answer as they do for the same pages with
-no split line.
+no split line; the pages under a page that follows another (a child and a grandchild with no line of their own, and a split of such a page) reading the target's keeper again whenever its mark is laid, moves or goes
+and whenever the project's mark moves, with the published value of every row equal to a fresh read of the same registry; the readers of the old forms not counting a row that follows another page; and the hand-back
+of an `agent:` page that has a split line.
 
     tests/run-suite keeper_split        → exit 0 / 1"""
-import contextlib, io, json, logging, os, pathlib, re, sys
+import contextlib, io, json, logging, os, pathlib, re, sys, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="keepersplit-"); T = pathlib.Path(tmp)
@@ -86,7 +88,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 REC = T / "store/project-record.json"
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.projects import keeper as kp
-from stackshot.projects import keeper_subpages as ks; from stackshot.projects import keeper_reads as KR
+from stackshot.projects import keeper_subpages as ks; from stackshot.projects import keeper_reads as KR; from stackshot.projects import project_verbs as pv
 from stackshot.anchors import anchors; from stackshot.router import router_live as rl; from stackshot.service import telling
 p.cmd_registry(quiet=True)
 def raw(): return json.loads((T / "store/projects.json").read_text())["pages"]
@@ -108,6 +110,15 @@ OLDE = entry("projects/old-one", status="archived", agents={"old-one-main": agen
 write_record({F: FORGE, LO: LOFT, OLD: OLDE})
 rg = R()
 FB, LM, LD, FM = "forge-builder", "loft-main", "loft-docs", "forge-main"
+def agrees(rg_, label):
+    """The published record of every row of `rg_` says what keeper.fields says of the same registry (a refresh that missed a row shows here as a stale value)."""
+    bad = []
+    for rec in prj.build(rg_)["projects"].values():
+        f = kp.fields(rec["key"], rg_); want = (f["keeper_agent"], f["keeper_source"])
+        if (rec.get("keeper_agent", ""), rec.get("keeper_source", "")) != want or (rg_[rec["key"]].get("keeper_agent", ""), rg_[rec["key"]].get("keeper_source", "")) != want:
+            bad.append((rec["key"], rec.get("keeper_agent"), rec.get("keeper_source"), f))
+    check(f"published keeper equals a fresh read for every row ({len(rg_)} rows): {label}", not bad and len(rg_) > 8, bad[:4])
+agrees(rg, "the base record")
 
 # ---- 1. the line, as the page row records it
 check("split_line: split_from wins over parent; a bare slug is a page of the first pages dir; quotes, slashes and `.md` are dropped; no line, an empty line and a list give none",
@@ -129,6 +140,9 @@ check("a `.md` suffix on the line is dropped; both lines on a page: split_from r
 check("a page with a line and no keeper of its own has no mark: it reads as an unmarked sub-page (role inherited), the registry's old fields unchanged", rg["projects/forge/hub-agent/part1"].get("role") == "inherited" and rg["projects/forge/hub-agent/part1"].get("split_from") == "projects/forge/hub-agent")
 
 # ---- 3. a line that cannot be followed is no line
+check("the shapes the docs list as reading as no line, silently: another letter case, a `#anchor`, a relative `../x`, a key without its pages dir, a YAML list (each names no page of the registry, and nothing is reported)",
+      all(kp.split_target("x", {"x": {"split_from": p.split_line({"split_from": v})}, "projects/a/b": {}}) == "" for v in ("Projects/A/B", "projects/a/b#top", "../a/b", "a/b", ["projects/a/b"]))
+      and kp.split_target("x", {"x": {"split_from": p.split_line({"split_from": "projects/a/b"})}, "projects/a/b": {}}) == "projects/a/b", [p.split_line({"split_from": v}) for v in ("Projects/A/B", "projects/a/b#top", "../a/b", "a/b")])
 check("a loop of two pages: neither follows the other, each reads as the page above it (the project's mark)", ks_of(rg, "projects/forge/cyc-a") == (FB, "mark") and ks_of(rg, "projects/forge/cyc-b") == (FB, "mark"), (ks_of(rg, "projects/forge/cyc-a"), ks_of(rg, "projects/forge/cyc-b")))
 check("a page that names itself reads as no line", ks_of(rg, "projects/forge/self") == (FB, "mark"), ks_of(rg, "projects/forge/self"))
 check("a line that names no page of the registry (a full key, a bare slug) reads as no line", ks_of(rg, "projects/forge/miss") == (FB, "mark") and ks_of(rg, "projects/forge/bare") == (FB, "mark"), (ks_of(rg, "projects/forge/miss"), ks_of(rg, "projects/forge/bare")))
@@ -173,6 +187,24 @@ gauge = KR._STATE["gauge"] or []
 check("the gauge projects.sync publishes counts the pages an old form keeps and no page that follows another (source split)", gauge == leg and "projects/forge/hub-agent" in gauge and not any(rg[k]["keeper_source"] == "split" for k in gauge), (gauge, leg))
 check("the keeper-subpages gauge (its `legacy` rows) agrees: none of them a split", ks._legacy(rg) == leg, ks._legacy(rg))
 
+# ---- 5b. the readers of the old forms do not count a row that follows another page
+def noted(): return set().union(*(v[1] for v in KR._PENDING.values())) if KR._PENDING else set()
+def fresh_reads(): KR._STATE["flushed"] = time.monotonic() + 3600; KR._PENDING.clear(); KR._SEEN.clear(); KR._LAST.clear()       # no flush in the middle of the reads
+SPLIT_ROWS = sorted(k for k, v in rg.items() if v.get("keeper_source") == "split" and str(v.get("session") or ""))
+fresh_reads()
+for k in SPLIT_ROWS: anchors.name_line(k, rg)
+got_names = noted(); fresh_reads()
+anchors.name_line("projects/other/plain", rg)
+ctl_names = noted(); fresh_reads()
+for n in sorted({str(rg[k]["session"]) for k in SPLIT_ROWS}): anchors.session_hubs(n, rg, {})
+got_hubs = noted(); fresh_reads()
+anchors.session_hubs("other-session", rg, {})
+ctl_hubs = noted(); fresh_reads()
+check("rows that follow another page have a session to read here (the fixture of the next two checks)", "projects/other/child" in SPLIT_ROWS and len(SPLIT_ROWS) > 3, SPLIT_ROWS)
+check("anchors.name_line counts a row an old form keeps and no row that follows another page (source split)", ctl_names == {"projects/other/plain"} and not got_names, (ctl_names, got_names))
+check("anchors.session_hubs counts a page the old form alone names and no row that follows another page (source split)", "projects/other/plain" in ctl_hubs and "projects/other/child" not in ctl_hubs and not got_hubs & set(SPLIT_ROWS), (ctl_hubs, got_hubs))
+KR._STATE["flushed"] = time.monotonic()
+
 # ---- 6. a retired project follows only a mark
 check("a retired project: a page that was split off a page that has no keeper there has none", ks_of(rg, "projects/old-one/kid") == ("", ""), ks_of(rg, "projects/old-one/kid"))
 check("a retired project: a page that was split off a marked page reads that mark (a mark is read even there), source split", ks_of(rg, "projects/old-one/kid2") == (LD, "split"), ks_of(rg, "projects/old-one/kid2"))
@@ -182,14 +214,14 @@ check("a retired project: a page that was split off a page an old form keeps (an
 check("a project with no entry follows the keeper of the page it names across projects: loft's derived keeper first", ks_of(rg, "projects/loft/hubless") == ("loft-main", "derived") and ks_of(rg, "projects/other/child") == ("loft-main", "split") and ks_of(rg, "projects/other/plain") == ("other-session", "legacy"), (ks_of(rg, "projects/other/child"), ks_of(rg, "projects/other/plain")))
 NOPK = {k: v for k, v in FORGE.items() if k != "page_keepers"}       # no sub-page mark anywhere: the page marks are not laid, so only the overlay of the entries can move the page
 write_record({F: NOPK, LO: {**LOFT, "agents": {**LOFT["agents"], "loft-docs": agent(True, "keeps the docs", keeper=True)}}, OLD: OLDE})
-rg2 = R()
+rg2 = R(); agrees(rg2, "loft marks loft-docs")
 check("loft marks loft-docs: the page it follows reads the mark, and the page that was split off it in a project with no entry reads it again", ks_of(rg2, "projects/loft/hubless") == (LD, "mark") and ks_of(rg2, "projects/other/child") == (LD, "split"), (ks_of(rg2, "projects/loft/hubless"), ks_of(rg2, "projects/other/child")))
 write_record({F: {**FORGE, "page_keepers": {**FORGE["page_keepers"], "projects/forge/hub-mark": "forge-main"}}, LO: LOFT, OLD: OLDE})
-rg3 = R()
+rg3 = R(); agrees(rg3, "the hub's mark moves")
 check("the mark of the hub moves (record, page_keepers): the page that was split off it reads the new one", ks_of(rg3, "projects/forge/hub-mark") == (FM, "mark") and ks_of(rg3, "projects/forge/hub-mark/part1") == (FM, "split") and ks_of(rg3, "projects/old-one/kid2") == (FM, "split"),
       (ks_of(rg3, "projects/forge/hub-mark/part1"), ks_of(rg3, "projects/old-one/kid2")))
 write_record({F: {**FORGE, "page_keepers": {"projects/forge/own-mark": "forge-builder"}}, LO: LOFT, OLD: OLDE})
-rg4 = R()
+rg4 = R(); agrees(rg4, "the hub's mark taken away")
 check("the hub's mark taken away: the hub follows the project's again and the page that was split off it with it (source split)", ks_of(rg4, "projects/forge/hub-mark") == (FB, "mark") and ks_of(rg4, "projects/forge/hub-mark/part1") == (FB, "split"), (ks_of(rg4, "projects/forge/hub-mark"), ks_of(rg4, "projects/forge/hub-mark/part1")))
 write_record({F: FORGE, LO: LOFT, OLD: OLDE})
 
@@ -228,6 +260,97 @@ check("keeper-subpages dry run: what the pass moves is the same for every page t
       and (moved_A | gained_A) <= set(SPLIT_PAGES) and "projects/old-one/kid3" in moved_A, (dryA["effects"]["moved"], dryC["effects"]["moved"]))
 check("keeper-subpages dry run: writes nothing (the record is as it was)", json.loads(REC.read_text())["projects"] == {F: FORGE, LO: LOFT, OLD: OLDE})
 check("the registry rebuilt with the lines on says what it said before", all(ks_of(R(), k) == ks_of(rg, k) for k in rg))
+
+# ---- 9. the pages under a page that follows another read the target's keeper again whenever it moves
+def page(rel, front):
+    q = BRAIN / rel; q.parent.mkdir(parents=True, exist_ok=True); q.write_text("---\n" + front + "\n---\n\n# x\n", encoding="utf-8")
+page("projects/q1.md", "type: project\ntitle: Q one\nagents:\n  q1-main: talks\n  q1-docs: keeps the docs\n  background:\n    q1-builder: builds and merges\nstatus: active")
+page("projects/q1/t.md", "type: note\ntitle: Target")
+page("projects/p1.md", "type: project\ntitle: P one\nagents:\n  p1-main: talks\nstatus: active")
+page("projects/p1/h.md", "type: note\ntitle: Hub\nsplit_from: projects/q1/t")
+page("projects/p1/h/x.md", "type: note\ntitle: X")
+page("projects/p1/h/x/y.md", "type: note\ntitle: Y")
+page("projects/p1/h2.md", "type: note\ntitle: Hub two\nsplit_from: projects/p1/h/x")          # a split of a page that is itself under a split page
+page("projects/p1/h2/c.md", "type: note\ntitle: C")
+page("projects/p1/h/own.md", "type: note\ntitle: Own\nagent: p1-main")                          # keeps its own, under the hub
+page("projects/p1/plain.md", "type: note\ntitle: Plain")
+page("projects/p1/h/own/z.md", "type: note\ntitle: Z")                                          # under a page an `agent:` line keeps, itself under the hub: the keeper above it is the hub's
+page("projects/q1/t2.md", "type: note\ntitle: Target two\nagent: ghost-two")                    # a hub an `agent:` line keeps, that a hand-back can move
+page("projects/p1/h3.md", "type: note\ntitle: Hub three\nsplit_from: projects/q1/t2")
+page("projects/p1/h3/k.md", "type: note\ntitle: K")
+page("projects/r1.md", "type: project\ntitle: R one\ndisplay-name: r1-sess\nstatus: active")      # a one-session project with no entry in the record: never a project the record changes
+page("projects/r1/hub.md", "type: note\ntitle: R hub\nsplit_from: projects/q1/t")
+page("projects/r1/hub/g.md", "type: note\ntitle: G")
+page("projects/r1/hub/g/gg.md", "type: note\ntitle: GG")
+p.cmd_registry(quiet=True); pr._CACHE["sig"] = None
+ids9 = {k: e["id"] for k, e in raw().items()}
+H, X, Y, H2, C9, T9 = "projects/p1/h", "projects/p1/h/x", "projects/p1/h/x/y", "projects/p1/h2", "projects/p1/h2/c", "projects/q1/t"
+ZO, T2, H3, K3, R_H, R_G, R_GG = "projects/p1/h/own/z", "projects/q1/t2", "projects/p1/h3", "projects/p1/h3/k", "projects/r1/hub", "projects/r1/hub/g", "projects/r1/hub/g/gg"
+UNDER = (H, X, Y, H2, C9, ZO, R_H, R_G, R_GG)          # all read the target's keeper: the hub, a child, a grandchild, a split of a child and its child, a child of a page an `agent:` line keeps, and a hub, child and grandchild of a project the record does not hold
+Q1M, Q1D, Q1B = "q1-main", "q1-docs", "q1-builder"
+def entries9(page_marks=None, q_mark="", p_mark=True):
+    q1 = entry("projects/q1", agents={Q1M: agent(True, "talks", **({"keeper": True} if q_mark == Q1M else {})), Q1D: agent(True, "keeps the docs", **({"keeper": True} if q_mark == Q1D else {})),
+                                       Q1B: agent(False, "builds and merges", **({"keeper": True} if q_mark == Q1B else {}))}, **({"page_keepers": page_marks} if page_marks else {}))
+    p1 = entry("projects/p1", agents={"p1-main": agent(True, "talks", **({"keeper": True} if p_mark else {}))})
+    return {ids9["projects/q1"]: q1, ids9["projects/p1"]: p1}
+def settle(label, who, src_t, **kw):
+    """The record with q1's page marks and q1's (or p1's) project mark as given: the pages under the hub read `who` (source split), the target `src_t`, and every published value equals a fresh read."""
+    write_record(entries9(**kw))
+    r = R()
+    got = {k: ks_of(r, k) for k in (*UNDER, T9)}
+    check(f"{label}: the hub, a child, a grandchild, a split of a child and its child, a child of an `agent:` page under it, and the same under a project the record does not hold read {who} (split), the target {src_t}", all(got[k] == (who, "split") for k in UNDER) and got[T9] == (who, src_t), got)
+    agrees(r, label)
+    return r
+r9 = settle("before the target has a mark", Q1B, "derived")
+pub9 = prj.build(r9)["projects"]
+check("the published record carries the line as `split_from` (the key the row records) for a page that has one, and no such key for a page that has none (also not for a page under it)",
+      pub9[ids9[H]].get("split_from") == T9 and pub9[ids9[H2]].get("split_from") == X and all("split_from" not in pub9[ids9[k]] for k in (X, Y, C9, T9, "projects/p1", "projects/p1/plain")), {k: v.get("split_from") for k, v in pub9.items()})
+check("a page with an `agent:` line under the hub keeps it, and a plain page of the project is the project's", ks_of(r9, "projects/p1/h/own") == ("p1-main", "legacy") and ks_of(r9, "projects/p1/plain") == ("p1-main", "mark"), (ks_of(r9, "projects/p1/h/own"), ks_of(r9, "projects/p1/plain")))
+check("the child under the hub has no line of its own and reads the keeper above it; reads_split says which pages a change of the target moves (and not the plain page, the `agent:` page or the target)",
+      "split_from" not in r9[X] and r9[X].get("role") == "inherited" and kp.split_target(X, r9) == "" and all(kp.reads_split(k, r9) for k in UNDER)
+      and not any(kp.reads_split(k, r9) for k in ("projects/p1/plain", "projects/p1/h/own", T9, "projects/p1", "projects/nowhere")), {k: (r9[k].get("role"), kp.reads_split(k, r9)) for k in (*UNDER, "projects/p1/plain")})
+check("the pages under the hub of a project the record does not hold (no entry, no mark) are read through the page above them too", all(kp.reads_split(k, r9) for k in (R_H, R_G, R_GG, ZO)) and ks_of(r9, R_GG) == (Q1B, "split"), ks_of(r9, R_GG))
+check("reads_split on pure rows: a row that follows a page; an unnamed row under one (through an unnamed row); a named row, an `agent:` row and a top-level row; an unnamed row with nothing above it; no row",
+      kp.reads_split("projects/a/b", {"projects/a/b": {"split_from": "projects/z"}, "projects/z": {}})
+      and kp.reads_split("projects/a/b/c/d", {"projects/a/b": {"session": "s", "role": "inherited", "split_from": "projects/z"}, "projects/z": {}, "projects/a/b/c": {"session": "s", "role": "inherited"}, "projects/a/b/c/d": {"role": "inherited"}})
+      and not kp.reads_split("projects/a/b/c", {"projects/a/b": {"split_from": "projects/z", "session": "s", "role": "name"}, "projects/z": {}, "projects/a/b/c": {"role": "name"}})
+      and not kp.reads_split("projects/a/b", {"projects/a/b": {"role": "inherited"}}) and not kp.reads_split("projects/a", {"projects/a": {"role": "inherited"}}) and not kp.reads_split("projects/a/b", {})
+      and not kp.reads_split("projects/a/b/c", {"projects/a/b/c": {"role": "agent", "session": "s"}, "projects/a/b": {"session": "s", "role": "inherited", "split_from": "projects/z"}, "projects/z": {}})
+      and not kp.reads_split("", {}) and not kp.reads_split("x", {"x": {"role": "inherited", "session": "s"}}))
+settle("the target's page mark is laid after the split", Q1D, "mark", page_marks={T9: Q1D})
+settle("the target's page mark moves", Q1M, "mark", page_marks={T9: Q1M})
+settle("the target's page mark is removed", Q1B, "derived")
+settle("the project's mark is laid on q1-docs", Q1D, "mark", q_mark=Q1D)
+settle("the project's mark moves", Q1M, "mark", q_mark=Q1M)
+settle("a page mark of the target and the project's mark: the page mark rules", Q1D, "mark", page_marks={T9: Q1D}, q_mark=Q1M)
+settle("... the page mark goes: the project's mark answers", Q1M, "mark", q_mark=Q1M)
+settle("the project's mark is removed", Q1B, "derived")
+# a hub an `agent:` line keeps is handed back to the page above it (a record's hand-back): the page that was split off it, and the page under that, read the new keeper
+write_record(entries9()); r9 = R(); before_hb = (ks_of(r9, T2), ks_of(r9, H3), ks_of(r9, K3))
+write_record(entries9(page_marks={T2: ""})); r9 = R()
+check("a hub an `agent:` line keeps, handed back: the hub reads the keeper of the project (no `agent:` answer any more), and the page that was split off it and the page under that read what it reads, as they read the `agent:` line before",
+      before_hb == (("ghost-two", "legacy"), ("ghost-two", "split"), ("ghost-two", "split")) and ks_of(r9, T2) == (Q1B, "derived") and ks_of(r9, H3) == (Q1B, "split") and ks_of(r9, K3) == (Q1B, "split"), (before_hb, ks_of(r9, T2), ks_of(r9, H3), ks_of(r9, K3)))
+agrees(r9, "a hand-back of the hub an `agent:` line keeps")
+write_record(entries9(page_marks={T9: Q1D}, p_mark=False)); r9 = R()
+check("the pages' own project has no mark: its unnamed sub-pages have no role, so only the hub follows the target (the split of a child follows the child, which reads the project's; the registry's rule for a page above it, unchanged), and every published value is a fresh read",
+      ks_of(r9, H) == (Q1D, "split") and ks_of(r9, H2) == ("p1-main", "split") and all(ks_of(r9, k) == ("p1-main", "derived") for k in (X, Y, C9)) and not any(kp.reads_split(k, r9) for k in (X, Y, C9)), {k: (ks_of(r9, k), r9[k].get("role")) for k in UNDER})
+agrees(r9, "the pages' own project has no mark")
+
+# the hand-back of a page an `agent:` line keeps, that has a split line: it then follows the page the line names (a valid answer of the pass)
+write_record(entries9())
+page("projects/p1/ghost.md", "type: note\ntitle: Ghost\nagent: ghost-one\nsplit_from: projects/q1/t")
+p.cmd_registry(quiet=True); pr._CACHE["sig"] = None
+GH = "projects/p1/ghost"
+new9, rows9 = ks.build(pr.entries(), prj.registry_raw(), live=set(), renames={})
+row = next((r for r in rows9 if r["key"] == GH), {})
+check("the pass hands back an `agent:` page that has a split line (no project lists the agent, no session runs under it): the page follows the page the line names",
+      row.get("action") == "inherit" and new9[ids9["projects/p1"]].get("page_keepers", {}).get(GH) == "", (row, new9))
+reg9 = pr.apply(prj.registry_raw(), new9)
+check("... and that registry answers the page's keeper by the split", ks_of(reg9, GH) == (Q1B, "split") and reg9[GH].get("role") == "inherited", ks_of(reg9, GH))
+check("the hand-back check accepts a page that follows the page it was split from (its keeper is not the one above it)", ks_of(reg9, GH) != ks_of(reg9, "projects/p1") and pv._page_answer_problem(GH, "", "", reg9) == "", pv._page_answer_problem(GH, "", "", reg9))
+msg = pv._page_answer_problem(GH, "someone", None, reg9)
+check("a mark asked for a page a split answers says the source in words: the page it was split from", "(the page it was split from)" in msg and msg.startswith(f"would answer {Q1B} ("), msg)
+check("... and that word is a source's own entry: every source has its words", pv._SRC_WORDS.get("split") == "the page it was split from" and set(pv._SRC_WORDS) == set(kp.SOURCES), pv._SRC_WORDS)
 
 if fails: print(f"FAILED: keeper split scenario, {len(ran)} checks, {len(fails)} failed"); sys.exit(1)
 print(f"ok: keeper split scenario, {len(ran)} checks")

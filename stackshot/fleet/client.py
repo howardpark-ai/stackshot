@@ -36,7 +36,9 @@ runs on every box.
                                 keeper_source says which: mark, derived (no mark), split (a page a split made: it follows the page its
                                 `split_from:` or `parent:` line names) or legacy (no mark, and the page's old name line or `agent:` names
                                 the keeper; a sub-page or hub-linked page with a name line of its own stays legacy). Both are empty for a retired
-                                project with no mark. With a mark, `keeper` is the marked agent too. Every API entry that takes a project takes the id or the key.
+                                project with no mark. With a mark, `keeper` is the marked agent too, except on a page a split made (source split): there
+                                `keeper` stays what the page's old fields name, so `keeper_agent` is the answer and wins. A page with a
+                                `split_from:` or `parent:` line also carries it as `split_from` (optional). Every API entry that takes a project takes the id or the key.
   client.py get answer <board#N>
                                 {OWNER}'s answer on a board item, as one line: <kind> TAB <chosen option's label> TAB <his text> TAB <when>.
                                 It is his newest decision on the item (kind decision: he answered it), even if he commented after it;

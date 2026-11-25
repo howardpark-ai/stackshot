@@ -352,6 +352,7 @@ def _record(key: str, entry: dict, reg: dict, pid: str, pending: dict, mark: dic
     rec = {"id": pid, "key": key, "keeper": str(entry.get("session") or ""), **kf, "agents": agents}
     if entry.get("keeper_problems"): rec["keeper_problems"] = list(entry["keeper_problems"])
     if entry.get("legacy_session"): rec["legacy_session"] = str(entry["legacy_session"])
+    if entry.get(_kp.SPLIT_FROM): rec[_kp.SPLIT_FROM] = str(entry[_kp.SPLIT_FROM])       # the page a `split_from:` (or `parent:`) line names, as the registry row carries it (optional, additive)
     rec.update(listing_fields(key, entry, reg, agents, mark, recent_items(reg, now) if recent is None else recent))
     return rec
 
