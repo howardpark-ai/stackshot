@@ -286,16 +286,16 @@ step must be only that phrase or carry step_proof, or the write is refused.
 draft: the text exactly as it is to be posted, sent or pasted somewhere else by the person whose step it is (a channel
 message, an email, a reply), as many lines as it has, stored and shown as written (no bullets, no line limit; at most
 {{DRAFT_MAX}} characters). His item page draws it under the step as a block with a Copy button; a close drops it, and
-so does his Done or Send note on the step. A text a session can send itself (a Slack message, a reply on an email
-thread) is not his step: it goes to him as a decision (needs=decision, an ask, the options Send / Change it / Don't
-send, the text in draft), and the session sends it when he picks Send; a step with a draft is for what only he can
-post or paste himself (an app or account a session cannot reach). An item whose step is such a post, send or paste
-carries the text: a write that sets the step or mover of an item so that it is his step, or that sets or clears its draft, with a step that
-names a text to post, send or paste ({{DRAFT_STEMS}}, and the instance's own words of [keywords.draft]; a heuristic,
-not a complete list), is refused unless the item has a draft or its step or description links the document that holds
-the text (an https:// link to a doc, Drive file, Notion page or Slack thread; a GitHub issue, pull request or commit
-link, or a link to the board, does not count). draft="none" (or update clear_draft=true) removes it; a create can
-store one before the step exists.
+so does his Done or Send note on the step. A text a session can send itself (a Slack message, an email in his name, new
+or a reply) is not his step: it goes to him as a decision (needs=decision, an ask, the options Send / Change it /
+Don't send, the text in draft), and the session sends it when he picks Send; a step with a draft is for what only he
+can post or paste himself (an app or account a session cannot reach). An item whose step is such a post, send or paste
+carries the text: a write that sets the step or mover of an item so that it is his step, or that sets or clears its
+draft, with a step that names a text to post, send or paste ({{DRAFT_STEMS}}, and the instance's own words of
+[keywords.draft]; a heuristic, not a complete list), is refused unless the item has a draft or its step or description
+links the document that holds the text (an https:// link to a doc, Drive file, Notion page or Slack thread; a GitHub
+issue, pull request or commit link, or a link to the board, does not count). draft="none" (or update clear_draft=true)
+removes it; a create can store one before the step exists.
 
 ## param STEP_PROOF
 The event that finishes a step, so the server ticks it: [{step: its 1-based position or exact first line, proof:
