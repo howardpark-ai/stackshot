@@ -267,6 +267,11 @@ runs on every box.
                                 characters). The server works out the source (router notice, stackshot message, background-agent hand-back, front peer, script, other), the project and the day in its own timezone; the first catch
                                 of an hour for one pane and sender sends the project's builder one held word that starts no turn. Prints "ok" (or "duplicate") and exits 0; 1 and the reason on stderr when refused (400 a field), not
                                 reached ([0]) or misused (usage). The counts per source and day are the audit's `catches` report.
+  client.py post anchor-add -   for a plugin hook that has just seen a session make a pull request or an issue: add anchors to a project, or to some of its open items, the way the anchors tool's `add` does. `-` reads one JSON object on
+                                stdin: {"project": "<key|slug>", "add": ["<anchor URL>", ...], "items": ["<item id>", ...] (optional: with none the anchors are project-wide), "sender": "<the session or script>"}; project, add and sender are required.
+                                The anchors tool's own checks all apply: a project that names no page, an item that is completed or belongs to another project, or a URL that is no anchor shape is refused with the tool's text. Adding only: the
+                                route takes no removal (a `remove` key is refused). The anchor records "<sender> via a script on <machine>". Prints the server's text (the project's anchors, as the tool lists them) and exits 0; 1 and the reason on stderr
+                                when refused (400), not reached ([0]) or misused (usage).
   client.py post agent-state --file <path>
                                 for the fleet's session manager: push which registered agents are busy and which idle, the whole fleet in one JSON file that REPLACES the server's last snapshot
                                 (`POST /client/agent-state`, machine token; the body is {"schema": 1, "written": <epoch s>, "agents": {<name>: {...}}}). The file's bytes go to the server exactly as they are
@@ -1139,6 +1144,26 @@ def catch(argv: list[str], timeout: float = 20.0, text: str | None = None) -> in
     print("duplicate" if d.get("duplicate") else "ok"); return 0
 
 
+ANCHOR_ADD_USAGE = ('usage: client.py post anchor-add - < anchors.json     (one JSON object: project, add (a list of anchor URLs), sender, and optionally items (a list of item ids))\n'
+                    '       {"project": "projects/<slug>", "add": ["https://github.com/<owner>/<repo>/pull/<n>"], "items": ["<item id>"], "sender": "<the session or script>"}')
+
+
+def anchor_add(argv: list[str], timeout: float = 20.0, text: str | None = None) -> int:
+    """`post anchor-add -` (the fields as one JSON object on stdin): add anchors to a project, or to some of its open items, as the anchors tool's add does -> exit 0 and the server's text (the project's anchors
+    as the tool lists them) on stdout; 1 and the reason on stderr when refused, not reached or misused. Only adds: this route takes no removal."""
+    if argv != ["-"]: print(ANCHOR_ADD_USAGE, file=sys.stderr); return 1
+    try: body = json.loads(sys.stdin.read() if text is None else text)
+    except ValueError: print("the JSON on stdin does not parse: send one object\n" + ANCHOR_ADD_USAGE, file=sys.stderr); return 1
+    if not isinstance(body, dict): print("the JSON on stdin is not an object\n" + ANCHOR_ADD_USAGE, file=sys.stderr); return 1
+    add = body.get("add")
+    if not all(isinstance(body.get(k), str) and body[k].strip() for k in ("project", "sender")) or not (isinstance(add, list) and add):
+        print("project and sender are required, as text, and add as a non-empty list\n" + ANCHOR_ADD_USAGE, file=sys.stderr); return 1
+    status, d = post("anchor-add", body, timeout)
+    if status != 200 or not isinstance(d, dict):
+        print(f"stackshot: anchors not added [{status}] {d.get('error') if isinstance(d, dict) else d}"[:1200], file=sys.stderr); return 1
+    print(d.get("result") or "ok"); return 0
+
+
 AGENT_STATE_USAGE = "usage: client.py post agent-state --file <path>     (the file is the snapshot's JSON body, at most 1,000,000 bytes)"
 AGENT_STATE_MAX = 1_000_000     # the server's limit for the body (stackshot/service/agent_state.py MAX_BYTES): a larger file is refused here, before anything is sent
 
@@ -1473,6 +1498,9 @@ def main(argv: list[str]) -> int:
     if cmd == "post" and len(argv) > 2 and argv[2] == "catch":
         try: return catch(argv[3:])
         except Exception as e: print(f"stackshot: catch not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
+    if cmd == "post" and len(argv) > 2 and argv[2] == "anchor-add":
+        try: return anchor_add(argv[3:])
+        except Exception as e: print(f"stackshot: anchors not added ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
     if cmd == "post" and len(argv) > 2 and argv[2] == "agent-state":
         try: return agent_state(argv[3:])
         except Exception as e: print(f"stackshot: agent state not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1

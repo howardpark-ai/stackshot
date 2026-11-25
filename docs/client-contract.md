@@ -1,6 +1,6 @@
 # The client contract
 
-What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, the agent state the fleet's session manager pushes (the route and what it keeps), a gap in a scheduled job, a hook's catch of a turn that signed off with no question, a failed run of a scheduled job, an item a script opens for a background agent, an item a script keeps in step with a condition, a caller's own key, and pushing the agent state with the script client (the `post agent-state` verb). Back to the [README](../README.md).
+What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, the agent state the fleet's session manager pushes (the route and what it keeps), a gap in a scheduled job, a hook's catch of a turn that signed off with no question, a failed run of a scheduled job, an item a script opens for a background agent, an item a script keeps in step with a condition, the anchors a hook adds for a pull request or an issue, a caller's own key, and pushing the agent state with the script client (the `post agent-state` verb). Back to the [README](../README.md).
 
 A machine where Claude Code runs needs three things from stackshot, and no copy of the config:
 
@@ -323,6 +323,28 @@ Each call prints one line and exits 0: `<item> opened`, `<item> refreshed`, `<it
 - **The subject** is the action and its object; the server puts the project scope's prefix before it, as for `item-open`. **The sender** is the script's own label (one word, at most 60 characters, never the person's name; default `client.py`).
 - **The row owes no page and tells no session.** It sets `TERMINAL_ROW` (`stackshot/service/writes.py`) as the other script routes do: no page debt for the script or the page's keeper, no notice to the `then` agent at the create. `_ITEMSYNC_LOCK` makes the look for an open item and the write one step, so two calls for one marker file one item.
   `tool-text`: a client call only, no MCP tool changes. Code: `stackshot/service/item_sync.py`; tests: `tests/item_open_scenario.py`.
+
+## Anchors a hook adds for a pull request or an issue
+
+A plugin hook on a client machine that has just seen a session make a pull request or an issue adds its anchor, so the board watches it, the way a session's `anchors` tool call with `add` does. The route is the tool's add and nothing else
+
+```
+stackshot/fleet/client.py post anchor-add - < anchors.json     # one JSON object on stdin; prints the server's text (the project's anchors, as the tool lists them), exit 0
+```
+
+Exit 1 prints the reason on stderr (a usage line on misuse). Underneath it is one authenticated write, `POST /client/anchor-add`, `Authorization: Bearer <machine token>` (a missing or unknown token is a 401), body
+
+```
+{"project": "projects/<slug>", "add": ["https://github.com/<owner>/<repo>/pull/<n>"], "items": ["<item id>"], "sender": "<the session or script>"}
+```
+
+and the answer is 200 `{"result": "<the tool's text>"}`; 400 `{"error": "<reason>"}` for a body that does not fit and for every refusal the tool has.
+
+- **It is the tool's function.** The route calls the code the `anchors` tool runs (`stackshot/web/tools/anchors.py`, `_anchors`) with `remove` empty, so every check of the tool holds and its text is the answer: a project that names no page or more than one, an anchor that is not a shape the board reads, a Gmail scope that names no mailbox the anchors service reads, a `machine:` name the fleet does not know, an item that does not exist, one that is completed ("scope an anchor to open items, or leave it project-wide") and one that belongs to another project. A refusal is a 400 with the tool's own text, never a 500.
+- **The body.** `project` is required text (the page key, `projects/<slug>` or `infra/<slug>`, or the bare slug). `add` is required and is a non-empty list of text. `items` is optional, a list of item ids; with none (or an empty list) the anchors are project-wide, with some each anchor is scoped to those open items, and adding a URL again with more items widens its scope (the tool's union), adding it project-wide makes it project-wide. `sender` is required, one line of at most 80 characters. Any other key is ignored, except `remove`.
+- **Adding only.** A body with a `remove` that is not empty is a 400 and changes nothing: a client route never takes an anchor away. Removing and listing stay with the `anchors` tool.
+- **Who added it.** The machine token proves the machine and the body names the session, as for the other script routes: the stored anchor records `<sender> via a script on <machine>`. The sender is the caller's own word, not proved by the token.
+  `tool-text`: a client call only, no MCP tool changes. Code: `stackshot/web/routes/client_api.py` (`_client_anchor_add`); tests: `tests/client_scenario.py`.
 
 ## A caller's own key
 

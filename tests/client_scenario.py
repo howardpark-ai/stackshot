@@ -407,6 +407,84 @@ def part_client():
         check("pages.py touch: the hook entry prints the server's line as one additionalContext", json.loads(printed or "{}") == {"hookSpecificOutput": {"hookEventName": "PostToolUse",
               "additionalContext": f"[stackshot] (named sparrow-bg in a1's needs: handover message from sparrow-main (SendMessage on {me}))"}} and m1().get("needs") == ["sparrow-bg"], printed)
         (T / "store/a/1.json").write_text(_a1); (T / "store/projects.json").write_text(_reg46); (T / "fleet/a/sessions.json").write_text("{}")
+        # ---- anchor-add: a hook adds the anchors of a pull request or an issue (POST /client/anchor-add, client.py post anchor-add -); the anchors tool's add, never its remove
+        _anchors_raw = (T / "store/anchors.json").read_text()
+        rg = json.loads(_reg46); rg["pages"]["projects/beta"] = {**rg["pages"]["projects/alpha"], "title": "Beta", "name": "Beta"}; (T / "store/projects.json").write_text(json.dumps(rg))
+        def _fx(n, project, status="open"):
+            (T / f"store/a/{n}.json").write_text(json.dumps({"id": str(n), "subject": f"[home] anchor fixture {n}", "description": "A thing. It lives here. Done when done.", "status": status,
+                                                              "metadata": {"owner": "sparrow", "project": project}}))
+        _fx(2, "projects/beta"); _fx(3, "projects/alpha", "completed"); _fx(4, "projects/alpha")
+        anc = lambda: json.loads((T / "store/anchors.json").read_text())
+        U1, U2, U3 = (f"https://github.com/example-org/example-repo/pull/{n}" for n in (101, 102, 103)); U4 = "https://github.com/example-org/example-repo/issues/104"
+        BY = "hook-sender via a script on box-far"
+        add_ = lambda body, hdr=H: c.post("/client/anchor-add", json=body, headers=hdr)
+        r = add_({"project": "projects/alpha", "add": [U1], "sender": "hook-sender"}, {}); check("http: anchor-add without a token → 401, nothing stored", r.status_code == 401 and anc() == {}, (r.status_code, anc()))
+        r = add_({"project": "projects/alpha", "add": [U1], "sender": "hook-sender"}, {"Authorization": "Bearer " + "x" * 43}); check("http: anchor-add with a wrong token → 401, nothing stored", r.status_code == 401 and anc() == {}, (r.status_code, anc()))
+        r = c.post("/client/anchor-add", content=b"not json", headers=H); check("http: anchor-add with a body that is not JSON → 400", r.status_code == 400, r.text)
+        r = c.get("/client/anchor-add", headers=H); check("http: anchor-add does not answer a GET", r.status_code == 404, r.status_code)
+        r = add_({"project": "projects/alpha", "add": [U1], "sender": "hook-sender"})
+        check("http: a project-wide add → 200 with the tool's own text, and the anchor is stored project-wide with who added it",
+              r.status_code == 200 and set(r.json()) == {"result"} and r.json()["result"].startswith("projects/alpha anchors (") and f"- {U1}  [project-wide]" in r.json()["result"]
+              and anc()["projects/alpha"] == [{"url": U1, "items": None, "added": anc()["projects/alpha"][0]["added"], "by": BY}], (r.text, anc()))
+        r = add_({"project": "alpha", "add": [U2], "items": ["a1"], "sender": "hook-sender"})
+        check("http: an item-scoped add (the bare slug names the project) → 200, the anchor is listed and stored for that item only",
+              r.status_code == 200 and f"- {U2}  [items: a1]" in r.json()["result"] and f"- {U1}  [project-wide]" in r.json()["result"]
+              and [(e["url"], e["items"]) for e in anc()["projects/alpha"]] == [(U1, None), (U2, ["a1"])], (r.text, anc()))
+        r = add_({"project": "projects/alpha", "add": [U2], "items": ["a4"], "sender": "hook-sender"})
+        check("http: adding a URL again scoped to another item widens its items (the tool's union)", r.status_code == 200 and f"- {U2}  [items: a1, a4]" in r.json()["result"], (r.text, anc()))
+        r = add_({"project": "projects/alpha", "add": [U2], "sender": "hook-sender"})
+        check("http: adding it project-wide makes it project-wide", r.status_code == 200 and f"- {U2}  [project-wide]" in r.json()["result"], r.text)
+        r = add_({"project": "projects/alpha", "add": [U2], "items": ["a1"], "sender": "hook-sender"})
+        check("http: …and a scoped add never narrows a project-wide anchor again", r.status_code == 200 and f"- {U2}  [project-wide]" in r.json()["result"]
+              and [(e["url"], e["items"]) for e in anc()["projects/alpha"]] == [(U1, None), (U2, None)], (r.text, anc()))
+        r = add_({"project": "projects/alpha", "add": [U3, U4], "items": [" a4 "], "sender": "hook-sender", "remove": []})
+        check("http: several URLs in one call, an item id with blanks around it, and an empty remove (nothing to remove) → 200", r.status_code == 200 and f"- {U3}  [items: a4]" in r.json()["result"] and f"- {U4}  [items: a4]" in r.json()["result"], (r.text, anc()))
+        r = add_({"project": "projects/alpha", "add": [U1], "items": [], "sender": "hook-sender"})
+        check("http: an empty items list is project-wide, as the tool takes it", r.status_code == 200 and f"- {U1}  [project-wide]" in r.json()["result"], r.text)
+        before = (T / "store/anchors.json").read_text()
+        def refused_(name, body, *words, status=400):
+            r = add_(body); err = r.json().get("error", "") if r.status_code == status and isinstance(r.json(), dict) else ""
+            check(name, r.status_code == status and set(r.json()) == {"error"} and all(w in err for w in words) and (T / "store/anchors.json").read_text() == before, (r.status_code, r.text[:300]))
+        S = "hook-sender"
+        refused_("http: anchor-add of a completed item is refused with the tool's text, nothing stored", {"project": "projects/alpha", "add": [U3], "items": ["a3"], "sender": S}, "Refused", "a3 is completed", "leave it project-wide")
+        refused_("http: …an item of another project", {"project": "projects/alpha", "add": [U3], "items": ["a2"], "sender": S}, "Refused", "a2 belongs to projects/beta, not projects/alpha")
+        refused_("http: …an item that does not exist", {"project": "projects/alpha", "add": [U3], "items": ["a99"], "sender": S}, "Refused", "no item a99")
+        refused_("http: …one good and one completed item (nothing of the call is stored)", {"project": "projects/alpha", "add": [U3], "items": ["a4", "a3"], "sender": S}, "a3 is completed")
+        refused_("http: …a URL that is no anchor shape", {"project": "projects/alpha", "add": ["https://example.invalid/not-an-anchor"], "sender": S}, "Refused", "is not an anchor shape")
+        refused_("http: …a good URL beside a bad one stores neither", {"project": "projects/alpha", "add": [U3 + "0", "not a url"], "sender": S}, "is not an anchor shape")
+        refused_("http: …a project that names no page", {"project": "projects/no-such", "add": [U3], "sender": S}, "Refused", "names no page")
+        refused_("http: a body with no project is refused with the shape", {"add": [U3], "sender": S}, "project is required", "sender")
+        refused_("http: …a project that is not text", {"project": 5, "add": [U3], "sender": S}, "project is required")
+        refused_("http: …a blank project", {"project": "  ", "add": [U3], "sender": S}, "project is required")
+        refused_("http: …no add", {"project": "projects/alpha", "sender": S}, "add must be a non-empty list")
+        refused_("http: …an empty add", {"project": "projects/alpha", "add": [], "sender": S}, "add must be a non-empty list")
+        refused_("http: …an add that is a string, not a list", {"project": "projects/alpha", "add": U3, "sender": S}, "add must be a non-empty list")
+        refused_("http: …an add with a value that is not text", {"project": "projects/alpha", "add": [U3, 7], "sender": S}, "add must be a non-empty list")
+        refused_("http: …items that is a string, not a list", {"project": "projects/alpha", "add": [U3], "items": "a1", "sender": S}, "items must be a list")
+        refused_("http: …items with a value that is not text", {"project": "projects/alpha", "add": [U3], "items": [1], "sender": S}, "items must be a list")
+        refused_("http: …no sender", {"project": "projects/alpha", "add": [U3]}, "Refused", "sender is required")
+        refused_("http: …a sender over 80 characters", {"project": "projects/alpha", "add": [U3], "sender": "s" * 81}, "sender is required")
+        refused_("http: a body that carries a remove is refused, and removes nothing", {"project": "projects/alpha", "add": [U3], "sender": S, "remove": [U1]}, "only adds anchors")
+        r = add_({"project": "projects/alpha", "add": [U3], "sender": S, "remove": [U1]})
+        check("http: …the anchor the remove named is still on the page", any(e["url"] == U1 for e in anc()["projects/alpha"]), anc())
+        # the script client: `post anchor-add -` reads the JSON object on stdin, prints the server's text and exits 0, or says why on stderr and exits 1
+        def run_(argv, text):
+            out_, err_ = io.StringIO(), io.StringIO(); _in = sys.stdin; sys.stdin = io.StringIO(text)
+            try:
+                with _cl.redirect_stdout(out_), _cl.redirect_stderr(err_): rc = client.main(["client.py", "post", "anchor-add", *argv])
+            finally: sys.stdin = _in
+            return rc, out_.getvalue(), err_.getvalue()
+        rc_, o_, e_ = run_(["-"], json.dumps({"project": "projects/alpha", "add": [U3 + "1"], "items": ["a4"], "sender": S}))
+        check("client.py post anchor-add -: a good body prints the server's text and exits 0", rc_ == 0 and f"- {U3}1  [items: a4]" in o_ and not e_, (rc_, o_, e_))
+        rc_, o_, e_ = run_(["-"], json.dumps({"project": "projects/alpha", "add": [U3], "items": ["a3"], "sender": S}))
+        check("client.py post anchor-add -: a refusal prints the tool's text on stderr and exits 1", rc_ == 1 and not o_ and "[400]" in e_ and "a3 is completed" in e_, (rc_, o_, e_))
+        n_ = len(anc()["projects/alpha"])
+        for name_, argv_, text_ in (("a body that is not JSON", ["-"], "nope"), ("a body that is not an object", ["-"], "[1]"), ("a body with no sender", ["-"], json.dumps({"project": "projects/alpha", "add": [U3]})),
+                                    ("a body with an empty add", ["-"], json.dumps({"project": "projects/alpha", "add": [], "sender": S})), ("no dash", [], "{}"), ("a flag instead of the dash", ["--project", "x"], "{}")):
+            rc_, o_, e_ = run_(argv_, text_)
+            check(f"client.py post anchor-add: {name_} → usage on stderr, exit 1, nothing sent", rc_ == 1 and not o_ and "usage: client.py post anchor-add" in e_ and len(anc()["projects/alpha"]) == n_, (rc_, o_, e_))
+        for n in (2, 3, 4): (T / f"store/a/{n}.json").unlink()
+        (T / "store/projects.json").write_text(_reg46); (T / "store/anchors.json").write_text(_anchors_raw)
         os.remove(T / "secrets/client.token"); st, body = client.get("registry"); check("client.get without a token says how to get one", st == 401 and "mint" in body, (st, body))
 
     # ---- 5. a held poll when the server stops (the item follow-up): uvicorn cancels the handler once its graceful shutdown times out;
@@ -722,6 +800,7 @@ def part_client():
         "terminal-prompt -> _terminal_prompt_svc._terminal_prompt",
         "job-gap -> _job_gap._jobgap_post",
         "catch -> _catches._catch_post",
+        "anchor-add -> _client_anchor_add",
         "item-open -> _item_open._itemopen_post",
         "item-sync -> _item_sync._itemsync_post",
         "job-failed -> _job_alert._jobalert_failed_post",
