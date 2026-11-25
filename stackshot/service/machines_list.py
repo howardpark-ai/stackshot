@@ -20,7 +20,7 @@ written whole to a temporary file beside it, flushed to disk, renamed over the o
 good list stays. The file also carries `high`, the highest `written` ever accepted (the high-water mark; a file without it, from an earlier version, counts its own `written`). A post whose `written` is more than `NEWER_S` older than the
 mark is a late arrival of an older list: it is answered 200 `{"ok": true, "kept": "newer"}` and the stored list stays (within `NEWER_S` of the mark, as when the sender's clock stepped back, the new post replaces, and the mark
 stays where it was, so a run of posts each a little older than the last cannot walk the list back: every one is compared with the newest ever accepted, never with the one before it). A mark further ahead of the server's clock than `AHEAD_S` (a hand-edited file, a clock set right since) counts as `AHEAD_S` ahead, so one wrong clock cannot hold out true posts, and the next accepted post writes the corrected mark. `last_machines()` reads the file back through a bounded read (a regular file of at most `READ_MAX` bytes, opened without blocking and without following a
-link) and answers None for no file or one that cannot be read as a list; it never raises and never blocks. Deciding how old a list may be before it is shown is the reader's, from `written` and `received`.
+link) and answers None for no file or one that cannot be read as a list; it never raises and never blocks. Deciding how old a list may be before it is shown is the reader's, from `written` and `received` (the Machines panel's reader is service/machines_panel.py).
 
 A service module: it imports core and the standard library only. The route that calls it (`_client_post`) is the surface's."""
 from __future__ import annotations

@@ -246,6 +246,19 @@ def approved() -> dict[str, dict[str, Any]]:
     return _read(_approved_path())
 
 
+def paired() -> bool:
+    """Is a fleet manager paired with this board: at least one approved key that reads as a key (`decode_key`, not a `weak_key`) AND at least one machine token on file (`clients.json` holds an entry with a
+    SHA-256). The one reader of that state: a board that was never paired has no approved key and no token, and a key still waiting for the owner counts for nothing. Read from the files at each call (a revoke
+    is in force at once), never raises: a file that cannot be read says False. It does not say which caller holds the key; the approved list is the fleet manager's today."""
+    try:
+        if not any(isinstance(e, dict) and (raw := decode_key(e.get("public_key"))) is not None and not weak_key(raw) for e in approved().values()):
+            return False
+        d = json.loads(Path(_cfg.secrets("clients.json")).read_text(encoding="utf-8"))
+        return isinstance(d, dict) and any(isinstance(v, dict) and re.fullmatch(r"[0-9a-f]{64}", str(v.get("sha256") or "")) for v in d.values())
+    except Exception:       # a store that cannot be read, a path the config cannot give: not paired, never an error
+        return False
+
+
 def pending(now: float | None = None) -> dict[str, dict[str, Any]]:
     """The keys waiting for the owner, those that have not expired."""
     return _purged(_read(_pending_path()), time.time() if now is None else now)
