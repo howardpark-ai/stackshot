@@ -124,6 +124,7 @@ runs on every box.
                                 gbrain CLI on the server box. Prints the server's JSON {"project": <the record, as get project>, "created": true,
                                 "page": {key, state, display_name}, "page_yaml": "", "mirror": {state, key, note}, "note"}, exit 0. The record is right as soon
                                 as the call returns: a page that could not be written is told in page.state and the note, and the project's next change writes it again.
+                                For a page that was made, the note carries one offer of the ready `anchors` call (the project's repository releases and its Slack channel; off with [anchors] offers = false).
                                 Refused, reason on stderr, exit 1: a key outside the page dirs, or with a sub-path, or a slug that is not lowercase letters,
                                 digits and dashes when a page is made (400); a page that exists, has sub-pages or is some project's, or a name some project
                                 has (409: use post project-list); the record cannot be written (503). The project has no agent: add the first with

@@ -1519,6 +1519,9 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     fc = get("front", "result_turn_cap_per_hour", cfg=cfg)
     if fc is not None and (not isinstance(fc, int) or isinstance(fc, bool) or fc < 0):
         out.append(f"[front] result_turn_cap_per_hour = {repr(fc)[:60]} is not a whole number from 0, so 6 is used: set a whole number (0 turns the case off)")
+    ao = get("anchors", "offers", cfg=cfg)
+    if ao is not None and not isinstance(ao, bool):
+        out.append(f"[anchors] offers = {repr(ao)[:60]} is not true or false, so the anchor offers stay on (true): write offers = false to stop the replies offering an anchors call")
     return out
 
 
