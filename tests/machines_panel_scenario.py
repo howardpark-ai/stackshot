@@ -16,7 +16,10 @@ Covers:
   7  a stored file whose fields are of the wrong kind (a hand-edited one) draws without raising; a machine with no name draws no card;
   8  200 machines (the most a post may hold) draw as 200 cards on the page, which still renders;
   9  `view()` never raises: a store that cannot be read is no view;
-  10 a revoked pairing returns the board to its unpaired state at once.
+  10 a revoked pairing returns the board to its unpaired state at once;
+  11 the sender's four optional readings (`online`, `last_seen`, `versions`, `checked`): the view gives a machine a `reported` object only when its entry has one of them (an old list is viewed as before), unknown is None and
+     never "no" (`{}` is "read nothing"), a reading is fresh for 900 s counted from the list's age plus how much older `checked` is than `written` and unknown past it, a stored reading of the wrong type is unknown, `fallback`
+     takes the board's own reading field by field and the sender's only where there is none and it is fresh, and the Machines block and the page are byte for byte the same whatever the readings hold.
 
     tests/run-suite machines_panel        -> exit 0 / 1"""
 import datetime, html.parser, json, os, pathlib, re, sys, time, logging
@@ -345,6 +348,85 @@ store([mach("testbox")], 30.0)
 check("10 paired: the list chooses the cards", machs(block()) == ["testbox"])
 unpair(fp)
 check("10 the key revoked and the token gone: the board is as before any pairing", block() == baseline_block and machs(block()) != ["testbox"])
+
+# ================================================================ 11. the sender's optional readings (online, last_seen, versions, checked): in the view, never on a card
+fp = pair()
+RW = float(int(time.time()) - 30)       # a `written` and `received` fixed for this section, so every age below is exact: the view is asked for its answer at RW + the age
+def put(machines, written=RW, received=RW):
+    clear()
+    LISTFILE.write_text(json.dumps({"schema": 1, "written": written, "received": received, "posted_by": "box-x", "high": written, "machines": machines, "not_read": []}))
+def rep_of(m_over, at=RW + 30, **put_kw):
+    """The `reported` object the view gives machine demo-a, asked at time `at`."""
+    put([{**mach("demo-a"), **m_over}], **put_kw)
+    return MP.view(at)["machines"][0].get("reported")
+READ = {"online": True, "last_seen": None, "versions": {"cli": "1.2.3"}, "checked": RW}
+# ---- an old body: the view and the page are byte for byte what they were
+put([mach("testbox"), mach("demo-b"), mach("lone-box", hostname=None, letter=None)])
+old_view = MP.view(RW + 30); old_html = block(); old_page = page()
+check("11 a list with none of the four keys: the view's machines are exactly name, hostname and retired (no `reported`)", all(set(m) == {"name", "hostname", "retired"} for m in old_view["machines"]) and len(old_view["machines"]) == 3, old_view)
+# ---- fresh readings
+r = rep_of(READ)
+check("11 a fresh entry: `reported` has online, last_seen, versions as stored, checked and fresh", r == {"online": True, "last_seen": None, "versions": {"cli": "1.2.3"}, "checked": RW, "fresh": True}, r)
+check("11 the other keys of the machine are unchanged beside it", MP.view(RW + 30)["machines"][0] == {"name": "demo-a", "hostname": "demo-a.example.net", "retired": False, "reported": r})
+r = rep_of({"online": False, "last_seen": RW - 600, "versions": {}, "checked": RW})
+check("11 offline with a last_seen: shown as stored, and `versions` of {} stays {} (the sender read nothing)", r["online"] is False and r["last_seen"] == RW - 600 and r["versions"] == {} and r["versions"] is not None and r["fresh"] is True, r)
+# ---- unknown is not no: absent, null, {}
+r = rep_of({"checked": RW})
+check("11 only `checked`: online, last_seen and versions are all None (unknown), never False or {}", r == {"online": None, "last_seen": None, "versions": None, "checked": RW, "fresh": True}, r)
+r = rep_of({"online": None, "last_seen": None, "versions": None, "checked": RW})
+check("11 nulls are unknown, the same as absent", r == {"online": None, "last_seen": None, "versions": None, "checked": RW, "fresh": True}, r)
+# ---- the 900-second rule: the list's age on the server's clock plus how much older `checked` is than `written`
+check("11 the reading is fresh at exactly 900 s of age and stale at 900.5 s (checked = written, the list received at its written time)", rep_of(READ, RW + 900)["fresh"] is True and rep_of(READ, RW + 900.5)["fresh"] is False, None)
+check("11 a `checked` older than the post's `written` adds its gap to the age: 880 s older and the list 20 s old is 900 (fresh), 21 s old is stale", rep_of({**READ, "checked": RW - 880}, RW + 20)["fresh"] is True and rep_of({**READ, "checked": RW - 880}, RW + 21)["fresh"] is False, None)
+check("11 …the gap alone can make it stale: 901 s older than `written` and the list just received", rep_of({**READ, "checked": RW - 901}, RW)["fresh"] is False and rep_of({**READ, "checked": RW - 900}, RW)["fresh"] is True, None)
+check("11 a `checked` after `written` counts no negative gap: it is as fresh as the list", rep_of({**READ, "checked": RW + 500}, RW + 900)["fresh"] is True and rep_of({**READ, "checked": RW + 500}, RW + 901)["fresh"] is False, None)
+check("11 a list received long ago has no fresh reading, whatever its `checked`: the age of the list counts", rep_of(READ, RW + 5000)["fresh"] is False, None)
+r = rep_of(READ, RW + 5000)
+check("11 a stale reading is viewed as unknown: online, last_seen and versions None, `checked` kept for display, `fresh` false (never a fact)", r == {"online": None, "last_seen": None, "versions": None, "checked": RW, "fresh": False}, r)
+r = rep_of({"online": True, "versions": {"cli": "1"}, "last_seen": 5})
+check("11 no `checked`: never fresh, whatever else is there (an unknown age is no fresh reading)", r["fresh"] is False and r["online"] is None and r["versions"] is None and r["checked"] is None, r)
+# ---- a hand-edited file: a reading of the wrong type is unknown, nothing raises
+for label, over in (("online as text", {"online": "yes"}), ("online as 1", {"online": 1}), ("last_seen as text", {"last_seen": "x"}), ("last_seen negative", {"last_seen": -5}), ("last_seen true", {"last_seen": True}),
+                    ("versions as a list", {"versions": ["a"]}), ("versions with a number value", {"versions": {"a": 1}}), ("versions of 17", {"versions": {f"k{i}": "v" for i in range(17)}}), ("checked as text", {"checked": "now"}), ("checked true", {"checked": True})):
+    try: r = rep_of({**READ, **over})
+    except Exception as e: r = e
+    key = next(iter(over))
+    ok = isinstance(r, dict) and r[key] is None and r["fresh"] is (key != "checked")      # the bad field is unknown; the rest still count (only a bad `checked` makes the reading not fresh)
+    check(f"11 a stored reading of the wrong type ({label}) is unknown in the view and raises nothing", ok, r)
+# ---- the field-by-field fallback
+FRESH = {"online": True, "last_seen": RW, "versions": {"cli": "1.2.3"}, "checked": RW, "fresh": True}
+STALE = {"online": None, "last_seen": None, "versions": None, "checked": RW, "fresh": False}
+fb = MP.fallback({"online": False, "last_seen": 5.0, "versions": {"cli": "0.9"}}, FRESH)
+check("11 every own reading present: all three are the board's own, the sender's is not used (False counts as a reading)", fb == {"online": {"value": False, "source": "own"}, "last_seen": {"value": 5.0, "source": "own"}, "versions": {"value": {"cli": "0.9"}, "source": "own"}}, fb)
+fb = MP.fallback({"online": None, "last_seen": None, "versions": None}, FRESH)
+check("11 no own reading and a fresh sender's: all three are the sender's", fb == {"online": {"value": True, "source": "list"}, "last_seen": {"value": RW, "source": "list"}, "versions": {"value": {"cli": "1.2.3"}, "source": "list"}}, fb)
+fb = MP.fallback({"online": None, "last_seen": None, "versions": None}, STALE)
+check("11 no own reading and a stale sender's: unknown for all three, never the sender's", all(v == {"value": None, "source": None} for v in fb.values()) and set(fb) == {"online", "last_seen", "versions"}, fb)
+fb = MP.fallback({"online": None}, {**FRESH, "fresh": False})
+check("11 a `reported` that says it is not fresh is never used, even if it holds values (the flag decides, not the values)", all(v == {"value": None, "source": None} for v in fb.values()), fb)
+fb = MP.fallback({"online": None}, {**FRESH, "fresh": 1})
+check("11 …and only a `fresh` of exactly true counts", all(v == {"value": None, "source": None} for v in fb.values()), fb)
+fb = MP.fallback({"online": False}, FRESH)
+check("11 field by field: an own `online` stays while last_seen and versions come from the fresh sender's", (fb["online"], fb["last_seen"]["source"], fb["versions"]["source"]) == ({"value": False, "source": "own"}, "list", "list"), fb)
+fb = MP.fallback({"versions": {"cli": "0.9"}}, FRESH)
+check("11 …and an own `versions` stays while online and last_seen come from the sender's", (fb["versions"]["source"], fb["online"]["source"], fb["last_seen"]["source"]) == ("own", "list", "list"), fb)
+fb = MP.fallback({"last_seen": 7.0, "versions": {}}, {**FRESH, "versions": None})
+check("11 an own `{}` is a reading (it is kept); a sender's unknown field is unknown, not borrowed: last_seen own, versions own {}, online from the sender", (fb["last_seen"], fb["versions"], fb["online"]) == ({"value": 7.0, "source": "own"}, {"value": {}, "source": "own"}, {"value": True, "source": "list"}), fb)
+check("11 no own readings at all (None) and no `reported` (None): unknown for all three", all(v == {"value": None, "source": None} for v in MP.fallback(None, None).values()))
+# ---- the page: nothing is drawn from the readings, byte for byte, whatever they hold
+def with_readings(over): return [{**m, **over(i)} for i, m in enumerate([mach("testbox"), mach("demo-b"), mach("lone-box", hostname=None, letter=None)])]
+for label, over in (("fresh readings on every machine", lambda i: {"online": i != 1, "last_seen": None if i != 1 else RW - 99, "versions": {"cli": "9.9.9"} if i == 0 else {}, "checked": RW}),
+                    ("stale readings", lambda i: {"online": False, "last_seen": 1, "versions": {"cli": "0.0.1"}, "checked": RW - 5000}),
+                    ("null readings", lambda i: {"online": None, "last_seen": None, "versions": None, "checked": None}),
+                    ("every machine told online with versions by the sender, those with a reading of their own and those with none", lambda i: {"online": True, "last_seen": None, "versions": {"cli": "1.0.0"}, "checked": RW})):
+    put(with_readings(over)); h2 = block(); p2 = page()
+    check(f"11 {label}: the Machines block and the page are byte for byte those of the same list without them (nothing is drawn from the readings)", h2 == old_html and p2 == old_page and "9.9.9" not in p2 and "0.0.1" not in p2, [i for i, (a, b) in enumerate(zip(h2, old_html)) if a != b][:1])
+put([mach("lone-box", hostname=None, letter=None, online=True, last_seen=None, versions={"cli": "9.9.9"}, checked=RW)]); h2 = block()
+put([mach("lone-box", hostname=None, letter=None)]); h3 = block()
+check("11 a listed machine nothing has read still draws its one offline line when the sender says it is online", h2 == h3 and 'class="mr offline"' in h2 and "9.9.9" not in h2, h2)
+unpair(fp)
+check("11 unpaired again: the view is None whatever the readings", MP.view(RW + 30) is None)
+check("11 the page's renderer reads nothing of `reported` or `fallback` yet", not re.search(r"""["']reported["']|_mpanel\.fallback""", pathlib.Path(STACK, "stackshot", "web", "ui", "render.py").read_text(encoding="utf-8")))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

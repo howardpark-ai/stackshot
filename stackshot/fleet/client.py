@@ -1236,7 +1236,7 @@ def agent_state(argv: list[str], timeout: float = 60.0) -> int:
 
 
 MACHINES_USAGE = ("usage: client.py post machines --file <path>     (the file is the machine list's JSON body, at most 1,000,000 bytes; `--file -` or a bare `-` reads standard input)\n"
-                  '       {"schema": 1, "written": <epoch s>, "machines": [{"name", "hostname", "letter", "ssh", "addresses": [...], "roles": ["sala-host" | "stackshot-host"], "retired": false, "sources": [...]}], "not_read": [...]}')
+                  '       {"schema": 1, "written": <epoch s>, "machines": [{"name", "hostname", "letter", "ssh", "addresses": [...], "roles": ["sala-host" | "stackshot-host"], "retired": false, "sources": [...], optional: "online": true|false|null, "last_seen": <epoch s>|null, "versions": {...}|null, "checked": <epoch s>|null}], "not_read": [...]}')
 MACHINES_BODY_MAX = 1_000_000     # the server's limit for the body (stackshot/service/machines_list.py MAX_BYTES): a larger file is refused here, before anything is sent
 
 

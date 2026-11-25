@@ -23,6 +23,9 @@ validates it strictly, keeps the last good one in one file in the state folder a
      no number and a body with no length (chunked) are each cut off at the cap (413) and the body is never parsed or validated; a declared length over the cap is refused before the body is read; a sender that disconnects mid-body
      gets a quiet 400, nothing is parsed or written and the log holds no traceback; the old list stays after every refusal; the unknown-verb answer names `machines`
  11  no secret: the machine token appears in no answer and not in the stored file
+ 12  the four optional readings of a machine (`online`, `last_seen`, `versions`, `checked`): an old body is stored byte for byte as before and answered as before; the four are stored after `sources` in their order; absent, null and `{}` stay three
+     different things; a reading of the wrong type or out of range (each case) never refuses the post: it is dropped from its row (unknown), the rest of the row is kept and the answer names it (`dropped`, at most 20 names then a count); the
+     boundaries (16 entries, a key of 64, a value of 200, 0 and 1e12) are accepted and 17 entries are dropped whole; texts are cleaned; a sample body of three machines replayed through the real route and read by the panel's view
 
     tests/run-suite machines_list       -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, random, stat as _stat, threading
@@ -732,6 +735,107 @@ with TestClient(app) as c:
         finally: SVC.validate = real_validate
         check(f"10 a sender gone mid-body ({what}, {len(chunks)} chunks read): the route answers quietly with a 400, nothing is parsed or validated and nothing is written", not isinstance(resp, str) and resp.status_code == 400 and not validated and stored() == keep and not (STATE / "agent-state.json").exists(), (resp, validated))
         check(f"10 …and the log holds no traceback and no error line for it ({what})", not [x for x in recs if x.exc_info or x.levelno >= logging.WARNING], [(x.levelname, x.getMessage()[:80]) for x in recs])
+
+# ================================================================ 12. the four optional readings of a machine: online, last_seen, versions, checked
+BASE_KEYS = ["name", "hostname", "letter", "ssh", "addresses", "roles", "retired", "sources"]
+def last_row(i=0): return SVC.last_machines()[0]["machines"][i]
+def drop_of(row_over, **top):
+    """Post one machine with the given extra keys: (status, answer, the stored row)."""
+    st, ans = SVC.post("box-far", good([mach("demo-a", **row_over)], **top))
+    return st, ans, (last_row() if st == 200 else None)
+FILE.unlink(missing_ok=True)
+# ---- an old body (no reading key anywhere) is stored exactly as before: the same keys in the same order, the same answer, no `dropped`
+W0 = time.time() - 40
+old_body = good([mach("demo-a"), mach("demo-b", hostname=None, letter=None, ssh=None, addresses=[], roles=[], retired=True, sources=[])], written=W0, not_read=["x.json"])
+st, ans = SVC.post("box-far", old_body); raw_old = stored(); rec_old = loaded()
+check("12 an old body (none of the four keys) answers exactly {ok, machines} and has no `dropped`", (st, ans) == (200, {"ok": True, "machines": 2}), (st, ans))
+check("12 …its stored rows hold exactly the eight old keys in the old order, nothing else", [list(m) for m in rec_old["machines"]] == [BASE_KEYS, BASE_KEYS] and set(rec_old) == {"schema", "written", "received", "posted_by", "high", "machines", "not_read"}, rec_old)
+legacy = json.dumps({"schema": 1, "written": W0, "received": rec_old["received"], "posted_by": "box-far", "high": W0, "machines": [{k: m[k] for k in BASE_KEYS} for m in old_body["machines"]], "not_read": ["x.json"]}, ensure_ascii=False, separators=(",", ":")).encode()
+check("12 …and the stored file is byte for byte what the code before these keys wrote", raw_old == legacy, (raw_old[:300], legacy[:300]))
+# ---- all four stored, in order, after `sources`
+RD = {"online": True, "last_seen": None, "versions": {"cli": "1.2.3", "manager": "a1b2c3d"}, "checked": W0}
+st, ans, row = drop_of(dict(RD), written=W0)
+check("12 the four readings are stored with the row, after `sources`, in the order online, last_seen, versions, checked, and the answer has no `dropped`", st == 200 and ans == {"ok": True, "machines": 1} and list(row) == BASE_KEYS + ["online", "last_seen", "versions", "checked"] and {k: row[k] for k in RD} == RD, (st, ans, row))
+st, ans, row = drop_of({"online": False, "last_seen": 1_700_000_000.5, "versions": {}, "checked": 1_700_000_100})
+check("12 offline with a last_seen, versions {} and an integer checked are stored as they are (a float stays a float, {} stays {})", st == 200 and (row["online"], row["last_seen"], row["versions"], row["checked"]) == (False, 1_700_000_000.5, {}, 1_700_000_100), row)
+# ---- absent, null and {} are three different stored things
+st, ans, row = drop_of({})
+check("12 absent keys: not stored at all (unknown)", st == 200 and not (set(row) & set(SVC.READING_KEYS)), row)
+st, ans, row = drop_of({"online": None, "last_seen": None, "versions": None, "checked": None})
+check("12 null keys: stored as null (unknown), nothing dropped", st == 200 and "dropped" not in ans and (row["online"], row["last_seen"], row["versions"], row["checked"]) == (None, None, None, None), (ans, row))
+st, ans, row = drop_of({"versions": {}})
+check("12 `versions` of {}: stored as {} (the sender read nothing), not as null", st == 200 and row["versions"] == {} and row["versions"] is not None and "dropped" not in ans, row)
+# ---- a bad value never refuses the post: it is dropped from its row (stored as unknown), the rest of the row is kept, the answer names it
+HUGE_N = 10 ** 400; SURR = json.loads('"\\ud800"'); V17 = {f"k{i}": "v" for i in range(17)}
+bad_reading = {
+    "online as text": ("online", "yes"), "online as 1": ("online", 1), "online as 0": ("online", 0), "online as a list": ("online", []), "online as an object": ("online", {}),
+    "last_seen as text": ("last_seen", "now"), "last_seen as true": ("last_seen", True), "last_seen negative": ("last_seen", -1), "last_seen nan": ("last_seen", float("nan")), "last_seen inf": ("last_seen", float("inf")),
+    "last_seen past 1e12": ("last_seen", 1e12 + 1), "last_seen a huge integer": ("last_seen", HUGE_N), "last_seen a list": ("last_seen", [1]),
+    "checked as text": ("checked", "2026-11-25"), "checked as false": ("checked", False), "checked negative": ("checked", -0.5), "checked nan": ("checked", float("nan")), "checked past 1e12": ("checked", 5e12), "checked an object": ("checked", {"a": 1}),
+    "versions as text": ("versions", "1.0"), "versions as a list": ("versions", ["a"]), "versions as a number": ("versions", 5), "versions as true": ("versions", True),
+    "versions of 17 entries": ("versions", V17), "versions with a number value": ("versions", {"a": 1}), "versions with a null value": ("versions", {"a": None}), "versions with a list value": ("versions", {"a": ["x"]}),
+    "versions with a value of 201": ("versions", {"a": "v" * 201}), "versions with a key of 65": ("versions", {"k" * 65: "v"}), "versions with an empty key": ("versions", {"": "v"}), "versions with a key of control characters": ("versions", {"\x00​": "v"}),
+    "versions with a key that is no text": ("versions", {5: "v"}), "versions with two keys the same once cleaned": ("versions", {"a b": "1", " a​  b ": "2"}), "versions with a lone surrogate value": ("versions", {"a": SURR}), "versions with a lone surrogate key": ("versions", {SURR: "v"}),
+    "versions with one bad entry among good ones": ("versions", {"a": "1", "b": "2", "c": 3}),
+}
+others = {"online": False, "last_seen": 1_700_000_000, "versions": {"cli": "1.2.3"}, "checked": W0}
+res12 = {}
+for label, (key, val) in bad_reading.items():
+    row_over = {k: v for k, v in others.items() if k != key}; row_over[key] = val
+    res12[label] = (key, drop_of(row_over, written=W0))
+check("12 a bad value in each reading never refuses the post: 200", all(r[1][0] == 200 for r in res12.values()), {k: v[1][:2] for k, v in res12.items() if v[1][0] != 200})
+check("12 …the bad key is not stored (it is unknown), and every other key of the row, old and new, is kept as sent", all(key not in r and {k: r[k] for k in others if k != key} == {k: v for k, v in others.items() if k != key} and [r[k] for k in BASE_KEYS] == [mach("demo-a")[k] for k in BASE_KEYS] for key, (_s, _a, r) in res12.values()), {k: v[1][2] for k, v in res12.items() if v[0] in v[1][2]})
+check("12 …and the answer names exactly the dropped reading, once, as machines[i].key", all(a.get("dropped") == [f"machines[0].{key}"] and a["ok"] and a["machines"] == 1 for key, (_s, a, _r) in res12.values()), {k: v[1][1] for k, v in res12.items() if v[1][1].get("dropped") != [f"machines[0].{v[0]}"]})
+check("12 …a refusal elsewhere in the entry still refuses the body (a bad `retired` beside good readings is 400, the old list stays)", (lambda s_: s_[0] == 400 and "retired" in s_[1]["error"])(SVC.post("box-far", good([mach("demo-a", retired="no", online=True, checked=W0)]))))
+# ---- the boundaries are accepted
+KEY64, VAL200 = "k" * 64, "v" * 200
+st, ans, row = drop_of({"online": False, "last_seen": 0, "versions": {KEY64: VAL200, **{f"e{i}": "" for i in range(15)}}, "checked": 1e12})
+check("12 the boundaries are accepted: 16 entries, a key of 64, a value of 200, an empty value, last_seen 0, checked 1e12", st == 200 and "dropped" not in ans and len(row["versions"]) == 16 and row["versions"][KEY64] == VAL200 and row["last_seen"] == 0 and row["checked"] == 1e12 and row["online"] is False, (ans, row))
+st, ans, row = drop_of({"versions": {f"e{i}": "v" for i in range(17)}})
+check("12 17 `versions` entries are DROPPED whole (not cut to 16): none stored, one `dropped` name", st == 200 and "versions" not in row and ans["dropped"] == ["machines[0].versions"], (ans, row))
+# ---- cleaned like every text
+st, ans, row = drop_of({"versions": {"c\x00l​i": "1.\x072\n.3 ", "  two   words ": " a\t b "}})
+check("12 `versions` keys and values are cleaned like every text (control characters out, white space one space, trimmed)", st == 200 and row["versions"] == {"cli": "1.2 .3", "two words": "a b"}, row)
+# ---- several rows, a bounded `dropped`
+rows25 = [mach(f"m{i}", online="yes") for i in range(25)]
+st, ans = SVC.post("box-far", good(rows25))
+check("12 a body with 25 bad readings in 25 rows is stored whole (200); the answer names 20 of them, then how many more", st == 200 and ans["machines"] == 25 and ans["dropped"] == [f"machines[{i}].online" for i in range(20)] + ["and 5 more"], ans)
+check("12 …and no row of it holds the bad `online`", all("online" not in m for m in SVC.last_machines()[0]["machines"]))
+st, ans = SVC.post("box-far", good([mach("demo-a", online=7, checked="x"), mach("demo-b", versions=V17)]))
+check("12 two rows, three bad readings: named in the body's order", ans.get("dropped") == ["machines[0].online", "machines[0].checked", "machines[1].versions"], ans)
+# ---- the validator on its own: `dropped` is not part of what is stored
+lst_, why_ = SVC.validate(good([mach("demo-a", online="x")]))
+check("12 `validate` names the dropped readings and the stored file never holds `dropped`", why_ == "" and lst_["dropped"] == ["machines[0].online"] and b"dropped" not in stored() and SVC.validate(old_body)[0]["dropped"] == [], lst_)
+
+# ---- a real sample body (three machines: online, offline with a last_seen, unknown and retired) replayed through the real route
+from stackshot.service import machines_panel as MP
+from stackshot.fleet import caller_keys as _KEYS
+FILE.unlink(missing_ok=True)
+WS = int(time.time()) - 20
+sample = {"schema": 1, "written": WS, "not_read": [], "machines": [
+    {"name": "demo-a", "hostname": "demo-a.example.net", "letter": "a", "ssh": None, "addresses": ["192.0.2.10"], "roles": ["sala-host", "stackshot-host"], "retired": False, "sources": ["fleet.json"],
+     "online": True, "last_seen": None, "versions": {"cli": "2.1.0", "manager": "9f2c1ab"}, "checked": WS},
+    {"name": "demo-b", "hostname": "demo-b.example.net", "letter": "b", "ssh": "user@demo-b", "addresses": ["192.0.2.11"], "roles": ["sala-host"], "retired": False, "sources": ["fleet.json"],
+     "online": False, "last_seen": WS - 3600, "versions": {}, "checked": WS},
+    {"name": "demo-c", "hostname": "", "letter": None, "ssh": None, "addresses": [], "roles": [], "retired": True, "sources": [],
+     "online": None, "last_seen": None, "versions": {}, "checked": WS}]}
+with TestClient(app) as c2:
+    r = c2.post("/client/machines", content=json.dumps(sample).encode(), headers=JH)
+    check("12 the sample body through the real route: 200 {ok, machines: 3}, no `dropped`", r.status_code == 200 and r.json() == {"ok": True, "machines": 3}, (r.status_code, r.text[:300]))
+    row3 = SVC.last_machines()[0]["machines"]
+    check("12 …stored as sent: the posting machine online with its versions, the other offline with its last_seen and no versions read, the third unknown (null) and retired", [(m["online"], m["last_seen"], m["versions"], m["checked"]) for m in row3] == [(True, None, {"cli": "2.1.0", "manager": "9f2c1ab"}, WS), (False, WS - 3600, {}, WS), (None, None, {}, WS)] and row3[2]["retired"] is True, row3)
+    # the same body with a bad reading and an old-style row replayed: still 200, and the answer names the one reading
+    sample2 = json.loads(json.dumps(sample)); sample2["machines"][1]["online"] = "off"; sample2["machines"][2] = {k: v for k, v in sample2["machines"][2].items() if k not in SVC.READING_KEYS}
+    r2 = c2.post("/client/machines", content=json.dumps(sample2).encode(), headers=JH)
+    row3b = SVC.last_machines()[0]["machines"]
+    check("12 the sample with a bad `online` and one row without readings: 200, the answer names machines[1].online, the row keeps its other readings, the old-style row has none", r2.status_code == 200 and r2.json() == {"ok": True, "machines": 3, "dropped": ["machines[1].online"]} and "online" not in row3b[1] and row3b[1]["last_seen"] == WS - 3600 and not (set(row3b[2]) & set(SVC.READING_KEYS)), (r2.status_code, r2.text, row3b[1]))
+    c2.post("/client/machines", content=json.dumps(sample).encode(), headers=JH)
+_real_paired = _KEYS.paired; _KEYS.paired = lambda: True
+try: view3 = MP.view(time.time())
+finally: _KEYS.paired = _real_paired
+rep = [m.get("reported") for m in view3["machines"]]
+check("12 …and the panel's view of the sample: fresh readings for each machine, as stored (unknown stays None, {} stays {})",
+      [(x["online"], x["last_seen"], x["versions"], x["fresh"]) for x in rep] == [(True, None, {"cli": "2.1.0", "manager": "9f2c1ab"}, True), (False, WS - 3600, {}, True), (None, None, {}, True)], rep)
 
 # ================================================================ 11. no secret
 check("11 the machine token appears in no answer and not in the stored file", tok not in "\n".join(answers) and tok.encode() not in stored() and tok not in repr(SVC.last_machines()), None)

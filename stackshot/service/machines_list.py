@@ -7,12 +7,17 @@ age. The body is one JSON object:
      "machines": [{"name", "hostname", "letter", "ssh", "addresses": [ipv4 or ipv6 text, ...], "roles": ["sala-host" | "stackshot-host", ...], "retired": true | false, "sources": [text, ...]}, ...],
      "not_read": [file name, ...]}
 
+A machine entry may also carry four optional readings the sender took (`online`, `last_seen`, `versions`, `checked`; below). Left out or null they mean unknown, never "no" or "off".
+
 Limits (a body that breaks one is refused whole with 400 and one line of reason; nothing is clipped): `schema` is the JSON number 1; `written` is a finite epoch in seconds, not before 2020 and not more than `AHEAD_S` ahead
 of the server's clock; `machines` at most `MACHINES_MAX` objects, no two with the same `name` once cleaned and case-folded; `name` is required text of 1 to `NAME_MAX` characters once cleaned, and so is `hostname` when it is
 not empty or null: each holds at least one letter, digit, punctuation mark or symbol (a name of combining marks or spaces alone would draw as nothing; a `hostname` that is blank (empty, white space or control and format characters only) is stored as "", as a retired machine has none); `letter` and `ssh` are text of at most `TEXT_MAX` characters or null (or left out);
 `addresses` at most `ADDRESSES_MAX` texts of at most `ADDRESS_MAX` characters (they are kept as text and not parsed as addresses); `roles` at most `ROLES_MAX` entries, each one of `ROLES`; `retired` is required and
 true or false; `sources` at most `SOURCES_MAX` texts of at most `TEXT_MAX` characters; `not_read` at most `NOT_READ_MAX` texts of at most `TEXT_MAX` characters. A text is cleaned before it is counted and kept:
-every control and format character (and the characters that draw as nothing) is taken out and runs of white space become one space. A key this module does not know is ignored and never stored. A body is read to at most `MAX_BYTES` bytes; the route
+every control and format character (and the characters that draw as nothing) is taken out and runs of white space become one space. A key this module does not know is ignored and never stored. The four optional readings of a machine never refuse a body: `online` is true, false or null; `last_seen` and `checked` are epoch seconds (a finite number of 0 to `NUMBER_MAX`) or null;
+`versions` is an object of at most `VERSIONS_MAX` entries, each a text key of 1 to `VERSION_KEY_MAX` characters (no two the same once cleaned) and a text value of at most `VERSION_VALUE_MAX` characters, or null; `{}` means "the sender read nothing", null or left out means
+unknown. A reading that breaks its rule is dropped from that machine's entry as a whole (stored as unknown, never clipped, and the rest of the entry is kept) and named in the answer's `dropped` list (`machines[1].online`, at most `DROPPED_MAX` of them), which is
+left out when nothing was dropped. A body with none of the four keys is stored exactly as before. A body is read to at most `MAX_BYTES` bytes; the route
 refuses a larger one with 413 before it parses anything (`too_large`).
 
 Only what was validated and cleaned is stored, as text and never escaped: a reader shows every field as text only and builds no link, command or markup from one. The file is `<paths.state>/machines-list.json` (mode 0600),
@@ -47,6 +52,9 @@ MAX_BYTES = 1_000_000       # a body over this is refused (413) before it is par
 ROLES = ("sala-host", "stackshot-host")
 MACHINES_MAX, NAME_MAX, TEXT_MAX = 200, 80, 200
 ADDRESSES_MAX, ADDRESS_MAX, ROLES_MAX, SOURCES_MAX, NOT_READ_MAX = 16, 64, 4, 20, 200
+VERSIONS_MAX, VERSION_KEY_MAX, VERSION_VALUE_MAX = 16, 64, 200      # a machine's `versions`: entries, a key's length, a value's length
+DROPPED_MAX = 20            # the answer names at most this many dropped readings, then how many more
+READING_KEYS = ("online", "last_seen", "versions", "checked")       # the optional readings of a machine entry, in the order they are stored (after `sources`)
 WRITTEN_MIN = 1577836800.0  # Jan 1st 2020: a list dated before it is no list of this fleet
 AHEAD_S = 60.0              # `written` may be at most this far ahead of the server's clock (a sender's clock that runs a little fast)
 NEWER_S = 300.0             # a post is kept out when the highest `written` ever stored (the high-water mark) is more than this newer than its own (an older list that arrived late); within it the post replaces (a clock that stepped back)
@@ -141,8 +149,50 @@ def _texts(v: Any, count: int, cap: int, what: str) -> tuple[list[str] | None, s
     return out, ""
 
 
-def _machine(i: int, m: Any) -> tuple[dict[str, Any] | None, str]:
-    """(one machine entry, cleaned and with only the keys this module knows, "") or (None, why the body is refused)."""
+def _number_or_none(v: Any) -> tuple[float | None, bool]:
+    """(the number, True) for a finite number of 0 to `NUMBER_MAX` that is no bool, (None, True) for null, (None, False) for anything else."""
+    if v is None:
+        return None, True
+    n = _num(v)
+    return (n, True) if n is not None and n >= 0 else (None, False)
+
+
+def _versions(v: Any) -> tuple[dict[str, str] | None, bool]:
+    """(the cleaned versions, True) for an object of at most `VERSIONS_MAX` entries with text keys and values within their limits, (None, True) for null, (None, False) for anything else, as a whole: one bad entry, a key
+    that is empty once cleaned or two keys the same once cleaned drops all of it (never cut to fit)."""
+    if v is None:
+        return None, True
+    if not isinstance(v, dict) or len(v) > VERSIONS_MAX:
+        return None, False
+    out: dict[str, str] = {}
+    for k, x in v.items():
+        ck, cx = _clean(k), _clean(x)
+        if not ck or cx is None or len(ck) > VERSION_KEY_MAX or len(cx) > VERSION_VALUE_MAX or ck in out:
+            return None, False
+        out[ck] = cx
+    return out, True
+
+
+def _readings(m: dict[str, Any], where: str, out: dict[str, Any], dropped: list[str]) -> None:
+    """Adds to `out` the optional readings `m` carries, each only when its key is there and its value is within its rule; one that is not is left out (unknown) and named in `dropped`. Never refuses."""
+    for key in READING_KEYS:
+        if key not in m:
+            continue
+        v = m[key]
+        if key == "online":
+            val, ok = v, v is None or isinstance(v, bool)
+        elif key == "versions":
+            val, ok = _versions(v)
+        else:
+            val, ok = _number_or_none(v)
+        if ok:
+            out[key] = val
+        else:
+            dropped.append(f"{where}.{key}")
+
+
+def _machine(i: int, m: Any, dropped: list[str] | None = None) -> tuple[dict[str, Any] | None, str]:
+    """(one machine entry, cleaned and with only the keys this module knows, "") or (None, why the body is refused). The optional readings dropped from the entry are named in `dropped`."""
     where = f"machines[{i}]"
     if not isinstance(m, dict):
         return None, f"{where} is no object"
@@ -169,11 +219,12 @@ def _machine(i: int, m: Any) -> tuple[dict[str, Any] | None, str]:
     if sources is None:
         return None, why
     out.update(addresses=addresses, roles=list(dict.fromkeys(roles)), retired=m["retired"], sources=sources)
+    _readings(m, where, out, [] if dropped is None else dropped)
     return out, ""
 
 
 def validate(body: Any, now: float | None = None) -> tuple[dict[str, Any] | None, str]:
-    """(the list to store: {schema, written, machines, not_read}, "") or (None, the one-line reason the body is refused)."""
+    """(the list to store: {schema, written, machines, not_read, dropped}, "") or (None, the one-line reason the body is refused). `dropped` names the optional readings left out of a machine (`machines[1].online`); it is not stored."""
     if not isinstance(body, dict):
         return None, NOT_OBJECT
     schema = body.get("schema")
@@ -189,8 +240,9 @@ def validate(body: Any, now: float | None = None) -> tuple[dict[str, Any] | None
         return None, f"machines holds at most {MACHINES_MAX} machines"
     out = []
     names: dict[str, int] = {}
+    dropped: list[str] = []
     for i, m in enumerate(machines):
-        norm, why = _machine(i, m)
+        norm, why = _machine(i, m, dropped)
         if norm is None:
             return None, why
         key = norm["name"].casefold()
@@ -201,7 +253,7 @@ def validate(body: Any, now: float | None = None) -> tuple[dict[str, Any] | None
     not_read, why = _texts(body.get("not_read"), NOT_READ_MAX, TEXT_MAX, "not_read")
     if not_read is None:
         return None, why
-    return {"schema": SCHEMA, "written": written, "machines": out, "not_read": not_read}, ""
+    return {"schema": SCHEMA, "written": written, "machines": out, "not_read": not_read, "dropped": dropped}, ""
 
 
 def _sweep(folder: Path) -> None:
@@ -256,7 +308,7 @@ def _write(rec: dict[str, Any]) -> None:
 
 
 def post(machine: str, body: Any) -> tuple[int, dict[str, Any]]:
-    """`POST /client/machines` -> (status, JSON): 200 `{ok, machines}` when the list replaced the last one, 200 `{ok, kept: "newer"}` when the high-water mark (the highest `written` ever accepted) is more than `NEWER_S` newer than this one's (the
+    """`POST /client/machines` -> (status, JSON): 200 `{ok, machines}` (and `dropped`, when a reading was left out of a machine) when the list replaced the last one, 200 `{ok, kept: "newer"}` when the high-water mark (the highest `written` ever accepted) is more than `NEWER_S` newer than this one's (the
     stored list stays; a post with a fresh `written` is always accepted, an unchanged re-post of an old list is kept out until its `written` is newer than the mark minus `NEWER_S`), 400 `{error}` for a body it refuses (the last list stays), 503 on a standby copy or a file that cannot be written. `machine` is the one the token proved; it is stored as `posted_by`."""
     if _ro.is_read_only():
         return 503, {"error": _ro.REFUSAL}
@@ -275,7 +327,11 @@ def post(machine: str, body: Any) -> tuple[int, dict[str, Any]]:
             _write(rec)
         except OSError as e:
             return 503, {"error": f"the list could not be written ({e.__class__.__name__}); the last one stays"}
-    return 200, {"ok": True, "machines": len(rec["machines"])}
+    ans: dict[str, Any] = {"ok": True, "machines": len(rec["machines"])}
+    if lst["dropped"]:      # a reading left out is said once, in the answer the sender reads; a body with none gets the answer it always got
+        more = len(lst["dropped"]) - DROPPED_MAX
+        ans["dropped"] = lst["dropped"][:DROPPED_MAX] + ([f"and {more} more"] if more > 0 else [])
+    return 200, ans
 
 
 def _read_stored() -> bytes | None:
