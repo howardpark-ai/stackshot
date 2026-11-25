@@ -695,11 +695,11 @@ def server_host_refusal(cfg: dict[str, Any] | None = None) -> str:
     return ""
 
 
-def record_host_refusal(script: str, argv: list[str], cfg: dict[str, Any] | None = None) -> str:
+def record_host_refusal(command: str, argv: list[str], cfg: dict[str, Any] | None = None) -> str:
     """The refusal line of a tool that reads or writes the project record, off the server box, or "" when it may run here. The record lives on the server box; a copy on another box (a client's
     checkout of the store) can be hundreds of commits behind, so a dry run there plans from old state and an --apply writes the old copy over the live record. The line names the ssh form to
-    run it where the record is: `ssh <host> 'python3 ~/stackshot/<script> <argv>'`, the host being [release] deploy_ssh when that is a plain host word, else "the server box". `script` is the
-    path under the checkout (stackshot/tools/project.py). A box that is the server host, and an install whose config names no server host at all (one box), get "". A check that cannot run (a config
+    run it where the record is: `ssh <host> '<command> <argv>'`, the host being [release] deploy_ssh when that is a plain host word, else "the server box". `command` is the
+    program as the record host runs it (`python3 ~/stackshot/stackshot/tools/project.py`, `~/stackshot/bin/stackshot keeper-mark`). A box that is the server host, and an install whose config names no server host at all (one box), get "". A check that cannot run (a config
     that cannot be read) is no refusal, as for `server_host_refusal`. The caller skips this check when it was pointed at a copy on purpose (--store DIR, a rehearsal)."""
     try:
         why = server_host_refusal(cfg)
@@ -710,7 +710,7 @@ def record_host_refusal(script: str, argv: list[str], cfg: dict[str, Any] | None
     h = get("release", "deploy_ssh", cfg=cfg)
     h = h.strip() if isinstance(h, str) else ""
     ok = bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._@-]*", h)) and _host_role(h) is None
-    where = f"ssh {h} " + shlex.quote(f"python3 ~/stackshot/{script} {shlex.join(argv)}".strip()) if ok else "on the server box"
+    where = f"ssh {h} " + shlex.quote(f"{command} {shlex.join(argv)}".strip()) if ok else "on the server box"
     return (f"{why}; its copy of the project record may be behind the live one, so nothing is read or written here (a dry run would plan from old state, an --apply would write it over the live record). "
             f"Run it where the record is: {where}")
 

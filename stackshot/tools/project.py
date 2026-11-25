@@ -221,7 +221,7 @@ def main(argv: list[str]) -> int:
             return 2
     from stackshot.core import config as _cfg
     if not a.store:                          # a copy named with --store is a rehearsal on purpose; the instance's own record is read and written only where it lives
-        why = _cfg.record_host_refusal("stackshot/tools/project.py", argv)
+        why = _cfg.record_host_refusal("python3 ~/stackshot/stackshot/tools/project.py", argv)
         if why:
             print(f"project {a.cmd}: {why}", file=sys.stderr)
             return 1
