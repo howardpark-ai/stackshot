@@ -12,7 +12,6 @@ from pydantic import Field
 
 from stackshot.anchors import anchor_scope as _ascope
 from stackshot.anchors import anchors as _anc
-from stackshot.core.instance import OWNER
 from stackshot.github import ghsync as _gh
 from stackshot.model import draft as _draft
 from stackshot.model import item_project as _ip
@@ -154,7 +153,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
                    + (f" {_rmod.when_words(dt.datetime.fromtimestamp(float(wb['at']), _wttext.ZONE))}" if isinstance(wb.get("at"), (int, float)) else "") + ")")
     if item.get("status") == "open" and _wt.words_of(m):   # his words behind the wake, quoted, and where they came from
         ww = _wt.words_of(m)
-        out.append(f"{OWNER}'s words behind the wake {_wt.wake_value(m)}: “{_clip_line(ww['quote'], 300)}”" + (f" ({ww['source']})" if ww["source"] else ""))
+        out.append(f"{_model.owner_display(m)}'s words behind the wake {_wt.wake_value(m)}: “{_clip_line(ww['quote'], 300)}”" + (f" ({ww['source']})" if ww["source"] else ""))
     if _after_of(m):                         # what must close first, each with its state
         states = []
         for g in _after_of(m):
@@ -175,11 +174,11 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         if e["kind"] == _said.ACTED:
             out.append(f"{e['tag']}: pasted in {sess_}{when_} · " + ("checked against the transcript" if e["checked"] else "unchecked") + f" (proof of a step, not his words) · “{_clip_line(e['quote'], 200)}”")
             continue
-        out.append(f"{e['tag']}: {OWNER} · {sess_}{when_}" + (" · checked" if e["checked"] else " · unchecked")
+        out.append(f"{e['tag']}: {_model.owner_display(m)} · {sess_}{when_}" + (" · checked" if e["checked"] else " · unchecked")
                    + f" · “{_clip_line(e['quote'], 200)}”")
     ans = _rmod.answers_of(item)
     if ans:                                  # phase 3: his answers from the board, the last three, oldest first
-        out.append(f"{OWNER}'s answers on the board" + (f" (last 3 of {len(ans)})" if len(ans) > 3 else "") + ":\n" + "\n".join(
+        out.append(f"{_model.owner_display(m)}'s answers on the board" + (f" (last 3 of {len(ans)})" if len(ans) > 3 else "") + ":\n" + "\n".join(
             f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(a.get('ts') or 0), _wttext.ZONE))} {'comment' if a.get('kind') == 'comment' else 'note on his step' if a.get('kind') == 'step-reply' else 'answer'}: "
             + _answer_words(a, 1200) + (f" [chosen option: {a['choice']}: {a['choice_line']}]" if a.get("choice") and a.get("choice_line") else "") for a in ans[-3:]))
     idle = m.get("idle") if isinstance(m.get("idle"), dict) else {}

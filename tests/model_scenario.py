@@ -441,5 +441,17 @@ check("hint: update's text says what clear_wait is for and when a decision is re
       "clear_wait=true is how an update drops a stored wait" in _wt_update._WAIT_FORM and "newly adds needs=decision to an item that stores a wait is refused unless it also passes clear_wait=true" in _wt_update._WAIT_FORM
       and "is how an update drops" not in _wt_text._MODEL_FORM and "clear_wait" in _inspect.signature(_wt_update.stackshot_update).parameters, None)
 
+# ---- stage 5: a board of several members (a list of two put where members() reads it; every answer above is the one-member board's)
+from stackshot.core import members as _mem5
+_mem5._seen = (_mem5._inputs(None), [_mem5.Person("Oliver"), _mem5.Person("Sam", ("SM",))])
+try:
+    check("stage 5: with two members an item's member is the one its stored mover names (an alias too), else the first",
+          model.owner_display({"mover": "SM"}) == "Sam" and model.owner_display({"mover": "Sam"}) == "Sam" and model.owner_display({}) == "Oliver", None)
+    check("stage 5: the default mover of a decision is the item's member, and its kind stays the generic word",
+          W.mover_of({"needs": ["decision"], "mover": "SM", "project": "projects/alpha"}) == {"kind": "owner", "who": "Sam"}, W.mover_of({"needs": ["decision"], "mover": "SM", "project": "projects/alpha"}))
+finally:
+    _mem5._seen = None
+check("stage 5: with one member again every item's member is that one", model.owner_display({"mover": "SM"}) == "Oliver" and model.owner_display({}) == "Oliver", None)
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
-print(("ok" if not fails else "FAILED") + f": model scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
+print(("ok" if not fails else "FAILED") + f": model scenario,{len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

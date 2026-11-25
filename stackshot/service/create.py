@@ -34,6 +34,7 @@ from stackshot.core.store import _item_files, _next_id
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
 from stackshot.model import decision_gates as _dg
+from stackshot.model import member_gates as _mgates
 from stackshot.model import faults as _faults
 from stackshot.model import field_gates as _fg
 from stackshot.model import model as _model
@@ -351,6 +352,7 @@ def create_item(
         fc.call(_dg._gate_design_link, meta)                                      # a design, plan or proposal asked about is linked in the ask (its own fault; a script cannot add a link, so not on its question)
     fc.call_family(*_faults.DECISION, _dg._gate_mockup, meta, description)        # a mockup linked in the text rides on the ask too
     fc.call_family(*_faults.DECISION, _dg._gate_own_action, meta, create=True)    # his own action asked as a decision: it is a your-step
+    fc.call(_mgates.gate_members, meta)                                           # several members: a decision or a `you:` line names which member (no check with one)
     asked += _dg._options_note(meta) + _dg._actor_note(meta)
     desc_note = fc.call(_gates.gate_model, {"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v), default="")    # the write guards of the item model, every field judged on a create
     fc.call(h.anchor_wait_gate, {}, meta, creating=True)                  # an anchor wait: its anchor must be on the project's list already (after the model guards, whose refusals are more specific)

@@ -36,6 +36,7 @@ from stackshot.fleet.sessions_registry import _role_name, _session_label
 from stackshot.github import ghsync as _gh
 from stackshot.model import activity as _activity
 from stackshot.model import decision_gates as _dg
+from stackshot.model import member_gates as _mgates
 from stackshot.model import faults as _faults
 from stackshot.model import field_gates as _fg
 from stackshot.model import model as _model
@@ -565,7 +566,7 @@ def _answered_since_note(gid: str, item: dict[str, Any], sender: str) -> str:
         verb = "answered" if rec.get("kind") == "decision" else "commented on"
         words = _save_hooks().answers_mod()._answer_words(rec, 200)
         where = "on GitHub" if rec.get("via") == "github" else "on the board"
-        return f"\n(note: {OWNER} {verb} {_gh.shown(gid)} {where} at {at} {_cfg.tz_abbr()}{': ' + words if words else ''}. You have not written to the item since his answer, so what you hold of it may be out of date: read it again before you rely on it)"
+        return f"\n(note: {_model.owner_display(item.get('metadata'))} {verb} {_gh.shown(gid)} {where} at {at} {_cfg.tz_abbr()}{': ' + words if words else ''}. You have not written to the item since his answer, so what you hold of it may be out of date: read it again before you rely on it)"
     except Exception as e:  # noqa: BLE001  — the write goes on; a note that fails is a stderr line
         print(f"update: {gid} answer note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""
@@ -994,7 +995,7 @@ def update_unlocked(
         else:
             meta.pop("step_lines", None)
     if step_lines and steps_on and not closing and not marks_bad:      # the long step sent as a line of his already (a session wrote `<owner>: <the step>` before): its actions replace it, so it is dropped, never left open beside them
-        long_k, rec_was = _steps.key(_hs.line_of(step_long)), _hs.recorded(item_was.get("metadata") or {})
+        long_k, rec_was = _steps.key(_hs.line_of(step_long, meta)), _hs.recorded(item_was.get("metadata") or {})
         for i, s_ in enumerate(steps_old):
             if s_["status"] == _steps.OPEN and _steps.key(s_["text"]) == long_k and not (rec_was and _hs.same_line(s_["text"], rec_was)) and i not in drop_ix and i not in done_ix:      # the server's own line for the old step is made again from the new step on every save
                 drop_ix.append(i)
@@ -1463,7 +1464,7 @@ def update_unlocked(
     if item.get("status") == "open":      # the state checks, on the item as this write leaves it (they refuse, or mark, before anything is saved)
         item_now = {**item, "metadata": meta}
         if done_ix and steps_on and _model.stood_his(item_now, lambda i_: h.after_open(i_.get("metadata") or {})):      # N4: while the item, as this write leaves it, waits on him, only his answer ticks his step (a call that also ends what asks him is no refusal: it withdraws the ask and the step goes with it)
-            _why = _hs.refuse_done(steps_old, done_ix, _hs.recorded(item_was.get("metadata") or {}), h.owner_want(meta))
+            _why = _hs.refuse_done(steps_old, done_ix, _hs.recorded(item_was.get("metadata") or {}), h.owner_want(meta), item_was.get("metadata") or {})
             if _why:
                 fc.add(f"Refused: {_why}")
         if _writes.session_next() and steps_new is not None and any(x["status"] == _steps.OPEN for x in steps_old) and not any(x["status"] == _steps.OPEN for x in steps_new) \
@@ -1509,6 +1510,8 @@ def update_unlocked(
                     if not fc.found:
                         raise                        # alone it is the write's own settling (step_settle.py), which makes the write whole
                     fc.add(e_step)                   # beside other faults the write is refused whole: the writer sends it again with all of them fixed
+        if next_touch or state_st or state_given.get("step") or needs_set or clear_needs or ask or "mover" in model_set or "mover" in model_drop:      # several members: a decision, a step or a `you:` line names which member (no check with one)
+            fc.call(_mgates.gate_members, meta)
         if state_st or state_given.get("step") or "mover" in model_set or "mover" in model_drop or draft_set or clear_draft:      # the draft guard reads a write that sets the state, the step, the mover or the draft, never an unrelated one
             fc.call(_gates.gate_draft, item_now, gid)
         if state_st or state_given.get("step") or "mover" in model_set or "mover" in model_drop or draft_set or clear_draft or description.strip():      # the step guards read the same writes, and a new description

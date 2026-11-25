@@ -125,9 +125,9 @@ def _summary(meta: dict[str, Any], rows: list[tuple[str, str]], removed: int, ed
     if rec:
         proofs = meta.get("step_proof") if isinstance(meta.get("step_proof"), dict) else {}
         at = next((i for i, (e, _) in enumerate(rows) if _steps.key(e) == _steps.key(rec)), None)
-        if at is None or not _os.same_line(rec, _os.line_of(step)) or _steps.key(rec) in proofs or "\n" in rows[at][0].strip():
+        if at is None or not _os.same_line(rec, _os.line_of(step, meta)) or _steps.key(rec) in proofs or "\n" in rows[at][0].strip():
             return None
-        edits[at] = _os.line_of(new)
+        edits[at] = _os.line_of(new, meta)
         meta[_os.KEY] = edits[at]
         meta["step"] = new
         return at

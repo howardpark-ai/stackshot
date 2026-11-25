@@ -801,5 +801,10 @@ check("15 text: the client's usage no longer teaches a step's command place in a
       all("@WHERE@" not in u_ and "{OWNER}" not in u_ and "post state ...      retired:" in u_ and "--step" not in u_.split("post state ...")[1].split("\n  client.py ")[0] for u_ in (named15["usage"], bare15["usage"], ps15["usage"], off15["usage"]))
       and "sala's Shell" not in named15["usage"] and "Shift+Insert" not in named15["usage"], named15["usage"][named15["usage"].find("post state"):][:400])
 
+# ---- stage 5: a one-member board's tool text carries no word of members (the note appears only with several; tests/two_members_model_scenario.py checks it with two)
+from stackshot.web.tools import text as _wt_text
+check("stage 5 text: with one member the members note is empty and no placeholder is left in the tools' text",
+      _wt_text._MEMBERS_NOTE == "" and "MEMBERS_NOTE" not in json.dumps(named15["tools"]) and "several members" not in json.dumps(named15["tools"]), None)
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
-print(("ok" if not fails else "FAILED") + f": step scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
+print(("ok" if not fails else "FAILED") + f": step scenario,{len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

@@ -144,18 +144,18 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     verb = "answered" if rec.get("kind") == "decision" else "commented on"
     url = _item_url(gid) or _telling.notice_link(gid)
     done = f"; parked with a wake on {rec['parked']}, set by the server" if rec.get("parked") else ""   # a stored raise's park, applied
-    line = f"[stackshot] {OWNER} {verb} {_gh.shown(gid)} on the board: {_answers()._answer_words(rec)}{done} → {url}"
+    line = f"[stackshot] {_model.owner_display(meta)} {verb} {_gh.shown(gid)} on the board: {_answers()._answer_words(rec)}{done} → {url}"
     thenid = _session_id(then or handed) if (then or handed) else ""
     if then:      # a Done: the step he did, then who has the item now and his note
         step = _states.clean(rec.get("step"))
         step = step if len(step) <= 240 else step[:240].rstrip() + " …"
         note = f", with his note: “{_answers()._answer_words({'text': rec.get('text')}, 300)}”" if rec.get("text") else ""
-        line = f"[stackshot] {OWNER} did his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now{note} → {url}"
+        line = f"[stackshot] {_model.owner_display(meta)} did his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now{note} → {url}"
     judge = ""
     if then and rec.get("kind") == "step-reply":      # his note on the step, sent with no Done: the session that takes the item judges it (only its own line says so)
-        line = (f"[stackshot] {OWNER} sent a note on his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now with his note: "
+        line = (f"[stackshot] {_model.owner_display(meta)} sent a note on his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now with his note: "
                 f"“{_answers()._answer_words({'text': rec.get('text')}, 300)}” → {url}")
-        judge = (f". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to {OWNER} "
+        judge = (f". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to {_model.owner_display(meta)} "
                  f"with a new step (step=…); if it says he will do the step at a later time, park the item until then "
                  f"(update hold=true, until=<that time, YYYY-MM-DDTHH:MM {_cfg.tz_abbr()}>, wait_reason=<what it waits on, at least {_cfg.WAIT_GUARD_REASON_MIN} characters>), "
                  f"leave his step open and hand no new step back.")
@@ -214,7 +214,7 @@ def _mail_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str
     step = _states.clean(rec.get("step"))
     step = step if len(step) <= 240 else step[:240].rstrip() + " …"
     thenid = _session_id(then) if then else ""
-    head = f"[stackshot] The server saw a mail {OWNER} sent that fits his step on {_gh.shown(gid)}: {step}. It ticked the step"
+    head = f"[stackshot] The server saw a mail {_model.owner_display(meta)} sent that fits his step on {_gh.shown(gid)}: {step}. It ticked the step"
     told: list[str] = []
     names = [n for n in (_telling.holder(item), *_needs_sessions(meta), then) if n]
     for n in names:
@@ -371,7 +371,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             if until:                       # a note that names a later time: on hold until then, as a park leaves it; his words are the ones behind the wake (they let it stand past the usual cap)
                 until = _wakes.parse_wake(until)
                 meta["until"] = until           # the one date the wait ends on (until_write.py); no hold and no wake are stored
-                _owner_words._cap_ok_put(meta, "wake", until, "a board note", quote=text, source=f"{OWNER}'s note on his step, {_hooks().when_words(dt.datetime.fromtimestamp(now, _hooks().zone()))}")
+                _owner_words._cap_ok_put(meta, "wake", until, "a board note", quote=text, source=f"{_model.owner_display(meta)}'s note on his step, {_hooks().when_words(dt.datetime.fromtimestamp(now, _hooks().zone()))}")
             item["state_updated"] = item["confirmed"] = now
         if kind == "decision" and not stepped:          # his call is in: off his queue at once; the sessions named in needs stay named
             mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # as stored before the call: read now, for the hand-over below
@@ -390,7 +390,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
                 _holders._state_end(meta)        # a hold ends a stored state of any kind (it reads as derived: parked)
                 meta["until"] = parked          # the one date the wait ends on (until_write.py); no hold and no wake are stored
                 _owner_words._cap_ok_put(meta, "wake", parked, "a board answer", quote=text or str(rec.get("choice_line") or ""),
-                            source=f"{OWNER}'s answer on the board, {_hooks().when_words(dt.datetime.fromtimestamp(now, _hooks().zone()))}")   # "Park until <date>" is his own word for that date
+                            source=f"{_model.owner_display(meta)}'s answer on the board, {_hooks().when_words(dt.datetime.fromtimestamp(now, _hooks().zone()))}")   # "Park until <date>" is his own word for that date
             item["state_updated"] = item["confirmed"] = now
             effect = _wait_gates._watch_answer(item, meta, eff, now) if eff["do"] else ""     # arrived, not yet (the date he gave), drop
             if not eff["do"]:           # the watcher asks above move the item themselves (arrived, words, wait, drop); any other call is handed over here
@@ -447,7 +447,7 @@ def _answer_tick(now: float | None = None) -> list[str]:
                 continue
             at = _hooks().when_words(dt.datetime.fromtimestamp(float(e.get("ts") or now), _hooks().zone()))
             olabel = _sr._session_label(owner) if owner else "none"
-            tells.append((gid, sid, f"[stackshot] {OWNER} answered {_gh.shown(gid)} on the board at {at} and its mover {olabel} has not written to the item "
+            tells.append((gid, sid, f"[stackshot] {_model.owner_display(meta)} answered {_gh.shown(gid)} on the board at {at} and its mover {olabel} has not written to the item "
                                   f"in {_answers()._ANSWER_ESCALATE_S / 60:g} min: {e.get('words') or ''}. As {_telling.keeper_words(project, stew)}: see that his answer is acted on "
                                   f"(by {olabel}, or the session named in its needs). → {_item_url(gid) or _telling.notice_link(gid)}", e))
             out.append(gid)

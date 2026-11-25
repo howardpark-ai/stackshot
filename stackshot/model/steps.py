@@ -473,7 +473,7 @@ def collapse_owner(line: Any) -> str:
     """A line as it is shown: an owner opener repeated at its front (a step stored with his name twice, before the server stopped doubling it) reads with it once; any other line comes back as it is."""
     t = str(line or "")
     if _owner_led(t) and _owner_led(strip_opener(t)):
-        return f"{_model.owner_display()}: {strip_owner(t)}"
+        return f"{_model.norm_who(opener(t))}: {strip_owner(t)}"
     return t
 
 
@@ -481,7 +481,7 @@ def owner_key(text: Any) -> str:
     """A step as compared when it may be the owner's: `key`, with the owner's opener written one way (`<owner>: `) and only once, so `Name: x`, `Name: Name: x`, `name (role): x` and a bulleted or bold form
     are one step, and a step stored with the name twice still matches the one-name form."""
     k = key(text)
-    return f"{_model.owner_display()}: {strip_owner(k)}" if _owner_led(k) else k
+    return f"{_model.norm_who(opener(k))}: {strip_owner(k)}" if _owner_led(k) else k
 
 
 def loose_key(text: Any) -> str:

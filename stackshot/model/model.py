@@ -66,9 +66,34 @@ def clean(v: Any) -> str:
     return " ".join(str(v or "").split())
 
 
-def owner_display() -> str:
-    """The owner as the instance names him (the first person's name), the name an owner-mover is stored and shown as."""
-    return _wt._owner_name()
+def named_people(meta: dict[str, Any] | None = None, extra: Any = "") -> list[_members.Person]:
+    """The members an item names, each once, in this order: the one its stored `mover` names, then the one the first line of `extra` (a step's text) opens with, then the ones the lines of its `next`
+    open with (a `you:` line names none). [] when it names none."""
+    m = meta or {}
+    out: list[_members.Person] = []
+    cands = [_members.person_of(clean(m.get("mover")))]
+    for raw in [*str(extra or "").splitlines()[:1], *str(m.get("next") or "").splitlines()]:
+        cands.append(_members.opener_person(_states._MARK_RX.sub("", raw)))
+    for p in cands:
+        if p is not None and all(p.name != q.name for q in out):
+            out.append(p)
+    return out
+
+
+def item_person(meta: dict[str, Any] | None = None) -> _members.Person:
+    """The member an item is for: the one its stored `mover` names, else the one a line of its `next` opens with, else the first member (the only one while a board serves one member).
+    With no item, the first member."""
+    m = meta or {}
+    p = _members.person_of(clean(m.get("mover")))
+    if p is not None:
+        return p
+    named = named_people(m)
+    return named[0] if named else _members.first()
+
+
+def owner_display(meta: dict[str, Any] | None = None) -> str:
+    """The member an owner-mover is stored and shown as: the item's member (item_person), the first member's name when no item is given."""
+    return item_person(meta).name
 
 
 def is_owner(who: Any) -> bool:
@@ -77,9 +102,10 @@ def is_owner(who: Any) -> bool:
 
 
 def norm_who(who: Any) -> str:
-    """A mover as it is stored: the owner as the instance names him, anything else (a session name or id) as written, on one line."""
+    """A mover as it is stored: a member as the config names that member (the name, whichever alias was written), anything else (a session name or id) as written, on one line."""
     w = clean(who)
-    return owner_display() if is_owner(w) else w
+    p = _members.person_of(w)
+    return p.name if p is not None else w
 
 
 def pick_who(who: Any) -> str:
@@ -267,7 +293,7 @@ def _defaults(m: dict[str, Any], today: str) -> tuple[str, str]:
     then = sess[0] if sess else ""
     after = then or fallback_mover(clean(m.get("project")))
     if "decision" in kinds or today in OWNER_STATES:
-        return owner_display(), then
+        return owner_display(m), then
     return after, then
 
 
@@ -328,7 +354,7 @@ def _settle_mover(item: dict[str, Any], was_his: bool, after_open: Callable[[dic
     if mod.state == ALIVE and owner_state(m, mod.today):
         if is_owner(mover_s):
             return None
-        return {"mover": owner_display(), "then": then_s if then_s and not is_owner(then_s) else mover_s}
+        return {"mover": owner_display(m), "then": then_s if then_s and not is_owner(then_s) else mover_s}
     if not was_his or not is_owner(mover_s) or mod.state == DEAD:
         return None
     if mod.state == ALIVE:
@@ -390,7 +416,7 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
         mover = mover_s or mv_d
         h_state = owner_state(m, today)
         if mover_s and (h_state or today == "doing") and is_owner(mover_s) != h_state:      # a stored mover against the state it stands in
-            whose = f"{owner_display()}'s" if h_state else "an agent's"
+            whose = f"{owner_display(m)}'s" if h_state else "an agent's"
             conflicts.append(f"mover={mover_s} on an item whose state is {today}, which is {whose} move")
         then = (then_s or then_d) if is_owner(mover) else ""         # `then` stands only while the owner is the mover; beside an agent mover a stored one is not read
         stray = [k for k in ("wait_anchor", "wait_event", "ask_by", "post_wake_mover") if _first(m, k)]
@@ -439,7 +465,7 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
     if mover_s and post_s and mover_s != post_s:
         conflicts.append(f"mover={mover_s} and post_wake_mover={post_s} are both stored on a waiting item and differ: post_wake_mover picks it up when the wait ends, as an item stored under the old key, which is being retired. Setting a different mover (update mover=) drops the old key; clear_mover or clear_wait drops it too")
     picker_s = stored_picker(m)        # a stored post_wake_mover (the old name, not yet moved) wins; a mover alone is the picker
-    post_d = owner_display() if kind == "relay" else mv_d       # a relay's ask-by day turns the item to him (section 4); the rest the section 3 chain
+    post_d = owner_display(m) if kind == "relay" else mv_d       # a relay's ask-by day turns the item to him (section 4); the rest the section 3 chain
     picker = picker_s or post_d
     then_s = norm_who(m.get("then")) if is_owner(picker) else ""         # `then` stands only while he is the one who picks the item up
     wait = Wait(kind=kind, kind_explicit=explicit, until=until, backstop=backstop,

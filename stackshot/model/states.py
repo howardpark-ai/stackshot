@@ -27,6 +27,7 @@ import time
 from typing import Any, Callable
 
 from stackshot.core import config as _cfg
+from stackshot.core import members as _members
 from stackshot.model import step_commands as _sc
 from stackshot.waits import waiting as _wt
 
@@ -273,7 +274,8 @@ def next_names_owner(next_text: Any, owner: str = "") -> str:
         if not ln.strip():
             continue
         if _cfg.owner_opener_rx().match(ln):
-            return owner if owner and owner != "the owner" else _cfg.owner()
+            p = _members.opener_person(ln)
+            return p.name if p is not None else (owner if owner and owner != "the owner" else _cfg.owner())
         if owner and owner != "the owner" and re.match(rf"{re.escape(owner)}(?:\s*:|\s+to\b)", ln, re.I):
             return owner
         return ""
