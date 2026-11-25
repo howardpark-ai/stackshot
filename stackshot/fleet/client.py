@@ -268,8 +268,8 @@ runs on every box.
                                 of an hour for one pane and sender sends the project's builder one held word that starts no turn. Prints "ok" (or "duplicate") and exits 0; 1 and the reason on stderr when refused (400 a field), not
                                 reached ([0]) or misused (usage). The counts per source and day are the audit's `catches` report.
   client.py post anchor-add -   for a plugin hook that has just seen a session make a pull request or an issue: add anchors to a project, or to some of its open items, the way the anchors tool's `add` does. `-` reads one JSON object on
-                                stdin: {"project": "<key|slug>", "add": ["<anchor URL>", ...], "items": ["<item id>", ...] (optional: with none the anchors are project-wide), "sender": "<the session or script>"}; project, add and sender are required.
-                                The anchors tool's own checks all apply: a project that names no page, an item that is completed or belongs to another project, or a URL that is no anchor shape is refused with the tool's text. Adding only: the
+                                stdin: {"project": "<key|slug>", "add": ["<pull request or issue URL>", ...], "items": ["<item id>", ...] (optional: with none the anchors are project-wide), "sender": "<the session or script>"}; project, add and sender are required.
+                                The anchors tool's own checks all apply: a project that names no page, an item that is completed or belongs to another project is refused with the tool's text, and a URL that is not https://github.com/<owner>/<repo>/pull/<n> or /issues/<n> is refused (no other anchor shape is taken here). At most 10 URLs of 300 characters and 20 item ids a call; the sender is made one plain line of at most 80 characters. Adding only: the
                                 route takes no removal (a `remove` key is refused). The anchor records "<sender> via a script on <machine>". Prints the server's text (the project's anchors, as the tool lists them) and exits 0; 1 and the reason on stderr
                                 when refused (400), not reached ([0]) or misused (usage).
   client.py post agent-state --file <path>
@@ -1144,7 +1144,7 @@ def catch(argv: list[str], timeout: float = 20.0, text: str | None = None) -> in
     print("duplicate" if d.get("duplicate") else "ok"); return 0
 
 
-ANCHOR_ADD_USAGE = ('usage: client.py post anchor-add - < anchors.json     (one JSON object: project, add (a list of anchor URLs), sender, and optionally items (a list of item ids))\n'
+ANCHOR_ADD_USAGE = ('usage: client.py post anchor-add - < anchors.json     (one JSON object: project, add (a list of 1 to 10 pull request or issue URLs), sender, and optionally items (a list of item ids))\n'
                     '       {"project": "projects/<slug>", "add": ["https://github.com/<owner>/<repo>/pull/<n>"], "items": ["<item id>"], "sender": "<the session or script>"}')
 
 

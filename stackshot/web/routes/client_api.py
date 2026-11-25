@@ -132,26 +132,44 @@ def _client_config() -> dict[str, Any]:
     return out
 
 
-_ANCHOR_ADD_SHAPE = ("project = the project's page key (projects/<slug>, infra/<slug> or the bare slug); add = a non-empty list of anchor URLs; items = a list of item ids (optional: with none the anchor "
+_ANCHOR_ADD_SHAPE = ("project = the project's page key (projects/<slug>, infra/<slug> or the bare slug); add = a list of 1 to 10 pull request or issue URLs; items = a list of at most 20 item ids (optional: with none the anchor "
                      "is project-wide); sender = the session or script that adds, one line of at most 80 characters")
+_ANCHOR_ADD_URL = re.compile(r"https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/(?:pull|issues)/[0-9]+")      # the one shape this route takes: no query, fragment, trailing text, whitespace or NUL
+_ANCHOR_ADD_URLS_MAX, _ANCHOR_ADD_URL_MAX, _ANCHOR_ADD_ITEMS_MAX = 10, 300, 20        # the most a call may carry, counted as received (a repeated entry counts each time)
+
+
+def _plain_sender(text: str) -> str:
+    """A sender as one plain line: whitespace runs collapsed to one space, then every control and format character (C0 and C1 controls, bidi and zero-width marks) taken out, and the blanks collapsed again."""
+    import unicodedata
+    one = " ".join(text.split())
+    return " ".join("".join(ch for ch in one if unicodedata.category(ch)[0] != "C").split())
 
 
 def _client_anchor_add(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    """`POST /client/anchor-add` body {project, add: [urls], items?: [ids], sender} -> 200 {result: the anchors tool's own text}; 400 a body that does not fit the shape, a `remove` key, or the
-    tool's own refusal (no such project, an item that is completed or in another project, a URL that is no anchor shape, ...) as {error}. It is the anchors tool's add and nothing else: the
-    tool's function runs with `remove` empty, so a client route can never take an anchor away. The anchor records who added it as "<sender> via a script on <machine>": the token proves the machine, the body
-    names the session (the trust the other script routes give their sender)."""
-    project, add, items = body.get("project"), body.get("add"), body.get("items")
-    if not isinstance(project, str) or not project.strip():
-        return 400, {"error": "project is required. " + _ANCHOR_ADD_SHAPE}
+    """`POST /client/anchor-add` body {project, add: [urls], items?: [ids], sender} -> 200 {result: the anchors tool's own text}; 400 a body that does not fit, a URL that is not a GitHub pull request or issue
+    (https://github.com/<owner>/<repo>/pull/<n> or /issues/<n>, nothing else: the machine token is no proof of the owner, so the tool's other shapes, which make the server read mail, chat or files, are not
+    taken here), a call over its caps (10 URLs of at most 300 characters, 20 item ids), a `remove` key, or the tool's own refusal (no such project, an item that is completed or in another project, ...) as {error}.
+    It is the anchors tool's add and nothing else: the tool's function runs with `remove` empty, so a client route can never take an anchor away. The anchor records who added it as
+    "<sender> via a script on <machine>": the token proves the machine, the body names the session (the trust the other script routes give their sender)."""
+    project, add, items, sender = body.get("project"), body.get("add"), body.get("items"), body.get("sender")
+    if not isinstance(project, str) or not project.strip() or len(project) > 200:
+        return 400, {"error": "project is required, at most 200 characters. " + _ANCHOR_ADD_SHAPE}
     if not (isinstance(add, list) and add and all(isinstance(u, str) and u.strip() for u in add)):
-        return 400, {"error": "add must be a non-empty list of anchor URLs. " + _ANCHOR_ADD_SHAPE}
+        return 400, {"error": "add must be a non-empty list of pull request or issue URLs. " + _ANCHOR_ADD_SHAPE}
+    if len(add) > _ANCHOR_ADD_URLS_MAX or any(len(u) > _ANCHOR_ADD_URL_MAX for u in add):
+        return 400, {"error": f"add takes at most {_ANCHOR_ADD_URLS_MAX} URLs of at most {_ANCHOR_ADD_URL_MAX} characters each"}
     if items is not None and not (isinstance(items, list) and all(isinstance(i, str) and i.strip() for i in items)):
         return 400, {"error": "items must be a list of item ids, or left out. " + _ANCHOR_ADD_SHAPE}
+    if items is not None and len(items) > _ANCHOR_ADD_ITEMS_MAX:
+        return 400, {"error": f"items takes at most {_ANCHOR_ADD_ITEMS_MAX} item ids"}
+    if not isinstance(sender, str):
+        return 400, {"error": "sender is required, as text. " + _ANCHOR_ADD_SHAPE}
+    if not all(_ANCHOR_ADD_URL.fullmatch(u) for u in add):
+        return 400, {"error": "only pull request and issue URLs are accepted here: https://github.com/<owner>/<repo>/pull/<number> or https://github.com/<owner>/<repo>/issues/<number>, with nothing before or after"}
     if body.get("remove"):
         return 400, {"error": "a client route only adds anchors; removing one is the anchors tool's, not this route's"}
     try:
-        by = _owner_words._script_sender(body, machine)
+        by = _owner_words._script_sender({"sender": _plain_sender(sender)}, machine)
         return 200, {"result": _anchors_tool._anchors(project, add, items or None, None, by)}
     except ToolError as e:
         return 400, {"error": str(e)}
