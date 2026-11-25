@@ -3,18 +3,21 @@
 
 `[front] result_turn_agents` (empty by default) lists front agents; for one of them a message by name (the message tool, `messaging._gate_front` -> `result_turn`) or a router pass to it (`router_live._front_result_turn`, hook `front_result`
 -> `messaging.router_result`) from a session it handed work to is delivered as a turn, with the person there or away, marked or not, past the builder-report and status-shape holds, as a line of kind `exempt` (the pane's digest never files it).
-Handed work = the agent wrote to that session within `[front] result_turn_hours` (any message that reached it), or the message names an open item the session moves that the agent made (owner) or is the contact of.
+Handed work = the agent wrote to that session within `[front] result_turn_hours` (any message that reached it), or the message names an open item the session moves now that the agent itself handed it (the item's hand-off record, written by the real update; having made the item or being its contact proves nothing).
 
 Covers:
   0. The three keys: defaults (no agent, 24 hours, 6 an hour), a value of the wrong kind reads as the default and `config.notes` names it.
   1. (a) The message tool, a row of the log from the agent to the sender: a status-shaped message from it is a turn with the person away, and while he is there, marked or not, to a builder and to any other session, the line pushed with the kind exempt and the log row marked `result_turn`;
      a row older than the window, a row that was held (reached nobody) or none is no hand-over; with no agent listed the same messages are held as before.
-  2. (b) No row: the message names an open item the sender moves (mover, or in needs) that the agent made or is the contact of; an item of nobody's, one the sender does not move, a closed one, is no hand-over.
+  2. (b) No row: the message names an open item the agent handed to the sender (its hand-off record, a real update by the agent), the sender its mover now; an item the agent only made or is the contact of, a stranger's contact item or takeover, an item handed on, handed by another agent, or closed, is no hand-over; the result is also kept on the item as a History line.
   3. (c) A stranger, a script, a peer front agent, the person, an agent not in the list, `fyi=true` (marked or not): not a turn.
   4. (d) The cap: at most `result_turn_cap_per_hour` turns per sender and agent in an hour, the next one held as before with a log line; another sender is not held by it; a row older than an hour does not count; 0 turns the case off.
   5. (e) The router: a pass of such a message to the listed agent is delivered, unmarked, kind exempt, with the person away or there; the same refusals; the cap; a retry counts once; a pass to an agent not listed is ruled as before.
   6. (f) The digest of queued lines (`messaging.digest_fyi`) never files a result turn: the kind the push carried is exempt.
   7. (g) With no agent listed (the default) none of it applies: the existing suites front_hold, front_turn and front_quiet run unchanged.
+  8. The message log is read from its last 800 KB only: a flood that hides the count holds the message (the cap counts as reached), a log whose tail reaches back an hour is counted, a hand-over row pushed out is not found.
+  9. What counts toward the cap (reached rows with the mark, to this agent, from this sender), who is never handed work, the failure paths, a mixed-case list, a boolean or an overflowing number in the keys, the note for entries that are no names.
+ 10. The router: a handed result that names an open item of his (he away) is a turn that keeps the mark; the notices that are no result pass (his words, a hand-back, a board line, fyi, page-owed, audit, watch, fallback, a board notice).
 
     tests/run-suite front_result_turn   -> exit 0 / 1"""
 import asyncio, datetime, importlib, inspect, json, logging, os, pathlib, re, sys, threading, time
@@ -256,19 +259,66 @@ check("1e: a row from another agent of the project to the sender is no hand-over
 fresh(); no_log(); listed(FRONT); log_row(FRONT, DOCS, 60, "go and build the export", question=False); n0 = len(pushes()); out = msg(FRONT, STATUS, BACK); settle()
 check("1e2: …nor a row from the agent to another session", held_note(out, n0), (out, pushes()[n0:]))
 
-# ---- 2. (b) an item the sender moves that the agent made or is the contact of, no row
-item(50, owner=A, mover=BACK); item(51, owner=D, contact=FRONT, needs=[BACK]); item(52, owner=D, mover=BACK); item(53, owner=A, mover=DOCS); item(54, owner=A, mover=BACK, status="completed")
-item(55, owner=A, mover=BACK, needs=["decision"]); item(56, owner=A, needs=[BACK, DOCS]); item(57, owner=A, mover=BACK)
-for name_, text_, want_ in (("an item the agent made, the sender its mover", "a50: the build is merged, the suites pass.", True), ("an item the agent is the contact of, the sender in its needs", "a51: the build is merged, the suites pass.", True),
-                             ("an item the agent made, the sender one of two in its needs", "a56: the build is merged, the suites pass.", True),
-                             ("an item neither made by the agent nor with it as contact", "a52: the build is merged, the suites pass.", False), ("an item the sender does not move", "a53: the build is merged, the suites pass.", False),
-                             ("a closed item", "a54: the build is merged, the suites pass.", False), ("no item named", "the build is merged, the suites pass.", False)):
-    fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); out = msg(FRONT, text_, BACK); settle()
-    check(f"2a: {name_}: {'a turn, no row needed' if want_ else 'no hand-over, held as before'}", (delivered_turn(out, n0) if want_ else (not_a_turn(n0) and result_rows() == [])), (out, pushes()[n0:]))
-fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); item(58, owner=A, mover=BACK); n0 = len(pushes()); out = msg(FRONT, "a58: the build is merged, the suites pass.", BACK); settle()
-check("2b: an item of the old kind (a message of the agent) and one of the new count the same: still one turn", delivered_turn(out, n0), (out, pushes()[n0:]))
-fresh(); no_log(); listed(); n0 = len(pushes()); out = msg(FRONT, "a50: the build is merged, the suites pass.", BACK); settle()
-check("2c: with no agent listed the message naming the item is written onto it, not delivered, as before (the item is the agent's, no turn warranted)", not_a_turn(n0) and result_rows() == [], (out, pushes()[n0:]))
+# ---- 2. (b) an open item the agent itself handed to the sender: the item's hand-off record, no row of the log
+from stackshot.service import update as _update_svc
+FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * 86400 + 86400))      # a date for the backstop a background agent's hand-off asks for
+from stackshot.web.tools import create as _wt_create
+pane(BACK, X); pane(DOCS, D); pane(STRANGER, B)
+def handover(i, writer=FRONT, to=BACK, owner=A, **kw):
+    """A real hand-over: item `i` is open and moved by `writer`, who then writes mover=`to` through the update service, which stamps the item's hand-off record (metadata.handoff)."""
+    item(i, owner=owner, mover=writer, **kw)
+    return _update_svc._update(f"a{i}", sender=writer, mover=to, next=f"{to}: carry on", **({} if writer == FRONT else {"wake": FUT}))
+def hrec(i): return rd(i)["metadata"].get("handoff") or {}
+def made_gid(r): return r.split()[1] if str(r).startswith("created") else ""
+TXT = lambda i: f"a{i}: the build is merged, the suites pass."
+handover(50); r_ = hrec(50)
+check("2pre: the update service stamps a hand-off record naming the agent (from) and the sender (to)", r_.get("from") == FRONT and BACK in (r_.get("to"), r_.get("to_id")) and rd(50)["metadata"].get("mover") == BACK, r_)
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); out = msg(FRONT, TXT(50), BACK); settle()
+check("2a: an item the agent handed to the sender (its record), the sender its mover now: a turn with the person away, no row of the log needed", delivered_turn(out, n0) and len(result_rows()) == 1, (out, pushes()[n0:]))
+check("2a2: …and the result is kept on the item as a History line, with no 'written onto' reply and no extra row", len(qlog(50)) == 1 and "work-osprey-x sent work-osprey-main the result of work work-osprey-main handed over" in qlog(50)[0] and "written onto" not in out and len(mlog()) == 1, (qlog(50), out, mlog()))
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); out = msg(FRONT, "the build is merged, the suites pass.", BACK); settle()
+check("2b: no item named: no hand-over", not_a_turn(n0) and result_rows() == [], (out, pushes()[n0:]))
+fresh(); no_log(); listed(); unstamp(A); n0 = len(pushes()); out = msg(FRONT, TXT(50), BACK); settle()
+check("2c: with no agent listed the same message is not a turn (written onto the item or held, as before)", not_a_turn(n0) and result_rows() == [], (out, pushes()[n0:]))
+handover(51, owner=A); item_ = rd(51); item_["status"] = "completed"; (T / "store/a/51.json").write_text(json.dumps(item_))
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); out = msg(FRONT, TXT(51), BACK); settle()
+check("2d: a closed item no longer counts", not_a_turn(n0) and result_rows() == [], (out, pushes()[n0:]))
+handover(52); _update_svc._update("a52", sender=BACK, mover=DOCS, next=f"{DOCS}: carry on", wake=FUT)
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); out = msg(FRONT, TXT(52), BACK); settle()
+check("2e: an item handed on again (the sender no longer moves it, the latest record is another's) is no hand-over", not_a_turn(n0) and result_rows() == [] and hrec(52).get("from") == BACK, (out, hrec(52), pushes()[n0:]))
+handover(53, writer=DOCS, to=BACK, owner=A)
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); out = msg(FRONT, TXT(53), BACK); settle()
+check("2f: an item another agent handed to the sender is no hand-over by this agent, though the agent made it", not_a_turn(n0) and result_rows() == [] and hrec(53).get("from") == DOCS, (out, hrec(53), pushes()[n0:]))
+handover(57, to=DOCS); _update_svc._update("a57", sender=BACK, mover=BACK, next=f"{BACK}: carry on")
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); out = msg(FRONT, TXT(57), BACK); settle()
+check("2j: an item the agent handed to someone else that the sender then took over: the takeover clears the record, no hand-over", not_a_turn(n0) and result_rows() == [] and (rd(57)["metadata"].get("mover") == BACK), (out, hrec(57), rd(57)["metadata"].get("mover"), pushes()[n0:]))
+REC = lambda to: {"from": FRONT, "to": to, "at": now0 - 600, "delivered_at": now0 - 590}
+item(58, owner=A, mover=BACK, handoff=REC(DOCS)); item(59, owner=A, mover=DOCS, handoff=REC(BACK)); item(61, owner=A, mover=BACK, handoff=REC(BACK)); item(62, owner=A, mover=BACK, handoff={**REC(BACK), "from": DOCS})
+for i_, why_, want_ in ((58, "a record that names another session as the new mover", False), (59, "a record naming the sender, though another session moves the item now", False),
+                        (61, "control: a record by the agent naming the sender, the sender the mover now (written by hand, as a write leaves it)", True), (62, "a record by another agent", False)):
+    fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); out = msg(FRONT, TXT(i_), BACK); settle()
+    check(f"2k: {why_}: {'a turn' if want_ else 'no hand-over'} (the record is checked, not only read)", delivered_turn(out, n0) if want_ else (not_a_turn(n0) and result_rows() == []), (out, pushes()[n0:]))
+item(54, owner=A, mover=BACK)
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); out = msg(FRONT, TXT(54), BACK); settle()
+check("2g: an item the agent made that the sender moves, with no hand-off record: the creator proves nothing", not_a_turn(n0) and result_rows() == [] and hrec(54) == {}, (out, pushes()[n0:]))
+item(55, owner=D, contact=FRONT, mover=BACK, needs=[BACK])
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); out = msg(FRONT, TXT(55), BACK); settle()
+check("2h: an item that names the agent its contact (and the sender in its needs) with no record: no hand-over", not_a_turn(n0) and result_rows() == [], (out, pushes()[n0:]))
+for who_, ref_ in (("a builder of the project", BACK), ("a session of another project", STRANGER)):
+    for how_ in ("contact", "takeover"):
+        if how_ == "contact":
+            r_ = _wt_create.stackshot_create(subject="[home] a spoofed contact", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", sender=ref_, mover=ref_, next=f"{ref_}: build it", contact=FRONT)
+            gid_ = made_gid(r_)
+        else:
+            item(56, owner=A, mover=FRONT); gid_ = "a56"
+            try: _update_svc._update("a56", sender=ref_, mover=ref_, next=f"{ref_}: carry on")
+            except Exception as e: r_ = f"refused: {e}"
+        fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes())
+        out = msg(FRONT, f"{gid_}: the build is merged, the suites pass.", ref_) if gid_ else ""; settle()
+        md_ = (_service_store._load(gid_).get("metadata") or {}) if gid_ else {}
+        mv_ = (md_.get("mover"), md_.get("contact"))
+        check(f"2i: {who_} {'creates an item naming the agent its contact' if how_ == 'contact' else 'takes over the agent item with update(mover=self)'}: its result is no turn (no record by the agent)",
+              bool(gid_) and (how_ != "contact" or mv_[1] == FRONT) and (how_ != "takeover" or mv_[0] == ref_) and not_a_turn(n0) and result_rows() == [] and (md_.get("handoff") or {}).get("from") != FRONT, (r_, mv_, out, pushes()[n0:]))
 
 # ---- 3. (c) what is no hand-over, and what is never a turn
 fresh(); no_log(); listed(FRONT); n0 = len(pushes()); out = msg(FRONT, "can you look at the export page?", STRANGER); settle()
@@ -321,10 +371,14 @@ for presence in ("away", "there"):
           and not reach(A, n0)[0][1].startswith(mark()) and KINDS()[-1:] == ["exempt"] and "handed over" in res["reason"], (res, pushes()[n0:], KINDS()))
 fresh(); no_log(); listed(); log_row(FRONT, BACK, 60, "go", question=False); unstamp(A); n0 = len(pushes()); n = recp(STATUS, kind="message", who=WHO_X); res = act2(n, FRONT)
 check("5b: with no agent listed the same pass is held for the agent's next turn, as before", res["ruling"] == "held" and reach(A, n0) == [] and held.count(A) == 1 and KINDS() == [], (res, pushes()[n0:]))
-fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); n = recp("a50: the build is merged, the suites pass.", kind="message", who=WHO_X); res = act2(n, FRONT)
-check("5c: no row, an item the sender moves and the agent made: a turn", res["ruling"] == "passed" and res["target"] == FRONT and len(reach(A, n0)) == 1 and KINDS()[-1:] == ["exempt"], (res, pushes()[n0:]))
-fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); n = recp("a54: the build is merged, the suites pass.", kind="message", who=WHO_X); res = act2(n, FRONT)
+handover(60)
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); n = recp(TXT(60), kind="message", who=WHO_X); res = act2(n, FRONT)
+check("5c: no row, an item the agent handed to the sender (its record), the sender its mover: a turn, unmarked, kind exempt, the History line kept on the item", res["ruling"] == "passed" and res["target"] == FRONT and res["marked"] is False and len(reach(A, n0)) == 1 and KINDS()[-1:] == ["exempt"]
+      and len(qlog(60)) == 1, (res, pushes()[n0:], qlog(60)))
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); n = recp(TXT(51), kind="message", who=WHO_X); res = act2(n, FRONT)
 check("5c2: …a closed item is not", reach(A, n0) == [] and KINDS() == [], (res, pushes()[n0:], KINDS()))
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); n = recp(TXT(54), kind="message", who=WHO_X); res = act2(n, FRONT)
+check("5c3: an item the agent made that the sender moves, with no hand-off record, is none (the creator proves nothing)", reach(A, n0) == [] and KINDS() == [], (res, pushes()[n0:], KINDS()))
 fresh(); no_log(); listed(FRONT); log_row(FRONT, STRANGER, 60, "go", question=False); unstamp(A); n0 = len(pushes()); n = recp("the export page is fixed", kind="message", who=WHO_B); res = act2(n, FRONT)
 check("5d: a session the agent wrote to that is no builder is a turn too", res["ruling"] == "passed" and res["target"] == FRONT and len(reach(A, n0)) == 1, (res, pushes()[n0:]))
 fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); n = recp("yes, the export is ready", kind="message", who=WHO_B); res = act2(n, FRONT)
@@ -356,6 +410,116 @@ fresh(); check("6c: control: the same line with no kind (an ordinary message) is
 fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); unstamp(A); n0 = len(pushes()); n = recp(STATUS, kind="message", who=WHO_X); act2(n, FRONT)
 check("6d: the router's push carried the kind exempt too, so its digest never files it", KINDS()[-1:] == ["exempt"] and _messaging.digest_fyi(FRONT, [line], KINDS()[-1:]) == [], KINDS())
 fresh(); no_log(); listed()
+
+# ---- 7. the message log is read from its last 800 KB only: a cap that cannot be counted holds, a hand-over row that fell out is not found
+def result_row(frm, to, ago_min=3.0, outcome="delivered → x", flag=True, nid=""):
+    """A row of the message log as a result turn leaves it (`result_turn: true`), or with `flag` False as an ordinary message."""
+    t = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=ago_min)).isoformat(timespec="seconds")
+    with open(_messaging.MSG_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"t": t, "from": frm, "auth": "", "to": to, "outcome": outcome, "error": "", "text": "r", **({"result_turn": True} if flag else {}), **({"nid": nid} if nid else {})}) + "\n")
+def flood(kb, ago_min):
+    """About `kb` KB of ordinary rows between other sessions, all `ago_min` minutes old."""
+    t = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=ago_min)).isoformat(timespec="seconds")
+    row = json.dumps({"t": t, "from": "flood-a", "auth": "", "to": "flood-b", "outcome": "delivered → x", "error": "", "text": "f" * 200}) + "\n"
+    with open(_messaging.MSG_LOG, "a", encoding="utf-8") as f: f.write(row * (kb * 1000 // len(row) + 1))
+IDX = lambda: _messaging._sr._sessions_index()
+def with_err(fn):
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf): out = fn()
+    return out, buf.getvalue()
+fresh(); no_log(); listed(FRONT)
+for _ in range(6): result_row(BACK, FRONT, 3)
+flood(900, 2); log_row(FRONT, BACK, 1, "go", question=False); n0 = len(pushes()); (out, err) = with_err(lambda: msg(FRONT, STATUS, BACK)); settle()
+check("7a: six turns of the sender are in the log but a 900 KB flood after them pushes them out of its last 800 KB: the count is unknown and counts as the cap: held, not a turn (it failed open before)", held_note(out, n0) and not_a_turn(n0)
+      and "do not reach back an hour" in err and "800 KB" in err, (out, err, pushes()[n0:]))
+fresh(); no_log(); listed(FRONT, result_turn_cap_per_hour=2); flood(900, 90); result_row(BACK, FRONT, 4); result_row(BACK, FRONT, 3); log_row(FRONT, BACK, 1, "go", question=False); n0 = len(pushes()); (out, err) = with_err(lambda: msg(FRONT, STATUS, BACK)); settle()
+check("7b: a log far larger than 800 KB whose tail reaches back past an hour is counted: two turns in it hold the third at a cap of 2", held_note(out, n0) and "2 turns started in the last hour" in err, (out, err))
+fresh(); no_log(); listed(FRONT, result_turn_cap_per_hour=3); flood(900, 90); result_row(BACK, FRONT, 4); result_row(BACK, FRONT, 3); log_row(FRONT, BACK, 1, "go", question=False); n0 = len(pushes()); (out, err) = with_err(lambda: msg(FRONT, STATUS, BACK)); settle()
+check("7c: …and one under the cap is a turn (the count is known, not held for a long log)", delivered_turn(out, n0), (out, err, pushes()[n0:]))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 100, "go", question=False); flood(900, 90); n0 = len(pushes()); out = msg(FRONT, STATUS, BACK); settle()
+check("7d: a hand-over row that the flood pushed out of the tail is not found: no hand-over, no turn (fail closed), and the message is handled as before", held_note(out, n0) and not _messaging.handed_to(FRONT, BACK, IDX(), STATUS) and result_rows() == [], (out, pushes()[n0:]))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 100, "go", question=False); flood(200, 90); n0 = len(pushes()); out = msg(FRONT, STATUS, BACK); settle()
+check("7e: control: a smaller flood leaves the hand-over row inside the tail: a turn", delivered_turn(out, n0), (out, pushes()[n0:]))
+no_log(); check("7f: a missing log is complete and empty: no hand-over, a count of 0", _messaging._read_log(0.0) == ([], True) and _messaging._result_turns_in_hour(FRONT, BACK, IDX()) == 0, None)
+
+# ---- 8. what counts toward the cap, who is never handed work, the failure paths, the case of the list
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False)
+for i in range(6): result_row(BACK, FRONT, 3, outcome="held for its next turn (front agent)")
+n0 = len(pushes()); out = msg(FRONT, STATUS, BACK); settle()
+check("8a: six rows marked result_turn that never reached the agent (held) do not count toward the cap: a turn", delivered_turn(out, n0), (out, pushes()[n0:]))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False)
+for i in range(6): result_row(BACK, TRIOM, 3)
+n0 = len(pushes()); out = msg(FRONT, STATUS, BACK); settle()
+check("8b: six result turns of the sender in another front agent do not count toward this one: a turn", delivered_turn(out, n0), (out, pushes()[n0:]))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False)
+for i in range(8): result_row(BACK, FRONT, 3, flag=False)
+n0 = len(pushes()); out = msg(FRONT, STATUS, BACK); settle()
+check("8c: ordinary messages of the sender to the agent (no result_turn mark) do not count: a turn", delivered_turn(out, n0), (out, pushes()[n0:]))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False)
+for i in range(6): result_row(BACK, FRONT, 3)
+n0 = len(pushes()); (out, err) = with_err(lambda: msg(FRONT, STATUS, BACK)); settle()
+check("8d: the cap's own line says how many turns were started and names the key; six started hold the next", held_note(out, n0) and "6 turns started in the last hour" in err and "result_turn_cap_per_hour = 6" in err and "work-osprey-x" in err and "work-osprey-main" in err, (out, err))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False)
+for i in range(5): result_row(BACK, FRONT, 3)
+n0 = len(pushes()); out = msg(FRONT, STATUS, BACK); settle()
+check("8e: five started: the sixth is a turn (the boundary is the cap itself)", delivered_turn(out, n0), (out, pushes()[n0:]))
+ROLES = _messaging._anc.session_roles()
+for who_, label_ in ((_cfg.AUDIT_SENDER, "the audit's sender"), ("Oliver", "the person"), (FRONT, "the agent itself"), (A, "the agent itself by its session id")):
+    fresh(); no_log(); listed(FRONT); log_row(FRONT, who_, 60, "go", question=False); log_row(who_, FRONT, 59, "go", question=False)
+    check(f"8f: {label_} is never handed work, though the log has a row from the agent to it", _messaging.result_turn(FRONT, who_, STATUS, IDX(), ROLES) is False, who_)
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False)
+check("8f2: control: the same call for the builder is a turn", _messaging.result_turn(FRONT, BACK, STATUS, IDX(), ROLES) is True, None)
+fresh(); no_log(); listed(FRONT); log_row(FRONT, "Oliver", 60, "go", question=False); n = recp(STATUS, kind="message", who="Oliver (aaaaaaaa…)")
+check("8g: the router hook refuses the person's own notice as well", _messaging.router_result(FRONT, "Oliver (aaaaaaaa…)", STATUS, n["id"]) is False and result_rows() == [], mlog()[-2:])
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); real_handed = _messaging.handed_to
+def boom(*a, **k): raise RuntimeError("boom")
+_messaging.handed_to = boom
+try: (r1, err1) = with_err(lambda: _messaging.result_turn(FRONT, BACK, STATUS, IDX(), ROLES))
+finally: _messaging.handed_to = real_handed
+real_idset = _messaging._idset; _messaging._idset = boom
+try: r2 = _messaging.handed_to(FRONT, BACK, IDX(), STATUS)
+finally: _messaging._idset = real_idset
+check("8h: a failure inside the test is no turn (result_turn and handed_to answer False, the first says so on stderr)", r1 is False and r2 is False and "not checked" in err1, (r1, r2, err1))
+fresh(); no_log(); listed("Work-Osprey-Main"); log_row(FRONT, BACK, 60, "go", question=False); n0 = len(pushes()); out = msg(FRONT, STATUS, BACK); settle()
+check("8i: the list is read case-folded: an agent listed as Work-Osprey-Main is a turn", delivered_turn(out, n0), (out, pushes()[n0:]))
+listed(FRONT, result_turn_cap_per_hour=True, result_turn_hours=True)
+check("8j: a boolean is no number for the cap or the hours: the defaults, and the notes name both", _front_turn_mod.result_turn_cap_per_hour() == 6 and _front_turn_mod.result_turn_hours() == 24.0
+      and len([x for x in _config.notes({**_cfg.CFG}) if x.startswith("[front] ")]) == 2, _config.notes({**_cfg.CFG}))
+for bad_hours in (10**400, float("nan"), float("inf"), -float("inf"), 0, "24"):
+    listed(FRONT, result_turn_hours=bad_hours)
+    try: got_h = _front_turn_mod.result_turn_hours(); got_n = [x for x in _config.notes({**_cfg.CFG}) if x.startswith("[front] result_turn_hours")]; err_h = ""
+    except Exception as e: got_h, got_n, err_h = None, [], repr(e)
+    check(f"8k: result_turn_hours = {repr(bad_hours)[:20]} reads as 24 and the notes name it, nothing raises", got_h == 24.0 and len(got_n) == 1 and len(got_n[0]) < 400 and not err_h, (got_h, got_n, err_h))
+listed(FRONT); _cfg.CFG["front"]["result_turn_agents"] = [FRONT, 7, None, "  "]
+note_ = [x for x in _config.notes({**_cfg.CFG}) if "result_turn_agents" in x]
+check("8l: a list with entries that are no names keeps the valid ones and the note says which were ignored (not that no agent is listed)", _front_turn_mod.result_turn_agents() == [FRONT] and len(note_) == 1 and "3 entries" in note_[0] and "7" in note_[0] and "None" in note_[0] and "no agent is listed" not in note_[0], note_)
+listed(FRONT, result_turn_cap_per_hour=10**400); check("8m: a cap that is a huge whole number is read as it is (nothing raises)", _front_turn_mod.result_turn_cap_per_hour() == 10**400 and not [x for x in _config.notes({**_cfg.CFG}) if "cap_per_hour" in x], None)
+listed()
+
+# ---- 9. the router: a result that names an open item of his (he is away), and what is never a result pass
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); unstamp(A); n0 = len(pushes()); n = recp("a14: the build is merged, the suites pass.", kind="message", who=WHO_X); res = act2(n, FRONT)
+check("9a: a handed result that names an open item of his, he is away: delivered as a turn (not archived or sent to the builder by the turn gate), kind exempt, and it keeps the mark: it needs him", res["ruling"] == "passed" and res["target"] == FRONT and res["marked"] is True and len(reach(A, n0)) == 1
+      and reach(A, n0)[0][1].startswith(_live._owner_mark()) and KINDS()[-1:] == ["exempt"] and "handed over" in res["reason"], (res, pushes()[n0:], KINDS()))
+fresh(); no_log(); listed(FRONT); unstamp(A); n0 = len(pushes()); n = recp("a14: the build is merged, the suites pass.", kind="message", who=WHO_X); res = act2(n, FRONT)
+check("9b: the same notice with no hand-over is ruled as before: the person is away, so no turn of the agent and nothing exempt", reach(A, n0) == [] and KINDS()[-1:] != ["exempt"] and "handed over" not in str(res.get("reason")), (res, pushes()[n0:], KINDS()))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); unstamp(A); n0 = len(pushes()); out = msg(FRONT, TXT(14), BACK); settle()
+check("9c: the message tool: a handed result naming an open item of his, he is away: a turn, the line kept on the item", delivered_turn(out, n0) and len(qlog(14)) >= 1, (out, pushes()[n0:], qlog(14)))
+for what_, kw_, text_ in (("carries his words", {"words": "Oliver: ship it"}, STATUS), ("is a hand-back", {"handback": True}, STATUS), ("is the server's own board line", {}, "[board] a50 moved: " + STATUS), ("has an fyi hold", {"hold": "fyi"}, STATUS), ("has a page-owed hold", {"hold": "page-owed"}, STATUS)):
+    fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); unstamp(A); n0 = len(pushes()); n = recp(text_, kind="message", who=WHO_X, **kw_); res = act2(n, FRONT)
+    check(f"9d: a notice that {what_} is no result pass: nothing exempt, no turn counted toward the cap, the ruling does not say the agent handed it over", KINDS()[-1:] != ["exempt"] and result_rows() == [] and "handed over" not in str(res.get("reason")), (res, KINDS()))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); log_row(FRONT, _cfg.AUDIT_SENDER, 60, "go", question=False); unstamp(A); n0 = len(pushes()); n = recp(STATUS, kind="message", who=_cfg.AUDIT_SENDER + " (aaaaaaaa…)"); res = act2(n, FRONT)
+check("9e: the audit's own notice is no result pass", KINDS()[-1:] != ["exempt"] and result_rows() == [] and "handed over" not in str(res.get("reason")), (res, KINDS()))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); unstamp(A); n0 = len(pushes()); n = recp(STATUS, kind="message", who=WHO_X); res = act2(n, FRONT, source="fallback")
+check("9f: a pass that is the fallback after the background agent's deliveries failed is not a result pass", KINDS()[-1:] != ["exempt"] and result_rows() == [] and "handed over" not in str(res.get("reason")), (res, KINDS()))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); unstamp(A); n0 = len(pushes()); n = recp(STATUS, kind="message", who="work-osprey-main (22222222…)"); res = act2(n, FRONT)
+check("9g: the agent's own notice to itself is no result pass", KINDS()[-1:] != ["exempt"] and "handed over" not in str(res.get("reason")), (res, KINDS()))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); unstamp(A); n0 = len(pushes()); n = recp(STATUS, kind="board", who=WHO_X); res = act2(n, FRONT)
+check("9h: a notice that is no message (a board notice) is no result pass", KINDS()[-1:] != ["exempt"] and result_rows() == [] and "handed over" not in str(res.get("reason")), (res, KINDS()))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); unstamp(A); n0 = len(pushes()); n = recp(STATUS, kind="message", who=WHO_X); res = act2(n, FRONT, rule="audit-owners")
+check("9i: an audit finding is no result pass", KINDS()[-1:] != ["exempt"] and result_rows() == [] and "handed over" not in str(res.get("reason")), (res, KINDS()))
+fresh(); no_log(); listed(FRONT); log_row(FRONT, BACK, 60, "go", question=False); unstamp(A); n0 = len(pushes()); n = recp(STATUS, kind="message", who=WHO_X); res = act2(n, FRONT, rule="watch")
+check("9j: a notice a standing watch passes is no result pass", KINDS()[-1:] != ["exempt"] and result_rows() == [] and "handed over" not in str(res.get("reason")), (res, KINDS()))
+listed(); fresh(); no_log()
 
 fresh(); no_log()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else f"; FAILED: {len(fails)}"))

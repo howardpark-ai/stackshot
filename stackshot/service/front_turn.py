@@ -6,7 +6,7 @@ A front agent is a session the person talks to. An inbound notice (the router's 
 Any other notice never reaches a front agent, not even held: the router sends it to the item's builder when it is about the builder's work, and otherwise logs it (ruling archived); a message that names an item of his, marked for him, is written onto the item (or held for the agent's next turn when no item can take it) and starts no turn.
 A message that carries the person's mark but names no open item of his (`his_items`) and none he asked that agent to tell him about (`asked`) is held for the agent's next turn and starts none: the mark is explicit, and an item is what it must point at.
 The digest of lines queued for a pane (`messaging.digest_fyi`, from `inbox.take`) is asked the same: a turn only under these two cases, else its lines are filed as fyi lines and start none.
-One more case, off until an instance names the agent: `[front] result_turn_agents` lists front agents to which a session that was handed work by them (a message of theirs within `[front] result_turn_hours`, or an open item they made or are the contact of that the session moves) may write the result and start a turn, whether or not he is there
+One more case, off until an instance names the agent: `[front] result_turn_agents` lists front agents to which a session that was handed work by them (a message of theirs that reached it within `[front] result_turn_hours`, or an open item the session moves that the agent itself handed it: the item's hand-off record names the agent as the sender and the session as the new mover) may write the result and start a turn, whether or not he is there
 (`messaging.handed_to`, `messaging.router_result`; the reader of the three keys is here: `result_turn_agents`, `result_turn_hours`, `result_turn_cap_per_hour`). Such a line is stored with the kind `exempt`, so the digest never files it. It is no case of `warranted`: the message tool and the router decide it before they ask this module.
 
 The record of case 2 is the item's own `tell_him` list (the update tool's `tell_him`): a front agent he asked to tell him about an item lists itself there. It is written only by a write that carries his own words (`said`,
@@ -16,6 +16,7 @@ subject, an item it names, and by nothing else; a closed item no longer matches 
 Imports point down only: it reads the store and the model; `telling` is imported where used, because telling's gate reads this module too."""
 from __future__ import annotations
 
+import math
 import re
 from typing import Iterable
 
@@ -38,12 +39,12 @@ def result_turn_agents() -> list[str]:
 
 
 def result_turn_hours() -> float:
-    """`[front] result_turn_hours` (24 by default): how long after a message of the front agent to a session that session's reply may start a turn. A value that is no number above 0 reads as 24 (`config.notes` says so)."""
+    """`[front] result_turn_hours` (24 by default): how long after a message of the front agent to a session that session's reply may start a turn. A value that is no finite number above 0 (a boolean, a string, nan, inf, an integer too large for a float) reads as 24 (`config.notes` says so)."""
+    raw = _cfg.get("front", "result_turn_hours", default=RESULT_TURN_HOURS)
     try:
-        raw = _cfg.get("front", "result_turn_hours", default=RESULT_TURN_HOURS)
-        v = float(raw)
-        return v if v > 0 and not isinstance(raw, bool) else float(RESULT_TURN_HOURS)
-    except (TypeError, ValueError):
+        v = float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 0.0
+        return v if math.isfinite(v) and v > 0 else float(RESULT_TURN_HOURS)
+    except (TypeError, ValueError, ArithmeticError):      # OverflowError: an integer of hundreds of digits
         return float(RESULT_TURN_HOURS)
 
 

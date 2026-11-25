@@ -28,7 +28,7 @@ delivered as before, marked, only when the held store cannot file it or the rule
            that conversation, else written onto the item it names or held), or goes to the project's background agent, unmarked, or, in a project with none, is held
            through the front gate for the agent's next turn. A gate that cannot file it leaves the pass delivered, marked. A delivery to a background agent is unmarked.
            A message a session wrote, passed to a front agent that `[front] result_turn_agents` lists, is a turn when that session was handed work by the agent (_front_result_turn, hook front_result: messaging.router_result, the message
-           tool's own test: the agent wrote to it within `[front] result_turn_hours`, or the message names an open item it moves that the agent made or is the contact of; at most `[front] result_turn_cap_per_hour` an hour per sender):
+           tool's own test: the agent wrote to it within `[front] result_turn_hours`, or the message names an open item it moves that the agent itself handed it (the item's hand-off record); at most `[front] result_turn_cap_per_hour` an hour per sender):
            delivered at once, unmarked unless it also needs him, as a line of kind exempt, past _front_route and _front_turn_gate. No agent is listed by default.
            A pass that would start the front agent's turn does so in two cases only (_front_turn_gate, service/front_turn.py): it needs him and he is talking with that agent now (telling.present_fronts), or he asked
            it, in his own words, to tell him about the notice's subject (the agent is in the `tell_him` of an open item the notice names). Otherwise it never reaches the front agent, not even held: it goes, unmarked, to the
@@ -592,10 +592,7 @@ def _front_result_turn(n: dict[str, Any], ln: dict[str, Any], target: str, root:
         body = _body(n)
         if not _is_session_message(n, body) or not _is_front(target, root, cx):
             return False
-        sender = _sender_name(n)
-        if not sender or sender.casefold() == str(target).casefold() or _front_anywhere(sender, root, cx):
-            return False
-        return bool(fn(target, str(n.get("who") or ""), body, n["id"]))
+        return bool(fn(target, str(n.get("who") or ""), body, n["id"]))      # the sender (a session, no script, not the target or a peer front agent) is the hook's test
     except Exception:  # noqa: BLE001
         return False
 
@@ -1017,7 +1014,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                     reason = f"written onto the item it names, not delivered: an answer to {held_for}'s question, and the person is not in that conversation" if act_ == "items" else f"held: front agent, {nameless}{arg_} (rides its next turn, starts none)"
                     base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold="fyi")
                 # a gate that could not file it (the agent's hook cannot fetch held lines, or the gate failed): delivered as before, marked, never dropped for want of a place to hold it
-        if ruling == "passed" and prior.get("status") != "delivered" and not result_front:      # a pass that asks nothing of a background agent is held for its next turn
+        if ruling == "passed" and prior.get("status") != "delivered":      # a pass that asks nothing of a background agent is held for its next turn (a result pass goes through it unchanged: its target is a front agent, `_hold_kind` holds only for a background agent, and `_front_result_turn` refuses the fyi and page-owed notices the two other branches take)
             hk = _hold_kind(n, ln, target, cx)
             if hk and _held.add(_held.key_of(target), hk, _body(n), sender=str(n.get("who") or ""), gid=str(ln.get("item") or ""), nid=n["id"], whole=(hk in ("fyi", "person")), where=_held_where(n)):
                 held_for = target
