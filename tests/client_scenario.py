@@ -451,6 +451,11 @@ def part_client():
         r = add_({"project": "projects/alpha", "add": [PR(301)], "sender": "hook\x1b[31m-sender‮  \t with \n blanks\x00​"})
         check("http: control, bidi and zero-width characters are taken out of the sender and the blanks collapsed", r.status_code == 200 and by_of(PR(301)) == "hook[31m-sender with blanks via a script on box-far", (r.text[:200], by_of(PR(301))))
         r = add_({"project": "projects/alpha", "add": [PR(302)], "sender": "h" * 80}); check("http: a sender of exactly 80 characters is taken", r.status_code == 200 and by_of(PR(302)) == "h" * 80 + " via a script on box-far", r.text[:200])
+        for n_, u_ in enumerate(("https://github.com/example-org/.github/pull/1", "https://github.com/.a/b/pull/1", "https://github.com/a/b./pull/1")):
+            r = add_({"project": "projects/alpha", "add": [u_], "sender": "hook-sender"})
+            check(f"http: a name that merely starts or ends with a dot is a name and is taken ({u_[19:-7]})", r.status_code == 200 and by_of(u_) == BY, (r.status_code, r.text[:200]))
+        r = add_({"project": "projects/alpha", "add": [PR(303)], "sender": "hook\u3164\u115f\u1160\u2800\uffa0-sender"})
+        check("http: Hangul fillers and the braille blank are taken out of the sender", r.status_code == 200 and by_of(PR(303)) == BY, (r.text[:200], by_of(PR(303))))
         before = (T / "store/anchors.json").read_text()
         def refused_(name, body, *words, status=400):
             r = add_(body); err = r.json().get("error", "") if r.status_code == status and isinstance(r.json(), dict) else ""
@@ -473,6 +478,8 @@ def part_client():
                             ("a repo URL with no pull request number", "https://github.com/example-org/example-repo/pull/"), ("a pull request number that is not digits", PR("abc")),
                             ("a pull request under /files", PR(101) + "/files"), ("a fragment", PR(101) + "#issuecomment-1"), ("a query", PR(101) + "?x=1"), ("trailing text", PR(101) + " and more"),
                             ("a trailing newline", PR(101) + "\n"), ("a newline inside", PR(101) + "\nslack:C0123456789"), ("a NUL", PR(101) + "\x00"), ("a leading blank", " " + PR(101)),
+                            ("a `..` owner", "https://github.com/../example-repo/pull/1"), ("`..` as owner and repo", "https://github.com/../../pull/1"), ("a `.` repo", "https://github.com/example-org/./pull/1"),
+                            ("a `.` owner", "https://github.com/./example-repo/pull/1"), ("a `..` repo", "https://github.com/example-org/../pull/1"),
                             ("plain http", "http://github.com/example-org/example-repo/pull/101"), ("another host", "https://github.example.invalid/example-org/example-repo/pull/101"), ("an Arabic-Indic digit", PR("١٢"))):
             refused_(f"http: …{what_} is not a pull request or issue URL: refused, nothing stored", {"project": "projects/alpha", "add": [url_], "sender": S}, ONLY)
         refused_("http: …a good URL beside a Gmail query stores neither", {"project": "projects/alpha", "add": [U3 + "0", "gmail:q:from:someone"], "sender": S}, ONLY)
@@ -483,6 +490,7 @@ def part_client():
         refused_("http: …a project of over 200 characters", {"project": "p" * 201, "add": [U3], "sender": S}, "project is required")
         refused_("http: …a sender that is not text (a number)", {"project": "projects/alpha", "add": [U3], "sender": 5}, "sender is required, as text")
         refused_("http: …a sender that is not text (a list)", {"project": "projects/alpha", "add": [U3], "sender": ["x"]}, "sender is required, as text")
+        refused_("http: …a sender of only Hangul fillers and braille blanks", {"project": "projects/alpha", "add": [U3], "sender": "\u3164\u115f\u1160\u2800\uffa0"}, "sender is required")
         refused_("http: …a sender of only control characters", {"project": "projects/alpha", "add": [U3], "sender": "\x1b‮\x00"}, "sender is required")
         refused_("http: …a sender of 81 characters after the control characters are taken out", {"project": "projects/alpha", "add": [U3], "sender": "h" * 40 + "\x1b" + "h" * 41}, "sender is required")
         refused_("http: …a project that names no page", {"project": "projects/no-such", "add": [U3], "sender": S}, "Refused", "names no page")

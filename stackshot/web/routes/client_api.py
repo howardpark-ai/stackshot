@@ -134,7 +134,8 @@ def _client_config() -> dict[str, Any]:
 
 _ANCHOR_ADD_SHAPE = ("project = the project's page key (projects/<slug>, infra/<slug> or the bare slug); add = a list of 1 to 10 pull request or issue URLs; items = a list of at most 20 item ids (optional: with none the anchor "
                      "is project-wide); sender = the session or script that adds, one line of at most 80 characters")
-_ANCHOR_ADD_URL = re.compile(r"https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/(?:pull|issues)/[0-9]+")      # the one shape this route takes: no query, fragment, trailing text, whitespace or NUL
+_ANCHOR_ADD_URL = re.compile(r"https://github\.com/(?!\.{1,2}/)[A-Za-z0-9._-]+/(?!\.{1,2}/)[A-Za-z0-9._-]+/(?:pull|issues)/[0-9]+")      # the one shape this route takes: no query, fragment, trailing text, whitespace or NUL, and no `.` or `..` as owner or repo (a path step, not a name; `.github` is a real repo name and stays)
+_BLANK_LOOKING = frozenset(map(chr, (0x3164, 0x115F, 0x1160, 0x2800, 0xFFA0)))      # the Hangul fillers and the braille blank: they draw as nothing
 _ANCHOR_ADD_URLS_MAX, _ANCHOR_ADD_URL_MAX, _ANCHOR_ADD_ITEMS_MAX = 10, 300, 20        # the most a call may carry, counted as received (a repeated entry counts each time)
 
 
@@ -142,7 +143,7 @@ def _plain_sender(text: str) -> str:
     """A sender as one plain line: whitespace runs collapsed to one space, then every control and format character (C0 and C1 controls, bidi and zero-width marks) taken out, and the blanks collapsed again."""
     import unicodedata
     one = " ".join(text.split())
-    return " ".join("".join(ch for ch in one if unicodedata.category(ch)[0] != "C").split())
+    return " ".join("".join(ch for ch in one if unicodedata.category(ch)[0] != "C" and ch not in _BLANK_LOOKING).split())
 
 
 def _client_anchor_add(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
