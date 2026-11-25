@@ -494,7 +494,7 @@ _exists = p.exists; p.exists = lambda key: key in KNOWN                       # 
 pref = [FULL[:i] for i in range(len("projects/") + 1, len(FULL) + 1)]        # every cut of the key that still has a character after `projects/`
 got_cut = {k: p.reply_project("updated a1.\nproject: " + k) for k in pref}
 check("cut: every cut of a key at the end of the text is dropped unless the cut is itself a known page",
-      all(v == (k if k in KNOWN else "") for k, v in got_cut.items()) and got_cut["projects/widget/anch"] == "" and got_cut["projects/widget"] == "projects/widget", got_cut)
+      all(v == (k if p.norm(k) in KNOWN else "") for k, v in got_cut.items()) and got_cut["projects/widget/anch"] == "" and got_cut["projects/widget"] == "projects/widget", got_cut)
 check("cut: a known page as the last characters, no trailing newline, is taken (the whole key and a shorter known page)", got_cut[FULL] == FULL and got_cut["projects/widget"] == "projects/widget", got_cut)
 check("cut: any key followed by a newline, a space or the JSON escape of a newline is whole, known or not",
       all(p.reply_project("updated a1.\nproject: " + k + "\nnext: x") == k and p.reply_project("project: " + k + " ") == k and p.reply_project("project: " + k + "\\nnext") == k and p.reply_project("project: " + k + "\n") == k for k in pref),
@@ -510,6 +510,26 @@ check("cut: a cut key before the closing quote of a JSON wrapper is a cut too; a
       and p.reply_project('{"result": "updated a1.\\nproject: projects/widget"}') == "projects/widget" and p.reply_project('{"result": "updated a1.\\nproject: projects/widg\\n"}') == "projects/widg",
       p.reply_project('{"result": "updated a1.\\nproject: projects/widg"}'))
 check("cut: a key with text after it stays whole although unknown (a line in the middle of a reply is no cut)", p.reply_project("project: projects/unknownpage next: x") == "projects/unknownpage", p.reply_project("project: projects/unknownpage next: x"))
+# every shape a reply reaches the hook in: the plain text, the portal's {"result": ...}, one level of [{"type": "text", "text": ...}], and the script's JSON nested in that
+SHAPES = {"plain": lambda t: t, "result": lambda t: json.dumps({"result": t}), "text": lambda t: json.dumps([{"type": "text", "text": t}]),
+          "nested": lambda t: json.dumps([{"type": "text", "text": json.dumps({"result": t})}])}
+bad_cut = [(sh, k) for sh, w in SHAPES.items() for k in pref if p.reply_project(w("updated a1.\nproject: " + k)) != (k if p.norm(k) in KNOWN else "")]
+bad_whole = [(sh, k) for sh, w in SHAPES.items() for k in pref if p.reply_project(w("updated a1.\nproject: " + k + "\nnext: x")) != k or p.reply_project(w("updated a1.\nproject: " + k + "\n")) != k]
+check("cut: in every wrapper shape (plain, result, text, nested) a cut key owes no phantom page unless the cut is a known page, the nested shape ending in an escaped quote",
+      not bad_cut and SHAPES["nested"]("project: x").endswith('x\\"}"}]'), bad_cut[:6])
+check("cut: in every wrapper shape the whole key followed by an escaped newline is recorded, known or not", not bad_whole, bad_whole[:6])
+check("cut: the normalized key is asked: a known page named with a trailing slash or .md at the very end is kept, a cut of the suffix is not",
+      p.reply_project("project: projects/widget/") == "projects/widget/" and p.reply_project("project: projects/widget.md") == "projects/widget.md"
+      and p.reply_project("project: projects/widget.m") == "" and p.reply_project("project: projects/widget/anchors/") == "projects/widget/anchors/", p.reply_project("project: projects/widget.m"))
+asked = []; p.exists = lambda key: (asked.append(key), key in KNOWN)[1]
+for _ in range(3): p.reply_project("project: projects/widget/anch"); p.reply_project("project: projects/widget")
+n_plain = len(asked); asked.clear(); p._KNOWN = {}
+for _ in range(3): p.reply_project("project: projects/widget/anch"); p.reply_project("project: projects/widget")
+n_run = len(asked); p._KNOWN = None
+import io; _stdin = sys.stdin; sys.stdin = io.StringIO(""); p.cmd_touch(); sys.stdin = _stdin
+check("cut: within one touch run a key is asked of the registry once (a script's N writes cost one read per key); outside a run nothing is remembered, and a run leaves nothing behind",
+      n_run == 2 and n_plain == 6 and p._KNOWN is None, (n_run, n_plain, p._KNOWN))
+p.exists = lambda key: key in KNOWN
 # the hook's own record: a cut key owes no page, a whole known page does
 p.save_state(A, {})
 def cut_touch(sid, resp, tid="s5"):
@@ -537,7 +557,8 @@ p.exists = lambda key: (_ for _ in ()).throw(RuntimeError("lookup failed"))
 check("cut: a lookup that raises is the same as one that cannot tell", p.reply_project("project: projects/widg") == "projects/widg", p.reply_project("project: projects/widg"))
 p.exists = _exists
 check("cut: against the fixture brain, a real page at the end of a reply is taken and a cut of it is not",
-      p.reply_project("project: projects/alpha") == "projects/alpha" and p.reply_project("project: projects/alph") == "" and p.reply_project("project: projects/alpha/") == "",
+      p.reply_project("project: projects/alpha") == "projects/alpha" and p.reply_project("project: projects/alph") == "" and p.reply_project("project: projects/alpha/") == "projects/alpha/"
+      and p.reply_project("project: projects/alpha.md") == "projects/alpha.md" and p.reply_project("project: projects/alpha.m") == "",
       [p.reply_project("project: projects/alpha"), p.reply_project("project: projects/alph"), p.reply_project("project: projects/alpha/")])
 
 # ---- 8. the end-of-turn board check: `Board: no change, <reason>` or update/confirm the items

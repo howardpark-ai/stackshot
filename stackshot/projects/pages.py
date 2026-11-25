@@ -846,10 +846,17 @@ def tid_of(raw):
 # the item's id in the server's reply, in every form it is shown: board#N, board-tmp-<machine>#3, or a store id (s5)
 _REPLY_ID = r"board-tmp-[A-Za-z0-9-]*[A-Za-z0-9][#-]\d+|board#\d+|[a-z]\d+"
 
+_KNOWN = None   # {normalized key: exists()'s answer} while one touch run is going (cmd_touch sets it), else None: nothing is remembered
+
 def _known_page(key):
-    """exists(), failing open: None (cannot tell) when the lookup itself raises, so a hook never stops a board write over it."""
-    try: return exists(key)
-    except Exception: return None
+    """exists() of the page the key names, failing open: None (cannot tell) when the lookup itself raises, so a hook never stops a board
+    write over it. Within one touch run the answer is remembered, so a script's N writes cost one registry read per key, not N."""
+    k = norm(key)
+    if _KNOWN is not None and k in _KNOWN: return _KNOWN[k]
+    try: ans = exists(k)
+    except Exception: ans = None
+    if _KNOWN is not None: _KNOWN[k] = ans
+    return ans
 
 def reply_project(text):
     """The page a write touched, from the `project:` line of the server's reply: `project: <page>`, or `project: <top-level> (filed on <page>)` for an item on a sub-page, where the page the item is filed on
@@ -862,7 +869,8 @@ def reply_project(text):
     # A script that returns only the first N characters of a reply can cut the line inside the key (`project: projects/widg`).
     # A key with nothing after it but the end of the text (or the quote and brackets a JSON wrapper closes with) may be such a cut:
     # it is taken only when the page is known. A page that cannot be told (exists() is None: no registry to ask) keeps the key as before.
-    if re.fullmatch(r"[\"'}\]]*", text[m.end(m.lastindex):]) and _known_page(found) is False: return ""
+    # The closers include the backslash: a script's JSON reply nested in the portal's own JSON ends in `projects/wid\"}"}]`.
+    if re.fullmatch(r"[\\\"'}\]]*", text[m.end(m.lastindex):]) and _known_page(found) is False: return ""
     return found
 
 def _touch_mcp_record(payload, inp, name):
@@ -1001,6 +1009,12 @@ def handover(payload):
     return f"[stackshot] {line}" if line else ""
 
 def cmd_touch():
+    global _KNOWN
+    _KNOWN = {}
+    try: return _cmd_touch()
+    finally: _KNOWN = None
+
+def _cmd_touch():
     try: payload = json.load(sys.stdin)
     except Exception: return 0
     tool = str(payload.get("tool_name") or "")
