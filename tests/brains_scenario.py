@@ -1041,6 +1041,15 @@ finally:
 c = calls()
 check("20 the audit's page call does not skip a refused default-brain page: it falls back to the keeper with the refusal text, and no CLI ran",
       res20 == "fallback" and len(fell20) == 1 and fell20[0][3].startswith("the page could not be read: the default brain has no home in [gbrain]") and 'set home = "<its GBRAIN_HOME folder>" under [gbrain]' in fell20[0][3] and c == [], (res20, fell20, c))
+_cfg.CFG["pages"]["flavor"] = "plain"; fell20p = []
+pdebt_svc.page_debt_fallback = lambda *a, **k: fell20p.append(a) or "keeper-x"
+try:
+    res20p = pdebt_svc.page_debt_project("projects/no-such-plain-page", moved20, time.time(), "live", runner=lambda m: {"status": "spawn"})
+finally:
+    pdebt_svc.page_debt_fallback = orig_fb20; _cfg.CFG["pages"]["flavor"] = "gbrain"
+c = calls()
+check("20 under the plain flavor an unreadable default-brain page gets the plain reason, no refusal text (no CLI is involved)",
+      res20p == "fallback" and len(fell20p) == 1 and fell20p[0][3] == "the page could not be read" and c == [], (res20p, fell20p, c))
 sent20 = []; orig_rel, orig_pa = pdebt_svc._telling.pilot_relay_many, pdebt_svc.page_agent
 pdebt_svc._telling.pilot_relay_many = lambda keeper, rows, head="": sent20.append((keeper, head)) or []
 pdebt_svc.page_agent = lambda key: "keeper-x"

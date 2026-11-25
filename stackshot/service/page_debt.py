@@ -160,7 +160,7 @@ def page_debt_project(key: str, moved: dict[str, dict[str, Any]], now: float, mo
         return "skipped"
     if content is None or (live and not rev):
         why = "the page could not be read"
-        refusal = _brains.cli_refusal(key) if live and kb.default else ""      # the default brain's CLI is refused (no [gbrain] home beside a second brain): the keeper's note says so and names the key
+        refusal = _brains.cli_refusal(key) if live and kb.default and _cfg.page_flavor() == "gbrain" else ""      # (the plain flavor reaches no CLI) the default brain's CLI is refused (no [gbrain] home beside a second brain): the keeper's note says so and names the key
         if refusal:
             why += ": " + refusal.removeprefix("refused: ")
     else:
