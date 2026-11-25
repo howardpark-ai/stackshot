@@ -117,7 +117,7 @@ def page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[t
         rows.append((key, gid, item, what, writer))
     n = len(rows); s, are, them = ("s", "are", "them") if n != 1 else ("", "is", "it")
     head = (f"[board] {n} page update{s} on {key} {are} yours to write: the writer{s} left {them} undone past {_hooks().grace_min()} min and the "
-            f"audit's page call could not write {them} ({clean_line(why, 200)}). "
+            f"audit's page call could not write {them} ({clean_line(why, 300)}). "
             + ("Write the Current state: you keep this page." if lead else "Write the Current state, or hand it to the agent that keeps the page."))
     if keeper and rows:
         for nid in _telling.pilot_relay_many(keeper, rows, head=head):
@@ -160,6 +160,9 @@ def page_debt_project(key: str, moved: dict[str, dict[str, Any]], now: float, mo
         return "skipped"
     if content is None or (live and not rev):
         why = "the page could not be read"
+        refusal = _brains.cli_refusal(key) if live and kb.default else ""      # the default brain's CLI is refused (no [gbrain] home beside a second brain): the keeper's note says so and names the key
+        if refusal:
+            why += ": " + refusal.removeprefix("refused: ")
     else:
         if not kb.default:
             _brains.clear(kb, PAGE_DEBT_READ_WHAT + " " + key)     # this page reads again: with no read of the brain failing, one line says it is back

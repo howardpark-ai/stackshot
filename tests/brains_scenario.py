@@ -104,9 +104,9 @@ def stderr():
 
 from stackshot.core import config as _cfg; from stackshot.projects import brains; from stackshot.projects import pages as _pg; from stackshot.router import page_debt; from stackshot.projects import rename_page
 _cfg.CFG["pages"]["flavor"] = "gbrain"
-DEFHOME = str(T / "home-default")      # [gbrain] home of the default brain: with a second brain configured the default brain needs one (see 21)
+DEFHOME = str(T / "home-default")      # [gbrain] home of the default brain: with a second brain configured the default brain needs one (see 20)
 def set_brains(*bs):
-    """Name the second brains; with any, the default brain gets its own home too (without one its CLI calls are refused, 21), with none it gets none."""
+    """Name the second brains; with any, the default brain gets its own home too (without one its CLI calls are refused, 20), with none it gets none."""
     if bs: _cfg.CFG["brains"] = [dict(b) for b in bs]; _cfg.CFG.setdefault("gbrain", {})["home"] = DEFHOME
     else: _cfg.CFG.pop("brains", None); _cfg.CFG.setdefault("gbrain", {}).pop("home", None)
     brains._WARNED.clear()
@@ -1028,6 +1028,27 @@ rc_s, out_s = rename_page.gb(["put", "projects/beta-one"], stdin="x"); c = calls
 check("20 a second brain's own call still runs, with its own home", rc_s == 0 and len(c) == 1 and c[0]["home"] == SECOND["home"], (rc_s, out_s, c))
 check("20 config.notes says the default brain's calls are refused until [gbrain] home is set",
       sum("[gbrain] home is not set while a second brain is configured" in n for n in _cfg.notes()) == 1, _cfg.notes())
+check("20 under the plain flavor the CLI is never reached for the default brain: no such note",
+      not any("[gbrain] home is not set" in n for n in _cfg.notes({**_cfg.CFG, "pages": {**_cfg.CFG["pages"], "flavor": "plain"}})), _cfg.notes({**_cfg.CFG, "pages": {**_cfg.CFG["pages"], "flavor": "plain"}}))
+# the audit's page call: a default-brain page that cannot be read goes to the keeper, and the note carries the refusal (a second brain's is skipped, section 6)
+moved20 = {"bbbbbbbb-0000-4000-8000-000000000002": {"ts": time.time(), "item": "s1", "moved": True, "debts": [{"item": "s1", "what": "changed", "writer": "bbbbbbbb-0000-4000-8000-000000000002"}]}}
+fell20 = []; orig_fb20 = pdebt_svc.page_debt_fallback
+pdebt_svc.page_debt_fallback = lambda *a, **k: fell20.append(a) or "keeper-x"
+try:
+    res20 = pdebt_svc.page_debt_project("projects/alpha", moved20, time.time(), "live", runner=lambda m: {"status": "spawn"})
+finally:
+    pdebt_svc.page_debt_fallback = orig_fb20
+c = calls()
+check("20 the audit's page call does not skip a refused default-brain page: it falls back to the keeper with the refusal text, and no CLI ran",
+      res20 == "fallback" and len(fell20) == 1 and fell20[0][3].startswith("the page could not be read: the default brain has no home in [gbrain]") and 'set home = "<its GBRAIN_HOME folder>" under [gbrain]' in fell20[0][3] and c == [], (res20, fell20, c))
+sent20 = []; orig_rel, orig_pa = pdebt_svc._telling.pilot_relay_many, pdebt_svc.page_agent
+pdebt_svc._telling.pilot_relay_many = lambda keeper, rows, head="": sent20.append((keeper, head)) or []
+pdebt_svc.page_agent = lambda key: "keeper-x"
+try:
+    pdebt_svc.page_debt_fallback("projects/alpha", moved20, [("s1", "changed", "w")], fell20[0][3], time.time())
+finally:
+    pdebt_svc._telling.pilot_relay_many, pdebt_svc.page_agent = orig_rel, orig_pa
+check("20 the keeper's note names [gbrain] home and the whole fix", len(sent20) == 1 and "the default brain has no home in [gbrain]" in sent20[0][1] and 'under [gbrain])' in sent20[0][1], sent20)
 # with its home set, the default brain runs with that home
 _cfg.CFG["gbrain"]["home"] = DEFHOME
 env_h, why_h = brains.prepare("projects/alpha", {"PATH": "/x"})

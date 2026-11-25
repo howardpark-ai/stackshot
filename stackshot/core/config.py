@@ -1394,7 +1394,8 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     if br is not None and not isinstance(br, list):
         out.append("brains is not a list of [[brains]] tables, so no second brain is used: write each one as a [[brains]] table (the example config has one)")
     seen: set[str] = set()
-    second_here = False      # a second brain whose CLI this box runs (a client's entry is marked remote: it runs none)
+    second_here = False      # a second brain whose CLI this box runs (a client's entry is marked remote: it runs none, so it gets no note; brains.prepare
+                             # counts every entry, remote ones too, which is harmless: a client box makes no gbrain CLI call)
     for i, b in enumerate(br if isinstance(br, list) else [], 1):
         if not isinstance(b, dict) or not str(b.get("name") or "").strip() or not str(b.get("path") or "").strip() or str(b.get("name")).strip() == "default":
             out.append(f"[[brains]] entry {i} has no name or path (or is named \"default\"), so it is skipped and its pages are read from the default brain: give it a name and its local copy's path")
@@ -1425,7 +1426,8 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
         if not str(b.get("home") or "").strip() and not b.get("remote"):
             out.append(f"[[brains]] {name} has no home, so its pages are neither read nor written through the gbrain CLI (the CLI would run on the default brain): set home = \"<its GBRAIN_HOME folder>\" on that entry")
     gb = get("gbrain", cfg=cfg)
-    if second_here and not str((gb.get("home") if isinstance(gb, dict) else "") or "").strip():
+    plain = str(get("pages", "flavor", cfg=cfg) or "plain").strip().lower() != "gbrain"      # the plain flavor never reaches the default brain's CLI
+    if second_here and not plain and not str((gb.get("home") if isinstance(gb, dict) else "") or "").strip():
         out.append("[gbrain] home is not set while a second brain is configured, so the default brain's gbrain CLI calls are refused (the CLI would run on whichever brain its own home holds): set home = \"<its GBRAIN_HOME folder>\" under [gbrain]")
     if isinstance(gb, dict) and "shared" in gb and not isinstance(gb["shared"], bool):
         out.append(f"[gbrain] shared = {gb['shared']!r} is not true or false, so the default brain is not marked shared and stackshot still writes its pages: write shared = true or shared = false (no quotes)")

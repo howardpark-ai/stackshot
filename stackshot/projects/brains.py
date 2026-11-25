@@ -398,7 +398,7 @@ def prepare(slug: Any = "", env: dict[str, str] | None = None, brain: Brain | No
     if b.home:
         out["GBRAIN_HOME"] = b.home
     if b.default:
-        if not b.home and configured():
+        if not b.home and configured():      # configured() counts a client box's remote entries too: harmless, a client makes no CLI call (config.notes skips them)
             return out, ("refused: the default brain has no home in [gbrain] and a second brain is configured, so the gbrain CLI would run on "
                          "whichever brain its own home holds; set home = \"<its GBRAIN_HOME folder>\" under [gbrain]")
         return out, ""
@@ -435,7 +435,8 @@ def cli_refusal(slug: Any) -> str:
     and a write would put the page into the default brain; both are refused until the entry names its home. A second brain whose
     `secret_file` cannot be used (unreadable, empty, no client_secret, or readable by group or others) is refused too, with a line naming the
     path and the reason and said once per outage: the CLI would fail without its secret. The caller treats a refused read as a page that
-    could not be read (skipped, said once per outage). The default brain is refused only when it has no `home` and a second brain is configured:
+    could not be read (a second brain's page: skipped, said once per outage; the default brain's: reported to the page's keeper like any
+    unreadable page, with this text in the report, see service/page_debt.page_debt_project). The default brain is refused only when it has no `home` and a second brain is configured:
     the CLI would run with its own home, which on a machine whose CLI home belongs to another brain is that brain; an instance with no
     [[brains]] is never refused."""
     return prepare(slug)[1]
