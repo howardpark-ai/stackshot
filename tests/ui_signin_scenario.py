@@ -115,14 +115,14 @@ with TestClient(app) as c:
     check("a forged cookie is not renewed", r.status_code == 302 and renewed(r) is None)
     r = c.get("/", cookies={"stackshot_ui": cookie("left@example.com", T0 + 20 * DAY)}, headers=NAV, follow_redirects=False)
     check("a cookie of an address that is no longer allowed is not renewed", r.status_code == 302 and renewed(r) is None)
-    _cfg.CFG["people"] = [{"name": "Pat", "emails": ["listed@example.com"]}]            # the sign-in asks the people reader: a listed address is allowed, and the old key is no longer read
+    _cfg.CFG["members"] = [{"name": "Pat", "emails": ["listed@example.com"]}]            # the sign-in asks the members reader: a listed address is allowed, and the old key is no longer read
     try:
         r = c.get("/", cookies={"stackshot_ui": cookie("listed@example.com", T0 + 20 * DAY)}, headers=NAV, follow_redirects=False)
-        check("a cookie of an address in [[people]] is allowed", r.status_code == 200, r.status_code)
+        check("a cookie of an address in [[members]] is allowed", r.status_code == 200, r.status_code)
         r = c.get("/", cookies={"stackshot_ui": cookie(EMAIL, T0 + 20 * DAY)}, headers=NAV, follow_redirects=False)
-        check("…and an address only in the old allowed_emails key is not, once [[people]] is set", r.status_code == 302 and renewed(r) is None, r.status_code)
+        check("…and an address only in the old allowed_emails key is not, once [[members]] is set", r.status_code == 302 and renewed(r) is None, r.status_code)
     finally:
-        del _cfg.CFG["people"]
+        del _cfg.CFG["members"]
     legacy = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": T0 + 25 * DAY}))                # the cookie as it was written before (email and exp only) is read and renewed
     r = c.get("/", cookies={"stackshot_ui": legacy}, headers=NAV, follow_redirects=False)
     check("a cookie written by the earlier release still works and is renewed", r.status_code == 200 and renewed(r) == T0 + DAYS * DAY, (r.status_code, renewed(r)))

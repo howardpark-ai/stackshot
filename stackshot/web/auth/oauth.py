@@ -12,7 +12,7 @@ import sys
 from fastmcp.exceptions import ToolError
 
 from stackshot.core import config as _cfg
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.web.auth import signin as _signin
 from stackshot.web.auth.signin import _ui_is_board_client
 
@@ -41,7 +41,7 @@ def _auth():
     from fastmcp.server.auth.providers.google import GoogleProvider
     scopes = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
     machine = _env("PORTAL_TOKEN").strip()          # the MCP portal's machine token (Cloudflare) — optional
-    identity = _cfg.CFG["auth"].get("portal_identity") or _people.emails()[0]
+    identity = _cfg.CFG["auth"].get("portal_identity") or _members.emails()[0]
 
     class _Provider(GoogleProvider):
         """Google OAuth for every client (claude.ai, panes) PLUS one machine bearer token for the MCP portal:
@@ -97,6 +97,6 @@ def _who() -> str:
     from fastmcp.server.dependencies import get_access_token
     tok = get_access_token()
     email = (getattr(tok, "claims", None) or {}).get("email", "")
-    if not _people.person_of_email(email):
+    if not _members.person_of_email(email):
         raise ToolError(f"Refused: {email or 'unknown identity'} is not allowed on this board")
     return email

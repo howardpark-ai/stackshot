@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg  # stackshot.toml: paths, fleet, scopes, the Machines panel, branding
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.core import legacy_owner as _lo   # an old version of an item (from the store's history) read as the current code reads it: History only, never written back
 from stackshot.web import item_history as _ihist   # the commits of an item's file in the store's git, kept per item (item_history.py)
 from stackshot.fleet import fleet as _fleet   # the session and machine view, and the one rule for a session's presence (running / present)
@@ -42,7 +42,7 @@ from stackshot.model import item_project as _iproj   # an item's project by its 
 from stackshot.projects import projects as _prj   # the project record: an agent registered there whose page line is still owed (with_pending)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
 from stackshot.fleet import sessions_registry as _sr   # the permanent session id: a stored id is shown as the session's name now, and two forms of one session read as one
-_OWNER = _people.first().name   # whom a Next line addresses with "<owner>:"
+_OWNER = _members.first().name   # whom a Next line addresses with "<owner>:"
 
 
 def fleet_names():
@@ -1416,7 +1416,7 @@ class Board:
                 if len(na_) > len(pa_) and na_[:len(pa_)] == pa_:        # phase 3: his answer from the board, one line each
                     for a in na_[len(pa_):]:
                         ch, tx = str(a.get("choice") or ""), str(a.get("text") or a.get("server_note") or "")      # a step the server ticked on a mail he sent carries its own sentence, not his words
-                        ev.append(("answer", f"{e(_people.recorded_by(a))} ({e(a.get('via') or 'board')}): " + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
+                        ev.append(("answer", f"{e(_members.recorded_by(a))} ({e(a.get('via') or 'board')}): " + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
                                    + e(tx) + (' <span class="dim">· comment</span>' if a.get("kind") == "comment" else ' <span class="dim">· note on his step</span>' if a.get("kind") == "step-reply" else "")))
                 for w in _work.legacy_changes(pm, m): ev.append(("work", e(w)))   # a line of the old work list added, moved or removed (a step status is folded under its step in the page, not a line each here)
                 new_said = _said.new_entries(pm, m)                          # the trailers: his words recorded by this version, a tag each
@@ -1432,7 +1432,7 @@ class Board:
                         where = f'<a href="{e(u)}" target="_blank" rel="noopener">on GitHub</a>' if u else "on GitHub"
                         try: at = float(a.get("ts") or 0) or None
                         except (TypeError, ValueError): at = None
-                        ev.append(("comment", f"{e(_people.recorded_by(a))} commented {where}: “{e(t)}”", at, _people.recorded_by(a)))
+                        ev.append(("comment", f"{e(_members.recorded_by(a))} commented {where}: “{e(t)}”", at, _members.recorded_by(a)))
             who = shown_ref(" ".join(str(v.get("written_by") or "").split()))          # the revision's author (model.py: every save records it); older revisions carry none
             chg = [x for x in ev if x[0] != "comment"]
             if not merge:                                                    # one entry per change, as before (item_events)

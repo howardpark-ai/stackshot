@@ -90,7 +90,7 @@ def wr(i, d): (T / f"store/a/{i}.json").write_text(json.dumps(d))
 STORE = T / "store"
 
 from stackshot.web import server
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.core.instance import NAME
 from stackshot.service import answer as answer_svc
 from stackshot.service import github_events as ghev_svc
@@ -109,19 +109,19 @@ told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 telling.tell_comment = lambda *a, **k: []
 
-OLIVER = _people.first()
-PAT = _people.Person("Pat", (), (EMAIL2,))
-check("the fixture: one person, Oliver, and the list is read through the one reader", [p.name for p in _people.people()] == ["Oliver"] and OLIVER.name == "Oliver")
+OLIVER = _members.first()
+PAT = _members.Person("Pat", (), (EMAIL2,))
+check("the fixture: one person, Oliver, and the list is read through the one reader", [p.name for p in _members.members()] == ["Oliver"] and OLIVER.name == "Oliver")
 # the pure helpers, with one person
 check("one person: stamp writes nothing, recorded_by reads the first person, signed_in is the first person for any address",
-      _people.stamp({"a": 1}, "Oliver") == {"a": 1} and _people.recorded_by({"a": 1}) == "Oliver" and _people.recorded_by({"by": "  Pat  x "}) == "Pat x"
-      and _people.signed_in("anyone@example.org").name == "Oliver" and _people.signed_in(EMAIL).name == "Oliver" and _people.recorded_by(None) == "Oliver")
+      _members.stamp({"a": 1}, "Oliver") == {"a": 1} and _members.recorded_by({"a": 1}) == "Oliver" and _members.recorded_by({"by": "  Pat  x "}) == "Pat x"
+      and _members.signed_in("anyone@example.org").name == "Oliver" and _members.signed_in(EMAIL).name == "Oliver" and _members.recorded_by(None) == "Oliver")
 
 # a second person, for the rest of the run (the config takes one person; the list is what every module asks)
-_people.people = lambda: [OLIVER, PAT]
+_members.members = lambda: [OLIVER, PAT]
 check("two persons: stamp writes the second person only, recorded_by reads `by` else the first, signed_in picks by address and falls back to the first",
-      _people.stamp({}, "Pat") == {"by": "Pat"} and _people.stamp({}, "Oliver") == {} and _people.stamp({}, "") == {} and _people.recorded_by({"by": "Pat"}) == "Pat"
-      and _people.recorded_by({}) == "Oliver" and _people.signed_in(EMAIL2).name == "Pat" and _people.signed_in(EMAIL).name == "Oliver" and _people.signed_in("x@example.org").name == "Oliver")
+      _members.stamp({}, "Pat") == {"by": "Pat"} and _members.stamp({}, "Oliver") == {} and _members.stamp({}, "") == {} and _members.recorded_by({"by": "Pat"}) == "Pat"
+      and _members.recorded_by({}) == "Oliver" and _members.signed_in(EMAIL2).name == "Pat" and _members.signed_in(EMAIL).name == "Oliver" and _members.signed_in("x@example.org").name == "Oliver")
 
 from starlette.testclient import TestClient
 COOKIE1 = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))

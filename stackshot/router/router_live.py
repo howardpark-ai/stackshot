@@ -102,7 +102,7 @@ from typing import Any, Callable
 
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.core import interp as _interp   # a missing interpreter (its uv environment deleted) never stops a delivery
 from stackshot.router import routing as _routing
 from stackshot.anchors import anchors as _anc
@@ -299,7 +299,7 @@ def _log(line: dict[str, Any]) -> None:
 
 
 def _owner_mark() -> str:
-    return f"[for {_people.first().name}]"
+    return f"[for {_members.first().name}]"
 
 
 # ----------------------------------------------------------------------------- delivery

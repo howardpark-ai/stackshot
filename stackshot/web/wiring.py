@@ -98,7 +98,7 @@ from stackshot.audit import audit_checks as _ac
 
 _HOST: Any = None       # the server module, set by `install_early`: the first owner of the passes' `S` (`pass_host` below)
 
-# The names the passes written against the server module (model/item_project_pass.py, model/last_activity_pass.py, waits/until_pass.py, waits/mover_pass.py, waits/people_pass.py) read off their `S` that neither the server module nor service/stamp.py,
+# The names the passes written against the server module (model/item_project_pass.py, model/last_activity_pass.py, waits/until_pass.py, waits/mover_pass.py, waits/members_pass.py) read off their `S` that neither the server module nor service/stamp.py,
 # service/retire_passes.py or service/merge_progress.py carries: the owners of the renderer, the pull-request event log and the merge pass. A suite or a tool that builds its own `stamp.PassHost` names this
 # namespace as its last owner.
 PASS_NAMES = SimpleNamespace(_rmod=_rmod, _elog=_elog, _merge_progress=_merge_progress)

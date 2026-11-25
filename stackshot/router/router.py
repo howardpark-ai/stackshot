@@ -85,7 +85,7 @@ from typing import Any, Callable
 
 from stackshot.core import agentbox as _ab
 from stackshot.core import config as _cfg
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.core.lines import newline_lines
 from stackshot.router import routing as _routing
 from stackshot.anchors import anchors as _anc
@@ -507,7 +507,7 @@ def _is_owner_name(who: Any) -> bool:
         from stackshot.model import model as _model     # at call time
         is_h = _model.is_owner
     except Exception:  # noqa: BLE001
-        is_h = lambda x: _people.person_of(x) is not None  # noqa: E731
+        is_h = lambda x: _members.person_of(x) is not None  # noqa: E731
     logins = _owner_logins()
     return any(w and (is_h(w) or w.lower() in logins) for w in (x.strip() for x in str(who or "").split(",")))
 

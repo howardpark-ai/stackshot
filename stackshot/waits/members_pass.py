@@ -1,11 +1,11 @@
-"""people_pass.py: the data change that stamps the first person on what the store holds without a name (tools/people_migrate.py runs it).
+"""members_pass.py: the data change that stamps the first person on what the store holds without a name (tools/members_migrate.py runs it).
 
-A board that serves one person stores no name on his answers: `people.recorded_by` reads a record with no `by` as the first person, and a decision that names nobody is his by default. The pass writes that
+A board that serves one person stores no name on his answers: `members.recorded_by` reads a record with no `by` as the first person, and a decision that names nobody is his by default. The pass writes that
 reading down, so the store says who the first person is before a second one is added; it removes no reader, and an item that is left as it is reads the first person all the same (an unapplied or half-applied
 store behaves exactly as an applied one).
 
 What a stored item gets (`plan_for`; the server's `one` refuses any item whose reading would change):
-  every answer (an entry of metadata.answers, mail ticks included) with no `by`, on an open or a closed item    `by` = the first person's name (people.first), written as the key the readers look at
+  every answer (an entry of metadata.answers, mail ticks included) with no `by`, on an open or a closed item    `by` = the first person's name (members.first), written as the key the readers look at
   an open, alive item that needs a decision, stores no mover and no old picker key, and reads the first person as its mover by default    `mover` = the first person's name
   a line of an open item's `next` that opens with `you:`    the name in its place (the line's writer pair and the stored step that matches it go with it), only when the checklist, the owner reading of every
                        line and the item's state read the same afterwards; otherwise the item keeps the line and is listed with what would differ
@@ -24,7 +24,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.model import ids as _ids
 from stackshot.model import item_project_pass as _ipp
 from stackshot.model import migration as _mig
@@ -115,7 +115,7 @@ def line_probe(meta: dict[str, Any], name: str) -> dict[str, Any]:
     return {
         "checklist": [[s["status"], s.get("writer", ""), s.get("by", ""), s.get("at", 0), _YOU_HEAD.sub(lambda _m: name, _steps.key(s["text"]))] for s in _steps.view(meta)],
         "his": [_steps.is_his(c) for c in chunks],
-        "opens": [(_people.opener_person(c).name if _people.opener_person(c) else "") for c in chunks],
+        "opens": [(_members.opener_person(c).name if _members.opener_person(c) else "") for c in chunks],
         "rest": [_steps.strip_owner(c) for c in chunks],
         "bare": [_steps.is_bare(c) for c in chunks],
         "first": _states.next_names_owner(meta.get("next")),
@@ -148,7 +148,7 @@ def decision_mover_edit(meta: dict[str, Any], mod: Any, name: str) -> bool:
 def plan_for(meta: dict[str, Any], mod: Any, is_open: bool) -> dict[str, Any]:
     """The plan for one item → {"edits": {key: new value, None drops}, "form": the changes in words, "listed": True when the item is to be listed, "notes": the rows to list, "answers": how many answers get a name, "why": why nothing is written when the board names no person}.
     `mod`: the model's reading of an open item (None for a closed one, whose answers are the only thing the pass writes). Pure."""
-    first = _people.first()
+    first = _members.first()
     out: dict[str, Any] = {"edits": {}, "form": "", "listed": False, "notes": [], "answers": 0, "why": ""}
     if first.placeholder:
         out["why"] = "the board names no person: nothing to stamp"
@@ -210,7 +210,7 @@ def entry_problem(side: Any) -> str:
     if not isinstance(side, dict) or not side:
         return "an entry side is a non-empty object of the keys the pass changed"
     extra = sorted(k for k in side if k not in ENTRY_KEYS)
-    return f"{', '.join(map(str, extra))} is not a key the people pass writes" if extra else ""
+    return f"{', '.join(map(str, extra))} is not a key the members pass writes" if extra else ""
 
 
 def entry_for(item: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
@@ -221,12 +221,16 @@ def entry_for(item: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def recorded(meta: dict[str, Any]) -> list[str]:
-    """Who each stored answer reads as made by (people.recorded_by), for the check that stamping changes no one's authorship."""
+    """Who each stored answer reads as made by (members.recorded_by), for the check that stamping changes no one's authorship."""
     a = meta.get("answers")
-    return [_people.recorded_by(r) for r in a] if isinstance(a, list) else []
+    return [_members.recorded_by(r) for r in a] if isinstance(a, list) else []
 
 
-# ---------------------------------------------------------------------------------------------------------------- the server's side: the ops `people` and `unpeople` of the migration route
+# The ops' first names, read as the new ones for one release: a pass the earlier script began (its undo file sends `unpeople`) stays reversible through a server that has the new names.
+RENAMED_OPS = {"people": "members", "unpeople": "unmembers"}
+
+
+# ---------------------------------------------------------------------------------------------------------------- the server's side: the ops `members` and `unmembers` of the migration route (the first names of the two, `people` and `unpeople`, are read as these for one release: RENAMED_OPS)
 # Every function takes `S`, the server module (the running server passes `stamp.PassHost`): the item lock, the file helpers and the refusal shape are the migration route's own. One item at a time under its
 # lock, the file read and replaced whole with only the keys above (and the History log) changed (stamp._stamp_write), the file's times kept (a closed item is dated by its file), a sha256 check so a writer
 # that takes no lock is never overwritten, and an undo that puts back only what the pass left.
@@ -265,7 +269,7 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
                 return {**out, "action": "moved", "why": "the item was written between the read and the replace: its write stands, and the next run stamps it"}
         return {**out, "action": "set", "why": "the first person stamped"}
     except Exception as e:  # noqa: BLE001  — one item that fails never stops the batch
-        print(f"people pass: {gid} not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        print(f"members pass: {gid} not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
@@ -312,29 +316,29 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
                 return {**out, "action": "moved", "why": "the item was written between the read and the replace: its write stands"}
         return {**out, "action": "set", "why": "the keys put back"}
     except Exception as e:  # noqa: BLE001
-        print(f"people pass: {gid} not put back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        print(f"members pass: {gid} not put back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return _mig.refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
 def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
-    """op people {items: [id, …], pass_id?, dry?} | unpeople {items: [{item, before, after, history, dropped}, …], pass_id?} (at most _mig.BATCH): the people pass over every item, open or closed. No begin and no
-    hold: each item is worked out and written under its own lock (`one`). `dry` (people only) writes nothing and answers what each item would get. One publish at the end when anything was written.
+    """op members {items: [id, …], pass_id?, dry?} | unmembers {items: [{item, before, after, history, dropped}, …], pass_id?} (at most _mig.BATCH): the members pass over every item, open or closed. No begin and no
+    hold: each item is worked out and written under its own lock (`one`). `dry` (members only) writes nothing and answers what each item would get. One publish at the end when anything was written.
     → {"op", "results": [...]}."""
     extra = [k for k in spec if k not in S._STAMP_BODY]
     if extra:
         raise ToolError(f"Refused: {op} takes op, sender, items, pass_id and dry only (got {', '.join(sorted(map(str, extra)))}): it writes the first person on what is stored without a name and nothing else")
     items = spec.get("items")
     if not isinstance(items, list) or not items or len(items) > _mig.BATCH:
-        raise ToolError(f"Refused: items is a list of 1 to {_mig.BATCH} " + ("item ids" if op == "people" else "entries {item, before, after}"))
+        raise ToolError(f"Refused: items is a list of 1 to {_mig.BATCH} " + ("item ids" if op == "members" else "entries {item, before, after}"))
     pid = str(spec.get("pass_id") or "")
     if pid and not _mig.PASS_ID_RX.fullmatch(pid):
         raise ToolError("Refused: pass_id is <YYYYMMDD-HHMMSS>-<6 hex>")
     dry = bool(spec.get("dry"))
-    if dry and op != "people":
-        raise ToolError("Refused: dry goes with people only")
+    if dry and op != "members":
+        raise ToolError("Refused: dry goes with members only")
     results: list[dict[str, Any]] = []
     for it in items:
-        if op == "unpeople":
+        if op == "unmembers":
             results.append(undo_one(S, it))
             continue
         try:

@@ -147,12 +147,12 @@ A running process reads the file again without a restart: the server on `systemc
 | `project_scopes.by_prefix.<prefix>` | none | A page key prefix mapped to a scope, e.g. `"infra/" = "infra"`. | |
 | `project_scopes.by_tag.<tag>` | none | A page's tag mapped to a scope (used when its `org` names none), e.g. `infra = "infra"`. | |
 
-## People
+## Members
 
-The people of a board are read in one place (`stackshot/core/people.py`), from the first of these that is set:
+The members of a board (the people who use it) are read in one place (`stackshot/core/members.py`), from the first of these that is set:
 
-1. `[[people]]`: one table per person, with `name`, `aliases` (a list) and `emails` (the Google addresses that sign in as that person). A name or alias is unique without regard to case, an address belongs to one person, and the list is read at start (a change takes a restart). This version serves one person, so a list of more than one is refused at start and by `doctor`, with the line "[[people]] lists more than one person: this version serves one, so keep one entry".
-2. The keys of the table above: `instance.owner`, `instance.owner_aliases` and `auth.allowed_emails`, read as a list of one person. With `[[people]]` set they are not read for a person, and the start says so.
+1. `[[members]]`: one table per member, with `name`, `aliases` (a list) and `emails` (the Google addresses that sign in as that person). A name or alias is unique without regard to case, an address belongs to one person, and the list is read at start (a change takes a restart). This version serves one member, so a list of more than one is refused at start and by `doctor`, with the line "[[members]] lists more than one member: this version serves one, so keep one entry". The table was called by another name before this release and is not read under it: a config that still has the old table is refused at start and by `doctor`, with a line that says it is now `[[members]]` and that its keys are the same.
+2. The keys of the table above: `instance.owner`, `instance.owner_aliases` and `auth.allowed_emails`, read as a list of one person. With `[[members]]` set they are not read for a person, and the start says so.
 3. Neither: one person called "the owner", with no alias and no sign-in address (`doctor` says so).
 
 A name written as a mover (`mover = "AE"`) is the person its alias belongs to, the same as the name itself.

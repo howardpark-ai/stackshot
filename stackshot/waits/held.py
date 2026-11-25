@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Any
 
 from stackshot.core import config as _cfg
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.core.lines import MSG_MAX, newline_lines
 
 KINDS = ("closed", "changed", "queue", "page-owed", "fyi", "person")
@@ -200,7 +200,7 @@ def cut_whole(text: str, n: int = WHOLE_MAX, where: str = REST_IN) -> str:
 # ----------------------------------------------------------------------------- the decision
 def _owner_mark() -> "re.Pattern[str]":
     """The mark that makes a notice the owner's: "[for <owner>]" with the instance's [instance] owner, or "needs: decision"."""
-    owner = _people.first().name
+    owner = _members.first().name
     return re.compile(r"\[for " + re.escape(owner) + r"\]|needs:\s*decision", re.I)
 
 
