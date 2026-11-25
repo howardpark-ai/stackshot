@@ -16,8 +16,8 @@ import asyncio
 import contextlib
 import logging
 import time
-import urllib.error
-import urllib.request
+import ssl
+import urllib.parse
 from dataclasses import replace
 from typing import Any
 
@@ -31,18 +31,33 @@ from stackshot.frontdoor import config as _config, identity as _identity
 
 log = logging.getLogger("stackshot.frontdoor")
 HEALTH_TIMEOUT = 5.0         # most seconds a health check waits for a backend (never longer than the backend_timeout_seconds of the config)
-_NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))      # a backend is reached directly, never through an HTTP_PROXY of the environment
 
 
-def _status_of(url: str, timeout: float = HEALTH_TIMEOUT) -> int:
-    """The HTTP status of a GET of `url` (an error status is a status; a refused connection or a timeout raises OSError)."""
-    try:
-        with _NO_PROXY.open(urllib.request.Request(url, method="GET"), timeout=timeout) as r:
-            return int(r.status)
-    except urllib.error.HTTPError as e:
-        return int(e.code)
-    except urllib.error.URLError as e:
-        raise OSError(str(e.reason)) from None
+async def _status_of(url: str, timeout: float = HEALTH_TIMEOUT) -> int:
+    """The HTTP status of a GET of `url`, read from the status line (an error status is a status; a refused connection or no answer in `timeout`
+    seconds raises OSError). `timeout` is a total deadline for the connection, the request and the status line together, kept with
+    `asyncio.wait_for` on a plain socket, so a backend that drips its answer one byte at a time is given up on at the deadline and nothing waits on
+    after it (no worker thread is held). The backend is reached directly, never through an HTTP_PROXY of the environment, and a redirect is not
+    followed: its status is the answer."""
+    async def get() -> int:
+        u = urllib.parse.urlsplit(url)
+        tls = u.scheme == "https"
+        host = u.hostname or ""
+        reader, writer = await asyncio.open_connection(
+            host, u.port or (443 if tls else 80), ssl=ssl.create_default_context() if tls else None, server_hostname=host if tls else None)
+        try:
+            path = urllib.parse.quote(u.path or "/", safe="/%:@!$&'()*+,;=~-._") + (("?" + urllib.parse.quote(u.query, safe="/%:@!$&'()*+,;=~-._?")) if u.query else "")
+            who = f"[{host}]" if ":" in host else host
+            writer.write(f"GET {path} HTTP/1.1\r\nHost: {who}{':' + str(u.port) if u.port else ''}\r\nAccept: */*\r\nConnection: close\r\n\r\n".encode("ascii"))
+            await writer.drain()
+            line = await reader.readline()
+        finally:
+            writer.close()
+        parts = line.split(None, 2)
+        if len(parts) < 2 or not parts[0].startswith(b"HTTP/") or not parts[1].isdigit():
+            raise OSError("not an HTTP answer")
+        return int(parts[1])
+    return await asyncio.wait_for(get(), timeout)
 
 
 class BackendTransport(StreamableHttpTransport):
@@ -111,7 +126,7 @@ class Backends:
         b = self.by_name[name]
         t0 = time.monotonic()
         try:
-            status = await asyncio.to_thread(_status_of, b.health_url, min(HEALTH_TIMEOUT, self.settings.backend_timeout_seconds))
+            status = await _status_of(b.health_url, min(HEALTH_TIMEOUT, self.settings.backend_timeout_seconds))
             res: dict[str, Any] = {"ok": status == 200, "status": status}
         except Exception as e:      # noqa: BLE001  (any failure of the check is the backend not answering)
             res = {"ok": False, "error": type(e).__name__}

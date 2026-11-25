@@ -48,7 +48,7 @@ Each is a tool error whose text a client shows as it is:
 
 ## A backend that does not answer
 
-Every wait for a backend is bounded by `backend_timeout_seconds` (default 10, a number above 0 and up to 300): the connection and handshake of a call, the tool listing, the reading of a backend's instructions, and each health check (which never waits longer than 5 s). A backend that accepts a connection and never answers is treated like one that refuses it: it is skipped for that request (named in the warning of a list, left out of the instructions text, `did not answer` on a call to it) and asked again at the next one, and the caller's other boards are not held by it. A tool call itself has no total limit, since a tool may run long and report progress.
+Every wait for a backend has a limit taken from `backend_timeout_seconds` (default 10, a number above 0 and up to 300): the tool listing and the reading of a backend's instructions give up after that long in total, the handshake of a call after that long once the connection is open, and each health check after the smaller of that and 5 s in total (one deadline for the connection, the request and the first line of the answer, so an answer that arrives a byte at a time is given up on at the deadline and holds no worker). The limit is not the whole cost of a request: the connection of a call is left to the system's own time for opening one before its handshake starts, and closing a connection that was given up on can add a few seconds, so allow about twice the limit as the worst case. A backend that accepts a connection and never answers is treated like one that refuses it: it is skipped for that request (named in the warning of a list, left out of the instructions text, `did not answer` on a call to it) and asked again at the next one, and the caller's other boards are not held by it. A tool call itself has no total limit, since a tool may run long and report progress.
 
 ## The instructions text
 
@@ -56,10 +56,10 @@ The front door writes its own: the `preface` of the config, a line naming the ca
 
 ## Health
 
-`GET /healthz` is open and answers JSON, one entry per backend (`ok`, the HTTP status or the error, the time in milliseconds): 200 when every backend answers its `health_url`, 503 when one does not. An answer is reused for `health_cache_seconds`; a failed call or list checks again at once.
+`GET /healthz` is open and answers JSON, one entry per backend (`ok`, the HTTP status or the error, the time in milliseconds): 200 when every backend answers its `health_url`, 503 when one does not. The status is read from the first line of the answer and a redirect is not followed (its status is the answer). An answer is reused for `health_cache_seconds`; a call that fails checks again at once, a list uses the answer it has.
 
 Streaming progress and log notifications of a tool call pass through as they arrive; the identity gate is plain ASGI and holds nothing back.
 
 ## Checked by
 
-`tests/frontdoor_scenario.py` (stand-in boards and a stand-in brain on loopback ports) covers the schema diff against a single board, the routing and every refusal text above, concurrent calls of several sessions with no cross-talk, that the caller's bearer never reaches a backend, streaming, a backend that is down, a backend that accepts a connection and never answers (initialize, list, call and `/healthz` return within the bound), a member removed from the members file on an open session, the instructions text, the signed identity, the no-caller list and the config notes.
+`tests/frontdoor_scenario.py` (stand-in boards and a stand-in brain on loopback ports) covers the schema diff against a single board, the routing and every refusal text above, concurrent calls of several sessions with no cross-talk, that the caller's bearer never reaches a backend, streaming, a backend that is down, a backend that accepts a connection and never answers (initialize, list, call and `/healthz` return within the bound), a health URL that answers a byte at a time (the list, `/healthz` and 40 lists at once return within the bound and the next member is not held), a member removed from the members file on an open session, the instructions text, the signed identity, the no-caller list and the config notes.

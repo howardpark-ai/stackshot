@@ -33,7 +33,7 @@ from fastmcp.server.middleware import Middleware
 from starlette.responses import JSONResponse
 
 from stackshot.core import config as cfgmod, frontdoor_config as fc
-from stackshot.frontdoor import app as fdapp, config as fdconf, identity as ident, instructions as fdinstr, provider as fdprov
+from stackshot.frontdoor import app as fdapp, backend as fdback, config as fdconf, identity as ident, instructions as fdinstr, provider as fdprov
 
 # ------------------------------------------------------------------------------------------------ files
 def secret_file(name, value, mode=0o600):
@@ -100,8 +100,29 @@ class Hang:
     @property
     def url(self): return f"http://127.0.0.1:{self.port}"
 
+class Drip(Hang):
+    """A listener that answers by dripping: it sends `prefix` at once, then one `fill` byte every `gap` seconds for as long as the connection stays open
+    (a health URL that answers a line and never finishes, or never finishes its first line). One thread per connection; stop() ends them all."""
+    def __init__(self, prefix=b"", gap=0.3, fill=b"y"):
+        super().__init__(); self.prefix, self.gap, self.fill = prefix, gap, fill; self.drippers = []
+    def _run(self):
+        self.sock.settimeout(0.2)
+        while not self.stopping:
+            try: c, _ = self.sock.accept()
+            except socket.timeout: continue
+            except OSError: return
+            self.conns.append(c); t = threading.Thread(target=self._drip, args=(c,), daemon=True); self.drippers.append(t); t.start()
+    def _drip(self, c):
+        try:
+            if self.prefix: c.sendall(self.prefix)
+            while not self.stopping: time.sleep(self.gap); c.sendall(self.fill)
+        except OSError: pass
+    def stop(self):
+        super().stop()
+        for t in self.drippers: t.join(5)
+
 SERVERS = []
-RECORDS = []                # one row per request that reached a stand-in's door
+RECORDS = []              # one row per request that reached a stand-in's door
 
 class Edge:
     """ASGI wrapper of a stand-in backend: records every request (header kinds, never values) and refuses what does not carry the backend's own credential."""
@@ -287,7 +308,9 @@ for label, args in (("an empty secret", (b"", "alice")), ("an empty identity", (
     try: ident.sign(*args); check(f"identity: sign refuses {label}", False)
     except ValueError: check(f"identity: sign refuses {label}", True)
 check("identity: an identity with symbols round-trips", ident.verify(S1, ident.sign(S1, "a.b+c@example.test/x y", now=5), now=5) == "a.b+c@example.test/x y")
-check("identity: the time defaults to the clock", ident.verify(S1, ident.sign(S1, "zed")) == "zed")
+_empty_body = f"{ident.VERSION}.{ident._b64(b'')}.5"       # sign() refuses an empty identity, so a value validly signed for one is built by hand
+check("identity: a value validly signed for an empty identity is no identity (None, never an empty caller)", ident.verify(S1, _empty_body + "." + ident._mac(S1, _empty_body), now=5) is None)
+check("identity: the time defaults to the clock",ident.verify(S1, ident.sign(S1, "zed")) == "zed")
 check("identity: the header name is the one the docs give", ident.HEADER == "x-stackshot-identity", ident.HEADER)
 
 # ------------------------------------------------------------------------------------------------ 2. config: notes, the settings, the secret-file reader
@@ -511,13 +534,21 @@ async def main():
         check("brain: back on the read-and-write credential the admin tools are gone again and refused", not set(ADMIN_TOOLS) & set(names) and e is not None and "is not offered to this connection" in e, (names, e))
 
     # ---- 5b. a member removed from the members file is refused at the next call, on a session that already listed its tools
+    async def board_of(c):
+        try: return json.loads(await call(c, "whoami"))["board"]
+        except Exception as e: return "refused: " + str(e)[:100]
+    async def found(c):
+        try: return await call(c, "search", {"query": "q"})
+        except Exception as e: return "refused: " + str(e)[:100]
     members_path.write_text(json.dumps({**MEMBERS, "zoe": ["a", "brain"]}))
     async with fclient("zoe") as c:
-        await c.list_tools()
-        check("revocation: before the change zoe reaches her board and the brain", json.loads(await call(c, "whoami"))["board"] == "a" and await call(c, "search", {"query": "q"}) == "hits for q")
+        try: zl, zerr = [t.name for t in await c.list_tools()], None          # a stale members file shows here, as a failed check and not as an exception
+        except Exception as e: zl, zerr = [], str(e)[:100]
+        check("revocation: a member added to the members file is let in at her next request (the file is read at each request, not once and not for a while)", zerr is None and "whoami" in zl, (zerr, zl))
+        check("revocation: before the change zoe reaches her board and the brain", await board_of(c) == "a" and await found(c) == "hits for q", (await board_of(c), await found(c)))
         members_path.write_text(json.dumps({**MEMBERS, "zoe": ["a"]}))
-        e = await refusal(c, "search", {"query": "q"})
-        check("revocation: removed from the brain only, the next brain call is refused as not offered (her board still works)", e is not None and "is not offered to this connection" in e and json.loads(await call(c, "whoami"))["board"] == "a", e)
+        e, bd = await refusal(c, "search", {"query": "q"}), await board_of(c)
+        check("revocation: removed from the brain only, the next brain call is refused as not offered (her board still works)", e is not None and "is not offered to this connection" in e and bd == "a", (e, bd))
         members_path.write_text(json.dumps(MEMBERS))
         e1, e2 = await refusal(c, "whoami"), await refusal(c, "search", {"query": "q"})
         check("revocation: removed from everything, the next call of either kind is refused as not a member", e1 == "you are not a member of any board." and e2 == "you are not a member of any board.", (e1, e2))
@@ -666,6 +697,70 @@ async def main():
         if hfront is not None: hfront.stop()
         hang.stop()
     check("hung backend: the stand-in listener and the second door are gone and their ports free", port_free(hang.port) and port_free(hfront.port), (hang.port, hfront.port))
+    members_path.write_text(json.dumps(MEMBERS))
+
+    # ---- 10c. a health URL that answers a byte at a time: the health check has a total deadline, and frees what it used (no thread is held)
+    LIMIT = 1.0
+    slow_hang, drip = Hang().start(), Drip(prefix=b"HTTP/1.1 200", gap=0.3, fill=b"0").start()           # the first line of the answer never ends
+    xslow = Drip(prefix=b"HTTP/1.1 200 OK\r\nX-Slow: ", gap=0.3).start()                                    # the first line is whole, the headers never end
+    redirect = Drip(prefix=b"HTTP/1.1 301 Moved Permanently\r\nLocation: http://127.0.0.1:9/\r\n", gap=0.3).start()
+    junk = Drip(prefix=b"this is not http\r\n", gap=0.3).start()
+    other = Drip(prefix=b"FTP/1.1 200 OK\r\n", gap=0.3).start()
+    nonum = Drip(prefix=b"HTTP/1.1 abc OK\r\n", gap=0.3).start()
+    dfront = None
+    try:
+        async def gstatus(url, guard=8):
+            """(the status, or 'ErrorName: text' when the check raised, and the seconds it took); a failure is a value here, so a broken check shows as a failed check"""
+            t0 = time.monotonic()
+            try: return await asyncio.wait_for(fdback._status_of(url, LIMIT), guard), time.monotonic() - t0
+            except BaseException as e: return f"{type(e).__name__}: {e}"[:80], time.monotonic() - t0
+        st, dt = await gstatus(xslow.url + "/healthz")
+        check(f"health GET: an answer whose first line is whole is read from that line, however slowly the rest comes ({dt:.2f} s)", st == 200 and dt < LIMIT, (st, dt))
+        await asyncio.sleep(1.5)                  # the loop runs the close; the stand-in's next two drips meet a closed socket
+        check("health GET: and the connection is closed once the status is read (the stand-in's dripping to it ends)", not any(t_.is_alive() for t_ in xslow.drippers), len(xslow.drippers))
+        st, dt = await gstatus(redirect.url + "/healthz")
+        check("health GET: a redirect is not followed, its status is the answer", st == 301 and dt < LIMIT, (st, dt))
+        st, dt = await gstatus(junk.url + "/healthz")
+        check("health GET: an answer that is not HTTP is an error", st == "OSError: not an HTTP answer", st)
+        st, dt = await gstatus(other.url + "/healthz")
+        check("health GET: an answer of another protocol with a number in it is an error too", st == "OSError: not an HTTP answer", st)
+        st, dt = await gstatus(nonum.url + "/healthz")
+        check("health GET: an HTTP status line with no number is an error", st == "OSError: not an HTTP answer", st)
+        st, dt = await gstatus(drip.url + "/healthz")
+        check(f"health GET: a first line that never ends gives up at the deadline ({dt:.2f} s), as a timeout, not at the guard", st.startswith("TimeoutError") and LIMIT <= dt < LIMIT + 1.0, (st, dt))
+        st, dt = await gstatus(slow_hang.url + "/healthz")
+        check(f"health GET: a backend that accepts and says nothing gives up at the deadline too ({dt:.2f} s)", st.startswith("TimeoutError") and LIMIT <= dt < LIMIT + 1.0, (st, dt))
+
+        dstate = {"name": "d", "kind": "board", "url": slow_hang.url + "/mcp", "health_url": drip.url + "/healthz", "token_file": board_tok_file["b"]}
+        dcfg = lambda: front_cfg(servers, backend_timeout_seconds=LIMIT, backends=[
+            {"name": "a", "kind": "board", "url": servers["a"].url + "/mcp", "token_file": board_tok_file["a"]}, dstate])
+        ddoor, dfront, dnotes = start_door(dcfg())
+        check("dripping health: the stand-in door's own config has no note", dnotes == [], dnotes)
+        members_path.write_text(json.dumps({**MEMBERS, "jo": ["a", "d"], "solo": ["a"]}))
+        async def dtimed(coro, guard=30):
+            t0 = time.monotonic()
+            try: return await asyncio.wait_for(coro, guard), None, time.monotonic() - t0
+            except BaseException as e: return None, e, time.monotonic() - t0
+        async def dlist(user):
+            async with client_to(dfront, user) as c: return [t.name for t in await c.list_tools()]
+        names, e, dt = await dtimed(dlist("jo"))
+        check(f"dripping health: a list for a member of a healthy board and the dripping backend returns within the bound ({dt:.1f} s) with the healthy board's tools",
+              e is None and dt < 4.0 and sorted(names) == sorted(single), (e, dt, names))
+        t0 = time.monotonic(); s, body = await asyncio.to_thread(http_get, dfront.url + "/healthz"); dt = time.monotonic() - t0; dh = json.loads(body)
+        check(f"dripping health: /healthz answers 503 within the bound ({dt:.1f} s), d not ok (a timeout) and a ok",
+              s == 503 and dt < 4.0 and dh["backends"]["d"]["ok"] is False and dh["backends"]["d"].get("error") == "TimeoutError" and dh["backends"]["a"]["ok"] is True, (s, dt, body))
+        t0 = time.monotonic()
+        many = await asyncio.gather(*(dtimed(dlist("jo"), 40) for _ in range(40)))
+        dt = time.monotonic() - t0
+        check(f"dripping health: 40 concurrent lists all return ({dt:.1f} s) with the healthy board's tools", all(e is None and sorted(n) == sorted(single) for n, e, _ in many) and dt < 20.0,
+              (dt, [str(e)[:80] for n, e, _ in many if e is not None][:3]))
+        names, e, dt = await dtimed(dlist("solo"))
+        check(f"dripping health: and then a list for a member of the healthy board only still answers fast ({dt:.1f} s): nothing stayed held", e is None and dt < 3.0 and sorted(names) == sorted(single), (e, dt, names))
+    finally:
+        if dfront is not None: dfront.stop()
+        for s_ in (slow_hang, drip, xslow, redirect, junk, other, nonum): s_.stop()
+    check("dripping health: the stand-in listeners and the door are gone and their ports free",
+          all(port_free(s_.port) for s_ in (slow_hang, drip, xslow, redirect, junk, other, nonum)) and port_free(dfront.port), None)
     members_path.write_text(json.dumps(MEMBERS))
 
     # ---- 11. a backend that is down
