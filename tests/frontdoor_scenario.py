@@ -317,7 +317,7 @@ e = err(fdconf.read_secret, str(T), "x"); check("secret file: a directory is ref
 big = T / "big.key"; big.write_text("x" * 70000); os.chmod(big, 0o600)
 e = err(fdconf.read_secret, str(big), "x"); check("secret file: a file over 64 KiB is refused unread", e and "larger" in e, e)
 fifo = T / "fifo.key"; os.mkfifo(fifo, 0o600)
-t0 = time.monotonic(); e = err(fdconf.read_secret, str(fifo), "x"); check("secret file: a FIFO is refused at once (no wait for a writer)", e and time.monotonic() - t0 < 2, (e, time.monotonic() - t0))
+t0 = time.monotonic(); e = err(fdconf.read_secret, str(fifo), "x"); check("secret file: a FIFO is refused at once as not a regular file (no wait for a writer)", e and "not a regular file" in e and time.monotonic() - t0 < 2, (e, time.monotonic() - t0))
 mm = T / "m1.json"; mm.write_text(json.dumps({"alice": ["a", " b ", 5, ""], " bob ": "a", "": ["a"], "c": []}))
 check("members: read as member -> [names]; a bad value is a member of nothing; a blank name is dropped", fdconf.read_members(str(mm)) == {"alice": ["a", "b"], "bob": [], "c": []}, fdconf.read_members(str(mm)))
 mm.write_text("[1]"); e = err(fdconf.read_members, str(mm)); check("members: a file that is not an object is refused", e and "JSON object" in e, e)
@@ -454,6 +454,20 @@ async def main():
           all(r["auth"] == "Bearer " + BOARD_TOK[r["backend"]] for r in rows if r["backend"] in "abc"), [r for r in rows if r["backend"] in "abc" and r["auth"] != "Bearer " + BOARD_TOK[r["backend"]]][:2])
     check("credentials: every board request carried a signed identity that verifies", all(ident.verify(IDENT_SECRET.encode(), r["identity"]) in MEMBERS for r in rows if r["backend"] in "abc"), [r["identity"] for r in rows if r["backend"] in "abc"][:2])
     check("credentials: the brain was called with its OAuth access token, never a caller's", all(r["auth"].startswith("Bearer TOK-") for r in rows if r["backend"] == "brain" and r["auth"]) and any(r["auth"] for r in rows if r["backend"] == "brain"))
+
+    # ---- 7b. the headers a backend is given, as the front door builds them; the health cache
+    from stackshot.frontdoor.backend import Backends
+    hdr, auth = door.backends._headers(SETTINGS.backends[0], "alice")
+    check("headers: the front door's own bearer is under the lower-case `authorization` key, alone (no capitalised twin)", hdr.get("authorization") == "Bearer " + BOARD_TOK["a"] and [k for k in hdr if k.lower() == "authorization"] == ["authorization"] and auth is None, hdr.keys())
+    check("headers: the caller's identity is signed under the identity header", ident.verify(IDENT_SECRET.encode(), hdr.get(ident.HEADER)) == "alice")
+    check("headers: only those two headers are set (nothing of the caller's request is copied)", sorted(hdr) == sorted(["authorization", ident.HEADER]), sorted(hdr))
+    hdr, auth = door.backends._headers(SETTINGS.backends[3], "alice")
+    check("headers: an OAuth backend gets its provider and no static authorization header", "authorization" not in hdr and auth is not None, (sorted(hdr), auth))
+    cached = Backends(fc.parse(front_cfg(servers, health_cache_seconds=60))[0])
+    n0 = len([r for r in RECORDS if r["backend"] == "a" and r["path"] == "/healthz"])
+    await cached.health("a"); await cached.health("a"); n1 = len([r for r in RECORDS if r["backend"] == "a" and r["path"] == "/healthz"])
+    await cached.health("a", force=True); n2 = len([r for r in RECORDS if r["backend"] == "a" and r["path"] == "/healthz"])
+    check("health: an answer is reused inside health_cache_seconds (one GET for two checks) and a forced check asks again", (n1 - n0, n2 - n1) == (1, 1), (n0, n1, n2))
 
     # ---- 8. streaming: progress and log events reach the client while the call runs
     ev, logs = [], []
