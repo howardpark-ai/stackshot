@@ -41,7 +41,8 @@ The one line a needs=decision item carries, all four parts in this order, joined
 characters in all: ask="Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week
 delays the demo · By: Mon Jun 8th 2099" (By is a date in words, or no date). A real choice, not "have you done X?";
 one question per ask, whose answers are the options (no ";" between decisions, no second question joined by "and say if",
-"and tell me whether", "plus"). An ask that approves or picks a design, plan, proposal, draft or spec links it in the ask
+"and tell me whether", "and also approve …" or "and, if so, …"; a bundled action or a conditional such as "merge now and,
+if green, release" is one decision and passes). An ask that approves or picks a design, plan, proposal, draft or spec links it in the ask
 itself, [design](https://…), never a path on a machine or a summary alone; a short link text keeps room under the limit.
 With no options listed the Recommend is a yes or a no. The ask line never says I, you or me.
 

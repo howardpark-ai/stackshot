@@ -131,7 +131,7 @@ _CODE_BARE_AFTER = re.compile(r"\b(?:steps?|sections?|figs?\.?|rooms?|at)\s+(?:\
 _CODE_UNIT_RX = re.compile(r"\s*(?:%|(?:years?|months?|weeks?|days?|hours?|minutes?|seconds?|mins?|secs?|percent|times?|points?|gb|mb|kb)\b)", re.I)   # "option 1 year"
 _CODE_PAREN_RX = re.compile(r"\(\s*([a-fA-F]|[1-6])\s*\)")
 _MANY_DECISIONS_RX = re.compile(r"\band\s+(?:the\s+)?(?:choices?|options?|alternatives?|decisions?)\s+(?:#?\d|\(|(?-i:[A-F]\b))", re.I)   # "and choices 2-3", not "and options stay"
-_URL_ENTITY_RX = re.compile(r"https?://\S+|&#?\w+;|\"[^\"]*\"|“[^”]*”")
+_URL_ENTITY_RX = re.compile(r"https?://\S+|&#?\w+;|\"[^\"]*\"|“[^”]{0,100}”")      # a curly quote is bounded: unclosed ones would each scan to the end of the text (a straight quote closes the one before it)
 
 
 def _code_defined(code: str, text: str, listing: str = "") -> bool:
@@ -148,32 +148,41 @@ def _code_defined(code: str, text: str, listing: str = "") -> bool:
 
 
 # A second question joined to the first in the Decide part. A decision asks ONE question and its answers are the options; "approve the design, and say if a member may be read-only" asks two
-# and the page draws a Yes / No under both. Read in the Decide part only (a Recommend, Stakes or By part is never judged), with URLs, entities and quoted words masked in place. A join counts only when
-# what follows it is a second question or a request to answer one, so "ship the login and signup pages" and "whether A or B" pass:
-#   1. a joiner (and, plus, then, but, also, a comma or semicolon before it or not) and a request to the owner: say (if, whether, which, what, how, when, who, where, why), tell me or us, let me or us know,
-#      decide, or confirm, state, advise, specify, clarify, indicate, choose, pick followed by a question word ("and say if", "and tell me whether", "and let me know", "and decide", "plus confirm whether");
-#   2. whether after and, plus or "as well as", and any other question word, or "if", after ", and" / ", plus" ("and whether", ", and which", "as well as whether");
-#   3. "and, if" and "and if so / yes / not" (a conditional follow-up question: "approve it and, if so, when");
-#   4. "and also" followed by a verb that asks for another decision (approve, accept, decline, allow, let, rename, ship, merge, add, remove, drop, keep, change, switch, use, make, move, publish, release, send);
-#   5. two question marks. A ";" followed by a space is the rule above (`; and`).
+# and the page draws a Yes / No under both. Read in the Decide part only (a Recommend, Stakes or By part is never judged), with URLs, entities and quoted words masked in place. The rule is NARROW on
+# purpose: a false refusal of a plain single decision costs more than a slip-through, so only forms that unambiguously ask for another answer count, and "ship the login and signup pages",
+# "whether A or B", "merge now and, if the run is green, release tomorrow", "retire the old queue and also move its jobs" and "wait a day and then decide" all pass:
+#   1. a joiner (and, plus, then, but, also, a comma or semicolon before it or not) and a request to the owner: say (if, whether, which, what, how, when, who, where, why), tell me or us, let me or
+#      us know, or decide, confirm, state, advise, specify, clarify, indicate followed by a question word ("and say if", "and tell me whether", "and let me know", "and decide whether", "plus confirm if");
+#   2. "and", "plus" or "as well as" before whether ("and whether", "as well as whether");
+#   3. ", and" or ", plus" before which, who or whom (", and which lane");
+#   4. "and, if so" and "and if so / yes / not / no" when it ends the clause ("approve it and, if so, when");
+#   5. "and also" before a verb that asks for another decision: approve, accept, decline, reject, allow, permit, let me or us decide;
+#   6. two question marks. A ";" followed by a space is the older rule (`; and`).
+# The text read is collapsed to single spaces and cut to its first _GATE_CHARS characters (an ask over 240 is refused before the gates), so the matching time is bounded.
+_GATE_CHARS = 2000
 _Q_WORD = r"(?:whether|if|which|what|how|when|who|whom|whose|where|why)"
-_ASK_VERB = (rf"(?:say(?:s|ing)?\s+{_Q_WORD}|tell(?:s|ing)?\s+(?:me|us)|let(?:ting)?\s+(?:me|us)\s+know|decid(?:e|es|ing)|"
-             rf"(?:confirm(?:s|ing)?|stat(?:e|es|ing)|advis(?:e|es|ing)|specif(?:y|ies|ying)|clarif(?:y|ies|ying)|indicat(?:e|es|ing)|choos(?:e|es|ing)|pick(?:s|ing)?)\s+{_Q_WORD})")
+_ASK_VERB = (rf"(?:say(?:s|ing)?\s+{_Q_WORD}|tell(?:s|ing)?\s+(?:me|us)|let(?:ting)?\s+(?:me|us)\s+know|"
+             rf"(?:decid(?:e|es|ing)|confirm(?:s|ing)?|stat(?:e|es|ing)|advis(?:e|es|ing)|specif(?:y|ies|ying)|clarif(?:y|ies|ying)|indicat(?:e|es|ing))\s+{_Q_WORD})")
 _JOIN = r"(?:and|plus|then|but|also)\b,?\s*(?:(?:also|please|then)\s+)*"
-_ALSO_VERBS = r"(?:approve|accept|decline|reject|allow|let|permit|rename|ship|merge|add|remove|drop|keep|change|switch|use|make|move|publish|release|send)"
+_ALSO_VERBS = r"(?:approve|accept|decline|reject|allow|permit|let\s+(?:me|us)\s+decide)"
 _SECOND_Q_RX = re.compile(
-    rf"[,;]?\s*\b{_JOIN}{_ASK_VERB}\b|"
-    rf"[,;]?\s*\b(?:and|plus|as\s+well\s+as)\s+(?:also\s+)?whether\b|"
-    rf",\s*(?:and|plus)\s+(?:also\s+)?{_Q_WORD}\b|"
-    rf"[,;]?\s*\band,\s*{_Q_WORD}\b|[,;]?\s*\band\s+if\s+(?:so|yes|not|no|approved|accepted)\b|"
-    rf"[,;]?\s*\bas\s+well\s+as\s+(?:{_Q_WORD}|saying|telling\s+(?:me|us)|deciding|confirming)\b|"
-    rf"[,;]?\s*\band\s+also\s+{_ALSO_VERBS}\b|"
+    rf"[,;]?\s?\b{_JOIN}{_ASK_VERB}\b|"
+    rf"[,;]?\s?\b(?:and|plus|as\s+well\s+as)\s+(?:also\s+)?whether\b|"
+    rf",\s?(?:and|plus)\s+(?:also\s+)?(?:which|who|whom)\b|"
+    rf"[,;]?\s?\band,?\s+if\s+(?:so|yes|not|no)\b(?=\s?[,;.?!]|\s?$|\s+{_Q_WORD}\b)|"
+    rf"[,;]?\s?\band\s+also\s+{_ALSO_VERBS}\b|"
     r"\?(?=[^?]*\S[^?]*\?)", re.I)
 _JOINER_LEAD_RX = re.compile(r"^[,;\s]*(?:(?:and|plus|then|but|also|as\s+well\s+as)\b[,\s]*)?(?:(?:also|please|then)\s+)*", re.I)
 
 
+def _gate_text(text: Any) -> str:
+    """The text a gate reads: single spaces, its first _GATE_CHARS characters ("" for anything that is no string)."""
+    return " ".join(text.split())[:_GATE_CHARS] if isinstance(text, str) else ""
+
+
 def _second_question(decide: str) -> tuple[str, str]:
     """(the first question, the second) when the Decide part joins a second question to the first, else ("", ""). URLs, entities and quoted words are masked in place, never cut."""
+    decide = _gate_text(decide)
     masked = _URL_ENTITY_RX.sub(lambda m: "_" * len(m.group(0)), decide)
     m = _SECOND_Q_RX.search(masked)
     if not m:
@@ -181,9 +190,8 @@ def _second_question(decide: str) -> tuple[str, str]:
     qmark = m.group(0) == "?"
     cut = m.end() if qmark else m.start()          # two question marks: the first question ends at its mark
     first = decide[:cut].strip(" ,;")
-    rest = decide[cut:]
-    second = _JOINER_LEAD_RX.sub("", rest, count=1).strip(" ,;")
-    return (first, second) if first and second else ("", "")
+    second = _JOINER_LEAD_RX.sub("", decide[cut:], count=1).strip(" ,;")
+    return first, second
 
 
 def _one_decision_kind(meta: dict[str, Any], description: str) -> tuple[str, str]:
@@ -262,7 +270,9 @@ _DESIGN_VERB = (r"(?:approv(?:e|es|ing)|accept(?:s|ing)?|adopt(?:s|ing)?|sign(?:
 _DESIGN_NOUN = r"(?:design|plan|proposal|draft|spec|specification|package|rfc|options?\s+(?:doc|document|page|paper|memo))"
 _DESIGN_NUM = r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)"
 _DESIGN_LEAD = (rf"(?<![\w-]){_DESIGN_VERB}(?:\s+[^\s·;,.?!:]+){{0,5}}?\s+(?:the|this|that|these|those|our|my|its|his|her|their|a|an)\s+")
-_DESIGN_RX = re.compile(_DESIGN_LEAD + rf"(?:[\w'’-]+\s+){{0,5}}?(?P<noun>{_DESIGN_NOUN})s?(?![\w-])(?!\s+(?:manager|lock|json|registry|index|name|version|install))", re.I)
+_DESIGN_RX = re.compile(_DESIGN_LEAD + rf"(?P<mods>(?:[\w'’-]+\s+){{0,5}}?)(?P<noun>{_DESIGN_NOUN})s?(?![\w-])(?!\.\w)(?!\s+(?:manager|lock|json|registry|index|name|version|install))", re.I)
+_PLAN_TIER_RX = re.compile(r"\b(?:pro|max|free|team|enterprise|billing|api|paid|subscription|pricing|price)\b", re.I)      # "the Pro plan" is a subscription, not a design
+_DRAFT_THING_RX = re.compile(r"\s+(?:pr|pull\s+request|release|e-?mail|message)\b", re.I)      # "the draft PR", "the draft email": a draft of a thing, not a draft design
 _DESIGN_PART_RX = re.compile(_DESIGN_LEAD + rf"(?P<noun>{_DESIGN_NUM}-part\s+[\w-]+)", re.I)
 _LINK_RX = re.compile(r"https?://[^\s)\]>]+", re.I)      # a markdown link's URL is one too
 _LINK_SHAPE = "[{noun}](<the page's link>)"
@@ -270,12 +280,19 @@ _LINK_SHAPE = "[{noun}](<the page's link>)"
 
 def _design_unlinked(meta: dict[str, Any]) -> str:
     """The noun of a design, plan, proposal, draft, spec or package the Decide part asks to approve or pick while the ask line holds no link, "" when it names none or links it."""
-    if "decision" not in _needs_kinds(meta) or _watch.asked_of(meta) or not _ar.yes_no_buttons(meta):
+    if not isinstance(meta, dict) or "decision" not in _needs_kinds(meta) or _watch.asked_of(meta) or not _ar.yes_no_buttons(meta):
         return ""
     if _LINK_RX.search(str(meta.get("ask") or "")):
         return ""
-    decide = _ar.decide_of(meta)
-    m = _DESIGN_RX.search(decide) or _DESIGN_PART_RX.search(decide)
+    decide = _gate_text(_ar.decide_of(meta))
+    for m in _DESIGN_RX.finditer(decide):
+        noun = m.group("noun").lower()
+        if noun == "plan" and _PLAN_TIER_RX.search(m.group("mods")):
+            continue
+        if noun == "draft" and _DRAFT_THING_RX.match(decide, m.end()):
+            continue
+        return re.sub(r"\s+", " ", noun)
+    m = _DESIGN_PART_RX.search(decide)
     return re.sub(r"\s+", " ", m.group("noun").lower()) if m else ""
 
 
