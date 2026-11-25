@@ -104,8 +104,8 @@ decisions. One decision per item: an ask that packs several decisions, or points
 the item does not spell out (“choices 2-3”, “2b”), is refused: split it into one item per decision and write each
 option out in words in the ask or the description, so that {{OWNER}} can decide from the item page alone. The Decide part
 asks one question, and its answers are the options: a second question joined to it (", and say if …", "and tell me
-whether …", "and decide whether …", "and whether …", ", and which …", "and, if so, …" when the clause ends there, two
-question marks) is refused: ask the first now and put the other on its own item, or fold it into the options. A bundled
+whether …", "and decide whether …", "and whether …", ", and which …", "and, if so, …" when the clause ends there, a
+second question after a question mark; "Use A? Or B?" is one question) is refused: ask the first now and put the other on its own item, or fold it into the options. A bundled
 action ("retire the queue and also allow its jobs to drain") or a conditional ("merge now and, if green, release tomorrow",
 "approve it and, if so, start Monday") is one decision and passes. An ask that approves or picks a design,
 plan, proposal, draft, spec or migration package (“approve the six-part design”) links it in the ask line itself, as

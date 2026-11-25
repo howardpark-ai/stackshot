@@ -98,9 +98,6 @@ SECOND = {
     ", and tell me whether": "ship the fix, and tell me whether to rename the repo",
     "and telling me (word form)": "ship the fix and telling me whether to rename the repo",
     "and tell us": "ship the fix and tell us whether to rename the repo",
-    "and let me know": "ship the fix and let me know the date",
-    "and let us know": "ship the fix and let us know the date",
-    "and letting me know (word form)": "ship the fix and letting me know the date",
     ", and decide whether": "ship the fix, and decide whether it has an owner",
     "and deciding whether (word form)": "ship the fix and deciding whether it has an owner",
     "and then decide whether": "ship the fix and then decide whether it has an owner",
@@ -114,7 +111,6 @@ SECOND = {
     "then say if": "ship the fix, then say if members may be read-only",
     "but say whether": "ship the fix, but say whether members may be read-only",
     "and also say if": "ship the fix and also say if members may be read-only",
-    "and please tell me": "ship the fix and please tell me the date",
     "plus say if": "ship the fix plus say if members may be read-only",
     "and whether": "ship the fix and whether to rename the repo",
     "plus whether": "ship the fix plus whether to rename the repo",
@@ -140,7 +136,7 @@ for j in ("and", "plus", "then", "but", "also"):
     check(f"1 matcher: the joiner `{j}` before `say if`", sq(f"ship the fix {j} say if members may be read-only"), j)
 QW = ("whether", "if", "which", "what", "how", "when", "who", "whom", "whose", "where", "why")
 for w in QW:
-    check(f"1 matcher: `say {w}` after a joiner", sq(f"ship the fix and say {w} it holds"), w)
+    check(f"1 matcher: `say {w}` after a joiner is a second question only for whether and if (the others are a message or a follow-up)", sq(f"ship the fix and say {w} it holds") == (w in ("whether", "if")), w)
     check(f"1 matcher: `decide {w}` after a joiner is a second question only for whether and if", sq(f"ship the fix and decide {w} it holds") == (w in ("whether", "if")), w)
 for w in ("which", "who", "whom"):
     check(f"1 matcher: `, and {w}`", sq(f"ship the fix, and {w} it holds"), w)
@@ -154,8 +150,8 @@ for w in ("if", "what", "how", "when", "whose", "where", "why"):
 for j in ("and", "plus", "as well as"):
     check(f"1 matcher: `{j} whether`", sq(f"ship the fix {j} whether to rename the repo"), j)
     check(f"1 matcher: `{j} also whether`", sq(f"ship the fix {j} also whether to rename the repo"), j)
-for v in ("say if", "say whether", "tell me", "tell us", "let me know", "let us know", "decide whether", "confirm whether", "state whether", "advise whether", "specify whether", "clarify whether",
-          "indicate whether", "saying whether", "telling me", "letting us know", "deciding whether", "confirming whether", "stating whether", "advising whether",
+for v in ("say if", "say whether", "tell me whether", "tell us if", "decide whether", "confirm whether", "state whether", "advise whether", "specify whether", "clarify whether",
+          "indicate whether", "saying whether", "telling me whether", "telling us if", "deciding whether", "confirming whether", "stating whether", "advising whether",
           "specifying whether", "clarifying whether", "indicating whether", "decides whether", "says if", "confirm if", "decide if", "state whether", "then decide whether"):
     check(f"1 matcher: `and {v}` is a second question", sq(f"ship the fix and {v} it holds"), v)
 for v in ("decide", "decide on the rollout", "confirm", "state", "advise", "specify", "clarify", "indicate", "choose which", "pick whether", "choosing", "tell", "say", "let"):
@@ -165,6 +161,30 @@ for v in ("decide", "confirm", "state", "advise", "specify", "clarify", "indicat
     for w in ("which", "what", "how", "when", "who", "whom", "whose", "where", "why"):
         check(f"1 narrow: `and {v} {w}` is one decision", not sq(f"ship the fix and {v} {w} it holds"), (v, w))
         check(f"1 narrow: `and then {v} {w}` is one decision", not sq(f"ship the fix and then {v} {w} it holds"), (v, w))
+# M2: a bundled action aimed at a third party, or a plain follow-up, is no second question (the known limit: `and say whether` to a third party is still read as one)
+M2_FINE = ("reply to Acme and say how long the fix takes", "email the customer and say what changed", "approve the spend and let me know when it lands", "ship it and tell me when it is done",
+           "ship the fix and let me know the date", "ship the fix and let us know the date", "ship the fix and letting me know the date", "ship the fix and please tell me the date",
+           "ship the fix and tell us the date", "ship the fix, and say which lane runs first", "ship the fix and say who owns it", "post the notice and tell me when", "ship the fix and say when it is live",
+           "ship the fix, then tell me what changed", "ship the fix and say why", "ship the fix and say where it went", "ship the fix and say how it went", "ship the fix and say whose it is",
+           "ship the fix and say whom to thank", "ship the fix plus say which date")
+for t in M2_FINE:
+    check(f"1 M2: `{t}` is one decision", not sq(t) and _dg._one_decision_kind({"ask": ask_of(t)}, "")[0] == "", t)
+for t in ("reply to Acme and say whether the fix is live", "ship it and tell me whether it is done", "approve the spend, and say if it lands", "ship it and, say if x", "ship it, and, say whether x"):
+    check(f"1 M2: `{t}` is still a second question (say / tell me with whether or if)", sq(t), t)
+for t in ("ship the fix and say how long it takes", "email the customer and say what changed", "approve the spend and let me know when it lands"):
+    out = mk(ask=ask_of(t))
+    check(f"1 M2 create: `{t}` is accepted", created(out), out)
+    item(70, needs=["decision"], ask=ask_of("ship the fix"), mover="Oliver", then="team-back")
+    upd(70, ask=ask_of(t))
+    check(f"1 M2 update: `{t}` is accepted on an update that writes the ask", rd(70)["metadata"]["ask"] == ask_of(t), rd(70)["metadata"].get("ask"))
+# the comma after the joiner is read (`and, say if`), and a curly or straight quote masks a join
+for t in ("ship the fix and, say if members may read", "ship the fix and, tell me whether to wait", "ship the fix, and, say whether it holds", "ship the fix;and, say if x"):
+    check(f"1 comma: `{t}` is a second question", sq(t), t)
+for t in ("ship the fix and \u201csay if members may read\u201d", "whether to ship \u201cthe fix and say if it holds\u201d now", "ship the fix and \u201ctell me whether\u201d now",
+          'ship the fix and "say if it holds"', "ship \u201ca b\u201d and \u201cc d\u201d"):
+    check(f"1 curly quote: `{t}` hides its join", not sq(t), t)
+check("1 curly quote: a join outside the quotes is still read", sq("ship \u201ca b\u201d now and say if it holds"), "")
+check("1 curly quote: the cut falls at the joiner after the quote", _dg._second_question("ship \u201ca b\u201d now, and say if it holds") == ("ship \u201ca b\u201d now", "say if it holds"), _dg._second_question("ship \u201ca b\u201d now, and say if it holds"))
 # "and also" + a verb is a bundled action, whatever the verb
 for v in ("approve", "accept", "decline", "reject", "allow", "permit", "let me decide", "let us decide", "approves", "allowing"):
     check(f"1 narrow: `and also {v}` is a bundled action, not a second question", not sq(f"ship the fix and also {v} the docs"), v)
@@ -196,7 +216,7 @@ try: mk(ask=ask_of("ship the fix, and tell me whether to rename the repo"))
 except Exception as ex: e = str(ex)
 check("1 create: the refusal quotes the first question and the second, without the joiner", "“ship the fix” and “tell me whether to rename the repo”" in e and "One decision per item" not in e, e)
 check("1 create: …and asks Oliver one question whose answers are the options", "A decision asks one question, and its answers are the options" in e and "Oliver" in e, e)
-for why in ("and say whether, no comma", ", and which", "and, if so,", "as well as whether", "and also say if", "two question marks", "and let me know", "and whether", "as well as whether"):
+for why in ("and say whether, no comma", ", and which", "and, if so,", "as well as whether", "and also say if", "two question marks", "and tell us", "and whether", "as well as whether"):
     n_ = nfiles()
     refused(f"1 create: {why} is refused", lambda: mk(ask=ask_of(SECOND[why])), *SECOND_WANT)
     check(f"1 create: {why} writes nothing", nfiles() == n_)
@@ -308,6 +328,33 @@ for why, decide in (("a doubled mark", "ship the fix?? members may read"), ("a m
 for why, decide in (("a word between", "ship the fix? may members read?"), ("a single character between", "ship the fix? x?"), ("a mark right after a word", "ship the fix?? may members read?")):
     check(f"1 matcher: {why} is a second question", sq(decide), why)
 check("1 matcher: the three marks of '? x ?' cut at the first", _dg._second_question("ship the fix? x ?")[0] == "ship the fix?", _dg._second_question("ship the fix? x ?"))
+# M1: "A? Or B?" is one question and its alternative; a mark counts only before whitespace or the end of the text
+ALT_FINE = ("Merge PR 5 now? Or wait for CI?", "Use Postgres? Or SQLite?", "Ship the fix tonight? Or hold until Monday?", "Merge the fix? Yes/No?", "Merge the fix? Yes or no?", "Merge the fix? Yes, no or later?",
+            "Merge the fix? Yes / No?", "Pick a lane? A, B or C?", "Merge it?  or wait?", "Merge it? OR wait?", "Merge it? Or? Or?", "Use A? Or B? Or C?", "Merge it? Approve/Decline?", "Merge the fix? Yes, No?")
+for t in ALT_FINE:
+    check(f"1 M1: `{t}` is one question with its alternatives", not sq(t) and _dg._one_decision_kind({"ask": ask_of(t)}, "")[0] == "", (t, _dg._second_question(t)))
+for t in ("approve foo?.py or bar?.py", "match the regex ^a?b? now", "rename a?b and c?d", "ship foo?.py? or bar?.py?", "ship the x?y? now", "what is a?b?c?d"):
+    check(f"1 M1: `{t}` holds no real question mark pair", not sq(t), (t, _dg._second_question(t)))
+for t in ("Merge it? Also should we rename the repo?", "Ship the fix? And may members read?", "Merge it? Should we rename the repo or keep it?", "Merge it? May members read it?", "Use Postgres? Rename the repo?",
+          "Merge it? Yes, and may members read?", "Merge it? Is it Friday or Monday for the date?", "Merge it? Then should we rename the repo?",
+          "Merge it? Or wait?  Also should we rename the repo?", "Merge it? Yes/No? Should we rename the repo?"):
+    check(f"1 M1: `{t}` is two separate questions", sq(t), (t, _dg._second_question(t)))
+check("1 M1: the cut of `Merge it? Or wait? And rename?` falls at the first mark that has a new question after it", _dg._second_question("Merge it? Or wait? And rename it?") == ("Merge it? Or wait?", "rename it?"),
+      _dg._second_question("Merge it? Or wait? And rename it?"))
+for t in ("Merge PR 5 now? Or wait for CI?", "Merge the fix? Yes/No?", "foo?.py or bar?.py"):
+    out = mk(ask=ask_of(t))
+    check(f"1 M1 create: `{t}` is accepted", created(out), out)
+item(71, needs=["decision"], ask=ask_of("ship the fix"), mover="Oliver", then="team-back")
+upd(71, ask=ask_of("Use Postgres? Or SQLite?"))
+check("1 M1 update: `Use Postgres? Or SQLite?` is accepted on an update that writes the ask", rd(71)["metadata"]["ask"] == ask_of("Use Postgres? Or SQLite?"), rd(71)["metadata"].get("ask"))
+# a word that only starts with "or" is no alternative; an empty option is none; the earlier of a joiner and a second question mark cuts
+for t_ in ("Merge it? Order a pizza and rename the repo?", "Merge it? Orange?", "Merge it? Ordering a pizza?", "Merge it? /rename?", "Merge it? , /rename?"):
+    check(f"1 M1: `{t_}` is a second question", sq(t_), (t_, _dg._second_question(t_)))
+check("1 M1: a joiner before two marks cuts at the joiner", _dg._second_question("ship the fix, and say if it holds? may members read?") == ("ship the fix", "say if it holds? may members read?"),
+      _dg._second_question("ship the fix, and say if it holds? may members read?"))
+check("1 M1: two marks before a joiner cut at the first mark", _dg._second_question("ship it? may we, and say if x?") == ("ship it?", "may we, and say if x?"), _dg._second_question("ship it? may we, and say if x?"))
+check("1 M1: two marks and a joiner after them cut at the first mark", _dg._second_question("ship it? may we? and say if x") == ("ship it?", "may we? and say if x"), _dg._second_question("ship it? may we? and say if x"))
+refused("1 M1 create: two separate questions are still refused", lambda: mk(ask=ask_of("Merge it? Also should we rename the repo?")), *SECOND_WANT)
 # a URL, an entity or quoted words are masked IN PLACE: nothing is cut out, so no join is made by closing a gap and the cut falls where the text says
 for why, decide in (("a URL between the joiner and the request", "ship the fix and https://example.test/a say if it holds"), ("a quote between them", 'ship the fix and "x" say if it holds'),
                     ("an entity between them", "ship the fix and &amp; say if it holds"), ("a curly quote between them", "ship the fix and \u201cx\u201d say if it holds"),
@@ -342,7 +389,7 @@ UNLINKED = {
     "a decision package": ("approve the decision package", "decision package"),
     "an options package": ("choose the options package", "options package"),
     "an options document": ("choose the options document", "options document"),
-    "a rfc": ("approve the RFC", "rfc"),
+    "an rfc": ("approve the RFC", "rfc"),
     "the six-part rollout": ("approve the six-part rollout", "six-part rollout"),
     "modifiers before the noun": ("approve the Q3 hiring and onboarding plan", "plan"),
     "go with the plan": ("go with the plan", "plan"),
@@ -493,7 +540,7 @@ for junk in (None, 5, "ask", [], ["decision"]):
     except Exception as ex: r3 = repr(ex)
     check(f"3 junk: _design_unlinked({junk!r}) does not raise", r3 == "", r3)
 # a design noun followed by a plain word is a compound; one followed by a preposition, conjunction, determiner, auxiliary or adverb (or nothing) is still the design
-for w in ("system", "tool", "tokens", "change", "sheet", "deadline", "status", "review", "update", "renewal", "meeting", "template", "library", "doc", "owner", "work"):
+for w in ("system", "tool", "tokens", "change", "sheet", "deadline", "status", "renewal", "meeting", "template", "library", "owner", "work", "rollout", "process", "budget"):
     for n in ("design", "plan", "proposal", "draft", "spec", "specification"):
         check(f"2 compound: `approve the {n} {w}` is no design asked about", dm(f"approve the {n} {w}") == "", (n, w))
 for w in ("in the link text", "below", "above", "for Q3", "of the lane", "that we wrote", "which holds", "is ready", "was sent", "and ship it", "or the other", "today", "now", "first", "then ship",
@@ -526,7 +573,7 @@ for t in ("approve the spec.json", "approve the design.md", "accept the plan.yam
 for t, n in (("approve the design.", "design"), ("approve the plan. Then ship", "plan"), ("pick the draft.", "draft")):
     check(f"2 file: `{t}` ends a sentence, a design asked about", dm(t) == n, t)
 # a draft of a thing is a compound (the draft PR, the draft e-mail ...), so it needs no rule of its own
-for t in ("review the draft PR", "approve the draft pull request", "confirm the draft release", "review the draft email", "accept the draft message", "review the draft e-mail", "review the draft notes",
+for t in ("review the draft PR", "approve the draft pull request", "confirm the draft release", "review the draft email", "accept the draft message", "review the draft e-mail",
           "approve the draft reply", "pick the draft title"):
     check(f"2 draft: `{t}` is a draft of a thing, no design asked about", dm(t) == "", t)
 check("2 draft: a draft of a design is a draft", dm("review the draft design") == "design" and dm("review the draft") == "draft" and dm("review the draft design draft") == "draft", "")
@@ -578,6 +625,70 @@ check("2 matcher: six are not", dm("approve the very big new fresh six-part home
 check("2 matcher: a verb inside another word is not the verb", dm("preview the design") == "" and dm("reaccept the design") == "", "")
 check("2 matcher: a plural s is read", dm("approve the designs") == "design" and dm("approve the proposals") == "proposal", "")
 check("2 matcher: the noun's boundary is read (planning, special, designer, drafting, packaged)", all(dm(f"approve the {w} meeting") == "" for w in ("planning", "special", "designer", "drafting", "packaged", "plan-b")), "")
+# M4: a design noun followed by a document-type word is still a design (the link is asked for); any other plain word keeps the compound exemption
+DOC_WORDS = ("doc", "docs", "document", "documents", "page", "pages", "file", "files", "text", "notes", "note", "summary", "summaries", "outline", "outlines", "diagram", "diagrams", "mockup", "mockups",
+             "review", "reviews", "writeup", "write-up", "writeups", "sketch", "sketches", "overview", "overviews", "section", "sections", "update", "updates", "version", "versions", "revision", "revisions")
+for n in ("design", "plan", "proposal", "spec", "draft"):
+    for w in DOC_WORDS:
+        check(f"2 M4: `approve the {n} {w}` is still a {n} asked about", dm(f"approve the {n} {w}") == n, (n, w, dm(f"approve the {n} {w}")))
+        check(f"2 M4: `APPROVE THE {n.upper()} {w.upper()}` in capitals", dm(f"APPROVE THE {n.upper()} {w.upper()}") == n, (n, w))
+for t, n in (("approve the design doc", "design"), ("approve the plan update", "plan"), ("approve the proposal text", "proposal"), ("approve the spec file", "spec"), ("approve the design review", "design"),
+             ("approve the design page", "design"), ("approve the design notes", "design"), ("approve the design summary", "design"), ("approve the design outline", "design"),
+             ("approve the design diagram", "design"), ("approve the design mockup", "design"), ("review the draft notes", "draft"), ("approve the design doc below", "design"), ("approve the design doc.", "design")):
+    check(f"2 M4: the issue's `{t}` needs a link", dm(t) == n, (t, dm(t)))
+    check(f"2 M4: `{t}` with a link in the ask passes", dm(t, ask=ask_of(f"{t} {MD}")) == "", t)
+for t in ("approve the design system rollout", "approve the spec change", "approve the proposal deadline", "approve the design sheet", "approve the plan rollout", "approve the draft change",
+          "approve the plan renewal", "approve the spec sheet", "approve the design tokens update", "approve the design system doc", "approve the design tool page"):
+    check(f"2 M4: `{t}` keeps the compound exemption", dm(t) == "", (t, dm(t)))
+check("2 M4: a tier plan with a document word stays a plan of a service", dm("approve the Pro plan update") == "" and dm("approve the hosting plan page") == "", "")
+check("2 M4: the `rfc doc` is an rfc", dm("approve the RFC doc") == "rfc" and dm("approve the options doc") == "options doc", "")
+refused("2 M4 create: `approve the design doc` with no link is refused", lambda: mk(ask=ask_of("approve the design doc")), *DESIGN_WANT, "design")
+out = mk(ask=ask_of(f"approve the design doc {MD}"))
+check("2 M4 create: …and with a link is accepted", created(out), out)
+out = mk(ask=ask_of("approve the design system rollout"))
+check("2 M4 create: a compound is accepted", created(out), out)
+# M3: a subscription or tier plan with a word beyond the first list, "plan:" with options and "plan for the lane" are a service, not a design
+M3_WORDS = ("ultra", "teams", "starter", "basic", "standard", "individual", "personal", "student", "unlimited", "prepaid", "growth", "developer", "hobby", "plus", "flat-rate", "metered", "pay-as-you-go",
+            "20x", "5x", "cheaper", "cheapest", "cheap", "premium", "lite")
+for t in M3_WORDS:
+    check(f"2 M3: `the {t} plan` is a subscription, not a design", dm(f"approve the {t} plan") == "", t)
+    check(f"2 M3: `the {t.upper()} plan` in capitals", dm(f"APPROVE THE {t.upper()} PLAN") == "", t)
+    for n in ("design", "proposal", "spec"):
+        check(f"2 M3: `the {t} {n}` is still a {n} asked about", dm(f"approve the {t} {n}") == n, (t, n))
+for t in ("approve the Ultra plan for the lane", "pick a plan: Pro or Max", "pick a plan: pro/max", "choose the plan: Pro, Max or Ultra", "pick the plan: Free or Pro", "approve the cheaper plan",
+          "approve the plan for the lane", "approve the plan for this account", "approve the plan for the seat", "approve the plan for our team", "approve the plan for each machine",
+          "pick a plan for my account"):
+    check(f"2 M3: `{t}` is a service plan", dm(t) == "", (t, dm(t)))
+for t in ("approve the migration plan", "approve the plan below", "approve the plan", "approve the rollout plan for Q3", "approve the plan: migrate in two steps", "approve the plan: stage it, then ship",
+          "approve the plan: phase one, phase two", "approve the plan: see below", "pick the plan for the Pro account", "approve the plan for the migration", "approve the plan for lane work", "approve the plan for lanes", "approve the plan for teamwork",
+          "approve the plan: A or B", "approve the plan:"):
+    check(f"2 M3: `{t}` is a design plan and needs a link", dm(t) == "plan", (t, dm(t)))
+for t in ("approve the Ultra plan for the lane", "pick a plan: Pro or Max", "approve the 20x plan", "approve the cheaper plan"):
+    out = mk(ask=ask_of(t))
+    check(f"2 M3 create: `{t}` needs no link and is accepted", created(out), out)
+for t_ in ("approve the plan for a lane", "approve the plan for an account", "approve the plan for one seat", "approve the plan for every machine", "approve the plan for his team", "approve the plan for her seat",
+           "approve the plan for their lane", "approve the plan for that account", "approve the plan for my machine"):
+    check(f"2 M3: `{t_}` is a service plan", dm(t_) == "", t_)
+refused("2 M3 create: `approve the migration plan` is still refused for a missing link", lambda: mk(ask=ask_of("approve the migration plan")), *DESIGN_WANT, "plan")
+refused("2 M3 create: `approve the plan below` is still refused for a missing link", lambda: mk(ask=ask_of("approve the plan below")), *DESIGN_WANT, "plan")
+# the refusal text reads a / an by the sound of the next word
+for decide, art in (("approve the RFC", "an rfc"), ("choose the options document", "an options document"), ("choose the options page", "an options page"), ("choose the option package", "an option package"),
+                    ("approve the design", "a design"), ("approve the plan", "a plan"), ("approve the spec", "a spec"), ("approve the specification", "a specification"), ("pick the proposal", "a proposal"),
+                    ("accept the draft", "a draft"), ("approve the decision package", "a decision package"), ("approve the six-part rollout", "a six-part rollout"), ("choose the options memo", "an options memo")):
+    try: _dg._gate_design_link({"needs": ["decision"], "ask": ask_of(decide)}); msg_ = ""
+    except Exception as ex: msg_ = str(ex)
+    check(f"2 grammar: `{decide}` is refused as {art}", f"this ask names {art} to approve or pick" in msg_ and f"Link the {art.split(' ', 1)[1]} in the ask" in msg_, msg_[:200])
+# the guards of _design_unlinked: an item that is no decision, a watcher's ask, options that name alternatives, a link, no ask
+ASK_D = ask_of("approve the home-brain design")
+for why, meta in (("needs team-back", {"needs": ["team-back"]}), ("needs external", {"needs": ["external"]}), ("needs empty", {"needs": []}), ("no needs", {}), ("needs None", {"needs": None})):
+    check(f"2 guard: an item with {why} is never judged", _dg._design_unlinked({**meta, "ask": ASK_D}) == "", why)
+check("2 guard: the same ask on a decision is judged", _dg._design_unlinked({"needs": ["decision"], "ask": ASK_D}) == "design", "")
+check("2 guard: a decision among other needs is judged", _dg._design_unlinked({"needs": ["external", "decision"], "ask": ASK_D}) == "design", "")
+for mark in ("relay", "dropit"):
+    check(f"2 guard: a watcher's ask (`{mark}`) is never judged", _dg._design_unlinked({"needs": ["decision"], "ask": WATCH_ASK, "watch": {"asked": mark}}) == "", mark)
+check("2 guard: options that name alternatives skip the item", _dg._design_unlinked({"needs": ["decision"], "ask": ASK_D, "options": OPT_A}) == "", "")
+check("2 guard: a link in the ask skips the item", _dg._design_unlinked({"needs": ["decision"], "ask": ask_of(f"approve the home-brain {MD}")}) == "", "")
+check("2 guard: an empty ask names no design", _dg._design_unlinked({"needs": ["decision"], "ask": ""}) == "" and _dg._design_unlinked({"needs": ["decision"]}) == "", "")
 check("2 matcher: only the Decide part is read", dm("ship the fix", ask="Decide: ship the fix · Recommend: approve the design · Stakes: the plan slips · By: no date") == "", "")
 for why in ("restart the server", "a noun list", "plan-A-only", "plan A", "the package manager", "a budget"):
     out = mk(ask=ask_of(FINE_D[why]))
@@ -659,6 +770,11 @@ BIG = {
     "repeated `approve the `": "approve the " * (3 * MB // 12),
     "repeated `and `": "and " * (MB // 2),
     "repeated `, and `": ", and " * (MB // 3),
+    "repeated `a? or `": "a? or " * (MB // 5),
+    "repeated `Yes/No? `": "Yes/No? " * (MB // 8),
+    "repeated `a?b? `": "a?b? " * (MB // 5),
+    "repeated `? a`": "? a" * (MB // 3),
+    "repeated `or, / `": " or, / " * (MB // 6) + "?",
 }
 LIMIT = 0.25
 for why, body in BIG.items():
