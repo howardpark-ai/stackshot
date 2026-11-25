@@ -454,6 +454,11 @@ switch_timeout_s = 90                               # one button press is given 
 bin = "gbrain"                                      # the gbrain command line, a name on PATH or a path (~ allowed): only a [pages] flavor = "gbrain" instance uses it (stackshot/projects/rename_page.py, stackshot/projects/page_keeper.py, the router's timeline notes). Read at start of those tools
 mirror_url = "https://github.com/example/brain/blob/main/{key}.md"
 # home = ""                                         # GBRAIN_HOME for the default brain's gbrain CLI calls; unset = the CLI's own default (the environment is left as it is). With a [[brains]] entry (and flavor = "gbrain") it is required: with none the default brain's CLI calls are refused (the CLI would run on whichever brain its own home holds); home = "~" keeps the CLI's own default (GBRAIN_HOME is a parent folder, .gbrain is appended)
+# secret_file = "~/.config/stackshot/default-brain-secret.json"   # optional: the default brain's CLI is a thin client of a remote gbrain and needs its OAuth client secret. Same rules as a [[brains]] entry's secret_file below:
+#                                                   # a path to a JSON file with a "client_secret" key (or a plain one-line file), mode 600, read at each CLI call and set as GBRAIN_REMOTE_CLIENT_SECRET in that child's
+#                                                   # environment only. A thin client: set home to the folder that holds its config (GBRAIN_HOME is a parent folder, .gbrain is appended) and secret_file to its secret;
+#                                                   # such a CLI forwards get, put and timeline-add and refuses `gbrain call` (the page store falls back to the named commands). Unset = no secret is passed
+#                                                   # (the parent's own variable of that name never reaches the CLI either way). With a secret_file but no home the secret goes to the CLI's own default home
 # shared = false                                    # true: other people's pages live in this brain too, so stackshot writes nothing of its board onto them (see [[brains]] shared)
 
 # [[brains]]: second notes brains that hold some projects' pages (stackshot/projects/brains.py). Optional: with no entry every page lives in the default brain

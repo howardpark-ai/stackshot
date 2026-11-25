@@ -85,6 +85,24 @@ copy is off the lines of a project stop following it from that verb on: turn the
   environment: the variable is removed from every child first and set only from the brain's file. A file that cannot be read, is empty, has
   no `client_secret`, or holds an unusable one (shorter than 16 characters, or with a control character) refuses the CLI calls for that brain with a line naming the path and the reason, said once per outage; the board carries
   on as with any other outage of that brain.
+- **The default brain can be a thin client too: `[gbrain] secret_file`.** `[gbrain] home` and `[gbrain] secret_file` do for the default brain what
+  `home` and `secret_file` do on a `[[brains]]` entry, with the same rules (a path with `~` allowed; JSON with a `client_secret` key or a plain
+  one-line file; mode 600; read at each CLI call; set in the child's environment only; shorter than 16 characters or a control character is unusable;
+  the value and the file's content are never printed). An example for a default brain whose CLI forwards to a remote gbrain:
+
+  ```toml
+  [gbrain]
+  home = "~/gbrain-thin"                          # the folder that holds the thin client's config (GBRAIN_HOME is a parent folder, .gbrain is appended)
+  secret_file = "~/.config/stackshot/brain-secret.json"   # {"client_secret": "<the OAuth client secret>"}, chmod 600
+  ```
+
+  Such a CLI forwards `get`, `put` and `timeline-add` and refuses `gbrain call` (see the next point; the page store falls back to the named commands
+  by itself). A `secret_file` that is mode 0644 or wider is named by `config.notes` as for an entry, and one that cannot be read, is empty, has no
+  `client_secret`, or holds an unusable one refuses the default brain's CLI calls with a line naming the path and the reason (`refused: the default
+  brain: secret_file <path> …`), said once per outage on stderr; a refused default-brain read is reported to the page's keeper like any unreadable page
+  (see above), never skipped quietly. With no `secret_file` nothing changes: no secret is passed, and the server's own variable of that name never
+  reaches any child. A `secret_file` with no `home` is not refused: the secret goes to the CLI running with its own default home (the way for a CLI
+  home that is itself a thin client); the refusal for a default brain with no `home` while a second brain is configured stays as it is and comes first.
 - **A brain that is a thin client of a remote gbrain.** Such a brain's CLI refuses `gbrain call <tool>` (error code `requires_local_engine`, "not
   routable") and forwards the named commands. A page read and a timeline line first run as `call get_page` and `call add_timeline_entry`; when
   the CLI answers with that refusal, the same read runs as `gbrain get <slug> --include-content --content-only --json` and the line as
