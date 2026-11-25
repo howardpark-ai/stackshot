@@ -1,6 +1,6 @@
 # The client contract
 
-What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, the agent state the fleet's session manager pushes (the route and what it keeps), a gap in a scheduled job, a hook's catch of a turn that signed off with no question, a failed run of a scheduled job, an item a script opens for a background agent, an item a script keeps in step with a condition, the anchors a hook adds for a pull request or an issue, a caller's own key, and pushing the agent state with the script client (the `post agent-state` verb). Back to the [README](../README.md).
+What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, the agent state the fleet's session manager pushes (the route and what it keeps), the machine list the fleet manager posts (the route, the `post machines` verb, its limits and the file it keeps), a gap in a scheduled job, a hook's catch of a turn that signed off with no question, a failed run of a scheduled job, an item a script opens for a background agent, an item a script keeps in step with a condition, the anchors a hook adds for a pull request or an issue, a caller's own key, and pushing the agent state with the script client (the `post agent-state` verb). Back to the [README](../README.md).
 
 A machine where Claude Code runs needs three things from stackshot, and no copy of the config:
 
@@ -207,6 +207,39 @@ subagents are the detail a line says and the audit ties to an item by name. 200 
 - **How the audit reads it** (`stackshot/audit/agent_state.py`): `busy` or `idle` only when the snapshot is no older than 15 minutes (`MAX_AGE_S`) and not dated more than five minutes ahead of the clock, names the agent, and its entry has `read` true and a state of busy or idle.
   Anything else (no snapshot, a torn file, a stale one, an agent it does not list, `read` false, an unknown state) is unknown, never idle: the audit writes its unknown line, flags nothing and hands nothing on. A busy agent's subagents are
   the ones the entry lists; an idle agent has none. The reader trusts `state` and does not count the subagents again.
+
+## The machine list the fleet manager posts
+
+The fleet manager knows which machines a fleet has and the server does not, so it posts its list, and the server keeps the last good one. One authenticated write, `POST /client/machines`, `Authorization: Bearer <machine token>`, the body
+
+```
+{"schema": 1, "written": <epoch s>,
+ "machines": [{"name": "<text>", "hostname": "<text>" | null, "letter": "<text>" | null, "ssh": "<text>" | null,
+               "addresses": ["<ipv4 or ipv6 text>", ...], "roles": ["sala-host" | "stackshot-host", ...], "retired": true | false, "sources": ["<text>", ...]}],
+ "not_read": ["<file name>", ...]}
+```
+
+The sender posts when the list changes and at least every few minutes, so `written` is the list's age: a reader judges how old a list may be from `written` (when the sender made it) and the server's own `received` time. The script client posts a file:
+
+```
+stackshot/fleet/client.py post machines --file <path>      # `--file -` (or a bare `-`) reads standard input; prints the server's {"ok": true, "machines": N}, exit 0
+```
+
+The file is the whole body and goes to the server byte for byte, never parsed or re-encoded by the client. The route is for a machine's token only and refuses a caller's pass; the verb sends this machine's token unless `STACKSHOT_CLIENT_PASS` is set in its environment, in which case it sends that value and the route refuses it, so the sender leaves that variable unset. A file that is missing, unreadable, not a regular file (a folder, a pipe or a device is refused without being read) or over 1,000,000 bytes, and an empty `--file` value, are refused with one line on stderr and exit 1, and nothing is sent; standard input is read to the same limit. Any answer but 200 prints the server's one-line reason on stderr and exits 1, as does a server that is not reached (`[0]`) or a machine with no token. The machine's token is taken out of any text the client prints.
+
+Answers: 200 `{"ok": true, "machines": N}` when the list was stored; 400 `{"error": "<one line>"}` for a body that does not fit, with the last good list kept; 401 without a machine token; 403 for a caller that holds a key's pass; 413 `{"error": ...}` for a body over 1,000,000 bytes; 503 on a read-only standby copy or when the file cannot be written.
+
+- **The limits.** A body that breaks any of them is refused whole (400), never clipped or partly stored.
+  - `schema` is the number 1. `written` is a finite epoch in seconds, not before Jan 1st 2020 and not more than five minutes ahead of the server's clock.
+  - `machines` is a list of at most 200 objects. Each has `name`, required text of 1 to 80 characters; `hostname`, `letter` and `ssh`, text of at most 200 characters or null (or left out); `addresses`, at most 16 texts of at most 64 characters each (kept as text, not parsed as addresses); `roles`, at most 4 entries, each `sala-host` or `stackshot-host` (a repeated role is kept once); `retired`, required, true or false; `sources`, at most 20 texts of at most 200 characters each. A list left out is empty.
+  - `not_read` is a list of at most 200 texts of at most 200 characters each (the names of the files the sender could not read); left out it is empty.
+  - Text is cleaned before it is counted and kept: control and format characters and characters that draw as nothing are taken out and runs of white space become one space. Text that cannot be written as UTF-8 (a lone surrogate) is refused.
+  - A key this page does not name is ignored and never stored.
+- **The size is judged before the body is parsed.** A declared length over 1,000,000 bytes is refused (413) before a byte is read. A body is also counted as it arrives, so a length that understates the body, or a body sent with no length, is cut off one chunk past the limit (413) and never parsed in full.
+- **The last good list.** The route keeps one list, `<paths.state>/machines-list.json` (mode 0600), holding what was validated and cleaned, `written`, `received` (the server's clock at the post) and `posted_by` (the machine the token proved). It is written whole to a temporary file beside it and renamed over the last one, so a reader sees the last list or the new one, never half of one; a post that is refused never touches it. Each good post replaces the whole list, and a post is not compared with the stored one's `written`. It is in the state folder, outside the store and the fleet folders, so a post every few minutes republishes nothing.
+- **Reading it.** `stackshot.service.machines_list.last_machines()` answers `(list, received)`, the list being `{schema, written, posted_by, machines, not_read}` and `received` epoch seconds, or `None` when there is no file or it cannot be read as a list (a missing, torn or altered file never raises).
+
+  `tool-text`: a client call only, no MCP tool changes. Code: `stackshot/service/machines_list.py`, the route in `stackshot/web/routes/client_api.py`, the verb in `stackshot/fleet/client.py`; tests: `tests/machines_list_scenario.py` (the route and the file), `tests/client_scenario.py` (its client part).
 
 ## A gap in a scheduled job
 

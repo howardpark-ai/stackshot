@@ -42,6 +42,7 @@ from stackshot.service import item_open as _item_open
 from stackshot.service import item_sync as _item_sync
 from stackshot.service import job_alert as _job_alert
 from stackshot.service import job_gap as _job_gap
+from stackshot.service import machines_list as _machines_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service.client_reads import NO_SUCH_READ as _NO_SUCH_READ
 from stackshot.service import migrations as _migrations
@@ -410,7 +411,9 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")}, digest=_messaging.digest_fyi, on_filed=_handoff.handoff_acked)}
     if what == "agent-state":   # the fleet's session manager pushes which registered agents are busy and which idle, the whole fleet in one body that replaces the last snapshot (the audit reads it)
         return _agent_state_svc.post(machine, body)
-    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | anchor-add | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result | agent-state"}
+    if what == "machines":      # the fleet manager posts its machine list; the last good one is kept in the state folder (client.py post machines)
+        return _machines_svc.post(machine, body)
+    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | anchor-add | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result | agent-state | machines"}
 
 
 async def client_write(request: Request):
@@ -425,20 +428,22 @@ async def client_write(request: Request):
         return JSONResponse({"error": _PASS_ONLY_FORM}, status_code=403, headers={"Cache-Control": "no-store"})
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
-    if what == _agent_state_svc.VERB:       # the one write whose size is capped: a whole fleet in one body, refused over the limit before it is read to the end
-        over = _agent_state_svc.too_large(request.headers.get("content-length"))
+    capped = {_agent_state_svc.VERB: (_agent_state_svc, 400), _machines_svc.VERB: (_machines_svc, 413)}.get(what)     # the writes whose size is capped: a whole fleet's report in one body, refused over the limit before it is parsed
+    if capped:
+        svc, over_status = capped
+        over = svc.too_large(request.headers.get("content-length"))       # a declared length over the cap is refused before a byte is read
         chunks: list[bytes] = []      # joined once: a running `raw += chunk` copies the whole body at every chunk
         size = 0
         if not over:
-            async for chunk in request.stream():
+            async for chunk in request.stream():      # whatever the header says, the body is read no further than one chunk past the cap
                 chunks.append(chunk)
                 size += len(chunk)
-                over = _agent_state_svc.too_large(size)
+                over = svc.too_large(size)
                 if over:
                     break
         raw = b"".join(chunks)
         if over:
-            return JSONResponse({"error": over}, status_code=400, headers={"Cache-Control": "no-store"})
+            return JSONResponse({"error": over}, status_code=over_status, headers={"Cache-Control": "no-store"})
         try:
             body = json.loads(raw)
         except Exception:
