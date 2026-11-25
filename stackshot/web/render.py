@@ -37,6 +37,7 @@ from stackshot.waits import stall as _stall   # the steps of the stall pass writ
 from stackshot.waits import handover as _hov   # a finished step handed the item on: the record behind a History line (handover.py)
 from stackshot.waits import quiet as _quiet   # what a front agent was or was not told of an item, one History line each
 from stackshot.web import whatschanged as _wc  # what changed in the tools in the last 7 days: a line in the brief
+from stackshot.core import instance as _inst   # the board's address (the brief renders on a client machine with the standard library alone: no model/ids.py here, which needs fastmcp)
 from stackshot.model import item_project as _iproj   # an item's project by its permanent id: the page key read through the id (item_project.py)
 from stackshot.projects import projects as _prj   # the project record: an agent registered there whose page line is still owed (with_pending)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
@@ -58,6 +59,11 @@ def render(data_dir: str, mode: str = "full") -> str:
 def render_all(data_dir: str) -> dict:
     """brief and full from ONE load of the store."""
     return Board(data_dir).render({"brief", "full"})
+
+
+def your_move(data_dir: str) -> list:
+    """The owner's whole Your move group, one dict per item (Board.your_move), for the client read `your-move`."""
+    return Board(data_dir).your_move()
 
 
 def receiver_type(st, k):
@@ -1510,6 +1516,18 @@ class Board:
         p = self.home_pairs()
         ym, ag, wt = (len(p[k]) for k in (_home.YOUR_MOVE, _home.AGENTS, _home.WAITING))
         return {"open": ym + ag + wt, "your_move": ym, "agents": ag, "alive": ym + ag, "waiting": wt}
+
+    def your_move(self) -> list:
+        """The whole Your move group as the client read `your-move` serves it: one dict per item, in the group's own order (`home_pairs`, the call the home page's group, board.md and the brief draw from; the brief
+        shows its first five, this shows all), {shown: the id as a person reads it, subject, url: the item's page (the path alone when the instance has no board address), ask: the open ask line or "", updated: epoch seconds of the
+        item's last write (the file's time for an item that stores none)}. No cap: the group is as long as the owner's queue."""
+        out = []
+        base = _inst.BOARD_URL.rstrip("/")
+        for r, _m in self.home_pairs()[_home.YOUR_MOVE]:
+            try: upd = float(r.get("updated") or 0) or r["_updated"].timestamp()
+            except (TypeError, ValueError): upd = r["_updated"].timestamp()
+            out.append({"shown": rid_full(r), "subject": str(r.get("subject") or ""), "url": base + id_href(r["gid"]), "ask": open_ask(r), "updated": upd})
+        return out
 
     def brief(self) -> str:
         """The few lines a session sees at start."""

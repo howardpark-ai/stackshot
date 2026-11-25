@@ -1,6 +1,6 @@
 """client_reads.py: the reads of the client API and the item facts they carry.
 
-What a machine's hooks read: the page registry, the brief, the rulebook, a page's freshness, the open items a session moves (`items?key=`) and what the end-of-turn check needs about the items a reply names
+What a machine's hooks read: the page registry, the brief, the rulebook, a page's freshness, the open items a session moves (`items?key=`), the owner's whole Your move group (`your-move`) and what the end-of-turn check needs about the items a reply names
 (`item-facts`), served to a machine that proves itself with its own token, so a client needs no checkout of the repository. `_client_get` is the one entry of the read calls (web/routes/client_api.py is the thin
 surface that serves it); `_client_items` and `_client_item_facts` read the store once per call; `_wait_fields`, `_then_label_raw`, `_item_mover_model`, `_item_mover`, `_item_mover_label`, `_basis_wait_of` and
 `_item_list` are the readers of an item's mover, its `then`, its wait and its list that those two (and the wake passes, the update's hand-over and the tools that probe an item) share.
@@ -123,6 +123,8 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
             return 200, "text/plain; charset=utf-8", _hooks().notice_report(nid)
         except ToolError as e:
             return 404, "text/plain", str(e)
+    if what == "your-move":             # the owner's whole Your move group, the home page's own list with no cap (client.py get your-move)
+        return _client_your_move()
     if what == "holds":                 # the open items on hold whose hold names no reason: read only, each mover releases its own
         return 200, "text/plain; charset=utf-8", _hooks().holds_report()
     if what == "inbox-holds":           # what is held on sessions' inboxes (fleet/inbox_holds.py): {holds: [{kind, key, origin, since, expires}]}, one key's with ?key=
@@ -134,7 +136,7 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
         return 200, "application/json", json.dumps(_inbox_holds.waiting(keys), ensure_ascii=False)
     if what == "for-you":               # the For you list: {"generated", "rows": newest first, "flags": {item: watch | mute}} (the fleet tool's items sheet reads it)
         return 200, "application/json", json.dumps(_fy.payload(_gh.shown), ensure_ascii=False)
-    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | item-record?key=<item id> | open-records?key=<session> | anchors-record | projects-record | answer?key=<item id> | notice?key=<notice id> | holds | inbox-holds[?key=<key>] | inbox-waiting?key=<name[,id]> | for-you | whoami | config | roles | state-files"
+    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | item-facts?key=<session>&ids=<id,…> | item-record?key=<item id> | open-records?key=<session> | anchors-record | projects-record | answer?key=<item id> | notice?key=<notice id> | holds | inbox-holds[?key=<key>] | inbox-waiting?key=<name[,id]> | for-you | your-move | whoami | config | roles | state-files"
 
 
 def _json_file(path: Any) -> Any:
@@ -430,6 +432,14 @@ def _client_items(key: str) -> tuple[int, str, str]:
     if not k or len(k) > 200 or any(c in k for c in "\r\n\t"):
         return 400, "text/plain", "key = the asking session: its transcript uuid, cse_ id or pane name"
     return 200, "application/json", _items_view().body_for(k)
+
+
+def _client_your_move() -> tuple[int, str, str]:
+    """`your-move`: every open item in the owner's Your move group, whoever the item's session mover is or whether it has one -> {"items": [{shown, subject, url, ask, updated}]}, in the order the home page draws the
+    group (the brief's first five lines are the head of the same list). The group is the renderer's own (`Board.your_move`, built on `home_pairs`, the call the home page, board.md and the brief all take their lists from), so
+    this read has no selection rule of its own and cannot drift from them. `ask` is the open ask line, "" for an item with none; `updated` is the item's last write in epoch seconds. No cap: the group is as long as the queue,
+    and a row is a few hundred bytes. An empty group is `{"items": []}`."""
+    return 200, "application/json", json.dumps({"items": _hooks().rmod_your_move(str(_store.STORE))}, ensure_ascii=False)
 
 
 def _then_label_raw(item: dict[str, Any]) -> str:

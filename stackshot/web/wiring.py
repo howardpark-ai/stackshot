@@ -410,6 +410,7 @@ def install_late() -> None:
         rmod_recycle_due=lambda *a, **k: _rmod.recycle_due(*a, **k),
         rmod_render=lambda *a, **k: _rmod.render(*a, **k),
         rmod_waits_recycle=lambda *a, **k: _rmod.waits_recycle(*a, **k),
+        rmod_your_move=lambda *a, **k: _rmod.your_move(*a, **k),
         rmod_when_words=lambda *a, **k: _rmod.when_words(*a, **k),
         rules_text=_late_in(_rules_tool, "_rules_text"),
         scoped_anchors=_late_in(_item_read, "_scoped_anchors"),

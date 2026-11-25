@@ -46,6 +46,7 @@ class Hooks:
     rmod_recycle_due: Callable[..., Any]  # web.render.recycle_due
     rmod_render: Callable[..., Any]  # web.render.render
     rmod_waits_recycle: Callable[..., Any]  # web.render.waits_recycle
+    rmod_your_move: Callable[..., Any]  # web.render.your_move
     rmod_when_words: Callable[..., Any]  # web.render.when_words
     rules_text: Callable[..., Any]  # web.tools.rules._rules_text
     scoped_anchors: Callable[..., Any]  # item_read._scoped_anchors

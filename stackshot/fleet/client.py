@@ -18,7 +18,7 @@ runs on every box.
                                 before the server wrote one), one line each, so the item's mover can release them one by one
                                 (update clear_hold=true). Reads only: nothing is released here. Exit 0 listed · 1 not reached.
   client.py get <read> [key]    registry | rules | brief | page-ts <page key | project id> | items <session> | item-record <id> | open-records <session> | anchors-record | projects-record | project <id | page key | slug> | holds |
-                                answer <board#N> (below) | for-you (below) | whoami | config | roles | state-files — read from the server with this machine's token (<secrets>/client.token);
+                                answer <board#N> (below) | for-you (below) | your-move (below) | whoami | config | roles | state-files — read from the server with this machine's token (<secrets>/client.token);
                                 config = the instance's non-secret settings;
                                 roles = every session's role, {"generated": <UTC>, "sessions": {name: {role, project}}}; an agent
                                 the project record holds whose page line is still owed is listed under its project like a page's, front
@@ -59,6 +59,10 @@ runs on every box.
                                 A row: {id, kind (closed | reopened | decision | check_failed | due), item ("board#N"), project, what (one line), url, urgent, ts (epoch), when (ISO), slacked}. `flags` are his own
                                 Watch / Mute settings on items (an item with no flag is in neither); "watch" adds an item that is not watched by
                                 default, "mute" stops rows for it. A row leaves the list when he marks it seen on the board. Reads only.
+                                Exit 0 · 1 no token or not reached.
+  client.py get your-move       every open item in {OWNER}'s Your move group, as JSON: {"items": [{shown ("board#N"), subject, url (the item's page), ask (the open ask line, "" for none), updated (epoch seconds
+                                of the item's last write)}]}. It is the home page's own list with no cap, in the home page's order (the item that has been his longest first; `get brief` shows the first
+                                five lines of the same list), and holds every item whose mover is him, whichever session it names or whether it names one. An empty group is {"items": []}. Reads only.
                                 Exit 0 · 1 no token or not reached.
   client.py post project-agent <project> <name> --role <role> (--front | --back) [--surface sala|slack] --mandate "<one line>" [--sender <session id | label>]
                                 ask to list a new agent of a project (<project> = its id, page key or bare slug). --surface is where a front agent talks with him: sala (the
@@ -470,7 +474,7 @@ CLIENTS = os.path.join(SECRETS, "clients.json")
 TOKENS = os.path.join(SECRETS, "client-tokens")
 TOKEN = os.path.join(SECRETS, "client.token")
 URLF = os.path.join(SECRETS, "client.url")
-READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "item-record", "open-records", "anchors-record", "projects-record", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you", "inbox-holds", "inbox-waiting")
+READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "item-record", "open-records", "anchors-record", "projects-record", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you", "your-move", "inbox-holds", "inbox-waiting")
 
 
 def _write_private(path: str, text: str) -> None:

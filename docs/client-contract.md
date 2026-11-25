@@ -1,6 +1,6 @@
 # The client contract
 
-What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, a pane waiting in its terminal, the agent state the fleet's session manager pushes (the route and what it keeps), the machine list the fleet manager posts (the route, the `post machines` verb, its limits and the file it keeps), a gap in a scheduled job, a hook's catch of a turn that signed off with no question, a failed run of a scheduled job, an item a script opens for a background agent, an item a script keeps in step with a condition, the anchors a hook adds for a pull request or an issue, a caller's own key, and pushing the agent state with the script client (the `post agent-state` verb). Back to the [README](../README.md).
+What this page covers: what a machine needs from stackshot, setup-run reports, permanent session ids, filing a question and reading the answer, the client item and For you routes, the owner's whole Your move group, a pane waiting in its terminal, the agent state the fleet's session manager pushes (the route and what it keeps), the machine list the fleet manager posts (the route, the `post machines` verb, its limits and the file it keeps), a gap in a scheduled job, a hook's catch of a turn that signed off with no question, a failed run of a scheduled job, an item a script opens for a background agent, an item a script keeps in step with a condition, the anchors a hook adds for a pull request or an issue, a caller's own key, and pushing the agent state with the script client (the `post agent-state` verb). Back to the [README](../README.md).
 
 A machine where Claude Code runs needs three things from stackshot, and no copy of the config:
 
@@ -154,6 +154,25 @@ Underneath it is one authenticated write:
 - `POST /client/items/{key}/watch`, the same token, body `{"state": "watch" | "mute" | "default", "sender": "<label>"}`. `{key}` is an item as shown
   (`board%23N` in the path, or `N`) or its store id, read the way the other client routes read an id. 200 `{"ok": true, "item": "board#N", "state": "<the
   new state>", "flags": {<the whole map, as in GET /client/for-you>}}` (`default` removes the flag). 400 a bad `state` or `sender`; 401; 403 as above; 404 an unknown item.
+
+## The owner's whole Your move group
+
+`GET /client/your-move` returns every open item that is the owner's move now, for a page that lists them all: `get brief` stops at five lines of the group, and `items?key=<session>` is the open items one session moves, so
+it leaves out an item that names no session. This read has no key and takes no query.
+
+- **Auth.** `Authorization: Bearer <machine token>`, as for every read of `/client`: no token, an unknown or revoked token, a Basic credential or the token in the query string is 401. A caller's pass (docs, *A caller's own key*)
+  opens only the form's calls and is 401 here. A read-only standby copy serves it like any other read.
+- **Shape.** 200 `{"items": [{"shown", "subject", "url", "ask", "updated"}]}`, `Cache-Control: no-store`. `shown` is the id as a person reads it (`board#N`); `subject` is the item's subject; `url` is the item's page under
+  the instance's board address (`/items/<n>` alone when the instance has none); `ask` is the open ask line of a decision the owner is asked, and the empty string for an item with none (a step of his, or a decision whose ask is no longer open);
+  `updated` is the item's last write, in epoch seconds (the item file's time for an old item that stores none). An empty group is `{"items": []}`, never an error.
+- **Which items.** The group the home page draws under its Your move heading: an open item that is alive with the owner as its mover, by the item model's reading and the board's queue rule. Whether the item names a session,
+  and which, plays no part. It is built from the call the home page, `board.md` and the brief take their lists from (`home_pairs` of the board renderer), so the three cannot disagree; a suite compares this read with the page's own group.
+- **Order.** The group's order, which is the home page's: the item that has been the owner's longest first (the age the page paints amber past two days and red past five), items of one age by due date, then by id. It is not
+  newest first; `get brief` shows the first five of the same order.
+- **Size.** No cap and no truncation flag: a row is the subject and one ask line (at most 240 characters), so the answer grows with the owner's queue and stays small next to `open-records`, which does cap.
+- **What is not in it.** Items of the other two lists (an agent's move, a wait), closed items, the item's description, steps, mover or project, and anything a session needs for its own board check (that is `items?key=`). A page that
+  needs more of one item reads it by its id (`item-record`).
+- `stackshot/fleet/client.py get your-move` prints the JSON and exits 0, or exits 1 with `[<status>] <reason>` when there is no token or the server is not reached. It is answered off the event loop, as `items` is, since it renders the board.
 
 ## A pane waiting in its terminal
 
