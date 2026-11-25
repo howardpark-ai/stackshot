@@ -354,6 +354,10 @@ Measured on one test box, the real repository (about 590 Python files), `select`
 17.7 s before, 1.5 s after a warm (the warm itself, once, 14 s on an empty folder and 2.5 s when the records of the merge before are kept; a second warm 0.25 s); the first call for
 the branch 2.1, 2.2 and 2.2 s before, 1.3, 1.4 and 1.5 s now; a repeat call for the same branch 0.5 to 0.7 s before (its tree entry had been kept), 1.3 to 1.5 s now, the price of not writing it.
 The output of select and audit is the same with no cache, a cold folder, a warmed one and a branch over it, on twelve ranges of this repository's history, four audits and the branches.
+
+A commit this checkout lacks (the map's, in a copy of the tree sent without history) is fetched once from `origin`, by a call that cannot ask anything of a terminal and is ended after FETCH_TIMEOUT seconds
+(SUITEMAP_FETCH_TIMEOUT: a number above 0, any other value is an error, checked when a command starts). Without that an ssh remote with no key or known host asks on the terminal and `select` never returned;
+now the commit stays missing, and `select` says so and picks every suite at once.
 """
 import argparse, ast, atexit, collections, contextlib, datetime, difflib, fcntl, hashlib, io, json, os, pickle, re, shutil, signal, stat, subprocess, sys, tempfile, time, tomllib, zlib
 
@@ -2505,10 +2509,45 @@ def measure(args):
     return fail
 
 
+FETCH_TIMEOUT = 60   # seconds `have` waits for its one fetch (SUITEMAP_FETCH_TIMEOUT)
+
+
+def fetch_timeout():
+    """seconds a fetch of a missing commit may take (default FETCH_TIMEOUT, or SUITEMAP_FETCH_TIMEOUT: a positive number; any other value is an error, checked when a command starts)"""
+    v = os.environ.get("SUITEMAP_FETCH_TIMEOUT", "").strip()
+    if not v:
+        return FETCH_TIMEOUT
+    try:
+        t = float(v)
+    except ValueError:
+        t = 0
+    if not t > 0 or t == float("inf"):
+        raise SystemExit(f"suitemap: SUITEMAP_FETCH_TIMEOUT={os.environ.get('SUITEMAP_FETCH_TIMEOUT')!r} is not a number of seconds above 0")
+    return t
+
+
+def fetch_commit(commit):
+    """one `git fetch` of a commit that is not here, that can neither prompt nor outlast fetch_timeout(). A copy of the tree sent to a test runner has an `origin` whose URL is the checkout's
+    (ssh, for GitHub) and none of the checkout's keys or known hosts: an ssh that finds a terminal asks about the host key there and waits for ever, and a network that drops the packets
+    leaves it as long. So it runs in a session of its own (no controlling terminal to ask on, so ssh fails at once), with nothing on stdin and nothing asked of the terminal by git, and the
+    whole group is killed at the timeout (ssh is git's child: killing git alone leaves it holding the call). A failure of any kind is the same as a commit that is not there"""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    p = subprocess.Popen(["git", "-C", ROOT, "fetch", "--quiet", "--no-tags", "--depth=1", "origin", commit], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, env=env, start_new_session=True)
+    try:
+        p.wait(timeout=fetch_timeout())
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.wait()
+
+
 def have(commit):
     """True when the commit is in the checkout, fetching it once when it is not (CI checks out one commit)"""
     if git("cat-file", "-e", f"{commit}^{{commit}}") is None:
-        git("fetch", "--quiet", "--no-tags", "--depth=1", "origin", commit)
+        fetch_commit(commit)
     return git("cat-file", "-e", f"{commit}^{{commit}}") is not None
 
 
@@ -3448,6 +3487,7 @@ def main():
     route_rule()
     class_rule()
     cache_switch()
+    fetch_timeout()   # a typo in SUITEMAP_FETCH_TIMEOUT is an error at once, not a silent default
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0
