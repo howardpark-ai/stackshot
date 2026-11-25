@@ -298,6 +298,14 @@ def tool(*a, env=None):
 
 r = tool("list")
 check("list: the four suites, sorted", r.stdout.split() == ["a", "b", "c", "z"], (r.stdout, r.stderr))
+# `run` with no suite named loops over nothing: it must not read as a green run (a launch error, a variable that expanded to nothing, an empty selection nobody guarded)
+r = tool("run", "-T", "900")
+check("run: no suite named exits 2 with one line on stderr naming the cause (no suites named; pass names or use select), runs nothing and prints nothing on stdout",
+      r.returncode == 2 and r.stdout == "" and r.stderr.count("\n") == 1 and "no suites were named" in r.stderr and "use `select`" in r.stderr, (r.returncode, r.stdout, r.stderr))
+r = tool("run", "-T", "120", "z")
+check("run: a named suite still runs and passes (exit 0, its header on stdout, no complaint on stderr)", r.returncode == 0 and "== z" in r.stdout and "no suites" not in r.stderr, (r.returncode, r.stdout[-300:], r.stderr[-300:]))
+r = tool("run", "--help")
+check("run --help says that no suite named is an error", r.returncode == 0 and "no suite named" in " ".join(r.stdout.split()) and "exits 2" in " ".join(r.stdout.split()), r.stdout)
 MAP = T / "map.json"
 r = tool("measure", "--map", str(MAP), "-T", "120")
 check("measure: every suite passes measured and the map is written", r.returncode == 0 and MAP.exists(), (r.stdout, r.stderr[-1500:]))

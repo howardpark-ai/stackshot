@@ -139,6 +139,9 @@ rc, out, err, calls = run([RS, "fail"], cfg=f"{plain}\n")
 check("a launcher without the execute bit: the same line, and a failing suite's exit code stays",
       rc == 1 and out == LOCAL["fail"][1] and err.strip() == f"test launcher {plain} is not executable: running here", (rc, err))
 rc, out, err, calls = run(SM + ["run", "pass"], cfg=f"{BAD}\n")
+rc, out, err, calls = run(SM + ["run", "-T", "900"], cfg=f"{STUB}\n")
+check("suitemap.py run with no suite named is refused where it was typed: exit 2, one line on stderr, the launcher not called",
+      rc == 2 and calls == [] and out == b"" and err.count("no suites were named") == 1 and err.count("\n") == 1, (rc, out, err, calls))
 check("suitemap.py run with a launcher that is not there: the line is said once for the whole run, the suite still runs",
       rc == 0 and b"ok: pass suite" in out and err.count("is not executable") == 1, (rc, err))
 for label, text in (("a comment-only file", "# nothing here\n   # nor here\n"), ("an empty file", ""), ("a file of blank lines", "\n  \n")):
