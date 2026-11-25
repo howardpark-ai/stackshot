@@ -570,7 +570,26 @@ check("11 `_update` is a thin wrapper over the service's entry, and lives in ser
 check("11 the update tool still goes through `_update` (its own checks stay on the server)", any(isinstance(c, ast.Name) and c.id == "_update" for c in ast.walk(tools["stackshot_update"])), None)
 check("11 the tools' bodies stay short", all(len(ast.get_source_segment(_tool_src_of[n], tools[n]).splitlines()) < 400 for n in ("stackshot_complete", "stackshot_confirm")) and len(ast.get_source_segment(src, _upd_fn).splitlines()) < 12, None)
 
+# ---- stage 5: the write gate for several members (a list of two put where members() reads it); with one member it is no gate at all
+from stackshot.core import members as _mem5
+from stackshot.model import member_gates as _mg5
+_DEC = {"needs": ["decision"], "ask": "Decide: x · Recommend: y · Stakes: z · By: no date"}
+def _refused5(meta):
+    try:
+        _mg5.gate_members(meta); return ""
+    except ToolError as e:
+        return str(e)
+check("stage 5 gate: with one member nothing is refused (a decision, a step and a `you:` line name no one)", all(_refused5(m) == "" for m in (_DEC, {"state": "your-step", "step": "do it"}, {"next": "you: look"})), None)
+_mem5._seen = (_mem5._inputs(None), [_mem5.Person("Oliver"), _mem5.Person("Sam", ("SM",))])
+try:
+    check("stage 5 gate: with two members a decision or step that names none, and a `you:` line, are refused naming the members",
+          all("Oliver, Sam" in _refused5(m) for m in (_DEC, {"state": "your-step", "step": "do it"}, {"next": "you: look"})), [_refused5(m) for m in (_DEC, {"next": "you: look"})])
+    check("stage 5 gate: a decision whose mover is a member (an alias too), or a step that opens with one, is taken; an ask beside another member's step is refused",
+          _refused5({**_DEC, "mover": "SM"}) == "" and _refused5({"state": "your-step", "step": "Sam: do it"}) == "" and "different members" in _refused5({**_DEC, "mover": "Sam", "step": "Oliver: do it"}), None)
+finally:
+    _mem5._seen = None
+
 writes.save = real_save
-print(f"update write scenario: {len(ran) - len(fails)}/{len(ran)} checks")
+print(f"update write scenario:{len(ran) - len(fails)}/{len(ran)} checks")
 if fails: print(f"FAILED {len(fails)}"); sys.exit(1)
 print(f"ok: update write scenario, {len(ran)} checks")

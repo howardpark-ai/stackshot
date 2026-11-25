@@ -54,13 +54,18 @@ class Person:
         return self.aliases if self.placeholder else (self.name, *self.aliases)
 
 
+def _one_line(text: Any) -> str:
+    """A name or an alias as the list keeps it: white space collapsed to single spaces, so `person_of`, `opener_person`, `names()` and the uniqueness check all read the same words."""
+    return " ".join(str(text or "").split())
+
+
 def _alias_list(raw: Any, name: str) -> tuple[str, ...]:
-    """The aliases of a person: text stripped, no empty one, none equal to the name or to `you` (a line `you: …` is anyone's own), no repeat; [] when `raw` is no list."""
+    """The aliases of a person: text on one line, no empty one, none equal to the name or to `you` (a line `you: …` is anyone's own), no repeat; [] when `raw` is no list."""
     if not isinstance(raw, list):
         return ()
     out: list[str] = []
     for a in raw:
-        a = str(a).strip()
+        a = _one_line(a)
         if a and a != name and a not in out and a.lower() != "you":
             out.append(a)
     return tuple(out)
@@ -82,10 +87,10 @@ def _build(raw: tuple[Any, Any, Any, Any]) -> list[Person]:
         out = []
         for t in listed:
             t = t if isinstance(t, dict) else {}
-            name = str(t.get("name") or "").strip()
+            name = _one_line(t.get("name"))
             out.append(Person(name, _alias_list(t.get("aliases"), name), _address_list(t.get("emails"))))
         return out
-    name = str(owner or "").strip()
+    name = _one_line(owner)
     return [Person(name or PLACEHOLDER, _alias_list(aliases, name or PLACEHOLDER), _address_list(emails), declared=bool(name))]
 
 
@@ -200,21 +205,36 @@ def opener_person(line: Any) -> Person | None:
     return first()          # the only opener left is `you`
 
 
+def _kind_word(v: Any) -> str:
+    """What a value is, in words a config's writer uses (never a Python type name)."""
+    if isinstance(v, bool):
+        return "true or false"
+    if isinstance(v, (int, float)):
+        return "a number"
+    if isinstance(v, dict):
+        return "a table"
+    if isinstance(v, list):
+        return "a list"
+    if isinstance(v, str):
+        return "text"
+    return "another kind of value"
+
+
 def _not_text(i: int, t: dict[str, Any]) -> list[str]:
     """One line per value of entry `i` that is no text: a name that is no string, an `aliases` or `emails` that is no list, an alias or an address in them that is no string. `build` would read such a value as its
     text (a number as digits) or drop it, so the check says so instead."""
     out: list[str] = []
     if "name" in t and not isinstance(t["name"], str):
-        out.append(f"[[members]] entry {i}: name is not text ({type(t['name']).__name__}): write it as a quoted string")
+        out.append(f"[[members]] entry {i}: name is not text ({_kind_word(t['name'])}): write it as a quoted string")
     for key in ("aliases", "emails"):
         if key not in t:
             continue
         if not isinstance(t[key], list):
-            out.append(f"[[members]] entry {i}: {key} is not a list ({type(t[key]).__name__}): write it as a list of quoted strings")
+            out.append(f"[[members]] entry {i}: {key} is not a list ({_kind_word(t[key])}): write it as a list of quoted strings")
             continue
         for n, v in enumerate(t[key], 1):
             if not isinstance(v, str):
-                out.append(f"[[members]] entry {i}: {key} item {n} is not text ({type(v).__name__}): write each as a quoted string")
+                out.append(f"[[members]] entry {i}: {key} item {n} is not text ({_kind_word(v)}): write each as a quoted string")
     return out
 
 
@@ -235,7 +255,7 @@ def problems(cfg: dict[str, Any] | None = None) -> list[str]:
         if bad:                         # a value that is no text is told, never coerced or dropped; the entry's other checks wait until it is fixed
             out += bad
             continue
-        name = str(t.get("name") or "").strip()
+        name = _one_line(t.get("name"))
         if not name:
             out.append(f"[[members]] entry {i} has no name")
             continue
@@ -245,13 +265,14 @@ def problems(cfg: dict[str, Any] | None = None) -> list[str]:
                 out.append(f'[[members]] entry {i}: "{k}" is already the name or an alias of entry {seen_names[k.casefold()]} (names and aliases are unique without regard to case)')
             else:
                 seen_names.setdefault(k.casefold(), i)
+        said: set[str] = set()                  # an address written three times in one entry is told once
         for e in _address_list(t.get("emails")):
             if e in seen_mail and seen_mail[e] == i:
-                out.append(f'[[members]] entry {i}: the address "{e}" is written twice in its own emails (keep it once)')
+                if e not in said:
+                    said.add(e)
+                    out.append(f'[[members]] entry {i}: the address "{e}" is written twice in its emails (keep it once)')
             elif e in seen_mail:
                 out.append(f'[[members]] entry {i}: the address "{e}" is already entry {seen_mail[e]}\'s')
             else:
                 seen_mail[e] = i
-    if len(listed) > 1:
-        out.append("[[members]] lists more than one member: this version serves one, so keep one entry")
     return out

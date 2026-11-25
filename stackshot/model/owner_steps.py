@@ -43,10 +43,13 @@ def is_named(text: Any) -> bool:
     return bool(nm) and _model.is_owner(nm)
 
 
-def line_of(text: Any) -> str:
-    """The step the server makes for `text`: `<owner>: <text on one line>`. A text that already opens with his name (is_named: any case, a role in parentheses, a list marker or bold marks around it,
-    however many times) gets none put in front: it reads the same written with the name or without."""
-    return f"{_model.owner_display()}: {_steps.without_owner(text)}"
+def line_of(text: Any, meta: dict[str, Any] | None = None) -> str:
+    """The step the server makes for `text`: `<owner>: <text on one line>`, the owner being the item's member (`meta`: the item's metadata; the first member when none is given). A text that already
+    opens with a member's name (is_named: any case, a role in parentheses, a list marker or bold marks around it, however many times) gets none put in front: it reads the same written with the
+    name or without, and the line keeps the member it opens with."""
+    nm = _steps.opener(text)
+    who = _model.norm_who(nm) if nm and _model.is_owner(nm) else _model.owner_display(meta)
+    return f"{who}: {_steps.without_owner(text)}"
 
 
 def same_line(a: Any, b: Any) -> bool:
@@ -111,7 +114,7 @@ def ensure(meta: dict[str, Any], text: Any, keeper: str, by: str, at: float, wri
     wrote is adopted), "added" when the step was added at the end (where it was asked), "reworded" when the server's step said something else (the ask changed): the old one is dropped by `by` and the
     new one added, N3. `writer` is the name the line is written under (the server's, not a session's)."""
     cl = _steps.view(meta, keeper=keeper)
-    want = line_of(text)
+    want = line_of(text, meta)
     rec = _steps.clean(meta.get(KEY))
     mine = _same(cl, rec, alike=False) if rec else []
     out = "added"
@@ -136,7 +139,7 @@ def drop_open(meta: dict[str, Any], keeper: str, by: str, at: float, also: str =
     """The item no longer waits on him (a session withdrew the ask or the step, or moved the item on): the server's step (metadata.owner_step) and any open line that says what the item's old ask did (`also`: the
     text of that ask, for an item that asked before the server made his steps) are dropped by `by`, and leave next. A `<owner>:` line a session wrote about something else stays. → the first lines dropped."""
     cl = _steps.view(meta, keeper=keeper)
-    idx = _same(cl, meta.get(KEY), line_of(also) if also else "")
+    idx = _same(cl, meta.get(KEY), line_of(also, meta) if also else "")
     if not idx:
         if meta.pop(KEY, None) is not None and "steps" in meta:
             _put_steps(meta, cl)
@@ -168,11 +171,11 @@ def tick(meta: dict[str, Any], keeper: str, by: str, at: float, answer: str, mak
     cl = _steps.view(meta, keeper=keeper)
     rec = _steps.clean(meta.get(KEY))
     if apart:
-        idx = [i for i in (_same(cl, line_of(make), alike=False) if make else []) if _steps.key(cl[i]["text"]) != _steps.key(rec)]
+        idx = [i for i in (_same(cl, line_of(make, meta), alike=False) if make else []) if _steps.key(cl[i]["text"]) != _steps.key(rec)]
     else:
-        idx = (_same(cl, rec) if rec else []) or (_same(cl, line_of(make)) if make else [])
+        idx = (_same(cl, rec) if rec else []) or (_same(cl, line_of(make, meta)) if make else [])
     if not idx and make and add:
-        want = line_of(make)
+        want = line_of(make, meta)
         _nl.append(meta, want, writer, keeper)
         cl.append({"text": want, "status": _steps.OPEN, "by": "", "at": 0})
         idx = [len(cl) - 1]
@@ -187,13 +190,13 @@ def tick(meta: dict[str, Any], keeper: str, by: str, at: float, answer: str, mak
     return out
 
 
-def refuse_done(steps_old: list[dict[str, Any]], done_ix: list[int], recorded: Any = "", want: Any = "") -> str:
+def refuse_done(steps_old: list[dict[str, Any]], done_ix: list[int], recorded: Any = "", want: Any = "", meta: dict[str, Any] | None = None) -> str:
     """The refusal text (without its `Refused: `) for a `done` that names his step, "" when none does (N4: only his answer ticks it). His step is the one the server made (`recorded`, metadata.owner_step) and an open
     line that says what the ask does (`want`); a `<owner>:` line a session wrote about something else is the session's to tick."""
-    keys = {_steps.owner_key(t) for t in (recorded, line_of(want) if want else "") if _steps.clean(t)}
+    keys = {_steps.owner_key(t) for t in (recorded, line_of(want, meta) if want else "") if _steps.clean(t)}
     mine = [i for i in done_ix if steps_old[i]["status"] == _steps.OPEN and is_named(steps_old[i]["text"]) and _steps.owner_key(steps_old[i]["text"]) in keys]
     if not mine:
         return ""
     i = mine[0]
-    return (f"done names step {i + 1} ({_steps.first_line(steps_old[i]['text'])[:90]}), which is {_model.owner_display()}'s: only his answer on the board ticks it, and a session cannot tick it for him. "
+    return (f"done names step {i + 1} ({_steps.first_line(steps_old[i]['text'])[:90]}), which is {_model.norm_who(_steps.opener(steps_old[i]['text']))}'s: only his answer on the board ticks it, and a session cannot tick it for him. "
             "If the step is no longer wanted, withdraw what asks him (clear_ask=true or needs without decision for a decision, or change the state for a your-step) and the server drops his step with it")

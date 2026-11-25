@@ -8,7 +8,7 @@ Covers, for each way a config can name its members:
     `names`, `names_cf`, `emails`, and the thin wrappers config.owner(), owner_aliases(), owner_names(), owner_opener_rx() and model.is_owner() / model_guards.owner_names_cf() that answer through it;
   * an alias written as a mover is the person: the same answer as the name (model.is_owner);
   * a list that is refused (at the start, by a reload that keeps the running config, and by `doctor`): a duplicate name or alias without regard to case, a duplicate address, an entry with no name,
-    a value that is no list of tables, and a list of more than one member (this version serves one), and the table's first name `[[people]]` (no longer read);
+    a value that is no list of tables, and the table's first name `[[people]]` (no longer read);
   * the review lows: a name or alias with doubled or tab spaces matches the same person; a value that is no text (a number as a name, alias or address, an aliases or emails that is no list) is refused with its own
     line and never crashes the read; an address written twice in one entry says so (and is not read as a clash between members); the old key written as an empty list (`people = []`) is refused like the old
     table, at the start, by a reload and by doctor; doctor shows config.py's refusal lines whole only when each line opens as one (not a line that merely mentions [[members]]);
@@ -25,7 +25,6 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-MORE_THAN_ONE = "[[members]] lists more than one member: this version serves one, so keep one entry"
 BASE = _instance.base_toml()
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"), ("fleet_names", f"{tmp}/names.tsv"), ("state", f"{tmp}/state"),
                  ("secrets", f"{tmp}/secrets"), ("session_links", f"{tmp}/sala"), ("project_touch", f"{tmp}/touch")):
@@ -125,7 +124,7 @@ d, r = report(config("inner-space", members=[{"name": "Pat  Lee", "aliases": ["P
 check("an inner-space config loads", d is not None, r.stderr[-600:])
 if d:
     check("person_of: a name or an alias written with doubled or tab spaces matches the same person as the text with single spaces (any case), and no other text",
-          d["of"] == {"Pat Lee": "Pat  Lee", "pat   lee": "Pat  Lee", "Pat\tLee": "Pat  Lee", "  PAT LEE ": "Pat  Lee", "P J": "Pat  Lee", "p\t\tj": "Pat  Lee", "q r": "Pat  Lee", "PJ": None, "Pat": None, "Pat Lee Jr": None}, d["of"])
+          d["of"] == {"Pat Lee": "Pat Lee", "pat   lee": "Pat Lee", "Pat\tLee": "Pat Lee", "  PAT LEE ": "Pat Lee", "P J": "Pat Lee", "p\t\tj": "Pat Lee", "q r": "Pat Lee", "PJ": None, "Pat": None, "Pat Lee Jr": None}, d["of"])
 
 # ---- 2. only the old keys: a list of one
 d, r = report(config("old", owner="Alex", aliases=["AE", " ", "Alex", "You", "AE", "オリバー"], emails=["a@example.com", "b@example.com"]), PROBES, MAILS, LINES)
@@ -173,9 +172,10 @@ def refused(label, members, expect, **old):
     return path, r, last
 
 two = [PAT, {"name": "Lee", "aliases": ["LL"], "emails": ["lee@example.com"]}]
-p_more, r, last = refused("more-than-one", two, [MORE_THAN_ONE])
-check("…the refusal is the one line, last, without a traceback", last == MORE_THAN_ONE and "Traceback" not in r.stderr, r.stderr[-400:])
-refused("dup-name", [{"name": "Pat"}, {"name": "pat"}], ['"pat" is already the name or an alias of entry 1', MORE_THAN_ONE])
+p_more = config("more-than-one", members=two)       # stage 5: a list of more than one member starts (the one-member refusal of stage 2 is gone)
+r = run(p_more, "import stackshot.core.config")
+check("start serves a list of two members: it does not end, and says nothing of 'more than one'", r.returncode == 0 and "more than one member" not in r.stderr, (r.returncode, r.stderr[-400:]))
+refused("dup-name", [{"name": "Pat"}, {"name": "pat"}], ['"pat" is already the name or an alias of entry 1'])
 refused("dup-alias", [{"name": "Pat", "aliases": ["PJ"]}, {"name": "Lee", "aliases": ["pj"]}], ['entry 2: "pj" is already the name or an alias of entry 1'])
 refused("alias-is-name", [{"name": "Pat", "aliases": ["LEE"]}, {"name": "Lee"}], ['entry 2: "Lee" is already the name or an alias of entry 1'])
 refused("dup-address", [{"name": "Pat", "emails": ["x@example.com"]}, {"name": "Lee", "emails": ["x@example.com"]}], ['entry 2: the address "x@example.com" is already entry 1\'s'])
@@ -194,16 +194,16 @@ r = run(path, "import stackshot.core.config")
 check("start refuses `people = []` (the old key as an empty list) like the old table, with the same line", r.returncode != 0 and "[[people]] is now [[members]]" in r.stderr and "Traceback" not in r.stderr, r.stderr[-400:])
 # a value that is no text: told with its own line, never coerced, dropped or a crash
 NOT_TEXT = [
-    ("name-number", [{"name": 5}], ["[[members]] entry 1: name is not text (int)"]),
-    ("name-list", [{"name": ["Pat"]}], ["[[members]] entry 1: name is not text (list)"]),
-    ("alias-number", [{"name": "Pat", "aliases": ["PJ", 7]}], ["[[members]] entry 1: aliases item 2 is not text (int)"]),
-    ("alias-not-list", [{"name": "Pat", "aliases": "PJ"}], ["[[members]] entry 1: aliases is not a list (str)"]),
-    ("email-bool", [{"name": "Pat", "emails": ["pat@example.com", True]}], ["[[members]] entry 1: emails item 2 is not text (bool)"]),
-    ("email-not-list", [{"name": "Pat", "emails": "pat@example.com"}], ["[[members]] entry 1: emails is not a list (str)"]),
+    ("name-number", [{"name": 5}], ["[[members]] entry 1: name is not text (a number)"]),
+    ("name-list", [{"name": ["Pat"]}], ["[[members]] entry 1: name is not text (a list)"]),
+    ("alias-number", [{"name": "Pat", "aliases": ["PJ", 7]}], ["[[members]] entry 1: aliases item 2 is not text (a number)"]),
+    ("alias-not-list", [{"name": "Pat", "aliases": "PJ"}], ["[[members]] entry 1: aliases is not a list (text)"]),
+    ("email-bool", [{"name": "Pat", "emails": ["pat@example.com", True]}], ["[[members]] entry 1: emails item 2 is not text (true or false)"]),
+    ("email-not-list", [{"name": "Pat", "emails": "pat@example.com"}], ["[[members]] entry 1: emails is not a list (text)"]),
 ]
 for label, members, expect in NOT_TEXT:
     refused(f"not-text-{label}", members, expect)
-refused("not-text-two-faults", [{"name": 5, "aliases": [1], "emails": [2]}], ["entry 1: name is not text (int)", "entry 1: aliases item 1 is not text (int)", "entry 1: emails item 1 is not text (int)"])
+refused("not-text-two-faults", [{"name": 5, "aliases": [1], "emails": [2]}], ["entry 1: name is not text (a number)", "entry 1: aliases item 1 is not text (a number)", "entry 1: emails item 1 is not text (a number)"])
 PROBE_PROBLEMS = r"""
 import json, sys
 from stackshot.core import members
@@ -221,7 +221,7 @@ except Exception:
 check("members.problems and members.build answer for every value that is no text without raising: one line per fault, and the list still builds", probed is not None and all(probed[l]["problems"] and probed[l]["built"] for l, _, _ in NOT_TEXT), (probed, r.stderr[-400:]))
 check("a value that is no text has its own line and is not reported as a duplicate or a missing name", probed is not None and all(len(probed[l]["problems"]) == 1 and "is not" in probed[l]["problems"][0] for l, _, _ in NOT_TEXT), probed)
 # an address written twice inside one entry
-_, r, last = refused("dup-address-one-entry", [{"name": "Pat", "emails": ["x@example.com", "y@example.com", "x@example.com"]}], ['entry 1: the address "x@example.com" is written twice in its own emails (keep it once)'])
+_, r, last = refused("dup-address-one-entry", [{"name": "Pat", "emails": ["x@example.com", "y@example.com", "x@example.com"]}], ['entry 1: the address "x@example.com" is written twice in its emails (keep it once)'])
 check("…and the line is its own: it does not read as a clash between two members", "is already entry" not in r.stderr and "lists more than one member" not in r.stderr, r.stderr[-400:])
 d, r = report(config("empty-list", owner="Alex", emails=["a@example.com"]))
 check("no [[members]] table at all is the old keys, not a refusal", d is not None and d["owner"] == "Alex", r.stderr[-300:])
@@ -244,7 +244,7 @@ try:
     out = json.loads(r.stdout.strip().splitlines()[-1])
 except Exception:
     out = None
-check("a reload to a list of two is refused (None) and the running members stay", out is not None and out["before"] == "Pat" and out["refused"] is None and out["after_refused"] == ["Pat"], (out, r.stderr[-500:]))
+check("a reload to a list of two is no refusal (stage 5) and the running members stay until a restart", out is not None and out["before"] == "Pat" and out["refused"] == [] and out["after_refused"] == ["Pat"], (out, r.stderr[-500:]))
 check("a reload to another single person is no live change: the running person stays and the change waits for a restart", out is not None and out["after_changed"] == ["Pat"] and "members" in out["pending"], out)
 
 # the old table and the old key as an empty list are refused by a reload too, and the running members stay
@@ -262,7 +262,7 @@ for n, (label, bad) in enumerate((("[[people]]", old_table), ("`people = []`", o
 # ---- 8. doctor says the same, and counts the addresses of a list
 HOME = T / "home"; HOME.mkdir(exist_ok=True)
 r = subprocess.run([os.path.join(STACK, "bin", "stackshot"), "doctor", "--no-systemd"], capture_output=True, text=True, env=env_for(p_more), cwd=STACK, stdin=subprocess.DEVNULL, timeout=300)
-check("doctor on a list of two: exit 1, the config line is missing and carries the refusal", r.returncode == 1 and re.search(r"missing\s+config .*loads through config\.py", r.stdout) is not None and MORE_THAN_ONE in r.stdout, r.stdout[-700:] + r.stderr[-300:])
+check("doctor on a list of two: the config line is no fault and counts the addresses of both", re.search(r"missing\s+config .*loads through config\.py", r.stdout) is None and "more than one member" not in r.stdout and re.search(r"ok\s+auth\.allowed_emails: 3 address\(es\)", r.stdout) is not None, r.stdout[-700:] + r.stderr[-300:])
 r = subprocess.run([os.path.join(STACK, "bin", "stackshot"), "doctor", "--no-systemd"], capture_output=True, text=True, env=env_for(config("doctor-ok", members=[PAT])), cwd=STACK, stdin=subprocess.DEVNULL, timeout=300)
 check("doctor counts the sign-in addresses of a [[members]] list (two)", re.search(r"ok\s+auth\.allowed_emails: 2 address\(es\)", r.stdout) is not None, r.stdout[-900:] + r.stderr[-300:])
 r = subprocess.run([os.path.join(STACK, "bin", "stackshot"), "doctor", "--no-systemd"], capture_output=True, text=True, env=env_for(config("doctor-old", owner="Alex", emails=["a@example.com"])), cwd=STACK, stdin=subprocess.DEVNULL, timeout=300)

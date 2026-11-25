@@ -16,6 +16,7 @@ from typing import Any
 from fastmcp.exceptions import ToolError
 
 from stackshot.core import config as _cfg
+from stackshot.core import members as _members
 from stackshot.core import retired_inputs as _retired
 from stackshot.core.instance import OWNER
 from stackshot.fleet import sessions_registry as _sr
@@ -53,10 +54,13 @@ def _sender_not_owner(sender: str) -> None:
     if not s:
         return
     norm = lambda x: re.sub(r"[^0-9a-z]+", " ", str(x or "").lower()).strip()
-    o = norm(OWNER)
-    if o and {norm(s), norm(_sr._session_label(s))} & {o, o + " board"}:
-        raise ToolError(f"Refused: sender names {OWNER}. Only the board writes as {OWNER} (his answer from the item's page); "
-                        f"pass sender=<your own session name or id>. When you write down what {OWNER} said, you are its author.")
+    who = [OWNER, *(p.name for p in _members.members()[1:])]      # every member a board lists, the first one being the owner (one name on a board of one member)
+    got = {norm(s), norm(_sr._session_label(s))}
+    for name in who:
+        o = norm(name)
+        if o and got & {o, o + " board"}:
+            raise ToolError(f"Refused: sender names {name}. Only the board writes as {name} (his answer from the item's page); "
+                            f"pass sender=<your own session name or id>. When you write down what {name} said, you are its author.")
 
 
 def _said_note(entries: list[dict[str, Any]]) -> str:

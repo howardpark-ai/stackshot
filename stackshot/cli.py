@@ -620,7 +620,12 @@ REFUSAL_OPENERS = ("[[members]]", "[[people]] is now [[members]]")
 
 def config_refusals_only(errs: list[str]) -> bool:
     """True when every stderr line of a config that failed to load is one of config.py's own refusals (they are shown whole, one after another); else the last line is shown (a traceback's)."""
-    return bool(errs) and all("removed in stackshot" in e or e.startswith(REFUSAL_OPENERS) for e in errs)
+    return bool(errs) and all(_is_removed_value_line(e) or e.startswith(REFUSAL_OPENERS) for e in errs)
+
+
+def _is_removed_value_line(e: str) -> bool:
+    """A refusal line of a removed key's value, as config.refused() writes it: `[sec] key = "v" in <file>: removed; "<keep>" is the one value left (...) — set ...`."""
+    return e.startswith("[") and ': removed; "' in e and '" is the one value left' in e
 
 
 def cmd_doctor(a: argparse.Namespace) -> int:

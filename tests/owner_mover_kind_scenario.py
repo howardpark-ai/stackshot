@@ -123,6 +123,13 @@ try:
     check("a person-named needs value is not the owner's (the code reads decision only)", _w.mover_of({"needs": [NAME], "project": "projects/alpha"})["kind"] == "session", None)
     CONFIG.write_text(base, encoding="utf-8"); _cfg.reload()
     check("a person-named [waiting] cap key is not read (the default stands)", _w.cap_needs_owner() is True, None)
+    from stackshot.core import members as _mem5                    # stage 5: the kind stays the generic word on a board of several members, the name is the item's member's
+    _mem5._seen = (_mem5._inputs(None), [_mem5.Person("Oliver"), _mem5.Person("Sam", ("SM",))])
+    try:
+        got5 = _w.mover_of({"needs": ["decision"], "mover": "SM", "project": "projects/alpha"})
+        check("stage 5: with two members a decision's mover kind is still the neutral word, and who is the item's member", got5 == {"kind": "owner", "who": "Sam"}, got5)
+    finally:
+        _mem5._seen = None
 except Exception:
     import traceback; traceback.print_exc(); fails.append("scenario raised")
 finally:

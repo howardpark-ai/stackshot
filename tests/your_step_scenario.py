@@ -249,6 +249,14 @@ check("7 page: a lead-in with items and no closing line is a list of one step, w
 # ---- 6. the summary stays where space is short
 check("6 summary: the step field still holds the summary (the tab title, the Slack notice read it)", json.loads((T / "store/a/1.json").read_text())["metadata"]["step"] == f"Oliver: {S1}", None)
 
+# ---- stage 5: a step is the member's it opens with (a list of two put where members() reads it)
+from stackshot.core import members as _mem5
+_mem5._seen = (_mem5._inputs(None), [_mem5.Person("Oliver"), _mem5.Person("Sam", ("SM",))])
+try:
+    check("stage 5 step: two members' steps with the same words have different keys; a member's alias and name have one", _S.owner_key("Sam: do it") != _S.owner_key("Oliver: do it") and _S.owner_key("SM: do it") == _S.owner_key("Sam: do it"), None)
+finally:
+    _mem5._seen = None
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()
 os._exit(1 if fails else 0)

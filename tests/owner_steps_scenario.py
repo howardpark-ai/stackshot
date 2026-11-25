@@ -440,4 +440,15 @@ check("decide_of: the Decide part; a leading `Decide:` stripped; a watcher's ask
       HS.decide_of(ASK) == D1 and HS.decide_of("Decide:   x   · Recommend: y") == "x" and HS.decide_of("is it there yet? · wake Fri") == "is it there yet?" and HS.decide_of("") == "", HS.decide_of(ASK))
 check("with_answer puts the arrow after the first line only, answer_words prefers the label", HS.with_answer("Oliver: a\n  more", "Ship") == "Oliver: a → Ship\n  more" and HS.answer_words("Ship", "x") == "Ship" and HS.answer_words("", "") == "")
 
-print(("ok" if not fails else "FAILED") + f": owner_steps scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
+# ---- stage 5: the server's step is the item's member's (a list of two put where members() reads it)
+from stackshot.core import members as _mem5
+_mem5._seen = (_mem5._inputs(None), [_mem5.Person("Oliver"), _mem5.Person("Sam", ("SM",))])
+try:
+    check("stage 5: line_of makes the step for the item's member; a text that opens with a member keeps that member; no item means the first member",
+          HS.line_of("check it", {"mover": "SM"}) == "Sam: check it" and HS.line_of("check it") == "Oliver: check it" and HS.line_of("Sam: check it", {"mover": "Oliver"}) == "Sam: check it", HS.line_of("check it", {"mover": "SM"}))
+    check("stage 5: two members' lines with the same words are two steps; a member's alias and name are one", not HS.same_line("Sam: x", "Oliver: x") and HS.same_line("SM: x", "Sam: x"), None)
+finally:
+    _mem5._seen = None
+check("stage 5: with one member again the step is the first member's whoever the mover names", HS.line_of("check it", {"mover": "SM"}) == "Oliver: check it", None)
+
+print(("ok" if not fails else "FAILED") + f": owner_steps scenario,{len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

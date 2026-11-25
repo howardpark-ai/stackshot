@@ -415,7 +415,7 @@ def _own_action_lines(meta: dict[str, Any]) -> list[str]:
     mine = {_steps.owner_key(_hs.recorded(meta))}
     pa = _rmod.parse_ask(str(meta.get("ask") or ""))
     if pa:
-        mine.add(_steps.owner_key(_hs.line_of(pa["decide"])))
+        mine.add(_steps.owner_key(_hs.line_of(pa["decide"], meta)))
     return [ln for ln in _nl.split(meta.get("next")) if _hs.is_named(ln) and _steps.owner_key(ln) not in mine]
 
 

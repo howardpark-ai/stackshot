@@ -213,7 +213,7 @@ def mover_of(m: dict[str, Any]) -> dict[str, str]:
     ns = needs_of(m)
     low = [x.lower() for x in ns]
     if "decision" in low:
-        return {"kind": OWNER_KIND, "who": _owner_name()}
+        return {"kind": OWNER_KIND, "who": _model.owner_display(m)}
     if "external" in low:
         return {"kind": "outside", "who": "an outside party"}
     named = [s for s in ns if s.lower() not in _KINDS]
