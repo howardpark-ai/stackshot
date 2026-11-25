@@ -846,12 +846,24 @@ def tid_of(raw):
 # the item's id in the server's reply, in every form it is shown: board#N, board-tmp-<machine>#3, or a store id (s5)
 _REPLY_ID = r"board-tmp-[A-Za-z0-9-]*[A-Za-z0-9][#-]\d+|board#\d+|[a-z]\d+"
 
+def _known_page(key):
+    """exists(), failing open: None (cannot tell) when the lookup itself raises, so a hook never stops a board write over it."""
+    try: return exists(key)
+    except Exception: return None
+
 def reply_project(text):
     """The page a write touched, from the `project:` line of the server's reply: `project: <page>`, or `project: <top-level> (filed on <page>)` for an item on a sub-page, where the page the item is filed on
-    is the one the ledger charges (the shown key is the top-level project, not the page). "" when the reply has no such line."""
+    is the one the ledger charges (the shown key is the top-level project, not the page). "" when the reply has no such line, or when the key
+    runs to the very end of the text and names no known page (a reply cut short by the script that returned it)."""
     d = _cfg.page_dirs_re(); key = r"(" + d + r"/[A-Za-z0-9._/-]+)"
     m = re.search(r"project:\s*" + key + r"\s*\(filed on\s+" + key + r"\s*\)", text) or re.search(r"project:\s*" + key, text)   # nested keys too (projects/parent/sub)
-    return m.group(m.lastindex) if m else ""
+    if not m: return ""
+    found = m.group(m.lastindex)
+    # A script that returns only the first N characters of a reply can cut the line inside the key (`project: projects/widg`).
+    # A key with nothing after it but the end of the text (or the quote and brackets a JSON wrapper closes with) may be such a cut:
+    # it is taken only when the page is known. A page that cannot be told (exists() is None: no registry to ask) keeps the key as before.
+    if re.fullmatch(r"[\"'}\]]*", text[m.end(m.lastindex):]) and _known_page(found) is False: return ""
+    return found
 
 def _touch_mcp_record(payload, inp, name):
     text = response_text(payload)

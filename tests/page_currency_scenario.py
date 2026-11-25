@@ -488,6 +488,58 @@ check("dirs: reply_project reads a plain line, and a suffixed line gives the pag
       (p.reply_project("project: areas/home (filed on areas/home/sub)"), p.reply_project("project: systems/box")))
 p._cfg.CFG["pages"].pop("dirs")
 
+# ---- 7b. a reply cut short inside the `project:` line names no page: the key is taken when its page is known, or when something follows it
+FULL = "projects/widget/anchors"; KNOWN = {"projects/widget", FULL}
+_exists = p.exists; p.exists = lambda key: key in KNOWN                       # a registry that knows two pages, one nested
+pref = [FULL[:i] for i in range(len("projects/") + 1, len(FULL) + 1)]        # every cut of the key that still has a character after `projects/`
+got_cut = {k: p.reply_project("updated a1.\nproject: " + k) for k in pref}
+check("cut: every cut of a key at the end of the text is dropped unless the cut is itself a known page",
+      all(v == (k if k in KNOWN else "") for k, v in got_cut.items()) and got_cut["projects/widget/anch"] == "" and got_cut["projects/widget"] == "projects/widget", got_cut)
+check("cut: a known page as the last characters, no trailing newline, is taken (the whole key and a shorter known page)", got_cut[FULL] == FULL and got_cut["projects/widget"] == "projects/widget", got_cut)
+check("cut: any key followed by a newline, a space or the JSON escape of a newline is whole, known or not",
+      all(p.reply_project("updated a1.\nproject: " + k + "\nnext: x") == k and p.reply_project("project: " + k + " ") == k and p.reply_project("project: " + k + "\\nnext") == k and p.reply_project("project: " + k + "\n") == k for k in pref),
+      [k for k in pref if p.reply_project("project: " + k + "\n") != k])
+check("cut: the `(filed on …)` form is whole at its closing paren, known or not, even at the end of the text",
+      p.reply_project("project: projects/widget (filed on projects/widget/anch)") == "projects/widget/anch"
+      and p.reply_project("project: projects/widget (filed on projects/widget/anch)\nnext: x") == "projects/widget/anch"
+      and p.reply_project("project: projects/widget (filed on  projects/widget/anch )") == "projects/widget/anch", p.reply_project("project: projects/widget (filed on projects/widget/anch)"))
+check("cut: a filed-on line cut inside its second key falls back to the whole first key, which is a page",
+      p.reply_project("project: projects/widget (filed on projects/widget/anc") == "projects/widget", p.reply_project("project: projects/widget (filed on projects/widget/anc"))
+check("cut: a cut key before the closing quote of a JSON wrapper is a cut too; a whole one is not",
+      p.reply_project('{"result": "updated a1.\\nproject: projects/widg"}') == "" and p.reply_project('["updated a1. project: projects/widg"]') == ""
+      and p.reply_project('{"result": "updated a1.\\nproject: projects/widget"}') == "projects/widget" and p.reply_project('{"result": "updated a1.\\nproject: projects/widg\\n"}') == "projects/widg",
+      p.reply_project('{"result": "updated a1.\\nproject: projects/widg"}'))
+check("cut: a key with text after it stays whole although unknown (a line in the middle of a reply is no cut)", p.reply_project("project: projects/unknownpage next: x") == "projects/unknownpage", p.reply_project("project: projects/unknownpage next: x"))
+# the hook's own record: a cut key owes no page, a whole known page does
+p.save_state(A, {})
+def cut_touch(sid, resp, tid="s5"):
+    p.touch_mcp({"session_id": sid, "tool_name": ST + "update", "tool_input": {"item_id": tid, "next": "x"}, "tool_response": resp})
+    return set((p.load_state(sid).get("touches") or {}))
+_ip = p.item_project; p.item_project = lambda tid, sid: ""                       # the server cannot say either: nothing but the reply's line to go on
+k1 = cut_touch(A, "updated [s5](https://x/items/s5).\nproject: projects/widget/anch")
+check("cut: touch_mcp records no page for a cut key", not any(k.startswith("projects/") for k in k1), k1)
+p.save_state(A, {}); k2 = cut_touch(A, "updated [s5](https://x/items/s5).\nproject: projects/widget")
+check("cut: touch_mcp records a known page named at the very end of the reply", "projects/widget" in k2, k2)
+p.save_state(A, {}); k3 = cut_touch(A, "updated [s5](https://x/items/s5).\nproject: projects/widget/anch\n")
+check("cut: touch_mcp records a whole unknown key that has a newline after it (as before)", "projects/widget/anch" in k3, k3)
+p.save_state(S, {}); p.item_project = lambda tid, sid: "projects/alpha"         # the server knows the item: a cut reply is read through the item
+k4 = cut_touch(S, "updated [s5](https://x/items/s5).\nproject: projects/alp")
+check("cut: a cut reply still names its page through the item when the server can say", "projects/alpha" in k4 and "projects/alp" not in k4, k4)
+p.item_project = _ip; p.save_state(A, {}); p.save_state(S, {})
+# a registry that cannot be read: nothing can be told, so the key is taken as before
+p.exists = _exists; _rl, _ap = p.reads_local, p._api
+p.reads_local = lambda base=None: False; p._api = lambda *a, **k: None
+check("cut: with the registry unreadable the key is taken as before (never break a board write)",
+      p.exists("projects/widget") is None and p.reply_project("updated a1.\nproject: projects/widg") == "projects/widg" and p.reply_project("project: projects/widget") == "projects/widget",
+      (p.exists("projects/widget"), p.reply_project("project: projects/widg")))
+p.reads_local, p._api = _rl, _ap
+p.exists = lambda key: (_ for _ in ()).throw(RuntimeError("lookup failed"))
+check("cut: a lookup that raises is the same as one that cannot tell", p.reply_project("project: projects/widg") == "projects/widg", p.reply_project("project: projects/widg"))
+p.exists = _exists
+check("cut: against the fixture brain, a real page at the end of a reply is taken and a cut of it is not",
+      p.reply_project("project: projects/alpha") == "projects/alpha" and p.reply_project("project: projects/alph") == "" and p.reply_project("project: projects/alpha/") == "",
+      [p.reply_project("project: projects/alpha"), p.reply_project("project: projects/alph"), p.reply_project("project: projects/alpha/")])
+
 # ---- 8. the end-of-turn board check: `Board: no change, <reason>` or update/confirm the items
 # The hook asks the server (client API items?key=<session>) over real HTTP: a thread here serves the server's own read with its
 # token check, against a fixture store, and counts the calls.
