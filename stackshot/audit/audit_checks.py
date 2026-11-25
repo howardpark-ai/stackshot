@@ -170,7 +170,7 @@ def check_stale(item: dict[str, Any], meta: dict[str, Any], mover: str, after_op
     if _states.of(item, after_open)[0] != "doing":
         return ""
     wake = _wt.wake_epoch(_wt.wake_value(meta)) if _wt.wake_value(meta) else None
-    if _wt.is_held(item) and (wake is None or wake > now):
+    if _wt.is_parked(item) and (wake is None or wake > now):
         return ""
     if wake is not None:
         if wake > now:
@@ -217,7 +217,7 @@ def check_stuck_elsewhere(item: dict[str, Any], meta: dict[str, Any], mover: str
         return None
     now = time.time() if now is None else now
     wake = _wt.wake_epoch(_wt.wake_value(meta)) if _wt.wake_value(meta) else None
-    if _wt.is_held(item) and (wake is None or wake > now):
+    if _wt.is_parked(item) and (wake is None or wake > now):
         return None                             # parked or held, its wake ahead (or none): the first step is what the wake leads to
     if wake is not None and wake > now and _model.is_owner(nm):
         zone = _cfg.tz()
@@ -716,7 +716,7 @@ def _proof_item(gid: str, items: dict[str, dict[str, Any]], now: float) -> tuple
     it, meta, after_open, mover = _item_view(items, gid)
     mod = _model.derive(it, now, after_open)
     wait = mod.wait if mod.state == _model.WAITING else None
-    if wait is None and not _wt.is_held(it):
+    if wait is None and not _wt.is_parked(it):
         return "", None                         # alive work: its quiet time is the hourly audit line's
     stage_event = ""
     if wait is not None and wait.kind == "event":

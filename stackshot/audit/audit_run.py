@@ -335,7 +335,7 @@ def _deliver(to: str, text: str, fyi: bool = False) -> tuple[bool, str]:
 def is_waiting(item: dict[str, Any], after_open: Callable[[dict[str, Any]], Any]) -> bool:
     """A waiting item as the model reads it (held, behind an open item, parked, blocked, outside or verifying); an item that waits on the owner's decision is his move, not a wait, and neither is a relay wait (an
     outside item that waits on news only the owner relays)."""
-    held = _wt.is_held(item)
+    held = _wt.is_parked(item)
     try:
         m = _model.derive(item, None, after_open)
     except Exception:  # noqa: BLE001  (a malformed item is no wait here; the field checks read it their own way)
@@ -489,7 +489,8 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
         meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
         sid = _nr.shown(gid)
         last = _br._last_write(it)
-        held = _wt.is_held(it)
+        held = _wt.is_held(it)                       # the stored flag alone: a flagged hold is not compared with the page
+        parked = _wt.is_parked(it)                   # a hold or a wait on one date: it keeps its ask, so the ask checks leave it alone
         ev: dict[str, str] = {}
         for s in _steps.view(meta, keeper=str(meta.get("owner") or "")):
             if s["status"] != _steps.OPEN:
@@ -500,7 +501,7 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
                     ev.setdefault("next-done", f"open step cites board#{n}, which is closed: {_clip(_steps.first_line(s['text']), 120)}")
         kinds = [k.lower() for k in _states.kinds_of(meta)]
         ask = " ".join(str(meta.get("ask") or "").split())
-        if not held:
+        if not parked:
             if "decision" in kinds and ask:
                 ev["unneeded-escalation"] = f"waits on {_cfg.owner()} with the ask: {_clip(ask, 140)}"
                 ev["ask-missing"] = "the ask may no longer fit the item"
@@ -510,6 +511,7 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
             elif ask and "decision" not in kinds:
                 ev["wrong-needs"] = f"carries an ask but needs lacks decision: {_clip(ask, 120)}"
                 ev["ask-missing"] = "an ask with no needs: decision"
+        if not held:
             proj = str(meta.get("project") or "")
             if proj and last:
                 if proj not in pages:

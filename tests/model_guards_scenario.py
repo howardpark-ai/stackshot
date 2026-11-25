@@ -111,7 +111,7 @@ def upd(i, **kw): return _update_svc._update(f"a{i}", sender="home-front", **kw)
 def refused_nw(name, i, f, *want, none=()):
     was = raw(i); refused(name, f, *want, none=none); check(name + " (nothing written)", raw(i) == was, None)
 def set_cfg(**kw):
-    _cfg.CFG["model"] = {"rebullet_machines": ["box-a"], **kw}      # the example-owner instance lists box-a (tests/_instance.py); a suite that sets [model] whole keeps it
+    _cfg.CFG["model"] = {"rebullet_machines": ["box-a"], "wait_alias_until": "2099-12-31", "post_wake_alias_until": "2099-12-31", **kw}      # the example-owner instance lists box-a and holds the alias windows open (tests/_instance.py); a suite that sets [model] whole keeps both
 set_cfg()
 
 # ================================================================ the words (pure)
@@ -345,7 +345,7 @@ from stackshot.service import wakes as _wakes
 OPTS = [{"label": "Go", "line": "Ship it now.", "recommended": True}, {"label": "Wait", "line": "Hold it a week.", "recommended": False}]
 PARK = dict(needs=[BACK], mover=OWN, hold=True, wait_basis=f"Oliver is away until {day(3)}")
 _model_view_phase = lambda i: mt(i).get("phase")      # the phase the model stores beside the item: alive, waiting
-def wake_all(): return _watching.watch_pass(time.time() + 6 * DAY), _wakes.wake_pass()
+def wake_all(days=6): return _watching.watch_pass(time.time() + days * DAY), _wakes.wake_pass()
 item(110, needs=["decision"], ask=ASK, options=OPTS)
 upd(110, wake=day(3), **PARK)
 check("6d park: a decision is parked as a hold with a session in needs and him as the mover; its ask and options stay exactly as written", mt(110).get("ask") == ASK and mt(110).get("options") == OPTS and mt(110)["needs"] == [BACK], mt(110))
@@ -370,6 +370,28 @@ wake_all()
 check("6d wake: a stored ask that does not parse still gets the generic question with its two buttons", mt(404)["needs"] == ["decision"] and "whose wait ended" in mt(404)["ask"] and len(mt(404)["options"]) == 2, mt(404))
 item(112, needs=[BACK])
 refused_nw("6d no date: a decision with a hold and no wake time is still refused", 112, lambda: upd(112, needs=["decision"], ask=ASK, hold=True), "hold")
+
+# ---- 6d, after the old parameters' window: a parked decision is a wait on a date (until with wait_kind "time" and a basis), never a hold; it keeps its ask and options and is his call again at the date
+import datetime as _dt6
+from stackshot.service import wait_fixes as _wf6
+_window6 = _wf6._wait_alias_until
+def upu(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-front", **kw)      # the tool itself: the until parameter is its own (the service call below it takes the working fields)
+_wf6._wait_alias_until = lambda: _dt6.date(2020, 1, 1)
+try:
+    PARKU = dict(needs=[BACK], mover=OWN, wait_kind="time", wait_basis=f"Oliver is away until {day(10)}")
+    NOKIND = {k: v for k, v in PARKU.items() if k != "wait_kind"}
+    item(120, needs=["decision"], ask=ASK, options=OPTS)
+    upu(120, until=day(10), **PARKU)
+    check("6d park after the window: until with wait_kind time and a basis parks a decision, with no hold stored, a session in needs and him as the mover", mt(120).get("until") == day(10) and mt(120).get("wait_kind") == "time" and not mt(120).get("hold") and mt(120)["needs"] == [BACK] and mt(120)["mover"] == OWN, mt(120))
+    check("6d park after the window: ...its ask and options stay as written and it shows as waiting", mt(120).get("ask") == ASK and mt(120).get("options") == OPTS and _model_view_phase(120) == "waiting", mt(120))
+    wake_all(12)
+    check("6d wake after the window: at the date it is his call again, needs decision, with the same ask and options", mt(120)["needs"] == ["decision"] and mt(120)["ask"] == ASK and mt(120)["options"] == OPTS and _model_view_phase(120) == "alive", mt(120))
+    item(121, needs=["decision"], ask=ASK, options=OPTS)
+    refused_nw("6d park after the window: hold is no parameter any more, and the refusal names until", 121, lambda: upu(121, hold=True, wake=day(10), **NOKIND), "hold", "until=")
+    item(127, needs=["decision"], ask=ASK, options=OPTS)
+    refused_nw("6d park after the window: a date and a basis with him as the mover but no kind is refused, and the refusal names wait_kind time", 127, lambda: upu(127, until=day(10), **NOKIND), "wait_kind")
+finally:
+    _wf6._wait_alias_until = _window6
 item(113, needs=[BACK], mover=BACK)
 upd(113, hold=True, wake=day(3), wait_basis=f"the vendor ships on {day(3)}")
 wake_all()

@@ -201,7 +201,7 @@ def eligible(items: dict[str, dict[str, Any]], gid: str, now: float, front: Call
     it, meta, after_open, mover = _ac._item_view(items, gid)
     if _ac._no_session(mover) or _model.is_owner(mover):
         return None
-    if _silence.reading(it, mover, after_open, now) != "agent" or _wt.is_held(it) or _waits_decision(meta):
+    if _silence.reading(it, mover, after_open, now) != "agent" or _wt.is_parked(it) or _waits_decision(meta):
         return None      # not on an agent as the board shows it (a hold, a park, an until, an open after, an anchor or other wait, the owner's move), or it waits on a decision of his
     mod = _model.derive(it, now, after_open)
     if mod.state != _model.ALIVE or mod.owner_moves or not same(mod.mover, mover):

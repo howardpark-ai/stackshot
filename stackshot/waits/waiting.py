@@ -185,9 +185,22 @@ def clock_of(item: dict[str, Any], now: float) -> float:
 
 
 def is_held(item: dict[str, Any]) -> bool:
-    """On hold, as the server and the renderer read it: an open item with metadata.hold whose needs do not hold decision."""
+    """On hold by the stored flag alone: an open item with metadata.hold whose needs do not hold decision. A park written as a date (`until`, no hold) is not held here: the readers that mean "parked as the
+    board draws it" call `is_parked`."""
     m = item.get("metadata") or {}
     return item.get("status") == "open" and bool(m.get("hold")) and not any(x.lower() == "decision" for x in needs_of(m))
+
+
+def waits_on_date(m: dict[str, Any]) -> bool:
+    """A wait on one date alone: a stored `until` with no wait kind beside it or the kind time. The one reading of a date wait (a park written as a date, the renderer's and the audit's)."""
+    return bool(stored_until(m)) and kind_of(m) == "time"
+
+
+def is_parked(item: dict[str, Any]) -> bool:
+    """Parked, as the board draws it and as every reader that skips a parked item means it: an open item that is on hold (the stored flag) or waits on one date alone (`waits_on_date`), never one whose
+    needs hold decision (that item is on the owner's move; a park of his call puts a session in needs and keeps the ask). The one definition: `web/ui/render.is_held` and the audit's checks read it."""
+    m = item.get("metadata") or {}
+    return item.get("status") == "open" and (bool(m.get("hold")) or waits_on_date(m)) and not any(x.lower() == "decision" for x in needs_of(m))
 
 
 # The project's fallback mover: the builder, else the -main agent. The server installs the lookup (it reads the project registry); with none

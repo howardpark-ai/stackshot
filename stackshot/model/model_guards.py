@@ -975,7 +975,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                             f"Keep needs to the one who moves it now and name who takes it after {H}'s answer or step in then=<session>.")
     if "decision" in kinds and held:
         add("decision_hold", f"needs holds decision together with a park: an item on {H}'s call is on his move, and a park is not. To park the call for a date, hand the item to the session that waits "
-                             f"(needs=[<session>]; the ask and options stay on the item as written) and park it with hold=true, until=YYYY-MM-DD, wait_basis=<what it waits for, with its date> and mover={H}: it shows as waiting until the date, "
+                             f"(needs=[<session>]; the ask and options stay on the item as written) and park it with until=YYYY-MM-DD, wait_kind=\"time\", wait_basis=<what it waits for, with its date> and mover={H}: it shows as waiting until the date, "
                              f"and at the date it is his call again, needs decision with the same ask and options, no rewrite. Or keep the item on his move and release the park (clear_hold=true).")
     if mod.state == _model.ALIVE:
         clash = next((c for c in mod.conflicts if c.startswith("mover=")), "")
@@ -992,6 +992,9 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
             else:
                 fix = (f"Put it in his state: pass step=<one line, the single thing only he does>, or needs=[\"decision\"] with {ask_form}. "
                        f"Or give the item to a session: mover=<session> (clear_mover=true, when the session in needs or the project's builder should move it) and write {H}'s part in a next line that starts `{H}:`.")
+            if until_wait or date_given or _wt.wake_value(m):      # a date beside him as the mover: the call is parked only as a time wait
+                fix += (f" A date beside {H} as the mover parks his call only as a time wait: until=YYYY-MM-DD, wait_kind=\"time\", wait_basis=<what it waits for, with its date> and mover={H}, with the session that waits in needs "
+                        f"(the ask and options stay on the item and come back as his call at the date; a park of {_wt.cap_days():g} days or less needs his recorded words).")
             add("owner_mover", f"{what} would be left with {H} as its mover but nothing for him to do: {gap}, so his item page shows no Your step and no ask. " + fix)
         why = ctx.mover_problem(mod.mover, project)
         if why:

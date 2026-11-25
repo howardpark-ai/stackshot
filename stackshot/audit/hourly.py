@@ -203,7 +203,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     it, meta, after_open, mover = _ac._item_view(items, gid)
     if queue is None:
         queue = _silence.queued(items, now, env)      # the mover's other items it is busy on (model/queued.py): `pass_` reads it once for every item
-    if not _silence.reading(it, mover, after_open, now, queue.get(gid, "")) or _wt.is_held(it):
+    if not _silence.reading(it, mover, after_open, now, queue.get(gid, "")) or _wt.is_parked(it):
         return None      # not on an agent as the board shows it (a hold, a park, a stored wait, an item queued behind another of its mover's, the owner's or an outsider's move), or on hold
     raw_front = getattr(env, "is_front_or_unread", None) or getattr(env, "is_front", None)      # an env that cannot tell who is front because its registry cannot be read says front (Env.is_front_or_unread), not builder
 
@@ -235,7 +235,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
             if not (mover2 and eq(mover2, mover)):
                 continue
             mine.append(g)
-            if _silence.reading(it2, mover2, after2, now, queue.get(g, "")) and not _wt.is_held(it2):
+            if _silence.reading(it2, mover2, after2, now, queue.get(g, "")) and not _wt.is_parked(it2):
                 elsewhere += 1
         except Exception:  # noqa: BLE001  (an item that cannot be read is no other item of the mover's)
             continue

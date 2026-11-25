@@ -130,7 +130,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, front: Callable[
     if item.get("status") != "open":
         return None
     it, meta, after_open, mover = _ac._item_view(items, gid)
-    if _silence.reading(it, mover, after_open, now) != "agent" or _wt.is_held(it):
+    if _silence.reading(it, mover, after_open, now) != "agent" or _wt.is_parked(it):
         return None      # not on an agent as the board shows it (a hold, a park, a stored wait, the owner's or an outsider's move), or on hold, or a record the board cannot read
     if _ho.awaiting_session(it):
         return None      # an untaken hand-off is the hand-off audit's, front agent or not
@@ -172,7 +172,7 @@ def busy_movers(items: dict[str, dict[str, Any]], now: float) -> list[str]:
             continue
         try:
             it, _meta, after_open, mover = _ac._item_view(items, gid)
-            if mover and _silence.reading(it, mover, after_open, now) and not _wt.is_held(it):
+            if mover and _silence.reading(it, mover, after_open, now) and not _wt.is_parked(it):
                 out.append(mover)
         except Exception:  # noqa: BLE001
             continue
@@ -285,7 +285,7 @@ def balance_queue(items: dict[str, dict[str, Any]], now: float, window: float, f
             continue
         try:
             it, _meta, after_open, mover = _ac._item_view(items, gid)
-            if _silence.reading(it, mover, after_open, now) == "agent" and not _wt.is_held(it):
+            if _silence.reading(it, mover, after_open, now) == "agent" and not _wt.is_parked(it):
                 cands.append(_queued.candidate(gid, it, mover, now))
         except Exception:  # noqa: BLE001
             continue
@@ -300,7 +300,7 @@ def balance_due(items: dict[str, dict[str, Any]], gid: str, now: float, minutes:
     if item.get("status") != "open":
         return None
     it, meta, after_open, mover = _ac._item_view(items, gid)
-    if not mover or _model.is_owner(mover) or _silence.reading(it, mover, after_open, now) != "agent" or _wt.is_held(it):
+    if not mover or _model.is_owner(mover) or _silence.reading(it, mover, after_open, now) != "agent" or _wt.is_parked(it):
         return None
     project = str(meta.get("project") or "")
     if front is not None and front(mover, project):

@@ -157,7 +157,7 @@ def paused(*names): PAUSED.write_text("\n".join(U[n] for n in names)) if names e
 def rec(to, frm="home-send", **kw):
     """A hand-off record made by the machinery an hour ago (delivered, not taken), for an item that is written to disk with it (the store holds records only this machinery made)."""
     return H.new_record(to, U[to], frm, now0 - 3600, **{"delivered_at": now0 - 3500, **kw})
-def set_cfg(**kw): _cfg.CFG["model"] = dict(kw)
+def set_cfg(**kw): _cfg.CFG["model"] = {"wait_alias_until": "2099-12-31", "post_wake_alias_until": "2099-12-31", **kw}      # [model] set whole drops the alias windows tests/_instance.py holds open: the old wait parameters (hold, wake) this suite passes would be refused from the day after them, so it keeps both open
 set_cfg()
 _cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the last rung of the ladder asks it, once, to recover a session nobody could hand the item to
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]

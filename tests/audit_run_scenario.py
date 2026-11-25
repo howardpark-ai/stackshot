@@ -1832,6 +1832,44 @@ check("wait-end pass: a fix that raises is recorded and never stops the pass", l
 from stackshot.audit import audit_checks as _AC9
 check("wait-end: event-missing is sent once (never repeated or escalated)", AR.ONCE == ("event-missing",) and "wait-end" in _AC9.CHECKS_FILING and "event-missing" in _AC9.CHECKS_FILING)
 
+# ---- a decision parked on a date keeps its ask: the audit reads the park as the board draws it (waiting.is_parked), not the stored hold flag alone
+from stackshot.waits import waiting as _WP
+from stackshot.web import render as _RP
+from stackshot.web.ui import render as _RPU
+from stackshot.audit import audit_checks as _ACP
+ASK_P = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
+UNTIL_P = (dt.datetime.fromtimestamp(now, ZONE) + dt.timedelta(days=10)).strftime("%Y-%m-%d")
+PARK_P = dict(needs=["home-agent"], ask=ASK_P, until=UNTIL_P, wait_kind="time", mover="Oliver", wait_basis={"text": f"away until {UNTIL_P}", "wake": UNTIL_P, "by": "a script", "at": now - H})
+ASK_CHECKS = ("wrong-needs", "ask-missing", "unneeded-escalation")
+def ask_flags(*pairs):
+    sus, _skip = AR.suspects(build(*pairs), now, env())
+    return {s["id"]: sorted(c for c in s["checks"] if c in ASK_CHECKS) for s in sus}
+P_DATE, P_NONE, P_HOLD, P_DEC, P_BARE = 1, 2, 3, 4, 5
+flags = ask_flags(item(P_DATE, wrote=now - 30 * H, **PARK_P),
+                  item(P_NONE, wrote=now - 30 * H, needs=["home-agent"], ask=ASK_P),
+                  item(P_HOLD, wrote=now - 30 * H, needs=["home-agent"], ask=ASK_P, hold=True, wake=UNTIL_P, wait_basis={"text": f"away until {UNTIL_P}", "wake": UNTIL_P, "by": "a script", "at": now - H}),
+                  item(P_DEC, wrote=now - 30 * H, **{**PARK_P, "needs": ["decision"]}),
+                  item(P_BARE, wrote=now - 30 * H, needs=["home-agent"], ask=ASK_P, wake=UNTIL_P))
+check("parked ask: an item with needs naming a session, its ask kept and a date wait (until, kind time) is not flagged wrong-needs or ask-missing", f"board#{P_DATE}" not in flags, flags)
+check("parked ask: …an item with the same ask and needs and no park still is flagged for both (the check is not blind)", flags.get(f"board#{P_NONE}") == ["ask-missing", "wrong-needs"], flags)
+check("parked ask: …a stored hold (flag and wake) still counts as parked, as before", f"board#{P_HOLD}" not in flags, flags)
+check("parked ask: …a date wait whose needs hold decision is no park: it is judged as the owner's call, as before", "unneeded-escalation" in flags.get(f"board#{P_DEC}", []), flags)
+check("parked ask: …a wake with no hold and no until (a hand-off's backstop) is no park, so its ask is still flagged", flags.get(f"board#{P_BARE}") == ["ask-missing", "wrong-needs"], flags)
+def prk(status="open", **meta): return {"status": status, "metadata": meta}
+matrix = [(prk(hold=True, needs=["home-agent"]), True), (prk(until=UNTIL_P, needs=["home-agent"]), True), (prk(until=UNTIL_P, wait_kind="time"), True), (prk(until=UNTIL_P, wait_kind="relay", needs=["external"]), False),
+          (prk(until=UNTIL_P, wait_kind="event"), False), (prk(hold=True, needs=["decision"]), False), (prk(until=UNTIL_P, needs=["Decision"]), False), (prk(until=UNTIL_P, needs="decision"), False),
+          (prk(status="completed", until=UNTIL_P), False), (prk(status="completed", hold=True), False), (prk(wake=UNTIL_P), False), (prk(), False), (prk(needs=["home-agent"]), False)]
+check("parked ask: waiting.is_parked is the flag or a wait on one date alone, never a decision, a closed item, a wait of another kind or a bare wake", [(_WP.is_parked(i), want) for i, want in matrix if _WP.is_parked(i) != want] == [], [(m["metadata"], _WP.is_parked(m)) for m, want in matrix if _WP.is_parked(m) != want])
+check("parked ask: …the board's own reading (render.is_held, both copies) agrees on every case, the retired status on_hold included", all(_RP.is_held({**i, "L": "a", "id": "1"}) == want == _RPU.is_held({**i, "L": "a", "id": "1"}) for i, want in matrix)
+      and _RP.is_held({"status": "on_hold", "metadata": {}}) and not _RP.is_held({"status": "on_hold", "metadata": {"needs": ["decision"]}}), None)
+check("parked ask: …and waiting.is_held stays the stored flag alone (a date park is not a hold flag)", not _WP.is_held(prk(until=UNTIL_P, needs=["home-agent"])) and _WP.is_held(prk(hold=True, needs=["home-agent"])), None)
+check("parked ask: the rubric tells the judge that a parked decision keeps its ask beside a session in needs, so a model call does not flag it either", "a parked decision keeps its ask and names the session that waits in needs until the date" in RUBRIC_TEXT, None)
+# the sites that skip a parked item read a date park as parked: no stale or stuck-elsewhere line for it, no proof-wait candidate on its flag alone
+pk_item = build(item(P_DATE, wrote=now - 30 * H, state="doing", **PARK_P))
+pit, pmeta, pafter, pmover = _ACP._item_view(pk_item, f"a{P_DATE}")
+check("parked ask: a date-parked doing item is not stale while its date is ahead", _ACP.check_stale(pit, pmeta, "home-agent", pafter, now, now - 30 * H) == "", None)
+check("parked ask: …and its first open step is no stuck-elsewhere finding while its date is ahead", _ACP.check_stuck_elsewhere(pit, pmeta, "home-agent", {"home-agent", "Oliver"}, now - 30 * H, pafter, now) is None, None)
+
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)
 print(f"ok: audit_run scenario, {len(ran)} checks")

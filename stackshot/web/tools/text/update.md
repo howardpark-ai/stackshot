@@ -253,7 +253,9 @@ cannot run now. Parked
 with a wake the server releases it at that moment, tells the sessions in its needs (else its mover; refresh the ask
 then) and returns it to the lane its needs give it. Meanwhile it reads as parked (a waiting state), not as work moving
 on agent; needs and due stay as they are. A write to an item whose needs hold decision drops its park (its date stays).
-Park his call instead: needs=["<session>"], hold, until, wait_basis, mover={{OWNER}}; the ask returns at the date. {{OWNER}} parks on his word. A park always names what it
+Park his call instead, from a doing item as from any other: needs=["<session>"] (the session that waits; a front agent will do), until=<date>, wait_kind="time", wait_basis="<what it waits for,
+with its date YYYY-MM-DD>" and mover={{OWNER}} (no hold: the date with the kind is the park); the ask and options stay on the item, and at the date it is his call again with the same ask. Without wait_kind="time" an
+item with him as mover and a date is refused as having nothing for him to do. A park of {{CAP_DAYS}} days or less needs his recorded words too (said=[Acked-by …], or his answer on the item). {{OWNER}} parks on his word. A park always names what it
 waits for: {{OWNER}}'s words, the items that must close first (after), a notice from an anchor scoped to the item, a
 pane recycle (recycle=true), or the end of a window the work itself needs; an unconditional or indefinite park is
 refused. Work moving in real time stays on agent however long it takes (a build, tests, a review, a release or its
