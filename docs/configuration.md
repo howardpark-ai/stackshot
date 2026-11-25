@@ -147,6 +147,16 @@ A running process reads the file again without a restart: the server on `systemc
 | `project_scopes.by_prefix.<prefix>` | none | A page key prefix mapped to a scope, e.g. `"infra/" = "infra"`. | |
 | `project_scopes.by_tag.<tag>` | none | A page's tag mapped to a scope (used when its `org` names none), e.g. `infra = "infra"`. | |
 
+## People
+
+The people of a board are read in one place (`stackshot/core/people.py`), from the first of these that is set:
+
+1. `[[people]]`: one table per person, with `name`, `aliases` (a list) and `emails` (the Google addresses that sign in as that person). A name or alias is unique without regard to case, an address belongs to one person, and the list is read at start (a change takes a restart). This version serves one person, so a list of more than one is refused at start and by `doctor`, with the line "[[people]] lists more than one person: this version serves one, so keep one entry".
+2. The keys of the table above: `instance.owner`, `instance.owner_aliases` and `auth.allowed_emails`, read as a list of one person. With `[[people]]` set they are not read for a person, and the start says so.
+3. Neither: one person called "the owner", with no alias and no sign-in address (`doctor` says so).
+
+A name written as a mover (`mover = "AE"`) is the person its alias belongs to, the same as the name itself.
+
 ## Host words: naming a machine by its role
 
 Some settings name a machine, and a machine can move between boxes. Such a setting may name the machine's **role** instead: the string `host:<role>`, where the role is made of letters, digits, `-`, `_` and `.` (for example `host:primary`). A real host name never holds a colon, so no value written before collides with it. The instance says how a role is looked up with the `[hosts]` table, so a move changes one record (what the lookup answers), not every setting that names the machine.

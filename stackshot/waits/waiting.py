@@ -21,6 +21,7 @@ import re
 from typing import Any, Callable
 
 from stackshot.core import config as _cfg
+from stackshot.core import people as _people
 from stackshot.fleet import sessions_registry as _sr
 
 
@@ -79,7 +80,7 @@ def basis_weekday() -> int:
 
 # ---------------------------------------------------------------- an item's fields
 def _owner_name() -> str:
-    return str(_cfg.get("instance", "owner") or "the owner")
+    return _people.first().name
 
 
 def needs_of(m: dict[str, Any]) -> list[str]:

@@ -94,6 +94,8 @@ allow = [
     "opens with the owner: or you:",
     # the start, reload and doctor warning for a config with no [instance] owner (config.notes); it names the key the instance sets.
     "[instance] has no owner, so the board names its person by a placeholder: set owner = ",
+    # the start, reload and doctor note for a config that sets [[people]] and still carries the old person keys (config.notes); it names those keys.
+    "[[people]] is set, so [instance] owner, owner_aliases and [auth] allowed_emails are not read for a person",
     # the runners page names the [runners] owner key (the GitHub login of the repos) when a repo has neither it nor an ID; the key keeps its name.
     ": no GitHub owner set; add owner = ",
     # a template slot the code fills with the instance owner's name ([instance] owner), or with the keeper of record's name: the slot keeps its variable's name.

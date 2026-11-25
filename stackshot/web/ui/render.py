@@ -13,6 +13,7 @@ from stackshot.web.ui import releasing as _rel   # which pull requests are in th
 RELEASE_LIST = "release"   # the home page's fourth list, beside home.py's three: the agents' items whose pull request is in the release queue (Board.home_lists)
 from stackshot.model import option_labels as _ol   # the letter an option's label repeats from its badge, dropped on read (option_labels.py)
 from stackshot.core import config as _cfg  # stackshot.toml: paths, fleet, scopes, the Machines panel, branding
+from stackshot.core import people as _people
 from stackshot.core import legacy_owner as _lo   # an old version of an item (from the store's history) read as the current code reads it: History only, never written back
 from stackshot.fleet import fleet as _fleet   # the session and machine view, and the one rule for a session's presence (running / present)
 from stackshot.router import routing as _routing   # the routing log: what came in per project and how it was ruled (the pilot)
@@ -60,7 +61,7 @@ from stackshot.core import ghbudget as _gb   # the hour's GitHub calls, drawn as
 from stackshot.web.ui import search as _search   # the search box every page's header draws, and its style (search.py)
 from stackshot.web.ui import colortool as _ct   # the shared color tool's settings and script blocks (ui/colortool.py, shared/colortool.js)
 from stackshot.web import runners as _runners   # the side panel's Runners section: the last snapshot, never a build (runners.peek)
-_OWNER = str(_cfg.get("instance", "owner") or "the owner")   # whom a Next line addresses with "<owner>:"
+_OWNER = _people.first().name   # whom a Next line addresses with "<owner>:"
 # The board page does not show the For you section: it is hidden until its redesign, because as it stands it is nearly unusable.
 # Display only: the rows are still recorded
 # (notify/foryou.py, for-you.json), the server's routes and `client.py get for-you` are unchanged, and for_you_html() / _FORYOU_JS stay below. True brings

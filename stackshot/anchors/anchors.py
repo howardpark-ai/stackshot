@@ -34,6 +34,7 @@ from typing import Any
 
 from stackshot.core import agentbox as _ab  # noqa: E402  (the agents' box over ssh, when [agents_box] ssh names one)
 from stackshot.core import config as _cfg  # noqa: E402  (stackshot.toml; next to this module)
+from stackshot.core import people as _people  # noqa: E402
 from stackshot.core import filecache as _fc  # noqa: E402  (a file's stamp, and its parse kept while the file is as it was)
 from stackshot.core import passmemo as _pm  # noqa: E402  (what one pass works out once)
 from stackshot.anchors import gmail_query as _gq  # noqa: E402  (the terms of a Gmail query anchor: the grammar an add checks)
@@ -384,7 +385,7 @@ def mover_of(t: dict[str, Any]) -> str:
 
     def named(w: Any) -> str:
         w = str(w or "").strip()
-        return "" if (not w or w.lower() == str(_cfg.get("instance", "owner") or "").strip().lower()) else w
+        return "" if (not w or _people.person_of(w)) else w
 
     needs = m.get("needs")
     parts = needs if isinstance(needs, (list, tuple)) else re.split(r"[,\n]", str(needs or ""))
@@ -459,7 +460,7 @@ def off_map(session: str, project: str, reg: dict[str, dict[str, Any]] | None = 
     if key.endswith(".md"):
         key = key[:-3]
     key = project_of({"metadata": {"project": key}})       # a bare slug names a page in the first [pages] dir, as a write reads it
-    if not s or not key or s.startswith("cse_") or s.lower().startswith("stackshot") or s.lower() == str(_cfg.get("instance", "owner") or "").strip().lower():
+    if not s or not key or s.startswith("cse_") or s.lower().startswith("stackshot") or _people.person_of(s):
         return ""
     reg = registry() if reg is None else reg
     nm = names() if nm is None else nm
