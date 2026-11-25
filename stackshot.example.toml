@@ -712,6 +712,12 @@ result_turn_cap_per_hour = 6                        # the most turns one session
 # token_file = "~/.config/stackshot/frontdoor-main.token"   #   the front door's own bearer for this backend, OR instead of it:
 # oauth = { client_id_file = "...", client_secret_file = "...", scopes = ["read", "write"] }   #   OAuth client credentials (one credential per backend, never both)
 
+# [behind_frontdoor]                                # on a BOARD that sits behind the front door (docs/front-door.md, "A board behind the front door"); absent = the board as it always was. Each key works alone. Restart-only
+# identity_secret_file = "~/.config/stackshot/door-identity.key"   # the secret the front door signs the caller's identity with (private to the owner, mode 600): set = a call to /mcp without a valid signed identity is refused with HTTP 403
+# identity_max_age_seconds = 300                    # how old a signed identity may be (a number from 1 to 3600; anything else reads as 300); raise it for tools that run longer than this
+# members_file = "~/.config/stackshot/frontdoor-members.json"   # the front door's members file: set = this board's members are the ones it lists for board_name, read at each call ([[members]] is then not read)
+# board_name = "main"                               # this board's name in the front door's [[frontdoor.backends]] (required with members_file)
+
 [step_proof]                                        # a step of an item's next that names the event which finishes it (a pull request merged or released) is ticked by the server (stackshot/model/step_proof.py).
                                                     # Without a switch, the first pass of the server's clock after a start only logs what it would do (and keeps it in <state>/step-proof-dry.json);
                                                     # the passes after it act. Set it to decide for yourself:

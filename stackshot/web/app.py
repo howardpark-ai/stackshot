@@ -29,7 +29,7 @@ from stackshot.web.tools import message as _tool_message
 from stackshot.web.tools import route as _tool_route
 from stackshot.web.tools import anchors as _tool_anchors
 from stackshot.web.tools import rules as _tool_rules
-from stackshot.web import requestlog as _requestlog
+from stackshot.web import door_guard as _door_guard, requestlog as _requestlog
 from stackshot.web.middleware import _Fingerprint, _LinkIds, _ReadOnly, _RefusalLog, _RetiredInputs
 from stackshot.web.routes import client_api as _routes_client_api
 from stackshot.web.routes import answers as _routes_answers
@@ -198,6 +198,7 @@ def build(
     mcp.add_middleware(_RefusalLog())
     mcp.add_middleware(_ReadOnly())
     mcp.add_middleware(_RetiredInputs())
+    _door_guard.install(mcp)      # a board behind a front door checks the signed identity of a call to /mcp (web/door_guard.py); with no [behind_frontdoor] identity_secret_file it touches nothing. Before the request log's wrapper, so the log is the outermost and sees a refusal too
     _requestlog.install(mcp)      # the HTTP app is served inside the request log's wrapper, outside every other layer
     _custom_route_plain = mcp.custom_route
     mcp.custom_route = _custom_route_ro

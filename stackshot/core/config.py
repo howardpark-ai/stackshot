@@ -1396,7 +1396,9 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     out: list[str] = stall_notes(cfg)
     out += keyword_notes(cfg)
     out += gmail_names_notes(cfg)
-    if not _members().build(cfg)[0].declared:
+    if behind_door_settings(cfg).members:       # the front door's list is the board's members: the keys below name nobody (behind_door.notes says so)
+        pass
+    elif not _members().build(cfg)[0].declared:
         out.append('[instance] has no owner, so the board names its person by a placeholder: set owner = "<first name>" (the example config has it)')
     elif get("members", cfg=cfg):
         pe = _members()
@@ -1523,7 +1525,20 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     if ao is not None and not isinstance(ao, bool):
         out.append(f"[anchors] offers = {repr(ao)[:60]} is not true or false, so the anchor offers stay on (true): write offers = false to stop the replies offering an anchors call")
     out.extend(frontdoor_notes(cfg))
+    out.extend(behind_door_notes(cfg))
     return out
+
+
+def behind_door_settings(cfg: dict[str, Any] | None = None) -> Any:
+    """The `[behind_frontdoor]` settings (core/behind_door.py: a board that checks a front door's signed identity and reads its members from the door's file). Imported at call time: that module reads this one."""
+    from stackshot.core import behind_door
+    return behind_door.settings(cfg)
+
+
+def behind_door_notes(cfg: dict[str, Any] | None = None) -> list[str]:
+    """The lines for the `[behind_frontdoor]` table: [] when the config has no such table."""
+    from stackshot.core import behind_door
+    return behind_door.notes(cfg)
 
 
 def frontdoor_notes(cfg: dict[str, Any] | None = None) -> list[str]:
@@ -1621,6 +1636,7 @@ RESTART_ONLY: dict[str, str] = {
     "auth.base_url": "",                          #   redirect URIs, the portal token's identity
     "auth.allowed_client_redirect_uris": "",
     "auth.portal_identity": "",
+    "behind_frontdoor": "",                       # the guard of the MCP endpoint is put around the HTTP app at start (web/door_guard.py), and the members the front door lists are read from the first call on
     "runner.process": "",                         # where the minute set's runner runs (a thread of the server, or `stackshot minute`): read once at a start, by the server and by that process
     "locks": "",                                  # the store locks are made at import and each holds or skips its flock for a whole hold
     "paths": "",                                  # the store, state and secrets dirs hold the running process's files, ids and locks,
