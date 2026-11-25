@@ -42,7 +42,7 @@ The first two are live states; the third is a recorded event, one the activity r
 rests on a recorded event alone stamps nothing, since that event is in the record already at its own time. The audit's write still moves no `activity` clock (model/activity.py): only `last_activity`.
 
 No pull request is read from GitHub here: the audit uses recorded data only (a new head commit is one of the recorded events: it breaks a busy stretch, audit/busy_tell.py). When nothing is
-verified the line reads `Audit hh:mm: idle, nothing verified` followed by one short clause of the reasons (`idle_why`: the mover's pane busy but with other items on agents, or idle, at a shell, asleep or not read; no subagent tied to the item; no recorded event in the hour), and its log entry carries kind `audit_idle`, which audit/hand_idle.py reads to hand the item on (by the kind, never the words).
+verified the line reads `Audit hh:mm: idle, nothing verified` followed by one short clause of the reasons (`idle_why`: the mover's pane busy but with other items on agents, or idle, at a shell, asleep or not given; no subagent tied to the item; no recorded event in the hour), and its log entry carries kind `audit_idle`, which audit/hand_idle.py reads to hand the item on (by the kind, never the words).
 
 Pure: no server import, no file, no clock read but the zone for the hour and minute in the line. Stdlib plus the repo's modules."""
 from __future__ import annotations
@@ -70,9 +70,9 @@ KIND_OK, KIND_IDLE, KIND_UNKNOWN = _log.KIND_OK, _log.KIND_IDLE, _log.KIND_UNKNO
 PANE = "the mover's pane is in a turn"      # the phrase of a busy pane; a line whose only phrase it is is `pane_only` (audit/busy_tell.py)
 LIVE_ONLY = " (live state only, nothing recorded on the item)"
 IDLE = "idle, nothing verified"      # an idle line starts with it, whatever clause follows (`WHY_MAX`): every reader that matches the line by its start keeps working
-WHY_MAX = 160            # the clause after `IDLE`, in characters: whole reasons are dropped from its end past this, so a line stays well inside the log's own clip (hourly_log.CLIP)
+WHY_MAX = 160            # the reasons of the clause after `IDLE`, joined with "; ", in characters (without the surrounding " (" and ")", so the whole clause can reach WHY_MAX + 3): whole reasons are dropped from its end past this, so a line stays well inside the log's own clip (hourly_log.CLIP)
 PANE_STATE = {"idle": "the mover's pane is idle", "shell": "the mover's pane is at a shell", "sleeping": "the mover's pane is asleep"}      # a pane that is not in a turn, by the state the snapshot gives
-PANE_UNREAD = "no fresh snapshot of the mover's pane"      # the state is unknown: no snapshot, an old one (agent_state.MAX_AGE_S), one that does not list the mover or did not read it, or no reading given
+PANE_UNREAD = "the mover's pane state was not given"      # an idle line reaches it only when a fresh snapshot lists the mover and gives no pane word, or no pane reading was given to the pass: a missing, old (agent_state.MAX_AGE_S) or unread snapshot makes the line `audit_unknown`, never idle (audit_ticks._mover_subagents)
 NO_SUBAGENT = "no subagent is running for the mover"
 SUBAGENT_ELSEWHERE = "its running subagents are tied to other items"
 NO_EVENT = "no commit, review or CI in the hour"
@@ -165,7 +165,7 @@ def stamp(item: dict[str, Any], line: dict[str, Any] | None, now: float) -> bool
 def idle_why(state: str, others: int, running: int) -> list[str]:
     """Why nothing was verified, one short reason each, from what `due` knows: the mover's pane (`state`: "busy", "idle", "shell", "sleeping" or "" when it could not be read; `others`: the mover's other items on an agent, which is why a busy pane proves nothing of this one),
     the subagents (`running`: how many the mover has running; none of them is tied to this item), and the recorded events (none in the hour: an item that had one would have been verified)."""
-    if state == "busy":
+    if state == "busy":      # `others` 0 cannot come from `due`: a busy pane with no other item on an agent verifies the item; the branch is left as it is
         pane = "the mover's pane is busy" + (f", but it carries {others} other item{'' if others == 1 else 's'} on {'an agent' if others == 1 else 'agents'}" if others else "")
     elif not state:
         pane = PANE_UNREAD
