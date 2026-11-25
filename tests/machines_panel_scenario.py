@@ -64,6 +64,9 @@ def now_dt(): return datetime.datetime.now(_cfg.tz())
 def board(): return ui_render.Board(str(T / "store"), now=now_dt())
 def block(b=None): return (b or board()).panel_blocks()["machines"]
 def page(): return board().render({"html"})["html"]
+# A page carries two stamps of the moment it was drawn: the `stackshot-rendered` meta (whole seconds of the wall clock) and the "rendered ... ago" line.
+# Two renders a second apart differ in those two places and nowhere else, so a byte comparison of two pages masks them first.
+def steady(h): return re.sub(r'<p class="rline">.*?</p>', '<p class="rline"></p>', re.sub(r'(<meta name="stackshot-rendered" content=")[0-9]+(">)', r'\g<1>0\2', h), flags=re.S)
 def mach(name="box-one", **over):
     m = {"name": name, "hostname": name + ".example.net", "letter": "a", "ssh": "user@" + name, "addresses": ["192.0.2.10", "2001:db8::10"], "roles": ["sala-host"], "retired": False, "sources": ["fleet.json"]}
     m.update(over); return m
@@ -362,7 +365,8 @@ def rep_of(m_over, at=RW + 30, **put_kw):
 READ = {"online": True, "last_seen": None, "versions": {"cli": "1.2.3"}, "checked": RW}
 # ---- an old body: the view and the page are byte for byte what they were
 put([mach("testbox"), mach("demo-b"), mach("lone-box", hostname=None, letter=None)])
-old_view = MP.view(RW + 30); old_html = block(); old_page = page()
+old_view = MP.view(RW + 30); old_html = block(); old_page = steady(page())
+check("11 the masked page still holds the Machines block and names only the two stamps as its difference between two renders", old_html in old_page and old_page.count('<p class="rline"></p>') == 1 and len(old_page) > 20000, (old_html in old_page, old_page.count('<p class="rline"></p>'), len(old_page)))
 check("11 a list with none of the four keys: the view's machines are exactly name, hostname and retired (no `reported`)", all(set(m) == {"name", "hostname", "retired"} for m in old_view["machines"]) and len(old_view["machines"]) == 3, old_view)
 # ---- fresh readings
 r = rep_of(READ)
@@ -428,8 +432,8 @@ for label, over in (("fresh readings on every machine", lambda i: {"online": i !
                     ("stale readings", lambda i: {"online": False, "last_seen": 1, "versions": {"cli": "0.0.1"}, "checked": RW - 5000}),
                     ("null readings", lambda i: {"online": None, "last_seen": None, "versions": None, "checked": None}),
                     ("every machine told online with versions by the sender, those with a reading of their own and those with none", lambda i: {"online": True, "last_seen": None, "versions": {"cli": "1.0.0"}, "checked": RW})):
-    put(with_readings(over)); h2 = block(); p2 = page()
-    check(f"11 {label}: the Machines block and the page are byte for byte those of the same list without them (nothing is drawn from the readings)", h2 == old_html and p2 == old_page and "9.9.9" not in p2 and "0.0.1" not in p2, [i for i, (a, b) in enumerate(zip(h2, old_html)) if a != b][:1])
+    put(with_readings(over)); h2 = block(); p2 = steady(page())
+    check(f"11 {label}: the Machines block and the page (but for the two stamps of when it was drawn) are byte for byte those of the same list without them (nothing is drawn from the readings)", h2 == old_html and p2 == old_page and "9.9.9" not in p2 and "0.0.1" not in p2, [i for i, (a, b) in enumerate(zip(h2, old_html)) if a != b][:1])
 put([mach("lone-box", hostname=None, letter=None, online=True, last_seen=None, versions={"cli": "9.9.9"}, checked=RW)]); h2 = block()
 put([mach("lone-box", hostname=None, letter=None)]); h3 = block()
 check("11 a listed machine nothing has read still draws its one offline line when the sender says it is online", h2 == h3 and 'class="mr offline"' in h2 and "9.9.9" not in h2, h2)
