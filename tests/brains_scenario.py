@@ -104,9 +104,11 @@ def stderr():
 
 from stackshot.core import config as _cfg; from stackshot.projects import brains; from stackshot.projects import pages as _pg; from stackshot.router import page_debt; from stackshot.projects import rename_page
 _cfg.CFG["pages"]["flavor"] = "gbrain"
+DEFHOME = str(T / "home-default")      # [gbrain] home of the default brain: with a second brain configured the default brain needs one (see 21)
 def set_brains(*bs):
-    if bs: _cfg.CFG["brains"] = [dict(b) for b in bs]
-    else: _cfg.CFG.pop("brains", None)
+    """Name the second brains; with any, the default brain gets its own home too (without one its CLI calls are refused, 21), with none it gets none."""
+    if bs: _cfg.CFG["brains"] = [dict(b) for b in bs]; _cfg.CFG.setdefault("gbrain", {})["home"] = DEFHOME
+    else: _cfg.CFG.pop("brains", None); _cfg.CFG.setdefault("gbrain", {}).pop("home", None)
     brains._WARNED.clear()
 
 # ---- 1. no [[brains]]: as before
@@ -150,7 +152,7 @@ store = page_debt.page_io()
 store.put("projects/beta-one", "new text", "r1"); store.put("projects/alpha", "a text", "r1"); store.add_timeline("gamma", "2026-11-02", "s", "", "test")
 c = calls()
 check("2 a write to a second-brain slug runs gbrain with its home", c[0]["home"] == str(T / "home-second") and c[0]["argv"][:2] == ["put", "projects/beta-one"] and c[0]["stdin"] == "new text", c)
-check("2 a write to a default slug carries no GBRAIN_HOME", c[1]["home"] is None and c[1]["argv"][:2] == ["put", "projects/alpha"], c)
+check("2 a write to a default slug carries the default brain's own GBRAIN_HOME", c[1]["home"] == DEFHOME and c[1]["argv"][:2] == ["put", "projects/alpha"], c)
 check("2 a timeline call finds the slug in its JSON and routes it", c[2]["home"] == str(T / "home-second") and c[2]["argv"][:2] == ["call", "add_timeline_entry"], c)
 content, rev = store.get("projects/beta-one"); calls()
 check("2 a read for a write goes through the second brain's CLI", content == "page from " + str(T / "home-second") and rev == "r1", content)
@@ -284,7 +286,7 @@ pdebt_svc.page_debt_fallback = orig_fb; c = calls()
 check("6 the audit's page call skips a no-home brain's page, no fallback, no gbrain command", res6 == ["skipped", "skipped"] and not fell and c == [], (res6, fell, c))
 check("6 and warns once for the outage, naming the brain", err.getvalue().count("second brain 'second'") == 1, err.getvalue())
 st_d, _n = store.put("projects/alpha", "a text", "r1"); c = calls()
-check("6 a default-brain write is not touched by it", st_d == "ok" and len(c) == 1 and c[0]["home"] is None, (st_d, c))
+check("6 a default-brain write is not touched by it", st_d == "ok" and len(c) == 1 and c[0]["home"] == DEFHOME, (st_d, c))
 check("6 config.notes names the entry with no home", any("[[brains]] second has no home" in n for n in _cfg.notes()), _cfg.notes())
 check("6 an entry with a home, or a client's remote entry, gets no such note", not any("has no home" in n for n in _cfg.notes({**_cfg.CFG, "brains": [dict(SECOND)]}))
       and not any("has no home" in n for n in _cfg.notes({**_cfg.CFG, "brains": [{**SECOND, "home": "", "remote": True}]})))
@@ -442,7 +444,7 @@ with stderr() as err:
 c = calls()
 sec_calls = [x for x in c if x["home"] == str(T / "home-second")]
 check("14 every call for the brain (put, read, timeline) carries GBRAIN_REMOTE_CLIENT_SECRET in the child's environment, from a JSON secret_file", len(sec_calls) == 3 and all(x["secret"] == MADE for x in sec_calls), c)
-check("14 a default-brain call carries none", [x["secret"] for x in c if x["home"] is None] == [None], c)
+check("14 a default-brain call carries none", [x["secret"] for x in c if x["home"] == DEFHOME] == [None], c)
 check("14 the calls worked (put ok, page read, timeline accepted)", st == "ok" and content is not None and note_tl == "", (st, note, content, note_tl))
 check("14 the server's own environment never holds it", "GBRAIN_REMOTE_CLIENT_SECRET" not in os.environ and MADE not in json.dumps(dict(os.environ)))
 given = {"PATH": "/x"}; brains.gbrain_env(env=given, brain=brains.by_name("second"))
@@ -999,6 +1001,51 @@ for wrapped_ in (False, True):
 WRAP.unlink(missing_ok=True); (T / "thin-page.md").write_text(THIN_PAGE); calls()
 check("19 unwrapped: get returns the page as it was", store.get("projects/thin-page") == (THIN_PAGE, "rev-" + str(len(THIN_PAGE))))
 set_brains(); rename_page._THIN.clear(); (T / "thin-page.md").unlink(missing_ok=True)
+
+# ---- 20. the default brain needs its home once a second brain is configured: with none its CLI call would run on whichever brain the CLI's own home holds
+WANT20 = ('refused: the default brain has no home in [gbrain] and a second brain is configured, so the gbrain CLI would run on whichever brain its own home holds; '
+          'set home = "<its GBRAIN_HOME folder>" under [gbrain]')
+GBHOME = "GBRAIN_HOME"
+set_brains(SECOND); _cfg.CFG["gbrain"].pop("home", None); calls()
+env_a, why_a = brains.prepare("projects/alpha", {"PATH": "/x"})
+check("20 a default-brain call with no [gbrain] home and a second brain is refused with the one-line text", why_a == WANT20 and "\n" not in why_a, why_a)
+check("20 ...and the environment it comes with has no GBRAIN_HOME", GBHOME not in env_a, env_a)
+check("20 cli_refusal says the same for a default slug, an unknown slug and no slug", all(brains.cli_refusal(x) == WANT20 for x in ("projects/alpha", "zeta-unknown-page", "")), [brains.cli_refusal(x) for x in ("projects/alpha", "zeta-unknown-page", "")])
+check("20 a second brain's slug is not the default brain's refusal", brains.cli_refusal("projects/beta-one") == "", brains.cli_refusal("projects/beta-one"))
+store = page_debt.page_io()
+rc_p, out_p = rename_page.gb(["put", "projects/alpha"], stdin="x")
+rc_r, out_r = rename_page.gb(["call", "get_page", json.dumps({"slug": "projects/alpha"})])
+rc_n, out_n = rename_page.gb(["call", "list_pages", "{}"])      # a call that names no slug is the default brain's too
+st_p, note_p = store.put("projects/alpha", "x", "r1")
+got_r = store.get("projects/alpha")
+note_t = store.add_timeline("projects/alpha", "2026-11-02", "s", "", "test")
+c = calls()
+check("20 a write, a read and a slugless call through rename_page.gb are refused (exit 2, the refusal text) and run no gbrain command",
+      (rc_p, out_p, rc_r, out_r, rc_n, out_n) == (2, WANT20, 2, WANT20, 2, WANT20) and c == [], (rc_p, out_p, rc_r, out_r, rc_n, out_n, c))
+check("20 the page store reports the refusal: a put is refused, a read is a page that could not be read, a timeline line carries the text",
+      st_p == "refused" and WANT20[:150] in note_p and got_r[0] is None and WANT20[:150] in note_t, (st_p, note_p, got_r, note_t))   # a note is cut at about 200 characters
+rc_s, out_s = rename_page.gb(["put", "projects/beta-one"], stdin="x"); c = calls()
+check("20 a second brain's own call still runs, with its own home", rc_s == 0 and len(c) == 1 and c[0]["home"] == SECOND["home"], (rc_s, out_s, c))
+check("20 config.notes says the default brain's calls are refused until [gbrain] home is set",
+      sum("[gbrain] home is not set while a second brain is configured" in n for n in _cfg.notes()) == 1, _cfg.notes())
+# with its home set, the default brain runs with that home
+_cfg.CFG["gbrain"]["home"] = DEFHOME
+env_h, why_h = brains.prepare("projects/alpha", {"PATH": "/x"})
+rc_h, out_h = rename_page.gb(["put", "projects/alpha"], stdin="x"); c = calls()
+check("20 with [gbrain] home set and a second brain, the default brain is not refused and GBRAIN_HOME is its home", why_h == "" and env_h.get(GBHOME) == DEFHOME and rc_h == 0 and len(c) == 1 and c[0]["home"] == DEFHOME, (why_h, env_h, rc_h, c))
+check("20 ...and config.notes has no such note", not any("[gbrain] home is not set" in n for n in _cfg.notes()), _cfg.notes())
+# no [[brains]]: unchanged, never refused, the environment untouched
+set_brains(); _cfg.CFG["gbrain"].pop("home", None); calls()
+env_o, why_o = brains.prepare("projects/alpha", {"PATH": "/x"})
+rc_o, out_o = rename_page.gb(["put", "projects/alpha"], stdin="x"); c = calls()
+check("20 with no [[brains]] and no home the default brain is not refused and GBRAIN_HOME is not set", why_o == "" and brains.cli_refusal("projects/alpha") == "" and GBHOME not in env_o and rc_o == 0 and len(c) == 1 and c[0]["home"] is None, (why_o, env_o, rc_o, c))
+check("20 ...and config.notes has no such note", not any("[gbrain] home is not set" in n for n in _cfg.notes()), _cfg.notes())
+# a client box lists its second brains as remote entries and runs no CLI: no note there
+check("20 a client's remote entries with no [gbrain] home get no such note",
+      not any("[gbrain] home is not set" in n for n in _cfg.notes({**_cfg.CFG, "brains": [{**SECOND, "home": "", "remote": True}]})))
+check("20 a [[brains]] entry that is skipped (no path) is no second brain: no such note",
+      not any("[gbrain] home is not set" in n for n in _cfg.notes({**_cfg.CFG, "brains": [{"name": "x"}]})))
+set_brains()
 
 print(f"brains: {len(ran) - len(fails)}/{len(ran)} passed", flush=True)
 sys.stdout.flush(); sys.stderr.flush()

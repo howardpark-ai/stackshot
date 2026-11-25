@@ -60,13 +60,15 @@ def _slug_of(args):
 
 def gb(args, stdin=None, slug=None):
     """One gbrain CLI call, with GBRAIN_HOME of the brain that holds the slug ([[brains]]; the default brain keeps the environment as it is,
-    unless [gbrain] home is set). A second brain is always written through gbrain, whatever [pages] flavor says for the default one."""
+    unless [gbrain] home is set, which it must be once a second brain is configured: with none the call is refused). A second brain is always
+    written through gbrain, whatever [pages] flavor says for the default one."""
     slug = _slug_of(args) if slug is None else slug
     b = _brains.for_key(slug) if slug else _brains.default()
     if _cfg.page_flavor() != "gbrain" and b.default: raise PlainPages(PLAIN_MSG)
     env, why = _brains.prepare(slug, ENV, b)    # one read of the brain's secret_file decides the refusal and the environment: a copy without the parent's client secret
-    if why: return 2, why                       # a second brain with no `home` (the CLI would run on the default brain's home: a read would return its page, a write land in it)
-                                                # or with an unusable secret_file: neither runs
+    if why: return 2, why                       # a second brain with no `home` (the CLI would run on the default brain's home: a read would return its page, a write land in it),
+                                                # the default brain with no `home` while a second brain is configured (the CLI would run on whichever brain its own home holds)
+                                                # or a second brain with an unusable secret_file: none of them runs
     r = subprocess.run([G, *args], input=stdin, capture_output=True, text=True, cwd=HOME, env=env, timeout=120)   # never inside a repo
     return r.returncode, _brains.redact((r.stdout or "") + (r.stderr or ""), env)
 
