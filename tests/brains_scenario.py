@@ -16,7 +16,7 @@ A parent environment that holds the variable passes it to no child (15), and one
 no keep fragment; an existing page keeps its brain; a create and the writes after it use that brain's home; bad values are ignored and named by config.notes.
 
     tests/run-suite brains        -> exit 0 / 1"""
-import contextlib, io, json, os, pathlib, re, shutil, subprocess, sys, time
+import contextlib, dataclasses, io, json, os, pathlib, re, shutil, subprocess, sys, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="brainstest-"); T = pathlib.Path(tmp)
@@ -1076,6 +1076,289 @@ check("20 a client's remote entries with no [gbrain] home get no such note",
 check("20 a [[brains]] entry that is skipped (no path) is no second brain: no such note",
       not any("[gbrain] home is not set" in n for n in _cfg.notes({**_cfg.CFG, "brains": [{"name": "x"}]})))
 set_brains()
+
+# ---- 21. the default brain as a thin client: [gbrain] secret_file is read like a [[brains]] entry's, and nothing else changes
+DMADE = "made-up-default-secret-9876543210"      # a made-up value: the real secret is never in a test
+DSF = T / "default-secret.json"
+def dleaks(*texts): return [i for i, t in enumerate(texts) if DMADE in str(t) or MADE in str(t) or PARENT in str(t)]
+def dwrite(text, mode=0o600): write_secret(text, mode, DSF)
+def with_default(secret_file, home=DEFHOME):
+    """The default brain's [gbrain] keys: its home (None = no key) and its secret_file (None = no key)."""
+    g = _cfg.CFG.setdefault("gbrain", {})
+    for k, v in (("home", home), ("secret_file", secret_file)):
+        if v is None: g.pop(k, None)
+        else: g[k] = v
+rename_page.ENV[SK] = PARENT       # the server's environment holds a client secret of its own: it reaches no child, with or without a secret_file
+try:
+    # a default brain with a secret_file: every call (put, read, timeline) carries it; a second brain's calls carry the second brain's own
+    dwrite(json.dumps({"client_id": "made-up-id", "client_secret": DMADE}))
+    write_secret(json.dumps({"client_secret": MADE}))
+    set_brains({**SECOND, "secret_file": str(SF)}); with_default(str(DSF)); calls()
+    check("21 default() reads [gbrain] secret_file (a path); the entry's own is untouched",
+          brains.default().secret_file == str(DSF) and brains.by_name("second").secret_file == str(SF), (brains.default().secret_file, brains.by_name("second").secret_file))
+    with stderr() as err:
+        st, note = page_debt.page_io().put("projects/alpha", "x", "r1")
+        content, rev = page_debt.page_io().get("projects/alpha")
+        note_tl = page_debt.page_io().add_timeline("projects/alpha", "2026-11-02", "s", "", "test")
+        page_debt.page_io().put("projects/beta-one", "x", "r1")
+    c = calls()
+    d_calls = [x for x in c if x["home"] == DEFHOME]; s_calls = [x for x in c if x["home"] == SECOND["home"]]
+    check("21 every default-brain call (put, read, timeline) carries the default brain's secret and its home", len(d_calls) == 3 and all(x["secret"] == DMADE for x in d_calls), c)
+    check("21 the second brain's call carries its own secret, never the default brain's", len(s_calls) == 1 and s_calls[0]["secret"] == MADE, c)
+    check("21 the calls worked", st == "ok" and content is not None and note_tl == "", (st, note, content, note_tl))
+    check("21 the server's own environment never holds it", SK not in os.environ and DMADE not in json.dumps(dict(os.environ)))
+    given = {"PATH": "/x", SK: PARENT}
+    env_d = brains.gbrain_env("projects/alpha", given)
+    check("21 gbrain_env sets the default brain's own value over the parent's, and returns a copy", env_d[SK] == DMADE and given == {"PATH": "/x", SK: PARENT}, (env_d, given))
+    check("21 no log line, note or repr carries a value or the path", not dleaks(err.getvalue(), _cfg.notes(), repr(brains.default()), repr(brains.all_brains())) and str(DSF) not in repr(brains.default()),
+          (err.getvalue(), _cfg.notes()))
+    check("21 a good file (mode 600) gives no config note", not any("[gbrain] secret_file" in n for n in _cfg.notes()), _cfg.notes())
+    cc = _rt_client._client_config()
+    check("21 the client config carries neither the value, the file's path nor the key", not dleaks(json.dumps(cc)) and str(DSF) not in json.dumps(cc) and "secret" not in json.dumps(cc), cc)
+    check("21 the client entry list is unchanged: no secret_file, no home", all("secret" not in k and "home" not in k for b_ in brains.client_entries() for k in b_))
+    dwrite(DMADE + "\n")      # a plain one-line file is read as for an entry
+    calls(); rename_page.gb(["put", "projects/alpha"], stdin="x"); c = calls()
+    check("21 a plain one-line file works for the default brain too", len(c) == 1 and c[0]["secret"] == DMADE, c)
+    dwrite(json.dumps({"client_secret": DMADE + "-rotated"}))
+    calls(); rename_page.gb(["put", "projects/alpha"], stdin="x"); c = calls()
+    check("21 a rotated secret applies at the next call", len(c) == 1 and c[0]["secret"] == DMADE + "-rotated", c)
+    dwrite(json.dumps({"client_secret": DMADE}))
+
+    # no second brain at all: the same
+    set_brains(); with_default(str(DSF)); calls()
+    rename_page.gb(["put", "projects/alpha"], stdin="x"); c = calls()
+    check("21 with no [[brains]] a default brain with a secret_file passes it, with its home", len(c) == 1 and c[0]["secret"] == DMADE and c[0]["home"] == DEFHOME, c)
+
+    # no secret_file: none passed, the parent's value removed (with and without a second brain)
+    for label, bs in (("a second brain configured", (SECOND,)), ("no second brain", ())):
+        set_brains(*bs); with_default(None); calls()
+        rename_page.gb(["put", "projects/alpha"], stdin="x")
+        rename_page.gb(["call", "list_pages", "{}"])
+        rename_page.gb(["call", "get_page", json.dumps({"slug": "zeta-unknown-page"})])
+        c = calls()
+        check(f"21 a default brain with no secret_file passes none of the parent's ({label})", len(c) == 3 and [x["secret"] for x in c] == [None] * 3, c)
+        check(f"21 ...and gbrain_env drops it ({label})", SK not in brains.gbrain_env("projects/alpha", {SK: PARENT, "PATH": "/x"}) and brains.cli_refusal("projects/alpha") == "")
+    set_brains(); with_default(None, home=None); calls()
+    env_n, why_n = brains.prepare("projects/alpha", {SK: PARENT, "PATH": "/x"})
+    rename_page.gb(["put", "projects/alpha"], stdin="x"); c = calls()
+    check("21 a plain default brain (no home, no secret_file, no second brain) is as before: nothing set, the parent's secret removed", why_n == "" and env_n == {"PATH": "/x"} and c[0]["home"] is None and c[0]["secret"] is None, (env_n, why_n, c))
+
+    # a secret_file with no home: not refused (the smaller choice), the secret goes to the CLI running on its own default home
+    set_brains(); with_default(str(DSF), home=None); calls()
+    env_h, why_h = brains.prepare("projects/alpha", {"PATH": "/x"})
+    rename_page.gb(["put", "projects/alpha"], stdin="x"); c = calls()
+    check("21 a secret_file with no home and no second brain is not refused: the secret is passed and GBRAIN_HOME is not set", why_h == "" and env_h.get(SK) == DMADE and GBHOME not in env_h and len(c) == 1 and c[0]["secret"] == DMADE and c[0]["home"] is None, (env_h, why_h, c))
+    check("21 ...and config.notes has no note for it", not any("secret_file" in n for n in _cfg.notes()), _cfg.notes())
+    set_brains(SECOND); with_default(str(DSF), home=None); calls()
+    env_w, why_w = brains.prepare("projects/alpha", {"PATH": "/x"})
+    check("21 with a second brain and no home the refusal for no home stays, comes first, and carries no secret", why_w == WANT20 and SK not in env_w and DMADE not in why_w, (why_w, env_w))
+
+    # an unusable file refuses the default brain's calls, with the path and the reason, once per outage, and never a value
+    def d_refused(label, want):
+        set_brains(); with_default(str(DSF)); brains._WARNED.clear(); calls()
+        with stderr() as e_:
+            rc_, out_ = rename_page.gb(["put", "projects/alpha"], stdin="x")
+            rc2_, out2_ = rename_page.gb(["call", "get_page", json.dumps({"slug": "projects/alpha"})])
+            st_, note_ = page_debt.page_io().put("projects/alpha", "x", "r1")
+            got_ = page_debt.page_io().get("projects/alpha")
+            tl_ = page_debt.page_io().add_timeline("projects/alpha", "2026-11-02", "s", "", "test")
+            env_, why_ = brains.prepare("projects/alpha", {SK: PARENT, "PATH": "/x"})
+        c_ = calls(); err_ = e_.getvalue()
+        check(f"21 {label}: every call is refused (exit 2) with 'refused: the default brain: secret_file <path> ...', and no CLI ran",
+              (rc_, rc2_) == (2, 2) and out_.startswith("refused: the default brain: secret_file ") and str(DSF) in out_ and want in out_ and out2_ == out_ and c_ == [], (rc_, out_, rc2_, c_))
+        check(f"21 {label}: the page store refuses a put, reads None and puts the reason on a timeline line", st_ == "refused" and want in note_ and got_[0] is None and want[:7] in tl_, (st_, note_, got_, tl_))   # the timeline line is cut at about 200 characters
+        check(f"21 {label}: the environment it comes with holds no secret (not even the parent's)", why_ and SK not in env_, (env_, why_))
+        check(f"21 {label}: said once on stderr, naming the default brain and the path", err_.count("brains: the default brain: ") == 1 and str(DSF) in err_ and "its gbrain CLI calls are refused" in err_, err_)
+        check(f"21 {label}: no value in any text", not dleaks(err_, out_, out2_, note_, tl_, why_, _cfg.notes()), (err_, out_))
+    dwrite(json.dumps({"client_secret": DMADE}), 0o644)
+    d_refused("a file of mode 0644", "readable by group or others")
+    for mode in (0o640, 0o604, 0o660):
+        os.chmod(DSF, mode); check(f"21 mode {mode:04o} is refused as well", "readable by group or others" in brains.prepare("projects/alpha")[1])
+    n = [x for x in _cfg.notes() if "[gbrain] secret_file" in x]
+    check("21 and config.notes names [gbrain] secret_file, the path and why, with no value", len(n) == 1 and str(DSF) in n[0] and "readable by group or others" in n[0] and not dleaks(n), n)
+    os.chmod(DSF, 0o600); calls()
+    with stderr() as e_:
+        st_ok, _n = page_debt.page_io().put("projects/alpha", "x", "r1")
+    c = calls()
+    check("21 after chmod 600 it works again and one line says the default brain is back", st_ok == "ok" and c and c[0]["secret"] == DMADE and e_.getvalue().strip().splitlines() == ["brains: the default brain is back"], (st_ok, c, e_.getvalue()))
+    DSF.unlink()
+    d_refused("a missing file", "cannot be read")
+    dwrite(json.dumps({"client_id": "made-up-id", "note": DMADE}))
+    d_refused("a JSON file with no client_secret key", "no client_secret key")
+    dwrite("{not json " + DMADE)
+    d_refused("a file that is not valid JSON (its content is not echoed)", "not valid JSON")
+    dwrite("  \n\n")
+    d_refused("an empty file", "is empty")
+    dwrite(json.dumps({"client_secret": "abcdefghijklmno"}))
+    d_refused("a 15-character secret", "shorter than 16 characters")
+    dwrite(json.dumps({"client_secret": DMADE + "\u0000-tail"}))
+    d_refused("a NUL in the value", "has an unusable client_secret")
+    dwrite("made-up-secret-with-bell\x07-tail\n")
+    d_refused("a control character in a plain file", "has an unusable client_secret")
+    DSF.unlink(); DSF.mkdir(); os.chmod(DSF, 0o700)
+    d_refused("a directory", "cannot be read")
+    DSF.rmdir()
+
+    # one read decides the refusal and the environment of a default-brain call
+    dwrite(json.dumps({"client_secret": DMADE})); set_brains(); with_default(str(DSF))
+    reads = []; real_secret = brains.secret
+    def once_then_gone(b):
+        reads.append(b.name)
+        return real_secret(b) if len(reads) == 1 else ("", "secret_file changed under the call")
+    brains.secret = once_then_gone
+    try:
+        calls(); rc_o, out_o = rename_page.gb(["put", "projects/alpha"], stdin="x"); c = calls()
+    finally:
+        brains.secret = real_secret
+    check("21 one default-brain call reads the secret_file once, and that read decides the refusal and the environment", reads == ["default"] and rc_o == 0 and len(c) == 1 and c[0]["secret"] == DMADE, (reads, rc_o, c))
+
+    # the second brains are untouched by it: an unusable default file does not refuse a second brain's call, and the reverse
+    set_brains({**SECOND, "secret_file": str(SF)}); with_default(str(DSF)); write_secret(json.dumps({"client_secret": MADE})); dwrite("{bad json " + DMADE)
+    calls(); brains._WARNED.clear()
+    with stderr() as e_:
+        rc_s, _o = rename_page.gb(["put", "projects/beta-one"], stdin="x"); rc_a, out_a = rename_page.gb(["put", "projects/alpha"], stdin="x")
+    c = calls()
+    check("21 an unusable default file refuses the default brain only: the second brain's call ran with its own secret", rc_s == 0 and rc_a == 2 and len(c) == 1 and c[0]["secret"] == MADE and c[0]["home"] == SECOND["home"], (rc_s, rc_a, c))
+    dwrite(json.dumps({"client_secret": DMADE})); os.chmod(SF, 0o644); calls(); brains._WARNED.clear()
+    with stderr() as e_:
+        rc_s, out_s = rename_page.gb(["put", "projects/beta-one"], stdin="x"); rc_a, _o = rename_page.gb(["put", "projects/alpha"], stdin="x")
+    c = calls()
+    check("21 an unusable second-brain file refuses that brain only, still named 'second brain', and the default brain's call ran",
+          rc_s == 2 and out_s.startswith("refused: second brain 'second': secret_file ") and rc_a == 0 and len(c) == 1 and c[0]["secret"] == DMADE and "brains: second brain 'second': " in e_.getvalue(), (rc_s, out_s, rc_a, c, e_.getvalue()))
+    os.chmod(SF, 0o600)
+
+    # config.notes: a value that is not a path, an empty one, a missing file; a client box's remote entries change nothing
+    gb_notes = lambda v, **kw: [x for x in _cfg.notes({**_cfg.CFG, "gbrain": {**_cfg.CFG.get("gbrain", {}), "secret_file": v}, **kw}) if "[gbrain] secret_file" in x]
+    n = gb_notes(5)
+    check("21 a [gbrain] secret_file that is not a string gets a note saying no secret is passed", len(n) == 1 and "is not a path" in n[0] and "default brain" in n[0], n)
+    check("21 an empty or blank [gbrain] secret_file gets no note", gb_notes("") == [] and gb_notes("  ") == [])
+    check("21 a [gbrain] secret_file that does not exist gets no mode note (the read says so)", gb_notes(str(T / "no-such-secret.json")) == [])
+    dwrite("x", 0o666)
+    n = gb_notes(str(DSF)); check("21 a world-writable file is named too", len(n) == 1 and "0666" in n[0], n)
+    dwrite(json.dumps({"client_secret": DMADE}))
+    check("21 a client box (remote entries, a missing file) gets no [gbrain] secret_file note", gb_notes(str(T / "client-only-secret.json"), brains=[{**SECOND, "home": "", "remote": True}]) == [])
+    set_brains(); with_default("   ")
+    check("21 a blank [gbrain] secret_file is no secret_file: default() has none and the call passes none",
+          brains.default().secret_file == "" and brains.prepare("projects/alpha", {"PATH": "/x", SK: PARENT}) == ({"PATH": "/x", "GBRAIN_HOME": DEFHOME}, ""))
+    with_default(5)
+    check("21 a [gbrain] secret_file that is not a string is read as none (config.notes names it)", brains.default().secret_file == "" and SK not in brains.prepare("projects/alpha", {SK: PARENT})[0])
+
+    # the audit's page call: an unreadable default-brain page goes to the keeper with the refusal text, which names the file
+    set_brains(); with_default(str(DSF)); dwrite("{bad json " + DMADE); calls()
+    fell21 = []; orig_fb21 = pdebt_svc.page_debt_fallback
+    pdebt_svc.page_debt_fallback = lambda *a, **k: fell21.append(a) or "keeper-x"
+    try:
+        res21 = pdebt_svc.page_debt_project("projects/alpha", moved20, time.time(), "live", runner=lambda m: {"status": "spawn"})
+    finally:
+        pdebt_svc.page_debt_fallback = orig_fb21
+    c = calls()
+    check("21 the audit's page call falls back to the keeper with the refusal text naming the default brain's secret_file, no value, and no CLI ran",
+          res21 == "fallback" and len(fell21) == 1 and fell21[0][3].startswith("the page could not be read: the default brain: secret_file ") and str(DSF) in fell21[0][3] and "not valid JSON" in fell21[0][3]
+          and not dleaks(fell21[0][3]) and c == [], (res21, fell21, c))
+    # the plain flavor never reaches the CLI: a secret_file changes nothing there
+    _cfg.CFG["pages"]["flavor"] = "plain"
+    try:
+        rename_page.gb(["put", "projects/alpha"], stdin="x"); plain_refused = False
+    except rename_page.PlainPages: plain_refused = True
+    finally: _cfg.CFG["pages"]["flavor"] = "gbrain"
+    check("21 under the plain flavor a gbrain call for the default brain is still refused before any file is read", plain_refused and not calls())
+finally:
+    rename_page.ENV.pop(SK, None)
+    if DSF.is_dir(): DSF.rmdir()
+    DSF.unlink(missing_ok=True)
+    SF.unlink(missing_ok=True)
+    _cfg.CFG.get("gbrain", {}).pop("secret_file", None)
+    set_brains()
+
+# ---- 22. secret(): one opened descriptor decides the kind, the mode and the size; no refusal, log line or note ever carries a value; the plain form is literal; JSON is trimmed
+MK = "marker-secret-value-ABCDEF"       # a made-up value of 16 or more characters
+MS = "short-val-12345"                  # a made-up value of 15 characters: too short to use
+MAXB = brains.SECRET_MAX_BYTES
+def _clear_path(path):
+    if path.is_dir() and not path.is_symlink(): path.rmdir()
+    else: path.unlink(missing_ok=True)
+def _put_bytes(path, data, mode=0o600):
+    _clear_path(path); path.write_bytes(data); os.chmod(path, mode)
+def _setup22(kind):
+    """The brain under test: ('default', its file, its slug) or ('second', its file, its slug); the other one has no secret_file."""
+    if kind == "default":
+        set_brains(); with_default(str(DSF)); return DSF, "projects/alpha"
+    set_brains({**SECOND, "secret_file": str(SF)}); with_default(None); return SF, "projects/beta-one"
+def refusal22(kind, label, prep, markers, want):
+    """One refusal: the file is prepared (prep(path)), every kind of call is refused with `want` in the reason and no CLI runs, and none of `markers`
+    appears in any text the refusal produced (the call's answer, the page store's note, a timeline line, stderr, config.notes, prepare's reason)."""
+    path, slug = _setup22(kind); brains._WARNED.clear(); prep(path); calls()
+    with stderr() as e_:
+        rc_, out_ = rename_page.gb(["put", slug], stdin="x")
+        st_, note_ = page_debt.page_io().put(slug, "x", "r1")
+        got_ = page_debt.page_io().get(slug)
+        tl_ = page_debt.page_io().add_timeline(slug, "2026-11-02", "s", "", "test")
+        env_, why_ = brains.prepare(slug, {SK: PARENT, "PATH": "/x"})
+    c_ = calls(); err_ = e_.getvalue()
+    who = "the default brain" if kind == "default" else "second brain 'second'"
+    texts = (out_, note_, tl_, err_, why_, _cfg.notes(), repr(got_))
+    check(f"22 {kind}: {label}: refused (exit 2) with 'refused: {who}: secret_file <path> ... {want[:30]}', and no CLI ran",
+          rc_ == 2 and out_.startswith(f"refused: {who}: secret_file {path} ") and want in out_ and want in why_ and st_ == "refused" and got_[0] is None and c_ == [] and SK not in env_, (rc_, out_, st_, c_))
+    check(f"22 {kind}: {label}: no value in the answer, the note, the timeline line, stderr, the config notes or the reason",
+          not [m for m in markers for t in texts if m in str(t)], [(m, i) for m in markers for i, t in enumerate(texts) if m in str(t)])
+JSON_ = lambda **kw: json.dumps(kw).encode()
+CASES22 = [
+    ("a 15-character plain value", lambda p: _put_bytes(p, (MS + "\n").encode()), [MS], "shorter than 16 characters"),
+    ("a 15-character JSON value", lambda p: _put_bytes(p, JSON_(client_secret=MS)), [MS], "shorter than 16 characters"),
+    ("a JSON value that is short once trimmed", lambda p: _put_bytes(p, JSON_(client_secret="   " + MS + "  \n")), [MS], "shorter than 16 characters"),
+    ("a NUL in a JSON value", lambda p: _put_bytes(p, JSON_(client_secret=MK + "\u0000-tail")), [MK], "has an unusable client_secret"),
+    ("a bell in a plain file", lambda p: _put_bytes(p, (MK + "\x07-tail\n").encode()), [MK], "has an unusable client_secret"),
+    ("a tab inside a plain value", lambda p: _put_bytes(p, (MK + "\twith-a-tab\n").encode()), [MK], "has an unusable client_secret"),
+    ("a JSON file with no client_secret", lambda p: _put_bytes(p, JSON_(client_id="made-up-id", note=MK)), [MK], "no client_secret key"),
+    ("a JSON list", lambda p: _put_bytes(p, json.dumps([MK]).encode()), [MK], "no client_secret key"),
+    ("a file that is not valid JSON", lambda p: _put_bytes(p, ("{not json " + MK).encode()), [MK], "not valid JSON"),
+    ("a file that is not text", lambda p: _put_bytes(p, b"\xff\xfe" + MK.encode()), [MK], "not text"),
+    ("a file with a good value and mode 0644", lambda p: _put_bytes(p, JSON_(client_secret=MK), 0o644), [MK], "readable by group or others"),
+    ("a file one byte over the size limit", lambda p: _put_bytes(p, JSON_(client_secret=MK) + b" " * (MAXB + 1 - len(JSON_(client_secret=MK)))), [MK], f"larger than {MAXB} bytes"),
+    ("a file far over the size limit", lambda p: _put_bytes(p, (MK + "\n").encode() + b"x" * (4 * MAXB)), [MK], f"larger than {MAXB} bytes"),
+    ("a directory", lambda p: (_clear_path(p), p.mkdir(), os.chmod(p, 0o700)), [], "Is a directory"),
+    ("a FIFO (opened without waiting for a writer)", lambda p: (_clear_path(p), os.mkfifo(p, 0o600)), [], "not a regular file"),
+    ("a missing file", lambda p: _clear_path(p), [], "No such file or directory"),
+]
+try:
+    for kind in ("default", "second"):
+        for label, prep, markers, want in CASES22:
+            refusal22(kind, label, prep, markers, want)
+    # a device is no regular file either (read without end if it were read): refused by the descriptor's kind
+    for kind in ("default", "second"):
+        path, slug = _setup22(kind); calls()
+        with stderr(): env_dev, why_dev = brains.prepare(slug, {"PATH": "/x"}, dataclasses.replace(brains.for_key(slug), secret_file="/dev/zero"))
+        check(f"22 {kind}: a character device is refused without being read", why_dev.endswith("secret_file /dev/zero cannot be read: not a regular file") and SK not in env_dev, why_dev)
+
+    # what works: a file of exactly the size limit, a quoted plain value taken literally, JSON trimmed, a JSON value with inner characters kept
+    for kind in ("default", "second"):
+        path, slug = _setup22(kind); b_ = brains.for_key(slug)
+        body = JSON_(client_secret=MK)
+        _put_bytes(path, body + b" " * (MAXB - len(body)))
+        check(f"22 {kind}: a valid file of exactly {MAXB} bytes is read", brains.secret(b_) == (MK, ""), brains.secret(b_)[1])
+        _put_bytes(path, ('"' + MK + '"\n').encode())
+        check(f"22 {kind}: a plain file is taken literally: a quoted string keeps its quotes", brains.secret(b_) == ('"' + MK + '"', ""), brains.secret(b_)[1])
+        calls(); rename_page.gb(["put", slug], stdin="x"); c = calls()
+        check(f"22 {kind}: ...and the child gets it as written, quotes included", len(c) == 1 and c[0]["secret"] == '"' + MK + '"', c)
+        _put_bytes(path, JSON_(client_secret="  " + MK + " \n\t"))
+        check(f"22 {kind}: a JSON client_secret with surrounding whitespace is trimmed", brains.secret(b_) == (MK, ""), brains.secret(b_)[1])
+        _put_bytes(path, json.dumps({"client_secret": '"' + MK + '"'}).encode())
+        check(f"22 {kind}: a JSON client_secret that holds quotes keeps them", brains.secret(b_) == ('"' + MK + '"', ""), brains.secret(b_)[1])
+        _put_bytes(path, ("\n \n  " + MK + "  \nsecond line\n").encode())
+        check(f"22 {kind}: a plain file reads its first non-empty line, trimmed", brains.secret(b_) == (MK, ""), brains.secret(b_)[1])
+        _put_bytes(path, b"")
+        check(f"22 {kind}: an empty file is refused as empty", brains.secret(b_)[1].endswith("is empty"), brains.secret(b_))
+    # the mode is judged on the opened file: a symlink to a private file works, to a world-readable one is refused with its mode
+    path, slug = _setup22("default"); b_ = brains.default()
+    real = T / "default-secret-real.json"; _put_bytes(real, JSON_(client_secret=MK)); _clear_path(DSF); os.symlink(real, DSF)
+    check("22 a symlink to a private file works", brains.secret(b_) == (MK, ""), brains.secret(b_)[1])
+    os.chmod(real, 0o644)
+    check("22 a symlink to a world-readable file is refused with the target's mode", "readable by group or others (mode 0644)" in brains.secret(b_)[1] and MK not in brains.secret(b_)[1], brains.secret(b_)[1])
+    DSF.unlink(); real.unlink()
+finally:
+    for f_ in (DSF, SF, T / "default-secret-real.json"): _clear_path(f_)
+    _cfg.CFG.get("gbrain", {}).pop("secret_file", None)
+    set_brains()
 
 print(f"brains: {len(ran) - len(fails)}/{len(ran)} passed", flush=True)
 sys.stdout.flush(); sys.stderr.flush()

@@ -1258,12 +1258,18 @@ def obsolete() -> list[str]:
 
 
 def secret_file_mode_problem(path: str) -> str:
-    """"" when the file at `path` (a `[[brains]]` secret_file) is not readable by group or others (mode & 0o077 == 0), or does not exist (the
+    """"" when the file at `path` (a `[[brains]]` or `[gbrain]` secret_file) is not readable by group or others (mode & 0o077 == 0), or does not exist (the
     read says so); else a few words saying it is, with the mode. Never reads the file."""
     try:
         mode = os.stat(path).st_mode
     except OSError:
         return ""
+    return secret_mode_text(mode)
+
+
+def secret_mode_text(mode: int) -> str:
+    """"" when a secret file's mode is private to its owner (mode & 0o077 == 0); else the few words saying it is not, with the mode. The one wording,
+    used by the load-time note (by the path's stat) and by the call (by the opened descriptor's mode)."""
     return f"is readable by group or others (mode {mode & 0o777:04o}), so it is not used: chmod 600 it" if mode & 0o077 else ""
 
 
@@ -1431,6 +1437,14 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
         out.append("[gbrain] home is not set while a second brain is configured, so the default brain's gbrain CLI calls are refused (the CLI would run on whichever brain its own home holds): set home = \"<its GBRAIN_HOME folder>\" under [gbrain]")
     if isinstance(gb, dict) and "shared" in gb and not isinstance(gb["shared"], bool):
         out.append(f"[gbrain] shared = {gb['shared']!r} is not true or false, so the default brain is not marked shared and stackshot still writes its pages: write shared = true or shared = false (no quotes)")
+    sf = gb.get("secret_file") if isinstance(gb, dict) else None
+    if sf is not None and not isinstance(sf, str):
+        out.append("[gbrain] secret_file is not a path, so no client secret is passed to the default brain's gbrain CLI: set secret_file = \"<path of the file holding the client_secret>\" or remove the key")
+    elif isinstance(sf, str) and sf.strip():
+        full = os.path.expanduser(sf.strip())
+        bad = secret_file_mode_problem(full)
+        if bad:
+            out.append(f"[gbrain] secret_file {full} {bad}")
     pgs = get("pages", cfg=cfg)
     if isinstance(pgs, dict) and "copy_project_lines" in pgs and not isinstance(pgs["copy_project_lines"], bool):
         out.append(f"[pages] copy_project_lines = {pgs['copy_project_lines']!r} is not true or false, so the copy stays on (true): write copy_project_lines = false to stop writing project lines onto pages")

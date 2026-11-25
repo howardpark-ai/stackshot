@@ -36,13 +36,18 @@ stackshot writes nothing of its board onto them. Every write the page store make
 project lines' copy of the record) is refused with a line that names the mark (shared_refusal), and a page of it owes no page update to a session. Reads are not touched.
 
 A remote brain's CLI also needs its OAuth client secret (GBRAIN_REMOTE_CLIENT_SECRET). The entry's optional `secret_file` is a path (~ allowed)
-to a file holding it: a JSON file with a `client_secret` key, or a plain file whose first line is the secret. The server reads it at each
+to a file holding it: a JSON file with a `client_secret` key, or a plain file whose first non-empty line is the secret, taken literally (a quoted string is not unwrapped). The file must be a regular file of at most
+SECRET_MAX_BYTES, opened once: that descriptor decides the kind, the mode and the content. The server reads it at each
 CLI call for that brain and sets the variable in the child's environment only: never in its own, never in a log, a note, an error message
 or the client config (the path may be named, the value and the file's content never). A file readable by group or others (mode & 0o077)
 is refused, by config.notes at load and again at the call; a file that cannot be read, is empty, has no `client_secret` or holds an unusable one
 (shorter than 16 characters, or with a control character) refuses the CLI call for that brain (cli_refusal: a note naming the path and the reason,
 once per outage), which fails open as any other outage. The child's environment never inherits the variable from the server's: prepare() removes it
 first and sets it only from the brain's own file, in the one read that also decides the refusal.
+The default brain may be a thin client of a remote gbrain too: `[gbrain] secret_file` is read by the same rules (the same secret(), the same refusal line
+naming the path and the reason, the same warn_once/clear), together with `[gbrain] home`. A default brain with no `secret_file` is exactly as before (no secret
+passed, the parent's variable removed). A `secret_file` with no `home` is not refused (the smaller choice: the CLI's own default home may itself be a thin client);
+the refusal for no `home` beside a second brain stays and comes first.
 
 A slug belongs to a [[brains]] entry when it is one of its `slugs` (a page key, or a bare slug read in the first [pages] dir) or a
 page under one of them, or when it starts with one of its `prefixes` (plain string prefixes of the page key, e.g. "projects/beta-").
@@ -58,8 +63,10 @@ The first entry whose `new_prefixes` match wins. `new_prefixes` never moves a pa
 Stdlib only."""
 from __future__ import annotations
 
+import errno
 import json
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -72,6 +79,7 @@ from stackshot.core import config as _cfg
 
 DEFAULT = "default"
 SECRET_ENV = "GBRAIN_REMOTE_CLIENT_SECRET"      # the variable the gbrain CLI reads a remote brain's OAuth client secret from
+SECRET_MAX_BYTES = 64 * 1024    # a secret_file larger than this is refused unread (a client secret is a few dozen bytes: a stray big file is no secret)
 SECRET_MIN = 16             # a client secret shorter than this is not used: redact() of a very short value would corrupt page text
 STALE_HOURS = 24.0          # a second brain's copy not synced for this long is stale ([[brains]] stale_hours; 0 = never stale)
 
@@ -111,10 +119,15 @@ def _flag(v: Any) -> bool:
     return v is True
 
 
+def _secret_path(v: Any) -> str:
+    """A `secret_file` value as a path (~ expanded); "" for none or for anything that is not a string (config.notes names it)."""
+    return _exp(v) if isinstance(v, str) else ""
+
+
 def default() -> Brain:
     return Brain(name=DEFAULT, path=Path(_exp(_cfg.get("paths", "brain")) or os.path.expanduser("~/brain")),
                  home=_exp(_cfg.get("gbrain", "home")), mirror_url=str(_cfg.get("gbrain", "mirror_url") or ""), default=True,
-                 shared=_flag(_cfg.get("gbrain", "shared")))
+                 secret_file=_secret_path(_cfg.get("gbrain", "secret_file")), shared=_flag(_cfg.get("gbrain", "shared")))
 
 
 def _strs(v: Any, strip_slash: bool = False) -> tuple[str, ...]:
@@ -146,7 +159,7 @@ def extra() -> list[Brain]:
         except (TypeError, ValueError):
             stale = STALE_HOURS
         out.append(Brain(name=name, path=Path(path), home=_exp(b.get("home")), mirror_url=str(b.get("mirror_url") or ""),
-                         secret_file=_exp(b.get("secret_file")) if isinstance(b.get("secret_file"), str) else "",
+                         secret_file=_secret_path(b.get("secret_file")),
                          slugs=tuple(s for s in (_norm(x) for x in slugs if isinstance(x, str)) if s),
                          prefixes=tuple(str(p).strip().lstrip("/") for p in prefixes if isinstance(p, str) and str(p).strip()),
                          new_prefixes=_strs(b.get("new_prefixes"), strip_slash=True), keep=_strs(b.get("keep")),
@@ -352,18 +365,45 @@ def key_problem(key: Any) -> tuple[Brain, str]:
 def secret(b: Brain) -> tuple[str, str]:
     """(the brain's CLI client secret, "") from its `secret_file`; ("", why) when it cannot be used; ("", "") when the entry has no secret_file.
     `why` names the path and the reason and never a value or any of the file's content. The file is read at each call (a rotated secret applies
-    at once); one that group or others can read is refused. JSON (a file starting with { or [) with a `client_secret` key, else a plain file whose first non-empty line is the secret.
+    at once) through one opened descriptor, which decides everything: it must be a regular file (a directory, a FIFO or a device is refused without
+    being read; the open does not wait for a writer), its mode must be private to the owner (group or others can read: refused), and it is read up to
+    SECRET_MAX_BYTES (a larger file is refused, naming the limit). JSON (a file starting with { or [) with a `client_secret` key, else a plain file whose
+    first non-empty line is the secret, taken literally (quotes included: a quoted string is no JSON here). A value is trimmed of surrounding whitespace.
     A value with a control or other non-printable character (a NUL or a lone surrogate would make the child process fail to start) or shorter than SECRET_MIN characters is unusable."""
     if not b.secret_file:
         return "", ""
     p = b.secret_file
-    bad = _cfg.secret_file_mode_problem(p)
-    if bad:
-        return "", f"secret_file {p} {bad}"
     try:
-        raw = Path(p).read_text(encoding="utf-8")
+        fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))      # O_NONBLOCK: a FIFO opens without waiting for a writer
     except OSError as e:
         return "", f"secret_file {p} cannot be read: {e.strerror or type(e).__name__}"
+    try:
+        st = os.fstat(fd)
+        if stat.S_ISDIR(st.st_mode):
+            return "", f"secret_file {p} cannot be read: {os.strerror(errno.EISDIR)}"
+        if not stat.S_ISREG(st.st_mode):
+            return "", f"secret_file {p} cannot be read: not a regular file"
+        bad = _cfg.secret_mode_text(st.st_mode)
+        if bad:
+            return "", f"secret_file {p} {bad}"
+        if st.st_size > SECRET_MAX_BYTES:
+            return "", f"secret_file {p} is larger than {SECRET_MAX_BYTES} bytes, so it is not used"
+        chunks: list[bytes] = []
+        size = 0
+        while size <= SECRET_MAX_BYTES:
+            chunk = os.read(fd, SECRET_MAX_BYTES + 1 - size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+    except OSError as e:
+        return "", f"secret_file {p} cannot be read: {e.strerror or type(e).__name__}"
+    finally:
+        os.close(fd)
+    if size > SECRET_MAX_BYTES:
+        return "", f"secret_file {p} is larger than {SECRET_MAX_BYTES} bytes, so it is not used"
+    try:
+        raw = b"".join(chunks).decode("utf-8")
     except ValueError:
         return "", f"secret_file {p} cannot be read: not text"
     if raw.lstrip().startswith(("{", "[")):
@@ -386,12 +426,18 @@ def secret(b: Brain) -> tuple[str, str]:
     return v, ""
 
 
+def _label(b: Brain) -> str:
+    """How a warning or a refusal names the brain: "the default brain" or "second brain 'name'"."""
+    return "the default brain" if b.default else f"second brain {b.name!r}"
+
+
 def prepare(slug: Any = "", env: dict[str, str] | None = None, brain: Brain | None = None) -> tuple[dict[str, str], str]:
     """(the environment a gbrain CLI call for this slug runs with, the refusal's text or ""): one read of the brain's secret_file decides both, so
     a file that turns unusable between a check and the call cannot let the call run on another value. The environment is a copy of `env` (default:
     the server's) with the client secret variable removed first, whatever the parent holds, and set only from this brain's own secret_file;
     GBRAIN_HOME is set to the brain's home when it has one. The default brain with no home is refused when a second brain is configured, and
-    never otherwise. A refusal (see cli_refusal) comes with an environment without the secret: the call must not run."""
+    never otherwise; a default brain with a `secret_file` gets its secret exactly as a second brain does, and without one it gets none. A refusal
+    (see cli_refusal) comes with an environment without the secret: the call must not run."""
     out = dict(os.environ if env is None else env)
     out.pop(SECRET_ENV, None)
     b = brain or for_key(slug)
@@ -401,14 +447,13 @@ def prepare(slug: Any = "", env: dict[str, str] | None = None, brain: Brain | No
         if not b.home and configured():      # configured() counts a client box's remote entries too: harmless, a client makes no CLI call (config.notes skips them)
             return out, ("refused: the default brain has no home in [gbrain] and a second brain is configured, so the gbrain CLI would run on "
                          "whichever brain its own home holds; set home = \"<its GBRAIN_HOME folder>\" under [gbrain]")
-        return out, ""
-    if not b.home:
+    elif not b.home:
         return out, (f"refused: second brain {b.name!r} has no home in its [[brains]] entry, so the CLI for {_norm(slug)} would use the default brain; "
                      f"set home = \"<its GBRAIN_HOME folder>\" on that entry")
     v, why = secret(b)
     if why:
         warn_once(b, why, "its gbrain CLI calls are refused")
-        return out, f"refused: second brain {b.name!r}: {why}"
+        return out, f"refused: {_label(b)}: {why}"
     clear(b, "its gbrain CLI calls are refused")
     if v:
         out[SECRET_ENV] = v
@@ -433,10 +478,11 @@ def cli_refusal(slug: Any) -> str:
     """"" when a gbrain CLI call (a read or a write) for this slug may run; else the refusal's text. A second brain with no `home` has no
     gbrain home of its own: the CLI would run with the default one, so a read would return the default brain's page for the slug (or none)
     and a write would put the page into the default brain; both are refused until the entry names its home. A second brain whose
-    `secret_file` cannot be used (unreadable, empty, no client_secret, or readable by group or others) is refused too, with a line naming the
+    `secret_file` (or the default brain's `[gbrain] secret_file`) cannot be used (unreadable, empty, no client_secret, or readable by group or others) is refused too, with a line naming the
     path and the reason and said once per outage: the CLI would fail without its secret. The caller treats a refused read as a page that
     could not be read (a second brain's page: skipped, said once per outage; the default brain's: reported to the page's keeper like any
-    unreadable page, with this text in the report, see service/page_debt.page_debt_project). The default brain is refused only when it has no `home` and a second brain is configured:
+    unreadable page, with this text in the report, see service/page_debt.page_debt_project). The default brain is refused when it has a `secret_file` that cannot be used (as a
+    second brain's), or when it has no `home` and a second brain is configured:
     the CLI would run with its own home, which on a machine whose CLI home belongs to another brain is that brain; an instance with no
     [[brains]] is never refused."""
     return prepare(slug)[1]
@@ -458,12 +504,12 @@ def warn_once(b: Brain, why: str, what: str, channel: str | None = None) -> bool
         first = not any(n == b.name for n, _c in _WARNED)
         _WARNED.add(k)
         if first:
-            print(f"brains: second brain {b.name!r}: {why}; {what}", file=sys.stderr, flush=True)
+            print(f"brains: {_label(b)}: {why}; {what}", file=sys.stderr, flush=True)
     return first
 
 
 def _back(name: str) -> None:
-    print(f"brains: second brain {name!r} is back", file=sys.stderr, flush=True)
+    print(f"brains: {'the default brain' if name == DEFAULT else f'second brain {name!r}'} is back", file=sys.stderr, flush=True)
 
 
 def clear(b: Brain, what: str | None = None) -> bool:
