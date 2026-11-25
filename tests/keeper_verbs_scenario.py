@@ -8,10 +8,11 @@ new mark and the sessions whose roles move; `--apply` writing the record and an 
 sub-page key; an agent that is the keeper already; a record with two flags coming out with one); the CLI in a child process; and the four keeper debts of the registry check (keeper-not-listed,
 keeper-two-marks, keeper-retired, keeper-not-derived), each with its test, off by default and on with `[registry_audit] keeper_debts = true`; and that with no mark anywhere the verbs leave every
 published field as it was; and the `page_keeper` verb (a sub-page's own mark, set on the entry of the project above it: nine pages at once, pages under different projects, one bad key refusing the
-whole call, the same mark again, handing a page back, an unlisted or non-sala agent, a retired project, a project's own page, the undo file, a dry run, the readers, the CLI).
+whole call, the same mark again, handing a page back, an unlisted or non-sala agent, a retired project, a project's own page, the undo file, a dry run, the readers, the CLI; the new record read
+back against the registry's own answer, stored keys read as the registry reads them, the pre-read of a project with no entry, the call that changes nothing, a project inside another's page, a key that only starts like another's).
 
     tests/run-suite keeper_verbs        → exit 0 / 1"""
-import hashlib, json, logging, os, pathlib, re, subprocess, sys
+import hashlib, json, logging, os, pathlib, re, shutil, subprocess, sys
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="keeperverbs-"); T = pathlib.Path(tmp)
@@ -346,8 +347,8 @@ for n, (what, keys, agent_, status, word) in enumerate((
         ("a key that is no page", [PK[2], "projects/forge/nowhere", PK[3]], "team-forge-main", 404, "projects/forge/nowhere"),
         ("a project nobody knows", [PK[2], "projects/nowhere/x"], "team-forge-main", 404, "projects/nowhere/x"),
         ("a project's own page (top level), which names `keeper`", [PK[2], "projects/wide"], "team-forge-main", 400, "`keeper`"),
-        ("a page with a name line of its own", [PK[2], "projects/forge/named"], "team-forge-main", 400, "display-name"),
-        ("a page with a `keeper:` line of its own", [PK[2], "projects/forge/own"], "team-forge-main", 400, "`keeper:` line"),
+        ("a page with a name line of its own", [PK[2], "projects/forge/named"], "team-forge-main", 400, "projects/forge/named has a project name line (`display-name:`) of its own"),
+        ("a page with a `keeper:` line of its own", [PK[2], "projects/forge/own"], "team-forge-main", 400, "projects/forge/own has a `keeper:` line of its own, which rules; edit the page"),
         ("a page that reaches the forge only through a `hub:` line", [PK[2], "projects/hubby"], "team-forge-main", 400, "hub:"),
         ("a page of a retired project", [PK[2], "projects/old/o1"], "team-forge-main", 409, "retired project"),
         ("an agent no project lists", [PK[2], PK[3]], "team-forge-nobody", 404, "team-forge-nobody"),
@@ -398,6 +399,141 @@ rc, out, err = tool("stackshot/tools/project.py", "restore", "--undo", re.search
 check("cli: the printed undo command takes it back", rc == 0 and recsha() == sha5, (rc, out, err))
 rc, out, err = tool("stackshot/tools/project.py", "--json", "page-keeper", "projects/forge/sub", "--hand-back")
 check("cli page-keeper --hand-back --json: a dry run of a page with no mark of its own: the whole answer as JSON, the page says same", rc == 0 and json.loads(out)["pages"][0]["same"] is True and json.loads(out)["mirror"]["state"] == "skipped", (rc, out[:300], err))
+# ---- 5c. page_keeper: the registry's own answer is what counts (the new record is read back), stored keys are read as the registry reads them, the pre-read, the call that changes nothing
+ents_before = set(ents())
+def put_record(fn):
+    d = recfile(); fn(d); REC.write_text(json.dumps(d), encoding="utf-8"); pr._CACHE["sig"] = None; refresh()
+def set_marks(pid, marks):
+    def f(d):
+        if marks: d["projects"][pid]["page_keepers"] = dict(marks)
+        else: d["projects"][pid].pop("page_keepers", None)
+    put_record(f)
+def attempt(call):
+    try: return call(), None, ""
+    except pv.VerbError as e: return None, e.status, e.message
+class CountIO(page_debt.PlainIO):
+    """The plain page store, noting each page it is asked for."""
+    def __init__(self): self.gets = []
+    def get(self, slug): self.gets.append(slug); return super().get(slug)
+# fixtures, made here and taken away at the end of the section: nest (a project that has no entry yet) with a project of its own inside its page (nest/inner) and a page under each; foo and foo-bar (a page whose
+# key starts with foo's but is no page under it: it has a `hub:` line); ghosty (an entry whose page is not in the registry, with pages under it)
+page("projects/nest.md", "type: project\ntitle: Nest\ndisplay-name: team-nest\nagents:\n  team-nest-main: talks\nstatus: active")
+page("projects/nest/y.md", "type: note\ntitle: Nest y"); page("projects/nest/inner.md", "type: note\ntitle: Nest inner"); page("projects/nest/inner/x.md", "type: note\ntitle: Nest inner x")
+page("projects/foo.md", "type: project\ntitle: Foo\ndisplay-name: team-foo\nagents:\n  team-foo-main: talks\nstatus: active"); page("projects/foo/z.md", "type: note\ntitle: Foo z")
+page("projects/foo-bar.md", "type: note\ntitle: Foo bar\nhub: projects/foo"); page("projects/foo-bar/x.md", "type: note\ntitle: Foo bar x")
+page("projects/ghosty/g1.md", "type: note\ntitle: Ghost one"); page("projects/ghosty/g2.md", "type: note\ntitle: Ghost two\nagent: team-forge-main")
+refresh()
+NEST, INNER = reg()["projects/nest"]["id"], reg()["projects/nest/inner"]["id"]; GHOST = "prj_" + "9a1c4e72"
+def add_ents(d):
+    d["projects"][INNER] = {"page": "projects/nest/inner", "status": "active", "name": "team-inner", "agents": {"team-inner-main": {"front": True, "mandate_line": "talks"}}}
+    d["projects"][GHOST] = {"page": "projects/ghosty", "status": "active", "name": "team-ghosty", "agents": {"team-ghosty-main": {"front": True, "mandate_line": "talks"}}}
+put_record(add_ents)
+check("5c setup: nest has no entry, the project inside its page has one, and the ghost's page is not in the registry while its sub-pages are",
+      NEST not in ents() and INNER in ents() and "projects/ghosty" not in reg() and "projects/ghosty/g1" in reg() and "projects/foo-bar/x" in reg(), (NEST in ents(), INNER in ents(), sorted(k for k in reg() if "ghost" in k)))
+
+# a call that changes nothing, under a project that has no entry yet: nothing is written and no entry is made
+sha_c = recsha(); nd = T / "undo-pk-noop"
+r = pv.page_keeper(["projects/nest/y"], "", apply=True, io=IO, by="lone-session", run_dir=nd)
+check("page_keeper, nothing to change under a project with no entry yet: changed false, no write (same bytes), no undo file or folder, no entry made, the lines say so, and the answer still names the project",
+      r["changed"] is False and r["same"] is True and r["undo"] is None and recsha() == sha_c and not nd.exists() and NEST not in ents() and r["lines"] == ["projects/nest/y: it follows the keeper above it already; nothing to change"]
+      and r["project"] == NEST and r["key"] == "projects/nest", (r["changed"], r["undo"], r["lines"], r["project"]))
+# the page of a project that has no entry yet is read before the lock, once, whatever the call says about it
+cio = CountIO()
+r = pv.page_keeper(["projects/nest/y"], "team-forge-main", apply=True, io=cio, by="lone-session", run_dir=T / "undo-pk-nest")
+check("page_keeper under a project with no entry yet: its page is read once before the record is written (the pre-read), and the entry made from it holds the mark and its agents",
+      cio.gets == ["projects/nest"] and pmarks(NEST) == {"projects/nest/y": "team-forge-main"} and "team-nest-main" in ents()[NEST].get("agents", {}) and r["changed"] is True, (cio.gets, pmarks(NEST)))
+
+# a project inside the page of another: the nearest project holds the mark
+r, st, msg = attempt(lambda: pv.page_keeper(["projects/nest/inner/x"], "team-forge-main", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-inner"))
+check("page_keeper, a page under a project that sits inside another's page: the mark is held on the entry of the nearest project (the inner one), not the topmost, and the registry reads it",
+      st is None and pmarks(INNER) == {"projects/nest/inner/x": "team-forge-main"} and "projects/nest/inner/x" not in pmarks(NEST) and r["pages"][0]["project"] == INNER and r["pages"][0]["holder"] == "projects/nest/inner"
+      and fields_of("projects/nest/inner/x") == ("team-forge-main", "mark"), (st, msg, pmarks(INNER), pmarks(NEST)))
+r, st, msg = attempt(lambda: pv.page_keeper(["projects/nest/y", "projects/nest/inner/x"], "", io=IO))
+check("... and a call over a page of each holds each on its own entry (the outer project's page: the outer entry)", st is None and [x["project"] for x in r["pages"]] == [NEST, INNER], (st, msg))
+
+# a page whose key starts with a project's key but sits under another page: the whole-segment prefix decides
+sha_c = recsha(); fb = T / "undo-pk-foobar"
+r, st, msg = attempt(lambda: pv.page_keeper(["projects/foo-bar/x"], "team-forge-main", apply=True, io=IO, run_dir=fb))
+check("page_keeper: a page under `projects/foo-bar` is not held by `projects/foo` (a whole-segment prefix, not a string one): it reaches foo by a `hub:` line, so it is refused for that, and nothing is written",
+      st == 400 and "hub:" in msg and recsha() == sha_c and not fb.exists(), (st, msg))
+r, st, msg = attempt(lambda: pv.page_keeper(["projects/foo/z"], "team-forge-main", io=IO))
+check("... while a page under `projects/foo` is held by foo", st is None and r["pages"][0]["holder"] == "projects/foo", (st, msg))
+
+# a mark the registry would not read is refused before anything is written
+sha_c = recsha(); gd = T / "undo-pk-ghost"
+for what, keys, who, word in (("a set", ["projects/ghosty/g1"], "team-forge-docs", "not team-forge-docs (the mark)"), ("a hand-back of a page an `agent:` line keeps", ["projects/ghosty/g2"], "", "not the keeper above it"),
+                              ("a set among pages that are fine", [PK[2], "projects/ghosty/g1", PK[3]], "team-forge-docs", "not team-forge-docs (the mark)")):
+    for apply_ in (True, False):
+        r, st, msg = attempt(lambda: pv.page_keeper(keys, who, apply=apply_, io=IO, run_dir=gd))
+        check(f"page_keeper: {what} on a page whose entry's page is not in the registry is refused (400, {'--apply' if apply_ else 'a dry run'}): the page is named, the answer says what the registry gives instead and why, nothing is written, no undo file",
+              st == 400 and "projects/ghosty/g" in msg and "the registry would answer" in msg and word in msg and "projects/ghosty is no page the registry holds" in msg and "nothing was changed" in msg and recsha() == sha_c and not gd.exists(), (st, msg))
+r, st, msg = attempt(lambda: pv.page_keeper(["projects/ghosty/g2"], "team-forge-main", apply=True, io=IO, run_dir=gd))
+check("... a set of the agent that the page's own `agent:` line names already is refused too: the page answers that agent by its name line, not by the mark",
+      st == 400 and "would answer team-forge-main (the name line) for it, not team-forge-main (the mark)" in msg and recsha() == sha_c and not gd.exists(), (st, msg))
+r, st, msg = attempt(lambda: pv.page_keeper(["projects/ghosty/g1"], "", apply=True, io=IO, run_dir=gd))
+check("... a hand-back of a page that has no mark and no `agent:` line has nothing to take back, and is no refusal", st is None and r["same"] is True and r["changed"] is False and recsha() == sha_c, (st, msg))
+
+# stored keys are read the way the registry reads them: a slash at the end or `.md` is the page
+K8, K9 = PK[7], PK[8]
+set_marks(FORGE, {K8 + "/": "team-forge-docs"})
+check("5c setup: a mark stored under a key with a slash at its end is read as the page's mark", fields_of(K8) == ("team-forge-docs", "mark"), fields_of(K8))
+sha_c = recsha()
+r = pv.page_keeper([K8], "", io=IO)
+check("page_keeper --hand-back of a page whose mark is stored under a key with a slash: it sees that mark (not `nothing to change`), says the keeper goes from the mark to the project's, and a dry run writes nothing",
+      r["same"] is False and r["changed"] is True and r["pages"][0]["old"] == "team-forge-docs" and r["pages"][0]["old_source"] == "mark" and r["pages"][0]["old_mark"] == "team-forge-docs" and r["pages"][0]["new_source"] == "mark" and r["pages"][0]["new"] == "team-forge-builder"
+      and recsha() == sha_c, (r["lines"], r["pages"]))
+r = pv.page_keeper([K8], "", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-slash")
+check("... applied: every stored key of the page is gone and the page answers the project's keeper", pmarks(FORGE) == {} and fields_of(K8) == ("team-forge-builder", "mark") and "page_mark" not in R()[K8] and r["undo"] and pathlib.Path(r["undo"]).is_file(), (pmarks(FORGE), fields_of(K8)))
+set_marks(FORGE, {K8 + "/": "team-forge-docs", K8 + ".md": "team-forge-main", K8: "team-forge-docs", K9: "team-forge-docs"})
+check("5c setup: a page marked under three spellings is read as marked twice (the first key rules, the others are ignored and said on the project's row)",
+      fields_of(K8) == ("team-forge-docs", "mark") and len([x for x in R()["projects/forge"].get("keeper_problems", []) if "marked twice" in x]) == 2, R()["projects/forge"].get("keeper_problems"))
+r = pv.page_keeper([K8], "team-forge-main", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-three")
+check("page_keeper: a set removes every other stored key of the page and writes one under the page's key (the other page's mark stays as it was), so the registry reads no `marked twice`",
+      pmarks(FORGE) == {K8: "team-forge-main", K9: "team-forge-docs"} and fields_of(K8) == ("team-forge-main", "mark") and not [x for x in R()["projects/forge"].get("keeper_problems", []) if "marked twice" in x], (pmarks(FORGE), R()["projects/forge"].get("keeper_problems")))
+set_marks(FORGE, {K8 + "/": "team-forge-docs"})
+r = pv.page_keeper([K8], "team-forge-docs", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-rekey")
+check("page_keeper: the same agent under a key that is not the page's key is a change (the key is rewritten), and the call after it changes nothing",
+      r["changed"] is True and r["pages"][0]["same"] is False and pmarks(FORGE) == {K8: "team-forge-docs"} and pv.page_keeper([K8], "team-forge-docs", apply=True, io=IO, run_dir=T / "undo-pk-rekey2")["changed"] is False, (pmarks(FORGE), r["lines"]))
+set_marks(FORGE, {K8: "team-forge-docs", K8 + "/": "team-forge-docs"})
+r = pv.page_keeper([K8], "team-forge-docs", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-dup")
+check("page_keeper: a stray second key of a page that has the mark already is taken away (not `same`)", r["changed"] is True and pmarks(FORGE) == {K8: "team-forge-docs"}, (pmarks(FORGE), r["lines"]))
+set_marks(FORGE, {PK[7]: "team-forge-docs", PK[2]: "team-forge-docs", K9: "team-forge-docs"})
+pv.page_keeper([PK[2]], "team-forge-main", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-order")
+check("page_keeper: a mark stored under the page's own key is overwritten, and the marks of the other pages are as they were", pmarks(FORGE) == {PK[7]: "team-forge-docs", PK[2]: "team-forge-main", K9: "team-forge-docs"}, pmarks(FORGE))
+set_marks(FORGE, {})
+
+# a key named twice, or in another spelling, is one page
+sha_c = recsha()
+r = pv.page_keeper([K8, K8, K8 + "/", K8 + ".md", "  " + K8 + "  "], "team-forge-docs", io=IO)
+check("page_keeper: a key named twice, or as `KEY/`, `KEY.md` or with spaces round it, is one page: one row, one line", [x["key"] for x in r["pages"]] == [K8] and len([ln for ln in r["lines"] if ln.startswith("dry run: keeper of")]) == 1, (r["pages"], r["lines"]))
+r = pv.page_keeper([K8 + "/", K8 + ".md"], "team-forge-docs", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-spell")
+check("... and a page named only as `KEY/` or `KEY.md` is marked under its own key", pmarks(FORGE) == {K8: "team-forge-docs"} and len(r["pages"]) == 1, (pmarks(FORGE), r["pages"]))
+set_marks(FORGE, {})
+
+# the registry check says where a mark that is not read can be mended, and where it cannot
+set_marks(FORGE, {PK[2]: "team-nobody-listed"})
+dd = [f for f in rr.keeper_debts(pr.entries(), prj.registry_raw(), R()) if f["line"] == rr.LINE_KEEPER_PAGE]
+check("registry check: the fix text of an ignored page mark names `page-keeper` (set and hand back) for a mark on the right holder, and says a mark on a page that no longer exists, or on another entry, is for whoever maintains the record to edit",
+      len(dd) == 1 and "`tools/project.py page-keeper <page> --agent <agent>`" in dd[0]["fix"] and "`--hand-back` removes it" in dd[0]["fix"] and "no longer exists" in dd[0]["fix"] and "whoever maintains the record" in dd[0]["fix"]
+      and "nearest above it" in dd[0]["fix"], dd)
+set_marks(FORGE, {})
+
+# the command line refuses an empty agent name
+sha_c = recsha()
+for bad in ("", "   "):
+    rc, out, err = tool("stackshot/tools/project.py", "page-keeper", PK[5], "--agent", bad, "--apply")
+    check(f"cli page-keeper: --agent {bad!r} is refused (exit 2) and names `--hand-back`, and nothing is written", rc == 2 and "--hand-back" in err and recsha() == sha_c, (rc, out, err))
+rc, out, err = tool("stackshot/tools/project.py", "page-keeper", PK[5], "--hand-back")
+check("cli page-keeper: --hand-back is the way (a page with no mark has nothing to hand back)", rc == 0 and "nothing to change" in out and recsha() == sha_c, (rc, out, err))
+
+# take the fixtures away
+def drop_ents(d):
+    for pid in [x for x in d["projects"] if x not in ents_before]: del d["projects"][pid]
+put_record(drop_ents)
+for rel in ("projects/nest", "projects/foo", "projects/foo-bar", "projects/ghosty"):
+    shutil.rmtree(BRAIN / rel, ignore_errors=True); (BRAIN / (rel + ".md")).unlink(missing_ok=True)
+refresh()
+
 # leave the forge as the sections below read it: no page marks, and the project's mark where it was
 d = recfile()
 for pid in (FORGE, WIDE, GONE): d["projects"][pid].pop("page_keepers", None)

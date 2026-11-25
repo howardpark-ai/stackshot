@@ -27,7 +27,9 @@ it refuses (404) an agent the record does not list and (409) a retired project; 
 `restore --undo FILE --apply` command that takes the change back.
 `page-keeper` does the same for sub-pages: a sub-page has no entry of its own, so its mark (`page_keepers`, docs/projects.md) is written on the entry of the project above it, for every page named, in one atomic change of the
 record. It refuses (400) a project's own page (`keeper` moves that mark), a page that has a name line or a `keeper:` line of its own, and an agent that is not a sala session; (404) a key that is no page under a project and an agent no
-project lists; (409) a retired project. A page that already has the mark asked for changes nothing. Nothing is written when any key is refused.
+project lists; (409) a retired project. The new record is read back before it is written: a mark the registry would not read (the page of the entry that holds it is not in the registry, say) refuses the whole call (400),
+naming the page and what the registry answers instead. A page that already has the mark asked for changes nothing, and a call that changes nothing writes no file. Nothing is written when any key is refused. `--agent` takes a name; an empty one
+is refused (exit 2): `--hand-back` is the way to hand pages back.
 
 PROJECT is an id (prj_<8 hex>), a page key, a bare slug, the project's name or a former name. A sub-page is never a project: its key names the top-level project that owns it for rename and the agent
 verbs, and is refused (400) by archive, reopen and move-page, which act on the whole project; the id of a sub-page is refused by every verb. Every verb is one atomic change of the record under the record's own lock (safe beside the running
@@ -204,6 +206,9 @@ def main(argv: list[str]) -> int:
         return 2 if e.code else 0
     if a.cmd in ("keeper", "page-keeper") and a.apply and a.dry_run:
         print(f"project {a.cmd}: --apply and --dry-run contradict each other ({a.cmd} is a dry run unless --apply)", file=sys.stderr)
+        return 2
+    if a.cmd == "page-keeper" and not a.hand_back and not " ".join(str(a.agent or "").split()):
+        print("project page-keeper: --agent needs the name of a listed agent, and an empty name is none (to hand the pages back to the keeper above them, use --hand-back)", file=sys.stderr)
         return 2
     if a.cmd == "restore":
         bad = _restore_usage(a)

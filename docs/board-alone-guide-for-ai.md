@@ -461,7 +461,7 @@ A project is an entry in `project-record.json` (store folder), keyed by an id `p
 | `agent-mandate PROJECT NAME --mandate M` | Changes the mandate line of a listed agent in the record, then writes the `agents:` block | `agent-add` with another mandate for a listed name is refused; use this verb. A hand edit of the page line does not stick (the record wins) |
 | `agent-retire PROJECT NAME`, `agent-rename PROJECT OLD NEW` | Takes an agent off the map, or renames it; retiring the last agent of a project with no open item archives it; the keeper mark follows a rename and moves on a retire of the marked agent | Not run |
 | `keeper PROJECT AGENT [--apply]` | Moves the project's keeper mark to a listed agent (a dry run unless `--apply`; keeps an undo file) | Not run |
-| `page-keeper PAGE [PAGE ...] (--agent AGENT \| --hand-back) [--apply]` | Sets the own keeper mark of sub-pages to a listed agent, or hands them back to the keeper above (a dry run unless `--apply`; keeps an undo file; one bad key refuses the whole call) | Not run |
+| `page-keeper PAGE [PAGE ...] (--agent AGENT \| --hand-back) [--apply]` | Sets the own keeper mark of sub-pages to a listed agent, or hands them back to the keeper above (a dry run unless `--apply`; keeps an undo file; one bad key, or a mark the registry would not read, refuses the whole call) | Not run |
 | `mirror PROJECT [--make-page]` | Writes the three mirror lines again | Not run |
 | `show PROJECT` | The entry and what the registry reads | Run |
 

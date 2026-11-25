@@ -1269,15 +1269,12 @@ def keeper(project: str, agent: str, *, apply: bool = False, by: str = "", io: A
 
 def _page_holder(ctx: Ctx, key: str) -> str:
     """The id of the project whose entry holds the own mark of the sub-page `key`: the project of the nearest page above it in the key tree (the place `project_registry._lay_page_keepers` reads a mark
-    from), whether or not it has an entry yet. "" when no page above it belongs to a project (a page that reaches its project only through a `hub:` line)."""
-    parts = key.split("/")
+    from: the longest key of a project that is a whole-segment prefix of `key`), whether or not it has an entry yet (a project with none is known by the id table, and only a page that is no
+    sub-page of another is one). "" when no page above it belongs to a project (a page that reaches its project only through a `hub:` line)."""
     cur, ids = pr.by_page(ctx.ents), ctx.key_ids()
-    for n in range(len(parts) - 1, 1, -1):
-        up = "/".join(parts[:n])
-        pid = cur.get(up) or (ids.get(up, "") if not ctx.owner(up) else "")
-        if pid:
-            return pid
-    return ""
+    cands = {t: i for t, i in ids.items() if t not in cur and i not in ctx.ents and "/" in t and key.startswith(t + "/") and not ctx.owner(t)}
+    cands.update({t: i for t, i in cur.items() if "/" in t and key.startswith(t + "/")})
+    return cands[max(cands, key=len)] if cands else ""
 
 
 def _page_target(ctx: Ctx, key: str) -> str:
@@ -1294,9 +1291,6 @@ def _page_target(ctx: Ctx, key: str) -> str:
     pid = _page_holder(ctx, key)
     if not pid:
         raise VerbError(400, f"{key} reaches {up} through a `hub:` line, not by its place in the key tree; a sub-page's mark is held for a page placed below its project's page, so it cannot be marked")
-    top = pr.page_key(ctx.entry(pid))
-    if not top or not key.startswith(top + "/"):
-        raise VerbError(400, f"{key} is not below the page of its project ({top or pid}); a sub-page's mark is held for a page placed below its project's page")
     if row.get("role") == "name":
         raise VerbError(400, f"{key} has a project name line (`display-name:`) of its own, which a keeper mark does not replace")
     if row.get("role") == _kp.MARK:
@@ -1304,14 +1298,45 @@ def _page_target(ctx: Ctx, key: str) -> str:
     return pid
 
 
+def _page_answer_problem(k: str, name: str, want: str | None, reg1: dict) -> str:
+    """"" when the registry `reg1` (the page rows with the entries laid over them) answers for the sub-page `k` what the call asked for, else what it answers instead. A set asks for `name` as the page's
+    keeper by its own mark; a hand-back asks that the page reads no mark of its own: a page an `agent:` line keeps (`want` "") follows the keeper above it (role `inherited`, that keeper's answer), any other
+    page is not marked."""
+    row = reg1.get(k) if isinstance(reg1.get(k), dict) else {}
+    f1 = _kp.fields(k, reg1)
+    who, src = f1.get("keeper_agent", ""), f1.get("keeper_source", "")
+    shown = f"{who} ({_SRC_WORDS.get(src, src)})" if who and src else (who or "no keeper")
+    if name:
+        return "" if who == name and src == "mark" else f"would answer {shown} for it, not {name} (the mark)"
+    if row.get(_kp.PAGE_MARK) is True:
+        return f"would still read a mark of its own on it ({shown})"
+    if want == "":
+        up = _kp.above(k, reg1)
+        f_up = _kp.fields(up, reg1) if up else {}
+        if row.get("role") != "inherited" or (up and (who, src) != (f_up.get("keeper_agent", ""), f_up.get("keeper_source", ""))):
+            return f"would answer {shown} for it, not the keeper above it"
+    return ""
+
+
+def _page_why(reg1: dict, top: str, k: str) -> str:
+    """Why the layer does not read a mark of `k` held on the entry of the project whose page is `top`: the line it said on that project's row, else that the page is not in the registry. "" when it says nothing."""
+    said = [str(x) for x in ((reg1.get(top) or {}).get("keeper_problems") or []) if str(x).startswith(f"page keeper of {k}:")]
+    if said:
+        return said[0]
+    return "" if top in reg1 else f"{top} is no page the registry holds, so the marks on the entry of that project are not read"
+
+
 def page_keeper(page_keys: list[str], agent: str, *, apply: bool = False, by: str = "", io: Any = None, now: str | None = None, run_dir: Any = None, pages: dict | None = None) -> dict:
     """Set the own keeper mark of each sub-page in `page_keys` to the agent `agent`: `page_keepers[<page key>] = <agent>` on the record entry of the project the page sits under (keeper.py,
     project_registry._lay_page_keepers). The agent is one some project lists as a sala session (its own map or another project's), spelled as it is listed; an empty `agent` hands each page back to the
     keeper above it. A dry run unless `apply`: nothing is written, and the answer says each page's old and new keeper. With `apply` the record is written in one change, and an undo file is kept the way
     `restore` keeps one (`restore --undo FILE --apply` takes the change back). The record only: no page is read or written, so `mirror` answers state "skipped".
+    The stored keys of an entry's marks are read the way the registry reads them (a key with a slash at its end, or `.md`, is the page it names): every stored key of a page is replaced by one under the page's key.
     All the keys are read before anything is written, and one bad key refuses the whole call: 400 a project's own page (`keeper` moves its mark), a page that has a name line or a `keeper:` line of
     its own, or one reached only through a `hub:` line; 404 a key that is no page under a project, or an agent no project lists as a sala session; 400 an agent that is not a sala session; 409 a
-    retired project. A page that already has the mark asked for changes nothing. The keys may sit under different projects: each is held on the entry of its own.
+    retired project. The new record is read back before anything is written: when the registry would not answer for a page what the call asked (a mark it ignores, as when the page of the entry that holds the
+    mark is not in the registry), the whole call is refused with 400 naming the page and what the registry would answer instead. A page that has the mark asked for, under its own key, changes nothing, and a
+    call that changes nothing writes no file and makes no entry. The keys may sit under different projects: each is held on the entry of its own.
     → {project, key, changed, dry, entry, mirror, name, projects, pages, roles, same, undo, lines}, `project`, `key` and `entry` those of the first project (`projects` lists them all), and per page
     {key, project, holder, old, new, old_source, new_source, old_mark, new_mark, same}: `old` and `new` the page's keeper as a reader sees it, `old_mark` and `new_mark` the record's own mark of the page
     (None: none)."""
@@ -1324,10 +1349,11 @@ def page_keeper(page_keys: list[str], agent: str, *, apply: bool = False, by: st
     undo = {"pid": "", "run_dir": run_dir}
 
     def targets(ctx: Ctx) -> dict:
-        return {k: _page_target(ctx, k) for k in keys}
+        return {k: _page_target(ctx, k) for k in keys}       # makes no entry: the holders that have none are the ones `_entryless_key` names, whose pages are read before the lock
 
     def work(ctx: Ctx) -> dict:
         held = targets(ctx)                                   # every key is read before any entry changes: one bad key refuses the whole call
+        saved = copy.deepcopy((ctx.d["ids"], ctx.d["pending_agents"], ctx.d["marks"], ctx.ents))
         for pid in dict.fromkeys(held.values()):
             e = ctx.entry(pid)
             if e.get("status") == "archived":
@@ -1345,30 +1371,49 @@ def page_keeper(page_keys: list[str], agent: str, *, apply: bool = False, by: st
                 raise VerbError(404, f"{agent} is not an agent any project lists: the mark of a page goes on an agent the record lists ({', '.join(shown[:30]) or 'none listed'}{f', and {len(shown) - 30} more' if len(shown) > 30 else ''})")
         before = copy.deepcopy(ctx.ents)
         reg0 = pr.apply(ctx.raw, before)
-        rows, f0 = [], {k: _kp.fields(k, reg0) for k in keys}
+        rows, f0, wants = [], {k: _kp.fields(k, reg0) for k in keys}, {}
         for k in keys:
             e = ctx.ents[held[k]]
             marks = e.get(_kp.PAGES) if isinstance(e.get(_kp.PAGES), dict) else {}
-            was = marks.get(k)
+            stored = sorted(sk for sk in marks if _norm_key(sk) == k)         # the registry reads every stored key as the page it names: all of them are this page's
+            was = marks[stored[0]] if stored else None                          # the first of them rules (the keys are read in order, and a second mark of a page is ignored)
             want = name if name else ("" if ctx.raw[k].get("role") == "agent" else None)      # a page that follows the keeper above it already has nothing to hand back: its mark goes
-            if was != want:
-                if want is None:
-                    del marks[k]
+            wants[k] = want
+            same = [marks[sk] for sk in stored] == ([] if want is None else [want]) and stored in ([], [k])
+            if not same:
+                marks = dict(marks)
+                if stored == [k] and want is not None:
+                    marks[k] = want                                             # the one stored key is the page's own key: overwritten where it stands
                 else:
-                    marks[k] = want
+                    for sk in stored:
+                        del marks[sk]
+                    if want is not None:
+                        marks[k] = want
                 if marks:
                     e[_kp.PAGES] = marks
                 else:
                     e.pop(_kp.PAGES, None)
-            rows.append({"key": k, "project": held[k], "holder": pr.page_key(e), "old_mark": was, "new_mark": want, "same": was == want})
+            rows.append({"key": k, "project": held[k], "holder": pr.page_key(e), "old_mark": was, "new_mark": want, "same": same})
         reg1 = pr.apply(ctx.raw, ctx.ents)
         for r in rows:
-            f1 = _kp.fields(r["key"], reg1)
-            r.update(old=f0[r["key"]].get("keeper_agent", ""), old_source=f0[r["key"]].get("keeper_source", ""), new=f1.get("keeper_agent", ""), new_source=f1.get("keeper_source", ""))
+            k = r["key"]
+            f1 = _kp.fields(k, reg1)
+            r.update(old=f0[k].get("keeper_agent", ""), old_source=f0[k].get("keeper_source", ""), new=f1.get("keeper_agent", ""), new_source=f1.get("keeper_source", ""))
+            bad = _page_answer_problem(k, name, wants[k], reg1)
+            if bad:
+                why = _page_why(reg1, r["holder"], k)
+                raise VerbError(400, f"{k}: the registry {bad}{f'; {why}' if why else ''}; nothing was changed")
         owners = sorted(dict.fromkeys(held.values()))
+        shown_ents = {p: copy.deepcopy(ctx.ents[p]) for p in owners}
+        roles = _roles_moved(ctx.raw, before, ctx.ents)
+        same_all = all(r["same"] for r in rows)
+        if same_all:                                          # nothing to change: not even an entry a holder had none of is kept, so nothing is written
+            for slot, was_ in zip(("ids", "pending_agents", "marks"), saved[:3]):
+                ctx.d[slot].clear(); ctx.d[slot].update(was_)
+            ctx.ents.clear(); ctx.ents.update(saved[3])
         undo["pid"] = owners[0] if len(owners) == 1 else ""
         undo["mode"] = "project" if len(owners) == 1 else "record"           # a change to several entries is taken back whole, as a pass over the whole record is
-        return {"pid": owners[0], "owners": owners, "name": name, "pages": rows, "roles": _roles_moved(ctx.raw, before, ctx.ents), "same": all(r["same"] for r in rows)}
+        return {"pid": owners[0], "owners": owners, "name": name, "pages": rows, "roles": roles, "same": same_all, "shown": shown_ents}
 
     if pages is None:
         pages = {}
@@ -1378,6 +1423,7 @@ def page_keeper(page_keys: list[str], agent: str, *, apply: bool = False, by: st
         except (VerbError, ValueError):                       # the transaction below tells it: a bad key is refused there
             pages = {}
     out, ents, changed = txn(work, by=by, now=now, dry=not apply, pages=pages, undo=undo if apply else None)
+    ents = {**ents, **{p: e for p, e in out["shown"].items() if p not in ents}}       # a call that changed nothing still names the entries of its projects
     shown = lambda who, src: f"{who} ({_SRC_WORDS.get(src, src)})" if who and src else (who or "none")
     head = "" if apply else "dry run: "
     lines = []
