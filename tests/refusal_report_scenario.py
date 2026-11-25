@@ -772,6 +772,18 @@ def part_refusal_report():
     c9, p9 = RR.collect(mon); t9_ = RR.build(mon, c9, p9)
     check("9h report: a handled call and a refusal in one week: 1 of 2 refused, 1 handled", "- message calls: 1 of 2 refused (50.0%)" in t9_ and "handled instead of refused (passed on, written onto an item or held, the sender told): 1 of 2 (50.0%), no-action-note 1" in t9_, t9_)
     wipe()
+    # a marked message written onto its item (handled) and a page key read as another spelling (a correction): each counted once, neither among the refusals
+    CL.record("message", True, sender="a-builder", to="a-main", fixes=[("handled:marked-no-turn:written-on-item", "")], now=epoch(d(1).year, d(1).month, d(1).day, 9, 0))
+    CL.record("message", True, sender="a-builder", to="infra/gizmo", fixes=[("page-key", "")], now=epoch(d(1).year, d(1).month, d(1).day, 9, 5))
+    CL.record("message", False, sender="a-builder", why="Refused: x", to="projects/nowhere", kind="unknown-page-key", text="t", now=epoch(d(1).year, d(1).month, d(1).day, 9, 10))
+    c9, p9 = RR.collect(mon); t9_ = RR.build(mon, c9, p9); m9 = c9["messages"]
+    check("9i stats: a handled `marked-no-turn` call counts once, as handled and never as refused, and a message with a `page-key` correction is a call that went through; only the unknown key is refused",
+          m9["calls"] == 3 and m9["refused"] == 1 and dict(m9["handled"]) == {("marked-no-turn", "written-on-item"): 1} and dict(m9["kinds"]) == {"unknown-page-key": 1}, (m9["calls"], m9["refused"], dict(m9["handled"]), dict(m9["kinds"])))
+    check("9i stats: …the page-key correction is counted once among the server's corrections, not among the refusals", dict(c9["fixes"]) == {"page-key": 1} and c9["refused"].get("message", 0) == 1, (dict(c9["fixes"]), dict(c9["refused"])))
+    check("9i report: the lines say 1 of 3 message calls refused, the handled call by its kind, and the correction by its kind",
+          "- message calls: 1 of 3 refused (33.3%)" in t9_ and "handled instead of refused (passed on, written onto an item or held, the sender told): 1 of 3 (33.3%), marked-no-turn 1" in t9_
+          and "- corrected by the server instead of refused: 1 (page-key 1)" in t9_, t9_)
+    wipe()
 
     return ran, fails
 

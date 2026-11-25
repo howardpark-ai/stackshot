@@ -433,3 +433,34 @@ allow = []
 retired = "or closing a clause set off by a comma, semicolon, bracket or dash, so a word"
 use = "or a clause set off by a comma, semicolon, bracket or dash that ends there, so a word"
 allow = []
+
+# ---- the front gate writes a marked message that names an item of his onto it when he is not talking with the agent (`messaging._written_unwoken`), where it once turned it away to the item's builder or refused it; a page key spelled another way is read as the page it matches
+[[term]]
+retired = "else it goes to that item's builder or is refused"
+use = "else it is written onto the open item it names (held for the agent's next turn when none can take it), the reply saying so"
+allow = []
+
+[[term]]
+retired = "is delivered or refused whatever the"
+use = "is delivered, written onto its item or held whatever the flag says"
+allow = []
+
+[[term]]
+retired = "is refused, naming the background agent that works a named item"
+use = "starts no turn and is written onto each open item it names, held for the agent's next turn when none can take it; refused, naming the builder, only when the hold is off too"
+allow = []
+
+[[term]]
+retired = "else it is refused (a script's too), naming the background agent"
+use = "else it starts no turn: it is written onto each open item it names (a script's too, status 200), or held when none can take it"
+allow = []
+
+[[term]]
+retired = "is today turned away to the item's builder"
+use = "is today written onto the item it names, and starts no turn"
+allow = []
+
+[[term]]
+retired = "any other is refused naming the project's background agent"
+use = "any other goes to the project's background agent"
+allow = []

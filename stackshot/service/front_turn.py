@@ -3,7 +3,7 @@
 A front agent is a session the person talks to. An inbound notice (the router's pass, a message with the person's mark) starts a turn of it in two cases only:
   1. it needs his attention and he is talking with that front agent now (`telling.present_fronts`: his last prompt in that pane is within [presence] minutes);
   2. he explicitly asked that front agent to tell him about the notice's subject.
-Any other notice never reaches a front agent, not even held: the router sends it to the item's builder when it is about the builder's work, and otherwise logs it (ruling archived); a message that names an item of his is refused or routed the same way.
+Any other notice never reaches a front agent, not even held: the router sends it to the item's builder when it is about the builder's work, and otherwise logs it (ruling archived); a message that names an item of his, marked for him, is written onto the item (or held for the agent's next turn when no item can take it) and starts no turn.
 A message that carries the person's mark but names no open item of his (`his_items`) and none he asked that agent to tell him about (`asked`) is held for the agent's next turn and starts none: the mark is explicit, and an item is what it must point at.
 The digest of lines queued for a pane (`messaging.digest_fyi`, from `inbox.take`) is asked the same: a turn only under these two cases, else its lines are filed as fyi lines and start none.
 

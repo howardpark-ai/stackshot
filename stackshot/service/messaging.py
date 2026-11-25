@@ -2,12 +2,12 @@
 
 `_message` is the one function the message tool, the `message` route of the client API and the passes that send from inside the server (filing, dates) call: it checks the target (a session by name or id, a cloud
 session, a project page), refuses a message nobody can take (a retired or paneless session, a front agent's pane without the owner's mark), handles a message a front agent's pane is not woken for in the way that fits it and tells the sender (a background agent's
-plain status report is written onto the item it names instead of delivered, `_builder_report`; a message not for the owner goes to the project's background agent, `_Pass`; a done or no-action note is held for the agent's next turn, `_Hold`), pushes the envelope (or holds it for the router when it is addressed to a project), logs it to `MSG_LOG` and names the working
+plain status report is written onto the item it names instead of delivered, `_builder_report`; a message marked for the owner that names an open item of his in the agent's project, when he is not talking with the agent, is written onto that item, `_written_unwoken`, and held for the agent's next turn when no item can take it; a message not for the owner goes to the project's background agent, `_Pass`; a done or no-action note is held for the agent's next turn, `_Hold`), reads a page key written another way (case, `-` for `/`, `projects/` for the directory) as the one page it matches, `_resolve_page_key`, pushes the envelope (or holds it for the router when it is addressed to a project), logs it to `MSG_LOG` and names the working
 agent on the items a handover names (agent_names.py). The helpers are its refusals' and labels' own: `_gate_front`, `_dead_recipient`, `_project_of_name`, `_project_takes`, `_pane_dead`, `_reachable`, `_msg_label`,
 `_CSE_ID`, the phrases that say nothing is needed (`_NOT_FOR_OWNER`, `_own_no_actions`) and the publisher's letter (`_pub_letter`).
 
 Every refusal is a `Refused(kind, text)`, one `kind` slug per refusal site; the call log keeps the kind with the refused call's target and text (`refusal_fields`, `count_client_call` for the client route), and the weekly refusal report counts message refusals by it.
-A refusal site that now handles the message keeps its kind: the call goes through, `_handled` marks it in the call log (`outcome: handled`, how), and the reply ends with a line saying what the relay did and why (`_NOTES`).
+A refusal site that now handles the message keeps its kind: the call goes through, `_handled` marks it in the call log (`outcome: handled`, how), and the reply ends with a line saying what the relay did and why (`_NOTES`). A `to` page key spelled another way is no refusal either, but a correction: `call_log.fixed("page-key")` counts it and the reply's last line says which page it went to.
 
 `MSG_LOG`, the file every message is logged to, is this module's alone: a reader takes it here (`messaging.MSG_LOG`), never a copy. A service module: it reads the store, the registry, the fleet's session rows and the
 config, and writes only through `writes.save` and the push. The session id of a name, the board's time zone and the message length cap are the surface's, reached through service/save_hooks.py. A suite that replaces
@@ -60,6 +60,7 @@ from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.save_hooks import hooks as _hooks
 from stackshot.waits import held as _held
+from stackshot.waits import quiet as _quiet
 from stackshot.waits import reports as _reports
 
 _FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as web/tools/text.py holds it
@@ -302,17 +303,44 @@ def _answered_dir() -> Path:
     return MSG_LOG.parent / "answered-notices"
 
 
+def _history_line(head: str, body: str) -> str:
+    """One History line: `head` (who said it, to whom), a colon and the message's words, cut so the whole line fits what an item keeps of one (quiet.CLIP), with an ellipsis where the words were cut."""
+    head = " ".join(str(head).split()) + ": "
+    return head + _clip_line(body, max(20, _quiet.CLIP - len(head)))
+
+
 def _write_on_items(target: str, sname: str, sender: str, raw: str, body: str, gids: list[str], via: str, line: str, because: str, nid: str = "") -> str:
-    """Write `line` onto each item in `gids` as a History line from the sender (the server's note on the item, an audit's own send marked as one), log the message as written onto them and not delivered,
-    and return the sender's reply (`because`: why it was not delivered). The one item-writing path of a message a front agent is not woken for: a background agent's plain report (_builder_report) and
-    an answer to the front agent's question that comes when the person is not in that conversation (_gate_front)."""
-    shown = ", ".join(_gh.shown(g) for g in gids)
+    """Write `line` onto each open item in `gids` as a History line (metadata.front_quiet.log, which the board shows as "stackshot: <line>": the server's own note, as the front gate's board line is), save the item under the activity kind
+    of the sender (an audit's own send is marked as one), log the message as written onto the items it reached and not delivered, and return the sender's reply (`because`: why it was not delivered). The one item-writing path of a message a front
+    agent is not woken for: a background agent's plain report (_builder_report), an answer to the front agent's question that comes when the person is not in that conversation (answer_route) and a marked message to a front agent he is not
+    talking with (_written_unwoken). A closed item takes no line and one whose write fails is left out; the reply and the log row name only the items the line stands on (an item whose newest line already says it counts, and is not saved again).
+    "" when the line stands on none: the caller delivers or holds the message instead."""
     mark_ = _answered_dir() / re.sub(r"[^0-9A-Za-z_.-]", "_", nid) if nid else None
     if mark_ is not None and mark_.exists():             # the router's notice was written onto its items already (its ruling failed to write and the pass came round again): once is enough
-        return f"Not delivered: written onto {shown} as a History line from {sname}, " + because
+        try:
+            done = mark_.read_text(encoding="utf-8").strip()
+        except OSError:
+            done = ""
+        return f"Not delivered: written onto {done or ', '.join(_gh.shown(g) for g in gids)} as a History line from {sname}, " + because
+    kind = _activity.AUDIT if _activity.audit_writer([sender, sname], _writes.audit_writer_names()) else _activity.MESSAGE      # a background agent's report written onto the item is a message about the work, unless the audit sent it
+    text = " ".join(str(line).split())
+    stands: list[str] = []
     for gid in gids:
-        with _writes.ITEM_LOCK:
-            _writes.save(gid, _svcstore._load(gid), note=line, activity=_activity.AUDIT if _activity.audit_writer([sender, sname], _writes.audit_writer_names()) else _activity.MESSAGE)      # a background agent's report written onto the item is a message about the work, unless the audit sent it
+        try:
+            with _writes.ITEM_LOCK:
+                it = _svcstore._load(gid)
+                if it.get("status") != "open":
+                    continue
+                meta = dict(it.get("metadata") or {})
+                if _quiet.note(meta, time.time(), text):
+                    it["metadata"] = meta
+                    _writes.save(gid, it, note=text[:120], activity=kind)
+            stands.append(gid)
+        except Exception as e:  # noqa: BLE001  — an item that cannot take the line is left out of the reply, the others still get it
+            print(f"message to {target} not written onto {gid}: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    if not stands:
+        return ""
+    shown = ", ".join(_gh.shown(g) for g in stands)
     if mark_ is not None:
         try:
             mark_.parent.mkdir(parents=True, exist_ok=True)
@@ -359,7 +387,7 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
             if "decision" in _needs_kinds(m_) or (tid and tid in {_session_id(x) for x in _needs_sessions(m_)}):
                 return ""
         return _write_on_items(target, sname, sender, raw, body, gids, via,
-                               f"{sname} reported to {target} (not sent to it: a plain status report): {_clip_line(body, 1500)}",
+                               _history_line(f"{sname} reported to {target}", body),
                                f"because {target} is a front agent, a session {OWNER} talks to, and this message reads as a plain status report (done, live, merged, deployed ...; no question, no word of trouble or waiting, nobody named to act). "
                                f"It does not wake {target}, which reads it on the item. If {target} or {OWNER} has something to do, decide or know, send it again saying what and it is delivered.")
     except Exception as e:  # noqa: BLE001  — the check is an extra: a failure in it delivers as before
@@ -367,6 +395,7 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
         return ""
 
 
+WRITTEN_DEDUPE_HOURS = 24       # the same words written onto the same items within this long are one History line (`_written_before`)
 ASKED_LOOKBACK_HOURS = 24       # an answer is to a question the front agent itself put to the sender within this long: the message log is read back this far
 _LOG_TAIL_BYTES = 800_000      # and no further than this much of its end
 
@@ -481,9 +510,10 @@ def answer_route(front: str, project: str, sender: str, raw: str, idx: dict[str,
             if ok:
                 sname = _sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or "")) or _msg_label(sender, idx)
                 body = re.sub(r"\A\s*\[for [^\]\n]{1,40}\]\s*", "", raw)
-                return "items", _write_on_items(front, sname, sender, raw, body, gids, via,
-                                                f"{sname} answered {front} (not sent to it: {OWNER} is not in that conversation now): {_clip_line(body, 1500)}",
-                                                f"because it answers a question of {front}'s and {OWNER} has not written to {front} in the last {_telling.presence_minutes():g} minutes. {front} reads it on the item.", nid)
+                done = _write_on_items(front, sname, sender, raw, body, gids, via, _history_line(f"{sname} answered {front}", body),
+                                       f"because it answers a question of {front}'s and {OWNER} has not written to {front} in the last {_telling.presence_minutes():g} minutes. {front} reads it on the item.", nid)
+                if done:
+                    return "items", done          # no item could take the line (closed meanwhile, or the save failed): held for the agent below
         return "hold", f"an answer to {front}, and {OWNER} is not in that conversation now"
     except Exception as e:  # noqa: BLE001  — the check is an extra: a failure in it leaves the message to the rules below
         print(f"answer: message to {front} not checked: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -514,7 +544,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
         a fixed phrase used inside a sentence is no note: the message goes on, its reply saying so;
         a background agent's marked message that only reports on a board item is written onto the item instead (_builder_report);
         it names an open item of his (front_turn.his_items: needs hold decision, or the model reads the step as his; a read that fails counts as none) or one he asked it to tell him about (its tell_him), else it is held for the agent's next turn and starts none (_Hold, its reason says what to put on an item and name; refused when the hold is off); his own message is exempt, a script's is tested too;
-        with such an item named, it is delivered, a turn, only when he is talking with that agent now or asked it to tell him about an item the text names (front_turn.warranted); else it never reaches the agent, not even held: refused, naming the background agent that works a named item (else the project), and logged;
+        with such an item named, it is delivered, a turn, only when he is talking with that agent now or asked it to tell him about an item the text names (front_turn.warranted); else it starts no turn: it is written onto each open item of his in the agent's project that it names, as a History line from the sender (`_written_unwoken`, once for the same words, the reply naming the items written and saying the front agent reads it there), else held for the agent's next turn (`_Hold`), and refused, naming the background agent that works a named item (else the project) and logged, only when the hold is off too;
       unmarked, from the person himself or with the mark or needs: decision away from the first line: refused, the mark goes on the first line;
       unmarked, from a background agent, a done, taken or no-ask note (a fixed phrase as its own statement, or a status report, reports.is_report), tested BEFORE the answer rule below, so a hand-back is never taken for an answer to a question: written onto the item it names (_builder_report),
         else held for the agent's next turn (_Hold; refused when the hold is off);
@@ -615,13 +645,84 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     if not (sender.strip() and _model.is_owner(sender)) and not _turn_warranted(name, text):      # the mark needs him, but a turn is warranted only when he is talking with this agent now or asked it to tell him about the subject
         if sname and _sibling_words.held_words(sender, name, text):      # a sibling front agent quoting his words (an Acked-by line, checked as the wake cap checks): held for the next turn, no turn started
             return _Hold(f"{sname} is a front agent of {project} and quotes {OWNER}'s words, so its message to {name} rides {name}'s next turn", project)
-        builder = _builder_named(text, roles, sname)
         why = f"{OWNER} is not talking with {name} now and has not asked it to tell him about this"
+        done = _written_unwoken(name, text, sender, sname, idx, project)          # the message names an open item of his in this project: it is written onto it, where the front agent reads it, and starts no turn
+        if done:
+            _handled("marked-no-turn", "written-on-item")
+            return done
+        if _held.enabled():          # no item could take it: it rides the agent's next turn and starts none
+            return _Hold(why + ", and no open item it names could take it", project,
+                         f"It is marked for {OWNER} and names an open item of his, so nothing more is needed from you: {name} reads it when it next takes a turn.", "marked-no-turn")
+        builder = _builder_named(text, roles, sname)
         _log_not_delivered(sender, to, text, f"not delivered: {why}")
         raise Refused("marked-no-turn", f"Refused: {name} is a front agent of {project}, and {why}, so it starts no turn there and nothing is held for its next turn. "
                         + (f"It names an item that {builder} works on: send it there (message(to={builder!r}, …)). " if builder else f"Put it on the board item it concerns, or send it to {goes}. ")
                         + "The message is in the message log.")
     return None
+
+
+def _written_before(shown: str, text: str) -> bool:
+    """Is `text` written onto the items `shown` already, by an earlier message within WRITTEN_DEDUPE_HOURS? The message log's row for such a write (`_write_on_items`) says `written onto <shown>, not delivered` and keeps the text,
+    so two senders' identical words for one item are one line, never two. False on any doubt (nothing is lost by writing it again)."""
+    try:
+        want, outcome = " ".join(_svcstore._shown_ids(text).split()), f"written onto {shown}, not delivered"
+        floor = time.time() - WRITTEN_DEDUPE_HOURS * 3600
+        with open(MSG_LOG, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - _LOG_TAIL_BYTES))
+            tail = f.read().decode("utf-8", "replace").splitlines()
+        for ln in reversed(tail):
+            try:
+                d = json.loads(ln)
+                at = dt.datetime.fromisoformat(str(d["t"])).timestamp()
+            except (ValueError, KeyError, TypeError):
+                continue
+            if at < floor:
+                break
+            if d.get("outcome") == outcome and " ".join(str(d.get("text") or "").split()) == want:
+                return True
+        return False
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _his_in_project(gids: list[str], project: str) -> list[str]:
+    """Of the items a message names, the ones a marked message to a front agent of `project` may be written onto: an open item of his (front_turn.his_items) that belongs to the same project (the page's hub, so a component page and
+    its hub are one) and no other, so the line never lands on another project's item or on one that is not his to act on. An item that cannot be read is left out."""
+    mine = set(_front_turn.his_items(gids))
+    hub = _anc.hub_of(project)
+    out = []
+    for gid in gids:
+        try:
+            if gid in mine and (page := _anc.project_of(_svcstore._load(gid))) and _anc.hub_of(page) == hub:
+                out.append(gid)
+        except Exception:  # noqa: BLE001  — an item that cannot be read cannot be written
+            continue
+    return out
+
+
+def _written_unwoken(name: str, text: str, sender: str, sname: str, idx: dict[str, dict[str, Any]], project: str) -> str:
+    """A message marked for the person and naming an open item of his, to the front agent `name` of `project` he is not talking with: it is written onto each item it names that is an open item of his in that project (one to REPORT_ITEMS_MAX named;
+    `_his_in_project`, never an item that is not his or belongs to another project) as a History line from the sender (`_write_on_items`), and starts no turn. The same words already written onto those items are not written twice (`_written_before`: two senders,
+    one line). The reply names only the items the line stands on. → the sender's reply, or "" when no item can take it (none named is his, in this project and open, or more than REPORT_ITEMS_MAX are named, or the write fails: the caller holds it for the agent's
+    next turn). Never raises."""
+    try:
+        gids = _agent_names._item_refs(text)
+        if not gids or len(gids) > REPORT_ITEMS_MAX:
+            return ""
+        open_ = _his_in_project(gids, project)
+        if not open_:
+            return ""
+        shown = ", ".join(_gh.shown(g) for g in open_)
+        label = (sname or _msg_label(sender, idx)) if sender.strip() else "a script"
+        because = f"and {name}, the front agent, reads it there. It starts no turn, because {OWNER} is not talking with {name} now and has not asked it to tell him about this."
+        if _written_before(shown, text):
+            return f"Not delivered: written onto {shown} already (the same words were sent earlier, so no second line is added), " + because
+        body = re.sub(r"\A\s*\[for [^\]\n]{1,40}\]\s*", "", text)
+        return _write_on_items(name, label, sender or "a script", text, body, open_, "", _history_line(f"{label} wrote to {name}", body), because)
+    except Exception as e:  # noqa: BLE001  — an extra: a failure in it holds the message for the agent's next turn
+        print(f"message to {name} not written onto its items, held instead: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return ""
 
 
 def _builder_named(text: str, roles: dict[str, Any], sname: str) -> str:
@@ -769,6 +870,48 @@ def _sent_instead(name: str, why: str, project: str, raw: str, sender: str, auth
     return f"{name!r} is retired ({why}), so this went to its project {project!r} instead — {got}"
 
 
+def _page_fold(key: str) -> str:
+    """A page key as the page-key correction compares it: case folded, a leading `projects/` dropped, `-` read as `/` (so `projects/infra-gizmo`, `Projects/infra/gizmo` and `infra/gizmo` are one spelling)."""
+    k = str(key or "").strip().casefold()
+    return (k[len("projects/"):] if k.startswith("projects/") else k).replace("-", "/")
+
+
+def _unknown_page_key(to: str, reg: dict[str, Any], matches: "list[str] | None" = None) -> Refused:
+    """The refusal of a `to` that is shaped like a page key and names no one page: with `matches` (two or more registry keys that read alike) it lists them, else the nearest keys (up to 3, by the same folded spelling). Not raised here."""
+    fold = _page_fold(to.rstrip("/").removesuffix(".md"))
+    by_fold: dict[str, list[str]] = {}
+    for k in reg:
+        by_fold.setdefault(_page_fold(k), []).append(k)
+    near = (list(matches or []) or [k for f in difflib.get_close_matches(fold, sorted(by_fold), n=3, cutoff=0.6) for k in by_fold[f]])[:3]
+    return Refused("unknown-page-key", f"Refused: {to!r} names no project page — address a session, or a page key like projects/<slug>"
+                   + (f". It fits more than one page: {', '.join(near)}; write the one you mean" if matches else (f". The nearest page keys: {', '.join(near)}" if near else "")))
+
+
+def _resolve_page_key(to: str) -> str:
+    """The page key a `to` shaped like one (a page directory and a slash, in any case) stands for: `to` itself when it is a registry key as written (or no key at all), else the one registry key that reads like it once case, a leading `projects/` and `-` against `/`
+    are folded (`_page_fold`), the correction `_message_body` counts (call_log.fixed `page-key`) and tells the sender. Raises the refusal (`_unknown_page_key`) when none or two or more keys match, naming the nearest."""
+    if not re.match(_cfg.page_dirs_re() + "/", to, re.IGNORECASE):
+        return to
+    key = to.rstrip("/").removesuffix(".md")
+    reg = _anc.registry()
+    if key in reg:
+        return to
+    hits = [k for k in reg if _page_fold(k) == _page_fold(key)]
+    if len(hits) == 1:
+        return hits[0]
+    raise _unknown_page_key(to, reg, sorted(hits) if hits else None)
+
+
+def _tell(note: str) -> None:
+    """Add one plain line to the end of this call's reply (`_NOTES`). Never raises."""
+    try:
+        got = _NOTES.get()
+        if got is not None:
+            got.append(note)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False, question: bool = False, name_items: bool = True) -> str:
     """Relay one message (`_message_body` has the rules) → the sender's reply: what became of it, and, where the relay handled it another way than asked where it once refused it (`_handled`), one plain line at the end saying so
     (each note ends in a full stop, and the reply before it does too). `name_items` false: the handover naming (a background agent named in the needs of the open items the text names) is left out; a message passed on in place of its front agent is no handover."""
@@ -814,6 +957,11 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
             raise Refused("question-from-owner", f"Refused: question=true is for a front agent's question to the session it writes to; {OWNER}'s own messages carry no such mark")
         if fyi:
             raise Refused("question-with-fyi", "Refused: question=true and fyi=true together: a question asks something and an fyi asks nothing; send it with one of them")
+    fixed_to = _resolve_page_key(to)           # a page key spelled another way (case, `projects/` for the directory, `-` for `/`) is the page it reads like, when only one does: counted as a correction, told in the reply
+    if fixed_to != to:
+        _calls.fixed("page-key", "")
+        _tell(f"`{to}` is `{fixed_to}`; sent there")
+        to = ref = fixed_to
     fyi = bool(fyi) and not _model.is_owner(sender)
     hold_why = hold_project = hold_tail = hold_kind = ""            # why a message to a front agent that is no fyi is held for its next turn all the same (_gate_front's _Hold), and the kind of refusal that hold replaces
     front_fyi = bool(fyi) and not re.match(_cfg.page_dirs_re() + "/", to) and bool(_front_fyi_name(to, raw, idx))      # an fyi for a front agent is not refused for its missing mark: the front gate below takes it
@@ -863,7 +1011,7 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
         key = to.rstrip("/")
         if key.endswith(".md"): key = key[:-3]
         if key not in _anc.registry():
-            raise Refused("unknown-page-key", f"Refused: {to!r} names no project page — address a session, or a page key like projects/<slug>")
+            raise _unknown_page_key(to, _anc.registry())
         pilot = bool(_anc.pilot_root(key))
         kept = _telling.stand_in_keeper(key)      # the page's keeper (its builder, else its -main agent; its hub's, else the scope's general one for a page with none): used only when the notice cannot be recorded
         if not kept:
