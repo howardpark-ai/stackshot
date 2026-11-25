@@ -37,7 +37,9 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           exit 1 when a suite fails (a suite that fails only when measured
                                                           passes on a plain rerun: a warning, and the map marks it `ok: false`, keeping the
                                                           earlier clean measurement beside it as `carry` for a reader of the map; release.sh no longer reads it)
-  tests/suitemap.py run [-T secs] suite…                  run the suites plainly; exit 1 when one fails
+  tests/suitemap.py run [-T secs] suite…                  run the suites plainly; exit 1 when one fails; exit 2 with one line on stderr when no
+                                                          suite is named (a launch error, a variable that expanded to nothing, an empty `select`:
+                                                          never a green run of nothing; a caller whose selection may be empty tests it first)
   tests/suitemap.py plan --of N [--map MAP] [--only [suite…]]
                                                           the whole plan of main's measured run, made once: `shard0=a b c`, `shard1=…`
                                                           lines (the format of $GITHUB_OUTPUT) for the N shards (see *Shards*). With
@@ -2551,7 +2553,19 @@ def have(commit):
     return git("cat-file", "-e", f"{commit}^{{commit}}") is not None
 
 
+def no_suites(args):
+    """True, with one line on stderr, for a `run` that names no suite: it would loop over nothing and exit 0, and a launch error (the names left out,
+    a variable that expanded to nothing) would read as a green run. A selection that may legitimately be empty (`select` printed nothing: no suite is
+    reached by the change) is the caller's to test before it calls `run`, as tests.yml does."""
+    if args.cmd == "run" and not args.suites:
+        print("suitemap: run: no suites were named, so nothing was run (pass suite names, or use `select` to list them)", file=sys.stderr)
+        return True
+    return False
+
+
 def run(args):
+    if no_suites(args):
+        return 2
     fail = 0
     for name in args.suites:
         print(f"== {name}", flush=True)
@@ -3469,7 +3483,8 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list")
     p = sub.add_parser("measure"); p.add_argument("--map", required=True); p.add_argument("--prev"); p.add_argument("-T", "--timeout", type=int, default=900); p.add_argument("suites", nargs="*")
-    p = sub.add_parser("run"); p.add_argument("-T", "--timeout", type=int, default=600); p.add_argument("suites", nargs="*")
+    p = sub.add_parser("run", description="run the named suites plainly; exit 1 when one fails. With no suite named it runs nothing and exits 2 with one line on stderr (pass names, or use `select` to list them): an empty list is never a green run.")
+    p.add_argument("-T", "--timeout", type=int, default=600); p.add_argument("suites", nargs="*")
     p = sub.add_parser("plan"); p.add_argument("--of", type=int, required=True); p.add_argument("--map"); p.add_argument("--only", nargs="*")
     p = sub.add_parser("shard"); p.add_argument("--of", type=int, required=True); p.add_argument("--index", type=int, required=True); p.add_argument("--map")
     p = sub.add_parser("merge"); p.add_argument("--map", required=True); p.add_argument("shards", nargs="+")
@@ -3479,6 +3494,8 @@ def main():
     p = sub.add_parser("warm"); p.add_argument("--rev", default="HEAD")
     p = sub.add_parser("audit"); p.add_argument("--old", required=True); p.add_argument("--new", required=True); p.add_argument("--to", required=True)
     args = ap.parse_args()
+    if no_suites(args):   # before a launcher is asked to run it elsewhere: a run of nothing is refused where it was typed
+        return 2
     relaunch(args)
     example_rule()   # a typo in SUITEMAP_EXAMPLE_RULE is an error at once, not a silent default
     docstring_rule()
