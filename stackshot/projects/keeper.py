@@ -27,7 +27,7 @@ An unnamed sub-page inherits the keeper of the nearest page above it, as it alwa
 document, which is the role every reader of such a page reads) and its row says `page_mark: true`, so `fields` answers "mark" for it; the sub-pages under it do not inherit from it, as they never did
 from an `agent:` page.
 
-The verbs (project_verbs.py) write the mark: `agent_add` marks a project's first agent, `agent_retire` and `agent_rename` move it, `keeper` moves it on purpose. `successor` names the agent a
+The verbs (project_verbs.py) write the mark: `agent_add` marks a project's first agent, `agent_retire` and `agent_rename` move it, `keeper` moves it on purpose, and `page_keeper` sets or hands back the own mark of sub-pages. `successor` names the agent a
 retired keeper's mark moves to, and `problems_of` reads what is wrong with a mark (registry_report.keeper_debts turns it into the four debts the registry check carries).
 
 Stdlib only at load; router_live and anchors (and projects, for the retired words) are imported lazily inside the functions that derive or read the status, never at load."""

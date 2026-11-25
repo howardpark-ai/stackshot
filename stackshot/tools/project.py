@@ -11,6 +11,8 @@
     tools/project.py agent-retire PROJECT NAME                                            the agent off the map; the archive rule is applied (no agent and no open item archives)
     tools/project.py agent-rename PROJECT OLD NEW                                         the entry renamed in place
     tools/project.py keeper PROJECT AGENT [--apply]                                       moves the project's keeper mark to a listed agent: a dry run unless --apply (old mark, new mark, the sessions whose roles move); --apply keeps an undo file
+    tools/project.py page-keeper PAGE [PAGE ...] (--agent AGENT | --hand-back) [--apply]  sets the own keeper mark of sub-pages to a listed agent, or hands them back to the keeper above (--hand-back): a dry run unless --apply
+                                                                                          (each page's old and new keeper); the pages may sit under different projects; one bad key refuses the whole call; --apply keeps an undo file
     tools/project.py mirror PROJECT [--make-page]                                         writes the page's three mirror lines (display-name:, agents:, status:) from the record again; state "retired" and nothing written when the
                                                                                           page is in a brain marked shared or [pages] copy_project_lines is false (`stackshot projects fields PROJECT` reads the record instead);
                                                                                           --make-page is not tied to that switch: a missing page is made from the template on a brain not marked shared (state "written", no copied lines), never on a shared one
@@ -23,6 +25,11 @@ The keeper is a mark on one agent of the project's map (docs/projects.md). agent
 the mark follow the new name, and agent-retire of the marked agent moves the mark to the project's builder, else its -main agent, else clears it (said in the answer, never left naming a retired agent). `keeper` moves it on purpose:
 it refuses (404) an agent the record does not list and (409) a retired project; it moves the one mark and never adds a second. Its --apply writes the record only (the page's mirror lines do not carry the mark), and prints the
 `restore --undo FILE --apply` command that takes the change back.
+`page-keeper` does the same for sub-pages: a sub-page has no entry of its own, so its mark (`page_keepers`, docs/projects.md) is written on the entry of the project above it, for every page named, in one atomic change of the
+record. It refuses (400) a project's own page (`keeper` moves that mark), a page that has a name line or a `keeper:` line of its own, and an agent that is not a sala session; (404) a key that is no page under a project and an agent no
+project lists; (409) a retired project. The new record is read back before it is written: a mark the registry would not read (the page of the entry that holds it is not in the registry, say) refuses the whole call (400),
+naming the page and what the registry answers instead. A page that already has the mark asked for changes nothing, and a call that changes nothing writes no file. Nothing is written when any key is refused. `--agent` takes a name; an empty one
+is refused (exit 2): `--hand-back` is the way to hand pages back.
 
 PROJECT is an id (prj_<8 hex>), a page key, a bare slug, the project's name or a former name. A sub-page is never a project: its key names the top-level project that owns it for rename and the agent
 verbs, and is refused (400) by archive, reopen and move-page, which act on the whole project; the id of a sub-page is refused by every verb. Every verb is one atomic change of the record under the record's own lock (safe beside the running
@@ -79,6 +86,12 @@ def _parser() -> argparse.ArgumentParser:
     kp = sub.add_parser("keeper", description="move the project's keeper mark to another listed agent (a dry run unless --apply)"); kp.add_argument("project"); kp.add_argument("agent")
     kp.add_argument("--apply", action="store_true", help="write the record (keeps an undo file); without it the answer only says what would change")
     kp.add_argument("--run-dir", metavar="DIR", default="", help="where --apply keeps its undo copy (default ~/.local/share/stackshot-runs/project-restore)")
+    pk = sub.add_parser("page-keeper", description="set the own keeper mark of sub-pages to a listed agent, or hand them back to the keeper above (a dry run unless --apply)"); pk.add_argument("pages", nargs="+", metavar="PAGE", help="sub-page keys, as many as wanted; they may sit under different projects")
+    pg = pk.add_mutually_exclusive_group(required=True)
+    pg.add_argument("--agent", default=None, help="the agent the pages are marked with (one that some project lists as a sala session)")
+    pg.add_argument("--hand-back", action="store_true", help="hand the pages back to the keeper above them (their own mark goes)")
+    pk.add_argument("--apply", action="store_true", help="write the record (keeps an undo file); without it the answer only says what would change")
+    pk.add_argument("--run-dir", metavar="DIR", default="", help="where --apply keeps its undo copy (default ~/.local/share/stackshot-runs/project-restore)")
     mi = sub.add_parser("mirror"); mi.add_argument("project"); mi.add_argument("--make-page", action="store_true")
     sh = sub.add_parser("show"); sh.add_argument("project")
     global _RESTORE
@@ -124,7 +137,7 @@ def run(a: argparse.Namespace) -> dict:
     from stackshot.projects import project_verbs as pv
     from stackshot.router import page_debt
     io = None
-    if a.cmd in ("create", "adopt", "rename", "archive", "reopen", "agent-add", "agent-mandate", "agent-retire", "agent-rename", "keeper", "mirror", "move-page"):
+    if a.cmd in ("create", "adopt", "rename", "archive", "reopen", "agent-add", "agent-mandate", "agent-retire", "agent-rename", "keeper", "page-keeper", "mirror", "move-page"):
         io = page_debt.page_io()
     kw = {"by": a.by, "io": io}
     dry = {"dry": a.dry_run}
@@ -161,6 +174,8 @@ def run(a: argparse.Namespace) -> dict:
         return pv.agent_rename(a.project, a.old, a.new, **kw, **dry)
     if a.cmd == "keeper":
         return pv.keeper(a.project, a.agent, apply=a.apply and not a.dry_run, run_dir=a.run_dir or None, **kw)
+    if a.cmd == "page-keeper":
+        return pv.page_keeper(a.pages, "" if a.hand_back else a.agent, apply=a.apply and not a.dry_run, run_dir=a.run_dir or None, **kw)
     if a.cmd == "mirror":
         pid = pv.one(a.project)
         if not pid:
@@ -189,8 +204,11 @@ def main(argv: list[str]) -> int:
         a = ap.parse_args(argv)
     except SystemExit as e:
         return 2 if e.code else 0
-    if a.cmd == "keeper" and a.apply and a.dry_run:
-        print("project keeper: --apply and --dry-run contradict each other (keeper is a dry run unless --apply)", file=sys.stderr)
+    if a.cmd in ("keeper", "page-keeper") and a.apply and a.dry_run:
+        print(f"project {a.cmd}: --apply and --dry-run contradict each other ({a.cmd} is a dry run unless --apply)", file=sys.stderr)
+        return 2
+    if a.cmd == "page-keeper" and not a.hand_back and not " ".join(str(a.agent or "").split()):
+        print("project page-keeper: --agent needs the name of a listed agent, and an empty name is none (to hand the pages back to the keeper above them, use --hand-back)", file=sys.stderr)
         return 2
     if a.cmd == "restore":
         bad = _restore_usage(a)
@@ -221,7 +239,7 @@ def main(argv: list[str]) -> int:
         print(f"project {a.cmd}: the record is right, but the page was not written: {m.get('note')}", file=sys.stderr)
     if a.json:
         print(json.dumps(res, indent=1, ensure_ascii=False, default=str))
-    elif a.cmd in ("restore", "keeper"):
+    elif a.cmd in ("restore", "keeper", "page-keeper"):
         print("\n".join(res["lines"]))
     elif a.cmd == "show":
         v, rec = res.get("entry") or {}, res.get("record") or {}
