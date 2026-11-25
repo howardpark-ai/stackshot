@@ -24,7 +24,7 @@ from starlette.requests import ClientDisconnect, Request
 from starlette.responses import JSONResponse, PlainTextResponse
 
 from stackshot.core import config as _cfg
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.fleet import clients as _clients, inbox as _inbox, inbox_holds as _inbox_holds
 from stackshot.fleet.clients import POLL_MAX as _POLL_MAX
 from stackshot.github import ghsync as _gh
@@ -117,7 +117,7 @@ def _client_caller(request: Any, verb_ok: bool = True) -> tuple[str, str]:
 
 def _owner_named() -> str:
     """The owner's name as the config writes it, "" when it names nobody (the client's own config then keeps no owner line)."""
-    p = _people.first()
+    p = _members.first()
     return p.name if p.declared else ""
 
 

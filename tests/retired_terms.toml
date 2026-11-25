@@ -94,8 +94,8 @@ allow = [
     "opens with the owner: or you:",
     # the start, reload and doctor warning for a config with no [instance] owner (config.notes); it names the key the instance sets.
     "[instance] has no owner, so the board names its person by a placeholder: set owner = ",
-    # the start, reload and doctor note for a config that sets [[people]] and still carries the old person keys (config.notes); it names those keys.
-    "[[people]] is set, so [instance] owner, owner_aliases and [auth] allowed_emails are not read for a person",
+    # the start, reload and doctor note for a config that sets [[members]] and still carries the old person keys (config.notes); it names those keys.
+    "[[members]] is set, so [instance] owner, owner_aliases and [auth] allowed_emails are not read for a person",
     # the runners page names the [runners] owner key (the GitHub login of the repos) when a repo has neither it nor an ID; the key keeps its name.
     ": no GitHub owner set; add owner = ",
     # a template slot the code fills with the instance owner's name ([instance] owner), or with the keeper of record's name: the slot keeps its variable's name.
@@ -440,6 +440,26 @@ allow = []
 [[term]]
 retired = "else it goes to that item's builder or is refused"
 use = "else it is written onto the open item it names (held for the agent's next turn when none can take it), the reply saying so"
+allow = []
+
+# ---- the board's user list is `[[members]]` (config table), read in `core/members.py`: "people" named the same list as the people in a brain's pages, and members is GitHub's, Slack's and Notion's word.
+# No alias and no migration: a config that still has the old table is refused with a line that names the new one, which is the one place the old name is written.
+[[term]]
+retired = "[[people]]"
+use = "[[members]] (the board's list of its users; `people` is the word for who a brain's pages are about)"
+allow = [
+    # core/members.py problems(): the refusal a config with the old table gets; it has to name the old table to say it is now [[members]].
+    "[[people]] is now [[members]]",
+]
+
+[[term]]
+retired = "people list"
+use = "the members list (`[[members]]`): the board's users are its members"
+allow = []
+
+[[term]]
+retired = "people pass"
+use = "members pass (the data change that stamps the first member's name: `stackshot/waits/members_pass.py`)"
 allow = []
 
 [[term]]

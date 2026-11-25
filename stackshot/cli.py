@@ -640,7 +640,7 @@ def cmd_doctor(a: argparse.Namespace) -> int:
 
     # the config through config.py, as the server and the hooks read it; with no config file, what they would fall back to
     env = env_with(cfg) if cfg.is_file() else {k: v for k, v in os.environ.items() if k not in ("STACKSHOT_CONFIG", "BOARD_MCP_CONFIG")}
-    r = subprocess.run([sys.executable, "-c", "from stackshot.core import config; import json; print(json.dumps({'file': str(config.PATH), 'cfg': config.CFG, 'obsolete': config.obsolete(), 'notes': config.notes(), 'runner_process': config.runner_process(), 'emails': __import__('stackshot.core.people', fromlist=['x']).emails()}))"],
+    r = subprocess.run([sys.executable, "-c", "from stackshot.core import config; import json; print(json.dumps({'file': str(config.PATH), 'cfg': config.CFG, 'obsolete': config.obsolete(), 'notes': config.notes(), 'runner_process': config.runner_process(), 'emails': __import__('stackshot.core.members', fromlist=['x']).emails()}))"],
                        capture_output=True, text=True, env=env, cwd=str(HERE))
     loaded = json.loads(r.stdout) if r.returncode == 0 else {}
     c = loaded.get("cfg") or {}
@@ -652,7 +652,7 @@ def cmd_doctor(a: argparse.Namespace) -> int:
     if r.returncode != 0:
         say(f"stackshot doctor · mode unknown (the config does not load) · checkout {HERE}")
         errs = r.stderr.strip().splitlines() or ["?"]       # config.py's refusals, one line per removed value, all of them; a traceback: its last line
-        line(False, f"config {cfg} loads through config.py", " | ".join(errs) if all("removed in stackshot" in e or e.startswith("[[people]]") for e in errs) else errs[-1])
+        line(False, f"config {cfg} loads through config.py", " | ".join(errs) if all("removed in stackshot" in e or "[[members]]" in e for e in errs) else errs[-1])
         return 1
     if client_box and not cfg.is_file() and not token.is_file():
         say(f"stackshot doctor · nothing installed here yet · checkout {HERE}")

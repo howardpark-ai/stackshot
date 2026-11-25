@@ -20,7 +20,7 @@ from typing import Any, Iterator
 from fastmcp.exceptions import ToolError
 
 from stackshot.core import config as _cfg
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.core.instance import NAME, OWNER
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
@@ -318,7 +318,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             rec["text"] = text
         rec["via"] = via
         if via != "mail":
-            _people.stamp(rec, who)     # whose answer it is (the board's sign-in), written when it is not the first person's: a record with no `by` reads as the first person's, and a server tick on a mail names no one
+            _members.stamp(rec, who)     # whose answer it is (the board's sign-in), written when it is not the first person's: a record with no `by` reads as the first person's, and a server tick on a mail names no one
         if via == "mail":
             rec["server_note"] = _clip_line(str((mail or {}).get("note") or ""), 300)
         forms = _answers()._option_forms(item)         # the item's valid options, as the page drew them: (the name a pick is stored under, the label shown, the label stored)

@@ -13,7 +13,7 @@ from stackshot.web.ui import releasing as _rel   # which pull requests are in th
 RELEASE_LIST = "release"   # the home page's fourth list, beside home.py's three: the agents' items whose pull request is in the release queue (Board.home_lists)
 from stackshot.model import option_labels as _ol   # the letter an option's label repeats from its badge, dropped on read (option_labels.py)
 from stackshot.core import config as _cfg  # stackshot.toml: paths, fleet, scopes, the Machines panel, branding
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.core import legacy_owner as _lo   # an old version of an item (from the store's history) read as the current code reads it: History only, never written back
 from stackshot.fleet import fleet as _fleet   # the session and machine view, and the one rule for a session's presence (running / present)
 from stackshot.router import routing as _routing   # the routing log: what came in per project and how it was ruled (the pilot)
@@ -62,7 +62,7 @@ from stackshot.core import ghbudget as _gb   # the hour's GitHub calls, drawn as
 from stackshot.web.ui import search as _search   # the search box every page's header draws, and its style (search.py)
 from stackshot.web.ui import colortool as _ct   # the shared color tool's settings and script blocks (ui/colortool.py, shared/colortool.js)
 from stackshot.web import runners as _runners   # the side panel's Runners section: the last snapshot, never a build (runners.peek)
-_OWNER = _people.first().name   # whom a Next line addresses with "<owner>:"
+_OWNER = _members.first().name   # whom a Next line addresses with "<owner>:"
 # The board page does not show the For you section: it is hidden until its redesign, because as it stands it is nearly unusable.
 # Display only: the rows are still recorded
 # (notify/foryou.py, for-you.json), the server's routes and `client.py get for-you` are unchanged, and for_you_html() / _FORYOU_JS stay below. True brings
@@ -2580,7 +2580,7 @@ class Board:
                     for a in na_[len(pa_):]:
                         ch, tx = str(a.get("choice") or ""), str(a.get("text") or a.get("server_note") or "")      # a step the server ticked on a mail he sent carries its own sentence, not his words
                         if ch and a.get("letter"): ch = _ol.pick_words(ch, a["letter"])      # the letter the answer box drew beside the option
-                        ev.append(("answer", _t("item.log.answer_via", owner=e(_people.recorded_by(a)), via=e(a.get('via') or _t("item.log.via_board"))) + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
+                        ev.append(("answer", _t("item.log.answer_via", owner=e(_members.recorded_by(a)), via=e(a.get('via') or _t("item.log.via_board"))) + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
                                    + e(tx) + (f' <span class="dim">{_t("item.log.tag_comment")}</span>' if a.get("kind") == "comment" else f' <span class="dim">{_t("item.log.tag_step_note")}</span>' if a.get("kind") == "step-reply" else "")))
                 for w in _work.legacy_changes(pm, m): ev.append(("work", e(w)))   # a line of the old work list added, moved, reassigned or removed, one line each (an item the migration has not reached)
                 new_said = _said.new_entries(pm, m)                          # the trailers: his words recorded by this version, a tag each
@@ -2596,7 +2596,7 @@ class Board:
                         where = f'<a href="{e(u)}" target="_blank" rel="noopener">{_t("item.log.on_github")}</a>' if u else _t("item.log.on_github")
                         try: at = float(a.get("ts") or 0) or None
                         except (TypeError, ValueError): at = None
-                        ev.append(("comment", _t("item.log.gh_comment", owner=e(_people.recorded_by(a)), where=where, text=e(t)), at, _people.recorded_by(a)))
+                        ev.append(("comment", _t("item.log.gh_comment", owner=e(_members.recorded_by(a)), where=where, text=e(t)), at, _members.recorded_by(a)))
             who = shown_ref(" ".join(str(v.get("written_by") or "").split()))          # the revision's author (model.py: every save records it); older revisions carry none
             chg = [x for x in ev if x[0] != "comment"]
             if not merge:                                                    # one entry per change, as before (item_events)
@@ -3581,7 +3581,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             if ch: body = f"picked {ch}" + (f" ({ln})" if ln else "")
             elif tx: body = tx if len(tx) <= 160 else tx[:159].rstrip() + "…"
             else: continue
-            who = _people.recorded_by(a)      # the person who answered: the answer's `by`, else the first person
+            who = _members.recorded_by(a)      # the person who answered: the answer's `by`, else the first person
             out.append({"text": f"{who}: {body}", "status": "decided", "by": who, "at": ts})
         return out
     def his_open_steps(self, r):

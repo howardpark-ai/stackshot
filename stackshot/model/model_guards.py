@@ -45,7 +45,7 @@ from stackshot.anchors import anchors as _anc
 from stackshot.anchors import anchor_scope as _ascope   # which anchors count for an item: from every project's page
 from stackshot.waits import event_waits as _ew
 from stackshot.core import config as _cfg
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.fleet import fleet as _fleet
 from stackshot.model import model as _model
 from stackshot.fleet import sessions_registry as _sr
@@ -635,7 +635,7 @@ def description_problem(text: Any) -> str:
 
 def owner_names_cf() -> set[str]:
     """The names a line of next may open with for the owner, casefolded: [instance] owner and owner_aliases."""
-    return _people.names_cf()
+    return _members.names_cf()
 
 
 def next_openers(text: Any) -> list[tuple[str, str]]:
