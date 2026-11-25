@@ -141,6 +141,9 @@ check("the owner's names match whole and in their own case: a host called ae-box
 check("the decision words hold for every alias: Oliver, AE and オリバー deciding, and a decision waiting on any of them",
       all(BR._decision_rx().search(t) for t in ("Oliver decided the lane", "AE will approve it", "オリバーが決定 decision", "waiting on AE", "waiting for Oliver", "the answer from オリバー"))
       and not BR._decision_rx().search("ae-ops pick the lane") and not BR._decision_rx().search("ae-box is down"), None)
+check("the decision words are whole words, not open stems: a pickup, a signup, a signal or a signature is no pick or sign-off, while picks, picked, signs, confirmed and answered still are",
+      not any(BR._decision_rx().search(t) for t in ("give Oliver the pickup step", "Oliver signup flow", "Oliver signal", "Oliver signature page", "Oliver answerable queue", "Oliver approvable list"))
+      and all(BR._decision_rx().search(t) for t in ("Oliver picks", "Oliver picked the lane", "Oliver signs off", "Oliver confirmed", "Oliver answered", "Oliver approves", "Oliver decides")), None)
 check("the check changes no file", digest() == d0, None)
 
 def run(*a):

@@ -79,7 +79,7 @@ def _decision_rx() -> "re.Pattern[str]":
     """A line that says the owner (any of his names) decides, approves or answers, or that a decision waits on him (no bare yes, no, say or call: they read in many other senses). The names match
     case-sensitively, the verbs in any case."""
     o = _owner_alt()
-    return re.compile(r"(?:" + o + r"[^.;\n]{0,50}(?i:\b(?:decid\w*|decision|approv\w*|pick\w*|choose|chooses|answer\w*|go-?ahead|sign\w*|says|confirm\w*)\b)"
+    return re.compile(r"(?:" + o + r"[^.;\n]{0,50}(?i:\b(?:decid(?:e|es|ed|ing)?|decision|approv(?:e|es|ed|al|als|ing)?|pick(?:s|ed|ing)?|choose|chooses|answer(?:s|ed|ing)?|go-?ahead|sign(?:s|ed|ing)?|says|confirm(?:s|ed|ing|ation)?)\b)"
                       r"|(?i:\b(?:decision|approval|go-?ahead|answer|sign-?off)\b[^.;\n]{0,25}\b(?:from|of|by)\s+)" + o +
                       r"|(?i:\bwaiting\s+(?:on|for)\s+)" + o + r")")
 _OUTSIDE_RX = re.compile(r"(?:\bouter\b|\boutside\s+(?:party|the\s+perimeter)\b|\bthird[- ]party\b|\bvendor\b|\bcustomers?\b|\bsupport\s+ticket\b|\btheir\s+(?:reply|answer|response)\b|\b(?:wait(?:ing|s)?\s+(?:for|on)\s+)(?:a\s+|the\s+|an\s+)?(?:reply|response|answer)\s+from\b)", re.I)
