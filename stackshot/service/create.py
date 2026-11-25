@@ -349,6 +349,7 @@ def create_item(
         fc.call_family(*_faults.DECISION, _dg._gate_open_question, meta)          # an open question with no options: the page would draw Yes / No under it
         fc.call_family(*_faults.DECISION, _dg._gate_recommend_stance, meta)       # no options and a Recommend that is no yes or no: the same Yes / No under a question it cannot answer
     fc.call_family(*_faults.DECISION, _dg._gate_mockup, meta, description)        # a mockup linked in the text rides on the ask too
+    fc.call(_dg._gate_design_link, meta)                                          # a design, plan or proposal asked about is linked in the ask (its own fault: split a second question off and it stays)
     fc.call_family(*_faults.DECISION, _dg._gate_own_action, meta, create=True)    # his own action asked as a decision: it is a your-step
     asked += _dg._options_note(meta) + _dg._actor_note(meta)
     desc_note = fc.call(_gates.gate_model, {"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v), default="")    # the write guards of the item model, every field judged on a create

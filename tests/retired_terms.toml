@@ -59,6 +59,7 @@ allow = [
     "[for the owner]",
     "input the owner must give",
     "the owner can decide",
+    "the page the owner opens",      # the create and update tools' text on a design linked in the ask: the page Oliver opens from the question
     "the owner would ask",
     "the owner runs",
     "the owner relays",

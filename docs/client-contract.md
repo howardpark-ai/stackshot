@@ -110,7 +110,7 @@ Underneath it is one authenticated write:
   been removed, the call files a new one. **the fleet tool passes one per parked question**, the same token each time that question is filed
   again, with the same `--sender`.
 - It is the create tool's own code (`create_item` in `stackshot/service/create.py`): the subject prefix, the ask's form, the options (2 to 6, exactly
-  one recommended), one decision per ask, the project page, the GitHub mirror and the page-debt rules apply as to a session, and a
+  one recommended), one question per ask (its answers are the options) with a design it approves linked in the ask, the project page, the GitHub mirror and the page-debt rules apply as to a session, and a
   refusal is the tool's text (400). A script owes no page, and the owner is charged none: the page debt goes to the page's keeper
   (a page's own agent that is not a front agent, else the hub's or the scope's general `-main` agent) to no one when the page has none, and to no one when the keeper is the owner itself, so a burst of
   questions cannot block the owner's own board writes. The owner is told nothing; it finds the item in its queue.

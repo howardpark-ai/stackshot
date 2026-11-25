@@ -356,6 +356,8 @@ _KINDS: tuple[tuple[str, str], ...] = (
     (r"the subject is \d+ characters", "a subject over its limit"),
     (r"subject must start with", "a subject without a scope prefix"),
     (r"ask must read|this ask has a Decide part|needs an ask line", "an ask in the wrong form"),
+    (r"puts two questions in its Decide part", "an ask with a second question in its Decide part"),
+    (r"carries no link to it", "an ask that approves a design or plan with no link in the ask"),
     (r"Refused: option \d+ ", "an option without its label and line"),
     (r"Refused: said[\[:]", "a said entry in the wrong form"),
     (r"wait on another item's close has no end|wait on news only .* relays has no end", "a wait on another item with no end date"),

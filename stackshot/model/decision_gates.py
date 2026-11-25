@@ -147,9 +147,48 @@ def _code_defined(code: str, text: str, listing: str = "") -> bool:
     return bool(re.search(lb + c + r"\.\s+\S", listing, re.I))
 
 
+# A second question joined to the first in the Decide part. A decision asks ONE question and its answers are the options; "approve the design, and say if a member may be read-only" asks two
+# and the page draws a Yes / No under both. Read in the Decide part only (a Recommend, Stakes or By part is never judged), with URLs, entities and quoted words masked in place. A join counts only when
+# what follows it is a second question or a request to answer one, so "ship the login and signup pages" and "whether A or B" pass:
+#   1. a joiner (and, plus, then, but, also, a comma or semicolon before it or not) and a request to the owner: say (if, whether, which, what, how, when, who, where, why), tell me or us, let me or us know,
+#      decide, or confirm, state, advise, specify, clarify, indicate, choose, pick followed by a question word ("and say if", "and tell me whether", "and let me know", "and decide", "plus confirm whether");
+#   2. whether after and, plus or "as well as", and any other question word, or "if", after ", and" / ", plus" ("and whether", ", and which", "as well as whether");
+#   3. "and, if" and "and if so / yes / not" (a conditional follow-up question: "approve it and, if so, when");
+#   4. "and also" followed by a verb that asks for another decision (approve, accept, decline, allow, let, rename, ship, merge, add, remove, drop, keep, change, switch, use, make, move, publish, release, send);
+#   5. two question marks. A ";" followed by a space is the rule above (`; and`).
+_Q_WORD = r"(?:whether|if|which|what|how|when|who|whom|whose|where|why)"
+_ASK_VERB = (rf"(?:say(?:s|ing)?\s+{_Q_WORD}|tell(?:s|ing)?\s+(?:me|us)|let(?:ting)?\s+(?:me|us)\s+know|decid(?:e|es|ing)|"
+             rf"(?:confirm(?:s|ing)?|stat(?:e|es|ing)|advis(?:e|es|ing)|specif(?:y|ies|ying)|clarif(?:y|ies|ying)|indicat(?:e|es|ing)|choos(?:e|es|ing)|pick(?:s|ing)?)\s+{_Q_WORD})")
+_JOIN = r"(?:and|plus|then|but|also)\b,?\s*(?:(?:also|please|then)\s+)*"
+_ALSO_VERBS = r"(?:approve|accept|decline|reject|allow|let|permit|rename|ship|merge|add|remove|drop|keep|change|switch|use|make|move|publish|release|send)"
+_SECOND_Q_RX = re.compile(
+    rf"[,;]?\s*\b{_JOIN}{_ASK_VERB}\b|"
+    rf"[,;]?\s*\b(?:and|plus|as\s+well\s+as)\s+(?:also\s+)?whether\b|"
+    rf",\s*(?:and|plus)\s+(?:also\s+)?{_Q_WORD}\b|"
+    rf"[,;]?\s*\band,\s*{_Q_WORD}\b|[,;]?\s*\band\s+if\s+(?:so|yes|not|no|approved|accepted)\b|"
+    rf"[,;]?\s*\bas\s+well\s+as\s+(?:{_Q_WORD}|saying|telling\s+(?:me|us)|deciding|confirming)\b|"
+    rf"[,;]?\s*\band\s+also\s+{_ALSO_VERBS}\b|"
+    r"\?(?=[^?]*\S[^?]*\?)", re.I)
+_JOINER_LEAD_RX = re.compile(r"^[,;\s]*(?:(?:and|plus|then|but|also|as\s+well\s+as)\b[,\s]*)?(?:(?:also|please|then)\s+)*", re.I)
+
+
+def _second_question(decide: str) -> tuple[str, str]:
+    """(the first question, the second) when the Decide part joins a second question to the first, else ("", ""). URLs, entities and quoted words are masked in place, never cut."""
+    masked = _URL_ENTITY_RX.sub(lambda m: "_" * len(m.group(0)), decide)
+    m = _SECOND_Q_RX.search(masked)
+    if not m:
+        return "", ""
+    qmark = m.group(0) == "?"
+    cut = m.end() if qmark else m.start()          # two question marks: the first question ends at its mark
+    first = decide[:cut].strip(" ,;")
+    rest = decide[cut:]
+    second = _JOINER_LEAD_RX.sub("", rest, count=1).strip(" ,;")
+    return (first, second) if first and second else ("", "")
+
+
 def _one_decision_kind(meta: dict[str, Any], description: str) -> tuple[str, str]:
-    """How an ask breaks "one decision per item, options in words": ("many", why) for several decisions, ("code", why) for choices pointed at by a
-    code the item does not spell out, ("", "") when it does not."""
+    """How an ask breaks "one decision per item, options in words": ("many", why) for several decisions, ("second", why) for a second question joined to the first in the Decide part,
+    ("code", why) for choices pointed at by a code the item does not spell out, ("", "") when it does not."""
     ask = str(meta.get("ask") or "")
     if not ask.strip():
         return "", ""
@@ -165,6 +204,9 @@ def _one_decision_kind(meta: dict[str, Any], description: str) -> tuple[str, str
     m = _MANY_DECISIONS_RX.search(decide)
     if m:
         return "many", f"asks several decisions in one (“{m.group(0)}”)"
+    first, second = _second_question(decide)
+    if first:
+        return "second", f"puts two questions in its Decide part: “{_clip_line(first, 80)}” and “{_clip_line(second, 80)}”"
     opt_text = " ".join(f"{o.get('label', '')}: {o.get('line', '')}" for o in meta.get("options") or [] if isinstance(o, dict))
     known, listing = f"{ask}\n{description or ''}\n{opt_text}", f"{description or ''}\n{opt_text}"
     codes: dict[str, str] = {}
@@ -198,11 +240,54 @@ def _gate_one_decision(meta: dict[str, Any], description: str, lifted: bool = Fa
     if not kind:
         return
     src = " (lifted from next's first line)" if lifted else ""
+    if kind == "second":
+        raise ToolError(f"Refused: this ask{src} {why}. A decision asks one question, and its answers are the options, so that {OWNER} can decide from the item page alone: ask the first one now "
+                        "and put the other on its own item (or fold it into the options, one option per combined answer).")
     if kind == "many":
         raise ToolError(f"Refused: this ask{src} {why}. One decision per item, so that {OWNER} can decide from the item page alone: split it into one item "
                         "per decision, and write each option out in words in the ask or the description (or list them with options=[…]).")
     raise ToolError(f"Refused: this ask{src} {why}. {OWNER} must be able to decide from the item page alone: write each option out in words in the ask or the "
                     "description (or list them with options=[…]), or define each code in the ask or description, e.g. ‘A: …’ or ‘2b = …’.")
+
+
+# ----------------------------------------------------------------------------- a decision on a design carries the link to it
+# An ask that approves or picks a design, plan, proposal, draft, spec or package carries the page it rests on IN THE ASK LINE (a markdown link or a bare http(s) URL): the owner opens it from the
+# question he answers, and a summary in the description, a link only in the description, or a path on a machine is not the design. Read in the Decide part only. The matcher is narrow: an approving
+# verb (approve, accept, adopt, sign off, pick, choose, select, decide on, go with, review, confirm ...), then up to five words, then a determiner (the, this, our, a ...), then up to five modifiers, then
+# the noun. So "ship the plan-A-only lane", "restart the server tonight" and "pick the package manager" are not it, and a hyphenated "plan-A-only" is never the noun. "the six-part rollout" (a number and
+# "-part", then a word) counts as the thing named. An item whose options name real alternatives (not Yes/No, not Approve/Decline) is read from its options, and a watcher's own ask is never judged.
+_DESIGN_VERB = (r"(?:approv(?:e|es|ing)|accept(?:s|ing)?|adopt(?:s|ing)?|sign(?:s|ing)?\s+off(?:\s+on)?|ratif(?:y|ies|ying)|endors(?:e|es|ing)|green-?light(?:s|ing)?|"
+                r"pick(?:s|ing)?|choos(?:e|es|ing)|select(?:s|ing)?|decid(?:e|es|ing)(?:\s+on)?|settl(?:e|es|ing)\s+on|go(?:es|ing)?\s+(?:ahead\s+)?with|"
+                r"review(?:s|ing)?|confirm(?:s|ing)?)")
+_DESIGN_NOUN = r"(?:design|plan|proposal|draft|spec|specification|package|rfc|options?\s+(?:doc|document|page|paper|memo))"
+_DESIGN_NUM = r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)"
+_DESIGN_LEAD = (rf"(?<![\w-]){_DESIGN_VERB}(?:\s+[^\s·;,.?!:]+){{0,5}}?\s+(?:the|this|that|these|those|our|my|its|his|her|their|a|an)\s+")
+_DESIGN_RX = re.compile(_DESIGN_LEAD + rf"(?:[\w'’-]+\s+){{0,5}}?(?P<noun>{_DESIGN_NOUN})s?(?![\w-])(?!\s+(?:manager|lock|json|registry|index|name|version|install))", re.I)
+_DESIGN_PART_RX = re.compile(_DESIGN_LEAD + rf"(?P<noun>{_DESIGN_NUM}-part\s+[\w-]+)", re.I)
+_LINK_RX = re.compile(r"https?://[^\s)\]>]+", re.I)      # a markdown link's URL is one too
+_LINK_SHAPE = "[{noun}](<the page's link>)"
+
+
+def _design_unlinked(meta: dict[str, Any]) -> str:
+    """The noun of a design, plan, proposal, draft, spec or package the Decide part asks to approve or pick while the ask line holds no link, "" when it names none or links it."""
+    if "decision" not in _needs_kinds(meta) or _watch.asked_of(meta) or not _ar.yes_no_buttons(meta):
+        return ""
+    if _LINK_RX.search(str(meta.get("ask") or "")):
+        return ""
+    decide = _ar.decide_of(meta)
+    m = _DESIGN_RX.search(decide) or _DESIGN_PART_RX.search(decide)
+    return re.sub(r"\s+", " ", m.group("noun").lower()) if m else ""
+
+
+def _gate_design_link(meta: dict[str, Any]) -> None:
+    """Refuse a needs=decision write whose Decide part asks to approve or pick a design, plan, proposal, draft, spec or package while the ask line links none."""
+    noun = _design_unlinked(meta)
+    if not noun:
+        return
+    shape = _LINK_SHAPE.format(noun=noun.split()[-1])
+    raise ToolError(f"Refused: this ask names a {noun} to approve or pick but carries no link to it. link the {noun} in the ask: a page {OWNER} can open, not a path on a machine or a summary "
+                    f"(a page in the project's brain or a doc; a link only in the description does not count). Put {shape} in the Decide part, with a short link text so the whole ask stays "
+                    f"within {_rmod.ASK_MAX} characters: ask=\"Decide: whether to approve the {noun} {shape} · Recommend: … · Stakes: … · By: …\".")
 
 
 # ----------------------------------------------------------------------------- his own step is not a decision

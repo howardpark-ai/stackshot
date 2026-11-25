@@ -102,7 +102,14 @@ apps and delete the test repo?"): use step="<his action>" instead (on a create, 
 between alternatives, a judgement ("have you decided …", "does it work for you?") and an Approve/Decline go-ahead stay
 decisions. One decision per item: an ask that packs several decisions, or points at choices by a number or letter code
 the item does not spell out (“choices 2-3”, “2b”), is refused: split it into one item per decision and write each
-option out in words in the ask or the description, so that {{OWNER}} can decide from the item page alone. A decision
+option out in words in the ask or the description, so that {{OWNER}} can decide from the item page alone. The Decide part
+asks one question, and its answers are the options: a second question joined to it (", and say if …", "and tell me
+whether …", "and also decide …", ", plus …", "as well as whether …", "and, if so, …", two question marks) is refused:
+ask the first now and put the other on its own item, or fold it into the options. An ask that approves or picks a design,
+plan, proposal, draft, spec or package (“approve the six-part design”) links it in the ask line itself, as
+[design](https://…) or a bare https URL, or the write is refused: a link only in the description, a path on a machine or a
+summary is not the page {{OWNER}} opens from the question; a short link text keeps the line within its character limit.
+A decision
 to change wording quotes the current and the proposed text, labeled before and after, in the description or the
 options' lines. A needs=decision item whose description or next links a mockup (a https://claude.ai/artifact/… page,
 or a /mockup/<n> page of the fleet tool's web UI (host set in the instance config)) puts [mockup](<that link>) in the

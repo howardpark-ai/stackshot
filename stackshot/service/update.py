@@ -1442,6 +1442,7 @@ def update_unlocked(
                                                                or (needs_set and "decision" not in [str(x).lower() for x in was_needs])):   # a write that sets the ask or the options, or puts the item on his call: an open question needs options
         fc.call_family(*_faults.DECISION, _dg._gate_open_question, meta)
         fc.call_family(*_faults.DECISION, _dg._gate_recommend_stance, meta)       # the same writes: no options and a Recommend that is no yes or no
+        fc.call(_dg._gate_design_link, meta)                                     # the same writes: a design, plan or proposal asked about is linked in the ask (its own fault)
     if item.get("status") != "completed" and not closing and (ask or (description and not reformat) or next_touch or needs_set or opts is not None):   # a write that sets the ask or the text it is read against
         fc.call_family(*_faults.DECISION, _dg._gate_mockup, meta, item.get("description") or "")
     if item.get("status") != "completed" and not closing and (ask or needs_set or opts is not None or next_touch):   # his own action asked as a decision: only a call that writes what it reads
