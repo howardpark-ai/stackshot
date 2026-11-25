@@ -131,7 +131,9 @@ check("1 a numbered step (the writer's own structure) is kept as it is", SS.spli
 check("1 a step with a fenced block is kept as it is", SS.split_step("Run this and read the output.\n```\nls -l\n```\nThen tell the session what it printed, and open the link in the kit leaflet. " * 2, LINE_ROOM) is None)
 INL = "Do these in order: 1) choose one of the three models listed on the item 2) compare the sellers of that model and note the best price 3) pay for it by card and order the starter kit from the same seller"
 inl = SS.actions(INL, LINE_ROOM)
-check("1 inline numbered items are cut at their items (the numbers are the list's own), the words before them kept as a first action", inl[0] == "Do these in order:" and len(inl) == 4 and inl[1].startswith("choose one of the three models"), inl)
+check("1 inline numbered items under a lead-in that ends with a colon are one action with the items as indented `- ` lines under it (the numbers are the list's own)",
+      len(inl) == 1 and inl[0].splitlines()[0] == "Do these in order:" and [x for x in inl[0].splitlines()[1:]] == ["  - choose one of the three models listed on the item", "  - compare the sellers of that model and note the best price",
+      "  - pay for it by card and order the starter kit from the same seller"], inl)
 CODE = "Run `ls -l. then cd ..` in the box terminal. Read what it prints, e.g. the file names, and tell the session whether the new build is there, as soon as the box answers at all"
 cd = SS.actions(CODE, LINE_ROOM)
 check("1 nothing is cut inside a code span or after an abbreviation (e.g.)", len(cd) == 2 and cd[0] == "Run `ls -l. then cd ..` in the box terminal" and cd[1].startswith("Read what it prints, e.g. the file names"), cd)
@@ -198,6 +200,52 @@ CSPAN = "Do it first. Run `" + "x" * 220 + "` and report back to the session."
 check("1b L2: a clause held up by a code span longer than a line is not cut at the spaces around it: the text is left as written, and says why", 111 <= len(CSPAN) <= 300 and SS.actions(CSPAN, LINE_ROOM) == [] and "code span" in SS.skipped(CSPAN, LINE_ROOM), (len(CSPAN), SS.actions(CSPAN, LINE_ROOM)))
 check("1b L3: skipped says nothing for a text that is split, a short one and a one-action one", SS.skipped(LONG, LINE_ROOM) == "" and SS.skipped("short one. and two.", LINE_ROOM) == "" and SS.skipped("please read this and decide " * 10, LINE_ROOM) == "", None)
 check("1b L3: …and names the size and the action count", "2000 characters" in SS.skipped(para(16), LINE_ROOM) and "at most 20 lines" in SS.skipped(sent(21), LINE_ROOM), (SS.skipped(para(16), LINE_ROOM), SS.skipped(sent(21), LINE_ROOM)))
+
+# ---- 1c. a list under a lead-in is one action with sub-lines
+def sub_of(line): return [x[len(SS.SUB):] for x in line.splitlines()[1:]]
+ITEMS3 = "1) open the setup page of the vendor 2) copy the key from the page into the form 3) press save and look for the green mark"
+N_END = "Please do these things in order: " + ITEMS3 + ". Then tell the session it went well."
+g = SS.split_step(N_END, LINE_ROOM)
+check("1c a lead-in with a colon, three items and a closing sentence: two lines (the lead-in with three sub-lines, then the closing sentence), the summary counts the lines at the top (+1 more), not the sub-lines",
+      g is not None and g[0] == "Please do these things in order: (+1 more)" and len(g[1]) == 2 and g[1][0].splitlines()[0] == "Oliver: Please do these things in order:" and sub_of(g[1][0]) == [
+      "open the setup page of the vendor", "copy the key from the page into the form", "press save and look for the green mark"] and g[1][1] == "Oliver: Then tell the session it went well", g)
+def kept(text, lines_):       # every word of the text, but the list's own numbers, is in the lines, in order
+    return [w for w in words(text) if not w.isdigit()] == [w for w in words(" ".join(S.without_owner(x) for l in lines_ for x in l.splitlines())) if not w.isdigit()]
+check("1c …every word of the text is in the lines, in order (the numbers and full stops are all that is gone)", kept(N_END, g[1]), (words(N_END), g[1]))
+check("1c …the lines are idempotent: a line with sub-lines is the writer's own shape and is never split, the summary splits no further",
+      all(SS.split_line(x, LINE_ROOM) is None for x in g[1]) and SS.split_step(g[0], LINE_ROOM) is None, g)
+N_NONE = "Please do these things in order: " + ITEMS3
+g = SS.split_step(N_NONE, LINE_ROOM)
+check("1c a lead-in with items and no closing sentence is one line with three sub-lines, the summary is the lead-in with no count (one top-level line)",
+      g is not None and g[0] == "Please do these things in order:" and len(g[1]) == 1 and len(sub_of(g[1][0])) == 3, g)
+N_MANY = "Read the notice first. Then do these, in order: 1) choose one of the three models listed on the item 2) compare the sellers of that model and note the best price. Pay by card. Tell the session how it went."
+g = SS.split_step(N_MANY, LINE_ROOM)
+check("1c of a lead-in of several sentences only the last (the one with the colon) is the parent: the first stands alone, the items go under the second; (+3 more) counts the four top-level lines",
+      g is not None and g[0] == "Read the notice first (+3 more)" and [x.splitlines()[0] for x in g[1]] == ["Oliver: Read the notice first", "Oliver: Then do these, in order:", "Oliver: Pay by card", "Oliver: Tell the session how it went"]
+      and sub_of(g[1][1]) == ["choose one of the three models listed on the item", "compare the sellers of that model and note the best price"] and all("\n" not in g[1][i] for i in (0, 2, 3)), g)
+N_NOCOLON = "Do these in order. " + ITEMS3 + ". Then tell the session it went well"
+g = SS.split_step(N_NOCOLON, LINE_ROOM)
+check("1c a lead-in with no colon keeps its items at the top level, one line each (no sub-lines)", g is not None and len(g[1]) == 5 and not any("\n" in x for x in g[1]) and g[0] == "Do these in order (+4 more)", g)
+N_ONE = "Do these in order: 1) only one item in the list here and that is all of it. Then report back to the session about it"
+g = SS.split_step(N_ONE, LINE_ROOM)
+check("1c a list of one item is no list: no sub-lines", g is not None and not any("\n" in x for x in g[1]), g)
+N_TWO = "Do these in order: " + "1) alpha thing to do now 2) beta thing to do now" + ". Then tell the session it went well, and say thanks for all the help from the vendor"
+g = SS.split_step(N_TWO, LINE_ROOM)
+check("1c two items are a list", g is not None and len(g[1]) == 2 and sub_of(g[1][0]) == ["alpha thing to do now", "beta thing to do now"], g)
+items_n = lambda n: " ".join(f"{i}) do item number {i} of the list now" for i in range(1, n + 1))
+g19, g20 = SS.split_step("Do these in order: " + items_n(19), LINE_ROOM), SS.split_step("Do these in order: " + items_n(20), LINE_ROOM)
+check("1c the cap of 20 counts every line drawn, sub-lines too: a lead-in with 19 items is split (one line, 19 sub-lines), a lead-in with 20 is left as written", g19 is not None and len(g19[1]) == 1 and len(sub_of(g19[1][0])) == 19 and g20 is None, (g19 and len(g19[1]), g20))
+WRAPPED = "Do these: 1) first read the page that the vendor sent you and write down the code it shows at the top and the date next to it, and also the name 2) copy the key"
+wr = SS.split_step(WRAPPED, 80)
+check("1c an item longer than the line limit is cut at a comma or a space into more sub-lines, every word kept, none over the limit", wr is not None and len(wr[1]) == 1 and len(sub_of(wr[1][0])) >= 3 and all(len(x) <= 80 for x in sub_of(wr[1][0]))
+      and kept(WRAPPED, wr[1]), wr)
+CODE_ITEM = "Do these things: 1) read it and note the plan 2) check what `echo a. echo b` prints 3) tell me the result. Then wait for the reply from the session, which comes later"
+g = SS.split_step(CODE_ITEM, LINE_ROOM)
+check("1c a code span with a full stop inside is kept whole in its sub-line", g is not None and sub_of(g[1][0])[1] == "check what `echo a. echo b` prints" and len(g[1]) == 2, g)
+LINEOF = SS.split_line("Oliver: " + N_MANY, LINE_ROOM)
+check("1c split_line (a long line of his in next) gives the same lines as a step does: the four top-level lines, the second with two sub-lines", LINEOF is not None and len(LINEOF) == 4 and sub_of(LINEOF[1]) == ["choose one of the three models listed on the item", "compare the sellers of that model and note the best price"], LINEOF)
+check("1c a line that already has sub-lines (the writer's own shape) is never split by split_line", SS.split_line("Oliver: " + N_MANY.replace(": 1)", ":\n  - x 1)"), LINE_ROOM) is None, None)
+check("1c the line of next a split makes for a lead-in is one step of next (nextlines.split), the sub-lines belong to it", NL.split("\n".join(["home-agent: build it", *SS.split_step(N_END, LINE_ROOM)[1]])) == ["home-agent: build it", SS.split_step(N_END, LINE_ROOM)[1][0], SS.split_step(N_END, LINE_ROOM)[1][1]], NL.split("\n".join(["home-agent: build it", *SS.split_step(N_END, LINE_ROOM)[1]])))
 
 # ---- 2. step= through update
 r, fx = send(lambda: upd(1, step=LONG))
@@ -464,6 +512,57 @@ r, fx = send(lambda: upd(60, step=LONG))
 check("2c a session sends the long step that the item stores already (the server's own line for it): that line is dropped once, by the remake, and the reply does not claim a line of his was dropped",
       sorted(his_open(60)) == sorted([f"Oliver: {summary}", *lines]) and sum(1 for k, t in fx if k == "step-split-dropped") == 0 and his(60).count(("dropped", "Oliver: " + LONG)) == 1, (st(60), fx))
 
+# ---- 2c. a list under a lead-in, through update: one line of next with sub-lines, one step of the checklist
+gN = SS.split_step(N_END, LINE_ROOM); sum_n, lines_n = gN
+item(90)
+r, fx = send(lambda: upd(90, step=N_END))
+check("2c step= with a lead-in, three items and a closing sentence is not refused; the stored step is the summary", not isinstance(r, ToolError) and mt(90).get("step") == sum_n == "Please do these things in order: (+1 more)", (r, mt(90)))
+check("2c …next holds the lead-in with its three sub-lines as one entry (the lines under it indented), the closing sentence as the next, the sender's own line first, and the server's line for the summary last",
+      NL.split(mt(90)["next"]) == ["home-agent: build it", *lines_n, f"Oliver: {sum_n}"] and "\n  - copy the key from the page into the form\n" in mt(90)["next"], mt(90)["next"])
+check("2c …the checklist holds the lead-in and its items as ONE step (an open entry whose text has the sub-lines), the closing sentence, and the summary line: his open steps are three, not six",
+      his_open(90) == [*lines_n, f"Oliver: {sum_n}"], st(90))
+check("2c …the record of the split lists the keys of the two lines (the lead-in with its sub-lines, the closing sentence), not of the items", mt(90).get("step_lines") == [S.key(x) for x in lines_n], mt(90).get("step_lines"))
+check("2c …the reply says so: split into a summary and 2 lines, and that the 3 items stand as sub-lines ticked with their lead-in", [k for k, _ in fx] == ["step-split"] and "split into a summary and 2 lines" in fx[0][1] and "the 3 items of a list stand as indented sub-lines" in fx[0][1], fx)
+wr = dict(NL.resolve(mt(90), OWNER))
+check("2c …the lead-in with its sub-lines is the sender's, as one line", wr.get(lines_n[0]) == AGENT and sum(1 for k in wr if "open the setup page" in k) == 1, wr)
+bd = ui_render.Board(str(T / "store"))
+ys = bd.your_steps(bd.item("a90"))
+check("2c …the board's list for his step is two entries: the lead-in with its three sub-lines under it, then the closing sentence", [f for f, _ in ys] == ["Please do these things in order:", "Then tell the session it went well"]
+      and ys[0][1] == ["  - open the setup page of the vendor", "  - copy the key from the page into the form", "  - press save and look for the green mark"] and ys[1][1] == [], ys)
+r, fx = send(lambda: upd(90, step=N_END))
+check("2c sent again: no second set of lines (the same three open entries of his), the record unchanged, the reply says nothing was added", not isinstance(r, ToolError) and his_open(90) == [*lines_n, f"Oliver: {sum_n}"] and mt(90)["next"].count("open the setup page") == 1
+      and mt(90).get("step_lines") == [S.key(x) for x in lines_n] and [k for k, _ in fx] == ["step-split"] and "nothing was added" in fx[0][1], (his_open(90), fx))
+r, fx = send(lambda: upd(90, step=sum_n, next=mt(90)["next"]))
+check("2c the stored summary sent back with the whole next (the lines with their sub-lines) changes nothing and drops nothing", not isinstance(r, ToolError) and his_open(90) == [*lines_n, f"Oliver: {sum_n}"] and not any(k == "step-split-dropped" for k, _ in fx), (his_open(90), fx))
+r, fx = send(lambda: upd(90, step=LONG_B))
+check("2c a different long step replaces the whole group: the lead-in with its sub-lines is dropped as one (its items are no lines to drop), the closing sentence with it, none of the old words stays open",
+      ("dropped", lines_n[0]) in his(90) and ("dropped", lines_n[1]) in his(90) and not any("open the setup page" in t for t in his_open(90)) and sorted(his_open(90)) == sorted([f"Oliver: {sum_b}", *lines_b]), st(90))
+item(91)
+upd(91, step=N_END)
+r, fx = send(lambda: upd(91, step="none"))
+check("2c step=none after such a split withdraws the lead-in with its sub-lines and the closing line: nothing of his is open, no sub-line is left in next",
+      his_open(91) == [] and "open the setup page" not in mt(91)["next"] and "step_lines" not in mt(91) and mt(91)["next"] == "home-agent: build it", (st(91), mt(91)))
+# the agent's own line with sub-lines is one step: done=[n] ticks the lead-in and its sub-lines together
+item(92, next="home-agent: build it\nhome-agent: Do these in order:\n  - open the page\n  - press save\nhome-agent: report back")
+own(92, mt(92)["next"])
+before = [(x["status"], x["text"]) for x in S.view(mt(92), keeper=OWNER)]
+r, fx = send(lambda: upd(92, done=[2]))
+after = [(x["status"], x["text"]) for x in S.view(mt(92), keeper=OWNER)]
+check("2c done=[2] on a line with sub-lines ticks the lead-in and its sub-lines as one step: one entry changes to done, the open lines left are the other two, and no sub-line is left in next",
+      not isinstance(r, ToolError) and [t for s_, t in before].count("home-agent: Do these in order:\n  - open the page\n  - press save") == 1 and ("done", "home-agent: Do these in order:\n  - open the page\n  - press save") in after
+      and [t for s_, t in after if s_ == "open"] == ["home-agent: build it", "home-agent: report back"] and "open the page" not in mt(92)["next"] and len(after) == 3, (before, after, mt(92)["next"]))
+
+item(93)
+sum_o, lines_o = SS.split_step(N_NONE, LINE_ROOM)
+r, fx = send(lambda: upd(93, step=N_NONE))
+check("2c a lead-in with items and no closing sentence: the step is the lead-in's words with no count, next holds the one line with its three sub-lines, and the reply says one line (not `1 lines`) and no `(+` tail",
+      not isinstance(r, ToolError) and mt(93)["step"] == sum_o == "Please do these things in order:" and len(lines_o) == 1 and NL.split(mt(93)["next"])[1] == lines_o[0] and "(+" not in mt(93)["step"]
+      and [k for k, _ in fx] == ["step-split"] and "a summary and 1 line of next" in fx[0][1] and "1 action," in fx[0][1] and "1 lines" not in fx[0][1], (mt(93), fx))
+check("2c …the server's own line for the summary (its words are the lead-in's) stands beside it as it does for every split, and the board's Your step block draws the lead-in once, with its sub-lines",
+      his_open(93) == [lines_o[0], f"Oliver: {sum_o}"] and [f for f, _ in ui_render.Board(str(T / "store")).your_steps(ui_render.Board(str(T / "store")).item("a93"))] == ["Please do these things in order:"], st(93))
+r, fx = send(lambda: upd(93, step=N_NONE))
+check("2c …sent again: nothing is added, and the reply says `its 1 line of next is on the item already`", his_open(93) == [lines_o[0], f"Oliver: {sum_o}"] and any("its 1 line of next is on the item already" in t for _, t in fx), (st(93), fx))
+
 # ---- 3. long lines of his in next
 LONGLINE = "Oliver: " + LONG
 r, fx = send(lambda: upd(7, next="home-agent: build it\n" + LONGLINE))
@@ -474,6 +573,13 @@ r, fx = send(lambda: upd(7, next="home-agent: build it\n" + "\n".join(lines)))
 check("3 the lines fed back change nothing, no fix", mt(7)["next"].splitlines() == ["home-agent: build it", *lines] and not fx, (mt(7)["next"], fx))
 r, fx = send(lambda: upd(8, next="home-agent: build it. Then test it after that and open the pull request once it is green. Then wait for the review and fix what comes back of it"))
 check("3 a long line of the agent's own (not his) is not split here: the next-line rules judge it as before (stored as one line, or refused whole)", not [k for k, _ in fx if k == "step-split"] and (isinstance(r, ToolError) or mt(8)["next"].count("\n") == 0), (r, fx, mt(8)["next"]))
+item(95)
+r, fx = send(lambda: upd(95, next="home-agent: build it\nOliver: " + N_MANY))
+lm = SS.split_line("Oliver: " + N_MANY, LINE_ROOM)
+check("3 a long line of his that opens a list under a lead-in: four lines of next, the second with its two sub-lines, the others as they were, and the reply counts four lines", NL.split(mt(95)["next"]) == ["home-agent: build it", *lm] and len(lm) == 4
+      and [k for k, _ in fx] == ["step-split"] and "into 4 lines" in fx[0][1], (r, mt(95)["next"], fx))
+r, fx = send(lambda: upd(95, next=mt(95)["next"]))
+check("3 …the stored lines sent back whole are left as they are (a line with sub-lines is the writer's own shape): no fix, the same next", NL.split(mt(95)["next"]) == ["home-agent: build it", *lm] and not fx, (mt(95)["next"], fx))
 item(45, next="home-agent: build it\nOliver: " + LONG)
 r, fx = send(lambda: upd(45, next="home-agent: build it\nOliver: " + LONG))
 check("3 a long line of his that is an open step already is left as it stands (its key is known): one line, no fix", mt(45)["next"].splitlines() == ["home-agent: build it", "Oliver: " + LONG] and not fx, (r, fx, mt(45)["next"]))

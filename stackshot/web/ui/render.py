@@ -3315,7 +3315,7 @@ li.hrow{padding:10px 12px;min-width:0;font-size:14px;line-height:1.4;scroll-marg
 .hl2 .hthen,.hl2 .hby{font-size:12px;color:var(--fg);min-width:0;margin-left:12px}.hl2 .hlab{color:var(--mut)}.hl2.hind .hwait{display:inline}.hbody{margin:6px 0 0 6px;padding-left:10px;border-left:1px solid var(--mut);min-width:0}.hbody>:first-child{margin-top:0}.hnote.hnstep{margin-left:16px}
 .hl2{margin-top:4px;min-width:0;font-size:13px;color:var(--mut)}.hnext,.hwait{display:block;min-width:0;overflow-wrap:anywhere;color:var(--fg)}.hwait{color:var(--mut)}.hwait .hon{color:var(--fg)}.hnext.hq{font-weight:500}a.mockup{white-space:nowrap;font-weight:500}
 .hwho{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--mut)}.hwho.own{font-family:inherit;font-weight:600;font-size:12px;color:var(--call)}a.hwho:hover{color:var(--acc)}
-.iask .istepbody>b.osub{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600;margin:10px 0 4px}.draft{margin:6px 0 4px}.draft .dhead{margin:0 0 4px}.draft .dlab{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600}.draft button.copy{margin-left:8px;vertical-align:baseline}.draft pre{margin:0;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.5;color:var(--fg)}.draft pre code{font:inherit;border:0;padding:0;background:none;color:var(--fg)}.hdraft{margin:4px 0 2px;font-size:13px}.hdraft summary{cursor:pointer;color:var(--mut);font-size:12px}.hdraft .dlab{font-size:12px;letter-spacing:0;text-transform:none;font-weight:400;color:var(--mut)}.hdraft pre{margin:4px 0 0;background:var(--bg);font-size:13px;line-height:1.45}.hnote{margin-top:4px;font-size:12px;color:var(--mut);overflow-wrap:anywhere}.hnote .hwho{font-size:12px}li.hrow .cmd{margin:6px 0 2px;color:var(--fg)}ol.stepol{margin:4px 0 6px;padding-left:22px}ol.stepol>li{margin:6px 0;line-height:1.5}p.sp{margin:4px 0}.stepol .cmd{margin:6px 0 2px}
+.iask .istepbody>b.osub{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600;margin:10px 0 4px}.draft{margin:6px 0 4px}.draft .dhead{margin:0 0 4px}.draft .dlab{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600}.draft button.copy{margin-left:8px;vertical-align:baseline}.draft pre{margin:0;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.5;color:var(--fg)}.draft pre code{font:inherit;border:0;padding:0;background:none;color:var(--fg)}.hdraft{margin:4px 0 2px;font-size:13px}.hdraft summary{cursor:pointer;color:var(--mut);font-size:12px}.hdraft .dlab{font-size:12px;letter-spacing:0;text-transform:none;font-weight:400;color:var(--mut)}.hdraft pre{margin:4px 0 0;background:var(--bg);font-size:13px;line-height:1.45}.hnote{margin-top:4px;font-size:12px;color:var(--mut);overflow-wrap:anywhere}.hnote .hwho{font-size:12px}li.hrow .cmd{margin:6px 0 2px;color:var(--fg)}ol.stepol{margin:4px 0 6px;padding-left:22px}ol.stepol>li{margin:6px 0;line-height:1.5}ol.stepol ul.stepsub{list-style:disc;margin:3px 0 2px;padding-left:20px}ol.stepol ul.stepsub>li{margin:2px 0}p.sp{margin:4px 0}.stepol .cmd{margin:6px 0 2px}
 .hask{margin-top:6px}form.hanswer{margin:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}form.hanswer[hidden]{display:none}form.hanswer .abtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}form.hanswer .abtns-opt{margin-top:0}form.hanswer textarea{display:block;box-sizing:border-box;width:100%;min-height:3.2em;margin-top:8px;padding:6px 8px;font:inherit;font-size:14px;color:var(--fg);background:var(--ifill);border:1px solid var(--ibd);border-radius:6px;resize:none}form.hanswer textarea:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
 ul.hdones li.hdone{display:block;min-width:0}.hdl1{display:flex;flex-wrap:nowrap;align-items:baseline;gap:2px 8px;min-width:0}ul.hdones .isubj{flex:1 1 0;grid-column:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}ul.hdones .badge{flex:none;margin:0;white-space:nowrap}ul.hdones .iage{flex:none;margin-left:auto;font-size:12px;color:var(--mut);white-space:nowrap}.hdl2{margin-top:2px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--mut)}ul.hdones a.hnum{flex:none}
 .hl1.hytop{display:flex;flex-wrap:nowrap;align-items:baseline;gap:8px;margin-top:0}.hytop a.hnum{flex:none;max-width:none;overflow:visible;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:inherit;font-weight:600;color:var(--fg)}.hytop a.hnum:hover{color:var(--acc)}.hytop a.hgoal{display:block;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hytop .hage{flex:none;white-space:nowrap}.hytop+.hmeta{margin-top:4px}
@@ -3598,7 +3598,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             elif p.kind == "text":
                 if _sc.split_spans(p.text)[1]: out.append((_steps.strip_owner(p.text), []))
             else:
-                for it in p.items: out.append((it.text, [ln for b in it.fences for ln in fence(b)]))
+                for it in p.items: out.append((" ".join([it.text, *(x.text for x in it.subs)]), [ln for x in it.all() for b in x.fences for ln in fence(b)]))      # a sub-item reads on its numbered line, as before they were parsed apart
         return out
     def your_steps(self, r):
         """What the Your step block lists, as (first line, lines under it) entries: his open steps (his_open_steps), and with them any numbered line or command of an old step field that none of his lines shows
@@ -3635,10 +3635,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         d = _draft.of(r)
         if not d or draft is None: return {}
         items = [it for p in parts if p.kind != "cmd" for it in (p.items if p.kind == "ol" else [_sc.Item(p.text)])]     # the lines step_parts_html numbers for `inside`
-        cmds = [_sc.split_spans(it.text)[1] + it.fences for it in items]
+        cmds = [[c for x in it.all() for c in _sc.split_spans(x.text)[1] + x.fences] for it in items]      # the commands of an item are those of its sub-items too
         if any(_draft.clean(c) == _draft.clean(d) for c in [p.text for p in parts if p.kind == "cmd"] + [c for cs in cmds for c in cs]): return {}
         if not items: return {-1: draft("")}
-        texts = [_sc.split_spans(it.text)[0] for it in items]
+        texts = [" ".join(t for t in (_sc.split_spans(x.text)[0] for x in it.all()) if t) for it in items]
         at = ([i for i, t in enumerate(texts) if _draft.names_text(t)] or [i for i, cs in enumerate(cmds) if not cs] or [len(items) - 1])[-1]
         return {at: draft(texts[at])}
     def your_step_html(self, r, home=False):
@@ -3658,7 +3658,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         d = _draft.of(r)
         cmds = list(sb.blocks)
         for p in sb.parts or []:
-            cmds += [p.text] if p.kind == "cmd" else _sc.split_spans(p.text)[1] if p.kind == "text" else [c for it in p.items for c in _sc.split_spans(it.text)[1] + it.fences]
+            cmds += [p.text] if p.kind == "cmd" else _sc.split_spans(p.text)[1] if p.kind == "text" else [c for it in p.items for x in it.all() for c in _sc.split_spans(x.text)[1] + x.fences]
         draft = "" if (not d or any(_draft.clean(c) == _draft.clean(d) for c in cmds)) else self.draft_html(r, self.draft_label(sb.text or "", (r["metadata"] or {}).get("step")), home)
         if sb.parts is not None: return self.step_parts_html(sb.parts, r["gid"]) + draft
         blk = _cmd_blocks(sb.blocks)
@@ -3683,9 +3683,19 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 for it in p.items:
                     n += 1
                     text, cmds = _sc.split_spans(it.text)
-                    lis.append(f"<li>{self.md_line(text, gid) if text else ''}{_cmd_blocks(cmds + it.fences)}{inside.get(n, '')}</li>")
+                    link = [False]      # one Open shell link for the item and its sub-items together
+                    own = f"{self.md_line(text, gid) if text else ''}{_cmd_blocks(cmds + it.fences, link)}"
+                    lis.append(f"<li>{own}{self.step_subs_html(it.subs, gid, link)}{inside.get(n, '')}</li>")
                 out.append(f'<ol class="stepol"{f" start={p.start}" if p.start != 1 else ""}>' + "".join(lis) + "</ol>")
         return "".join(out) + inside.get(-1, "")
+    def step_subs_html(self, subs, gid, link):
+        """The sub-items of a numbered step (step_commands.Item.subs) as a bulleted list inside its <li>: each one's text as inline markdown with the commands taken out of it into code blocks with a Copy button
+        under that line, as for the item itself (`link`: the one-item list that says the Open shell link is drawn already). "" for an item with none."""
+        out = []
+        for x in subs:
+            text, cmds = _sc.split_spans(x.text)
+            out.append(f"<li>{self.md_line(text, gid) if text else ''}{_cmd_blocks(cmds + x.fences, link)}</li>")
+        return f'<ul class="stepsub">{"".join(out)}</ul>' if out else ""
     def draft_label(self, *texts):
         """What the text to paste is called: "Email text to paste" when the words of the step it sits under speak of an email (email, e-mail, or the Korean words for it), else "Message to paste". Never "Draft". A word that only
         looks like one (a channel `#email-alerts`, an address, `gmail`) is no email, and the item's summary is not asked where a step is: a Slack post under a summary that says e-mail is a message. Only the paths with no step line of his (the step field drawn alone, a draft with no step block)

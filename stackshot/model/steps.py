@@ -98,33 +98,43 @@ def _step(text: str, status: str = OPEN, by: str = "", at: float = 0) -> dict[st
 
 
 def view(meta: dict[str, Any] | None, closed: bool = False, keeper: str = "") -> list[dict[str, Any]]:
-    """The checklist of an item as its metadata gives it, in the order the steps were written: the stored steps with their open ones lined up with the lines of `next` (a stored open
+    """The checklist of an item as its metadata gives it (`view_rows` says how, and where each open step's line stands in next)."""
+    return view_rows(meta, closed, keeper)[0]
+
+
+def view_rows(meta: dict[str, Any] | None, closed: bool = False, keeper: str = "") -> tuple[list[dict[str, Any]], list[int | None]]:
+    """(the checklist `view` gives, for each of its steps the position of its line among the lines of `next`, None for a step that has none: done, dropped, or an open one whose line is gone). The checklist of an item as its metadata gives it, in the order the steps were written: the stored steps with their open ones lined up with the lines of `next` (a stored open
     step whose line is no longer in next reads as dropped, with nobody and no time; a line of next that matches no stored step is a new open step at the end). A closed item's
     steps are the record as stored (its next is gone; a close marks the open ones, so a closed item shows none open, except an old one the backfill has not reached). Each step is a new dict; an open one also carries `writer`, the session whose
     write put its line in next (nextlines; `keeper`, default the item's creator, for a line with none stored)."""
     m = meta or {}
     stored = _valid(m.get("steps"))
     if closed:
-        return stored
+        return stored, [None] * len(stored)
     rows = _nl.resolve(m, keeper or str(m.get("owner") or ""))
     chunks = [e for e, _ in rows]
     writers = [w for _, w in rows]
     keys = [key(c) for c in chunks]
     used: set[int] = set()
     out: list[dict[str, Any]] = []
+    at: list[int | None] = []
     for s in stored:
         if s["status"] != OPEN:
             out.append(s)
+            at.append(None)
             continue
         k = key(s["text"])
         j = next((j for j, kk in enumerate(keys) if j not in used and kk == k), -1)
         if j >= 0:
             used.add(j)
             out.append(_with_tag({**_step(chunks[j]), "writer": writers[j]}, tag_of(s)))
+            at.append(j)
         else:
             out.append(_with_tag(_step(s["text"], DROPPED), tag_of(s)))
-    out += [{**_step(c), "writer": writers[j]} for j, c in enumerate(chunks) if j not in used]
-    return out
+            at.append(None)
+    rest = [j for j in range(len(chunks)) if j not in used]
+    out += [{**_step(chunks[j]), "writer": writers[j]} for j in rest]
+    return out, at + rest
 
 
 def drawn_order(steps: list[dict[str, Any]], extra: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:

@@ -308,8 +308,9 @@ sn = re.search(r'<div class="istepnext">(.*?)</div></div></div><form', blk, re.S
 sn_html = sn.group(1) if sn else ""
 check("the step's summary line passes the step guards (no pointer, no command) and the page holds no pointer such as 'numbered below'",
       SC.problem(rd(21)) == "" and SC.points_elsewhere(STEPY) == "" and "numbered below" not in p21, SC.problem(rd(21)))
-check("the Your step block holds his open Next lines in one numbered list, in full, without their 'Oliver:' openers, none of the agent's, and no summary line",
-      "One line in PowerShell on your Windows laptop" not in blk and blk.index('<div class="istepnext">') < blk.index("<form") and sn_html.count("<li>") == 3
+check("the Your step block holds his open Next lines in one numbered list (three steps, a sub line under the second one a bullet of its own inside it), in full, without their 'Oliver:' openers, none of the agent's, and no summary line",
+      "One line in PowerShell on your Windows laptop" not in blk and blk.index('<div class="istepnext">') < blk.index("<form") and sn_html.count("<li>") == 4 and sn_html.count('<ul class="stepsub"><li>a sub line with the command below') == 1
+      and sn_html.index("then paste the") < sn_html.index('<ul class="stepsub">') < sn_html.index("run this one")
       and sn_html.startswith('<ol class="stepol"') and "In PowerShell run the command below and read the output" in sn_html and "then paste the" in sn_html and "run this one" in sn_html
       and "Oliver:" not in sn_html and "prepare the box" not in sn_html and "check what he pasted" not in sn_html, sn_html[:900])
 check("each command is a code block with a Copy button under its line: a backticked span with a space in it, a sub line's, and a fenced block",

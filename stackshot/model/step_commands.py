@@ -35,6 +35,7 @@ from stackshot.model import draft as _draft
 from stackshot.model import model as _model
 
 NUM_RX = re.compile(r"^[ \t]*(\d{1,3})[.)][ \t]+(\S.*)$")
+SUB_RX = re.compile(r"^[ \t]*(?:[-*+\u2022]|\d{1,3}[.)])[ \t]+(\S.*)$")      # a bullet or a numbered line, the marker off in group 1: under an item (more indented than it) it is a sub-item
 FENCE_RX = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*([\w+.#-]*)[ \t]*$")      # group 2: the tag (```bash)
 SHELL_TAGS = frozenset("sh bash shell powershell pwsh console".split())      # a fence in a description holds commands only when tagged so; an untagged one holds pasted output
 SPAN_RX = re.compile(r"`([^`\n]+)`")
@@ -52,9 +53,14 @@ def structured(text: Any) -> bool:
 
 @dataclass
 class Item:
-    """One numbered line: its text (command spans still in it) and the fenced blocks under it."""
+    """One numbered line: its text (command spans still in it), the fenced blocks under it and its sub-items (the bullets or numbers indented under it, one level: a line under a sub-item reads as one of them)."""
     text: str
     fences: list[str] = field(default_factory=list)
+    subs: list["Item"] = field(default_factory=list)
+
+    def all(self) -> list["Item"]:
+        """The item and its sub-items, in order: what a reader of every command or every word of the item walks."""
+        return [self, *self.subs]
 
 
 @dataclass
@@ -81,35 +87,46 @@ def _fence_body(lines: list[str], i: int) -> tuple[str, int]:
     return textwrap.dedent("\n".join(body)).strip("\n"), j
 
 
+def _indent(ln: str) -> int:
+    return len(ln.expandtabs(4)) - len(ln.expandtabs(4).lstrip(" "))
+
+
 def parse(text: Any) -> list[Part]:
-    """The step as parts. A numbered line opens an item (consecutive ones make one list); an indented line after an item goes on its text; a fenced block right after an item belongs to it, any
-    other fenced block stands alone; a plain line that is not indented is a text part and ends the list. Blank lines are skipped."""
+    """The step as parts. A numbered line opens an item (consecutive ones make one list); a bullet or a numbered line indented under an item (more than the item's own line) is a sub-item of it, and a line
+    under a sub-item that is neither goes on that sub-item's text; any other indented line after an item goes on its text; a fenced block right after an item belongs to it (to its last sub-item when it is indented
+    under one), any other fenced block stands alone; a plain line that is not indented is a text part and ends the list. Blank lines are skipped."""
     lines = lines_of(text)
     parts: list[Part] = []
     cur: Item | None = None
+    cur_at = 0                 # the indent of the numbered line that opened `cur`: a marker line indented more than that is under it
     i = 0
     while i < len(lines):
         ln = lines[i]
         if FENCE_RX.match(ln):
+            at = _indent(ln)
             body, i = _fence_body(lines, i)
             if body.strip():
                 if cur is not None:
-                    cur.fences.append(body)
+                    (cur.subs[-1] if cur.subs and at > cur_at else cur).fences.append(body)
                 else:
                     parts.append(Part("cmd", body))
             continue
         i += 1
         if not ln.strip():
             continue
-        m = NUM_RX.match(ln)
-        if m:
+        sub = SUB_RX.match(ln) if cur is not None and _indent(ln) > cur_at else None
+        m = None if sub else NUM_RX.match(ln)
+        if sub:
+            cur.subs.append(Item(sub.group(1).strip()))
+        elif m:
             cur = Item(m.group(2).strip())
+            cur_at = _indent(ln)
             if parts and parts[-1].kind == "ol":
                 parts[-1].items.append(cur)
             else:
                 parts.append(Part("ol", items=[cur], start=int(m.group(1))))
         elif cur is not None and ln[:1] in (" ", "\t"):
-            cur.text += " " + ln.strip()
+            (cur.subs[-1] if cur.subs else cur).text += " " + ln.strip()
         else:
             parts.append(Part("text", ln.strip()))
             cur = None
@@ -156,7 +173,8 @@ def commands_of(text: Any) -> list[str]:
             out += split_spans(p.text)[1]
         else:
             for it in p.items:
-                out += split_spans(it.text)[1] + it.fences
+                for x in it.all():
+                    out += split_spans(x.text)[1] + x.fences
     return out
 
 
@@ -944,8 +962,9 @@ def step_commands(step: Any, bodies: bool = True) -> list[str]:
             spans += split_spans(p.text)[1]
         else:
             for it in p.items:
-                spans += split_spans(it.text)[1]
-                blocks += it.fences
+                for x in it.all():
+                    spans += split_spans(x.text)[1]
+                    blocks += x.fences
         out += [c for c in spans if looks_like_command(c)]
         for b in blocks:
             out += fence_commands(b, bodies)

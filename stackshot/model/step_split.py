@@ -13,9 +13,14 @@ make more than MAX_ACTIONS actions, is never split (the old limits then judge it
 An inline `1)` is an item only where a list can start: at the start of the text or after the end of a sentence or a colon (`Pick plan 1) basic or 2) pro` is no list), and a clause with no letter or digit in it (a stray `;` or `.`)
 is no action.
 
-WHAT IT MAKES (`split_step`). The summary: the first action cut at a word to fit SUMMARY_MAX, with `(+N more)` after it, so the summary says there is a list and is never the same words as the
+A LIST UNDER A LEAD-IN. When the words before the first inline item end with a colon (`Do these in order: 1) a 2) b 3) c. Then report back.`), the last sentence of them (the one with the colon) is ONE action and the items are
+the sub-lines under it, drawn as a list inside that step (`<owner>: Do these in order:` with `  - a`, `  - b`, `  - c` indented under it); a sentence after the last item is an action of its own, at the top level, and
+a sentence before the lead-in sentence stays a top-level action. Of an item that is not the last, every word stays in its sub-line; of the last, the first sentence is the item and the sentences after it are top-level. Items with
+no colon lead-in (no words before them, or words that do not end with a colon) are top-level actions, one each. The summary's `(+N more)` counts top-level actions only; the cap MAX_ACTIONS counts every line made, sub-lines included.
+
+WHAT IT MAKES (`split_step`). The summary: the first action cut at a word to fit SUMMARY_MAX, with `(+N more)` after it (nothing after it when it is the only top-level action: one lead-in with its list), so the summary says there is a list and is never the same words as the
 first line (the board skips a line of his that reads as the summary). The lines: every action, each opening with his name (`<owner>: <action>`), each within the line limit, the full stop or semicolon
-that ended a clause dropped and nothing else changed. Fed back, the output changes nothing (the summary and every line are under SPLIT_OVER or hold one action).
+that ended a clause dropped and nothing else changed. Fed back, the output changes nothing (the summary and every line are under SPLIT_OVER or hold one action, and a line with sub-lines is never split again).
 
 `split_line` does the same for one long line of next that opens with his name: the lines, one per action, with no summary (the item's step or ask is the summary).
 
@@ -40,11 +45,12 @@ _RX_INLINE_NUM = re.compile(r"(?:(?<=\s)|^)\(?(\d{1,2})[.)]\s+(?=\S)")      # `1
 _RX_WORD = re.compile(r"\w")        # an action holds at least one letter or digit: a clause of marks only is no action
 _LIST_OPENERS = ".;:!?"           # what may stand before an inline `1)` that starts a list (the end of a sentence, a semicolon, a colon): after any other word it is a number in a sentence
 _TRIM = " .;"                      # what ends a clause and is no part of the action's words
+SUB = "  - "                       # how a sub-line stands under its action in a line of next: indented, so the line above keeps it (nextlines.split), a bullet, so the board draws a list
 
 
-def _inline_items(text: str) -> list[str]:
-    """`text` cut at inline numbered items when it holds two or more in a row from 1 (`Do: 1) a 2) b`), the first one at the start of the text or after the end of a sentence or a colon (a number in a sentence,
-    `Pick plan 1) basic or 2) pro`, is no list): the words before the first item (when there are some), then each item, its number off. Else [text]."""
+def _inline_list(text: str) -> tuple[str, list[str]]:
+    """(the words before the list, the items) when `text` holds two or more inline numbered items in a row from 1 (`Do: 1) a 2) b`), the first one at the start of the text or after the end of a sentence or a colon (a
+    number in a sentence, `Pick plan 1) basic or 2) pro`, is no list): the words before the first item ("" when there are none), then each item, its number off, the last one with whatever follows it. Else (text, [])."""
     starts, ends = _bt._merged(_bt._spans(text) + [m.span() for m in _bt._RX_CODE_SPAN.finditer(text)])
     seq: list[Any] = []
     for m in _RX_INLINE_NUM.finditer(text):
@@ -58,11 +64,20 @@ def _inline_items(text: str) -> list[str]:
             continue
         seq.append(m)
     if len(seq) < 2:
-        return [text]
-    out = [text[:seq[0].start()]] if text[:seq[0].start()].strip() else []
-    for k, m in enumerate(seq):
-        out.append(text[m.end():seq[k + 1].start() if k + 1 < len(seq) else len(text)])
-    return [x.strip() for x in out if x.strip()]
+        return text, []
+    items = [text[m.end():seq[k + 1].start() if k + 1 < len(seq) else len(text)].strip() for k, m in enumerate(seq)]
+    return text[:seq[0].start()].strip(), [x for x in items if x]
+
+
+def _clause_list(part: str) -> list[str]:
+    """The clauses of a text as actions: cut at sentence ends and semicolons (bullet_text._clauses), the closing full stop or semicolon off, a clause with no letter or digit in it left out."""
+    out: list[str] = []
+    for clause, _gap in _bt._clauses(part):
+        c = clause.strip()
+        c = c.rstrip(_TRIM).strip() or c
+        if c and _RX_WORD.search(c):
+            out.append(c)
+    return out
 
 
 def _wrap(clause: str, limit: int) -> list[str]:
@@ -102,37 +117,62 @@ def _wrap(clause: str, limit: int) -> list[str]:
     return [*out, rest] if rest else out
 
 
-def _plan(text: Any, line_max: int) -> tuple[list[str], str]:
-    """(the actions, why none): the actions of `actions`, or [] with the reason when the text is left as written for its size (a sentence for a person: `skipped`); "" when it is short, structured or one action."""
+Entry = tuple[str, list[str]]       # an action of the top level and the sub-lines under it ([] for a plain action)
+
+
+def _entries(t: str) -> list[Entry]:
+    """The clauses of a text as top-level actions, each with its sub-lines, before any is cut to the line limit: the inline items under a lead-in that ends with a colon are the sub-lines of that action (see the module
+    doc), any other text is plain actions, one per clause."""
+    lead, items = _inline_list(t)
+    if items:
+        before = _clause_list(lead)
+        if before and before[-1].endswith(":"):
+            subs: list[str] = []
+            for x in items[:-1]:
+                c = x.rstrip(_TRIM).strip() or x
+                if _RX_WORD.search(c):
+                    subs.append(c)
+            last = _clause_list(items[-1])
+            if len(subs) + bool(last) >= 2:
+                return [(c, []) for c in before[:-1]] + [(before[-1], subs + last[:1])] + [(c, []) for c in last[1:]]
+        return [(c, []) for part in ([lead] if lead else []) + items for c in _clause_list(part)]
+    return [(c, []) for c in _clause_list(t)]
+
+
+def _plan(text: Any, line_max: int) -> tuple[list[Entry], str]:
+    """(the actions with their sub-lines, why none): the actions of `actions`, or [] with the reason when the text is left as written for its size (a sentence for a person: `skipped`); "" when it is short, structured or one action."""
     t = _steps.clean(text)
     if len(t) <= SPLIT_OVER or _sc.structured(str(text or "")) or line_max < 20:
         return [], ""
     if len(t) > SPLIT_MAX:
         return [], f"the server splits a step into lines only up to {SPLIT_MAX} characters, and this one runs {len(t)}"
-    clauses: list[str] = []
-    for part in _inline_items(t):
-        for clause, _gap in _bt._clauses(part):
-            c = clause.strip()
-            c = c.rstrip(_TRIM).strip() or c
-            if c and _RX_WORD.search(c):
-                clauses.append(c)
-    if len(clauses) < 2:            # one sentence is one action however long: it is never cut mid-sentence (a line over the limit is judged by the next-line rules as before)
+    entries = _entries(t)
+    if len(entries) < 2 and not any(subs for _, subs in entries):            # one sentence is one action however long: it is never cut mid-sentence (a line over the limit is judged by the next-line rules as before); a lead-in with its list is a step of its own
         return [], ""
-    out: list[str] = []
-    for c in clauses:
-        out.extend(_wrap(c, line_max))
-        if len(out) > MAX_ACTIONS:      # past the cap: left as written (cheap to say early: a long text never gets the whole of its pieces made)
+    out: list[Entry] = []
+    made = 0
+    for head, subs in entries:
+        pieces = _wrap(head, line_max)
+        out.extend((p, []) for p in pieces[:-1])
+        out.append((pieces[-1], [q for s_ in subs for q in _wrap(s_, line_max)]))      # the sub-lines hang under the last piece of the lead-in, the one that ends with the colon
+        made += len(pieces) + len(out[-1][1])
+        if made > MAX_ACTIONS:      # past the cap: left as written (cheap to say early: a long text never gets the whole of its pieces made)
             return [], f"the server splits a step into at most {MAX_ACTIONS} lines, and this one would make more"
-    if any(_bt.visible_len(x) > line_max for x in out):      # a word, a link's words or a code span that no cut can bring within a line (a naked URL reads as nothing, so it never counts): the lines would be refused, naming a line the writer did not write
+    if any(_bt.visible_len(x) > line_max for h, subs in out for x in (h, *subs)):      # a word, a link's words or a code span that no cut can bring within a line (a naked URL reads as nothing, so it never counts): the lines would be refused, naming a line the writer did not write
         return [], f"a word, a link or a code span in it is longer than a line of next ({line_max} characters), so the server could not cut it into lines"
     return out, ""
 
 
+def _text_of(entry: Entry) -> str:
+    """An action with its sub-lines as one text: the action, then each sub-line on a line of its own, indented under it."""
+    return entry[0] + "".join("\n" + SUB + s for s in entry[1])
+
+
 def actions(text: Any, line_max: int) -> list[str]:
-    """The actions of a text read as one line: [] when it is to be left as written (under SPLIT_OVER, over SPLIT_MAX, structured, one action, more than MAX_ACTIONS, or with a piece that cannot be
+    """The actions of a text read as one line: [] when it is to be left as written (under SPLIT_OVER, over SPLIT_MAX, structured, one action, more than MAX_ACTIONS lines, or with a piece that cannot be
     brought within `line_max`), else the actions in order, each at most `line_max` characters, every word of the text in them (only a closing full stop or semicolon, an inline item's number and the
-    spaces between clauses are gone)."""
-    return _plan(text, line_max)[0]
+    spaces between clauses are gone). An action that opens a list (a lead-in that ends with a colon, followed by inline items) comes as its words, then each item on a line of its own, indented under it (`SUB`)."""
+    return [_text_of(e) for e in _plan(text, line_max)[0]]
 
 
 def skipped(text: Any, line_max: int) -> str:
@@ -141,26 +181,31 @@ def skipped(text: Any, line_max: int) -> str:
 
 
 def summary_of(first: str, more: int) -> str:
-    """The summary: `first` cut at a word so that with ` (+N more)` it reads within SUMMARY_MAX characters (an ellipsis when cut)."""
-    tail = MORE_FORM.format(n=more)
+    """The summary: `first` cut at a word so that with ` (+N more)` it reads within SUMMARY_MAX characters (an ellipsis when cut); with nothing more, `first` alone."""
+    tail = MORE_FORM.format(n=more) if more else ""
     room = SUMMARY_MAX - len(tail)
     head = _bt.cut_words(first, room) or first[:max(room - 1, 1)].rstrip() + "…"
     return head + tail
 
 
+def _line(entry: Entry) -> str:
+    """The line of next for an action: his name and the action, the sub-lines indented under it."""
+    return _os.line_of(entry[0]) + "".join("\n" + SUB + s for s in entry[1])
+
+
 def split_step(text: Any, line_max: int) -> tuple[str, list[str]] | None:
-    """A long step as (the summary, the lines of next that carry the actions, each opening with his name), None when the text is left as written (`actions`)."""
-    acts = actions(text, line_max)
+    """A long step as (the summary, the lines of next that carry the actions, each opening with his name; an action with a list is one line with its sub-lines indented under it), None when the text is left as written (`actions`)."""
+    acts = _plan(text, line_max)[0]
     if not acts:
         return None
-    return summary_of(acts[0], len(acts) - 1), [_os.line_of(a) for a in acts]
+    return summary_of(acts[0][0], len(acts) - 1), [_line(a) for a in acts]
 
 
 def split_line(line: Any, line_max: int) -> list[str] | None:
-    """One line of next that opens with his name, as one line per action (each opening with his name), None when it is left as written: it has no first line only, or holds under two actions
-    (`actions`), or is no line of his."""
+    """One line of next that opens with his name, as one line per action (each opening with his name, a list's items indented under its lead-in), None when it is left as written: it has no first line only, or holds under two
+    actions (`actions`), or is no line of his. A line with sub-lines under it is the writer's own shape and is never split."""
     raw = str(line or "")
     if "\n" in raw.strip() or not _os.is_named(raw):
         return None
-    acts = actions(_steps.without_owner(raw), line_max)
-    return [_os.line_of(a) for a in acts] or None
+    acts = _plan(_steps.without_owner(raw), line_max)[0]
+    return [_line(a) for a in acts] or None

@@ -222,21 +222,25 @@ def say_long_step(step: str, lines: list[str], added: int, settled: int = 0) -> 
     """The reply's line for a long step that was split into `lines` (call_log.fixed, kind step-split): what was done, or, when `added` is 0 (the summary and every one of its lines are on the item already: the same step
     sent again), that nothing was added. `settled`: how many of the lines were ticked done or dropped before and stay so (they are no open lines on the item, and the reply does not say they are)."""
     open_n = max(0, len(lines) - added - settled)
+    acts, lns = (f"{len(lines)} action", f"{len(lines)} line") if len(lines) == 1 else (f"{len(lines)} actions", f"{len(lines)} lines")      # a lead-in with its list is one line
     was = [f"{open_n} of the lines {'was' if open_n == 1 else 'were'} on the item already" if open_n else "", f"{settled} {'was' if settled == 1 else 'were'} done or dropped before and stay so" if settled else ""]
     was_txt = " and ".join(x for x in was if x)
     if added:
-        _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {len(lines)} actions, so it was split into a summary and {len(lines)} lines of next that open with {OWNER}'s name, "
-                     "which the board draws as his list; every word is in a line" + ("" if added == len(lines) else f" ({was_txt}, so {added} were added)"), fields=["step", "next"])
+        nested = sum(len(x.splitlines()) - 1 for x in lines)      # the items of a list that stand as sub-lines under their lead-in line
+        _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {acts}, so it was split into a summary and {lns} of next that open with {OWNER}'s name, "
+                     "which the board draws as his list; every word is in a line" + (f"; the {nested} items of a list stand as indented sub-lines under their lead-in line, ticked with it" if nested else "")
+                     + ("" if added == len(lines) else f" ({was_txt}, so {added} were added)"), fields=["step", "next"])
     elif settled:
-        _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {len(lines)} actions: it is stored as a summary, and of its {len(lines)} lines {was_txt}, so nothing was added", fields=["step"])
+        _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {acts}: it is stored as a summary, and of its {lns} {was_txt}, so nothing was added", fields=["step"])
     else:
-        _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {len(lines)} actions: it is stored as a summary, and its {len(lines)} lines of next are on the item already, so nothing was added",
+        _calls.fixed("step-split", f"the step ran {len(_steps.clean(step))} characters with {acts}: it is stored as a summary, and its {lns} of next {'is' if len(lines) == 1 else 'are'} on the item already, so nothing was added",
                      fields=["step"])
 
 
 def fix_long_owner_lines(next_: str, known: set[str]) -> str:
     """The lines of next that open with the owner's name and run long with several actions, one line per action (step_split.split_line), the other lines as they are, and the reply says so (call_log.fixed).
-    A line that is an open step already (`known`: its steps.key) or one whole command in backticks is left as it stands. The text as given when no line is split."""
+    A line that is an open step already (`known`: its steps.key) or one whole command in backticks is left as it stands, and so is a line that has sub-lines under it (the writer's own shape). A lead-in that ends with
+    a colon, followed by `1) … 2) …`, is one line with its items as indented sub-lines (step_split). The text as given when no line is split."""
     if not next_ or not str(next_).strip():
         return next_
     room, out, n_in, n_out = _step_line_room(), [], 0, 0
