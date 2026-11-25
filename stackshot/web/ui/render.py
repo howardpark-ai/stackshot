@@ -1711,7 +1711,7 @@ _MACH_CSS = """
 .mr .lbl{font-size:12px;color:var(--mut)}.mr a.lbl{text-decoration:none}.mr a.lbl:hover{color:var(--fg);text-decoration:underline}.mr .val{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
 .mr .st{font-size:12px;color:var(--mut);min-width:0;overflow-wrap:anywhere}.mr .st.ok{color:var(--ok);font-weight:600}.mr.update .st{color:var(--fg);font-weight:600}.mr.offline{opacity:.6}
 #machines .matrix{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
-.fleetlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;margin:0 0 8px}.pc.fl{grid-template-columns:minmax(0,1fr) max-content;min-width:0}.pc.fl .fn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pc.fl .fm{grid-column:1/-1;overflow-wrap:anywhere}.pc.fl.ret{opacity:.6}.fl-stale{color:var(--call)}.fl-nr{overflow-wrap:anywhere}
+.fl-stale{color:var(--call)}.fl-nr{overflow-wrap:anywhere}
 .pc.mach>.mf{grid-column:1/-1;display:block;min-width:0;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;cursor:help}
 """   # the Machines panel's machine cards, appended after the main sheet so that its #machines .matrix wins over the old 128px columns; the panel's own one-column rule is more specific and still applies
 
@@ -3354,7 +3354,7 @@ p.lpgnote{margin:8px 0 0;font-size:13px;color:var(--mut)}section.lcompleted{marg
 #panel section{margin:0;padding:14px 0;border-top:1px solid var(--line)}#panel>section{--pt:2px;position:relative;padding-top:var(--pt);border-top:0}#panel>section:not([hidden],#audit-panel:has(#audit[hidden]):not(:has(#ghcalls)))~section:not([hidden],#audit-panel:has(#audit[hidden]):not(:has(#ghcalls))){--pt:14px;border-top:1px solid var(--line)}
 #panel section h2,#panel section h2.hdr{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--fg);margin:0;padding:0;border:0}#panel #tasks h2{margin-bottom:8px}#panel details.fold>summary+*{margin-top:8px}
 
-#panel #machines .matrix,#panel .matrix.rcvs{grid-template-columns:minmax(0,1fr);margin-bottom:0}#panel .mcol .pc.none{display:none}#panel .mnote{margin:0 0 8px}#panel .fleetlist{grid-template-columns:minmax(0,1fr)}#panel .tip:hover::after{left:auto;right:0;width:max-content;max-width:min(200px,70vw);white-space:normal;overflow-wrap:anywhere}
+#panel #machines .matrix,#panel .matrix.rcvs{grid-template-columns:minmax(0,1fr);margin-bottom:0}#panel .mcol .pc.none{display:none}#panel .mnote{margin:0 0 8px}#panel .tip:hover::after{left:auto;right:0;width:max-content;max-width:min(200px,70vw);white-space:normal;overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){#panel{transition:none}}
 @media(min-width:__DOCK__px){
 body::before{content:"";position:fixed;top:0;right:0;width:104px;height:__PTOP__px;background:var(--bg);z-index:8;pointer-events:none}
@@ -3428,29 +3428,19 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return (f'<div id="ghcalls" class="pc ghc"><b class="lbl mh">{esc(_t("panel.gh.title"))}</b>' + row(esc(_t("panel.gh.writes")), b["writes"], b["write_cap"]) + row(esc(_t("panel.gh.reads")), b["reads"], b["read_cap"])
                 + f'<span class="lbl">{esc(_t("panel.gh.counted"))}</span><span class="val">{start:%H:%M} – {end:%H:%M}</span></div>')
 
-    def fleet_list_html(self):
-        """HTML: the machine list a fleet manager posted, as the top of the Machines panel's body, and only while a fleet manager is paired (service/machines_panel.view): "" for a board that was never paired, so its panel is
-        what it was. Paired with no readable list: one muted line saying none has arrived. Otherwise a line with the list's age (the server's clock at the post; amber, with its own words, once it is older than the view's
-        STALE_S, the list still shown) and a card per machine: its name, the retired mark, and a line of hostname, letter and roles; the ssh text, addresses and sources are the card's hover text; then the names the sender could
+    def fleet_list_notes(self, v):
+        """HTML (head, foot): the two notes the machine list puts around the Machines panel's cards, from `v`, the view of service/machines_panel.view. The list draws no card of its own: it chooses which machines get a card
+        (the machine card, see panel_blocks) and in what order. ("", "") for a board that is not paired (v is None), so its panel is what it was. Paired with no readable list: one muted line saying none has arrived, as the head.
+        Paired with a list: the head is empty while the list is fresh, and one amber line (the age is the server's clock at the post, older than the view's STALE_S) once it is stale; the foot names the files the sender could
         not read. Every stored value is text only: each is escaped where it is written, and no link, command or markup is built from one."""
-        v = _mpanel.view(self.now.timestamp())
-        if v is None: return ""
-        if not v["list"]: return f'<p class="mnote">{esc(_t("panel.mach.list_none"))}</p>\n'
-        age = ago(v["age"])
-        out = [f'<p class="mnote fl-age{" fl-stale" if v["stale"] else ""}">{esc(_t("panel.mach.list_stale" if v["stale"] else "panel.mach.list_age", age=age))}</p>']
-        cards = []
-        for m in v["machines"]:
-            line = " · ".join(x for x in (m["hostname"], _t("panel.mach.letter", letter=m["letter"]) if m["letter"] else "", ", ".join(m["roles"])) if x)
-            tip = f' title="{esc("; ".join(m["detail"]))}"' if m["detail"] else ""
-            cards.append(f'<div class="pc fl{" ret" if m["retired"] else ""}"{tip}><b class="lbl fn">{esc(m["name"])}</b><span class="lbl st">{esc(_t("panel.mach.retired")) if m["retired"] else ""}</span>'
-                         + (f'<span class="val fm">{esc(line)}</span>' if line else "") + '</div>')
-        out.append(f'<div class="fleetlist">{"".join(cards)}</div>')
+        if v is None: return "", ""
+        if not v["list"]: return f'<p class="mnote">{esc(_t("panel.mach.list_none"))}</p>\n', ""
+        head = f'<p class="mnote fl-age fl-stale">{esc(_t("panel.mach.list_stale", age=ago(v["age"])))}</p>\n' if v["stale"] else ""
         nr = v["not_read"]
-        if nr:
-            names = ", ".join(nr[:_mpanel.NOT_READ_SHOWN])
-            if len(nr) > _mpanel.NOT_READ_SHOWN: names = _t("panel.mach.not_read_more", names=names, n=len(nr) - _mpanel.NOT_READ_SHOWN)
-            out.append(f'<p class="mnote fl-nr">{esc(_t("panel.mach.not_read", names=names))}</p>')
-        return "\n".join(out) + "\n"
+        if not nr: return head, ""
+        names = ", ".join(nr[:_mpanel.NOT_READ_SHOWN])
+        if len(nr) > _mpanel.NOT_READ_SHOWN: names = _t("panel.mach.not_read_more", names=names, n=len(nr) - _mpanel.NOT_READ_SHOWN)
+        return head, f'\n<p class="mnote fl-nr">{esc(_t("panel.mach.not_read", names=names))}</p>\n'
 
     def recycle_html(self):
         """HTML: the one "Pane recycle pending for … (<the fleet tool> runs it)" status line, listing the
@@ -4424,10 +4414,42 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         for h in self.ssh_hosts: _HOSTS.setdefault(str(h["name"]), h)
         _fleet_cards = [FLEET.get(L, _t("panel.mach.cloud") if L == "c" else L) for L in _COLS]
         _orphans = [c for L in sorted(self.mfacts) if L not in _COLS for c in orphan_alert_cards(L)]       # a failed machine the panel draws no card for
-        matrix_html = ('<div class="matrix">' + "".join(f'<div class="mcol">{fleet_card(L, _HOSTS.get(n))}</div>' for L, n in zip(_COLS, _fleet_cards))
-                       + "".join(f'<div class="mcol">{host_card(h)}</div>' for n, h in _HOSTS.items() if n not in _fleet_cards)
-                       + (f'<div class="mcol">{"".join(_orphans)}</div>' if _orphans else "") + '</div>')
-        return {"machines": _top_fold("machines", f'<h2 class="hdr">{esc(panel_label("machines"))}</h2>', f'\n{self.recycle_html()}{self.fleet_list_html()}{matrix_html}', is_open=True),
+        _lv = _mpanel.view(now.timestamp())      # None: no fleet manager is paired, the panel is what it was
+        _head, _foot = self.fleet_list_notes(_lv)
+        if _lv and _lv["list"]:
+            # The machine list chooses the cards and their order; each listed machine has exactly one card, its own (versions, failure lines) or, when nothing has read it, its name and one `offline` line. A retired
+            # machine has none. A failure of a machine that got no card keeps its own alert card. A name is drawn once (case-insensitive, the first entry wins; a name blank after strip is nameless).
+            # The join is two passes: every entry claims by its NAME first (the fleet's name, then the ssh hosts'); only an entry whose name found nothing may then try its hostname; by then every listed name has its machine, so
+            # a hostname only ever takes a machine no listed entry names. The fleet letters and the ssh host names each have their own set of what has a card: a fleet machine merged with the
+            # ssh host of its name (whatever the case) has drawn that host too.
+            _fname = dict(zip(_COLS, _fleet_cards))
+            _by_name = {n.casefold(): L for L, n in _fname.items()}; _by_host = {}
+            for n, h in _HOSTS.items(): _by_host.setdefault(n.casefold(), h)
+            _used_L, _used_H, _seen, _ents = set(), set(), set(), []
+            for m in _lv["machines"]:
+                name = m["name"].strip()
+                if m["retired"] or not name or name.casefold() in _seen: continue
+                _seen.add(name.casefold()); _ents.append([name, m["hostname"].strip().casefold(), None])
+            def _claim(key):
+                L = _by_name.get(key)
+                if L is not None and L not in _used_L:
+                    _used_L.add(L); h = _by_host.get(_fname[L].casefold())
+                    if h is not None: _used_H.add(str(h["name"]))
+                    return fleet_card(L, h)
+                h = _by_host.get(key)
+                if h is not None and str(h["name"]) not in _used_H: _used_H.add(str(h["name"])); return host_card(h)
+                return None
+            for e in _ents: e[2] = _claim(e[0].casefold())
+            for e in _ents:
+                if e[2] is None and e[1]: e[2] = _claim(e[1])
+            _cols = [e[2] or mcard(e[0], [r for _, r in host_rows({"reachable": False})]) for e in _ents]      # no reading at all: the lone offline line
+            _orphans = [c for L in sorted(self.mfacts) if L not in _used_L for c in orphan_alert_cards(L)]
+            matrix_html = '<div class="matrix">' + "".join(f'<div class="mcol">{c}</div>' for c in _cols) + (f'<div class="mcol">{"".join(_orphans)}</div>' if _orphans else "") + '</div>'
+        else:
+            matrix_html = ('<div class="matrix">' + "".join(f'<div class="mcol">{fleet_card(L, _HOSTS.get(n))}</div>' for L, n in zip(_COLS, _fleet_cards))
+                           + "".join(f'<div class="mcol">{host_card(h)}</div>' for n, h in _HOSTS.items() if n not in _fleet_cards)
+                           + (f'<div class="mcol">{"".join(_orphans)}</div>' if _orphans else "") + '</div>')
+        return {"machines": _top_fold("machines", f'<h2 class="hdr">{esc(panel_label("machines"))}</h2>', f'\n{self.recycle_html()}{_head}{matrix_html}{_foot}', is_open=True),
                 "runners": runners_html(), "anchorhub": receivers_html(),
                 "audit-panel": _top_fold("audit-panel", f'<h2 class="hdr">{esc(panel_label("audit-panel"))}</h2>', self.audit_line() + self.gh_calls_card(), is_open=True),
                 "projects-panel": projects_panel_html()}

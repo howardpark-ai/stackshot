@@ -1112,6 +1112,10 @@ def main(a: list) -> int:
     if a[:1] in (["-h"], ["--help"]):
         print(USAGE); return 0
     if len(a) == 3 and a[0] == "rename":
+        from stackshot.core import config as _cfg
+        why = _cfg.record_host_refusal("~/stackshot/bin/stackshot projects", a)      # the record lives on the server box: a copy elsewhere may be far behind it
+        if why:
+            print(f"projects.py rename: {why}", file=sys.stderr); return 1
         try: print(f"{rename(a[1], a[2])}: now {a[2]}")
         except ValueError as e: sys.exit(f"projects.py: {e}")
         return 0

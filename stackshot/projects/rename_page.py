@@ -244,6 +244,16 @@ def agents_gap(content, new, old_content=None, old=None):
     return (f"{new} is a top-level type: project page{was} with {what} and no session of its own (no front agent, no -main agent)",
             f"add the agents map with its -main agent on {new} (ask the keeper or the project's -main agent)")
 
+
+def id_move_hint(old: str, new: str) -> str:
+    """The command that moves a page's project id when `stub` could not: `projects rename` runs only on the server box (it reads and writes the project record there), so a box that is not the server host
+    is told the ssh form, and the server host keeps the local command."""
+    cmd = "~/stackshot/bin/stackshot projects"
+    where = _cfg.record_host_where(cmd, ["rename", old, new])
+    if not where:
+        return f"python3 {_paths.ROOT}/stackshot/projects/projects.py rename {old} {new}"
+    return where if where.startswith("ssh ") else f"{cmd} rename {old} {new} (on the server box)"
+
 def main():
     a = sys.argv[1:]; verb = a.pop(0) if a else ""
     why = a.pop(a.index("--why") + 1) if "--why" in a else f"renamed on {_cfg.owner()}'s go."; a = [x for x in a if x != "--why"]
@@ -318,7 +328,7 @@ def main():
                 _prj.ensure_ids([old])      # a page the id file has never seen gets its id now, so there is one to move
                 print(f"  project id {_prj.rename(old, new)} now stands for {new}")
             except Exception as e:
-                print(f"  FAIL project id of {old} not moved to {new} ({e}); run: python3 {_paths.ROOT}/stackshot/projects/projects.py rename {old} {new}"); bad += 1
+                print(f"  FAIL project id of {old} not moved to {new} ({e}); run: {id_move_hint(old, new)}"); bad += 1
     sys.exit(1 if bad else 0)
 
 if __name__ == "__main__":

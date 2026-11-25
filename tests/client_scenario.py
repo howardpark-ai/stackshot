@@ -946,6 +946,7 @@ def part_client():
                 except Exception: cnt = 0
                 code, body, ctype = 200, json.dumps({"ok": True, "machines": cnt}).encode(), "application/json"
             elif _mode["v"] == "kept": code, body, ctype = 200, json.dumps({"ok": True, "kept": "newer"}).encode(), "application/json"
+            elif _mode["v"] == "dropped": code, body, ctype = 200, json.dumps({"ok": True, "machines": 2, "dropped": ["machines[1].online"]}).encode(), "application/json"
             elif _mode["v"] == "big": code, body, ctype = 413, json.dumps({"error": "the body is 1000001 bytes, over the 1000000-byte limit"}).encode(), "application/json"
             elif _mode["v"] == "bad": code, body, ctype = 400, json.dumps({"error": "schema must be 1"}).encode(), "application/json"
             elif _mode["v"] == "multi": code, body, ctype = 400, json.dumps({"error": "agent 'x' is no object\nand a second line"}).encode(), "application/json"
@@ -1078,6 +1079,9 @@ def part_client():
         _mode["v"] = "kept"; _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines.json", _mbody))
         check("machines: an answer {kept: newer} (200, not stored) is printed as given, says one line `kept: the server holds a newer list` on stderr and still exits 0",
               rc == 0 and json.loads(out) == {"ok": True, "kept": "newer"} and err == "kept: the server holds a newer list\n", (rc, out, err))
+        _mode["v"] = "dropped"; _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines.json", _mbody))
+        check("machines: an answer with a `dropped` list is printed whole on stdout and says nothing on stderr, exit 0; the usage text says so", rc == 0 and json.loads(out) == {"ok": True, "machines": 2, "dropped": ["machines[1].online"]} and err == ""
+              and "dropped" in client.MACHINES_USAGE and "stdout only" in client.MACHINES_USAGE, (rc, out, err))
         _mode["v"] = "mok"; _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines.json", _mbody))
         check("machines: a stored list (no `kept`) says nothing on stderr", rc == 0 and err == "", (rc, err))
         _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines-blob.bin", _blob))

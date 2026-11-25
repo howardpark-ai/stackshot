@@ -319,6 +319,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--by", default=BY, help="who the change is recorded as")
     ap.add_argument("--json", action="store_true", help="the structured answer")
     a = ap.parse_args(argv)
+    from stackshot.core import config as _cfg
+    why = _cfg.record_host_refusal("~/stackshot/bin/stackshot keeper-subpages", sys.argv[1:] if argv is None else argv)      # the record lives on the server box: a copy elsewhere may be far behind it
+    if why:
+        print("keeper-subpages: " + why, file=sys.stderr)
+        return 1
     from stackshot.anchors import anchors as anc
     from stackshot.fleet import renamed_agents as ra
     rows = anc.sala_rows()                      # sala is read once: the names and aliases that run, and the rename log, come from the same rows

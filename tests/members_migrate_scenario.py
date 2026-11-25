@@ -16,6 +16,8 @@ would read differently with the name in its place keeps the line and is listed.
   8  script           tools/members_migrate.py: --apply asks for the plan first, backs up every touched file byte for byte and writes the undo file before the first write; --plan and a re-plan refuse when the store
                       moved; --undo puts the keys back and keeps what a later save changed; twice is a no-op; the dry run over a copy writes nothing live
   9  gate             refused while [model] migration is off, for a sender or machine outside the lists, for a body naming another key, for an undo entry naming a key the pass does not write
+  10 review lows      a closed item that holds a decision is stamped on its answers alone (its mover, stored or not, stays); a plan file edited after the dry run is refused on --apply with nothing written;
+                      the unfinished pass of the earlier run folder (`people-run`) is named when the run folder is the default one, and not otherwise
 
     tests/run-suite members_migrate        -> exit 0 / 1"""
 import argparse, contextlib, copy, dataclasses, io, json, logging, os, pathlib, re, subprocess, sys, time
@@ -418,6 +420,85 @@ st_o, d_o = call(op="people", items=["g1"], dry=True)
 check("9 …the first name of the stamp op (`people`) is read as `members`", st_o == 200 and st_n == 200 and d_o == d_n, (st_o, d_o, st_n, d_n))
 st_, d_ = call(op="unpeople", items=[entry1])
 check("9 …and the first name of the undo op (`unpeople`) is read as `unmembers`: the same answer", st_ == 200 and d_["results"][0]["action"] == "kept" and bytes_of(1) == b1c, (st_, d_))
+CFGM["migration"] = False
+
+# ---- 10. the review lows: a closed decision, a plan edited after the dry run, the earlier run folder
+CFGM["migration"] = True
+def cli2(fn, app=None, **kw):
+    """cli, with the script's own lines (stderr) as well: → exit code, stdout, stderr."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = fn(argparse.Namespace(**{**vars(args), **kw}), app or DirectApp())
+    return rc, out.getvalue(), err.getvalue()
+fixtures()
+CLOSED_DECISIONS = {20: dict(DECIDE, outcome="done", reason="it worked", answers=[ANS(1), ANS(2, by="Pat")]),
+                    21: dict(DECIDE, mover=OWN, outcome="done", reason="it worked", answers=[ANS(1, by="Oliver")]),
+                    22: dict(DECIDE, mover=BACK, outcome="done", reason="it worked", answers=[ANS(1)])}
+for i, m in CLOSED_DECISIONS.items(): put(i, status="completed", **m)
+o10 = {i: raw(i) for i in CLOSED_DECISIONS}
+P10 = {i: PP.plan_for(mt(i), None, False) for i in CLOSED_DECISIONS}
+check("10 a closed item that holds a decision with no stored mover gets its answers named and no mover (the pass reads a closed item for its answers alone); the same decision open gets the mover too",
+      set(P10[20]["edits"]) == {"answers"} and "mover" not in P10[20]["edits"] and PP.plan_for(mt(20), mod_of(1), True)["edits"].get("mover") == "Oliver", (P10[20], PP.plan_for(mt(20), mod_of(1), True)["edits"].keys()))
+check("10 …a closed decision whose mover is stored (the first person, or an agent) keeps it, and one whose answers all carry a `by` has nothing to write", set(P10[22]["edits"]) == {"answers"} and P10[21]["edits"] == {} and not P10[21]["form"], (P10[22], P10[21]))
+st_, d_ = call(op="members", items=[f"g{i}" for i in CLOSED_DECISIONS])
+r10 = {int(r["item"].split("#")[1]): r for r in d_["results"]} if st_ == 200 else {}
+check("10 …the route writes the closed decisions that have an unnamed answer and leaves the other as it is", st_ == 200 and [r10[i]["action"] for i in (20, 21, 22)] == ["set", "same", "set"], (st_, {i: r10[i]["action"] for i in r10}))
+check("10 …in the written files only the answers changed: the mover is as it was (none, the first person's, the agent's), and status, needs, ask, options, outcome and next stay",
+      all({k: v for k, v in mt(i).items() if k not in ("answers", "stall")} == {k: v for k, v in o10[i]["metadata"].items() if k not in ("answers", "stall")} and {k: v for k, v in raw(i).items() if k != "metadata"} == {k: v for k, v in o10[i].items() if k != "metadata"}
+          for i in CLOSED_DECISIONS) and "mover" not in mt(20) and mt(21)["mover"] == OWN and mt(22)["mover"] == BACK, {i: mt(i).get("mover") for i in CLOSED_DECISIONS})
+check("10 …every answer of them is named: the unnamed ones the first person, a `by` as it was; a closed item does not show the History line but records it", [a["by"] for a in mt(20)["answers"]] == ["Oliver", "Pat"] and [a["by"] for a in mt(22)["answers"]] == ["Oliver"]
+      and len(STALL.log_of(mt(20))) == 1 and len(STALL.log_of(mt(22))) == 1 and not STALL.log_of(mt(21)) and bytes_of(21) == json.dumps(o10[21], ensure_ascii=False, indent=1).encode(), None)
+
+# a plan file edited after the dry run is refused on --apply, nothing written
+fixtures()
+st_, d_ = call(op="members", items=[f"g{i}" for i in ALL], dry=True)
+rows10 = d_["results"] if st_ == 200 else []
+def edited(label, fn):
+    rs = copy.deepcopy(rows10); fn(rs); f = RUN / f"edited-{label}.json"; f.write_text(json.dumps(rs)); return f
+def first_of(action): return next(r for r in rows10 if r["action"] == action)["item"]
+def mark(rs, item, **kw):
+    for r in rs:
+        if r["item"] == item: r.update(kw)
+snapE = snapshot(); undosE = sorted(RUN.rglob("undo.json"))
+EDITS = {"a row marked refused": (edited("refused", lambda rs: mark(rs, first_of("same"), action="refused")), "differ from the dry run"),
+         "a note added to a row": (edited("note", lambda rs: mark(rs, first_of("would_set"), notes=["a note the plan never had"])), "differ from the dry run"),
+         "a note taken off a listed row": (edited("unlisted", lambda rs: [r.pop("notes", None) for r in rs if r.get("notes")] and None), "differ from the dry run"),
+         "the file's hash of an item changed": (edited("hash", lambda rs: mark(rs, first_of("would_set"), sha256_before="0" * 64)), "the store moved since the dry run")}
+if not any(r.get("notes") for r in rows10): EDITS.pop("a note taken off a listed row")        # no row is listed in this fixture: nothing to take off
+check("10 the dry run gives rows to edit", st_ == 200 and len(rows10) == len(ALL) and any(r["action"] == "would_set" for r in rows10) and any(r["action"] == "same" for r in rows10), (st_, [r["action"] for r in rows10]))
+for label, (f, said) in EDITS.items():
+    rcE, outE, errE = cli2(PM.apply, plan=str(f))
+    check(f"10 --plan edited after the dry run ({label}): refused with exit 1, saying so, and nothing is written, no undo file", rcE == 1 and said in errE and snapshot() == snapE and sorted(RUN.rglob("undo.json")) == undosE and outE == "", (rcE, errE[-300:], outE[-200:]))
+fE = edited("same", lambda rs: None)
+rcE, outE, errE = cli2(PM.apply, plan=str(fE))
+check("10 …the same file left as the dry run wrote it is applied (the refusals above are the edits, not the file)", rcE in (0, 3) and snapshot() != snapE and "differ from the dry run" not in errE and "moved since" not in errE, (rcE, errE[-300:]))
+
+# the earlier run folder: named only when the run folder is the default one, and only read
+NEW = pathlib.Path(_scratch.mkdtemp(prefix="membersmig-dflt-"))
+real_default, real_earlier = PM.DEFAULT_RUN, PM.EARLIER_RUN
+PM.DEFAULT_RUN, PM.EARLIER_RUN = NEW / "members-run", NEW / "people-run"
+def unfinished_undo(folder, pass_id, result=None):
+    f = folder / pass_id / "undo.json"; f.parent.mkdir(parents=True)
+    f.write_text(json.dumps({"pass_id": pass_id, "by": SENDER, "when": "x", "store": str(T / "store"), "backup": str(f.parent / "items"),
+                             "items": [{"item": "g9999", "shown": BOARD + "9999", "before": {"mover": None}, "after": {"mover": "Oliver"}, "history": "", "dropped": [], "sha256_before": "0" * 64, "result": result}]}))
+    return f
+try:
+    earlier = unfinished_undo(PM.EARLIER_RUN, "20250101-000000-abcdef"); kept = earlier.read_bytes()
+    named = lambda err, f: "an earlier pass did not finish recording its results" in err and f"--undo {f}" in err
+    rcN, outN, errN = cli2(PM.apply, run_dir=str(PM.DEFAULT_RUN))
+    check("10 an unfinished pass left in the earlier run folder (people-run) is named by an --apply on the default run folder, with the --undo line", named(errN, earlier) and rcN in (0, 3), (rcN, errN[-500:]))
+    check("10 …the earlier folder is only read: nothing is added to it (no lock file, no pass folder) and its undo file is the same bytes", sorted(p.name for p in PM.EARLIER_RUN.iterdir()) == ["20250101-000000-abcdef"] and earlier.read_bytes() == kept and sorted(p.name for p in earlier.parent.iterdir()) == ["undo.json"], sorted(p.name for p in PM.EARLIER_RUN.rglob("*")))
+    rcN, outN, errN = cli2(PM.apply, run_dir=str(NEW / "own-run"))
+    check("10 …a run folder of one's own never looks there: the same --apply names nothing", "an earlier pass did not finish" not in errN and rcN in (0, 3), (rcN, errN[-500:]))
+    newer = unfinished_undo(PM.DEFAULT_RUN, "20250102-000000-abcdef")
+    rcN, outN, errN = cli2(PM.apply, run_dir=str(PM.DEFAULT_RUN))
+    check("10 …an unfinished pass in the default folder is named as well, and both are told apart by their paths", named(errN, newer) and named(errN, earlier) and errN.count("an earlier pass did not finish") == 2, errN[-700:])
+    earlier.write_text(json.dumps({**json.loads(kept), "items": [{**e, "result": "set"} for e in json.loads(kept)["items"]]}))
+    newer.write_text(json.dumps({**json.loads(newer.read_text()), "items": [{**e, "result": "set"} for e in json.loads(newer.read_text())["items"]]}))
+    rcN, outN, errN = cli2(PM.apply, run_dir=str(PM.DEFAULT_RUN))
+    check("10 …a pass whose entries all have their result is not named", "an earlier pass did not finish" not in errN and rcN in (0, 3), errN[-500:])
+finally:
+    PM.DEFAULT_RUN, PM.EARLIER_RUN = real_default, real_earlier
 CFGM["migration"] = False
 
 print(f"members_migrate: {len(ran) - len(fails)} of {len(ran)} checks passed")
