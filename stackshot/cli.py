@@ -613,6 +613,16 @@ SYSTEM_UNIT = Path(os.environ.get("STACKSHOT_SYSTEM_UNIT_DIR") or "/etc/systemd/
 WHOAMI_PY = "from stackshot.fleet import client; import json; st, b = client.get('whoami'); print(json.dumps([st, b, client.server_url()]))"
 
 
+# What config.py's refusals open with (the import that stops with them prints one per line and nothing else): a line of the [[members]] check (core/members.py `problems`, every line opens `[[members]]`) or the line
+# that tells a config still holding the old table's first name (`[[people]] is now [[members]]: ...`). A line that only mentions `[[members]]` somewhere in it is not one of them.
+REFUSAL_OPENERS = ("[[members]]", "[[people]] is now [[members]]")
+
+
+def config_refusals_only(errs: list[str]) -> bool:
+    """True when every stderr line of a config that failed to load is one of config.py's own refusals (they are shown whole, one after another); else the last line is shown (a traceback's)."""
+    return bool(errs) and all("removed in stackshot" in e or e.startswith(REFUSAL_OPENERS) for e in errs)
+
+
 def cmd_doctor(a: argparse.Namespace) -> int:
     cfg = default_config()
     missing = 0
@@ -652,7 +662,7 @@ def cmd_doctor(a: argparse.Namespace) -> int:
     if r.returncode != 0:
         say(f"stackshot doctor · mode unknown (the config does not load) · checkout {HERE}")
         errs = r.stderr.strip().splitlines() or ["?"]       # config.py's refusals, one line per removed value, all of them; a traceback: its last line
-        line(False, f"config {cfg} loads through config.py", " | ".join(errs) if all("removed in stackshot" in e or "[[members]]" in e for e in errs) else errs[-1])
+        line(False, f"config {cfg} loads through config.py", " | ".join(errs) if config_refusals_only(errs) else errs[-1])
         return 1
     if client_box and not cfg.is_file() and not token.is_file():
         say(f"stackshot doctor · nothing installed here yet · checkout {HERE}")

@@ -52,7 +52,7 @@ from stackshot.tools import until_migrate as UM  # noqa: E402  — the run folde
 # leave the server (and the pass) on the LIVE store paths.
 
 DEFAULT_RUN = Path.home() / ".local" / "share" / "stackshot-runs" / "members-run"
-EARLIER_RUN = DEFAULT_RUN.with_name("people-run")      # where the script's first version kept its runs (it was called the people pass): read for unfinished passes, never written
+EARLIER_RUN = DEFAULT_RUN.with_name("people-run")      # the run folder of the script's first version (the people pass). Only while --run-dir is the default, an unfinished pass left there is named before a new --apply so its undo file is not forgotten; this folder is never locked, pruned or given a new pass, and a --run-dir of your own never looks there
 say = MM.say
 show = UM.show
 EXIT_LEFT_OVER = UM.EXIT_LEFT_OVER

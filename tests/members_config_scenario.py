@@ -9,6 +9,9 @@ Covers, for each way a config can name its members:
   * an alias written as a mover is the person: the same answer as the name (model.is_owner);
   * a list that is refused (at the start, by a reload that keeps the running config, and by `doctor`): a duplicate name or alias without regard to case, a duplicate address, an entry with no name,
     a value that is no list of tables, and a list of more than one member (this version serves one), and the table's first name `[[people]]` (no longer read);
+  * the review lows: a name or alias with doubled or tab spaces matches the same person; a value that is no text (a number as a name, alias or address, an aliases or emails that is no list) is refused with its own
+    line and never crashes the read; an address written twice in one entry says so (and is not read as a clash between members); the old key written as an empty list (`people = []`) is refused like the old
+    table, at the start, by a reload and by doctor; doctor shows config.py's refusal lines whole only when each line opens as one (not a line that merely mentions [[members]]);
   * the members are as restart-only as the keys they replace: a reload that changes the list keeps the running one.
 
     tests/run-suite members_config      -> exit 0 / 1"""
@@ -117,6 +120,13 @@ if d:
     check("the opener regex agrees with opener_person (with `to`), and without `to` a `<name> to …` line is not an opener", all(v[1] == (v[0] is not None) for v in L.values()) and L["Pat to review it"][2] is False and L["Pat: take it"][2] is True, L)
     check("with only [[members]] set (the example's placeholder owner and no old address beside it), notes() has no no-owner line and no both-set line", not [n for n in d["notes"] if "[[members]]" in n or "has no owner" in n], d["notes"])
 
+# ---- 1b. white space inside a configured name or alias is collapsed like the text asked about
+d, r = report(config("inner-space", members=[{"name": "Pat  Lee", "aliases": ["P\tJ", "Q  R"]}]), ["Pat Lee", "pat   lee", "Pat\tLee", "  PAT LEE ", "P J", "p\t\tj", "q r", "PJ", "Pat", "Pat Lee Jr"])
+check("an inner-space config loads", d is not None, r.stderr[-600:])
+if d:
+    check("person_of: a name or an alias written with doubled or tab spaces matches the same person as the text with single spaces (any case), and no other text",
+          d["of"] == {"Pat Lee": "Pat  Lee", "pat   lee": "Pat  Lee", "Pat\tLee": "Pat  Lee", "  PAT LEE ": "Pat  Lee", "P J": "Pat  Lee", "p\t\tj": "Pat  Lee", "q r": "Pat  Lee", "PJ": None, "Pat": None, "Pat Lee Jr": None}, d["of"])
+
 # ---- 2. only the old keys: a list of one
 d, r = report(config("old", owner="Alex", aliases=["AE", " ", "Alex", "You", "AE", "オリバー"], emails=["a@example.com", "b@example.com"]), PROBES, MAILS, LINES)
 check("the old keys load", d is not None, r.stderr[-600:])
@@ -178,6 +188,41 @@ check("start refuses a `members` that is no list of tables", r.returncode != 0 a
 path = T / "old-table.toml"; path.write_text('[[people]]\nname = "Pat"\n' + BASE, encoding="utf-8")
 r = run(path, "import stackshot.core.config")
 check("start refuses a config that still has [[people]], and says it is now [[members]]", r.returncode != 0 and "[[people]] is now [[members]]" in r.stderr, r.stderr[-400:])
+# the old key written as an empty list is the old table all the same
+path = T / "old-key-empty.toml"; path.write_text('people = []\n' + BASE, encoding="utf-8")
+r = run(path, "import stackshot.core.config")
+check("start refuses `people = []` (the old key as an empty list) like the old table, with the same line", r.returncode != 0 and "[[people]] is now [[members]]" in r.stderr and "Traceback" not in r.stderr, r.stderr[-400:])
+# a value that is no text: told with its own line, never coerced, dropped or a crash
+NOT_TEXT = [
+    ("name-number", [{"name": 5}], ["[[members]] entry 1: name is not text (int)"]),
+    ("name-list", [{"name": ["Pat"]}], ["[[members]] entry 1: name is not text (list)"]),
+    ("alias-number", [{"name": "Pat", "aliases": ["PJ", 7]}], ["[[members]] entry 1: aliases item 2 is not text (int)"]),
+    ("alias-not-list", [{"name": "Pat", "aliases": "PJ"}], ["[[members]] entry 1: aliases is not a list (str)"]),
+    ("email-bool", [{"name": "Pat", "emails": ["pat@example.com", True]}], ["[[members]] entry 1: emails item 2 is not text (bool)"]),
+    ("email-not-list", [{"name": "Pat", "emails": "pat@example.com"}], ["[[members]] entry 1: emails is not a list (str)"]),
+]
+for label, members, expect in NOT_TEXT:
+    refused(f"not-text-{label}", members, expect)
+refused("not-text-two-faults", [{"name": 5, "aliases": [1], "emails": [2]}], ["entry 1: name is not text (int)", "entry 1: aliases item 1 is not text (int)", "entry 1: emails item 1 is not text (int)"])
+PROBE_PROBLEMS = r"""
+import json, sys
+from stackshot.core import members
+cases = json.loads(sys.argv[1]); out = {}
+for k, listed in cases.items():
+    cfg = {"members": listed}
+    out[k] = {"problems": members.problems(cfg), "built": [[p.name, list(p.aliases), list(p.emails)] for p in members.build(cfg)]}
+print(json.dumps(out))
+"""
+r = run(config("probe-ok", members=[PAT]), PROBE_PROBLEMS, json.dumps({label: members for label, members, _ in NOT_TEXT}))
+try:
+    probed = json.loads(r.stdout.strip().splitlines()[-1])
+except Exception:
+    probed = None
+check("members.problems and members.build answer for every value that is no text without raising: one line per fault, and the list still builds", probed is not None and all(probed[l]["problems"] and probed[l]["built"] for l, _, _ in NOT_TEXT), (probed, r.stderr[-400:]))
+check("a value that is no text has its own line and is not reported as a duplicate or a missing name", probed is not None and all(len(probed[l]["problems"]) == 1 and "is not" in probed[l]["problems"][0] for l, _, _ in NOT_TEXT), probed)
+# an address written twice inside one entry
+_, r, last = refused("dup-address-one-entry", [{"name": "Pat", "emails": ["x@example.com", "y@example.com", "x@example.com"]}], ['entry 1: the address "x@example.com" is written twice in its own emails (keep it once)'])
+check("…and the line is its own: it does not read as a clash between two members", "is already entry" not in r.stderr and "lists more than one member" not in r.stderr, r.stderr[-400:])
 d, r = report(config("empty-list", owner="Alex", emails=["a@example.com"]))
 check("no [[members]] table at all is the old keys, not a refusal", d is not None and d["owner"] == "Alex", r.stderr[-300:])
 
@@ -202,6 +247,18 @@ except Exception:
 check("a reload to a list of two is refused (None) and the running members stay", out is not None and out["before"] == "Pat" and out["refused"] is None and out["after_refused"] == ["Pat"], (out, r.stderr[-500:]))
 check("a reload to another single person is no live change: the running person stays and the change waits for a restart", out is not None and out["after_changed"] == ["Pat"] and "members" in out["pending"], out)
 
+# the old table and the old key as an empty list are refused by a reload too, and the running members stay
+old_table = T / "reload-old-table.toml"; old_table.write_text(BASE + '\n[[people]]\nname = "Pat"\n', encoding="utf-8")
+old_key = T / "reload-old-key.toml"; old_key.write_text('people = []\n' + BASE, encoding="utf-8")
+for n, (label, bad) in enumerate((("[[people]]", old_table), ("`people = []`", old_key))):
+    fresh = config(f"reload-good-{n}", members=[PAT])          # the script above rewrote `good` (it ends on the other person's file): each run starts from its own copy
+    r = run(fresh, RELOAD, str(fresh), str(bad), str(other))
+    try:
+        out = json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:
+        out = None
+    check(f"a reload to a config with {label} is refused (None), says it is now [[members]], and the running members stay", out is not None and out["refused"] is None and out["after_refused"] == ["Pat"] and "[[people]] is now [[members]]" in r.stderr + r.stdout, (out, r.stderr[-500:]))
+
 # ---- 8. doctor says the same, and counts the addresses of a list
 HOME = T / "home"; HOME.mkdir(exist_ok=True)
 r = subprocess.run([os.path.join(STACK, "bin", "stackshot"), "doctor", "--no-systemd"], capture_output=True, text=True, env=env_for(p_more), cwd=STACK, stdin=subprocess.DEVNULL, timeout=300)
@@ -210,6 +267,27 @@ r = subprocess.run([os.path.join(STACK, "bin", "stackshot"), "doctor", "--no-sys
 check("doctor counts the sign-in addresses of a [[members]] list (two)", re.search(r"ok\s+auth\.allowed_emails: 2 address\(es\)", r.stdout) is not None, r.stdout[-900:] + r.stderr[-300:])
 r = subprocess.run([os.path.join(STACK, "bin", "stackshot"), "doctor", "--no-systemd"], capture_output=True, text=True, env=env_for(config("doctor-old", owner="Alex", emails=["a@example.com"])), cwd=STACK, stdin=subprocess.DEVNULL, timeout=300)
 check("…and of the old key (one), in the words it always had", re.search(r"ok\s+auth\.allowed_emails: 1 address\(es\)", r.stdout) is not None, r.stdout[-900:] + r.stderr[-300:])
+
+for label, bad in (("[[people]]", old_table), ("`people = []`", old_key)):
+    r = subprocess.run([os.path.join(STACK, "bin", "stackshot"), "doctor", "--no-systemd"], capture_output=True, text=True, env=env_for(bad), cwd=STACK, stdin=subprocess.DEVNULL, timeout=300)
+    check(f"doctor on a config with {label}: exit 1, the config line is missing and says it is now [[members]]", r.returncode == 1 and re.search(r"missing\s+config .*loads through config\.py", r.stdout) is not None and "[[people]] is now [[members]]" in r.stdout, r.stdout[-700:] + r.stderr[-300:])
+# doctor shows config.py's refusal lines whole only when every line opens as one of them
+REFUSALS = r"""
+import json, sys
+from stackshot import cli
+print(json.dumps([cli.config_refusals_only(e) for e in json.loads(sys.argv[1])]))
+"""
+cases = [["[[members]] entry 1 has no name"], ["[[members]] is not a list of tables: write one"], ["[[people]] is now [[members]]: rename the table"],
+         ["[[members]] entry 2: the address \"a\" is already entry 1's", "[[members]] lists more than one member: keep one"],
+         ["a note that mentions [[members]] in passing"], ["Traceback (most recent call last):", 'KeyError: "[[members]]"'], ["see [[members]] and [[people]] is now [[members]]"],
+         ["[[members]] entry 1 has no name", "something else went wrong"], ["[[people]] is the old name"], []]
+r = run(good, REFUSALS, json.dumps(cases))
+try:
+    shown = json.loads(r.stdout.strip().splitlines()[-1])
+except Exception:
+    shown = None
+check("doctor's match: a refusal line opens `[[members]]` or `[[people]] is now [[members]]`; a line that only mentions the table, a traceback, a mixed set and no line are not shown whole",
+      shown == [True, True, True, True, False, False, False, False, False, False], (shown, r.stderr[-400:]))
 
 # ---- 9. no other module reads the three keys for a person
 leaks = []
