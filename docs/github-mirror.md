@@ -67,7 +67,7 @@ The notification anchors (`github:<owner/repo>@notifications`) are read from `GE
 The inbound half (phase 3): with the mirror on, a reader thread polls the repo's comments every `[github] poll_seconds` (60 by
 default, one GET each; no webhook, since the server sits behind an access proxy), and a comment by `[github] owner_login`
 (by default the login the mirror's token belongs to) with no `[author: …]` header (the mirror's older comments carry one) is the owner's own: it is recorded on the
-item under `metadata.answers` as `{ts, kind: "comment", text, via: "github", url, comment_id}`, shown in the item page's
+item under `metadata.answers` as `{ts, kind: "comment", text, via: "github", url, comment_id}` (the one login read is the first person's, and a record with no `by` reads as theirs), shown in the item page's
 history as written on GitHub, and told in one line to the item's mover and to every session named in its needs (a front
 agent mover hears it marked for the owner). It clears no needs, changes no status and owes no page; the server's save of it
 is not echoed back to the issue. The cursor and the ids delivered live in `<state>/github/comments.json`: a restart delivers

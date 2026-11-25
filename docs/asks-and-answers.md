@@ -21,7 +21,7 @@ token (an HMAC over his address and the item, keyed by `<secrets>/ui-session.key
 by script (a fetch that follows the 303, then `location.replace`), so the answer replaces the item page in history and Back
 goes to where he came from; without script it is the plain POST and 303. Item and project pages are served `no-store` and
 reload when restored from the back-forward cache (the board updates itself in place then). An answer is
-stored in `metadata.answers`, takes `decision` out of needs (the sessions named stay) and clears the ask; a comment changes
+stored in `metadata.answers` (with `by`, the name of the person who sent it, from the address signed in, written when that person is not the first; an answer with no `by` reads as the first person, and the History, the tick on his step and the save's author use that person's name), takes `decision` out of needs (the sessions named stay) and clears the ask; a comment changes
 neither. Each is pushed to the item's mover and to the sessions named in needs (and reaches the item's contact and the front agents he is talking to, as the first bullet below says; on a project with a builder, a front agent named in needs that neither moves the item nor takes it gets the line as a held line, as the bullet after the first one says), and with the mirror on becomes the issue's comment
 headed `[author: <owner> · board]`, a header only the server writes (a tool `sender` that names the owner is refused). A
 decision that no session it went to has followed with a write within 30 min goes to the project's keeper once

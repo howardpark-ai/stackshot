@@ -20,6 +20,7 @@ from typing import Any, Iterator
 from fastmcp.exceptions import ToolError
 
 from stackshot.core import config as _cfg
+from stackshot.core import people as _people
 from stackshot.core.instance import NAME, OWNER
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
@@ -240,7 +241,7 @@ def _release_dropped(gid: str, drop: list[bool]) -> Iterator[None]:
                 print(f"answer: {gid} dropped but its after releases failed: {e}", file=sys.stderr, flush=True)
 
 
-def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail: dict[str, Any] | None = None) -> str:
+def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail: dict[str, Any] | None = None, by: str = "") -> str:
     """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), askedback (a date button whose note held no date it could read: the note is kept
     and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | emptynote | toolong | nostep | nomover (nothing written; `emptynote` is a Send note on a blank box). A step form has two buttons and an optional note box.
     Done (act=done) is his word that the step is finished (`done`: the item goes to its then-mover, recorded as his answer "Done"); a note in the box stays on that record (`text`) and goes with the Done to the then-mover,
@@ -248,16 +249,18 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
     his send step because a mail he sent fits it (service/sent_match.py; the answer then reads Done by a mail, and is no word of his for a wait or a date). A mail tick passes `mail` = {"step": the step it was asked about, "since": the item's state clock then, "note": the server's
     own sentence} and no text: under the lock it is dropped, nothing written, unless the item is open, in your-step with that very step and clock (else `changed`, `closed`) and asks nothing beside it (an ask, options or a decision need: `beside`);
     the sentence is kept as `server_note`, never as his `text`; nobody is told it as his answer, a background agent is told plainly what the server did and a front agent nothing; no answer is left pending for escalation. Send note (act=note, text required) is his note on a step that stays open (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step);
-    on an item with no step any more it is a comment, and with no text nothing is written (`emptynote`). A page loaded before this form posts act=send (an empty box is a Done, a note is a step-reply, as ever) or act=comment (a comment only, the step stands).
+    on an item with no step any more it is a comment, and with no text nothing is written (`emptynote`). `by` is the name of the person who answered (the route's signed-in person): it is stored on the answer as `by` (when it is not the first person, whose answers carry none), ticks his
+    step and is the save's author; none stands for the first person, and a mail tick records no `by`. A page loaded before this form posts act=send (an empty box is a Done, a note is a step-reply, as ever) or act=comment (a comment only, the step stands).
     """
     choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
+    who = " ".join(str(by or "").split()) or OWNER      # the person the answer is recorded under: the route passes the signed-in person's name (`by`); a server tick on a mail, and a caller that names none, stand for the first person
     if len(text) > _answers()._ANSWER_TEXT_MAX:
         return "toolong"
     drop: list[bool] = []       # set once the drop is saved: the release below then runs on every way out of the locks, a delivery or a bookkeeping step that raised included
     with _release_dropped(gid, drop), _writes.ITEM_LOCK, _answers()._ANSWER_LOCK:      # the order every writer takes (an update holds the item lock and then acks here): the item first, the pending answers second; the release is the outermost, so it runs with both let go
         item = _svcstore._load(gid)
         if item.get("status") != "open":
-            return _handover._keep_note(gid, item, text, "closednote", choice, "the item is closed") if text else "closed"      # a note on a closed item is kept as his comment
+            return _handover._keep_note(gid, item, text, "closednote", choice, "the item is closed", by=who) if text else "closed"      # a note on a closed item is kept as his comment
         meta = dict(item.get("metadata") or {})
         if via == "mail":               # the server's tick: checked again here, under the lock, against the step it was asked about; anything else dropped, nothing written
             if not mail or text or act != "done":
@@ -277,7 +280,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             valid = [f[0] for f in _answers()._option_forms(item)] or [o["label"] for o in _hooks().yesno_options(item)]
             if "decision" not in _needs_kinds(meta) or choice not in valid:
                 if "decision" in _needs_kinds(meta) or not isinstance(meta.get(_askl.LEFT), dict):
-                    return _handover._keep_note(gid, item, text, "stalenote", choice, "late, the item no longer asks this") if text else "stale"      # his note is kept as a comment; a bare pick on a question that changed is not an answer to the new one
+                    return _handover._keep_note(gid, item, text, "stalenote", choice, "late, the item no longer asks this", by=who) if text else "stale"      # his note is kept as a comment; a bare pick on a question that changed is not an answer to the new one
                 text, choice, kind = f"(late, on the ask the server took off his move: {_clip_line(str(meta[_askl.LEFT].get('ask') or ''), 120)}) {choice}" + (f" — {text}" if text else ""), "", "comment"      # his pick is kept as his comment, never lost
             else:
                 kind = "decision"
@@ -314,6 +317,8 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
         if text:
             rec["text"] = text
         rec["via"] = via
+        if via != "mail":
+            _people.stamp(rec, who)     # whose answer it is (the board's sign-in), written when it is not the first person's: a record with no `by` reads as the first person's, and a server tick on a mail names no one
         if via == "mail":
             rec["server_note"] = _clip_line(str((mail or {}).get("note") or ""), 300)
         forms = _answers()._option_forms(item)         # the item's valid options, as the page drew them: (the name a pick is stored under, the label shown, the label stored)
@@ -345,16 +350,16 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             if not then or _model.is_owner(then):      # nobody to take it (no default mover, no session in needs, no keeper): not recorded, nothing written
                 return "nomover"
             if kind == "decision":          # his word that the step is done checks it on the item's checklist (a note leaves it open: the session that takes the item judges it)
-                _handover._check_his_step(meta, rec["step"], now)
+                _handover._check_his_step(meta, rec["step"], now, by=who)
             else:                           # N4: his note on the step is his answer too: the server's step is ticked with his words (`→ "…"`); the lines a session wrote stay open for the session that judges them
                 said = _noteread.read(text, _pages.zone_now(), _watch.parse_date)      # what the note says, applied by the server (note_read.py): a note that says he did it, or names a later time
                 if said["until"]:           # "tomorrow evening": his step stays open and the item waits until then, on his words (the park path below); the then-mover is told it is held
                     until = said["until"]
                     rec["applied"] = f"The server read the note as a later time and parked the item until {until} {_cfg.tz_abbr()}: nothing is asked of you before then."
                 else:
-                    _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words("", text), make=_holders._owner_want(meta), writer=NAME, add=False)
+                    _hs.tick(meta, str(meta.get("owner") or ""), who, now, _hs.answer_words("", text), make=_holders._owner_want(meta), writer=NAME, add=False)
                     if said["done"]:        # "ran it": his step is ticked as a Done ticks it (every open line of his), the then-mover is told
-                        _handover._check_his_step(meta, rec["step"], now)
+                        _handover._check_his_step(meta, rec["step"], now, by=who)
                         rec["applied"] = "The server read the note as done and ticked his step: carry on as after a Done."
             _holders._state_end(meta, "your-step")
             meta.pop("draft", None)         # the step is done: the text he was to post is posted
@@ -371,7 +376,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
         if kind == "decision" and not stepped:          # his call is in: off his queue at once; the sessions named in needs stay named
             mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # as stored before the call: read now, for the hand-over below
             beside = meta.get("state") == "your-step" and bool(_states.clean(meta.get("step")))      # the ask stands beside a your-step: his answer to it is not his word that the step is done
-            _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words(choice, text), make=(_hs.decide_of(meta.get("ask")) or _holders._OWNER_STEP_NONE) if beside else _holders._owner_want(meta), writer=NAME, apart=beside)      # N4: his answer ticks his step, shown on it (`→ the option`); an item that asked before the server made his steps gets the step now, done
+            _hs.tick(meta, str(meta.get("owner") or ""), who, now, _hs.answer_words(choice, text), make=(_hs.decide_of(meta.get("ask")) or _holders._OWNER_STEP_NONE) if beside else _holders._owner_want(meta), writer=NAME, apart=beside)      # N4: his answer ticks his step, shown on it (`→ the option`); an item that asked before the server made his steps gets the step now, done
             _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))
             if meta.get("ask"):
                 rec["ask"] = str(meta["ask"])   # the ask he answered stays with his answer: the item drops it, and a decision asked again within an hour with that same ask is refused (gates.gate_decision_again)
@@ -395,7 +400,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             meta["ask"], meta["options"] = _watch.ask_back(meta, asked_note, _pages.zone_now().date())
         item["metadata"] = meta
         item["updated"] = now
-        _writes.save(gid, item, note=_answers()._answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(NAME, "mail") if via == "mail" else (OWNER, "board"))
+        _writes.save(gid, item, note=_answers()._answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(NAME, "mail") if via == "mail" else (who, "board"))
         if parked or until or (kind == "decision" and eff["do"] == "wait"):
             _runner.wake()                     # the minute loop takes the new wake in (the event, and the wake file for a runner in another process)
         if kind == "decision" and eff["do"] == "drop":      # the items that waited on this one are released after both locks are let go (_release_dropped): a release tells the waiters
