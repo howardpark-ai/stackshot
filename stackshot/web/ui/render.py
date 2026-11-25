@@ -46,6 +46,7 @@ from stackshot.web import uiprefs as _up   # the signed-in person's panel order 
 from stackshot.web import i18n as _i18n   # the string table: a page's words in the person's language, the English ones when it has none (i18n.py)
 from stackshot.web.i18n import t as _t
 from stackshot.service import foryou as _fy  # the For you list's file: rows for what the owner should see, newest first (service/foryou.py)
+from stackshot.service import machines_panel as _mpanel  # the Machines panel's rows from the machine list a fleet manager posts, only while one is paired (service/machines_panel.py)
 from stackshot.service import landed as _ldsvc  # the Landed list's file: the closes of agents that the owner did not make, and which he has cleared (service/landed.py)
 from stackshot.notify import landed as _ld  # the Landed list's rules: its outcomes, its keys and how long a record is kept (notify/landed.py)
 from stackshot.model import item_project as _iproj   # an item's project by its permanent id: the page key read through the id (item_project.py)
@@ -1710,6 +1711,7 @@ _MACH_CSS = """
 .mr .lbl{font-size:12px;color:var(--mut)}.mr a.lbl{text-decoration:none}.mr a.lbl:hover{color:var(--fg);text-decoration:underline}.mr .val{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
 .mr .st{font-size:12px;color:var(--mut);min-width:0;overflow-wrap:anywhere}.mr .st.ok{color:var(--ok);font-weight:600}.mr.update .st{color:var(--fg);font-weight:600}.mr.offline{opacity:.6}
 #machines .matrix{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+.fleetlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;margin:0 0 8px}.pc.fl{grid-template-columns:minmax(0,1fr) max-content;min-width:0}.pc.fl .fn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pc.fl .fm{grid-column:1/-1;overflow-wrap:anywhere}.pc.fl.ret{opacity:.6}.fl-stale{color:var(--call)}.fl-nr{overflow-wrap:anywhere}
 .pc.mach>.mf{grid-column:1/-1;display:block;min-width:0;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;cursor:help}
 """   # the Machines panel's machine cards, appended after the main sheet so that its #machines .matrix wins over the old 128px columns; the panel's own one-column rule is more specific and still applies
 
@@ -3352,7 +3354,7 @@ p.lpgnote{margin:8px 0 0;font-size:13px;color:var(--mut)}section.lcompleted{marg
 #panel section{margin:0;padding:14px 0;border-top:1px solid var(--line)}#panel>section{--pt:2px;position:relative;padding-top:var(--pt);border-top:0}#panel>section:not([hidden],#audit-panel:has(#audit[hidden]):not(:has(#ghcalls)))~section:not([hidden],#audit-panel:has(#audit[hidden]):not(:has(#ghcalls))){--pt:14px;border-top:1px solid var(--line)}
 #panel section h2,#panel section h2.hdr{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--fg);margin:0;padding:0;border:0}#panel #tasks h2{margin-bottom:8px}#panel details.fold>summary+*{margin-top:8px}
 
-#panel #machines .matrix,#panel .matrix.rcvs{grid-template-columns:minmax(0,1fr);margin-bottom:0}#panel .mcol .pc.none{display:none}#panel .mnote{margin:0 0 8px}#panel .tip:hover::after{left:auto;right:0;width:max-content;max-width:min(200px,70vw);white-space:normal;overflow-wrap:anywhere}
+#panel #machines .matrix,#panel .matrix.rcvs{grid-template-columns:minmax(0,1fr);margin-bottom:0}#panel .mcol .pc.none{display:none}#panel .mnote{margin:0 0 8px}#panel .fleetlist{grid-template-columns:minmax(0,1fr)}#panel .tip:hover::after{left:auto;right:0;width:max-content;max-width:min(200px,70vw);white-space:normal;overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){#panel{transition:none}}
 @media(min-width:__DOCK__px){
 body::before{content:"";position:fixed;top:0;right:0;width:104px;height:__PTOP__px;background:var(--bg);z-index:8;pointer-events:none}
@@ -3425,6 +3427,30 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         def row(lab, n, cap): return f'<span class="lbl">{lab}</span><span class="val">{n:,} <span class="cap">/ {cap:,}</span></span>'
         return (f'<div id="ghcalls" class="pc ghc"><b class="lbl mh">{esc(_t("panel.gh.title"))}</b>' + row(esc(_t("panel.gh.writes")), b["writes"], b["write_cap"]) + row(esc(_t("panel.gh.reads")), b["reads"], b["read_cap"])
                 + f'<span class="lbl">{esc(_t("panel.gh.counted"))}</span><span class="val">{start:%H:%M} – {end:%H:%M}</span></div>')
+
+    def fleet_list_html(self):
+        """HTML: the machine list a fleet manager posted, as the top of the Machines panel's body, and only while a fleet manager is paired (service/machines_panel.view): "" for a board that was never paired, so its panel is
+        what it was. Paired with no readable list: one muted line saying none has arrived. Otherwise a line with the list's age (the server's clock at the post; amber, with its own words, once it is older than the view's
+        STALE_S, the list still shown) and a card per machine: its name, the retired mark, and a line of hostname, letter and roles; the ssh text, addresses and sources are the card's hover text; then the names the sender could
+        not read. Every stored value is text only: each is escaped where it is written, and no link, command or markup is built from one."""
+        v = _mpanel.view(self.now.timestamp())
+        if v is None: return ""
+        if not v["list"]: return f'<p class="mnote">{esc(_t("panel.mach.list_none"))}</p>\n'
+        age = ago(v["age"])
+        out = [f'<p class="mnote fl-age{" fl-stale" if v["stale"] else ""}">{esc(_t("panel.mach.list_stale" if v["stale"] else "panel.mach.list_age", age=age))}</p>']
+        cards = []
+        for m in v["machines"]:
+            line = " · ".join(x for x in (m["hostname"], _t("panel.mach.letter", letter=m["letter"]) if m["letter"] else "", ", ".join(m["roles"])) if x)
+            tip = f' title="{esc("; ".join(m["detail"]))}"' if m["detail"] else ""
+            cards.append(f'<div class="pc fl{" ret" if m["retired"] else ""}"{tip}><b class="lbl fn">{esc(m["name"])}</b><span class="lbl st">{esc(_t("panel.mach.retired")) if m["retired"] else ""}</span>'
+                         + (f'<span class="val fm">{esc(line)}</span>' if line else "") + '</div>')
+        out.append(f'<div class="fleetlist">{"".join(cards)}</div>')
+        nr = v["not_read"]
+        if nr:
+            names = ", ".join(nr[:_mpanel.NOT_READ_SHOWN])
+            if len(nr) > _mpanel.NOT_READ_SHOWN: names = _t("panel.mach.not_read_more", names=names, n=len(nr) - _mpanel.NOT_READ_SHOWN)
+            out.append(f'<p class="mnote fl-nr">{esc(_t("panel.mach.not_read", names=names))}</p>')
+        return "\n".join(out) + "\n"
 
     def recycle_html(self):
         """HTML: the one "Pane recycle pending for … (<the fleet tool> runs it)" status line, listing the
@@ -4400,7 +4426,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         matrix_html = ('<div class="matrix">' + "".join(f'<div class="mcol">{fleet_card(L, _HOSTS.get(n))}</div>' for L, n in zip(_COLS, _fleet_cards))
                        + "".join(f'<div class="mcol">{host_card(h)}</div>' for n, h in _HOSTS.items() if n not in _fleet_cards)
                        + (f'<div class="mcol">{"".join(_orphans)}</div>' if _orphans else "") + '</div>')
-        return {"machines": _top_fold("machines", f'<h2 class="hdr">{esc(panel_label("machines"))}</h2>', f'\n{self.recycle_html()}{matrix_html}', is_open=True),
+        return {"machines": _top_fold("machines", f'<h2 class="hdr">{esc(panel_label("machines"))}</h2>', f'\n{self.recycle_html()}{self.fleet_list_html()}{matrix_html}', is_open=True),
                 "runners": runners_html(), "anchorhub": receivers_html(),
                 "audit-panel": _top_fold("audit-panel", f'<h2 class="hdr">{esc(panel_label("audit-panel"))}</h2>', self.audit_line() + self.gh_calls_card(), is_open=True),
                 "projects-panel": projects_panel_html()}
