@@ -224,6 +224,13 @@ open step only) gets one `(note: …)` line in the reply when the item has no ma
 wait on it, naming the fix: anchors(project=<its project>, add=["machine:<name>"], items=[<its id>]) tells the item's
 mover each time that machine checks in again, without parking the item. A note, never a refusal.
 
+## text ANCHOR_OFFER_FORM trail
+A reply may carry one `(anchor offer: …)` line: when the write set a relay wait on an item with no anchor scoped to it,
+or put a Slack, Gmail, Drive or Notion link in its description that no anchor watches for the item, the line carries the
+ready anchors call (the project and the item id filled in; a placeholder in angle brackets only for what the server
+cannot know, the person's thread). A note, never a refusal, and at most one a reply: make the call when news on that
+thread should reach the item, or leave it.
+
 ## text SELF_WAIT_FORM lead trail
 A wait on your own item names its blocker: when the item's mover (you) sets a wake, or writes a line of its own next
 whose step is dated later than today (a date, "next week", "until Monday", "retry tomorrow", "after the weekend", "at

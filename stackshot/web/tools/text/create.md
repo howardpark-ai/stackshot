@@ -91,7 +91,7 @@ send `For <agent>,` to its project page; with no builder there, its front agents
 by mover= or a step behind an open step. owner is not a parameter any more: it is still accepted for a few days with a note in the
 reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 |
 p2 | p3, shown but not sorted. {{ITEM_FORM}} {{NEEDS_FORM}}
-{{SAID_FORM}}{{CHECK_FORM}}{{STEP_PROOF_FORM}}{{CAP_FORM}}{{AGENT_DUE_FORM}}{{MODEL_FORM}}{{DRAFT_FORM}}{{SELF_WAIT_FORM}}{{MACHINE_FORM}}{{CONTACT_FORM}}The
+{{SAID_FORM}}{{CHECK_FORM}}{{STEP_PROOF_FORM}}{{CAP_FORM}}{{AGENT_DUE_FORM}}{{MODEL_FORM}}{{DRAFT_FORM}}{{SELF_WAIT_FORM}}{{MACHINE_FORM}}{{ANCHOR_OFFER_FORM}}{{CONTACT_FORM}}The
 reply may end with a line listing up to 3 similar open or recently completed items: the create always goes through, so
 check them for a duplicate before working the new item. request_id: any random string of yours; a retry with the same
 one returns the item already created.

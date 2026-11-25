@@ -25,6 +25,7 @@ from stackshot.projects import project_verbs as _verbs
 from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import _projects_sync_safe, _registry
 from stackshot.router import page_debt as _page_debt
+from stackshot.service import anchor_offers as _anchor_offers
 from stackshot.service import background_want as _bgw
 from stackshot.service import caller_pass as _caller_pass
 from stackshot.service import contacts as _contacts
@@ -411,7 +412,10 @@ def _new_project(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any
     _projects_sync_safe(force=True)
     rec, bad = _one_project(pid)
     if bad: return bad
-    return _verbs.new_project_answer(rec, name, scope, pid, key, make_page, m, _page_store())
+    status, answer = _verbs.new_project_answer(rec, name, scope, pid, key, make_page, m, _page_store())
+    if status == 200 and key and make_page and (answer.get("page") or {}).get("state") == "ok":      # a new project's page: one offer of the ready anchors call (the anchors tool refuses a project with no page)
+        answer["note"] = str(answer.get("note") or "") + _anchor_offers.project_line(key)
+    return status, answer
 
 
 def _project_list(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:

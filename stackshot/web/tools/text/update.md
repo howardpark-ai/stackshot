@@ -331,4 +331,4 @@ or it is refused (a model may refuse it too when the step could be done now). No
 due or before is a deadline, not a wait.
 
 ## description update
-{{UPDATE_DESC}}{{CONTACT_FORM}}{{MODEL_FORM}}{{CHECKLIST_FORM}}{{STEP_PROOF_FORM}}{{DRAFT_FORM}}{{STEP_FORM}}{{STALL_SHORT}}{{SELF_WAIT_FORM}}{{MACHINE_FORM}}{{WAIT_FORM}}
+{{UPDATE_DESC}}{{CONTACT_FORM}}{{MODEL_FORM}}{{CHECKLIST_FORM}}{{STEP_PROOF_FORM}}{{DRAFT_FORM}}{{STEP_FORM}}{{STALL_SHORT}}{{SELF_WAIT_FORM}}{{MACHINE_FORM}}{{ANCHOR_OFFER_FORM}}{{WAIT_FORM}}

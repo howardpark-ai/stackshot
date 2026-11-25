@@ -538,6 +538,10 @@ unreadable_days = 7                                 # stackshot/anchors/anchor_s
 require_sender = false                              # stackshot/fleet/push.py refuses a drop that names no sender (--from or $PUSH_FROM). false (the bridge
                                                     # while callers switch): it is labelled with the calling program's name instead
 
+[anchors]                                           # what the board's replies offer about anchors. Live (read at use)
+offers = true                                       # true: a reply that sets a relay wait with no anchor scoped to the item, a create or update that puts a Slack, Gmail, Drive or Notion link in an item's description that no anchor watches, and the answer to a new project's page, carry one line with the ready `anchors` call. Never a refusal, at most one line a reply, none when the anchor exists.
+                                                    # false turns every offer off. Anything that is not true or false reads as true (the config notes say so)
+
 [pilot]                                             # the router-and-agent model: it holds for EVERY project page of the registry (a top-level page key, projects/ or infra/ ...), its sub-pages with it
                                                     # (the former `projects = [...]` list is gone and ignored if present). Every anchor notice and board notice is held and ruled by the router;
                                                     # a page with no agent of its own falls to its hub page's -main agent, else to the scope's general -main agent ([router] general_*)
