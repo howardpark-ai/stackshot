@@ -42,7 +42,7 @@ The first two are live states; the third is a recorded event, one the activity r
 rests on a recorded event alone stamps nothing, since that event is in the record already at its own time. The audit's write still moves no `activity` clock (model/activity.py): only `last_activity`.
 
 No pull request is read from GitHub here: the audit uses recorded data only (a new head commit is one of the recorded events: it breaks a busy stretch, audit/busy_tell.py). When nothing is
-verified the line reads `Audit hh:mm: idle, nothing verified` and its log entry carries kind `audit_idle`, which audit/hand_idle.py reads to hand the item on.
+verified the line reads `Audit hh:mm: idle, nothing verified` followed by one short clause of the reasons (`idle_why`: the mover's pane busy but with other items on agents, or idle, at a shell, asleep or not read; no subagent tied to the item; no recorded event in the hour), and its log entry carries kind `audit_idle`, which audit/hand_idle.py reads to hand the item on (by the kind, never the words).
 
 Pure: no server import, no file, no clock read but the zone for the hour and minute in the line. Stdlib plus the repo's modules."""
 from __future__ import annotations
@@ -69,6 +69,13 @@ PREFIX = "Audit "        # every line starts with it, then the time: `Audit 14:0
 KIND_OK, KIND_IDLE, KIND_UNKNOWN = _log.KIND_OK, _log.KIND_IDLE, _log.KIND_UNKNOWN      # the `kind` of the log entry of a line that verified something, of one that verified nothing, and of one that could not tell
 PANE = "the mover's pane is in a turn"      # the phrase of a busy pane; a line whose only phrase it is is `pane_only` (audit/busy_tell.py)
 LIVE_ONLY = " (live state only, nothing recorded on the item)"
+IDLE = "idle, nothing verified"      # an idle line starts with it, whatever clause follows (`WHY_MAX`): every reader that matches the line by its start keeps working
+WHY_MAX = 160            # the clause after `IDLE`, in characters: whole reasons are dropped from its end past this, so a line stays well inside the log's own clip (hourly_log.CLIP)
+PANE_STATE = {"idle": "the mover's pane is idle", "shell": "the mover's pane is at a shell", "sleeping": "the mover's pane is asleep"}      # a pane that is not in a turn, by the state the snapshot gives
+PANE_UNREAD = "no fresh snapshot of the mover's pane"      # the state is unknown: no snapshot, an old one (agent_state.MAX_AGE_S), one that does not list the mover or did not read it, or no reading given
+NO_SUBAGENT = "no subagent is running for the mover"
+SUBAGENT_ELSEWHERE = "its running subagents are tied to other items"
+NO_EVENT = "no commit, review or CI in the hour"
 PR_KINDS = frozenset({_la.CI_RESULT, _la.REVIEW, _la.COMMENT, _la.PR_MERGED, _la.COMMIT})      # the recorded signals that are a tied pull request's events (a new head commit included, as in audit/hand_idle.py)
 
 
@@ -155,11 +162,33 @@ def stamp(item: dict[str, Any], line: dict[str, Any] | None, now: float) -> bool
     return _la.apply(item, [sig], now)
 
 
-def text(now: float, what: list[str], recorded: list[str] | None = None) -> str:
-    """The line: `Audit hh:mm: verified a, b` or `Audit hh:mm: idle, nothing verified`, the time in the instance zone. A line that rests on live states alone (nothing in `recorded`) says so."""
+def idle_why(state: str, others: int, running: int) -> list[str]:
+    """Why nothing was verified, one short reason each, from what `due` knows: the mover's pane (`state`: "busy", "idle", "shell", "sleeping" or "" when it could not be read; `others`: the mover's other items on an agent, which is why a busy pane proves nothing of this one),
+    the subagents (`running`: how many the mover has running; none of them is tied to this item), and the recorded events (none in the hour: an item that had one would have been verified)."""
+    if state == "busy":
+        pane = "the mover's pane is busy" + (f", but it carries {others} other item{'' if others == 1 else 's'} on {'an agent' if others == 1 else 'agents'}" if others else "")
+    elif not state:
+        pane = PANE_UNREAD
+    else:
+        pane = PANE_STATE.get(state, f"the mover's pane is {state}")
+    return [pane, SUBAGENT_ELSEWHERE if running else NO_SUBAGENT, NO_EVENT]
+
+
+def _clause(why: list[str]) -> str:
+    """` (a; b; c)` for the reasons that fit in `WHY_MAX` characters (whole reasons, the first ones kept: the first that does not fit ends it), "" for none."""
+    kept: list[str] = []
+    for w in why:
+        if not w or len("; ".join([*kept, w])) > WHY_MAX:
+            break
+        kept.append(w)
+    return f" ({'; '.join(kept)})" if kept else ""
+
+
+def text(now: float, what: list[str], recorded: list[str] | None = None, why: list[str] | None = None) -> str:
+    """The line: `Audit hh:mm: verified a, b` or `Audit hh:mm: idle, nothing verified`, the time in the instance zone. A line that rests on live states alone (nothing in `recorded`) says so. An idle line may carry `why` (`idle_why`) after those words, `idle, nothing verified (the mover's pane is idle; no subagent …)`: the words themselves never change."""
     hm = dt.datetime.fromtimestamp(now, _cfg.tz()).strftime("%H:%M")
     if not what:
-        return f"{PREFIX}{hm}: idle, nothing verified"
+        return f"{PREFIX}{hm}: {IDLE}" + _clause(why or [])
     return f"{PREFIX}{hm}: verified " + ", ".join(what) + ("" if recorded else LIVE_ONLY)
 
 
@@ -197,7 +226,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     from stackshot.tools import next_report as _nr  # noqa: PLC0415
     eq = same or (lambda a, b: str(a or "").casefold() == str(b or "").casefold())
     mine: list[str] = []          # the mover's other open items (any state): what a running subagent may be tied to
-    busy_elsewhere = False        # …and whether one of them is on an agent as the board shows it (then a busy pane says nothing of this item)
+    elsewhere = 0                 # …and how many of them are on an agent as the board shows it (then a busy pane says nothing of this item)
     for g in items:
         if g == gid or items[g].get("status") != "open":
             continue
@@ -207,7 +236,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
                 continue
             mine.append(g)
             if _silence.reading(it2, mover2, after2, now, queue.get(g, "")) and not _wt.is_held(it2):
-                busy_elsewhere = True
+                elsewhere += 1
         except Exception:  # noqa: BLE001  (an item that cannot be read is no other item of the mover's)
             continue
     is_front = front(mover, str(meta.get("project") or ""))
@@ -223,7 +252,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     ties = [_tie.tied_to(s, cands) for s in subs]      # each by its description first, its brief only when the description names none of them
     tied_here = readable and any(gid in t for t in ties)
     # a busy pane verifies the item when it is the mover's one item on an agent, or the mover is a front agent (the owner's own session: its items are never handed on, and its pane in a turn is the old, honest claim)
-    what, recorded = verified(it, meta, mover, now, pane, same, lambda: tied_here, lambda: is_front or not busy_elsewhere)
+    what, recorded = verified(it, meta, mover, now, pane, same, lambda: tied_here, lambda: is_front or not elsewhere)
     if what:
         return {"text": text(now, what, recorded), "verified": what, "recorded": recorded, "kind": KIND_OK}
     why = ""
@@ -233,7 +262,13 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
         why = "a subagent of the mover is running, not tied to an item"
     if why:      # unknown, not idle: nothing is verified and nothing is stamped, but the item is not marked idle either (audit/hand_idle.py reads `audit_idle` alone), so it is not handed on over a subagent that may be building it
         return {"text": f"{PREFIX}{dt.datetime.fromtimestamp(now, _cfg.tz()).strftime('%H:%M')}: {why}, nothing verified", "verified": [], "recorded": [], "kind": KIND_UNKNOWN}
-    return {"text": text(now, [], []), "verified": [], "recorded": [], "kind": KIND_IDLE}
+    state = ""
+    try:
+        state = str(pane(mover) or "") if pane is not None else ""      # the same reading `verified` made; one that raises is unknown
+    except Exception:  # noqa: BLE001
+        pass
+    running = sum(1 for t in ties if t)      # the running subagents, each tied to some other item of the mover's (an untied one made the line unknown above)
+    return {"text": text(now, [], [], idle_why(state, elsewhere, running)), "verified": [], "recorded": [], "kind": KIND_IDLE}
 
 
 def pass_(items: dict[str, dict[str, Any]], now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None,

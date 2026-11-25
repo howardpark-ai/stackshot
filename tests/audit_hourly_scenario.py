@@ -31,6 +31,8 @@ network, no model call, no message sent.
   24 a mover's own status write with new text is the item's hourly update (kind `update`, the text its words, the row reads it), as the audit's line is: the same text again, a write by anyone but the mover and a cleared status
      are not; the audit's own line still stamps beside it and the newer of the two is the record
   26 the first line is owed after 45 minutes without activity (`hourly.EVERY`, the same as `FAST_GAP`), so it lands inside the hour: none at 44 minutes, one at 46, the cadence after it and the slow stretch unchanged, the constants pinned by value, the idle hand-over still waits a full hour, a tied pull request's event still verifies within the hour
+  27 an idle line says why nothing was verified in one short clause after the unchanged words `idle, nothing verified`: a busy pane that proves nothing of this item (the mover's other items on agents), a pane that is idle, at a shell, asleep or not read,
+     a subagent tied to other items or none running, no recorded event in the hour; the clause is capped, stored whole, and every reader (kind, `idle_marked`, the idle hand-over, `get`, the History) is unchanged
   20 the tie by description first, a read error kept for the pass, a front test that raises
 
   Where the state comes from (the snapshot the fleet's session manager pushes, its staleness, the unknown cases, no ssh and no transcript read) is tests/agent_state_scenario.py.
@@ -216,7 +218,7 @@ with _Err() as err: got = tick()
 check("1 a pass over the six writes a line on the items with something verified and the idle ones too: items 1 to 6 are all due", got == ["a1", "a2", "a3", "a4", "a5", "a6"], got)
 L = {i: lines(i) for i in range(1, 7)}
 check("1 a busy pane of a mover with no other item on an agent: `Audit hh:mm: verified the mover's pane is in a turn (live state only, …)`, the time in the instance's zone, kind audit", len(L[1]) == 1 and L[1][0]["text"] == f"Audit {hm(now0)}: verified the mover's pane is in a turn" + HR.LIVE_ONLY and "live state only, nothing recorded on the item" in L[1][0]["text"] and L[1][0]["kind"] == "audit" and L[1][0]["at"] == now0, L[1])
-check("1 an idle pane verifies nothing: the line says idle", len(L[2]) == 1 and L[2][0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and L[2][0]["kind"] == "audit_idle", L[2])
+check("1 an idle pane verifies nothing: the line says idle", len(L[2]) == 1 and L[2][0]["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified") and L[2][0]["kind"] == "audit_idle", L[2])
 check("1 a running subagent of the mover's whose brief names this item is verified (the pane idle), a status line in progress is not read", len(L[3]) == 1 and L[3][0]["text"] == f"Audit {hm(now0)}: verified a subagent is running on it" + HR.LIVE_ONLY, L[3])
 check("1 a CI result of a tied pull request in the last hour (metadata.last_activity) is verified, in the record's words, and a line that rests on a recorded event carries no live-state note (the mover's busy pane says nothing of this item: it has another)", L[4][0]["text"] == f"Audit {hm(now0)}: verified CI failed on PR 5", L[4])
 check("1 …a review likewise", L[5][0]["text"] == f"Audit {hm(now0)}: verified review on PR 9", L[5])
@@ -251,14 +253,14 @@ check("1 …(another agent's status line, a done one, one older than 90 minutes,
       all(lines(i) == [] for i in range(1, 8)) and all(mt(i).get("stall") is None and mt(i).get("hourly_audit") is None for i in range(1, 8)))
 panes["home-peer"] = "busy"
 tick()
-check("1 …they say idle, and with the pane busy they still do: the mover has seven items on an agent, so its busy pane says nothing of any one", [e["text"] for i in range(1, 8) for e in lines(i)] == [f"Audit {hm(now0)}: idle, nothing verified"] * 7, [lines(i) for i in range(1, 8)])
+check("1 …they say idle, and with the pane busy they still do: the mover has seven items on an agent, so its busy pane says nothing of any one", [e["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified") for i in range(1, 8) for e in lines(i)] == [True] * 7, [lines(i) for i in range(1, 8)])
 
 # ================================================================ 2. due and nothing verified
 clean_pane()
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 put(1, act=90)
 check("2 nothing verified: the line says idle, kind audit_idle, `idle_marked` reads it, the last-activity record is untouched",
-      tick() == ["a1"] and lines(1)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and lines(1)[0]["kind"] == "audit_idle" and HR.idle_marked(mt(1)) and "last_activity" not in mt(1))
+      tick() == ["a1"] and lines(1)[0]["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified") and lines(1)[0]["kind"] == "audit_idle" and HR.idle_marked(mt(1)) and "last_activity" not in mt(1))
 panes["home-peer"] = "busy"
 tick(now0 + 61 * MIN)
 check("2 the next hour verifies the pane: idle_marked reads the newest line, not the first", len(lines(1)) == 2 and not HR.idle_marked(mt(1)) and HR.last_line(mt(1))["kind"] == "audit")
@@ -327,7 +329,7 @@ for p in (T / "store/a").glob("*.json"): p.unlink()
 put(1, mover="home-front", act=90)
 check("7 the test's front agent is one for the server's own answer", telling.front_keeper("home-front", "projects/alpha")[0] is True and telling.front_keeper("team-back", "projects/alpha")[0] is False)
 got7 = tick()
-check("7 a front agent's item due gets its line like any other (a pane that is not in a turn: idle)", got7 == ["a1"] and lines(1)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified", lines(1))
+check("7 a front agent's item due gets its line like any other (a pane that is not in a turn: idle)", got7 == ["a1"] and lines(1)[0]["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified"), lines(1))
 check("7 …and nothing is sent to it or to anyone: no message, no notice, no ladder entry", sent == [] and stall_svc.stall_load().get("a1") is None, (sent, stall_svc.stall_load()))
 panes["home-front"] = "busy"; tick(now0 + 61 * MIN)
 check("7 …a front agent in a turn is verified the same", lines(1)[1]["text"] == f"Audit {hm(now0 + 61 * MIN)}: verified the mover's pane is in a turn" + HR.LIVE_ONLY, lines(1))
@@ -423,7 +425,7 @@ put(1, act=90, last_activity={"at": now0 + 10 * MIN, "kind": "ci_result", "what"
 put(2, act=90, last_activity={"at": now0 - 10 * MIN, "kind": "ci_result", "what": "CI failed on PR 6"})
 tick()
 check("12 a last-activity record dated ahead of the clock is no recorded event (the line says idle, the record is left alone); the same event ten minutes in the past is verified (and neither is stamped)",
-      lines(1)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and mt(1)["last_activity"]["at"] == now0 + 10 * MIN
+      lines(1)[0]["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified") and mt(1)["last_activity"]["at"] == now0 + 10 * MIN
       and lines(2)[0]["text"] == f"Audit {hm(now0)}: verified CI failed on PR 6" and mt(2)["last_activity"] == {"at": now0 - 10 * MIN, "kind": "ci_result", "what": "CI failed on PR 6"}, (lines(1), mt(1).get("last_activity"), lines(2)))
 put(3, act=90); off()
 check("12 with `hourly_line = false` in the loaded config the pass is off and writes nothing", _cfg.CFG["audit"]["hourly_line"] is False and HR.enabled() is False and tick() == [] and lines(3) == [])
@@ -500,7 +502,7 @@ put(7, act=90, last_activity={"at": now0 - 59 * MIN, "kind": "commit", "what": "
 tick()
 check("9 a tied pull request's merge, comment, CI result, review and new head commit each verify, in the record's words", all(lines(i_)[0]["text"] == f"Audit {hm(now0)}: verified {w_}" for i_, (k_, w_) in kinds9.items()), [lines(i_) for i_ in kinds9])
 check("9 a recorded commit under an hour old verifies (recorded, so the line is no live-only one) and one older than an hour verifies nothing (idle)", lines(7)[0]["text"] == f"Audit {hm(now0)}: verified commit on PR 4" and lines(7)[0]["kind"] == "audit"
-      and lines(6)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and lines(6)[0]["kind"] == "audit_idle" and HR.PR_KINDS == frozenset({"ci_result", "review", "comment", "pr_merged", "commit"}), [lines(6), lines(7)])
+      and lines(6)[0]["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified") and lines(6)[0]["kind"] == "audit_idle" and HR.PR_KINDS == frozenset({"ci_result", "review", "comment", "pr_merged", "commit"}), [lines(6), lines(7)])
 # an item with no timestamp at all
 nots = rd(1); [nots.pop(k_, None) for k_ in ("activity", "updated", "state_updated", "created", "confirmed", "written_at")]
 try: wt = HR.due({"a1": nots}, "a1", now0, audit_ticks_svc._silence_env(), lambda w: "busy", handoff_svc.ho_same)
@@ -579,7 +581,7 @@ check("17 one mover with three items, each with a status in progress, one subage
 check("17 only the item the subagent is tied to reads verified (a subagent is running on it), and it is stamped as the item's last activity",
       lines(1)[0]["text"] == f"Audit {hm(now0)}: verified a subagent is running on it" + HR.LIVE_ONLY and lines(1)[0]["kind"] == "audit" and mt(1)["last_activity"]["what"] == "audit verified a subagent is running on it", (lines(1), mt(1).get("last_activity")))
 check("17 …the other two read idle, nothing verified, though they carry the same status in progress and the mover's pane is busy: marked idle (kind audit_idle, so part F hands them on) and not stamped",
-      all(lines(i)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and lines(i)[0]["kind"] == "audit_idle" and HR.idle_marked(mt(i)) and "last_activity" not in mt(i) for i in (2, 3)), [lines(i) for i in (2, 3)])
+      all(lines(i)[0]["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified") and lines(i)[0]["kind"] == "audit_idle" and HR.idle_marked(mt(i)) and "last_activity" not in mt(i) for i in (2, 3)), [lines(i) for i in (2, 3)])
 # what ties, and what does not
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 clean_pane(); panes["home-peer"] = "busy"
@@ -1037,6 +1039,60 @@ tick()
 check("26 a CI result exactly an hour (60:00) old verifies the item, one at 60:01 does not", lines(1)[0]["kind"] == "audit" and "CI passed on PR 8" in lines(1)[0]["text"] and lines(2)[0]["kind"] == "audit_idle", (lines(1), lines(2)))
 check("26 a log entry dated exactly an hour (+60:00) ahead of the clock still counts as the newest line, one second more (+60:01) is torn",
       HR.last_line(meta26(now0 + HR.HOUR), now0) is not None and HR.last_line(meta26(now0 + HR.HOUR + 1), now0) is None, (HR.last_line(meta26(now0 + HR.HOUR), now0), HR.last_line(meta26(now0 + HR.HOUR + 1), now0)))
+
+# ================================================================ 27. an idle line says why nothing was verified (one short clause after the unchanged words)
+IDLE27 = lambda at: f"Audit {hm(at)}: idle, nothing verified"
+NO_SUB, NO_EV = "no subagent is running for the mover", "no commit, review or CI in the hour"
+def wipe27(): clean_pane(); [p_.unlink() for p_ in (T / "store/a").glob("*.json")]
+def idle27(i): return lines(i)[-1]["text"]
+# a busy pane of a mover that carries other items on agents proves nothing of this one: the clause says so, with the count
+wipe27()
+for i in (1, 2, 3, 4): put(i, act=90)
+panes["home-peer"] = "busy"; tick()
+check("27 busy pane, three other items on agents: the clause names the busy pane and the count, then the other reasons, after the unchanged words",
+      all(idle27(i) == IDLE27(now0) + f" (the mover's pane is busy, but it carries 3 other items on agents; {NO_SUB}; {NO_EV})" for i in (1, 2, 3, 4)) and all(lines(i)[-1]["kind"] == "audit_idle" for i in (1, 2, 3, 4)), [idle27(i) for i in (1, 2)])
+wipe27(); put(1, act=90); put(2, act=90); panes["home-peer"] = "busy"; tick()
+check("27 busy pane, one other item on an agent: singular", idle27(1) == IDLE27(now0) + f" (the mover's pane is busy, but it carries 1 other item on an agent; {NO_SUB}; {NO_EV})", idle27(1))
+# a pane that is not in a turn: its state in the snapshot is the reason
+for st, words in (("idle", "the mover's pane is idle"), ("shell", "the mover's pane is at a shell"), ("sleeping", "the mover's pane is asleep"), ("dozing", "the mover's pane is dozing")):
+    wipe27(); put(1, act=90); panes["home-peer"] = st; tick()
+    check(f"27 a pane that is {st}: the clause says so", idle27(1) == IDLE27(now0) + f" ({words}; {NO_SUB}; {NO_EV})", idle27(1))
+# a pane the snapshot cannot give (missing, older than the limit, not listing the mover, one that raises)
+for st in ("", "boom"):
+    wipe27(); put(1, act=90); panes["home-peer"] = st; tick()
+    check(f"27 a pane that is {'not in the snapshot' if not st else 'unreadable'}: the clause says there was no fresh snapshot", idle27(1) == IDLE27(now0) + f" ({HR.PANE_UNREAD}; {NO_SUB}; {NO_EV})" and HR.PANE_UNREAD == "no fresh snapshot of the mover's pane", idle27(1))
+wipe27(); put(1, act=90); panes["home-peer"] = "idle"; tick(pane=None)
+check("27 no pane reading given at all reads as no fresh snapshot", idle27(1) == IDLE27(now0) + f" ({HR.PANE_UNREAD}; {NO_SUB}; {NO_EV})", idle27(1))
+# subagents: one running for the mover but tied to another of its items
+wipe27(); put(1, act=90); put(2, act=90); panes["home-peer"] = "idle"; run_on("home-peer", f"Build {BID(2)}: the thing"); tick()
+check("27 a subagent runs for the mover but names another item: the line for this item says its subagents are tied to other items; the other item is verified",
+      idle27(1) == IDLE27(now0) + f" (the mover's pane is idle; its running subagents are tied to other items; {NO_EV})" and lines(2)[-1]["kind"] == "audit", (idle27(1), idle27(2)))
+# a recorded event older than the hour is no event: the reason stays
+wipe27(); put(1, act=90, last_activity={"at": now0 - 61 * MIN, "kind": "ci_result", "what": "CI failed on PR 5"}); panes["home-peer"] = "idle"; tick()
+check("27 a recorded event 61 minutes old is none in the hour", idle27(1) == IDLE27(now0) + f" (the mover's pane is idle; {NO_SUB}; {NO_EV})", idle27(1))
+# the unchanged prefix, the kind and every reader of the line
+wipe27(); put(1, act=90); put(2, act=90); put(3, act=90); panes["home-peer"] = "busy"; tick()
+t27 = idle27(1)
+check("27 the words `idle, nothing verified` stay at the start of the line, right after the time, whatever clause follows; the kind is audit_idle and `idle_marked` reads it",
+      t27.startswith(IDLE27(now0) + " (") and t27.endswith(")") and HR.IDLE == "idle, nothing verified" and lines(1)[-1]["kind"] == "audit_idle" and HR.idle_marked(mt(1)) and "last_activity" not in mt(1), t27)
+check("27 `text` without a reason is exactly the old line, and a verified line takes no clause", HR.text(now0, []) == IDLE27(now0) and HR.text(now0, [], [], []) == IDLE27(now0)
+      and HR.text(now0, ["a"], ["a"], ["ignored"]) == f"Audit {hm(now0)}: verified a", (HR.text(now0, []), HR.text(now0, ["a"], ["a"], ["ignored"])))
+# a line with the clause is read by get and the History as it was, and the idle hand-over still reads it
+check("27 `get` prints the whole line with its clause", f"audit: " in _get_tool._fmt(_service_store._load("a1")) and t27 in _get_tool._fmt(_service_store._load("a1")), _get_tool._fmt(_service_store._load("a1"))[-600:])
+check("27 the History shows the line (the log entry), clause included", [e["text"] for e in HL.new_entries({}, mt(1))] == [t27], HL.new_entries({}, mt(1)))
+# the log keeps the whole line: the longest clause is far inside the clip, and the clause never passes WHY_MAX
+longest = HR.text(now0, [], [], HR.idle_why("busy", 99, 0))
+longest2 = HR.text(now0, [], [], HR.idle_why("busy", 99, 3))
+check("27 the longest clause fits WHY_MAX (160) and the whole line is inside the log's clip, so the entry is stored whole",
+      all(len(x.split(" (", 1)[1]) - 1 <= HR.WHY_MAX and len(x) < HL.CLIP for x in (longest, longest2)) and HR.WHY_MAX == 160 and HL.CLIP >= 240, (len(longest), len(longest2)))
+mm27 = {}; HL.note(mm27, now0, longest2, "audit_idle")
+check("27 …and stored through the log it is not clipped", HL.log_of(mm27)[0]["text"] == longest2, HL.log_of(mm27))
+# whole reasons only past the limit: the first reasons stay, the first that does not fit ends the clause
+over = HR.text(now0, [], [], ["a" * 100, "b" * 100, "c"])
+check("27 past WHY_MAX whole reasons are dropped from the end, never cut in the middle, and nothing after a reason that did not fit is kept", over == IDLE27(now0) + " (" + "a" * 100 + ")" and HR.text(now0, [], [], ["x" * 200]) == IDLE27(now0), over)
+# the idle hand-over's reason is unchanged and still hands the item on from a line that carries the clause
+check("27 the idle hand-over reads the line with the clause (kind and start of the words) and its own reason text is unchanged", [g for g, _r in HI.due_all({"a1": rd(1)}, now0 + 15 * MIN, lambda who, project: telling.front_keeper(who, project)[0])] == ["a1"] and HI.WHY == "no activity for an hour, nothing verified")
+
 clean_pane()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
