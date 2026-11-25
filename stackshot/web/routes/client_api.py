@@ -60,6 +60,7 @@ from stackshot.waits import event_waits as _ew
 from stackshot.waits import held as _held
 from stackshot.web import requestlog as _requestlog
 from stackshot.web.publish import _publish
+from stackshot.web.tools import anchors as _anchors_tool
 
 
 _client_get, _recycle_wanted_tokens = None, None      # the server's own, set by register()
@@ -129,6 +130,50 @@ def _client_config() -> dict[str, Any]:
     if _brains.configured():    # each second brain's page rules and mirror, so a client box links its pages to the right mirror (no gbrain home: a client writes nothing)
         out["brains"] = _brains.client_entries()
     return out
+
+
+_ANCHOR_ADD_SHAPE = ("project = the project's page key (projects/<slug>, infra/<slug> or the bare slug); add = a list of 1 to 10 pull request or issue URLs; items = a list of at most 20 item ids (optional: with none the anchor "
+                     "is project-wide); sender = the session or script that adds, one line of at most 80 characters")
+_ANCHOR_ADD_URL = re.compile(r"https://github\.com/(?!\.{1,2}/)[A-Za-z0-9._-]+/(?!\.{1,2}/)[A-Za-z0-9._-]+/(?:pull|issues)/[0-9]+")      # the one shape this route takes: no query, fragment, trailing text, whitespace or NUL, and no `.` or `..` as owner or repo (a path step, not a name; `.github` is a real repo name and stays)
+_BLANK_LOOKING = frozenset(map(chr, (0x3164, 0x115F, 0x1160, 0x2800, 0xFFA0)))      # the Hangul fillers and the braille blank: they draw as nothing
+_ANCHOR_ADD_URLS_MAX, _ANCHOR_ADD_URL_MAX, _ANCHOR_ADD_ITEMS_MAX = 10, 300, 20        # the most a call may carry, counted as received (a repeated entry counts each time)
+
+
+def _plain_sender(text: str) -> str:
+    """A sender as one plain line: whitespace runs collapsed to one space, then every control and format character (C0 and C1 controls, bidi and zero-width marks) taken out, and the blanks collapsed again."""
+    import unicodedata
+    one = " ".join(text.split())
+    return " ".join("".join(ch for ch in one if unicodedata.category(ch)[0] != "C" and ch not in _BLANK_LOOKING).split())
+
+
+def _client_anchor_add(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """`POST /client/anchor-add` body {project, add: [urls], items?: [ids], sender} -> 200 {result: the anchors tool's own text}; 400 a body that does not fit, a URL that is not a GitHub pull request or issue
+    (https://github.com/<owner>/<repo>/pull/<n> or /issues/<n>, nothing else: the machine token is no proof of the owner, so the tool's other shapes, which make the server read mail, chat or files, are not
+    taken here), a call over its caps (10 URLs of at most 300 characters, 20 item ids), a `remove` key, or the tool's own refusal (no such project, an item that is completed or in another project, ...) as {error}.
+    It is the anchors tool's add and nothing else: the tool's function runs with `remove` empty, so a client route can never take an anchor away. The anchor records who added it as
+    "<sender> via a script on <machine>": the token proves the machine, the body names the session (the trust the other script routes give their sender)."""
+    project, add, items, sender = body.get("project"), body.get("add"), body.get("items"), body.get("sender")
+    if not isinstance(project, str) or not project.strip() or len(project) > 200:
+        return 400, {"error": "project is required, at most 200 characters. " + _ANCHOR_ADD_SHAPE}
+    if not (isinstance(add, list) and add and all(isinstance(u, str) and u.strip() for u in add)):
+        return 400, {"error": "add must be a non-empty list of pull request or issue URLs. " + _ANCHOR_ADD_SHAPE}
+    if len(add) > _ANCHOR_ADD_URLS_MAX or any(len(u) > _ANCHOR_ADD_URL_MAX for u in add):
+        return 400, {"error": f"add takes at most {_ANCHOR_ADD_URLS_MAX} URLs of at most {_ANCHOR_ADD_URL_MAX} characters each"}
+    if items is not None and not (isinstance(items, list) and all(isinstance(i, str) and i.strip() for i in items)):
+        return 400, {"error": "items must be a list of item ids, or left out. " + _ANCHOR_ADD_SHAPE}
+    if items is not None and len(items) > _ANCHOR_ADD_ITEMS_MAX:
+        return 400, {"error": f"items takes at most {_ANCHOR_ADD_ITEMS_MAX} item ids"}
+    if not isinstance(sender, str):
+        return 400, {"error": "sender is required, as text. " + _ANCHOR_ADD_SHAPE}
+    if not all(_ANCHOR_ADD_URL.fullmatch(u) for u in add):
+        return 400, {"error": "only pull request and issue URLs are accepted here: https://github.com/<owner>/<repo>/pull/<number> or https://github.com/<owner>/<repo>/issues/<number>, with nothing before or after"}
+    if body.get("remove"):
+        return 400, {"error": "a client route only adds anchors; removing one is the anchors tool's, not this route's"}
+    try:
+        by = _owner_words._script_sender({"sender": _plain_sender(sender)}, machine)
+        return 200, {"result": _anchors_tool._anchors(project, add, items or None, None, by)}
+    except ToolError as e:
+        return 400, {"error": str(e)}
 
 
 _NO_SUCH_WRITE = "no such write"       # what the client API answers (404) to a verb no branch of _client_post took; client_write reads it to tell a verb it handled from a guess
@@ -266,6 +311,8 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         return _job_gap._jobgap_post(machine, body)
     if what == "catch":         # a front agent's hook: a turn that signed off with a no-ask phrase after a trigger-started turn is one line of the catch log (client.py post catch)
         return _catches._catch_post(machine, body)
+    if what == "anchor-add":    # a plugin hook adds the anchors of a PR or issue a session made, as the anchors tool's add does (client.py post anchor-add)
+        return _client_anchor_add(machine, body)
     if what == "item-open":     # a script opens one board item for a background agent of a project, once per marker while it is open (client.py post item-open)
         return _item_open._itemopen_post(machine, body)
     if what == "item-sync":     # a script keeps one item for the person in step with a condition: open, refresh, close by its marker (client.py post item-sync)
@@ -363,7 +410,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")}, digest=_messaging.digest_fyi, on_filed=_handoff.handoff_acked)}
     if what == "agent-state":   # the fleet's session manager pushes which registered agents are busy and which idle, the whole fleet in one body that replaces the last snapshot (the audit reads it)
         return _agent_state_svc.post(machine, body)
-    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result | agent-state"}
+    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | anchor-add | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result | agent-state"}
 
 
 async def client_write(request: Request):

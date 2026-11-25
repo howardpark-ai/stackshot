@@ -407,6 +407,125 @@ def part_client():
         check("pages.py touch: the hook entry prints the server's line as one additionalContext", json.loads(printed or "{}") == {"hookSpecificOutput": {"hookEventName": "PostToolUse",
               "additionalContext": f"[stackshot] (named sparrow-bg in a1's needs: handover message from sparrow-main (SendMessage on {me}))"}} and m1().get("needs") == ["sparrow-bg"], printed)
         (T / "store/a/1.json").write_text(_a1); (T / "store/projects.json").write_text(_reg46); (T / "fleet/a/sessions.json").write_text("{}")
+        # ---- anchor-add: a hook adds the anchors of a pull request or an issue (POST /client/anchor-add, client.py post anchor-add -); the anchors tool's add, never its remove
+        _anchors_raw = (T / "store/anchors.json").read_text()
+        rg = json.loads(_reg46); rg["pages"]["projects/beta"] = {**rg["pages"]["projects/alpha"], "title": "Beta", "name": "Beta"}; (T / "store/projects.json").write_text(json.dumps(rg))
+        def _fx(n, project, status="open"):
+            (T / f"store/a/{n}.json").write_text(json.dumps({"id": str(n), "subject": f"[home] anchor fixture {n}", "description": "A thing. It lives here. Done when done.", "status": status,
+                                                              "metadata": {"owner": "sparrow", "project": project}}))
+        _fx(2, "projects/beta"); _fx(3, "projects/alpha", "completed"); _fx(4, "projects/alpha")
+        anc = lambda: json.loads((T / "store/anchors.json").read_text())
+        U1, U2, U3 = (f"https://github.com/example-org/example-repo/pull/{n}" for n in (101, 102, 103)); U4 = "https://github.com/example-org/example-repo/issues/104"
+        BY = "hook-sender via a script on box-far"
+        add_ = lambda body, hdr=H: c.post("/client/anchor-add", json=body, headers=hdr)
+        r = add_({"project": "projects/alpha", "add": [U1], "sender": "hook-sender"}, {}); check("http: anchor-add without a token → 401, nothing stored", r.status_code == 401 and anc() == {}, (r.status_code, anc()))
+        r = add_({"project": "projects/alpha", "add": [U1], "sender": "hook-sender"}, {"Authorization": "Bearer " + "x" * 43}); check("http: anchor-add with a wrong token → 401, nothing stored", r.status_code == 401 and anc() == {}, (r.status_code, anc()))
+        r = c.post("/client/anchor-add", content=b"not json", headers=H); check("http: anchor-add with a body that is not JSON → 400", r.status_code == 400, r.text)
+        r = c.get("/client/anchor-add", headers=H); check("http: anchor-add does not answer a GET", r.status_code == 404, r.status_code)
+        r = add_({"project": "projects/alpha", "add": [U1], "sender": "hook-sender"})
+        check("http: a project-wide add → 200 with the tool's own text, and the anchor is stored project-wide with who added it",
+              r.status_code == 200 and set(r.json()) == {"result"} and r.json()["result"].startswith("projects/alpha anchors (") and f"- {U1}  [project-wide]" in r.json()["result"]
+              and anc()["projects/alpha"] == [{"url": U1, "items": None, "added": anc()["projects/alpha"][0]["added"], "by": BY}], (r.text, anc()))
+        r = add_({"project": "alpha", "add": [U2], "items": ["a1"], "sender": "hook-sender"})
+        check("http: an item-scoped add (the bare slug names the project) → 200, the anchor is listed and stored for that item only",
+              r.status_code == 200 and f"- {U2}  [items: a1]" in r.json()["result"] and f"- {U1}  [project-wide]" in r.json()["result"]
+              and [(e["url"], e["items"]) for e in anc()["projects/alpha"]] == [(U1, None), (U2, ["a1"])], (r.text, anc()))
+        r = add_({"project": "projects/alpha", "add": [U2], "items": ["a4"], "sender": "hook-sender"})
+        check("http: adding a URL again scoped to another item widens its items (the tool's union)", r.status_code == 200 and f"- {U2}  [items: a1, a4]" in r.json()["result"], (r.text, anc()))
+        r = add_({"project": "projects/alpha", "add": [U2], "sender": "hook-sender"})
+        check("http: adding it project-wide makes it project-wide", r.status_code == 200 and f"- {U2}  [project-wide]" in r.json()["result"], r.text)
+        r = add_({"project": "projects/alpha", "add": [U2], "items": ["a1"], "sender": "hook-sender"})
+        check("http: …and a scoped add never narrows a project-wide anchor again", r.status_code == 200 and f"- {U2}  [project-wide]" in r.json()["result"]
+              and [(e["url"], e["items"]) for e in anc()["projects/alpha"]] == [(U1, None), (U2, None)], (r.text, anc()))
+        r = add_({"project": "projects/alpha", "add": [U3, U4], "items": [" a4 "], "sender": "hook-sender", "remove": []})
+        check("http: several URLs in one call, an item id with blanks around it, and an empty remove (nothing to remove) → 200", r.status_code == 200 and f"- {U3}  [items: a4]" in r.json()["result"] and f"- {U4}  [items: a4]" in r.json()["result"], (r.text, anc()))
+        r = add_({"project": "projects/alpha", "add": [U1], "items": [], "sender": "hook-sender"})
+        check("http: an empty items list is project-wide, as the tool takes it", r.status_code == 200 and f"- {U1}  [project-wide]" in r.json()["result"], r.text)
+        PR = lambda n: f"https://github.com/example-org/example-repo/pull/{n}"
+        by_of = lambda url: next((e["by"] for e in anc()["projects/alpha"] if e["url"] == url), None)
+        r = add_({"project": "projects/alpha", "add": [PR(n) for n in range(201, 211)], "sender": "hook-sender"})
+        check("http: exactly 10 URLs in one call are taken", r.status_code == 200 and all(f"- {PR(n)}  [project-wide]" in r.json()["result"] for n in range(201, 211)), r.text[:300])
+        U300 = PR("7" * (300 - len(PR(""))))
+        r = add_({"project": "projects/alpha", "add": [U300], "sender": "hook-sender"}); check("http: a URL of exactly 300 characters is taken", r.status_code == 200 and len(U300) == 300 and by_of(U300) == BY, (r.status_code, r.text[:200]))
+        r = add_({"project": "projects/alpha", "add": [U4 + "1"], "items": ["a4"] * 20, "sender": "hook-sender"}); check("http: exactly 20 item ids are taken", r.status_code == 200 and f"- {U4}1  [items: a4]" in r.json()["result"], r.text[:300])
+        r = add_({"project": "projects/alpha", "add": [PR(301)], "sender": "hook\x1b[31m-sender‮  \t with \n blanks\x00​"})
+        check("http: control, bidi and zero-width characters are taken out of the sender and the blanks collapsed", r.status_code == 200 and by_of(PR(301)) == "hook[31m-sender with blanks via a script on box-far", (r.text[:200], by_of(PR(301))))
+        r = add_({"project": "projects/alpha", "add": [PR(302)], "sender": "h" * 80}); check("http: a sender of exactly 80 characters is taken", r.status_code == 200 and by_of(PR(302)) == "h" * 80 + " via a script on box-far", r.text[:200])
+        for n_, u_ in enumerate(("https://github.com/example-org/.github/pull/1", "https://github.com/.a/b/pull/1", "https://github.com/a/b./pull/1")):
+            r = add_({"project": "projects/alpha", "add": [u_], "sender": "hook-sender"})
+            check(f"http: a name that merely starts or ends with a dot is a name and is taken ({u_[19:-7]})", r.status_code == 200 and by_of(u_) == BY, (r.status_code, r.text[:200]))
+        r = add_({"project": "projects/alpha", "add": [PR(303)], "sender": "hook\u3164\u115f\u1160\u2800\uffa0-sender"})
+        check("http: Hangul fillers and the braille blank are taken out of the sender", r.status_code == 200 and by_of(PR(303)) == BY, (r.text[:200], by_of(PR(303))))
+        before = (T / "store/anchors.json").read_text()
+        def refused_(name, body, *words, status=400):
+            r = add_(body); err = r.json().get("error", "") if r.status_code == status and isinstance(r.json(), dict) else ""
+            check(name, r.status_code == status and set(r.json()) == {"error"} and all(w in err for w in words) and (T / "store/anchors.json").read_text() == before, (r.status_code, r.text[:300]))
+        S = "hook-sender"
+        refused_("http: anchor-add of a completed item is refused with the tool's text, nothing stored", {"project": "projects/alpha", "add": [U3], "items": ["a3"], "sender": S}, "Refused", "a3 is completed", "leave it project-wide")
+        refused_("http: …an item of another project", {"project": "projects/alpha", "add": [U3], "items": ["a2"], "sender": S}, "Refused", "a2 belongs to projects/beta, not projects/alpha")
+        refused_("http: …an item that does not exist", {"project": "projects/alpha", "add": [U3], "items": ["a99"], "sender": S}, "Refused", "no item a99")
+        refused_("http: …one good and one completed item (nothing of the call is stored)", {"project": "projects/alpha", "add": [U3], "items": ["a4", "a3"], "sender": S}, "a3 is completed")
+        ONLY = "only pull request and issue URLs are accepted here"
+        refused_("http: …a URL that is no anchor shape", {"project": "projects/alpha", "add": ["https://example.invalid/not-an-anchor"], "sender": S}, ONLY)
+        refused_("http: …a good URL beside a bad one stores neither", {"project": "projects/alpha", "add": [U3 + "0", "not a url"], "sender": S}, ONLY)
+        # the machine token is no proof of the owner: the tool's other shapes, which make the server read mail, chat, files or a repo's notifications, are not taken here
+        for what_, url_ in (("a Gmail query", "gmail:q:from:someone"), ("a Gmail query scoped to a mailbox", "gmail:q@work:from:someone"), ("a Gmail thread link", "https://mail.google.com/mail/u/0/#inbox/0123456789abcdef"),
+                            ("a Slack channel", "https://example-team.slack.com/archives/C0123456789"), ("a Slack anchor id", "slack:C0123456789"),
+                            ("a Drive file", "https://drive.google.com/file/d/0123456789abcdefghij/view"), ("a Drive anchor id", "drive:0123456789abcdefghij"),
+                            ("a Notion page", "https://www.notion.so/Page-0123456789abcdef0123456789abcdef"), ("a repo's notifications id", "github:example-org/example-repo@notifications"),
+                            ("a repo's notifications link", "https://github.com/example-org/example-repo"), ("a repo's releases", "https://github.com/example-org/example-repo/releases"),
+                            ("a repo URL with a trailing slash", "https://github.com/example-org/example-repo/"), ("an anchor id of a pull request", "github:example-org/example-repo#101"),
+                            ("a repo URL with no pull request number", "https://github.com/example-org/example-repo/pull/"), ("a pull request number that is not digits", PR("abc")),
+                            ("a pull request under /files", PR(101) + "/files"), ("a fragment", PR(101) + "#issuecomment-1"), ("a query", PR(101) + "?x=1"), ("trailing text", PR(101) + " and more"),
+                            ("a trailing newline", PR(101) + "\n"), ("a newline inside", PR(101) + "\nslack:C0123456789"), ("a NUL", PR(101) + "\x00"), ("a leading blank", " " + PR(101)),
+                            ("a `..` owner", "https://github.com/../example-repo/pull/1"), ("`..` as owner and repo", "https://github.com/../../pull/1"), ("a `.` repo", "https://github.com/example-org/./pull/1"),
+                            ("a `.` owner", "https://github.com/./example-repo/pull/1"), ("a `..` repo", "https://github.com/example-org/../pull/1"),
+                            ("plain http", "http://github.com/example-org/example-repo/pull/101"), ("another host", "https://github.example.invalid/example-org/example-repo/pull/101"), ("an Arabic-Indic digit", PR("١٢"))):
+            refused_(f"http: …{what_} is not a pull request or issue URL: refused, nothing stored", {"project": "projects/alpha", "add": [url_], "sender": S}, ONLY)
+        refused_("http: …a good URL beside a Gmail query stores neither", {"project": "projects/alpha", "add": [U3 + "0", "gmail:q:from:someone"], "sender": S}, ONLY)
+        refused_("http: …11 URLs in one call", {"project": "projects/alpha", "add": [PR(400 + n) for n in range(11)], "sender": S}, "add takes at most 10 URLs")
+        refused_("http: …11 copies of one URL count as 11", {"project": "projects/alpha", "add": [U3] * 11, "sender": S}, "add takes at most 10 URLs")
+        refused_("http: …a URL of 301 characters", {"project": "projects/alpha", "add": [PR("7" * (301 - len(PR(""))))], "sender": S}, "at most 300 characters")
+        refused_("http: …21 item ids in one call (a repeated id counts each time)", {"project": "projects/alpha", "add": [U3], "items": ["a4"] * 21, "sender": S}, "items takes at most 20")
+        refused_("http: …a project of over 200 characters", {"project": "p" * 201, "add": [U3], "sender": S}, "project is required")
+        refused_("http: …a sender that is not text (a number)", {"project": "projects/alpha", "add": [U3], "sender": 5}, "sender is required, as text")
+        refused_("http: …a sender that is not text (a list)", {"project": "projects/alpha", "add": [U3], "sender": ["x"]}, "sender is required, as text")
+        refused_("http: …a sender of only Hangul fillers and braille blanks", {"project": "projects/alpha", "add": [U3], "sender": "\u3164\u115f\u1160\u2800\uffa0"}, "sender is required")
+        refused_("http: …a sender of only control characters", {"project": "projects/alpha", "add": [U3], "sender": "\x1b‮\x00"}, "sender is required")
+        refused_("http: …a sender of 81 characters after the control characters are taken out", {"project": "projects/alpha", "add": [U3], "sender": "h" * 40 + "\x1b" + "h" * 41}, "sender is required")
+        refused_("http: …a project that names no page", {"project": "projects/no-such", "add": [U3], "sender": S}, "Refused", "names no page")
+        refused_("http: a body with no project is refused with the shape", {"add": [U3], "sender": S}, "project is required", "sender")
+        refused_("http: …a project that is not text", {"project": 5, "add": [U3], "sender": S}, "project is required")
+        refused_("http: …a blank project", {"project": "  ", "add": [U3], "sender": S}, "project is required")
+        refused_("http: …no add", {"project": "projects/alpha", "sender": S}, "add must be a non-empty list")
+        refused_("http: …an empty add", {"project": "projects/alpha", "add": [], "sender": S}, "add must be a non-empty list")
+        refused_("http: …an add that is a string, not a list", {"project": "projects/alpha", "add": U3, "sender": S}, "add must be a non-empty list")
+        refused_("http: …an add with a value that is not text", {"project": "projects/alpha", "add": [U3, 7], "sender": S}, "add must be a non-empty list")
+        refused_("http: …items that is a string, not a list", {"project": "projects/alpha", "add": [U3], "items": "a1", "sender": S}, "items must be a list")
+        refused_("http: …items with a value that is not text", {"project": "projects/alpha", "add": [U3], "items": [1], "sender": S}, "items must be a list")
+        refused_("http: …no sender", {"project": "projects/alpha", "add": [U3]}, "sender is required")
+        refused_("http: …a sender over 80 characters", {"project": "projects/alpha", "add": [U3], "sender": "s" * 81}, "sender is required")
+        refused_("http: a body that carries a remove is refused, and removes nothing", {"project": "projects/alpha", "add": [U3], "sender": S, "remove": [U1]}, "only adds anchors")
+        r = add_({"project": "projects/alpha", "add": [U3], "sender": S, "remove": [U1]})
+        check("http: …the anchor the remove named is still on the page", any(e["url"] == U1 for e in anc()["projects/alpha"]), anc())
+        # the script client: `post anchor-add -` reads the JSON object on stdin, prints the server's text and exits 0, or says why on stderr and exits 1
+        def run_(argv, text):
+            out_, err_ = io.StringIO(), io.StringIO(); _in = sys.stdin; sys.stdin = io.StringIO(text)
+            try:
+                with _cl.redirect_stdout(out_), _cl.redirect_stderr(err_): rc = client.main(["client.py", "post", "anchor-add", *argv])
+            finally: sys.stdin = _in
+            return rc, out_.getvalue(), err_.getvalue()
+        rc_, o_, e_ = run_(["-"], json.dumps({"project": "projects/alpha", "add": [U3 + "1"], "items": ["a4"], "sender": S}))
+        check("client.py post anchor-add -: a good body prints the server's text and exits 0", rc_ == 0 and f"- {U3}1  [items: a4]" in o_ and not e_, (rc_, o_, e_))
+        rc_, o_, e_ = run_(["-"], json.dumps({"project": "projects/alpha", "add": [U3], "items": ["a3"], "sender": S}))
+        check("client.py post anchor-add -: a refusal prints the tool's text on stderr and exits 1", rc_ == 1 and not o_ and "[400]" in e_ and "a3 is completed" in e_, (rc_, o_, e_))
+        n_ = len(anc()["projects/alpha"])
+        for name_, argv_, text_ in (("a body that is not JSON", ["-"], "nope"), ("a body that is not an object", ["-"], "[1]"), ("a body with no sender", ["-"], json.dumps({"project": "projects/alpha", "add": [U3]})),
+                                    ("a body with an empty add", ["-"], json.dumps({"project": "projects/alpha", "add": [], "sender": S})), ("no dash", [], "{}"), ("a flag instead of the dash", ["--project", "x"], "{}")):
+            rc_, o_, e_ = run_(argv_, text_)
+            check(f"client.py post anchor-add: {name_} → usage on stderr, exit 1, nothing sent", rc_ == 1 and not o_ and "usage: client.py post anchor-add" in e_ and len(anc()["projects/alpha"]) == n_, (rc_, o_, e_))
+        for n in (2, 3, 4): (T / f"store/a/{n}.json").unlink()
+        (T / "store/projects.json").write_text(_reg46); (T / "store/anchors.json").write_text(_anchors_raw)
         os.remove(T / "secrets/client.token"); st, body = client.get("registry"); check("client.get without a token says how to get one", st == 401 and "mint" in body, (st, body))
 
     # ---- 5. a held poll when the server stops (the item follow-up): uvicorn cancels the handler once its graceful shutdown times out;
@@ -722,6 +841,7 @@ def part_client():
         "terminal-prompt -> _terminal_prompt_svc._terminal_prompt",
         "job-gap -> _job_gap._jobgap_post",
         "catch -> _catches._catch_post",
+        "anchor-add -> _client_anchor_add",
         "item-open -> _item_open._itemopen_post",
         "item-sync -> _item_sync._itemsync_post",
         "job-failed -> _job_alert._jobalert_failed_post",
@@ -1210,6 +1330,8 @@ def part_caller_keys():
             r = post("/client/for-you/seen", {"id": "all", "sender": "alphabet"}, AUTH(tok)); check("a sender that is not the key's label or its dash form is 403", r.status_code == 403, (r.status_code, r.text))
             r = post("/client/for-you/seen", {"id": "all", "sender": "someone-else"}, AUTH(tok)); check("another sender is 403", r.status_code == 403)
             r = post("/client/setup-result", {"ok": True}, AUTH(tok)); check("a pass opens no other verb of /client: 403 naming the form's calls", r.status_code == 403 and "project-agent" in r.json()["error"], (r.status_code, r.text))
+            r = post("/client/anchor-add", {"project": "projects/alpha", "add": ["https://github.com/example-org/example-repo/pull/101"], "sender": "alpha-web"}, AUTH(tok))
+            check("a pass opens no anchor-add: 403 naming the form's calls, nothing added", r.status_code == 403 and "project-agent" in r.json()["error"], (r.status_code, r.text))
             r = c.get("/client/whoami", headers=AUTH(tok)); check("a pass opens no read of /client: 401", r.status_code == 401, (r.status_code, r.text))
             r = post("/client/poll", {"sessions": []}, AUTH(tok)); check("a pass is not a machine: poll is 403", r.status_code == 403)
             r = post("/client/project-agent-rename", {"project": "projects/none-such", "old": "x", "new": "y", "sender": "alpha-rename"}, AUTH(tok))
