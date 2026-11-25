@@ -55,7 +55,7 @@ REC = T / "store/project-record.json"
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.projects import keeper as kp
 from stackshot.projects import project_restore as rs; from stackshot.projects import keeper_reads as KR
 from stackshot.anchors import anchors; from stackshot.router import router_live as rl; from stackshot.service import telling
-from stackshot import cli
+from stackshot import cli; from stackshot.core import config as _cfgmod
 try:
     from stackshot.projects import keeper_subpages as ks
 except ImportError as e:
@@ -283,6 +283,24 @@ else:
         anchors.sala_rows = _rows0
     check("cli: the record is back as it was after the undo", recbytes() == ORIG)
     check("cli: the program is listed (`stackshot keeper-subpages`)", cli.PROGRAMS.get("keeper-subpages", ("",))[0] == "stackshot.projects.keeper_subpages", None)
+
+    # ---- 6c. off the server box (in this process): the same readable sala list that lets 6b write is refused before it is read, and the record stays as it was. Without the guard this run would
+    # write (6b above); the exit 1 of a box that cannot read sala is not what is asserted here, the unchanged record and the undo folder that never appears are.
+    _rows0, _rel0 = anchors.sala_rows, _cfgmod.CFG.get("release")
+    anchors.sala_rows = lambda *a, **k: [{"name": n, "aliases": []} for n in sorted(LIVE)]
+    _cfgmod.CFG["release"] = dict(_rel0 or {}, deploy_ssh="record-host")
+    try:
+        pre6c = tree(*SPACE)
+        buf, ebuf = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(ebuf):
+            rc = ks.main(["--apply", "--run-dir", str(T / "undo-off")])
+        out, err = buf.getvalue(), ebuf.getvalue()
+        check("off the server box, a readable sala list, --apply: exit 1, the ssh form on stderr, nothing on stdout, the record and every file unchanged, no undo folder",
+              rc == 1 and "ssh record-host '~/stackshot/bin/stackshot keeper-subpages --apply --run-dir " in err and out == "" and recbytes() == ORIG and tree(*SPACE) == pre6c and not (T / "undo-off").exists(), (rc, out[-200:], err[-400:]))
+    finally:
+        anchors.sala_rows = _rows0
+        if _rel0 is None: _cfgmod.CFG.pop("release", None)
+        else: _cfgmod.CFG["release"] = _rel0
 
     # ---- 7. nobody loses a page by the readers that look at session and role; a wrong live set is caught; what a session gains is said
     ENTS0, RAW0 = pr.entries(), prj.registry_raw()
