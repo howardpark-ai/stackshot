@@ -141,11 +141,12 @@ def _state_apply_core(meta: dict[str, Any], status: str, st: str, given: dict[st
     return ""
 
 
-def _owner_then(project: str, mover_before: str, sender: str, next_text: str, needs: list[str]) -> str:
+def _owner_then(project: str, mover_before: str, sender: str, next_text: str, needs: list[str], meta: "dict[str, Any] | None" = None) -> str:
     """Who takes an item after the owner's answer when nobody named it, as an item goes to him. Not the front agent that relayed the
     ask: the agent that does the work. In order: (1) the mover before his step when it is a background agent; (2) the project's builder when it moves the item (a session in needs) or when
     next names it as the one building (a line `<builder>: …`); (3) the sender when it is a background agent (a builder that files or edits its own decision item is its own then);
-    (4) the project's builder when the model's default then would be a front agent (the first session in needs is one): the front agent that relayed the ask stays in needs and hears of his answer, the builder takes the item. "" when
+    (4) the project's builder when the model's default then would be a front agent (the first session in needs is one): the front agent that relayed the ask stays in needs and hears of his answer, the builder takes the item.
+    Not (2) by a line in next when `meta` shows a front agent holding the item's first open named step, nor (4) when it shows the front agent that is first in needs holding it: it is the one to act on his answer, so nothing is stored and the model's default stands. "" when
     none (the model's own default then stands: the first session in needs, else nobody, and his answer hands the item to the project's builder, else its -main agent; a project with no builder keeps the front agent)."""
     if _holders._is_background(mover_before, project):
         return mover_before
@@ -153,13 +154,14 @@ def _owner_then(project: str, mover_before: str, sender: str, next_text: str, ne
     if b:
         bid = _session_id(b)
         named = any(_session_id(x) == bid for x in needs)
-        if not named and next_text:
+        holds = bool(meta and (first := _telling.step_holder(meta)) and _telling.front_sender(first))      # a front agent holds the item's first open named step (past his own lines)
+        if not named and next_text and not holds:
             named = bool(re.search(r"(?mi)^\s*(?:[-*]\s+|\d+[.)]\s+)?" + re.escape(b) + r"\s*:", next_text))
         if named:
             return b
     if _holders._is_background(sender, project):
         return sender
-    if b and needs and _telling.front_sender(needs[0]):      # the default would be the front agent that filed or relayed the item (the first session in needs): the builder takes it after his answer, the front agent stays in needs
+    if b and needs and _telling.front_sender(needs[0]) and not (meta and _telling.own_step(meta, needs[0], past_his=True)):      # the default would be the front agent that filed or relayed the item (the first session in needs): the builder takes it after his answer, the front agent stays in needs
         return b
     return ""
 
@@ -184,7 +186,7 @@ def _owner_then_default(item_was: dict[str, Any] | None, meta: dict[str, Any], s
             wm = _item_read._model_of({**item_was, "gid": ""})
             before = wm.mover if wm.state == _model.ALIVE else ""
         project = str(meta.get("project") or "")
-        who = _owner_then(project, before, sender, str(meta.get("next") or ""), _needs_sessions(meta))
+        who = _owner_then(project, before, sender, str(meta.get("next") or ""), _needs_sessions(meta), meta)
     except Exception as e:  # noqa: BLE001  — a default is never worth failing a write
         print(f"model: then default not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""
@@ -215,7 +217,7 @@ def _owner_state_mover(item_now: dict[str, Any], meta: dict[str, Any], named: bo
         return ""
     mover_s, h = _model.norm_who(meta.get("mover")), _model.owner_display()
     if ch.get("mover") == h and not _model.norm_who(meta.get("then")) and ch.get("then") == mover_s and not _holders._is_background(mover_s, str(meta.get("project") or "")):
-        better = _owner_then(str(meta.get("project") or ""), mover_s, "", str(meta.get("next") or ""), _needs_sessions(meta))      # D9: a front agent that relayed the ask is not its then when a builder does the work
+        better = _owner_then(str(meta.get("project") or ""), mover_s, "", str(meta.get("next") or ""), _needs_sessions(meta), meta)      # D9: a front agent that relayed the ask is not its then when a builder does the work
         if better:
             ch = {**ch, "then": better}
     then_before = _model.norm_who(meta.get("then"))

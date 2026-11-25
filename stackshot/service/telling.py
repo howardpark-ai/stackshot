@@ -472,6 +472,14 @@ def own_step(meta: dict[str, Any], who: str, past_his: bool = False) -> bool:
     return any((nm := _steps.opener(t)) and _anc.same_session(nm, who) for t in named[:1] + [meta.get("ask")])
 
 
+def step_holder(meta: dict[str, Any], past_his: bool = True) -> str:
+    """The name that opens the item's first open named step (a step with no `<name>:` opener is skipped; `past_his`: the owner's own open lines are not counted, as in own_step), "" when there is none. The ask is not read."""
+    for s in _steps.view(meta):
+        if s["status"] == _steps.OPEN and _steps.opener(s["text"]) and not (past_his and _steps.is_his(s["text"], unnamed_is_his=False)):
+            return str(_steps.opener(s["text"]))
+    return ""
+
+
 def _own_named(gid: str, item: "dict[str, Any] | None", who: str) -> bool:
     """Is the item's first open named step, or its ask, `who`'s own (`own_step`)? An item that cannot be read is not shown to be."""
     try:

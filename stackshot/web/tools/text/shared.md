@@ -344,8 +344,7 @@ a machine the fleet does not know; an item waiting on a date for an offline mach
 Who moves the item now: {{OWNER}}, a session name or id, or the project's background agent. On an item that waits it
 is who takes the item when the wait ends. A front agent (a session
 {{OWNER}} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets
-mover=<front agent> gets the project's builder instead (the reply and History say so; send it again to keep it, or, on an
-update, name the front agent that holds the item's first open named step: it is kept as sent at once;
+mover=<front agent> gets the project's builder instead (the reply and History say so; send it again to keep it;
 with no builder it is refused, except from a listed session to a front agent of the item's own project: mover= tells it,
 the others leave it to the answer or the wake). A front agent of the item's project may
 hand it to a sibling front agent on {{OWNER}}'s words: said=[Acked-by …] keeps the sibling in mover, then,

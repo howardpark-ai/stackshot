@@ -98,6 +98,18 @@ def _builder_for_front(who: str, meta: dict[str, Any]) -> str:
         return ""
 
 
+def _front_step_holder(meta: dict[str, Any]) -> str:
+    """The front agent that holds the item's first open named step (past the owner's own lines) when the project's live builder would otherwise take the item after his answer; "" in every other case (no such step, the
+    holder is no front agent, the project has no builder or a dead one). The one his answer is to reach when the item names no session at all (needs is the decision alone, no `then`): the default would hand it to the builder."""
+    try:
+        who = _telling.step_holder(meta, past_his=True)
+        b = _telling.no_front(who, str(meta.get("project") or "")) if who else ""      # no_front answers `who` itself for a session that is no front agent, and the builder for one that is
+        return who if b and b != who and _then_live(b, meta) else ""
+    except Exception as e:  # noqa: BLE001  — an extra: a failed read leaves the default
+        print(f"answer: step holder of {meta.get('project')} not read ({e.__class__.__name__}: {e}); the default stands", file=sys.stderr, flush=True)
+        return ""
+
+
 def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parked: bool = False, waiting: bool = False, now: float = 0.0) -> str:
     """His decision is in (decision already out of needs, your-call ended): the item leaves his hands, as a Done does on a step. With a stored `then` (a session, not he) the
     item goes to it at once (_hand_to_mover: mover = then, `then` cleared, named first in needs).
@@ -147,6 +159,9 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
         _hand_to_mover(meta, then)
         return then
     sess = _needs_sessions(meta)
+    if not sess and (holder := _front_step_holder(meta)):      # needs names no session (the decision alone) and no `then`: the default would be the builder, but the front agent that holds the item's first open named step is the one to act on his answer
+        _hand_to_mover(meta, holder)
+        return holder
     builder = _builder_for_front(sess[0] if sess else "", meta)      # no stored `then`: the default is the first session in needs, and a front agent that filed or relayed the item is not who builds after his answer
     if builder:
         _hand_to_mover(meta, builder)      # the builder moves it; the front agent stays named in needs and hears of it at its next turn
