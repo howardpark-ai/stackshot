@@ -9,7 +9,7 @@ age. The body is one JSON object:
 
 Limits (a body that breaks one is refused whole with 400 and one line of reason; nothing is clipped): `schema` is the JSON number 1; `written` is a finite epoch in seconds, not before 2020 and not more than `AHEAD_S` ahead
 of the server's clock; `machines` at most `MACHINES_MAX` objects, no two with the same `name` once cleaned and case-folded; `name` is required text of 1 to `NAME_MAX` characters once cleaned, and so is `hostname` when it is
-not null: each holds at least one letter, digit, punctuation mark or symbol (a name of combining marks or spaces alone would draw as nothing); `letter` and `ssh` are text of at most `TEXT_MAX` characters or null (or left out);
+not empty or null: each holds at least one letter, digit, punctuation mark or symbol (a name of combining marks or spaces alone would draw as nothing; a `hostname` that is blank (empty, white space or control and format characters only) is stored as "", as a retired machine has none); `letter` and `ssh` are text of at most `TEXT_MAX` characters or null (or left out);
 `addresses` at most `ADDRESSES_MAX` texts of at most `ADDRESS_MAX` characters (they are kept as text and not parsed as addresses); `roles` at most `ROLES_MAX` entries, each one of `ROLES`; `retired` is required and
 true or false; `sources` at most `SOURCES_MAX` texts of at most `TEXT_MAX` characters; `not_read` at most `NOT_READ_MAX` texts of at most `TEXT_MAX` characters. A text is cleaned before it is counted and kept:
 every control and format character (and the characters that draw as nothing) is taken out and runs of white space become one space. A key this module does not know is ignored and never stored. A body is read to at most `MAX_BYTES` bytes; the route
@@ -102,9 +102,14 @@ def _draws(t: str) -> bool:
     return any(unicodedata.category(ch)[0] in "LNPS" for ch in t)
 
 
+def _is_blank(v: str) -> bool:
+    """Is the raw text empty, white space or control and format characters only (what a sender means by "no value")? A filler that draws as nothing (`_BLANK_LOOKING`) is no blank: `_clean` takes it out, but it was sent as a value."""
+    return all(ch.isspace() or unicodedata.category(ch)[0] == "C" for ch in v)
+
+
 def _text(v: Any, cap: int, what: str, *, null: bool = False, need: bool = False, draws: bool = False) -> tuple[str | None, str]:
     """(the cleaned text, "") or (None, why it is refused). `null`: None (or a missing key, which the caller passes as None) is allowed and answers (None, ""). `need`: the text must not be empty once cleaned.
-    `draws`: the text must hold a character that draws something (`_draws`), which also rules out an empty one."""
+    `draws`: a text that is not blank (empty, white space, or control and format characters only: `_is_blank`) must hold a character that draws something (`_draws`); a blank one is allowed and stays "" (add `need` to refuse it)."""
     if v is None and null:
         return None, ""
     t = _clean(v)
@@ -114,7 +119,7 @@ def _text(v: Any, cap: int, what: str, *, null: bool = False, need: bool = False
         return None, f"{what} is at most {cap} characters"
     if need and not t:
         return None, f"{what} is text of 1 to {cap} characters"
-    if draws and not _draws(t):
+    if draws and not _is_blank(v) and not _draws(t):
         return None, f"{what} needs a letter, digit, punctuation mark or symbol (combining marks and spaces alone draw as nothing)"
     return t, ""
 

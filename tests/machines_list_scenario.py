@@ -15,7 +15,7 @@ validates it strictly, keeps the last good one in one file in the state folder a
      300 s older or the same time or newer replaces; a run of posts each a little older than the last cannot walk the list back (five posts newest first, over the service and over HTTP); a file without `high` counts its
      own `written`; a stored time or mark far ahead of the clock, or an unreadable file, holds nothing out and the next write corrects the mark; the ahead limit is exactly 60 s; a refused body is still 400, old and new
      posts at once leave the newest
-  7  names that draw as nothing (combining marks, spaces, and each of U+FFA0, U+115F, U+1160, U+3164 and U+2800 alone, in `name` and `hostname`) are refused with one line; letters with marks, one symbol or one digit are kept; two machines of one name once cleaned and case-folded are refused
+  7  names that draw as nothing (combining marks, spaces, and each of U+FFA0, U+115F, U+1160, U+3164 and U+2800 alone, in `name` and `hostname`) are refused with one line (an EMPTY `hostname`, one of spaces or of invisible characters alone is no refusal: it is stored as "", as a retired machine has none; `name` stays required); letters with marks, one symbol or one digit are kept; two machines of one name once cleaned and case-folded are refused
   8  durability: the temporary file is flushed, then renamed, then the folder is flushed; a folder that cannot be flushed is no failure, a file that cannot be flushed is a failed write (503)
   9  `last_machines()` never blocks and never reads without a bound: a pipe at the path (with a timeout), a file over the bound (by its size and by a size that lied), a link and a folder read as None; a file at the bound reads
  10  over HTTP: no token 401, a wrong token 401, a machine token stores (200), a LIVE pass is exactly 403, a refused body 400 with one reason for each of: text that is no JSON, JSON that is no object, a nesting too deep, too many
@@ -114,7 +114,7 @@ bad = {
     "no name": good([{"retired": False}]), "a name that is a number": good([mach(5)]), "an empty name": good([mach("")]), "a blank name": good([mach("   ")]), "a control-only name": good([mach("\x00\x07\x1b")]),
     "a name of 81 characters": good([mach("n" * 81)]),
     "a name of combining marks": good([mach("\u0301\u0302")]), "a name of a mark and spaces": good([mach(" \u0301 \u0300 ")]), "a name of a variation selector": good([mach("\ufe0f")]), "a name of combining marks and invisible characters": good([mach("\u0301\u200b\u3164")]),
-    "a hostname of combining marks": good([mach(hostname="\u0301\u0302")]), "a hostname that is empty": good([mach(hostname="")]), "a hostname of spaces": good([mach(hostname="   ")]),
+    "a hostname of combining marks": good([mach(hostname="\u0301\u0302")]),
     "two machines of one name": good([mach("box"), mach("other"), mach("box")]), "two names that differ in case": good([mach("Box"), mach("bOX")]), "two names that differ in spaces and invisible characters": good([mach("a b"), mach(" a\u200b  b ")]),
     "two names that fold to one": good([mach("Stra\u00dfe"), mach("STRASSE")]), "a name that is a list": good([mach(["a"])]),
     "a hostname of 201": good([mach(hostname="h" * 201)]), "a hostname that is a number": good([mach(hostname=5)]), "a letter of 201": good([mach(letter="l" * 201)]), "a letter that is a list": good([mach(letter=["a"])]),
@@ -358,6 +358,24 @@ st, out = SVC.post("box-far", good([mach(chr(0xFFA0) + "x" + chr(0x115F) + chr(0
 check("7 \u2026and a name with a letter among them is stored with those characters taken out", st == 200 and SVC.last_machines()[0]["machines"][0]["name"] == "x", (st, out))
 st, out = SVC.post("box-far", good([mach("ok"), mach("fine", hostname="\u0301")]))
 check("7 a hostname of combining marks alone is refused, naming machines[1].hostname", st == 400 and one_line(out["error"]) and out["error"].startswith("machines[1].hostname"), (st, out))
+# a retired machine has no hostname and no ssh: the sender posts "" for both, and one empty hostname must not refuse the list
+for label, hv in (("an empty string", ""), ("spaces", "   "), ("a tab and a newline", "\t\n"), ("zero-width characters alone", "\u200b\u200d\ufeff"), ("a control character alone", "\x00")):
+    st, out = SVC.post("box-far", good([mach("ok"), mach("gone", hostname=hv)]))
+    check(f"7 a hostname of {label} is accepted and stored as an empty string", st == 200 and SVC.last_machines()[0]["machines"][1]["hostname"] == "", (st, out))
+for label, hv in (("a lone combining mark", "\u0301"), ("a Hangul filler", "\u3164"), ("a filler among zero-width characters", "\u200b\u3164")):
+    st, out = SVC.post("box-far", good([mach("ok"), mach("gone", hostname=hv)]))
+    check(f"7 a hostname of {label} is still refused, naming machines[1].hostname", st == 400 and one_line(out["error"]) and out["error"].startswith("machines[1].hostname") and "letter, digit, punctuation mark or symbol" in out["error"], (st, out))
+st, out = SVC.post("box-far", good([mach("ok"), mach("gone", ssh="", letter="")]))
+m1 = (SVC.last_machines() or ({"machines": [{}, {}]},))[0]["machines"][1]
+check("7 an empty `ssh` and an empty `letter` are accepted and stored as empty strings", st == 200 and m1.get("ssh") == "" and m1.get("letter") == "", (st, out, m1))
+for label, nv in (("an empty name", ""), ("a name of spaces", "   ")):
+    st, out = SVC.post("box-far", good([mach("ok"), mach(nv, hostname="")]))
+    check(f"7 {label} is still refused with a hostname of \"\" beside it", st == 400 and one_line(out["error"]) and out["error"].startswith("machines[1].name"), (st, out))
+five = [mach("m0"), mach("m1"), mach("m2"), mach("m3"), mach("retired-box", hostname="", ssh="", letter=None, addresses=[], roles=[], retired=True, sources=[])]
+st, out = SVC.post("box-far", good(five))
+lm = SVC.last_machines()
+check("7 a retired machine with hostname \"\" and ssh \"\" in a list of five is accepted and read back by last_machines()",
+      st == 200 and out == {"ok": True, "machines": 5} and lm is not None and len(lm[0]["machines"]) == 5 and lm[0]["machines"][4]["name"] == "retired-box" and lm[0]["machines"][4]["hostname"] == "" and lm[0]["machines"][4]["ssh"] == "" and lm[0]["machines"][4]["retired"] is True, (st, out, lm))
 st, out = SVC.post("box-far", good([mach("ok"), mach("two"), mach("OK")]))
 check("7 a repeated name is refused with one line naming both positions", st == 400 and one_line(out["error"]) and "machines[2].name" in out["error"] and "machines[0].name" in out["error"], (st, out))
 st, out = SVC.post("box-far", good([mach("x", letter=None, ssh=None, hostname=None), mach("y", letter="\u0301", ssh="\u0301")]))
