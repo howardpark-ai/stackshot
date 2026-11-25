@@ -490,6 +490,22 @@ async def main():
     await cached.health("a", force=True); n2 = len([r for r in RECORDS if r["backend"] == "a" and r["path"] == "/healthz"])
     check("health: an answer is reused inside health_cache_seconds (one GET for two checks) and a forced check asks again", (n1 - n0, n2 - n1) == (1, 1), (n0, n1, n2))
 
+    # a backend that answers its health URL with a 5xx is reachable and not healthy: it is down for the front door
+    import dataclasses, http.server, threading
+    class Sick(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(503); self.send_header("Content-Length", "0"); self.end_headers()
+        def log_message(self, *a): pass
+    sick = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Sick)
+    threading.Thread(target=sick.serve_forever, daemon=True).start()
+    try:
+        st0 = fc.parse(front_cfg(servers))[0]
+        st1 = dataclasses.replace(st0, backends=tuple(dataclasses.replace(b, health_url=f"http://127.0.0.1:{sick.server_address[1]}/healthz") if b.name == "a" else b for b in st0.backends))
+        h = await Backends(st1).health("a")
+        check("health: a backend that answers its health URL with 503 is not ok, and the status is reported", h["ok"] is False and h["status"] == 503, h)
+    finally:
+        sick.shutdown(); sick.server_close()
+
     # ---- 8. streaming: progress and log events reach the client while the call runs
     ev, logs = [], []
     async def prog(progress, total, message): ev.append(time.monotonic() - t0)
