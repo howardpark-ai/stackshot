@@ -51,6 +51,9 @@ project with another id, or a page key (its page, a former key or its id row) th
     --store DIR  --brain DIR  --state DIR     read and write those instead of the instance's: a COPY of the store and the pages for a dry run or a rehearsal (--state keeps the lock and
                                               temp files out of the live state dir). move-page does not run rename_page.py under these options, which read the instance's own config.
 
+Every verb, a dry run and `show` included, runs only on the server box: the record lives there, and a copy on another box can be far behind it (a dry run plans from old state, an --apply writes it over the live record). Off the server box
+(a box whose config names another server host: [release] deploy_ssh, or [server] box = false) it is refused (exit 1) with the ssh form that runs it there; `--store DIR`, a copy named on purpose, is the one way to run it elsewhere.
+
 Exit 0 done (or nothing to do) · 1 refused or not done, the reason on stderr · 2 wrong arguments. A mirror that failed is exit 0 with the failure on stderr and in the answer: the record is right."""
 from __future__ import annotations
 import os as _os, sys as _sys
@@ -217,6 +220,11 @@ def main(argv: list[str]) -> int:
             print(f"project restore: {bad}", file=sys.stderr)
             return 2
     from stackshot.core import config as _cfg
+    if not a.store:                          # a copy named with --store is a rehearsal on purpose; the instance's own record is read and written only where it lives
+        why = _cfg.record_host_refusal("python3 ~/stackshot/stackshot/tools/project.py", argv)
+        if why:
+            print(f"project {a.cmd}: {why}", file=sys.stderr)
+            return 1
     for key, val in (("store", a.store), ("brain", a.brain), ("state", a.state)):
         if val:
             _cfg.CFG.setdefault("paths", {})[key] = str(Path(val).expanduser())

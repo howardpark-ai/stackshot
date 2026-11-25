@@ -353,6 +353,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--by", default=BY, help="who the written agents entries name")
     ap.add_argument("--json", action="store_true", help="the structured answer")
     a = ap.parse_args(argv)
+    from stackshot.core import config as _cfg
+    why = _cfg.record_host_refusal("~/stackshot/bin/stackshot keeper-mark", sys.argv[1:] if argv is None else argv)      # the record lives on the server box: a copy elsewhere may be far behind it
+    if why:
+        print("keeper-mark: " + why, file=sys.stderr)
+        return 1
     from stackshot.anchors import anchors as anc
     try:
         res = run(apply_=a.apply, accept=tuple(a.accept_role_loss), live=anc.sala_live(), by=a.by, run_dir=a.run_dir or None)
