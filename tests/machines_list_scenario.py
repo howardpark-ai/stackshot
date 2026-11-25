@@ -25,7 +25,7 @@ validates it strictly, keeps the last good one in one file in the state folder a
  11  no secret: the machine token appears in no answer and not in the stored file
 
     tests/run-suite machines_list       -> exit 0 / 1"""
-import json, os, re, sys, pathlib, time, logging, stat as _stat, threading
+import json, os, re, sys, pathlib, time, logging, random, stat as _stat, threading
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="machineslist-"); T = pathlib.Path(tmp)
@@ -601,6 +601,78 @@ with TestClient(app) as c:
     check("10 brackets and digits inside strings are not counted (an escaped quote does not end a string), nor are lists that close before the next opens: the body is stored (200)",
           rr[0] == 200 and SVC.last_machines()[0]["machines"][0]["name"] == '"' + "[" * 70 and SVC.last_machines()[0]["machines"][1]["hostname"] == "[" * 70, (rr, SVC.last_machines()))
     SVC.post("box-far", good([mach("keeper")])); keep = stored()
+    # ---- an unterminated string is no JSON, and what is inside it is never counted: brackets and digits in it do not give the nesting or digits reason
+    for label, body_ in (("100 brackets", b'{"a": "' + b"[" * 100), ("100 digits", b'{"a": "' + b"1" * 100), ("70 braces and a lone backslash at the end", b'{"a": "' + b"{" * 70 + b"\\"), ("escaped quotes only", b'{"a": "' + b'\\"' * 100)):
+        check(f"10 an unterminated string holding {label} is `the body is not valid JSON`, never the nesting or digits reason", reason(content=body_, headers=JH) == (400, "the body is not valid JSON") and stored() == keep, reason(content=body_, headers=JH))
+    # ---- text that is not UTF-8 is no JSON here: the scan reads bytes, so a body the parser would detect as UTF-16 or UTF-32 must not slip past it
+    lst_json = json.dumps(good([mach("wide")], written=time.time() - 3))
+    for label, enc in (("UTF-16LE", "utf-16-le"), ("UTF-16BE", "utf-16-be"), ("UTF-16 with a BOM", "utf-16"), ("UTF-32LE", "utf-32-le"), ("UTF-32 with a BOM", "utf-32")):
+        rr = reason(content=lst_json.encode(enc), headers=JH)
+        check(f"10 a list written as {label} is refused: 400 `the body is not valid JSON`, the old list stays", rr == (400, "the body is not valid JSON") and stored() == keep, rr)
+    rr = reason(content=lst_json.encode("utf-8"), headers=JH)
+    check("10 …the same list as UTF-8 is stored (200)", rr[0] == 200, rr)
+    SVC.post("box-far", good([mach("keeper")])); keep = stored()
+    rr = reason(content=b'{"schema": 1,\x00 "machines": []}', headers=JH)
+    check("10 a NUL byte in the body is refused as no JSON", rr == (400, "the body is not valid JSON") and stored() == keep, rr)
+    rr = reason(content=b"\xef\xbb\xbf" + lst_json.encode("utf-8"), headers=JH)
+    check("10 a UTF-8 byte order mark before the list is read as before (200)", rr[0] == 200, rr)
+    SVC.post("box-far", good([mach("keeper")])); keep = stored()
+    # ---- the scan takes time in proportion to the body, whatever its shape: nothing here may back up and retry (an unterminated string of escaped quotes once cost time that grew with the square of the body)
+    SCAN = client_api._too_deep_or_long
+    SHAPES_ = {
+        "an unterminated string of escaped quotes": lambda n: b'"' + b'\\"' * (n // 2),
+        "escaped quotes with no opening quote": lambda n: b'\\"' * (n // 2),
+        "an unterminated value of escaped quotes": lambda n: b'{"a":"' + b'\\"' * (n // 2),
+        "quotes alone": lambda n: b'"' * n, "backslashes alone": lambda n: b"\\" * n, "quote and bracket pairs": lambda n: b'["' * (n // 2),
+        "an unterminated string of brackets": lambda n: b'{"a":"' + b"[" * n, "empty strings": lambda n: b'"" ' * (n // 3),
+        "runs of 64 digits": lambda n: (b"1" * 64 + b"a") * (n // 65), "bracket pairs": lambda n: b"[]" * (n // 2), "open brackets": lambda n: b"[" * n,
+    }
+    def best_(raw, tries=3):
+        best = 1e9
+        for _ in range(tries):
+            t0 = time.perf_counter(); SCAN(raw); best = min(best, time.perf_counter() - t0)
+            if best > 0.3: break      # far too slow already: no need to measure it again
+        return best
+    grow_ = {}
+    for nm_, mk_ in SHAPES_.items():
+        t1_, t2_ = best_(mk_(20_000)), best_(mk_(80_000)); grow_[nm_] = (round(t1_, 4), round(t2_, 4))
+    slow_ = {k: v for k, v in grow_.items() if not v[1] < max(8 * v[0], 0.05)}
+    check("10 the scan grows in step with the body: for every shape, 4 times the size takes less than 8 times the time (or under 50 ms)", not slow_, slow_)
+    if not slow_:
+        big_ = {nm_: round(best_(mk_(1_000_000), 2), 3) for nm_, mk_ in SHAPES_.items()}
+        check("10 a body of 1,000,000 bytes of any of these shapes is scanned in under 1 second (about 0.05 s on a quiet machine)", all(v < 1.0 for v in big_.values()), big_)
+    else:
+        check("10 a body of 1,000,000 bytes of any of these shapes is scanned in under 1 second", False, "not measured: the scan does not grow in step with the body")
+    if not slow_:      # (a scan that is not linear would take minutes here)
+        t0_ = time.perf_counter(); rr = reason(content=b'"' + b'\\"' * 499_999, headers=JH); took_ = time.perf_counter() - t0_
+        check("10 over HTTP a body of 999,999 bytes that is one unterminated string of escaped quotes is answered 400 `not valid JSON` in under 2 seconds", rr == (400, "the body is not valid JSON") and took_ < 2.0, (rr, round(took_, 3)))
+    else:
+        check("10 over HTTP a body of 999,999 bytes that is one unterminated string of escaped quotes is answered 400 in under 2 seconds", False, "not measured: the scan does not grow in step with the body")
+    for label, body_ in (("a backslash and a line feed inside a string (the escape takes any character)", b'{"a": "\\\n' + b"[" * 100 + b'"}'), ("digits on both sides of a string (the string keeps them apart)", b'{"a": ' + b"1" * 40 + b'"x"' + b"1" * 40 + b"}"),
+                         ("a byte order mark of UTF-16 and no NUL byte", b"\xff\xfe" + b"[" * 100)):
+        rr = reason(content=body_, headers=JH)
+        check(f"10 {label}: `the body is not valid JSON`", rr == (400, "the body is not valid JSON"), rr)
+    # the scan agrees with a plain loop over the bytes on random bodies made of the characters that matter (strings and escapes, brackets, digits)
+    def plain_(raw):
+        depth = top = run = 0; in_str = esc = digits = False
+        for c in raw:
+            if in_str:
+                if esc: esc = False
+                elif c == 92: esc = True
+                elif c == 34: in_str = False
+                continue
+            if c == 34: in_str = True; run = 0
+            elif c in b"[{": depth += 1; top = max(top, depth); run = 0
+            elif c in b"]}": depth -= 1; run = 0
+            elif 48 <= c <= 57:
+                run += 1; digits = digits or run > client_api._DIGITS_MAX
+            else: run = 0
+        return client_api._NEST_REASON if top > client_api._NEST_MAX else (client_api._DIGITS_REASON if digits else "")
+    rnd_ = random.Random(20260601); diffs_ = []
+    for _ in range(4000):
+        raw_ = "".join(rnd_.choice('"\\[]{}12a \n') * rnd_.choice([1, 1, 2, 5, 30, 70, 90]) for _ in range(rnd_.randint(1, 12))).encode()
+        if SCAN(raw_) != plain_(raw_): diffs_.append(raw_[:60])
+    check("10 …on 4000 random bodies the scan gives the answer a plain loop over the bytes gives", not diffs_, diffs_[:3])
     for label, txt in (("1.0", b"1.0"), ("true", b"true"), ("1e0", b"1e0"), ('"1"', b'"1"')):
         r = post(content=b'{"schema": ' + txt + b', "written": ' + str(time.time() - 30).encode() + b', "machines": [{"name": "s", "retired": false}]}', headers=JH)
         check(f"10 a schema written as {txt.decode()} is not the JSON number 1: 400 naming schema, the old list stays", r.status_code == 400 and r.json()["error"].startswith("schema = 1") and stored() == keep, (r.status_code, r.text[:160]))

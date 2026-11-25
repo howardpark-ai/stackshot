@@ -55,7 +55,7 @@ NUMBER_MAX = 1e12           # a time past this, or not finite, is no time; conve
 STALE_TMP_S = 3600.0        # a leftover temporary file older than this is removed by the next write
 _BLANK_LOOKING = frozenset(map(chr, (0x3164, 0x115F, 0x1160, 0x2800, 0xFFA0)))      # the Hangul fillers and the braille blank: they draw as nothing
 _TMP = re.compile(r"^\.machines-list\.json\.\d+\.\d+\.tmp$")      # the name `_write` gives its temporary file, and no other
-_LOCK = threading.Lock()
+_LOCK = threading.Lock()      # per process: it makes the read of the mark and the replacement of the file one step among this process's threads; two server processes on one state folder would not share it
 
 
 NOT_OBJECT = "the body is a JSON object, not a list, text, number, true, false or null"
@@ -251,8 +251,8 @@ def _write(rec: dict[str, Any]) -> None:
 
 
 def post(machine: str, body: Any) -> tuple[int, dict[str, Any]]:
-    """`POST /client/machines` -> (status, JSON): 200 `{ok, machines}` when the list replaced the last one, 200 `{ok, kept: "newer"}` when the stored list's `written` is more than `NEWER_S` newer than this one's (the
-    stored list stays), 400 `{error}` for a body it refuses (the last list stays), 503 on a standby copy or a file that cannot be written. `machine` is the one the token proved; it is stored as `posted_by`."""
+    """`POST /client/machines` -> (status, JSON): 200 `{ok, machines}` when the list replaced the last one, 200 `{ok, kept: "newer"}` when the high-water mark (the highest `written` ever accepted) is more than `NEWER_S` newer than this one's (the
+    stored list stays; a post with a fresh `written` is always accepted, an unchanged re-post of an old list is kept out until its `written` is newer than the mark minus `NEWER_S`), 400 `{error}` for a body it refuses (the last list stays), 503 on a standby copy or a file that cannot be written. `machine` is the one the token proved; it is stored as `posted_by`."""
     if _ro.is_read_only():
         return 503, {"error": _ro.REFUSAL}
     lst, why = validate(body)
