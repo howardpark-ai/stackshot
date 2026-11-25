@@ -222,8 +222,7 @@ def is_held(r):
     wake an item still carries with no hold and no until (a hand-off's backstop, or one stored before until) is no wait and leaves it in its lane."""
     st = str(r.get("status") or "")
     m = r.get("metadata") or {}
-    date_wait = bool(_wt.stored_until(m)) and _wt.kind_of(m) == "time"        # a wait on a date alone (an until with no kind, or the kind time): parked like the hold with a wake it replaces
-    return (st == "on_hold" or (st == "open" and (bool(m.get("hold")) or date_wait))) and needs_kind(r) != "call"
+    return (st == "on_hold" and needs_kind(r) != "call") or _wt.is_parked(r)        # the retired status on_hold here; the hold flag and a wait on a date alone (an until with no kind, or the kind time) are waiting.is_parked, the one definition
 def _when_of(v):
     v = str(v or "").strip().replace(" ", "T")
     try:

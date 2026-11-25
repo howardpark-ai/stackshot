@@ -126,7 +126,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, front: Callable[
     if item.get("status") != "open":
         return None
     it, meta, after_open, mover = _ac._item_view(items, gid)
-    if not mover or _model.is_owner(mover) or not _silence.reading(it, mover, after_open, now, (queue or {}).get(gid, "")) or _wt.is_held(it):
+    if not mover or _model.is_owner(mover) or not _silence.reading(it, mover, after_open, now, (queue or {}).get(gid, "")) or _wt.is_parked(it):
         return None      # not on an agent as the board shows it (a hold, a park, a stored wait, the owner's or an outsider's move)
     clock = _silence.clock(it, mover)
     if not clock > 0:

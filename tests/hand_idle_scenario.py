@@ -322,7 +322,7 @@ def probe_wait_skipped():
 rule("4 a waiting item (the board shows it waiting) is skipped", probe_wait_skipped, [(SL, "reading", lambda *a, **k: "agent")])
 def probe_held_skipped():
     wipe(); on(); panes["team-back"] = "idle"; put(1, act=90, hold=True); return tick() == [] and mover_of(1) == "home-peer" and sent == []
-rule("4 an item on hold is skipped", probe_held_skipped, [(HI._wt, "is_held", lambda it: False), (SL, "reading", lambda *a, **k: "agent")])
+rule("4 an item on hold is skipped", probe_held_skipped, [(HI._wt, "is_parked", lambda it: False), (SL, "reading", lambda *a, **k: "agent")])
 def probe_untaken():
     wipe(); on(); panes["team-back"] = "idle"; put(1, act=90, **{HO.KEY: HO.new_record("home-peer", "", "team-aux", now0 - 90 * MIN)}); return tick() == [] and mover_of(1) == "home-peer" and sent == []
 rule("4 an untaken hand-off is left to the hand-off audit", probe_untaken, [(HO, "awaiting_session", lambda it: False)])
