@@ -12,7 +12,7 @@ backend that is down (a warning, a call error, none answered, /healthz 503); the
 a backend that accepts a connection and never answers (every wait is bounded); a board tool with a `board` property of its own; a member removed on an open session;
 the composed instructions; the entry point as a subprocess. Every server and the temp folder are removed at the end, pass or fail.
 """
-import asyncio, base64, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.error, urllib.request
+import asyncio, base64, gc, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.error, urllib.request, warnings
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 sys.path.insert(0, SCR); sys.path.insert(0, STACK)
 import _scratch
@@ -120,6 +120,50 @@ class Drip(Hang):
     def stop(self):
         super().stop()
         for t in self.drippers: t.join(5)
+
+class Catch(Hang):
+    """A listener that records the request bytes each connection sends (up to the blank line) in .requests and answers 200 with no body."""
+    def __init__(self):
+        super().__init__(); self.requests = []
+    def _run(self):
+        self.sock.settimeout(0.2)
+        while not self.stopping:
+            try: c, _ = self.sock.accept()
+            except socket.timeout: continue
+            except OSError: return
+            self.conns.append(c); c.settimeout(2)
+            try:
+                got = b""
+                while b"\r\n\r\n" not in got:
+                    d = c.recv(4096)
+                    if not d: break
+                    got += d
+                self.requests.append(got)
+                c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            except OSError: pass
+
+class Flood(Hang):
+    """A listener that answers with `total` bytes of one letter and no newline, then holds the connection open."""
+    def __init__(self, total):
+        super().__init__(); self.total = total; self.flooders = []
+    def _run(self):
+        self.sock.settimeout(0.2)
+        while not self.stopping:
+            try: c, _ = self.sock.accept()
+            except socket.timeout: continue
+            except OSError: return
+            self.conns.append(c); t = threading.Thread(target=self._flood, args=(c,), daemon=True); self.flooders.append(t); t.start()
+    def _flood(self, c):
+        c.settimeout(0.5); sent = 0
+        while not self.stopping:
+            try:
+                if sent < self.total: sent += c.send(b"a" * min(16384, self.total - sent))
+                else: time.sleep(0.1)
+            except socket.timeout: continue
+            except OSError: return
+    def stop(self):
+        super().stop()
+        for t in self.flooders: t.join(5)
 
 SERVERS = []
 RECORDS = []              # one row per request that reached a stand-in's door
@@ -707,6 +751,8 @@ async def main():
     junk = Drip(prefix=b"this is not http\r\n", gap=0.3).start()
     other = Drip(prefix=b"FTP/1.1 200 OK\r\n", gap=0.3).start()
     nonum = Drip(prefix=b"HTTP/1.1 abc OK\r\n", gap=0.3).start()
+    cap, flood70, flood = Catch().start(), Flood(70_000).start(), Flood(4_000_000).start()
+    LISTENERS = (slow_hang, drip, xslow, redirect, junk, other, nonum, cap, flood70, flood)
     dfront = None
     try:
         async def gstatus(url, guard=8):
@@ -727,13 +773,38 @@ async def main():
         st, dt = await gstatus(nonum.url + "/healthz")
         check("health GET: an HTTP status line with no number is an error", st == "OSError: not an HTTP answer", st)
         st, dt = await gstatus(drip.url + "/healthz")
-        check(f"health GET: a first line that never ends gives up at the deadline ({dt:.2f} s), as a timeout, not at the guard", st.startswith("TimeoutError") and LIMIT <= dt < LIMIT + 1.0, (st, dt))
+        check(f"health GET: a first line that never ends gives up at the deadline ({dt:.2f} s), as a timeout, not at the guard", str(st).startswith("TimeoutError") and LIMIT <= dt < LIMIT + 1.0, (st, dt))
         st, dt = await gstatus(slow_hang.url + "/healthz")
-        check(f"health GET: a backend that accepts and says nothing gives up at the deadline too ({dt:.2f} s)", st.startswith("TimeoutError") and LIMIT <= dt < LIMIT + 1.0, (st, dt))
+        check(f"health GET: a backend that accepts and says nothing gives up at the deadline too ({dt:.2f} s)", str(st).startswith("TimeoutError") and LIMIT <= dt < LIMIT + 1.0, (st, dt))
+        def nfds(): return len(os.listdir("/proc/self/fd"))
+        f0, c0 = nfds(), len(slow_hang.conns)
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always")
+            for _ in range(8):
+                try: await fdback._status_of(slow_hang.url + "/healthz", 0.2)
+                except TimeoutError: pass
+            await asyncio.sleep(0.5)              # the loop runs the closes
+            gc.collect()                          # a transport nobody closed says so when it is collected: a ResourceWarning
+        grown = (nfds() - f0) - (len(slow_hang.conns) - c0)           # the stand-in's own side of each connection lives in this process too: not counted
+        unclosed = [str(w.message)[:80] for w in seen if issubclass(w.category, ResourceWarning)]
+        check(f"health GET: eight checks that time out leave no socket open ({grown} more descriptors than before) and no transport for the collector to close ({len(unclosed)} warnings)", grown <= 1 and not unclosed, (grown, unclosed[:2]))
+        st, dt = await gstatus(cap.url + "/healthz?probe=1")
+        req = (cap.requests[-1] if cap.requests else b"").decode("latin-1").split("\r\n")
+        names_sent = sorted(l.split(":", 1)[0].lower() for l in req[1:] if ":" in l)
+        check("health GET: the request is a GET of the path and query with only Host, Accept and Connection (no credential, no identity)",
+              st == 200 and req[0] == "GET /healthz?probe=1 HTTP/1.1" and names_sent == ["accept", "connection", "host"], (st, req))
+        st, dt = await gstatus(flood70.url + "/healthz")
+        check(f"health GET: a status line of 70,000 bytes with no newline is over the 64 KiB cap and reads as down at once ({dt:.2f} s)", str(st).startswith("ValueError") and dt < LIMIT, (st, dt))
+        import tracemalloc
+        tracemalloc.start(); st, dt = await gstatus(flood.url + "/healthz"); peak = tracemalloc.get_traced_memory()[1]; tracemalloc.stop()
+        check(f"health GET: 4 MB with no newline is an error and not a wait for the end of it ({dt:.2f} s)", str(st).startswith("ValueError") and dt < LIMIT, (st, dt))
+        check(f"health GET: and memory does not grow with it (peak {peak // 1024} KiB, under 2 MiB)", peak < 2 * 1024 * 1024, peak)
 
         dstate = {"name": "d", "kind": "board", "url": slow_hang.url + "/mcp", "health_url": drip.url + "/healthz", "token_file": board_tok_file["b"]}
-        dcfg = lambda: front_cfg(servers, backend_timeout_seconds=LIMIT, backends=[
-            {"name": "a", "kind": "board", "url": servers["a"].url + "/mcp", "token_file": board_tok_file["a"]}, dstate])
+        DL = 4.0                                  # the door's own limit: long enough that a loaded box does not time the healthy board out, short enough to keep the block quick
+        dcfg = lambda: front_cfg(servers, backend_timeout_seconds=DL, backends=[
+            {"name": "a", "kind": "board", "url": servers["a"].url + "/mcp", "token_file": board_tok_file["a"]}, dstate,
+            {"name": "e", "kind": "board", "url": slow_hang.url + "/mcp", "health_url": cap.url + "/healthz", "token_file": board_tok_file["c"]}])
         ddoor, dfront, dnotes = start_door(dcfg())
         check("dripping health: the stand-in door's own config has no note", dnotes == [], dnotes)
         members_path.write_text(json.dumps({**MEMBERS, "jo": ["a", "d"], "solo": ["a"]}))
@@ -745,22 +816,26 @@ async def main():
             async with client_to(dfront, user) as c: return [t.name for t in await c.list_tools()]
         names, e, dt = await dtimed(dlist("jo"))
         check(f"dripping health: a list for a member of a healthy board and the dripping backend returns within the bound ({dt:.1f} s) with the healthy board's tools",
-              e is None and dt < 4.0 and sorted(names) == sorted(single), (e, dt, names))
-        t0 = time.monotonic(); s, body = await asyncio.to_thread(http_get, dfront.url + "/healthz"); dt = time.monotonic() - t0; dh = json.loads(body)
+              e is None and dt < 2 * DL + 3.0 and sorted(names) == sorted(single), (e, dt, names))
+        n_before = len(cap.requests)
+        t0 = time.monotonic(); s, body = await asyncio.to_thread(http_get, dfront.url + "/healthz", {"X-Forwarded-User": "alice@example.test", "Authorization": "Bearer door-level-leak-check"}); dt = time.monotonic() - t0; dh = json.loads(body)
         check(f"dripping health: /healthz answers 503 within the bound ({dt:.1f} s), d not ok (a timeout) and a ok",
-              s == 503 and dt < 4.0 and dh["backends"]["d"]["ok"] is False and dh["backends"]["d"].get("error") == "TimeoutError" and dh["backends"]["a"]["ok"] is True, (s, dt, body))
+              s == 503 and dt < DL + 3.0 and dh["backends"]["d"]["ok"] is False and dh["backends"]["d"].get("error") == "TimeoutError" and dh["backends"]["a"]["ok"] is True, (s, dt, body))
+        got = cap.requests[n_before:]
+        check("dripping health: the door's health request to a backend carries neither the caller's credentials nor the identity header",
+              dh["backends"]["e"]["ok"] is True and len(got) == 1 and b"leak-check" not in got[0] and b"alice" not in got[0].lower() and b"authorization" not in got[0].lower(), got)
         t0 = time.monotonic()
-        many = await asyncio.gather(*(dtimed(dlist("jo"), 40) for _ in range(40)))
+        many = await asyncio.gather(*(dtimed(dlist("jo"), 60) for _ in range(40)))
         dt = time.monotonic() - t0
-        check(f"dripping health: 40 concurrent lists all return ({dt:.1f} s) with the healthy board's tools", all(e is None and sorted(n) == sorted(single) for n, e, _ in many) and dt < 20.0,
+        check(f"dripping health: 40 concurrent lists all return ({dt:.1f} s) with the healthy board's tools", all(e is None and sorted(n) == sorted(single) for n, e, _ in many) and dt < 3 * DL + 8.0,
               (dt, [str(e)[:80] for n, e, _ in many if e is not None][:3]))
         names, e, dt = await dtimed(dlist("solo"))
-        check(f"dripping health: and then a list for a member of the healthy board only still answers fast ({dt:.1f} s): nothing stayed held", e is None and dt < 3.0 and sorted(names) == sorted(single), (e, dt, names))
+        check(f"dripping health: and then a list for a member of the healthy board only still answers fast ({dt:.1f} s): nothing stayed held", e is None and dt < 2 * DL and sorted(names) == sorted(single), (e, dt, names))
     finally:
         if dfront is not None: dfront.stop()
-        for s_ in (slow_hang, drip, xslow, redirect, junk, other, nonum): s_.stop()
+        for s_ in LISTENERS: s_.stop()
     check("dripping health: the stand-in listeners and the door are gone and their ports free",
-          all(port_free(s_.port) for s_ in (slow_hang, drip, xslow, redirect, junk, other, nonum)) and port_free(dfront.port), None)
+          all(port_free(s_.port) for s_ in LISTENERS) and port_free(dfront.port), None)
     members_path.write_text(json.dumps(MEMBERS))
 
     # ---- 11. a backend that is down

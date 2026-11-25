@@ -37,7 +37,7 @@ async def _status_of(url: str, timeout: float = HEALTH_TIMEOUT) -> int:
     """The HTTP status of a GET of `url`, read from the status line (an error status is a status; a refused connection or no answer in `timeout`
     seconds raises OSError). `timeout` is a total deadline for the connection, the request and the status line together, kept with
     `asyncio.wait_for` on a plain socket, so a backend that drips its answer one byte at a time is given up on at the deadline and nothing waits on
-    after it (no worker thread is held). The backend is reached directly, never through an HTTP_PROXY of the environment, and a redirect is not
+    after it (no thread is held while connecting or reading). The backend is reached directly, never through an HTTP_PROXY of the environment, and a redirect is not
     followed: its status is the answer."""
     async def get() -> int:
         u = urllib.parse.urlsplit(url)
