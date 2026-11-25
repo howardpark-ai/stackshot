@@ -121,7 +121,7 @@ def person_of(text: Any) -> Person | None:
     if not t:
         return None
     for p in members():
-        if t == p.name.casefold() or any(t == a.casefold() for a in p.aliases):
+        if t == _clean(p.name) or any(t == _clean(a) for a in p.aliases):          # the configured words get the same white-space collapse as the text asked about
             return p
     return None
 
@@ -200,6 +200,24 @@ def opener_person(line: Any) -> Person | None:
     return first()          # the only opener left is `you`
 
 
+def _not_text(i: int, t: dict[str, Any]) -> list[str]:
+    """One line per value of entry `i` that is no text: a name that is no string, an `aliases` or `emails` that is no list, an alias or an address in them that is no string. `build` would read such a value as its
+    text (a number as digits) or drop it, so the check says so instead."""
+    out: list[str] = []
+    if "name" in t and not isinstance(t["name"], str):
+        out.append(f"[[members]] entry {i}: name is not text ({type(t['name']).__name__}): write it as a quoted string")
+    for key in ("aliases", "emails"):
+        if key not in t:
+            continue
+        if not isinstance(t[key], list):
+            out.append(f"[[members]] entry {i}: {key} is not a list ({type(t[key]).__name__}): write it as a list of quoted strings")
+            continue
+        for n, v in enumerate(t[key], 1):
+            if not isinstance(v, str):
+                out.append(f"[[members]] entry {i}: {key} item {n} is not text ({type(v).__name__}): write each as a quoted string")
+    return out
+
+
 def problems(cfg: dict[str, Any] | None = None) -> list[str]:
     """One line per fault of the config's `[[members]]` table (none when it is fine or absent): what the start and a reload refuse and doctor shows."""
     out: list[str] = []
@@ -213,6 +231,10 @@ def problems(cfg: dict[str, Any] | None = None) -> list[str]:
     seen_names: dict[str, int] = {}
     seen_mail: dict[str, int] = {}
     for i, t in enumerate(listed, 1):
+        bad = _not_text(i, t)
+        if bad:                         # a value that is no text is told, never coerced or dropped; the entry's other checks wait until it is fixed
+            out += bad
+            continue
         name = str(t.get("name") or "").strip()
         if not name:
             out.append(f"[[members]] entry {i} has no name")
@@ -224,7 +246,9 @@ def problems(cfg: dict[str, Any] | None = None) -> list[str]:
             else:
                 seen_names.setdefault(k.casefold(), i)
         for e in _address_list(t.get("emails")):
-            if e in seen_mail:
+            if e in seen_mail and seen_mail[e] == i:
+                out.append(f'[[members]] entry {i}: the address "{e}" is written twice in its own emails (keep it once)')
+            elif e in seen_mail:
                 out.append(f'[[members]] entry {i}: the address "{e}" is already entry {seen_mail[e]}\'s')
             else:
                 seen_mail[e] = i
