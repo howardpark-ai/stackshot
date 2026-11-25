@@ -15,11 +15,12 @@ import math
 import re
 import sys
 import time
+from itertools import accumulate
 from pathlib import Path
 from typing import Any
 
 from fastmcp.exceptions import ToolError
-from starlette.requests import Request
+from starlette.requests import ClientDisconnect, Request
 from starlette.responses import JSONResponse, PlainTextResponse
 
 from stackshot.core import config as _cfg
@@ -43,6 +44,7 @@ from stackshot.service import item_open as _item_open
 from stackshot.service import item_sync as _item_sync
 from stackshot.service import job_alert as _job_alert
 from stackshot.service import job_gap as _job_gap
+from stackshot.service import machines_list as _machines_svc
 from stackshot.service import messaging as _messaging
 from stackshot.service.client_reads import NO_SUCH_READ as _NO_SUCH_READ
 from stackshot.service import migrations as _migrations
@@ -417,7 +419,55 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")}, digest=_messaging.digest_fyi, on_filed=_handoff.handoff_acked)}
     if what == "agent-state":   # the fleet's session manager pushes which registered agents are busy and which idle, the whole fleet in one body that replaces the last snapshot (the audit reads it)
         return _agent_state_svc.post(machine, body)
-    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | anchor-add | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result | agent-state"}
+    if what == "machines":      # the fleet manager posts its machine list; the last good one is kept in the state folder (client.py post machines)
+        return _machines_svc.post(machine, body)
+    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | anchor-add | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result | agent-state | machines"}
+
+
+_BODY_CUT = "the body ended before it was complete"
+
+
+_NEST_MAX, _DIGITS_MAX = 64, 64        # the most brackets open at once, and the most digits in a run, that a capped body may hold (a machine list nests at most 4 deep and an agent-state body 5, and neither holds a number of more than 20 digits)
+_NEST_REASON, _DIGITS_REASON, _NOT_JSON = "the JSON nests too deeply to read", "a number in the JSON has too many digits", "the body is not valid JSON"
+# A string, escapes honored, up to its closing quote, or, when it has none, to the end of the body (a lone backslash may end it). The tail always matches, so the engine never backs up into a string and
+# retries at a later quote: the scan is linear (an unterminated string of `\"` pairs once cost time that grew with the square of the body).
+_STRING = re.compile(rb'"[^"\\]*(?:\\.[^"\\]*)*(?:"|\\?\Z)', re.S)
+_DIGIT_RUN = re.compile(rb"(?<![0-9])[0-9]{%d}" % (_DIGITS_MAX + 1))      # tried only where a run starts, so a run of 64 digits costs 64 steps once, not at every digit
+_NOT_BRACKET = bytes(b for b in range(256) if b not in b"[]{}")
+_STEP = {91: 1, 123: 1, 93: -1, 125: -1}      # [ { open, ] } close
+
+
+def _too_deep_or_long(raw: bytes) -> str:
+    """The refusal (one line) when `raw` nests brackets deeper than `_NEST_MAX` or holds a run of more than `_DIGITS_MAX` digits outside its strings, else "". Strings (an unterminated one runs to the end, so what is
+    inside it counts for nothing and the parser then calls the body no JSON) are blanked, then the brackets are summed and the digit runs looked for: every step is a linear pass in C or a single `accumulate`, no
+    recursion and no backtracking, so the answer depends neither on the interpreter's recursion, stack or integer-conversion limit nor on how the body is shaped. It runs before the parser does. A bracket that closes
+    what was never opened is not counted below zero: such a body is no JSON and the parser stops at it before it can nest."""
+    rest = _STRING.sub(b" ", raw)
+    brackets = rest.translate(None, _NOT_BRACKET)
+    if len(brackets) > _NEST_MAX and max(accumulate(map(_STEP.__getitem__, brackets))) > _NEST_MAX:
+        return _NEST_REASON
+    return _DIGITS_REASON if _DIGIT_RUN.search(rest) else ""
+
+
+def _parse_body(raw: bytes) -> tuple[Any, str]:
+    """(the JSON object in `raw`, "") or (None, a one-line reason): text that is no JSON, JSON that is no object, a nesting too deep to read, or a number with too many digits. The last two are judged by
+    `_too_deep_or_long` before the parser runs; the parser's own limits (recursion, memory, integer digits) give the same two reasons."""
+    if b"\x00" in raw or raw[:2] in (b"\xff\xfe", b"\xfe\xff"):      # UTF-16 and UTF-32 text (the parser would detect them): the scan reads bytes as UTF-8, so these are refused as no JSON
+        return None, _NOT_JSON
+    why = _too_deep_or_long(raw)
+    if why:
+        return None, why
+    try:
+        body = json.loads(raw)
+    except (RecursionError, MemoryError):
+        return None, _NEST_REASON
+    except ValueError as e:      # JSONDecodeError and UnicodeDecodeError are the body's own faults; any other ValueError is the parser's limit on the digits of an integer
+        if isinstance(e, (json.JSONDecodeError, UnicodeDecodeError)):
+            return None, _NOT_JSON
+        return None, _DIGITS_REASON
+    if not isinstance(body, dict):
+        return None, "the body is a JSON object, not a list, text, number, true, false or null"
+    return body, ""
 
 
 async def client_write(request: Request):
@@ -432,24 +482,28 @@ async def client_write(request: Request):
         return JSONResponse({"error": _PASS_ONLY_FORM}, status_code=403, headers={"Cache-Control": "no-store"})
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
-    if what == _agent_state_svc.VERB:       # the one write whose size is capped: a whole fleet in one body, refused over the limit before it is read to the end
-        over = _agent_state_svc.too_large(request.headers.get("content-length"))
+    capped = {_agent_state_svc.VERB: (_agent_state_svc, 400), _machines_svc.VERB: (_machines_svc, 413)}.get(what)     # the writes whose size is capped: a whole fleet's report in one body, refused over the limit before it is parsed
+    if capped:
+        svc, over_status = capped
+        over = svc.too_large(request.headers.get("content-length"))       # a declared length over the cap is refused before a byte is read
         chunks: list[bytes] = []      # joined once: a running `raw += chunk` copies the whole body at every chunk
         size = 0
         if not over:
-            async for chunk in request.stream():
-                chunks.append(chunk)
-                size += len(chunk)
-                over = _agent_state_svc.too_large(size)
-                if over:
-                    break
+            try:
+                async for chunk in request.stream():      # whatever the header says, the body is read no further than one chunk past the cap
+                    chunks.append(chunk)
+                    size += len(chunk)
+                    over = svc.too_large(size)
+                    if over:
+                        break
+            except ClientDisconnect:      # the sender went away mid-body: nothing was parsed or written, and nobody is left to read an answer
+                return JSONResponse({"error": _BODY_CUT}, status_code=400, headers={"Cache-Control": "no-store"})
         raw = b"".join(chunks)
         if over:
-            return JSONResponse({"error": over}, status_code=400, headers={"Cache-Control": "no-store"})
-        try:
-            body = json.loads(raw)
-        except Exception:
-            body = None
+            return JSONResponse({"error": over}, status_code=over_status, headers={"Cache-Control": "no-store"})
+        body, why = _parse_body(raw)
+        if why:
+            return JSONResponse({"error": why}, status_code=400, headers={"Cache-Control": "no-store"})
     else:
         try:
             body = await request.json()

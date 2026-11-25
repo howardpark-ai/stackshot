@@ -859,6 +859,7 @@ def part_client():
         "inbox-release -> _inbox_holds.api_release",
         "drain -> _clients.sessions_on, _clients.seen, _clients.register, _inbox.take",
         "agent-state -> _agent_state_svc.post",
+        "machines -> _machines_svc.post",
     ]
     check("client_post: the `what` -> handlers table of the dispatcher is the one it had in server.py (%d branches)" % len(_WHAT_TABLE), _what_table(_rt_client._client_post) == _WHAT_TABLE, _what_table(_rt_client._client_post))
     check("client_post: an unknown `what` is a 404 naming the writes there are, and the dispatcher is no name of server", _rt_client._client_post("home", "no-such-write", {})[0] == 404 and not hasattr(server, "_client_post"), _rt_client._client_post("home", "no-such-write", {}))
@@ -940,6 +941,12 @@ def part_client():
                 try: cnt = len(json.loads(raw)["agents"])
                 except Exception: cnt = 0
                 code, body, ctype = 200, json.dumps({"ok": True, "agents": cnt}).encode(), "application/json"
+            elif _mode["v"] == "mok":
+                try: cnt = len(json.loads(raw)["machines"])
+                except Exception: cnt = 0
+                code, body, ctype = 200, json.dumps({"ok": True, "machines": cnt}).encode(), "application/json"
+            elif _mode["v"] == "kept": code, body, ctype = 200, json.dumps({"ok": True, "kept": "newer"}).encode(), "application/json"
+            elif _mode["v"] == "big": code, body, ctype = 413, json.dumps({"error": "the body is 1000001 bytes, over the 1000000-byte limit"}).encode(), "application/json"
             elif _mode["v"] == "bad": code, body, ctype = 400, json.dumps({"error": "schema must be 1"}).encode(), "application/json"
             elif _mode["v"] == "multi": code, body, ctype = 400, json.dumps({"error": "agent 'x' is no object\nand a second line"}).encode(), "application/json"
             elif _mode["v"] == "echo400": code, body, ctype = 400, json.dumps({"error": "bad token " + self.headers.get("Authorization", "").split()[-1]}).encode(), "application/json"
@@ -1060,6 +1067,65 @@ def part_client():
         _run = subprocess.run([sys.executable, client.__file__, "post", "agent-state", "--file", str(_adir / "good.json")], capture_output=True, text=True, timeout=60, env=dict(os.environ))
         check("agent-state: run as a script (python3 stackshot/fleet/client.py post agent-state --file <path>) it posts the same bytes, prints the JSON and exits 0",
               _run.returncode == 0 and json.loads(_run.stdout) == {"ok": True, "agents": 2} and [g[3] for g in _got] == [_body], (_run.returncode, _run.stdout, _run.stderr, _got))
+
+        # ---- 8. `post machines --file <path>`: the fleet manager posts its machine list with the script client (the same stub; the route's own checks are in tests/machines_list_scenario.py)
+        _mbody = ('{"schema" : 1,\n "written":1700000000, "machines":[{"name":"caf\u00e9-one","retired":false},\n {"name":"two","retired":true,"roles":["sala-host"]}], "not_read":[]}\n').encode("utf-8")
+        _mode["v"] = "mok"; _got.clear()
+        rc, out, err = _acli("post", "machines", "--file", _afile("machines.json", _mbody))
+        check("machines: a good file is POSTed to /client/machines with the machine token and its bytes unchanged",
+              rc == 0 and len(_got) == 1 and _got[0][0] == "/client/machines" and _got[0][1] == "Bearer tok-agent-e7" and _got[0][2] == "application/json" and _got[0][3] == _mbody, (rc, out, err, _got[:1]))
+        check("machines: the server's 200 JSON is printed on stdout, nothing on stderr, exit 0", json.loads(out) == {"ok": True, "machines": 2} and out.count("\n") == 1 and err == "", (out, err))
+        _mode["v"] = "kept"; _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines.json", _mbody))
+        check("machines: an answer {kept: newer} (200, not stored) is printed as given, says one line `kept: the server holds a newer list` on stderr and still exits 0",
+              rc == 0 and json.loads(out) == {"ok": True, "kept": "newer"} and err == "kept: the server holds a newer list\n", (rc, out, err))
+        _mode["v"] = "mok"; _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines.json", _mbody))
+        check("machines: a stored list (no `kept`) says nothing on stderr", rc == 0 and err == "", (rc, err))
+        _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines-blob.bin", _blob))
+        check("machines: the file is never parsed or decoded: a body that is no JSON and no UTF-8 reaches the server byte for byte", rc == 0 and [g[3] for g in _got] == [_blob], (rc, err, _got))
+        _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines-full.json", _full))
+        check("machines: a file of exactly 1,000,000 bytes is sent whole", rc == 0 and [g[3] for g in _got] == [_full], (rc, err, [len(g[3]) for g in _got]))
+        check("machines: the client's body limit is named MACHINES_BODY_MAX (1,000,000, the server's) and the old name is gone", client.MACHINES_BODY_MAX == 1_000_000 and not hasattr(client, "MACHINES_MAX"), (getattr(client, "MACHINES_BODY_MAX", None), hasattr(client, "MACHINES_MAX")))
+        _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines-over.json", b"x" * 1_000_001))
+        check("machines: a file of 1,000,001 bytes is refused before sending: one line on stderr, exit 1, nothing sent", rc == 1 and not _got and out == "" and _one_line(err) and "limit" in err and "machine list" in err, (rc, out, err, _got))
+        _got.clear(); rc, out, err = _acli("post", "machines", "--file", str(_adir / "no-such-machines.json"))
+        check("machines: a missing file is refused with one line on stderr and exit 1, and nothing is sent", rc == 1 and not _got and out == "" and _one_line(err) and "no-such-machines" in err, (rc, out, err, _got))
+        _got.clear(); rc, out, err, hung = _guarded("post", "machines", "--file", str(_adir))
+        check("machines: a folder is refused as not a regular file, one line, nothing sent", not hung and rc == 1 and not _got and out == "" and _one_line(err) and "not a regular file" in err, (rc, out, err, _got))
+        for label, argv in (("no --file", ["post", "machines"]), ("--file with no value", ["post", "machines", "--file"]), ("an empty --file value", ["post", "machines", "--file", ""]), ("a stray argument", ["post", "machines", "--file", str(_adir / "machines.json"), "extra"]),
+                            ("an unknown option", ["post", "machines", "--path", str(_adir / "machines.json")]), ("a bare - and more", ["post", "machines", "-", "extra"])):
+            _got.clear(); rc, out, err = _acli(*argv)
+            check(f"machines: {label} is a usage error on stderr, exit 1, nothing sent", rc == 1 and not _got and out == "" and "usage: client.py post machines --file <path>" in err, (rc, out, err, _got))
+        _mode["v"] = "bad"; _got.clear(); rc, out, err = _acli("post", "machines", "--file", str(_adir / "machines.json"))
+        check("machines: a 400 prints the server's reason as one line on stderr, nothing on stdout, exit 1", rc == 1 and len(_got) == 1 and out == "" and _one_line(err) and "schema must be 1" in err and "400" in err, (rc, out, err))
+        _mode["v"] = "big"; rc, out, err = _acli("post", "machines", "--file", str(_adir / "machines.json"))
+        check("machines: a 413 prints the server's reason as one line on stderr, nothing on stdout, exit 1", rc == 1 and out == "" and _one_line(err) and "413" in err and "limit" in err, (rc, out, err))
+        _mode["v"] = "unauth"; _got.clear(); rc, out, err = _acli("post", "machines", "--file", str(_adir / "machines.json"))
+        check("machines: a 401 (plain text) is exit 1 with its reason on stderr and nothing on stdout", rc == 1 and len(_got) == 1 and out == "" and _one_line(err) and "401" in err and "machine token" in err, (rc, out, err))
+        for mode, code in (("echo400", "400"), ("echotext", "502")):
+            _mode["v"] = mode; _got.clear(); rc, out, err = _acli("post", "machines", "--file", str(_adir / "machines.json"))
+            check(f"machines: a {code} answer that echoes the machine token never lets it reach stderr or stdout", rc == 1 and len(_got) == 1 and _one_line(err) and code in err and "tok-agent-e7" not in err + out, (rc, out, err))
+        _mode["v"] = "mok"; _got.clear(); rc, out, err = _acli("post", "machines", "--file", str(_adir / "gone-tok-agent-e7.json"))
+        check("machines: a not-readable path that holds the machine token is refused without printing the token", rc == 1 and not _got and _one_line(err) and "gone-" in err and "tok-agent-e7" not in err + out, (rc, out, err))
+        _atok.unlink(); _got.clear(); rc, out, err = _acli("post", "machines", "--file", str(_adir / "machines.json"))
+        check("machines: with no token on the machine nothing is sent, one line on stderr, exit 1", rc == 1 and not _got and out == "" and _one_line(err) and "no token" in err and "tok-agent-e7" not in err, (rc, out, err, _got))
+        _atok.write_text("tok-agent-e7\n")
+        os.environ[client.PASS_ENV] = "ssp_pass-in-use-4f1"; _mode["v"] = "echo400"; _got.clear(); rc, out, err = _acli("post", "machines", "--file", str(_adir / "machines.json"))
+        check("machines: with a pass in use the pass is sent and is never printed, not from a server text that echoes it", rc == 1 and len(_got) == 1 and _got[0][1] == "Bearer ssp_pass-in-use-4f1" and "ssp_pass-in-use-4f1" not in err + out and "tok-agent-e7" not in err + out, (rc, out, err))
+        os.environ.pop(client.PASS_ENV, None)
+        # -- standard input: `--file -` and a bare `-`, run as a script (the client reads file descriptor 0), to the same limit
+        _mode["v"] = "mok"
+        for label, argv in (("`--file -`", ["--file", "-"]), ("a bare `-`", ["-"])):
+            _got.clear(); _run = subprocess.run([sys.executable, client.__file__, "post", "machines", *argv], input=_mbody, capture_output=True, timeout=60, env=dict(os.environ))
+            check(f"machines: {label} reads the body from standard input and posts the same bytes, prints the JSON and exits 0", _run.returncode == 0 and json.loads(_run.stdout) == {"ok": True, "machines": 2} and [g[3] for g in _got] == [_mbody] and _got[0][0] == "/client/machines", (_run.returncode, _run.stdout, _run.stderr, _got))
+        _got.clear(); _run = subprocess.run([sys.executable, client.__file__, "post", "machines", "--file", "-"], input=b"x" * 1_000_000, capture_output=True, timeout=60, env=dict(os.environ))
+        check("machines: a standard input of exactly 1,000,000 bytes is sent whole", _run.returncode == 0 and [len(g[3]) for g in _got] == [1_000_000], (_run.returncode, _run.stderr, [len(g[3]) for g in _got]))
+        _got.clear(); _run = subprocess.run([sys.executable, client.__file__, "post", "machines", "--file", "-"], input=b"x" * 1_000_001, capture_output=True, timeout=60, env=dict(os.environ))
+        _err = _run.stderr.decode()
+        check("machines: a standard input of 1,000,001 bytes is refused before sending: one line on stderr, exit 1, nothing sent", _run.returncode == 1 and not _got and _run.stdout == b"" and _one_line(_err) and "standard input" in _err and "limit" in _err, (_run.returncode, _run.stdout, _err, _got))
+        _got.clear(); _run = subprocess.run([sys.executable, client.__file__, "post", "machines", "--file", "-"], stdin=subprocess.DEVNULL, capture_output=True, timeout=60, env=dict(os.environ))
+        check("machines: an empty standard input is sent as an empty body (the server refuses it), nothing is printed on stdout", _run.returncode in (0, 1) and [g[3] for g in _got] == [b""], (_run.returncode, _run.stderr, _got))
+        _got.clear(); rc, out, err = _acli("post", "agent-state", "--file", "-")
+        check("agent-state: `-` is still a path there (a file of that name), not standard input: a missing file is refused, nothing sent", rc == 1 and not _got and _one_line(err) and "standard input" not in err, (rc, out, err, _got))
     finally:
         _asrv.shutdown(); _asrv.server_close(); _athr.join(5)
         for k, v in _aenv.items():

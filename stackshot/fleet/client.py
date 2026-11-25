@@ -278,6 +278,13 @@ runs on every box.
                                 (never parsed or re-encoded here). A file that is missing, unreadable, not a regular file (a folder, a pipe, a device; a link to a regular file is read) or over 1,000,000 bytes is refused here with one line and exit 1, and nothing is sent; an empty --file value is a usage error. Prints the server's answer,
                                 {"ok": true, "agents": N}, and exits 0; any other answer prints the server's one-line reason on stderr and exits 1, as does a server that is not reached ([0]), no token, or a misuse
                                 (usage on stderr).
+  client.py post machines --file <path>
+                                for the fleet manager: post its machine list, which the server keeps as the last good list (`POST /client/machines`, machine token; the body is {"schema": 1, "written": <epoch s>,
+                                "machines": [{"name", "hostname", "letter", "ssh", "addresses", "roles", "retired", "sources"}], "not_read": [<file name>]}; docs/client-contract.md has every limit). Post it when the list
+                                changes and at least every few minutes: `written` is the list's age. `--file -` (or a bare `-`) reads the body from standard input. The file's bytes go to the server exactly as they are (never
+                                parsed or re-encoded here). A file that is missing, unreadable, not a regular file or over 1,000,000 bytes is refused here with one line and exit 1, and nothing is sent. Prints the server's answer,
+                                {"ok": true, "machines": N} (or {"ok": true, "kept": "newer"}: a list of an older `written` arrived late and the stored one stays), and exits 0; any other answer prints the server's one-line reason on
+                                stderr and exits 1 (400 a body that does not fit, the last good list stays; 413 a body over the limit), as does a server that is not reached ([0]), no token, or a misuse (usage on stderr). Run it with STACKSHOT_CLIENT_PASS unset: the route takes the machine token only.
   client.py post item-open <marker> --project <key|id|slug> --subject "<action and object>" --mover <agent> --step "<agent>: <what it does>" --line "<fact>" [--line "<fact>" ...] [--sender <label>]
                                 for a timer's script that finds work for a project's background agent (a project that lists none is a front-only project: the item is filed with its -main agent): open ONE board item for it and print its id (exit 0). <marker> = <kind>:<what> (for example
                                 test_trim:stackshot), the item's mark: while an item with that marker is open on the same project a repeat call prints the same id and files nothing; once it is closed a call files a new item. A project holds at most 10 open items filed by this route: past it a new marker is refused until one closes. --mover must be a
@@ -1181,36 +1188,59 @@ def _secret() -> str:
     except Exception: return ""
 
 
-def agent_state(argv: list[str], timeout: float = 60.0) -> int:
-    """`post agent-state --file <path>`: the fleet's session manager pushes which registered agents are busy and which idle, the whole fleet in one JSON file that REPLACES the last snapshot
-    (`POST /client/agent-state`). The file's bytes go to the server as they are, never parsed here. Prints the server's answer ({"ok": true, "agents": N}) and exits 0; 1 and one line on stderr
-    for a file that is missing, unreadable, not a regular file (a folder, a pipe, a device) or over the limit (nothing is sent), a refusal (the server's reason), a server that is not reached ([0]) or a
-    misuse (usage). A path or a server text in that line has control characters collapsed and this machine's token taken out."""
-    opt = _opts(argv, ("file",), AGENT_STATE_USAGE)
+def _post_file(what: str, noun: str, argv: list[str], usage: str, limit: int, timeout: float, stdin_ok: bool = False) -> int:
+    """`post <what> --file <path>` for a verb whose whole body is one JSON file the caller wrote: the file's bytes go to `POST /client/<what>` exactly as they are, never parsed here. With `stdin_ok`, the path `-` is
+    standard input (read the same way, to the same limit). Prints the server's answer as JSON and exits 0 (an answer `{"kept": "newer"}`, a list the server did not store, also puts the line `kept: the server holds a newer list` on stderr); 1 and one line on stderr for a file that is missing, unreadable, not a regular file (a folder, a pipe, a
+    device) or over `limit` bytes (nothing is sent), a refusal (the server's reason), a server that is not reached ([0]) or a misuse (usage). A path or a server text in that line has control characters collapsed and
+    this machine's token (or the pass in use) taken out."""
+    opt = _opts(argv, ("file",), usage)
     if opt is None: return 1
-    if not opt.get("file", "").strip(): print(AGENT_STATE_USAGE, file=sys.stderr); return 1
+    if not opt.get("file", "").strip(): print(usage, file=sys.stderr); return 1
     path, sec = opt["file"], _secret()
-    def refuse(why: str) -> int: print(_one_line(f"stackshot: agent state not sent: {path} {why}", sec), file=sys.stderr); return 1
+    from_stdin = stdin_ok and path == "-"
+    def refuse(why: str) -> int: print(_one_line(f"stackshot: {noun} not sent: {'standard input' if from_stdin else path} {why}", sec), file=sys.stderr); return 1
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)      # non-blocking: a pipe with no writer opens at once instead of waiting for one
+        fd = 0 if from_stdin else os.open(path, os.O_RDONLY | os.O_NONBLOCK)      # non-blocking: a pipe with no writer opens at once instead of waiting for one
     except OSError as e: return refuse(f"is not readable ({type(e).__name__})")
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode): return refuse("is not a regular file")
-        chunks, left = [], AGENT_STATE_MAX + 1
+        if not from_stdin and not stat.S_ISREG(os.fstat(fd).st_mode): return refuse("is not a regular file")
+        chunks, left = [], limit + 1
         while left > 0:
             chunk = os.read(fd, min(left, 1 << 20))
             if not chunk: break
             chunks.append(chunk); left -= len(chunk)
         data = b"".join(chunks)
     except OSError as e: return refuse(f"is not readable ({type(e).__name__})")
-    finally: os.close(fd)
-    if len(data) > AGENT_STATE_MAX: return refuse(f"is over the {AGENT_STATE_MAX}-byte limit")
-    status, d = post("agent-state", {}, timeout, raw=data)
+    finally:
+        if not from_stdin: os.close(fd)
+    if len(data) > limit: return refuse(f"is over the {limit}-byte limit")
+    status, d = post(what, {}, timeout, raw=data)
     if status != 200 or not isinstance(d, dict):
         err = d.get("error") if isinstance(d, dict) else None
         reason = _one_line(err, sec) if err else _one_line(d if isinstance(d, str) else json.dumps(d, ensure_ascii=False, default=str), sec, 200)      # no `error` key: the body's first 200 characters
-        print(_one_line(f"stackshot: agent state not sent [{status}] {reason}", sec), file=sys.stderr); return 1
-    print(json.dumps(d, ensure_ascii=False)); return 0
+        print(_one_line(f"stackshot: {noun} not sent [{status}] {reason}", sec), file=sys.stderr); return 1
+    if d.get("kept") == "newer": print("kept: the server holds a newer list", file=sys.stderr)      # answered 200 but not stored: said once on stderr, exit 0 (the answer is still printed)
+    print(json.dumps(d, ensure_ascii=False)); return 0      # (an answer of {"kept": "newer"} also said its line on stderr above)
+
+
+def agent_state(argv: list[str], timeout: float = 60.0) -> int:
+    """`post agent-state --file <path>`: the fleet's session manager pushes which registered agents are busy and which idle, the whole fleet in one JSON file that REPLACES the last snapshot
+    (`POST /client/agent-state`). The file's bytes go to the server as they are, never parsed here. Prints the server's answer ({"ok": true, "agents": N}) and exits 0; 1 and one line on stderr
+    for a file that is missing, unreadable, not a regular file (a folder, a pipe, a device) or over the limit (nothing is sent), a refusal (the server's reason), a server that is not reached ([0]) or a
+    misuse (usage). A path or a server text in that line has control characters collapsed and this machine's token taken out."""
+    return _post_file("agent-state", "agent state", argv, AGENT_STATE_USAGE, AGENT_STATE_MAX, timeout)
+
+
+MACHINES_USAGE = ("usage: client.py post machines --file <path>     (the file is the machine list's JSON body, at most 1,000,000 bytes; `--file -` or a bare `-` reads standard input)\n"
+                  '       {"schema": 1, "written": <epoch s>, "machines": [{"name", "hostname", "letter", "ssh", "addresses": [...], "roles": ["sala-host" | "stackshot-host"], "retired": false, "sources": [...]}], "not_read": [...]}')
+MACHINES_BODY_MAX = 1_000_000     # the server's limit for the body (stackshot/service/machines_list.py MAX_BYTES): a larger file is refused here, before anything is sent
+
+
+def machines(argv: list[str], timeout: float = 60.0) -> int:
+    """`post machines --file <path>` (or `--file -`, or a bare `-`, for standard input): the fleet manager posts its machine list (`POST /client/machines`), which the server keeps as the last good list. The file's
+    bytes go to the server as they are, never parsed here. Prints the server's answer ({"ok": true, "machines": N}) and exits 0, with one line on stderr, `kept: the server holds a newer list`, when the answer is {"ok": true, "kept": "newer"} (the list was not stored); 1 and one line on stderr for a file that is missing, unreadable, not a regular
+    file or over 1,000,000 bytes (nothing is sent), a refusal (the server's reason: 400 a body that does not fit, 413 a body over the limit), a server that is not reached ([0]) or a misuse (usage)."""
+    return _post_file("machines", "machine list", ["--file", "-"] if argv == ["-"] else argv, MACHINES_USAGE, MACHINES_BODY_MAX, timeout, stdin_ok=True)
 
 
 JOB_FAILED_USAGE = "usage: client.py job-failed <unit> <host> <ISO-Z time of the failing run, 2026-11-23T02:15:00Z> <project: a page key, a scope/project label, or - for none>"
@@ -1504,6 +1534,9 @@ def main(argv: list[str]) -> int:
     if cmd == "post" and len(argv) > 2 and argv[2] == "agent-state":
         try: return agent_state(argv[3:])
         except Exception as e: print(f"stackshot: agent state not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
+    if cmd == "post" and len(argv) > 2 and argv[2] == "machines":
+        try: return machines(argv[3:])
+        except Exception as e: print(f"stackshot: machine list not sent ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
     if cmd == "post" and len(argv) > 2 and argv[2] == "item-open":
         try: return item_open(argv[3:])
         except Exception as e: print(f"stackshot: item not opened ({type(e).__name__}: {str(e)[:160]})", file=sys.stderr); return 1
