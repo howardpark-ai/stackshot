@@ -154,7 +154,7 @@ def _owner_then(project: str, mover_before: str, sender: str, next_text: str, ne
     if b:
         bid = _session_id(b)
         named = any(_session_id(x) == bid for x in needs)
-        holds = bool(meta and (first := _telling.step_holder(meta)) and _telling.front_sender(first))      # a front agent holds the item's first open named step (past his own lines)
+        holds = bool(meta and (first := _telling.step_holder(meta)) and _telling.front_name(first))      # a front agent holds the item's first open named step (past his own lines)
         if not named and next_text and not holds:
             named = bool(re.search(r"(?mi)^\s*(?:[-*]\s+|\d+[.)]\s+)?" + re.escape(b) + r"\s*:", next_text))
         if named:

@@ -65,8 +65,10 @@ from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._owing_note = lambda debtor: ""
-told = []
-telling.tell_woken = lambda gid, owner, note, tag="wake", **k: told.append((gid, owner, note, tag))
+told = []; kinds = []      # kinds: the kind each push was told in (the hint tell_kind sets; "" is a turn)
+def _tell_woken(gid, owner, note, tag="wake", **k):
+    told.append((gid, owner, note, tag)); kinds.append((gid, owner, tag, getattr(telling.FRONT_HINT, "kind", "")))
+telling.tell_woken = _tell_woken
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 SID = _web_page_debts._session_id
 OWNER = _core_instance.OWNER
@@ -350,23 +352,84 @@ for label, got, want_kept in (("a checked Acked-by", chk, True), ("an unchecked 
 v, note, fx = _gates.fix_front_mover("mover", SIDE, MAIN, "projects/delta", "", {}, None)
 check("fix_front_mover: no words handed at all is the swap", v == BUILD and POINTER in note, (v, note))
 
-# the swap does not read who holds the item's open step: another session's mover, then or post_wake_mover set to a front agent is the builder's whoever holds the step (the owner's answer reaches a front agent that holds its step
-# through the answer path, not through a hand-off a session makes)
+# a hand-back: a front agent that holds the item's first open named step, as the item stands before the write, is kept as sent when the sender is the item's mover or the project's builder and the front agent is live,
+# and a mover is told as a turn; every other case is the swap, as before
+import contextlib, io
+from stackshot.model import model_guards as _mg
 STEPF = "carry out whichever way the owner picks"
+def pushed(user):
+    return [(t, k) for t, k in zip(told, kinds) if t[1] == U[user] and t[3] == "handoff"]
 put(90, mover=BUILD, next=f"{MAIN}: {STEPF}")
+told.clear(); kinds.clear()
 r = call(lambda: _wt_update.stackshot_update(item_id="a90", sender=BUILD, mover=MAIN))
-check("an open step that is the front agent's own: another session's mover=<that front agent> is still swapped to the builder, with the note and the fix recorded", fixed(r, MAIN) and telling.holder(rd(90)) == BUILD and MAIN in json.dumps(rd(90)["metadata"].get("server_fixed")), (r, rd(90)["metadata"]))
+check("hand-back: the builder sets mover=<the front agent that holds the first open step>: kept as sent, no swap, no fix recorded", "kept as you sent it: " + MAIN in r and "(fixed:" not in r and telling.holder(rd(90)) == MAIN and not rd(90)["metadata"].get("server_fixed"), (r, rd(90)["metadata"]))
+check("hand-back: the front agent is pushed once, as a turn (kind empty), the notice names the session that handed it back", len(pushed(MAIN)) == 1 and pushed(MAIN)[0][1][3] == "" and BUILD in pushed(MAIN)[0][0][2] and "has been told it is handed" in r and " back)" in r, (told, kinds, r))
+r = call(lambda: _wt_update.stackshot_update(item_id="a90", sender=BUILD, mover=MAIN))
+check("hand-back: sending it again changes nothing and tells nobody again", telling.holder(rd(90)) == MAIN and len(pushed(MAIN)) == 1, (r, told))
+put(190, mover=REVIEW, next=f"{MAIN}: {STEPF}")
+told.clear(); kinds.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a190", sender=REVIEW, mover=MAIN))
+check("hand-back: the item's own mover (a background agent that is no builder) may hand it back", telling.holder(rd(190)) == MAIN and "(fixed:" not in r and len(pushed(MAIN)) == 1, (r, told))
+put(192, mover=REVIEW, next=f"{MAIN}: {STEPF}")
+told.clear(); kinds.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a192", sender=BUILD, mover=MAIN))
+check("hand-back: the project's builder may hand it back although another session moves the item", telling.holder(rd(192)) == MAIN and "(fixed:" not in r and len(pushed(MAIN)) == 1, (r, told))
+put(191, mover=BUILD, next=f"{MAIN}: {STEPF}")
+told.clear(); kinds.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a191", sender=REVIEW, mover=MAIN))
+check("hand-back: a third session (neither the mover nor the builder) is swapped to the builder, nobody told", fixed(r, MAIN) and telling.holder(rd(191)) == BUILD and not pushed(MAIN), (r, told))
 put(91, mover=BUILD, next=f"{BUILD}: build it")
 r = call(lambda: _wt_update.stackshot_update(item_id="a91", sender=BUILD, mover=MAIN))
 check("an open step that is the builder's: the swap stands", fixed(r, MAIN) and telling.holder(rd(91)) == BUILD, r)
+told.clear(); kinds.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a91", sender=BUILD, mover=MAIN))
+check("the swap's second send is kept as sent as before, and the front agent that holds no step is told nothing", telling.holder(rd(91)) == MAIN and "kept as you sent it" in r and not pushed(MAIN), (r, told))
 put(92, mover=BUILD, next=f"{BUILD}: build it\n{MAIN}: carry out the result")
 r = call(lambda: _wt_update.stackshot_update(item_id="a92", sender=BUILD, mover=MAIN))
 check("the front agent's step comes after the builder's: the swap stands", fixed(r, MAIN) and telling.holder(rd(92)) == BUILD, r)
+put(95, mover=BUILD)
+told.clear(); kinds.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a95", sender=BUILD, mover=MAIN, next=f"{MAIN}: {STEPF}", check="item_closed a1"))
+check("the step is written in the same call: the front-agent step gate refuses the write, and the item keeps its mover", "opens with " + MAIN in r and telling.holder(rd(95)) == BUILD and not pushed(MAIN), (r, told))
+it95 = dict(rd(95), gid="a95")
+v, note, fx = _gates.fix_front_mover("mover", MAIN, BUILD, "projects/delta", "", it95["metadata"], item=it95)
+check("fix_front_mover: a step the same call adds is not in the stored item, so it is not read: the swap stands", v == BUILD and len(fx) == 1, (v, note, fx))
+put(96, mover=BUILD, next=f"{MAIN}: {STEPF}")
+_orig_state = _mg.Ctx.session_state
+_mg.Ctx.session_state = lambda self, who: "gone" if who == MAIN else _orig_state(self, who)
+try:
+    told.clear(); kinds.clear()
+    r = call(lambda: _wt_update.stackshot_update(item_id="a96", sender=BUILD, mover=MAIN))
+finally:
+    _mg.Ctx.session_state = _orig_state
+check("the front agent is not live: the swap stands, with the stall line, nobody told", fixed(r, MAIN) and telling.holder(rd(96)) == BUILD and not pushed(MAIN), (r, told))
+put(97, mover=BUILD, next=f"{MAIN.upper()}: {STEPF}")
+told.clear(); kinds.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a97", sender=BUILD, mover=MAIN))
+check("a step line in another letter case still holds the step: kept as sent and the front agent is pushed as a turn", telling.holder(rd(97)) == MAIN and "(fixed:" not in r and len(pushed(MAIN)) == 1 and pushed(MAIN)[0][1][3] == "", (r[-300:], told, kinds, rd(97)["metadata"].get("mover")))
+put(98, mover=BUILD, next=f"{OWNER}: check the sheet\n{MAIN}: {STEPF}")
+told.clear(); kinds.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a98", sender=BUILD, mover=MAIN))
+check("the owner's own line comes first: the front agent's step is the first one past his lines, kept as sent and pushed as a turn", telling.holder(rd(98)) == MAIN and "(fixed:" not in r and len(pushed(MAIN)) == 1 and pushed(MAIN)[0][1][3] == "", (r, told, kinds))
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    r = call(lambda: _wt_create.stackshot_create(subject="[home] a create has no stored step", description=DESC, project="projects/delta", sender=BUILD, mover=MAIN, next=f"{BUILD}: build it"))
+check("a create has no stored item: the swap stands, and the hand-back read does not fail or print", fixed(r, MAIN) and "hand-back read" not in err.getvalue(), (r, err.getvalue()))
 put(94, mover=OWNER, needs=["decision"], ask="Decide: a or b - Recommend: a - Stakes: none - By: no date", then=REVIEW, state="your-call", next=f"{MAIN}: {STEPF}")
+told.clear(); kinds.clear()
 r = call(lambda: _wt_update.stackshot_update(item_id="a94", sender=BUILD, then=MAIN))
-check("then=<the front agent that holds the open step> beside his call: still swapped to the builder", fixed(r, MAIN, "then") and rd(94)["metadata"].get("then") == BUILD, (r, rd(94)["metadata"]))
+check("then=<the front agent that holds the open step> beside his call, by the builder: kept as sent, nobody told by the write (the answer tells it)", "kept as you sent it: " + MAIN in r and "(fixed:" not in r and rd(94)["metadata"].get("then") == MAIN and not pushed(MAIN), (r, rd(94)["metadata"]))
+put(194, mover=OWNER, needs=["decision"], ask="Decide: a or b - Recommend: a - Stakes: none - By: no date", then=REVIEW, state="your-call", next=f"{BUILD}: build it\n{MAIN}: {STEPF}")
+r = call(lambda: _wt_update.stackshot_update(item_id="a194", sender=BUILD, then=MAIN))
+check("then=<the front agent> whose step comes after the builder's: swapped to the builder", fixed(r, MAIN, "then") and rd(194)["metadata"].get("then") == BUILD, (r, rd(194)["metadata"]))
+put(195, mover=BUILD, next=f"{MAIN}: {STEPF}")
+it = dict(rd(195), gid="a195")
+v, note, fx = _gates.fix_front_mover("post_wake_mover", MAIN, BUILD, "projects/delta", "", it["metadata"], item=it)
+check("fix_front_mover: post_wake_mover to the holder of the open step, by the builder, with the stored item: kept as sent", v == MAIN and not fx, (v, note, fx))
+v, note, fx = _gates.fix_front_mover("post_wake_mover", MAIN, REVIEW, "projects/delta", "", it["metadata"], item=it)
+check("fix_front_mover: post_wake_mover from a third session is swapped", v == BUILD and len(fx) == 1, (v, note, fx))
 v, note, fx = _gates.fix_front_mover("post_wake_mover", MAIN, BUILD, "projects/delta", "", {"project": "projects/delta", "next": f"{MAIN}: {STEPF}"})
-check("fix_front_mover: post_wake_mover to the holder of the open step is swapped too", v == BUILD and len(fx) == 1, (v, note, fx))
+check("fix_front_mover: with no stored item handed (a create) post_wake_mover is swapped too", v == BUILD and len(fx) == 1, (v, note, fx))
 
 # who may: a background agent, another project's session, a target that is no front agent of the project, a builderless project
 put(60, mover=BUILD)

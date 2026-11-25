@@ -262,7 +262,27 @@ def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]", pr
                      + (f"; for a check or an answer only {key} can give, {via}." if via else "."))
 
 
-def fix_front_mover(field: str, value: str, sender: str, project: str, current: str, meta: "dict[str, Any] | None", said_l: "Callable[[], list[dict[str, Any]]] | None" = None, verb: str = "update") -> "tuple[str, str, list[tuple[str, str, str]]]":
+def handed_back(value: str, sender: str, builder: list[str], meta: "dict[str, Any] | None", item: "dict[str, Any] | None") -> bool:
+    """Is a session's `mover`, `then` or `post_wake_mover` = the front agent `value` a hand-back: the item goes back to the front agent that holds its first open named step (past the owner's own lines), as the item
+    STANDS before this write (`meta`, never a step line the write itself adds). All four must hold: the front agent holds that step (telling.step_holder, in any letter case, as own_step reads it); the sender is the item's current
+    mover (`item`, read as the board reads it) or the project's builder; the front agent is a live session (live or cloud: a mover nobody can wake is the swap's); the item is a stored one (a create has none). A front agent that holds
+    the step is the one the work comes back to, and `handoff_notify` tells it as a turn; a mover set by any other session, or one whose step comes after another's, is the builder's as before. A failing read is no hand-back."""
+    try:
+        if not meta or not item:
+            return False
+        holder = _telling.step_holder(meta, past_his=True)
+        if not holder or not _anc.same_session(holder, value):
+            return False
+        mover_now = str(_hooks().item_mover(item) or "")
+        if not (_anc.same_session(sender, mover_now) or any(_anc.same_session(sender, b) for b in builder)):
+            return False
+        return _mg.Ctx().session_state(value) in ("live", "cloud")
+    except Exception as e:  # noqa: BLE001  — an extra: a failed read leaves the swap
+        print(f"front-mover gate: hand-back read for {value} failed ({e.__class__.__name__}: {e}); the swap stands", file=sys.stderr, flush=True)
+        return False
+
+
+def fix_front_mover(field: str, value: str, sender: str, project: str, current: str, meta: "dict[str, Any] | None", said_l: "Callable[[], list[dict[str, Any]]] | None" = None, verb: str = "update", item: "dict[str, Any] | None" = None) -> "tuple[str, str, list[tuple[str, str, str]]]":
     """The front-mover rule as a fix (server_fixes.FRONT_MOVER): a mover, then or post_wake_mover that another session sets to a front agent becomes the project's builder, since the front agent gets
     no hand-off notice. → (the value to use, the note for the reply, the fixes to record on the item: (fix, token, History line), a line of "" = take the mark off). The value is the one sent when it is
     no case (_front_mover_case), or when the server already substituted this very value on this item for this very sender less than a day ago and the sender sends it again: the mover's no, kept as sent with a note, and the server leaves that
@@ -277,6 +297,8 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
     if case is None:
         return value, "", []
     key, proj, builder, _hub = case
+    if handed_back(value, sender, builder, meta, item):      # the front agent holds the item's open step and the sender is its mover or builder: the item goes back to it as sent, and it is told (handoff_notify; a then or post_wake_mover, by the answer or the wake)
+        return value, (f"\n(note: {field}={key} is kept as you sent it: {key} holds the item's open step, so the item goes back to it" + (", and it is told it is handed back)" if field == "mover" else "; the owner's answer or the wake hands it the item and tells it)")), []
     sib = _front_sibling(sender, key, project)
     if sib and sibling_quote(said_l() if said_l else []):
         return value, (f"\n(note: {field}={key} is kept as you sent it, on {OWNER}'s words in said; {key} is a front agent of {proj}, and "

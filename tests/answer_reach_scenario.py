@@ -542,6 +542,73 @@ check("13 telling.step_holder: the name that opens the first open named step, th
       telling.step_holder({"next": f"Oliver: {STEP}\ndemo-lead: {STEP_F}"}) == "demo-lead" and telling.step_holder({"next": f"Oliver: {STEP}\ndemo-lead: {STEP_F}"}, past_his=False) == "Oliver"
       and telling.step_holder({"next": "do it"}) == "")
 
+# ================================================================ 14. the holder is a live front agent of the item's own project, read in any letter case; the writes that leave it as the holder
+# the pick or Done reaches the front agent that holds the first open named step only when that agent is live and a front agent of THIS project; a retired or offline one, or another project's, leaves what main does (the builder, or the model's default)
+from stackshot.model import model_guards as _mg
+def with_state(who, state, fn):
+    """fn() with the session `who` read in the given state (retired, gone, ...), put back after"""
+    orig = _mg.Ctx.session_state
+    _mg.Ctx.session_state = lambda self, w: state if w in (who, U[who]) else orig(self, w)
+    try:
+        return fn()
+    finally:
+        _mg.Ctx.session_state = orig
+def raise_pick(i, nxt):
+    item(i, mover="demo-lead", next=nxt)
+    return raised(i, mover="Oliver", needs=["decision"], ask=ASK, options=OPTS)
+def builder_took(i, out, kind, got):
+    meta = rd(i)["metadata"]
+    return out == kind and derived(i).mover == "demo-builder" and meta.get("mover") != "demo-lead" and "demo-lead" not in got and "demo-lead" not in names_of(meta) and not derived(i).conflicts
+r = raise_pick(110, f"demo-lead: {STEP_F}")
+out, got, kept = with_state("demo-lead", "retired", lambda: answer("a110", "Ship", "", "answer"))
+check("14 the front agent that holds the first step is retired: the pick does not make it the mover or push it; the builder takes the item as on main", builder_took(110, out, "decision", got), (r, out, rd(110)["metadata"], got, kept))
+r = raise_pick(111, f"demo-lead: {STEP_F}")
+out, got, kept = with_state("demo-lead", "gone", lambda: answer("a111", "Ship", "", "answer"))
+check("14 ...offline (gone) the same", builder_took(111, out, "decision", got), (r, out, rd(111)["metadata"], got, kept))
+r = raise_pick(112, "demo-side: carry out whichever way he picks")
+out, got, kept = answer("a112", "Ship", "", "answer")
+check("14 the first named step is another project's front agent's: the pick does not make it the mover or push it; the builder takes the item as on main", builder_took(112, out, "decision", {k: v for k, v in got.items() if k != "demo-side"}) and "demo-side" not in got and rd(112)["metadata"].get("mover") != "demo-side", (r, out, rd(112)["metadata"], got, kept))
+item(113, mover="demo-lead", next=f"demo-lead: {STEP_F}"); raised(113, mover="Oliver", step=STEP, needs="")
+out, got, kept = with_state("demo-lead", "retired", lambda: answer("a113", "", "", "done"))
+check("14 a Done with no session in needs, the front agent whose step is next is retired: the builder takes the item as on main", out == "done" and rd(113)["metadata"].get("mover") == "demo-builder" and "demo-lead" not in got, (out, rd(113)["metadata"], got, kept))
+item(114, mover="demo-lead", next="demo-side: carry out the result"); raised(114, mover="Oliver", step=STEP, needs="")
+out, got, kept = answer("a114", "", "", "done")
+check("14 ...the step is another project's front agent's: the builder takes the item as on main, nothing is pushed to that agent", out == "done" and rd(114)["metadata"].get("mover") == "demo-builder" and "demo-side" not in got, (out, rd(114)["metadata"], got, kept))
+# the case of the step line: read as own_step reads it
+r = raise_pick(115, f"DEMO-LEAD: {STEP_F}")
+out, got, kept = answer("a115", "Ship", "", "answer")
+meta = rd(115)["metadata"]
+check("14 a step line in another letter case (DEMO-LEAD) with needs the decision alone: the front agent takes the item (mover, first in needs, as the roles list it) and is pushed as the holder; the builder is not named",
+      out == "decision" and meta.get("mover") == "demo-lead" and names_of(meta) == ["demo-lead"] and holder_pushed("demo-lead", got, kept) and "demo-builder" not in got, (r, out, meta, got, kept))
+item(116, mover="demo-lead", next=f"DEMO-LEAD: {STEP_F}"); raised(116, mover="Oliver", step=STEP, needs="")
+out, got, kept = answer("a116", "", "", "done")
+meta = rd(116)["metadata"]
+check("14 ...a Done with no session in needs, the same: the front agent takes the item (mover, first in needs, under its listed name) and the builder is not named; the bare line to it rides as a progress notice, as own_step reads an id against a step line in another case", out == "done" and meta.get("mover") == "demo-lead" and names_of(meta) == ["demo-lead"] and "demo-builder" not in got and "demo-builder" not in kept, (out, meta.get("mover"), meta.get("then"), names_of(meta), got, kept))
+check("14 telling.front_name: a front agent in any letter case and by id as the roles list it; its project decides when one is asked; no other session, the owner or an empty name",
+      telling.front_name("DEMO-LEAD") == "demo-lead" and telling.front_name(U["demo-lead"]) == "demo-lead" and telling.front_name("demo-lead", "projects/alpha") == "demo-lead"
+      and telling.front_name("demo-lead", "projects/beta") == "" and telling.front_name("demo-side", "projects/alpha") == "" and telling.front_name("demo-side") == "demo-side"
+      and telling.front_name("demo-builder") == "" and telling.front_name("Oliver") == "" and telling.front_name("") == "")
+# the writes that leave the front agent as the holder (each through the update tool, then his answer)
+r, out, got, kept = done(117, f"Oliver: {STEP}\ndemo-lead: {STEP_F}")
+meta = rd(117)["metadata"]
+check("14 a raise on his step with the front agent in needs, the owner's own line first and the front agent's step next: no `then` is stored, and his Done hands the item to the front agent",
+      not r.startswith("REFUSED") and "then" not in STORED[117] and out == "done" and meta.get("mover") == "demo-lead" and holder_pushed("demo-lead", got, kept), (r, STORED[117], out, meta, got, kept))
+r, out, got, kept = pick(118, f"Oliver: {STEP}\ndemo-lead: {STEP_F}\ndemo-builder: build what he picks")
+meta = rd(118)["metadata"]
+check("14 a raise whose next has the owner's line, then the front agent's, then the builder's: the builder is not stored as `then` (the front agent holds the first step past his line), and his pick reaches the front agent",
+      not r.startswith("REFUSED") and "then" not in STORED[118] and out == "decision" and meta.get("mover") == "demo-lead" and holder_pushed("demo-lead", got, kept), (r, STORED[118], out, meta, got, kept))
+r = raise_pick(121, f"DEMO-LEAD: {STEP_F}\ndemo-builder: build what he picks")
+check("14 a raise whose first step is the front agent's in another letter case, a builder line after it: the builder is not stored as `then`", not r.startswith("REFUSED") and "then" not in STORED[121], (r, STORED[121]))
+item(119, mover="demo-lead", next=f"demo-lead: {STEP_F}\ndemo-builder: build what he picks")
+r = raised(119, needs=["decision"], ask=ASK, options=OPTS)      # the front agent raises the item on him and names no mover: the write settles it onto him and the stored mover becomes `then`
+check("14 the front agent raises the item with no mover= (its own step, then a builder line): the stored mover, the front agent, becomes `then`, not the builder",
+      not r.startswith("REFUSED") and STORED[119].get("then") == "demo-lead" and STORED[119].get("mover") == "Oliver", (r, STORED[119]))
+item(120, mover="Oliver", next=f"demo-lead: {STEP_F}", needs=["decision", "demo-builder"], ask=ASK, options=OPTS)
+out, got, kept = answer("a120", "Ship", "", "answer")
+meta = rd(120)["metadata"]
+check("14 a pick with the builder named in needs beside the decision and the front agent's step first: the builder stays the mover (the front agent is not made the mover over a session in needs)",
+      out == "decision" and derived(120).mover == "demo-builder" and meta.get("mover") != "demo-lead" and names_of(meta)[:1] == ["demo-builder"] and "demo-lead" not in got, (out, meta, got, kept))
+
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)
 print(f"ok: {len(ran)} checks")

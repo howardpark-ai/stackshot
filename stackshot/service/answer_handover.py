@@ -100,11 +100,14 @@ def _builder_for_front(who: str, meta: dict[str, Any]) -> str:
 
 def _front_step_holder(meta: dict[str, Any]) -> str:
     """The front agent that holds the item's first open named step (past the owner's own lines) when the project's live builder would otherwise take the item after his answer; "" in every other case (no such step, the
-    holder is no front agent, the project has no builder or a dead one). The one his answer is to reach when the item names no session at all (needs is the decision alone, no `then`): the default would hand it to the builder."""
+    holder is no front agent of the item's project, or one that is not live (_then_live, the test a stored `then` passes), the project has no builder or a dead one), and the caller keeps what main does (the builder, or the model's default). The one his answer is to reach
+    when the item names no session at all (needs is the decision alone, no `then`): the default would hand it to the builder. The holder is read in any letter case, as `own_step` reads a step's name, and returned as the roles list it."""
     try:
+        project = str(meta.get("project") or "")
         who = _telling.step_holder(meta, past_his=True)
-        b = _telling.no_front(who, str(meta.get("project") or "")) if who else ""      # no_front answers `who` itself for a session that is no front agent, and the builder for one that is
-        return who if b and b != who and _then_live(b, meta) else ""
+        name = _telling.front_name(who, project) if who else ""      # a front agent of this item's project, not another project's or a retired one
+        b = _telling.no_front(name, project) if name else ""
+        return name if b and b != name and _then_live(b, meta) and _then_live(name, meta) else ""
     except Exception as e:  # noqa: BLE001  — an extra: a failed read leaves the default
         print(f"answer: step holder of {meta.get('project')} not read ({e.__class__.__name__}: {e}); the default stands", file=sys.stderr, flush=True)
         return ""

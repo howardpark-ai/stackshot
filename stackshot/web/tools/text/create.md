@@ -80,7 +80,8 @@ to keep it as sent; with no builder it is refused, except from a listed session 
 a sibling front agent is kept on {{OWNER}}'s words in said, see mover). With no mover= an alive
 item is moved by the project's builder (for a page the instance maps to a builder, that one when the project lists
 it), else its -main agent, never by its creator; an item that waits on {{OWNER}}'s call (needs=decision with its ask)
-is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it (a
+is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it, unless that
+front agent holds the item's first open named step: then no `then` is stored and its answer reaches it (a
 builder that files its own decision item is its own `then`). An item created in his state (his step, or needs holding
 decision) has him as mover, and naming a session as mover beside that state is refused; mover={{OWNER}} on an item in
 none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name
