@@ -234,4 +234,74 @@ v = rd()
 check("the sleeper wakes (polled again, and the mark gone): a running row with no `sleeping` and no gone", "gone" not in v[NAP] and "sleeping" not in v[NAP] and LV.idle_live(v[NAP]) and cl.sleeping_sessions() == {}, v[NAP])
 check("an unreadable or absent store marks nothing: no sleepers", (T / "links/a/sessions.json").unlink() is None and cl.sleeping_sessions() == {})
 
+# ---- 5. a sleeper stored under a retired box's letter is read under the machine the agents run on
+# Box d was retired ([fleet] retired_letters); box b is where the agents run now ([agents_box] ssh, as `user@name.domain`); box a is an ordinary live one. No puller reports a sleeper, so the sleepers
+# that d last reported keep its letter in the store for ever: the view (and so every reader) must read them under b, without rewriting the store.
+(T / "names.tsv").write_text("host-a\tbox-a\ta\nhost-b\tbox-b\tb\nhost-d\tbox-d\td\n"); (T / "links/b").mkdir(exist_ok=True)
+SLP, SLA, RUN, WAKE, GON = uid(21), uid(22), uid(23), uid(24), uid(25)      # a sleeper stored on d, a sleeper on live box a, a session running on d, a sleeper on d that wakes later, one only gone on d
+N5 = {SLP: "work-heron-sleep", SLA: "work-heron-live", RUN: "work-heron-run", WAKE: "work-heron-wake", GON: "work-heron-gone"}
+rec5 = lambda u: {"uuid": u, "name": N5[u], "name_source": "user"}
+def links5(sleepers):
+    (T / "links/b/sessions.json").write_text(json.dumps({u: {"name": n, "url": f"https://term.example/#s={n}", "machine": "b", "seen": "x", **({"sleeping": sleepers[u]} if u in sleepers else {})} for u, n in N5.items()}))
+    os.utime(T / "links/b/sessions.json", ns=(time.time_ns() + links.n * 10**9,) * 2); links.n += 1
+vw = lambda L: json.loads((cl.VIEW / L / "sessions.json").read_text())
+t5 = NOW0 + 1000
+cfg.CFG.setdefault("fleet", {})["retired_letters"] = ["d"]; cfg.CFG["agents_box"] = {"ssh": "ops@Host-B.example.net"}
+cl._ab.host = lambda: ""                                   # the fixture store is read here, over no ssh
+links5({})
+cl.checkin("host-d", [rec5(u) for u in (SLP, RUN, WAKE, GON)], now=t5); cl.checkin("host-a", [rec5(SLA)], now=t5 + 1)
+links5({SLP: iso(t5 + 10), SLA: iso(t5 + 10), WAKE: iso(t5 + 10)})
+cl.checkin("host-d", [rec5(RUN)], now=t5 + 20)             # d's last poll: SLP, WAKE and GON are not in it; d is retired and never polls again
+cl.checkin("host-b", [], now=t5 + 30)
+check("the retired box's folder holds what is not asleep (the running session, the one only gone) and no sleeper", set(vw("d")) == {RUN, GON} and vw("d")[RUN]["machine"] == "d" and vw("d")[GON].get("gone") and "sleeping" not in vw("d")[GON], vw("d"))
+check("a sleeper stored on the retired letter is read under the agents' machine: its row there says machine b, keeps its time asleep and its link, and is not gone",
+      {SLP, WAKE} <= set(vw("b")) and all(vw("b")[u]["machine"] == "b" and vw("b")[u]["sleeping"] == iso(t5 + 10) and "gone" not in vw("b")[u] for u in (SLP, WAKE)) and vw("b")[SLP]["url"].endswith("work-heron-sleep"), vw("b"))
+check("a sleeper on a letter that is not retired stays where it is", SLA in vw("a") and vw("a")[SLA]["machine"] == "a" and vw("a")[SLA]["sleeping"] == iso(t5 + 10) and SLA not in vw("b"), vw("a").get(SLA))
+check("the stored record is not rewritten: the sleepers keep the letter of the box that last reported them", st()[SLP]["machine"] == "d" and st()[WAKE]["machine"] == "d" and st()[SLA]["machine"] == "a", {u[-2:]: r["machine"] for u, r in st().items()})
+check("the readers that go through the view agree: the sessions index, the inbox's index and fleet.sessions() give machine b to the sleeper, d to the running session",
+      _sr._sessions_index()[SLP]["machine"] == "b" and inbox._index()[SLP]["machine"] == "b" and fl.sessions()[SLP]["machine"] == "b" and fl.sessions()[RUN]["machine"] == "d", (_sr._sessions_index()[SLP], fl.sessions()[RUN]))
+ls = _wt_sessions._sessions_listing("", now=t5 + 31).split("\n")
+slp = [l for l in ls if l.startswith("- work-heron-sleep ")]
+check("the sessions tool names the agents' machine for the sleeper (not the retired letter), and says it sleeps", len(slp) == 1 and " · box-b · sleeping since " in slp[0] and " · d" not in slp[0], slp)
+on_b, on_d, on_a = cl.sessions_on("host-b"), cl.sessions_on("host-d"), cl.sessions_on("host-a")
+check("sessions_on: the agents' machine holds the sleepers (record read as its own), the retired one only what is not asleep, the live one its own sleeper",
+      {SLP, WAKE} <= set(on_b) and all(on_b[u]["machine"] == "b" for u in (SLP, WAKE)) and SLA not in on_b and RUN not in on_b
+      and set(on_d) == {RUN, GON} and SLA in on_a and SLP not in on_a and cl.sessions_on("host-none") == {}, (sorted(u[-2:] for u in on_b), sorted(u[-2:] for u in on_d)))
+i_slp = inbox.put("work-heron-sleep", "a line for the sleeper on the retired letter", "msg", now=time.time() - 900, sender="work-heron-run (00000023…)")
+its = {str(i["id"]): i for i in inbox._items()}; idx = _sr._sessions_index()
+check("inbox: a line for that sleeper is asleep and, as the machine it is read under is online, alive (an overdue wake shows in the flag); a poll that does not report the sleeper hands it nothing",
+      inbox.asleep(its[i_slp], idx) and inbox.alive(its[i_slp], idx) and inbox.take({}, now=time.time()) == [], (i_slp, idx[SLP]))
+s0 = cl.STATE.read_text(); v1 = cl._view(cl.load(), t5 + 31); v2 = cl._view(cl.load(), t5 + 31)
+check("idempotent: two views are equal, a third write of the view changes no file, the store is untouched", v1 == v2 and cl._materialize(cl.load(), t5 + 31) is False and cl._materialize(cl.load(), t5 + 31) is False and cl.STATE.read_text() == s0)
+
+class _Cap(logging.Handler):
+    def __init__(self): super().__init__(); self.lines = []
+    def emit(self, r): self.lines.append(r.getMessage())
+cap = _Cap(); kept_handlers = cl.log.handlers[:]; cl.log.handlers[:] = [cap]; logging.disable(logging.NOTSET)
+try:
+    cl._HOME_WARNED.clear()
+    cfg.CFG["agents_box"] = {}                                   # no agents' box: nobody to attribute the sleepers to
+    cl.tick(now=t5 + 40); cl.tick(now=t5 + 41); cl.sessions_on("host-b"); cl.sessions_on("host-d")
+    check("no agents' box set: the sleepers stay on the retired letter (view and sessions_on), the other rows as they were", {SLP, WAKE} <= set(vw("d")) and vw("d")[SLP]["machine"] == "d" and SLP not in vw("b") and SLP not in cl.sessions_on("host-b")
+          and SLP in cl.sessions_on("host-d") and SLA in vw("a") and RUN in vw("d"), (sorted(vw("d")), sorted(vw("b"))))
+    check("…and says so once in the log, however often it is read", len(cap.lines) == 1 and "stay as they are" in cap.lines[0] and "[agents_box] ssh" in cap.lines[0], cap.lines)
+    cfg.CFG["agents_box"] = {"ssh": "host-q"}; cl.tick(now=t5 + 42); cl.tick(now=t5 + 43)
+    check("an agents' box that names no machine of the view: unchanged, one more line (its own reason), once", SLP in vw("d") and SLP not in vw("b") and len(cap.lines) == 2 and "host-q" in cap.lines[1], cap.lines)
+    cfg.CFG["agents_box"] = {"ssh": "host-d"}; cl.tick(now=t5 + 44); cl.tick(now=t5 + 45)
+    check("an agents' box that is the retired machine itself: unchanged, one more line, once", SLP in vw("d") and SLP not in vw("b") and len(cap.lines) == 3 and "retired itself" in cap.lines[2], cap.lines)
+    cfg.CFG["agents_box"] = {"ssh": "host-b"}; cl.tick(now=t5 + 46); cl.tick(now=t5 + 47)
+    check("the agents' machine set again: the sleepers are read under it again (a plain name matches as well as user@name.domain), nothing more logged", {SLP, WAKE} <= set(vw("b")) and SLP not in vw("d") and RUN in vw("d") and len(cap.lines) == 3, (sorted(vw("b")), cap.lines))
+finally:
+    cl.log.handlers[:] = kept_handlers; logging.disable(logging.CRITICAL)
+# the sleeper wakes: the agents' machine's puller reports it (box d has been silent for a day). A real report wins: the stored letter moves for good, with the mark still there and after it goes
+t6 = t5 + 86400
+cl.checkin("host-b", [rec5(WAKE)], now=t6)
+check("a report from the agents' machine's puller moves the stored record for good (with the mark still set, the row is on b, asleep or not as the store says)", st()[WAKE]["machine"] == "b" and "gone" not in st()[WAKE] and vw("b")[WAKE]["machine"] == "b" and WAKE not in cl.sessions_on("host-d")
+      and WAKE in cl.sessions_on("host-b") and st()[SLP]["machine"] == "d", (st()[WAKE], vw("b").get(WAKE)))
+links5({SLP: iso(t5 + 10), SLA: iso(t5 + 10)})
+cl.checkin("host-b", [rec5(WAKE)], now=t6 + 10)
+check("…and once the mark is gone it is a running session of b: no `sleeping`, not gone, never on d", "sleeping" not in vw("b")[WAKE] and "gone" not in vw("b")[WAKE] and LV.idle_live(vw("b")[WAKE]) and WAKE not in vw("d"), (vw("b")[WAKE], sorted(vw("d"))))
+links5({SLA: iso(t5 + 10)}); cl.tick(now=t6 + 20)
+check("a sleeper whose mark goes before any report is no sleeper: the attribution ends at once, its row is back on the retired letter (with the normal rules from there)", SLP in vw("d") and SLP not in vw("b") and "sleeping" not in vw("d")[SLP], (sorted(vw("d")), sorted(vw("b"))))
+
 print(("ok" if not fails else "FAILED") + f": sleeping scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

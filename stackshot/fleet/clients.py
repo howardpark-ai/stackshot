@@ -26,6 +26,9 @@ A sleeper is neither: the fleet tool puts a session that has been idle for a whi
 to it wakes it) and marks its row in the links store below with `sleeping`, the ISO time it went to sleep. Such a session is in no puller's poll,
 so a row with a non-empty `sleeping` is kept from `gone`, from the hook TTL and from the horizon for as long as the mark is there, and the view's row
 carries `sleeping`; stackshot only reads the mark, never writes it and never wakes anyone. When the mark goes the normal rules start from that moment.
+A sleeper last reported from a box that was later retired ([fleet] retired_letters) would keep that box's letter for ever, since no puller reports a sleeper: where the
+agents' box ([agents_box] ssh) names a machine of the view that is not retired, such a row is read as that machine's (`sleeper_homes`: in the view, so in every reader, and in
+`sessions_on`); the stored record keeps its letter, so a later report from a puller or a hook still moves it for good.
 The CLI's own placeholder names (nameSource auto or collision, or a name of its shape "<os user>-<2 hex>" whatever nameSource
 came with it, before a /rename) never displace a name on record.
 
@@ -542,7 +545,52 @@ def _expire(st: dict[str, Any], now: float) -> None:
 def sessions_on(machine: str) -> dict[str, dict[str, Any]]:
     """uuid → record of the sessions the server holds for that machine (the inbox asks which keys a puller may be handed)."""
     st = load(); m = st["machines"].get(machine)
-    return {u: s for u, s in st["sessions"].items() if m and s.get("machine") == m["letter"]}
+    if not m:
+        return {}
+    home = sleeper_homes(st, sleeping_sessions())
+    return {u: ({**s, "machine": home[u]} if u in home else s) for u, s in st["sessions"].items() if home.get(u, s.get("machine")) == m["letter"]}
+
+
+_HOME_WARNED: set[str] = set()                                           # the reasons already logged by sleeper_homes: each once, not at every read
+
+
+def _home_note(why: str) -> str:
+    if why not in _HOME_WARNED:
+        _HOME_WARNED.add(why); log.info("%s", why)
+    return ""
+
+
+def _agents_letter(st: dict[str, Any], gone: frozenset[str]) -> str:
+    """The letter of the machine of the view that the agents run on: [agents_box] ssh (a host word is already resolved by config.get; `user@` and the domain are left off, as fleet.py compares names),
+    matched against the machines' own names and fleet names and the fleet names table. "" (and one line in the log) when none is set, when it names no machine of the view, or when that machine is itself retired."""
+    h = str(_cfg.get("agents_box", "ssh") or "").strip()
+    if not h or h.startswith("-") or any(c.isspace() for c in h):
+        return _home_note("sleepers on a retired box stay as they are: [agents_box] ssh names no machine to attribute them to")
+    key = _flt._hkey(h.rsplit("@", 1)[-1])
+    letters = {m["letter"] for m in st["machines"].values()}
+    hit = {m["letter"] for name, m in st["machines"].items() if key in (_flt._hkey(name), _flt._hkey(m.get("fleet")))}
+    hit |= {lt for k, (fl_name, lt) in names_table().items() if key in (_flt._hkey(k), _flt._hkey(fl_name))} & letters
+    if len(hit) != 1:
+        return _home_note(f"sleepers on a retired box stay as they are: [agents_box] ssh {h!r} names {'no' if not hit else 'more than one'} machine of the view")
+    (letter,) = hit
+    if letter in gone:
+        return _home_note(f"sleepers on a retired box stay as they are: the machine [agents_box] ssh names ({letter}) is retired itself")
+    return letter
+
+
+def sleeper_homes(st: dict[str, Any], asleep: dict[str, str]) -> dict[str, str]:
+    """uuid → the letter a session row is read under, for each row that must be read under another letter than the one it is stored with: the fleet tool marks it asleep (`asleep`, sleeping_sessions) while
+    its stored machine is retired (`fleet.not_drawn`). No puller reports a sleeper, so it keeps the letter of the last box that did, for ever; the fleet tool says it sleeps where the agents are now, so it is read
+    as the agents' machine's (`_agents_letter`). Read-time only: the stored record is not changed, so a report from a puller or a hook later still moves the row (`_upsert`) and a mark that goes ends
+    the attribution at once. Nothing else moves: a running session on a retired letter, a row with no mark, a sleeper on a letter that is not retired; and with no agents' machine to name, nothing at all."""
+    gone = _flt.not_drawn()
+    if not gone or not asleep:
+        return {}
+    rows = [u for u, s in st["sessions"].items() if s.get("machine") in gone and u.strip().lower() in asleep]
+    if not rows:
+        return {}
+    to = _agents_letter(st, gone)
+    return dict.fromkeys(rows, to) if to else {}
 
 
 # ---------------------------------------------------------------------------- session links, from the fleet tool
@@ -649,14 +697,17 @@ def _view(st: dict[str, Any], now: float) -> dict[str, tuple[dict[str, Any], dic
     out: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     links = session_links()
     asleep = sleeping_sessions()
+    home = sleeper_homes(st, asleep)                      # a sleeper stored under a retired box's letter is read under the agents' machine's
     for name, m in st["machines"].items():
         L = m["letter"]; on = _lv.puller_online(m, now)
         rows = {}
         for u, s in st["sessions"].items():               # the puller's list, and what the hooks registered: the machine's truth
-            if s.get("machine") != L:
+            if home.get(u, s.get("machine")) != L:
                 continue
             r = {k: s[k] for k in ("name", "seen", "machine", "previous_name", "renamed_at", "status", "gone", "stopped") if s.get(k) is not None}
             r.setdefault("name", "")
+            if u in home:
+                r["machine"] = L
             if u.strip().lower() in asleep:                   # asleep: present, never gone (a stamp left from before the mark was read is not shown), with the time it went to sleep
                 r.pop("gone", None); r["sleeping"] = asleep[u.strip().lower()]
             r["url"] = links.get(u.strip().lower(), "")       # the fleet tool's link (the map's keys are lowercased) for this transcript id, whatever the bridge does; none → the plain name
