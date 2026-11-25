@@ -453,7 +453,7 @@ switch_timeout_s = 90                               # one button press is given 
 [gbrain]
 bin = "gbrain"                                      # the gbrain command line, a name on PATH or a path (~ allowed): only a [pages] flavor = "gbrain" instance uses it (stackshot/projects/rename_page.py, stackshot/projects/page_keeper.py, the router's timeline notes). Read at start of those tools
 mirror_url = "https://github.com/example/brain/blob/main/{key}.md"
-# home = ""                                         # GBRAIN_HOME for the default brain's gbrain CLI calls; unset = the CLI's own default (the environment is left as it is)
+# home = ""                                         # GBRAIN_HOME for the default brain's gbrain CLI calls; unset = the CLI's own default (the environment is left as it is). With a [[brains]] entry (and flavor = "gbrain") it is required: with none the default brain's CLI calls are refused (the CLI would run on whichever brain its own home holds); home = "~" keeps the CLI's own default (GBRAIN_HOME is a parent folder, .gbrain is appended)
 # shared = false                                    # true: other people's pages live in this brain too, so stackshot writes nothing of its board onto them (see [[brains]] shared)
 
 # [[brains]]: second notes brains that hold some projects' pages (stackshot/projects/brains.py). Optional: with no entry every page lives in the default brain

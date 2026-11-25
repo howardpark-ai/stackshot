@@ -68,6 +68,14 @@ copy is off the lines of a project stop following it from that verb on: turn the
   brain's page for that slug and a write would put the page into the default brain. So a CLI call for that brain's slugs (a read, a put, a
   timeline line, a rename) is refused with a line saying so, and `config.notes` names the entry. A refused read is a page that could not be
   read: the audit's page call skips it and says so once per outage, naming the brain.
+- **With a second brain, the default brain needs its `home` too.** An instance with a `[[brains]]` entry and no `[gbrain] home` runs the default
+  brain's CLI calls with the CLI's own home, and on a machine whose CLI home belongs to another brain those calls read and write that brain.
+  So, on a `[pages] flavor = "gbrain"` instance, the default brain's calls are refused the same way until `home` is set under `[gbrain]`, and
+  `config.notes` says so (the plain flavor never reaches the CLI: no note). A refused default-brain read is a page that could not be read: the
+  audit's page call does not skip it quietly as it does a second brain's page, it reports the debts to the page's keeper like any unreadable page,
+  and that report carries the refusal text, which names `[gbrain] home`. The way out for a setup with one gbrain home is `home = "~"`: `GBRAIN_HOME`
+  is a parent folder (the CLI appends `.gbrain` to it), so `~` is the CLI's own default and changes nothing. An instance with no `[[brains]]` is
+  unchanged: no `home` means the CLI's own default.
 - **A remote brain's client secret: `secret_file`.** A remote brain's CLI also needs its OAuth client secret (it fails with "No client_secret
   available" on `GBRAIN_HOME` alone). An entry may name `secret_file`, a path (`~` allowed) to a JSON file with a `client_secret` key, or a plain
   file whose first line is the secret. The server reads it at each CLI call for that brain and sets `GBRAIN_REMOTE_CLIENT_SECRET` in that

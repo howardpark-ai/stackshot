@@ -8,10 +8,10 @@ gbrain CLI run with that brain's home folder (environment GBRAIN_HOME=<home>, wh
     for_key("projects/acme-x")   → the Brain that holds the page (the default brain when no [[brains]] entry names it)
     file("projects/acme-x")      → <that brain's copy>/projects/acme-x.md
     problem(brain)               → "" when its copy can be read; else why not (missing, not a usable git copy, or not synced for stale_hours)
-    cli_refusal(slug)            → "" when a gbrain CLI call (read or write) for the slug may run; else why not (a second brain with no `home`)
+    cli_refusal(slug)            → "" when a gbrain CLI call (read or write) for the slug may run; else why not (a second brain with no `home`, or the default brain with no `home` while a second brain is configured)
     prepare(slug, env, brain)    → (the child environment, the refusal or ""): one secret_file read decides both; the parent's client secret never passes
     gbrain_env(slug, env)        → env with GBRAIN_HOME (and, for a brain with a `secret_file`, GBRAIN_REMOTE_CLIENT_SECRET) set for the slug's brain
-                                   (a copy: the server's own environment is never touched; unchanged for the default brain without a home)
+                                   (a copy: the server's own environment is never touched; unchanged for the default brain without a home when no second brain is configured)
     redact(text, env)            → text with the secret of that environment replaced, for any output a CLI call hands back
     mirror(key)                  → the page's mirror link from its brain's template ("" when none)
     shared_refusal(key)          → "" when stackshot may write the page; else why not (its brain is marked `shared`: see below)
@@ -21,7 +21,8 @@ gbrain CLI run with that brain's home folder (environment GBRAIN_HOME=<home>, wh
 
 With no `[[brains]]` every slug resolves to the default brain, whose copy is `[paths] brain`, whose home is `[gbrain] home` (unset:
 the CLI's own default, so its environment is not touched) and whose mirror is `[gbrain] mirror_url`: exactly the behavior from
-before. The default brain never fails open here: its checks stay as they were. A second brain whose copy is missing or stale, or
+before. The default brain never fails open here: its checks stay as they were. Once a second brain is configured, the default brain needs its
+`home` too: with none, its CLI calls are refused (cli_refusal), because the CLI would run on whichever brain its own home holds. A second brain whose copy is missing or stale, or
 whose CLI call fails, never blocks the board: the readers skip its pages for the run and say so. The state is per brain, in the memory of each
 process: the first failed read of an outage prints one warning (warn_once), every further failure of that brain stays silent, and when the last
 failing read works again (clear) one line says the brain is back. A long-lived process such as the server says it once per outage; the page hook
@@ -389,13 +390,17 @@ def prepare(slug: Any = "", env: dict[str, str] | None = None, brain: Brain | No
     """(the environment a gbrain CLI call for this slug runs with, the refusal's text or ""): one read of the brain's secret_file decides both, so
     a file that turns unusable between a check and the call cannot let the call run on another value. The environment is a copy of `env` (default:
     the server's) with the client secret variable removed first, whatever the parent holds, and set only from this brain's own secret_file;
-    GBRAIN_HOME is set to the brain's home when it has one. A refusal (see cli_refusal) comes with an environment without the secret: the call must not run."""
+    GBRAIN_HOME is set to the brain's home when it has one. The default brain with no home is refused when a second brain is configured, and
+    never otherwise. A refusal (see cli_refusal) comes with an environment without the secret: the call must not run."""
     out = dict(os.environ if env is None else env)
     out.pop(SECRET_ENV, None)
     b = brain or for_key(slug)
     if b.home:
         out["GBRAIN_HOME"] = b.home
     if b.default:
+        if not b.home and configured():      # configured() counts a client box's remote entries too: harmless, a client makes no CLI call (config.notes skips them)
+            return out, ("refused: the default brain has no home in [gbrain] and a second brain is configured, so the gbrain CLI would run on "
+                         "whichever brain its own home holds; set home = \"<its GBRAIN_HOME folder>\" under [gbrain]")
         return out, ""
     if not b.home:
         return out, (f"refused: second brain {b.name!r} has no home in its [[brains]] entry, so the CLI for {_norm(slug)} would use the default brain; "
@@ -430,7 +435,10 @@ def cli_refusal(slug: Any) -> str:
     and a write would put the page into the default brain; both are refused until the entry names its home. A second brain whose
     `secret_file` cannot be used (unreadable, empty, no client_secret, or readable by group or others) is refused too, with a line naming the
     path and the reason and said once per outage: the CLI would fail without its secret. The caller treats a refused read as a page that
-    could not be read (skipped, said once per outage). The default brain is never refused here."""
+    could not be read (a second brain's page: skipped, said once per outage; the default brain's: reported to the page's keeper like any
+    unreadable page, with this text in the report, see service/page_debt.page_debt_project). The default brain is refused only when it has no `home` and a second brain is configured:
+    the CLI would run with its own home, which on a machine whose CLI home belongs to another brain is that brain; an instance with no
+    [[brains]] is never refused."""
     return prepare(slug)[1]
 
 
