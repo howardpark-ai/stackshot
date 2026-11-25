@@ -352,5 +352,176 @@ msg = pv._page_answer_problem(GH, "someone", None, reg9)
 check("a mark asked for a page a split answers says the source in words: the page it was split from", "(the page it was split from)" in msg and msg.startswith(f"would answer {Q1B} ("), msg)
 check("... and that word is a source's own entry: every source has its words", pv._SRC_WORDS.get("split") == "the page it was split from" and set(pv._SRC_WORDS) == set(kp.SOURCES), pv._SRC_WORDS)
 
+# ---- 10. a change that ends a split page's own reading (a page mark laid on it, a hand-back, a project mark that moves, a retired target) is read by the pages under it too
+# The pages under a split page are asked whether they read a split before the change as well as after it: after it the page above them no longer splits, so only the rows before the change say so.
+def stale(rg_):
+    """[(key, stored, fresh)] of every row whose stored keeper fields differ from keeper.fields of the same registry (a refresh that missed a row)."""
+    return [(k, (v.get("keeper_agent", ""), v.get("keeper_source", "")), (lambda f: (f["keeper_agent"], f["keeper_source"]))(kp.fields(k, rg_))) for k, v in sorted(rg_.items())
+            if isinstance(v, dict) and "keeper_source" in v and (v.get("keeper_agent", ""), v.get("keeper_source", "")) != (lambda f: (f["keeper_agent"], f["keeper_source"]))(kp.fields(k, rg_))]
+def lines(agents, extra=""):
+    return "type: project\ntitle: T\nagents:\n  " + "\n  ".join(f"{n}: talks" for n in agents[:-1]) + f"\n  background:\n    {agents[-1]}: builds and merges\nstatus: active{extra}"
+page("projects/s1.md", lines(["s1-main", "s1-docs", "s1-builder"]))
+page("projects/s1/t.md", "type: note\ntitle: Target")
+page("projects/s1/u0.md", "type: note\ntitle: Split page\nsplit_from: projects/s1/t")
+page("projects/s1/u0/v0.md", "type: note\ntitle: V0")
+page("projects/s1/u0/v0/w0.md", "type: note\ntitle: W0")
+page("projects/s1/g0.md", "type: note\ntitle: Split page of an agent page\nsplit_from: projects/s1/t\nagent: ghost-three")       # an `agent:` line keeps it: a hand-back makes it follow the target
+page("projects/s1/g0/v0.md", "type: note\ntitle: G V0")
+page("projects/s2.md", lines(["s2-main", "s2-builder"]).replace("status: active", "status: archived"))
+page("projects/s2/t.md", "type: note\ntitle: Target in a retired project")
+page("projects/s1/u1.md", "type: note\ntitle: Split page of a retired target\nsplit_from: projects/s2/t")
+page("projects/s1/u1/v0.md", "type: note\ntitle: U1 V0")
+page("projects/s1/u1/v0/w0.md", "type: note\ntitle: U1 W0")
+p.cmd_registry(quiet=True); pr._CACHE["sig"] = None
+ids10 = {k: e["id"] for k, e in raw().items()}
+S1, S2 = ids10["projects/s1"], ids10["projects/s2"]
+S1M, S1D, S1B, S2M, S2B = "s1-main", "s1-docs", "s1-builder", "s2-main", "s2-builder"
+def entries10(mark="", pk=None, mark2="", pk2=None, extra=None):
+    def ag(names, m): return {n: agent(not n.endswith("builder"), "builds and merges" if n.endswith("builder") else "talks", **({"keeper": True} if n == m else {})) for n in names}
+    return {S1: entry("projects/s1", agents=ag([S1M, S1D, S1B], mark), **({"page_keepers": pk} if pk else {})), S2: entry("projects/s2", status="archived", agents=ag([S2M, S2B], mark2), **({"page_keepers": pk2} if pk2 else {})), **(extra or {})}
+def settle10(label, expect, **kw):
+    """The record as given: every row's published value equals a fresh read, and the rows in `expect` ({key: (agent, source)}) read what is asked."""
+    write_record(entries10(**kw)); r = R()
+    check(f"{label}: no row holds a keeper other than a fresh read of the registry gives ({len(r)} rows)", not stale(r), stale(r)[:4]); agrees(r, label)
+    got = {k: ks_of(r, k) for k in expect}
+    check(f"{label}: the pages read what the registry's order gives", got == expect, got)
+    return r
+U0, V0, W0, G0, GV, U1, U1V, U1W = "projects/s1/u0", "projects/s1/u0/v0", "projects/s1/u0/v0/w0", "projects/s1/g0", "projects/s1/g0/v0", "projects/s1/u1", "projects/s1/u1/v0", "projects/s1/u1/v0/w0"
+r10 = settle10("the base: a project mark, no page mark", {U0: (S1M, "split"), V0: (S1M, "split"), W0: (S1M, "split"), U1: (S1M, "mark"), U1V: (S1M, "mark"), "projects/s1/t": (S1M, "mark")}, mark=S1M)
+check("a split page of the project's own target: the pages under it read the target's keeper as a split", kp.reads_split(V0, r10) and kp.reads_split(W0, r10), (r10[U0].get("role"), r10[V0].get("role")))
+r = settle10("a page mark laid on the split page: the pages under it read the project's mark, no longer a split (a page an agent keeps never passes its keeper down)", {U0: (S1D, "mark"), V0: (S1M, "mark"), W0: (S1M, "mark")}, mark=S1M, pk={U0: S1D})
+check("... and that registry no longer reads a split for them (only the rows before the change did)", not kp.reads_split(V0, r) and not kp.reads_split(W0, r), (kp.reads_split(V0, r), kp.reads_split(W0, r)))
+settle10("a page mark laid on the split page, no project mark", {U0: (S1D, "mark")}, pk={U0: S1D})
+settle10("a page mark laid on the pages under it and on the split page", {U0: (S1M, "mark"), V0: (S1D, "mark"), W0: (S1B, "mark")}, mark=S1B, pk={U0: S1M, V0: S1D})
+settle10("a page mark on the child of the split page, the split page itself unmarked: the page under the child still follows the split page", {U0: (S1M, "split"), V0: (S1D, "mark"), W0: (S1M, "split")}, mark=S1M, pk={V0: S1D})
+settle10("the page keeper of an `agent:` split page handed back with an empty name: the page follows its target, and the page under it reads that", {G0: (S1M, "split"), GV: (S1M, "split")}, mark=S1M, pk={G0: ""})
+settle10("the same hand-back with a page mark on the target", {G0: (S1D, "split"), GV: (S1D, "split")}, mark=S1M, pk={G0: "", "projects/s1/t": S1D})
+settle10("a hand-back asked of a split page that has no `agent:` line (nothing to hand back)", {U0: (S1M, "split"), V0: (S1M, "split")}, mark=S1M, pk={U0: ""})
+settle10("the project's mark moves: the split pages and the pages under them read the new one", {U0: (S1D, "split"), V0: (S1D, "split"), W0: (S1D, "split"), "projects/s1/t": (S1D, "mark")}, mark=S1D)
+settle10("the project's mark moves while the split page is page-marked: the pages under it read the new project mark", {U0: (S1M, "mark"), V0: (S1D, "mark")}, mark=S1D, pk={U0: S1M})
+settle10("a page keeper laid on a page in a retired project that a split page follows: the page reads that mark (a mark is read there) and the pages under it too", {U1: (S2M, "split"), U1V: (S2M, "split"), U1W: (S2M, "split")}, mark=S1M, pk2={"projects/s2/t": S2M}, mark2=S2B)
+settle10("a page keeper laid on the split page that follows a retired target: the pages under it read the project's mark", {U1: (S1D, "mark"), U1V: (S1M, "mark"), U1W: (S1M, "mark")}, mark=S1M, pk={U1: S1D})
+settle10("the retired project's own mark moves", {U1: (S2B, "split"), U1V: (S2B, "split")}, mark=S1M, mark2=S2B)
+settle10("a page mark on the split page and a mark on the retired project's target", {U1: (S1B, "mark"), U1V: (S1M, "mark")}, mark=S1M, pk={U1: S1B}, pk2={"projects/s2/t": S2M}, mark2=S2B)
+# the published record of the same rows (the build reads the registry's rows, never a keeper of its own)
+write_record(entries10(mark=S1M, pk={U0: S1D})); r = R()
+pubs = prj.build(r)["projects"]
+check("the published record of the pages under a page-marked split page says the project's mark, not split", all((pubs[ids10[k]].get("keeper_agent"), pubs[ids10[k]].get("keeper_source")) == (S1M, "mark") for k in (V0, W0)), {k: (pubs[ids10[k]].get("keeper_agent"), pubs[ids10[k]].get("keeper_source")) for k in (V0, W0)})
+
+# a chain of 6 to 11 hops with a page mark on a page of the chain, and children under chain pages: the chain follows the marked page (up to the bound), the children under it read the mark, never a split
+for n in (6, 8, 9, 11):
+    page(f"projects/ch{n}.md", lines([f"ch{n}-main", f"ch{n}-docs", f"ch{n}-builder"]))
+    page(f"projects/ch{n}/c0.md", "type: note\ntitle: c0")
+    for i in range(1, n + 1):
+        page(f"projects/ch{n}/c{i}.md", f"type: note\ntitle: c{i}\nsplit_from: projects/ch{n}/c{i - 1}")
+        page(f"projects/ch{n}/c{i}/k.md", f"type: note\ntitle: k{i}")
+        page(f"projects/ch{n}/c{i}/k/kk.md", f"type: note\ntitle: kk{i}")
+p.cmd_registry(quiet=True); pr._CACHE["sig"] = None
+ids_ch = {k: e["id"] for k, e in raw().items()}
+def chain_entries(n, mark_at, project_mark):
+    """The record of the four chain projects: the project `n` marks `project_mark` (an agent suffix) and page-marks its chain page c<mark_at> (0: none) with its docs agent; the others mark their main agent."""
+    ents = {}
+    for m in (6, 8, 9, 11):
+        who = project_mark if m == n else "main"
+        ag = {f"ch{m}-{s}": agent(s != "builder", "talks" if s != "builder" else "builds and merges", **({"keeper": True} if s == who else {})) for s in ("main", "docs", "builder")}
+        e = entry(f"projects/ch{m}", agents=ag)
+        if m == n and mark_at:
+            e["page_keepers"] = {f"projects/ch{n}/c{mark_at}": f"ch{n}-docs"}
+        ents[ids_ch[f"projects/ch{m}"]] = e
+    return ents
+for n in (6, 8, 9, 11):
+    for mark_at in sorted({1, n // 2, n - 1, n}):
+        for pm in ("main", "builder"):
+            write_record(chain_entries(n, mark_at, pm)); r = R(); bad = stale(r)
+            under = [f"projects/ch{n}/c{mark_at}/k", f"projects/ch{n}/c{mark_at}/k/kk"]; after = [f"projects/ch{n}/c{j}" for j in range(mark_at + 1, min(n, mark_at + 7) + 1)]
+            check(f"a chain of {n} hops, a page mark on c{mark_at}, the project's mark on {pm}: no row holds a stale keeper; the pages under c{mark_at} read the project's mark (never a split), the chain pages after it read the page mark",
+                  not bad and all(ks_of(r, k) == (f"ch{n}-{pm}", "mark") for k in under) and ks_of(r, f"projects/ch{n}/c{mark_at}") == (f"ch{n}-docs", "mark") and all(ks_of(r, k) == (f"ch{n}-docs", "split") for k in after),
+                  (bad[:3], [ks_of(r, k) for k in under], [ks_of(r, k) for k in after]))
+    write_record(chain_entries(n, 0, "docs")); r = R(); bad = stale(r)
+    check(f"a chain of {n} hops, the project's mark on its docs agent and no page mark: no row holds a stale keeper", not bad, bad[:3])
+# a cycle of split lines: the pages follow nobody, and a page mark laid on one of them breaks it: the pages under both read again
+page("projects/s1/cy-a.md", "type: note\ntitle: Cycle a\nsplit_from: projects/s1/cy-b")
+page("projects/s1/cy-b.md", "type: note\ntitle: Cycle b\nsplit_from: projects/s1/cy-a")
+page("projects/s1/cy-a/k.md", "type: note\ntitle: ka"); page("projects/s1/cy-b/k.md", "type: note\ntitle: kb")
+page("projects/s1/cy-b/k/kk.md", "type: note\ntitle: kkb")
+# a one-session project the record holds nothing of (its sub-pages read its name line), whose sub-page u0 was split off a page of s1 and has a child and a grandchild; the record then gives the sub-page a name of its own
+page("projects/s3.md", "type: note\ntitle: S3\ndisplay-name: s3-sess\nstatus: active")
+page("projects/s3/u0.md", "type: note\ntitle: S3 split page\nsplit_from: projects/s1/t")
+page("projects/s3/u0/v0.md", "type: note\ntitle: S3 V0"); page("projects/s3/u0/v0/w0.md", "type: note\ntitle: S3 W0")
+p.cmd_registry(quiet=True); pr._CACHE["sig"] = None
+ids10 = {k: e["id"] for k, e in raw().items()}
+SU, SV, SW = "projects/s3/u0", "projects/s3/u0/v0", "projects/s3/u0/v0/w0"
+r = settle10("a sub-page that carries a split line and is named by the record (the project it sits in is untouched): the pages under it read that name, no longer the split", {SU: ("s3-own", "legacy"), SV: ("s3-own", "legacy"), SW: ("s3-own", "legacy")}, mark=S1M, extra={ids10[SU]: entry(SU, name="s3-own")})
+settle10("... and with no name given, the sub-page follows the split and so do the pages under it", {SU: (S1M, "split"), SV: (S1M, "split"), SW: (S1M, "split")}, mark=S1M)
+CA, CB, CAK, CBK, CBKK = "projects/s1/cy-a", "projects/s1/cy-b", "projects/s1/cy-a/k", "projects/s1/cy-b/k", "projects/s1/cy-b/k/kk"
+r = settle10("a cycle of two split pages: neither follows the other, the pages under them read the project's mark", {CA: (S1M, "mark"), CB: (S1M, "mark"), CAK: (S1M, "mark"), CBK: (S1M, "mark"), CBKK: (S1M, "mark")}, mark=S1M)
+r = settle10("a page mark laid on one page of the cycle: the other follows it, and the pages under both are read again", {CA: (S1D, "mark"), CB: (S1D, "split"), CAK: (S1M, "mark"), CBK: (S1D, "split"), CBKK: (S1D, "split")}, mark=S1M, pk={CA: S1D})
+r = settle10("the page keeper of the cycle is handed back", {CA: (S1M, "mark"), CB: (S1M, "mark")}, mark=S1M, pk={CA: ""})
+
+# ---- 11. the same, at random (seeded): any registry of split pages, `agent:` pages and children, any record laid over it, every row after every step equals a fresh read
+import random
+rng = random.Random(447)
+ONE_SESSION_RAND = set()
+SPLIT_PAGES_RAND = set()      # the random sub-pages that carry a split line and no keeper line of their own (the record names some of them: a sub-page named by the record that has no split line leaves the pages under it as they were, which is not this suite's rule)
+def gen_topology(tag, nproj=4, nsub=11):
+    """Write the pages of a random topology under the projects `tag`0..: every page may split off any other page (itself, a descendant and a page of another project included); some keep an `agent:` line; a project may list no agents (a top-level page the record may name)."""
+    allk = [f"projects/{tag}{i}" for i in range(nproj)]; kids = {a: [] for a in allk}; keys = list(allk); agents = {}
+    for a in allk:
+        agents[a] = [f"{a[9:]}-main", f"{a[9:]}-docs", f"{a[9:]}-builder"] if rng.random() < .8 else []
+        pool = [a]
+        for j in range(nsub):
+            par = rng.choice([x for x in pool if x.count("/") < 4]); k = f"{par}/n{j}"; pool.append(k); keys.append(k); kids[a].append(k)
+    every = [n for names in agents.values() for n in names]
+    for a in allk:
+        status = "archived" if rng.random() < .25 else "active"
+        if agents[a]:
+            front = lines(agents[a]).replace("status: active", f"status: {status}")
+        else:
+            front = f"type: note\ntitle: Top {a}\nstatus: {status}" + (f"\ndisplay-name: {a[9:]}-one" if rng.random() < .6 else "")      # a one-session project: its sub-pages read its name line
+            if "display-name" in front: ONE_SESSION_RAND.add(a)
+        if rng.random() < .3:
+            front += f"\nsplit_from: {rng.choice(keys)}"
+        page(a + ".md", front)
+        for k in kids[a]:
+            f = f"type: note\ntitle: {k[-3:]}"
+            if rng.random() < .4: f += f"\nsplit_from: {rng.choice(keys)}"
+            if rng.random() < .15: f += f"\nagent: {rng.choice([*every, 'ghost-rand'])}"
+            if rng.random() < .04: f += f"\ndisplay-name: own-{k.replace('/', '-')}"
+            if "split_from" in f and "agent:" not in f and "display-name:" not in f: SPLIT_PAGES_RAND.add(k)
+            page(k + ".md", f)
+    return allk, kids, agents, keys
+def random_record(allk, kids, agents, keys, ids_):
+    ents = {}
+    for a in allk:
+        marked = rng.choice(agents[a] + [""]) if agents[a] else ""
+        pk = {}
+        for k in rng.sample(kids[a], rng.randint(0, 3)):
+            pk[k] = rng.choice([*agents[a], *agents[a], ""]) if agents[a] else ""
+        status = "archived" if rng.random() < .25 else "active"
+        if agents[a]:
+            ag = {n: agent(not n.endswith("builder"), "builds and merges" if n.endswith("builder") else "talks", **({"keeper": True} if n == marked else {})) for n in agents[a]}
+            e = entry(a, status=status, agents=ag, **({"page_keepers": pk} if pk else {}))
+        elif a not in ONE_SESSION_RAND and rng.random() < .5:      # a name the record gives a top page that already has a name line is not this suite's rule
+            e = entry(a, status=status, name=f"{a[9:]}-sess")
+        else:
+            continue
+        ents[ids_[a]] = e
+    for a in allk:
+        for k in kids[a]:
+            if k in SPLIT_PAGES_RAND and rng.random() < .4:      # a sub-page the record names: a change that does not touch its project, and ends the page's own reading of a split
+                ents[ids_[k]] = entry(k, name=f"{k.replace('/', '-')}-sess")
+    return ents
+t0 = time.monotonic(); steps = 0; bad_steps = []
+for topo in range(16):
+    allk, kids, agents, keys = gen_topology(f"rz{topo}x")
+    p.cmd_registry(quiet=True); pr._CACHE["sig"] = None
+    ids_ = {k: e["id"] for k, e in raw().items()}
+    for step in range(10):
+        write_record(random_record(allk, kids, agents, keys, ids_)); rr = R(); steps += 1
+        bad = stale(rr)
+        if bad: bad_steps.append((topo, step, bad[:2]))
+check(f"random: after every one of {steps} records laid over 16 random topologies (seed 447), every row's keeper equals a fresh read of the registry", steps == 160 and not bad_steps, (len(bad_steps), bad_steps[:3]))
+print(f"random section: {steps} registries in {time.monotonic() - t0:.1f}s")
+
 if fails: print(f"FAILED: keeper split scenario, {len(ran)} checks, {len(fails)} failed"); sys.exit(1)
 print(f"ok: keeper split scenario, {len(ran)} checks")

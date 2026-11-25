@@ -1834,7 +1834,8 @@ def front_caller_refusal(sender: str, is_id: bool, names_get: Callable[[str, str
     if not sname and sender not in allowed:
         return 403, {"error": f"refused: {sender!r} is not a session in the fleet's heartbeat, so it names nobody; run this from the keeper's or a front agent's own session"}
     if not ({sender, sname} & allowed):
-        kp = f"the agent marked keeper: {rec['keeper']}" if rec.get("keeper_source") == "mark" and rec["keeper"] else (rec["keeper"] or "none")
+        shown = (rec.get("keeper_agent") or rec["keeper"]) if rec.get("keeper_source") == "split" else rec["keeper"]      # a page that follows another reads the keeper of the page it was split from; `keeper` is its own old line
+        kp = f"the agent marked keeper: {rec['keeper']}" if rec.get("keeper_source") == "mark" and rec["keeper"] else (shown or "none")
         return 403, {"error": f"refused: session {sname or sender!r} is neither the keeper ({kp}) nor a front agent of {named} "
                               f"({', '.join(listed_front) or 'none'}); one of them {action}"}
     return None

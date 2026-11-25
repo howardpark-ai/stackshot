@@ -213,7 +213,7 @@ def effects(raw: dict, before: dict, after: dict, rows: list[dict], live: set | 
         s0, s1 = rl.stand_in_of(k, reg0), rl.stand_in_of(k, reg1)
         if (n0, p0, s0) != (n1, p1, s1):
             notices.append({"key": k, "notice_name": [n0, n1], "item_keeper": [p0, p1], "stand_in": [s0, s1], "hands": (p0, s0) != (p1, s1)})
-        f0 = _kp.fields(k, reg0)
+        f0 = _kp.fields(k, reg0)      # `k` is a project's own page (it lists agents or names itself), which never follows a `split_from:` line (keeper.split_target): its source is never "split", only "derived" can move here
         if f0.get("keeper_source") == "derived" and f0.get("keeper_agent") != r["agent"]:
             derived_moved.append({"key": k, "derived": f0.get("keeper_agent"), "marked": r["agent"]})
     non_builders = [{"key": r["key"], "agent": r["agent"]} for r in changed if r["front"]]

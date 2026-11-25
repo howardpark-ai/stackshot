@@ -29,7 +29,7 @@ the page that line names, whatever the page above it gives, a mark of that page 
 The row carries the page in `split_from`, and `keeper_source` says "split" (not "legacy": the gauge does not count it). The named page is followed through the registry, a chain of splits up to SPLIT_HOPS
 hops; a line that names no page of the registry, a chain that loops or is longer than the bound, or a target that has no keeper, leaves the page to the rules below as if the line were not there.
 A value in another shape (another letter case than the page's key, a `#anchor`, a relative `../x`, a key without its pages dir that is not a bare slug, a YAML list) names no page and reads as no line, silently.
-A page with no line of its own under a page that follows another takes that keeper from above (`reads_split` says which pages a change of the target moves).
+A page with no line of its own under a page that follows another takes that keeper from above (`reads_split` says which pages a change of the target moves; the project record asks it of the rows before a change as well as after it, because a change can end the split page's own reading, a mark laid on it or a hand-back, and the pages under it then hold a keeper nothing refreshes).
 An unnamed sub-page inherits the keeper of the nearest page above it, as it always did. A sub-page with its own mark keeps the registry role it had ("agent": a page an agent keeps as its own working
 document, which is the role every reader of such a page reads) and its row says `page_mark: true`, so `fields` answers "mark" for it; the sub-pages under it do not inherit from it, as they never did
 from an `agent:` page.
