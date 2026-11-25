@@ -945,6 +945,7 @@ def part_client():
                 try: cnt = len(json.loads(raw)["machines"])
                 except Exception: cnt = 0
                 code, body, ctype = 200, json.dumps({"ok": True, "machines": cnt}).encode(), "application/json"
+            elif _mode["v"] == "kept": code, body, ctype = 200, json.dumps({"ok": True, "kept": "newer"}).encode(), "application/json"
             elif _mode["v"] == "big": code, body, ctype = 413, json.dumps({"error": "the body is 1000001 bytes, over the 1000000-byte limit"}).encode(), "application/json"
             elif _mode["v"] == "bad": code, body, ctype = 400, json.dumps({"error": "schema must be 1"}).encode(), "application/json"
             elif _mode["v"] == "multi": code, body, ctype = 400, json.dumps({"error": "agent 'x' is no object\nand a second line"}).encode(), "application/json"
@@ -1074,6 +1075,11 @@ def part_client():
         check("machines: a good file is POSTed to /client/machines with the machine token and its bytes unchanged",
               rc == 0 and len(_got) == 1 and _got[0][0] == "/client/machines" and _got[0][1] == "Bearer tok-agent-e7" and _got[0][2] == "application/json" and _got[0][3] == _mbody, (rc, out, err, _got[:1]))
         check("machines: the server's 200 JSON is printed on stdout, nothing on stderr, exit 0", json.loads(out) == {"ok": True, "machines": 2} and out.count("\n") == 1 and err == "", (out, err))
+        _mode["v"] = "kept"; _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines.json", _mbody))
+        check("machines: an answer {kept: newer} (200, not stored) is printed as given, says one line `kept: the server holds a newer list` on stderr and still exits 0",
+              rc == 0 and json.loads(out) == {"ok": True, "kept": "newer"} and err == "kept: the server holds a newer list\n", (rc, out, err))
+        _mode["v"] = "mok"; _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines.json", _mbody))
+        check("machines: a stored list (no `kept`) says nothing on stderr", rc == 0 and err == "", (rc, err))
         _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines-blob.bin", _blob))
         check("machines: the file is never parsed or decoded: a body that is no JSON and no UTF-8 reaches the server byte for byte", rc == 0 and [g[3] for g in _got] == [_blob], (rc, err, _got))
         _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines-full.json", _full))

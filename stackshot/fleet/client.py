@@ -1190,7 +1190,7 @@ def _secret() -> str:
 
 def _post_file(what: str, noun: str, argv: list[str], usage: str, limit: int, timeout: float, stdin_ok: bool = False) -> int:
     """`post <what> --file <path>` for a verb whose whole body is one JSON file the caller wrote: the file's bytes go to `POST /client/<what>` exactly as they are, never parsed here. With `stdin_ok`, the path `-` is
-    standard input (read the same way, to the same limit). Prints the server's answer as JSON and exits 0; 1 and one line on stderr for a file that is missing, unreadable, not a regular file (a folder, a pipe, a
+    standard input (read the same way, to the same limit). Prints the server's answer as JSON and exits 0 (an answer `{"kept": "newer"}`, a list the server did not store, also puts the line `kept: the server holds a newer list` on stderr); 1 and one line on stderr for a file that is missing, unreadable, not a regular file (a folder, a pipe, a
     device) or over `limit` bytes (nothing is sent), a refusal (the server's reason), a server that is not reached ([0]) or a misuse (usage). A path or a server text in that line has control characters collapsed and
     this machine's token (or the pass in use) taken out."""
     opt = _opts(argv, ("file",), usage)
@@ -1219,7 +1219,8 @@ def _post_file(what: str, noun: str, argv: list[str], usage: str, limit: int, ti
         err = d.get("error") if isinstance(d, dict) else None
         reason = _one_line(err, sec) if err else _one_line(d if isinstance(d, str) else json.dumps(d, ensure_ascii=False, default=str), sec, 200)      # no `error` key: the body's first 200 characters
         print(_one_line(f"stackshot: {noun} not sent [{status}] {reason}", sec), file=sys.stderr); return 1
-    print(json.dumps(d, ensure_ascii=False)); return 0
+    if d.get("kept") == "newer": print("kept: the server holds a newer list", file=sys.stderr)      # answered 200 but not stored: said once on stderr, exit 0 (the answer is still printed)
+    print(json.dumps(d, ensure_ascii=False)); return 0      # (an answer of {"kept": "newer"} also said its line on stderr above)
 
 
 def agent_state(argv: list[str], timeout: float = 60.0) -> int:
@@ -1237,7 +1238,7 @@ MACHINES_BODY_MAX = 1_000_000     # the server's limit for the body (stackshot/s
 
 def machines(argv: list[str], timeout: float = 60.0) -> int:
     """`post machines --file <path>` (or `--file -`, or a bare `-`, for standard input): the fleet manager posts its machine list (`POST /client/machines`), which the server keeps as the last good list. The file's
-    bytes go to the server as they are, never parsed here. Prints the server's answer ({"ok": true, "machines": N}) and exits 0; 1 and one line on stderr for a file that is missing, unreadable, not a regular
+    bytes go to the server as they are, never parsed here. Prints the server's answer ({"ok": true, "machines": N}) and exits 0, with one line on stderr, `kept: the server holds a newer list`, when the answer is {"ok": true, "kept": "newer"} (the list was not stored); 1 and one line on stderr for a file that is missing, unreadable, not a regular
     file or over 1,000,000 bytes (nothing is sent), a refusal (the server's reason: 400 a body that does not fit, 413 a body over the limit), a server that is not reached ([0]) or a misuse (usage)."""
     return _post_file("machines", "machine list", ["--file", "-"] if argv == ["-"] else argv, MACHINES_USAGE, MACHINES_BODY_MAX, timeout, stdin_ok=True)
 

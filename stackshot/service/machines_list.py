@@ -17,8 +17,9 @@ refuses a larger one with 413 before it parses anything (`too_large`).
 
 Only what was validated and cleaned is stored, as text and never escaped: a reader shows every field as text only and builds no link, command or markup from one. The file is `<paths.state>/machines-list.json` (mode 0600),
 written whole to a temporary file beside it, flushed to disk, renamed over the old one and the folder flushed, so a reader sees the last list or the new one, never half of one, and a power loss keeps one of them. It carries `schema`, `written`, `received` (the server's clock at the post), `posted_by` (the machine the token proved) and the list. A post that is refused never touches it: the last
-good list stays. A post whose `written` is more than `NEWER_S` older than the stored list's is a late arrival of an older list: it is answered 200 `{"ok": true, "kept": "newer"}` and the stored list stays (within `NEWER_S` of each
-other, as when the sender's clock stepped back, the new post replaces). `last_machines()` reads the file back through a bounded read (a regular file of at most `READ_MAX` bytes, opened without blocking and without following a
+good list stays. The file also carries `high`, the highest `written` ever accepted (the high-water mark; a file without it, from an earlier version, counts its own `written`). A post whose `written` is more than `NEWER_S` older than the
+mark is a late arrival of an older list: it is answered 200 `{"ok": true, "kept": "newer"}` and the stored list stays (within `NEWER_S` of the mark, as when the sender's clock stepped back, the new post replaces, and the mark
+stays where it was, so a run of posts each a little older than the last cannot walk the list back: every one is compared with the newest ever accepted, never with the one before it). A mark further ahead of the server's clock than `AHEAD_S` (a hand-edited file, a clock set right since) counts as `AHEAD_S` ahead, so one wrong clock cannot hold out true posts, and the next accepted post writes the corrected mark. `last_machines()` reads the file back through a bounded read (a regular file of at most `READ_MAX` bytes, opened without blocking and without following a
 link) and answers None for no file or one that cannot be read as a list; it never raises and never blocks. Deciding how old a list may be before it is shown is the reader's, from `written` and `received`.
 
 A service module: it imports core and the standard library only. The route that calls it (`_client_post`) is the surface's."""
@@ -48,7 +49,7 @@ MACHINES_MAX, NAME_MAX, TEXT_MAX = 200, 80, 200
 ADDRESSES_MAX, ADDRESS_MAX, ROLES_MAX, SOURCES_MAX, NOT_READ_MAX = 16, 64, 4, 20, 200
 WRITTEN_MIN = 1577836800.0  # Jan 1st 2020: a list dated before it is no list of this fleet
 AHEAD_S = 60.0              # `written` may be at most this far ahead of the server's clock (a sender's clock that runs a little fast)
-NEWER_S = 300.0             # a post is kept out when the stored list's `written` is more than this newer than its own (an older list that arrived late); within it the post replaces (a clock that stepped back)
+NEWER_S = 300.0             # a post is kept out when the highest `written` ever stored (the high-water mark) is more than this newer than its own (an older list that arrived late); within it the post replaces (a clock that stepped back)
 READ_MAX = MAX_BYTES + 65536    # `last_machines()` reads no more than this: the body cap and a margin for the fields the server adds
 NUMBER_MAX = 1e12           # a time past this, or not finite, is no time; converting a huge integer raises OverflowError
 STALE_TMP_S = 3600.0        # a leftover temporary file older than this is removed by the next write
@@ -257,10 +258,14 @@ def post(machine: str, body: Any) -> tuple[int, dict[str, Any]]:
     lst, why = validate(body)
     if lst is None:
         return 400, {"error": why}
-    rec = {"schema": SCHEMA, "written": lst["written"], "received": time.time(), "posted_by": str(machine), "machines": lst["machines"], "not_read": lst["not_read"]}
-    with _LOCK:     # reading the stored `written` and replacing the file are one step
-        if _newer_stored(lst["written"]):
-            return 200, {"ok": True, "kept": "newer"}
+    now = time.time()
+    rec = {"schema": SCHEMA, "written": lst["written"], "received": now, "posted_by": str(machine), "high": lst["written"], "machines": lst["machines"], "not_read": lst["not_read"]}
+    with _LOCK:     # reading the stored mark and replacing the file are one step
+        high = _high_water(now)
+        if high is not None:
+            if high - lst["written"] > NEWER_S:
+                return 200, {"ok": True, "kept": "newer"}
+            rec["high"] = max(high, lst["written"])
         try:
             _write(rec)
         except OSError as e:
@@ -296,19 +301,27 @@ def _read_stored() -> bytes | None:
         os.close(fd)
 
 
-def _newer_stored(written: float) -> bool:
-    """Is the stored list's `written` more than `NEWER_S` newer than `written` (and not further ahead of the server's clock than `AHEAD_S`, which a clock that was set right since would not allow)? Then a post of `written`
-    is an older list that arrived late."""
-    cur = last_machines()
+def _high_water(now: float) -> float | None:
+    """The highest `written` ever accepted, as the stored file records it (a file without `high` counts its own `written`), held to at most `AHEAD_S` ahead of `now`; None when there is no readable list."""
+    cur = _load()
     if cur is None:
-        return False
-    w = cur[0]["written"]
-    return w - written > NEWER_S and w <= time.time() + AHEAD_S
+        return None
+    rec, _ = cur
+    return min(rec["high"], now + AHEAD_S)      # `_load` has already made it at least the list's own `written`
 
 
 def last_machines() -> tuple[dict[str, Any], float] | None:
     """(the last good list, when the server received it as epoch seconds), or None when there is none or the file cannot be read as one (absent, torn, not an object, another schema, a field of the wrong kind, no regular file,
     larger than `READ_MAX`). The list is {schema, written, posted_by, machines, not_read}. Never raises and never blocks (a pipe at the path is None)."""
+    cur = _load()
+    if cur is None:
+        return None
+    rec, received = cur
+    return {k: v for k, v in rec.items() if k != "high"}, received
+
+
+def _load() -> tuple[dict[str, Any], float] | None:
+    """`last_machines()`'s read, with the high-water mark in the record as `high` (a missing or unreadable one is the list's own `written`)."""
     try:
         raw = _read_stored()
         if raw is None:
@@ -322,6 +335,7 @@ def last_machines() -> tuple[dict[str, Any], float] | None:
             return None
         if not isinstance(machines, list) or not all(isinstance(m, dict) for m in machines) or not isinstance(not_read, list):
             return None
-        return {"schema": SCHEMA, "written": written, "posted_by": by, "machines": machines, "not_read": not_read}, received
+        high = _num(d.get("high"))
+        return {"schema": SCHEMA, "written": written, "posted_by": by, "machines": machines, "not_read": not_read, "high": written if high is None else max(high, written)}, received
     except Exception:       # a file that cannot be read, a torn one, a path the config cannot give: no list, never an error
         return None

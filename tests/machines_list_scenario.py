@@ -11,9 +11,11 @@ validates it strictly, keeps the last good one in one file in the state folder a
      umask (a new file and a replaced one); a stale temporary file of the writer's own name is swept and nothing else is touched; 8 threads posting at once leave a whole list and no reader meets a torn file
   5  `last_machines()` reads a missing file, an empty one, a torn one, one that is no object, another schema, and one with a field of the wrong kind (`machines`, `received`, `written`, `posted_by`, `not_read`) as None,
      and a folder in place of the file; it never raises
-  6  a list that arrives late does not replace a newer one: more than 300 s older is kept out (200 {ok, kept: newer}, the file untouched), 300 s older or the same time or newer replaces, a stored time far ahead of the clock or an
-     unreadable file holds nothing out, a refused body is still 400, old and new posts at once leave the newest
-  7  names that draw as nothing (combining marks, spaces, in `name` and `hostname`) are refused with one line; letters with marks, one symbol or one digit are kept; two machines of one name once cleaned and case-folded are refused
+  6  a list that arrives late does not replace a newer one: more than 300 s older than the high-water mark (the newest `written` ever accepted, stored as `high`) is kept out (200 {ok, kept: newer}, the file untouched),
+     300 s older or the same time or newer replaces; a run of posts each a little older than the last cannot walk the list back (five posts newest first, over the service and over HTTP); a file without `high` counts its
+     own `written`; a stored time or mark far ahead of the clock, or an unreadable file, holds nothing out and the next write corrects the mark; the ahead limit is exactly 60 s; a refused body is still 400, old and new
+     posts at once leave the newest
+  7  names that draw as nothing (combining marks, spaces, and each of U+FFA0, U+115F, U+1160, U+3164 and U+2800 alone, in `name` and `hostname`) are refused with one line; letters with marks, one symbol or one digit are kept; two machines of one name once cleaned and case-folded are refused
   8  durability: the temporary file is flushed, then renamed, then the folder is flushed; a folder that cannot be flushed is no failure, a file that cannot be flushed is a failed write (503)
   9  `last_machines()` never blocks and never reads without a bound: a pipe at the path (with a timeout), a file over the bound (by its size and by a size that lied), a link and a folder read as None; a file at the bound reads
  10  over HTTP: no token 401, a wrong token 401, a machine token stores (200), a LIVE pass is exactly 403, a refused body 400 with one reason for each of: text that is no JSON, JSON that is no object, a nesting too deep, too many
@@ -75,7 +77,7 @@ check("1 a good body is stored and answers 200 {ok, machines: N}", (st, out) == 
 lst, received = got
 check("1 …and read back: the cleaned machines, `written`, `not_read`, who posted it (the machine the token proved) and the received time (the server's clock)",
       lst == {"schema": 1, "written": b["written"], "posted_by": "box-far", "machines": [{k: v for k, v in m.items() if k != "secret_extra"} for m in b["machines"]], "not_read": ["broken.json"]} and t0 <= received <= time.time() + 1, (lst, received))
-check("1 …a key the module does not know (in a machine, at the top) is ignored and never stored", "secret_extra" not in stored().decode() and "top_extra" not in stored().decode() and set(loaded()) == {"schema", "written", "received", "posted_by", "machines", "not_read"}, loaded())
+check("1 …a key the module does not know (in a machine, at the top) is ignored and never stored", "secret_extra" not in stored().decode() and "top_extra" not in stored().decode() and set(loaded()) == {"schema", "written", "received", "posted_by", "high", "machines", "not_read"}, loaded())
 check("1 …the file is in the state folder, nothing else is left beside it", FILE.parent == STATE and leftovers() == [], leftovers())
 st, out = SVC.post("box-far", {"schema": 1, "written": time.time(), "machines": [{"name": "bare", "retired": False}]})
 m0 = SVC.last_machines()[0]["machines"][0]
@@ -255,6 +257,53 @@ st, out = SVC.post("box-far", good([mach("after-clock-fix")], written=time.time(
 check("6 …a stored `written` far ahead of the server's clock (the clock was wrong when it was kept) does not hold later lists out", (st, out) == (200, {"ok": True, "machines": 1}) and SVC.last_machines()[0]["machines"][0]["name"] == "after-clock-fix", (st, out))
 FILE.write_text("{torn"); st, out = SVC.post("box-far", good([mach("over-torn")], written=W0 - 5000))
 check("6 …a stored file that cannot be read as a list never holds a post out", (st, out) == (200, {"ok": True, "machines": 1}) and SVC.last_machines() is not None, (st, out))
+
+# ---- the high-water mark: a late post is compared with the newest `written` ever accepted, never with the stored list's (which an accepted older-within-300-s post lowers)
+KEPT, OKM = (200, {"ok": True, "kept": "newer"}), (200, {"ok": True, "machines": 1})
+def _seq(offsets):      # posts in this order, each a list named for its offset: (the answers, the name stored at the end)
+    FILE.unlink(missing_ok=True); ans = []
+    for off in offsets: ans.append(SVC.post("box-far", good([mach(f"p{off}")], written=W0 + off)))
+    return ans, SVC.last_machines()[0]["machines"][0]["name"]
+ans_, name_ = _seq([0, -300, -600, -900, -1200])
+check("6 five posts, newest first, each 300 s older than the last (W, W-300, W-600, W-900, W-1200): the first two are stored, the other three kept out; the stored list is never more than 300 s older than the newest",
+      ans_ == [OKM, OKM, KEPT, KEPT, KEPT] and name_ == "p-300" and SVC.last_machines()[0]["written"] >= W0 - SVC.NEWER_S and loaded()["high"] == W0, (ans_, name_, loaded() and loaded().get("high")))
+ans_, name_ = _seq([0, -200, -400, -600, -800, -1000])
+check("6 …the same with 200 s steps (each only 200 s older than the one before): the second is stored (200 s), every later one is 400 s or more behind the newest and kept out", ans_ == [OKM, OKM, KEPT, KEPT, KEPT, KEPT] and name_ == "p-200", (ans_, name_))
+check("6 …the mark stays at the newest `written` ever accepted when an older post replaces the list (stored `written` W-200, `high` W)", loaded()["written"] == W0 - 200 and loaded()["high"] == W0, loaded() and (loaded()["written"], loaded()["high"], W0))
+ans_, name_ = _seq([0, -200, -100, -250, 30, -200])
+check("6 …a post newer than the mark raises it (W+30), the next one 200 s older than that replaces; the mark never falls", ans_ == [OKM] * 6 and loaded()["high"] == W0 + 30 and loaded()["written"] == W0 - 200, (ans_, loaded() and loaded().get("high")))
+FILE.unlink(missing_ok=True); SVC.post("box-far", good([mach("a")], written=W0)); SVC.post("box-far", good([mach("b")], written=W0 - 100)); kept_file = stored()
+st, out = SVC.post("box-far", good([mach("c")], written=W0 - 301))
+check("6 …a kept post changes nothing in the file, byte for byte, the mark included", (st, out) == KEPT and stored() == kept_file, (st, out))
+rec_ = loaded(); rec_.pop("high"); FILE.write_text(json.dumps(rec_))
+st, out = SVC.post("box-far", good([mach("legacy-late")], written=W0 - 100 - 301))
+check("6 a stored file without `high` (an earlier version) counts its own `written` as the mark: a post 301 s older than it is kept out", (st, out) == KEPT, (st, out))
+st, out = SVC.post("box-far", good([mach("legacy-ok")], written=W0 - 100 - 300))
+check("6 …a post exactly 300 s older replaces, and the file then carries `high` (the legacy `written`)", (st, out) == OKM and loaded()["high"] == W0 - 100 and loaded()["written"] == W0 - 400, loaded())
+rec_ = loaded(); rec_["high"] = "soon"; FILE.write_text(json.dumps(rec_))
+st, out = SVC.post("box-far", good([mach("bad-high")], written=W0 - 5000))
+check("6 a `high` that is no number counts as the list's own `written`: the file reads, an old post is kept out", (st, out) == KEPT and SVC.last_machines() is not None, (st, out))
+FILE.unlink(missing_ok=True); SVC.post("box-far", good([mach("seed")], written=W0))
+rec_ = loaded(); rec_["high"] = W0 - 1000; FILE.write_text(json.dumps(rec_))
+st, out = SVC.post("box-far", good([mach("low-high")], written=W0 - 301))
+check("6 a `high` lower than the list's own `written` (an edited file) never lowers the mark below `written`: a post 301 s older than the list is kept out", (st, out) == KEPT, (st, out))
+for ahead in (100, 301, 600, 5000):
+    FILE.unlink(missing_ok=True); SVC.post("box-far", good([mach("seed")], written=W0))
+    rec_ = loaded(); rec_["written"] = time.time() + ahead; rec_.pop("high", None); FILE.write_text(json.dumps(rec_))      # a legacy file whose `written` is ahead of the clock
+    st, out = SVC.post("box-far", good([mach(f"after-{ahead}")], written=time.time() - 5)); hi_ = loaded()["high"]
+    check(f"6 a stored `written` {ahead} s ahead of the server's clock counts as {int(SVC.AHEAD_S)} s ahead: a true post replaces it and the next mark is no further ahead than that", (st, out) == OKM and hi_ <= time.time() + SVC.AHEAD_S + 1, (st, out, hi_ - time.time()))
+    FILE.unlink(missing_ok=True); SVC.post("box-far", good([mach("seed")], written=W0))
+    rec_ = loaded(); rec_["high"] = time.time() + ahead; FILE.write_text(json.dumps(rec_))      # a `high` ahead of the clock
+    st, out = SVC.post("box-far", good([mach(f"high-{ahead}")], written=time.time() - 5))
+    check(f"6 …and a `high` {ahead} s ahead of the clock holds nothing out either, and is written back corrected", (st, out) == OKM and loaded()["high"] <= time.time() + SVC.AHEAD_S + 1, (st, out, loaded()["high"] - time.time()))
+FILE.unlink(missing_ok=True); t_ = time.time()
+st59, o59 = SVC.post("box-far", good([mach("ahead59")], written=t_ + 59)); hi59 = loaded()["high"]
+st_n, o_n = SVC.post("box-far", good([mach("then-now")], written=time.time() - 2))
+check("6 a `written` 59 s ahead of the clock is stored and becomes the mark; a post of the true time (about 61 s older) still replaces it (60 s is far inside 300)", (st59, o59, st_n, o_n) == (200, {"ok": True, "machines": 1}, 200, {"ok": True, "machines": 1}) and hi59 >= t_ + 58 and loaded()["high"] == hi59, (st59, o59, st_n, o_n))
+st61, o61 = SVC.post("box-far", good([mach("ahead61")], written=time.time() + 65))
+check("6 …65 s ahead is refused (400): a clock that far ahead never becomes the mark, so it holds nothing out", st61 == 400 and "written" in o61["error"] and loaded()["high"] == hi59, (st61, o61))
+lst_, why_ = SVC.validate(good([mach("e")], written=1_800_000_000 + 60), now=1_800_000_000); lst2_, why2_ = SVC.validate(good([mach("e")], written=1_800_000_000 + 60.5), now=1_800_000_000)
+check("6 the ahead limit is exactly 60 s: 60 s ahead is read, 60.5 s ahead is refused", lst_ is not None and lst2_ is None and "written" in why2_, (why_, why2_))
 _fresh(W0); base = stored()
 st, out = SVC.post("box-far", good([mach("n" * 81)], written=W0 - 1000))
 check("6 a refused body is still 400 whatever its age (the check for age comes after the validation)", st == 400 and stored() == base, (st, out))
@@ -301,6 +350,12 @@ st, out = SVC.post("box-far", good([mach("box", hostname=None), mach("Boxes")]))
 check("7 two different names are stored", st == 200 and len(SVC.last_machines()[0]["machines"]) == 2, (st, out))
 st, out = SVC.post("box-far", good([mach("\u0301\u0302")]))
 check("7 a name of combining marks alone is refused with one line that names the field and the reason", st == 400 and one_line(out["error"]) and out["error"].startswith("machines[0].name") and "letter, digit, punctuation mark or symbol" in out["error"], (st, out))
+for cp_ in (0xFFA0, 0x115F, 0x1160, 0x3164, 0x2800):
+    for field_, kw_ in (("name", {}), ("hostname", {"hostname": chr(cp_)})):
+        st, out = SVC.post("box-far", good([mach(chr(cp_) if field_ == "name" else "fine", **kw_)]))
+        check(f"7 U+{cp_:04X} alone is no {field_} (it draws as nothing): refused with one line naming machines[0].{field_}", st == 400 and one_line(out["error"]) and out["error"].startswith(f"machines[0].{field_}"), (st, out))
+st, out = SVC.post("box-far", good([mach(chr(0xFFA0) + "x" + chr(0x115F) + chr(0x1160))]))
+check("7 \u2026and a name with a letter among them is stored with those characters taken out", st == 200 and SVC.last_machines()[0]["machines"][0]["name"] == "x", (st, out))
 st, out = SVC.post("box-far", good([mach("ok"), mach("fine", hostname="\u0301")]))
 check("7 a hostname of combining marks alone is refused, naming machines[1].hostname", st == 400 and one_line(out["error"]) and out["error"].startswith("machines[1].hostname"), (st, out))
 st, out = SVC.post("box-far", good([mach("ok"), mach("two"), mach("OK")]))
@@ -484,8 +539,9 @@ with TestClient(app) as c:
 
     # ---- one reason for each kind of unreadable body
     SVC.post("box-far", good([mach("keeper")])); keep = stored()
-    lim = sys.get_int_max_str_digits() or 4300
     OBJ = "the body is a JSON object, not a list, text, number, true, false or null"
+    NEST, DIG = client_api._NEST_MAX, client_api._DIGITS_MAX
+    def nested(n): return b'{"a":' * (n - 1) + b"{}" + b"}" * (n - 1)      # objects n levels deep: n brackets open at the deepest point
     def reason(**kw):
         r = post(**({"headers": H} | kw)); return r.status_code, (r.json().get("error") if r.headers.get("content-type", "").startswith("application/json") else r.text)
     cases = {
@@ -496,11 +552,55 @@ with TestClient(app) as c:
         "a list": (dict(json=[1, 2]), OBJ), "a string": (dict(json="x"), OBJ), "a number": (dict(content=b"5", headers=JH), OBJ), "null": (dict(content=b"null", headers=JH), OBJ), "true": (dict(content=b"true", headers=JH), OBJ),
         "a nesting too deep": (dict(content=b"[" * 200000, headers=JH), "the JSON nests too deeply to read"),
         "an object nested too deep": (dict(content=b'{"a":' * 100000 + b"1" + b"}" * 100000, headers=JH), "the JSON nests too deeply to read"),
-        "an integer of too many digits": (dict(content=b'{"schema": 1, "written": ' + b"1" * (lim + 10) + b', "machines": []}', headers=JH), "a number in the JSON has too many digits"),
+        "an object nested one level over the bound": (dict(content=nested(NEST + 1), headers=JH), "the JSON nests too deeply to read"),
+        "a list nested one level over the bound": (dict(content=b'{"x":' + b"[" * NEST + b"]" * NEST + b"}", headers=JH), "the JSON nests too deeply to read"),
+        "a nesting past the bound that never closes": (dict(content=b'{"a":' * (NEST + 1), headers=JH), "the JSON nests too deeply to read"),
+        "an integer of too many digits": (dict(content=b'{"schema": 1, "written": ' + b"1" * 5000 + b', "machines": []}', headers=JH), "a number in the JSON has too many digits"),
+        "an integer one digit over the bound": (dict(content=b'{"x": ' + b"1" * (DIG + 1) + b"}", headers=JH), "a number in the JSON has too many digits"),
+        "a fraction of too many digits": (dict(content=b'{"x": 0.' + b"1" * 5000 + b"}", headers=JH), "a number in the JSON has too many digits"),
+        "a number of too many digits in a list": (dict(content=b'{"x": [' + b"1" * (DIG + 1) + b"]}", headers=JH), "a number in the JSON has too many digits"),
     }
     got_ = {k: reason(**kw) for k, (kw, _) in cases.items()}
     check("10 each unreadable body is 400 with its own one-line reason: invalid JSON, not an object, nested too deep, too many digits", all(got_[k] == (400, want) for k, (_, want) in cases.items()) and stored() == keep, {k: v for k, v in got_.items() if v != (400, cases[k][1])})
     check("10 …four different reasons in all", len({v[1] for v in got_.values()}) == 4 and OBJ == SVC.NOT_OBJECT, {v[1] for v in got_.values()})
+    # nesting and digits are judged by a scan of the bytes, so the answer is the same whatever the interpreter's recursion limit, stack or integer-conversion limit
+    check("10 the bounds are small and fixed: 64 brackets open at once, 64 digits in a run", (NEST, DIG) == (64, 64))
+    r_at = reason(content=nested(NEST), headers=JH)
+    check("10 an object nested exactly at the bound is read: it is refused for what it lacks (the schema), not for its depth", r_at[0] == 400 and r_at[1].startswith("schema = 1"), r_at)
+    r_dig = reason(content=b'{"x": ' + b"1" * DIG + b"}", headers=JH)
+    check("10 a number of exactly the digit bound is read: refused for the missing schema, not for its digits", r_dig[0] == 400 and r_dig[1].startswith("schema = 1"), r_dig)
+    class _Counting:      # the parser behind client_api.json: records every call
+        calls = []
+        def loads(self, s, *a, **k):
+            if isinstance(s, bytes): self.calls.append(len(s))      # a body (the token file is read as text)
+            return json.loads(s, *a, **k)
+        def __getattr__(self, n): return getattr(json, n)
+    CJ = _Counting(); client_api.json = CJ
+    try:
+        for label, kw in (("a nesting one over the bound", nested(NEST + 1)), ("a nesting of 100000", b'{"a":' * 100000 + b"1" + b"}" * 100000), ("a number one digit over the bound", b'{"x": ' + b"1" * (DIG + 1) + b"}")):
+            CJ.calls.clear(); rr = reason(content=kw, headers=JH)
+            check(f"10 {label}: refused before the parser is called, so no limit of the interpreter decides it", rr[0] == 400 and rr[1] in ("the JSON nests too deeply to read", "a number in the JSON has too many digits") and not CJ.calls, (rr, CJ.calls))
+        CJ.calls.clear(); rr = reason(content=nested(NEST), headers=JH)
+        check("10 …while a body at the bounds does reach the parser", CJ.calls == [len(nested(NEST))], (rr, CJ.calls))
+    finally: client_api.json = real_json
+    class _Raises:      # a parser that gives up by its own limits: the same reasons
+        def __init__(self, exc): self.exc = exc
+        def loads(self, s, *a, **k):
+            if isinstance(s, bytes): raise self.exc
+            return json.loads(s, *a, **k)
+        def __getattr__(self, n): return getattr(json, n)
+    for label, exc, want in (("a recursion limit", RecursionError("deep"), "the JSON nests too deeply to read"), ("memory", MemoryError(), "the JSON nests too deeply to read"), ("the integer-digit limit", ValueError("Exceeds the limit (4300 digits) for integer string conversion"), "a number in the JSON has too many digits")):
+        client_api.json = _Raises(exc)
+        try: rr = reason(content=b'{"schema": 1}', headers=JH)
+        finally: client_api.json = real_json
+        check(f"10 a parser that stops at {label} gives the same one-line reason", rr == (400, want) and stored() == keep, rr)
+    pad = ",".join(["[]"] * 1000)          # many lists that open and close one after the other: the depth is what is open at once
+    ok_body = json.dumps(good([mach('"' + "[" * 70, ssh="1" * 70), mach("{" * 70, hostname="[" * 70)]))      # a name that starts with a quote (written as an escaped quote) and holds 70 brackets
+    ok_body = ok_body[:-1] + ', "x": [' + pad + '], "y": {"z": ' + "1" * DIG + "}}"
+    rr = reason(content=ok_body.encode(), headers=JH)
+    check("10 brackets and digits inside strings are not counted (an escaped quote does not end a string), nor are lists that close before the next opens: the body is stored (200)",
+          rr[0] == 200 and SVC.last_machines()[0]["machines"][0]["name"] == '"' + "[" * 70 and SVC.last_machines()[0]["machines"][1]["hostname"] == "[" * 70, (rr, SVC.last_machines()))
+    SVC.post("box-far", good([mach("keeper")])); keep = stored()
     for label, txt in (("1.0", b"1.0"), ("true", b"true"), ("1e0", b"1e0"), ('"1"', b'"1"')):
         r = post(content=b'{"schema": ' + txt + b', "written": ' + str(time.time() - 30).encode() + b', "machines": [{"name": "s", "retired": false}]}', headers=JH)
         check(f"10 a schema written as {txt.decode()} is not the JSON number 1: 400 naming schema, the old list stays", r.status_code == 400 and r.json()["error"].startswith("schema = 1") and stored() == keep, (r.status_code, r.text[:160]))
@@ -511,6 +611,11 @@ with TestClient(app) as c:
     r = post(content=json.dumps(good([mach("a")], written=time.time() - 10)).encode(), headers=H)
     r_old = post(content=json.dumps(good([mach("b")], written=time.time() - 2000)).encode(), headers=H)
     check("10 over HTTP a list of an older `written` is kept out: 200 {ok, kept: newer}, the stored list stays", r_old.status_code == 200 and r_old.json() == {"ok": True, "kept": "newer"} and SVC.last_machines()[0]["machines"][0]["name"] == "a", (r_old.status_code, r_old.text))
+    FILE.unlink(missing_ok=True); Wh = time.time() - 5; outs_ = []
+    for off in (0, -300, -600, -900, -1200):
+        rr = post(content=json.dumps(good([mach(f"h{off}")], written=Wh + off)).encode(), headers=JH); outs_.append((rr.status_code, rr.json()))
+    check("10 over HTTP five posts newest first, each 300 s older than the last: two stored, three kept out; the stored list ends no more than 300 s older than the newest, and the mark is the newest",
+          outs_ == [(200, {"ok": True, "machines": 1}), (200, {"ok": True, "machines": 1})] + [(200, {"ok": True, "kept": "newer"})] * 3 and SVC.last_machines()[0]["machines"][0]["name"] == "h-300" and loaded()["high"] == Wh, (outs_, loaded() and loaded().get("high")))
 
     # ---- a sender that goes away in the middle of its body: nothing parsed, nothing written, no traceback
     import asyncio

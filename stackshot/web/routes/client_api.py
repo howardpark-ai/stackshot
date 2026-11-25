@@ -419,16 +419,42 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
 _BODY_CUT = "the body ended before it was complete"
 
 
+_NEST_MAX, _DIGITS_MAX = 64, 64        # the most brackets open at once, and the most digits in a run, that a capped body may hold (a machine list nests at most 4 deep and an agent-state body 5, and neither holds a number of more than 20 digits)
+_NEST_REASON, _DIGITS_REASON = "the JSON nests too deeply to read", "a number in the JSON has too many digits"
+_JSON_TOKENS = re.compile(rb'"[^"\\]*(?:\\.[^"\\]*)*"|[\[\]{}]|' + b"[0-9]{%d,}" % (_DIGITS_MAX + 1), re.S)      # a string (skipped whole, escapes honored), a bracket, or a run of digits over the bound
+
+
+def _too_deep_or_long(raw: bytes) -> str:
+    """The refusal (one line) when `raw` nests brackets deeper than `_NEST_MAX` or holds a run of more than `_DIGITS_MAX` digits outside its strings, else "". One pass over the bytes without recursion, so the answer
+    does not depend on the interpreter's recursion limit, its stack or its integer-conversion limit; it runs before the parser does."""
+    depth = 0
+    for m in _JSON_TOKENS.finditer(raw):
+        tok = m.group()
+        if tok in (b"[", b"{"):
+            depth += 1
+            if depth > _NEST_MAX:
+                return _NEST_REASON
+        elif tok in (b"]", b"}"):
+            depth = max(0, depth - 1)
+        elif tok[:1] != b'"':
+            return _DIGITS_REASON
+    return ""
+
+
 def _parse_body(raw: bytes) -> tuple[Any, str]:
-    """(the JSON object in `raw`, "") or (None, a one-line reason): text that is no JSON, JSON that is no object, a nesting too deep to read, or a number with too many digits."""
+    """(the JSON object in `raw`, "") or (None, a one-line reason): text that is no JSON, JSON that is no object, a nesting too deep to read, or a number with too many digits. The last two are judged by
+    `_too_deep_or_long` before the parser runs; the parser's own limits (recursion, memory, integer digits) give the same two reasons."""
+    why = _too_deep_or_long(raw)
+    if why:
+        return None, why
     try:
         body = json.loads(raw)
-    except RecursionError:
-        return None, "the JSON nests too deeply to read"
+    except (RecursionError, MemoryError):
+        return None, _NEST_REASON
     except ValueError as e:      # JSONDecodeError and UnicodeDecodeError are the body's own faults; any other ValueError is the parser's limit on the digits of an integer
         if isinstance(e, (json.JSONDecodeError, UnicodeDecodeError)):
             return None, "the body is not valid JSON"
-        return None, "a number in the JSON has too many digits"
+        return None, _DIGITS_REASON
     if not isinstance(body, dict):
         return None, "the body is a JSON object, not a list, text, number, true, false or null"
     return body, ""
