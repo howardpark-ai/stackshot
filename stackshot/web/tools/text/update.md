@@ -152,7 +152,13 @@ reword an open step to add progress. next="none" removes your open lines; an emp
 The one line a needs=decision item carries, all four parts in this order, joined by " · ", no line break, at most 240
 characters in all: ask="Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week
 delays the demo · By: Mon Jun 8th 2099" (By is a date in words, or no date). A real choice, not "have you done X?";
-one decision per ask (no ";" between decisions). With no options listed the Recommend is a yes or a no. The ask line never says I, you or me. "none"
+one question per ask, whose answers are the options (no ";" between decisions, no second question joined by "and say if",
+"and tell me whether", "and decide whether" or "and, if so, …" when the clause ends there; a bundled action such as
+"retire the queue and also allow its jobs to drain" or a conditional such as "merge now and, if green, release" or "approve
+it and, if so, start Monday" is one decision and passes). An ask that approves or picks a design, plan, proposal, draft or spec
+links it in the ask itself, [design](https://…), never a path on a machine or a summary alone; a short link text keeps room under
+the limit (a subscription or payment plan, software package or compound such as "the design system rollout" needs none).
+With no options listed the Recommend is a yes or a no. The ask line never says I, you or me. "none"
 or clear_ask=true withdraws it.
 
 ## param HOLD

@@ -348,6 +348,7 @@ def create_item(
     if not _writes.question():    # a script's question is never lost on its wording: its Decide is the question as written, and the board may take no options
         fc.call_family(*_faults.DECISION, _dg._gate_open_question, meta)          # an open question with no options: the page would draw Yes / No under it
         fc.call_family(*_faults.DECISION, _dg._gate_recommend_stance, meta)       # no options and a Recommend that is no yes or no: the same Yes / No under a question it cannot answer
+        fc.call(_dg._gate_design_link, meta)                                      # a design, plan or proposal asked about is linked in the ask (its own fault; a script cannot add a link, so not on its question)
     fc.call_family(*_faults.DECISION, _dg._gate_mockup, meta, description)        # a mockup linked in the text rides on the ask too
     fc.call_family(*_faults.DECISION, _dg._gate_own_action, meta, create=True)    # his own action asked as a decision: it is a your-step
     asked += _dg._options_note(meta) + _dg._actor_note(meta)
