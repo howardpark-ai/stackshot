@@ -1888,9 +1888,9 @@ def wake_park_pass(findings: list[dict[str, Any]], items: dict[str, dict[str, An
         to, front = recipient(mover, proj.get(mover, ""), env, mover)
         if to != mover or front:
             continue
-        ok, said = _send(env, mover, (f"The server parked {len(shown)} item{'s' if len(shown) > 1 else ''} of yours whose only open step waits for its wake, as the ten-minute check used to ask you to: " + "; ".join(shown)
-                                       + ". Each is parked until its wake, with a wait_basis made from the step's own words, and History has a line. If a step can run now, write it as the action and pass clear_hold=true: "
-                                         "the server then leaves that wake alone."), fyi=True)
+        ok, said = _send(env, mover, (f"The server parked {len(shown)} item{'s' if len(shown) > 1 else ''} of yours whose only open step waits for its date, as the ten-minute check used to ask you to: " + "; ".join(shown)
+                                       + ". Each is parked until its date, with a wait_basis made from the step's own words, and History has a line. If a step can run now, write it as the action and pass clear_hold=true: "
+                                         "the server then leaves that date alone."), fyi=True)
         rep["messages"].append({"to": mover, "delivered": ok, "said": _clip(said, 120)})
     return [f for f in findings if str(f.get("id")) not in done or f.get("category") != "why-not-now"], rep
 

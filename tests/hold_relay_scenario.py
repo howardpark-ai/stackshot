@@ -191,7 +191,7 @@ item(1, **REL2)
 out = bupd(1, hold=True, wake=w(3))
 check("1 hold=true + wake inside the cap on a relay wait is accepted and stored as until, kind kept", W.stored_until(mt(1)) == w(3) and mt(1).get("wait_kind") == "relay", mt(1))
 check("1 …no hold flag and no old field is stored", not mt(1).get("hold") and no_old(mt(1)), mt(1))
-check("1 …the reply says the wait is the park until its ask-by day", "hold=true is not stored on a relay or event wait" in out and w(3) in out, out[-700:])
+check("1 …the reply says the wait is the park until its ask-by day", "stores no park flag" in out and w(3) in out, out[-700:])
 
 item(2, **REL2)
 bupd(2, hold=True, ask_by=w(4))
@@ -199,7 +199,7 @@ check("1 hold=true + ask_by on a relay wait is accepted too", W.stored_until(mt(
 
 item(3, **REL2)
 out = bupd(3, hold=True)
-check("1 hold=true alone on a relay wait that has its day is accepted, the day stands", W.stored_until(mt(3)) == w(5) and not mt(3).get("hold") and "not stored" in out, (mt(3), out[-500:]))
+check("1 hold=true alone on a relay wait that has its day is accepted, the day stands", W.stored_until(mt(3)) == w(5) and not mt(3).get("hold") and "stores no park flag" in out, (mt(3), out[-500:]))
 
 item(4, needs=[BACK], until=w(5), wait_kind="event", wait_event="box_online testbox", post_wake_mover=BACK)
 bupd(4, hold=True, wake=w(3))
@@ -248,7 +248,7 @@ item(8, needs=[BACK], until=w(5), wait_kind="anchor", wait_anchor=A1, wait_event
 bupd(8, hold=True, wake=w(3))
 check("3 hold=true + wake on an anchor wait keeps the hold flag and the date", mt(8).get("hold") is True and W.stored_until(mt(8)) == w(3), mt(8))
 refused("3 a hold with no date on an item with a scoped anchor is still refused with the backstop-wake message", lambda: (item(10, needs=[BACK]), _wt_update.stackshot_update("a10", sender=BACK, hold=True))[1],
-        "still carries a backstop wake", "at most 7 days out")
+        "still carries a backstop date", "at most 7 days out")
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

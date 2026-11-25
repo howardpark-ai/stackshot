@@ -9,25 +9,26 @@ A wrong `stall:` step is undone with update (mover, next, clear_needs); the whol
 
 ## text WAIT_FORM lead trail
 A wait is one stored date, until, with wait_kind beside it when it stands on more than the date. An item with an until
-is waiting; the server clears both when the wait ends. wake, ask_by and hold with a wake are still accepted for now as
-other names of until. A wait_kind with no date is never refused: the server takes a date from the item's words, else a
-suggested one, else tomorrow, and says which. Every open item has a mover (the one party whose move it is now: a
-session, {{OWNER}}, an outside party, or the item it waits `after`). An open item waits on its real dates only (wake,
-due, ask by): no expected time is derived for any item, and a parked item waits until its wake or its blocker
-closes, with no stale mark. A wake a session sets runs at most {{CAP_DAYS}} days from the item's last move: a wake
-further out, an anchored thread's included, is refused without {{OWNER}}'s words (said=[Acked-by …] checked against a
-transcript, a message from those days; or his answer on the item, given since its last move: ask him to answer there)
-or a wait_basis. A due date is a deadline and is not refused. Which wait to write: own work waiting on a date within
-{{CAP_DAYS}} days: until="<tomorrow or later, within {{CAP_DAYS}} days, YYYY-MM-DD>T04:00" with wait_reason="the
-nightly run finishes at 03:00"; a window the work itself needs, or a wake past the cap: hold=true, until="<last day of
-the window, YYYY-MM-DD>", wait_basis="error-log soak ends <that day, YYYY-MM-DD>" (parameter wait_basis has the form;
-it goes with a park's wake, a stored verifying item's wake, or a wake past the cap, and lifts the cap for that wake
-alone; clear_wait_basis=true drops it). A bare date within the cap (until, or its old name wake) is a wait on its own,
-and a basis for it is dropped, the reply saying so, unless the item is parked (hold=true) or verifying; a date no longer
-leaves the item active as a reminder (outside a hand-off's backstop): set no date to keep an item moving. A wait that
-can no longer end (a check whose pull request was closed unmerged) fails at once and tells the item's mover.
-clear_wait=true is how an update drops a stored wait (wait_kind and its fields); wait_anchor or wait_event of none and
-clear_wait_basis do not. An update that newly adds needs=decision to an item that stores a wait is refused unless it
+is waiting; the server clears both when the wait ends. wake and ask_by, and hold beside a date, are retired parameters: a call that passes
+one is refused, and the date goes in until. A wait_kind with no date is never refused: the server takes a date from the
+item's words, else a suggested one, else tomorrow, and says which. Every open item has a mover (the one party whose
+move it is now: a session, {{OWNER}}, an outside party, or the item it waits `after`). An open item waits on its real
+dates only (until, due): no expected time is derived for any item, and a parked item waits until its date or its
+blocker closes, with no stale mark. A date a session sets runs at most {{CAP_DAYS}} days from the item's last move: a
+date further out, an anchored thread's included, is refused without {{OWNER}}'s words (said=[Acked-by …] checked
+against a transcript, a message from those days; or his answer on the item, given since its last move: ask him to
+answer there) or a wait_basis. A due date is a deadline and is not refused. Which wait to write: own work waiting on a
+date within {{CAP_DAYS}} days: until="<tomorrow or later, within {{CAP_DAYS}} days, YYYY-MM-DD>T04:00" with
+wait_reason="the nightly run finishes at 03:00"; a park for a window the work itself needs, or a date past the cap:
+until="<last day of the window, YYYY-MM-DD>", wait_kind="time", wait_basis="error-log soak ends <that day,
+YYYY-MM-DD>" (parameter wait_basis has the form; it goes with a date past the cap and with a stored verifying item's
+date, and lifts the cap for that date alone; clear_wait_basis=true drops it; a park of
+{{CAP_DAYS}} days or less carries his recorded words instead, said=[Acked-by …] or his answer on the item, and
+a basis sent with such a date is dropped, the reply saying so). A bare date within the cap is a wait on its own and
+needs no basis; a date does not leave the item active as a reminder (outside a hand-off's backstop): set no date to
+keep an item moving. A wait that can no longer end (a check whose pull request was closed unmerged) fails at once and
+tells the item's mover. clear_wait=true is how an update drops a stored wait (wait_kind and its fields); wait_anchor or
+wait_event of none and clear_wait_basis do not. An update that newly adds needs=decision to an item that stores a wait is refused unless it
 also passes clear_wait=true: the wait would otherwise win and get would list a model conflict. clear_after=true clears
 the after list, as after=[] or after="none" do; some clients drop an empty list, so the flag always arrives. A write
 that clears a wait while an open next line still defers on what it cleared in words goes through, and its reply
@@ -38,25 +39,25 @@ proof or chase_note is refused with what to pass instead. Whose move it is goes 
 needs=["decision"] with an ask; his own step is step=<one line, no command, of the single thing only {{OWNER}} does;
 what he runs goes in a next line that starts `{{OWNER}}:`> (the board ticks it when he says it is done; never ask him
 "have you done it?" as a decision); a wait on another item is after=["board#N"] (supplies=<one line: what that item's
-output gives this one> says what it takes from it); a park is hold=true with a wake and either his recorded words for
-it (cap_ok) or a wait_basis (the end of a window the work needs, or a wake past the cap); a wait on someone
-outside is wait_kind="relay" with wait_event=<who>, ask_by=<the day to chase>, mover=<who takes it then> and needs=["external"].
+output gives this one> says what it takes from it); a park is until=<date> with wait_kind="time" and either his recorded
+words for it (cap_ok) or a wait_basis (the end of a window the work needs, or a date past the cap); a wait on someone
+outside is wait_kind="relay" with wait_event=<who>, until=<the day to chase>, mover=<who takes it then> and needs=["external"].
 Work in hand needs next and its mover and carries no expected time (the item shows how long it has run); expected_by
 and expected_reason, which older calls pass, are accepted and not kept (the reply says so). Work in hand is not a
-wait: a wait (a date, a timer, someone else's step or release) is parked the turn it starts, with update(hold=true,
-until="YYYY-MM-DD" or "YYYY-MM-DDTHH:MM", wait_basis="<what it waits for, with its date YYYY-MM-DD>"),
+wait: a wait (a date, a timer, someone else's step or release) is parked the turn it starts, with
+update(until="YYYY-MM-DD" or "YYYY-MM-DDTHH:MM", wait_kind="time", wait_basis="<what the date is, with its date YYYY-MM-DD>"),
 update(after=["board#N"]) for another item, or the relay wait above for someone outside (a write that leaves wait
 wording in next, such as overnight or once the vendor replies, gets a note saying to park it). No
-clock renewal without progress: a write that moves a wake or ask_by to a later time while the item's reason
+clock renewal without progress: a write that moves an until to a later time while the item's reason
 (description, wait_basis text) and its open steps are as they were is refused (a wait_reason does not count: it is not
 stored); in the same write mark a step done or dropped, write the next step or state a new reason (or send
 {{OWNER}}'s own words in said), or change what the wait stands on to a shape the item never held (wait_kind,
 wait_event, wait_anchor, after: a flip back to an earlier one does not count; such a shape change alone lets a clock
 push through twice and the third is refused, until a step, the reason, his new words or a hand-off resets the
-count); or, if the item now waits, park it (hold=true, wake, wait_basis) or use the event-wait form
-(wait_kind="event", wait_event, ask_by, mover). Setting a first clock, pulling one in, clearing
+count); or, if the item now waits, park it (until, wait_kind="time", wait_basis) or use the event-wait form
+(wait_kind="event", wait_event, until, mover). Setting a first clock, pulling one in, clearing
 it and handing the item on are not renewals. On a parked item give a new wait_basis; an item on his
-decision cannot be parked. Take a wake from the wait's real schedule (a timer, watch tick, catch-up run) or
+decision cannot be parked. Take a date from the wait's real schedule (a timer, watch tick, catch-up run) or
 check it live, never a guessed round time. step=<one line> sets the item in his step and makes him the mover (then, or
 the agent that had it, takes it after his Done); step is a short summary, and a long one is put right for you: a step over
 {{STEP_SPLIT_OVER}} characters with several actions (sentences, semicolons, `1) … 2) …`) is split into a summary of at most {{STEP_SUMMARY_MAX}}
@@ -120,32 +121,28 @@ Open steps that are no longer wanted, named like done: dropped=[2]. A different 
 reword.
 
 ## param WAKE
-The old name of until, accepted for now: when the item wakes, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a
-time of day, in the board timezone (a relay or event wait takes the day alone, YYYY-MM-DD). Alone it is a wait, as
-until says. A
-wait on your own item also needs wait_reason (at least {{WAIT_GUARD_REASON_MIN}} characters); a wait with a kept wait_basis
-needs none, and a wake more than {{CAP_DAYS}} days out needs a wait_basis. Moving a wake (or ask_by) later with the
-item otherwise as it was is refused, as a clock renewal (see the wait text in the description).
+Retired: a call that passes it is refused. The date a wait ends on is until.
 
 ## param ASK_BY
-The old name of until, accepted for now: the day a wait on another item, a relay or an event comes back to someone if
-it has not ended, YYYY-MM-DD, tomorrow at the earliest: ask_by="2099-03-02". Moving it later with nothing else changed
-is refused (see wake).
+Retired: a call that passes it is refused. The day a wait on another item, a relay or an event comes back to someone
+if it has not ended is until, YYYY-MM-DD, tomorrow at the earliest: until="<day, within {{CAP_DAYS}} days>".
 
 ## param UNTIL
 The one date a wait ends on, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM, in the board timezone (a relay or event
-wait takes the day alone, YYYY-MM-DD: its ask-by day). An item with an until is waiting (outside a hand-off: in an
-update that hands the item to another session the date parks nothing, it is the hand-off's backstop and the item stays
-active in the new mover's lane (unless the item carries hold, wait_kind, wait_basis or an after link, in this call or
-stored by an earlier one: then the date stays a wait)); wait_kind goes only beside it (none: it waits on the date
-alone). until="none" drops it. Moving it later
-with nothing else changed is refused, as for wake. Beside waits it is the list's backstop day.
+wait takes the day alone, YYYY-MM-DD: the day it comes back to someone). Alone it is a wait; a wait on your own item
+also needs wait_reason (at least {{WAIT_GUARD_REASON_MIN}} characters), a date more than {{CAP_DAYS}} days out needs a
+wait_basis, and a park (wait_kind="time") within the cap needs his recorded words. An item with an until is waiting
+(outside a hand-off: in an update that hands the item to another session the date parks nothing, it is the hand-off's
+backstop and the item stays active in the new mover's lane (unless the item is parked or carries wait_kind, wait_basis
+or an after link, in this call or stored by an earlier one: then the date stays a wait)); wait_kind goes only beside
+it (none: it waits on the date alone). until="none" drops it. Moving it later with nothing else changed is refused, as
+a clock renewal (see the wait text in the description). Beside waits it is the list's backstop day.
 
 ## param NEXT
 Your lines of the checklist, one step per line, each opening with who takes it, then a space (a label such as
 `Status:` names no one). It replaces only your own lines: write again every open step of yours that stays and mark the
 others in done or dropped (or reword) in the same call. Steps 1 and 2 open, step 1 finished: done=[1], next="my-x:
-test it\nmy-x: open the PR". An item that stays open keeps one open step, a parked one the step its wake leads to. Never
+test it\nmy-x: open the PR". An item that stays open keeps one open step, a parked one the step its date leads to. Never
 reword an open step to add progress. next="none" removes your open lines; an empty next is next not passed.
 
 ## param ASK
@@ -162,10 +159,10 @@ With no options listed the Recommend is a yes or a no. The ask line never says I
 or clear_ask=true withdraws it.
 
 ## param HOLD
-The old way to wait on a date, accepted for now (stored as until). True parks the item until its wake, for a window
-the work itself needs (the form is under wait_basis). It
-reads as waiting, not on agent; clear_hold=true ends it. On a relay or event wait no flag is stored (the wait is the
-park until its day) and the park ends a stored work-in-hand state.
+Retired beside a date: a call that passes hold with a date is refused. A park is until=<date> with wait_kind="time"
+and wait_basis (the form is under wait_basis). It reads as waiting, not on agent; clear_hold=true ends a park the item
+stores. On a relay or event wait no flag is stored (the wait is the park until its day) and the park ends a stored
+work-in-hand state.
 
 ## text STEP_FORM lead trail
 step (update only; create sets no step): a ONE-LINE summary of what the person whose step it is does, for an item that
@@ -191,13 +188,13 @@ pasted output), or when the step points elsewhere ("see the description", "see b
 step, mover, description or draft are judged, and [model] guards = false skips these checks.
 
 ## param WAIT_BASIS
-The reason a wake (on a relay or event wait, its ask-by day) carries when it parks the item or lies past the cap: one line of 12 to 300 characters that names the
-real date it stands on as YYYY-MM-DD, from the wake day to 30 days after it: wait_basis="error-log soak ends <that day, YYYY-MM-DD>"; a date outside the board reads the same way, wait_basis="vendor
-reply due <YYYY-MM-DD>" (a wake with no date is refused). Three
-wakes take it, each basis bound to the wake it was given for: a park's wake, a verifying item's wake, and a
-wake more than {{CAP_DAYS}} days out (it lifts the cap for that wake alone, up to {{BASIS_MAX_WAKE_DAYS}} days: a wake
+The reason an until (on a relay or event wait, its day) carries when it lies past the cap or parks the item: one line of 12 to 300 characters that names the
+real date it stands on as YYYY-MM-DD, from the until day to 30 days after it: wait_basis="error-log soak ends <that day, YYYY-MM-DD>"; a date outside the board reads the same way, wait_basis="vendor
+reply due <YYYY-MM-DD>" (a basis with no date is refused). Three
+dates take it, each basis bound to the date it was given for: a park's, a verifying item's, and an until more than
+{{CAP_DAYS}} days out (it lifts the cap for that date alone, up to {{BASIS_MAX_WAKE_DAYS}} days: a date
 further out is refused whatever the basis). A bare date within the cap takes wait_reason on your own item and a basis
-there is dropped, the reply saying so. A park with a wake and no basis takes the line of next or the description that says
+there is dropped, the reply saying so; a new park within the cap takes his recorded words, not a basis. A park with a date and no basis takes the line of next or the description that says
 what the work waits for.
 
 ## param RANK
@@ -220,17 +217,17 @@ Update an item; only the fields you pass change.{{OFF_MAP}} Right calls (sender 
 "my-x: test it" open, step 1 done: update(item_id="board#N", sender="my-x", done=[1], next="my-x: test it\nmy-x: open
 the PR") (next lists every open step of yours that stays); reword an
 open step: reword={"2": "my-x: ship the export"}; drop a step: dropped=[2]; work: the status of your open step, one line per call: work={"text":
-"PR 83 up", "state": "in progress"}; park for a work window: hold=true,
-until="<last day of the window, YYYY-MM-DD>", wait_basis="soak ends <that day>" (the basis names its date, YYYY-MM-DD;
-only with hold=true or a wake past {{CAP_DAYS}} days); a wait until a date on your own item: until="<tomorrow or
-later, within {{CAP_DAYS}} days, YYYY-MM-DD>T04:00", wait_reason="the nightly run finishes at 03:00"; wait on another
-item: after=["board#N"], ask_by="2099-03-02"; description="- Goal: the export finishes in under a minute\n- Problem:
+"PR 83 up", "state": "in progress"}; park for a work window: until="<last day of the window, YYYY-MM-DD>",
+wait_kind="time", wait_basis="soak ends <that day>" (the basis names its date, YYYY-MM-DD; it goes with a date past
+{{CAP_DAYS}} days; within them his recorded words stand in); a wait until a date on your own
+item: until="<tomorrow or later, within {{CAP_DAYS}} days, YYYY-MM-DD>T04:00", wait_reason="the nightly run finishes
+at 03:00"; wait on another item: after=["board#N"], until="<day, within {{CAP_DAYS}} days>"; description="- Goal: the export finishes in under a minute\n- Problem:
 the nightly run takes 9 minutes" (short `- ` bullets, never a paragraph; every line, `- ` included, at most {{DESC_LINE_MAX}} characters, at most
 {{DESC_MAX_LINES}} lines); close: the complete tool. status: open | completed (`needs` says whose move it is).
 {{CLOSE_FORM}}A new or reworded open step that opens with a front agent is refused on an item another session moves:
 open it with the mover's name, or send `For <agent>,` to its project page (a step it already holds stays). With no
 builder there, its front agents may take the item by mover= or a step behind an open step
-(the item moves to it, told, when the step before is done). A wake alone is a wait: the item waits until that date. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not: to leave an item again, pass needs without yourself. {{ITEM_FORM}} {{NEXT_FORM}}
+(the item moves to it, told, when the step before is done). A date alone is a wait: the item waits until that date. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not: to leave an item again, pass needs without yourself. {{ITEM_FORM}} {{NEXT_FORM}}
 ask="none" clears it (so does clear_ask=true). A write that leaves an ask standing on an item you move or wrote ends
 with a one-line reminder to withdraw the ask if it is wrong or moot; a write that sets an ask shows {{OWNER}}'s
 comments and notes since the item's last ask, so one that already answers it is seen before you ask again. His note on
@@ -243,46 +240,45 @@ open question; a non-empty list still takes 2 to 6 entries, exactly one recommen
 picking an option, the server clears the ask and the options itself and keeps his answer with the option's label and
 line. A client whose tool has no ask parameter refreshes the ask by writing the new line, in the ask's form, as the
 first line of next. When this work settles or changes a premise of another open item, update that one too, in the same
-turn. item_id: board#N; a bare number N is read as board#N, except in an update that closes the item. wake (the old
-name of until) and until take YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, {{TZ_ABBR}}; a full ISO time with
+turn. item_id: board#N; a bare number N is read as board#N, except in an update that closes the item. until takes YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, {{TZ_ABBR}}; a full ISO time with
 seconds or a UTC offset is converted to that minute in {{TZ_ABBR}}, and the reply says so. At that moment the server
-tells the item's mover and the sessions in its needs once and drops the date. A doing item whose wake is over an hour away and whose every open step waits for a later date ("after Mar 2", "until
+tells the item's mover and the sessions in its needs once and drops the date. A doing item whose date is over an hour away and whose every open step waits for a later date ("after Mar 2", "until
 Mar 2"; a deadline such as "by Mar 2" or "due Mar 2" is no wait) is listed as waiting, and the audit asks why the step
 cannot run now. Parked
-= an open item waiting until its next move is due: hold=true, always passed explicitly, with what it waits for;
-with a wake the server releases it at that moment, tells the sessions in its needs (else its mover; refresh the ask
+= an open item waiting until its next move is due: until with wait_kind="time", with what it waits for;
+at its date the server releases it, tells the sessions in its needs (else its mover; refresh the ask
 then) and returns it to the lane its needs give it. Meanwhile it reads as parked (a waiting state), not as work moving
 on agent; needs and due stay as they are. A write to an item whose needs hold decision drops its park (its date stays).
-Park his call instead, from a doing item as from any other: needs=["<session>"] (the session that waits; a front agent will do), until=<date>, wait_kind="time", wait_basis="<what it waits for,
-with its date YYYY-MM-DD>" and mover={{OWNER}} (no hold: the date with the kind is the park); the ask and options stay on the item, and at the date it is his call again with the same ask. Without wait_kind="time" an
-item with him as mover and a date is refused as having nothing for him to do. A park of {{CAP_DAYS}} days or less needs his recorded words too (said=[Acked-by …], or his answer on the item). {{OWNER}} parks on his word. A park always names what it
+Park his call instead, from a decision item or a doing item: needs=["<session>"] (the session that picks it up at the date; a front agent will do), until=<YYYY-MM-DD or YYYY-MM-DDTHH:MM>, wait_kind="time" (or event, relay, item where the wait stands on more than the date), wait_basis="<what the date is,
+with its date YYYY-MM-DD>" and mover={{OWNER}}; the ask and options stay on the item, and at the date they come back to him: a decision item returns with its ask and options, a doing item with its ask if it had one. Without wait_kind an
+item with him as mover and a date is refused as having nothing for him to do. A park of {{CAP_DAYS}} days or less needs his recorded words (said=[Acked-by …], or his answer on the item); a longer one needs a wait_basis. {{OWNER}} parks on his word. A park always names what it
 waits for: {{OWNER}}'s words, the items that must close first (after), a notice from an anchor scoped to the item, a
 pane recycle (recycle=true), or the end of a window the work itself needs; an unconditional or indefinite park is
 refused. Work moving in real time stays on agent however long it takes (a build, tests, a review, a release or its
 queue, a run or subagent of yours): do not park it: its mover's park is refused while its subagent runs on it. A
 session parks its own item when the work itself needs a wait-and-see window (a soak, a log or data collection window,
-a trial week, a timer it started): hold=true, until=<when the window ends>, wait_basis="<what the window collects>
-ends <YYYY-MM-DD>". A session does not park to defer work it could do now: an item not parked is one its mover can
-move now, so work it in your next free turn. A wake without hold whose next says the work waits for that wake's day
+a trial week, a timer it started): until=<when the window ends>, wait_kind="time", wait_basis="<what the window collects>
+ends <YYYY-MM-DD>" (a window of {{CAP_DAYS}} days or less on your own item is a bare until with wait_reason). A session does not park to defer work it could do now: an item not parked is one its mover can
+move now, so work it in your next free turn. A date that is no park, whose next says the work waits for that day
 ("collect logs until <that day>, then review") gets a note on the reply, never a refusal: the item stays on agent and
-the note gives the park form above. When your write sets or keeps a wake with no hold over an hour ahead, you are the
-item's mover and every open step opens with a time at the wake's hour or day ("at 03:00", "on <that day>", "tomorrow
+the note gives the park form above. When your write sets or keeps a date with no park over an hour ahead, you are the
+item's mover and every open step opens with a time at the date's hour or day ("at 03:00", "on <that day>", "tomorrow
 at 9"), the server parks it itself (parked, wait_basis from your wait_reason; the reply says `(parked: …)`); to work
 a step now, write it as the action and pass clear_hold=true. A next line that says in words it waits for an open item,
 a pull request's merge or release, a machine coming back online or a link, while the item stores no wait for it, is
 set by the ten-minute pass when the line is the item's only open step and one thing is named (after, an event wait, an
 anchor wait, or a step proof): clear_after=true, clear_wait=true or step_proof="none" sends it back and the server
 leaves that line alone. Steps started by an outside event ("when the next release lands") get a note instead: park
-with hold=true, wake, wait_basis, wait_reason (needs=external for a named outside party's reply). Neither applies to
+with until, wait_kind="time", wait_basis, wait_reason (needs=external for a named outside party's reply). Neither applies to
 an action to take now, another party's step in flight, or an item not on agent (parked, waiting on {{OWNER}}'s
 decision or an open after item, needs=external, outside, verifying, blocked). An item that waits on another item is
 not parked but names it: after=["board#N"]. Nor is one that waits on {{OWNER}}: needs=decision with its ask, after=<the item that carries the ask>, or his call parked as above. An item that waits on a named person outside (needs=external) is not parked,
 unless the thread it waits on is anchored to it (anchors(project, add=[url], items=[its id])) and named in next: park
-that one with a backstop wake (at most [waiting] cap_days out unless his words are on the item), since the notice may
+that one with a backstop date (until, at most [waiting] cap_days out unless his words are on the item), since the notice may
 never come; the server releases the park when the project's router (or the project's builder, else its -main agent)
 passes or merges a notice from that anchor (never when it drops one; in a project nobody rules, when any notice from
 it arrives), and tells the sessions in its needs (else the project's builder, else its -main agent). clear_hold=true
-releases it now (its date goes with it); until="none" (or clear_wake=true) drops the date: an item that waits on
+releases it now (its date goes with it); until="none" drops the date: an item that waits on
 nothing else is active again, and a park stays only when an after, an anchor or a recycle still holds it. mover hands
 the item over: set mover=<session> (then=<who takes it after {{OWNER}}'s answer or step>, kept only while he is the
 mover; on an item a session moves it is dropped with a note) and the new mover is told; a
@@ -303,7 +299,7 @@ mover = that project's user-facing agent (or the background agent doing the work
 not moved with it. owner, the old name of mover, is accepted for a few more days with a note in the reply and then
 refused: say mover. sender = your own session (name or cse_… id) when you edit an item you are not the mover of (a
 session named in needs always passes sender=<itself>): the page update the edit owes is then yours, not the mover's (a
-create, a complete, or an update to description, next, needs, status, due, after, or the park and its wake owes one).
+create, a complete, or an update to description, next, needs, status, due, after, or the park and its date owes one).
 {{SENDER_MIRROR}}Pass clear_needs=true (or needs="none") to remove the needs badge, clear_check=true (or check="none")
 to remove the done check, clear_due=true (or due="none") to remove a date that no longer holds (a postponement with no
 new date). priority: p1 | p2 | p3, shown but not sorted. project re-files the item under another page (projects/<slug>
@@ -327,9 +323,9 @@ Re-files the item under this page, as `(filed on X)` shows it, never the shown t
 ## param wait_reason
 What the step waits on that is not available now (a reply, a build or test still running, a window the work needs, a
 resource that is down), at least {{WAIT_GUARD_REASON_MIN}} characters: wait_reason="the nightly run finishes at
-03:00". Required when this write sets a wake, or a line of your own next dated later than today, on an item you move,
+03:00". Required when this write sets an until, or a line of your own next dated later than today, on an item you move,
 or it is refused (a model may refuse it too when the step could be done now). Not stored on the item. A park
-(hold=true with wait_basis), a wait on another item (after) and needs decision or external need none. A date after by,
+(wait_kind="time" with wait_basis), a wait on another item (after) and needs decision or external need none. A date after by,
 due or before is a deadline, not a wait.
 
 ## description update

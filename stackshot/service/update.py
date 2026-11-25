@@ -75,8 +75,8 @@ from stackshot.waits import watchers as _watch
 
 
 RETIRED_NOTE = ("\n(note: expected_by and expected_reason are no longer kept: a doing item carries no expected time and shows how long it has run. "
-                "If it waits on a date or a person, park it: update(hold=true, until=\"YYYY-MM-DD\", wait_basis=\"<what it waits for, with its date YYYY-MM-DD>\"), or after=[\"board#N\"], "
-                "or wait_kind=\"relay\" with wait_event=<who> and ask_by=<the day to chase>.)")
+                "If it waits on a date or a person, park it: update(until=\"YYYY-MM-DD\", wait_kind=\"time\", wait_basis=\"<what the date is, with its date YYYY-MM-DD>\"), or after=[\"board#N\"], "
+                "or wait_kind=\"relay\" with wait_event=<who> and until=<the day to chase>. A park of the wait cap's days or less needs his recorded words: there set a bare until with wait_reason.)")
 
 _STALE_WAIT_NOTE_MAX = 5
 _DROPPED_NOTE_MAX = 5           # the old description lines a dropped-lines note names, then "and N more"
@@ -479,7 +479,7 @@ def _doing_wait_note(meta: dict[str, Any], next_: str = "", busy: str | None = N
     if not found or busy:
         return ""
     return (f"\n(note: this item is doing, but its next reads as a wait ({found}), not work in hand; a doing item that waits shows as on an agent while nobody works it. "
-            "Park it this turn with update(hold=true, until=\"<the time it waits for>\", wait_basis=\"<what it waits on, with its date YYYY-MM-DD>\"))")
+            "Park it this turn with update(until=\"<the time it waits for>\", wait_kind=\"time\", wait_basis=\"<what it waits on, with its date YYYY-MM-DD>\"); a park of the wait cap's days or less needs his recorded words, so for a date within them set a bare until with wait_reason)")
 
 
 def _wait_tells(sender: str, reasons: "list[str]", nexts: "list[str]", sets_wait: bool) -> str:
@@ -580,7 +580,7 @@ def _reads_time_wait(item: dict[str, Any]) -> bool:
 
 def _basis_frame(item: dict[str, Any], meta: dict[str, Any], status: str, wake: str, ask_by: str, wait_kind: str, hold: bool, state_st: str) -> tuple[dict[str, Any], str, bool]:
     """What a wait_basis is judged against, for the write that sends it → (the item with the status the write gives it, the wake it stands for, whether the item is a time wait held: a hold, a held or verifying
-    item). Raises ToolError for a wake in no valid form. A relay or event wait keeps its date in ask_by, not in a wake: its basis stands for that day."""
+    item). Raises ToolError for a wake in no valid form. A relay or event wait keeps its end day, not a wake: its basis stands for that day."""
     h = _hooks()
     basis_day = ""
     if not wake and not meta.get("wake") and (wait_kind.strip().lower() or _uw.kind_of(meta)) in ("relay", "event"):
@@ -1082,7 +1082,7 @@ def update_unlocked(
         next_after = dry_meta.get("next")
     if status:
         if status == "on_hold":   # a retired status: on hold is a property of an open item
-            fc.add("Refused: status must be open | completed; parked is a property of an open item: hold=true (with an optional wake); clear_hold=true releases it")
+            fc.add("Refused: status must be open | completed; parked is a property of an open item: until=<date> with wait_kind=\"time\" and wait_basis (a park of the wait cap's days or less needs his recorded words); clear_hold=true releases it")
         elif status not in ("open", "completed"):
             fc.add("Refused: status must be open | completed")
         else:
@@ -1217,12 +1217,12 @@ def update_unlocked(
         fc.skip("the check that a park names what it waits for", "it reads the wake, the after list, the wait's arguments or the wait_basis, which are refused above")
     elif meta.get("hold") and not meta.get("wake") and (hold or clear_wake or after_set or clear_after or clear_recycle) and not h.after_open(meta) and not meta.get("recycle"):
         if h.scoped_anchors(str(meta.get("project") or ""), gid):
-            fc.add(f"Refused: a park that waits on a notice from the anchor scoped to {gid} still carries a backstop wake, at most {_wt.cap_days():g} "
-                   f"days out unless {OWNER}'s words are on the item (wake=YYYY-MM-DD): the notice may never come")
+            fc.add(f"Refused: a park that waits on a notice from the anchor scoped to {gid} still carries a backstop date, at most {_wt.cap_days():g} "
+                   f"days out unless {OWNER}'s words are on the item (until=YYYY-MM-DD): the notice may never come")
         else:
-            fc.add("Refused: a park names what it waits for; an unconditional or indefinite park is refused. Give it a date (hold=true with wake=YYYY-MM-DD or "
-                        f"YYYY-MM-DDTHH:MM: the date {OWNER} gave, the date the outside party or event it waits on is due, or the end of a window the work itself needs, with wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"), the items that must close first (`after=[\"board#N\"]`), "
-                        f"a notice from an anchor scoped to it (`anchors(project, add=[url], items=[\"{_gh.shown(gid)}\"])`, with a backstop wake at most {_wt.cap_days():g} "
+            fc.add("Refused: a park names what it waits for; an unconditional or indefinite park is refused. Give it a date (until=YYYY-MM-DD or "
+                        f"YYYY-MM-DDTHH:MM with wait_kind=\"time\": the date {OWNER} gave, the date the outside party or event it waits on is due, or the end of a window the work itself needs, with wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"; a park of {_wt.cap_days():g} days or less needs {OWNER}'s recorded words), the items that must close first (`after=[\"board#N\"]`), "
+                        f"a notice from an anchor scoped to it (`anchors(project, add=[url], items=[\"{_gh.shown(gid)}\"])`, with a backstop date at most {_wt.cap_days():g} "
                         f"days out), or a pane recycle (recycle=true). An item waiting on {OWNER}'s call is parked with needs=[<session>] and mover={OWNER} (his ask returns at the date); "
                         "to put it on his move instead, needs=decision with its ask, or after=[<the item that carries the ask>], which releases it when that item closes. To check back on work you keep moving while the "
                         "item stays active, set no date: a date with no park is a wait until it (outside a hand-off)")
@@ -1247,7 +1247,7 @@ def update_unlocked(
         elif handed and not meta.get("check") and not meta.get("wake") and not _telling.front_sender(sender):     # a front agent's hand-off asks for neither: the mover's close lands the result, and its own wake or check is refused below
             fc.add(f"Refused: this update hands {_gh.shown(gid)} to {', '.join(handed)} (a line of next in the form `<session>: <action>`) and nothing "
                             f"would close the item once that work is done. Add check=<what closes it> ({_checks.CHECK_HOW}): the server then closes it when the check passes, no session turn spent. "
-                            f"Only when no check fits, add a date, wake=YYYY-MM-DD (or until=, YYYY-MM-DDTHH:MM, {_cfg.tz_abbr()}), as the backstop of this hand-off: because the write hands the item on, the date is no wait, the item stays active in the new mover's lane and the hand-off is recorded (the same date with no hand-off is a wait, and the item waits until then). "
+                            f"Only when no check fits, add a date, until=YYYY-MM-DD (or YYYY-MM-DDTHH:MM, {_cfg.tz_abbr()}), as the backstop of this hand-off: because the write hands the item on, the date is no wait, the item stays active in the new mover's lane and the hand-off is recorded (the same date with no hand-off is a wait, and the item waits until then). "
                             "(A front agent's hand-off is not asked for either: its mover's close or hand-back lands the result through stackshot.) "
                             "Pass the same update again with the check, or with the date alone if none fits. "
                             "If this tool shows no check parameter, this session's cached tool list predates it: pass the date, or call the update through the "
@@ -1361,7 +1361,7 @@ def update_unlocked(
     if relay_clear_hold:
         wait_note += "\n(clear_hold releases a park, and this relay or event wait holds no flag: it goes on waiting; clear_wait=true ends the wait)"
     if relay_hold:
-        wait_note += "\n(hold=true is not stored on a relay or event wait: the wait is itself the park, until its ask-by day " + (_uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))) + "; it ends when the notice arrives or on that day)"
+        wait_note += "\n(a relay or event wait stores no park flag: the wait is itself the park, until its day " + (_uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))) + "; it ends when the notice arrives or on that day)"
     gave_ask = bool(ask_by.strip()) and ask_by.strip().lower() not in h.ask_none
     if was_until and bool(wake) != gave_ask and item.get("status") == "open":      # one date given: the date the item held before (unfolded into the other working field) does not outlive it
         meta.pop("ask_by" if wake else "wake", None)
@@ -1499,7 +1499,7 @@ def update_unlocked(
         full_judgement = reopening or (h.switchover_on() and not filing_only)     # step 4's switchover: every write is judged whole, old items included; a bookkeeping write (a page rename) still only by what it touches
         desc_note = fc.call(_gates.gate_model, item_now, None if full_judgement else touched_m, gid, needs=[x for x in _needs_of(meta) if x not in naming_added], hold=hold_pre, desc_set=bool(description.strip()),
                             next_text=next_judged if next_touch else None, windows_text=next_judged if next_touch else "", defers_text=next_judged if next_touch else "",
-                            until_wait=until_wait or (was_until and not (wake or hold or clear_wait_basis or str(wait_basis or "").strip())), date_given=bool(wake), hold_given=bool(hold), default="")   # the write guards of the item model; his lines' Windows check judges only the lines this write sets; a wait on an until carries no snooze reason
+                            until_wait=until_wait or (was_until and not (wake or hold or clear_wait_basis or str(wait_basis or "").strip())), date_given=bool(wake), hold_given=bool(hold), basis_kept=bool(wake) and not str(wait_basis or "").strip() and _gates.basis_held({**item, "status": status or item.get("status")}, hold=hold, verifying=state_st == "verifying"), default="")   # the write guards of the item model; his lines' Windows check judges only the lines this write sets; a wait on an until carries no snooze reason
         desc_note += mover_note
         fc.call(h.anchor_wait_gate, item_was.get("metadata") or {}, meta, gid)      # an anchor wait newly set or moved: its anchor must be on the project's list already (after the model guards)
         if next_touch or state_st or state_given.get("step") or needs_set or clear_needs or agent.strip():      # only a write that touches next, the state, needs or the step; any other keeps the note. After the model guards, so their more specific refusals (a command in his line) come first

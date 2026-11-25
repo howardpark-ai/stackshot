@@ -102,7 +102,7 @@ check("doing: get shows no expected_by under the state", "state: doing" in txt a
 item(2, needs=[BACK], state="doing")
 out = upd(2, expected_by=stamp(now0 + 30 * HOUR), expected_reason="the builder subagent runs the full test suite and the review")
 check("retired: a far expected_by (30 hours) with a reason, which was refused before, is accepted and not stored", mt(2)["state"] == "doing" and "expected_by" not in mt(2) and "expected_reason" not in mt(2), mt(2))
-check("retired: …the reply carries one note: no longer kept, and the park calls", out.count("no longer kept") == 1 and "update(hold=true, until=" in out and "after=[" in out and "wait_kind=\"relay\"" in out, out[-600:])
+check("retired: …the reply carries one note: no longer kept, and the park calls", out.count("no longer kept") == 1 and 'update(until="YYYY-MM-DD", wait_kind="time"' in out and "after=[" in out and "wait_kind=\"relay\"" in out, out[-600:])
 for n_, kw_ in ((20, dict(expected_by="next week")), (21, dict(expected_by="2026-10-30 25:00")), (22, dict(expected_by=stamp(now0 - 2 * HOUR))), (23, dict(expected_by=time.strftime("%Y-%m-%d", time.gmtime(now0 + ZONE_OFFSET + DAY)))),
                 (24, dict(expected_reason="slow")), (25, dict(expected_by=stamp(now0 + 5 * HOUR), expected_reason="waits on Sunday's timer runs, deploying the Monday change"))):
     item(n_, needs=[BACK], state="doing"); o_ = upd(n_, **kw_)
@@ -149,7 +149,7 @@ refused("others: a wake past the 7-day cap is still refused without his words", 
 
 # ================================================================ 6b. a doing item whose next reads as a wait gets a note (the write still goes through)
 NOTE_HEAD = "reads as a wait"
-NOTE_CALL = "update(hold=true, until="
+NOTE_CALL = "update(until="
 OVERNIGHT = "box-g's first nightly run ends overnight; kestrel-hosting records its counts and cost in the morning"
 def bupd(i, **kw): return _update_svc._update(f"a{i}", sender=BACK, **kw)
 def doing_next(k, why):
@@ -162,7 +162,7 @@ def doing_next(k, why):
 item(70, needs=[BACK], state="doing")
 out = bupd(70, next="team-back: " + OVERNIGHT)
 check("wait note: the overnight example as the next line of a doing item is stored (the write goes through)", mt(70)["state"] == "doing" and "nightly run ends overnight" in mt(70)["next"], mt(70))
-check("wait note: …and the reply carries one note line that says to park it, with the hold, wake and wait_basis call",
+check("wait note: …and the reply carries one note line that says to park it, with the until, wait_kind and wait_basis call",
       out.count(NOTE_HEAD) == 1 and "(note: this item is doing, but its next reads as a wait (overnight)" in out and NOTE_CALL in out and 'wait_basis="<what it waits on, with its date YYYY-MM-DD>"' in out and 'until="<the time it waits for>"' in out, out)
 out, err = doing_next(71, "building PR #13, tests running")
 check("wait note: work wording (building, tests running) gets no note", mt(71)["state"] == "doing" and NOTE_HEAD not in out, (out, err))
@@ -220,13 +220,13 @@ def bupd(i, **kw): return _update_svc._update(f"a{i}", sender=BACK, **kw)
 item(120, needs=[BACK], next=f"team-back: collect logs until {w2}, then review")
 out = bupd(120, wake=w2)
 check("window note: a wake alone on an item whose next says 'collect logs until <the wake day>, then review' is stored, and the reply carries one note", wk_(mt(120)) == w2 and "hold" not in mt(120) and out.count(WN_HEAD) == 1, out)
-check("window note: …it names the wake, says the item waits until then, and recommends only update(until=...), with no wait_basis", f"wake {w2} alone" in out and "the item waits until then, listed as waiting" in out and 'update(until="<when the window ends>")' in out and "wait_basis" not in out and 'until="none"' in out and "clear_wake" not in out, out)
+check("window note: …it names the wake, says the item waits until then, and recommends only update(until=...), with no wait_basis", f"until {w2} alone" in out and "the item waits until then, listed as waiting" in out and 'update(until="<when the window ends>")' in out and "wait_basis" not in out and 'until="none"' in out and "clear_wake" not in out, out)
 item(121, needs=[BACK])
 out = bupd(121, next="team-back: merge the PR once the reviewer approves", wake=w2)
 check("window note: a wake alone with an unrelated next gets no note, and the wake is stored", WN_HEAD not in out and wk_(mt(121)) == w2, out)
 item(122, needs=[BACK])
 refused("window note: writing 'collect logs until <the wake day>' as next on an alive item is still refused by the next_wait guard, which names the park (hold, wake, wait_basis)",
-        lambda: bupd(122, next=f"team-back: collect logs until {w2}, then review", wake=w2), "reads as a wait", "hold=true with wake=YYYY-MM-DD")
+        lambda: bupd(122, next=f"team-back: collect logs until {w2}, then review", wake=w2), "reads as a wait", 'until=YYYY-MM-DD with wait_kind="time"')
 out = bupd(122, next=f"team-back: collect logs for 2 days, then review on {w2}", wake=w2)
 check("window note: a window the guard's list misses ('for 2 days, then review on <the wake day>') in this call's next draws the note", out.count(WN_HEAD) == 1, out)
 item(123, needs=[BACK])
@@ -286,7 +286,7 @@ EVENT = "team-back: when the next vendor release lands, check the fleet reaches 
 item(140, needs=[BACK], next="")
 out = bupd(140, next=TIMED, wake=f"{w2}T03:00")
 check("step park: a step timed at the wake's own hour is parked by the write (one parked line, no note): on hold with the wake, a wait_basis, stored waiting on a time",
-      out.count("(parked: wake") == 1 and SN_HEAD not in out and wk_(mt(140)) == f"{w2}T03:00" and hd_(mt(140)) is True and f"wake {w2}" in mt(140)["wait_basis"]["text"]
+      out.count("(parked: until") == 1 and SN_HEAD not in out and wk_(mt(140)) == f"{w2}T03:00" and hd_(mt(140)) is True and f"wake {w2}" in mt(140)["wait_basis"]["text"]
       and mt(140).get("phase") == "waiting" and mt(140).get("waits_on") == "time", (out, mt(140)))
 item(141, needs=[BACK], next="")
 out = bupd(141, next=EVENT, wake=f"{w2}T10:00")
@@ -299,10 +299,10 @@ out = bupd(142, next=EVENT + " Then close the ticket.")
 check("step note: a next write on an item that keeps a stored wake draws the note", out.count(SN_HEAD) == 1, out)
 item(143, needs=[BACK], next="")
 out = bupd(143, next=f"team-back: on {w2} rotate the key", wake=w2)
-check("step park: a step on the wake's own day ('on <the wake day>') is parked", out.count("(parked: wake") == 1 and SN_HEAD not in out and hd_(mt(143)) is True, out)
+check("step park: a step on the wake's own day ('on <the wake day>') is parked", out.count("(parked: until") == 1 and SN_HEAD not in out and hd_(mt(143)) is True, out)
 item(144, needs=[BACK], next="")
 out = bupd(144, next="team-back: tomorrow at 9 run the check", wake=f"{w_tomorrow}T09:00")
-check("step park: 'tomorrow at …' on a wake of tomorrow is parked", out.count("(parked: wake") == 1 and SN_HEAD not in out and hd_(mt(144)) is True, out)
+check("step park: 'tomorrow at …' on a wake of tomorrow is parked", out.count("(parked: until") == 1 and SN_HEAD not in out and hd_(mt(144)) is True, out)
 item(145, needs=[BACK], next="")
 out = bupd(145, next="team-back: tomorrow at 9 run the check", wake=w2)
 check("step note: 'tomorrow at …' on a wake two days off does not", SN_HEAD not in out, out)
@@ -350,7 +350,7 @@ out = bupd(159, next="team-back: when the tests pass, merge it; check the log", 
 check("step note: a builder waiting on its own tests is work in hand, no note", SN_HEAD not in out, out)
 item(160, needs=[BACK], next="")
 out = bupd(160, next="team-back: when the vendor replies, send them the signed copy", wake=f"{w2}T10:00")
-check("step note: a trigger that is a named outside party's reply also names needs=external with the relay wait (wait_kind, wait_event, ask_by)", out.count(SN_HEAD) == 1 and 'needs=["external"] with wait_kind="relay", wait_event=<who> and ask_by=YYYY-MM-DD' in out and "as an outside wait instead of a plain park:" in out, out)
+check("step note: a trigger that is a named outside party's reply also names needs=external with the relay wait (wait_kind, wait_event, until)", out.count(SN_HEAD) == 1 and 'needs=["external"] with wait_kind="relay", wait_event=<who> and until=YYYY-MM-DD' in out and "as an outside wait instead of a plain park:" in out, out)
 item(161, needs=[BACK], next="")
 out = bupd(161, next=EVENT, wake=f"{w2}T10:00")
 check("step note: …and a release trigger does not", out.count(SN_HEAD) == 1 and "needs=[" not in out, out)
@@ -376,7 +376,7 @@ for x, w_, want in STEP_CASES:
     check(f"step matcher: {x!r} on {w_!r} {'reads' if want else 'does not read'}", bool(MG.reads_as_timed_step(x, w_, _today_local)) is want, MG.reads_as_timed_step(x, w_, _today_local))
 check("step matcher: is_reply_trigger reads a reply, not a release", MG.is_reply_trigger(MG.reads_as_timed_step("once the vendor replies, send it", w2)) and not MG.is_reply_trigger(MG.reads_as_timed_step(EVENT.split(": ", 1)[1], w2)), None)
 _ud2 = _ud
-check("step text: update's description names the note for a mover's timed or event-started steps", "every open step opens with a time at the wake's hour or day" in _ud2 and "the reply says `(parked: …)`" in _ud2 and "clear_hold=true" in _ud2 and "needs=external for a named outside party's reply" in _ud2 and "started by an outside event" in _ud2 and "another party's step in flight" in _ud2, None)
+check("step text: update's description names the note for a mover's timed or event-started steps", "every open step opens with a time at the date's hour or day" in _ud2 and "the reply says `(parked: …)`" in _ud2 and "clear_hold=true" in _ud2 and "needs=external for a named outside party's reply" in _ud2 and "started by an outside event" in _ud2 and "another party's step in flight" in _ud2, None)
 
 # ================================================================ 7. what was stored before keeps working
 for p in (T / "store/a").glob("*.json"): p.unlink()
@@ -403,13 +403,13 @@ async def tools():
 tl = asyncio.run(tools())
 ud, cd = tl["update"].description, tl["create"].description
 check("text: update's description says a doing item carries no expected time, that the old fields are accepted and not kept, and the park calls, and no ladder",
-      "carries no expected time (the item shows how long it has run)" in ud and "expected_by and expected_reason, which older calls pass, are accepted and not kept" in ud and "update(hold=true, until=" in ud and 'wait_kind="relay" with wait_event=<who>, ask_by=<the day to chase>, mover=<who takes it then> and needs=["external"]' in ud
+      "carries no expected time (the item shows how long it has run)" in ud and "expected_by and expected_reason, which older calls pass, are accepted and not kept" in ud and 'update(until="YYYY-MM-DD" or "YYYY-MM-DDTHH:MM", wait_kind="time"' in ud and 'wait_kind="relay" with wait_event=<who>, until=<the day to chase>, mover=<who takes it then> and needs=["external"]' in ud
       and "ladder" not in ud and "stuck list" not in ud and "3 hours from this write" not in ud and "at most 12 hours ahead" not in ud, None)
 check("text: update's parameters still include expected_reason, a string (so an older call is not rejected)", tl["update"].parameters["properties"].get("expected_reason", {}).get("type") == "string", tl["update"].parameters["properties"].get("expected_reason"))
 check("text: create's description says agent work carries no expected time, and no tool text derives one or says past due for a wait",
       "Agent work carries no expected time: a create sets none" in cd and "never past due" not in cd and "A doing item is never past due" not in cd and "timed in hours" not in cd + ud, None)
 check("text: update's wait form says an open item waits on its real dates only, that no expected time is derived for any item, and that a parked item carries no stale mark",
-      "waits on its real dates only (wake, due, ask by): no expected time is derived for any item" in ud and "a parked item waits until its wake or its blocker closes, with no stale mark" in ud and "is shown as past due" not in ud, None)
+      "waits on its real dates only (until, due): no expected time is derived for any item" in ud and "a parked item waits until its date or its blocker closes, with no stale mark" in ud and "is shown as past due" not in ud, None)
 check("text: the audit rubric's why-not-now reads the wake only",
       "but its wake is hours or a day away" in pathlib.Path(STACK, "audit_rubric.txt").read_text(encoding="utf-8") and "wake, or expected-by" not in pathlib.Path(STACK, "audit_rubric.txt").read_text(encoding="utf-8"), None)
 cli = pathlib.Path(STACK, "stackshot/fleet/client.py").read_text(encoding="utf-8")

@@ -7,7 +7,7 @@ background agent of the item's project counts as a mover, and two of them, or de
 the one who moves it now, and who takes it after his answer in then=); a background agent of this project never counts
 as a second mover; empty means the item's mover (mover=, else the project's builder, else its -main agent) moves it.
 The lane follows the first of decision, external, a session (your call · on others · on agent). A session named is
-told when added, is asked about the item at each turn end and hears its wake, recycle and after notices; it passes
+told when added, is asked about the item at each turn end and hears its date, recycle and after notices; it passes
 sender=<its name> on its writes, so they reach the mover as another session's. needs= replaces the whole list
 (name again what should stay); needs="none" or clear_needs=true empties it. decision vs your-step: needs=decision is
 {{OWNER}}'s call, a choice between options; a thing that is {{OWNER}}'s own to do is step=<his action> (update; a
@@ -18,7 +18,7 @@ observers="none" clears. tell_him: front agents he asked to tell him of it, a tu
 item counts as waiting without a park, and when the last one closes it wakes and the sessions in its needs (else its
 mover) are told; a dropped one releases it too, a superseded one is followed to its replacement; a loop is refused;
 after="none" clears. after is for a real dependency (this item needs that one's output), never for the order a builder
-takes its items in. A park (hold=true) names what it waits for (a wake, after items, an anchor notice, a recycle, or a
+takes its items in. A park (until with wait_kind="time") names what it waits for (a date, after items, an anchor notice, a recycle, or a
 wait_basis window); one with none is refused. An item waiting on {{OWNER}} carries needs=decision
 with its ask, or after=<the item that carries the ask>; to park his call, see update (until with wait_kind="time", mover={{OWNER}}). needs names only who can move now.{{MEMBERS_NOTE}} An item that waits on
 {{OWNER}} and on a session at once: where his answer could change with the session's work, or its work with his
@@ -38,7 +38,7 @@ outside party's name; a role may follow the name, `my-x (builder):`; a space fol
 (`Status:`) is refused, and a `- ` line under a named step belongs to it. {{OWNER}}'s steps are made by the server
 from the ask and the step and ticked by his answer: never write or mark them. Mark your step done=[n] when it is done
 and dropped=[n] when it is no longer wanted; never reword an open step to add progress, and a parked item still has
-the open step its wake leads to. Results, PRs, commit ids and test counts go on the project page, never in next.
+the open step its date leads to. Results, PRs, commit ids and test counts go on the project page, never in next.
 
 ## text NEXT_REFUSALS trail
 A session's writes are refused: (1) a line of next that opens with no `<actor>:` (right: `my-x: open the PR`, or an
@@ -47,7 +47,7 @@ the colon is refused); (2) on an update, an open step reworded in next alone (it
 left unmarked): keep the step as it is, mark it done=[n] when the work is finished, or write a different action as a
 new line (a step marked dropped=[n] may be replaced by a longer one); progress goes on the project page, never in a
 step (to give an open step other words, pass reword={n: "<new text>"}); (3) a write that leaves an item that stays
-open with no open step in next: name who takes the next step, keep one open step (a parked item's is the one its wake
+open with no open step in next: name who takes the next step, keep one open step (a parked item's is the one its date
 leads to), or close the item with complete, which is exempt; {{OWNER}}'s server-made step counts. A step with a commit
 id, a test count, a merged, live or deployed status or a "since 09:30" stamp is written all the same and the reply
 notes it.
@@ -82,15 +82,15 @@ needs or the step: set step=<his step in one line>, or needs=decision with an as
 that defers on another item in words (once, after, when, until or before, then a board#N; the words of
 [keywords.model_guards] defer_after_id also count) is refused unless after=["board#N"] names that item in the same
 item, since a wait written only in words wakes nobody when the item closes; give the wait its end too,
-ask_by=YYYY-MM-DD, the day it comes back to someone if board#N is still open (supplies=<what that item's output gives
-this one>). Right: next="my-x: ship the export once board#N closes", after=["board#N"], ask_by="2099-03-02". Only the
+until=YYYY-MM-DD, the day it comes back to someone if board#N is still open (supplies=<what that item's output gives
+this one>). Right: next="my-x: ship the export once board#N closes", after=["board#N"], until="<day, within {{CAP_DAYS}} days>". Only the
 lines the call sets are checked; a line that only mentions an item ("see board#N") is not a deferral; on an item
-waiting on his call (needs=decision) write "see board#N", not after=; wake=YYYY-MM-DD is the way to be reminded on a
+waiting on his call (needs=decision) write "see board#N", not after=; until=YYYY-MM-DD is the way to be reminded on a
 day. Links sit on the words (`blocked on [#7](url)`), never a naked URL or a bare id: a naked http(s) URL in
 next or ask is refused, in a description it becomes a link to itself; write `[words](url)` (a code span or fence is fine). needs: whose move it is now
 (the list is described below). due: YYYY-MM-DD {{TIMEZONE}}, set only from a real deadline ({{OWNER}}'s word, an
 outside date, or a date a dependency fixes), otherwise left empty: a made-up date reads to {{OWNER}} as their own
-deadline (to expect something back by a date, use a wake). ask: the line a needs=decision item carries, written so
+deadline (to expect something back by a date, use until). ask: the line a needs=decision item carries, written so
 {{OWNER}} can decide from it alone and refreshed whenever the question moves, one line of at most 240 characters with
 all four parts in this order, joined by " · ": "Decide: <what to decide> · Recommend: <your recommendation> · Stakes:
 <what happens either way> · By: <a date in words such as Mon Jun 8th 2099, or no date>"; example: ask="Decide: whether
@@ -160,15 +160,15 @@ never ticked and never closes the item. A parked item, or one whose needs name h
 mover, is left alone; a check that passes while the item waits on his decision does not close it until the decision is
 cleared. An update whose next hands the work to another session (a line of next in the form `<session>: <action>`, a
 list marker before the name at most: any session but the item's mover and you, not one already in needs; a name
-elsewhere, in a slug, a link or a sentence, hands nothing over) is refused unless the item carries a check or a wake
-(or until), the hand-off's backstop: with a hand-off the date is no wait (unless the item carries hold, wait_kind,
+elsewhere, in a slug, a link or a sentence, hands nothing over) is refused unless the item carries a check or an until
+date, the hand-off's backstop: with a hand-off the date is no wait (unless the item is parked or carries wait_kind,
 wait_basis or an after link, in this call or stored by an earlier one: then the date stays a wait), the item stays
 active in the new mover's lane; a write that leaves an existing hand-off as it was is not asked again. Right:
 update(item_id="board#N", sender="my-x", next="other-x: build the export", check="pr_merged acme/widgets#12"). A front
 agent is the exception: its hand-off needs neither (a check stays allowed to anyone), because a front agent does not
 watch handed-off work itself: the result lands through stackshot when the mover closes the item or hands it back to
-you, so a front agent's own wake or until date (no hold) on an alive item another session moves is refused (a done
-check, a park with its wake and ask_by stay allowed). To watch anyway, pass watch_reason=<why no push reaches you> (at
+you, so a front agent's own until date (no park) on an alive item another session moves is refused (a done
+check, a park with its until date stay allowed). To watch anyway, pass watch_reason=<why no push reaches you> (at
 least 15 characters) on update, in the same call; it is recorded on the item. check="none" clears it; a check alone
 owes no page. A check does not set the item's due time.
 
@@ -187,17 +187,17 @@ another session gets the builder the same way>;
 wait_kind=time | anchor | item | relay | event; wait_anchor=<url of the anchor an anchor wait watches>, which must be
 on the project's anchors list first (add it with the anchors tool, scoped to this item), else the write is refused;
 wait_event=<what you expect there (an anchor wait), or the party or event {{OWNER}} relays (a relay wait), or the
-fleet event an event wait watches: {{EVENT_FORMS}}>; ask_by=YYYY-MM-DD (a relay wait's end day; an event, item or
-anchor wait's backstop day, as a wake is); post_wake_mover, the old name of mover, is still read as mover for a while
+fleet event an event wait watches: {{EVENT_FORMS}}>; until=YYYY-MM-DD (a relay wait's end day; an event, item or
+anchor wait's backstop day); post_wake_mover, the old name of mover, is still read as mover for a while
 (the reply says so; on an item that waits on nothing it is dropped, and a different mover beside it is refused). An event wait is how an item whose mover waits in the background for something the fleet does
-says so: update(wait_kind="event", wait_event="pr_released <n>" (this repository's pull request number), ask_by=<the
+says so: update(wait_kind="event", wait_event="pr_released <n>" (this repository's pull request number), until=<the
 day it comes back anyway, required>, mover=<who takes it then>). Live for now: pr_released, pr_merged,
 box_online, recycle, and every fleet_op form (any verb, any, many); a job_run wait turns only on its backstop day.
 box_online <machine> waits for a machine to be online (its puller checking in, within the minutes the server counts as
 online): the server reads it itself and the item turns within a minute or two of the machine's return, so an item
-waiting on a date for an offline machine says wait_event="box_online <machine>" with that date as ask_by instead; the
+waiting on a date for an offline machine says wait_event="box_online <machine>" with that date as until instead; the
 machine must be one the fleet knows (an unknown name is refused with the known ones). The backstop must be after now,
-and a day (ask_by=YYYY-MM-DD) falls due at 00:00 of that day in the instance timezone, so today's date is already
+and a day (until=YYYY-MM-DD) falls due at 00:00 of that day in the instance timezone, so today's date is already
 past: give tomorrow at the earliest (a relay or event wait takes the day alone: a time of day is dropped). A wait for
 something that has already happened (a PR already merged or live, a machine already online) is refused; a recycle wait
 never asks for a recycle (it waits for the next one). A step of his, or needs holding decision, makes him the mover: a
@@ -207,16 +207,16 @@ it has no step and no ask, is refused: pass step=<one line>, or needs=["decision
 session (mover=<session>) and write his part in a next line that starts `{{OWNER}}:`. A waiting item, a close, a
 rename, a priority or project write and a re-bullet are not judged by it. A wait that replaces his state drops the
 mover, and the session in then picks the item up when the wait ends (it is stored as the mover). "none" clears a field; clear_goal, clear_mover and
-clear_then clear theirs, clear_wait the wait's four (wait_kind, wait_anchor, wait_event, ask_by). A close drops the
-mover and the wait and keeps the goal. The wait ends by itself when its kind's event comes: a time at its wake; an
+clear_then clear theirs, clear_wait the wait's fields (wait_kind, wait_anchor, wait_event, until). A close drops the
+mover and the wait and keeps the goal. The wait ends by itself when its kind's event comes: a time at its until date; an
 item when the last `after` item closes; an anchor when the anchor watcher's notice for wait_anchor reaches the server,
 and any new notice at the anchor that reaches the server and passes the project's keeper wakes the item; an event when
-the server is told of it; a relay on its ask_by day, when it comes to {{OWNER}} as a question (arrived / ask again in a week,
+the server is told of it; a relay on its until day, when it comes to {{OWNER}} as a question (arrived / ask again in a week,
 two weeks or a month / not yet, ask again on a date / drop); a date beside it is its backstop. The item then turns alive with its mover. A moved
-ask_by or wake resets the backstop. Several waits at once are a list: waits (2 to 8 lines), wait_mode all | any, until as its backstop day; the item is
+until resets the backstop. Several waits at once are a list: waits (2 to 8 lines), wait_mode all | any, until as its backstop day; the item is
 back when every line has arrived (all) or the first has (any), at its until at the latest. Example:
 update(waits=[{"kind": "item", "after": "board#N"}, {"kind": "event", "event": "pr_merged <n>"}], wait_mode="any",
-until="2099-03-02"). Send the lines that remain to edit it: one left is a single wait, waits=[] ends it.
+until="<day, within {{CAP_DAYS}} days>"). Send the lines that remain to edit it: one left is a single wait, waits=[] ends it.
 
 ## text MACHINE_FORM trail
 A step of next that names a machine of the fleet which is offline now (its fleet name or hostname as a whole word, an
@@ -232,7 +232,7 @@ cannot know, the person's thread). A note, never a refusal, and at most one a re
 thread should reach the item, or leave it.
 
 ## text SELF_WAIT_FORM lead trail
-A wait on your own item names its blocker: when the item's mover (you) sets a wake, or writes a line of its own next
+A wait on your own item names its blocker: when the item's mover (you) sets an until date, or writes a line of its own next
 whose step is dated later than today (a date, "next week", "until Monday", "retry tomorrow", "after the weekend", "at
 the next nightly run"; a date after by, due, before, target or ETA is a deadline, no wait; a day named about the past
 is none), pass wait_reason=<what the step waits on that is not available now, at least {{WAIT_GUARD_REASON_MIN}}
@@ -240,13 +240,13 @@ characters> in the same call, or the write is refused. With a reason, one model 
 done now: if it could, the write is refused with the model's reason, so do the step now or name the real blocker (a
 reply, a build or test still running, a window the work itself needs, a resource that is down; a preference for a
 scheduled run is none). The check passes the write when the model is unavailable or slow. It does not apply to a wait
-on another item (after), on a decision or an outside party (needs decision or external), a park (hold with
+on another item (after), on a decision or an outside party (needs decision or external), a park (wait_kind="time" with
 wait_basis), a stored wait (wait_kind), a hand-off to another session, or a step you leave as it was. Right:
 update(item_id="board#N", sender="my-x", until="<tomorrow or later, within {{CAP_DAYS}} days, YYYY-MM-DD>T04:00",
 wait_reason="the nightly run finishes at 03:00").
 
 ## param AFTER
-Items this one waits on: after=["board#N"], with ask_by=<YYYY-MM-DD> as the day it comes back if they are still open.
+Items this one waits on: after=["board#N"], with until=<YYYY-MM-DD> as the day it comes back if they are still open.
 The wait ends when they close.
 
 ## param OUTCOME
@@ -277,8 +277,8 @@ does, in its order.
 ## param CHECK
 What closes the item once work handed to another session is done; the server runs it every minute: check="pr_merged
 acme/widgets#12" (also item_closed <item id>, lane <session> <lane>, unit_active <unit>.service). A next line that
-hands the item to a session other than its mover and you needs a check or, instead, a date (wake or until) as the
-hand-off's backstop: with a hand-off the date is no wait (unless the item carries hold, wait_kind, wait_basis or an
+hands the item to a session other than its mover and you needs a check or, instead, an until date as the
+hand-off's backstop: with a hand-off the date is no wait (unless the item is parked or carries wait_kind, wait_basis or an
 after link, in this call or stored by an earlier one: then the date stays a wait), the item stays active in the new
 mover's lane and the hand-off is recorded; a front agent needs neither. check="none" clears it.
 
@@ -321,18 +321,18 @@ pr_merged|pr_released <owner>/<repo>#<n> (or none to clear that step's)}], or th
 step must be open and not {{OWNER}}'s own.
 
 ## param WAIT_KIND
-What a waiting item waits on: time | anchor | item | relay | event. A time wait is its wake; an item wait its after;
-an anchor wait its wait_anchor (on the project's anchors list first: add it with the anchors tool) and wait_event (a
-wake is the backstop); a relay wait its wait_event and ask_by; an event wait its wait_event (a fleet event) and a
-backstop day (ask_by or a wake). An anchor wait wakes the item on any new notice at its anchor that reaches the server
+What a waiting item waits on: time | anchor | item | relay | event. A time wait is its until date; an item wait its after;
+an anchor wait its wait_anchor (on the project's anchors list first: add it with the anchors tool) and wait_event (an
+until date is the backstop); a relay wait its wait_event and until day; an event wait its wait_event (a fleet event) and a
+backstop day (until). An anchor wait wakes the item on any new notice at its anchor that reaches the server
 and passes the project's keeper, not only on the awaited event, so it fits something quiet apart from that event (a
 PR, a thread, a file) and not a busy channel or DM; for a busy channel use a relay wait (it is put to someone on a
 day) or a time wait (check back on a date). "none" clears it.
 
 ## param WAITS
 A wait on a list: 2 to 8 lines {"kind": time|anchor|item|relay|event, plus its fields: until; anchor, event; after;
-event}. Needs until, the backstop day (an update may omit it); no wait_kind, wait_anchor, wait_event, after, wake, ask_by,
-hold, wait_basis or clear_*. Replaces the list: send the remaining lines, [] ends it.
+event}. Needs until, the backstop day (an update may omit it); no wait_kind, wait_anchor, wait_event, after,
+wait_basis or clear_*. Replaces the list: send the remaining lines, [] ends it.
 
 ## param WAIT_MODE
 With waits: all (the default, or the stored list's) = every line has arrived; any = the first has.
@@ -345,7 +345,7 @@ merged or closed). A relay wait: the party or event {{OWNER}} relays. An event w
 {{EVENT_FORMS}} (live today: pr_released, pr_merged, box_online, recycle and every fleet_op form; job_run turns only
 on the backstop day; box_online <machine> ends when that machine is online and is refused while it already is, or for
 a machine the fleet does not know; an item waiting on a date for an offline machine says wait_event="box_online
-<machine>" with that date as ask_by instead). "none" clears it.
+<machine>" with that date as until instead). "none" clears it.
 
 ## param MOVER
 Who moves the item now: {{OWNER}}, a session name or id, or the project's background agent. On an item that waits it
@@ -355,7 +355,7 @@ mover=<front agent> gets the project's builder instead (the reply and History sa
 mover (no front agent) or the project's builder that names a live front agent of the project holding the item's first open named step, as the item stands before the
 write and left open by it, hands it back: kept as sent at once, and a mover is told as a turn;
 with no builder it is refused, except from a listed session to a front agent of the item's own project: mover= tells it,
-the others leave it to the answer or the wake). A front agent of the item's project may
+the others leave it to the answer or the date). A front agent of the item's project may
 hand it to a sibling front agent on {{OWNER}}'s words: said=[Acked-by …] keeps the sibling in mover, then,
 post_wake_mover or agent as sent, and mover and agent tell it. On an update that sets no needs, the
 session needs names for the mover it replaces is swapped for the new one.
@@ -408,7 +408,7 @@ can't) | superseded (replaced by another item: reworded, merged or split), with 
 id (open or completed); reason: one line, the end state reached and why, at most {{CLOSE_REASON_MAX}} characters
 (longer is refused); and outcome_text: how it ended, as short `- ` bullets (at most {{DESC_MAX_LINES}} lines of
 {{DESC_LINE_MAX}} characters), shown in the Outcome block. A close leaves the description as it was (a description
-passed with a close is stored as outcome_text) and clears next, ask and needs (and any hold, wake or recycle wait);
+passed with a close is stored as outcome_text) and clears next, ask and needs (and any park, until date or recycle wait);
 due stays as a record. Reopening (status=open on a completed item) takes a new next, and drops outcome, outcome_text,
 reason and superseded_by. A close ticks only the steps that are still open and are yours (you wrote them, or they open
 with your name), by the closer (done when the outcome is done, dropped otherwise; steps marked in the same call keep
@@ -416,13 +416,13 @@ their marks; this settles a step of his too, the one case where a session's call
 A step that opens with another session's name stays open, so the close is refused, naming that step, and nothing
 changes: ask that session to finish it, or mark it in the closing call itself (update with status=completed and
 done=[n] or dropped=[n]). It tells the mover of every other open item whose next or description names the closed item
-(board#N), one message per mover (the first 8 items, then a count); the items that wait on it through after get their
-own wake, and the closer is not told. {{ASK_RULE}}
+(board#N), one message per mover (the first 8 items, then a count); the items that wait on it through after are
+woken, and the closer is not told. {{ASK_RULE}}
 
 ## text CLOSE_FORM
 A close (complete, or update with status=completed) carries outcome: done | dropped | superseded (superseded_by = its
 id), reason (one line, at most {{CLOSE_REASON_MAX}} characters (longer is refused)) and outcome_text (`- ` bullets,
-every line `- ` included at most {{DESC_LINE_MAX}} characters); it clears next, ask and needs (and any hold, wake or
+every line `- ` included at most {{DESC_LINE_MAX}} characters); it clears next, ask and needs (and any park, until date or
 recycle wait), leaves the description as it was (one passed with a close is stored as outcome_text) and keeps due as a
 record. Reopening (status=open on a completed item) takes a new next, and drops outcome, outcome_text, reason and
 superseded_by. A close ticks only the steps that are still open and are yours (you wrote them, or they open with your
@@ -430,7 +430,7 @@ name), by the closer (done when the outcome is done, dropped otherwise; this set
 opens with another session's name stays open, so the close is refused, naming that step: ask that session to finish
 it, or mark it in the closing call with update (status=completed and done=[n] or dropped=[n]; complete takes no
 marks). It tells the mover of every other open item that names the closed item (board#N), one message per mover (the
-first 8, then a count); the items that wait on it through after get their own wake; the closer is not told.
+first 8, then a count); the items that wait on it through after are woken; the closer is not told.
 {{ASK_RULE}}
 
 ## param OUTCOME_TEXT

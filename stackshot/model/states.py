@@ -249,11 +249,11 @@ def problems(meta: dict[str, Any], state: str, today: dt.date, *, check_dates: b
         text("supplies", "one line: what that item's output gives this one")
     elif state == "parked":
         if not _wt.wake_value(meta):
-            out.append("wake=YYYY-MM-DD")
+            out.append("until=YYYY-MM-DD")
         if not _wt.is_held({"status": "open", "metadata": meta}):
-            out.append("hold=true (the parked state is hold=true: a date alone makes the item wait until then, outside a hand-off, and states no park)")
+            out.append("wait_kind=\"time\" (the parked state is a time wait: a date alone makes the item wait until then, outside a hand-off, and states no park)")
         if not (_wt.wake_value(meta) and _wt.cap_words(meta, "wake")):
-            out.append("the owner's words for the wake (said=[...], which records cap_ok) or wait_basis=\"<what happens> YYYY-MM-DD\"")
+            out.append("the owner's words for the date (said=[...], which records cap_ok) or wait_basis=\"<what happens> YYYY-MM-DD\"")
     elif state == "verifying":
         need_agent("verifying is a session checking its work")
         text("proof", "one line: what proves it works")

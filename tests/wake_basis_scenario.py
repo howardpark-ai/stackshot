@@ -185,7 +185,7 @@ check("7 an item with dated steps and a basis reads as waiting on the basis (the
 for cls in (render, ui_render):
     bdx = cls.Board(str(T / "store"))
     st_ = bdx.brief()
-    check(f"7 {cls.__name__}: the brief's advice counts the dated-step item only", "1 of the doing items have a wake more than 1 h out and every open step dated" in st_, [l for l in st_.splitlines() if "doing items" in l])
+    check(f"7 {cls.__name__}: the brief's advice counts the dated-step item only", "1 of the doing items have a date more than 1 h out and every open step dated" in st_, [l for l in st_.splitlines() if "doing items" in l])
     # counted from the store files, not from the renderer and not from a fixed list: every open item that stores a wait_basis and that dated_wait reads as a basis wait now
     basis_ids = [p_.stem for p_ in sorted((T / "store" / "g").glob("*.json"))
                  if json.loads(p_.read_text()).get("status") == "open" and isinstance((json.loads(p_.read_text()).get("metadata") or {}).get("wait_basis"), dict)
@@ -199,7 +199,7 @@ for cls in (render, ui_render):
     check(f"8 {cls.__name__}: …every one of them is under Waiting in board.md, and none under Your move or On agents",
           all(f'<a id="task-g-{i}"></a>' in wsec_ for i in basis_ids) and not any(f'<a id="task-g-{i}"></a>' in md_.replace(wsec_, "") for i in basis_ids), (basis_ids, wsec_[:200]))
     check(f"8 {cls.__name__}: …and a line says how many doing items the board lists as waiting for a wake that states its reason, the count the store gives",
-          any(l.startswith(f"  {nb_} of the doing items have a wake that states its reason (wait_basis): the board lists them as waiting until the wake") for l in st_.splitlines()), [l for l in st_.splitlines() if "states its reason" in l])
+          any(l.startswith(f"  {nb_} of the doing items have a date that states its reason (wait_basis): the board lists them as waiting until that date") for l in st_.splitlines()), [l for l in st_.splitlines() if "states its reason" in l])
 
 # ---- 9. the end-of-turn board question skips a basis wait, as it skips a held item
 rows = {x["shown"]: x for x in json.loads(client_reads_svc._client_items(U["team-back"])[2])["items"]}

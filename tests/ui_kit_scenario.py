@@ -1076,7 +1076,7 @@ w17, a17 = row_ids(section(h17, "waiting-list")), row_ids(section(h17, "agents-a
 check("a doing item whose open steps are all dated for a later day is listed under Waiting, not On agent", "a78" in w17 and "a78" not in a17, (w17, a17))
 check("a doing item with a step that can run now, or whose date is only a deadline, stays On agent", {"a79", "a80"} <= set(a17) and not {"a79", "a80"} & set(w17), (w17, a17))
 check("the dated wait row says what it waits for: 'Until <day>' and the step after the wait", "Until " in row_of14(h17, 78) and "after the wait:" in row_of14(h17, 78), row_of14(h17, 78))
-check("the brief counts the doing items that read as waiting for their dates", "have a wake more than" in b17.brief(), b17.brief()[:600])
+check("the brief counts the doing items that read as waiting for their dates", "have a date more than" in b17.brief(), b17.brief()[:600])
 
 pg14 = Bd().item_html("a14")
 check("Next: a done step and a dropped step each open their byline with the verb, then who and when", re.search(r'<span class="cl-by"><b>done</b> by alpha-builder · [^<]+</span>', pg14) is not None

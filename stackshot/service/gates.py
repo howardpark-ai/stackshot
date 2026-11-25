@@ -797,7 +797,7 @@ def _description_guard_mode() -> str:
     return "refuse" if str(_cfg.get("model", "description_guard", default="note") or "note").strip().lower() == "refuse" else "note"
 
 
-def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None", gid: str = "", needs: list[str] | None = None, hold: bool | None = None, desc_set: bool = True, strict: bool = False, next_text: str | None = None, windows_text: str | None = None, creating: bool = False, defers_text: str | None = None, until_wait: bool = False, date_given: bool = False, hold_given: bool = False) -> str:
+def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None", gid: str = "", needs: list[str] | None = None, hold: bool | None = None, desc_set: bool = True, strict: bool = False, next_text: str | None = None, windows_text: str | None = None, creating: bool = False, defers_text: str | None = None, until_wait: bool = False, date_given: bool = False, hold_given: bool = False, basis_kept: bool = False) -> str:
     """The item model's write guards (model_guards.py) on the item as a create or update leaves it: refuse, with what is wrong and the fix, a write that
     leaves an alive item with no valid mover, a wait without its input, post-wake mover, reason or end, a second mover in needs, a decision with a hold, a placeholder, a next line with
     no name or one that reads as a wait, or an alarming word. `touched` = the fields the write sets (None: a create or a reopen, every field is judged): a guard on a field runs
@@ -820,7 +820,7 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
                                  after_open=lambda i_: h.after_open(i_.get("metadata") or {}),
                                  anchored=lambda i_: bool(gid and h.scoped_anchors(project, gid)),
                                  needs=needs, hold=hold, one_mover=bool(_cfg.get("model", "one_mover", default=True)), next_text=next_text, windows_text=windows_text, creating=creating,
-                                 defers_text=defers_text, named_open=h.open_item_named, canon=_gh.resolve, until_wait=until_wait, date_given=date_given, hold_given=hold_given)
+                                 defers_text=defers_text, named_open=h.open_item_named, canon=_gh.resolve, until_wait=until_wait, date_given=date_given, hold_given=hold_given, basis_kept=basis_kept)
     except Exception as e:  # noqa: BLE001  — the guard is an extra: a failure in it writes as before
         print(f"model guards: {gid or 'a new item'} not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         if strict:
@@ -1099,18 +1099,18 @@ def gate_clock_renewal(item_was: dict[str, Any], meta: dict[str, Any], gid: str,
         return
     if list_end_words:
         raise ToolError(f"{list_end_words}, or change something real in the same write: {real}.")
-    event = ("the event-wait form (wait_kind=\"event\", wait_event=<the event>, ask_by=<the backstop day>, mover=<who takes it when it happens>)")
+    event = ("the event-wait form (wait_kind=\"event\", wait_event=<the event>, until=<the backstop day>, mover=<who takes it when it happens>)")
     if _waits_decision(meta):
         ways = f"Change something real in the same write: {real}. An item on {OWNER}'s decision cannot be held, so the date stays as it is until a step or the reason changes."
     elif str(m0.get("wait_kind") or "").lower() == "event":
         ways = (f"Change something real in the same write: {real}, or change what the wait stands on (a different wait_event or wait_anchor, or after=[…] naming another item). "
-                "The event-wait form is already in use, so a later ask_by alone is only a later date.")
+                "The event-wait form is already in use, so a later until alone is only a later date.")
     elif m0.get("hold") or h.eff_state(item_was) == "parked":
         ways = ("Change something real in the same write: a new wait_basis (what the wait now rests on, with its date), or " + real
                 + f". If it waits on something that happens in the fleet, use {event} instead.")
     else:
         ways = (f"Change something real in the same write: {real}. If the item now waits, say what on: park it "
-                f"(hold=true with wake=YYYY-MM-DD and wait_basis=<what it waits for, with its date>), or, for something that happens in the fleet, use {event}.")
+                f"(until=YYYY-MM-DD with wait_kind=\"time\" and wait_basis=<what the date is, with its date>), or, for something that happens in the fleet, use {event}.")
     raise ToolError(f"Refused: {_gh.shown(gid)} would have its clock pushed out ({'; '.join(moved)}) with its reason and its open steps exactly as they were: moving a date forward is not progress, "
                     f"and an item that keeps being re-dated is how work sits unseen. {ways} A wait_reason does not count (it is not stored). The item model: {h.model_page}")
 
@@ -1191,8 +1191,8 @@ def gate_sender_watch(gid: str, item_now: dict[str, Any], sender: str, *, handed
         if len(why) < _WATCH_REASON_MIN:
             raise ToolError(f"Refused: watch_reason {why!r} is too short to name why no push exists (at least {_WATCH_REASON_MIN} characters)")
         return why
-    raise ToolError(f"Refused: {_WATCH_RULE}. {_gh.shown(gid)} is moved by {who}, so your wake is refused: "
-                    f"{who}'s close or hand-back reaches you through stackshot (a done `check` is allowed, and so is a park: hold=true with its wake). The date you may set is ask_by, which the server watches. "
+    raise ToolError(f"Refused: {_WATCH_RULE}. {_gh.shown(gid)} is moved by {who}, so your date is refused: "
+                    f"{who}'s close or hand-back reaches you through stackshot (a done `check` is allowed, and so is a park: until with wait_kind=\"time\" and wait_basis; within the wait cap's days it needs his recorded words). The date you may set is until on a wait, which the server watches. "
                     "If no push exists, pass watch_reason=<why no push reaches you> with the same call: it is recorded on the item and the call goes through.")
 
 
@@ -1304,13 +1304,13 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
             dated = []
         if not wake_new and not dated:
             return
-        waits = ([f"a wake {wake_given}"] if wake_new else []) + [f"a step dated {found}" for _, found in dated]
+        waits = ([f"an until date {wake_given}"] if wake_new else []) + [f"a step dated {found}" for _, found in dated]
         own = _selfwait.own_lines(next_text, mine) if next_text.strip() and not clear_next else _selfwait.own_lines(stored_next, mine)
         step = " ".join(own) or subject
     except Exception as e:  # noqa: BLE001  — the rule is an extra: a failure in it lets the write through, never a 500
         print(f"wait guard: {gid or 'a new item'} not judged: {e.__class__.__name__}: {e}; the write passes", file=sys.stderr, flush=True)
         return
-    call = ", ".join(([f'wake="{wake_given}"'] if wake_new else []) + (['next="<your next, as you sent it>"'] if dated else []))
+    call = ", ".join(([f'until="{wake_given}"'] if wake_new else []) + (['next="<your next, as you sent it>"'] if dated else []))
     why = _selfwait.gate(subject=subject, waits=waits, step=step, reason=wait_reason, now=today, call=call)
     if why:
         raise ToolError(f"Refused: {why}")
@@ -1322,7 +1322,7 @@ BUSY_HOLD_REFUSAL = ("Refused: this item is being moved now: {live} is running o
 
 BUSY_RELEASE_PREFIX = "a release of PR #"      # what the words of a running release begin with (audit/busy_hold.py `live_release`): the refusal that names one is BUSY_RELEASE_REFUSAL
 BUSY_RELEASE_REFUSAL = ("Refused: this item is being moved now: {live}, so it is not paused. Keep it in hand and write where its step stands (work=<one line>, state in progress), "
-                        "or wait on it by name: update(wait_kind=\"event\", wait_event=\"pr_released <n>\" or \"pr_merged <n>\", ask_by=<the day it comes back anyway, required>, mover=<who takes it then>). "
+                        "or wait on it by name: update(wait_kind=\"event\", wait_event=\"pr_released <n>\" or \"pr_merged <n>\", until=<the day it comes back anyway, required>, mover=<who takes it then>). "
                         "Park it only once nothing is running on it.")
 
 
@@ -1809,7 +1809,7 @@ def gate_wait_basis(item: dict[str, Any], text: str, wake: str, held: bool = Fal
         raise ToolError("Refused: a completed item waits for nothing; wait_basis goes with an open item's wake")
     if not wake:
         raise ToolError("Refused: wait_basis explains the wake of a time wait (a park's or a verifying item's), or a wake past the cap, by the real-world date it waits for, and this item has no wake date. A park with no date is refused too: "
-                        f"give the wake (hold=true with wake=YYYY-MM-DD, the date the outside event or {OWNER}'s words give) and the basis with it")
+                        f"give the date (until=YYYY-MM-DD with wait_kind=\"time\", the date the outside event or {OWNER}'s words give) and the basis with it")
     cap = _wt.cap_days()
     days = (h.wake_at(wake).timestamp() - time.time()) / 86400.0
     if not held and (not _wt.cap_needs_owner() or days <= cap):

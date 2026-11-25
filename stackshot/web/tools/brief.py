@@ -45,7 +45,7 @@ def _world_waits_text() -> str:
     if rows:
         out.append(f"Waiting on the world ({len(rows)}; news only {OWNER} relays, each comes to him as a question on its ask-by day):\n" + "\n".join(r for _d, r in sorted(rows)))
     if stuck:
-        out.append(f"Waits no watcher can end ({len(stuck)}: {', '.join(stuck)}): the wait has no date or anchor to watch, so it keeps today's wake pass; give it one (wake, ask_by, after or wait_anchor).")
+        out.append(f"Waits no watcher can end ({len(stuck)}: {', '.join(stuck)}): the wait has no date or anchor to watch, so it keeps today's wake pass; give it one (until, after or wait_anchor).")
     return "\n\n".join(out)
 
 

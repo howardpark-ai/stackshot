@@ -219,12 +219,12 @@ refused("create refuses a bad check", lambda: _wt_create._create(subject="[home]
 
 # ---- 2. the gate: a hand-off is a line of next in the form "<session>: <action>", a list marker before the name at most
 refused("next handing the work to a background agent, no check, no wake: refused, naming the session, the form and the fix",
-        lambda: _update_svc._update("a2", next="team-back: merge the PR", sender="home-owner"), "hands a2 to team-back", "a line of next in the form `<session>: <action>`", "check=<what closes it>", FORMS, "wake=YYYY-MM-DD",
-        "Only when no check fits, add a date, wake=YYYY-MM-DD", "the item stays active in the new mover's lane", "as the backstop of this hand-off", "the date is no wait", "If this tool shows no check parameter", "codemode.stackshot_update({item_id, sender, next, check})")
+        lambda: _update_svc._update("a2", next="team-back: merge the PR", sender="home-owner"), "hands a2 to team-back", "a line of next in the form `<session>: <action>`", "check=<what closes it>", FORMS, "until=YYYY-MM-DD",
+        "Only when no check fits, add a date, until=YYYY-MM-DD", "the item stays active in the new mover's lane", "as the backstop of this hand-off", "the date is no wait", "If this tool shows no check parameter", "codemode.stackshot_update({item_id, sender, next, check})")
 try: _update_svc._update("a2", next="team-back: merge the PR", sender="home-owner"); _hand = ""
 except ToolError as e: _hand = str(e)
 check("the hand-off refusal steers to check first, the wake only when no check fits, and never mentions a hold or a park (Fri Oct 16th 2026)",
-      _hand.index("Add check=") < _hand.index("Only when no check fits") < _hand.index("wake=YYYY-MM-DD") and not re.search(r"hold|park", _hand, re.I), _hand)
+      _hand.index("Add check=") < _hand.index("Only when no check fits") < _hand.index("until=YYYY-MM-DD") and not re.search(r"hold|park", _hand, re.I), _hand)
 check("the refusal left the item as it was", rd(2)["metadata"].get("next") == "do the thing" and "check" not in rd(2)["metadata"], rd(2)["metadata"])
 _update_svc._update("a2", next="team-back: merge the PR", check="pr_merged o/r#7", sender="home-owner")
 check("…accepted with a check", rd(2)["metadata"].get("next") == "team-back: merge the PR" and rd(2)["metadata"].get("check") == "pr_merged o/r#7", rd(2)["metadata"])
@@ -239,7 +239,7 @@ try:
 except ToolError as e:
     e_h = str(e)
 check("the hand-off refusal offers the date as the hand-off's backstop that leaves the item active in the new mover's lane, and never says hold",
-      "wake=YYYY-MM-DD" in e_h and "as the backstop of this hand-off" in e_h and "the date is no wait" in e_h and "the item stays active in the new mover's lane" in e_h and "hold" not in e_h.lower(), e_h)
+      "until=YYYY-MM-DD" in e_h and "as the backstop of this hand-off" in e_h and "the date is no wait" in e_h and "the item stays active in the new mover's lane" in e_h and "hold" not in e_h.lower(), e_h)
 _update_svc._update("a3", next="home-stew: rule on it", wake="2099-01-01", sender="home-owner")
 check("…accepted with a wake, which parks nothing: it stays the hand-off's backstop (a wake, no until, no hold) and the item stays active", rd(3)["metadata"].get("wake") == "2099-01-01" and "until" not in rd(3)["metadata"]
       and "hold" not in rd(3)["metadata"], rd(3)["metadata"])
@@ -628,7 +628,7 @@ for i in (73, 74): item(i, status="completed", outcome="dropped", reason="out of
 # ---- 7. the descriptions say so
 cd = str(getattr(_wt_create.stackshot_create, "description", "") or "")
 check("the create and update descriptions carry the check field and the gate", all("check: what closes this item once the work handed to another session is done" in d and "pr_merged <owner>/<repo>#<n>" in d
-      and "is refused unless the item carries a check or a wake" in d and "the hand-off's backstop" in d for d in (_wt_update._UPDATE_DESC, cd or _wt_text._CHECK_FORM)), (len(cd), _wt_update._UPDATE_DESC[-300:]))
+      and "is refused unless the item carries a check or an until date" in d and "the hand-off's backstop" in d for d in (_wt_update._UPDATE_DESC, cd or _wt_text._CHECK_FORM)), (len(cd), _wt_update._UPDATE_DESC[-300:]))
 check("the close form still sits inside the first 2048 characters of the update description", 0 < _wt_text._lead(_wt_update._UPDATE_DESC).find("drops outcome, outcome_text, reason and superseded_by.") < 2048 - 40)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

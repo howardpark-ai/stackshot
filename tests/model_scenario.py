@@ -246,7 +246,7 @@ refused_nw("update: clear_wait does not go with a new wait field", 1, lambda: up
 import inspect as _inspect
 _params, _doc = _inspect.signature(_wt_update.stackshot_update).parameters, _wt_text._MODEL_FORM
 check("update: wait_anchor and wait_event are real parameters of the tool and each is listed in its description with its own line, as ask_by and post_wake_mover are",
-      all(f in _params for f in ("wait_anchor", "wait_event", "ask_by", "post_wake_mover")) and "; wait_anchor=<" in _doc and "; wait_event=<" in _doc and "; ask_by=YYYY-MM-DD" in _doc and "; post_wake_mover, the old name of mover," in _doc, _doc[:900])
+      all(f in _params for f in ("wait_anchor", "wait_event", "ask_by", "post_wake_mover")) and "; wait_anchor=<" in _doc and "; wait_event=<" in _doc and "; post_wake_mover, the old name of mover," in _doc, _doc[:900])
 refused_nw("update: …clear_goal does not go with a new goal", 1, lambda: upd(1, clear_goal=True, goal="x"), "clear_goal drops goal")
 refused_nw("update: a wait_kind that is no kind is refused", 1, lambda: upd(1, wait_kind="eventually"), "wait_kind is one of")
 refused_nw("update: an ask_by that is no date is refused", 1, lambda: upd(1, wait_kind="relay", ask_by="soon"), "ask_by is YYYY-MM-DD")
@@ -415,8 +415,8 @@ WAITK = dict(wait_kind="anchor", wait_anchor=ANC, wait_event="the PR merges", as
 item(40, needs=[BACK], subject="[home] waits on an anchor", **WAITK)
 item(41, needs=["decision", BACK], ask=ASK, state="your-call", subject="[home] wait beside a your-call", **WAITK)
 g41 = _wt_get.stackshot_get("a41")
-check("hint: get's model conflict (a wait beside a your-call state) ends with how to resolve it: clear_wait=true, or park the item with hold=true",
-      any(l.startswith("model conflict: wait_kind=anchor") and "the wait wins" in l and "update clear_wait=true" in l and "park the item: update hold=true" in l for l in g41.splitlines()), g41)
+check("hint: get's model conflict (a wait beside a your-call state) ends with how to resolve it: clear_wait=true, or end the stored state with a bare hold=true",
+      any(l.startswith("model conflict: wait_kind=anchor") and "the wait wins" in l and "update clear_wait=true" in l and "end the stored state with a bare update hold=true" in l and "a new until alone leaves it" in l for l in g41.splitlines()), g41)
 refused_nw("hint: wait_event=none on an anchor wait is refused 'input is missing' and names clear_wait=true", 40, lambda: upd(40, wait_event="none"), "input is missing", "clear_wait=true")
 refused_nw("hint: wait_anchor=none on an anchor wait: the same refusal and the same hint", 40, lambda: upd(40, wait_anchor="none"), "input is missing", "clear_wait=true")
 item(42, needs=[BACK], subject="[home] wait derived from the state", state="outside", party="Acme", chase=day(4))

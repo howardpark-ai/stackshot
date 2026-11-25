@@ -487,3 +487,57 @@ allow = []
 retired = "any other is refused naming the project's background agent"
 use = "any other goes to the project's background agent"
 allow = []
+
+# ---- the retired wait parameters: `hold` beside a date, `wake` and `ask_by` are refused (the alias window of `[model] wait_alias_until` has ended). The one date of a wait is `until`, with `wait_kind` and `wait_basis`
+# beside it, and `mover` for who picks it up. The old forms are written nowhere a session or a reader learns a wait from; the retired parameters' own refusal names them without these call forms, and bare `hold=true`
+# and `clear_hold` stay (a bare hold still ends a stored work-in-hand state on a relay or event wait, and clear_hold releases a park).
+[[term]]
+retired = "hold=true with wake"
+use = "`until=<date>` with `wait_kind=\"time\"` and `wait_basis` for a park (the date is `until`; `hold` and `wake` are retired parameters)"
+allow = []
+
+[[term]]
+retired = "hold=true with a wake"
+use = "`until=<date>` with `wait_kind=\"time\"` and `wait_basis` for a park"
+allow = []
+
+[[term]]
+retired = "hold=true with its wake"
+use = "`until=<date>` with `wait_kind=\"time\"` and `wait_basis` for a park"
+allow = []
+
+[[term]]
+retired = "update(hold=true"
+use = "`update(until=<date>, wait_kind=\"time\", wait_basis=...)` for a park"
+allow = []
+
+[[term]]
+retired = "hold=true, until"
+use = "`until=<date>` with `wait_kind=\"time\"` and `wait_basis` for a park"
+allow = []
+
+# The lint wraps a term in (?<!\w)...(?!\w), so a term ending in `<` never matched `ask_by=<the day to chase>` (a word character follows): the terms end on the first word of the placeholder.
+[[term]]
+retired = "ask_by=<the"
+use = "`until=<day>` for the day a relay, event or item wait comes back (`ask_by` is a retired parameter)"
+allow = []
+
+[[term]]
+retired = "ask_by=<YYYY"
+use = "`until=<YYYY-MM-DD>` for the day a relay, event or item wait comes back (`ask_by` is a retired parameter)"
+allow = []
+
+[[term]]
+retired = "ask_by=YYYY"
+use = "`until=YYYY-MM-DD` for the day a relay, event or item wait comes back"
+allow = []
+
+[[term]]
+retired = "wake=YYYY"
+use = "`until=YYYY-MM-DD` for the date a wait ends on (`wake` is a retired parameter)"
+allow = []
+
+[[term]]
+retired = "its old name `wake`"
+use = "`until` is the one date of a wait; `wake` is a retired parameter"
+allow = []

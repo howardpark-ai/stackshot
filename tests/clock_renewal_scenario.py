@@ -104,7 +104,7 @@ def refused_nw(name, i, f, *want):
     check(name + " (nothing written)", raw(i) == was, None)
 def doing(i, **kw):
     item(i, needs=[BACK], next="team-back: do the first thing\nteam-back: do the second thing", state="doing", wake=day(2), **kw)
-FORMS = ("hold=true", "wait_basis", 'wait_kind="event"', "wait_event", "ask_by", "mover=<who takes it when it happens>")
+FORMS = ("wait_kind=\"time\"", "wait_basis", 'wait_kind="event"', "wait_event", "until=<the backstop day>", "mover=<who takes it when it happens>")
 
 # ================================================================ the retired expected_by and expected_reason: no clock to renew
 doing(1)

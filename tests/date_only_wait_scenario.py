@@ -77,7 +77,7 @@ def bupd(i, **kw): return _update_svc._update(f"a{i}", sender=BACK, **kw)
 def stamped(i): return (mt(i).get("phase"), mt(i).get("waits_on"))
 local_day = lambda ts: dt.datetime.fromtimestamp(ts + ZONE_OFFSET, dt.timezone.utc).strftime("%Y-%m-%d")
 w2 = local_day(now0 + 2 * DAY)
-PARK = "(parked: wake"
+PARK = "(parked: until"
 SN_HEAD = "alone is a wait until that date, and this item's only open next line"
 TIMED = f"{BACK}: at 08:00 run the nightly check and report"
 
@@ -90,6 +90,9 @@ check("1 the parked note says the item waits until the date (outside a hand-off)
 import json as _j
 rec1 = _j.dumps(m1.get("server_fixes") or m1.get("fixes") or m1)
 check("1 the History line the server keeps for the park says the same", "alone is a wait until that date (outside a hand-off)" in rec1, rec1[:400])
+from stackshot.service import wait_fixes as _wf_line
+_line = _wf_line._wake_park_line("2099-03-02T08:00", "the nightly job writes the report at 08:00")
+check("1 …the line itself, in full: what it did, that the only open next line waits for the date, the reason it kept, and how the mover sends it back (clear_hold=true, the date left alone); the History entry clips it", _line == "parked: until 2099-03-02T08:00 alone is a wait until that date (outside a hand-off) and the only open next line waits for it; the item waits until then (reason: the nightly job writes the report at 08:00). clear_hold=true sends it back and the server leaves that date alone" and "and the only open next line waits for it; the item waits until then (reason: " in rec1, _line)
 check("1 …on hold with the wake as given and a wait_basis made of the reason and the wake day", hd_(m1) is True and wk_(m1) == f"{w2}T08:00"
       and m1["wait_basis"]["text"] == f"the nightly job writes the report at 08:00 (wake {w2})" and m1["wait_basis"]["wake"] == f"{w2}T08:00", m1)
 check("1 …stored as waiting on a time from this write, and the board reads it so", stamped(1) == ("waiting", "time") and MODEL.view({**rd(1), "gid": "a1"}, MODEL.derive({**rd(1), "gid": "a1"}), time.time()).state == "waiting", (stamped(1), m1))
@@ -208,7 +211,7 @@ got = sorted((f["id"], f["category"]) for f in fs)
 check("3 the shape set directly in the store is a why-not-now finding for each item", got == [("board#9031", "why-not-now"), ("board#9071", "why-not-now")], got)
 f9031 = next(f for f in fs if f["id"] == "board#9031")
 check("3 …to the mover, with the wake, the hours away, the line and the park as the fix", f9031["mover"] == "home-agent" and f9031["source"] == "code" and wk_(shape["a9031"]["metadata"]) in f9031["detail"] and "hours away" in f9031["detail"]
-      and "every open next line waits for it" in f9031["detail"] and f9031["fix"] == AC.DATE_ONLY_FIX and "hold=true" in f9031["fix"] and "wait_basis" in f9031["fix"], f9031)
+      and "every open next line waits for it" in f9031["detail"] and f9031["fix"] == AC.DATE_ONLY_FIX and 'wait_kind="time"' in f9031["fix"] and "wait_basis" in f9031["fix"], f9031)
 check("3 …and the server's stamp agrees that the board shows such an item alive (the gap this closes)", stamp_svc._stamp_values("a9031", shape["a9031"])[0] == "alive", stamp_svc._stamp_values("a9031", shape["a9031"]))
 many = dict(aitem(i) for i in range(40, 40 + AR.SELF_WAIT_MAX + 4))
 fs, _flags = AC.filing_findings(many, {}, now, env())
@@ -240,7 +243,7 @@ if w2h[:10] == local_day(now):
 # the pass: delivered through deliver_findings, once; again after a write
 r1 = AR.filing_pass(now=now, items=shape, anchors={}, env=env())
 check("3 the pass sends each to its mover in one message headed as a filing check, with the category and the fix", r1["fresh"] == 2 and len(sent) == 1 and sent[0][0] == "home-agent"
-      and sent[0][1].count("board#") == 2 and "· why-not-now ·" in sent[0][1] and "hold=true with the wake and wait_basis" in sent[0][1], (r1, sent))
+      and sent[0][1].count("board#") == 2 and "· why-not-now ·" in sent[0][1] and 'until=<date> with wait_kind="time" and wait_basis' in sent[0][1], (r1, sent))
 sent.clear()
 r2 = AR.filing_pass(now=now + 600, items=shape, anchors={}, env=env())
 check("3 …and again ten minutes later sends nothing while the items are unwritten", r2["fresh"] == 0 and r2["repeats"] == 2 and not sent, (r2, sent))

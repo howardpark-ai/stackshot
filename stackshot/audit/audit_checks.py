@@ -69,8 +69,8 @@ FIX = {
     "why-not-now": "do the step now, or write what concretely keeps it from running before then (an event, someone's run, a scheduled job)",
     "proof-wait": "close the item with that evidence; if part of it really cannot be staged (another party, a vendor, a date), write that as the wait's basis",
     "step-handover": "split the delivery into a step of its own or give it step_proof, or hand the item to the session the next step names (mover=)",
-    "wait-end": ("say what ends the wait: after=[\"board#N\"]; wait_kind=event with wait_event=<pr_merged|pr_released owner/repo#n | box_online <machine> | recycle | fleet_op <verb>> and ask_by=YYYY-MM-DD; "
-                 "wait_kind=anchor with wait_anchor=<link> (add the link with the anchors tool); wait_kind=relay with wait_event=<who> and ask_by (news only " + _cfg.owner() + " relays); step_proof for a step a pull request's merge or release finishes; "
+    "wait-end": ("say what ends the wait: after=[\"board#N\"]; wait_kind=event with wait_event=<pr_merged|pr_released owner/repo#n | box_online <machine> | recycle | fleet_op <verb>> and until=YYYY-MM-DD; "
+                 "wait_kind=anchor with wait_anchor=<link> (add the link with the anchors tool); wait_kind=relay with wait_event=<who> and until (news only " + _cfg.owner() + " relays); step_proof for a step a pull request's merge or release finishes; "
                  "or rewrite the line as the action to take now"),
     "wait-loop": "end the newest link of the loop: clear that item's `after`, or reword its step as the action to take now, and say what it does instead",
     "event-missing": "add an event type for it to event_waits.py, or tell the mover to wait on a time or a relay",
@@ -451,7 +451,7 @@ def wait_words(item: dict[str, Any], after_open: Callable[[dict[str, Any]], Any]
     return hits, ([] if hits else broad)
 
 
-DATE_ONLY_FIX = "park it: hold=true with the wake and wait_basis (what it waits on, with its date YYYY-MM-DD); or, if a step can run now, write it as the action and drop the wake"
+DATE_ONLY_FIX = "park it: until=<date> with wait_kind=\"time\" and wait_basis (what the date is, with its date YYYY-MM-DD) (a park of the wait cap's days or less needs his recorded words, so for a date within them send a bare until with wait_reason); or, if a step can run now, write it as the action and drop the date (until=\"none\")"
 
 
 def date_only_wait(it: dict[str, Any], meta: dict[str, Any], mover: str, after_open: Callable[[dict[str, Any]], Any], now: float) -> str:

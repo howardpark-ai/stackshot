@@ -31,16 +31,16 @@ stores none shows no state line and no derived one, and its `model:` line says a
 `model:` says alive or waiting, the mover and what it waits on (a time, the close of other items, an anchor, an answer
 relayed to a person, or a fleet event, shown as `a fleet event (<the event>; backstop <day>)`); on a doing item the
 board lists as waiting it ends with `· the board lists it as waiting until <time> (<why>)`: the item is stored as
-doing, but its wake is more than an hour away (`[waiting] dated_wait_min_hours`) and every open step is dated for that
-day or later, so it is listed as waiting until then; a date alone (an until, or a wake sent as its old name) is a wait
+doing, but its date is more than an hour away (`[waiting] dated_wait_min_hours`) and every open step is dated for that
+day or later, so it is listed as waiting until then; a date alone (an until) is a wait
 until it and the item is listed as waiting, except in a write that hands the item to another session, where the date
-is only that hand-off's backstop and is no wait (unless the item carries hold, wait_kind, wait_basis or an after link,
-in this call or stored by an earlier one: then the date stays a wait); for a wake an item still carries with no until:
+is only that hand-off's backstop and is no wait (unless the item is parked or carries wait_kind, wait_basis or an after link,
+in this call or stored by an earlier one: then the date stays a wait); for a date an item still carries from before until (a stored wake):
 on a stored doing item that is parked, with a wake more than that hour away it is listed as waiting until the wake
 (`parked until its wake`), and on a stored doing item that is not parked whose wake is still ahead and carries a
 wait_basis: it is listed as waiting until the wake with the basis text as the reason (an item parked keeps `parked
 until its wake` as the reason, a basis or not; a wake with no wait_basis there is a backstop and the item stays
-active). An item shows only its real dates (wake, due, ask by) and no expected time: nothing is sent when a date
+active). An item shows only its real dates (until, due) and no expected time: nothing is sent when a date
 passes, so whoever reads it closes the item or moves it through update. `next:` holds the open steps (the first open
 step first), followed by a `named in next:` block with one line for each board#N the next names (up to 8, the item
 itself left out) and that item's live state, so nobody relays a stale status: `board#N: closed Tue Feb 3rd 2099 14:10

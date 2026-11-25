@@ -157,7 +157,7 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
                 f"“{_answers()._answer_words({'text': rec.get('text')}, 300)}” → {url}")
         judge = (f". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to {_model.owner_display(meta)} "
                  f"with a new step (step=…); if it says he will do the step at a later time, park the item until then "
-                 f"(update hold=true, until=<that time, YYYY-MM-DDTHH:MM {_cfg.tz_abbr()}>, wait_reason=<what it waits on, at least {_cfg.WAIT_GUARD_REASON_MIN} characters>), "
+                 f"(update until=<that time, YYYY-MM-DDTHH:MM {_cfg.tz_abbr()}>, wait_reason=<what it waits on, at least {_cfg.WAIT_GUARD_REASON_MIN} characters>), "
                  f"leave his step open and hand no new step back.")
     yours = ("" if _answers()._answer_words(rec).rstrip()[-1:] in (".", "!", "?", ")") else ".") + " It's yours now" if handed and not then else ""      # a decision handed over: the mover's line plus the tail
     to_then = lambda t: t.replace(f"It goes to {_sr._session_label(then)} now", "It's yours now", 1).replace(f" → {url}", f"{yours}{judge} → {url}", 1)      # the then-mover's own line: "It's yours now", and for a note the instruction to judge it
@@ -386,7 +386,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             if matched:                 # a pick among the options settles the question: ask and options go, his answer keeps the label and line
                 meta.pop("options", None)
             meta.pop("idle", None)
-            if parked:                  # on hold until that day, as update(hold=true, until=…) would leave it; "Owner acts now" leaves it on agent
+            if parked:                  # on hold until that day, as a time park by update(until=…, wait_kind="time") would leave it; "Owner acts now" leaves it on agent
                 _holders._state_end(meta)        # a hold ends a stored state of any kind (it reads as derived: parked)
                 meta["until"] = parked          # the one date the wait ends on (until_write.py); no hold and no wake are stored
                 _owner_words._cap_ok_put(meta, "wake", parked, "a board answer", quote=text or str(rec.get("choice_line") or ""),

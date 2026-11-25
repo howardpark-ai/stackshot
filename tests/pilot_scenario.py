@@ -1191,12 +1191,12 @@ def refusal(fn):
 rd = lambda g: json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())
 held_ = lambda g: rd(g)["status"] == "open" and hd_(rd(g)["metadata"]) is True
 today = pages.zone_now().date(); D = lambda n: (today + datetime.timedelta(days=n)).isoformat()
-NEW_FORM = "Refused: status must be open | completed; parked is a property of an open item: hold=true (with an optional wake); clear_hold=true releases it"
+NEW_FORM = "Refused: status must be open | completed; parked is a property of an open item: until=<date> with wait_kind=\"time\" and wait_basis (a park of the wait cap's days or less needs his recorded words); clear_hold=true releases it"
 HINT = "\nstill parked: pass clear_hold=true to release it"
 for i in (5, 6, 7, 8): item(i, "projects/beta", B)
 runner_svc.WAKE_EVENT.clear(); e = refusal(lambda: _update_svc._update("a3", hold=True, sender="home-beta"))
 check("hold: hold=true with no wake, after, anchor or recycle is refused, naming the four conditions",
-      e.startswith("Refused: a park names what it waits for; an unconditional or indefinite park is refused.") and all(x in e for x in ("wake=", "after=[\"board#N\"]", "anchors(project, add=[url], items=[\"a3\"])", "recycle=true"))
+      e.startswith("Refused: a park names what it waits for; an unconditional or indefinite park is refused.") and all(x in e for x in ("until=YYYY-MM-DD", "after=[\"board#N\"]", "anchors(project, add=[url], items=[\"a3\"])", "recycle=true"))
       and not held_("a3") and not runner_svc.WAKE_EVENT.is_set(), e)
 check("minute loop: no next wake while nothing is on hold", wakes_svc.next_wake() is None, wakes_svc.next_wake())
 # an item waiting on the owner is never held. The refusal
@@ -2137,12 +2137,12 @@ res = _update_svc._update(g5, wake=(today + datetime.timedelta(days=45)).isoform
 check("anchored hold: a wake beyond the backstop (the 7-day cap) → a note", "(note: parked on an anchored thread with a wake more than 7 days out" in res and "a longer one needs" in res, res)
 res = _update_svc._update(g5, wake=(today + datetime.timedelta(days=7)).isoformat(), sender="home-beta"); check("anchored hold: a backstop of cap_days → no note", "(note:" not in res, res)
 check("anchored hold: the update description carries the exception", "anchored to it (anchors(project, add=[url], items=[its id])) and named in next" in _wt_update._UPDATE_DESC
-      and "backstop wake (at most [waiting] cap_days out unless his words are on the item)" in _wt_update._UPDATE_DESC, _wt_update._UPDATE_DESC[:200])
+      and "backstop date (until, at most [waiting] cap_days out unless his words are on the item)" in _wt_update._UPDATE_DESC, _wt_update._UPDATE_DESC[:200])
 # the item: a notice from the anchor scoped to a held item
 # releases the hold when the keeper passes or merges it, never when it drops it; the anchor alone is no condition (the backstop wake stays);
 # a project with no keeper releases on the notice itself, by the minute loop's pass
 e = refusal(lambda: _update_svc._update(g5, wake="none", sender="home-beta"))
-check("anchor wait: dropping the backstop wake of a hold that waits on an anchor is refused, naming the backstop", e.startswith(f"Refused: a park that waits on a notice from the anchor scoped to {g5} still carries a backstop wake, at most 7 days out unless the owner's words are on the item") and held_(g5), e)
+check("anchor wait: dropping the backstop wake of a hold that waits on an anchor is refused, naming the backstop", e.startswith(f"Refused: a park that waits on a notice from the anchor scoped to {g5} still carries a backstop date, at most 7 days out unless the owner's words are on the item") and held_(g5), e)
 t0 = time.time(); time.sleep(0.05)
 n_d = routing.record("projects/beta", kind="anchor", to=B, label="GitHub #7", who="hub", text="a comment on #7", target="for home-beta", anchor=TH, bot=True)
 _wt_route._route(n_d, "dropped", reason="noise", sender="home-beta")
