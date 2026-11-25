@@ -27,6 +27,7 @@ from stackshot.core import config as _cfg
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8020
 DEFAULT_HEALTH_CACHE_SECONDS = 5.0
+DEFAULT_BACKEND_TIMEOUT_SECONDS = 10.0
 DEFAULT_PREFACE = ("FRONT DOOR: one connection to the boards and the brain you are a member of, with this connector's own credential. "
                    "Tools that are not in your tool list are not available to this connection.")
 KINDS = ("board", "brain")
@@ -63,6 +64,7 @@ class Settings:
     identity_secret_file: str = ""
     members_file: str = ""
     health_cache_seconds: float = DEFAULT_HEALTH_CACHE_SECONDS
+    backend_timeout_seconds: float = DEFAULT_BACKEND_TIMEOUT_SECONDS      # how long one call to a backend waits for it (its handshake, its tool list, its instructions)
     preface: str = DEFAULT_PREFACE
     backends: tuple[Backend, ...] = ()
 
@@ -208,6 +210,10 @@ def parse(cfg: dict[str, Any] | None = None) -> tuple[Settings, list[str]]:
     if isinstance(hc, bool) or not isinstance(hc, (int, float)) or not 0 <= hc <= 3600 or hc != hc:
         out.append(f"[frontdoor] health_cache_seconds = {str(hc)[:60]!r} is not a number from 0 to 3600, so {DEFAULT_HEALTH_CACHE_SECONDS:g} is used")
         hc = DEFAULT_HEALTH_CACHE_SECONDS
+    bt = t.get("backend_timeout_seconds", DEFAULT_BACKEND_TIMEOUT_SECONDS)
+    if isinstance(bt, bool) or not isinstance(bt, (int, float)) or not 0 < bt <= 300:
+        out.append(f"[frontdoor] backend_timeout_seconds = {str(bt)[:60]!r} is not a number above 0 and up to 300, so {DEFAULT_BACKEND_TIMEOUT_SECONDS:g} is used")
+        bt = DEFAULT_BACKEND_TIMEOUT_SECONDS
     pre = t.get("preface", DEFAULT_PREFACE)
     if not isinstance(pre, str) or not pre.strip():
         out.append("[frontdoor] preface is not text, so the built-in preface is used")
@@ -232,7 +238,7 @@ def parse(cfg: dict[str, Any] | None = None) -> tuple[Settings, list[str]]:
             backends.append(be)
         if raw and not backends:
             out.append("[frontdoor] has no usable backend, so the front door does not start")
-    return Settings(True, host, port, ident_header, secret_file, members_file, float(hc), pre.strip(), tuple(backends)), out
+    return Settings(True, host, port, ident_header, secret_file, members_file, float(hc), float(bt), pre.strip(), tuple(backends)), out
 
 
 def blocking(settings: Settings) -> list[str]:

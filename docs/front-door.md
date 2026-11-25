@@ -15,7 +15,7 @@ It needs the `server` extra (FastMCP is already in it, so there is no new depend
 
 ## Who is calling
 
-A reverse proxy in front of it checks the sign-in (for example Caddy's `forward_auth`) and sets one header, named by `identity_header`, to the caller's identity. The front door trusts that header and nothing else: a request to `/mcp` without it is refused with HTTP 401, and `/healthz` is open. It therefore listens on the loopback address only (`listen_host`), and the proxy is the only thing that can reach it. The caller's own `Authorization`, `X-Api-Key` and `Cookie` headers stop at the front door: each backend is called through a transport that sets that backend's headers itself (`forward_incoming_headers=False`).
+A reverse proxy in front of it checks the sign-in (for example Caddy's `forward_auth`) and sets one header, named by `identity_header`, to the caller's identity. The front door trusts that header and nothing else: a request to `/mcp` without it is refused with HTTP 401, and `/healthz` is open. The header is plain text: the front door cannot tell a header the proxy set from one a client sent, so the setup has two requirements. First, only the proxy may reach the front door: it listens on the loopback address by default (`listen_host`; any other address is named in the config notes, not refused, and keeping everything but the proxy away is then the setup's job). Second, the proxy must drop or overwrite any copy of that header the client sends itself (with `forward_auth` that is the step that copies the header from the sign-in answer). The signature described below covers only the hop from the front door to a backend; nothing signs the hop from the proxy to the front door. The caller's own `Authorization`, `X-Api-Key` and `Cookie` headers stop at the front door: each backend is called through a transport that sets that backend's headers itself (`forward_incoming_headers=False`).
 
 `members_file` is a JSON object `{"alice": ["main", "side"], "bob": ["main", "brain"]}`: a member and the names of the backends the member is on. It is read at each request. A file that cannot be read makes nobody a member, never everybody.
 
@@ -28,6 +28,8 @@ The caller's identity goes to the backend as a second header, `x-stackshot-ident
 ## The one tool set
 
 The tool list is one board's tool list, whichever boards the caller is on, with each tool's schema as the board gives it plus one optional property, `board`. A caller on several boards must pass `board` on each call; a caller on one need not. When the caller is a member of the brain, the brain's tools are listed beside them (a brain tool takes no `board`). The list shows only the caller's own backends and lists each live, so a backend that is down is named in a warning to the client and left out, and the list fails only when none answers. With no caller (the server's own start) the list is empty.
+
+A board tool that already has a property named `board` is not offered (the front door routes by that name, so the tool would be ambiguous) and the log says so; the other tools of the board are listed as usual.
 
 A brain tool the brain's credential does not list is not offered: the list is the credential's own, so an admin tool of a read-and-write credential is not there and a call to it is refused.
 
@@ -44,6 +46,10 @@ Each is a tool error whose text a client shows as it is:
 | every board of the caller down, on a list | `none of your boards answered (b). Check /healthz.` |
 | a brain tool not in the credential's list | `tool '<name>' is not offered to this connection (its credential is limited to what the tool list shows; admin-scoped tools are not part of it).` |
 
+## A backend that does not answer
+
+Every wait for a backend is bounded by `backend_timeout_seconds` (default 10, a number above 0 and up to 300): the connection and handshake of a call, the tool listing, the reading of a backend's instructions, and each health check (which never waits longer than 5 s). A backend that accepts a connection and never answers is treated like one that refuses it: it is skipped for that request (named in the warning of a list, left out of the instructions text, `did not answer` on a call to it) and asked again at the next one, and the caller's other boards are not held by it. A tool call itself has no total limit, since a tool may run long and report progress.
+
 ## The instructions text
 
 The front door writes its own: the `preface` of the config, a line naming the caller's backends, then each backend's own instructions verbatim (backends with the same text share one block). Each backend's text is read live and kept five minutes; a backend that does not answer is skipped and tried at the next request.
@@ -56,4 +62,4 @@ Streaming progress and log notifications of a tool call pass through as they arr
 
 ## Checked by
 
-`tests/frontdoor_scenario.py` (stand-in boards and a stand-in brain on loopback ports) covers the schema diff against a single board, the routing and every refusal text above, concurrent calls of several sessions with no cross-talk, that the caller's bearer never reaches a backend, streaming, a backend that is down, the instructions text, the signed identity, the no-caller list and the config notes.
+`tests/frontdoor_scenario.py` (stand-in boards and a stand-in brain on loopback ports) covers the schema diff against a single board, the routing and every refusal text above, concurrent calls of several sessions with no cross-talk, that the caller's bearer never reaches a backend, streaming, a backend that is down, a backend that accepts a connection and never answers (initialize, list, call and `/healthz` return within the bound), a member removed from the members file on an open session, the instructions text, the signed identity, the no-caller list and the config notes.

@@ -30,14 +30,14 @@ from stackshot.core.frontdoor_config import Backend, Settings
 from stackshot.frontdoor import config as _config, identity as _identity
 
 log = logging.getLogger("stackshot.frontdoor")
-HEALTH_TIMEOUT = 5.0         # seconds a health check waits for a backend
+HEALTH_TIMEOUT = 5.0         # most seconds a health check waits for a backend (never longer than the backend_timeout_seconds of the config)
 _NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))      # a backend is reached directly, never through an HTTP_PROXY of the environment
 
 
-def _status_of(url: str) -> int:
+def _status_of(url: str, timeout: float = HEALTH_TIMEOUT) -> int:
     """The HTTP status of a GET of `url` (an error status is a status; a refused connection or a timeout raises OSError)."""
     try:
-        with _NO_PROXY.open(urllib.request.Request(url, method="GET"), timeout=HEALTH_TIMEOUT) as r:
+        with _NO_PROXY.open(urllib.request.Request(url, method="GET"), timeout=timeout) as r:
             return int(r.status)
     except urllib.error.HTTPError as e:
         return int(e.code)
@@ -90,11 +90,15 @@ class Backends:
             hdr[_identity.HEADER] = _identity.sign(secret.encode("utf-8"), caller)
         return hdr, auth
 
-    def client(self, name: str, caller: str) -> ProxyClient:
-        """A client of the backend `name`, whose connection carries the front door's credential and `caller`'s signed identity."""
+    def client(self, name: str, caller: str, bound_handshake: bool = False) -> ProxyClient:
+        """A client of the backend `name`, whose connection carries the front door's credential and `caller`'s signed identity.
+
+        `bound_handshake`: the connection and the initialize handshake give up after backend_timeout_seconds (a call of a tool is given no total limit, since
+        a tool may run long and report progress; a caller that lists or reads instructions bounds the whole use with `asyncio.wait_for` instead)."""
         b = self.by_name[name]
         hdr, auth = self._headers(b, caller)
-        return ProxyClient(BackendTransport(b, hdr, auth), mode="legacy")
+        kw = {"init_timeout": self.settings.backend_timeout_seconds} if bound_handshake else {}
+        return ProxyClient(BackendTransport(b, hdr, auth), mode="legacy", **kw)
 
     # ------------------------------------------------------------------ health
 
@@ -107,7 +111,7 @@ class Backends:
         b = self.by_name[name]
         t0 = time.monotonic()
         try:
-            status = await asyncio.to_thread(_status_of, b.health_url)
+            status = await asyncio.to_thread(_status_of, b.health_url, min(HEALTH_TIMEOUT, self.settings.backend_timeout_seconds))
             res: dict[str, Any] = {"ok": status == 200, "status": status}
         except Exception as e:      # noqa: BLE001  (any failure of the check is the backend not answering)
             res = {"ok": False, "error": type(e).__name__}

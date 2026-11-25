@@ -35,9 +35,15 @@ class Instructions:
         have = self._cache.get(name)
         if have and time.monotonic() - have[0] < CACHE_SECONDS:
             return have[1]
-        try:
+
+        async def read() -> str:
             async with self.door.backends.client(name, user) as c:
-                text = (c.initialize_result.instructions or "") if c.initialize_result else ""
+                return (c.initialize_result.instructions or "") if c.initialize_result else ""
+        try:
+            text = await asyncio.wait_for(read(), self.door.settings.backend_timeout_seconds)      # a backend that never answers costs one wait, not the connection
+        except asyncio.TimeoutError:
+            log.warning("instructions: %s '%s' did not answer in %g s", self.door.backends.by_name[name].kind, name, self.door.settings.backend_timeout_seconds)
+            return None
         except Exception as e:      # noqa: BLE001  (the backend is down or refuses: its text is left out this time)
             log.warning("instructions: %s '%s' did not answer (%s: %s)", self.door.backends.by_name[name].kind, name, type(e).__name__, str(e)[:160])
             return None

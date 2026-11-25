@@ -170,7 +170,7 @@ class DoorProvider(Provider):
 
     def _factory(self) -> Any:
         d = self.door
-        return lambda: d.backends.client(d.backend.get(), d.caller_var.get())
+        return lambda: d.backends.client(d.backend.get(), d.caller_var.get(), bound_handshake=True)
 
     async def _tools(self, warn: bool) -> dict[str, DoorTool]:
         d = self.door
@@ -181,14 +181,23 @@ class DoorProvider(Provider):
         if not mine:
             raise ToolError(NOT_A_MEMBER)
 
-        async def one(n: str) -> Any:
+        limit = d.settings.backend_timeout_seconds
+
+        async def listing(n: str) -> Any:
             async with d.backends.client(n, user) as c:
                 return await c.list_tools()
-        res, _ = await asyncio.gather(asyncio.gather(*(one(n) for n in mine), return_exceptions=True), asyncio.gather(*(d.backends.health(n) for n in mine)))
+
+        async def one(n: str) -> Any:
+            # A backend that accepts a connection and never answers must not hold the caller's other boards: the wait is bounded, and a timeout is the
+            # backend not answering, like a refused connection (it is skipped for this request and asked again at the next).
+            try:
+                return await asyncio.wait_for(listing(n), limit)
+            except asyncio.TimeoutError:
+                raise TimeoutError(f"no answer in {limit:g} s") from None
+        res, health = await asyncio.gather(asyncio.gather(*(one(n) for n in mine), return_exceptions=True), asyncio.gather(*(d.backends.health(n) for n in mine)))
         ok = {n: r for n, r in zip(mine, res) if not isinstance(r, BaseException)}
-        for n, r in zip(mine, res):
+        for n, r, h in zip(mine, res, health):
             if isinstance(r, BaseException):
-                h = await d.backends.health(n, force=True)
                 msg = (f"{d.backends.by_name[n].kind} '{n}' did not list its tools ({type(r).__name__}: {str(r)[:200]}); health={h}. "
                        f"Its tools are not missing, the {d.backends.by_name[n].kind} is down.")
                 if warn:

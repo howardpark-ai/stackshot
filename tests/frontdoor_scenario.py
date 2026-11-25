@@ -9,6 +9,7 @@ Checked: the identity functions (sign/verify: tamper, expiry, a wrong secret); t
 plus an optional `board`; only the caller's backends; no caller → empty); routing and every refusal text; 45 concurrent calls over 3 sessions (no
 cross-talk, the caller's identity at the board); the caller's own credentials never at a backend; streaming progress and logs while the call runs; a
 backend that is down (a warning, a call error, none answered, /healthz 503); the brain's credential-limited list and the refusal that follows from it;
+a backend that accepts a connection and never answers (every wait is bounded); a board tool with a `board` property of its own; a member removed on an open session;
 the composed instructions; the entry point as a subprocess. Every server and the temp folder are removed at the end, pass or fail.
 """
 import asyncio, base64, json, os, pathlib, socket, subprocess, sys, threading, time, urllib.error, urllib.request
@@ -59,7 +60,7 @@ class Server:
         self.sock = sock or socket.socket();
         if sock is None: self.sock.bind(("127.0.0.1", 0))
         self.port = self.sock.getsockname()[1]
-        self.srv = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="on"))
+        self.srv = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="on", timeout_graceful_shutdown=3))
         self.th = threading.Thread(target=lambda: self.srv.run(sockets=[self.sock]), daemon=True)
         self.up = False
     def start(self):
@@ -71,6 +72,29 @@ class Server:
     def stop(self):
         if not self.up: return
         self.srv.should_exit = True; self.th.join(15); self.up = False
+        try: self.sock.close()
+        except OSError: pass
+    @property
+    def url(self): return f"http://127.0.0.1:{self.port}"
+
+class Hang:
+    """A listener that accepts connections and never answers: what a backend that is up but wedged looks like. stop() closes every connection and the port."""
+    def __init__(self):
+        self.sock = socket.socket(); self.sock.bind(("127.0.0.1", 0)); self.sock.listen(32)
+        self.port = self.sock.getsockname()[1]; self.conns = []; self.stopping = False
+        self.th = threading.Thread(target=self._run, daemon=True)
+    def _run(self):
+        self.sock.settimeout(0.2)
+        while not self.stopping:
+            try: c, _ = self.sock.accept(); self.conns.append(c)
+            except socket.timeout: continue
+            except OSError: return
+    def start(self): self.th.start(); return self
+    def stop(self):
+        self.stopping = True; self.th.join(5)
+        for c in self.conns:
+            try: c.close()
+            except OSError: pass
         try: self.sock.close()
         except OSError: pass
     @property
@@ -289,6 +313,12 @@ CASES = [
     ("no identity_secret_file", {"frontdoor": {k: v for k, v in good.items() if k != "identity_secret_file"}}, "no identity_secret_file"),
     ("identity_secret_file group-readable", with_(identity_secret_file=secret_file("loose.key", "identity-secret-0123456789", 0o640)), "identity_secret_file"),
     ("health_cache_seconds negative", with_(health_cache_seconds=-1), "health_cache_seconds"), ("health_cache_seconds a string", with_(health_cache_seconds="5"), "health_cache_seconds"),
+    ("health_cache_seconds infinite", with_(health_cache_seconds=float("inf")), "health_cache_seconds"), ("health_cache_seconds 100000", with_(health_cache_seconds=100000), "health_cache_seconds"),
+    ("health_cache_seconds 3601", with_(health_cache_seconds=3601), "health_cache_seconds"), ("health_cache_seconds nan", with_(health_cache_seconds=float("nan")), "health_cache_seconds"),
+    ("backend_timeout_seconds zero", with_(backend_timeout_seconds=0), "backend_timeout_seconds"), ("backend_timeout_seconds negative", with_(backend_timeout_seconds=-5), "backend_timeout_seconds"),
+    ("backend_timeout_seconds a string", with_(backend_timeout_seconds="10"), "backend_timeout_seconds"), ("backend_timeout_seconds a bool", with_(backend_timeout_seconds=True), "backend_timeout_seconds"),
+    ("backend_timeout_seconds infinite", with_(backend_timeout_seconds=float("inf")), "backend_timeout_seconds"), ("backend_timeout_seconds 301", with_(backend_timeout_seconds=301), "backend_timeout_seconds"),
+    ("backend_timeout_seconds nan", with_(backend_timeout_seconds=float("nan")), "backend_timeout_seconds"),
     ("preface empty", with_(preface="  "), "preface"), ("no backends", with_(backends=[]), "no backends"), ("backends not a list", with_(backends="a"), "backends is not a list"),
     ("backend not a table", with_(backends=["a"]), "is not a table"), ("backend without a name", bad_backend(name=""), "no usable name"), ("backend name with a slash", bad_backend(name="a/b"), "no usable name"),
     ("backend kind unknown", bad_backend(kind="proxy"), "neither"), ("backend url not http", bad_backend(url="ftp://x/mcp"), "url is not an http"),
@@ -304,6 +334,11 @@ for name, cfg, want in CASES:
     _, ns = fc.parse(cfg)
     check(f"config note: {name} is named", any(want in n for n in ns), ns)
     check(f"config note: {name} reaches core/config.notes", any(want in n for n in cfgmod.notes(cfg)), cfgmod.notes(cfg)[-3:] if isinstance(cfgmod.notes(cfg), list) else None)
+for key, bad_values, default, edges in (("health_cache_seconds", (float("inf"), 100000, 3601, -1, float("nan"), "5", True), 5.0, (0, 0.5, 3600)),
+                                       ("backend_timeout_seconds", (0, -5, float("inf"), 301, float("nan"), "10", True), 10.0, (0.5, 10, 300))):
+    check(f"config: {key} that is refused reads as {default:g}", all(getattr(fc.parse(with_(**{key: b}))[0], key) == default for b in bad_values), [(b, getattr(fc.parse(with_(**{key: b}))[0], key)) for b in bad_values])
+    check(f"config: {key} at its edges ({', '.join(map(str, edges))}) is taken as written, with no note", all(fc.parse(with_(**{key: e}))[1] == [] and getattr(fc.parse(with_(**{key: e}))[0], key) == float(e) for e in edges), edges)
+check("config: backend_timeout_seconds defaults to 10 and health_cache_seconds to 5", fc.parse({"frontdoor": good})[0].backend_timeout_seconds == 10.0 and fc.parse({"frontdoor": good})[0].health_cache_seconds == 5.0)
 st_bad, _ = fc.parse(bad_backend(name="a/b"))
 check("config: a wrong backend entry is left out and the others are served", [b.name for b in st_bad.backends] == ["brain"] and fc.blocking(st_bad) == [], st_bad.backends)
 check("config: no backend at all, or no identity_header, or no members_file blocks the start", all(fc.blocking(fc.parse(c)[0]) for c in (with_(backends=[]), {"frontdoor": {k: v for k, v in good.items() if k != "identity_header"}}, {"frontdoor": {k: v for k, v in good.items() if k != "members_file"}}, {})))
@@ -345,6 +380,12 @@ def proxy_headers(user):
     """What the reverse proxy and the client send for `user`: the identity header the proxy sets, and the client's own credentials, in the three spellings."""
     return {"X-Forwarded-User": user, "authorization": f"Bearer {CALLER}{user}", "x-api-key": CALLER + user, "cookie": f"session={CALLER}{user}"}
 def fclient(user, **kw): return Client(StreamableHttpTransport(FRONT + "/mcp", headers=proxy_headers(user)), mode="legacy", **kw)
+def start_door(cfg):
+    """A second front door over `cfg` on its own port: (its Door, its Server, its config notes)."""
+    st, notes = fc.parse(cfg)
+    f, d = fdapp.build(st); srv = Server(fdapp.asgi_app(f, d)); SERVERS.append(srv); srv.start()
+    return d, srv, notes
+def client_to(srv, user, **kw): return Client(StreamableHttpTransport(srv.url + "/mcp", headers=proxy_headers(user)), mode="legacy", **kw)
 def direct_board(n): return Client(StreamableHttpTransport(servers[n].url + "/mcp", headers={"authorization": "Bearer " + BOARD_TOK[n], "x-test-direct": "1"}), mode="legacy")
 async def call(c, name, args=None): return (await c.call_tool(name, args or {})).content[0].text
 async def refusal(c, name, args=None):
@@ -383,6 +424,34 @@ async def main():
     e, names = await list_text("mallory"); check("list: a caller the members file does not know gets the same refusal", e is not None and "you are not a member of any board." in e, (e, names))
     check("list: a name in the members file that no backend has is no membership", fdprov.Door.backends_of(door, "zed") == [])
 
+    # ---- 3b. a board tool with a property named `board` of its own is not offered (the front door routes by that name); the board's other tools are
+    clash = FastMCP("board-x")
+    @clash.tool
+    def plain() -> str:
+        """A tool with no clash."""
+        return "plain"
+    @clash.tool
+    def pick(board: str) -> str:
+        """A tool with a `board` property of its own."""
+        return "picked " + board
+    @clash.custom_route("/healthz", methods=["GET"])
+    async def xhealthz(request):
+        return JSONResponse({"ok": True})
+    xsrv = Server(Edge(clash.http_app(path="/mcp"), "x", lambda a: a == "Bearer " + BOARD_TOK["a"])); SERVERS.append(xsrv); xsrv.start()
+    xdoor, xfront, xnotes = start_door(front_cfg(servers, backends=[{"name": "x", "kind": "board", "url": xsrv.url + "/mcp", "token_file": board_tok_file["a"]}]))
+    members_path.write_text(json.dumps({**MEMBERS, "xin": ["x"]}))
+    async with client_to(xfront, "xin") as c:
+        xnames = [t.name for t in await c.list_tools()]
+        check("board property: a tool whose own schema has a `board` property is left out of the list, and the board's other tools stay", xnames == ["plain"], xnames)
+        e = await refusal(c, "pick", {"board": "x"})
+        check("board property: a call to it is refused as not offered (the front door would route by that argument)", e == fdprov.not_offered("pick"), e)
+        check("board property: the board's other tool is called as usual", await call(c, "plain") == "plain")
+    check("board property: with_board refuses a schema that has the property and adds it to one that has not",
+          fdprov.with_board({"type": "object", "properties": {"board": {"type": "string"}}}) is None and list(fdprov.with_board({"type": "object", "properties": {"q": {}}})["properties"]) == ["q", "board"]
+          and list(fdprov.with_board({"type": "object"})["properties"]) == ["board"])
+    xfront.stop(); xsrv.stop()
+    members_path.write_text(json.dumps(MEMBERS))
+
     # ---- 4. routing and the refusal texts
     async with fclient("bob") as c:
         ra, rb = json.loads(await call(c, "whoami", {"board": "a"})), json.loads(await call(c, "whoami", {"board": "b"}))
@@ -407,8 +476,10 @@ async def main():
         check("routing: a member of board b and the brain needs no `board` for a board tool", json.loads(await call(c, "whoami"))["board"] == "b")
         check("routing: a brain tool goes to the brain", await call(c, "search", {"query": "q"}) == "hits for q")
         check("routing: a brain tool takes no board (and one is not passed on)", await call(c, "get_page", {"slug": "s"}) == "page s")
+    async with fclient("bob") as cb: await cb.list_tools()          # the first caller cached by the front door has the board tools in its list
     async with fclient("fred") as c:
-        e = await refusal(c, "whoami"); check("refusal: a member of the brain only has no board tool to call", e is not None, e)
+        for tool in ("whoami", "brief"):
+            e = await refusal(c, tool); check(f"refusal: a member of the brain only calling the board tool `{tool}` is told it is not offered (not another caller's list, not 'not a member')", e == fdprov.not_offered(tool), e)
         check("routing: a member of the brain only reaches it", await call(c, "get_page", {"slug": "s2"}) == "page s2")
     async with fclient("alice") as c:
         e = await refusal(c, "get_page", {"slug": "s"}); check("refusal: a brain tool for a caller who is not on the brain is not offered", e is not None and "not offered" in e or (e is not None and "not a member" in e), e)
@@ -543,9 +614,59 @@ async def main():
     s, body = http_get(FRONT + "/mcp", {"authorization": "Bearer CALLER-x"}); check("no identity: the caller's own credential in place of the identity header gets no more", s == 401, (s, body))
     s, body = http_get(FRONT + "/mcp", {"X-Forwarded-User": "   "}); check("no identity: a blank identity header is refused 401", s == 401, (s, body))
     s, body = http_get(FRONT + "/healthz"); check("no identity: /healthz is open", s == 200, (s, body))
+    for path in ("/hfoo", "/h", "/healthzz", "/healthz/x", "/health", "/healthz.json", "/"):
+        s, body = http_get(FRONT + path); check(f"no identity: {path} is not an open path (401, not 404)", s == 401, (s, body))
+    s, body = http_get(FRONT + "/hfoo", {"X-Forwarded-User": "alice"}); check("no identity: with the header, a path the front door does not serve is 404 (the gate is only the gate)", s == 404, (s, body))
     s, body = http_get(FRONT + "/healthz"); h = json.loads(body)
     check("healthz: all up is 200 with an entry per backend", s == 200 and h["status"] == "ok" and set(h["backends"]) == {"a", "b", "c", "brain"} and all(v["ok"] and v["status"] == 200 for v in h["backends"].values()), (s, body))
     check("healthz: the identity header is not needed and not echoed", "X-Forwarded-User" not in body)
+
+    # ---- 10b. a backend that accepts a connection and never answers: every wait is bounded, the caller's other boards are not held
+    LIMIT = 1.0
+    hang = Hang().start()
+    hfront = None
+    try:
+        hdoor, hfront, hnotes = start_door(front_cfg(servers, backend_timeout_seconds=LIMIT, backends=[
+            {"name": "a", "kind": "board", "url": servers["a"].url + "/mcp", "token_file": board_tok_file["a"]},
+            {"name": "h", "kind": "board", "url": hang.url + "/mcp", "token_file": board_tok_file["b"]}]))
+        check("hung backend: the stand-in door's own config has no note and reads the limit", hnotes == [] and hdoor.settings.backend_timeout_seconds == LIMIT, hnotes)
+        members_path.write_text(json.dumps({**MEMBERS, "jo": ["a", "h"], "kim": ["h"]}))
+        hwarn = []
+        async def hw(m): hwarn.append(str(getattr(m, "data", m)))
+        async def timed(coro, guard=25):
+            t0 = time.monotonic()
+            try: return await asyncio.wait_for(coro, guard), None, time.monotonic() - t0
+            except BaseException as e: return None, e, time.monotonic() - t0
+        async def connect_only():
+            async with client_to(hfront, "jo", log_handler=hw) as c: return c.initialize_result.instructions or ""
+        ins, e, dt = await timed(connect_only())
+        check(f"hung backend: initialize of a member of a and the hung h returns within the bound ({dt:.1f} s) with a's instructions and not h's",
+              e is None and dt < 4.0 and BOARD_TEXT["a"] in ins and "--- instructions of board h" not in ins and "--- instructions of board a" in ins, (e, dt, (ins or "")[:200]))
+        async def list_all():
+            async with client_to(hfront, "jo", log_handler=hw) as c: return [t.name for t in await c.list_tools()]
+        names, e, dt = await timed(list_all())
+        check(f"hung backend: initialize and tools/list together return within the bound ({dt:.1f} s) with the healthy board's tools", e is None and dt < 4.0 and sorted(names) == sorted(single), (e, dt, names))
+        check("hung backend: the list names h in a warning to the client", any("board 'h'" in w and "did not list" in w and "no answer in 1 s" in w for w in hwarn), hwarn)
+        check("hung backend: its instructions were not stored (it is asked again at the next request) and a's were", "h" not in hdoor.instructions._cache and "a" in hdoor.instructions._cache, list(hdoor.instructions._cache))
+        async def call_h():
+            async with client_to(hfront, "jo") as c:
+                ok = json.loads(await call(c, "whoami", {"board": "a"}))["board"]
+                t0 = time.monotonic(); e1 = await refusal(c, "whoami", {"board": "h"}); d1 = time.monotonic() - t0
+                return ok, e1, d1, json.loads(await call(c, "whoami", {"board": "a"}))["board"]
+        res, e, dt = await timed(call_h())
+        check(f"hung backend: a call to h is refused as 'did not answer' within the bound ({res[2] if res else dt:.1f} s) and a still answers on the same session",
+              e is None and res[0] == "a" and res[3] == "a" and res[1] == "board 'h' did not answer (unreachable). Other boards you are on are unaffected." and res[2] < 4.5, (e, res))
+        async def list_kim():
+            async with client_to(hfront, "kim") as c: return [t.name for t in await c.list_tools()]
+        names, e, dt = await timed(list_kim())
+        check(f"hung backend: a member of h only gets the none-answered text within the bound ({dt:.1f} s)", e is not None and "none of your boards answered (h). Check /healthz." in str(e) and dt < 4.0, (e, dt, names))
+        t0 = time.monotonic(); s, body = await asyncio.to_thread(http_get, hfront.url + "/healthz"); dt = time.monotonic() - t0; hh = json.loads(body)
+        check(f"hung backend: /healthz answers 503 within the bound ({dt:.1f} s), h not ok and a ok", s == 503 and dt < 4.0 and hh["backends"]["h"]["ok"] is False and hh["backends"]["a"]["ok"] is True, (s, dt, body))
+    finally:
+        if hfront is not None: hfront.stop()
+        hang.stop()
+    check("hung backend: the stand-in listener and the second door are gone and their ports free", port_free(hang.port) and port_free(hfront.port), (hang.port, hfront.port))
+    members_path.write_text(json.dumps(MEMBERS))
 
     # ---- 11. a backend that is down
     logw = []
