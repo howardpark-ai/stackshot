@@ -694,6 +694,24 @@ result_turn_agents = []                             # the front agents whose tur
 result_turn_hours = 24                              # how long after the agent's message to a session that session's message may start the agent's turn (a number above 0; anything else reads as 24)
 result_turn_cap_per_hour = 6                        # the most turns one session may start in one listed front agent in an hour; past it the message is held or handled as without the key, and a log line says so (a whole number from 0; 0 turns the case off; anything else reads as 6)
 
+# [frontdoor]                                       # the front door (python -m stackshot.frontdoor; docs/front-door.md): one MCP endpoint over several boards and a brain, behind a reverse proxy that sets
+#                                                   # the caller's identity header. A separate program: the board server does not read this table. Restart-only, except members_file, which is read at each request
+# listen_host = "127.0.0.1"                         # the address it listens on; keep the loopback address and let the proxy connect to it (anything else is named in the config notes). Restart-only
+# listen_port = 8020                                # a whole number from 1 to 65535 (anything else reads as 8020). Restart-only
+# identity_header = "x-forwarded-user"              # REQUIRED: the header the proxy sets from its sign-in check (never Authorization, Cookie or X-Api-Key). Restart-only
+# identity_secret_file = "~/.config/stackshot/frontdoor-identity.key"   # the secret the identity sent to a backend is signed with (private to the owner, mode 600; 16 characters or more). Restart-only
+# members_file = "~/.config/stackshot/frontdoor-members.json"           # REQUIRED: JSON {"alice": ["main", "side"], "bob": ["main", "brain"]}, member -> the names of the backends the member is on. Live (read at each request)
+# health_cache_seconds = 5                          # how long a backend's health answer is reused (a number from 0 to 3600; anything else reads as 5). Restart-only
+# backend_timeout_seconds = 10                    # how long one wait for a backend lasts (tool listing and instructions in total, the connection and handshake of a call, a health check in total but at most 5 s; a request that waits twice can cost about twice it); a backend that does not answer is skipped for that request (a number above 0 and up to 300; anything else reads as 10). Restart-only
+# preface = "..."                                   # the text the instructions of the front door begin with (a built-in one when unset). Restart-only
+# [[frontdoor.backends]]                            # one table per backend; REQUIRED, at least one; a wrong one is left out and named in the config notes. Restart-only
+# name = "main"                                     #   the value of a call's board argument: letters, digits, '.', '_' and '-'
+# kind = "board"                                    #   "board" (default) or "brain" (at most one brain)
+# url = "http://127.0.0.1:8010/mcp"                 #   the backend's MCP endpoint
+# health_url = "http://127.0.0.1:8010/healthz"      #   an open route that answers 200 when it is up (default: /healthz on the url's host)
+# token_file = "~/.config/stackshot/frontdoor-main.token"   #   the front door's own bearer for this backend, OR instead of it:
+# oauth = { client_id_file = "...", client_secret_file = "...", scopes = ["read", "write"] }   #   OAuth client credentials (one credential per backend, never both)
+
 [step_proof]                                        # a step of an item's next that names the event which finishes it (a pull request merged or released) is ticked by the server (stackshot/model/step_proof.py).
                                                     # Without a switch, the first pass of the server's clock after a start only logs what it would do (and keeps it in <state>/step-proof-dry.json);
                                                     # the passes after it act. Set it to decide for yourself:

@@ -38,7 +38,7 @@ LAYERS = [("surface", ("web",)),
           ("core", ("core",))]
 RANK = {area: len(LAYERS) - i for i, (_, areas) in enumerate(LAYERS) for area in areas}      # higher number = higher layer
 LAYER = {area: name for name, areas in LAYERS for area in areas}
-UNLAYERED = ("audit", "tools")          # reports and tools that read the package; with the command line they sit outside the layers
+UNLAYERED = ("audit", "frontdoor", "tools")   # reports, the front door (its own program) and tools that read the package; with the command line they sit outside the layers
 ROOT_OK = ("stackshot", "stackshot.paths")      # the root modules a layer below the surface may import: the package itself and paths.py
 
 # What points the wrong way today (measured Tue Nov 10th 2026): (importing file, module it imports) → (how many imported names, the structure change

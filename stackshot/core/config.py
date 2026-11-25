@@ -1522,7 +1522,15 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     ao = get("anchors", "offers", cfg=cfg)
     if ao is not None and not isinstance(ao, bool):
         out.append(f"[anchors] offers = {repr(ao)[:60]} is not true or false, so the anchor offers stay on (true): write offers = false to stop the replies offering an anchors call")
+    out.extend(frontdoor_notes(cfg))
     return out
+
+
+def frontdoor_notes(cfg: dict[str, Any] | None = None) -> list[str]:
+    """The lines for the `[frontdoor]` table and its `[[frontdoor.backends]]` entries (core/frontdoor_config.py judges them): [] when the config has no such table.
+    Imported at call time: that module reads this one."""
+    from stackshot.core import frontdoor_config
+    return frontdoor_config.notes(cfg)
 
 
 def stall_item_answers(item: str) -> list[dict[str, Any]] | None:
