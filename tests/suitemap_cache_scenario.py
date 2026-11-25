@@ -84,7 +84,7 @@ elif a[:2] == ["run", "download"]:
     ENV.update(SUITEMAP_ROOT=str(R), SUITEMAP_CACHE_DIR=str(T / "cache"), STACKSHOT_TEST_LAUNCHER="", GIT_SSH_COMMAND="false", GIT_TERMINAL_PROMPT="0", HOME=str(T / "home"),
                FAKE_GH_LOG=str(LOG), PATH=f"{BIN}:{os.environ['PATH']}")
     MAPDIR = R / ".suitemap-ci"; MAPFILE = MAPDIR / "map.json"
-    def tool(*a, timeout=None, **env): return subprocess.run([sys.executable, os.path.join(SCR, "suitemap.py"), *a], capture_output=True, text=True, env={**ENV, **env}, cwd=str(R), timeout=timeout)
+    def tool(*a, timeout=None, drop=(), **env): return subprocess.run([sys.executable, os.path.join(SCR, "suitemap.py"), *a], capture_output=True, text=True, env={k: v for k, v in {**ENV, **env}.items() if k not in drop}, cwd=str(R), timeout=timeout)
     def calls(): return LOG.read_text().splitlines() if LOG.exists() else []
     def fresh():
         shutil.rmtree(MAPDIR, ignore_errors=True); LOG.unlink(missing_ok=True)
@@ -175,7 +175,7 @@ sys.exit(255)
         return os.path.exists(f"/proc/{pid}") and "Z" not in pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
     try:
         for f in (SEEN, PIDS): f.unlink(missing_ok=True)
-        r = tool("select", GIT_SSH_COMMAND=str(SSH))
+        r = tool("select", GIT_SSH_COMMAND=str(SSH), drop=("GIT_TERMINAL_PROMPT",))   # the child starts with no GIT_TERMINAL_PROMPT, so the "0" ssh sees is the fetch's own
         seen = SEEN.read_text().split() if SEEN.exists() else None
         check("select: the fetch of the map's missing commit runs in a session of its own (no terminal for ssh to ask the host key on) and git is told not to prompt",
               seen is not None and len(seen) == 2 and int(seen[0]) != os.getsid(0) and seen[1] == "0", (seen, os.getsid(0), r.stderr))
@@ -197,6 +197,11 @@ sys.exit(255)
     for bad in ("0", "-3", "soon", "inf", "nan"):
         r = tool("select", SUITEMAP_FETCH_TIMEOUT=bad)
         check(f"select: SUITEMAP_FETCH_TIMEOUT={bad} is an error at once, never a silent default", r.returncode != 0 and "SUITEMAP_FETCH_TIMEOUT" in r.stderr and r.stdout == "", (r.returncode, r.stdout, r.stderr))
+    r = tool("list", SUITEMAP_FETCH_TIMEOUT="soon")
+    check("list: a bad SUITEMAP_FETCH_TIMEOUT is refused when the command starts, though `list` never fetches (the value is checked up front, not when a fetch happens to need it)",
+          r.returncode != 0 and "SUITEMAP_FETCH_TIMEOUT" in r.stderr and r.stdout == "", (r.returncode, r.stdout, r.stderr))
+    r = tool("list")
+    check("list: with no SUITEMAP_FETCH_TIMEOUT it runs as before", r.returncode == 0 and r.stdout.strip() != "", (r.returncode, r.stdout[:200], r.stderr))
 
     # ---- the folder is the one a test runner's copy carries, and never a commit's
     REAL = os.path.dirname(SCR)
