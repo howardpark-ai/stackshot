@@ -27,6 +27,9 @@ delivered as before, marked, only when the held store cannot file it or the rule
            through. Any other pass to a front agent (_front_route) is an answer to the agent's own question (delivered unmarked while the person is in
            that conversation, else written onto the item it names or held), or goes to the project's background agent, unmarked, or, in a project with none, is held
            through the front gate for the agent's next turn. A gate that cannot file it leaves the pass delivered, marked. A delivery to a background agent is unmarked.
+           A message a session wrote, passed to a front agent that `[front] result_turn_agents` lists, is a turn when that session was handed work by the agent (_front_result_turn, hook front_result: messaging.router_result, the message
+           tool's own test: the agent wrote to it within `[front] result_turn_hours`, or the message names an open item it moves that the agent itself handed it (the item's hand-off record); at most `[front] result_turn_cap_per_hour` an hour per sender):
+           delivered at once, unmarked unless it also needs him, as a line of kind exempt, past _front_route and _front_turn_gate. No agent is listed by default.
            A pass that would start the front agent's turn does so in two cases only (_front_turn_gate, service/front_turn.py): it needs him and he is talking with that agent now (telling.present_fronts), or he asked
            it, in his own words, to tell him about the notice's subject (the agent is in the `tell_him` of an open item the notice names). Otherwise it never reaches the front agent, not even held: it goes, unmarked, to the
            background agent that moves or works a named item, else it is ruled archived (a row of the digest). A pass to a background agent is not gated, nor is a configured watch (his standing ask); a hand-back, a fallback pass to -main and an
@@ -120,7 +123,7 @@ _LOCK = threading.Lock()
 
 # What the server wires in (configure): the front-agent test (telling.front_keeper), the push, the call made after a ruling
 # (the release of a hold that waited on the notice's anchor, the board's republish), and the front gate for an fyi or a page-owed notice (telling.front_fyi). The defaults stand alone, for the tests and the CLI.
-_HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None, "front_fyi": None, "front_answer": None, "front_turn": None, "his_items": None, "want_background": None, "front_words": None}      # his_items: service/front_turn.his_items, which of the named items are open ones of his; front_answer: messaging.router_answer, what becomes of an answer to a front agent's own question; front_turn: service/front_turn.warranted, whether a notice may start a turn of a front agent; want_background: service/background_want.want_background, the record that a project with no background agent could use one; front_words: service/sibling_words.held_words, whether a sibling front agent's message quotes his words
+_HOOKS: dict[str, Any] = {"is_front": None, "deliver": None, "after_rule": None, "front_fyi": None, "front_answer": None, "front_result": None, "front_turn": None, "his_items": None, "want_background": None, "front_words": None}      # his_items: service/front_turn.his_items, which of the named items are open ones of his; front_answer: messaging.router_answer, what becomes of an answer to a front agent's own question; front_turn: service/front_turn.warranted, whether a notice may start a turn of a front agent; want_background: service/background_want.want_background, the record that a project with no background agent could use one; front_words: service/sibling_words.held_words, whether a sibling front agent's message quotes his words
 
 
 def configure(**kw: Any) -> None:
@@ -303,12 +306,12 @@ def _owner_mark() -> str:
 
 
 # ----------------------------------------------------------------------------- delivery
-def deliver_via(push: list[str], target: str, text: str, timeout: float = 110.0) -> str:
+def deliver_via(push: list[str], target: str, text: str, timeout: float = 110.0, kind: str = "") -> str:
     """Push `text` to `target` the way the server's relays do (push.py, the message source's queue) → push.py's last line
-    ("delivered …", "queued …", "inbox …") or an error word."""
+    ("delivered …", "queued …", "inbox …") or an error word. `kind` is the front gate's kind of the line (`exempt` for a result turn), stored on the queued line: the pane's digest never files an exempt one."""
     try:
         r = subprocess.run([*_interp.resilient(push), "--from", BY, target, text], capture_output=True, text=True, timeout=timeout,
-                           env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg"})
+                           env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg", **({"ANCHOR_PUSH_KIND": kind} if kind else {})})
         return (r.stdout.strip().splitlines() or [r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "no result"])[-1]
     except subprocess.TimeoutExpired:
         return "timed out"
@@ -316,9 +319,11 @@ def deliver_via(push: list[str], target: str, text: str, timeout: float = 110.0)
         return f"failed: {type(e).__name__}"
 
 
-def _deliver(target: str, text: str) -> str:
+def _deliver(target: str, text: str, kind: str = "") -> str:
     fn = _HOOKS["deliver"]
-    return fn(target, text) if fn else deliver_via([sys.executable, _paths.program("fleet", "push")], target, text)
+    if fn:
+        return fn(target, text, kind=kind) if kind else fn(target, text)
+    return deliver_via([sys.executable, _paths.program("fleet", "push")], target, text, kind=kind)
 
 
 def _ok(outcome: str) -> bool:
@@ -574,6 +579,22 @@ def _want_background(n: dict[str, Any], root: str, ln: dict[str, Any], cx: "_rou
         fn(root, "message")
     except Exception:  # noqa: BLE001
         return
+
+
+def _front_result_turn(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, cx: "_router.Context") -> bool:
+    """Is a pass to the FRONT agent `target` the result of work that agent handed over, so it is delivered as a turn whether or not the person is there (`[front] result_turn_agents`, the `front_result` hook: service/messaging.py `router_result`, the test the message tool makes
+    for a message by name)? Only a message a session wrote (`_is_session_message`: not his, not a board line, not the audit's, no hand-back or words of his), not an fyi or page-owed hold, not a watch or an audit finding, and not from a front agent (the target itself or a peer: the channel
+    between front agents). False when no hook is wired, the key lists no agent, or anything fails: the pass takes the rules below. Never raises."""
+    try:
+        fn = _HOOKS["front_result"]
+        if not fn or not target or str(n.get("kind") or "") != "message" or str(n.get("hold") or "") in ("fyi", "page-owed") or ln.get("rule") in ("audit-owners", "watch"):
+            return False
+        body = _body(n)
+        if not _is_session_message(n, body) or not _is_front(target, root, cx):
+            return False
+        return bool(fn(target, str(n.get("who") or ""), body, n["id"]))      # the sender (a session, no script, not the target or a peer front agent) is the hook's test
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _front_route(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, cx: "_router.Context") -> tuple[str, str]:
@@ -965,7 +986,12 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                 held_for = target
                 ruling, target, reason = "held", "", f"held: a person's message, {reason} (rides {held_for}'s next turn, starts none)"
                 base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold="person")
-        if ruling == "passed" and prior.get("status") != "delivered" and base.get("source") != "fallback" and not person_front:      # a pass to a front agent with no need of the person: not marked, not a turn for him
+        result_front = False           # a pass that is the result of work the front agent handed over (`_front_result_turn`): a turn, past the holds and gates below, a line of kind exempt
+        if ruling == "passed" and base.get("source") != "fallback" and not person_front and _front_result_turn(n, ln, target, aroot, cx):
+            result_front = True
+            unmarked_front = not _must_see(n, ln, _body(n), cx, target)      # it keeps the mark when it also needs him (it names an open item of his), as a pass to a front agent always has
+            base["reason"] = reason = f"{reason} (the result of work {target} handed over: a turn)"
+        if ruling == "passed" and prior.get("status") != "delivered" and base.get("source") != "fallback" and not person_front and not result_front:      # a pass to a front agent with no need of the person: not marked, not a turn for him
             act_, arg_ = _front_route(n, ln, target, aroot, cx)
             nameless = "the message names no open item of his; " if _is_session_message(n, _body(n)) and act_ in ("background", "archived", "hold") and not _must_see(n, ln, _body(n), cx, target) else ""      # a session's message reaches here with no item of his named, except a sibling's quoted words (held with one named): the reason line says so only for the first
             if act_ == "deliver":
@@ -988,7 +1014,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                     reason = f"written onto the item it names, not delivered: an answer to {held_for}'s question, and the person is not in that conversation" if act_ == "items" else f"held: front agent, {nameless}{arg_} (rides its next turn, starts none)"
                     base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold="fyi")
                 # a gate that could not file it (the agent's hook cannot fetch held lines, or the gate failed): delivered as before, marked, never dropped for want of a place to hold it
-        if ruling == "passed" and prior.get("status") != "delivered":      # a pass that asks nothing of a background agent is held for its next turn
+        if ruling == "passed" and prior.get("status") != "delivered":      # a pass that asks nothing of a background agent is held for its next turn (a result pass goes through it unchanged: its target is a front agent, `_hold_kind` holds only for a background agent, and `_front_result_turn` refuses the fyi and page-owed notices the two other branches take)
             hk = _hold_kind(n, ln, target, cx)
             if hk and _held.add(_held.key_of(target), hk, _body(n), sender=str(n.get("who") or ""), gid=str(ln.get("item") or ""), nid=n["id"], whole=(hk in ("fyi", "person")), where=_held_where(n)):
                 held_for = target
@@ -1005,7 +1031,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                     ruling, target = ("held" if held_for else "archived"), ""      # filed for the agent's next turn, or told to no one (its hook cannot fetch held lines): only the first is held
                     reason = _held.reason(hold_as) if verdict == "fyi" else f"archived: front agent, {why} ({hold_as})"
                     base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold=hold_as)
-        if ruling == "passed" and prior.get("status") != "delivered" and not unmarked_front and not person_front:      # a pass to a front agent starts a turn only when he is with it and it needs him, or he asked it to tell him about the subject
+        if ruling == "passed" and prior.get("status") != "delivered" and not unmarked_front and not person_front and not result_front:      # a pass to a front agent starts a turn only when he is with it and it needs him, or he asked it to tell him about the subject
             verdict_t, arg_t = _front_turn_gate(n, ln, target, aroot, cx)
             if verdict_t == "background" and base.get("source") == "fallback" and arg_t == tried:      # the fallback after the background agent's own deliveries failed: back to it it never goes, so a pass that meets neither case is logged
                 verdict_t, arg_t = "archived", f"the background agent {tried} could not be reached, and he is not talking with {target} and has not asked it to tell him about this"
@@ -1027,7 +1053,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
             if prior.get("status") == "delivered":            # delivered earlier; only the ruling is missing
                 out = str(prior.get("outcome") or "delivered")
             else:
-                out = _deliver(target, compose(n, root, target, reason, mark))
+                out = _deliver(target, compose(n, root, target, reason, mark), "exempt" if result_front else "")
                 if not _ok(out):
                     return {**base, "status": "error", "outcome": out, "error": f"delivery to {target} failed: {out}"}
             base["outcome"] = out
