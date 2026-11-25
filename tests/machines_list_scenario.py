@@ -801,6 +801,13 @@ rows25 = [mach(f"m{i}", online="yes") for i in range(25)]
 st, ans = SVC.post("box-far", good(rows25))
 check("12 a body with 25 bad readings in 25 rows is stored whole (200); the answer names 20 of them, then how many more", st == 200 and ans["machines"] == 25 and ans["dropped"] == [f"machines[{i}].online" for i in range(20)] + ["and 5 more"], ans)
 check("12 …and no row of it holds the bad `online`", all("online" not in m for m in SVC.last_machines()[0]["machines"]))
+st, ans = SVC.post("box-far", good([mach(f"n{i}", online="yes") for i in range(20)]))
+check("12 exactly 20 dropped readings are all named and there is no `and 0 more`; 21 name 20 and say `and 1 more`", ans.get("dropped") == [f"machines[{i}].online" for i in range(20)] and "and 0 more" not in json.dumps(ans)
+      and SVC.post("box-far", good([mach(f"p{i}", online="yes") for i in range(21)]))[1]["dropped"] == [f"machines[{i}].online" for i in range(20)] + ["and 1 more"], ans)
+st, ans, row = drop_of({"last_seen": 1_700_000_000, "checked": 1_700_000_100, "online": False})
+check("12 a valid number is stored as a float: 1700000000 is read back as 1700000000.0 in the file", st == 200 and isinstance(row["last_seen"], float) and b'"last_seen":1700000000.0' in stored() and b'"checked":1700000100.0' in stored(), stored()[-300:])
+st, ans, row = drop_of({"versions": {"café": "1", "café": "2"}})
+check("12 `versions` keys are not Unicode-normalised: a composed and a decomposed é are two keys", st == 200 and len(row["versions"]) == 2 and "dropped" not in ans, row)
 st, ans = SVC.post("box-far", good([mach("demo-a", online=7, checked="x"), mach("demo-b", versions=V17)]))
 check("12 two rows, three bad readings: named in the body's order", ans.get("dropped") == ["machines[0].online", "machines[0].checked", "machines[1].versions"], ans)
 # ---- the validator on its own: `dropped` is not part of what is stored
@@ -829,6 +836,16 @@ with TestClient(app) as c2:
     r2 = c2.post("/client/machines", content=json.dumps(sample2).encode(), headers=JH)
     row3b = SVC.last_machines()[0]["machines"]
     check("12 the sample with a bad `online` and one row without readings: 200, the answer names machines[1].online, the row keeps its other readings, the old-style row has none", r2.status_code == 200 and r2.json() == {"ok": True, "machines": 3, "dropped": ["machines[1].online"]} and "online" not in row3b[1] and row3b[1]["last_seen"] == WS - 3600 and not (set(row3b[2]) & set(SVC.READING_KEYS)), (r2.status_code, r2.text, row3b[1]))
+    c2.post("/client/machines", content=json.dumps(sample).encode(), headers=JH)
+    keep12 = stored()
+    # the whole-body guards still apply to the new keys: a number of more than 64 digits, and more than 64 brackets open at once, are 400 whatever key holds them; the last good list stays
+    base_txt = json.dumps(good([mach("demo-a")], written=WS))
+    r3 = c2.post("/client/machines", content=base_txt.replace('"retired": false', '"retired": false, "last_seen": ' + "1" * 65, 1).encode(), headers=JH)
+    r4 = c2.post("/client/machines", content=base_txt.replace('"retired": false', '"retired": false, "versions": ' + "[" * 70 + "]" * 70, 1).encode(), headers=JH)
+    after_refused = stored()
+    r5 = c2.post("/client/machines", content=base_txt.replace('"retired": false', '"retired": false, "last_seen": ' + "1" * 64, 1).encode(), headers=JH)
+    check("12 a number of 65 digits in a reading is a 400 `too many digits`, 70 brackets deep in a reading is a 400 `nests too deeply`, and the last good list stays", r3.status_code == 400 and "too many digits" in r3.json()["error"] and r4.status_code == 400 and "nests too deeply" in r4.json()["error"] and after_refused == keep12, (r3.text[:100], r4.text[:100]))
+    check("12 …a number of 64 digits is within that guard: it is no 400 and the reading, out of range, is dropped (200 with `dropped`)", r5.status_code == 200 and r5.json().get("dropped") == ["machines[0].last_seen"], (r5.status_code, r5.text[:200]))
     c2.post("/client/machines", content=json.dumps(sample).encode(), headers=JH)
 _real_paired = _KEYS.paired; _KEYS.paired = lambda: True
 try: view3 = MP.view(time.time())
