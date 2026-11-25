@@ -345,8 +345,8 @@ Who moves the item now: {{OWNER}}, a session name or id, or the project's backgr
 is who takes the item when the wait ends. A front agent (a session
 {{OWNER}} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets
 mover=<front agent> gets the project's builder instead (the reply and History say so; send it again to keep it; an update by the item's
-mover or the project's builder that names a live front agent holding the item's first open named step, as the item stands before the
-write, hands it back: kept as sent at once, and a mover is told as a turn;
+mover (no front agent) or the project's builder that names a live front agent of the project holding the item's first open named step, as the item stands before the
+write and left open by it, hands it back: kept as sent at once, and a mover is told as a turn;
 with no builder it is refused, except from a listed session to a front agent of the item's own project: mover= tells it,
 the others leave it to the answer or the wake). A front agent of the item's project may
 hand it to a sibling front agent on {{OWNER}}'s words: said=[Acked-by …] keeps the sibling in mover, then,

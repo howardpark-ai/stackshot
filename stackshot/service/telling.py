@@ -489,12 +489,18 @@ def own_step(meta: dict[str, Any], who: str, past_his: bool = False) -> bool:
     return any((nm := _steps.opener(t)) and _anc.same_session(nm, who) for t in named[:1] + [meta.get("ask")])
 
 
-def step_holder(meta: dict[str, Any], past_his: bool = True) -> str:
-    """The name that opens the item's first open named step (a step with no `<name>:` opener is skipped; `past_his`: the owner's own open lines are not counted, as in own_step), "" when there is none. The ask is not read."""
-    for s in _steps.view(meta):
+def step_holder_at(meta: dict[str, Any], past_his: bool = True) -> "tuple[str, int]":
+    """(the name that opens the item's first open named step, that step's position on the checklist, 0-based as the step numbers of a write count it less one); ("", -1) when there is none. A step with no `<name>:` opener is
+    skipped; `past_his`: the owner's own open lines are not counted, as in own_step. The ask is not read."""
+    for i, s in enumerate(_steps.view(meta)):
         if s["status"] == _steps.OPEN and _steps.opener(s["text"]) and not (past_his and _steps.is_his(s["text"], unnamed_is_his=False)):
-            return str(_steps.opener(s["text"]))
-    return ""
+            return str(_steps.opener(s["text"])), i
+    return "", -1
+
+
+def step_holder(meta: dict[str, Any], past_his: bool = True) -> str:
+    """The name that opens the item's first open named step (`step_holder_at`), "" when there is none."""
+    return step_holder_at(meta, past_his)[0]
 
 
 def _own_named(gid: str, item: "dict[str, Any] | None", who: str, past_his: bool = False) -> bool:
@@ -1841,7 +1847,7 @@ def tell_check_closed(gid: str, item: dict[str, Any], label: str) -> list[str]:
     return told
 
 
-HO_STATE = threading.local()      # per write: the hand-offs it has just recorded ({gid: to}), and the (gid, session) pairs it has already told
+HO_STATE = threading.local()      # per write: the hand-offs it has just recorded ({gid: to}), the (gid, session) pairs it has already told, and the front agents its gate kept as a hand-back (`handback`, set by gates.fix_front_mover, cleared by the update tool)
 
 
 def handoff_notify(gid: str, item: dict[str, Any]) -> str:
@@ -1859,7 +1865,8 @@ def handoff_notify(gid: str, item: dict[str, Any]) -> str:
             return ""
         proj = str((item.get("metadata") or {}).get("project") or "")
         if front_keeper(to, proj)[0] and not h.front_handed_by_peer(r, to, proj) and not r.get("words"):      # a front agent is told only of a hand-off from a session some project page lists when the item's project is front-only, or of one a sibling front agent made on the owner's words (the record keeps them)
-            if not own_step(item.get("metadata") or {}, to, past_his=True):      # …or of a hand-back: the front agent holds the item's first open named step (past the owner's own lines), the gate kept the session's mover as sent (gates.handed_back), and it is told as a turn
+            kept = any(_anc.same_session(v, to) for v in getattr(HO_STATE, "handback", None) or ())      # …or of a hand-back: this very write's gate kept the mover as sent because the front agent holds the item's first open named step (gates.handed_back); a mover another session
+            if not kept or not own_step(item.get("metadata") or {}, to, past_his=True):      # sent again after the swap (the mover's no) is no hand-back, and the step must still stand after the write for the notice to start a turn
                 return ""
             tell_kind(own_move_kind(to, gid, {gid: item}, named=True, past_his=True), gid, tid or to, h.handoff_text(gid, item, r), tag="handoff")      # the kind is read for the name the item stores (a step line's own letter case matches it), the push goes to the id
             return f"\n({_session_label(to)} has been told it is handed {_gh.shown(gid)} back)"
