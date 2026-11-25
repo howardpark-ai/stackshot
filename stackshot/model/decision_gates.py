@@ -151,27 +151,30 @@ def _code_defined(code: str, text: str, listing: str = "") -> bool:
 # and the page draws a Yes / No under both. Read in the Decide part only (a Recommend, Stakes or By part is never judged), with URLs, entities and quoted words masked in place. The rule is NARROW on
 # purpose: a false refusal of a plain single decision costs more than a slip-through, so only forms that unambiguously ask for another answer count, and "ship the login and signup pages",
 # "whether A or B", "merge now and, if the run is green, release tomorrow", "retire the old queue and also move its jobs" and "wait a day and then decide" all pass:
-#   1. a joiner (and, plus, then, but, also, a comma or semicolon before it or not) and a request to the owner: say (if, whether, which, what, how, when, who, where, why), tell me or us, let me or
-#      us know, or decide, confirm, state, advise, specify, clarify, indicate followed by a question word ("and say if", "and tell me whether", "and let me know", "and decide whether", "plus confirm if");
-#   2. "and", "plus" or "as well as" before whether ("and whether", "as well as whether");
-#   3. ", and" or ", plus" before which, who or whom (", and which lane");
-#   4. "and, if so" and "and if so / yes / not / no" when it ends the clause ("approve it and, if so, when");
-#   5. "and also" before a verb that asks for another decision: approve, accept, decline, reject, allow, permit, let me or us decide;
-#   6. two question marks. A ";" followed by a space is the older rule (`; and`).
+#   1. a joiner (and, plus, then, but, also, a comma or semicolon before it or not) and say (if, whether, which, what, how, when, who, where, why), tell me or us, or let me or us know
+#      ("and say if", "and tell me whether", "and let me know", "plus say which");
+#   2. a joiner and decide, confirm, state, advise, specify, clarify or indicate followed by whether or if ("and decide whether", "plus confirm if"): "and confirm when it is live",
+#      "and then state which version went out" and "and then decide when to ship" are one decision and pass;
+#   3. "and", "plus" or "as well as" before whether ("and whether", "as well as whether");
+#   4. ", and" or ", plus" before which, who or whom (", and which lane");
+#   5. "and, if so" and "and if so / yes / not / no" when the clause ENDS there (end of text, ? . ;) or a question word follows ("approve it and, if so, when to ship"); a comma followed by
+#      anything else is a condition on one decision and passes ("merge PR 8 and, if so, release", "merge it now and if not, wait for CI");
+#   6. two question marks with text between them. A ";" followed by a space is the older rule (`; and`).
+# "and also approve / allow / accept ..." is no rule: it is a bundled action ("retire the old queue and also allow its jobs to drain"), so it passes. Known limits that pass too: a second question
+# put with an auxiliary verb and no join, an imperative that asks for another answer without a question word, and "choose/pick which".
 # The text read is collapsed to single spaces and cut to its first _GATE_CHARS characters (an ask over 240 is refused before the gates), so the matching time is bounded.
 _GATE_CHARS = 2000
 _Q_WORD = r"(?:whether|if|which|what|how|when|who|whom|whose|where|why)"
-_ASK_VERB = (rf"(?:say(?:s|ing)?\s+{_Q_WORD}|tell(?:s|ing)?\s+(?:me|us)|let(?:ting)?\s+(?:me|us)\s+know|"
-             rf"(?:decid(?:e|es|ing)|confirm(?:s|ing)?|stat(?:e|es|ing)|advis(?:e|es|ing)|specif(?:y|ies|ying)|clarif(?:y|ies|ying)|indicat(?:e|es|ing))\s+{_Q_WORD})")
+_ASK_VERB = rf"(?:say(?:s|ing)?\s+{_Q_WORD}|tell(?:s|ing)?\s+(?:me|us)|let(?:ting)?\s+(?:me|us)\s+know)"
 _JOIN = r"(?:and|plus|then|but|also)\b,?\s*(?:(?:also|please|then)\s+)*"
-_ALSO_VERBS = r"(?:approve|accept|decline|reject|allow|permit|let\s+(?:me|us)\s+decide)"
+_ASK_WHETHER = r"(?:decid(?:e|es|ing)|confirm(?:s|ing)?|stat(?:e|es|ing)|advis(?:e|es|ing)|specif(?:y|ies|ying)|clarif(?:y|ies|ying)|indicat(?:e|es|ing))\s+(?:whether|if)"
 _SECOND_Q_RX = re.compile(
     rf"[,;]?\s?\b{_JOIN}{_ASK_VERB}\b|"
+    rf"[,;]?\s?\b{_JOIN}{_ASK_WHETHER}\b|"
     rf"[,;]?\s?\b(?:and|plus|as\s+well\s+as)\s+(?:also\s+)?whether\b|"
     rf",\s?(?:and|plus)\s+(?:also\s+)?(?:which|who|whom)\b|"
-    rf"[,;]?\s?\band,?\s+if\s+(?:so|yes|not|no)\b(?=\s?[,;.?!]|\s?$|\s+{_Q_WORD}\b)|"
-    rf"[,;]?\s?\band\s+also\s+{_ALSO_VERBS}\b|"
-    r"\?(?=[^?]*\S[^?]*\?)", re.I)
+    rf"[,;]?\s?\band,?\s+if\s+(?:so|yes|not|no)\b(?=\s?[.?;]|\s?$|,?\s+{_Q_WORD}\b)|"
+    r"\?(?=[^?]*[^\s?][^?]*\?)", re.I)
 _JOINER_LEAD_RX = re.compile(r"^[,;\s]*(?:(?:and|plus|then|but|also|as\s+well\s+as)\b[,\s]*)?(?:(?:also|please|then)\s+)*", re.I)
 
 
@@ -262,17 +265,27 @@ def _gate_one_decision(meta: dict[str, Any], description: str, lifted: bool = Fa
 # An ask that approves or picks a design, plan, proposal, draft, spec or package carries the page it rests on IN THE ASK LINE (a markdown link or a bare http(s) URL): the owner opens it from the
 # question he answers, and a summary in the description, a link only in the description, or a path on a machine is not the design. Read in the Decide part only. The matcher is narrow: an approving
 # verb (approve, accept, adopt, sign off, pick, choose, select, decide on, go with, review, confirm ...), then up to five words, then a determiner (the, this, our, a ...), then up to five modifiers, then
-# the noun. So "ship the plan-A-only lane", "restart the server tonight" and "pick the package manager" are not it, and a hyphenated "plan-A-only" is never the noun. "the six-part rollout" (a number and
-# "-part", then a word) counts as the thing named. An item whose options name real alternatives (not Yes/No, not Approve/Decline) is read from its options, and a watcher's own ask is never judged.
+# the noun. So "ship the plan-A-only lane" and "restart the server tonight" are not it, and a hyphenated "plan-A-only" is never the noun. A noun directly followed by another plain word is a compound
+# and no design ("approve the design system rollout", "the spec change", "the draft deadline", "the plan renewal"); only a preposition, conjunction, determiner, auxiliary or adverb after it leaves
+# the design ("the design in the link text", "the plan below"). "plan" after a service word (data, hosting, payment, support, backup ...) is a subscription or a payment, and "package" counts only after
+# decision, option, proposal, design, migration, rollout or launch ("the migration package"): a bare "the package" is usually software. "the six-part rollout" (a number and "-part", then a word)
+# counts as the thing named. An item whose options name real alternatives (not Yes/No, not Approve/Decline) is read from its options, and a watcher's own ask is never judged.
 _DESIGN_VERB = (r"(?:approv(?:e|es|ing)|accept(?:s|ing)?|adopt(?:s|ing)?|sign(?:s|ing)?\s+off(?:\s+on)?|ratif(?:y|ies|ying)|endors(?:e|es|ing)|green-?light(?:s|ing)?|"
                 r"pick(?:s|ing)?|choos(?:e|es|ing)|select(?:s|ing)?|decid(?:e|es|ing)(?:\s+on)?|settl(?:e|es|ing)\s+on|go(?:es|ing)?\s+(?:ahead\s+)?with|"
                 r"review(?:s|ing)?|confirm(?:s|ing)?)")
-_DESIGN_NOUN = r"(?:design|plan|proposal|draft|spec|specification|package|rfc|options?\s+(?:doc|document|page|paper|memo))"
+_DESIGN_NOUN = r"(?:design|plan|proposal|draft|spec|specification|rfc|(?:decision|options?|proposal|design|migration|rollout|launch)\s+package|options?\s+(?:doc|document|page|paper|memo))"
 _DESIGN_NUM = r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)"
 _DESIGN_LEAD = (rf"(?<![\w-]){_DESIGN_VERB}(?:\s+[^\s·;,.?!:]+){{0,5}}?\s+(?:the|this|that|these|those|our|my|its|his|her|their|a|an)\s+")
-_DESIGN_RX = re.compile(_DESIGN_LEAD + rf"(?P<mods>(?:[\w'’-]+\s+){{0,5}}?)(?P<noun>{_DESIGN_NOUN})s?(?![\w-])(?!\.\w)(?!\s+(?:manager|lock|json|registry|index|name|version|install))", re.I)
-_PLAN_TIER_RX = re.compile(r"\b(?:pro|max|free|team|enterprise|billing|api|paid|subscription|pricing|price)\b", re.I)      # "the Pro plan" is a subscription, not a design
-_DRAFT_THING_RX = re.compile(r"\s+(?:pr|pull\s+request|release|e-?mail|message)\b", re.I)      # "the draft PR", "the draft email": a draft of a thing, not a draft design
+# A word that follows the noun and leaves it a design ("approve the design in the link", "the plan below", "the proposal for Q3", "the plan today"): a preposition, a conjunction, a determiner or pronoun,
+# an auxiliary verb, an adverb of time or place. Any OTHER plain word after the noun makes the two a compound ("the design system rollout", "the spec change", "the draft deadline", "the plan renewal"),
+# which is no design asked about.
+_DESIGN_AFTER = (r"(?:for|to|of|in|on|at|by|with|from|that|which|who|whom|whose|below|above|here|there|is|are|was|were|be|been|being|and|or|nor|as|if|so|then|but|before|after|until|because|when|while|since|"
+                 r"via|per|into|onto|over|under|about|within|without|across|through|against|between|among|around|during|than|today|tonight|tomorrow|now|soon|first|again|please|asap|too|also|alone|together|"
+                 r"attached|linked|outlined|described|proposed|next|last|this|these|those|the|a|an|our|my|your|their|his|her|its|it|we|you|they|i|will|would|can|could|may|might|should|must|shall|has|have|had|"
+                 r"does|do|did|not|no|yet|instead|anyway|either|only|just|still|already|up|out|down|off|back|upon|toward|towards|except|unless|whether|how|what|where|why)")
+_DESIGN_RX = re.compile(_DESIGN_LEAD + rf"(?P<mods>(?:[\w'’-]+\s+){{0,5}}?)(?P<noun>{_DESIGN_NOUN})s?(?![\w-])(?!\.\w)(?!\s+(?!{_DESIGN_AFTER}\b)[a-z])", re.I)
+_PLAN_TIER_RX = re.compile(r"\b(?:pro|max|free|team|enterprise|billing|api|paid|subscription|pricing|price|data|hosting|payment|support|storage|backup|phone|mobile|insurance|savings|retirement|service|cloud|"
+                           r"monthly|annual|yearly|usage|credit|loan)\b", re.I)      # "the Pro plan", "the data plan": a subscription or a payment plan, not a design
 _DESIGN_PART_RX = re.compile(_DESIGN_LEAD + rf"(?P<noun>{_DESIGN_NUM}-part\s+[\w-]+)", re.I)
 _LINK_RX = re.compile(r"https?://[^\s)\]>]+", re.I)      # a markdown link's URL is one too
 _LINK_SHAPE = "[{noun}](<the page's link>)"
@@ -289,8 +302,6 @@ def _design_unlinked(meta: dict[str, Any]) -> str:
         noun = m.group("noun").lower()
         if noun == "plan" and _PLAN_TIER_RX.search(m.group("mods")):
             continue
-        if noun == "draft" and _DRAFT_THING_RX.match(decide, m.end()):
-            continue
         return re.sub(r"\s+", " ", noun)
     m = _DESIGN_PART_RX.search(decide)
     return re.sub(r"\s+", " ", m.group("noun").lower()) if m else ""
@@ -302,7 +313,7 @@ def _gate_design_link(meta: dict[str, Any]) -> None:
     if not noun:
         return
     shape = _LINK_SHAPE.format(noun=noun.split()[-1])
-    raise ToolError(f"Refused: this ask names a {noun} to approve or pick but carries no link to it. link the {noun} in the ask: a page {OWNER} can open, not a path on a machine or a summary "
+    raise ToolError(f"Refused: this ask names a {noun} to approve or pick but carries no link to it. Link the {noun} in the ask: a page {OWNER} can open, not a path on a machine or a summary "
                     f"(a page in the project's brain or a doc; a link only in the description does not count). Put {shape} in the Decide part, with a short link text so the whole ask stays "
                     f"within {_rmod.ASK_MAX} characters: ask=\"Decide: whether to approve the {noun} {shape} · Recommend: … · Stakes: … · By: …\".")
 
