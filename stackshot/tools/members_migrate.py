@@ -1,15 +1,15 @@
-"""tools/people_migrate.py — the one-time data change that writes the first person's name on what the store holds without one (the rules are stackshot/waits/people_pass.py), in three modes:
+"""tools/members_migrate.py — the one-time data change that writes the first person's name on what the store holds without one (the rules are stackshot/waits/members_pass.py), in three modes:
 
-  tools/people_migrate.py                              DRY RUN (the default): the live store copied into a private scratch folder, the whole pass run on the copy twice, and what it did read back: one block
+  tools/members_migrate.py                              DRY RUN (the default): the live store copied into a private scratch folder, the whole pass run on the copy twice, and what it did read back: one block
                                                       per item the pass would change, refuse or list, with the keys as they stand now and as they would stand, the History line, then the totals. Writes
                                                       nothing live; asks no server.
-  tools/people_migrate.py --store <dir>                the dry run over another store directory
-  tools/people_migrate.py --json out.json              the rows as JSON too
-  tools/people_migrate.py --apply --sender <you>       the real pass, through the live server (POST /client/migrate op people, this machine's token; [model] migration = true and the sender in
-                                                      [model] migration_senders). It asks the server for the plan first (op people with dry), then writes, BEFORE the first write, a backup of every item it
+  tools/members_migrate.py --store <dir>                the dry run over another store directory
+  tools/members_migrate.py --json out.json              the rows as JSON too
+  tools/members_migrate.py --apply --sender <you>       the real pass, through the live server (POST /client/migrate op members, this machine's token; [model] migration = true and the sender in
+                                                      [model] migration_senders). It asks the server for the plan first (op members with dry), then writes, BEFORE the first write, a backup of every item it
                                                       will touch (the item's file, byte for byte: <run-dir>/<pass id>/items/<id>.json) and the undo file <run-dir>/<pass id>/undo.json (fsynced), then stamps the
-                                                      items in batches and records each batch's real result in the undo file. The default run directory is ~/.local/share/stackshot-runs/people-run.
-  tools/people_migrate.py --undo <undo.json> --sender <you>   puts every item's keys back the way the undo file says (op unpeople): an item that still holds what the pass left gets its old keys back;
+                                                      items in batches and records each batch's real result in the undo file. The default run directory is ~/.local/share/stackshot-runs/members-run (a pass the earlier script began is in people-run beside it: an unfinished one there is named too, and its undo file is undone with --undo as ever).
+  tools/members_migrate.py --undo <undo.json> --sender <you>   puts every item's keys back the way the undo file says (op unmembers): an item that still holds what the pass left gets its old keys back;
                                                       one a later save changed is `kept` and left as it is; running it again is a no-op.
 
 What the pass does, per item (open or closed): every stored answer with no `by` gets the first person's name (the name a record with none already reads as). On an open item, where reading it makes no
@@ -48,10 +48,11 @@ from stackshot.tools import compare_pair_reads as CP  # noqa: E402  — the priv
 from stackshot.tools import migrate_model as MM  # noqa: E402  — LiveApplier, say
 from stackshot.tools import stamp_phase as SP  # noqa: E402  — load_dir, write_atomic, chunks, new_pass_id
 from stackshot.tools import until_migrate as UM  # noqa: E402  — the run folder's lock, pruning and undo-file helpers are the until pass's, shared
-# stackshot.waits.people_pass is imported inside dry_run, after the scratch config is set: it loads stackshot.core.config, which reads the config file once at import, so a top-level import would
+# stackshot.waits.members_pass is imported inside dry_run, after the scratch config is set: it loads stackshot.core.config, which reads the config file once at import, so a top-level import would
 # leave the server (and the pass) on the LIVE store paths.
 
-DEFAULT_RUN = Path.home() / ".local" / "share" / "stackshot-runs" / "people-run"
+DEFAULT_RUN = Path.home() / ".local" / "share" / "stackshot-runs" / "members-run"
+EARLIER_RUN = DEFAULT_RUN.with_name("people-run")      # the run folder of the script's first version (the people pass). Only while --run-dir is the default, an unfinished pass left there is named before a new --apply so its undo file is not forgotten; this folder is never locked, pruned or given a new pass, and a --run-dir of your own never looks there
 say = MM.say
 show = UM.show
 EXIT_LEFT_OVER = UM.EXIT_LEFT_OVER
@@ -109,23 +110,23 @@ def dry_run(a: argparse.Namespace) -> int:
         os.environ.pop("STACKSHOT_URL", None)
         os.environ["STACKSHOT_FLEET_DIR"] = str(root / "fleet")
         if "stackshot.core.config" in sys.modules:
-            raise SystemExit("people_migrate: the config was loaded before the scratch copy was made; refusing to run the pass (it would write the live store)")
+            raise SystemExit("members_migrate: the config was loaded before the scratch copy was made; refusing to run the pass (it would write the live store)")
         from stackshot.web import server  # noqa: PLC0415
         from stackshot.web import publish as _web_publish  # noqa: PLC0415
         from stackshot.service import store as _service_store  # noqa: PLC0415
-        from stackshot.waits import people_pass as PP  # noqa: PLC0415
-        from stackshot.core import people as _people  # noqa: PLC0415
+        from stackshot.waits import members_pass as PP  # noqa: PLC0415
+        from stackshot.core import members as _members  # noqa: PLC0415
         from stackshot.service import retire_passes as _retire_passes  # noqa: PLC0415
         from stackshot.service import stamp as _stamp  # noqa: PLC0415
         from stackshot.web import wiring as _wiring  # noqa: PLC0415
         if not Path(_service_store._path("g1")).resolve().is_relative_to(root.resolve()):
-            raise SystemExit("people_migrate: the server does not resolve items inside the scratch copy; refusing to run the pass")
+            raise SystemExit("members_migrate: the server does not resolve items inside the scratch copy; refusing to run the pass")
         _web_publish._publish = lambda: None
         d = root / "repo/board-data"
         items = SP.load_dir(d)
         ids = sorted(items, key=SP.num)
         host = _stamp.PassHost(server, _stamp, _retire_passes, _wiring.PASS_NAMES)
-        first = _people.first()
+        first = _members.first()
         planned = {g: PP.one(host, g, dry=True) for g in ids}
         wrote = {g: PP.one(host, g) for g in ids}
         again = {g: PP.one(host, g) for g in ids}
@@ -182,7 +183,7 @@ def _apply(a: argparse.Namespace, app: Any = None) -> int:
         return sorted(SP.load_dir(store), key=SP.num)           # every item, open or closed: the server works out what each gets
     cands = candidates()
     say(f"{len(cands)} items read from {store}")
-    for f in unfinished(run_dir):
+    for f in unfinished(run_dir) + (unfinished(EARLIER_RUN) if run_dir == DEFAULT_RUN else []):
         say(f"an earlier pass did not finish recording its results ({f}): its entries with no result are not known to have been written. Undoing it alone also reverts items a later --apply wrote, "
             f"so undo the later pass files first, then this one: --undo {f}")
     def make_plan() -> list[dict[str, Any]] | None:
@@ -190,7 +191,7 @@ def _apply(a: argparse.Namespace, app: Any = None) -> int:
         cands = candidates()                  # read again each time: an item may have changed since the last plan
         out: list[dict[str, Any]] = []
         for ch in SP.chunks(cands):
-            st, d = app.call({"op": "people", "items": ch, "dry": True})
+            st, d = app.call({"op": "members", "items": ch, "dry": True})
             if st != 200:
                 say(f"the plan could not be made: [{st}] {d.get('error') if isinstance(d, dict) else d}")
                 return None
@@ -244,7 +245,7 @@ def _apply(a: argparse.Namespace, app: Any = None) -> int:
     entries = {e["item"]: e for e in undo["items"]}
     counts: collections.Counter[str] = collections.Counter()
     for ch in SP.chunks([g for g, _ in todo]):
-        st, d = app.call({"op": "people", "items": ch, "pass_id": pass_id})
+        st, d = app.call({"op": "members", "items": ch, "pass_id": pass_id})
         if st != 200:
             why = d.get('error') if isinstance(d, dict) else d
             if 400 <= st < 500:
@@ -312,7 +313,7 @@ def _undo(a: argparse.Namespace, app: Any = None) -> int:
     counts: collections.Counter[str] = collections.Counter()
     kept: list[str] = []
     for ch in SP.chunks(todo):
-        st, d = app.call({"op": "unpeople", "items": [{"item": e["item"], "before": e["before"], "after": e["after"], "history": e.get("history", ""), "dropped": e.get("dropped", [])} for e in ch]})
+        st, d = app.call({"op": "unmembers", "items": [{"item": e["item"], "before": e["before"], "after": e["after"], "history": e.get("history", ""), "dropped": e.get("dropped", [])} for e in ch]})
         if st != 200:
             say(f"a batch was refused as a whole: [{st}] {d.get('error') if isinstance(d, dict) else d}")
             counts["batch refused"] += len(ch)

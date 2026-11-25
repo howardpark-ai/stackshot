@@ -98,7 +98,7 @@ from stackshot.audit import audit_checks as _ac
 
 _HOST: Any = None       # the server module, set by `install_early`: the first owner of the passes' `S` (`pass_host` below)
 
-# The names the passes written against the server module (model/item_project_pass.py, model/last_activity_pass.py, waits/until_pass.py, waits/mover_pass.py, waits/people_pass.py) read off their `S` that neither the server module nor service/stamp.py,
+# The names the passes written against the server module (model/item_project_pass.py, model/last_activity_pass.py, waits/until_pass.py, waits/mover_pass.py, waits/members_pass.py) read off their `S` that neither the server module nor service/stamp.py,
 # service/retire_passes.py or service/merge_progress.py carries: the owners of the renderer, the pull-request event log and the merge pass. A suite or a tool that builds its own `stamp.PassHost` names this
 # namespace as its last owner.
 PASS_NAMES = SimpleNamespace(_rmod=_rmod, _elog=_elog, _merge_progress=_merge_progress)
@@ -177,11 +177,12 @@ def install_early(host: Any) -> None:
     _pages.LOCAL_ONLY = True   # the server answers the client API, so pages._api must never call it (a request to itself from the event loop stalls every request until its timeout)
 
     # the router's live mode reaches the server only through these (router_live.configure): which agents are front ones, the push,
-    # the call after a ruling, the front gate for an fyi, and what becomes of an answer to a front agent's question. `PUSH` is read at each call, so a test's fake push is the one used.
+    # the call after a ruling, the front gate for an fyi, what becomes of an answer to a front agent's question, and whether a pass is the result of work a listed front agent handed over (a turn). `PUSH` is read at each call, so a test's fake push is the one used.
     _router_live.configure(is_front=lambda who, project: _telling.front_keeper(who, project)[0],
-                           deliver=lambda target, text: _agent_names._router_delivered(target, text, _router_live.deliver_via(_telling.PUSH, target, text)),
+                           deliver=lambda target, text, kind="": _agent_names._router_delivered(target, text, _router_live.deliver_via(_telling.PUSH, target, text, kind=kind)),
                            after_rule=_router_live_after,
                            front_answer=lambda target, who, text, nid="": _messaging.router_answer(target, who, text, nid),
+                           front_result=lambda target, who, text, nid="": _messaging.router_result(target, who, text, nid),
                            front_turn=lambda target, subject, needs=True: _front_turn.warranted(target, subject, needs),
                            his_items=lambda subject: _front_turn.his_items(subject),
                            want_background=lambda project, kind: _background_want.want_background(project, kind),

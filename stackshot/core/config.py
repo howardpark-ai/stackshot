@@ -29,6 +29,7 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
     _here = _os.path.dirname(_os.path.abspath(__file__))
     _sys.path[:] = [_os.path.dirname(_os.path.dirname(_here))] + [p for p in _sys.path if _os.path.abspath(p or ".") != _here]
 
+import math
 import os
 import re
 import shlex
@@ -695,6 +696,26 @@ def server_host_refusal(cfg: dict[str, Any] | None = None) -> str:
     return ""
 
 
+def record_host_refusal(command: str, argv: list[str], cfg: dict[str, Any] | None = None) -> str:
+    """The refusal line of a tool that reads or writes the project record, off the server box, or "" when it may run here. The record lives on the server box; a copy on another box (a client's
+    checkout of the store) can be hundreds of commits behind, so a dry run there plans from old state and an --apply writes the old copy over the live record. The line names the ssh form to
+    run it where the record is: `ssh <host> '<command> <argv>'`, the host being [release] deploy_ssh when that is a plain host word, else "the server box". `command` is the
+    program as the record host runs it (`python3 ~/stackshot/stackshot/tools/project.py`, `~/stackshot/bin/stackshot keeper-mark`). A box that is the server host, and an install whose config names no server host at all (one box), get "". A check that cannot run (a config
+    that cannot be read) is no refusal, as for `server_host_refusal`. The caller skips this check when it was pointed at a copy on purpose (--store DIR, a rehearsal)."""
+    try:
+        why = server_host_refusal(cfg)
+    except Exception:  # noqa: BLE001
+        return ""
+    if not why:
+        return ""
+    h = get("release", "deploy_ssh", cfg=cfg)
+    h = h.strip() if isinstance(h, str) else ""
+    ok = bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._@-]*", h)) and _host_role(h) is None
+    where = f"ssh {h} " + shlex.quote(f"{command} {shlex.join(argv)}".strip()) if ok else "on the server box"
+    return (f"{why}; its copy of the project record may be behind the live one, so nothing is read or written here (a dry run would plan from old state, an --apply would write it over the live record). "
+            f"Run it where the record is: {where}")
+
+
 def report_notes(cfg: dict[str, Any] | None = None) -> list[str]:
     """Lines for a [audit] summary_to or [release] report_to that is set and cannot be used (see _report_slug): the default stands in its place, so the reports would go to the stand-in page."""
     out: list[str] = []
@@ -818,15 +839,15 @@ def fleet_tool() -> str:
     return str(get("fleet", "tool_name") or "").strip()
 
 
-def _people():
-    """The one reader of who the people are (people.py), imported at call time: it reads this module."""
-    from stackshot.core import people
-    return people
+def _members():
+    """The one reader of who the members are (members.py), imported at call time: it reads this module."""
+    from stackshot.core import members
+    return members
 
 
 def owner() -> str:
-    """How the prose names the person this board is for: [instance] owner, or the first of [[people]] ("the owner" when the config names nobody; notes() says so at the start)."""
-    return _people().first().name
+    """How the prose names the person this board is for: [instance] owner, or the first of [[members]] ("the owner" when the config names nobody; notes() says so at the start)."""
+    return _members().first().name
 
 
 OWNER_KIND = "owner"          # the generic word for the owner's mover kind (the kind the code uses inside, and what [items_api] owner_mover_kind = "owner" emits)
@@ -883,12 +904,12 @@ def shell_url() -> str:
 def owner_aliases() -> list[str]:
     """The other names a session may open a line of next with for the owner's step (the owner's initials, a name in another language): [instance] owner_aliases, or the first person's aliases; [] by default.
     The name `you` is always one (a line `you: …` is the owner's) and is not listed here."""
-    return list(_people().first().aliases)
+    return list(_members().first().aliases)
 
 
 def owner_names() -> list[str]:
     """The owner's name and every alias, the name first; with no owner named, only the aliases."""
-    return _people().names()
+    return _members().names()
 
 
 def owner_openers() -> list[str]:
@@ -900,7 +921,7 @@ def owner_openers() -> list[str]:
 def owner_opener_rx(to: bool = True):
     """A compiled regex for a who-takes-it opener of a line of next that names the owner: `<name>:` (name, alias or `you`, any case for `you`), and with `to` also `<name> to …` for the names
     (never `the owner's`, `ACME-1` or "the owner approved …"). Cached per set of names, so a reload is read at once."""
-    return _people().opener_rx(to)
+    return _members().opener_rx(to)
 
 
 # ---------------------------------------------------------------------------------------------------------------- [keywords]: the words of another language
@@ -1225,7 +1246,7 @@ REMOVED = {
 
 
 def refused(cfg: dict[str, Any] | None = None) -> list[str]:
-    """One line per key of REMOVED whose value in the file (or in `cfg`) is not the one left, and per fault of the [[people]] list (people.problems); [] when the file is fine."""
+    """One line per key of REMOVED whose value in the file (or in `cfg`) is not the one left, and per fault of the [[members]] table (members.problems); [] when the file is fine."""
     out = []
     for (sec, key), (keep, what) in REMOVED.items():
         v = get(sec, key, cfg=cfg)
@@ -1233,7 +1254,7 @@ def refused(cfg: dict[str, Any] | None = None) -> list[str]:
             continue
         out.append(f'[{sec}] {key} = "{v}" in {PATH}: removed; "{keep}" is the one value left ({what}) '
                    f'— set {key} = "{keep}" or drop the line')
-    return out + _people().problems(cfg)
+    return out + _members().problems(cfg)
 
 
 def obsolete() -> list[str]:
@@ -1348,15 +1369,15 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     out: list[str] = stall_notes(cfg)
     out += keyword_notes(cfg)
     out += gmail_names_notes(cfg)
-    if not _people().build(cfg)[0].declared:
+    if not _members().build(cfg)[0].declared:
         out.append('[instance] has no owner, so the board names its person by a placeholder: set owner = "<first name>" (the example config has it)')
-    elif get("people", cfg=cfg):
-        pe = _people()
+    elif get("members", cfg=cfg):
+        pe = _members()
         owned = {e for p in pe.build(cfg) for e in p.emails}
         old_owner = str(get("instance", "owner", cfg=cfg) or "").strip()
         old_mail = get("auth", "allowed_emails", default=[], cfg=cfg)
         if (old_owner and old_owner != pe.PLACEHOLDER) or get("instance", "owner_aliases", cfg=cfg) or (isinstance(old_mail, list) and any(e not in owned for e in old_mail)):
-            out.append("[[people]] is set, so [instance] owner, owner_aliases and [auth] allowed_emails are not read for a person: move what they hold into it, and drop them")
+            out.append("[[members]] is set, so [instance] owner, owner_aliases and [auth] allowed_emails are not read for a person: move what they hold into it, and drop them")
     pg = get("page_gate", cfg=cfg)
     pg = pg if isinstance(pg, dict) else {}
     if "keeper_currency" in pg:
@@ -1454,6 +1475,23 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
             ok = False
         if not ok:
             out.append(f"[presence] minutes = {pm!r} is not a number above 0, so 30 minutes is used: set a number of minutes above 0")
+    fa = get("front", "result_turn_agents", cfg=cfg)
+    if fa is not None and not isinstance(fa, list):
+        out.append(f"[front] result_turn_agents = {repr(fa)[:60]} is not a list of front agent names, so no agent is listed and nothing changes: write result_turn_agents = [\"my-front-agent\"]")
+    elif isinstance(fa, list) and any(not isinstance(x, str) or not x.strip() for x in fa):
+        bad_ = [x for x in fa if not isinstance(x, str) or not x.strip()]
+        out.append(f"[front] result_turn_agents has {len(bad_)} entr{'y' if len(bad_) == 1 else 'ies'} that {'is' if len(bad_) == 1 else 'are'} no front agent name ({', '.join(repr(x)[:40] for x in bad_[:5])}), ignored: the names that are valid stay listed")
+    fh = get("front", "result_turn_hours", cfg=cfg)
+    if fh is not None:
+        try:
+            ok = isinstance(fh, (int, float)) and not isinstance(fh, bool) and math.isfinite(float(fh)) and float(fh) > 0
+        except (TypeError, ValueError, ArithmeticError):      # OverflowError: an integer of hundreds of digits
+            ok = False
+        if not ok:
+            out.append(f"[front] result_turn_hours = {repr(fh)[:60]} is not a number above 0, so 24 hours is used: set a number of hours above 0")
+    fc = get("front", "result_turn_cap_per_hour", cfg=cfg)
+    if fc is not None and (not isinstance(fc, int) or isinstance(fc, bool) or fc < 0):
+        out.append(f"[front] result_turn_cap_per_hour = {repr(fc)[:60]} is not a whole number from 0, so 6 is used: set a whole number (0 turns the case off)")
     return out
 
 
@@ -1555,7 +1593,7 @@ RESTART_ONLY: dict[str, str] = {
     "instance.name": "",                          # these are written into the MCP tool descriptions and the connector's
     "instance.owner": "",                         #   instructions when the tools are registered at start
     "instance.owner_aliases": "",
-    "people": "",                                 # the people are read into the tool texts at start (and a sign-in address is a person's: the list is as restart-only as the keys it replaces)
+    "members": "",                                # the members are read into the tool texts at start (and a sign-in address is a person's: the list is as restart-only as the keys it replaces)
     "steps": "",                                  # the shell rule is written into the create and update descriptions at start
     "instance.board_url": "",
     "instance.machine": "",                       # written into a temporary id (board-tmp-<machine>#<n>) and its page address

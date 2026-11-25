@@ -538,5 +538,49 @@ pv.archive(D, by="home-sparrow", io=IO)
 rc, out, err = tool("stackshot/tools/project.py", "reopen", D)
 check("cli: reopen prints the note on the anchors its archiving ended (how many and where the restore calls are), not only the one-line result", rc == 0 and "changed" in out and "2 anchors" in out and "projects/delta" in out and "https://example.invalid/d1" in out, (rc, out[:500], err[:300]))
 
+# ---- 12. off the server box: the record is read and written only where it lives
+def tool_cfg(extra, script, *args):
+    """Run a tool with the config changed by `extra` (a function of the toml text); STACKSHOT_CONFIG points at the changed copy for this one run."""
+    q = T / "other.toml"; q.write_text(extra((T / "stackshot.toml").read_text(encoding="utf-8")), encoding="utf-8")
+    r = subprocess.run([sys.executable, f"{STACK}/{script}"] + list(args), capture_output=True, text=True, env=dict(os.environ, STACKSHOT_CONFIG=str(q)), cwd=str(T))
+    return r.returncode, r.stdout, r.stderr
+elsewhere = lambda t: re.sub(r'(?m)^deploy_ssh = .*$', 'deploy_ssh = "record-host"', t, count=1)
+assert 'deploy_ssh = "record-host"' in elsewhere((T / "stackshot.toml").read_text(encoding="utf-8")), "the test config has no deploy_ssh line to point elsewhere"
+rb = recsha()
+PK = "ssh record-host 'python3 ~/stackshot/stackshot/tools/project.py"
+rc, out, err = tool_cfg(elsewhere, "stackshot/tools/project.py", "page-keeper", "projects/alpha/sub", "--agent", "home-sparrow-main", "--apply")
+check("off the server box: page-keeper --apply is refused (exit 1), nothing written, and the ssh form that runs it on the record host is named",
+      rc == 1 and recsha() == rb and "not the server host" in err and PK + " page-keeper projects/alpha/sub --agent home-sparrow-main --apply'" in err, (rc, out[:200], err[:700]))
+rc, out, err = tool_cfg(elsewhere, "stackshot/tools/project.py", "page-keeper", "projects/alpha/sub", "--agent", "home-sparrow-main")
+check("off the server box: a dry run is refused too (it would plan from the old copy)", rc == 1 and "ssh record-host" in err and out == "", (rc, out[:200], err[:400]))
+rc, out, err = tool_cfg(elsewhere, "stackshot/tools/project.py", "show", "home-sparrow")
+check("off the server box: show is refused as well, the record read here may be behind", rc == 1 and "ssh record-host" in err, (rc, out[:200], err[:400]))
+rc, out, err = tool_cfg(elsewhere, "stackshot/tools/project.py", "--dry-run", "agent-add", "home-sparrow", "home-sparrow-x", "--front", "--mandate", "it's quoted; $(touch x)")
+import shlex
+form = shlex.split(err.split("Run it where the record is:")[-1].strip()) if rc == 1 else []
+check("off the server box: an argument with a quote and a shell metacharacter is carried into the ssh form so the remote shell reads it back whole",
+      rc == 1 and form[:2] == ["ssh", "record-host"] and shlex.split(form[2])[-1] == "it's quoted; $(touch x)" and shlex.split(form[2])[:2] == ["python3", "~/stackshot/stackshot/tools/project.py"] and recsha() == rb, (rc, err[-500:]))
+rc, out, err = tool_cfg(elsewhere, "stackshot/tools/project.py", "--store", f"{tmp}/store", "show", "home-sparrow")
+check("off the server box: --store names a copy on purpose, and the verb runs on it", rc == 0 and "home-sparrow-main" in out, (rc, out[:200], err[:400]))
+rc, out, err = tool_cfg(lambda t: elsewhere(t).replace('deploy_ssh = "record-host"', 'deploy_ssh = ""').replace("\n[server]\n", "\n[server]\nbox = false\n", 1), "stackshot/tools/project.py", "show", "home-sparrow")
+check("off the server box by [server] box = false with no host named: refused, saying only that it runs on the server box", rc == 1 and "on the server box" in err and "ssh " not in err.split("Run it where the record is:")[-1], (rc, err[:500]))
+import socket as _so
+mine = lambda t: re.sub(r'(?m)^deploy_ssh = .*$', f'deploy_ssh = "{_so.gethostname()}"', t, count=1)
+rc, out, err = tool_cfg(mine, "stackshot/tools/project.py", "show", "home-sparrow")
+check("on the server host (deploy_ssh names this box): the verb runs", rc == 0 and "home-sparrow-main" in out, (rc, out[:200], err[:400]))
+rc, out, err = tool("stackshot/tools/project.py", "show", "home-sparrow")
+check("a config that names no server host (one box): the verb runs", rc == 0 and "home-sparrow-main" in out, (rc, out[:200], err[:400]))
+rc, out, err = tool_cfg(elsewhere, "stackshot/tools/archive_empty_projects.py", "--all", "--apply")
+check("off the server box: archive_empty_projects --apply is refused with its own ssh form and archives nothing", rc == 1 and recsha() == rb and "ssh record-host 'python3 ~/stackshot/stackshot/tools/archive_empty_projects.py --all --apply'" in err, (rc, out[:200], err[:500]))
+rc, out, err = tool_cfg(elsewhere, "stackshot/tools/migrate_project_record.py", "--apply")
+check("off the server box: migrate_project_record --apply is refused, nothing written", rc == 1 and recsha() == rb and "ssh record-host 'python3 ~/stackshot/stackshot/tools/migrate_project_record.py --apply'" in err, (rc, out[:200], err[:500]))
+rc, out, err = tool_cfg(elsewhere, "stackshot/tools/migrate_project_record.py", "--store", f"{tmp}/store")
+check("off the server box: migrate_project_record --store DIR (a copy) is not refused for being off the server box", "not the server host" not in err, (rc, err[:300]))
+for mod, name in (("stackshot/projects/keeper_mark.py", "keeper-mark"), ("stackshot/projects/keeper_subpages.py", "keeper-subpages")):
+    rc, out, err = tool_cfg(elsewhere, mod, "--apply")
+    check(f"off the server box: {name} --apply is refused with the bin/stackshot ssh form, nothing written", rc == 1 and recsha() == rb and f"ssh record-host '~/stackshot/bin/stackshot {name} --apply'" in err, (rc, out[:200], err[:500]))
+rc, out, err = tool_cfg(elsewhere, "stackshot/projects/projects.py", "rename", "projects/alpha", "projects/alpha-new")
+check("off the server box: projects rename is refused with the ssh form, nothing written", rc == 1 and recsha() == rb and "ssh record-host '~/stackshot/bin/stackshot projects rename projects/alpha projects/alpha-new'" in err, (rc, out[:200], err[:500]))
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

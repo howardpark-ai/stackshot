@@ -9,7 +9,7 @@ from typing import Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, RedirectResponse
 
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model
@@ -71,7 +71,7 @@ async def item_answer(request: Request):
     if not hmac.compare_digest(f("token"), _answer_token(email, gid)):
         return PlainTextResponse("refused: the form's token does not match; reload the item's page and send again", status_code=403)
     from starlette.concurrency import run_in_threadpool
-    who = _people.signed_in(email).name      # the person the signed-in address belongs to: the answer is recorded under that name
+    who = _members.signed_in(email).name      # the person the signed-in address belongs to: the answer is recorded under that name
     code = await run_in_threadpool(_answer, gid, f("choice"), f("text"), f("act"), "board", None, who)
     back = _answer_back(f("back"))
     if back:      # from the home page's row: back to the page the form was on, with the item named for its notice

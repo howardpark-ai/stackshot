@@ -59,7 +59,7 @@ from stackshot.service.passes_hooks import hooks as _hooks
 from stackshot.service.store import _legacy_hold, _legacy_needs, _load, _path
 from stackshot.waits import handoff as _ho
 from stackshot.waits import mover_pass as _mover_pass
-from stackshot.waits import people_pass as _people_pass
+from stackshot.waits import members_pass as _members_pass
 from stackshot.waits import until_pass as _until_pass
 from stackshot.waits import waiting as _wt
 from stackshot.waits import watchers as _watch
@@ -862,7 +862,7 @@ def migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
       retire / unretire the retire pass (tools/retire_fields_report.py --apply / --undo): the stored state words and carry fields taken out of the open items, each moved to its home, and put back (_retire_write_op)
       until / ununtil   the until pass (tools/until_migrate.py --apply / --undo): the waits stored as wake, ask_by and hold rewritten as `until` (until_pass.py), one History line each, and put back (until_pass.write_op)
       mover / unmover   the mover pass (tools/mover_migrate.py --apply / --undo): the picker of a waiting item stored as `mover` (the old key post_wake_mover moved, a `then` nothing reads dropped or, where it stood in for a picker, moved), one History line each, and put back (mover_pass.write_op)
-      people / unpeople the people pass (tools/people_migrate.py --apply / --undo): the first person's name stored as `by` on every stored answer with none, open or closed, and on an open item (a decision's mover when it stores none, a `you:` line of its next) where reading it makes no difference, one History line each, and put back (people_pass.write_op)
+      members / unmembers the members pass (tools/members_migrate.py --apply / --undo; its first names, people / unpeople, are read as these for one release): the first person's name stored as `by` on every stored answer with none, open or closed, and on an open item (a decision's mover when it stores none, a `you:` line of its next) where reading it makes no difference, one History line each, and put back (members_pass.write_op)
       lastact / unlastact the last-activity pass (tools/last_activity_backfill.py --apply / --undo): metadata.last_activity filled from the History for the open items that have none, nothing else written, and put back (last_activity_pass.write_op)
       project_id / unproject_id the project-id pass (tools/project_id_report.py --apply / --undo): the permanent id of the item's project stored on every item, open or closed, and put back (_pid_write_op)
       begin   holds the board-wide pause for the pass (for at most an hour, whatever renews it) and says what the server's switches are ({guards, pause, switchover, handoff, held}); the pass stops
@@ -877,10 +877,11 @@ def migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     by = _hooks().script_sender(spec, machine)
     _hooks().sender_not_owner(str(spec.get("sender") or ""))
     op = str(spec.get("op") or "apply")
+    op = _members_pass.RENAMED_OPS.get(op, op)     # a pass the earlier script began stays reversible: its undo sends the first names
     state = lambda: {"guards": _hooks().model_guards_on(), "pause": bool(_cfg.get("model", "pause", default=False)), "switchover": _hooks().switchover_on(), "handoff": _handoff.handoff_on(),
                      "held": _watch.holding(), "by": by}
-    if op not in ("begin", "apply", "end", "wake_text", "send_wake", "stamp", "unstamp", "retire", "unretire", "project_id", "unproject_id", "until", "ununtil", "mover", "unmover", "people", "unpeople", "lastact", "unlastact"):
-        raise ToolError("Refused: op = begin | apply | end | wake_text | send_wake | stamp | unstamp | retire | unretire | project_id | unproject_id | until | ununtil | mover | unmover | people | unpeople | lastact | unlastact")
+    if op not in ("begin", "apply", "end", "wake_text", "send_wake", "stamp", "unstamp", "retire", "unretire", "project_id", "unproject_id", "until", "ununtil", "mover", "unmover", "members", "unmembers", "lastact", "unlastact"):
+        raise ToolError("Refused: op = begin | apply | end | wake_text | send_wake | stamp | unstamp | retire | unretire | project_id | unproject_id | until | ununtil | mover | unmover | members | unmembers | lastact | unlastact")
     if op in ("stamp", "unstamp"):
         return _hooks().stamp_write_op(spec, op, by)
     if op in ("retire", "unretire"):
@@ -891,8 +892,8 @@ def migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
         return _until_pass.write_op(_hooks().pass_host(), spec, op, by)
     if op in ("mover", "unmover"):
         return _mover_pass.write_op(_hooks().pass_host(), spec, op, by, _answer_handover._then_live)
-    if op in ("people", "unpeople"):
-        return _people_pass.write_op(_hooks().pass_host(), spec, op, by)
+    if op in ("members", "unmembers"):
+        return _members_pass.write_op(_hooks().pass_host(), spec, op, by)
     if op in ("lastact", "unlastact"):
         return _lact_pass.write_op(_hooks().pass_host(), spec, op, by)
     if op == "wake_text":

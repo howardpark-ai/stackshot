@@ -537,6 +537,11 @@ put(223, mover=BUILD, next=f"{MAIN}: {STEPF}\n{BUILD}: build it")
 told.clear(); kinds.clear()
 r = call(lambda: _wt_update.stackshot_update(item_id="a223", sender=BUILD, mover=MAIN, work={"state": "done", "agent": MAIN}))
 check("hand-back, a work status done that finishes the holder's step (agent names it): no step is left for the notice, so the swap stands or the call is refused, and nobody is told", telling.holder(rd(223)) != MAIN and not pushed(MAIN), (r[:300], told, rd(223)["metadata"].get("mover")))
+put(227, mover=BUILD, next=f"{MAIN}: {STEPF}\n{BUILD}: build it")
+told.clear(); kinds.clear()
+r = call(lambda: _wt_update.stackshot_update(item_id="a227", sender=BUILD, mover=MAIN, work={"state": "done", "remove": True, "agent": MAIN}))
+check("hand-back, a work line removed (remove: true) for the holder: it finishes no step, so the hand-back is kept as sent and the front agent is pushed once", telling.holder(rd(227)) == MAIN and "(fixed:" not in r and len(pushed(MAIN)) == 1, (r[:300], told, rd(227)["metadata"].get("mover")))
+check("gates.step_marks: a work line removed (remove: true) marks no step", _gates.step_marks({"project": "projects/delta", "next": f"{MAIN}: {STEPF}\n{BUILD}: build it"}, work={"state": "done", "remove": True, "agent": MAIN}, sender=BUILD) == frozenset(), None)
 # the flag: cleared at the start of every update, by the call that raises after the gate, and set by mover only
 telling.HO_STATE.handback = {MAIN}
 put(225, mover=BUILD, next=f"{MAIN}: {STEPF}\n{BUILD}: build it")

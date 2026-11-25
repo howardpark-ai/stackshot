@@ -1,10 +1,11 @@
-"""machines_panel.py: what the board's Machines panel draws from the machine list a fleet manager posts (service/machines_list.py), and only while a fleet manager is paired.
+"""machines_panel.py: what the board's Machines panel takes from the machine list a fleet manager posts (service/machines_list.py), and only while a fleet manager is paired. The list chooses which machines get a card and in what
+order (the page joins each to its own readings by name); it adds no card of its own and no text to a card.
 
 `view(now)` answers None for a board that is not paired (`fleet/caller_keys.py` `paired()`: an approved key and a machine token), so such a board draws nothing from the list. For a paired board it answers
 {"list": None} when there is no readable list yet, else
 
     {"list": True, "age": seconds since the server received the list, "stale": age > STALE_S, "received": epoch seconds,
-     "machines": [{"name", "hostname", "letter", "roles": [..], "retired": bool, "detail": [one line of text per ssh / addresses / sources that is set]}, ...],
+     "machines": [{"name", "hostname", "retired": bool}, ...],
      "not_read": [file name, ...]}
 
 The age is the server's own clock at the post (`received`), never the sender's `written`, which a wrong clock on the sender would make wrong. A list is stale once it is older than `STALE_S`: the sender posts when
@@ -35,16 +36,7 @@ def _texts(v: Any) -> list[str]:
 
 
 def _machine(m: dict[str, Any]) -> dict[str, Any]:
-    detail = []
-    ssh = _text(m.get("ssh"))
-    if ssh:
-        detail.append("ssh: " + ssh)
-    for key in ("addresses", "sources"):
-        items = _texts(m.get(key))
-        if items:
-            detail.append(f"{key}: " + ", ".join(items))
-    return {"name": _text(m.get("name")), "hostname": _text(m.get("hostname")), "letter": _text(m.get("letter")),
-            "roles": [r for r in _texts(m.get("roles")) if r in _list.ROLES], "retired": m.get("retired") is True, "detail": detail}
+    return {"name": _text(m.get("name")), "hostname": _text(m.get("hostname")), "retired": m.get("retired") is True}
 
 
 def view(now: float) -> dict[str, Any] | None:

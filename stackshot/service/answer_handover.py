@@ -17,7 +17,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.core.instance import OWNER
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
@@ -209,7 +209,7 @@ def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str =
         if isinstance(a, dict) and now - _ts(a) < 600 and (a.get("text") == text or (pick and a.get("choice") == pick and a.get("text") == note)):
             return code
     who = by or OWNER
-    rec: dict[str, Any] = _people.stamp({"ts": now, "kind": "comment", "text": text, "via": "board"}, who)      # `by` only when it is not the first person's (a record with none reads as the first person's)
+    rec: dict[str, Any] = _members.stamp({"ts": now, "kind": "comment", "text": text, "via": "board"}, who)      # `by` only when it is not the first person's (a record with none reads as the first person's)
     prior = meta.get("answers") if isinstance(meta.get("answers"), list) else []
     meta["answers"] = [*prior, rec]
     item["metadata"], item["updated"] = meta, now

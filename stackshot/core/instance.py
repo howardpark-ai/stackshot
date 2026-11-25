@@ -5,8 +5,8 @@ config.RESTART_ONLY keeps for the run, so a reload (SIGHUP) does not change them
 from __future__ import annotations
 
 from stackshot.core import config as _cfg
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 
-OWNER = _people.first().name
+OWNER = _members.first().name
 NAME = str(_cfg.get("instance", "name") or "stackshot")
 BOARD_URL = str(_cfg.get("instance", "board_url") or "")

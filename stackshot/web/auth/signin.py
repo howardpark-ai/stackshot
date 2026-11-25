@@ -19,7 +19,7 @@ from starlette.responses import PlainTextResponse
 
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg
-from stackshot.core import people as _people
+from stackshot.core import members as _members
 from stackshot.web import render as _rmod
 from stackshot.core.instance import NAME
 
@@ -96,7 +96,7 @@ def _ui_session(request: Request) -> dict[str, Any]:
     if not isinstance(d, dict):
         return {}
     email = str(d.get("email") or "")
-    return d if _people.person_of_email(email) and float(d.get("exp") or 0) > _ui_now() else {}
+    return d if _members.person_of_email(email) and float(d.get("exp") or 0) > _ui_now() else {}
 
 
 def _ui_email(request: Request) -> str:
@@ -244,7 +244,7 @@ async def ui_callback(request: Request):
     if not code or not flow or state != flow.get("state") or float(flow.get("exp") or 0) < _ui_now():
         return PlainTextResponse("sign-in failed: this link is not part of a sign-in that started here (or it took longer than ten minutes). Open the board again.", status_code=400)
     email = await run_in_threadpool(_ui_exchange, code, str(flow.get("verifier") or ""))
-    if not _people.person_of_email(email):
+    if not _members.person_of_email(email):
         return PlainTextResponse(f"{email or 'this account'} is not allowed on this board", status_code=403)
     r = RedirectResponse(str(flow.get("next") or "/"), status_code=302)
     _ui_set_session(r, email)
