@@ -6,6 +6,8 @@ A front agent is a session the person talks to. An inbound notice (the router's 
 Any other notice never reaches a front agent, not even held: the router sends it to the item's builder when it is about the builder's work, and otherwise logs it (ruling archived); a message that names an item of his, marked for him, is written onto the item (or held for the agent's next turn when no item can take it) and starts no turn.
 A message that carries the person's mark but names no open item of his (`his_items`) and none he asked that agent to tell him about (`asked`) is held for the agent's next turn and starts none: the mark is explicit, and an item is what it must point at.
 The digest of lines queued for a pane (`messaging.digest_fyi`, from `inbox.take`) is asked the same: a turn only under these two cases, else its lines are filed as fyi lines and start none.
+One more case, off until an instance names the agent: `[front] result_turn_agents` lists front agents to which a session that was handed work by them (a message of theirs within `[front] result_turn_hours`, or an open item they made or are the contact of that the session moves) may write the result and start a turn, whether or not he is there
+(`messaging.handed_to`, `messaging.router_result`; the reader of the three keys is here: `result_turn_agents`, `result_turn_hours`, `result_turn_cap_per_hour`). Such a line is stored with the kind `exempt`, so the digest never files it. It is no case of `warranted`: the message tool and the router decide it before they ask this module.
 
 The record of case 2 is the item's own `tell_him` list (the update tool's `tell_him`): a front agent he asked to tell him about an item lists itself there. It is written only by a write that carries his own words (`said`,
 checked against the transcript; gates.gate_tell_him), never by a session on its own say, and it is not `observers` (those hear a close or a reopen, and no entry of them is a request to be told). A notice matches the record by its
@@ -18,11 +20,37 @@ import re
 from typing import Iterable
 
 from stackshot.anchors import anchors as _anc
+from stackshot.core import config as _cfg
 from stackshot.model import model as _model
 from stackshot.model.needs import _tell_him_of, _waits_decision
 from stackshot.service.store import _load
 
 _GID = re.compile(r"^[a-z]\d+$")
+
+RESULT_TURN_HOURS = 24         # a message of the front agent to a session counts as a hand-over of work for this long
+RESULT_TURN_CAP_PER_HOUR = 6   # the most result turns one session may start in one front agent in an hour
+
+
+def result_turn_agents() -> list[str]:
+    """`[front] result_turn_agents`: the front agents a session they handed work to may start a turn of with its result (names, case-folded). [] when the key is missing, is no list, or holds no name: nothing changes for the instance."""
+    raw = _cfg.get("front", "result_turn_agents", default=[])
+    return [str(x).strip().casefold() for x in raw if isinstance(x, str) and str(x).strip()] if isinstance(raw, list) else []
+
+
+def result_turn_hours() -> float:
+    """`[front] result_turn_hours` (24 by default): how long after a message of the front agent to a session that session's reply may start a turn. A value that is no number above 0 reads as 24 (`config.notes` says so)."""
+    try:
+        raw = _cfg.get("front", "result_turn_hours", default=RESULT_TURN_HOURS)
+        v = float(raw)
+        return v if v > 0 and not isinstance(raw, bool) else float(RESULT_TURN_HOURS)
+    except (TypeError, ValueError):
+        return float(RESULT_TURN_HOURS)
+
+
+def result_turn_cap_per_hour() -> int:
+    """`[front] result_turn_cap_per_hour` (6 by default): the most turns one sender may start in one listed front agent in an hour; past it a message is held as it is without the key (the loop stop). 0 turns the case off. A value that is no whole number from 0 reads as 6."""
+    raw = _cfg.get("front", "result_turn_cap_per_hour", default=RESULT_TURN_CAP_PER_HOUR)
+    return raw if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0 else RESULT_TURN_CAP_PER_HOUR
 
 
 def _gids(subject: Iterable[str] | str) -> list[str]:

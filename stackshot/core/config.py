@@ -1454,6 +1454,20 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
             ok = False
         if not ok:
             out.append(f"[presence] minutes = {pm!r} is not a number above 0, so 30 minutes is used: set a number of minutes above 0")
+    fa = get("front", "result_turn_agents", cfg=cfg)
+    if fa is not None and (not isinstance(fa, list) or any(not isinstance(x, str) or not x.strip() for x in fa)):
+        out.append(f"[front] result_turn_agents = {fa!r} is not a list of front agent names, so no agent is listed and nothing changes: write result_turn_agents = [\"my-front-agent\"]")
+    fh = get("front", "result_turn_hours", cfg=cfg)
+    if fh is not None:
+        try:
+            ok = not isinstance(fh, bool) and float(fh) > 0
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            out.append(f"[front] result_turn_hours = {fh!r} is not a number above 0, so 24 hours is used: set a number of hours above 0")
+    fc = get("front", "result_turn_cap_per_hour", cfg=cfg)
+    if fc is not None and (not isinstance(fc, int) or isinstance(fc, bool) or fc < 0):
+        out.append(f"[front] result_turn_cap_per_hour = {fc!r} is not a whole number from 0, so 6 is used: set a whole number (0 turns the case off)")
     return out
 
 

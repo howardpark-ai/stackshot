@@ -428,6 +428,10 @@ class _Pass:
         self.to, self.front, self.project, self.refusal = to, front, project, refusal
 
 
+class _Turn:
+    """What _gate_front returns for a message that starts the front agent's turn as the result of work the agent handed over (`result_turn`): `_message` pushes it with the kind `exempt` (so the pane's digest never files it as an fyi) and logs the row with `"result_turn": true`."""
+
+
 # What the relay tells the sender of a message it handled where it once refused (`_handled`): the reply of the call carries these lines at its end (`_message` wraps `_message_body`). Per call, in the caller's context, so a
 # message sent on to another session inside the call keeps its own lines apart.
 _NOTES: "contextvars.ContextVar[list[str] | None]" = contextvars.ContextVar("message_notes", default=None)
@@ -495,6 +499,96 @@ def asked_by(front: str, sender: str, idx: dict[str, dict[str, Any]], now: float
         return False
 
 
+def _log_rows(floor: float):
+    """The rows of the message log (`MSG_LOG`) written at or after `floor` (epoch seconds), newest first, from the last `_LOG_TAIL_BYTES` of it. Nothing on any doubt (a missing or unreadable log has no rows)."""
+    try:
+        with open(MSG_LOG, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - _LOG_TAIL_BYTES))
+            tail = f.read().decode("utf-8", "replace").splitlines()
+    except Exception:  # noqa: BLE001
+        return
+    for ln in reversed(tail):
+        try:
+            d = json.loads(ln)
+            at = dt.datetime.fromisoformat(str(d["t"])).timestamp()
+        except (ValueError, KeyError, TypeError):
+            continue
+        if at < floor:
+            return
+        if isinstance(d, dict):
+            yield d
+
+
+def _reached(d: dict[str, Any]) -> bool:
+    """Did the message of this log row reach its recipient (delivered, or queued for it): a held, refused or failed send reached nobody."""
+    return str(d.get("outcome") or "").startswith(("delivered", "queued", "inbox"))
+
+
+def handed_to(front: str, sender: str, idx: dict[str, dict[str, Any]], text: str = "", now: float | None = None) -> bool:
+    """Was `sender` handed work by the front agent `front`, so that its message back is the result of that work? True when
+      (a) the message log has a row, within `[front] result_turn_hours` (24), from the front agent to the sender that reached it: any message, a question or not (`asked_by` wants a marked question and reads a day; this reads any row); or
+      (b) `text` names an open item (the plain ids `_agent_names._item_refs` reads) that the sender moves (it is in the item's needs, or is its mover) and that the front agent made (`metadata.owner`) or is the contact of (`metadata.contact`): no time limit, until the item closes.
+    The sender is not told apart from its role here (a peer front agent is refused by the caller). False on any doubt."""
+    try:
+        me = _idset(sender, idx)
+        peers = _idset(front, idx) - me
+        if not me or not peers:
+            return False
+        floor = (time.time() if now is None else now) - _front_turn.result_turn_hours() * 3600
+        for d in _log_rows(floor):
+            if str(d.get("from") or "").strip().casefold() in peers and str(d.get("to") or "").strip().casefold() in me and _reached(d):
+                return True
+        for gid in _agent_names._item_refs(text)[:REPORT_ITEMS_MAX]:
+            try:
+                it = _svcstore._load(gid)
+                m_ = it.get("metadata") or {}
+                if it.get("status") != "open":
+                    continue
+                if not any(x and _anc.same_session(sender, x) for x in [*_needs_sessions(m_), _anc.mover_of(it)]):
+                    continue
+                if any(x and _anc.same_session(front, x) for x in (str(m_.get("owner") or "").strip(), str(m_.get("contact") or "").strip())):
+                    return True
+            except Exception:  # noqa: BLE001  — an item that cannot be read hands nothing over
+                continue
+        return False
+    except Exception:  # noqa: BLE001  — no signal, no hand-over
+        return False
+
+
+def _result_turns_in_hour(front: str, sender: str, idx: dict[str, dict[str, Any]], now: float | None = None) -> int:
+    """How many messages of `sender` to the front agent `front` started a turn through the result-turn case in the last hour: the rows of the message log that carry `"result_turn": true` and reached it."""
+    me = _idset(sender, idx)
+    peers = _idset(front, idx) - me
+    floor = (time.time() if now is None else now) - 3600
+    return sum(1 for d in _log_rows(floor) if d.get("result_turn") is True and _reached(d) and str(d.get("from") or "").strip().casefold() in me and str(d.get("to") or "").strip().casefold() in peers)
+
+
+def result_turn(name: str, sender: str, text: str, idx: dict[str, dict[str, Any]], roles: dict[str, Any], fyi: bool = False) -> bool:
+    """Does a message from `sender` to the front agent `name` start its turn as the result of work the agent handed over (`[front] result_turn_agents` lists the agent; off for every other)? All of: the agent is listed; the message is no fyi; the sender is a session
+    (not a script, not the person, not the audit's, not the agent itself, not a peer front agent); `handed_to` holds; and the sender has started fewer than `[front] result_turn_cap_per_hour` (6) turns in this agent in the last hour: past the cap the message
+    is handled as without the key (held, passed or written onto an item) and a stderr line says so. False on any doubt: nothing starts a turn on a guess."""
+    try:
+        if fyi or name.casefold() not in _front_turn.result_turn_agents():
+            return False
+        sender = sender.strip()
+        if not sender or _model.is_owner(sender) or _cfg.is_audit_sender(sender) or _anc.same_session(sender, name):
+            return False
+        sname = _sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or ""))
+        if sname and roles.get(sname, {}).get("role") == "front":      # a front agent's word to a peer is the channel between front agents, held for the peer's next turn
+            return False
+        if not handed_to(name, sender, idx, text):
+            return False
+        cap = _front_turn.result_turn_cap_per_hour()
+        if _result_turns_in_hour(name, sender, idx) >= cap:
+            print(f"result turn: message from {sender} to {name} held, not a turn: {cap} turns started in the last hour ([front] result_turn_cap_per_hour)", file=sys.stderr, flush=True)
+            return False
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"result turn: message to {name} not checked, handled as before: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return False
+
+
 def background_of(project: str) -> str:
     """The project's background agent a message not for the person goes to: anchors.background_agent, the one lookup the router uses too (its builder, else the first background agent, read through the project's hub), "" when the project has none."""
     return _anc.background_agent(project)
@@ -504,7 +598,8 @@ def answer_route(front: str, project: str, sender: str, raw: str, idx: dict[str,
     """What becomes of a message with no need of the person that comes from `sender` to the front agent `front`, when it is an answer to a question the front agent itself put to the sender (asked_by):
     ("deliver", "") the person is in that conversation (his last message to the front agent within [presence] minutes, 30 by default: telling.presence_here), so it goes back to the agent, unmarked;
     ("items", reply) he is not, and the text names one to REPORT_ITEMS_MAX open items, none waiting on his decision or naming the agent in its needs: it is written onto them (_write_on_items, once per `nid`, a router notice) and `reply` says so;
-    ("hold", why) he is not, and no item can carry it (it names none, a closed one, or one that waits on his decision): the front gate holds it for the agent's next turn. ("", "") it is no answer (the sender was not written to), so the caller applies its other rules. Never raises."""
+    ("hold", why) he is not, and no item can carry it (it names none, a closed one, or one that waits on his decision): the front gate holds it for the agent's next turn. ("", "") it is no answer (the sender was not written to), so the caller applies its other rules.
+    A front agent that `[front] result_turn_agents` lists is asked before this rule, by `result_turn` in the gate: a message from a session it handed work to is a turn at once, so an answer to its question reaches this function only past the cap of turns per hour. Never raises."""
     try:
         if not sender.strip() or not asked_by(front, sender, idx):
             return "", ""
@@ -550,9 +645,43 @@ def router_answer(front: str, who: str, raw: str, nid: str = "") -> tuple[str, s
         return "", ""
 
 
-def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str = "", script: str = "") -> "str | _Hold | _Pass | None":
+def router_result(front: str, who: str, raw: str, nid: str = "") -> bool:
+    """The router's use of `result_turn` (router_live's `front_result` hook): is the message notice from `who` (the sender's label, `name (id…)`; a script, `x (a script on m)`, is none) to the front agent `front` the result of work that agent handed over,
+    so the pass is delivered as a turn of kind exempt whatever the person's presence? The same test as the message tool's (`[front] result_turn_agents` lists the agent, `handed_to`, the cap per sender and agent in the hour). Counted in the message log
+    (a row with `"result_turn": true` and the notice id, written here when the answer is yes, once per `nid`: a delivery the router tries again counts once). False on any doubt or failure."""
+    try:
+        if not _front_turn.result_turn_agents():
+            return False
+        sender = re.split(r" \(", str(who).strip(), maxsplit=1)[0].strip()
+        if not sender or "(a script on" in str(who):
+            return False
+        roles = _anc.session_roles()
+        idx = _sr._sessions_index()
+        name = _sr._role_name(roles, front, str((idx.get(front) or {}).get("name") or ""))
+        if not name or roles[name]["role"] != "front":
+            return False
+        if nid and any(d.get("nid") == nid and d.get("result_turn") is True for d in _log_rows(time.time() - 3600)):
+            return True
+        if not result_turn(name, sender, raw, idx, roles):
+            return False
+        try:
+            MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with open(MSG_LOG, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": "", "to": name, "outcome": "delivered (router pass, result turn)", "error": "",
+                                    "text": raw, "result_turn": True, "nid": nid}, ensure_ascii=False) + "\n")
+        except Exception:  # noqa: BLE001  — the count is an extra: a row not written is a turn not counted
+            pass
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str = "", script: str = "", fyi: bool = False) -> "str | _Hold | _Pass | _Turn | None":
     """(the owner's decision): a front agent, a session he talks to, hears a peer's message with a turn only when it needs him. A message addressed to a project page goes to the
     project (the router rules it) and never reaches this gate. What the gate cannot give a turn it handles another way and tells the sender (`_handled`), and it refuses only what nothing can carry. In order:
+      first, for a front agent that `[front] result_turn_agents` lists (none by default): a message from a session it handed work to (`handed_to`: it wrote to that session within `[front] result_turn_hours`, or the message names an open item the session moves that the agent made or is the contact of)
+        is a turn, whether or not it carries the mark and whether or not the person is there (`result_turn`: not an fyi, not a script's, not the person's, not a peer front agent's; at most `[front] result_turn_cap_per_hour` turns per sender, the rest handled by the rules below): `_Turn`, delivered
+        past the builder-report, status-shape and item-of-his tests below, as a line of kind `exempt` the pane's digest never files. The loop it could make (the agent's reply starts the sender, whose reply starts the agent) is stopped by that cap and by the sender's `fyi=true`;
       marked ([for <owner>] on its first non-empty line): it needs him; unless it says in a fixed phrase, as its own statement, that nothing is needed from him (`_own_no_actions`: a done, taken or no-ask note): a background agent's is written onto the item it names (_builder_report), any other is held for the agent's next turn (_Hold; refused when the hold is off, and for the person's own);
         a fixed phrase used inside a sentence is no note: the message goes on, its reply saying so;
         a background agent's marked message that only reports on a board item is written onto the item instead (_builder_report);
@@ -565,7 +694,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
       unmarked, from any other sender, a done, taken or no-ask note (a fixed phrase as its own statement, or a plain status report): held for the agent's next turn (_Hold; refused when the hold is off);
       a front agent's message to a peer front agent, or the project's background agent's own: held for the agent's next turn (_Hold), the channel between front agents and the way a builder reaches the front agent;
       any other unmarked message: passed to the project's background agent (_Pass: `_message` sends it there and tells the sender); a project with none holds it for the agent's next turn (_Hold: telling.front_fyi).
-    → the sender's reply (item-written), a _Hold, a _Pass, or None (deliver it). Raises Refused for a refusal. `sender` is blank for a script (no session); `script` is its label, `name (a script on <machine>)`, for the History line a marked message of its writes."""
+    → the sender's reply (item-written), a _Hold, a _Pass, a _Turn (deliver it as a turn of kind exempt: a result of work the agent handed over) or None (deliver it). Raises Refused for a refusal. `sender` is blank for a script (no session); `script` is its label, `name (a script on <machine>)`, for the History line a marked message of its writes."""
     roles = _anc.session_roles()
     name = _sr._role_name(roles, to, str((idx.get(to) or {}).get("name") or ""))
     if not name or roles[name]["role"] != "front":
@@ -579,6 +708,8 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     mine = bool(sname and roles.get(sname, {}).get("role") == "back" and roles[sname].get("project") == project)          # a background agent of this project, whichever of them
     same = bool(sname and back and (sname.casefold() == back.casefold() or mine))          # the sender is the background agent itself, or one beside it: it is not sent back to itself or across to its sibling
     goes = (f"the project's background agent, {back} (message(to={back!r}, …))" if back and not same else f"the project, where the router rules it (to={project!r})")
+    if sender.strip() and result_turn(name, sender, text, idx, roles, fyi):          # the work the agent handed over comes back: a turn, however late (off unless the agent is listed in [front] result_turn_agents)
+        return _Turn()
     if _FOR_OWNER not in first:
         if (sender.strip() and _model.is_owner(sender)) or _held._owner_mark().search(text):
             raise Refused("mark-not-first-line", f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and it takes what is for {OWNER} only with {_FOR_OWNER} on the message's first line. "
@@ -794,7 +925,7 @@ def digest_fyi(agent: str, lines: list[str], kinds: list[str] | None = None) -> 
     a line carries his mark (the held rule's own test, `[for <owner>]` or needs: decision) and he is talking with that agent now, or when he asked it to tell him about an item a line names (front_turn.warranted, the test a
     marked message passes). Otherwise the lines are filed as fyi lines (telling.front_fyi: held for the agent's next turn, the board line written on the items they name).
     `kinds[i]` is the kind of line i (inbox.kind_of: the front gate's kind stored with the line, "exempt" for the shape of a hand-off, wake or stall notice). A line of an exempt kind (telling.FRONT_TAG_KIND: a hand-off, a
-    wake, a relayed board answer, a stall, a comment, a notice that asks its mover to act) is never filed, with or without his mark: the digest is a turn, as the gate's own rule has it ("held, the item would sit unmoved").
+    wake, a relayed board answer, a stall, a comment, a notice that asks its mover to act) is never filed, with or without his mark: the digest is a turn, as the gate's own rule has it ("held, the item would sit unmoved"). A result turn (`result_turn`, a message to a front agent that `[front] result_turn_agents` lists from a session it handed work to) is pushed with the kind `exempt` too, so it is never filed here.
     DESIGN CHOICE (decided, not a gap): a line carrying his mark that is filed because he is not at the pane (after a recycle the presence stamp is gone) rides his next prompt and starts no turn; that is intended.
     A filed line is held whole (`whole=True`: all its words and line breaks, up to held.WHOLE_MAX), as the turn it would have been carries it.
     → the positions of the lines filed, in order: all of them, or the prefix before the first line that could not be filed (that line and the ones after it are handed out as a turn, the filed ones never again: no line is
@@ -951,7 +1082,8 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
     hook cannot fetch held lines, not passed on; it starts no turn either way. A script's fyi (`origin` set) takes the same way: the held line names it as a script on that machine (a script's message cannot be
     answered), and where a session gets the reply "not passed on" a script gets a refusal (HTTP 400), since it reads the status and not the sentence. The sender being the person the instance works for, or the text carrying the mark or needs: decision, makes it an ordinary message (to a front agent: delivered or
     refused exactly as without the flag, a script's included). `question`: a front agent marks a message that asks the session it writes to something; the log row carries the mark, and only a reply to such a row is an answer (asked_by). It is
-    refused beside `fyi` (a message that asks nothing) and from the person himself (his messages are no question to a session)."""
+    refused beside `fyi` (a message that asks nothing) and from the person himself (his messages are no question to a session). A front agent listed in `[front] result_turn_agents` is started by a message from a session it handed work to (`result_turn`: it wrote to it within `[front] result_turn_hours`,
+    or the message names an open item the session moves that the agent made or is the contact of), marked or not, whether or not the person is there, at most `[front] result_turn_cap_per_hour` times an hour per sender; `fyi` never is. The row of such a message carries `"result_turn": true`."""
     # g7 → for what is delivered and logged only: the gates, the length cap and the handover's naming
     # read the text as the sender wrote it (`raw`), so a message is refused, passed and names items exactly as it did before
     to, raw, sender = to.strip(), text.strip(), sender.strip()
@@ -979,11 +1111,14 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
         _tell(f"`{to}` is `{fixed_to}`; sent there")
         to = ref = fixed_to
     fyi = bool(fyi) and not _model.is_owner(sender)
+    result_turn_ = False            # the front gate found the message the result of work the front agent handed over: pushed as a line of kind exempt, logged with the mark
     hold_why = hold_project = hold_tail = hold_kind = ""            # why a message to a front agent that is no fyi is held for its next turn all the same (_gate_front's _Hold), and the kind of refusal that hold replaces
     front_fyi = bool(fyi) and not re.match(_cfg.page_dirs_re() + "/", to) and bool(_front_fyi_name(to, raw, idx))      # an fyi for a front agent is not refused for its missing mark: the front gate below takes it
     if not re.match(_cfg.page_dirs_re() + "/", to):
         _want_for_front(to, idx, sender, auth, bool(origin))      # a want for a background agent when its front agent's project has none, whatever the gate or the fyi path then does with the message
-        reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender, f"{sender} (a script on {origin})" if origin else "")     # a front agent is given a turn only by what needs the person: the rest is passed to its builder, written onto an item, held, or refused (_gate_front)
+        reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender, f"{sender} (a script on {origin})" if origin else "", fyi)     # a front agent is given a turn only by what needs the person: the rest is passed to its builder, written onto an item, held, or refused (_gate_front)
+        if isinstance(reported, _Turn):          # the result of work the front agent handed over: delivered below as a turn, past every hold
+            result_turn_, reported = True, None
         if isinstance(reported, _Pass):          # not for the person: the project's background agent takes it, and the reply says so
             moved: list[str] = []          # filled by `_sent_instead` when the agent is retired: the message then went to its project, never to the agent
             moved_token = _REDIRECTED.set(moved)
@@ -1138,7 +1273,7 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
             _router_live.stash(nid, envelope); outcome, err = "held for the router", ""
         else:
             r = subprocess.run([*_interp.resilient(_telling.PUSH), "--from", who, ref, envelope], capture_output=True, text=True, timeout=110,
-                               env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg"})      # its own queue and pause (the reboot hook); `ref` = a permanent id stays one, push.py turns it into the address and the inbox keeps the id
+                               env={**os.environ, "ANCHOR_PUSH_SOURCE": "msg", **({"ANCHOR_PUSH_KIND": "exempt"} if result_turn_ else {})})      # its own queue and pause (the reboot hook); `ref` = a permanent id stays one, push.py turns it into the address and the inbox keeps the id
             outcome = (r.stdout.strip().splitlines() or [""])[-1]
             err = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else ""
     except subprocess.TimeoutExpired:
@@ -1149,7 +1284,7 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
         MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
         with open(MSG_LOG, "a", encoding="utf-8") as f:
             # a notice held for the router reached no session: log the page key it was addressed to, never the retired name-line session's name
-            f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": auth, "to": key if held else to, "outcome": outcome, "error": err, "text": text, **({"fyi": True} if fyi else {}), **({"question": True} if question else {})}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"t": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "from": sender, "auth": auth, "to": key if held else to, "outcome": outcome, "error": err, "text": text, **({"fyi": True} if fyi else {}), **({"question": True} if question else {}), **({"result_turn": True} if result_turn_ else {})}, ensure_ascii=False) + "\n")
     except Exception:
         pass
     if not origin and not held:
