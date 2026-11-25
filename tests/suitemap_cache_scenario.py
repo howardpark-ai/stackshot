@@ -84,7 +84,7 @@ elif a[:2] == ["run", "download"]:
     ENV.update(SUITEMAP_ROOT=str(R), SUITEMAP_CACHE_DIR=str(T / "cache"), STACKSHOT_TEST_LAUNCHER="", GIT_SSH_COMMAND="false", GIT_TERMINAL_PROMPT="0", HOME=str(T / "home"),
                FAKE_GH_LOG=str(LOG), PATH=f"{BIN}:{os.environ['PATH']}")
     MAPDIR = R / ".suitemap-ci"; MAPFILE = MAPDIR / "map.json"
-    def tool(*a, **env): return subprocess.run([sys.executable, os.path.join(SCR, "suitemap.py"), *a], capture_output=True, text=True, env={**ENV, **env}, cwd=str(R))
+    def tool(*a, timeout=None, **env): return subprocess.run([sys.executable, os.path.join(SCR, "suitemap.py"), *a], capture_output=True, text=True, env={**ENV, **env}, cwd=str(R), timeout=timeout)
     def calls(): return LOG.read_text().splitlines() if LOG.exists() else []
     def fresh():
         shutil.rmtree(MAPDIR, ignore_errors=True); LOG.unlink(missing_ok=True)
@@ -151,6 +151,52 @@ elif a[:2] == ["run", "download"]:
     MAPFILE.write_text(json.dumps(a_map(commit_="1" * 40))); r = tool("select")
     check("select: a map of a commit this checkout lacks (a copy sent without history) picks `all` and says so in one line",
           r.stdout.split() == ["all"] and "does not hold" in r.stderr and "wider than CI" in r.stderr, (r.stdout, r.stderr))
+
+    # ---- the fetch of the map's missing commit cannot ask a terminal, and cannot outlast its timeout (a copy sent to a test runner has an ssh `origin` and no key or known host: ssh asked on the terminal and select never returned)
+    SSH = T / "fake-ssh"; SEEN = T / "ssh.seen"; PIDS = T / "ssh.pids"
+    SSH.write_text(f"""#!{sys.executable}
+import os, sys, time
+with open({str(PIDS)!r}, "a") as f: f.write(str(os.getpid()) + "\\n")
+if os.environ.get("FAKE_SSH_MODE") == "hang":
+    time.sleep(60)   # a prompt nobody answers, or a network that drops the packets: only the caller's timeout ends it
+with open({str(SEEN)!r}, "w") as f:
+    f.write(" ".join([str(os.getsid(0)), os.environ.get("GIT_TERMINAL_PROMPT", "")]))
+sys.exit(255)
+""", encoding="utf-8")
+    os.chmod(SSH, 0o755)
+    MAPFILE.write_text(json.dumps(a_map(commit_="1" * 40)))
+    def reap():
+        for pid in PIDS.read_text().split() if PIDS.exists() else ():
+            try: os.kill(int(pid), 9)   # a fake ssh of this test, by the pid it wrote: never by name
+            except (ProcessLookupError, ValueError): pass
+    def alive(pid):
+        try: os.kill(pid, 0)
+        except ProcessLookupError: return False
+        return os.path.exists(f"/proc/{pid}") and "Z" not in pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    try:
+        for f in (SEEN, PIDS): f.unlink(missing_ok=True)
+        r = tool("select", GIT_SSH_COMMAND=str(SSH))
+        seen = SEEN.read_text().split() if SEEN.exists() else None
+        check("select: the fetch of the map's missing commit runs in a session of its own (no terminal for ssh to ask the host key on) and git is told not to prompt",
+              seen is not None and len(seen) == 2 and int(seen[0]) != os.getsid(0) and seen[1] == "0", (seen, os.getsid(0), r.stderr))
+        check("select: that failed fetch leaves the pick `all` with the one `does not hold` line, as a commit that is not there",
+              r.returncode == 0 and r.stdout.split() == ["all"] and "does not hold" in r.stderr and "wider than CI" in r.stderr, (r.returncode, r.stdout, r.stderr))
+
+        PIDS.unlink(missing_ok=True); t0 = time.monotonic()
+        try:
+            r = tool("select", GIT_SSH_COMMAND=str(SSH), FAKE_SSH_MODE="hang", SUITEMAP_FETCH_TIMEOUT="2", timeout=40)
+            took = time.monotonic() - t0
+        except subprocess.TimeoutExpired:
+            r, took = None, time.monotonic() - t0
+        check("select: an ssh that never answers is ended at the fetch timeout and select still returns `all` with the one `does not hold` line (it never returned before)",
+              r is not None and took < 30 and r.returncode == 0 and r.stdout.split() == ["all"] and "does not hold" in r.stderr, (took, r and (r.returncode, r.stdout, r.stderr)))
+        pids = [int(x) for x in PIDS.read_text().split()] if PIDS.exists() else []
+        check("select: the ssh that hung is gone with the fetch (the whole process group is ended, not git alone)", pids and not any(alive(x) for x in pids), pids)
+    finally:
+        reap()
+    for bad in ("0", "-3", "soon", "inf", "nan"):
+        r = tool("select", SUITEMAP_FETCH_TIMEOUT=bad)
+        check(f"select: SUITEMAP_FETCH_TIMEOUT={bad} is an error at once, never a silent default", r.returncode != 0 and "SUITEMAP_FETCH_TIMEOUT" in r.stderr and r.stdout == "", (r.returncode, r.stdout, r.stderr))
 
     # ---- the folder is the one a test runner's copy carries, and never a commit's
     REAL = os.path.dirname(SCR)
