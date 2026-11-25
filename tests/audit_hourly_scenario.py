@@ -31,7 +31,7 @@ network, no model call, no message sent.
   24 a mover's own status write with new text is the item's hourly update (kind `update`, the text its words, the row reads it), as the audit's line is: the same text again, a write by anyone but the mover and a cleared status
      are not; the audit's own line still stamps beside it and the newer of the two is the record
   26 the first line is owed after 45 minutes without activity (`hourly.EVERY`, the same as `FAST_GAP`), so it lands inside the hour: none at 44 minutes, one at 46, the cadence after it and the slow stretch unchanged, the constants pinned by value, the idle hand-over still waits a full hour, a tied pull request's event still verifies within the hour
-  27 an idle line says why nothing was verified in one short clause after the unchanged words `idle, nothing verified`: a busy pane that proves nothing of this item (the mover's other items on agents), a pane that is idle, at a shell, asleep or not read,
+  27 an idle line says why nothing was verified in one short clause after the unchanged words `idle, nothing verified`: a busy pane that proves nothing of this item (the mover's other items on agents), a pane that is idle, at a shell, asleep or not given,
      a subagent tied to other items or none running, no recorded event in the hour; the clause is capped, stored whole, and every reader (kind, `idle_marked`, the idle hand-over, `get`, the History) is unchanged
   20 the tie by description first, a read error kept for the pass, a front test that raises
 
@@ -1057,12 +1057,12 @@ check("27 busy pane, one other item on an agent: singular", idle27(1) == IDLE27(
 for st, words in (("idle", "the mover's pane is idle"), ("shell", "the mover's pane is at a shell"), ("sleeping", "the mover's pane is asleep"), ("dozing", "the mover's pane is dozing")):
     wipe27(); put(1, act=90); panes["home-peer"] = st; tick()
     check(f"27 a pane that is {st}: the clause says so", idle27(1) == IDLE27(now0) + f" ({words}; {NO_SUB}; {NO_EV})", idle27(1))
-# a pane the snapshot cannot give (missing, older than the limit, not listing the mover, one that raises)
+# a pane word the pass is not given (an empty one, or a reading that raises); a missing, old or unread snapshot never gets here: the line is audit_unknown
 for st in ("", "boom"):
     wipe27(); put(1, act=90); panes["home-peer"] = st; tick()
-    check(f"27 a pane that is {'not in the snapshot' if not st else 'unreadable'}: the clause says there was no fresh snapshot", idle27(1) == IDLE27(now0) + f" ({HR.PANE_UNREAD}; {NO_SUB}; {NO_EV})" and HR.PANE_UNREAD == "no fresh snapshot of the mover's pane", idle27(1))
+    check(f"27 a pane that is {'not in the snapshot' if not st else 'unreadable'}: the clause says the pane state was not given", idle27(1) == IDLE27(now0) + f" ({HR.PANE_UNREAD}; {NO_SUB}; {NO_EV})" and HR.PANE_UNREAD == "the mover's pane state was not given", idle27(1))
 wipe27(); put(1, act=90); panes["home-peer"] = "idle"; tick(pane=None)
-check("27 no pane reading given at all reads as no fresh snapshot", idle27(1) == IDLE27(now0) + f" ({HR.PANE_UNREAD}; {NO_SUB}; {NO_EV})", idle27(1))
+check("27 no pane reading given at all reads as the pane state not given", idle27(1) == IDLE27(now0) + f" ({HR.PANE_UNREAD}; {NO_SUB}; {NO_EV})", idle27(1))
 # subagents: one running for the mover but tied to another of its items
 wipe27(); put(1, act=90); put(2, act=90); panes["home-peer"] = "idle"; run_on("home-peer", f"Build {BID(2)}: the thing"); tick()
 check("27 a subagent runs for the mover but names another item: the line for this item says its subagents are tied to other items; the other item is verified",
@@ -1090,6 +1090,15 @@ check("27 …and stored through the log it is not clipped", HL.log_of(mm27)[0]["
 # whole reasons only past the limit: the first reasons stay, the first that does not fit ends the clause
 over = HR.text(now0, [], [], ["a" * 100, "b" * 100, "c"])
 check("27 past WHY_MAX whole reasons are dropped from the end, never cut in the middle, and nothing after a reason that did not fit is kept", over == IDLE27(now0) + " (" + "a" * 100 + ")" and HR.text(now0, [], [], ["x" * 200]) == IDLE27(now0), over)
+# the cap is on the joined reasons, inclusive: exactly WHY_MAX characters are kept (the clause is then WHY_MAX + 3 with " (" and ")"), one more drops the last reason
+exact = ["a" * 100, "b" * (HR.WHY_MAX - 102)]
+one_over = ["a" * 100, "b" * (HR.WHY_MAX - 101)]
+t_exact, t_over = HR.text(now0, [], [], exact), HR.text(now0, [], [], one_over)
+check("27 reasons joined to exactly WHY_MAX characters are all kept, the clause being WHY_MAX + 3 long", len("; ".join(exact)) == HR.WHY_MAX and t_exact == IDLE27(now0) + " (" + "; ".join(exact) + ")" and len(t_exact) - len(IDLE27(now0)) == HR.WHY_MAX + 3, t_exact)
+check("27 reasons joined to WHY_MAX + 1 characters lose the last reason", len("; ".join(one_over)) == HR.WHY_MAX + 1 and t_over == IDLE27(now0) + " (" + exact[0] + ")", t_over)
+kept3, over3 = ["a" * 100, "b" * (HR.WHY_MAX - 105), "c"], ["a" * 100, "b" * (HR.WHY_MAX - 104), "c"]
+check("27 the same with a one-character third reason: joined to WHY_MAX it is kept, joined to WHY_MAX + 1 it is dropped and the first two stay",
+      len("; ".join(kept3)) == HR.WHY_MAX and len("; ".join(over3)) == HR.WHY_MAX + 1 and HR.text(now0, [], [], kept3) == IDLE27(now0) + " (" + "; ".join(kept3) + ")" and HR.text(now0, [], [], over3) == IDLE27(now0) + " (" + "; ".join(over3[:2]) + ")", (HR.text(now0, [], [], kept3), HR.text(now0, [], [], over3)))
 # the idle hand-over's reason is unchanged and still hands the item on from a line that carries the clause
 check("27 the idle hand-over reads the line with the clause (kind and start of the words) and its own reason text is unchanged", [g for g, _r in HI.due_all({"a1": rd(1)}, now0 + 15 * MIN, lambda who, project: telling.front_keeper(who, project)[0])] == ["a1"] and HI.WHY == "no activity for an hour, nothing verified")
 
