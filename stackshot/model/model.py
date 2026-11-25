@@ -39,6 +39,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from stackshot.core import people as _people
 from stackshot.model import states as _states
 from stackshot.waits import wait_list as _wl
 from stackshot.waits import waiting as _wt
@@ -66,14 +67,13 @@ def clean(v: Any) -> str:
 
 
 def owner_display() -> str:
-    """The owner as the instance names him ([instance] owner), the name an owner-mover is stored and shown as."""
+    """The owner as the instance names him (the first person's name), the name an owner-mover is stored and shown as."""
     return _wt._owner_name()
 
 
 def is_owner(who: Any) -> bool:
-    """Does `who` name the owner: the instance's owner name ([instance] owner), in any case."""
-    w = clean(who).lower()
-    return bool(w) and w == owner_display().lower()
+    """Does `who` name the owner: a person's name or alias, in any case (people.person_of)."""
+    return _people.person_of(clean(who)) is not None
 
 
 def norm_who(who: Any) -> str:

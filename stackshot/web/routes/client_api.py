@@ -23,6 +23,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
 
 from stackshot.core import config as _cfg
+from stackshot.core import people as _people
 from stackshot.fleet import clients as _clients, inbox as _inbox, inbox_holds as _inbox_holds
 from stackshot.fleet.clients import POLL_MAX as _POLL_MAX
 from stackshot.github import ghsync as _gh
@@ -112,13 +113,19 @@ def _client_caller(request: Any, verb_ok: bool = True) -> tuple[str, str]:
     return pm, ""
 
 
+def _owner_named() -> str:
+    """The owner's name as the config writes it, "" when it names nobody (the client's own config then keeps no owner line)."""
+    p = _people.first()
+    return p.name if p.declared else ""
+
+
 def _client_config() -> dict[str, Any]:
     """The instance's settings a client box's hooks need, and nothing secret: `stackshot client install --url` writes
     them into that box's config, so its nag speaks in the instance's timezone and page flavor. Values as the hooks read them."""
     def plain(v: Any) -> Any:           # what TOML may hold that JSON cannot (a bare date) goes as its text
         return v if isinstance(v, (str, int, float, bool)) else [plain(x) for x in v] if isinstance(v, list) else str(v)
     out: dict[str, Any] = {
-        "instance": {k: str(_cfg.get("instance", k) or "") for k in ("name", "title", "owner", "timezone", "board_url")},
+        "instance": {k: _owner_named() if k == "owner" else str(_cfg.get("instance", k) or "") for k in ("name", "title", "owner", "timezone", "board_url")},
         "pages": {"flavor": _cfg.page_flavor(), "dirs": _cfg.page_dirs()},
         "paths": {"brain": str(_cfg.get("paths", "brain") or "")},
         "subject": {"prefixes": [str(p) for p in (_cfg.get("subject", "prefixes") or [])]},

@@ -818,9 +818,15 @@ def fleet_tool() -> str:
     return str(get("fleet", "tool_name") or "").strip()
 
 
+def _people():
+    """The one reader of who the people are (people.py), imported at call time: it reads this module."""
+    from stackshot.core import people
+    return people
+
+
 def owner() -> str:
-    """[instance] owner: how the prose names the person this board is for ("the owner" when the key is missing; notes() says so at the start)."""
-    return str(get("instance", "owner") or "").strip() or "the owner"
+    """How the prose names the person this board is for: [instance] owner, or the first of [[people]] ("the owner" when the config names nobody; notes() says so at the start)."""
+    return _people().first().name
 
 
 OWNER_KIND = "owner"          # the generic word for the owner's mover kind (the kind the code uses inside, and what [items_api] owner_mover_kind = "owner" emits)
@@ -875,23 +881,14 @@ def shell_url() -> str:
 
 
 def owner_aliases() -> list[str]:
-    """[instance] owner_aliases: the other names a session may open a line of next with for the owner's step (the owner's initials, a name in another language); [] by default.
+    """The other names a session may open a line of next with for the owner's step (the owner's initials, a name in another language): [instance] owner_aliases, or the first person's aliases; [] by default.
     The name `you` is always one (a line `you: …` is the owner's) and is not listed here."""
-    v = get("instance", "owner_aliases", default=[])
-    if not isinstance(v, list):
-        return []
-    out: list[str] = []
-    for a in v:
-        a = str(a).strip()
-        if a and a != owner() and a not in out and a.lower() != "you":
-            out.append(a)
-    return out
+    return list(_people().first().aliases)
 
 
 def owner_names() -> list[str]:
-    """The owner's name and every alias, the name first; with no [instance] owner set, only the aliases."""
-    own = owner()
-    return ([] if own == "the owner" else [own]) + owner_aliases()
+    """The owner's name and every alias, the name first; with no owner named, only the aliases."""
+    return _people().names()
 
 
 def owner_openers() -> list[str]:
@@ -903,20 +900,7 @@ def owner_openers() -> list[str]:
 def owner_opener_rx(to: bool = True):
     """A compiled regex for a who-takes-it opener of a line of next that names the owner: `<name>:` (name, alias or `you`, any case for `you`), and with `to` also `<name> to …` for the names
     (never `the owner's`, `ACME-1` or "the owner approved …"). Cached per set of names, so a reload is read at once."""
-    return _opener_rx(tuple(owner_names()), to)
-
-
-_OPENERS: dict[tuple[tuple[str, ...], bool], Any] = {}
-
-
-def _opener_rx(names: tuple[str, ...], to: bool):
-    key = (names, to)
-    if key not in _OPENERS:
-        alt = "|".join(re.escape(n) for n in names)
-        colon = rf"(?:(?:{alt})|[Yy]ou)\s*:" if alt else r"[Yy]ou\s*:"
-        pat = rf"^(?:{colon}" + (rf"|(?:{alt})\s+to\b" if alt else "") + ")"
-        _OPENERS[key] = re.compile(pat)
-    return _OPENERS[key]
+    return _people().opener_rx(to)
 
 
 # ---------------------------------------------------------------------------------------------------------------- [keywords]: the words of another language
@@ -1241,7 +1225,7 @@ REMOVED = {
 
 
 def refused(cfg: dict[str, Any] | None = None) -> list[str]:
-    """One line per key of REMOVED whose value in the file (or in `cfg`) is not the one left; [] when the file is fine."""
+    """One line per key of REMOVED whose value in the file (or in `cfg`) is not the one left, and per fault of the [[people]] list (people.problems); [] when the file is fine."""
     out = []
     for (sec, key), (keep, what) in REMOVED.items():
         v = get(sec, key, cfg=cfg)
@@ -1249,7 +1233,7 @@ def refused(cfg: dict[str, Any] | None = None) -> list[str]:
             continue
         out.append(f'[{sec}] {key} = "{v}" in {PATH}: removed; "{keep}" is the one value left ({what}) '
                    f'— set {key} = "{keep}" or drop the line')
-    return out
+    return out + _people().problems(cfg)
 
 
 def obsolete() -> list[str]:
@@ -1364,8 +1348,15 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     out: list[str] = stall_notes(cfg)
     out += keyword_notes(cfg)
     out += gmail_names_notes(cfg)
-    if not str(get("instance", "owner", cfg=cfg) or "").strip():
+    if not _people().build(cfg)[0].declared:
         out.append('[instance] has no owner, so the board names its person by a placeholder: set owner = "<first name>" (the example config has it)')
+    elif get("people", cfg=cfg):
+        pe = _people()
+        owned = {e for p in pe.build(cfg) for e in p.emails}
+        old_owner = str(get("instance", "owner", cfg=cfg) or "").strip()
+        old_mail = get("auth", "allowed_emails", default=[], cfg=cfg)
+        if (old_owner and old_owner != pe.PLACEHOLDER) or get("instance", "owner_aliases", cfg=cfg) or (isinstance(old_mail, list) and any(e not in owned for e in old_mail)):
+            out.append("[[people]] is set, so [instance] owner, owner_aliases and [auth] allowed_emails are not read for a person: move what they hold into it, and drop them")
     pg = get("page_gate", cfg=cfg)
     pg = pg if isinstance(pg, dict) else {}
     if "keeper_currency" in pg:
@@ -1564,6 +1555,7 @@ RESTART_ONLY: dict[str, str] = {
     "instance.name": "",                          # these are written into the MCP tool descriptions and the connector's
     "instance.owner": "",                         #   instructions when the tools are registered at start
     "instance.owner_aliases": "",
+    "people": "",                                 # the people are read into the tool texts at start (and a sign-in address is a person's: the list is as restart-only as the keys it replaces)
     "steps": "",                                  # the shell rule is written into the create and update descriptions at start
     "instance.board_url": "",
     "instance.machine": "",                       # written into a temporary id (board-tmp-<machine>#<n>) and its page address

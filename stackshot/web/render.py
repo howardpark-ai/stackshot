@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg  # stackshot.toml: paths, fleet, scopes, the Machines panel, branding
+from stackshot.core import people as _people
 from stackshot.core import legacy_owner as _lo   # an old version of an item (from the store's history) read as the current code reads it: History only, never written back
 from stackshot.web import item_history as _ihist   # the commits of an item's file in the store's git, kept per item (item_history.py)
 from stackshot.fleet import fleet as _fleet   # the session and machine view, and the one rule for a session's presence (running / present)
@@ -40,7 +41,7 @@ from stackshot.model import item_project as _iproj   # an item's project by its 
 from stackshot.projects import projects as _prj   # the project record: an agent registered there whose page line is still owed (with_pending)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
 from stackshot.fleet import sessions_registry as _sr   # the permanent session id: a stored id is shown as the session's name now, and two forms of one session read as one
-_OWNER = str(_cfg.get("instance", "owner") or "the owner")   # whom a Next line addresses with "<owner>:"
+_OWNER = _people.first().name   # whom a Next line addresses with "<owner>:"
 
 
 def fleet_names():
