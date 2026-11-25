@@ -1264,6 +1264,12 @@ def secret_file_mode_problem(path: str) -> str:
         mode = os.stat(path).st_mode
     except OSError:
         return ""
+    return secret_mode_text(mode)
+
+
+def secret_mode_text(mode: int) -> str:
+    """"" when a secret file's mode is private to its owner (mode & 0o077 == 0); else the few words saying it is not, with the mode. The one wording,
+    used by the load-time note (by the path's stat) and by the call (by the opened descriptor's mode)."""
     return f"is readable by group or others (mode {mode & 0o777:04o}), so it is not used: chmod 600 it" if mode & 0o077 else ""
 
 

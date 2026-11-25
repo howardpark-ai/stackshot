@@ -16,7 +16,7 @@ A parent environment that holds the variable passes it to no child (15), and one
 no keep fragment; an existing page keeps its brain; a create and the writes after it use that brain's home; bad values are ignored and named by config.notes.
 
     tests/run-suite brains        -> exit 0 / 1"""
-import contextlib, io, json, os, pathlib, re, shutil, subprocess, sys, time
+import contextlib, dataclasses, io, json, os, pathlib, re, shutil, subprocess, sys, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="brainstest-"); T = pathlib.Path(tmp)
@@ -1267,6 +1267,96 @@ finally:
     if DSF.is_dir(): DSF.rmdir()
     DSF.unlink(missing_ok=True)
     SF.unlink(missing_ok=True)
+    _cfg.CFG.get("gbrain", {}).pop("secret_file", None)
+    set_brains()
+
+# ---- 22. secret(): one opened descriptor decides the kind, the mode and the size; no refusal, log line or note ever carries a value; the plain form is literal; JSON is trimmed
+MK = "marker-secret-value-ABCDEF"       # a made-up value of 16 or more characters
+MS = "short-val-12345"                  # a made-up value of 15 characters: too short to use
+MAXB = brains.SECRET_MAX_BYTES
+def _clear_path(path):
+    if path.is_dir() and not path.is_symlink(): path.rmdir()
+    else: path.unlink(missing_ok=True)
+def _put_bytes(path, data, mode=0o600):
+    _clear_path(path); path.write_bytes(data); os.chmod(path, mode)
+def _setup22(kind):
+    """The brain under test: ('default', its file, its slug) or ('second', its file, its slug); the other one has no secret_file."""
+    if kind == "default":
+        set_brains(); with_default(str(DSF)); return DSF, "projects/alpha"
+    set_brains({**SECOND, "secret_file": str(SF)}); with_default(None); return SF, "projects/beta-one"
+def refusal22(kind, label, prep, markers, want):
+    """One refusal: the file is prepared (prep(path)), every kind of call is refused with `want` in the reason and no CLI runs, and none of `markers`
+    appears in any text the refusal produced (the call's answer, the page store's note, a timeline line, stderr, config.notes, prepare's reason)."""
+    path, slug = _setup22(kind); brains._WARNED.clear(); prep(path); calls()
+    with stderr() as e_:
+        rc_, out_ = rename_page.gb(["put", slug], stdin="x")
+        st_, note_ = page_debt.page_io().put(slug, "x", "r1")
+        got_ = page_debt.page_io().get(slug)
+        tl_ = page_debt.page_io().add_timeline(slug, "2026-11-02", "s", "", "test")
+        env_, why_ = brains.prepare(slug, {SK: PARENT, "PATH": "/x"})
+    c_ = calls(); err_ = e_.getvalue()
+    who = "the default brain" if kind == "default" else "second brain 'second'"
+    texts = (out_, note_, tl_, err_, why_, _cfg.notes(), repr(got_))
+    check(f"22 {kind}: {label}: refused (exit 2) with 'refused: {who}: secret_file <path> ... {want[:30]}', and no CLI ran",
+          rc_ == 2 and out_.startswith(f"refused: {who}: secret_file {path} ") and want in out_ and want in why_ and st_ == "refused" and got_[0] is None and c_ == [] and SK not in env_, (rc_, out_, st_, c_))
+    check(f"22 {kind}: {label}: no value in the answer, the note, the timeline line, stderr, the config notes or the reason",
+          not [m for m in markers for t in texts if m in str(t)], [(m, i) for m in markers for i, t in enumerate(texts) if m in str(t)])
+JSON_ = lambda **kw: json.dumps(kw).encode()
+CASES22 = [
+    ("a 15-character plain value", lambda p: _put_bytes(p, (MS + "\n").encode()), [MS], "shorter than 16 characters"),
+    ("a 15-character JSON value", lambda p: _put_bytes(p, JSON_(client_secret=MS)), [MS], "shorter than 16 characters"),
+    ("a JSON value that is short once trimmed", lambda p: _put_bytes(p, JSON_(client_secret="   " + MS + "  \n")), [MS], "shorter than 16 characters"),
+    ("a NUL in a JSON value", lambda p: _put_bytes(p, JSON_(client_secret=MK + "\u0000-tail")), [MK], "has an unusable client_secret"),
+    ("a bell in a plain file", lambda p: _put_bytes(p, (MK + "\x07-tail\n").encode()), [MK], "has an unusable client_secret"),
+    ("a tab inside a plain value", lambda p: _put_bytes(p, (MK + "\twith-a-tab\n").encode()), [MK], "has an unusable client_secret"),
+    ("a JSON file with no client_secret", lambda p: _put_bytes(p, JSON_(client_id="made-up-id", note=MK)), [MK], "no client_secret key"),
+    ("a JSON list", lambda p: _put_bytes(p, json.dumps([MK]).encode()), [MK], "no client_secret key"),
+    ("a file that is not valid JSON", lambda p: _put_bytes(p, ("{not json " + MK).encode()), [MK], "not valid JSON"),
+    ("a file that is not text", lambda p: _put_bytes(p, b"\xff\xfe" + MK.encode()), [MK], "not text"),
+    ("a file with a good value and mode 0644", lambda p: _put_bytes(p, JSON_(client_secret=MK), 0o644), [MK], "readable by group or others"),
+    ("a file one byte over the size limit", lambda p: _put_bytes(p, JSON_(client_secret=MK) + b" " * (MAXB + 1 - len(JSON_(client_secret=MK)))), [MK], f"larger than {MAXB} bytes"),
+    ("a file far over the size limit", lambda p: _put_bytes(p, (MK + "\n").encode() + b"x" * (4 * MAXB)), [MK], f"larger than {MAXB} bytes"),
+    ("a directory", lambda p: (_clear_path(p), p.mkdir(), os.chmod(p, 0o700)), [], "Is a directory"),
+    ("a FIFO (opened without waiting for a writer)", lambda p: (_clear_path(p), os.mkfifo(p, 0o600)), [], "not a regular file"),
+    ("a missing file", lambda p: _clear_path(p), [], "No such file or directory"),
+]
+try:
+    for kind in ("default", "second"):
+        for label, prep, markers, want in CASES22:
+            refusal22(kind, label, prep, markers, want)
+    # a device is no regular file either (read without end if it were read): refused by the descriptor's kind
+    for kind in ("default", "second"):
+        path, slug = _setup22(kind); calls()
+        with stderr(): env_dev, why_dev = brains.prepare(slug, {"PATH": "/x"}, dataclasses.replace(brains.for_key(slug), secret_file="/dev/zero"))
+        check(f"22 {kind}: a character device is refused without being read", why_dev.endswith("secret_file /dev/zero cannot be read: not a regular file") and SK not in env_dev, why_dev)
+
+    # what works: a file of exactly the size limit, a quoted plain value taken literally, JSON trimmed, a JSON value with inner characters kept
+    for kind in ("default", "second"):
+        path, slug = _setup22(kind); b_ = brains.for_key(slug)
+        body = JSON_(client_secret=MK)
+        _put_bytes(path, body + b" " * (MAXB - len(body)))
+        check(f"22 {kind}: a valid file of exactly {MAXB} bytes is read", brains.secret(b_) == (MK, ""), brains.secret(b_)[1])
+        _put_bytes(path, ('"' + MK + '"\n').encode())
+        check(f"22 {kind}: a plain file is taken literally: a quoted string keeps its quotes", brains.secret(b_) == ('"' + MK + '"', ""), brains.secret(b_)[1])
+        calls(); rename_page.gb(["put", slug], stdin="x"); c = calls()
+        check(f"22 {kind}: ...and the child gets it as written, quotes included", len(c) == 1 and c[0]["secret"] == '"' + MK + '"', c)
+        _put_bytes(path, JSON_(client_secret="  " + MK + " \n\t"))
+        check(f"22 {kind}: a JSON client_secret with surrounding whitespace is trimmed", brains.secret(b_) == (MK, ""), brains.secret(b_)[1])
+        _put_bytes(path, json.dumps({"client_secret": '"' + MK + '"'}).encode())
+        check(f"22 {kind}: a JSON client_secret that holds quotes keeps them", brains.secret(b_) == ('"' + MK + '"', ""), brains.secret(b_)[1])
+        _put_bytes(path, ("\n \n  " + MK + "  \nsecond line\n").encode())
+        check(f"22 {kind}: a plain file reads its first non-empty line, trimmed", brains.secret(b_) == (MK, ""), brains.secret(b_)[1])
+        _put_bytes(path, b"")
+        check(f"22 {kind}: an empty file is refused as empty", brains.secret(b_)[1].endswith("is empty"), brains.secret(b_))
+    # the mode is judged on the opened file: a symlink to a private file works, to a world-readable one is refused with its mode
+    path, slug = _setup22("default"); b_ = brains.default()
+    real = T / "default-secret-real.json"; _put_bytes(real, JSON_(client_secret=MK)); _clear_path(DSF); os.symlink(real, DSF)
+    check("22 a symlink to a private file works", brains.secret(b_) == (MK, ""), brains.secret(b_)[1])
+    os.chmod(real, 0o644)
+    check("22 a symlink to a world-readable file is refused with the target's mode", "readable by group or others (mode 0644)" in brains.secret(b_)[1] and MK not in brains.secret(b_)[1], brains.secret(b_)[1])
+    DSF.unlink(); real.unlink()
+finally:
+    for f_ in (DSF, SF, T / "default-secret-real.json"): _clear_path(f_)
     _cfg.CFG.get("gbrain", {}).pop("secret_file", None)
     set_brains()
 

@@ -36,7 +36,8 @@ stackshot writes nothing of its board onto them. Every write the page store make
 project lines' copy of the record) is refused with a line that names the mark (shared_refusal), and a page of it owes no page update to a session. Reads are not touched.
 
 A remote brain's CLI also needs its OAuth client secret (GBRAIN_REMOTE_CLIENT_SECRET). The entry's optional `secret_file` is a path (~ allowed)
-to a file holding it: a JSON file with a `client_secret` key, or a plain file whose first line is the secret. The server reads it at each
+to a file holding it: a JSON file with a `client_secret` key, or a plain file whose first non-empty line is the secret, taken literally (a quoted string is not unwrapped). The file must be a regular file of at most
+SECRET_MAX_BYTES, opened once: that descriptor decides the kind, the mode and the content. The server reads it at each
 CLI call for that brain and sets the variable in the child's environment only: never in its own, never in a log, a note, an error message
 or the client config (the path may be named, the value and the file's content never). A file readable by group or others (mode & 0o077)
 is refused, by config.notes at load and again at the call; a file that cannot be read, is empty, has no `client_secret` or holds an unusable one
@@ -62,8 +63,10 @@ The first entry whose `new_prefixes` match wins. `new_prefixes` never moves a pa
 Stdlib only."""
 from __future__ import annotations
 
+import errno
 import json
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -76,6 +79,7 @@ from stackshot.core import config as _cfg
 
 DEFAULT = "default"
 SECRET_ENV = "GBRAIN_REMOTE_CLIENT_SECRET"      # the variable the gbrain CLI reads a remote brain's OAuth client secret from
+SECRET_MAX_BYTES = 64 * 1024    # a secret_file larger than this is refused unread (a client secret is a few dozen bytes: a stray big file is no secret)
 SECRET_MIN = 16             # a client secret shorter than this is not used: redact() of a very short value would corrupt page text
 STALE_HOURS = 24.0          # a second brain's copy not synced for this long is stale ([[brains]] stale_hours; 0 = never stale)
 
@@ -361,18 +365,45 @@ def key_problem(key: Any) -> tuple[Brain, str]:
 def secret(b: Brain) -> tuple[str, str]:
     """(the brain's CLI client secret, "") from its `secret_file`; ("", why) when it cannot be used; ("", "") when the entry has no secret_file.
     `why` names the path and the reason and never a value or any of the file's content. The file is read at each call (a rotated secret applies
-    at once); one that group or others can read is refused. JSON (a file starting with { or [) with a `client_secret` key, else a plain file whose first non-empty line is the secret.
+    at once) through one opened descriptor, which decides everything: it must be a regular file (a directory, a FIFO or a device is refused without
+    being read; the open does not wait for a writer), its mode must be private to the owner (group or others can read: refused), and it is read up to
+    SECRET_MAX_BYTES (a larger file is refused, naming the limit). JSON (a file starting with { or [) with a `client_secret` key, else a plain file whose
+    first non-empty line is the secret, taken literally (quotes included: a quoted string is no JSON here). A value is trimmed of surrounding whitespace.
     A value with a control or other non-printable character (a NUL or a lone surrogate would make the child process fail to start) or shorter than SECRET_MIN characters is unusable."""
     if not b.secret_file:
         return "", ""
     p = b.secret_file
-    bad = _cfg.secret_file_mode_problem(p)
-    if bad:
-        return "", f"secret_file {p} {bad}"
     try:
-        raw = Path(p).read_text(encoding="utf-8")
+        fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))      # O_NONBLOCK: a FIFO opens without waiting for a writer
     except OSError as e:
         return "", f"secret_file {p} cannot be read: {e.strerror or type(e).__name__}"
+    try:
+        st = os.fstat(fd)
+        if stat.S_ISDIR(st.st_mode):
+            return "", f"secret_file {p} cannot be read: {os.strerror(errno.EISDIR)}"
+        if not stat.S_ISREG(st.st_mode):
+            return "", f"secret_file {p} cannot be read: not a regular file"
+        bad = _cfg.secret_mode_text(st.st_mode)
+        if bad:
+            return "", f"secret_file {p} {bad}"
+        if st.st_size > SECRET_MAX_BYTES:
+            return "", f"secret_file {p} is larger than {SECRET_MAX_BYTES} bytes, so it is not used"
+        chunks: list[bytes] = []
+        size = 0
+        while size <= SECRET_MAX_BYTES:
+            chunk = os.read(fd, SECRET_MAX_BYTES + 1 - size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+    except OSError as e:
+        return "", f"secret_file {p} cannot be read: {e.strerror or type(e).__name__}"
+    finally:
+        os.close(fd)
+    if size > SECRET_MAX_BYTES:
+        return "", f"secret_file {p} is larger than {SECRET_MAX_BYTES} bytes, so it is not used"
+    try:
+        raw = b"".join(chunks).decode("utf-8")
     except ValueError:
         return "", f"secret_file {p} cannot be read: not text"
     if raw.lstrip().startswith(("{", "[")):

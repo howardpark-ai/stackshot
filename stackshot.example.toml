@@ -458,7 +458,10 @@ mirror_url = "https://github.com/example/brain/blob/main/{key}.md"
 #                                                   # a path to a JSON file with a "client_secret" key (or a plain one-line file), mode 600, read at each CLI call and set as GBRAIN_REMOTE_CLIENT_SECRET in that child's
 #                                                   # environment only. A thin client: set home to the folder that holds its config (GBRAIN_HOME is a parent folder, .gbrain is appended) and secret_file to its secret;
 #                                                   # such a CLI forwards get, put and timeline-add and refuses `gbrain call` (the page store falls back to the named commands). Unset = no secret is passed
-#                                                   # (the parent's own variable of that name never reaches the CLI either way). With a secret_file but no home the secret goes to the CLI's own default home
+#                                                   # (the parent's own variable of that name never reaches the CLI either way). With a secret_file but no home the secret goes to the CLI's own default home.
+#                                                   # The path is read on the machine that runs the CLI: where the file does not exist every default-brain CLI call is refused ("refused: the default brain: secret_file <path> cannot be read: No such file or directory"),
+#                                                   # so when two machines read one config file, keep the secret file at the same path on both or set the key only in the config of the machine that has it.
+#                                                   # The plain-file form is taken literally (quotes included); the file must be a regular file of at most 64 KiB
 # shared = false                                    # true: other people's pages live in this brain too, so stackshot writes nothing of its board onto them (see [[brains]] shared)
 
 # [[brains]]: second notes brains that hold some projects' pages (stackshot/projects/brains.py). Optional: with no entry every page lives in the default brain
