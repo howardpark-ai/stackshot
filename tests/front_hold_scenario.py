@@ -1286,11 +1286,11 @@ check("11t4: a long message is one line cut to what an item keeps of one (360 ch
 # whom it reaches: the items of his in the agent's own project, and no other
 fresh(); no_log(); SAVES.clear(); a1_before, a30_before = list(qlog(1)), list(qlog(30)); n0 = len(pushes())
 out = msg(FRONT, mark() + "\na34 and a1: the second lane is cheaper, pick one.", "home-beta"); settle()
-check("11u: an open item named beside his that is not his (a1) is not written onto: only a34 gets the line, and the reply names a34 alone", out.startswith("Not delivered: written onto a34 as a History line from home-beta") and not re.search(r"\ba1\b", out)
+check("11u: an open item named beside his that is not his (a1) is not written onto: only a34 gets the line, and the reply names a34 as written and a1 only as left out", out.startswith("Not delivered: written onto a34 as a History line from home-beta (not written onto a1), and ") and out.count("a1") == 1
       and len(qlog(34)) == 1 and qlog(1) == a1_before and SAVES == ["a34"] and len(written_rows("a34")) == 1 and not written_rows("a34, a1") and reach(A, n0) == [], (out, qlog(34), qlog(1), SAVES))
 fresh(); no_log(); SAVES.clear(); n0 = len(pushes())
 out = msg(FRONT, mark() + "\na35 and a30: the second lane is cheaper, pick one.", "home-beta"); settle()
-check("11v: an item of his in another project (a30, trio's) named beside one of his own is not written onto: only a35 gets the line, and the reply names a35 alone", out.startswith("Not delivered: written onto a35 as a History line from home-beta") and not re.search(r"\ba30\b", out)
+check("11v: an item of his in another project (a30, trio's) named beside one of his own is not written onto: only a35 gets the line, and the reply names a35 as written and a30 only as left out", out.startswith("Not delivered: written onto a35 as a History line from home-beta (not written onto a30), and ") and out.count("a30") == 1
       and len(qlog(35)) == 1 and qlog(30) == a30_before and SAVES == ["a35"], (out, qlog(35), qlog(30), SAVES))
 fresh(); no_log(); SAVES.clear(); n0 = len(pushes())
 out = msg(FRONT, mark() + "\na30: the second lane is cheaper, pick one.", "home-beta"); settle()
@@ -1315,13 +1315,13 @@ def save_flaky(gid, *a, **k):
 fresh(); no_log(); SAVES.clear(); _messaging._writes.save = save_flaky; n0 = len(pushes())
 try: out = msg(FRONT, mark() + "\na36 and a37: both need your word, in this order.", "home-beta"); settle()
 finally: _messaging._writes.save = _save_count
-check("11y: one of two items cannot be saved: the reply and the message log name the item written (a36) and not the other (a37), whose History has no line", out.startswith("Not delivered: written onto a36 as a History line from home-beta") and not re.search(r"\ba37\b", out)
+check("11y: one of two items cannot be saved: the reply and the message log name the item written (a36), the reply says a37 was left out, and a37's History has no line", out.startswith("Not delivered: written onto a36 as a History line from home-beta (not written onto a37), and ") and out.count("a37") == 1
       and len(qlog(36)) == 1 and qlog(37) == [] and len(written_rows("a36")) == 1 and not written_rows("a36, a37") and held.count(A) == 0, (out, qlog(36), qlog(37), [x.get("outcome") for x in mlog()]))
 # the write path itself leaves a closed item alone, and answers "" when no item took the line
 fresh(); no_log(); SAVES.clear()
 none_ = _messaging._write_on_items(FRONT, "home-beta", "home-beta", "a15 and a38: words", "a15 and a38: words", ["a15"], "", "home-beta wrote to work-osprey-main: a15 words", "because")
 some_ = _messaging._write_on_items(FRONT, "home-beta", "home-beta", "a15 and a38: words", "a15 and a38: words", ["a15", "a38"], "", "home-beta wrote to work-osprey-main: a15 and a38 words", "because")
-check("11z: a closed item takes no line (a15: nothing saved, no line, no claim: the reply is empty), and beside an open one the reply names the open one only", none_ == "" and some_.startswith("Not delivered: written onto a38 as a History line from home-beta") and "a15" not in some_
+check("11z: a closed item takes no line (a15: nothing saved, no line, no claim: the reply is empty), and beside an open one the reply names the open one only", none_ == "" and some_.startswith("Not delivered: written onto a38 as a History line from home-beta (not written onto a15), because") and some_.count("a15") == 1
       and qlog(15) == [] and len(qlog(38)) == 1 and SAVES == ["a38"] and [x.get("outcome") for x in mlog()] == ["written onto a38, not delivered"], (none_, some_, qlog(15), qlog(38), SAVES))
 # the same words, written once within a day: the window is 24 hours, read from the message log
 fresh(); no_log(); SAVES.clear(); T39 = mark() + "\na39: pick the date for the review."
@@ -1335,6 +1335,97 @@ fresh(); no_log(); SAVES.clear(); unstamp(C); out = msg("comp-main", mark() + "\
 check("11z4: a front agent of a component page is written for an open item of his in its hub's project (a40, alpha's): the page's hub is the project", out.startswith("Not delivered: written onto a40 as a History line from home-beta") and qlog(40) == ["home-beta wrote to comp-main: a40: pick the lane."], (out, qlog(40)))
 fresh(); no_log(); SAVES.clear(); out = msg(FRONT, mark() + "\na41: pick the lane.", "home-beta"); settle()
 check("11z5: …and the front agent of the hub for one filed under the component's page (a41)", out.startswith("Not delivered: written onto a41 as a History line from home-beta") and qlog(41) == ["home-beta wrote to work-osprey-main: a41: pick the lane."], (out, qlog(41)))
+
+# ---- 11+. the follow-up lows of the message gate: a cut line says so, the cut keeps its ellipsis, a skipped item is named, two identical messages are one line, a script is named, and three guards hold
+for i_ in (42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55): item(i_, owner=A, needs=["decision"])      # open items of his, one set for each check below
+item(45); item(56)      # ordinary open items (no decision, nobody of the front agent's): an answer can be written onto them
+CLIP = _messaging._quiet.CLIP
+# 1. a long message is cut to one line and the sender is told; a short one is not told anything
+long11 = "the retest needs your pick " + "and a very long account of both lanes " * 20
+fresh(); no_log(); unstamp(A); SAVES.clear(); out = msg(FRONT, mark() + "\na42: " + long11, "home-beta"); settle()
+check("11aa: a message cut to one History line says so in the reply, in a few words, and the full words are in the message log row", out.startswith("Not delivered: written onto a42 as a History line from home-beta (cut to 360 characters, the full text stays in the message log), and work-osprey-main")
+      and len(qlog(42)) == 1 and long11.strip() in written_rows("a42")[0]["text"], (out, qlog(42)))
+fresh(); no_log(); out = msg(FRONT, mark() + "\na43: the retest needs your pick between the two lanes.", "home-beta"); settle()
+check("11ab: …a message that fits is told nothing of the kind", out.startswith("Not delivered: written onto a43 as a History line from home-beta, and work-osprey-main") and "cut" not in out.split("because")[0], out)
+log_row(FRONT, BACK, 5); stamp(A, 31); fresh(); out = msg(FRONT, "a45: " + long11, BACK); settle()
+check("11ac: the answer path says it too (an answer to the agent's question, the person away)", out.startswith("Not delivered: written onto a45 as a History line from work-osprey-x (cut to 360 characters, the full text stays in the message log), because it answers"), out)
+no_log(); fresh(); unstamp(A)
+rep_long = "the export is merged and live. " * 14
+out = msg(FRONT, mark() + "\na1: " + rep_long, BACK); settle()
+check("11ad: a builder's plain report that is cut says it too", out.startswith("Not delivered: written onto a1 as a History line from work-osprey-x (cut to 360 characters, the full text stays in the message log), because"), out)
+# 2. the cut keeps its ellipsis inside the limit, whatever the words: no space to cut at, or a space just before the limit
+def hist_ok(head, body):
+    line, cut = _messaging._history(head, body)
+    h_ = " ".join(head.split()) + ": "; words = " ".join(body.split()); room = max(20, CLIP - len(h_))
+    return len(line) <= CLIP and cut == (len(words) > room) and (line.endswith(" …") if cut else line == h_ + words)
+check("11ae: a body with no space to cut at (a long path, a hash) is cut inside the limit with its ellipsis, so the item's own cut (quiet.note) drops nothing", hist_ok("home-beta wrote to work-osprey-main", "x" * 500))
+check("11af: …for every length around the limit, spaced or not: the line is at most 360 characters, ends in the ellipsis exactly when the words were cut, and is whole when they were not",
+      all(hist_ok("a b", ("w" * k) if sp == 0 else ("word " * (k // 5 + 1))[:k]) for sp in (0, 1) for k in range(300, 420)) and all(hist_ok("home-beta wrote to work-osprey-main", "y" * k) for k in range(300, 420)), "")
+fresh(); no_log(); out = msg(FRONT, mark() + "\na44: " + "z" * 500, "home-beta"); settle()
+check("11ag: …and on the item itself the ellipsis stays (it was lost when the cut was two characters over)", len(qlog(44)) == 1 and len(qlog(44)[0]) <= CLIP and qlog(44)[0].endswith(" …"), qlog(44))
+# 3. a partial write names the items it left out (see also 11u, 11v, 11y, 11z)
+fresh(); no_log(); out = msg(FRONT, mark() + "\na46 and a1 and a15: the second lane is cheaper, pick one.", "home-beta"); settle()
+check("11ah: three named, one written: the reply names the ones left out (an item not his, a closed one) and the written one once", out.startswith("Not delivered: written onto a46 as a History line from home-beta (not written onto a1, a15), and ") and out.count("a46") == 1 and len(qlog(46)) == 1, out)
+fresh(); no_log(); out = msg(FRONT, mark() + "\na47 and a48: both need a pick.", "home-beta"); settle()
+check("11ai: every named item written: nothing is said of the ones left out", out.startswith("Not delivered: written onto a47, a48 as a History line from home-beta, and ") and "not written" not in out, out)
+fresh(); no_log(); out = msg(FRONT, mark() + "\na47 and a1: both need a pick, the same words again.", "home-beta"); settle()
+out2 = msg(FRONT, mark() + "\na47 and a1: both need a pick, the same words again.", BACK); settle()
+check("11aj: the same words again, from another sender: still told where they are, with the item left out named", out2.startswith("Not delivered: written onto a47 already (the same words were sent earlier, so no second line is added) (not written onto a1), and "), out2)
+# 4. two identical messages arriving together are one line: the look at what was written and the write are one step under the item lock
+fresh(); no_log(); SAVES.clear(); _wb_real = _messaging._written_before
+def _slow_before(*a, **k):
+    r = _wb_real(*a, **k); time.sleep(0.5); return r          # whoever looks first waits here before it writes: without the lock the other looks in the meantime and finds nothing
+_messaging._written_before = _slow_before
+race_text = mark() + "\na49: the same words, sent twice at once."; idx_ = _messaging._sr._sessions_index(); got_ = {}
+def _send(who): got_[who] = _messaging._written_unwoken(FRONT, race_text, who, "", idx_, "projects/alpha")
+ths_ = [threading.Thread(target=_send, args=(w,)) for w in ("home-beta", BACK)]
+try:
+    for t_ in ths_: t_.start()
+    for t_ in ths_: t_.join(30)
+finally: _messaging._written_before = _wb_real
+outs_ = sorted(got_.values())
+check("11ak: two identical messages from two senders at once: one written, the other told it is there already, one line on the item and one row in the message log", len(outs_) == 2 and sum(o.startswith("Not delivered: written onto a49 as a History line") for o in outs_) == 1
+      and sum(o.startswith("Not delivered: written onto a49 already") for o in outs_) == 1 and len(qlog(49)) == 1 and len(written_rows("a49")) == 1 and SAVES == ["a49"], (outs_, qlog(49), SAVES))
+# 5. a script's marked message is named as scripts are everywhere else (the sender and the machine)
+fresh(); no_log(); gate_open(); SAVES.clear()
+st_, body_ = _rt_client._client_post(MACH, "message", {"to": FRONT, "text": mark() + "\na50: the form step is for you; the second form is not ready.", "sender": "deploy-watch"}); settle()
+check("11al: a script's line names the script and its machine, as the other labels of a script do, not just `a script`", st_ == 200 and len(qlog(50)) == 1 and qlog(50)[0].startswith(f"deploy-watch (a script on {MACH}) wrote to work-osprey-main: a50:") and f"from deploy-watch (a script on {MACH})" in str(body_.get("result", "")), (st_, qlog(50), body_))
+fresh(); no_log(); out = _messaging._written_unwoken(FRONT, mark() + "\na51: a plain script, nothing known of it.", "", "", idx_, "projects/alpha"); settle()
+check("11am: …and with neither the sender nor the machine known, the line says `a script`, as before", out.startswith("Not delivered: written onto a51 as a History line from a script, ") and qlog(51)[0].startswith("a script wrote to work-osprey-main: a51:"), (out, qlog(51)))
+# 6a. an answer that no item could take is held, never returned as an empty reply (which the gate reads as `deliver it`)
+def roles_(): return _messaging._anc.session_roles()
+no_log(); fresh(); log_row(FRONT, BACK, 5); stamp(A, 31); SAVES.clear(); n0 = len(pushes()); _messaging._writes.save = save_boom
+try:
+    kind_, arg_ = _messaging.answer_route(FRONT, "projects/alpha", BACK, "a56: yes, the export is ready for the review", idx_, roles_())
+    out = msg(FRONT, "a56: yes, the export is ready for the review", BACK); settle()
+finally: _messaging._writes.save = _save_count
+check("11an: an answer whose item cannot be written (the item was open at the check, the save fails) is held for the agent: answer_route says `hold`, the reply says held, nothing delivered, not an empty reply", kind_ == "hold" and arg_ and out.startswith("held for work-osprey-main's next turn")
+      and held.count(A) == 1 and reach(A, n0) == [] and qlog(56) == [], (kind_, arg_, out, pushes()[n0:]))
+no_log(); fresh(); log_row(FRONT, BACK, 5); n0 = len(pushes()); _closing = _messaging._write_on_items
+def _closes_first(*a, **k):          # the item is closed between the check and the write
+    d_ = rd(56); d_["status"] = "completed"; (T / "store/a/56.json").write_text(json.dumps(d_)); return _closing(*a, **k)
+_messaging._write_on_items = _closes_first
+try: kind_, arg_ = _messaging.answer_route(FRONT, "projects/alpha", BACK, "a56: yes, the export is ready, once more", idx_, roles_())
+finally:
+    _messaging._write_on_items = _closing; d_ = rd(56); d_["status"] = "open"; (T / "store/a/56.json").write_text(json.dumps(d_))
+check("11ao: …and so is one whose item was closed between the check and the write", kind_ == "hold", (kind_, arg_))
+# 6b. the audit's own message is no activity on the item, a person's is: the item's `activity` clock moves for the one and not for the other
+audit_ = _cfg.audit_agent(); old_act = now0 - 3600
+for i_ in (53, 54):
+    d_ = rd(i_); d_["activity"] = old_act; (T / f"store/a/{i_}.json").write_text(json.dumps(d_))
+check("11ap: fixture: the audit agent's name is one the server counts as the audit's", audit_ and _messaging._activity.audit_writer([audit_], _messaging._writes.audit_writer_names()) and not _messaging._activity.audit_writer(["home-beta"], _messaging._writes.audit_writer_names()), audit_)
+fresh(); no_log(); t_before = time.time(); out_a = msg(FRONT, mark() + "\na53: the audit's note about the pick.", audit_); settle()
+out_p = msg(FRONT, mark() + "\na54: a person's note about the pick.", "home-beta"); settle()
+check("11aq: an audit sender's line is written and leaves the item's activity clock where it was; a person's line moves it to now", out_a.startswith("Not delivered: written onto a53") and out_p.startswith("Not delivered: written onto a54") and len(qlog(53)) == 1 and len(qlog(54)) == 1
+      and abs(rd(53).get("activity", 0) - old_act) < 1 and rd(54).get("activity", 0) >= t_before - 1, (out_a, out_p, rd(53).get("activity"), rd(54).get("activity"), old_act, t_before))
+# 6c. the replay mark of a router notice: the reply of a second pass names the items the first one wrote, never what the second was given
+fresh(); no_log(); SAVES.clear(); marks_ = _messaging._answered_dir()
+first_ = _messaging._write_on_items(FRONT, "work-osprey-x", "work-osprey-x", "a47 a48: words", "a47 a48: words", ["a47", "a15", "a48"], "", "work-osprey-x answered work-osprey-main: a47 a48 notice words", "because", "n-replay-1")
+again_ = _messaging._write_on_items(FRONT, "work-osprey-x", "work-osprey-x", "a47 a48: words", "a47 a48: words", ["a55"], "", "work-osprey-x answered work-osprey-main: a55 notice words", "because", "n-replay-1")
+check("11ar: a notice written once is not written again: the mark file holds the items the line stands on (a47, a48; a15, closed, is not among them), and the second reply names those (a47, a48), saves nothing and does not name or write the item it was given now",
+      first_.startswith("Not delivered: written onto a47, a48 as a History line from work-osprey-x") and (marks_ / "n-replay-1").read_text(encoding="utf-8") == "a47, a48"
+      and again_ == "Not delivered: written onto a47, a48 as a History line from work-osprey-x, because" and "a55" not in again_ and SAVES == ["a47", "a48"] and qlog(55) == [], (first_, again_, SAVES, (marks_ / "n-replay-1").read_text(encoding="utf-8")))
+
 _messaging._writes.save = _save_orig
 fresh(); no_log()
 
