@@ -12,6 +12,7 @@ record is always the one that is right and the page is a copy stackshot writes f
                  on one agent of the map (keeper.py): agent_add marks a project's first agent, agent_retire moves the mark of the agent that leaves (to the builder, else the -main agent, else nobody, said in
                  the answer), agent_rename makes it follow the new name
     keeper       moves the mark to another listed agent: a dry run unless asked to apply, and the apply keeps an undo file (project_restore.py's, taken back with `restore --undo`)
+    page_keeper  sets the own mark of sub-pages (`page_keepers` on the entry of the project above each page), or hands them back to the keeper above: the same dry run, undo file and record-only write as `keeper`
     restore      the record, or one project of it, put back from a past revision of the store's history in its repository (project_restore.py): a dry run unless asked to apply, with an undo file
 
 Each verb is one atomic change of the record under the record's own lock (projects.locked: the same flock every writer of the file takes), then a write of the page mirror if
@@ -1263,6 +1264,135 @@ def keeper(project: str, agent: str, *, apply: bool = False, by: str = "", io: A
     extra = {k: out[k] for k in ("name", "old", "new", "old_source", "new_source", "roles", "same")} | {"undo": undo.get("file"), "lines": lines}
     res = _finish(out["pid"], ents, changed, not apply, io, warn=out.get("warning", ""), extra=extra, by=by, mirror_now=False)      # the record only: the mark is no mirrored line, so no page is read or written
     res["mirror"] = {"state": "skipped", "key": res["key"], "note": "the keeper verb writes the record only"}
+    return res
+
+
+def _page_holder(ctx: Ctx, key: str) -> str:
+    """The id of the project whose entry holds the own mark of the sub-page `key`: the project of the nearest page above it in the key tree (the place `project_registry._lay_page_keepers` reads a mark
+    from), whether or not it has an entry yet. "" when no page above it belongs to a project (a page that reaches its project only through a `hub:` line)."""
+    parts = key.split("/")
+    cur, ids = pr.by_page(ctx.ents), ctx.key_ids()
+    for n in range(len(parts) - 1, 1, -1):
+        up = "/".join(parts[:n])
+        pid = cur.get(up) or (ids.get(up, "") if not ctx.owner(up) else "")
+        if pid:
+            return pid
+    return ""
+
+
+def _page_target(ctx: Ctx, key: str) -> str:
+    """The id of the project that holds the mark of the sub-page `key`, after the refusals that say why `key` cannot be marked: 400 a project's own page (its mark moves with `keeper`) and a page
+    the layer would not read a mark for (a name line of its own, a `keeper:` line of its own, a page reached only through `hub:`), 404 a key that is no page under any project."""
+    up = ctx.owner(key) if key else ""
+    if not up:
+        if key and ctx.pid_of(key):
+            raise VerbError(400, f"{key} is a project's own page, not a sub-page: its keeper mark is moved with `keeper`, never with `page-keeper`")
+        raise VerbError(404, f"{key or 'an empty key'} is no sub-page of any project the record or the registry knows: nothing was changed")
+    row = ctx.raw.get(key)
+    if not isinstance(row, dict):
+        raise VerbError(404, f"{key} is no page the registry knows (it would sit under {up}): nothing was changed")
+    pid = _page_holder(ctx, key)
+    if not pid:
+        raise VerbError(400, f"{key} reaches {up} through a `hub:` line, not by its place in the key tree; a sub-page's mark is held for a page placed below its project's page, so it cannot be marked")
+    top = pr.page_key(ctx.entry(pid))
+    if not top or not key.startswith(top + "/"):
+        raise VerbError(400, f"{key} is not below the page of its project ({top or pid}); a sub-page's mark is held for a page placed below its project's page")
+    if row.get("role") == "name":
+        raise VerbError(400, f"{key} has a project name line (`display-name:`) of its own, which a keeper mark does not replace")
+    if row.get("role") == _kp.MARK:
+        raise VerbError(400, f"{key} has a `keeper:` line of its own, which rules; edit the page to change it")
+    return pid
+
+
+def page_keeper(page_keys: list[str], agent: str, *, apply: bool = False, by: str = "", io: Any = None, now: str | None = None, run_dir: Any = None, pages: dict | None = None) -> dict:
+    """Set the own keeper mark of each sub-page in `page_keys` to the agent `agent`: `page_keepers[<page key>] = <agent>` on the record entry of the project the page sits under (keeper.py,
+    project_registry._lay_page_keepers). The agent is one some project lists as a sala session (its own map or another project's), spelled as it is listed; an empty `agent` hands each page back to the
+    keeper above it. A dry run unless `apply`: nothing is written, and the answer says each page's old and new keeper. With `apply` the record is written in one change, and an undo file is kept the way
+    `restore` keeps one (`restore --undo FILE --apply` takes the change back). The record only: no page is read or written, so `mirror` answers state "skipped".
+    All the keys are read before anything is written, and one bad key refuses the whole call: 400 a project's own page (`keeper` moves its mark), a page that has a name line or a `keeper:` line of
+    its own, or one reached only through a `hub:` line; 404 a key that is no page under a project, or an agent no project lists as a sala session; 400 an agent that is not a sala session; 409 a
+    retired project. A page that already has the mark asked for changes nothing. The keys may sit under different projects: each is held on the entry of its own.
+    → {project, key, changed, dry, entry, mirror, name, projects, pages, roles, same, undo, lines}, `project`, `key` and `entry` those of the first project (`projects` lists them all), and per page
+    {key, project, holder, old, new, old_source, new_source, old_mark, new_mark, same}: `old` and `new` the page's keeper as a reader sees it, `old_mark` and `new_mark` the record's own mark of the page
+    (None: none)."""
+    keys = list(dict.fromkeys(_norm_key(k) for k in (page_keys or []) if str(k or "").strip()))
+    if not keys:
+        raise VerbError(400, "name at least one sub-page key")
+    if not isinstance(agent, str):
+        raise VerbError(400, "agent = the name of a listed agent, or an empty name to hand the pages back to the keeper above")
+    agent = " ".join(agent.split())
+    undo = {"pid": "", "run_dir": run_dir}
+
+    def targets(ctx: Ctx) -> dict:
+        return {k: _page_target(ctx, k) for k in keys}
+
+    def work(ctx: Ctx) -> dict:
+        held = targets(ctx)                                   # every key is read before any entry changes: one bad key refuses the whole call
+        for pid in dict.fromkeys(held.values()):
+            e = ctx.entry(pid)
+            if e.get("status") == "archived":
+                raise VerbError(409, f"{pr.page_key(e) or pid} is a retired project: the keeper of its pages is not moved (reopen it first)")
+        name = ""
+        if agent:
+            ov = pr.apply(ctx.raw, ctx.ents)
+            sala, anyone = pr._listed_agents(ov, ctx.ents, True), pr._listed_agents(ov, ctx.ents)
+            name = agent if agent in sala else next((n for n in sorted(sala) if n.casefold() == agent.casefold()), "")
+            if not name:
+                have = next((n for n in sorted(anyone) if n.casefold() == agent.casefold()), "")
+                if have:
+                    raise VerbError(400, f"{have} is listed only as an agent that is not a sala session (a Slack agent): the keeper of a page is a sala session, so the mark does not go on it")
+                shown = sorted(sala)
+                raise VerbError(404, f"{agent} is not an agent any project lists: the mark of a page goes on an agent the record lists ({', '.join(shown[:30]) or 'none listed'}{f', and {len(shown) - 30} more' if len(shown) > 30 else ''})")
+        before = copy.deepcopy(ctx.ents)
+        reg0 = pr.apply(ctx.raw, before)
+        rows, f0 = [], {k: _kp.fields(k, reg0) for k in keys}
+        for k in keys:
+            e = ctx.ents[held[k]]
+            marks = e.get(_kp.PAGES) if isinstance(e.get(_kp.PAGES), dict) else {}
+            was = marks.get(k)
+            want = name if name else ("" if ctx.raw[k].get("role") == "agent" else None)      # a page that follows the keeper above it already has nothing to hand back: its mark goes
+            if was != want:
+                if want is None:
+                    del marks[k]
+                else:
+                    marks[k] = want
+                if marks:
+                    e[_kp.PAGES] = marks
+                else:
+                    e.pop(_kp.PAGES, None)
+            rows.append({"key": k, "project": held[k], "holder": pr.page_key(e), "old_mark": was, "new_mark": want, "same": was == want})
+        reg1 = pr.apply(ctx.raw, ctx.ents)
+        for r in rows:
+            f1 = _kp.fields(r["key"], reg1)
+            r.update(old=f0[r["key"]].get("keeper_agent", ""), old_source=f0[r["key"]].get("keeper_source", ""), new=f1.get("keeper_agent", ""), new_source=f1.get("keeper_source", ""))
+        owners = sorted(dict.fromkeys(held.values()))
+        undo["pid"] = owners[0] if len(owners) == 1 else ""
+        undo["mode"] = "project" if len(owners) == 1 else "record"           # a change to several entries is taken back whole, as a pass over the whole record is
+        return {"pid": owners[0], "owners": owners, "name": name, "pages": rows, "roles": _roles_moved(ctx.raw, before, ctx.ents), "same": all(r["same"] for r in rows)}
+
+    if pages is None:
+        pages = {}
+        try:
+            for kk in dict.fromkeys(txn(lambda c: [_entryless_key(c, h) for h in dict.fromkeys(targets(c).values())], dry=True)[0]):
+                pages.update(preread(kk, io) if kk else {})
+        except (VerbError, ValueError):                       # the transaction below tells it: a bad key is refused there
+            pages = {}
+    out, ents, changed = txn(work, by=by, now=now, dry=not apply, pages=pages, undo=undo if apply else None)
+    shown = lambda who, src: f"{who} ({_SRC_WORDS.get(src, src)})" if who and src else (who or "none")
+    head = "" if apply else "dry run: "
+    lines = []
+    for r in out["pages"]:
+        if r["same"]:
+            lines.append(f"{r['key']}: " + (f"{out['name']} is its keeper mark already" if out["name"] else "it follows the keeper above it already") + "; nothing to change")
+        else:
+            lines.append(head + f"keeper of {r['key']}: {shown(r['old'], r['old_source'])} -> {shown(r['new'], r['new_source'])}")
+    if not out["same"]:
+        lines += [f"roles.json: {m['session']}: {m['from']} -> {m['to']}" for m in out["roles"]] or ["roles.json: no session's entry moves"]
+        lines.append(f"undo file {undo['file']}; to undo: project.py restore --undo {undo['file']} --apply" if undo.get("file") else "nothing written (add --apply)")
+    extra = {"name": out["name"], "projects": [{"project": p, "key": pr.page_key(ents.get(p) or {})} for p in out["owners"]], "pages": out["pages"], "roles": out["roles"], "same": out["same"],
+             "undo": undo.get("file"), "lines": lines}
+    res = _finish(out["pid"], ents, changed, not apply, io, warn=out.get("warning", ""), extra=extra, by=by, mirror_now=False)      # the record only: no page is read or written
+    res["mirror"] = {"state": "skipped", "key": res["key"], "note": "the page-keeper verb writes the record only"}
     return res
 
 

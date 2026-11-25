@@ -23,7 +23,7 @@ The keeper debts, four for the mark of a project and a fifth for a sub-page mark
   keeper-retired                the mark names an agent the record says was retired from the project. Fix: `tools/project.py keeper <project> <agent>`
   keeper-not-derived            a live project that lists agents, has no mark, and has no builder or -main agent to derive a keeper from. Fix: mark one: `tools/project.py keeper <project> <agent>`
   keeper-page-ignored           a sub-page mark (`page_keepers` on the project's record entry) that is not read: a key that is no page under the project, an agent no project lists, a page with a line of its own, a mark held
-                                on an entry that is not the nearest above the page, or a page marked twice; the page's own lines answer meanwhile. Fix: correct the key or the agent in the record, or list the agent
+                                on an entry that is not the nearest above the page, or a page marked twice; the page's own lines answer meanwhile. Fix: correct the key or the agent in the record (`tools/project.py page-keeper`), or list the agent
 
 A `parent:` line is not checked: nothing in the project registry reads it (projects.py: it makes no sub-page), so a line off the key tree is no error of the record.
 
@@ -164,7 +164,7 @@ def keeper_debts(ents: dict, reg: dict, ov: dict | None = None) -> list[dict[str
         lost = [str(x) for x in (((ov or {}).get(k) or {}).get("keeper_problems") or []) if str(x).startswith("page keeper of ")]
         if lost:                                                       # a sub-page mark that was ignored (keeper.PAGES): one finding per project, the first line and how many more
             out.append(_f(k, LINE_KEEPER_PAGE, lost[0] + (f" (and {len(lost) - 1} more)" if len(lost) > 1 else ""),
-                          f"the page's own lines answer meanwhile; correct the key or the agent of the mark (`page_keepers` on the project's record entry; `tools/project.py agent-add {pid} <agent>` lists an agent first), or remove it", pid))
+                          f"the page's own lines answer meanwhile; correct the key or the agent of the mark (`page_keepers` on the project's record entry; `tools/project.py agent-add {pid} <agent>` lists an agent first; `tools/project.py page-keeper <page> --agent <agent>` sets a page's mark, `--hand-back` removes it), or remove it", pid))
         if ag and not _kp.effective_mark(ag, row):
             got = (ov or {}).get(k) or {}
             if isinstance(got, dict) and got and not got.get("keeper_agent"):      # a page the overlaid registry does not hold says nothing

@@ -7,7 +7,8 @@ the builder, else the -main agent, else clearing it with a problem line, and of 
 new mark and the sessions whose roles move; `--apply` writing the record and an undo file that `restore --undo` takes back; the refusals: an agent the record does not list, a retired project, a
 sub-page key; an agent that is the keeper already; a record with two flags coming out with one); the CLI in a child process; and the four keeper debts of the registry check (keeper-not-listed,
 keeper-two-marks, keeper-retired, keeper-not-derived), each with its test, off by default and on with `[registry_audit] keeper_debts = true`; and that with no mark anywhere the verbs leave every
-published field as it was.
+published field as it was; and the `page_keeper` verb (a sub-page's own mark, set on the entry of the project above it: nine pages at once, pages under different projects, one bad key refusing the
+whole call, the same mark again, handing a page back, an unlisted or non-sala agent, a retired project, a project's own page, the undo file, a dry run, the readers, the CLI).
 
     tests/run-suite keeper_verbs        → exit 0 / 1"""
 import hashlib, json, logging, os, pathlib, re, subprocess, sys
@@ -48,6 +49,16 @@ page("projects/loner2.md", "type: project\ntitle: Loner two\ndisplay-name: lone-
 page("projects/nameless.md", "type: project\ntitle: Nameless\nstatus: active")
 page("projects/old3.md", "type: project\ntitle: Old three\ndisplay-name: team-old3\nstatus: archived")
 page("projects/gone.md", "type: project\ntitle: Gone\ndisplay-name: team-gone\nagents:\n  team-gone-main: talks\n  team-gone-docs: docs\nstatus: active")
+# sub-pages for the `page_keeper` verb: forge/p1..p9 (p1 and p2 are kept by an `agent:` line, the others name nobody), pages under two more projects, a sub-page that has a name line of its own, one with a `keeper:` line of
+# its own, a page that reaches the forge only through a `hub:` line, and a page under a retired project
+for i in range(1, 10): page(f"projects/forge/p{i}.md", "type: note\ntitle: Forge page " + str(i) + ("\nagent: team-forge-audit" if i < 3 else ""))
+page("projects/forge/sub/deep.md", "type: note\ntitle: Forge deep")
+page("projects/forge/named.md", "type: note\ntitle: Forge named\ndisplay-name: team-forge-named")
+page("projects/forge/own.md", "type: note\ntitle: Forge own\nkeeper: team-own-x\nagents:\n  team-own-x: talks")
+page("projects/hubby.md", "type: note\ntitle: Hubby\nhub: projects/forge")
+page("projects/wide/w1.md", "type: note\ntitle: Wide one"); page("projects/wide/w2.md", "type: note\ntitle: Wide two")
+page("projects/gone/g1.md", "type: note\ntitle: Gone one")
+page("projects/old/o1.md", "type: note\ntitle: Old one")
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 fails = []; ran = []
@@ -275,6 +286,123 @@ check("cli keeper --apply: exit 0, the record carries the flag, the undo command
 undo_file = re.search(r"--undo (\S+)", out).group(1)
 rc, out, err = tool("stackshot/tools/project.py", "restore", "--undo", undo_file, "--apply")
 check("cli: the printed undo command takes it back", rc == 0 and flags(WIDE) == ["team-wide-builder"], (rc, out, err, flags(WIDE)))
+
+# ---- 5b. page_keeper: a sub-page's own mark
+PK = [f"projects/forge/p{i}" for i in range(1, 10)]
+def pmarks(pid): return dict((ents().get(pid) or {}).get("page_keepers") or {})
+def brain_tree(): return {str(q): hashlib.sha256(q.read_bytes()).hexdigest() for q in sorted(BRAIN.rglob("*")) if q.is_file()}
+def status_of(call):
+    try: call(); return None, ""
+    except pv.VerbError as e: return e.status, e.message
+pv.agent_add("projects/hollow", "team-hollow-slack", True, "answers the chat app", surface="slack", io=IO, by="lone-session")     # an agent that is listed and is no sala session
+pv.keeper("projects/forge", "team-forge-builder", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-setup")
+check("page_keeper setup: before any mark the forge's pages answer as their own lines say (p1 by its `agent:` line, the rest by the project's keeper) and the forge has no page marks",
+      fields_of("projects/forge/p1") == ("team-forge-audit", "legacy") and fields_of("projects/forge/p5") == ("team-forge-builder", "mark") and pmarks(FORGE) == {}, (fields_of("projects/forge/p1"), fields_of("projects/forge/p5"), pmarks(FORGE)))
+sha0, tree0 = recsha(), brain_tree(); pkdir = T / "undo-pk-dry"
+r = pv.page_keeper(PK, "team-forge-docs", io=IO, by="lone-session", run_dir=pkdir)
+check("page_keeper: a dry run (the default) writes nothing: the record is the same bytes, no undo file or folder, no page is touched", recsha() == sha0 and brain_tree() == tree0 and r["dry"] is True and r["undo"] is None and not pkdir.exists() and pmarks(FORGE) == {}, (r, pmarks(FORGE)))
+check("... it names, for each of the nine pages, the keeper before and after, and says `dry run` and `nothing written (add --apply)`",
+      len(r["pages"]) == 9 and all(x["new"] == "team-forge-docs" and x["new_source"] == "mark" and x["same"] is False for x in r["pages"]) and r["pages"][0]["old"] == "team-forge-audit" and r["pages"][0]["old_source"] == "legacy"
+      and r["pages"][4]["old"] == "team-forge-builder" and r["lines"][0] == f"dry run: keeper of {PK[0]}: team-forge-audit (the name line) -> team-forge-docs (the mark)" and r["lines"][-1] == "nothing written (add --apply)" and r["same"] is False, (r["lines"], r["pages"][:2]))
+r = pv.page_keeper(PK, "team-forge-docs", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk")
+check("page_keeper --apply: nine pages marked in one write, on the one entry that holds them; the answer names the undo file and it exists",
+      r["changed"] is True and r["dry"] is False and pmarks(FORGE) == {k: "team-forge-docs" for k in PK} and r["undo"] and pathlib.Path(r["undo"]).is_file() and [x["project"] for x in r["projects"]] == [FORGE], (r.get("undo"), pmarks(FORGE)))
+check("... the record only: no page is written (the bytes of every page are the same) and the mirror answers skipped", brain_tree() == tree0 and r["mirror"]["state"] == "skipped" and "record only" in r["mirror"]["note"], r["mirror"])
+check("... a reader answers the new mark for each page (keeper.fields, the registry row and keeper.names_of): the agent, source mark, page_mark true",
+      all(fields_of(k) == ("team-forge-docs", "mark") and kp.fields(k, R()) == {"keeper_agent": "team-forge-docs", "keeper_source": "mark"} and "team-forge-docs" in kp.names_of(R()[k]) and R()[k]["page_mark"] is True for k in PK), [fields_of(k) for k in PK])
+check("... and the pages the call did not name are as they were (the project's own mark, a page that is not marked)", fields_of("projects/forge") == ("team-forge-builder", "mark") and fields_of("projects/forge/sub") == ("team-forge-builder", "mark") and "page_mark" not in R()["projects/forge/sub"], (fields_of("projects/forge"), fields_of("projects/forge/sub")))
+sha_applied = recsha()
+u = pv.restore_undo(r["undo"], apply=True)
+check("... `restore --undo --apply` takes it back: the record is the same bytes as before the call, and the pages answer as they did", u["changed"] is True and recsha() == sha0 and pmarks(FORGE) == {} and fields_of(PK[0]) == ("team-forge-audit", "legacy") and fields_of(PK[4]) == ("team-forge-builder", "mark"), (u, pmarks(FORGE)))
+r = pv.page_keeper(PK, "TEAM-FORGE-DOCS", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk")
+check("page_keeper: the agent name is matched without case and written as it is listed", pmarks(FORGE) == {k: "team-forge-docs" for k in PK} and r["name"] == "team-forge-docs" and recsha() == sha_applied, (pmarks(FORGE), r["name"]))
+
+# the same mark again changes nothing; a call that is part change, part the same
+sha1 = recsha(); nodir = T / "undo-pk-same"
+r = pv.page_keeper([PK[0], PK[1]], "team-forge-docs", apply=True, io=IO, by="lone-session", run_dir=nodir)
+check("page_keeper: pages that have the mark already change nothing: no write (same bytes), no undo file, every page says same, and the lines say so",
+      r["changed"] is False and r["same"] is True and r["undo"] is None and recsha() == sha1 and not nodir.exists() and all(x["same"] for x in r["pages"])
+      and r["lines"] == [f"{PK[0]}: team-forge-docs is its keeper mark already; nothing to change", f"{PK[1]}: team-forge-docs is its keeper mark already; nothing to change"], (r["lines"], r["changed"]))
+r = pv.page_keeper([PK[0], "projects/forge/sub/deep"], "team-forge-docs", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-part")
+check("... a call with one page that has the mark and one that has not: the one is `same`, the other is marked, and only the other moves",
+      r["changed"] is True and [x["same"] for x in r["pages"]] == [True, False] and pmarks(FORGE)["projects/forge/sub/deep"] == "team-forge-docs" and fields_of("projects/forge/sub/deep") == ("team-forge-docs", "mark"), (r["pages"], pmarks(FORGE)))
+pv.page_keeper(["projects/forge/sub/deep"], "", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-part")
+
+# pages under different projects: each mark is held on the entry of its own project, and the change is one write
+mixed = [PK[0], "projects/wide/w1", "projects/gone/g1", "projects/wide/w2"]
+sha2 = recsha()
+r = pv.page_keeper(mixed, "team-forge-main", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-mixed")
+check("page_keeper, pages under different projects: each mark is on the entry of the project above its page, all in one write",
+      pmarks(WIDE) == {"projects/wide/w1": "team-forge-main", "projects/wide/w2": "team-forge-main"} and pmarks(GONE) == {"projects/gone/g1": "team-forge-main"} and pmarks(FORGE)[PK[0]] == "team-forge-main"
+      and sorted(x["project"] for x in r["projects"]) == sorted([FORGE, WIDE, GONE]) and [x["project"] for x in r["pages"]] == [FORGE, WIDE, GONE, WIDE], (pmarks(WIDE), pmarks(GONE), r["projects"]))
+check("... an agent of another project keeps the page (a cross-project keeper) and every page reads it as its mark", all(fields_of(k) == ("team-forge-main", "mark") for k in (PK[0], "projects/wide/w1", "projects/gone/g1")), [fields_of(k) for k in mixed])
+umeta = json.loads(pathlib.Path(r["undo"]).read_text(encoding="utf-8"))
+check("... the undo file of a call that moves several entries is a whole-record one (mode record, no single project)", (umeta.get("mode"), umeta.get("project")) == ("record", ""), umeta.get("mode"))
+u = pv.restore_undo(r["undo"], apply=True)
+check("... one undo file takes the three entries back whole: the record is the same bytes as before the call", u["changed"] is True and recsha() == sha2 and pmarks(WIDE) == {} and pmarks(GONE) == {} and pmarks(FORGE)[PK[1]] == "team-forge-docs", (u, pmarks(WIDE)))
+
+# one bad key refuses the whole call and nothing is written (the good keys before and after it too)
+for n, (what, keys, agent_, status, word) in enumerate((
+        ("a key that is no page", [PK[2], "projects/forge/nowhere", PK[3]], "team-forge-main", 404, "projects/forge/nowhere"),
+        ("a project nobody knows", [PK[2], "projects/nowhere/x"], "team-forge-main", 404, "projects/nowhere/x"),
+        ("a project's own page (top level), which names `keeper`", [PK[2], "projects/wide"], "team-forge-main", 400, "`keeper`"),
+        ("a page with a name line of its own", [PK[2], "projects/forge/named"], "team-forge-main", 400, "display-name"),
+        ("a page with a `keeper:` line of its own", [PK[2], "projects/forge/own"], "team-forge-main", 400, "`keeper:` line"),
+        ("a page that reaches the forge only through a `hub:` line", [PK[2], "projects/hubby"], "team-forge-main", 400, "hub:"),
+        ("a page of a retired project", [PK[2], "projects/old/o1"], "team-forge-main", 409, "retired project"),
+        ("an agent no project lists", [PK[2], PK[3]], "team-forge-nobody", 404, "team-forge-nobody"),
+        ("an agent that is no sala session", [PK[2], PK[3]], "team-hollow-slack", 400, "not a sala session"),
+        ("no key at all", [], "team-forge-main", 400, "at least one"),
+        ("an agent that is no text", [PK[2]], None, 400, "agent ="))):
+    sha_b, tree_b, bad_dir = recsha(), brain_tree(), T / f"undo-pk-bad-{n}"
+    st, msg = status_of(lambda: pv.page_keeper(keys, agent_, apply=True, io=IO, run_dir=bad_dir))
+    check(f"page_keeper: {what} is refused ({status}), naming it, and nothing is written (no key of the call is marked, no undo file)", st == status and word in msg and recsha() == sha_b and brain_tree() == tree_b and not bad_dir.exists(), (st, msg))
+st, msg = status_of(lambda: pv.page_keeper([PK[2], "projects/nowhere/x"], "team-forge-main", io=IO))
+check("... a dry run refuses a bad key just as an apply does", st == 404, (st, msg))
+st, msg = status_of(lambda: pv.page_keeper([PK[2]], "team-forge-nobody", apply=True, io=IO, run_dir=T / "undo-pk-bad"))
+check("... the 404 for an agent no project lists names the agents that are listed, and leaves out the one that is no sala session", "team-forge-main" in msg and "team-forge-docs" in msg and "team-hollow-slack" not in msg, msg)
+check("... the refusals left the forge's marks as the earlier calls made them", pmarks(FORGE) == {k: "team-forge-docs" for k in PK}, pmarks(FORGE))
+
+# an empty name hands the page back to the keeper above it
+r = pv.page_keeper([PK[0], PK[4]], "", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-back")
+check("page_keeper with an empty name: a page an `agent:` line keeps is handed back (its mark is an empty name, it follows the keeper above it), a page with no such line just loses its mark",
+      pmarks(FORGE)[PK[0]] == "" and PK[4] not in pmarks(FORGE) and r["changed"] is True and [x["new_mark"] for x in r["pages"]] == ["", None], (pmarks(FORGE), [x["new_mark"] for x in r["pages"]]))
+check("... the readers: the pages follow the project's keeper, p5 as any unmarked page, p1 by the mark above it (role inherited)",
+      fields_of(PK[4]) == ("team-forge-builder", "mark") and fields_of(PK[0]) == ("team-forge-builder", "mark") and R()[PK[0]]["role"] == "inherited" and R()[PK[0]].get("page_mark") is not True, (fields_of(PK[0]), R()[PK[0]]))
+check("... the answer's lines say who keeps each page before and after", r["lines"][0] == f"keeper of {PK[0]}: team-forge-docs (the mark) -> team-forge-builder (the mark)", r["lines"])
+sha4 = recsha()
+r = pv.page_keeper([PK[0], PK[4], "projects/forge/sub"], "", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-back")
+check("... handing back again, and handing back a page that never had a mark, change nothing", r["changed"] is False and r["same"] is True and recsha() == sha4 and r["undo"] is None, (r["lines"], r["changed"]))
+pv.restore_undo(pv.page_keeper([PK[0]], "team-forge-docs", apply=True, io=IO, run_dir=T / "undo-pk-back")["undo"], apply=True)
+check("... and the undo of a mark set after a hand-back puts the hand-back back", pmarks(FORGE)[PK[0]] == "" and recsha() == sha4, pmarks(FORGE))
+
+# a project's own page, and a retired project's page, for an agent that exists
+st, msg = status_of(lambda: pv.page_keeper(["projects/old/o1"], "team-old-docs", apply=True, io=IO, run_dir=T / "undo-pk-old"))
+check("page_keeper: a retired project's page is refused (409) even for an agent it lists, and the answer says to reopen", st == 409 and "reopen" in msg, (st, msg))
+st, msg = status_of(lambda: pv.page_keeper(["projects/forge"], "team-forge-main", io=IO))
+check("page_keeper: the project's own page is a 400 that names `keeper`, a dry run too", st == 400 and "`keeper`" in msg, (st, msg))
+
+# the CLI
+sha5 = recsha()
+rc, out, err = tool("stackshot/tools/project.py", "page-keeper", PK[5], PK[6], "--agent", "team-forge-main")
+check("cli page-keeper: a dry run (no --apply): exit 0, says dry run, names each page, writes nothing", rc == 0 and "dry run" in out and PK[5] in out and PK[6] in out and recsha() == sha5, (rc, out, err))
+rc, out, err = tool("stackshot/tools/project.py", "--dry-run", "page-keeper", PK[5], "--agent", "team-forge-main", "--apply")
+check("cli page-keeper: --apply with --dry-run contradict (exit 2)", rc == 2 and "contradict" in err and recsha() == sha5, (rc, err))
+rc, out, err = tool("stackshot/tools/project.py", "page-keeper", PK[5])
+check("cli page-keeper: an agent or --hand-back is needed (exit 2), and so is only one of them", rc == 2 and recsha() == sha5 and tool("stackshot/tools/project.py", "page-keeper", PK[5], "--agent", "x", "--hand-back")[0] == 2, (rc, err))
+rc, out, err = tool("stackshot/tools/project.py", "page-keeper", PK[5], "projects/forge/nowhere", "--agent", "team-forge-main", "--apply")
+check("cli page-keeper: a bad key among good ones: exit 1, the 404 on stderr, nothing written", rc == 1 and "[404]" in err and recsha() == sha5, (rc, err))
+rc, out, err = tool("stackshot/tools/project.py", "page-keeper", PK[5], PK[6], "--agent", "team-forge-main", "--apply", "--run-dir", str(T / "undo-pk-cli"))
+check("cli page-keeper --apply: exit 0, both pages carry the mark, the undo command is printed", rc == 0 and pmarks(FORGE).get(PK[5]) == "team-forge-main" and pmarks(FORGE).get(PK[6]) == "team-forge-main" and "restore --undo" in out, (rc, out, err))
+rc, out, err = tool("stackshot/tools/project.py", "restore", "--undo", re.search(r"--undo (\S+)", out).group(1), "--apply")
+check("cli: the printed undo command takes it back", rc == 0 and recsha() == sha5, (rc, out, err))
+rc, out, err = tool("stackshot/tools/project.py", "--json", "page-keeper", "projects/forge/sub", "--hand-back")
+check("cli page-keeper --hand-back --json: a dry run of a page with no mark of its own: the whole answer as JSON, the page says same", rc == 0 and json.loads(out)["pages"][0]["same"] is True and json.loads(out)["mirror"]["state"] == "skipped", (rc, out[:300], err))
+# leave the forge as the sections below read it: no page marks, and the project's mark where it was
+d = recfile()
+for pid in (FORGE, WIDE, GONE): d["projects"][pid].pop("page_keepers", None)
+REC.write_text(json.dumps(d), encoding="utf-8"); pr._CACHE["sig"] = None
+pv.keeper("projects/forge", "team-forge-main", apply=True, io=IO, by="lone-session", run_dir=T / "undo-pk-setup")
 
 # ---- 6. the four debts of the registry check
 def ent(agents, former=(), **kw): return {"page": kw.pop("page", "projects/debtx"), "status": "active", "name": "team-debtx", "agents": agents, "former_agents": list(former), **kw}
