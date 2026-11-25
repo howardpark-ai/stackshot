@@ -16,6 +16,8 @@ Fixture data, no live store, no network, no tmux: the push is a fake script that
  10  a contact that is also a front agent he is talking to now is told once
  11  after his answer the project's builder moves an item whose needs name a front agent (the front agent stays in needs and is handed a held line, never a push); a project with no builder, a builder that cannot take the item,
      a stored then that is the front agent, and a comment, keep what they had or follow the same rule
+ 12  a front agent that holds the item's first open named step (past his own lines) keeps the item after his answer, a pick or a Done: the answer is pushed to it as the holder, marked for him, and the builder is neither
+     made the mover nor told; a step of the builder's, or one that comes after it, leaves the builder taking the item as in 11
 
     tests/run-suite answer_reach        → exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, subprocess
@@ -396,6 +398,51 @@ check("11 a comment on a project with no builder: the front agent in needs is pu
 item(78, project="projects/beta", mover="Oliver", then="demo-solo", needs=["decision", "demo-side"], ask=ASK, options=OPTS)      # another session holds the item (its then), and the front agent is only named in needs
 out, got, kept = answer("a78", "", "a thought, no decision yet", "comment")
 check("11 …also when another session holds the item: with no builder a front agent in needs is not demoted to a held line, as before", out == "comment" and len(got.get("demo-side", [])) == 1 and "demo-side" not in kept, (out, got, kept))
+
+# ================================================================ 12. a front agent that holds the item's open step is the one to act on his answer
+# the item's first open named step is the front agent's own ("demo-lead: carry out ..."), its builder is live: the answer stays with the front agent and is pushed to it as the holder, marked for him (a turn); the builder takes
+# the item only when the open step is not the front agent's
+STEP_F = "carry out whichever way he picks"
+def holder_pushed(who, got, kept):
+    return len(got.get(who, [])) == 1 and got[who][0].startswith("[for Oliver] ") and who not in kept
+item(80, mover="demo-lead", needs=["decision", "demo-lead"], ask=ASK, options=OPTS, next=f"demo-lead: {STEP_F}")
+out, got, kept = answer("a80", "Ship", "", "answer")
+meta = rd(80)["metadata"]
+check("12 a pick on an item the front agent moves, with its own open step: the front agent stays the mover and first in needs, the builder is not named",
+      out == "decision" and meta.get("mover") == "demo-lead" and names_of(meta) == ["demo-lead"] and "then" not in meta and derived(80).mover == "demo-lead" and not derived(80).conflicts, (out, meta, derived(80)))
+check("12 ...the answer is pushed to the front agent as the holder, marked for him, and is held for nobody; the builder is told nothing", holder_pushed("demo-lead", got, kept) and "demo-builder" not in got and "demo-builder" not in kept, (got, kept))
+check("12 ...the pending answer lists the front agent, so its write settles it", json.loads((T / "state/answers.json").read_text())["a80"]["told"] == [U["demo-lead"]], (T / "state/answers.json").read_text())
+item(81, mover="Oliver", needs=["decision", "demo-lead"], ask=ASK, options=OPTS, next=f"demo-lead: {STEP_F}")      # the mover stored as the owner's, as an ask on it leaves it
+out, got, kept = answer("a81", "Ship", "", "answer")
+meta = rd(81)["metadata"]
+check("12 the same with the owner as the stored mover: the front agent moves the item by the default and is pushed the line, the builder is not named",
+      out == "decision" and "demo-builder" not in names_of(meta) and derived(81).mover == "demo-lead" and not derived(81).conflicts and holder_pushed("demo-lead", got, kept) and "demo-builder" not in got, (out, meta, got, kept))
+item(82, mover="demo-lead", needs=["decision", "demo-lead"], ask=ASK, options=OPTS, next="demo-builder: build whatever he picks")
+out, got, kept = answer("a82", "Ship", "", "answer")
+meta = rd(82)["metadata"]
+check("12 the open step names the builder: as before, the builder takes the item and the front agent is handed a held line, no push",
+      out == "decision" and meta.get("mover") == "demo-builder" and names_of(meta) == ["demo-builder", "demo-lead"] and "demo-lead" not in got and "answered a82" in kept.get("demo-lead", ""), (out, meta, got, kept))
+item(83, mover="demo-lead", needs=["decision", "demo-lead"], ask=ASK, options=OPTS, next=f"demo-builder: build whatever he picks\ndemo-lead: {STEP_F}")
+out, got, kept = answer("a83", "Ship", "", "answer")
+meta = rd(83)["metadata"]
+check("12 the first open named step is the builder's, the front agent's comes after it: the builder takes the item as before",
+      out == "decision" and meta.get("mover") == "demo-builder" and "demo-lead" not in got and "answered a83" in kept.get("demo-lead", ""), (out, meta, got, kept))
+item(84, mover="Oliver", state="your-step", step=STEP, needs=["demo-lead"], next=f"Oliver: {STEP}\ndemo-lead: {STEP_F}")
+out, got, kept = answer("a84", "", "", "done")
+meta = rd(84)["metadata"]
+check("12 a Done on his step, the front agent's own step next after it: his own line is passed over, the front agent takes the item (mover, first in needs), the builder is not named",
+      out == "done" and meta.get("mover") == "demo-lead" and names_of(meta) == ["demo-lead"] and "demo-builder" not in got and "demo-builder" not in kept and derived(84).mover == "demo-lead" and not derived(84).conflicts, (out, meta, got, kept))      # the bare hand-over line of a Done is a progress notice for a front agent (answer line rule, unchanged here): gated by the front gate, never to the builder
+item(85, mover="Oliver", state="your-step", step=STEP, needs=["demo-lead"], next=f"Oliver: {STEP}\ndemo-builder: build it after")
+out, got, kept = answer("a85", "", "", "done")
+meta = rd(85)["metadata"]
+check("12 a Done on his step, the next open step the builder's: the builder takes the item as before, the front agent has a held line",
+      out == "done" and meta.get("mover") == "demo-builder" and names_of(meta) == ["demo-builder", "demo-lead"] and "demo-lead" not in got and "did his step on a85" in kept.get("demo-lead", ""), (out, meta, got, kept))
+# the unit: the predicate the swap reads
+check("12 _builder_for_front: \"\" when the front agent holds the first open named step (past his own lines), the builder otherwise",
+      handover_svc._builder_for_front("demo-lead", {"project": "projects/alpha", "next": f"demo-lead: {STEP_F}"}) == ""
+      and handover_svc._builder_for_front("demo-lead", {"project": "projects/alpha", "next": "demo-builder: build it"}) == "demo-builder"
+      and handover_svc._builder_for_front("demo-lead", {"project": "projects/alpha", "next": f"Oliver: {STEP}\ndemo-lead: {STEP_F}"}) == ""
+      and handover_svc._builder_for_front("demo-lead", {"project": "projects/alpha"}) == "demo-builder")
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)

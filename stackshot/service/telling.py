@@ -465,10 +465,10 @@ def carries_for_owner(gid: str, item: "dict[str, Any] | None" = None) -> bool:
         return True
 
 
-def own_step(meta: dict[str, Any], who: str) -> bool:
+def own_step(meta: dict[str, Any], who: str, past_his: bool = False) -> bool:
     """Is the item's open step (the first one that names someone: a step with no `<name>:` opener is skipped) or its ask addressed to `who`, a session's name or id, in any letter case (anchors.same_session)?
-    Then the step is only that session's to take."""
-    named = [s["text"] for s in _steps.view(meta) if s["status"] == _steps.OPEN and _steps.opener(s["text"])]
+    Then the step is only that session's to take. `past_his`: the owner's own open lines are not counted, so the first step is the first one a session holds (a Done still has his lines open while the item is handed on)."""
+    named = [s["text"] for s in _steps.view(meta) if s["status"] == _steps.OPEN and _steps.opener(s["text"]) and not (past_his and _steps.is_his(s["text"], unnamed_is_his=False))]
     return any((nm := _steps.opener(t)) and _anc.same_session(nm, who) for t in named[:1] + [meta.get("ask")])
 
 

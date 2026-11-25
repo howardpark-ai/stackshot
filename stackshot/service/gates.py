@@ -177,11 +177,11 @@ def _sibling_pointer(key: str, verb: str = "update") -> str:
     return f"to hand it to {key} on {OWNER}'s order, send the {verb} again with said=[Acked-by …] quoting his words with the time"
 
 
-def _front_mover_case(field: str, value: str, sender: str, project: str, current: str = "") -> "tuple[str, str, list[str], str] | None":
+def _front_mover_case(field: str, value: str, sender: str, project: str, current: str = "", meta: "dict[str, Any] | None" = None) -> "tuple[str, str, list[str], str] | None":
     """The case the front-mover rule judges: (the front agent's key, its project, the project's builder list, the project's hub) when a create or update sets mover, then (which becomes the mover after
     the owner's answer) or post_wake_mover (the mover once a wait ends) to a front agent, sent by another session; None otherwise. A front agent gets no hand-off notice, so the item would sit handed
     and not taken until the owner noticed. Not a case: a front agent naming itself, the owner, a background agent, a session no page lists, a value that clears the field, and the value the item
-    already stores in `current` (nothing changes hands). A failing roles read is no case, with one stderr line, as front_sender does."""
+    already stores in `current` (nothing changes hands), and a front agent that holds the item's first open named step (`meta`: the item as stored; a create passes none): it is the one to act on the owner's answer or the wake, and its own named step gets it a turn. A failing roles read is no case, with one stderr line, as front_sender does."""
     h = _hooks()
     v = _model.clean(value)
     if not v or v.lower() in h.ask_none or _model.is_owner(v):
@@ -194,6 +194,8 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
             return None
         roles, key = h.role_of(v, nm)
         if not key or roles[key].get("role") != "front":      # a one-session project's single name-line session is not front here either, as in the needs gate and front_sender
+            return None
+        if meta and (_telling.own_step(meta, key) or _telling.own_step(meta, v)):      # the front agent's own named step is the item's work: the answer or the wake tells it (and starts its turn), so the builder is no stand-in
             return None
         s = str(sender or "").strip()
         if s:
@@ -273,7 +275,7 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
     owner's words (`sibling_quote`, the wake cap's reading). The value is then kept as sent, builder or none, with a note; the hand-off record carries his quoted words and its notice (handoff_notify) tells the sibling. With no
     such words a sibling's swap note says how to send them (`verb`: the call, update or create, the note names)."""
     h = _hooks()
-    case = _front_mover_case(field, value, sender, project, current)
+    case = _front_mover_case(field, value, sender, project, current, meta)
     if case is None:
         return value, "", []
     key, proj, builder, _hub = case
