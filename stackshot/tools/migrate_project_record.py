@@ -291,6 +291,11 @@ def main(argv: list[str]) -> int:
         print("--undo takes no --apply or --keep-pending", file=sys.stderr)
         return 2
     from stackshot.core import config as _cfg
+    if not a.store:                          # a copy named with --store is a rehearsal on purpose; the instance's own record is read and written only where it lives
+        why = _cfg.record_host_refusal("stackshot/tools/migrate_project_record.py", argv)
+        if why:
+            print(f"project record: {why}", file=sys.stderr)
+            return 1
     for key, val in (("store", a.store), ("brain", a.brain), ("state", a.state)):
         if val:
             _cfg.CFG.setdefault("paths", {})[key] = str(Path(val).expanduser())

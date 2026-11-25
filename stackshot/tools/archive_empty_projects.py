@@ -67,6 +67,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--all", action="store_true", help="also pages with no agents: key")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
+    why = _cfg.record_host_refusal("stackshot/tools/archive_empty_projects.py", argv)      # the record lives on the server box: a copy elsewhere may be far behind it
+    if why:
+        print(f"archive_empty_projects: {why}", file=sys.stderr)
+        return 1
     reg = _prj.registry()
     io = _page_debt.page_io()
     arch, wait, unread = candidates(io, reg, a.keys, a.all)
