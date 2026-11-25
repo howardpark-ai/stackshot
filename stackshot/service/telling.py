@@ -54,7 +54,7 @@ from stackshot.projects import keeper_reads as _reads
 from stackshot.router import router_live as _router_live, routing as _routing
 from stackshot.service import foryou as _fy, foryou_events as _fyev, front_turn as _front_turn, writes as _writes
 from stackshot.service.store import _load, _path
-from stackshot.waits import handoff as _ho, held as _held, quiet as _frontq
+from stackshot.waits import builderless as _bl, handoff as _ho, held as _held, quiet as _frontq
 
 
 
@@ -392,6 +392,23 @@ def front_sender(who: str) -> bool:
         return False
 
 
+def front_name(who: str, project: str = "") -> str:
+    """The name the roles list `who` under when it is a front agent, as `front_sender` reads it but in any letter case too (`own_step` reads a step's name that way): `who` as a name in any case or as an id; "" for any
+    other session, the owner and a failing read. `project`: only a live front agent of that project's page (waits.builderless.front_of: its page or one above it) counts, so a front agent of another project, or a retired one, is ""."""
+    who = str(who or "").strip()
+    if not who or _model.is_owner(who):
+        return ""
+    try:
+        roles = _anc.session_roles()
+        name = _hooks().role_name(roles, who) or next((k for k in roles if _anc.same_session(k, who)), "")
+        if not name or roles[name]["role"] != "front":
+            return ""
+        return name if not project or _bl.front_of(roles[name], project) else ""
+    except Exception as e:  # noqa: BLE001  — an extra: a failing read names no front agent
+        print(f"front name: {who} not read ({e.__class__.__name__}: {e})", file=sys.stderr, flush=True)
+        return ""
+
+
 def front_role(who: str) -> bool | None:
     """`front_sender` for a caller that must not fail open: True for a front agent, False for any other session and for him, None when the roles could not be read (the caller then
     treats the session as a front agent, so a notice that must never start a turn does not start one on a failed read)."""
@@ -465,33 +482,48 @@ def carries_for_owner(gid: str, item: "dict[str, Any] | None" = None) -> bool:
         return True
 
 
-def own_step(meta: dict[str, Any], who: str) -> bool:
+def own_step(meta: dict[str, Any], who: str, past_his: bool = False) -> bool:
     """Is the item's open step (the first one that names someone: a step with no `<name>:` opener is skipped) or its ask addressed to `who`, a session's name or id, in any letter case (anchors.same_session)?
-    Then the step is only that session's to take."""
-    named = [s["text"] for s in _steps.view(meta) if s["status"] == _steps.OPEN and _steps.opener(s["text"])]
+    Then the step is only that session's to take. `past_his`: the owner's own open lines are not counted, so the first step is the first one a session holds (a Done still has his lines open while the item is handed on)."""
+    named = [s["text"] for s in _steps.view(meta) if s["status"] == _steps.OPEN and _steps.opener(s["text"]) and not (past_his and _steps.is_his(s["text"], unnamed_is_his=False))]
     return any((nm := _steps.opener(t)) and _anc.same_session(nm, who) for t in named[:1] + [meta.get("ask")])
 
 
-def _own_named(gid: str, item: "dict[str, Any] | None", who: str) -> bool:
-    """Is the item's first open named step, or its ask, `who`'s own (`own_step`)? An item that cannot be read is not shown to be."""
+def step_holder_at(meta: dict[str, Any], past_his: bool = True) -> "tuple[str, int]":
+    """(the name that opens the item's first open named step, that step's position on the checklist, 0-based as the step numbers of a write count it less one); ("", -1) when there is none. A step with no `<name>:` opener is
+    skipped; `past_his`: the owner's own open lines are not counted, as in own_step. The ask is not read."""
+    for i, s in enumerate(_steps.view(meta)):
+        if s["status"] == _steps.OPEN and _steps.opener(s["text"]) and not (past_his and _steps.is_his(s["text"], unnamed_is_his=False)):
+            return str(_steps.opener(s["text"])), i
+    return "", -1
+
+
+def step_holder(meta: dict[str, Any], past_his: bool = True) -> str:
+    """The name that opens the item's first open named step (`step_holder_at`), "" when there is none."""
+    return step_holder_at(meta, past_his)[0]
+
+
+def _own_named(gid: str, item: "dict[str, Any] | None", who: str, past_his: bool = False) -> bool:
+    """Is the item's first open named step, or its ask, `who`'s own (`own_step`; `past_his` as there)? An item that cannot be read is not shown to be."""
     try:
         it = item if item is not None else _load(gid)
-        return it.get("status") == "open" and own_step(it.get("metadata") or {}, who)
+        return it.get("status") == "open" and own_step(it.get("metadata") or {}, who, past_his=past_his)
     except Exception:  # noqa: BLE001  — an unreadable item is not shown to be anyone's step
         return False
 
 
-def own_move_kind(owner: str, gids: str, items: "dict[str, dict[str, Any]] | None" = None, named: bool = False) -> str:
+def own_move_kind(owner: str, gids: str, items: "dict[str, dict[str, Any]] | None" = None, named: bool = False, past_his: bool = False) -> str:
     """The kind a notice about `gids` (one id or several, comma-separated) is told to `owner` in when it asks the agent to act on its own move and nothing in it is for him: "progress" when `owner` is a front agent and
     no item named holds anything for him (`carries_for_owner`), so the notice rides the agent's next turn and starts none; "" otherwise (the tag's own kind stands: a background agent, a session whose role cannot be
     read, an item that waits on his decision or is his step, one that cannot be read, `[router] hold_notices = false`). `items`: the caller's copies by id, read from the store where it has none.
     `named`: the notice is a wake's (a wait that ended or came due), which hands the item over to be worked: when the first open named step of an item in it, or its ask, is `owner`'s own (`own_step`), that step is the
-    agent's work and the notice is a turn, "" as for an item that holds something for him; a step of another session or one with no name leaves the notice progress."""
+    agent's work and the notice is a turn, "" as for an item that holds something for him; a step of another session or one with no name leaves the notice progress. `past_his`: the owner's own open lines are not counted
+    (a hand-back's: the front agent's step is the first one past his lines)."""
     ids = [g for g in re.split(r"[,\s]+", str(gids or "")) if _GID.match(g)]
     if not ids or not _held.enabled() or not front_sender(owner):      # [router] hold_notices = false: every notice is delivered as before
         return ""
     have = items or {}
-    if named and any(_own_named(g, have.get(g), owner) for g in ids):
+    if named and any(_own_named(g, have.get(g), owner, past_his) for g in ids):
         return ""
     return "" if any(carries_for_owner(g, have.get(g)) for g in ids) else "progress"
 
@@ -1815,7 +1847,7 @@ def tell_check_closed(gid: str, item: dict[str, Any], label: str) -> list[str]:
     return told
 
 
-HO_STATE = threading.local()      # per write: the hand-offs it has just recorded ({gid: to}), and the (gid, session) pairs it has already told
+HO_STATE = threading.local()      # per write: the hand-offs it has just recorded ({gid: to}), the (gid, session) pairs it has already told, and the front agents its gate kept as a hand-back (`handback`, set by gates.fix_front_mover, cleared by the update tool)
 
 
 def handoff_notify(gid: str, item: dict[str, Any]) -> str:
@@ -1833,7 +1865,11 @@ def handoff_notify(gid: str, item: dict[str, Any]) -> str:
             return ""
         proj = str((item.get("metadata") or {}).get("project") or "")
         if front_keeper(to, proj)[0] and not h.front_handed_by_peer(r, to, proj) and not r.get("words"):      # a front agent is told only of a hand-off from a session some project page lists when the item's project is front-only, or of one a sibling front agent made on the owner's words (the record keeps them)
-            return ""
+            kept = any(_anc.same_session(v, to) for v in getattr(HO_STATE, "handback", None) or ())      # …or of a hand-back: this very write's gate kept the mover as sent because the front agent holds the item's first open named step (gates.handed_back); a mover another session
+            if not kept or not own_step(item.get("metadata") or {}, to, past_his=True):      # sent again after the swap (the mover's no) is no hand-back, and the step must still stand after the write for the notice to start a turn
+                return ""
+            tell_kind(own_move_kind(to, gid, {gid: item}, named=True, past_his=True), gid, tid or to, h.handoff_text(gid, item, r), tag="handoff")      # the kind is read for the name the item stores (a step line's own letter case matches it), the push goes to the id
+            return f"\n({_session_label(to)} has been told it is handed {_gh.shown(gid)} back)"
         tell_woken(gid, tid or to, h.handoff_text(gid, item, r), tag="handoff")
         return f"\n({_session_label(to)} has been told it is handed {_gh.shown(gid)})"
     except Exception as e:  # noqa: BLE001

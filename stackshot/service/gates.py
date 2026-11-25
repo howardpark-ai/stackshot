@@ -53,6 +53,7 @@ from stackshot.model import states as _states
 from stackshot.model import step_commands as _sc
 from stackshot.model import step_proof as _sp
 from stackshot.model import steps as _steps
+from stackshot.model import work as _work
 from stackshot.projects import brains as _brains
 from stackshot.projects import pages as _pages
 from stackshot.projects import projects as _prj
@@ -262,7 +263,56 @@ def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]", pr
                      + (f"; for a check or an answer only {key} can give, {via}." if via else "."))
 
 
-def fix_front_mover(field: str, value: str, sender: str, project: str, current: str, meta: "dict[str, Any] | None", said_l: "Callable[[], list[dict[str, Any]]] | None" = None, verb: str = "update") -> "tuple[str, str, list[tuple[str, str, str]]]":
+def step_marks(meta: "dict[str, Any] | None", done: Any = None, dropped: Any = None, reword: Any = None, work: Any = None, sender: str = "") -> "frozenset[int] | None":
+    """The checklist positions (0-based) a write settles or rewords in the item as it stands (`meta`): the refs of `done` and `dropped` and the keys of `reword` read as the update tool reads them (`steps.resolve`,
+    `steps.resolve_reword`: a position as a number or text, a comma list, a JSON string, or the exact text of an open step), and the first open step of the one a `work` status done finishes (the sender's, or the
+    `agent` it names). None when a ref cannot be read the way the tool reads it (the write is refused for it, or the call is not one this reads): a hand-back then reads it as marking the holder's step and is the swap."""
+    try:
+        steps = _steps.view(meta)
+        ix = {*_steps.resolve(steps, done, "done"), *_steps.resolve(steps, dropped, "dropped")}
+        if _steps.reword_given(reword):
+            ix |= set(_steps.resolve_reword(steps, reword))
+        if work is not None and str(work).strip():
+            spec = _work.parse(work)
+            if spec.get("state") == "done" and not spec.get("remove"):
+                nm = _anc.names()
+                same = lambda x, y: bool(x) and bool(y) and (x == y or _anc.canonical(x, nm) == _anc.canonical(y, nm))
+                at = _work.step_of(steps, spec.get("agent") or sender, same)
+                if at >= 0:
+                    ix.add(at)
+        return frozenset(ix)
+    except Exception:  # noqa: BLE001  — a ref the tool would refuse or this cannot read: the holder's step is taken as marked
+        return None
+
+
+def handed_back(value: str, sender: str, builder: list[str], meta: "dict[str, Any] | None", item: "dict[str, Any] | None", project: str = "", marked: "frozenset[int] | None" = frozenset(), ends: bool = False) -> bool:
+    """Is a session's `mover`, `then` or `post_wake_mover` = the front agent `value` a hand-back: the item goes back to the front agent that holds its first open named step (past the owner's own lines), as the item
+    STANDS before this write (`meta`, never a step line the write itself adds). All must hold: the front agent holds that step (telling.step_holder_at, in any letter case, as own_step reads it) and is a front agent of the
+    item's `project` (telling.front_name, as the owner's answer reads its holder); the write leaves that step open (`marked`: the positions it ticks, drops or rewords, `step_marks`, None when its refs cannot be read; `ends`: it closes the item or clears next), so the
+    notice has a step to read; the sender is the project's builder, or the item's current mover (`item`, read as the board reads it) when that mover is no front agent (a front agent that moves the item hands it to a
+    sibling only on the owner's words, `fix_front_mover`'s own case); the front agent is a live session (live or cloud: a mover nobody can wake is the swap's); the item is a stored one (a create has none). A front
+    agent that holds the step is the one the work comes back to, and `handoff_notify` tells it as a turn; a mover set by any other session, or one whose step comes after another's, is the builder's as before. A failing
+    read is no hand-back."""
+    try:
+        if not meta or not item or not project:
+            return False
+        holder, at = _telling.step_holder_at(meta, past_his=True)
+        if not holder or not _anc.same_session(holder, value) or ends or marked is None or at in marked:
+            return False
+        if not _telling.front_name(value, project):
+            return False
+        mover_now = str(_hooks().item_mover(item) or "")
+        by_builder = any(_anc.same_session(sender, b) for b in builder)
+        by_mover = _anc.same_session(sender, mover_now) and _telling.front_role(sender) is False      # a failed roles read is not "no front agent"
+        if not (by_builder or by_mover):
+            return False
+        return _mg.Ctx().session_state(value) in ("live", "cloud")
+    except Exception as e:  # noqa: BLE001  — an extra: a failed read leaves the swap
+        print(f"front-mover gate: hand-back read for {value} failed ({e.__class__.__name__}: {e}); the swap stands", file=sys.stderr, flush=True)
+        return False
+
+
+def fix_front_mover(field: str, value: str, sender: str, project: str, current: str, meta: "dict[str, Any] | None", said_l: "Callable[[], list[dict[str, Any]]] | None" = None, verb: str = "update", item: "dict[str, Any] | None" = None, marked: "frozenset[int] | None" = frozenset(), ends: bool = False) -> "tuple[str, str, list[tuple[str, str, str]]]":
     """The front-mover rule as a fix (server_fixes.FRONT_MOVER): a mover, then or post_wake_mover that another session sets to a front agent becomes the project's builder, since the front agent gets
     no hand-off notice. → (the value to use, the note for the reply, the fixes to record on the item: (fix, token, History line), a line of "" = take the mark off). The value is the one sent when it is
     no case (_front_mover_case), or when the server already substituted this very value on this item for this very sender less than a day ago and the sender sends it again: the mover's no, kept as sent with a note, and the server leaves that
@@ -277,6 +327,13 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
     if case is None:
         return value, "", []
     key, proj, builder, _hub = case
+    if handed_back(value, sender, builder, meta, item, project, marked, ends):      # the front agent holds the item's open step and the sender is its builder or its mover (no front agent): the item goes back to it as sent, and it is told (handoff_notify, for this write's hand-back only; a then or post_wake_mover, by the answer or the wake)
+        if field == "mover":
+            hb = getattr(_telling.HO_STATE, "handback", None)
+            if hb is None:
+                hb = _telling.HO_STATE.handback = set()
+            hb.add(key)
+        return value, (f"\n(note: {field}={key} is kept as you sent it: {key} holds the item's open step, so the item goes back to it" + (", and it is told it is handed back)" if field == "mover" else "; the owner's answer or the wake hands it the item and tells it)")), []
     sib = _front_sibling(sender, key, project)
     if sib and sibling_quote(said_l() if said_l else []):
         return value, (f"\n(note: {field}={key} is kept as you sent it, on {OWNER}'s words in said; {key} is a front agent of {proj}, and "

@@ -137,7 +137,7 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     path (tell_woken). A front-agent mover's line carries the mark a front agent takes. A front agent that is named in needs but neither moves the item nor takes it after the answer (the project's builder does) gets the line held for its
     next turn (_tell_aside), never the plain send that starts one. After a Done or a note on his step (`then` is who the item moved to) the then-mover is told too,
     in its own line: the step he did and "it's yours now". After a decision that handed the item to its stored then-mover (`handed`) the same: its line ends "It's yours now". A line that carries his words (a pick, a note, a Done with
-    its note) is pushed to a front agent as ever; the bare hand-over of a Done with no note is a progress notice (telling.tell_own_move) when the item holds nothing for him: filed for its next turn, or archived with him away.
+    its note) is pushed to a front agent as ever; the bare hand-over of a Done with no note is a progress notice (telling.tell_own_move) when the item holds nothing for him and the front agent's own named step is not the next one: filed for its next turn, or archived with him away; a front agent whose own step is the item's first open named step is given a turn (`named=True`).
     → the session ids told: one the front gate archived is left out, so its next write is still told his answer."""
     meta = item.get("metadata") or {}
     owner, project = _telling.holder(item), str(meta.get("project") or "")
@@ -167,8 +167,8 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     bare = bool(then) and not str(rec.get("text") or "").strip()      # a Done with no note: the hand-over line carries none of his words, only that the item is the then-mover's now
     tried: list[str] = []      # every session a line was sent to, held or not: one line each, and the ones he is in conversation with (below) are not sent it twice
     def tell(sid: str, text: str, yours: bool = False) -> None:
-        if yours and bare:      # the bare hand-over ("It's yours now" and nothing of his): to a front agent it is a progress notice when the item holds nothing for him (telling.own_move_kind), filed for its next turn. A line that carries his words (a pick, a note, a Done with its note) keeps its kind and starts a turn as ever
-            _telling.tell_own_move(gid, sid, text, tag="answer", items={gid: item})
+        if yours and bare:      # the bare hand-over ("It's yours now" and nothing of his): to a front agent it is a progress notice when the item holds nothing for him (telling.own_move_kind), filed for its next turn, unless the item's first open named step is that agent's own (`named=True`): its step is the work, and the line starts its turn. A line that carries his words (a pick, a note, a Done with its note) keeps its kind and starts a turn as ever
+            _telling.tell_own_move(gid, sid, text, tag="answer", items={gid: item}, named=True)
         else:
             _telling.tell_kind("", gid, sid, text, tag="answer")      # the tag's own kind (exempt); tell_kind also clears the gate's last verdict, read just below
         tried.append(sid)
@@ -345,8 +345,8 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             then = _model.derive({**item, "metadata": _pm}).then
             if then and not _model.is_owner(then) and not _model.norm_who(meta.get("then")):      # no stored `then`: the default is the first session in needs; a front agent there is not who takes the item after his step, the project's builder is (a builderless project keeps the front agent)
                 then = _handover._builder_for_front(then, meta) or then
-            if not then or _model.is_owner(then):      # no default mover and no session in needs: a project with no builder hands it to the session its next open step names, else its contact; else the item goes to its project's keeper at once, as mover
-                then = _holders._builderless_answer_to(meta, str(meta.get("project") or "")) or _telling.auto_mover(_telling.project_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
+            if not then or _model.is_owner(then):      # no default mover and no session in needs: the front agent that holds the item's next open named step when the project has a builder; a project with no builder hands it to the session its next open step names, else its contact; else the item goes to its project's keeper at once, as mover
+                then = _handover._front_step_holder(meta) or _holders._builderless_answer_to(meta, str(meta.get("project") or "")) or _telling.auto_mover(_telling.project_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
             if not then or _model.is_owner(then):      # nobody to take it (no default mover, no session in needs, no keeper): not recorded, nothing written
                 return "nomover"
             if kind == "decision":          # his word that the step is done checks it on the item's checklist (a note leaves it open: the session that takes the item judges it)

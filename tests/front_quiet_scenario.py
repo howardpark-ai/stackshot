@@ -798,10 +798,13 @@ check("13c answer: …the hand-over line of an item that still waits on his deci
 item(173, mover="team-back", writer="team-back"); p0 = len(pushes())
 deliver(173, handed="team-back"); drain()
 check("13c answer: …and the hand-over line to a background agent is pushed as before", len([x for x in pushes()[p0:] if x[0] == U["team-back"]]) == 1, pushes()[p0:])
-item(178, mover="home-front", writer="home-front"); held.take(U["home-front"])
+item(178, mover="home-front", writer="home-front", next="do the thing"); held.take(U["home-front"])      # no named step: the front agent's own step is not what the item waits on
 p, h = sent_to_front(lambda: deliver(178, then="home-front", rec=BARE))
 check("13c answer: the bare hand-over of a Done with no note, to the front agent that now moves the item, starts no turn with Oliver away: nothing pushed", p == [], (p, h))
 check("13c answer: …the board keeps it (a History line saying it was not told)", quiet_log(178) and any("was not told (" in x["text"] and "yours now" in x["text"] for x in quiet_log(178)), quiet_log(178))
+item(179, mover="home-front", writer="home-front", next="home-front: do the thing"); held.take(U["home-front"]); unstamp("home-front")
+p, h = sent_to_front(lambda: deliver(179, then="home-front", rec=BARE))
+check("13c answer: …but when the item's first open named step is the front agent's own, the bare hand-over starts its turn with Oliver away: pushed, marked, \"yours now\" (the answer line passes named=True)", len(p) == 1 and p[0][1].startswith(telling._FOR_OWNER + " ") and "yours now" in p[0][1], (p, h))
 item(174, mover="team-back", writer="team-back", needs=["home-front"]); held.take(U["home-front"]); unstamp("home-front")
 p, h = sent_to_front(lambda: deliver(174, then="home-front", rec=BARE))
 check("13c answer: …the bare line to a session named in the item's needs that takes it over (the stored then-mover) is a progress notice too: nothing pushed with Oliver away", p == [], (p, h))
@@ -882,15 +885,15 @@ box.update(o=_pr._recovery_tell("a193", rd(193), "home-send", "gone", "none", ta
 check("13e recovery: a request to the fleet's builder (a background agent) is pushed as before", box.get("o") == "asked" and len([x for x in pushes()[p0:] if x[0] == U["team-back"]]) == 1, (box, pushes()[p0:]))
 held.take(U["home-front"]); unstamp("home-front")
 
-# 13f. the senders that do not pass `named` keep their behavior: an item whose first open step (or ask) is the front agent's own is still a progress notice from the answer line, the ladder's notice and the recovery request
-# (only a wake's and a watcher's notice pass named=True, 13 kind, 13a, 13b); a change of own_move_kind's or tell_own_move's default for `named` fails here
+# 13f. the senders that do not pass `named` keep their behavior: an item whose first open step (or ask) is the front agent's own is still a progress notice from the ladder's notice and the recovery request
+# (a wake's, a watcher's and the answer line's bare hand-over pass named=True, 13 kind, 13a, 13b, 13c); a change of own_move_kind's or tell_own_move's default for `named` fails here
 item(1700, mover="team-back", writer="team-back", next="home-front: do the thing"); item(1701, mover="team-back", writer="team-back", next="do the thing", ask="home-front: which one")
 check("13f setup: both items are the front agent's own named step (the first open step, and the ask), so named=True would make them a turn and without the flag they are progress",
       all(K(g, named=True) == "" and K(g) == "progress" for g in ("a1700", "a1701")), [(K(g, named=True), K(g)) for g in ("a1700", "a1701")])
 for g in (1700, 1701):
     unstamp("home-front"); held.take(U["home-front"])
     p, h = sent_to_front(lambda: deliver(g, then="home-front", rec=BARE))
-    check(f"13f answer: the bare hand-over of a Done with no note, for an item whose own named {'step' if g == 1700 else 'ask'} is the front agent's, stays a progress notice: nothing pushed, Oliver away", p == [], (p, h))
+    check(f"13f answer: the bare hand-over of a Done with no note, for an item whose own named {'step' if g == 1700 else 'ask'} is the front agent's, passes named=True: it starts its turn, pushed with Oliver away", len(p) == 1 and "yours now" in p[0][1], (p, h))
     unstamp("home-front"); held.take(U["home-front"])
     p, h = sent_to_front(lambda: ladder_tell(g))
     check(f"13f ladder: the notice about a silent live background mover, for an item whose own named {'step' if g == 1700 else 'ask'} is the front agent's, stays a progress notice: nothing pushed, Oliver away", p == [], (p, h))

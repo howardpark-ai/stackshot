@@ -10,7 +10,7 @@ from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.model import ask_leaves as _askl, model as _model, states as _states, step_split as _step_split, work as _work
 from stackshot.model.ids import _bare_id_ok, _norm_id
-from stackshot.service import gates as _gates, wait_fixes as _wait_fixes, writes as _writes
+from stackshot.service import gates as _gates, telling as _telling, wait_fixes as _wait_fixes, writes as _writes
 from stackshot.service.store import _load
 from stackshot.waits import until_write as _uw, wait_list_write as _wlw, waiting as _wt
 from stackshot.web.auth import oauth as _oauth
@@ -190,46 +190,52 @@ def stackshot_update(
     _sender_not_owner(sender)
     note = _owner_param("update", owner)           # step 4b: owner is accepted with a note until [model] owner_param_until, then refused
     fixes: list[tuple[str, str, str]] = []; fix_note = ""
-    if _model.clean(mover) or _model.clean(then) or _model.clean(post_wake_mover):
-        try:
-            meta_ = (_load(_norm_id(item_id, bare=_bare_id_ok(status))).get("metadata") or {})
-        except Exception:  # noqa: BLE001
-            meta_ = {}      # an unknown item is _update's to refuse
-        proj_ = project or str(meta_.get("project") or "")
-        vals = {"mover": mover, "then": then, "post_wake_mover": post_wake_mover}
-        words_ = _gates.lazy_said(said, sender)
-        for f_, v_ in list(vals.items()):
-            vals[f_], n_, fx_ = _gates.fix_front_mover(f_, v_, sender, proj_, str(meta_.get(f_) or ""), meta_, words_)    # a front agent gets no hand-off notice: another session's value becomes the project's builder and the reply says so; the value the item already holds changes nothing; the same value sent again is kept as sent; a sibling front agent of the project, with the owner's words in said, is kept as sent and told
-            fix_note += n_; fixes += fx_
-        mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
-    list_in = _wlw.passed(waits) and not _wlw.clearing(waits)      # a wait on a list: its date is the backstop, read as an anchor or item wait's is, and it names its blockers (the lines)
-    if list_in:
-        old_ = [n for n, v in (("wake", wake), ("ask_by", ask_by), ("hold", hold)) if v and str(v).strip().lower() not in _ASK_NONE]
-        if old_:
-            raise _gates.waits_clash(old_)
-    wake, ask_by, until_wait, alias_used, alias_date = _gates.until_in(item_id, status, until, wake, ask_by, hold, "list" if list_in else wait_kind)     # the date as the gates below read it; wake, ask_by and hold are aliases of until
-    alias_ends = _wait_fixes._wait_alias_gate(alias_used)
-    _gates.gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=_wlw.judged_as(waits) if list_in else wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
-                    status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
-    gid_ = _norm_id(item_id, bare=_bare_id_ok(status))
-    live_ = (lambda g_, who_: _busy_live(g_, who_)) if _busy_live is not None else None
-    _gates.gate_busy_hold(gid_, sender, hold=hold, wake=wake, ask_by=ask_by, wait_kind="list" if list_in else wait_kind, needs=needs, after=after or "",
-                          mover=mover, next_text=next, status=status, done=done, clear_hold=clear_hold, clear_wake=clear_wake, clear_wait=clear_wait, clear_needs=clear_needs, clear_after=clear_after,
-                          clear_next=clear_next, live=live_)      # before the item lock: an item its mover is moving is not paused
-    busy_note = _gates.busy_note_answer(gid_, hold=hold, next_text=next, reword=reword, mover=mover, live=live_)      # …and the proof for the reply note of a doing item whose next reads as a wait, read here, never under the item lock
-    ask_pre = _gates.ask_pre(item_id)      # the ask that stands before this write, for its tail (the reminder, the ask-time check, an ask the author calls wrong)
-    with _writes.session_write():
-        out = _update(item_id, subject, description, status, next, needs, priority, due, anchors, owner, owner_name, clear_needs, project, sender, clear_due, wake, clear_wake,
-                       hold, clear_hold, ask, recycle, clear_recycle, outcome, reason, superseded_by, options=options, agent=agent, observers=observers, tell_him=tell_him, after=after, work=work, said=said, check=check,
-                       clear_options=clear_options, clear_ask=clear_ask, clear_after=clear_after, wait_basis=wait_basis, clear_wait_basis=clear_wait_basis,
-                       expected_by=expected_by, expected_reason=expected_reason, step=step, supplies=supplies,
-                       goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, until_wait=until_wait,
-                       clear_goal=clear_goal, clear_mover=clear_mover, clear_then=clear_then, clear_wait=clear_wait, draft=draft, clear_draft=clear_draft, clear_next=clear_next, clear_check=clear_check,
-                       done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes, waits=waits, wait_mode=wait_mode,
-                       **({"busy_note": busy_note} if busy_note is not None else {})) + fix_note
-        if alias_used:
-            out += _uw.alias_note(alias_used, _model.clean(alias_date), alias_ends, _backstop_field(item_id, status))
-        return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()))
+    _telling.HO_STATE.handback = set()      # the front agents this write's gate keeps as a hand-back (gates.fix_front_mover); the hand-off notice reads them
+    try:
+        if _model.clean(mover) or _model.clean(then) or _model.clean(post_wake_mover):
+            try:
+                item_ = _load(_norm_id(item_id, bare=_bare_id_ok(status)))
+                meta_ = (item_.get("metadata") or {})
+            except Exception:  # noqa: BLE001
+                item_, meta_ = None, {}      # an unknown item is _update's to refuse
+            proj_ = project or str(meta_.get("project") or "")
+            vals = {"mover": mover, "then": then, "post_wake_mover": post_wake_mover}
+            words_ = _gates.lazy_said(said, sender)
+            _marked, _ends = _gates.step_marks(meta_, done, dropped, reword, work, sender), bool(clear_next) or str(status or "").strip().lower() not in ("", "open")      # a write that ticks, drops or rewords the holder's step (any form the tool reads), closes the item or clears next leaves no step for a hand-back to reach
+            for f_, v_ in list(vals.items()):
+                vals[f_], n_, fx_ = _gates.fix_front_mover(f_, v_, sender, proj_, str(meta_.get(f_) or ""), meta_, words_, item=item_, marked=_marked, ends=_ends)    # a front agent gets no hand-off notice: another session's value becomes the project's builder and the reply says so; the value the item already holds changes nothing; the same value sent again is kept as sent; a sibling front agent of the project, with the owner's words in said, is kept as sent and told
+                fix_note += n_; fixes += fx_
+            mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
+        list_in = _wlw.passed(waits) and not _wlw.clearing(waits)      # a wait on a list: its date is the backstop, read as an anchor or item wait's is, and it names its blockers (the lines)
+        if list_in:
+            old_ = [n for n, v in (("wake", wake), ("ask_by", ask_by), ("hold", hold)) if v and str(v).strip().lower() not in _ASK_NONE]
+            if old_:
+                raise _gates.waits_clash(old_)
+        wake, ask_by, until_wait, alias_used, alias_date = _gates.until_in(item_id, status, until, wake, ask_by, hold, "list" if list_in else wait_kind)     # the date as the gates below read it; wake, ask_by and hold are aliases of until
+        alias_ends = _wait_fixes._wait_alias_gate(alias_used)
+        _gates.gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=_wlw.judged_as(waits) if list_in else wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
+                        status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
+        gid_ = _norm_id(item_id, bare=_bare_id_ok(status))
+        live_ = (lambda g_, who_: _busy_live(g_, who_)) if _busy_live is not None else None
+        _gates.gate_busy_hold(gid_, sender, hold=hold, wake=wake, ask_by=ask_by, wait_kind="list" if list_in else wait_kind, needs=needs, after=after or "",
+                              mover=mover, next_text=next, status=status, done=done, clear_hold=clear_hold, clear_wake=clear_wake, clear_wait=clear_wait, clear_needs=clear_needs, clear_after=clear_after,
+                              clear_next=clear_next, live=live_)      # before the item lock: an item its mover is moving is not paused
+        busy_note = _gates.busy_note_answer(gid_, hold=hold, next_text=next, reword=reword, mover=mover, live=live_)      # …and the proof for the reply note of a doing item whose next reads as a wait, read here, never under the item lock
+        ask_pre = _gates.ask_pre(item_id)      # the ask that stands before this write, for its tail (the reminder, the ask-time check, an ask the author calls wrong)
+        with _writes.session_write():
+            out = _update(item_id, subject, description, status, next, needs, priority, due, anchors, owner, owner_name, clear_needs, project, sender, clear_due, wake, clear_wake,
+                           hold, clear_hold, ask, recycle, clear_recycle, outcome, reason, superseded_by, options=options, agent=agent, observers=observers, tell_him=tell_him, after=after, work=work, said=said, check=check,
+                           clear_options=clear_options, clear_ask=clear_ask, clear_after=clear_after, wait_basis=wait_basis, clear_wait_basis=clear_wait_basis,
+                           expected_by=expected_by, expected_reason=expected_reason, step=step, supplies=supplies,
+                           goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, until_wait=until_wait,
+                           clear_goal=clear_goal, clear_mover=clear_mover, clear_then=clear_then, clear_wait=clear_wait, draft=draft, clear_draft=clear_draft, clear_next=clear_next, clear_check=clear_check,
+                           done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes, waits=waits, wait_mode=wait_mode,
+                           **({"busy_note": busy_note} if busy_note is not None else {})) + fix_note
+            if alias_used:
+                out += _uw.alias_note(alias_used, _model.clean(alias_date), alias_ends, _backstop_field(item_id, status))
+            return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()))
+    finally:
+        _telling.HO_STATE.handback = set()      # the flag is this write's: a later write on this thread starts without it
 
 
 def register(mcp, *, ask_after_write, sender_not_owner, update, busy_live=None) -> None:

@@ -85,10 +85,12 @@ def _then_live(then: str, meta: dict[str, Any]) -> bool:
 
 def _builder_for_front(who: str, meta: dict[str, Any]) -> str:
     """The project's builder when `who` (the default then: the first session in the item's needs) is a front agent and the project has a builder that can take the item now (_then_live, the test a stored `then` passes too);
-    "" in every other case (`who` is no front agent, the project has no builder or a dead one), and the caller keeps what it had: a builderless project (front-only) keeps its front agent, as it always did."""
+    "" in every other case (`who` is no front agent, it holds the item's first open named step past the owner's own lines, the project has no builder or a dead one), and the caller keeps what it had: a builderless project (front-only) keeps its front agent, as it always did."""
     if not who:
         return ""
     try:
+        if _telling.own_step(meta, who, past_his=True):      # the front agent holds the item's open step (past his own lines): the answer is its to act on, the builder is no stand-in for it
+            return ""
         b = _telling.no_front(who, str(meta.get("project") or ""))
         return b if b and b != who and _then_live(b, meta) else ""
     except Exception as e:  # noqa: BLE001  — the swap is an extra: a failed read keeps the front agent, as before
@@ -96,11 +98,26 @@ def _builder_for_front(who: str, meta: dict[str, Any]) -> str:
         return ""
 
 
+def _front_step_holder(meta: dict[str, Any]) -> str:
+    """The front agent that holds the item's first open named step (past the owner's own lines) when the project's live builder would otherwise take the item after his answer; "" in every other case (no such step, the
+    holder is no front agent of the item's project, or one that is not live (_then_live, the test a stored `then` passes), the project has no builder or a dead one), and the caller keeps what main does (the builder, or the model's default). The one his answer is to reach
+    when the item names no session at all (needs is the decision alone, no `then`): the default would hand it to the builder. The holder is read in any letter case, as `own_step` reads a step's name, and returned as the roles list it."""
+    try:
+        project = str(meta.get("project") or "")
+        who = _telling.step_holder(meta, past_his=True)
+        name = _telling.front_name(who, project) if who else ""      # a front agent of this item's project, not another project's or a retired one
+        b = _telling.no_front(name, project) if name else ""
+        return name if b and b != name and _then_live(b, meta) and _then_live(name, meta) else ""
+    except Exception as e:  # noqa: BLE001  — an extra: a failed read leaves the default
+        print(f"answer: step holder of {meta.get('project')} not read ({e.__class__.__name__}: {e}); the default stands", file=sys.stderr, flush=True)
+        return ""
+
+
 def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parked: bool = False, waiting: bool = False, now: float = 0.0) -> str:
     """His decision is in (decision already out of needs, your-call ended): the item leaves his hands, as a Done does on a step. With a stored `then` (a session, not he) the
     item goes to it at once (_hand_to_mover: mover = then, `then` cleared, named first in needs).
     A `then` that is no live session (_then_live: free text, retired, unknown) is dropped first, and the item takes the no-`then` path below.
-    With no `then` and a default `then` (the first session in needs) that is a front agent, the project's builder takes the item at once (_builder_for_front: _hand_to_mover, the front agent stays named in needs); a project with no builder, or one whose builder cannot take it, keeps the front agent as the default.
+    With no `then` and a default `then` (the first session in needs) that is a front agent, the project's builder takes the item at once (_builder_for_front: _hand_to_mover, the front agent stays named in needs); a project with no builder, or one whose builder cannot take it, keeps the front agent as the default, and so does a front agent that holds the item's first open named step (it is the one to act on his answer).
     With no `then` otherwise, a stored mover that is he is dropped, so the item reads as it does when nothing is stored: the first session in needs, else the project's builder or -main agent (the model's default `then`).
     An item that still reads as waiting after the answer (`waiting`; a park, a pick carrying a wake, is one) has no mover: a stored mover that is he goes, and a stored `then` is kept for
     whoever ends the wait, as the wait's picker. By what the wait is:
@@ -145,6 +162,9 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
         _hand_to_mover(meta, then)
         return then
     sess = _needs_sessions(meta)
+    if not sess and (holder := _front_step_holder(meta)):      # needs names no session (the decision alone) and no `then`: the default would be the builder, but the front agent that holds the item's first open named step is the one to act on his answer
+        _hand_to_mover(meta, holder)
+        return holder
     builder = _builder_for_front(sess[0] if sess else "", meta)      # no stored `then`: the default is the first session in needs, and a front agent that filed or relayed the item is not who builds after his answer
     if builder:
         _hand_to_mover(meta, builder)      # the builder moves it; the front agent stays named in needs and hears of it at its next turn

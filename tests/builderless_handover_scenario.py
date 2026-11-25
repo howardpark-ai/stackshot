@@ -120,9 +120,12 @@ put_step(5, then=SDESK, next_text=f"{OWNER}: {STEP}\n{SMAIN}: carry on", contact
 res = answer_svc._answer("a5", "", "", "send")
 check("1.7 a stored `then` still wins over the step and the contact", res == "done" and held(5) == SDESK, (res, held(5)))
 
-put_step(6, project="projects/delta", post=DMAIN, contact=DDESK, next_text=f"{OWNER}: {STEP}\n{DDESK}: check the result")
+put_step(6, project="projects/delta", post=DMAIN, contact=DDESK, next_text=f"{OWNER}: {STEP}\ncheck the result")
 res = answer_svc._answer("a6", "", "", "send")
-check("1.8 a project that has a builder hands the answer to its builder, as before", res == "done" and held(6) == DBUILD, (res, held(6)))
+check("1.8 a project that has a builder hands the answer to its builder, as before (no step after his names a session)", res == "done" and held(6) == DBUILD, (res, held(6)))
+put_step(70, project="projects/delta", post=DMAIN, contact=DDESK, next_text=f"{OWNER}: {STEP}\n{DDESK}: check the result")
+res = answer_svc._answer("a70", "", "", "send")
+check("1.8b ...but a front agent that holds the next open named step takes it, builder or not: it is the one to act on his answer (the builder stays out)", res == "done" and held(70) == DDESK, (res, held(70)))
 
 put_step(7, next_text=f"{OWNER}: {STEP}\n{OWNER}: and then sign it\n{SDESK}: finish")      # the owner's own later line is skipped
 res = answer_svc._answer("a7", "", "", "send")
