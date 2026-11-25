@@ -18,11 +18,18 @@ done, closed ...) with no mark has no keeper at all: both fields are empty.
 What a registry row gains (pages.cmd_registry; project_registry.apply lays the record over it):
 
     keeper_agent      the keeper agent: the marked agent, else the derived one, else the session the old fields name ("" when none)
-    keeper_source     "mark" | "derived" | "legacy" ("" when there is no keeper): legacy = no mark, and the old fields (`display-name:`, `agent:`) name the keeper
+    keeper_source     "mark" | "derived" | "legacy" | "split" ("" when there is no keeper): legacy = no mark, and the old fields (`display-name:`, `agent:`) name the keeper;
+                      split = a sub-page a split made, which follows the keeper of the page its `split_from:` line names (see below)
     keeper_problems   (only when there are some) one line for each mark that was ignored
     session, role     with a mark: the marked agent and the role "mark" (a sub-page under it: the same agent, role "inherited"); `legacy_session` and `legacy_role`
                       then hold what they were. With no mark both keep exactly the value the page's old fields give
 
+A sub-page a split made carries a `split_from: <page>` line (or a `parent: <page>` line) and no `agent:` line, no `display-name:` line, no mark and no agents of its own: it takes the keeper of
+the page that line names, whatever the page above it gives, a mark of that page included (a hub that is itself a sub-page with its own mark, or one an `agent:` line keeps, passes its keeper to the pages that were split off it).
+The row carries the page in `split_from`, and `keeper_source` says "split" (not "legacy": the gauge does not count it). The named page is followed through the registry, a chain of splits up to SPLIT_HOPS
+hops; a line that names no page of the registry, a chain that loops or is longer than the bound, or a target that has no keeper, leaves the page to the rules below as if the line were not there.
+A value in another shape (another letter case than the page's key, a `#anchor`, a relative `../x`, a key without its pages dir that is not a bare slug, a YAML list) names no page and reads as no line, silently.
+A page with no line of its own under a page that follows another takes that keeper from above (`reads_split` says which pages a change of the target moves; the project record asks it of the rows before a change as well as after it, because a change can end the split page's own reading, a mark laid on it or a hand-back, and the pages under it then hold a keeper nothing refreshes).
 An unnamed sub-page inherits the keeper of the nearest page above it, as it always did. A sub-page with its own mark keeps the registry role it had ("agent": a page an agent keeps as its own working
 document, which is the role every reader of such a page reads) and its row says `page_mark: true`, so `fields` answers "mark" for it; the sub-pages under it do not inherit from it, as they never did
 from an `agent:` page.
@@ -40,7 +47,10 @@ KEY = "keeper"                  # the page's flat line, and the record's flag on
 PAGES = "page_keepers"          # the record entry's map of the sub-pages under it that carry a mark of their own: {sub-page key: agent name, or "" for "follows the keeper above"}
 PAGE_MARK = "page_mark"         # the registry row's flag: its keeper (`session`, role "agent") was named by such a mark, not by the page's `agent:` line
 MARK = "mark"                   # the registry role of a row whose `session` is the agent its page (or its record entry) marks
-SOURCES = ("mark", "derived", "legacy")
+SPLIT = "split"                 # keeper_source of a sub-page that follows the page its `split_from:` line names
+SPLIT_FROM = "split_from"       # the registry row's field: the page key a `split_from:` (or `parent:`) line names
+SPLIT_HOPS = 8                  # the most `split_from` hops one page follows (a chain of splits of splits); a longer chain is read as no line
+SOURCES = ("mark", "derived", "legacy", SPLIT)
 _UNMARKED = ("agent", "inherited")      # registry roles that are not a page's own name line
 
 SALA = "sala"                  # the surface of an agent entry that names none (project_registry.SURFACES): a session of sala's list
@@ -137,6 +147,47 @@ def above(key: str, reg: dict) -> str:
     return ""
 
 
+def split_target(key: str, reg: dict) -> str:
+    """The page the row `key` follows by its `split_from:` line ("" when none): the row has the line, no mark and no name or `agent:` line of its own (its role is "inherited" or none), and lists no
+    agent of its own, and the page the line names is another row of `reg`."""
+    row = reg.get(key) if isinstance(reg, dict) else None
+    if not isinstance(row, dict) or row.get(PAGE_MARK) is True or row.get("agents") or str(row.get("role") or "") not in ("", "inherited"):
+        return ""
+    t = str(row.get(SPLIT_FROM) or "").strip()
+    return t if t and t != key and isinstance(reg.get(t), dict) else ""
+
+
+def split_root(key: str, reg: dict) -> str:
+    """The page the `split_from:` chain of the row `key` ends at ("" when it follows none: no line, a chain that loops, or one longer than SPLIT_HOPS hops). The end is the first page of the chain that
+    follows no page itself, so a chain whose last link names no page of the registry ends at the page before it."""
+    chain, cur = [key], key
+    while True:
+        t = split_target(cur, reg)
+        if not t:
+            return cur if cur != key else ""
+        if t in chain or len(chain) > SPLIT_HOPS:
+            return ""
+        chain.append(t)
+        cur = t
+
+
+def reads_split(key: str, reg: dict) -> bool:
+    """Does the keeper of the row `key` come through a page that follows another? True when the row follows one itself (split_target), or it is an unnamed sub-page (role "inherited") whose page above it
+    (`above`, as `fields` reads it) does, through any number of unnamed pages: such a page takes the split keeper from above, so it is read again whenever a page that follows another is. Never loops: a page
+    is looked at once, and a chain longer than the registry is cut by that."""
+    seen: set = set()
+    cur = key
+    while cur and cur not in seen:
+        seen.add(cur)
+        if split_target(cur, reg):
+            return True
+        row = reg.get(cur) if isinstance(reg, dict) else None
+        if not (isinstance(row, dict) and row.get("role") == "inherited"):
+            return False
+        cur = above(cur, reg)
+    return False
+
+
 def _lists_agents(key: str, reg: dict) -> bool:
     """Does the project's page, or its hub's, list an agent (router_live.agent_root: the page that serves this key)? A one-session page does not: its keeper is its name line."""
     from stackshot.router import router_live as _rl
@@ -170,6 +221,8 @@ def retired(key: str, reg: dict) -> bool:
 def fields(key: str, reg: dict, _seen: tuple = ()) -> dict:
     """{"keeper_agent", "keeper_source"} of the page `key` of the registry `reg` (rows as pages.cmd_registry and project_registry.apply leave them), by the order:
       1. a mark (the row's own, the one a sub-page inherits, or a sub-page's own mark of the record: `page_mark`): "mark";
+      1b. a sub-page that follows another by a `split_from:` line (split_root) and has no mark of its own: the keeper of the page at the end of that chain, "split". In a retired project only a mark is
+         followed; when that page has no keeper the line is ignored and the rules below read the page as if it had none;
       2. a retired project with no mark: no keeper, two empty strings (it has no agent to derive and its name line is no keeper any more);
       3. an unnamed sub-page: the keeper of the page above it; a sub-page an agent keeps (`agent:`): that agent, "legacy";
       4. a page that has its own name line (`display-name:`) and lists no agent of its own (a sub-page or a hub-linked page that names itself): that name, "legacy". Such a page
@@ -180,6 +233,11 @@ def fields(key: str, reg: dict, _seen: tuple = ()) -> dict:
     role = str(row.get("role") or ""); who = str(row.get("session") or "")
     if (role == MARK or row.get(PAGE_MARK) is True) and who:
         return {"keeper_agent": who, "keeper_source": "mark"}
+    root = split_root(key, reg) if key not in _seen else ""
+    if root:
+        got = fields(root, reg, _seen + (key,))
+        if got["keeper_agent"] and (got["keeper_source"] == "mark" or not retired(key, reg)):
+            return {"keeper_agent": got["keeper_agent"], "keeper_source": SPLIT}
     up = above(key, reg) if role == "inherited" and key not in _seen else ""
     above_got = fields(up, reg, _seen + (key,)) if up else None      # an unnamed sub-page takes the mark above it, in a retired project too (a mark is read even there)
     if above_got and above_got["keeper_source"] == "mark":

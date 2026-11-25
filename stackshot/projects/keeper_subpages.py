@@ -155,7 +155,7 @@ def build(ents: dict, raw: dict, live: set | None = None, renames: dict | None =
             if isinstance(r, dict) and r.get("role") == "agent" and r.get("keeper_source") == "legacy" and str(r.get("session") or "")]
     after = pr.apply(raw, new)
     for r in rows:                      # a page handed back follows the keeper above it only when that keeper is a mark or derived: under a project that lists no agent it would still be an old form
-        if r["action"] == "inherit" and (after.get(r["key"]) or {}).get("keeper_source") not in ("mark", "derived"):
+        if r["action"] == "inherit" and (after.get(r["key"]) or {}).get("keeper_source") not in ("mark", "derived", "split"):
             pid = _holder(r["key"], by_page)
             del new[pid][_kp.PAGES][r["key"]]
             if not new[pid][_kp.PAGES]:

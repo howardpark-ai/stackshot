@@ -949,7 +949,7 @@ def _set_mark(ag: dict, name: str | None) -> None:
         ag[n] = a
 
 
-_SRC_WORDS = {"mark": "the mark", "derived": "derived", "legacy": "the name line"}
+_SRC_WORDS = {"mark": "the mark", "derived": "derived", "legacy": "the name line", "split": "the page it was split from"}
 
 
 def _keeper_fields(ctx: Ctx, e: dict, ents: dict) -> dict:
@@ -1313,7 +1313,7 @@ def _page_answer_problem(k: str, name: str, want: str | None, reg1: dict) -> str
     if want == "":
         up = _kp.above(k, reg1)
         f_up = _kp.fields(up, reg1) if up else {}
-        if row.get("role") != "inherited" or (up and (who, src) != (f_up.get("keeper_agent", ""), f_up.get("keeper_source", ""))):
+        if row.get("role") != "inherited" or (up and (who, src) != (f_up.get("keeper_agent", ""), f_up.get("keeper_source", "")) and src != _kp.SPLIT):      # a page that follows the page it was split from answers that page's keeper, not the one above
             return f"would answer {shown} for it, not the keeper above it"
     return ""
 
@@ -1834,7 +1834,8 @@ def front_caller_refusal(sender: str, is_id: bool, names_get: Callable[[str, str
     if not sname and sender not in allowed:
         return 403, {"error": f"refused: {sender!r} is not a session in the fleet's heartbeat, so it names nobody; run this from the keeper's or a front agent's own session"}
     if not ({sender, sname} & allowed):
-        kp = f"the agent marked keeper: {rec['keeper']}" if rec.get("keeper_source") == "mark" and rec["keeper"] else (rec["keeper"] or "none")
+        shown = (rec.get("keeper_agent") or rec["keeper"]) if rec.get("keeper_source") == "split" else rec["keeper"]      # a page that follows another reads the keeper of the page it was split from; `keeper` is its own old line
+        kp = f"the agent marked keeper: {rec['keeper']}" if rec.get("keeper_source") == "mark" and rec["keeper"] else (shown or "none")
         return 403, {"error": f"refused: session {sname or sender!r} is neither the keeper ({kp}) nor a front agent of {named} "
                               f"({', '.join(listed_front) or 'none'}); one of them {action}"}
     return None
