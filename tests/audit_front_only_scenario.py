@@ -39,7 +39,7 @@ PARTS = ("audit_front_only", "audit_front_turn")
 # ================================================================ part audit_front_only: where the audit sends a front-only project's unmoved findings and its unmoved digest
 def part_audit_front_only():
     import contextlib, copy, datetime as dt, io, json, os, pathlib, re, sys, time
-    import _scratch
+    import _scratch, _instance
     tmp = _scratch.mkdtemp(prefix="auditfo-"); T = pathlib.Path(tmp)
     sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools"))
 
@@ -48,7 +48,7 @@ def part_audit_front_only():
     for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"), ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"),
                      ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
         toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
-    toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml, count=1); assert n == 1
+    toml = _instance.set_person(toml)
     for key, val in (("agent", "falcon-audit"), ("builder", "falcon-engineer"), ("main", "falcon-main")):
         toml, n = re.subn(rf"(?m)^{key} = \"my-[a-z]+\"", f"{key} = \"{val}\"", toml); assert n == 1, key
     toml, n = re.subn(r'(?m)^(\[audit\][^\n]*\n)enabled = false', r'\g<1>enabled = true', toml); assert n == 1
@@ -257,7 +257,7 @@ def part_audit_front_only():
 def part_audit_front_turn():
     import datetime as dt, json, os, pathlib, re, sys, time
 
-    import _scratch
+    import _scratch, _instance
     tmp = _scratch.mkdtemp(prefix="auditfront-"); T = pathlib.Path(tmp)
     sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools"))
 
@@ -266,7 +266,7 @@ def part_audit_front_turn():
     for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"), ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"),
                      ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
         toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
-    toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml, count=1); assert n == 1
+    toml = _instance.set_person(toml)
     for key, val in (("agent", "falcon-audit"), ("builder", "falcon-engineer"), ("main", "falcon-main")):
         toml, n = re.subn(rf"(?m)^{key} = \"my-[a-z]+\"", f"{key} = \"{val}\"", toml); assert n == 1, key
     toml, n = re.subn(r'(?m)^(\[audit\][^\n]*\n)enabled = false', r'\g<1>enabled = true', toml); assert n == 1

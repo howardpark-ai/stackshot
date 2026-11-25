@@ -150,9 +150,10 @@ def part_reload():
     check("missing file: refused, CFG untouched", out is None and config.CFG is running and "FileNotFoundError" in err.getvalue(), err.getvalue())
 
     # ---- 3. a RESTART_ONLY key: reported, never applied
-    RS = edit(LIVE, (r"(?m)^port = 8020", "port = 9999"), (r'(?m)^owner = "the owner"', 'owner = "Someone Else"'),
+    RS = edit(LIVE, (r"(?m)^port = 8020", "port = 9999"),
               (r'(?m)^store = "[^"]*"', f'store = "{tmp}/elsewhere"'), (r'(?m)^at = \["05:00", "20:00"\]', 'at = "06:30"'),
               (r"(?m)^call_days = 1", "call_days = 2"), (r"(?m)^slack_seconds = 120", "slack_seconds = 90"))
+    RS = _instance.set_person(RS, "Someone Else")
     out, log = reload_with(RS)
     check("restart-only: only the live key is applied", out == ["page_rule.slack_seconds"] and _pdebts._page_slack() == 90, out)
     check("restart-only: the running values stay in CFG", config.get("server", "port") == 8020 and config.get("instance", "owner") == "the owner"
@@ -336,7 +337,7 @@ echo "host-of-$1"
     for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"), ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"),
                      ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
         toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
-    toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml, count=1); assert n == 1
+    toml = _instance.set_person(toml)
     toml, n = re.subn(r'(?m)^bash_host = "[^"]*"', 'bash_host = "host:primary"', toml); assert n == 1
     toml, n = re.subn(r'(?m)^form_machines = \[[^\]]*\]', 'form_machines = ["host:primary", "db-primary"]', toml); assert n == 1
     toml, n = re.subn(r'(?m)^ssh_hosts = \[\]', 'ssh_hosts = ["host:spare", "box-d", "host:spare"]', toml); assert n == 1

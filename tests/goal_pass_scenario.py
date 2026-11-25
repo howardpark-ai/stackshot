@@ -9,7 +9,7 @@ no item in the store changes, no message is sent, no audit record is written or 
 import hashlib, json, os, pathlib, re, sys, time
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch
+import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="goalpass-"); T = pathlib.Path(tmp)
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools"))
 toml = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
@@ -17,7 +17,7 @@ toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'sessio
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"), ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"),
                  ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
     toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
-toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml, count=1); assert n == 1
+toml = _instance.set_person(toml)
 (T / "stackshot.toml").write_text(toml, encoding="utf-8")
 (T / "home").mkdir()
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", HOME=str(T / "home"), STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)

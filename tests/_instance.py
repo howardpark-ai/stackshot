@@ -3,13 +3,15 @@
 The code carries no instance's values as defaults (machines, scopes, agents, the aliases a line of next opens with, ...); they are settings. A suite
 whose checks are about what a configured instance does (an `AE:` line of next, the ssh form for box-a, the work, home and ops scopes) builds its config
 and then passes the text through apply(): the values below are made-up test values. The owner's name is not set here (a suite sets `owner` itself where
-it checks a text that names the owner). tests/neutral_install_scenario.py checks the example config on its own.
+it checks a text that names the owner), and it does so through one function, set_person(): no suite patches the example config's `owner` line by its own pattern.
+tests/neutral_install_scenario.py checks the example config on its own.
 
     toml = _instance.apply(toml)              # before the suite writes its config file
     toml = _instance.apply(toml, owner=True)  # a suite that does not set `owner` itself
     toml = _instance.apply(toml, login=True)  # a suite that checks the owner's GitHub login ([github] owner_login)
     toml = _instance.apply(toml, gbrain=True) # a suite that runs the gbrain-only tools with a fake `gb` (rename_page, page_keeper, page_debt)
     toml = _instance.apply(toml, keywords=True)  # a suite that checks the words of another language ([keywords.<feature>], Japanese here)
+    toml = _instance.set_person(toml)         # a suite that names the person the tools speak of: `[instance] owner` = "Oliver" (set_person(toml, "Pat Example") for another name)
 
 The text a suite starts from is base_toml(): the example config, read through the tracked link tests/example_base.toml (-> ../stackshot.example.toml)
 and not by its own path. The selection of CI (tests/suitemap.py, *The example config* in its docstring) tells the two apart: a suite that reads the real
@@ -134,6 +136,14 @@ def _set(toml: str, section: str, key: str, value: str) -> str:
             return "\n".join(lines)
     lines.insert(start + 1, f"{key} = {value}")
     return "\n".join(lines)
+
+
+def set_person(toml: str, name: str = "Oliver") -> str:
+    """The config text with the person's name set: the one place a suite writes the example config's `owner` line (`[instance] owner`, the placeholder "the owner" in the example).
+    Asserts the line is there exactly once, so a suite that sets the person fails here when the example config's shape moves, not later on a missing name."""
+    toml, n = re.subn(r'(?m)^owner = "the owner"', lambda _m: f'owner = "{name}"', toml)
+    assert n == 1, f"expected one `owner = \"the owner\"` line in the config text, found {n}"
+    return toml
 
 
 def apply(toml: str, gbrain: bool = False, owner: bool = False, login: bool = False, keywords: bool = False) -> str:
