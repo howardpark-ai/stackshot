@@ -638,7 +638,7 @@ def _own_names(key: str, entry: dict, reg: dict, name: str) -> list:
 def agent_gap(key: str, entry: dict, reg: dict) -> dict | None:
     """Is this page a project with no one to take its items: `type: project`, active, no sub-page, and no front agent on its `agents:` map (agent_records)? → None when it has one, or when it is something else. Otherwise
     {"kind": "no-agents-map" | "no-front-agent"}: a project lists its agents, a one-session project lists its one session as its one front agent, and a page with none has no one to take its items. Sub-pages are the registry's:
-    a key under another page, or a `hub:` line (`is_sub_page`); a `parent:` line is not read by anything else here, so it makes no sub-page. One rule for the daily check and for rename_page.py."""
+    a key under another page, or a `hub:` line (`is_sub_page`); a `parent:` line makes no sub-page here (the keeper reads it for a page with no keeper of its own, keeper.py). One rule for the daily check and for rename_page.py."""
     if str(entry.get("type") or "").strip().lower() != "project" or not page_active(entry) or is_sub_page(key, reg, entry): return None
     recs = agent_records(key, entry, reg)
     if any(a["front"] for a in recs.values()): return None

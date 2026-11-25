@@ -9,7 +9,7 @@ The keeper is a mark on one agent (keeper.py). The old forms are a page's own na
     stackshot keeper-reads      prints the gauge, each instrumented site (last read in the instance's timezone, distinct keys), the readers that stay, and a loud line when nothing is being recorded
 
   * The gauge is the number of registry rows whose `keeper_source` is `legacy` (only an old form names the keeper), with their page keys; `projects.sync` refreshes it each time it runs. Zero means every
-    keeper is a mark or derived.
+    keeper is a mark, derived or a split (a page that follows the page its `split_from:` line names: `keeper_source` split is not counted, and the page it follows is, when an old form keeps that one).
   * A site is a reader that answers a keeper question from an old form that decides the row's keeper (`keeper_source` legacy: no mark on the row or its project), a removal candidate: the kind of read and the function
     that made it ("old form as the keeper <- anchors.notice_name"). A site counts each distinct row key once between two writes of a process, so volume (a registry build re-reads every row) cannot hide a quiet week; a read where a
     mark answers is never counted, and each gauge written drops the keys a site holds that are not rows of it, so right after a process writes a gauge its sites hold only rows of that gauge (none at zero). A process remembers a key it counted only until the write that put it in the file (a key another process pruned from the file is counted again by the next read, not suppressed by a memory of an older file). The readers of the project's name, its agent-name prefix and its scope read the name line by design and

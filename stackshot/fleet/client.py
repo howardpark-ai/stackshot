@@ -33,7 +33,8 @@ runs on every box.
                                 `keeper: true` on that agent, set in the project record or by a `keeper: <agent>` line on the page (a sub-page can
                                 carry a mark of its own, `page_keepers` on the record entry above it). keeper_agent
                                 is that agent, else the project's builder, else its -main agent (a one-session page: its own session), and
-                                keeper_source says which: mark, derived (no mark) or legacy (no mark, and the page's old name line or `agent:` names
+                                keeper_source says which: mark, derived (no mark), split (a page a split made: it follows the page its
+                                `split_from:` or `parent:` line names) or legacy (no mark, and the page's old name line or `agent:` names
                                 the keeper; a sub-page or hub-linked page with a name line of its own stays legacy). Both are empty for a retired
                                 project with no mark. With a mark, `keeper` is the marked agent too. Every API entry that takes a project takes the id or the key.
   client.py get answer <board#N>

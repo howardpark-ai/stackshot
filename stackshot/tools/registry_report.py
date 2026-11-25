@@ -26,7 +26,7 @@ The keeper debts, four for the mark of a project and a fifth for a sub-page mark
                                 on an entry that is not the nearest above the page, or a page marked twice; the page's own lines answer meanwhile. Fix: list the agent, or correct the key or the agent in the record; `tools/project.py page-keeper <page> (--agent <agent> | --hand-back)` sets or removes the mark of a page that exists, held on the entry of the project
                                 nearest above it; a mark on a page that no longer exists, or on an entry that is not that project's, is for whoever maintains the record to edit
 
-A `parent:` line is not checked: nothing in the project registry reads it (projects.py: it makes no sub-page), so a line off the key tree is no error of the record.
+A `parent:` line is not checked: it makes no sub-page in the project registry (projects.py), and the keeper reads it only for a page with no keeper of its own (keeper.py `split_target`), so a line off the key tree is no error of the record.
 
 Not checked when the record has no projects (an instance that has not made its record: every page would read as "no project"), or when it cannot be read. Each check that needs a source (sala's session list, the page store,
 the board items) is skipped, with a note, when that source cannot be read; it never makes the others fail. The agent check follows page_agent_report's guard against a cut-short session list. A page is "gone" only when its read

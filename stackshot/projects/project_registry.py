@@ -464,6 +464,11 @@ def _lay_page_keepers(base: dict, ents: dict) -> dict:
     for k in [*marked, *handed]:
         if "keeper_source" in out[k]:
             out[k].update(_kp.fields(k, out))
+    if marked or handed:                                  # a page that was split off a page whose mark moved follows it: read its keeper again
+        for k, r in list(out.items()):
+            if isinstance(r, dict) and r.get(_kp.SPLIT_FROM) and "keeper_source" in r and k not in marked and k not in handed:
+                out[k] = dict(r)
+                out[k].update(_kp.fields(k, out))
     return out
 
 
@@ -547,7 +552,8 @@ def apply(reg: dict, ents: dict | None = None) -> dict:
                 out[k]["agent_records"] = _p.agent_records(k, out[k], out)
         hubbed = [x for x in out if _top(x) not in tops and x not in changed and isinstance(out.get(_top(x)), dict)       # a page that names no agents and falls to its hub's: its derived keeper follows the hub's agents
                   and _top(str(out[_top(x)].get("hub") or "")) in tops]
-        for k in [*changed, *(x for x in out if _top(x) in tops and x not in changed), *hubbed]:
+        splits = [x for x, r in out.items() if isinstance(r, dict) and r.get(_kp.SPLIT_FROM) and x not in changed and _top(x) not in tops]      # a page that was split off another follows its keeper, which may sit in a project that changed
+        for k in [*changed, *(x for x in out if _top(x) in tops and x not in changed), *hubbed, *splits]:
             if "keeper_source" in out[k]:                  # a registry file written before the keeper fields has none to refresh: the published record reads them itself
                 if out[k] is reg.get(k):
                     out[k] = dict(out[k])

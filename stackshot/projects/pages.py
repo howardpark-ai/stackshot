@@ -619,6 +619,17 @@ def _registry_json(pages):
     from stackshot.projects import projects as _prj      # the one writer of the file's text (sorted keys, the page's own agent order)
     return _prj.registry_json({"pages": pages})
 
+def split_line(fm):
+    """The page key a sub-page's `split_from:` line (else its `parent:` line) names, as the registry row carries it ('' when there is none): a bare slug reads as a page in the first [pages] dir, as `hub:` does;
+    a trailing `.md` and slashes are dropped. keeper.fields follows it only for a page with no mark, name line, `agent:` line or agents of its own, and only when it names a page of the registry."""
+    for k in ("split_from", "parent"):
+        v = fm.get(k) if isinstance(fm, dict) else None
+        if isinstance(v, str) and v.strip():
+            v = v.strip().strip("'\"").strip("/")
+            v = v[:-3] if v.endswith(".md") else v
+            return v if "/" in v or not v else _cfg.page_dirs()[0] + "/" + v
+    return ""
+
 def page_row(key, fm, fms, quiet=True):
     """The registry row a page's own lines give (everything but what the publisher adds: `updated`, `mirror`, the keeper problems and the lead agents): the page's title, name, org, tags, type and status, its
     keeper (`session` and `role`, with the `legacy_` pair where a `keeper:` mark took the place of the old lines), its `hub`, and its `agents` with the `back_agents` subset. The registry is built from it, and
@@ -637,6 +648,8 @@ def page_row(key, fm, fms, quiet=True):
         if old[1]: row["legacy_role"] = old[1]
     hub = hub_line(key, fm, fms, quiet)         # the project this page's tree belongs to on the board (anchors.hub_of)
     if hub: row["hub"] = hub
+    split = split_line(fm)                      # a sub-page a split made follows the page this names (keeper.fields): only the line is recorded here, the registry resolves it
+    if split: row[_kp.SPLIT_FROM] = split
     if agents: row["agents"] = agents
     if back: row["back_agents"] = back
     return row

@@ -949,7 +949,7 @@ def _set_mark(ag: dict, name: str | None) -> None:
         ag[n] = a
 
 
-_SRC_WORDS = {"mark": "the mark", "derived": "derived", "legacy": "the name line"}
+_SRC_WORDS = {"mark": "the mark", "derived": "derived", "legacy": "the name line", "split": "the page it was split from"}
 
 
 def _keeper_fields(ctx: Ctx, e: dict, ents: dict) -> dict:
@@ -1313,7 +1313,7 @@ def _page_answer_problem(k: str, name: str, want: str | None, reg1: dict) -> str
     if want == "":
         up = _kp.above(k, reg1)
         f_up = _kp.fields(up, reg1) if up else {}
-        if row.get("role") != "inherited" or (up and (who, src) != (f_up.get("keeper_agent", ""), f_up.get("keeper_source", ""))):
+        if row.get("role") != "inherited" or (up and (who, src) != (f_up.get("keeper_agent", ""), f_up.get("keeper_source", "")) and src != _kp.SPLIT):      # a page that follows the page it was split from answers that page's keeper, not the one above
             return f"would answer {shown} for it, not the keeper above it"
     return ""
 
