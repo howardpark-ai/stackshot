@@ -18,6 +18,7 @@ These pages hold the detail behind the [README](../README.md). Each page starts 
 
 ## The board and its tools
 
+- [The front door](front-door.md): One MCP endpoint over several boards and a brain behind a sign-in proxy: the identity header, the members file, the one tool set with its `board` argument, the refusals, the backends' credentials and how to run it.
 - [The board, the publisher and the connector](board-and-connector.md): The server and the publisher, the MCP connector, and every tool the connector offers.
 - [The board pages](board-ui.md): How the board pages are drawn: search, the item page, the home lists, rows, cards, buttons, the side panel and the CI runners page.
 - [The color tool](color-tool.md): The Colors button that tries a whole dark color combination, and the saved color combinations.

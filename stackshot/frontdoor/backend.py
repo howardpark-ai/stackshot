@@ -1,0 +1,121 @@
+"""backend.py: the backends as the front door calls them.
+
+A call to a board or a brain leaves the front door through a transport built here, and nothing of the caller's request goes with it:
+
+  * the backend's headers are set by this transport and no other: the front door's own credential (`Authorization: Bearer <token_file>`, or an OAuth
+    access token the SDK's client-credentials provider asks for with the two client files and the scopes) under the lower-case key `authorization`,
+    and the caller's identity, signed (`identity.sign`), under `identity.HEADER`;
+  * `forward_incoming_headers=False`: the transport options FastMCP passes to a proxy's transport say not to copy the inbound request's headers, so the
+    caller's own Authorization, X-Api-Key, Cookie and the rest stay at the front door.
+
+`Backends` also holds the health of each backend: an open GET of its health URL, cached for `health_cache_seconds`.
+"""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import time
+import urllib.error
+import urllib.request
+from dataclasses import replace
+from typing import Any
+
+from fastmcp.client.auth import ClientCredentialsOAuthProvider
+from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.client.transports.base import TransportOptions
+from fastmcp.server.providers.proxy import ProxyClient
+
+from stackshot.core.frontdoor_config import Backend, Settings
+from stackshot.frontdoor import config as _config, identity as _identity
+
+log = logging.getLogger("stackshot.frontdoor")
+HEALTH_TIMEOUT = 5.0         # seconds a health check waits for a backend
+_NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))      # a backend is reached directly, never through an HTTP_PROXY of the environment
+
+
+def _status_of(url: str) -> int:
+    """The HTTP status of a GET of `url` (an error status is a status; a refused connection or a timeout raises OSError)."""
+    try:
+        with _NO_PROXY.open(urllib.request.Request(url, method="GET"), timeout=HEALTH_TIMEOUT) as r:
+            return int(r.status)
+    except urllib.error.HTTPError as e:
+        return int(e.code)
+    except urllib.error.URLError as e:
+        raise OSError(str(e.reason)) from None
+
+
+class BackendTransport(StreamableHttpTransport):
+    """The transport of one connection to a backend: a new inner transport, with this backend's headers only."""
+
+    def __init__(self, backend: Backend, headers: dict[str, str], auth: Any = None):
+        super().__init__(backend.url)
+        self._backend_url = backend.url
+        self._headers = headers
+        self._auth = auth
+
+    @contextlib.asynccontextmanager
+    async def connect_session(self, *, transport_options: TransportOptions | None = None, **kw: Any):
+        inner = StreamableHttpTransport(self._backend_url, headers=self._headers, auth=self._auth)
+        opts = replace(transport_options or TransportOptions(), forward_incoming_headers=False)
+        async with inner.connect_session(transport_options=opts, **kw) as session:
+            yield session
+
+
+class Backends:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.by_name: dict[str, Backend] = {b.name: b for b in settings.backends}
+        self._oauth: dict[str, tuple[tuple[str, str, str], ClientCredentialsOAuthProvider]] = {}
+        self._health: dict[str, tuple[float, dict[str, Any]]] = {}
+
+    # ------------------------------------------------------------------ calling a backend
+
+    def _headers(self, b: Backend, caller: str) -> tuple[dict[str, str], Any]:
+        """(the backend's headers, its OAuth provider or None) for a call made for `caller`; the files are read now, so a rotated secret applies at once."""
+        hdr: dict[str, str] = {}
+        auth = None
+        cred = _config.credentials(b)
+        if b.oauth:
+            key = (cred["client_id"], cred["client_secret"], cred["scopes"])
+            have = self._oauth.get(b.name)
+            if have is None or have[0] != key:
+                have = (key, ClientCredentialsOAuthProvider(client_id=key[0], client_secret=key[1], scopes=key[2] or None))
+                self._oauth[b.name] = have
+            auth = have[1]
+        else:
+            hdr["authorization"] = "Bearer " + cred["token"]
+        if self.settings.identity_secret_file:
+            secret = _config.read_secret(self.settings.identity_secret_file, "identity_secret_file")
+            hdr[_identity.HEADER] = _identity.sign(secret.encode("utf-8"), caller)
+        return hdr, auth
+
+    def client(self, name: str, caller: str) -> ProxyClient:
+        """A client of the backend `name`, whose connection carries the front door's credential and `caller`'s signed identity."""
+        b = self.by_name[name]
+        hdr, auth = self._headers(b, caller)
+        return ProxyClient(BackendTransport(b, hdr, auth), mode="legacy")
+
+    # ------------------------------------------------------------------ health
+
+    async def health(self, name: str, force: bool = False) -> dict[str, Any]:
+        """{"ok", "status" or "error", "ms", "kind"} of the backend `name`: a cached answer younger than health_cache_seconds, else a new GET of its health URL
+        (`force`: always a new one, for the check that follows a failed call)."""
+        have = self._health.get(name)
+        if have and not force and time.monotonic() - have[0] < self.settings.health_cache_seconds:
+            return have[1]
+        b = self.by_name[name]
+        t0 = time.monotonic()
+        try:
+            status = await asyncio.to_thread(_status_of, b.health_url)
+            res: dict[str, Any] = {"ok": status == 200, "status": status}
+        except Exception as e:      # noqa: BLE001  (any failure of the check is the backend not answering)
+            res = {"ok": False, "error": type(e).__name__}
+        res["ms"] = int((time.monotonic() - t0) * 1000)
+        res["kind"] = b.kind
+        self._health[name] = (time.monotonic(), res)
+        return res
+
+    async def health_all(self) -> dict[str, dict[str, Any]]:
+        res = await asyncio.gather(*(self.health(n) for n in self.by_name))
+        return dict(zip(self.by_name, res))
