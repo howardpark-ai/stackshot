@@ -42,7 +42,7 @@ def _rekeyed(old: str, new: str, item: dict[str, Any]) -> None:
 def _github_comment(gid: str, c: dict[str, Any]) -> bool:
     """ghsync's hook for the owner's own comment on an item's issue. The comment
     is recorded on the item under metadata.answers, the list the board's answer buttons write too (the board's
-    answer box): {ts, kind: "comment", text, via: "github", url, comment_id}, `via` being the flag that it was written
+    answer box): {ts, kind: "comment", text, via: "github", url, comment_id} (no `by` while one person is served: the comment's login is the first person's, and a record with none reads as theirs), `via` being the flag that it was written
     on GitHub. The save is the server's own (no author): the mirror carries no answers, so the owner's comment is never posted back to the issue. Then the mover and the sessions named in
     its needs are told one line each (tell_comment). Reading only: needs, status and the page stay as they are. → False when
     no item has the id (the reader skips the comment); True when it is on the item (a second call for the same comment, after
@@ -59,7 +59,7 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
         if any(a.get("comment_id") == c.get("id") for a in answers):
             return True
         rec = {"ts": float(c.get("ts") or time.time()), "kind": "comment", "text": str(c.get("text") or ""), "via": "github",
-               "url": str(c.get("url") or ""), "comment_id": c.get("id")}
+               "url": str(c.get("url") or ""), "comment_id": c.get("id")}      # no `by`: the one login the reader follows ([github] owner_login) is the first person's, and a record with none reads as the first person's
         answers.append(rec)
         meta["answers"] = answers
         try:

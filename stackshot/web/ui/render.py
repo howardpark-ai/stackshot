@@ -2578,7 +2578,7 @@ class Board:
                     for a in na_[len(pa_):]:
                         ch, tx = str(a.get("choice") or ""), str(a.get("text") or a.get("server_note") or "")      # a step the server ticked on a mail he sent carries its own sentence, not his words
                         if ch and a.get("letter"): ch = _ol.pick_words(ch, a["letter"])      # the letter the answer box drew beside the option
-                        ev.append(("answer", _t("item.log.answer_via", owner=e(_OWNER), via=e(a.get('via') or _t("item.log.via_board"))) + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
+                        ev.append(("answer", _t("item.log.answer_via", owner=e(_people.recorded_by(a)), via=e(a.get('via') or _t("item.log.via_board"))) + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
                                    + e(tx) + (f' <span class="dim">{_t("item.log.tag_comment")}</span>' if a.get("kind") == "comment" else f' <span class="dim">{_t("item.log.tag_step_note")}</span>' if a.get("kind") == "step-reply" else "")))
                 for w in _work.legacy_changes(pm, m): ev.append(("work", e(w)))   # a line of the old work list added, moved, reassigned or removed, one line each (an item the migration has not reached)
                 new_said = _said.new_entries(pm, m)                          # the trailers: his words recorded by this version, a tag each
@@ -2594,7 +2594,7 @@ class Board:
                         where = f'<a href="{e(u)}" target="_blank" rel="noopener">{_t("item.log.on_github")}</a>' if u else _t("item.log.on_github")
                         try: at = float(a.get("ts") or 0) or None
                         except (TypeError, ValueError): at = None
-                        ev.append(("comment", _t("item.log.gh_comment", owner=e(_OWNER), where=where, text=e(t)), at))
+                        ev.append(("comment", _t("item.log.gh_comment", owner=e(_people.recorded_by(a)), where=where, text=e(t)), at, _people.recorded_by(a)))
             who = shown_ref(" ".join(str(v.get("written_by") or "").split()))          # the revision's author (model.py: every save records it); older revisions carry none
             chg = [x for x in ev if x[0] != "comment"]
             if not merge:                                                    # one entry per change, as before (item_events)
@@ -2604,7 +2604,7 @@ class Board:
                     h = self.hist_bullets([(x[1], x[3] if len(x) > 3 else "", x[4] if len(x) > 4 else "") for x in chg])
                     out.append((vi, 0, {"ts": ts, "kind": next((k_ for k_ in ("completed", "reopened", "answer", "created", "said") if any(x[0] == k_ for x in chg)), chg[0][0]), "html": h, "who": who, "what": "; ".join(_ip.plain(x[1]) for x in chg), "comment": False}))
                 for j, x in enumerate(c for c in ev if c[0] == "comment"):   # his comment written on GitHub: its own line, at the comment's own time
-                    out.append((vi, j + 1, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": "comment", "html": self.hist_bullets([(x[1], "")]), "who": _OWNER, "what": _ip.plain(x[1]), "comment": True}))
+                    out.append((vi, j + 1, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": "comment", "html": self.hist_bullets([(x[1], "")]), "who": x[3] if len(x) > 3 and x[3] else _OWNER, "what": _ip.plain(x[1]), "comment": True}))
             prev = v
         for g in groups.values():          # one line per step: a closed step says it was closed, the status updates written on it folded under; an open step's updates are one line too, at its newest update
             n = len(g["ups"])
@@ -3555,7 +3555,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             if ch: body = f"picked {ch}" + (f" ({ln})" if ln else "")
             elif tx: body = tx if len(tx) <= 160 else tx[:159].rstrip() + "…"
             else: continue
-            out.append({"text": f"{_OWNER}: {body}", "status": "decided", "by": _OWNER, "at": ts})
+            who = _people.recorded_by(a)      # the person who answered: the answer's `by`, else the first person
+            out.append({"text": f"{who}: {body}", "status": "decided", "by": who, "at": ts})
         return out
     def his_open_steps(self, r):
         """His open steps of the checklist (the lines of next that open with his name, or with none) as (first line without its opener, the lines under it), each said once, in order. The line the

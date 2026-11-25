@@ -1410,7 +1410,7 @@ class Board:
                 if len(na_) > len(pa_) and na_[:len(pa_)] == pa_:        # phase 3: his answer from the board, one line each
                     for a in na_[len(pa_):]:
                         ch, tx = str(a.get("choice") or ""), str(a.get("text") or a.get("server_note") or "")      # a step the server ticked on a mail he sent carries its own sentence, not his words
-                        ev.append(("answer", f"{e(_OWNER)} ({e(a.get('via') or 'board')}): " + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
+                        ev.append(("answer", f"{e(_people.recorded_by(a))} ({e(a.get('via') or 'board')}): " + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
                                    + e(tx) + (' <span class="dim">· comment</span>' if a.get("kind") == "comment" else ' <span class="dim">· note on his step</span>' if a.get("kind") == "step-reply" else "")))
                 for w in _work.legacy_changes(pm, m): ev.append(("work", e(w)))   # a line of the old work list added, moved or removed (a step status is folded under its step in the page, not a line each here)
                 new_said = _said.new_entries(pm, m)                          # the trailers: his words recorded by this version, a tag each
@@ -1426,7 +1426,7 @@ class Board:
                         where = f'<a href="{e(u)}" target="_blank" rel="noopener">on GitHub</a>' if u else "on GitHub"
                         try: at = float(a.get("ts") or 0) or None
                         except (TypeError, ValueError): at = None
-                        ev.append(("comment", f"{e(_OWNER)} commented {where}: “{e(t)}”", at))
+                        ev.append(("comment", f"{e(_people.recorded_by(a))} commented {where}: “{e(t)}”", at, _people.recorded_by(a)))
             who = shown_ref(" ".join(str(v.get("written_by") or "").split()))          # the revision's author (model.py: every save records it); older revisions carry none
             chg = [x for x in ev if x[0] != "comment"]
             if not merge:                                                    # one entry per change, as before (item_events)
@@ -1436,7 +1436,7 @@ class Board:
                     h = self.hist_bullets([(x[1], x[3] if len(x) > 3 else "") for x in chg])
                     out.append((vi, 0, {"ts": ts, "kind": next((k_ for k_ in ("completed", "reopened", "answer", "created", "said") if any(x[0] == k_ for x in chg)), chg[0][0]), "html": h, "who": who, "what": "; ".join(_ip.plain(x[1]) for x in chg), "comment": False}))
                 for j, x in enumerate(c for c in ev if c[0] == "comment"):   # his comment written on GitHub: its own line, at the comment's own time
-                    out.append((vi, j + 1, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": "comment", "html": self.hist_bullets([(x[1], "")]), "who": _OWNER, "what": _ip.plain(x[1]), "comment": True}))
+                    out.append((vi, j + 1, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": "comment", "html": self.hist_bullets([(x[1], "")]), "who": x[3] if len(x) > 3 and x[3] else _OWNER, "what": _ip.plain(x[1]), "comment": True}))
             prev = v
         out.sort(key=lambda x: (-x[0], x[1]))
         return [x for _vi, _j, x in out[:self.HISTORY_CAP]], max(len(out) - self.HISTORY_CAP, 0)

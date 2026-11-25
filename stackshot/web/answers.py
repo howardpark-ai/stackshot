@@ -31,7 +31,7 @@ from stackshot.web.auth.signin import _ui_key
 # item carries a form (render.Board.item_html): a button per stored option while it needs his
 # decision (none when the owner listed none: Yes / No and the box, the fallback for a yes/no ask or an older item; Approve and Decline are options like any other), and a comment box sent as his answer or as a comment. POST /items/<n>/answer takes it, signed-in only (the board's
 # cookie, _ui_email) with a token bound to his address and the item and a same-origin Origin or Referer. An answer is stored in
-# metadata.answers ({ts, kind: decision | comment, choice?, choice_line?, letter? (the answer box's A, B, C beside the label), text?, via: "board"}); a decision takes `decision` out of needs (the
+# metadata.answers ({ts, kind: decision | comment, choice?, choice_line?, letter? (the answer box's A, B, C beside the label), text?, via: "board", by? (the signed-in person's name, when that person is not the first)}); a decision takes `decision` out of needs (the
 # sessions named stay) and clears the ask, so the item leaves his queue at once, and moves the state clock; a decision that is a pick
 # among the item's options also clears the options (his answer keeps the option's label and line); a comment changes
 # neither. Either is pushed to the owner and to every session named in needs, and shows in the History as his

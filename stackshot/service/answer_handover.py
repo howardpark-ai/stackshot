@@ -17,6 +17,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
+from stackshot.core import people as _people
 from stackshot.core.instance import OWNER
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
@@ -155,26 +156,26 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
     return ""
 
 
-def _check_his_step(meta: dict[str, Any], step: str, now: float) -> str:
+def _check_his_step(meta: dict[str, Any], step: str, now: float, by: str = "") -> str:
     """his Done (his word that his step is done; an empty Send from a page loaded earlier is the same) checks the open steps of the item's checklist that are his, the lines the Your step block shows
     (steps.is_his: named for him, or naming no one), whoever wrote them, the server's own line for the summary included (the block does not draw that line or a repeat, but his Done is his word that all of it is done). Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
     other lines staying. → the first checked step's first line, "" when none was his (nothing written). A note on the step (step-reply) never comes here: it ticks only the server's step (owner_steps.tick), and the session that takes the item
-    marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Done finishes all of his open lines."""
+    marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Done finishes all of his open lines. `by` is the person whose Done it is (the first person when none is named)."""
     cl = _steps.view(meta)
     mine = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN and _steps.is_his(x["text"])]      # the open lines render.his_open_steps starts from, before it leaves out the server's summary line and repeats
     if not mine:
         return ""
     for i in mine:
-        cl[i] = {"text": cl[i]["text"], "status": _steps.DONE, "by": OWNER, "at": now}
+        cl[i] = {"text": cl[i]["text"], "status": _steps.DONE, "by": by or OWNER, "at": now}
     _nl.prune(meta, [cl[i]["text"] for i in mine], str(meta.get("owner") or ""))
     meta["steps"] = _steps.stored(cl)
     return _steps.first_line(cl[mine[0]]["text"])
 
 
-def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str = "", why: str = "") -> str:
+def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str = "", why: str = "", by: str = "") -> str:
     """An answer note that has no decision to go with it (the item is closed, or the question it answered has changed) is kept as his comment on the item and told to the mover, as any comment of his
     is: the board never drops what he wrote. `pick` is the option he sent with it and `why` the words that name it in front of the note ("the item is closed", "the item no longer asks this"). A second
-    send of the same thing is a no-op: the same text, or the same pick with the same note that a decision just recorded, among the item's latest answers within ten minutes (a double click).
+    send of the same thing is a no-op: the same text, or the same pick with the same note that a decision just recorded, among the item's latest answers within ten minutes (a double click). `by` is the person who wrote it (the first person when none is named): it is kept on the comment and is the save's author.
     → `code`, the notice the page shows (it says the note was kept). The caller holds the item and answer locks."""
     now = time.time()
     meta = dict(item.get("metadata") or {})
@@ -187,11 +188,12 @@ def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str =
     for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])[-3:]:
         if isinstance(a, dict) and now - _ts(a) < 600 and (a.get("text") == text or (pick and a.get("choice") == pick and a.get("text") == note)):
             return code
-    rec: dict[str, Any] = {"ts": now, "kind": "comment", "text": text, "via": "board"}
+    who = by or OWNER
+    rec: dict[str, Any] = _people.stamp({"ts": now, "kind": "comment", "text": text, "via": "board"}, who)      # `by` only when it is not the first person's (a record with none reads as the first person's)
     prior = meta.get("answers") if isinstance(meta.get("answers"), list) else []
     meta["answers"] = [*prior, rec]
     item["metadata"], item["updated"] = meta, now
-    _writes.save(gid, item, note=_hooks().answer_note(rec), author=(OWNER, "board"))
+    _writes.save(gid, item, note=_hooks().answer_note(rec), author=(who, "board"))
     item["gid"] = gid
     told = [t for t in _hooks().answer_deliver(gid, item, rec) if t]
     print(f"answer: {gid} {code}: his note kept as a comment, told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)

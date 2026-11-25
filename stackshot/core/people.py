@@ -137,6 +137,28 @@ def person_of_email(address: Any) -> Person | None:
     return None
 
 
+def signed_in(address: Any) -> Person:
+    """The person a sign-in address stands for when something is recorded under it: the person that has the address, else the first (an address the list does not name is still let in by
+    the sign-in's own allow-list, and while the list has one person every address is that person's)."""
+    return person_of_email(address) or first()
+
+
+def recorded_by(rec: Any) -> str:
+    """The name a stored record says it was made by: its `by` when it has one, else the first person (a record from before the key was written, a mail tick the server made). A name is the
+    key a person is stored under, so a `by` that no list entry carries any more is still shown as it was written."""
+    by = " ".join(str(rec.get("by") or "").split()) if isinstance(rec, dict) else ""
+    return by or first().name
+
+
+def stamp(rec: dict[str, Any], name: Any) -> dict[str, Any]:
+    """Write `name` on the record `rec` as its `by`, unless it is the first person: a record with no `by` reads as the first person (`recorded_by`), so while the list has one person
+    every record is written exactly as it was before the key existed. → `rec`."""
+    name = " ".join(str(name or "").split())
+    if name and name != first().name:
+        rec["by"] = name
+    return rec
+
+
 def emails() -> list[str]:
     """Every address allowed to sign in, the first person's first: what the setup check counts and the portal's own identity falls back to."""
     return [e for p in people() for e in p.emails]
