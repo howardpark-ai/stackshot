@@ -5,7 +5,7 @@ relay | event): what the board shows the item as. The stamp pass (`_stamp_one`, 
 the clock moves (the minute set's `phase_sweep` tick and a config reload). The project-id pass (`_pid_one`, `_unpid_one`, `_pid_write_op`) is the stamp pass's shape for `metadata.project_id`; its rules are in
 model/item_project_pass.py, which reads the file helpers of this module (`_stamp_open`, `_stamp_sha`, `_stamp_write`, `_stamp_pass_keep`) off the `S` it is given.
 
-`PassHost` is that `S` for the four passes written against the server module (model/item_project_pass.py, model/last_activity_pass.py, waits/until_pass.py, waits/mover_pass.py): a name they read is looked up when it is read, on the owners
+`PassHost` is that `S` for the passes written against the server module (model/item_project_pass.py, model/last_activity_pass.py, waits/until_pass.py, waits/mover_pass.py, waits/people_pass.py): a name they read is looked up when it is read, on the owners
 the host is given (this module, service/retire_passes.py, service/merge_progress.py, web/wiring.py's `PASS_NAMES`, web/server.py), so a suite that replaces one on its owner reaches the passes.
 
 The publish is the surface's, reached through `Hooks` in service/passes_hooks.py, looked up when it runs. A suite that replaces a function or the clock of the pass sets it here (and `time` here, since this module
@@ -51,7 +51,7 @@ _pubmod = _Publish          # what `_ipp` reads off this module as its `S`
 
 
 class PassHost:
-    """The `S` of model/last_activity_pass.py, waits/until_pass.py and waits/mover_pass.py (they read the stamp helpers, the retire reading and the server's own names off it): a name is looked up on each owner in turn when it is read."""
+    """The `S` of model/last_activity_pass.py, waits/until_pass.py, waits/mover_pass.py and waits/people_pass.py (they read the stamp helpers, the retire reading and the server's own names off it): a name is looked up on each owner in turn when it is read."""
 
     def __init__(self, *owners: Any) -> None:
         self._owners = owners
@@ -317,7 +317,7 @@ def _stamp_pass_keep(pass_id: str, by: str, op: str, results: list[dict[str, Any
                 rec = _migrations.pass_load(pass_id)
             except ToolError:
                 rec = {"pass_id": pass_id, "by": by, "kind": "stamp", "begun": time.time(), "ended": None, "owners": {}, "items": [], "undone": []}
-            rec.setdefault("items" if op in ("stamp", "retire", "project_id", "until", "mover", "lastact") else "undone", []).extend(results)
+            rec.setdefault("items" if op in ("stamp", "retire", "project_id", "until", "mover", "people", "lastact") else "undone", []).extend(results)
             _migrations.pass_save(rec)
     except Exception as e:  # noqa: BLE001
         print(f"stamp: the results of pass {pass_id} not kept: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
