@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from fastmcp.exceptions import ToolError
-from starlette.requests import Request
+from starlette.requests import ClientDisconnect, Request
 from starlette.responses import JSONResponse, PlainTextResponse
 
 from stackshot.core import config as _cfg
@@ -416,6 +416,24 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
     return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | anchor-add | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result | agent-state | machines"}
 
 
+_BODY_CUT = "the body ended before it was complete"
+
+
+def _parse_body(raw: bytes) -> tuple[Any, str]:
+    """(the JSON object in `raw`, "") or (None, a one-line reason): text that is no JSON, JSON that is no object, a nesting too deep to read, or a number with too many digits."""
+    try:
+        body = json.loads(raw)
+    except RecursionError:
+        return None, "the JSON nests too deeply to read"
+    except ValueError as e:      # JSONDecodeError and UnicodeDecodeError are the body's own faults; any other ValueError is the parser's limit on the digits of an integer
+        if isinstance(e, (json.JSONDecodeError, UnicodeDecodeError)):
+            return None, "the body is not valid JSON"
+        return None, "a number in the JSON has too many digits"
+    if not isinstance(body, dict):
+        return None, "the body is a JSON object, not a list, text, number, true, false or null"
+    return body, ""
+
+
 async def client_write(request: Request):
     """The client API's writes: what a machine's hooks and its puller send, each proved by the machine's token.
     `poll` is the puller's long poll: it reports the sessions live on the machine (the machine's sign of life), and is held
@@ -435,19 +453,21 @@ async def client_write(request: Request):
         chunks: list[bytes] = []      # joined once: a running `raw += chunk` copies the whole body at every chunk
         size = 0
         if not over:
-            async for chunk in request.stream():      # whatever the header says, the body is read no further than one chunk past the cap
-                chunks.append(chunk)
-                size += len(chunk)
-                over = svc.too_large(size)
-                if over:
-                    break
+            try:
+                async for chunk in request.stream():      # whatever the header says, the body is read no further than one chunk past the cap
+                    chunks.append(chunk)
+                    size += len(chunk)
+                    over = svc.too_large(size)
+                    if over:
+                        break
+            except ClientDisconnect:      # the sender went away mid-body: nothing was parsed or written, and nobody is left to read an answer
+                return JSONResponse({"error": _BODY_CUT}, status_code=400, headers={"Cache-Control": "no-store"})
         raw = b"".join(chunks)
         if over:
             return JSONResponse({"error": over}, status_code=over_status, headers={"Cache-Control": "no-store"})
-        try:
-            body = json.loads(raw)
-        except Exception:
-            body = None
+        body, why = _parse_body(raw)
+        if why:
+            return JSONResponse({"error": why}, status_code=400, headers={"Cache-Control": "no-store"})
     else:
         try:
             body = await request.json()

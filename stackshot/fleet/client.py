@@ -283,8 +283,8 @@ runs on every box.
                                 "machines": [{"name", "hostname", "letter", "ssh", "addresses", "roles", "retired", "sources"}], "not_read": [<file name>]}; docs/client-contract.md has every limit). Post it when the list
                                 changes and at least every few minutes: `written` is the list's age. `--file -` (or a bare `-`) reads the body from standard input. The file's bytes go to the server exactly as they are (never
                                 parsed or re-encoded here). A file that is missing, unreadable, not a regular file or over 1,000,000 bytes is refused here with one line and exit 1, and nothing is sent. Prints the server's answer,
-                                {"ok": true, "machines": N}, and exits 0; any other answer prints the server's one-line reason on stderr and exits 1 (400 a body that does not fit, the last good list stays; 413 a body over
-                                the limit), as does a server that is not reached ([0]), no token, or a misuse (usage on stderr). Run it with STACKSHOT_CLIENT_PASS unset: the route takes the machine token only.
+                                {"ok": true, "machines": N} (or {"ok": true, "kept": "newer"}: a list of an older `written` arrived late and the stored one stays), and exits 0; any other answer prints the server's one-line reason on
+                                stderr and exits 1 (400 a body that does not fit, the last good list stays; 413 a body over the limit), as does a server that is not reached ([0]), no token, or a misuse (usage on stderr). Run it with STACKSHOT_CLIENT_PASS unset: the route takes the machine token only.
   client.py post item-open <marker> --project <key|id|slug> --subject "<action and object>" --mover <agent> --step "<agent>: <what it does>" --line "<fact>" [--line "<fact>" ...] [--sender <label>]
                                 for a timer's script that finds work for a project's background agent (a project that lists none is a front-only project: the item is filed with its -main agent): open ONE board item for it and print its id (exit 0). <marker> = <kind>:<what> (for example
                                 test_trim:stackshot), the item's mark: while an item with that marker is open on the same project a repeat call prints the same id and files nothing; once it is closed a call files a new item. A project holds at most 10 open items filed by this route: past it a new marker is refused until one closes. --mover must be a
@@ -1232,14 +1232,14 @@ def agent_state(argv: list[str], timeout: float = 60.0) -> int:
 
 MACHINES_USAGE = ("usage: client.py post machines --file <path>     (the file is the machine list's JSON body, at most 1,000,000 bytes; `--file -` or a bare `-` reads standard input)\n"
                   '       {"schema": 1, "written": <epoch s>, "machines": [{"name", "hostname", "letter", "ssh", "addresses": [...], "roles": ["sala-host" | "stackshot-host"], "retired": false, "sources": [...]}], "not_read": [...]}')
-MACHINES_MAX = 1_000_000     # the server's limit for the body (stackshot/service/machines_list.py MAX_BYTES): a larger file is refused here, before anything is sent
+MACHINES_BODY_MAX = 1_000_000     # the server's limit for the body (stackshot/service/machines_list.py MAX_BYTES): a larger file is refused here, before anything is sent
 
 
 def machines(argv: list[str], timeout: float = 60.0) -> int:
     """`post machines --file <path>` (or `--file -`, or a bare `-`, for standard input): the fleet manager posts its machine list (`POST /client/machines`), which the server keeps as the last good list. The file's
     bytes go to the server as they are, never parsed here. Prints the server's answer ({"ok": true, "machines": N}) and exits 0; 1 and one line on stderr for a file that is missing, unreadable, not a regular
     file or over 1,000,000 bytes (nothing is sent), a refusal (the server's reason: 400 a body that does not fit, 413 a body over the limit), a server that is not reached ([0]) or a misuse (usage)."""
-    return _post_file("machines", "machine list", ["--file", "-"] if argv == ["-"] else argv, MACHINES_USAGE, MACHINES_MAX, timeout, stdin_ok=True)
+    return _post_file("machines", "machine list", ["--file", "-"] if argv == ["-"] else argv, MACHINES_USAGE, MACHINES_BODY_MAX, timeout, stdin_ok=True)
 
 
 JOB_FAILED_USAGE = "usage: client.py job-failed <unit> <host> <ISO-Z time of the failing run, 2026-11-23T02:15:00Z> <project: a page key, a scope/project label, or - for none>"

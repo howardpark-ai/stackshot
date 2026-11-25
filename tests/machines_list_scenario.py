@@ -4,17 +4,23 @@ validates it strictly, keeps the last good one in one file in the state folder a
   1  the route's module: a good body is stored and read back (cleaned fields only, who posted it, when it was received); a key the module does not know is ignored and never stored; a list left out is empty and a
      role named twice is kept once; text is cleaned (control and format characters out, white space collapsed); the boundary values (200 machines, an 80-character name, 16 addresses of 64 characters, ...) are accepted
   2  each refused body answers 400 with one line of reason and leaves the last good list byte for byte, with no temporary file left: a body that is no object, a wrong schema, a `written` that is not a time (text, true,
-     zero, before 2020, more than five minutes ahead, infinite, a huge integer), `machines` that is no list or holds 201, a machine that is no object, a missing, empty, control-only or 81-character name, a text field of
+     zero, before 2020, more than a minute ahead, 1.0 or true as the schema, infinite, a huge integer), `machines` that is no list or holds 201, a machine that is no object, a missing, empty, control-only or 81-character name, a text field of
      the wrong kind or too long, addresses, roles, `retired`, `sources` and `not_read` outside their limits, a lone surrogate
   3  a bad post never replaces the last good one: after a run of refused bodies the same list is read back; a read-only standby copy answers 503 and a file that cannot be written answers 503, both keep it
   4  the write is atomic: the temporary file is made in the same folder, mode 0600, and is renamed over the list; no temporary file is left after a good post, a refused one or a failed write; the list is mode 0600 whatever the
      umask (a new file and a replaced one); a stale temporary file of the writer's own name is swept and nothing else is touched; 8 threads posting at once leave a whole list and no reader meets a torn file
   5  `last_machines()` reads a missing file, an empty one, a torn one, one that is no object, another schema, and one with a field of the wrong kind (`machines`, `received`, `written`, `posted_by`, `not_read`) as None,
      and a folder in place of the file; it never raises
-  6  over HTTP: no token 401, a wrong token 401, a machine token stores (200), a refused body 400, a body that is no JSON or no object 400, a body of exactly 1,000,000 bytes is stored, one of 1,000,001 is 413; a
-     Content-Length that understates the body, one that is no number and a body with no length (chunked) are each cut off at the cap (413) and the body is never parsed or validated; a declared length over the cap is refused before
-     the body is read; the old list stays after every refusal; the unknown-verb answer names `machines`
-  7  no secret: the machine token appears in no answer and not in the stored file
+  6  a list that arrives late does not replace a newer one: more than 300 s older is kept out (200 {ok, kept: newer}, the file untouched), 300 s older or the same time or newer replaces, a stored time far ahead of the clock or an
+     unreadable file holds nothing out, a refused body is still 400, old and new posts at once leave the newest
+  7  names that draw as nothing (combining marks, spaces, in `name` and `hostname`) are refused with one line; letters with marks, one symbol or one digit are kept; two machines of one name once cleaned and case-folded are refused
+  8  durability: the temporary file is flushed, then renamed, then the folder is flushed; a folder that cannot be flushed is no failure, a file that cannot be flushed is a failed write (503)
+  9  `last_machines()` never blocks and never reads without a bound: a pipe at the path (with a timeout), a file over the bound (by its size and by a size that lied), a link and a folder read as None; a file at the bound reads
+ 10  over HTTP: no token 401, a wrong token 401, a machine token stores (200), a LIVE pass is exactly 403, a refused body 400 with one reason for each of: text that is no JSON, JSON that is no object, a nesting too deep, too many
+     digits; a schema that is not the number 1 (1.0, true, text) is refused; no Content-Type is needed; a body of exactly 1,000,000 bytes is stored, one of 1,000,001 is 413; a Content-Length that understates the body, one that is
+     no number and a body with no length (chunked) are each cut off at the cap (413) and the body is never parsed or validated; a declared length over the cap is refused before the body is read; a sender that disconnects mid-body
+     gets a quiet 400, nothing is parsed or written and the log holds no traceback; the old list stays after every refusal; the unknown-verb answer names `machines`
+ 11  no secret: the machine token appears in no answer and not in the stored file
 
     tests/run-suite machines_list       -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, stat as _stat, threading
@@ -83,12 +89,13 @@ check("1 text is cleaned: control and format characters out, runs of white space
 check("1 …a name or text of characters that draw as nothing is empty after cleaning (the name is then refused)", SVC.post("box-far", good([mach("\u3164\u2800\u200b")]))[0] == 400 and SVC.last_machines()[0]["machines"][0]["name"] == "abc d e[0m")
 SVC.post("box-far", good([mach("\u00e9\u4e2d\u6587\U0001f600 box")]))
 check("1 non-ASCII text is kept whole", SVC.last_machines()[0]["machines"][0]["name"] == "\u00e9\u4e2d\u6587\U0001f600 box")
-edge = good([mach(f"m{i}") for i in range(200)], written=time.time() + 299)
+edge = good([mach(f"m{i}") for i in range(200)], written=time.time() + 59)
 edge["machines"][0] = mach("n" * 80, hostname="h" * 200, letter="l" * 200, ssh="s" * 200, addresses=["a" * 64] * 16, roles=["sala-host", "stackshot-host", "sala-host", "stackshot-host"], sources=["x" * 200] * 20)
 edge["not_read"] = ["f" * 200] * 200
 st, out = SVC.post("box-far", edge)
-check("1 the boundary values are accepted: 200 machines, an 80-character name, 200-character texts, 16 addresses of 64, 4 roles, 20 sources of 200, 200 not-read names of 200, a time 299 s ahead", (st, out) == (200, {"ok": True, "machines": 200}) and len(SVC.last_machines()[0]["machines"]) == 200, (st, out))
-check("1 …a time of Jan 1st 2020 is accepted", SVC.post("box-far", good(written=1577836800))[0] == 200)
+check("1 the boundary values are accepted: 200 machines, an 80-character name, 200-character texts, 16 addresses of 64, 4 roles, 20 sources of 200, 200 not-read names of 200, a time 59 s ahead", (st, out) == (200, {"ok": True, "machines": 200}) and len(SVC.last_machines()[0]["machines"]) == 200, (st, out))
+FILE.unlink()
+check("1 …a time of Jan 1st 2020 is accepted and stored", SVC.post("box-far", good(written=1577836800))[0] == 200 and loaded()["written"] == 1577836800)
 
 # ================================================================ 2. every refusal: 400, one line, the last good list stays
 SVC.post("box-far", good([mach("keeper")])); keep = stored()
@@ -97,12 +104,17 @@ bad = {
     "a list": [1, 2], "a string": "x", "null": None,
     "another schema": good(schema=2), "a text schema": good(schema="1"), "a true schema": good(schema=True), "no schema": {"written": time.time(), "machines": []},
     "no time": {"schema": 1, "machines": []}, "a time that is text": good(written="now"), "a true time": good(written=True), "a time of zero": good(written=0), "a time before 2020": good(written=1577836799),
-    "a negative time": good(written=-5), "a time ten minutes ahead": good(written=time.time() + 600), "an infinite time": good(written=float("inf")), "a nan time": good(written=float("nan")),
+    "a negative time": good(written=-5), "a time ten minutes ahead": good(written=time.time() + 600), "a time two minutes ahead": good(written=time.time() + 120), "a time 90 s ahead": good(written=time.time() + 90),
+    "a schema of 1.0": good(schema=1.0), "a schema of 1.5": good(schema=1.5), "an infinite time": good(written=float("inf")), "a nan time": good(written=float("nan")),
     "a time that is a huge integer": good(written=HUGE), "a time past the bound": good(written=2e12), "a time of 1e400": json.loads('{"schema": 1, "written": 1e400, "machines": []}'),
     "machines left out": {"schema": 1, "written": time.time()}, "machines null": good(machines=None) | {"machines": None}, "machines an object": good(machines={}), "machines a string": good(machines="x"),
     "201 machines": good([mach(f"m{i}") for i in range(201)]), "a machine that is no object": good(["box"]), "a machine that is null": good([None]),
     "no name": good([{"retired": False}]), "a name that is a number": good([mach(5)]), "an empty name": good([mach("")]), "a blank name": good([mach("   ")]), "a control-only name": good([mach("\x00\x07\x1b")]),
-    "a name of 81 characters": good([mach("n" * 81)]), "a name that is a list": good([mach(["a"])]),
+    "a name of 81 characters": good([mach("n" * 81)]),
+    "a name of combining marks": good([mach("\u0301\u0302")]), "a name of a mark and spaces": good([mach(" \u0301 \u0300 ")]), "a name of a variation selector": good([mach("\ufe0f")]), "a name of combining marks and invisible characters": good([mach("\u0301\u200b\u3164")]),
+    "a hostname of combining marks": good([mach(hostname="\u0301\u0302")]), "a hostname that is empty": good([mach(hostname="")]), "a hostname of spaces": good([mach(hostname="   ")]),
+    "two machines of one name": good([mach("box"), mach("other"), mach("box")]), "two names that differ in case": good([mach("Box"), mach("bOX")]), "two names that differ in spaces and invisible characters": good([mach("a b"), mach(" a\u200b  b ")]),
+    "two names that fold to one": good([mach("Stra\u00dfe"), mach("STRASSE")]), "a name that is a list": good([mach(["a"])]),
     "a hostname of 201": good([mach(hostname="h" * 201)]), "a hostname that is a number": good([mach(hostname=5)]), "a letter of 201": good([mach(letter="l" * 201)]), "a letter that is a list": good([mach(letter=["a"])]),
     "an ssh of 201": good([mach(ssh="s" * 201)]), "an ssh that is true": good([mach(ssh=True)]),
     "addresses a string": good([mach(addresses="192.0.2.1")]), "17 addresses": good([mach(addresses=["198.51.100.7"] * 17)]), "an address of 65": good([mach(addresses=["a" * 65])]), "an address that is a number": good([mach(addresses=[5])]),
@@ -219,7 +231,181 @@ writes(json.dumps(whole))
 check("5 …and the untouched file reads back whole", SVC.last_machines() is not None and SVC.last_machines()[0]["machines"][0]["name"] == "ok")
 FILE.unlink()
 
-# ================================================================ 6. over HTTP
+# ================================================================ 6. a list that arrives late does not replace a newer one
+W0 = float(int(time.time())) - 10
+def _fresh(written, name="base"):
+    FILE.unlink(missing_ok=True); st_, out_ = SVC.post("box-far", good([mach(name)], written=written)); assert st_ == 200, (st_, out_)
+_fresh(W0); base = stored()
+st, out = SVC.post("box-far", good([mach("late")], written=W0 - 1000))
+check("6 a list whose `written` is 1000 s older than the stored one's is kept out: 200 {ok, kept: newer}, the stored file stays byte for byte, no temporary file", (st, out) == (200, {"ok": True, "kept": "newer"}) and stored() == base and leftovers() == [], (st, out, leftovers()))
+st, out = SVC.post("box-far", good([mach("edge1")], written=W0 - 301))
+check("6 …301 s older is kept out", (st, out) == (200, {"ok": True, "kept": "newer"}) and stored() == base, (st, out))
+st, out = SVC.post("box-far", good([mach("edge2")], written=W0 - 300))
+check("6 …exactly 300 s older replaces (the stored one must be MORE than 300 s newer)", (st, out) == (200, {"ok": True, "machines": 1}) and SVC.last_machines()[0]["machines"][0]["name"] == "edge2" and SVC.last_machines()[0]["written"] == W0 - 300, (st, out))
+_fresh(W0)
+st, out = SVC.post("box-far", good([mach("clock-step")], written=W0 - 200))
+check("6 …a list 200 s older (a sender whose clock stepped back) replaces, and the stored `written` is then the older one", (st, out) == (200, {"ok": True, "machines": 1}) and SVC.last_machines()[0]["machines"][0]["name"] == "clock-step" and SVC.last_machines()[0]["written"] == W0 - 200, (st, out))
+_fresh(W0)
+st, out = SVC.post("box-far", good([mach("same")], written=W0))
+check("6 …a list of the same `written` replaces", (st, out) == (200, {"ok": True, "machines": 1}) and SVC.last_machines()[0]["machines"][0]["name"] == "same", (st, out))
+st, out = SVC.post("box-far", good([mach("newer")], written=W0 + 40))
+check("6 …a newer list replaces", (st, out) == (200, {"ok": True, "machines": 1}) and SVC.last_machines()[0]["machines"][0]["name"] == "newer", (st, out))
+rec_ = loaded(); rec_["written"] = time.time() + 5000; FILE.write_text(json.dumps(rec_))
+st, out = SVC.post("box-far", good([mach("after-clock-fix")], written=time.time() - 30))
+check("6 …a stored `written` far ahead of the server's clock (the clock was wrong when it was kept) does not hold later lists out", (st, out) == (200, {"ok": True, "machines": 1}) and SVC.last_machines()[0]["machines"][0]["name"] == "after-clock-fix", (st, out))
+FILE.write_text("{torn"); st, out = SVC.post("box-far", good([mach("over-torn")], written=W0 - 5000))
+check("6 …a stored file that cannot be read as a list never holds a post out", (st, out) == (200, {"ok": True, "machines": 1}) and SVC.last_machines() is not None, (st, out))
+_fresh(W0); base = stored()
+st, out = SVC.post("box-far", good([mach("n" * 81)], written=W0 - 1000))
+check("6 a refused body is still 400 whatever its age (the check for age comes after the validation)", st == 400 and stored() == base, (st, out))
+errs_ = []
+def _late_poster():
+    try:
+        for i in range(20):
+            s_, o_ = SVC.post("box-far", good([mach(f"l{i}")], written=W0 - 2000 - i))
+            if (s_, o_) != (200, {"ok": True, "kept": "newer"}): errs_.append((s_, o_))
+    except BaseException as e_: errs_.append(repr(e_))
+def _new_poster():
+    try:
+        for i in range(20):
+            s_, o_ = SVC.post("box-far", good([mach(f"n{i}")], written=W0 + 20 + i))
+            if s_ != 200: errs_.append((s_, o_))
+    except BaseException as e_: errs_.append(repr(e_))
+ths = [threading.Thread(target=f_) for f_ in (_late_poster, _new_poster, _late_poster)]
+SWITCH = sys.getswitchinterval(); sys.setswitchinterval(1e-5)
+try:
+    for t_ in ths: t_.start()
+finally:
+    for t_ in ths: t_.join()
+    sys.setswitchinterval(SWITCH)
+check("6 old and new lists posted at the same time: the stored list is the newest one, whole, and every old post answered `kept`", not errs_ and SVC.last_machines()[0]["written"] == W0 + 39 and leftovers() == [], (errs_[:3], SVC.last_machines()[0]["written"] - W0))
+# the comparison and the replacement are one step: while a newer post is being written, a post that is older than it by more than 300 s waits for it and is then kept out
+_fresh(W0 - 290)
+a_in_write, release, real_write, res_ = threading.Event(), threading.Event(), SVC._write, {}
+def slow_write(rec):
+    a_in_write.set(); release.wait(10); return real_write(rec)
+SVC._write = slow_write
+try:
+    ta = threading.Thread(target=lambda: res_.__setitem__("a", SVC.post("box-far", good([mach("newest")], written=W0 + 30))))
+    ta.start(); a_in_write.wait(10)
+    tb = threading.Thread(target=lambda: res_.__setitem__("b", SVC.post("box-far", good([mach("middle")], written=W0 - 280))))
+    tb.start(); time.sleep(0.4); release.set(); ta.join(); tb.join()
+finally: SVC._write = real_write
+check("6 …the comparison and the replacement are one step: a post that is 310 s older than one being written waits for it and is kept out", res_.get("a") == (200, {"ok": True, "machines": 1}) and res_.get("b") == (200, {"ok": True, "kept": "newer"}) and SVC.last_machines()[0]["machines"][0]["name"] == "newest", (res_, SVC.last_machines()[0]["machines"][0]["name"]))
+
+# ================================================================ 7. names that draw as nothing, and names that repeat
+for label, nm in (("a letter and a combining mark", "e\u0301"), ("one punctuation mark", "-"), ("one symbol", "\u2603"), ("one digit", "7"), ("a Hangul syllable", "\ud55c"), ("marks around a letter", "\u0301a\u0301")):
+    st, out = SVC.post("box-far", good([mach(nm, hostname=nm)]))
+    check(f"7 {label} is a name that draws: stored", st == 200 and SVC.last_machines()[0]["machines"][0]["name"] == nm, (st, out))
+st, out = SVC.post("box-far", good([mach("box", hostname=None), mach("Boxes")]))
+check("7 two different names are stored", st == 200 and len(SVC.last_machines()[0]["machines"]) == 2, (st, out))
+st, out = SVC.post("box-far", good([mach("\u0301\u0302")]))
+check("7 a name of combining marks alone is refused with one line that names the field and the reason", st == 400 and one_line(out["error"]) and out["error"].startswith("machines[0].name") and "letter, digit, punctuation mark or symbol" in out["error"], (st, out))
+st, out = SVC.post("box-far", good([mach("ok"), mach("fine", hostname="\u0301")]))
+check("7 a hostname of combining marks alone is refused, naming machines[1].hostname", st == 400 and one_line(out["error"]) and out["error"].startswith("machines[1].hostname"), (st, out))
+st, out = SVC.post("box-far", good([mach("ok"), mach("two"), mach("OK")]))
+check("7 a repeated name is refused with one line naming both positions", st == 400 and one_line(out["error"]) and "machines[2].name" in out["error"] and "machines[0].name" in out["error"], (st, out))
+st, out = SVC.post("box-far", good([mach("x", letter=None, ssh=None, hostname=None), mach("y", letter="\u0301", ssh="\u0301")]))
+check("7 `letter` and `ssh` are not held to the rule (only name and hostname are)", st == 200, (st, out))
+
+# ================================================================ 8. durability: the file is flushed before the rename and the folder after it
+events = []
+real_fsync, real_replace2 = os.fsync, os.replace
+sizes_at_fsync = []
+def _fs(fd):
+    isdir = _stat.S_ISDIR(os.fstat(fd).st_mode); events.append("fsync-dir" if isdir else "fsync-file")
+    if not isdir: sizes_at_fsync.append(os.fstat(fd).st_size)      # what the kernel has been handed when the file is flushed: all of it, not what is still in the writer's buffer
+    return real_fsync(fd)
+def _rp(src, dst, *a, **k):
+    events.append("replace"); return real_replace2(src, dst, *a, **k)
+SVC.os.fsync, SVC.os.replace = _fs, _rp
+try: st, out = SVC.post("box-far", good([mach("durable")]))
+finally: SVC.os.fsync, SVC.os.replace = real_fsync, real_replace2
+check("8 a good post flushes the temporary file, then renames it, then flushes the folder (in that order, once each)", st == 200 and events == ["fsync-file", "replace", "fsync-dir"], (st, events))
+check("8 …and the file is flushed after the whole list was written to it (its buffer emptied first)", sizes_at_fsync == [len(stored())] and len(stored()) > 0, (sizes_at_fsync, len(stored())))
+real_open = os.open
+def _open_no_dir(pth, flags, *a, **k):
+    if flags & os.O_DIRECTORY: raise OSError(13, "cannot open the folder")
+    return real_open(pth, flags, *a, **k)
+SVC.os.open = _open_no_dir
+try: st, out = SVC.post("box-far", good([mach("no-dir-open")]))
+finally: SVC.os.open = real_open
+check("8 a folder that cannot be opened for flushing is no failure either: 200, the list is in place", st == 200 and SVC.last_machines()[0]["machines"][0]["name"] == "no-dir-open", (st, out))
+def _fs_fail(fd):
+    if _stat.S_ISDIR(os.fstat(fd).st_mode): raise OSError(22, "not supported")
+    return real_fsync(fd)
+SVC.os.fsync = _fs_fail
+try: st, out = SVC.post("box-far", good([mach("no-dir-sync")]))
+finally: SVC.os.fsync = real_fsync
+check("8 a folder that cannot be flushed is no failure: the list is in place and the post is 200", st == 200 and SVC.last_machines()[0]["machines"][0]["name"] == "no-dir-sync", (st, out))
+def _fs_file_fail(fd):
+    if not _stat.S_ISDIR(os.fstat(fd).st_mode): raise OSError(5, "io error")
+    return real_fsync(fd)
+keep10 = stored(); SVC.os.fsync = _fs_file_fail
+try: st, out = SVC.post("box-far", good([mach("file-sync-fails")]))
+finally: SVC.os.fsync = real_fsync
+check("8 a temporary file that cannot be flushed is a failed write: 503, the last list stays and no temporary file is left", st == 503 and stored() == keep10 and leftovers() == [], (st, out, leftovers()))
+
+# ================================================================ 9. `last_machines()` never blocks and never reads without a bound
+SVC.post("box-far", good([mach("fifo-base")])); good_bytes = stored()
+def _timed(fn, secs=5.0):
+    box = []
+    th = threading.Thread(target=lambda: box.append(fn()), daemon=True); th.start(); th.join(secs)
+    return (not th.is_alive()), (box[0] if box else None)
+def _release_pipe():        # a writer opening the pipe lets a reader stuck in its open() return, so the test can finish
+    try: os.close(os.open(FILE, os.O_WRONLY | os.O_NONBLOCK))
+    except OSError: pass
+FILE.unlink(); os.mkfifo(FILE)
+done, r = _timed(SVC.last_machines)
+if not done: _release_pipe()
+check("9 a pipe at the store's path reads as None at once (no block, with a 5 s limit)", done and r is None, (done, r))
+done, r = _timed(lambda: SVC.post("box-far", good([mach("over-fifo")])))
+if not done: _release_pipe()
+check("9 a post with a pipe at the store's path does not block either (the list replaces the pipe)", done and r is not None and r[0] == 200 and SVC.last_machines() is not None, (done, r))
+SVC.post("box-far", good([mach("cap")])); whole = loaded(); head = json.dumps(whole).encode()
+def _padded(n): return head + b" " * (n - len(head))
+FILE.write_bytes(_padded(SVC.READ_MAX))
+check("9 a file of exactly READ_MAX bytes (the body cap and a margin) is still read", SVC.READ_MAX > SVC.MAX_BYTES and SVC.last_machines() is not None, SVC.READ_MAX)
+FILE.write_bytes(_padded(SVC.READ_MAX + 1))
+check("9 a file one byte over READ_MAX reads as None though its JSON is a whole list", SVC.last_machines() is None)
+FILE.write_bytes(_padded(60 * 1024 * 1024))
+t_ = time.time(); r = SVC.last_machines()
+check("9 a 60 MB file reads as None, without being read in", r is None and time.time() - t_ < 2, time.time() - t_)
+reads = []; real_read, real_fstat = os.read, os.fstat
+class _Lie:        # a size check that answers "small": the file grew after it, so the read itself must stop at the bound
+    st_mode = _stat.S_IFREG | 0o600; st_size = 10
+def _spy_read(fd, n): reads.append(n); return real_read(fd, n)
+FILE.write_bytes(_padded(SVC.READ_MAX + 5000)); SVC.os.read = _spy_read; SVC.os.fstat = lambda fd: _Lie()
+try: r = SVC.last_machines()
+finally: SVC.os.read, SVC.os.fstat = real_read, real_fstat
+check("9 …a file that grew after the size check is read no further than READ_MAX + 1 bytes in all, and is None", r is None and reads and sum(reads) <= SVC.READ_MAX + 1, (r, len(reads), sum(reads), SVC.READ_MAX))
+class _NotRegular:      # a size check that answers "a device, size 0": only a regular file is read
+    st_mode = _stat.S_IFCHR | 0o600; st_size = 0
+FILE.write_bytes(good_bytes); reads = []; SVC.os.read = _spy_read; SVC.os.fstat = lambda fd: _NotRegular()
+try: r = SVC.last_machines()
+finally: SVC.os.read, SVC.os.fstat = real_read, real_fstat
+check("9 a file that is no regular file (a device, by its mode) is not read: None, and no byte read", r is None and not reads, (r, reads))
+FILE.write_bytes(_padded(SVC.READ_MAX + 5000)); reads = []; SVC.os.read = _spy_read
+try: r = SVC.last_machines()
+finally: SVC.os.read = real_read
+check("9 a file whose size is over the bound is not read at all: None, and no byte read", r is None and not reads, (r, reads))
+flags_seen = []
+def _open_spy(pth, flags, *a, **k):
+    if str(pth) == str(FILE): flags_seen.append(flags)
+    return real_open(pth, flags, *a, **k)
+SVC.os.open = _open_spy
+try: SVC.last_machines()
+finally: SVC.os.open = real_open
+want_flags = os.O_NONBLOCK | os.O_NOFOLLOW | os.O_NOCTTY
+check("9 the file is opened without blocking, without following a link and without taking a terminal (O_NONBLOCK, O_NOFOLLOW, O_NOCTTY)", len(flags_seen) == 1 and flags_seen[0] & want_flags == want_flags, flags_seen)
+FILE.unlink(); target = T / "link-target.json"; target.write_bytes(good_bytes); FILE.symlink_to(target)
+check("9 a link at the store's path is not followed: None", SVC.last_machines() is None)
+FILE.unlink(); target.unlink()
+FILE.write_bytes(good_bytes)
+check("9 …and the whole file reads back", SVC.last_machines() is not None and SVC.last_machines()[0]["machines"][0]["name"] == "fifo-base")
+FILE.unlink()
+
+# ================================================================ 10. over HTTP
 from starlette.testclient import TestClient
 tok = open(client.mint("box-far")).read().strip()
 H = {"Authorization": "Bearer " + tok}; JH = H | {"Content-Type": "application/json"}
@@ -236,54 +422,126 @@ with TestClient(app) as c:
     def post(path="/client/machines", **kw):
         r = c.post(path, **kw); answers.append(r.text); return r
     r = post(json=good([mach("x")]))
-    check("6 no token → 401, nothing stored", r.status_code == 401 and stored() == keep, (r.status_code, r.text[:80]))
+    check("10 no token → 401, nothing stored", r.status_code == 401 and stored() == keep, (r.status_code, r.text[:80]))
     r = post(json=good([mach("x")]), headers={"Authorization": "Bearer " + "x" * 43})
-    check("6 a wrong token → 401, nothing stored", r.status_code == 401 and stored() == keep, (r.status_code, r.text[:80]))
+    check("10 a wrong token → 401, nothing stored", r.status_code == 401 and stored() == keep, (r.status_code, r.text[:80]))
     r = post(json=good([mach("web-one"), mach("web-two", retired=True)]), headers=H)
     lst, received = SVC.last_machines()
-    check("6 a machine token stores the list and answers 200 {ok, machines}, posted_by is the machine the token proves", r.status_code == 200 and r.json() == {"ok": True, "machines": 2} and lst["posted_by"] == "box-far" and [m["name"] for m in lst["machines"]] == ["web-one", "web-two"], (r.status_code, r.text[:200], lst))
+    check("10 a machine token stores the list and answers 200 {ok, machines}, posted_by is the machine the token proves", r.status_code == 200 and r.json() == {"ok": True, "machines": 2} and lst["posted_by"] == "box-far" and [m["name"] for m in lst["machines"]] == ["web-one", "web-two"], (r.status_code, r.text[:200], lst))
     keep = stored()
     r = post(json=good([mach("n" * 81)]), headers=H)
-    check("6 a refused body is 400 with the reason, and the old list stays", r.status_code == 400 and "name" in r.json()["error"] and stored() == keep, (r.status_code, r.text[:200]))
+    check("10 a refused body is 400 with the reason, and the old list stays", r.status_code == 400 and "name" in r.json()["error"] and stored() == keep, (r.status_code, r.text[:200]))
     for label, kw in (("a list", {"json": [1, 2]}), ("a string", {"json": "x"}), ("text that is no JSON", {"content": b"not json", "headers": JH}), ("bytes that are no UTF-8", {"content": b"\xff\xfe{", "headers": JH}), ("an empty body", {"content": b"", "headers": JH}),
                       ("a nesting too deep", {"content": b"[" * 200000, "headers": JH})):
         r = post(**({"headers": H} | kw))
-        check(f"6 {label} is 400, never a 500, and the old list stays", r.status_code == 400 and one_line(r.json().get("error")) and stored() == keep, (r.status_code, r.text[:200]))
+        check(f"10 {label} is 400, never a 500, and the old list stays", r.status_code == 400 and one_line(r.json().get("error")) and stored() == keep, (r.status_code, r.text[:200]))
     r = post(json={"schema": 1}, headers=H)
-    check("6 a body with no written or machines is 400, the old list stays", r.status_code == 400 and stored() == keep, (r.status_code, r.text[:200]))
+    check("10 a body with no written or machines is 400, the old list stays", r.status_code == 400 and stored() == keep, (r.status_code, r.text[:200]))
     def sized(n):      # a valid body of exactly n bytes: a good list padded with spaces after the JSON
         b_ = json.dumps(good([mach("padded")])).encode(); assert len(b_) < n; return b_ + b" " * (n - len(b_))
     r = post(content=sized(SVC.MAX_BYTES), headers=JH)
-    check("6 a body of exactly 1,000,000 bytes is stored (200)", SVC.MAX_BYTES == 1_000_000 and r.status_code == 200 and SVC.last_machines()[0]["machines"][0]["name"] == "padded", (r.status_code, r.text[:200]))
+    check("10 a body of exactly 1,000,000 bytes is stored (200)", SVC.MAX_BYTES == 1_000_000 and r.status_code == 200 and SVC.last_machines()[0]["machines"][0]["name"] == "padded", (r.status_code, r.text[:200]))
     SVC.post("box-far", good([mach("keeper")])); keep = stored()
     client_api.json = J; SVC.validate = counting_validate
     try:
         J.sizes.clear(); validated.clear()
         r = post(content=sized(SVC.MAX_BYTES + 1), headers=JH)
-        check("6 a body of 1,000,001 bytes is 413 naming the limit, the old list stays, and the body was never parsed or validated", r.status_code == 413 and str(SVC.MAX_BYTES) in r.json()["error"] and one_line(r.json()["error"]) and stored() == keep and not validated and max([0] + J.sizes) < 100000, (r.status_code, r.text[:200], validated, J.sizes))
+        check("10 a body of 1,000,001 bytes is 413 naming the limit, the old list stays, and the body was never parsed or validated", r.status_code == 413 and str(SVC.MAX_BYTES) in r.json()["error"] and one_line(r.json()["error"]) and stored() == keep and not validated and max([0] + J.sizes) < 100000, (r.status_code, r.text[:200], validated, J.sizes))
         J.sizes.clear(); validated.clear()
         r = post(content=sized(SVC.MAX_BYTES + 1), headers=JH | {"Content-Length": "10"})
-        check("6 a Content-Length that understates the body (10 for 1,000,001 bytes) does not get it past the cap: 413, old list stays, never parsed", r.status_code == 413 and stored() == keep and not validated and max([0] + J.sizes) < 100000, (r.status_code, r.text[:200], validated, J.sizes))
+        check("10 a Content-Length that understates the body (10 for 1,000,001 bytes) does not get it past the cap: 413, old list stays, never parsed", r.status_code == 413 and stored() == keep and not validated and max([0] + J.sizes) < 100000, (r.status_code, r.text[:200], validated, J.sizes))
         J.sizes.clear(); validated.clear()
         r = post(content=b"x" * (3 * SVC.MAX_BYTES), headers=JH | {"Content-Length": "abc"})
-        check("6 a Content-Length that is no number does not get a 3 MB body past the cap: 413, old list stays, never parsed", r.status_code == 413 and stored() == keep and not validated and max([0] + J.sizes) < 100000, (r.status_code, r.text[:200], validated, J.sizes))
+        check("10 a Content-Length that is no number does not get a 3 MB body past the cap: 413, old list stays, never parsed", r.status_code == 413 and stored() == keep and not validated and max([0] + J.sizes) < 100000, (r.status_code, r.text[:200], validated, J.sizes))
         J.sizes.clear(); validated.clear()
         r = post(content=(b"x" * 65536 for _ in range(40)), headers=JH)
-        check("6 a body with no length (sent in chunks) over the cap is 413, old list stays, never parsed", r.status_code == 413 and stored() == keep and not validated and max([0] + J.sizes) < 100000, (r.status_code, r.text[:200], validated, J.sizes))
+        check("10 a body with no length (sent in chunks) over the cap is 413, old list stays, never parsed", r.status_code == 413 and stored() == keep and not validated and max([0] + J.sizes) < 100000, (r.status_code, r.text[:200], validated, J.sizes))
         J.sizes.clear(); validated.clear()
         r = post(content=json.dumps(good([mach("small")])).encode(), headers=JH | {"Content-Length": str(10 * SVC.MAX_BYTES)})
-        check("6 a declared length over the cap is refused before the body is read (413) even when the body sent is small", r.status_code == 413 and stored() == keep and not validated and max([0] + J.sizes) < 100000, (r.status_code, r.text[:200], validated, J.sizes))
+        check("10 a declared length over the cap is refused before the body is read (413) even when the body sent is small", r.status_code == 413 and stored() == keep and not validated and max([0] + J.sizes) < 100000, (r.status_code, r.text[:200], validated, J.sizes))
     finally: client_api.json = real_json; SVC.validate = real_validate
-    check("6 …and no temporary file is left in the state folder by any of the refusals", not [n for n in leftovers() if n.endswith(".tmp")], leftovers())
+    check("10 …and no temporary file is left in the state folder by any of the refusals", not [n for n in leftovers() if n.endswith(".tmp")], leftovers())
     r = post("/client/no-such-verb", json={}, headers=H)
-    check("6 the answer to an unknown verb names `machines` among the writes", r.status_code == 404 and "machines" in r.json()["error"], (r.status_code, r.text[:200]))
+    check("10 the answer to an unknown verb names `machines` among the writes", r.status_code == 404 and "machines" in r.json()["error"], (r.status_code, r.text[:200]))
     r = post(json=good([mach("x")]), headers={"Authorization": "Bearer ssp_" + "a" * 43})
-    check("6 a caller's pass (not a machine token) does not open the route: refused, nothing stored", r.status_code in (401, 403) and stored() == keep, (r.status_code, r.text[:120]))
+    check("10 a caller's pass (not a machine token) does not open the route: refused, nothing stored", r.status_code in (401, 403) and stored() == keep, (r.status_code, r.text[:120]))
+    # a live pass (a trade of a caller's own key) opens only the New session form's calls: stubbed the way the pass verification is stubbed elsewhere (a request's bearer is a pass or it is not)
+    PASS_TOK = "ssp_" + "L" * 43
+    real_pass_machine = client_api._caller_pass.pass_machine
+    client_api._caller_pass.pass_machine = lambda auth: "pass:abcd1234abcd1234" if auth == "Bearer " + PASS_TOK else ""
+    try:
+        keep = stored()
+        r = post(json=good([mach("by-pass")]), headers={"Authorization": "Bearer " + PASS_TOK})
+        check("10 a LIVE pass does not open /client/machines: exactly 403, nothing stored", r.status_code == 403 and stored() == keep, (r.status_code, r.text[:160]))
+        r = post(content=b"x" * 3000, headers={"Authorization": "Bearer " + PASS_TOK})
+        check("10 …whatever the body (even one that is no JSON): 403, nothing stored", r.status_code == 403 and stored() == keep, (r.status_code, r.text[:160]))
+        r = post("/client/agent-state", json={"schema": 1}, headers={"Authorization": "Bearer " + PASS_TOK})
+        check("10 …and the same for the other capped write, /client/agent-state: 403", r.status_code == 403, (r.status_code, r.text[:160]))
+        r = post("/client/project-agent", json={}, headers={"Authorization": "Bearer " + PASS_TOK})
+        check("10 …while the stub is live: a verb a pass does open is not refused as a pass (so the 403 above is the route's own)", r.status_code not in (401, 403), (r.status_code, r.text[:160]))
+    finally: client_api._caller_pass.pass_machine = real_pass_machine
+    check("10 the pass verbs do not name machines", "machines" not in client_api._PASS_VERBS and "agent-state" not in client_api._PASS_VERBS)
 
-# ================================================================ 7. no secret
-check("7 the machine token appears in no answer and not in the stored file", tok not in "\n".join(answers) and tok.encode() not in stored() and tok not in repr(SVC.last_machines()), None)
+    # ---- one reason for each kind of unreadable body
+    SVC.post("box-far", good([mach("keeper")])); keep = stored()
+    lim = sys.get_int_max_str_digits() or 4300
+    OBJ = "the body is a JSON object, not a list, text, number, true, false or null"
+    def reason(**kw):
+        r = post(**({"headers": H} | kw)); return r.status_code, (r.json().get("error") if r.headers.get("content-type", "").startswith("application/json") else r.text)
+    cases = {
+        "text that is no JSON": (dict(content=b"not json", headers=JH), "the body is not valid JSON"),
+        "an empty body": (dict(content=b"", headers=JH), "the body is not valid JSON"),
+        "a torn object": (dict(content=b'{"schema": 1, "writ', headers=JH), "the body is not valid JSON"),
+        "bytes that are no UTF-8": (dict(content=b'{"a": "\xff\xfe"}', headers=JH), "the body is not valid JSON"),
+        "a list": (dict(json=[1, 2]), OBJ), "a string": (dict(json="x"), OBJ), "a number": (dict(content=b"5", headers=JH), OBJ), "null": (dict(content=b"null", headers=JH), OBJ), "true": (dict(content=b"true", headers=JH), OBJ),
+        "a nesting too deep": (dict(content=b"[" * 200000, headers=JH), "the JSON nests too deeply to read"),
+        "an object nested too deep": (dict(content=b'{"a":' * 100000 + b"1" + b"}" * 100000, headers=JH), "the JSON nests too deeply to read"),
+        "an integer of too many digits": (dict(content=b'{"schema": 1, "written": ' + b"1" * (lim + 10) + b', "machines": []}', headers=JH), "a number in the JSON has too many digits"),
+    }
+    got_ = {k: reason(**kw) for k, (kw, _) in cases.items()}
+    check("10 each unreadable body is 400 with its own one-line reason: invalid JSON, not an object, nested too deep, too many digits", all(got_[k] == (400, want) for k, (_, want) in cases.items()) and stored() == keep, {k: v for k, v in got_.items() if v != (400, cases[k][1])})
+    check("10 …four different reasons in all", len({v[1] for v in got_.values()}) == 4 and OBJ == SVC.NOT_OBJECT, {v[1] for v in got_.values()})
+    for label, txt in (("1.0", b"1.0"), ("true", b"true"), ("1e0", b"1e0"), ('"1"', b'"1"')):
+        r = post(content=b'{"schema": ' + txt + b', "written": ' + str(time.time() - 30).encode() + b', "machines": [{"name": "s", "retired": false}]}', headers=JH)
+        check(f"10 a schema written as {txt.decode()} is not the JSON number 1: 400 naming schema, the old list stays", r.status_code == 400 and r.json()["error"].startswith("schema = 1") and stored() == keep, (r.status_code, r.text[:160]))
+    body_ok = json.dumps(good([mach("no-ctype")])).encode()
+    r = post(content=body_ok, headers=H); ok1 = (r.status_code, r.request.headers.get("content-type"))
+    r2 = post(content=body_ok, headers=H | {"Content-Type": "text/plain"})
+    check("10 no Content-Type is asked for: a body with none, or with text/plain, is stored (200)", ok1[0] == 200 and ok1[1] is None and r2.status_code == 200, (ok1, r2.status_code))
+    r = post(content=json.dumps(good([mach("a")], written=time.time() - 10)).encode(), headers=H)
+    r_old = post(content=json.dumps(good([mach("b")], written=time.time() - 2000)).encode(), headers=H)
+    check("10 over HTTP a list of an older `written` is kept out: 200 {ok, kept: newer}, the stored list stays", r_old.status_code == 200 and r_old.json() == {"ok": True, "kept": "newer"} and SVC.last_machines()[0]["machines"][0]["name"] == "a", (r_old.status_code, r_old.text))
+
+    # ---- a sender that goes away in the middle of its body: nothing parsed, nothing written, no traceback
+    import asyncio
+    from starlette.requests import Request as _Req
+    SVC.post("box-far", good([mach("keeper")])); keep = stored()
+    class _Cap(logging.Handler):
+        def __init__(self): super().__init__(logging.DEBUG); self.recs = []
+        def emit(self, rec): self.recs.append(rec)
+    def dropped(what, chunks):
+        msgs = [{"type": "http.request", "body": c, "more_body": True} for c in chunks] + [{"type": "http.disconnect"}]
+        it = iter(msgs)
+        async def receive(): return next(it, {"type": "http.disconnect"})
+        scope = {"type": "http", "method": "POST", "path": "/client/" + what, "raw_path": ("/client/" + what).encode(), "headers": [(b"authorization", b"Bearer " + tok.encode()), (b"content-type", b"application/json")],
+                 "path_params": {"what": what}, "query_string": b"", "client": ("127.0.0.1", 5000), "server": ("testserver", 80), "scheme": "http", "http_version": "1.1", "root_path": ""}
+        cap = _Cap(); root = logging.getLogger(); root.addHandler(cap)
+        try:
+            try: resp = asyncio.run(client_api.client_write(_Req(scope, receive)))
+            except BaseException as e_: return f"raised {e_!r}", cap.recs
+        finally: root.removeHandler(cap)
+        return resp, cap.recs
+    for what, chunks in (("machines", []), ("machines", [b'{"schema": 1, "written": ', b"1700000000"]), ("agent-state", [b'{"schema": 1, "agents":'])):
+        validated.clear(); SVC.validate = counting_validate
+        try: resp, recs = dropped(what, chunks)
+        finally: SVC.validate = real_validate
+        check(f"10 a sender gone mid-body ({what}, {len(chunks)} chunks read): the route answers quietly with a 400, nothing is parsed or validated and nothing is written", not isinstance(resp, str) and resp.status_code == 400 and not validated and stored() == keep and not (STATE / "agent-state.json").exists(), (resp, validated))
+        check(f"10 …and the log holds no traceback and no error line for it ({what})", not [x for x in recs if x.exc_info or x.levelno >= logging.WARNING], [(x.levelname, x.getMessage()[:80]) for x in recs])
+
+# ================================================================ 11. no secret
+check("11 the machine token appears in no answer and not in the stored file", tok not in "\n".join(answers) and tok.encode() not in stored() and tok not in repr(SVC.last_machines()), None)
 src = pathlib.Path(STACK, "stackshot", "service", "machines_list.py").read_text(encoding="utf-8")
-check("7 the module imports no process, socket or network module", not re.search(r"^\s*(?:import|from)\s+(?:subprocess|socket|urllib|http|requests|paramiko)\b", src, re.M))
+check("11 the module imports no process, socket or network module", not re.search(r"^\s*(?:import|from)\s+(?:subprocess|socket|urllib|http|requests|paramiko)\b", src, re.M))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

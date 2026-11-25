@@ -1078,6 +1078,7 @@ def part_client():
         check("machines: the file is never parsed or decoded: a body that is no JSON and no UTF-8 reaches the server byte for byte", rc == 0 and [g[3] for g in _got] == [_blob], (rc, err, _got))
         _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines-full.json", _full))
         check("machines: a file of exactly 1,000,000 bytes is sent whole", rc == 0 and [g[3] for g in _got] == [_full], (rc, err, [len(g[3]) for g in _got]))
+        check("machines: the client's body limit is named MACHINES_BODY_MAX (1,000,000, the server's) and the old name is gone", client.MACHINES_BODY_MAX == 1_000_000 and not hasattr(client, "MACHINES_MAX"), (getattr(client, "MACHINES_BODY_MAX", None), hasattr(client, "MACHINES_MAX")))
         _got.clear(); rc, out, err = _acli("post", "machines", "--file", _afile("machines-over.json", b"x" * 1_000_001))
         check("machines: a file of 1,000,001 bytes is refused before sending: one line on stderr, exit 1, nothing sent", rc == 1 and not _got and out == "" and _one_line(err) and "limit" in err and "machine list" in err, (rc, out, err, _got))
         _got.clear(); rc, out, err = _acli("post", "machines", "--file", str(_adir / "no-such-machines.json"))
