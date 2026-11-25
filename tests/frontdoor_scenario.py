@@ -48,7 +48,7 @@ BOARD_TOK = {n: f"BOARDTOK-{n}-0123456789abcdef" for n in "abc"}
 board_tok_file = {n: secret_file(f"board-{n}.token", BOARD_TOK[n]) for n in "abc"}
 cid_file = secret_file("brain.cid", "cid-rw"); csec_file = secret_file("brain.csec", "brain-secret-rw-0123456789")
 members_path = T / "members.json"
-MEMBERS = {"alice": ["a"], "bob": ["a", "b"], "carol": [], "dave": ["b", "brain"], "erin": ["a", "c"], "fred": ["brain"], "gina": ["a", "b", "c", "brain"]}
+MEMBERS = {"alice": ["a"], "bob": ["a", "b"], "carol": [], "dave": ["b", "brain"], "erin": ["a", "c"], "fred": ["brain"], "gina": ["a", "b", "c", "brain"], "zoe": []}
 members_path.write_text(json.dumps(MEMBERS))
 CALLER = "CALLER-"          # every credential the test's client sends to the front door starts with this: none may reach a backend
 
@@ -248,9 +248,17 @@ for label, bad in (("the identity swapped", v.replace(v.split(".")[1], base64.ur
     check(f"identity: tampered ({label}) does not verify", ident.verify(S1, bad, now=1010) is None, bad)
 check("identity: older than max_age (300 s) does not verify, 299 s does", ident.verify(S1, v, now=1000 + 301) is None and ident.verify(S1, v, now=1000 + 299) == "alice@example.test")
 check("identity: a time more than 30 s ahead of the verifier does not verify, 10 s ahead does", ident.verify(S1, v, now=1000 - 31) is None and ident.verify(S1, v, now=1000 - 10) == "alice@example.test")
+import hashlib, hmac as _hmac
+def forged(version):
+    body = f"{version}.{v.split('.')[1]}.1000"
+    return f"{body}.{_hmac.new(S1, body.encode(), hashlib.sha256).hexdigest()}"
+check("identity: a value with a correct mac under the right secret verifies (the helper forges as sign does)", ident.verify(S1, forged("v1"), now=1010) == "alice@example.test")
+check("identity: a correctly signed value of another version does not verify", ident.verify(S1, forged("v2"), now=1010) is None)
 check("identity: max_age is the caller's to set", ident.verify(S1, v, now=1100, max_age=50) is None and ident.verify(S1, v, now=1100, max_age=500) == "alice@example.test")
 check("identity: None and a non-string never verify", ident.verify(S1, None, now=1000) is None and ident.verify(S1, 5, now=1000) is None)
 check("identity: an empty secret verifies nothing", ident.verify(b"", v, now=1010) is None)
+check("identity: a value signed with an empty secret verifies against an empty secret no more than against any other",
+      ident.verify(b"", f"v1.{v.split('.')[1]}.1000." + _hmac.new(b"", f"v1.{v.split('.')[1]}.1000".encode(), hashlib.sha256).hexdigest(), now=1010) is None)
 for label, args in (("an empty secret", (b"", "alice")), ("an empty identity", (S1, "")), ("a blank identity", (S1, "  "))):
     try: ident.sign(*args); check(f"identity: sign refuses {label}", False)
     except ValueError: check(f"identity: sign refuses {label}", True)
@@ -430,6 +438,19 @@ async def main():
         names = [t.name for t in await c.list_tools()]
         e = await refusal(c, "admin_stats")
         check("brain: back on the read-and-write credential the admin tools are gone again and refused", not set(ADMIN_TOOLS) & set(names) and e is not None and "is not offered to this connection" in e, (names, e))
+
+    # ---- 5b. a member removed from the members file is refused at the next call, on a session that already listed its tools
+    members_path.write_text(json.dumps({**MEMBERS, "zoe": ["a", "brain"]}))
+    async with fclient("zoe") as c:
+        await c.list_tools()
+        check("revocation: before the change zoe reaches her board and the brain", json.loads(await call(c, "whoami"))["board"] == "a" and await call(c, "search", {"query": "q"}) == "hits for q")
+        members_path.write_text(json.dumps({**MEMBERS, "zoe": ["a"]}))
+        e = await refusal(c, "search", {"query": "q"})
+        check("revocation: removed from the brain only, the next brain call is refused as not offered (her board still works)", e is not None and "is not offered to this connection" in e and json.loads(await call(c, "whoami"))["board"] == "a", e)
+        members_path.write_text(json.dumps(MEMBERS))
+        e1, e2 = await refusal(c, "whoami"), await refusal(c, "search", {"query": "q"})
+        check("revocation: removed from everything, the next call of either kind is refused as not a member", e1 == "you are not a member of any board." and e2 == "you are not a member of any board.", (e1, e2))
+    members_path.write_text(json.dumps(MEMBERS))
 
     # ---- 6. 45 concurrent calls over 3 sessions
     def user_of(text): return ident.verify(IDENT_SECRET.encode(), json.loads(text)["identity"])
