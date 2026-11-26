@@ -736,6 +736,8 @@ result_turn_cap_per_hour = 6                        # the most turns one session
 # identity_secret_file = "~/.config/stackshot/frontdoor-identity.key"   # default: the [frontdoor] identity_secret_file. The service does not start when the verify secret is this file or value
 # timeout_seconds = 5                               # the longest wait for the board's whole answer (above 0, up to 60); after it the answer is 503
 # cache_seconds = 5                                 # how long a 200 of the board is reused for the same token (0 to 60; 0 = off)
+# accept_portal_token = false                       # true: the board's own machine token ([auth] portal_identity) is passed on as that person's sign-in. Off: 403. It belongs to
+#                                                   # one board, and as an identity at the front door it reaches every board that person is a member of
 
 [step_proof]                                        # a step of an item's next that names the event which finishes it (a pull request merged or released) is ticked by the server (stackshot/model/step_proof.py).
                                                     # Without a switch, the first pass of the server's clock after a start only logs what it would do (and keeps it in <state>/step-proof-dry.json);

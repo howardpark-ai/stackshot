@@ -1,8 +1,8 @@
 """tests/frontdoor_signin_scenario.py: the sign-in service of the front door (`stackshot/frontdoor/signin.py`, config `core/frontdoor_signin_config.py`).
 
-Offline and hermetic, one process: a stand-in board on a loopback port (it answers `GET /frontdoor/verify` as the real board's route does: it checks the signed header first and
-answers 403 to a request that has none, then reads the bearer from a table), the service itself as an ASGI app called in this process, and one scratch folder (tests/_scratch.py).
-No Caddy, no real board: `tests/frontdoor_signin_run_scenario.py` runs the real parts.
+Hermetic, with nothing but this machine's loopback (making the `server` environment may fetch what uv has not cached): a stand-in board on a loopback port (it answers `GET /frontdoor/verify` as the real board's route does: it checks the signed header first and
+answers 403 to a request that has none, then reads the bearer from a table), the service itself as an ASGI app called in this process, its start (`--check` and serving) as processes of an environment that holds the `server` extra and nothing of the tests
+group (tests/_server_env.py), and one scratch folder (tests/_scratch.py). No Caddy, no real board: `tests/frontdoor_signin_run_scenario.py` runs the real parts.
 
 Covers:
   * the settings: every key read, each wrong value told in the config notes and read as its default, the keys the service cannot start without, the members file taken from `[frontdoor]`
@@ -21,7 +21,13 @@ Covers:
   * the cache: a 200 of the board is reused for `cache_seconds` under a hash of the token and not longer; another token (even one sharing a long prefix) is never served from it; a refusal
     and a failure are never kept; it is bounded; `cache_seconds = 0` turns it off; an unreadable secret or members file is an outage with a token in the cache too;
   * what is sent to the board: the caller's bearer as it came, a header signed with the secret read now (a rotated secret applies to the next request), nothing else of the caller's request;
-  * what is never echoed: an identity header the client sends (of any of the names in use) is not the answer's, nor any other header of the request; no token, secret or address is in the log.
+  * what is never echoed: an identity header the client sends (of any of the names in use) is not the answer's, nor any other header of the request; no token, secret or address is in the log;
+  * the board's machine token (`"via": "portal"`) is 403 with no identity unless `accept_portal_token` is true, and an answer that names no kind of token is 503; an address that is not
+    ASCII is no address, before it is lower-cased;
+  * more checks at once than there are connections, over a board that stalls, leave every connection usable; no cookie of the board is kept; only `Authorization` is read; the
+    environment's proxy is ignored, a redirect's target gets nothing, a fault of the service is never a 401, only a bounded part of an answer is read, and a members file nested too
+    deeply degrades `/healthz` instead of breaking it;
+  * the service starts and `--check` passes where only the `server` extra is installed, and both refuse when a module serving needs cannot be imported.
 
     tests/run-suite frontdoor_signin       -> exit 0 / 1"""
 import asyncio, hashlib, json, logging, os, pathlib, re, socket, subprocess, sys, tempfile, threading, time, tomllib, traceback
@@ -29,7 +35,7 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 sys.path.insert(0, SCR); sys.path.insert(0, STACK)
-import _scratch
+import _scratch, _server_env
 
 import httpx
 from stackshot.core import behind_door as door, config as cfgmod, frontdoor_files as ffiles, frontdoor_identity as ident, frontdoor_signin_config as sc
@@ -85,9 +91,10 @@ for name in ("", "stackshot.frontdoor.signin"):
 # ------------------------------------------------------------------------------------------------ the stand-in board
 class Board:
     """GET /frontdoor/verify as a board answers it: a request without the signed header is 403 whatever its bearer; with it, the bearer is looked up in `rules`
-    ({token: (status, headers, body)}); a token that is not in the table is 401 with `www`. `mode` makes it hang, drip an answer or redirect."""
+    ({token: (status, headers, body)}); a token that is not in the table is 401 with `www`. `mode` makes it hang, drip or flood an answer, redirect (to `target`), stall until `release`
+    is set, or hold each check until `gate` (a threading.Barrier) has as many at once as it waits for."""
     def __init__(self):
-        self.secret = SECRET; self.rules = {}; self.seen = []; self.mode = None; self.www = BOARD_WWW
+        self.secret = SECRET; self.rules = {}; self.seen = []; self.mode = None; self.www = BOARD_WWW; self.release = threading.Event(); self.gate = None; self.target = "http://127.0.0.1:1/x"
         board = self
 
         class H(BaseHTTPRequestHandler):
@@ -101,6 +108,22 @@ class Board:
                 board.seen.append({"path": self.path, "auth": auth, "verify": v, "sig_ok": ident.verify(board.secret.encode(), v) == door.VERIFY_WHO, "headers": {k.lower(): x for k, x in self.headers.items()}})
                 if board.mode == "hang":
                     time.sleep(4)
+                if board.mode == "stall":      # no answer at all: the service gives up, and the connection ends when the board is released
+                    board.release.wait(30); self.close_connection = True; return
+                if board.mode == "gate":
+                    try:
+                        board.gate.wait()
+                    except threading.BrokenBarrierError:
+                        self.close_connection = True; return
+                if board.mode == "flood":      # an answer far over what is read of one, that goes on arriving for longer than the deadline
+                    self.send_response(200); self.send_header("Content-Length", str(10 ** 9)); self.end_headers()
+                    end = time.monotonic() + 8
+                    try:
+                        while time.monotonic() < end:
+                            self.wfile.write(b" " * 32768); self.wfile.flush(); time.sleep(0.05)
+                    except OSError:
+                        pass
+                    self.close_connection = True; return
                 if board.mode == "drip":
                     self.send_response(200); self.send_header("Content-Length", "400"); self.end_headers()
                     for _ in range(40):
@@ -110,10 +133,10 @@ class Board:
                             return
                         time.sleep(0.1)
                     return
-                if board.mode == "open":
-                    self.reply(200, {}, json.dumps({"email": "alice@example.invalid"}).encode()); return
+                if board.mode in ("open", "open-portal"):
+                    self.reply(200, {}, json.dumps({"email": "alice@example.invalid", "via": "portal" if board.mode == "open-portal" else "google"}).encode()); return
                 if board.mode == "redirect":
-                    self.send_response(302); self.send_header("Location", "http://127.0.0.1:1/x"); self.send_header("Content-Length", "0"); self.end_headers(); return
+                    self.send_response(302); self.send_header("Location", board.target); self.send_header("Content-Length", "0"); self.end_headers(); return
                 if not board.seen[-1]["sig_ok"]:
                     self.reply(403, {}, b"refused: the signed header of this request is not accepted"); return
                 token = auth.split(" ", 1)[1] if auth and auth.lower().startswith("bearer ") else ""
@@ -133,7 +156,14 @@ class Board:
                 except OSError:      # the service gave up on a slow answer
                     pass
 
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H); self.srv.daemon_threads = True
+        class Server(ThreadingHTTPServer):
+            daemon_threads = True
+            request_queue_size = 256      # many checks at once connect at once
+
+            def handle_error(self, request, client_address):      # a connection the service gave up on
+                pass
+
+        self.srv = Server(("127.0.0.1", 0), H)
         self.port = self.srv.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/frontdoor/verify"
         self.th = threading.Thread(target=self.srv.serve_forever, daemon=True); self.th.start()
@@ -237,7 +267,7 @@ async def answer_part(board):
     try:
         board.accept(tok("alice"), "alice@example.invalid"); board.accept(tok("alice-upper"), "ALICE@Example.INVALID"); board.accept(tok("alice-alt"), "Alice.Alt@Example.Invalid")
         board.accept(tok("dana"), "Dana.Two@Example.Invalid"); board.accept(tok("bob"), "bob@example.invalid"); board.accept(tok("stranger"), "Stranger@Example.Invalid")
-        board.accept(tok("cafe"), "cafe.person@example.invalid"); board.accept(tok("carol"), "Carol@Example.Invalid", via="portal")
+        board.accept(tok("cafe"), "cafe.person@example.invalid"); board.accept(tok("carol"), "Carol@Example.Invalid")
         n0 = board.calls()
         x = await r.get(tok("alice"))
         check("answer: a member's token is 200 with the member's key in X-Verified-User and nothing else", x.status_code == 200 and who(x) == KEY_A and x.content == b"" and "www-authenticate" not in x.headers, (x.status_code, dict(x.headers)))
@@ -255,7 +285,7 @@ async def answer_part(board):
         x = await r.get(tok("stranger"))
         check("answer: an address no member holds is not refused: it goes on as the identity, in lower case", x.status_code == 200 and who(x) == "stranger@example.invalid", (x.status_code, who(x)))
         x = await r.get(tok("carol"))
-        check("answer: the board's `via` makes no difference, and a person no member holds is passed on in lower case", x.status_code == 200 and who(x) == "carol@example.invalid", (x.status_code, who(x)))
+        check("answer: another person no member holds is passed on in lower case too", x.status_code == 200 and who(x) == "carol@example.invalid", (x.status_code, who(x)))
         x = await r.get(tok("cafe"))
         check("answer: a member key that cannot be a header value (not ASCII) is an outage, never a 200", x.status_code == 503 and who(x) is None, (x.status_code, dict(x.headers)))
         for scheme in ("bearer", "BEARER"):
@@ -293,6 +323,30 @@ async def answer_part(board):
         board.accept(tok("quinn"), "quinn@example.invalid")
         x = await r.get(tok("quinn"))
         check("membership: an address written as a key that is dropped as another key's other case is 403 too (the front door still looks it up)", x.status_code == 403 and who(x) is None, (x.status_code, dict(x.headers)))
+        # keys a surrounding space apart are one member to the records (the first entry) and one key to the front door's own reader (the last entry)
+        board.accept(tok("twice"), "dana.one@example.invalid")
+        for label, listing in (("an object each", {"dana": {"boards": ["main"], "emails": ["dana.one@example.invalid"]}, "dana ": {"boards": ["side"], "emails": ["other@example.invalid"]}}),
+                               ("the first entry on no board", {"dana": {"boards": [], "emails": ["dana.one@example.invalid"]}, " dana": ["side"]}),
+                               ("a key that is the address", {"dana.one@example.invalid": ["main"], "dana.one@example.invalid ": ["main", "side"]})):
+            MEMBERS.write_text(json.dumps(listing))
+            before = len(LOGS)
+            x = await r.get(tok("twice"))
+            check(f"membership: a member listed twice with different boards ({label}) is 503 with no identity: the front door would give the other entry's boards",
+                  x.status_code == 503 and who(x) is None and "www-authenticate" not in x.headers and any("more than once with different boards" in l for l in LOGS[before:])
+                  and not any("dana" in l for l in LOGS[before:]), (x.status_code, who(x), LOGS[before:]))
+        MEMBERS.write_text(json.dumps({"dana": {"boards": ["main", "side"], "emails": ["dana.one@example.invalid"]}, "dana ": ["side", "main"]}))
+        x = await r.get(tok("twice"))
+        check("membership: ... listed twice with the same boards in another order, the member is answered", x.status_code == 200 and who(x) == "dana", (x.status_code, who(x)))
+        MEMBERS.write_text(json.dumps({"Dana Lee": {"boards": ["main"], "emails": ["dana.one@example.invalid"]}, "dana  lee": {"boards": ["side"], "emails": ["other@example.invalid"]}}))
+        x = await r.get(tok("twice"))
+        board.accept(tok("twice-other"), "other@example.invalid")
+        y = await r.get(tok("twice-other"))
+        door = signin._files.read_members(str(MEMBERS))
+        check("membership: keys that differ in case or repeated spaces are one member to the records: the first key is answered and the front door reads its boards; the second entry's address gets no member",
+              x.status_code == 200 and who(x) == "Dana Lee" and door[who(x)] == ["main"] and y.status_code == 200 and who(y) == "other@example.invalid" and who(y) not in door, (who(x), who(y), door))
+        MEMBERS.write_text(json.dumps({"ghost": {"boards": [], "emails": ["dana.one@example.invalid"]}, "dana": {"boards": ["main"], "emails": ["dana.one@example.invalid"]}}))
+        x = await r.get(tok("twice"))
+        check("membership: an address that an entry on no board shares with a member on a board is that member's", x.status_code == 200 and who(x) == "dana", (x.status_code, who(x)))
         MEMBERS.write_text(json.dumps(MEMBER_RECORDS))
         x = await r.get(tok("alice"), method="POST")
         check("answer: only GET is answered (POST is 405)", x.status_code == 405 and who(x) is None, x.status_code)
@@ -314,7 +368,9 @@ async def refusal_part(board):
         x = await r.get(tok("unknown"))
         check("401: a token the board does not know is 401 with the board's text, and the board saw the bearer", x.status_code == 401 and x.headers.get("www-authenticate") == BOARD_WWW and who(x) is None and board.seen[-1]["auth"] == "Bearer " + tok("unknown"), (x.status_code, dict(x.headers)))
         for label, kw in (("a Basic header", {"token": "Zm9vOmJhcg==", "scheme": "Basic"}), ("an empty bearer", {"token": "", "scheme": "Bearer"}), ("a token that is too long", {"token": "x" * 5000}),
-                          ("a token with a control character", {"token": "ab\tcd"}), ("a token with a space", {"token": "ab cd"}), ("a token that is not ASCII", {"token": "töken"})):
+                          ("a token with a control character", {"token": "ab\tcd"}), ("a token with a space", {"token": "ab cd"}), ("a token that is not ASCII", {"token": "töken"}),
+                          ("two spaces before a good token", {"token": " " + tok("alice")}), ("a space and a tab before a good token", {"token": "\t" + tok("alice")}),
+                          ("a tab in place of the space before a good token", {"extra": {"Authorization": "Bearer\t" + tok("alice")}})):
             n0 = board.calls()
             try:
                 x = await r.get(**kw)
@@ -348,15 +404,15 @@ async def outage_part(board):
     r = Rig(board)
     try:
         for status in (400, 403, 404, 429, 500, 501, 502, 503, 504, 599, 301):
-            for body in (b"", json.dumps({"email": "alice@example.invalid"}).encode()):
+            for body in (b"", json.dumps({"email": "alice@example.invalid", "via": "google"}).encode()):
                 t = tok(f"s{status}{len(body)}")
                 board.rules[t] = (status, {"Location": "http://127.0.0.1:1/"} if status == 301 else {"WWW-Authenticate": BOARD_WWW} if status >= 500 else {}, body)
                 x = await r.get(t)
                 check(f"fail closed: the board's {status}{' with an address in its body' if body else ''} is 503, no identity, no WWW-Authenticate, never 200 or 401",
                       x.status_code == 503 and who(x) is None and "www-authenticate" not in x.headers and x.headers.get("cache-control") == "no-store", (x.status_code, dict(x.headers)))
-        for label, body in (("a body that is no JSON", b"<html>not json</html>"), ("JSON that is a list", b"[1,2]"), ("JSON with no email", b'{"via": "google"}'), ("an email that is a number", b'{"email": 5}'),
-                            ("an empty email", b'{"email": ""}'), ("a blank email", b'{"email": "   "}'), ("an email with no @", b'{"email": "alice"}'), ("an email with a space inside", b'{"email": "al ice@example.invalid"}'),
-                            ("an email with a control character", b'{"email": "alice\\n@example.invalid"}'), ("an over-long email", json.dumps({"email": "a" * 300 + "@example.invalid"}).encode()),
+        for label, body in (("a body that is no JSON", b"<html>not json</html>"), ("JSON that is a list", b"[1,2]"), ("JSON with no email", b'{"via": "google"}'), ("an email that is a number", b'{"email": 5, "via": "google"}'),
+                            ("an empty email", b'{"email": "", "via": "google"}'), ("a blank email", b'{"email": "   ", "via": "google"}'), ("an email with no @", b'{"email": "alice", "via": "google"}'), ("an email with a space inside", b'{"email": "al ice@example.invalid", "via": "google"}'),
+                            ("an email with a control character", b'{"email": "alice\\n@example.invalid", "via": "google"}'), ("an over-long email", json.dumps({"email": "a" * 300 + "@example.invalid", "via": "google"}).encode()),
                             ("an empty body", b"")):
             t = tok("body-" + re.sub(r"[^a-z]+", "-", label))
             board.rules[t] = (200, {}, body)
@@ -581,19 +637,247 @@ async def echo_part(board):
         await r.close()
 
 
-# ------------------------------------------------------------------------------------------------ 7. the start
+# ------------------------------------------------------------------------------------------------ 7. the board's machine token, and the address it names
+async def portal_part(board):
+    t = tok("machine")
+    board.accept(t, "alice@example.invalid", via="portal")
+    check("portal: not accepted unless switched on: the default is off", sc.parse({})[0].accept_portal_token is False and sc.parse({"frontdoor_signin": {}})[0].accept_portal_token is False)
+    for label, value, want in (("true", True, True), ("false", False, False)):
+        s, n = sc.parse({"frontdoor_signin": {"accept_portal_token": value}})
+        check(f"portal: accept_portal_token = {label} is read, with no note about it", s.accept_portal_token is want and not any("accept_portal_token" in x for x in n), (s.accept_portal_token, n))
+    for value in ("true", "yes", 1, [True]):
+        s, n = sc.parse({"frontdoor_signin": {"accept_portal_token": value}})
+        check(f"portal: accept_portal_token = {value!r} is not true or false: it reads as off and is named in the notes", s.accept_portal_token is False and any("accept_portal_token" in x for x in n), (s.accept_portal_token, n))
+    for label, kw in (("by default", {}), ("switched off", {"accept_portal_token": False})):
+        r = Rig(board, cache_seconds=30.0, **kw)
+        try:
+            n0 = board.calls(); before = len(LOGS)
+            x = await r.get(t); y = await r.get(t)
+            check(f"portal: {label} the board's machine token is 403 with a sentence and no identity header", x.status_code == y.status_code == 403 and who(x) is None and who(y) is None and "x-forwarded-user" not in x.headers
+                  and "www-authenticate" not in x.headers and x.headers.get("cache-control") == "no-store" and "machine token" in x.text and "@" not in x.text and t not in x.text, (x.status_code, dict(x.headers), x.text))
+            check(f"portal: {label} the refusal is not kept: the board is asked each time", board.calls() == n0 + 2 and not r.svc.cache, (board.calls() - n0, len(r.svc.cache)))
+            check(f"portal: {label} the log says why, by the token's hash only", any("403" in l and "accept_portal_token" in l and signin.tag(t) in l for l in LOGS[before:]) and not any(t in l for l in LOGS), LOGS[before:])
+            board.accept(tok("person"), "alice@example.invalid", via="google")
+            z = await r.get(tok("person"))
+            check(f"portal: {label} a person's own sign-in is served as before", z.status_code == 200 and who(z) == KEY_A, (z.status_code, who(z)))
+        finally:
+            await r.close()
+    r = Rig(board, cache_seconds=30.0, accept_portal_token=True)
+    try:
+        n0 = board.calls()
+        x = await r.get(t); y = await r.get(t)
+        check("portal: switched on, the machine token is 200 as the member its address belongs to, and is kept like any other", x.status_code == y.status_code == 200 and who(x) == who(y) == KEY_A and board.calls() == n0 + 1, (x.status_code, who(x), board.calls() - n0))
+        x = await r.get(tok("person"))
+        check("portal: switched on, a person's own sign-in is served too", x.status_code == 200 and who(x) == KEY_A, (x.status_code, who(x)))
+    finally:
+        await r.close()
+    for on in (False, True):
+        state = "on" if on else "off"
+        r = Rig(board, cache_seconds=0, accept_portal_token=on)
+        try:
+            for label, extra in (("no via", None), ("an empty via", ""), ("a via this service does not know", "passkey"), ("a via in capitals", "Google"), ("a via that is a list", ["google"]), ("a via that is a number", 1)):
+                u = tok("via-" + label.replace(" ", "-"))
+                board.rules[u] = (200, {}, json.dumps({"email": "alice@example.invalid", **({} if extra is None else {"via": extra})}).encode())
+                x = await r.get(u)
+                check(f"fail closed: a 200 with {label} (machine token {state}) is 503, never 200", x.status_code == 503 and who(x) is None, (x.status_code, dict(x.headers)))
+            board.mode = "open-portal"
+            x = await r.get()
+            check(f"fail closed: a board that answers a check with no token as its machine token's 200 is 503 (machine token {state})", x.status_code == 503 and who(x) is None, (x.status_code, dict(x.headers)))
+        finally:
+            board.mode = None
+            await r.close()
+    # an address is ASCII before it is lower-cased: lower() turns some other characters into ASCII ones
+    MEMBERS.write_text(json.dumps({"kim@example.invalid": ["main"]}))
+    r = Rig(board, cache_seconds=0)
+    try:
+        board.accept(tok("kim"), "Kim@Example.Invalid")
+        x = await r.get(tok("kim"))
+        check("address: an ASCII address in capitals is the member's", x.status_code == 200 and who(x) == "kim@example.invalid", (x.status_code, who(x)))
+        for label, address in (("the Kelvin sign for a k", chr(0x212A) + "im@example.invalid"), ("a no-break space in front", chr(0xA0) + "kim@example.invalid"), ("a line separator behind", "kim@example.invalid" + chr(0x2028))):
+            u = tok("ascii-" + label.replace(" ", "-")); board.accept(u, address)
+            x = await r.get(u)
+            check(f"address: an address with {label} is no address: 503, never the member it lower-cases or trims to", x.status_code == 503 and who(x) is None, (x.status_code, who(x)))
+    finally:
+        MEMBERS.write_text(json.dumps(MEMBER_RECORDS))
+        await r.close()
+
+
+# ------------------------------------------------------------------------------------------------ 8. more checks at once than there are connections
+async def pool_part(board):
+    r = Rig(board, timeout_seconds=3.0, cache_seconds=0)
+    try:
+        t = tok("alice"); board.accept(t, "alice@example.invalid")
+        for round_ in range(1, 4):
+            board.release.clear(); board.mode = "stall"
+            got = await asyncio.gather(*(r.get(tok(f"burst{round_}-{i}") if i % 4 else None) for i in range(200)))
+            check(f"pool: round {round_}: 200 checks at once over a board that stalls are all 503", all(x.status_code == 503 and who(x) is None for x in got), sorted({x.status_code for x in got}))
+            board.mode = None; board.release.set()
+            x = await r.get(t)
+            check(f"pool: round {round_}: once the board answers again the next check is served, with no restart", x.status_code == 200 and who(x) == KEY_A, x.status_code)
+            # every connection is usable: the board answers only when it holds as many checks at once as the service keeps connections
+            most = getattr(signin, "MAX_CONNECTIONS", 64)
+            board.gate = threading.Barrier(most, timeout=2.5); board.mode = "gate"
+            got = await asyncio.gather(*(r.get(t) for _ in range(most)))
+            board.mode = None
+            codes = [x.status_code for x in got]
+            check(f"pool: round {round_}: ... and every connection is free: as many checks as there are connections are at the board at once", codes == [200] * most, {c: codes.count(c) for c in set(codes)})
+            if codes != [200] * most:
+                break      # connections are stuck: a later round would only wait
+        check("pool: there are 64 connections to the board", getattr(signin, "MAX_CONNECTIONS", None) == 64, getattr(signin, "MAX_CONNECTIONS", None))
+    finally:
+        board.mode = None; board.release.set()
+        await r.close()
+
+
+# ------------------------------------------------------------------------------------------------ 9. what a board, a client or the machine can push on the service
+async def hostile_part(board):
+    t = tok("alice"); board.accept(t, "alice@example.invalid")
+    # cookies: one caller's answer never rides on another's check
+    r = Rig(board, cache_seconds=0)
+    try:
+        for status in (200, 401, 503):
+            a = tok(f"cookie{status}")
+            board.rules[a] = (status, {"Set-Cookie": f"sid=first-caller-{status}; Path=/"}, json.dumps({"email": "alice@example.invalid", "via": "google"}).encode())
+            await r.get(a); await r.get(t)
+            sent = board.seen[-1]["headers"]
+            await r.get()
+            check(f"cookies: a cookie the board sets on a {status} is not sent with the next check, with a token or without", "cookie" not in sent and "cookie" not in board.seen[-1]["headers"],
+                  (sent.get("cookie"), board.seen[-1]["headers"].get("cookie")))
+    finally:
+        await r.close()
+    # only Authorization is read
+    r = Rig(board, cache_seconds=0)
+    try:
+        x = await r.get(None, extra={"X-Forwarded-Authorization": "Bearer " + t, "Proxy-Authorization": "Bearer " + t, "X-Authorization": "Bearer " + t, "Cookie": "Authorization=Bearer " + t})
+        check("authorization: a token in any other header (X-Forwarded-Authorization among them) is no bearer: 401, and the board is sent no Authorization", x.status_code == 401 and who(x) is None and board.seen[-1]["auth"] is None, (x.status_code, board.seen[-1]["auth"]))
+        x = await r.get(tok("unknown"), extra={"X-Forwarded-Authorization": "Bearer " + t})
+        check("authorization: ... and beside a bearer of its own it changes nothing: that bearer is the one the board is sent", x.status_code == 401 and board.seen[-1]["auth"] == "Bearer " + tok("unknown"), (x.status_code, board.seen[-1]["auth"]))
+    finally:
+        await r.close()
+    # a redirect to a live board that would accept the token: it is never asked
+    other = Board(); other.accept(t, "alice@example.invalid")
+    r = Rig(board, cache_seconds=0)
+    try:
+        board.mode = "redirect"; board.target = other.url
+        x = await r.get(t); y = await r.get()
+        check("redirect: not followed to a live target: it is sent nothing (no token, no signed header) and the answer is 503", x.status_code == y.status_code == 503 and who(x) is None and other.calls() == 0, (x.status_code, y.status_code, other.calls()))
+    finally:
+        board.mode = None
+        await r.close()
+    # the proxy settings of the environment are ignored
+    names = ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy")
+    saved = {k: os.environ.pop(k) for k in names if k in os.environ}
+    before = other.calls()
+    try:
+        for k in names[:6]:
+            os.environ[k] = f"http://127.0.0.1:{other.port}"
+        r = Rig(board, cache_seconds=0)
+        try:
+            n0 = board.calls()
+            x = await r.get(t)
+            check("proxy: the environment's proxy is sent nothing: the board is asked directly", x.status_code == 200 and who(x) == KEY_A and board.calls() == n0 + 1 and other.calls() == before, (x.status_code, board.calls() - n0, other.calls() - before))
+        finally:
+            await r.close()
+    finally:
+        for k in names:
+            os.environ.pop(k, None)
+        os.environ.update(saved)
+        other.stop()
+    # a fault of the service is an outage, never a refusal of the token
+    for name in ("identity_of", "ask", "_cached"):
+        real = getattr(signin.Service, name)
+
+        def broken(*a, **kw):
+            raise RuntimeError("made up fault")
+        setattr(signin.Service, name, broken)
+        r = Rig(board, cache_seconds=5.0)
+        try:
+            x = await r.get(t)
+            check(f"fault: a fault inside the service ({name}) is 503 with no identity, never 401 and never 200", x.status_code == 503 and who(x) is None and "www-authenticate" not in x.headers and "made up" not in x.text, (x.status_code, dict(x.headers), x.text))
+        finally:
+            setattr(signin.Service, name, real)
+            await r.close()
+    # only a bounded part of an answer is read
+    r = Rig(board, cache_seconds=0, timeout_seconds=5.0)
+    try:
+        big = tok("big"); board.rules[big] = (200, {}, json.dumps({"email": "alice@example.invalid", "via": "google", "pad": "x" * 70000}).encode())
+        x = await r.get(big)
+        check("size: an answer longer than what is read of one (64 KiB) is 503, though the whole of it would be a good answer", x.status_code == 503 and who(x) is None, (x.status_code, who(x)))
+        fits = tok("fits"); board.rules[fits] = (200, {}, json.dumps({"email": "alice@example.invalid", "via": "google", "pad": "x" * 60000}).encode())
+        x = await r.get(fits)
+        check("size: ... one that fits is read whole", x.status_code == 200 and who(x) == KEY_A, x.status_code)
+        board.mode = "flood"; before = len(LOGS)
+        t0 = time.monotonic(); x = await r.get(t); dt = time.monotonic() - t0
+        check("size: reading stops there: an answer that goes on arriving is given up on at once, well before the deadline", x.status_code == 503 and dt < 3.0 and any("not JSON" in l for l in LOGS[before:]), (x.status_code, dt, LOGS[before:]))
+    finally:
+        board.mode = None
+        await r.close()
+    # a members file nested too deeply
+    deep = T / "deep.json"; deep.write_text('{"a": ' + "[" * 60000)
+    r = Rig(board, cache_seconds=0, members_file=str(deep))
+    try:
+        for label, path, token in (("/healthz is 503 degraded", "/healthz", None), ("a check is 503 with no identity", "/verify", t)):
+            try:
+                x = await r.get(token, path=path)
+                good = x.status_code == 503 and who(x) is None and (path != "/healthz" or x.json() == {"status": "degraded"})
+                got = (x.status_code, x.text)
+            except Exception as e:      # noqa: BLE001  (the fault came out of the app: it answered nothing)
+                good, got = False, type(e).__name__
+            check(f"deep: with a members file nested too deeply {label}, never 500", good, got)
+    finally:
+        await r.close()
+    real_read = ffiles.read_member_records
+    for fault in (RecursionError, MemoryError, KeyError):
+        def raising(*a, **kw):
+            raise fault("made up fault of a reader")
+        ffiles.read_member_records = raising
+        r = Rig(board, cache_seconds=0)
+        try:
+            try:
+                h = await r.get(path="/healthz"); x = await r.get(t)
+                good = h.status_code == 503 and h.json() == {"status": "degraded"} and x.status_code == 503 and who(x) is None
+                got = (h.status_code, x.status_code)
+            except Exception as e:      # noqa: BLE001
+                good, got = False, type(e).__name__
+            check(f"deep: whatever the reader of the members file raises ({fault.__name__}), /healthz is 503 degraded and a check 503", good, got)
+        finally:
+            ffiles.read_member_records = real_read
+            await r.close()
+
+
+# ------------------------------------------------------------------------------------------------ 10. the start
 def start_part():
     cfgdir = T / "start"; (cfgdir / "home").mkdir(parents=True)
-    def run(toml, *args, timeout=120):
+    server = _server_env.python(STACK, T / "server-env")
+    r = subprocess.run([server, "-c", "import httpx"], cwd=str(cfgdir), capture_output=True, text=True, timeout=120)
+    check("start: the starts below run with the `server` extra's packages and not the tests group's (httpx, which only that group names, is not there)", r.returncode != 0 and "No module named 'httpx'" in r.stderr, (r.returncode, r.stderr[-300:]))
+    def run(toml, *args, timeout=120, path=(), more=None):
         p = cfgdir / "stackshot.toml"; p.write_text(toml)
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("STACKSHOT_", "BOARD_MCP_", "XDG_"))}
-        env.update(HOME=str(cfgdir / "home"), STACKSHOT_CONFIG=str(p), PYTHONPATH=STACK)
-        return subprocess.run([sys.executable, "-m", "stackshot.frontdoor.signin", *args], env=env, cwd=str(cfgdir), capture_output=True, text=True, timeout=timeout)
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("STACKSHOT_", "BOARD_MCP_", "XDG_", "PYTHON", "VIRTUAL_ENV"))}
+        env.update(HOME=str(cfgdir / "home"), STACKSHOT_CONFIG=str(p), PYTHONPATH=os.pathsep.join([*path, STACK]), **(more or {}))
+        return subprocess.run([server, "-m", "stackshot.frontdoor.signin", *args], env=env, cwd=str(cfgdir), capture_output=True, text=True, timeout=timeout)
     base = f'[frontdoor_signin]\nlisten_port = 8123\nboard_verify_url = "http://127.0.0.1:8010/frontdoor/verify"\nverify_secret_file = "{SFILE}"\nmembers_file = "{MEMBERS}"\n'
     good = base + f'identity_secret_file = "{IFILE}"\n'
     r = run(good, "--check")
     check("start: --check of a good config prints what would run (port, board, header, no secret) and exits 0", r.returncode == 0 and "127.0.0.1:8123" in r.stdout and "http://127.0.0.1:8010/frontdoor/verify" in r.stdout
           and "X-Verified-User" in r.stdout and SECRET not in r.stdout + r.stderr, (r.returncode, r.stdout, r.stderr[-300:]))
+    check("start: ... and says that the board's machine token is refused", "machine token refused" in r.stdout, r.stdout)
+    r = run(good + "accept_portal_token = true\n", "--check")
+    check("start: with accept_portal_token = true --check says the machine token is accepted", r.returncode == 0 and "machine token accepted" in r.stdout, (r.returncode, r.stdout))
+    # --check imports what serving needs: a module that cannot be imported fails it, and serving too
+    hook = T / "hook"; hook.mkdir()
+    (hook / "sitecustomize.py").write_text("import os, sys\n\n\nclass Block:\n    def find_spec(self, name, path=None, target=None):\n        if name == os.environ.get('SUITE_BLOCKED'):\n"
+                                           "            raise ModuleNotFoundError(f'No module named {name!r}', name=name)\n\n\nsys.meta_path.insert(0, Block())\n")
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0)); spare = sock.getsockname()[1]
+    for module in ("httpx2", "starlette", "uvicorn", "uvicorn.lifespan.on"):      # the last is imported only when uvicorn loads its configuration
+        for args in (["--check"], []):
+            try:
+                r = run(good.replace("8123", str(spare)), *args, timeout=60, path=(str(hook),), more={"SUITE_BLOCKED": module})
+                got = (r.returncode, r.stderr[-400:])
+            except subprocess.TimeoutExpired:      # it is serving (run() ends it)
+                got = ("still running", "")
+            check(f"imports: without {module}, {'--check' if args else 'serving'} exits 2, names it and says to use the server extra", got[0] == 2 and "does not start" in got[1] and module in got[1] and "--extra server" in got[1] and "Traceback" not in got[1], got)
     r = run('[frontdoor_signin]\nlisten_port = 8123\n', "--check")
     check("start: a config that lacks what the service cannot start without exits 2, names each, prints no secret", r.returncode == 2 and "no usable board_verify_url" in r.stderr and "no verify_secret_file" in r.stderr and "no members_file" in r.stderr
           and "no identity_secret_file" in r.stderr, (r.returncode, r.stderr[-300:]))
@@ -662,6 +946,9 @@ def main():
         section("files", files_part, board)
         section("cache", cache_part, board)
         section("echo", echo_part, board)
+        section("portal", portal_part, board)
+        section("pool", pool_part, board)
+        section("hostile", hostile_part, board)
         section("start", start_part)
         blob = "\n".join(LOGS)
         check("log: the service logged (so the next checks mean something): a request is named by a hash of its token", len(LOGS) > 20 and re.search(r"token [0-9a-f]{8}\b", blob) is not None, len(LOGS))

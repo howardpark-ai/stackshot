@@ -42,6 +42,7 @@ class Settings:
     identity_secret_files: tuple[str, ...] = ()     # every identity secret file the config names (its own, [frontdoor]'s, [behind_frontdoor]'s): the verify secret may be none of them
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     cache_seconds: float = DEFAULT_CACHE_SECONDS    # 0: no cache
+    accept_portal_token: bool = False               # true: the board's own machine token is passed on as its person's sign-in (off: refused)
 
 
 def _text(v: Any) -> str:
@@ -123,7 +124,11 @@ def parse(cfg: dict[str, Any] | None = None) -> tuple[Settings, list[str]]:
                    f"set identity_secret_file = \"<the file the front door's identity_secret_file names>\"")
     timeout = _number(t, "timeout_seconds", DEFAULT_TIMEOUT_SECONDS, True, MAX_TIMEOUT_SECONDS, out)
     cache = _number(t, "cache_seconds", DEFAULT_CACHE_SECONDS, False, MAX_CACHE_SECONDS, out)
-    return Settings(True, port, verify_url, secret_file, members_file, identity_files, timeout, cache), out
+    portal = t.get("accept_portal_token", False)
+    if not isinstance(portal, bool):
+        out.append(f"[{TABLE}] accept_portal_token = {str(portal)[:60]!r} is not true or false, so the board's machine token is not accepted")
+        portal = False
+    return Settings(True, port, verify_url, secret_file, members_file, identity_files, timeout, cache, portal), out
 
 
 def blocking(settings: Settings) -> list[str]:
