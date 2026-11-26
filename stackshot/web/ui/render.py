@@ -1782,8 +1782,11 @@ def _run_stale_s(): return 3 * max(float(_runners.conf("panel_refresh_s")), _eve
 class Board:
     """The board's data, read once: items, sessions, projects, anchors, versions, the hub's status — and what is drawn from it."""
 
-    def __init__(self, data_dir: str, now=None, contact_of=None):
-        """`contact_of(item) -> str` (the server's `_contact_label`): the item's contact as the item page's side column names it, so a list row names the same agent. None reads the stored contact."""
+    def __init__(self, data_dir: str, now=None, contact_of=None, viewer: str = ""):
+        """`contact_of(item) -> str` (the server's `_contact_label`): the item's contact as the item page's side column names it, so a list row names the same agent. None reads the stored contact.
+        `viewer`: the member the home page is drawn for (the signed-in one). On a board of several members Your move holds only what names that member, another member's move is listed under
+        Waiting and a session that acts as a member says so; anything else (one member, a name that is no member, none) draws the page every member shares."""
+        self.viewer = _model.board_viewer(viewer)
         self.contact_of = contact_of; self._contacts = {}      # the lookup runs at most once per item in a render (row_contact)
         ZONE = _cfg.tz(); now = now or datetime.datetime.now(ZONE)
         PUB = _fleet.publisher()                                                 # the box that runs the server: first column, always live
@@ -3525,10 +3528,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         """The open rows (default: every open item of the board) in the three lists, sorted as the page says: {your-move, agents, waiting} → [(row, model)].
         Your move oldest first; On agent oldest first by the age the row shows; Waiting by end date."""
         rows = [r for r in (self.rows if rows is None else rows) if r.get("status") != "completed"]
-        lists = _home.classify(rows, self.mod_of)
+        lists = _home.classify(rows, self.mod_of, self.viewer)
         return {_home.YOUR_MOVE: _home.sort_your_move(lists[_home.YOUR_MOVE], sort_key, same_ref),
                 _home.AGENTS: _home.sort_agents(lists[_home.AGENTS], sort_key, same_ref),
-                _home.WAITING: _home.sort_waiting(lists[_home.WAITING], sort_key)}
+                _home.WAITING: _home.sort_waiting(lists[_home.WAITING], sort_key, same_ref)}
     def list_title(self, which):
         """The heading of one of the four lists, the home page's own words (ui/kit.py title)."""
         return {_home.YOUR_MOVE: _ui.title(_ui.YOUR_MOVE), _home.AGENTS: _ui.title(_ui.AGENT), RELEASE_LIST: _ui.title(_ui.RELEASE), _home.WAITING: _ui.title(_ui.WAITING)}[which]
@@ -3553,10 +3556,22 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             if pairs: return _ui.RELEASE if which == _home.AGENTS and r["gid"] in self.queued_release_ids() else _ui.kind_of_list(which)
         return _ui.AGENT
     def home_mover(self, who):
-        """A mover as a row shows him: the owner by name; a session by name, linked to its view in the fleet tool while its pane lives (sess_html)."""
+        """A mover as a row shows him: the owner by name; a session by name, linked to its view in the fleet tool while its pane lives (sess_html). On a member's Home a member is named as the one it
+        is, in the owner's color only when it is the viewer."""
         if not who: return f'<span class="hwho dim">{esc(_t("home.no_mover"))}</span>'
+        if self.viewer and _model.is_owner(who):
+            mine = _model.names_member(who, self.viewer)
+            return f'<span class="{"hwho own" if mine else "hwho"}">{esc(_model.norm_who(who))}</span>'
         if _model.is_owner(who): return f'<span class="hwho own">{esc(_model.owner_display())}</span>'
         return self.sess_html(self.mover_name(who), cls="hwho")
+    def acts_for(self, who) -> str:
+        """The member the session `who` acts as (`[[members]] agents`, by its name or any reference to it), "" for every other session: the board's agent."""
+        if not who: return ""
+        named = lambda ref: " ".join(self.mover_name(ref).split()).casefold()
+        name = named(who)
+        for agent, p in _members.agent_names():
+            if named(agent) == name or same_ref(agent, who): return p.name
+        return ""
     def day_words(self, s):
         """A stored date (YYYY-MM-DD, or with THH:MM) as "Mon Mar 30th" ("… 09:00"); text that is no date as it is."""
         t = wake_of({"metadata": {"wake": s}})
@@ -3763,10 +3778,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         relay or drop-it ask, which has no Recommend, Stakes or By, its whole question); the form is the item page's: a card per stored option (_cards_html; Approve and Decline
         appear only as listed options; with none listed, Yes and No), the recommended one first, an optional note, one "Send" (greyed until a card is picked or the note has text). It is drawn hidden: the page script (_HOME_JS) asks GET /answer-tokens for the signed-in viewer's tokens and shows the form
         only when it gets one, so the static page carries no token; until then (and for a viewer who is not signed in) the row links the item page."""
-        if "decision" not in [x.lower() for x in needs_of(r)]: return None
-        ask = open_ask(r)
-        if not ask: return None
-        q = decide_words(ask)
+        q = self.ask_question(r)
+        if q is None: return None
         stored = open_options(r)
         opts = _card_order(stored or yesno_options(r), _named_only(r))      # with no stored options, Yes and No
         cards = _cards_html(opts, _named_only(r)) if opts else ""
@@ -3776,6 +3789,11 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 + _abox(f'<textarea id="atext-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="{hint}" placeholder="{hint}"></textarea>', f'atext-{esc(r["gid"])}') +
                 f'<div class="abtns{"-send" if cards else ""}">{send}</div></form>')
         return self.md_line(q, r["gid"]) + mockup_link(r, q), form       # the mockup a design decision is about, beside the question
+    def ask_question(self, r):
+        """The question of an open decision as a row words it (home_ask), None when the item carries none."""
+        if "decision" not in [x.lower() for x in needs_of(r)]: return None
+        ask = open_ask(r)
+        return decide_words(ask) if ask else None
     def home_wait(self, r, mod):
         """A waiting row's detail line, as HTML: what it waits on and until when, in the words the row leads with: "Until Sun Mar 1st 07:00: <why>" for a time (his words or the basis, or
         the proof of a verifying item), "After #5, #6" for another item's close (with its backstop day), "On <anchor>: <event>" for an anchor, "On <event> · backstop <day>" for an outside event, "On <party's news>, ask by <day>" for news only the owner
@@ -3894,13 +3912,16 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         a draft under it), On agent the immediate next step, Waiting "Until <when>: <what>" and the chases, then "after the wait: <next step>"; a `woke:` line shows until the mover writes. The actions under the detail: on Your move the answer form, drawn hidden
         for the page script to show with a token (_HOME_JS); the title is the link to the item. named=True (home) draws the project's name above the title (project_line) and the item's owner after it (row_line); a project page's rows show the owner alone, the page says the project.
         The card's left edge takes the list's color (Your move, On agent, Queued for release, Waiting).
-        flags=True (the project page's lists) keeps what an item's line there carried: the due badge, the stale ⚠ and the "waits for recycle" badge, on the who line."""
+        flags=True (the project page's lists) keeps what an item's line there carried: the due badge, the stale ⚠ and the "waits for recycle" badge, on the who line.
+        On a member's Home (self.viewer) a Waiting row may be another member's move (home.list_of): "<member> picks it up · on <member>'s move", the age in the slot, the question or the next step, and
+        nothing to answer or copy; and a row of a session that acts as a member ends its who line with "acts for <member>"."""
         e = esc; m = r["metadata"]; gid = r["gid"]
         ts = _home.since(r, mod, same_ref)
         t0 = datetime.datetime.fromtimestamp(ts, self.now.tzinfo) if ts else None
         cls = _home.age_class((self.now - t0).total_seconds()) if (which == _home.YOUR_MOVE and t0) else ""
         age = self.stamp(t0, "ir-age" + (f" {cls}" if cls else "")) if t0 else ""
-        if which == _home.WAITING: age = self.wait_end_slot(mod, t0)      # Waiting is sorted by end date, so its slot shows the end date; the age is the hover
+        theirs = which == _home.WAITING and mod.state == _model.ALIVE      # another member's move, listed in the viewer's Waiting
+        if which == _home.WAITING and not theirs: age = self.wait_end_slot(mod, t0)      # Waiting is sorted by end date, so its slot shows the end date; the age is the hover
         act = self.act_parts(r) if which == _home.AGENTS else None      # On agent: the age is the time since the item's last activity, with the pill and what it was under the mover; an item with no record keeps the old age and has no line
         if act: age = act[0]
         who = []
@@ -3910,6 +3931,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             exempt = self.mover_name(mod.mover) in front        # a front agent is no hand-off waiting to be taken
             if ho and same_ref(ho.get("to"), mod.mover) and _ho.awaiting_session(r) and not exempt: who.append(f'<span class="attn">{_t("home.handed", who=self.home_mover(mod.mover))}</span>')
             else: who.append(self.home_mover(mod.mover))
+            person = self.acts_for(mod.mover) if self.viewer else ""
+            if person: who.append(f'<span class="dim">{_t("home.acts_for", name=e(person))}</span>')
+        elif theirs:
+            who.append(_t("home.theirs", who=self.home_mover(mod.mover), name=e(_model.norm_who(mod.mover))))
         elif which == _home.WAITING:
             who.append(self.wait_who(r, mod))
         if flags:
@@ -3926,7 +3951,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         _name, step = _home.first_next(m.get("next"), self.known_movers(r, mod))
         nxt = (self.step_html(step, gid) if which == _home.YOUR_MOVE else self.md_line(step, gid)) if step else f'<span class="dim">{esc(_t("home.no_next"))}</span>'
         actions = ""
-        if which == _home.WAITING: detail = f'<span class="hwait">{self.home_wait(r, mod)}</span>' + (f'<span class="hnext hafter"><span class="dim">{esc(_t("home.after_wait"))}</span> {nxt}</span>' if step else "")
+        if theirs:
+            q = self.ask_question(r)
+            detail = f'<span class="hnext hq">{self.md_line(q, gid)}{mockup_link(r, q)}</span>' if q is not None else f'<span class="hnext">{nxt}</span>'
+        elif which == _home.WAITING: detail = f'<span class="hwait">{self.home_wait(r, mod)}</span>' + (f'<span class="hnext hafter"><span class="dim">{esc(_t("home.after_wait"))}</span> {nxt}</span>' if step else "")
         elif ask: detail, actions = f'<span class="hnext hq">{ask[0]}</span>{dr}', ask[1]
         elif stp: detail, actions = f'<span class="hnext">{stp[0]}</span>', stp[1]      # a your-step item: the step itself in place of the next line, with the note box and its Done and Send note buttons
         else: detail = f'<span class="hnext">{nxt}</span>{dr}'

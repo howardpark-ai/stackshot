@@ -433,9 +433,11 @@ def end_date(meta: dict[str, Any], what: str, to: str, now: float) -> None:
             meta.pop("watch")
 
 
-def turn_to_owner(meta: dict[str, Any], then: str, ask: str, options: list[dict[str, Any]], what: str, now: float) -> None:
+def turn_to_owner(meta: dict[str, Any], then: str, ask: str, options: list[dict[str, Any]], what: str, now: float, picker: str = "") -> None:
     """The wait is over and the item is the owner's move: needs is decision alone (a second mover in needs is refused by the guards; the one who takes it after him is `then`, the post-wake
-    mover), the ask and its options up."""
+    mover), the ask and its options up. On a board of several members the question goes to the member who picks the wait up (`picker`, else the one the item names: model.wake_member), stored as
+    the `mover`, never to whoever the list names first."""
+    who = _model.wake_member(meta, picker)      # read before the stored mover goes
     for k in LIVE_DROP:
         meta.pop(k, None)
     meta.pop("mover", None)
@@ -445,7 +447,9 @@ def turn_to_owner(meta: dict[str, Any], then: str, ask: str, options: list[dict[
         meta.pop("then", None)
     meta["needs"] = ["decision"]
     meta["ask"], meta["options"] = ask, options
-    meta["woke"] = {"what": what, "to": _model.owner_display(), "at": now}
+    if who:
+        meta["mover"] = who
+    meta["woke"] = {"what": what, "to": who or _model.owner_display(), "at": now}
 
 
 def woke_line(meta: dict[str, Any], label=str) -> str:

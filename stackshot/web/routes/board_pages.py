@@ -27,7 +27,7 @@ from stackshot.web import i18n as _i18n, render as _rmod
 from stackshot.web.answers import _answer_token
 from stackshot.web.auth import signin as _signin
 from stackshot.web.auth.signin import _APP_ICON_DIR, _APP_ICONS, _FONT_PATH, _UI_PUBLIC, _ui_guard
-from stackshot.web.board_home import _BOARD_GEN_LOCK, _board_home_slot
+from stackshot.web.board_home import _BOARD_GEN_LOCK, _board_home_slot, use_viewer as _use_viewer, viewer as _viewer
 from stackshot.web.routes.answers import _watch_box
 
 
@@ -217,10 +217,11 @@ _BOARD_FAIL_BACKOFF_S = 10.0                # after a failed draw no other is tr
 
 
 def _board_home_draw_locked() -> None:
-    """Draw the root home if none is held or the held one is older than _BOARD_HOME_TTL_S, and no draw failed within _BOARD_FAIL_BACKOFF_S. The caller holds _BOARD_HOME_LOCK. Each language has its own
-    kept draw (the request's, i18n.current(); English is _BOARD_HOME)."""
+    """Draw the root home if none is held or the held one is older than _BOARD_HOME_TTL_S, and no draw failed within _BOARD_FAIL_BACKOFF_S. The caller holds _BOARD_HOME_LOCK. Each language and viewer
+    has its own kept draw (the request's: i18n.current() and board_home.viewer(); English with no viewer is _BOARD_HOME)."""
     now = time.time()
-    slot = _board_home_slot(_i18n.current())
+    who = _viewer()
+    slot = _board_home_slot(_i18n.current(), who)
     sig = _i18n.signature()      # a catalog added, removed or edited makes the held draws stale at once (the switch and the words are in them)
     if slot["html"] is not None and now - slot["at"] <= _BOARD_HOME_TTL_S and slot.get("sig") == sig:
         return
@@ -230,7 +231,7 @@ def _board_home_draw_locked() -> None:
         gen = slot["gen"]
     try:
         from stackshot.web.ui import render as r2
-        page = r2.Board(str(_store.STORE), contact_of=_contact_label).html()
+        page = r2.Board(str(_store.STORE), contact_of=_contact_label, **({"viewer": who} if who else {})).html()
         slot["drawn"] = int(now)
         slot["sig"] = sig
         slot["html"] = page
@@ -246,7 +247,7 @@ def _board_home() -> str | None:
     """The root home page as HTML: the kept one while it is younger than _BOARD_HOME_TTL_S, else drawn now; the last good one if a draw fails (and for _BOARD_FAIL_BACKOFF_S after it, with no new draw); None before the first."""
     with _BOARD_HOME_LOCK:
         _board_home_draw_locked()
-        return _board_home_slot(_i18n.current())["html"]
+        return _board_home_slot(_i18n.current(), _viewer())["html"]
 
 
 def _board_home_kick() -> None:
@@ -257,12 +258,12 @@ def _board_home_kick() -> None:
     started = False
     try:
         now = time.time()
-        lang = _i18n.current()
-        slot = _board_home_slot(lang)
+        lang, who = _i18n.current(), _viewer()
+        slot = _board_home_slot(lang, who)
         if (slot["html"] is None or now - slot["at"] > _BOARD_HOME_TTL_S or slot.get("sig") != _i18n.signature()) and now - slot["failed"] >= _BOARD_FAIL_BACKOFF_S:
             def run() -> None:
                 try:
-                    with _i18n.use(lang):       # a new thread has no request language: the draw is the one asked for
+                    with _i18n.use(lang), _use_viewer(who):       # a new thread has no request language or viewer: the draw is the one asked for
                         _board_home_draw_locked()
                 finally:
                     _BOARD_HOME_LOCK.release()
@@ -276,7 +277,7 @@ def _board_home_kick() -> None:
 def _board_home_stamp() -> int | None:
     """When the root home the server holds was drawn (epoch seconds): the stamp the page carries, else the time of the draw; None while nothing has been drawn. It only reads: it never draws and
     never waits for a draw, and a drop does not change it (the copy held is the one the stamp tells). Never 0."""
-    slot = _board_home_slot(_i18n.current())
+    slot = _board_home_slot(_i18n.current(), _viewer())
     page = slot["html"]
     if page is None:
         return None

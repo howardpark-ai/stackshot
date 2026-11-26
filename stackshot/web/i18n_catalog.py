@@ -381,6 +381,8 @@ CATALOG: dict[str, str] = {
     "home.until": "until {day}",
     "home.no_end": "no end date",
     "home.picks_up": "{who} picks it up",
+    "home.theirs": "{who} picks it up · on {name}'s move",
+    "home.acts_for": "acts for {name}",
     "home.owner_then": "{who}, then {then}",
     "home.nobody_picks": "nobody set to pick it up",
     "home.watched_by": "watched by {who}",
