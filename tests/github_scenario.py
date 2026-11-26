@@ -1634,6 +1634,8 @@ check("the reader thread delivers a comment on its own, once", len([t for t in t
 # [github] owner_login names whose comments count; the token's login then does not
 _ghc["owner_login"] = "Someone-Else"
 c_o = F.comment(n_c, "as the configured login", login="someone-else"); c_h = F.comment(n_c, "as the token's login, not the configured one"); told.clear()
+# the earlier comment is put at the cursor: where it was posted, the cursor has moved past it once the checks above took over a second
+next(c for c in F.issues[n_c]["_comments"] if c["body"] == "a word from someone else")["updated_at"] = G.comments_state()["since"]
 r = G.poll_comments(GH, STORE, say=lambda s: None); _ghc.pop("owner_login")
 said = lambda: sorted({t[2].split("on GitHub: ")[1].split(" →")[0] for t in told})
 check("[github] owner_login names whose comments count (case apart), the earlier one by that login still at the cursor included; the token's login then does not",
