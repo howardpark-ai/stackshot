@@ -138,8 +138,8 @@ body.aframe::before,body.aframe::after{display:none}
 # The frame's script. What it holds: the state and what the parent is told of it (post: height, state, typing; only ever to a configured origin by name), the parent's two requests (refresh,
 # theme; accepted only from window.parent at a configured origin), the send (the board's own answer path, asked for its code as JSON), the refresh (this page again, read against the question
 # first drawn), and what two frames of one item share (BroadcastChannel on the board's origin: the pick, the note, a send under way and how it ended; only a person's own press or typing shares,
-# never a field's `change`, which a box left for the other frame fires with what it held before that press). Nothing it posts to the parent or reads
-# from it holds a word of the item, the answer or the token.
+# never a field's `change`, which a box left for the other frame fires with what it held before that press). A frame that was signed out from its first drawing loads itself again once signed in,
+# so its language and its script's words are the member's; one whose session ran out keeps its pick and note. Nothing it posts to the parent or reads from it holds a word of the item, the answer or the token.
 _SCRIPT = r"""<script>(function(){
 var M=document.getElementById('aframe');if(!M)return;
 var root=document.documentElement,framed=window.parent!==window;
@@ -181,6 +181,7 @@ function load(){var u=new URL(location.href);u.searchParams.set('since',since);i
 return fetch(u.href,{credentials:'same-origin',cache:'no-store',headers:{'Accept':'text/html'}}).then(function(r){if(r.status!==200&&r.status!==404)throw 0;return r.text()})
 .then(function(t){var n=new DOMParser().parseFromString(t,'text/html').getElementById('aframe');if(!n||n.getAttribute('data-item')!==item)throw 0;return n})}
 function show(n){var next=n.getAttribute('data-state'),ref=n.getAttribute('data-ref'),f=form();
+if(state==='signed_out'&&next!==state){if(!was){location.reload();return}M.querySelector('#afmsg').textContent=''}
 if(next==='open'&&state==='open'&&ref===A('ref')&&f){var a=f.querySelector('input[name=token]'),b=n.querySelector('input[name=token]');if(a&&b)a.value=b.value;return}
 keep();M.querySelector('#afbody').innerHTML=n.querySelector('#afbody').innerHTML;
 ['ref','chan','href'].forEach(function(k){M.setAttribute('data-'+k,n.getAttribute('data-'+k)||'')});

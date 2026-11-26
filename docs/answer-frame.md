@@ -62,7 +62,7 @@ Both are taken only when the sender is the parent window and its origin is a con
 | `{"source": "...", "kind": "answer-frame", "v": 1, "do": "refresh"}` | Reads the item again. A pick and a typed note stay when the question is unchanged. |
 | `{"source": "...", "kind": "answer-frame", "v": 1, "do": "theme", "theme": "dark"}` | Switches the colors (`dark` or `light`). |
 
-A frame that shows `signed_out` also reads again by itself when it comes back into view, so a sign-in made in the new tab shows without the parent doing anything.
+A frame that shows `signed_out` also reads again by itself when it comes back into view, so a sign-in made in the new tab shows without the parent doing anything. A frame that had shown no question yet then loads itself again, so it draws in the signed-in person's language; one whose sign-in ran out keeps its pick and note.
 
 ## Two frames of one item
 
