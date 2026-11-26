@@ -520,6 +520,15 @@ check("pages clear: another session's sala-id debt on the same page is named and
 LEDGER.write_text(json.dumps({"projects/alpha": {Tr["main_a"]: E()}}), encoding="utf-8")
 rc, out = clear("alpha")
 check("pages clear: a debt under an older transcript id of the same session is the caller's too", rc == 0 and "projects/alpha" not in led(), (rc, out, led()))
+# …and from a sessions' box that is not the server host (tests/_twobox.py, a fake `ssh`): the server host has no session registry here, so what finds
+# the entry keyed by the sala id is the id the calling box sends with the call
+import _twobox
+tb = _twobox.TwoBoxes(T, STACK, T / "stackshot.toml"); tb.client_config()
+blind = tb.config("server-blind.toml", session_links="")
+LEDGER.write_text(json.dumps({"projects/alpha": {S["main"]: E(), S["docs"]: E()}}), encoding="utf-8")
+rc, out, calls = tb.clear("alpha", sid=Tr["main_b"], server=blind)
+check("two boxes: the caller's permanent id goes with the call, and only the caller's entry goes (exit 3 for the other's)",
+      rc == 3 and list(led().get("projects/alpha", {})) == [S["docs"]] and len(calls) == 1 and f"--id {S['main']}" in calls[0][-1] and f"--session {Tr['main_b']}" in calls[0][-1], (rc, out, led(), calls))
 SALA.unlink(); RJ.write_text(json.dumps({"generated": j["generated"], "sessions": j["sessions"], "ids": {"home-sparrow-main": S["main"]}}))
 LEDGER.write_text(json.dumps({"projects/alpha": {S["main"]: E()}}), encoding="utf-8")
 rc, out = clear("alpha")

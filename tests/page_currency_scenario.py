@@ -351,6 +351,121 @@ owe([S], {"projects/delta": 1700000000})
 rc, out = clear("projects/delta")
 check("clear: …and goes when nobody else owes", rc == 0 and "projects/delta" not in led() and not touched(S), (rc, out, led()))
 rc, _ = clear(); check("clear: no key → usage, exit 1", rc == 1)
+
+# ---- 5c. two boxes: the sessions' box (its own state and reminders, [release] deploy_ssh naming the server host) and the server host (this fixture's
+# state, where the owed list is), with a fake `ssh` between them (tests/_twobox.py: nothing connects anywhere)
+import contextlib, fcntl, io, shlex, socket
+import _twobox
+tb = _twobox.TwoBoxes(T, STACK, T / "stackshot.toml"); tb.client_config()
+K = "projects/delta"
+def two(client_sids, ledger):
+    for x in (S, A, B): p.save_state(x, {}); (tb.touch / f"{x}.json").unlink(missing_ok=True)
+    for x in client_sids: tb.owe(K, x)
+    LEDGER.write_text(json.dumps(ledger), encoding="utf-8")
+two([S], {K: {S: E()}, "projects/beta": {B: E()}})
+rc, out, calls = tb.clear("delta", sid=S)
+check("two boxes: the reminder here and the caller's entry in the server's list both go, exit 0", rc == 0 and not tb.reminded(K, S) and K not in led() and B in led().get("projects/beta", {}), (rc, out, led()))
+check("two boxes: …and the server's own result lines are printed under the host's name (nothing else it says)",
+      "cleared projects/delta for you, work-osprey (11111111): 1 session state(s) on this box\n" in out and "From the server host (server-host):\n" in out
+      and "cleared projects/delta for you, work-osprey (11111111): 0 session state(s), 1 server owed entry\n" in out and "0 server owed" not in out and "welcome" not in out and "Kept" not in out, out)
+check("two boxes: …over one ssh call in release.sh's form, into the server's checkout, carrying the caller",
+      len(calls) == 1 and calls[0][:5] == ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "server-host"] and len(calls[0]) == 6
+      and calls[0][5] == f"cd ~/stackshot && python3 stackshot/projects/pages.py clear-forwarded projects/delta --session {S} --name work-osprey", calls)
+two([], {K: {"work-osprey": E()}})
+rc, out, _ = tb.clear(K, sid=S)
+check("two boxes: an entry kept under the caller's name is the caller's, though the server cannot name the session itself", rc == 0 and K not in led(), (rc, out, led()))
+two([S], {K: {S: E(), B: E()}})
+rc, out, _ = tb.clear(K, sid=S)
+check("two boxes: another writer's server entry is named and kept (exit 3), the caller's still goes", rc == 3 and list(led().get(K, {})) == [B] and not tb.reminded(K, S)
+      and "Kept, not yours: projects/delta is still owed by " + B in out and "(server owed entry)" in out, (rc, out, led()))
+check("two boxes: …and the command that clears every writer's is this box's, said once", out.count("--force` clears every writer's.") == 1
+      and f"`python3 {STACK}/stackshot/projects/pages.py clear projects/delta --force`" in out, out)
+two([S, B], {K: {S: E()}})
+rc, out, _ = tb.clear(K, sid=S)
+check("two boxes: another writer's reminder on this box alone also makes it exit 3, and it is kept", rc == 3 and tb.reminded(K, B) and not tb.reminded(K, S) and K not in led()
+      and "Kept on this box, not yours: projects/delta is still owed by home-beta (33333333) (session reminder)" in out and "1 server owed entry" in out, (rc, out, led()))
+two([S, B], {K: {S: E(), B: E(), "work-osprey-main": E()}})
+rc, out, calls = tb.clear(K, "--force", sid=S)
+check("two boxes: --force goes through, every writer's goes on both boxes, exit 0", rc == 0 and not tb.reminded(K, S) and not tb.reminded(K, B) and K not in led()
+      and calls[0][5].endswith(" --force") and "for every writer (--force): 0 session state(s), 3 server owed entries" in out and "Kept" not in out, (rc, out, led(), calls))
+two([S], {K: {S: E()}})
+rc, out, calls = tb.clear(K, sid=S, mode="down")
+stays = [x for x in out.split("\n") if x.startswith("The server's entry for ")]
+check("two boxes: the server out of reach → the reminder here still goes, the server's entry stays, exit 4", rc == 4 and not tb.reminded(K, S) and S in led().get(K, {}) and len(calls) == 1, (rc, out, led()))
+check("two boxes: …one plain line says so, with ssh's reason and the command to run there", len(stays) == 1 and "stays: ssh to server-host failed (ssh: connect to host" in stays[0]
+      and "To clear it, run `ssh server-host " in stays[0] and "server owed entr" not in out and "From the server host" not in out, out)
+rc, said, _ = tb.run(shlex.split(_twobox.given_command(out)), sid="")
+check("two boxes: …and that command, run as printed, clears the caller's entry on the server", rc == 0 and K not in led() and "1 server owed entry" in said, (rc, said, led()))
+for what, how, why in (("an older checkout there", {"home": tb.old_home}, "gave no result (exit 1: a checkout there that is older than this one does not take the call)"),
+                       ("a run that says nothing", {"mode": "silent"}, "gave no result (exit 0)")):
+    two([S], {K: {S: E()}})
+    rc, out, _ = tb.clear(K, sid=S, **how)
+    check(f"two boxes: {what} is no answer (exit 4, the entry stays, the reminder here goes)", rc == 4 and why in out and S in led().get(K, {}) and not tb.reminded(K, S), (rc, out, led()))
+two([S], {K: {S: E()}})
+t0 = time.time()
+rc, out, _ = tb.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {STACK!r}); from stackshot.projects import pages as p; p.CLEAR_SSH_TIMEOUT = 1; sys.exit(p.main(['pages.py', 'clear', 'delta']))"], sid=S, mode="hang")
+check("two boxes: a server that does not answer is given up on at the limit (exit 4)", rc == 4 and "no answer from server-host within 1 s" in out and time.time() - t0 < 20 and S in led().get(K, {}), (rc, out, time.time() - t0))
+two([S], {K: {S: E()}})
+LEDGER.write_text("not json", encoding="utf-8")
+rc, out, _ = tb.clear(K, sid=S)
+check("two boxes: a server that cannot rewrite its list says why (exit 4), and the file is left as it was", rc == 4 and "exit 4: clear-forwarded: the owed list could not be rewritten (JSONDecodeError)" in out
+      and LEDGER.read_text(encoding="utf-8") == "not json", (rc, out))
+for what, name, sets in (("no host named, [server] box = false", "nohost.toml", {"deploy_ssh": "", "box_false": True}),
+                         ("a host that starts like an ssh option", "option.toml", {"deploy_ssh": f"-oProxyCommand=touch {T}/pwned-host"}),
+                         ("a host word that does not resolve", "word.toml", {"deploy_ssh": "host:server"})):
+    two([S], {K: {S: E()}})
+    rc, out, calls = tb.clear(K, sid=S, config=tb.client_config(name, **sets))
+    check(f"two boxes: {what} → no ssh call, exit 4, the command to run on the server box", rc == 4 and calls == [] and not tb.reminded(K, S) and S in led().get(K, {})
+          and "[release] deploy_ssh gives this box no plain host name" in out and f"on the server box: `env CLAUDE_CODE_SESSION_ID={S} python3 ~/stackshot/stackshot/projects/pages.py clear projects/delta`" in out
+          and not (T / "pwned-host").exists(), (rc, out, calls))
+two([S], {K: {S: E()}})
+rc, out, calls = tb.clear(K, sid=S, config=tb.client_config("self.toml", deploy_ssh=socket.gethostname()))
+check("one box: deploy_ssh naming this box is the server host, so nothing is forwarded and the reply is the one-box one", rc == 0 and calls == [] and "1 session state(s), 0 server owed entries" in out and "on this box" not in out, (rc, out, calls))
+two([S], {K: {S: E()}})
+rc, out, calls = tb.clear(K, sid=S, server=tb.config("server-misnamed.toml", deploy_ssh=_twobox.HOST))
+check("two boxes: the run on the server host never forwards again, even where its own config names another host", rc == 0 and len(calls) == 1 and K not in led(), (rc, out, calls))
+for what, key in (("a key with shell words", f"projects/x; touch {T}/pwned-key #"), ("a key with a command substitution", f"projects/$(touch {T}/pwned-key)")):
+    rc, out, calls = tb.clear(key, sid=S)
+    check(f"two boxes: {what} is not sent (no ssh call, exit 4)", rc == 4 and calls == [] and "not a plain key" in out and not (T / "pwned-key").exists(), (rc, out, calls))
+    rc, said, _ = tb.run(shlex.split(_twobox.given_command(out)))
+    check(f"two boxes: …and the printed command, run as printed, hands {what} to the server as one word", rc == 0 and f"cleared {key}" in said and not (T / "pwned-key").exists(), (rc, said))
+bad = f"x'; touch {T}/pwned-sid; echo '$(touch {T}/pwned-sid)"
+rc, out, calls = tb.clear(K, sid=bad)
+check("two boxes: a session id with shell words is not sent (no ssh call, exit 4)", rc == 4 and calls == [] and "the session id here is not a plain id" in out and not (T / "pwned-sid").exists(), (rc, out, calls))
+rc, said, _ = tb.run(shlex.split(_twobox.given_command(out)))
+check("two boxes: …and the printed command quotes it: nothing in it runs", not (T / "pwned-sid").exists() and "cleared projects/delta" in said, (rc, said))
+names = T / "fleet/a/sessions.json"; kept_names = names.read_text(encoding="utf-8")
+names.write_text(json.dumps({S: {"name": f"w$(touch {T}/pwned-name)", "machine": "a"}}))
+two([], {K: {S: E()}})
+rc, out, calls = tb.clear(K, sid=S)
+check("two boxes: a session name that is not plain is left out of the call, which clears by the id", rc == 0 and len(calls) == 1 and "--name" not in calls[0][5] and "pwned" not in calls[0][5] and K not in led() and not (T / "pwned-name").exists(), (rc, out, calls))
+names.write_text(kept_names, encoding="utf-8")
+tb.owe(p.NO_PROJECT, S)
+rc, out, calls = tb.clear(p.NO_PROJECT, sid=S)
+check("two boxes: a debt with no page is only this box's reminder: no ssh call, exit 0", rc == 0 and calls == [] and not tb.reminded(p.NO_PROJECT, S), (rc, out, calls))
+said = io.StringIO()
+with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said): rc = p.main(["pages.py", "clear-forwarded", K, "--other"])
+check("clear-forwarded: a word it does not know is refused (exit 1), nothing cleared", rc == 1 and "not understood" in said.getvalue(), (rc, said.getvalue()))
+# the owed list is rewritten only under the lock the server holds while it rewrites it
+two([], {K: {S: E()}})
+lock_file = pathlib.Path(p._cfg.state("ledger.lock")); lock_file.touch()
+held = os.open(lock_file, os.O_RDONLY); child = None; was = p.CLEAR_LOCK_WAIT
+try:
+    fcntl.flock(held, fcntl.LOCK_EX)
+    p.CLEAR_LOCK_WAIT = 0.3; said = io.StringIO()
+    with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said): rc = p.main(["pages.py", "clear-forwarded", K, "--session", S])
+    check("lock: a forwarded run gives up on a held lock (exit 4) and changes nothing", rc == 4 and "stayed locked" in said.getvalue() and S in led().get(K, {}), (rc, said.getvalue(), led()))
+    env = {**os.environ, "CLAUDE_CODE_SESSION_ID": S}
+    child = subprocess.Popen([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "clear", K], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env)
+    try: child.wait(timeout=2); waited = False
+    except subprocess.TimeoutExpired: waited = True
+    check("lock: a clear on the server host waits while the lock is held, the list unchanged", waited and S in led().get(K, {}), (waited, led()))
+    fcntl.flock(held, fcntl.LOCK_UN)
+    out = child.communicate(timeout=30)[0]
+    check("lock: …and clears once it is let go", child.returncode == 0 and K not in led() and "1 server owed entry" in out, (child.returncode, out, led()))
+finally:
+    p.CLEAR_LOCK_WAIT = was; os.close(held)
+    if child and child.poll() is None: child.kill(); child.wait()
 for x in (S, A, B): p.save_state(x, {})
 if kept_ledger is None: LEDGER.unlink(missing_ok=True)
 else: LEDGER.write_text(kept_ledger, encoding="utf-8")

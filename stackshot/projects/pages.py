@@ -30,7 +30,19 @@ layer any session reads before acting. This script is the mechanism behind the r
   clear <key> [--force] drop your own pending touch and your own entry in the server's owed list (only for a board-only edit
                         that needed no page change). You are the session in CLAUDE_CODE_SESSION_ID, which Claude Code sets for
                         every Bash command. Another writer's debt on the same page is named and kept (exit 3); --force clears
-                        every writer's, as clear did before
+                        every writer's, as clear did before.
+                        On a box that is not the server host ([release] deploy_ssh names another box, or [server] box = false) the owed
+                        list is the server's: your reminders here are dropped, and the same clear runs on that host over
+                        `ssh -o BatchMode=yes <[release] deploy_ssh>` in the checkout ~/stackshot there, carrying your session id, name and
+                        permanent id. The server's own result lines are printed, and exit 3 means that either box kept another writer's
+                        debt. When the server cannot be asked (deploy_ssh gives no plain host name, ssh or the command there fails, or the
+                        checkout there is too old to take the call), your reminders here are still dropped, one line says that the server's
+                        entry stays and gives the command to run there, and the exit is 4.
+                        Exit 0 cleared, nobody else's debt left standing · 1 no key given · 3 another writer's debt kept · 4 the server's
+                        entry stays
+  clear-forwarded <key> [--session <id>] [--name <name>] [--id <permanent id>]... [--force]
+                        what `clear` on another box runs on the server host, for the caller it names. It never forwards again. Exit 0, 3,
+                        4 (the owed list could not be rewritten; the reason on stderr) or 1 (a call it does not understand)
   keeper                SessionStart hook (stackshot.toml [page_gate] keeper_currency): show a
                         page's keeper the Current state of its pages (whole when it fits, else cut at a line; pages with open items
                         first), labelled as background data
@@ -58,12 +70,13 @@ import os as _os, sys as _sys
 if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py): the checkout must be importable
     _here = _os.path.dirname(_os.path.abspath(__file__))
     _sys.path[:] = [_os.path.dirname(_os.path.dirname(_here))] + [p for p in _sys.path if _os.path.abspath(p or ".") != _here]
-import glob, json, os, re, shlex, subprocess, sys, time, datetime
+import glob, json, os, re, shlex, subprocess, sys, tempfile, time, datetime
 
 HOME = os.path.expanduser("~")
 from stackshot import paths as _paths
 HERE = str(_paths.ROOT)      # the checkout: the commands this module prints for a session name this file by its package path (the allow rules match that path)
 from stackshot.core import filecache as _fc   # what the server works out from the registry file is dropped when this writes it
+from stackshot.core import xlock as _xlock   # the owed list's lock, which the server holds while it rewrites that file
 from stackshot.core import config as _cfg   # stackshot.toml through the repo checkout: the same paths on every machine (stdlib tomllib)
 from stackshot.core.lines import newline_lines
 from stackshot.projects import project_registry as _pr   # the project record's entries, laid over the registry's page lines (stdlib only)
@@ -1784,15 +1797,21 @@ def _is_mine(o, me, ids):
         return _sr.resolve(o) in ids
     except Exception: return False
 
-def cmd_clear(key, force=False):
-    """Drop a page debt for a board edit that needed no page change. By default only the caller's own: its session state and
-    its entry in the server's owed list, which is kept per writer ({page: {writer: {...}}}, server._owed_mark). Another
-    writer's debt on the same page is named and kept (a clear once wiped a keeper's reminder); --force drops every writer's, as clear did before. Exit 0 = nothing of anyone else's was left
-    standing, 3 = another writer's debt kept."""
-    key = key.strip() if key.strip().startswith(NO_PROJECT) else norm(key)     # "(no project)" is a key of its own, not a page
-    sid = caller_sid(); me = {x for x in (sid, session_name(sid) if sid else "") if x}
-    ids = caller_ids(sid, session_name(sid) if sid else "") if sid else set()      # the server's owed list is keyed by the permanent id once the registry knows the caller
-    n = 0; others = []                       # (writer, where): another writer's debt on this key, kept
+CLEAR_KEPT = 3                  # clear: another writer's debt was kept
+CLEAR_SERVER_STAYS = 4          # clear: the server's owed entry is still there, because the server host could not be asked or could not rewrite its list
+CLEAR_CONNECT_TIMEOUT = 15      # seconds ssh waits to connect to the server host (release.sh's figure)
+CLEAR_SSH_TIMEOUT = 45          # seconds the whole run on the server host may take, connecting included
+CLEAR_LOCK_WAIT = 20.0          # seconds the run on the server host waits for the owed list's lock: it gives up well before the caller's ssh limit
+SERVER_CHECKOUT = "~/stackshot"        # the checkout on the server host, where release.sh deploys
+_PLAIN_KEY = re.compile(r"\w[\w./-]{0,299}")          # a page key as it may be sent to the server host
+_PLAIN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")        # a session id, transcript or permanent
+_PLAIN_NAME = re.compile(r"\w[\w.@ -]{0,127}")        # a session name
+_RESULT_STARTS = ("cleared ", "Kept, not yours:", "No session could be told")        # the lines of the server host's run that are its result
+_NO_SESSION = "No session could be told (CLAUDE_CODE_SESSION_ID is not set: run by hand?), so no debt here counts as yours."
+
+def _clear_reminders(key, me, force):
+    """The session reminders kept on this box: drops those of the caller (`me`; every one with force) → (how many, [(writer, where)] kept)."""
+    n = 0; others = []
     for p in glob.glob(os.path.join(STATE, "*.json")):
         try: st = json.load(open(p, encoding="utf-8"))
         except Exception: continue
@@ -1802,10 +1821,20 @@ def cmd_clear(key, force=False):
             del st["touches"][key]; n += 1
             save_state(owner, st)
         else: others.append((owner, "session reminder"))
-    # the server's own owed list (stackshot nag, on the server box only): stored under whatever spelling the item carried —
-    # bare slug or full key — so look at both (an infra/ key could not be cleared from the CLI side)
+    return n, others
+
+def _clear_owed(key, me, ids, force, others, wait=None):
+    """The server's owed list in this box's state folder: drops the caller's entries on `key` (every writer's with force) and adds another
+    writer's to `others`, all under the ledger lock the server holds while it rewrites the file (`wait`: the most seconds to wait for it;
+    None = as long as it takes). → (entries dropped, [keys whose entry names no writer], why the list was not rewritten: "" when it was,
+    or when this box keeps none)."""
+    # stored under whatever spelling the item carried — bare slug or full key — so look at both (an infra/ key could not be cleared from the CLI side)
     owed = str(_cfg.state("ledger.json")); m = 0; shared = []
-    if os.path.isfile(owed):
+    if not os.path.isfile(owed): return m, shared, ""
+    try:
+        lock = _xlock.XLock("ledger")
+        if not lock.acquire(timeout=-1 if wait is None else wait):
+            return m, shared, f"the owed list stayed locked for {wait:g} s"
         try:
             d = json.load(open(owed, encoding="utf-8")); dirty = False
             for k in [key, key.split("/", 1)[1]] if "/" in key else [key]:
@@ -1824,19 +1853,134 @@ def cmd_clear(key, force=False):
                     del d[k]; m += 1; dirty = True
             if dirty:
                 tmp = owed + ".tmp"; json.dump(d, open(tmp, "w", encoding="utf-8")); os.replace(tmp, owed)
-        except Exception: pass
-    whose = " for every writer (--force)" if force else (f" for you, {_who(sid)}" if sid else "")
-    print(f"cleared {key}{whose}: {n} session state(s), {m} server owed entr{'y' if m == 1 else 'ies'}")
-    if not sid and not force:
-        print("No session could be told (CLAUDE_CODE_SESSION_ID is not set: run by hand?), so no debt here counts as yours.")
-    if not others: return 0
+        finally: lock.release()
+    except Exception as e: return m, shared, f"the owed list could not be rewritten ({type(e).__name__})"
+    return m, shared, ""
+
+def _writers(others):
+    """Another writers' debts as a reply names them: each writer once, with where its debt is kept."""
     seen = {}
     for o, where in others: seen.setdefault(_who(o), []).append(where)
-    print(f"Kept, not yours: {key} is still owed by " + "; ".join(f"{w} ({', '.join(dict.fromkeys(ws))})" for w, ws in seen.items())
-          + (f". The server's entry {', '.join(shared)} names no writer, so it cannot be split and stays while they owe" if shared else "")
-          + ". That debt settles when they update the page. Only if their board edit needed no page change either: "
-          + f"`python3 {HERE}/stackshot/projects/pages.py clear {shlex.quote(key)} --force` clears every writer's.")
-    return 3
+    return "; ".join(f"{w} ({', '.join(dict.fromkeys(ws))})" for w, ws in seen.items())
+
+def _kept_line(key, others, shared):
+    return (f"Kept, not yours: {key} is still owed by " + _writers(others)
+            + (f". The server's entry {', '.join(shared)} names no writer, so it cannot be split and stays while they owe" if shared else "")
+            + ". That debt settles when they update the page.")
+
+def _force_hint(key):
+    return ("Only if their board edit needed no page change either: "
+            f"`python3 {HERE}/stackshot/projects/pages.py clear {shlex.quote(key)} --force` clears every writer's.")
+
+def _printable(s):
+    return "".join(c for c in str(s) if c.isprintable())
+
+def _server_ssh_host():
+    """None when `clear` acts here (this box is the server host, the config names none, or the check cannot run), else the ssh host that reaches
+    the server, "" when the config gives this box none to reach it by: config.record_host_where's answer, read for its host."""
+    where = _cfg.record_host_where("true", [])
+    if not where: return None
+    return shlex.split(where)[1] if where.startswith("ssh ") else ""
+
+def _ask_server(key, host, sid, name, ids, force):
+    """Run `clear-forwarded` on the server host for this caller → (its exit status, its result lines, why the server's entry stays: "" when
+    the server answered). Every value is checked to be plain and then quoted for the shell ssh starts there."""
+    if not host: return None, [], "[release] deploy_ssh gives this box no plain host name for the server"
+    if not _PLAIN_KEY.fullmatch(key): return None, [], "the page key is not a plain key, so it was not sent"
+    if sid and not _PLAIN_ID.fullmatch(sid): return None, [], "the session id here is not a plain id, so it was not sent"
+    argv = ["clear-forwarded", key]
+    if sid: argv += ["--session", sid]
+    if _PLAIN_NAME.fullmatch(name): argv += ["--name", name]
+    for i in sorted(ids):
+        if _PLAIN_ID.fullmatch(i): argv += ["--id", i]
+    if force: argv.append("--force")
+    remote = f"cd {SERVER_CHECKOUT} && python3 stackshot/projects/pages.py {shlex.join(argv)}"
+    cmd = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={CLEAR_CONNECT_TIMEOUT}", host, remote]
+    try:      # files, not pipes: a connection ssh keeps open in the background cannot hold the wait past its limit
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            rc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=CLEAR_SSH_TIMEOUT).returncode
+            out.seek(0); err.seek(0)
+            said, wrong = (f.read().decode("utf-8", "replace") for f in (out, err))
+    except subprocess.TimeoutExpired:
+        return None, [], f"no answer from {host} within {CLEAR_SSH_TIMEOUT:g} s (a run that finishes there later still clears it)"
+    except OSError as e:
+        return None, [], f"ssh could not be started ({type(e).__name__})"
+    lines = [x for x in (_printable(l) for l in newline_lines(said)) if x.startswith(_RESULT_STARTS)]
+    if rc in (0, CLEAR_KEPT) and any(l.startswith("cleared ") for l in lines): return rc, lines, ""
+    last = next((x for x in (_printable(l).strip() for l in reversed(newline_lines(wrong))) if x), "")[:200]
+    if rc == 255: return rc, [], f"ssh to {host} failed" + (f" ({last})" if last else "")
+    if rc == 1 and not last: last = "a checkout there that is older than this one does not take the call"
+    return rc, [], f"the run on {host} gave no result (exit {rc}" + (f": {last}" if last else "") + ")"
+
+def _clear_away(key, host, sid, name, ids, force, whose, n, others):
+    """`clear` on a box that is not the server host, after this box's reminders were dropped: the server clears its own owed entry."""
+    print(f"cleared {key}{whose}: {n} session state(s) on this box")
+    if not sid and not force: print(_NO_SESSION)
+    if others: print(f"Kept on this box, not yours: {key} is still owed by {_writers(others)}. That debt settles when they update the page.")
+    rc, lines, why = _ask_server(key, host, sid, name, ids, force)
+    if why:
+        command = (f"env CLAUDE_CODE_SESSION_ID={shlex.quote(sid)} " if sid else "") + f"python3 {SERVER_CHECKOUT}/stackshot/projects/pages.py"
+        argv = ["clear", key] + (["--force"] if force else [])
+        where = _cfg.record_host_where(command, argv)
+        where = f"`{where}`" if where.startswith("ssh ") else f"on the server box: `{command} {shlex.join(argv)}`"
+        print(_printable(f"The server's entry for {key} stays: {why}. To clear it, run {where}"))
+    else:
+        print(f"From the server host ({host}):")
+        for l in lines: print(l)
+    if others or rc == CLEAR_KEPT: print(_force_hint(key))
+    if why: return CLEAR_SERVER_STAYS
+    return CLEAR_KEPT if others or rc == CLEAR_KEPT else 0
+
+def cmd_clear(key, force=False):
+    """Drop a page debt for a board edit that needed no page change. By default only the caller's own: its session state and
+    its entry in the server's owed list, which is kept per writer ({page: {writer: {...}}}, server._owed_mark). Another
+    writer's debt on the same page is named and kept (a clear once wiped a keeper's reminder); --force drops every writer's, as clear did before.
+    On a box that is not the server host the owed list is the server's, so the same clear is run there (_clear_away). Exit 0 = nothing of anyone
+    else's was left standing, 3 = another writer's debt kept, 4 = the server's entry stays."""
+    key = key.strip() if key.strip().startswith(NO_PROJECT) else norm(key)     # "(no project)" is a key of its own, not a page
+    sid = caller_sid(); name = session_name(sid) if sid else ""; me = {x for x in (sid, name) if x}
+    ids = caller_ids(sid, name) if sid else set()      # the server's owed list is keyed by the permanent id once the registry knows the caller
+    away = None if key.startswith(NO_PROJECT) else _server_ssh_host()      # a debt with no page is only ever this box's reminder
+    n, others = _clear_reminders(key, me, force)
+    whose = " for every writer (--force)" if force else (f" for you, {_who(sid)}" if sid else "")
+    if away is not None: return _clear_away(key, away, sid, name, ids, force, whose, n, others)
+    m, shared, _why = _clear_owed(key, me, ids, force, others)
+    print(f"cleared {key}{whose}: {n} session state(s), {m} server owed entr{'y' if m == 1 else 'ies'}")
+    if not sid and not force: print(_NO_SESSION)
+    if not others: return 0
+    print(_kept_line(key, others, shared) + " " + _force_hint(key))
+    return CLEAR_KEPT
+
+def cmd_clear_forwarded(args):
+    """The server host's half of a `clear` run on another box (_ask_server): the caller is named by the arguments, never by this process's
+    environment, and nothing is forwarded from here. The command that clears every writer's is the calling box's to print."""
+    key = ""; sid = ""; name = ""; ids = set(); force = False; rest = list(args)
+    while rest:
+        a = rest.pop(0)
+        if a == "--force": force = True
+        elif a in ("--session", "--name", "--id") and rest:
+            v = rest.pop(0)
+            if a == "--session": sid = v
+            elif a == "--name": name = v
+            else: ids.add(v)
+        elif not a.startswith("-") and not key: key = a
+        else:
+            print(f"clear-forwarded: not understood: {_printable(a)}", file=sys.stderr); return 1
+    if not key:
+        print("usage: pages.py clear-forwarded <key> [--session <id>] [--name <name>] [--id <permanent id>]... [--force]", file=sys.stderr); return 1
+    key = norm(key); me = {x for x in (sid, name) if x}
+    if me: ids |= caller_ids(sid, name or session_name(sid))
+    caller = f"{name} ({sid[:8]})" if name and sid else _who(sid or name)       # the calling box's name for the session, which this box may not know
+    whose = " for every writer (--force)" if force else (f" for you, {caller}" if me else "")
+    n, others = _clear_reminders(key, me, force)
+    m, shared, why = _clear_owed(key, me, ids, force, others, wait=CLEAR_LOCK_WAIT)
+    if why:
+        print(f"clear-forwarded: {why}", file=sys.stderr); return CLEAR_SERVER_STAYS
+    print(f"cleared {key}{whose}: {n} session state(s), {m} server owed entr{'y' if m == 1 else 'ies'}")
+    if not me and not force: print(_NO_SESSION)
+    if not others: return 0
+    print(_kept_line(key, others, shared))
+    return CLEAR_KEPT
 
 def cmd_pending():
     for p in sorted(glob.glob(os.path.join(STATE, "*.json"))):
@@ -1859,6 +2003,7 @@ def main(argv):
         rest = argv[2:]; force = "--force" in rest; rest = [a for a in rest if a != "--force"]
         if not rest: print("usage: pages.py clear <key> [--force]", file=sys.stderr); return 1
         return cmd_clear(rest[0], force=force)
+    if cmd == "clear-forwarded": return cmd_clear_forwarded(argv[2:])      # `clear` on another box, run here over ssh: never forwards
     if cmd == "pending": return cmd_pending()
     if cmd == "agent-listed":      # agent-listed <name>: 0 fine · 3 not listed · 2 cannot tell (the fleet tool refuses on 3 only)
         if len(argv) < 3 or not argv[2].strip(): print("usage: pages.py agent-listed <session name>", file=sys.stderr); return 1
