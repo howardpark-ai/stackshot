@@ -1458,7 +1458,7 @@ class Board:
              "empty": ("warn", "Nothing sent: write something in the box, or pick an option."),
              "emptynote": ("warn", "Nothing sent: write a note to send it."),
              "toolong": ("warn", "Nothing sent: the text is too long."),
-             "stale": ("warn", "Nothing sent: the item no longer asks this (its options or its needs changed). Read it again below.",
+             "stale": ("warn", "Nothing sent: the item no longer asks this (its question, options or needs changed). Read it again below.",
                        "Nothing sent: the ask changed before your answer arrived; open the item to read it again."),
              "askedback": ("warn", "Sent: your note is on the item. I could not read a date from it, so the question is back below with days to pick from. Pick one, or write a date in the box.",
                            "Sent: your note is on the item. I could not read a date from it; open the item to pick a day."),
