@@ -17,7 +17,7 @@ runs on every box.
                                 item-scoped anchor): item, mover, wake, who set it and when ("before the record" for a park stored
                                 before the server wrote one), one line each, so the item's mover can release them one by one
                                 (update clear_hold=true). Reads only: nothing is released here. Exit 0 listed · 1 not reached.
-  client.py get <read> [key]    registry | rules | brief | page-ts <page key | project id> | items <session> | item-record <id> | open-records <session> | anchors-record | projects-record | project <id | page key | slug> | holds |
+  client.py get <read> [key]    registry | rules | brief | page-ts <page key | project id> | items <session> | involved <session> | item-record <id> | open-records <session> | anchors-record | projects-record | project <id | page key | slug> | holds |
                                 answer <board#N> (below) | for-you (below) | your-move (below) | whoami | config | roles | state-files — read from the server with this machine's token (<secrets>/client.token);
                                 config = the instance's non-secret settings;
                                 roles = every session's role, {"generated": <UTC>, "sessions": {name: {role, project}}}; an agent
@@ -63,6 +63,11 @@ runs on every box.
                                 Watch / Mute settings on items (an item with no flag is in neither); "watch" adds an item that is not watched by
                                 default, "mute" stops rows for it. A row leaves the list when he marks it seen on the board. Reads only.
                                 Exit 0 · 1 no token or not reached.
+  client.py get involved <session>
+                                the open items a session is the contact of or an observer on, whoever moves them, newest write first, as JSON: {"items": [{shown ("board#N"), subject, url (the item's page), mover (the name of whoever moves it now, as the item model reads it and `get item-facts` gives it),
+                                contact (the item's contact now, by name), observers ([names]), list ("your-move" | "agents" | "waiting", as `get items` gives it), held (as `get items` gives it: true for a parked item, one that waits on an open item or a doing item waiting for a stated wake), until (the day a held item comes back,
+                                "YYYY-MM-DD" as the home page's Waiting row dates it; null for an item that is not held or has no such day), state_updated and updated (epoch seconds, null for none)}]}. <session> is read as `get items` reads it (a pane name, a transcript uuid, a cse_ id or a permanent id). A closed item is not in it; a session that is neither contact nor
+                                observer anywhere, or that no one knows, gets {"items": []}; no session is 400. No cap. Reads only. Exit 0 · 1 no token, a refusal or not reached.
   client.py get your-move       every open item in {OWNER}'s Your move group, as JSON: {"items": [{shown ("board#N"), subject, url (the item's page), ask (the open ask line, "" for none), updated (epoch seconds
                                 of the item's last write)}], "group": {"en": <the group's name>, "ko": <its name in the second language>}}. It is the home page's own list with no cap, in the home page's order (the item that has been his longest first; `get brief` shows the first
                                 five lines of the same list), and holds every item whose mover is him, whichever session it names or whether it names one. An empty group is {"items": [], "group": {...}}.
@@ -479,7 +484,7 @@ CLIENTS = os.path.join(SECRETS, "clients.json")
 TOKENS = os.path.join(SECRETS, "client-tokens")
 TOKEN = os.path.join(SECRETS, "client.token")
 URLF = os.path.join(SECRETS, "client.url")
-READS = ("registry", "rules", "brief", "page-ts", "items", "item-facts", "item-record", "open-records", "anchors-record", "projects-record", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you", "your-move", "inbox-holds", "inbox-waiting")
+READS = ("registry", "rules", "brief", "page-ts", "items", "involved", "item-facts", "item-record", "open-records", "anchors-record", "projects-record", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you", "your-move", "inbox-holds", "inbox-waiting")
 
 
 def _write_private(path: str, text: str) -> None:

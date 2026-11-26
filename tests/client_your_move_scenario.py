@@ -4,7 +4,7 @@ Covers: the read lists every item of the group, more than five, whichever way th
 the other two lists (an item an agent moves, one that waits on a date or on another item, a held one, a closed one, one in the retired on-hold status); the answer is the home page's own group: the same items in the same order as the
 ui renderer's Your move list, and its first five are the brief's five lines; the order is the page's (the longest-his first, items of one age by due date), not newest first; each row's fields (`shown`, `subject`, `url`, `ask`
 empty without an open ask, `updated` in epoch seconds with the file's time for an item that stores none), a url without the instance's board address; a decision that leaves the group and an item that joins it show at once;
-an empty group is {"items": [], "group": {...}}; the group's name (`group`: {"en", "ko"}) is the string table's own Your move heading, as the home page draws it, with no second-language catalog (the English text for both), with an ASCII test locale, with a catalog that lacks the key or refuses its value; over HTTP: no token, a wrong token, the token in the query string, a Basic credential and a live caller's pass are 401, the machine's token is the read's own answer, no-store, answered in a
+an empty group is {"items": [], "group": {...}}; with the queue rule on (which asks for the session roles about each item an agent moves) the roles are built once for a read, and the answer is byte for byte the one without that memo; the group's name (`group`: {"en", "ko"}) is the string table's own Your move heading, as the home page draws it, with no second-language catalog (the English text for both), with an ASCII test locale, with a catalog that lacks the key or refuses its value; over HTTP: no token, a wrong token, the token in the query string, a Basic credential and a live caller's pass are 401, the machine's token is the read's own answer, no-store, answered in a
 worker thread, a read-only standby serves it and a write to it is refused; the 404 list and `client.py` name the read.
 
     tests/run-suite client_your_move        → exit 0 / 1"""
@@ -43,10 +43,12 @@ sys.path.insert(0, STACK); logging.disable(logging.INFO)
 
 from stackshot.core import config as _cfg
 from stackshot.core import instance as _inst
+from stackshot.core import passmemo as _passmemo
 from stackshot.core import readonly as _ro
 from stackshot.core import store as _store
 from stackshot.fleet import client
 from stackshot.github import ghsync as _gh
+from stackshot.projects import projects as _prj
 from stackshot.service import caller_pass as _cp
 from stackshot.service import client_reads as cr
 from stackshot.web import render as _rmod
@@ -178,6 +180,33 @@ for n in gone: drop(n)
 st, ct, b = cr._client_get("your-move", {})
 check("an empty group is 200 {items: [], group: {...}}: the group's name is there with no item", st == 200 and json.loads(b) == {"items": [], "group": NAMES_EN} and ui_group() == [], (st, b))
 for n, t in saved.items(): (T / f"store/a/{n}.json").write_text(t)
+
+# the session roles are worked out once for a read: with the queue rule on, the group asks who is a front agent about each item an agent moves
+def roles_builds(call):
+    """How many times the session roles were built while `call` ran (anchors.session_roles reads the projects waiting for their page once per build)."""
+    count = [0]; real = _prj.with_pending
+    def counted(*a, **k):
+        if sys._getframe(1).f_code.co_name == "session_roles": count[0] += 1
+        return real(*a, **k)
+    _prj.with_pending = counted
+    try: call()
+    finally: _prj.with_pending = real
+    return count[0]
+extra = (40, 41, 42)
+for n in extra: put(n, subject=f"[home] one more a session moves, {n}", age=2, mover="alpha-builder")
+try:
+    _cfg.CFG.setdefault("model", {})["queued_behind"] = True
+    outside = roles_builds(cr._client_your_move)
+    check("roles: the fixture is live: with the queue rule on, the group outside a pass memo asks for the session roles for each item an agent moves", outside >= len(extra) and not _passmemo.active(), outside)
+    once = roles_builds(body)
+    check("roles: the session roles are built once for a read", once == 1, once)
+    twice = roles_builds(lambda: (body(), body()))
+    check("roles: …and once more for the next read: the memo ends with its request", twice == 2 and not _passmemo.active(), twice)
+    with_memo, without = cr._client_get("your-move", {}), cr._client_your_move()
+    check("roles: …and the answer is byte for byte the answer without the memo", with_memo == without and with_memo[0] == 200 and len(json.loads(with_memo[2])["items"]) == len(mine), (with_memo[2][:200], without[2][:200]))
+finally:
+    _cfg.CFG.get("model", {}).pop("queued_behind", None)
+    for n in extra: drop(n)
 
 # the surface
 tok = open(client.mint("box-far")).read().strip(); H = {"Authorization": "Bearer " + tok}
