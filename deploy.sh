@@ -48,6 +48,14 @@
 #                            The server's runner watchdog and `stackshot doctor` flag a runner that stays down. At "inline" (no unit restarted) there is no check and no wait.
 #   anchor-hub.service       stackshot/anchors/anchor_hub.py, stackshot/anchors/anchorhub/*, anchors.py, project_registry.py, projects.py (apply() reaches it), push.py, fleet.py, liveness.py, routing.py, inbox.py, sessions_registry.py, interp.py, config.py (all under stackshot/), or its unit
 #   stackshot-puller.service stackshot/fleet/puller.py, stackshot/fleet/client.py, stackshot/core/config.py, or its unit
+#   stackshot-frontdoor.service, stackshot-signin.service (docs/front-door.md): whatever restarts stackshot.service, or the unit's own template; and only a unit its
+#                            owner has turned on (installed, and enabled or running: installing one turns nothing on). Restarted after the server, by name, with `reset-failed` first;
+#                            a restart that fails is a WARNING line, and the check below then says what does not answer
+#   stackshot-splitter.service  its own templates (units/stackshot-splitter.*), and only while it runs: nothing here ever starts it, and a server restart leaves it running
+#                            (it holds the port the clients connect to)
+# The front door's health check: when a front door unit is turned on, `python -m stackshot.frontdoor.check --installed` runs after /healthz (after the republish and the minute unit's
+# check): a real tool call through the parts that are on, since a /healthz of theirs answers with the board down. It waits up to DEPLOY_FRONT_WAIT seconds (default 90) for them,
+# and a failure fails the deploy exactly as an unanswered /healthz does (exit 1; release.sh then reports "merged, not live" and pauses its queue; nothing is rolled back by it).
 # Code is restarted here, deliberately; stackshot-reload.path only reloads the config file (SIGHUP). It is still held
 # while the units are reinstalled, so a config change never reloads a service whose unit is being replaced.
 # After a server restart the board is published once more, so a change to the renderer is live at once and not at the next timer.
@@ -123,7 +131,18 @@ if [ -z "$ROLLBACK" ] && ! $G merge-base --is-ancestor "$OLD" "$NEW"; then echo 
 files="$($G diff --name-only "$OLD" "$NEW")"
 if [ -n "$ROLLBACK" ]; then echo "rolling back $(git rev-parse --short "$OLD") to $(git rev-parse --short "$NEW"), taking out:"; $G log --oneline "$NEW..$OLD" | sed 's/^/  /'
 else echo "deploying $(git rev-parse --short "$OLD")..$(git rev-parse --short "$NEW"):"; $G log --oneline "$OLD..$NEW" | sed 's/^/  /'; fi
-server=0; minute=0; hub=0; puller=0
+server=0; minute=0; hub=0; puller=0; door=0; signin=0; splitter=0
+front_on() {   # a front door unit its owner has turned on: installed (install.sh), and enabled or running
+    [ -f "$HOME/.config/systemd/user/$1" ] || return 1
+    case "$(systemctl --user is-enabled "$1" 2>/dev/null || true)" in enabled|enabled-runtime) return 0 ;; esac
+    case "$(systemctl --user is-active "$1" 2>/dev/null || true)" in active|activating|reloading|failed) return 0 ;; esac
+    return 1
+}
+front_running() {   # an installed front door unit that runs now
+    [ -f "$HOME/.config/systemd/user/$1" ] || return 1
+    case "$(systemctl --user is-active "$1" 2>/dev/null || true)" in active|activating|reloading) return 0 ;; esac
+    return 1
+}
 MINUTE_UNIT="$HOME/.config/systemd/user/stackshot-minute.service"      # there only when install.sh put it there: [runner] process = "unit"
 MINUTE_DROP=0; [ -n "$ROLLBACK" ] && [ -z "$FROM" ] && [ -f "$MINUTE_UNIT" ] && ! $G cat-file -e "$NEW:units/stackshot-minute.service.in" 2>/dev/null && MINUTE_DROP=1     # a rollback's first step to a commit from before the unit: its own deploy.sh knows nothing of the unit, so this one takes it out before it hands over
 runner_mode() {   # [runner] process as the instance's config reads it ("inline" or "unit"), "unreadable" when the config cannot be read
@@ -143,6 +162,9 @@ while IFS= read -r f; do
         units/stackshot-minute.service.in) minute=1 ;;
         units/anchor-hub.service.in) hub=1 ;;
         units/stackshot-puller.service.in) puller=1 ;;
+        units/stackshot-frontdoor.service.in) door=1 ;;
+        units/stackshot-signin.service.in) signin=1 ;;
+        units/stackshot-splitter.*) splitter=1 ;;
         stackshot/anchors/anchor_hub.py|stackshot/anchors/anchorhub/*|stackshot/fleet/push.py) hub=1 ;;
         stackshot/anchors/merge_log.py) server=1; minute=1; hub=1 ;;      # the hub writes the merge log and the server reads it: both read the file at their start
         stackshot/anchors/event_log.py) server=1; minute=1; hub=1 ;;      # the same for the event log (events.jsonl): the hub writes it, the server's last-activity pass reads it
@@ -161,7 +183,11 @@ while IFS= read -r f; do
     esac
 done <<< "$files"
 swap=0; if minute_gone; then server=1; swap=1; fi   # the unit goes at "inline" and the server that ran without a runner (started at "unit") gets its own at its restart: in this same deploy, never left to a later one
+if [ $server = 1 ]; then door=1; signin=1; fi   # the door and the sign-in service restart with the board
 plan=""; [ $server = 1 ] && plan="$plan stackshot.service"; [ $minute = 1 ] && minute_on && plan="$plan stackshot-minute.service"; [ $hub = 1 ] && plan="$plan anchor-hub.service"; [ $puller = 1 ] && plan="$plan stackshot-puller.service"
+if [ $door = 1 ] && front_on stackshot-frontdoor.service; then plan="$plan stackshot-frontdoor.service"; fi
+if [ $signin = 1 ] && front_on stackshot-signin.service; then plan="$plan stackshot-signin.service"; fi
+if [ $splitter = 1 ] && front_running stackshot-splitter.service; then plan="$plan stackshot-splitter.service"; fi
 echo "restarts:${plan:- none}"
 if [ $swap = 1 ]; then echo "note: stackshot-minute.service is installed but [runner] process reads \"inline\": install.sh removes it, and the server restarts in this deploy, since one started at \"unit\" runs no runner of its own"; fi
 if [ $MINUTE_DROP = 1 ]; then echo "note: $target predates stackshot-minute.service, whose removal this deploy runs first (install.sh minute-off): its own deploy.sh knows nothing of it, and the older server's runner starts with its restart"; fi
@@ -190,6 +216,18 @@ beat_since=""   # set when the minute unit was restarted here: the moment, for t
 if [ $minute = 1 ] && minute_on; then beat_since="$(python3 -c 'import time; print(time.time())')"; systemctl --user reset-failed stackshot-minute.service 2>/dev/null || true; systemctl --user restart stackshot-minute.service; echo "  restarted stackshot-minute.service"; fi   # after the server (it waits for /healthz at its own start); not installed: [runner] process is not "unit"
 if [ $hub = 1 ] && [ -f "$HOME/.config/systemd/user/anchor-hub.service" ]; then systemctl --user restart anchor-hub.service; echo "  restarted anchor-hub.service"; fi   # not installed: [anchor_hub] enabled is off
 if [ $puller = 1 ]; then systemctl --user restart stackshot-puller.service; echo "  restarted stackshot-puller.service"; fi
+front_restart() {   # past a start limit a plain restart is refused, hence reset-failed first. A restart that fails does not stop the deploy here: the front door check below says what does not answer
+    systemctl --user reset-failed "$1" 2>/dev/null || true
+    if systemctl --user restart "$1"; then echo "  restarted $1"; else echo "  WARNING: $1 could not be restarted: systemctl --user status $1"; fi
+}
+if [ $door = 1 ] && front_on stackshot-frontdoor.service; then front_restart stackshot-frontdoor.service; fi
+if [ $signin = 1 ] && front_on stackshot-signin.service; then front_restart stackshot-signin.service; fi
+if [ $splitter = 1 ] && front_running stackshot-splitter.service; then front_restart stackshot-splitter.service; fi
+front_check() {   # a real tool call through the front door's parts that are turned on (stackshot/frontdoor/check.py); nothing runs when none is
+    front_on stackshot-frontdoor.service || front_on stackshot-signin.service || front_on stackshot-splitter.service || return 0
+    local wait="${DEPLOY_FRONT_WAIT:-90}"; case "$wait" in ''|*[!0-9]*) wait=90 ;; esac
+    "$UV" run --project "$HERE" --locked --extra server python -m stackshot.frontdoor.check --installed --wait "$wait" 2>&1 | sed 's/^/  /'      # pipefail: the check's own exit status
+}
 port="$(python3 stackshot/core/config.py get server.port)"
 # Wait up to 180 s: a start reads thousands of files in turn, and on a busy disk (a weekly fstrim, for one)
 # it can take a minute while the server comes up fine; 60 s would call that a failed release.
@@ -245,6 +283,7 @@ while [ $SECONDS -lt $deadline ]; do
             else echo "  WARNING: the republish failed ($(echo "$out" | tail -1)); the deploy itself is done and the timer publishes within 10 min"; fi
         fi
         if [ -n "$beat_since" ]; then minute_check "$beat_since"; fi      # only when this deploy restarted the minute unit (so never at "inline": it is not installed there)
+        front_check || { echo "the front door check failed after the deploy (the lines above say which part)" >&2; exit 1; }
         exit 0
     fi
     sleep 2

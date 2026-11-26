@@ -2,7 +2,8 @@
 # install.sh — render stackshot's systemd units for this checkout and install them. The templates in
 # units/*.in carry no path of any one machine: @CHECKOUT@ (this directory), @CONFIG@ (the instance config, config.py's
 # answer, which stackshot-reload.path watches), @HOME@, @UV@, @PORT@ (server.port), @TZ@ (instance.timezone) @AUDIT_AT@
-# ([audit] at, HH:MM or a list of them) and @AUDIT_PROJECT@ ([audit] project) are filled in here.
+# ([audit] at, HH:MM or a list of them) and @AUDIT_PROJECT@ ([audit] project) are filled in here; the splitter's own (its ports, addresses, identity header, program and
+# Caddyfile path) come from stackshot/core/frontdoor_splitter_config.py.
 #
 # Every unit is a user unit under ~/.config/systemd/user, driven with systemctl --user, and nothing here calls sudo: the
 # server, its reload watcher and the portal sync are written for the user manager (no User= line, WantedBy=default.target,
@@ -27,8 +28,13 @@
 #                                   started: it only arms the schedule, the audit, or its cue in mode "agent", runs at [audit] at),
 #                                   and stackshot-minute.service only when [runner] process = "unit" (the default, so unless "inline" is set) on a box that is not a read-only
 #                                   standby (the minute set's runner as a process of its own; "unit" is the default, so it is installed unless [runner] process = "inline" is set)
+#                                   The front door's own (docs/front-door.md), after those and only for the tables the config has: stackshot-frontdoor.service ([frontdoor]), stackshot-signin.service
+#                                   ([frontdoor_signin]), and stackshot-splitter.service with its Caddyfile (~/.config/stackshot/splitter.Caddyfile) when [frontdoor_splitter] and the tables it points at allow
+#                                   a splitter: never while [server] port gives the board the splitter's port. These are installed and NEVER enabled or started here, --start included: enabling them is a
+#                                   person's own step (systemctl --user enable --now ...). With --restart or --start one whose file changed is restarted only when it already runs. A config without the tables
+#                                   changes nothing of the install; a unit an earlier run installed is never removed, and the installed splitter's own check (ExecStartPre) refuses a start the config no longer allows.
 #   ./install.sh puller             the puller's user unit alone (a box that only fetches; never sudo)
-#   ./install.sh render [name]      print the rendered unit(s), install nothing (no name: the units `units` would install);
+#   ./install.sh render [name]      print the rendered unit(s), install nothing (no name: the units `units` would install, the splitter's Caddyfile among them);
 #                                   the unit directory goes to stderr
 #   options: --checkout DIR  --config FILE  --restart (restart the units whose file changed; otherwise only say which)
 #            --start (after enabling, start the long-running units of this verb, or restart them if running; how setup
@@ -81,6 +87,9 @@ TZNAME="$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py
 PORTAL=0; [ -n "$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" get portal.account_id)" ] && PORTAL=1       # the portal-sync unit and its drop-in
 HUB=0; case "$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" get anchor_hub.enabled | tr '[:upper:]' '[:lower:]')" in true|1|yes) HUB=1 ;; esac   # anchor-hub's user unit
 read -r AUDIT AUDIT_AT RUNNER_PROCESS AUDIT_PROJECT < <(STACKSHOT_CONFIG="$CONFIG" python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from stackshot.core import config as c; print(int(c.audit_enabled()), ",".join(c.audit_at()), c.runner_process(), c.audit_project())' "$CHECKOUT")   # the audit's timer pair, its HH:MM times (comma-joined: one OnCalendar line each), and [runner] process ("inline" for any value but "unit")
+# the front door's units: which of its tables the config has, and why there is no splitter to render ("" when there is one, "absent" with no [frontdoor_splitter] table)
+read -r DOOR SIGNIN SPLITTER_WHY < <(STACKSHOT_CONFIG="$CONFIG" python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from stackshot.core import config as c, frontdoor_splitter_config as sp; s = sp.parse()[0]; print(int(c.get("frontdoor") is not None), int(c.get("frontdoor_signin") is not None), "; ".join(sp.blocking(s)) if s.present else "absent")' "$CHECKOUT")
+CADDYFILE="$HOME/.config/stackshot/splitter.Caddyfile"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 . "$HERE/units/scope.sh"      # UNIT_DIR, xdg_repair, user_manager_ok (config.py refused a removed mode above, with its line)
 MINUTE=0; MINUTE_OFF=inline; MINUTE_STUCK=0     # stackshot-minute.service: only at [runner] process = "unit", and never on a standby (`stackshot minute` exits 4 there); MINUTE_OFF says why it is not wanted
@@ -104,18 +113,31 @@ SERVERU=" stackshot.service stackshot-reload.service stackshot-reload.path stack
 render() {   # render <name> → stdout: the template with its placeholders filled in
     local t="$HERE/units/$1.in"; [ -f "$t" ] || { echo "no template $t" >&2; return 1; }
     local kind=unit; case "$SERVERU" in *" $1 "*) kind=server ;; esac
-    python3 - "$t" "$CHECKOUT" "$CONFIG" "$HOME" "$UV" "$PORT" "$TZNAME" "$kind" "$AUDIT_AT" "$AUDIT_PROJECT" <<'PY'
-import sys
-t, checkout, config, home, uv, port, tz, kind, audit_at, audit_project = sys.argv[1:11]
+    python3 - "$t" "$CHECKOUT" "$CONFIG" "$HOME" "$UV" "$PORT" "$TZNAME" "$kind" "$AUDIT_AT" "$AUDIT_PROJECT" "$CADDYFILE" <<'PY'
+import os, re, sys
+t, checkout, config, home, uv, port, tz, kind, audit_at, audit_project, caddyfile = sys.argv[1:12]
+name = t.rsplit("/", 1)[1]
 s = open(t, encoding="utf-8").read()
 # a line that carries @AUDIT_AT@ is written once per time of [audit] at (audit_at is the comma-joined list), so the timer has one OnCalendar line for each
 s = "".join("".join(l.replace("@AUDIT_AT@", t) for t in audit_at.split(",")) if "@AUDIT_AT@" in l else l for l in s.splitlines(keepends=True))
-for k, v in (("@CHECKOUT@", checkout), ("@CONFIG@", config), ("@HOME@", home), ("@UV@", uv), ("@PORT@", port), ("@TZ@", tz), ("@AUDIT_PROJECT@", audit_project)):
+pairs = [("@CHECKOUT@", checkout), ("@CONFIG@", config), ("@HOME@", home), ("@UV@", uv), ("@PORT@", port), ("@TZ@", tz), ("@AUDIT_PROJECT@", audit_project)]
+if name.startswith("stackshot-splitter."):      # the splitter's values come from the module that also says whether this config allows a splitter at all
+    sys.path.insert(0, checkout)
+    os.environ["STACKSHOT_CONFIG"] = config
+    from stackshot.core import frontdoor_splitter_config as sp
+    settings = sp.parse()[0]
+    why = sp.blocking(settings)
+    if why:
+        sys.exit("%s: not rendered: %s" % (name[:-3], "; ".join(why)))
+    pairs += [("@%s@" % k, v) for k, v in sp.values(settings).items()] + [("@CADDYFILE@", caddyfile)]
+for k, v in pairs:
     s = s.replace(k, v)
-left = [l for l in s.splitlines() if "@" in l and "@" in l.split("#")[0]]
+if name.endswith(".Caddyfile.in"):      # a Caddyfile names its matchers with an @, so only a placeholder's own shape counts there
+    left = [l for l in s.splitlines() if re.search(r"@[A-Z0-9_]+@", l.split("#")[0])]
+else:
+    left = [l for l in s.splitlines() if "@" in l and "@" in l.split("#")[0]]
 if left:
     sys.exit("unrendered placeholder in %s: %s" % (t, left[0].strip()))
-name = t.rsplit("/", 1)[1]
 # The header is part of the installed bytes: it is kept word for word (the server units' one still says `[units] scope = "user"`,
 # the key removed in an earlier change), so an upgrade reports every unit unchanged instead of re-installing them all.
 head = ("# Rendered by install.sh from units/%s for the user manager ([units] scope = \"user\") — edit the template, not this file.\n" % name
@@ -127,12 +149,51 @@ SERVER=(stackshot.service stackshot-reload.service stackshot-reload.path); [ $PO
 USERU=(); [ $HUB = 1 ] && USERU+=(anchor-hub.service); USERU+=(stackshot-puller.service)
 AUDITU=(stackshot-audit.service stackshot-audit.timer); [ $AUDIT = 1 ] && USERU+=("${AUDITU[@]}")
 [ $MINUTE = 1 ] && USERU+=(stackshot-minute.service)
+FRONTU=()      # installed by `units`, never enabled or started by this script
+[ "$DOOR" = 1 ] && FRONTU+=(stackshot-frontdoor.service)
+[ "$SIGNIN" = 1 ] && FRONTU+=(stackshot-signin.service)
+[ -z "$SPLITTER_WHY" ] && FRONTU+=(stackshot-splitter.Caddyfile stackshot-splitter.service)
 changed=()
-put() {      # put <name> <dir>  → installs when the rendered text differs
-    local name="$1" dir="$2" tmp; tmp="$(mktemp)"; render "$name" > "$tmp"
-    if [ -f "$dir/$name" ] && cmp -s "$tmp" "$dir/$name"; then rm -f "$tmp"; echo "  $name: unchanged"; return 0; fi
-    install -D -m 0644 "$tmp" "$dir/$name"
-    rm -f "$tmp"; changed+=("$name"); echo "  $name: installed → $dir/$name"
+put() {      # put <name> <dir> [file name, else <name>]  → installs when the rendered text differs
+    local name="$1" dir="$2" file="${3:-$1}" tmp; tmp="$(mktemp)"; render "$name" > "$tmp"
+    if [ -f "$dir/$file" ] && cmp -s "$tmp" "$dir/$file"; then rm -f "$tmp"; echo "  $name: unchanged"; return 0; fi
+    install -D -m 0644 "$tmp" "$dir/$file"
+    rm -f "$tmp"; changed+=("$name"); echo "  $name: installed → $dir/$file"
+}
+front_units() {   # the front door's files for the tables the config has; what an earlier run installed and this config no longer asks for is said, and stays
+    local n u stays="; the installed unit stays as it is"
+    for n in ${FRONTU[@]+"${FRONTU[@]}"}; do
+        if [ "$n" = stackshot-splitter.Caddyfile ]; then
+            [ -d "$(dirname "$CADDYFILE")" ] || install -d -m 0700 "$(dirname "$CADDYFILE")"      # the directory the secrets are kept in: private when this makes it
+            put "$n" "$(dirname "$CADDYFILE")" "$(basename "$CADDYFILE")"
+        else put "$n" "$UNIT_DIR"; fi
+    done
+    if [ "$DOOR" = 0 ] && [ -f "$UNIT_DIR/stackshot-frontdoor.service" ]; then echo "  stackshot-frontdoor.service: skipped (the config has no [frontdoor] table)$stays"; fi
+    if [ "$SIGNIN" = 0 ] && [ -f "$UNIT_DIR/stackshot-signin.service" ]; then echo "  stackshot-signin.service: skipped (the config has no [frontdoor_signin] table)$stays"; fi
+    u="$UNIT_DIR/stackshot-splitter.service"
+    case "$SPLITTER_WHY" in
+        "") ;;
+        absent) if [ -f "$u" ]; then echo "  stackshot-splitter.service: skipped (the config has no [frontdoor_splitter] table)$stays, and its own check refuses to start it"; fi ;;
+        *) if [ -f "$u" ]; then echo "  stackshot-splitter.service: skipped ($SPLITTER_WHY)$stays, and its own check refuses to start it"
+           else echo "  stackshot-splitter.service: skipped ($SPLITTER_WHY)"; fi ;;
+    esac
+    if [ ${#FRONTU[@]} -gt 0 ]; then echo "  front door units: never enabled or started by this script (systemctl --user enable --now <unit> is your step; docs/front-door.md)"; fi
+}
+front_restart() {   # a front door unit whose file changed is restarted only when it runs already: nothing here starts one
+    local n u seen=" "
+    for n in ${changed[@]+"${changed[@]}"}; do
+        case "$n" in
+            stackshot-frontdoor.service|stackshot-signin.service|stackshot-splitter.service) u="$n" ;;
+            stackshot-splitter.Caddyfile) u=stackshot-splitter.service ;;
+            *) continue ;;
+        esac
+        case "$seen" in *" $u "*) continue ;; esac
+        seen="$seen$u "
+        case "$(systemctl --user is-active "$u" 2>/dev/null || true)" in
+            active|activating|reloading)
+                if systemctl --user restart "$u"; then echo "  restarted $u"; else echo "  FAILED to restart $u" >&2; return 1; fi ;;
+        esac
+    done
 }
 linger_state() {   # yes | no | unknown: logind's own answer, else its flag file (loginctl knows no user that is neither logged in nor lingering)
     local v=""; command -v loginctl >/dev/null 2>&1 && v="$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || true)"
@@ -153,7 +214,7 @@ case "$VERB" in
     render)   # byte-identical to what `units` installs: no separator after a single unit, a comment line between several
         echo "# $UNITS_SAYS" >&2
         first=1
-        for n in "${ARGS[@]:-${SERVER[@]} ${USERU[@]}}"; do for m in $n; do [ $first = 1 ] || echo "# ---------------- $m"; first=0; render "$m"; done; done ;;
+        for n in "${ARGS[@]:-${SERVER[@]} ${USERU[@]} ${FRONTU[*]:-}}"; do for m in $n; do [ $first = 1 ] || echo "# ---------------- $m"; first=0; render "$m"; done; done ;;
     units|puller)
         if [ "$VERB" = units ] && [ "$FORCE_HOST" = 0 ]; then      # the server's units go on the server host only: checked once, first, before lingering or any unit is touched; one line and exit 1 on another box
             why="$(STACKSHOT_CONFIG="$CONFIG" python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from stackshot.core import config as c; print(c.server_host_refusal())' "$CHECKOUT" 2>/dev/null)" || why=""      # a config that names no server host, or a check that cannot run, refuses nothing
@@ -208,6 +269,7 @@ case "$VERB" in
             fi
         fi
         for n in "${USERU[@]}"; do [ "$VERB" = units ] || [ "$n" = stackshot-puller.service ] || continue; put "$n" "$UNIT_DIR"; done
+        if [ "$VERB" = units ]; then front_units; fi
         systemctl --user daemon-reload
         [ "$VERB" = units ] && { systemctl --user enable --quiet stackshot.service stackshot-reload.path 2>/dev/null || true; }
         [ "$VERB" = units ] && [ $HUB = 1 ] && systemctl --user enable --quiet anchor-hub.service 2>/dev/null || true
@@ -229,16 +291,19 @@ case "$VERB" in
                 if [ $MINUTE = 1 ]; then start stackshot-minute.service; fi      # after the server: it waits for /healthz only at its own start
             fi
             start stackshot-puller.service
+            if [ "$VERB" = units ]; then front_restart || failed+=("a front door unit"); fi
             if [ ${#failed[@]} -gt 0 ]; then echo "not started: ${failed[*]}" >&2; exit 1; fi
         elif [ ${#changed[@]} -gt 0 ]; then
             if [ "$RESTART" = 1 ]; then
                 for n in "${changed[@]}"; do
                     case "$n" in
                         stackshot-reload.service|stackshot-portal-sync.service|stackshot-audit.service|stackshot-audit.timer) ;;   # the audit's: a restart of its service would cue an audit; its timer is re-armed above
+                        stackshot-frontdoor.service|stackshot-signin.service|stackshot-splitter.service|stackshot-splitter.Caddyfile) ;;   # front_restart below: only one that runs already
                         stackshot-minute.service) systemctl --user reset-failed "$n" 2>/dev/null || true; systemctl --user restart "$n" && echo "  restarted $n" ;;   # reset-failed first: past its start limit a plain restart is refused
                         *) systemctl --user restart "$n" && echo "  restarted $n" ;;
                     esac
                 done
+                front_restart || exit 1
             elif [ "$QUIET_HINT" = 0 ]; then
                 echo "changed, not restarted: ${changed[*]}  (rerun with --restart, or restart them yourself)"
             fi

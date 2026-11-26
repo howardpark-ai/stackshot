@@ -1,0 +1,37 @@
+# The splitter's Caddyfile (stackshot-splitter.service): Caddy on the port the board listened on before it moved behind the front door
+# (docs/front-door.md). The MCP path is checked by the sign-in service and goes to the front door; everything else goes to the board.
+# Needs Caddy 2.11.6 or later. A client's own identity headers are removed before anything reads the request, the board's token check
+# (/frontdoor/*) is refused here, the admin API is off, and it listens on the loopback address only.
+{
+	admin off
+	auto_https off
+	persist_config off
+	grace_period 3s
+	servers {
+		# a tunnel or a proxy on this machine connects from the loopback address: its X-Forwarded-For and X-Forwarded-Proto are kept,
+		# so the board still sees the real caller (its per-source limits) and https
+		trusted_proxies static 127.0.0.1/32 ::1/128
+	}
+}
+
+http://:@LISTEN_PORT@ {
+	bind 127.0.0.1
+	route {
+		# a client's own copy of any identity header goes first
+		request_header -@IDENTITY_HEADER@
+		request_header -X-Forwarded-User
+		request_header -X-Verified-User
+		request_header -X-Stackshot-Identity
+		request_header -X-Stackshot-Verify
+		# the board's token check is for the sign-in service only, which asks the board directly
+		@token_check path /frontdoor /frontdoor/*
+		respond @token_check 404
+		@mcp path /mcp /mcp/*
+		forward_auth @mcp @SIGNIN_ADDR@ {
+			uri /verify
+			copy_headers X-Verified-User>@IDENTITY_HEADER@
+		}
+		reverse_proxy @mcp @DOOR_ADDR@
+		reverse_proxy @BOARD_ADDR@
+	}
+}

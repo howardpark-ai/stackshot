@@ -1,8 +1,8 @@
 # The front door
 
-What this page covers: the front door, one MCP endpoint over several boards and a brain for people who sign in through a reverse proxy: how it is run, the sign-in service the proxy asks, who the caller is, the one tool set and its `board` argument, every refusal text, the credential each backend is called with, the instructions text, the health route and what is checked. Back to the [README](../README.md).
+What this page covers: the front door, one MCP endpoint over several boards and a brain for people who sign in through a reverse proxy: how it is run, the sign-in service the proxy asks, its units, the splitter, releases, who the caller is, the one tool set and its `board` argument, every refusal text, the credential each backend is called with, the instructions text, the health route and what is checked. Back to the [README](../README.md).
 
-The front door is a separate program (`python -m stackshot.frontdoor`, package `stackshot/frontdoor/`). The board server does not import it and does not read its settings. Nothing in it is installed or started by `setup`; a person who runs it writes the proxy and the unit themselves. A board takes part in it only when its own config says so (see [A board behind the front door](#a-board-behind-the-front-door)); a board with no such table behaves as it always did.
+The front door is a separate program (`python -m stackshot.frontdoor`, package `stackshot/frontdoor/`). The board server does not import it and does not read its settings. `./install.sh units` renders a unit for each part the config has a table for, and nothing enables or starts one: a person does ([Units, the splitter and releases](#units-the-splitter-and-releases)). A board takes part in it only when its own config says so (see [A board behind the front door](#a-board-behind-the-front-door)); a board with no such table behaves as it always did.
 
 ## Run it
 
@@ -11,7 +11,7 @@ uv run --project <checkout> --locked --extra server python -m stackshot.frontdoo
 uv run --project <checkout> --locked --extra server python -m stackshot.frontdoor --check    # read the settings, print what would run, exit
 ```
 
-It needs the `server` extra (FastMCP is already in it, so there is no new dependency). The settings are the `[frontdoor]` table and one `[[frontdoor.backends]]` table per backend of the config file ([Configuration: integrations](configuration-integrations.md), `frontdoor.*`). It does not start (exit 2, the reason on standard error, never a secret) without an `identity_header`, a `members_file` and one usable backend. A backend entry that is wrong is left out, named in the config notes (`stackshot doctor` prints them), and the others are served.
+It needs the `server` extra (FastMCP is already in it, so there is no new dependency). The settings are the `[frontdoor]` table and one `[[frontdoor.backends]]` table per backend of the config file ([Configuration: integrations](configuration-integrations.md), `frontdoor.*`). It does not start (exit 2, the reason on standard error, never a secret) without an `identity_header`, a `members_file` and one usable backend. `--check` also reads the files serving needs: a signing secret, a members file or a backend's credential file that is missing, unreadable or not usable is exit 2, with each one named and no value shown. A backend entry that is wrong is left out, named in the config notes (`stackshot doctor` prints them), and the others are served.
 
 ## Who is calling
 
@@ -77,7 +77,7 @@ A 401 carries the `WWW-Authenticate` value the board's own `/mcp` sends for the 
 
 ## The sign-in service
 
-`python -m stackshot.frontdoor.signin` (`stackshot/frontdoor/signin.py`) is the program the proxy's `forward_auth` asks about each request. It is a program of its own, nothing installs or starts it, and it listens on 127.0.0.1 only.
+`python -m stackshot.frontdoor.signin` (`stackshot/frontdoor/signin.py`) is the program the proxy's `forward_auth` asks about each request. It is a program of its own and listens on 127.0.0.1 only; `./install.sh units` renders its unit when the config has its table, and nothing enables or starts it.
 
 ```
 uv run --project <checkout> --locked --extra server python -m stackshot.frontdoor.signin            # serve
@@ -88,9 +88,11 @@ The settings are the `[frontdoor_signin]` table ([Configuration: integrations](c
 
 The verify secret is a secret of its own. The service does not start when it is the same file as an identity secret its config names (`frontdoor_signin`, `frontdoor` or `behind_frontdoor` `identity_secret_file`, links resolved) or holds the same value, nor when it cannot read one of them: whoever holds the identity secret can sign any caller's identity to a board. The comparison is made at the start; restart the service after changing either secret.
 
+The verify secret has to be the same value as the board's (`[behind_frontdoor] verify_secret_file`, which may name the same file). Where the board the service asks is the one of its own config (a loopback `board_verify_url` on `[server] port`), `--check` compares the two and exits 2 when they do not match, showing neither; its line says when it could not compare.
+
 ### Caddy in front
 
-Use Caddy 2.11.5 or later. Before 2.11.2, `copy_headers` could leave a client's own identity header in place when the check's answer did not carry it ([GHSA-7r4p-vjf4-gxv4](https://github.com/caddyserver/caddy/security/advisories/GHSA-7r4p-vjf4-gxv4)), and before 2.11.5, `forward_auth` beside `reverse_proxy` could send a request over a connection made for the wrong upstream ([GHSA-6365-7ppr-5r92](https://github.com/caddyserver/caddy/security/advisories/GHSA-6365-7ppr-5r92)). Version 2.11.5 is a tag with no release of its own; 2.11.6 is the first release that has the fix.
+Use Caddy 2.11.6 or later. Before 2.11.2, `copy_headers` could leave a client's own identity header in place when the check's answer did not carry it ([GHSA-7r4p-vjf4-gxv4](https://github.com/caddyserver/caddy/security/advisories/GHSA-7r4p-vjf4-gxv4)), and before 2.11.5, `forward_auth` beside `reverse_proxy` could send a request over a connection made for the wrong upstream ([GHSA-6365-7ppr-5r92](https://github.com/caddyserver/caddy/security/advisories/GHSA-6365-7ppr-5r92)). There is no 2.11.5 release to install (the tag has none); 2.11.6 is the first release that has that fix.
 
 For a front door on port 8020 whose `identity_header` is `x-forwarded-user`, a service on port 8021 and the board that service asks on port 8010:
 
@@ -138,6 +140,83 @@ A 200 of the board that the service accepts is reused for `cache_seconds` (5 by 
 The service reaches the board directly, whatever proxy the environment names, follows no redirect and keeps no cookie. It holds at most 64 connections to the board; a further check waits for one within its own `timeout_seconds`.
 
 Every answer is `Cache-Control: no-store`. A header the client sends is not repeated in the answer, whatever its name. The log names a request by the first 8 hex digits of a hash of the token and of the identity; no token, secret or address is written to it. It keeps no access log and speaks no websocket protocol (a websocket upgrade is answered as the plain request it also is): Caddy's check carries the query string of the caller's own request, which the service neither reads nor writes. `GET /healthz` answers 200 `{"status": "ok"}` when the secret and the members file can be read and 503 `{"status": "degraded"}` when not; it does not ask the board.
+
+## Units, the splitter and releases
+
+### The units
+
+`./install.sh units` renders a user unit for each part of the front door whose table the config has. A config without the tables installs exactly what it installed before.
+
+| Unit | Rendered when | What it runs |
+| --- | --- | --- |
+| `stackshot-frontdoor.service` | `[frontdoor]` | the front door |
+| `stackshot-signin.service` | `[frontdoor_signin]` | the sign-in service |
+| `stackshot-splitter.service`, with `~/.config/stackshot/splitter.Caddyfile` | `[frontdoor_splitter]`, `[frontdoor]` with an identity header and `[frontdoor_signin]`, and a `listen_port` that `[server] port` does not give the board | the splitter, a Caddy on 127.0.0.1 |
+
+Nothing here enables or starts them: not `setup`, not `./install.sh units` with or without `--start`, not a release. A person does it once, with `systemctl --user enable --now <unit>`. With `--restart` or `--start`, `install.sh` restarts a front door unit whose file changed only when it runs already. A unit an earlier run installed is not removed when its table goes.
+
+The front door and the sign-in service are `PartOf=stackshot.service`: a restart of the board restarts them and a stop of the board stops them. Once enabled they are also wanted by the board, so starting it starts them.
+
+### The splitter
+
+The splitter takes the address the board's clients already use. It sends the MCP path (`/mcp`) through the sign-in service's check to the front door and everything else to the board. Before anything reads a request it removes the identity headers a client sends; it answers the board's token check (`/frontdoor/*`) with 404; its admin API is off; it trusts `X-Forwarded-*` from the loopback address only; and it listens on 127.0.0.1 only. It needs Caddy 2.11.6 or later at `[frontdoor_splitter] caddy` (`/usr/bin/caddy` by default).
+
+Moving a board that clients reach on a port behind the splitter, in this order:
+
+1. Give the board another port (`[server] port`). Point at that port everything that asks the board directly: the board's `url` and `health_url` in `[[frontdoor.backends]]`, `[frontdoor_signin] board_verify_url`, and a client on this machine that must not go through the front door. Add the board's `[behind_frontdoor]` table with `verify_secret_file`, which the sign-in service needs. Restart the board.
+2. Add `[frontdoor_splitter]` with `listen_port` set to the old port, run `./install.sh units`, and enable the front door and the sign-in service.
+3. Enable the splitter: `systemctl --user enable --now stackshot-splitter.service`. From here the old address reaches the splitter.
+
+The splitter cannot take the port while it is the board's. `install.sh` renders no splitter whose `listen_port` is the one `[server] port` gives the board, and the unit checks again before every start, a reboot's included (`ExecStartPre`, `stackshot/frontdoor/splitter.py`): it does not start unless the values it was rendered with are what the config says now, the config still allows a splitter and the Caddy is new enough.
+
+To undo, stop the splitter first:
+
+1. `systemctl --user disable --now stackshot-splitter.service`. The check runs only when the splitter starts, so a splitter that is still running keeps the port, and the board cannot bind it.
+2. Give the board its port back (`[server] port`, and the addresses of step 1), restart it, and disable the front door and the sign-in service if they are not to run.
+
+A splitter left enabled after the config gave the port back does not start at the next boot; `systemctl --user --failed` shows it.
+
+### Releases
+
+`deploy.sh` restarts the front door and the sign-in service with the board, where their units are turned on (enabled or running). It restarts a running splitter only when the splitter's unit or Caddyfile template changed. After the board's health check, with at least one front door unit turned on, the deploy runs
+
+```
+uv run --project <checkout> --locked --extra server python -m stackshot.frontdoor.check --installed --wait 90
+```
+
+and fails, as it fails on a board that does not answer, when a part does not do its work (a release then reports it and pauses the release queue; nothing is rolled back for a failed deploy). A health route is not enough here: the front door answers its own routes and an MCP initialize with its board down. So the check makes a real tool call (`sessions`, which only reads): through the front door with a member's identity, and through the splitter with the board's machine token. It also asks the sign-in service's token check, and sees that the splitter refuses a client's own identity header and the token check path. With `accept_portal_token` off the machine token is refused through the splitter by design: the check says so and makes no tool call that way. The units are found by the names above; a part run another way is not checked.
+
+The same check by hand, against an address:
+
+```
+uv run --project <checkout> --locked --extra server python -m stackshot.frontdoor.check --door http://127.0.0.1:8030 [--as MEMBER] [--board NAME]
+uv run --project <checkout> --locked --extra server python -m stackshot.frontdoor.check --signin http://127.0.0.1:8031 [--board NAME]
+uv run --project <checkout> --locked --extra server python -m stackshot.frontdoor.check --splitter http://127.0.0.1:8020 [--board NAME]
+```
+
+Set `STACKSHOT_CONFIG` to the instance's config. `--door` sends the identity header itself, naming a member of the board; `--splitter` and `--signin` read the board's machine token from the front door's `token_file`. The token is never printed or passed as an argument, and is not sent over plain http to another machine. Exit 0: passed; 1: something did not, and the last line says what; 2: the arguments or the config allow no check.
+
+### After a new machine token
+
+The front door keeps its own copy of the board's machine token (`[[frontdoor.backends]] token_file`). After a new token in `<paths.secrets>/oauth.env`:
+
+1. Restart the board: it reads the file at its start only.
+2. At once, copy the token: `stackshot frontdoor-token` (or `uv run --project <checkout> --locked python -m stackshot.frontdoor.boardtoken`), with `--board NAME` when the front door's boards include no single one on this config's `[server] port`. The front door reads its token file at each request, so it needs no restart; between step 1 and this step its calls to the board are refused.
+3. Check with a real call: `python -m stackshot.frontdoor.check`, as above.
+
+The command writes a new file, readable by its owner only, and moves it over the old one in one step. It prints no value and takes none as an argument. `--check` says whether the file holds the board's token and writes nothing (exit 0 it does, 1 it does not, 2 it cannot tell). Where releases run, hold them around the steps (next).
+
+### Holding releases
+
+A release restarts the board. While work on the server must not have that in its middle, hold releases:
+
+```
+./release.sh hold --minutes 30 --by "<who>" --why "<what for>"
+./release.sh hold --status
+./release.sh hold --end
+```
+
+While the hold stands no release deploys: one started by hand or by the queue still merges its PR, then waits before its deploy, says in its log and in one message who holds and why, and goes on by itself when the hold ends. A rollback waits too. `release.sh queue --list` shows the hold. It ends after the minutes given, 120 at most, or by `--end`. The command first waits for a deploy that is under way. `deploy.sh` run by hand does not look at the hold. Where `release.sh` runs on another machine than the server (`[release] deploy_ssh`), run the hold there.
 
 ## The one tool set
 
@@ -189,6 +268,8 @@ Streaming progress and log notifications of a tool call pass through as they arr
 The other scenarios cover the pieces, in one process:
 
 `tests/frontdoor_board_scenario.py` covers the board's side: the settings and their notes, the check of one signed identity (every refusal, the window, a rotated secret), the members read from the front door's file (the format, a change on an open session, a file that is missing or wrong), the guard as a wrapper, the real board over HTTP and the front door's own transport against it, a board with no table, which is as it was, and a real board with sign-in on that offers the token check (the route's place among the app's routes, the header's name and the signed word as the service writes them, the portal's machine token, a token the board does not know, a bearer that `/mcp` refuses, a 401's `WWW-Authenticate` against `/mcp`'s own; Google's own check of a grant is called by no test). `tests/frontdoor_scenario.py` (stand-in boards and a stand-in brain on loopback ports) covers the schema diff against a single board, the routing and every refusal text above, concurrent calls of several sessions with no cross-talk, that the caller's bearer never reaches a backend, streaming, a backend that is down, a backend that accepts a connection and never answers (initialize, list, call and `/healthz` return within the bound), a health URL that answers a byte at a time (the list, `/healthz` and 40 lists at once return within the bound and the next member is not held), a member removed from the members file on an open session, the instructions text, the signed identity, the no-caller list and the config notes.
+
+`tests/frontdoor_units_scenario.py` covers the units: what `install.sh` renders with and without the tables, that none is enabled or started, the splitter's refusals to render and to start, and the splitter's Caddyfile (with a real Caddy where one is on the PATH). `tests/frontdoor_realcall_scenario.py` runs the real-call check against real processes, the deploy's use of it and the command that copies the machine token. `tests/release_hold_scenario.py` covers holding releases.
 
 `tests/frontdoor_verify_scenario.py` covers the token check for the sign-in service: the `verify_secret_file` settings and notes, every refusal of the signed header, a rotated secret, a verify secret that is the identity secret, and the route over a stand-in sign-in provider (a good token, the portal's, no bearer, an unknown token, a token with no address, a check that raises, a board with no sign-in, that the route itself never asks about the token of a refused request, and that the bearer is read as the MCP library's middleware reads it).
 

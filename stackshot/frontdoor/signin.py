@@ -1,7 +1,8 @@
 """signin.py: the sign-in service, the target of the reverse proxy's `forward_auth` in front of the front door.
 
     python -m stackshot.frontdoor.signin            serve, with the settings of the config file's [frontdoor_signin] table
-    python -m stackshot.frontdoor.signin --check    read the settings, print the config notes and what would run, exit (0: the service could start)
+    python -m stackshot.frontdoor.signin --check    read the settings, print the config notes and what would run, exit (0: the service could start, and where this config
+                                                    also holds its board's verify_secret_file, the two hold the same value; `board_secret`)
 
 For each request the proxy asks `GET /verify`, carrying the original request's headers. The service
   * takes the caller's `Authorization: Bearer <token>`, and asks the board who the token is for: `GET <board_verify_url>` (the board's `/frontdoor/verify`, web/routes/door_verify.py)
@@ -40,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import hmac
 import http.cookiejar
 import json
 import logging
@@ -114,6 +116,29 @@ def secret_clash(s: _sc.Settings) -> str:
     except OSError as e:
         return f"the secret files cannot be compared: {e.strerror or type(e).__name__}"
     return ""
+
+
+def board_secret(s: _sc.Settings) -> tuple[bool, str]:
+    """(whether `--check` passes, what it says) about the verify secret and the board's. Only a config that holds both settings can tell: its `[behind_frontdoor]`
+    verify_secret_file, with a board_verify_url that is this config's own board (the loopback address, `[server] port`). Never a value of either."""
+    from stackshot.core import behind_door
+    from stackshot.frontdoor import config as _door
+    board = behind_door.settings()
+    if not board.verify:
+        return True, "not compared with a board's: this config has no [behind_frontdoor] verify_secret_file"
+    if not _door.is_own_board(s.board_verify_url):
+        return True, "not compared with a board's: board_verify_url is not the board of this config's [server] port"
+    if not board.verify_file:
+        return False, "[behind_frontdoor] verify_secret_file is not a path, so the board answers no token check"
+    try:
+        mine = _files.read_secret(s.verify_secret_file, "verify_secret_file")
+        theirs = _files.read_secret(board.verify_file, "[behind_frontdoor] verify_secret_file")
+    except _files.FileError as e:
+        return False, str(e)
+    if not hmac.compare_digest(mine.encode(), theirs.encode()):
+        return False, (f"[{_sc.TABLE}] verify_secret_file {os.path.expanduser(s.verify_secret_file)} and [behind_frontdoor] verify_secret_file "
+                       f"{os.path.expanduser(board.verify_file)} do not match: the board would refuse every token check")
+    return True, "the same value as the board's"
 
 
 def refused(www: str) -> Any:
@@ -333,8 +358,12 @@ def main(argv: list[str]) -> int:
         print(f"the sign-in service does not start: what serving needs cannot be loaded ({type(e).__name__}: {e}): run it with the project's `server` extra (uv run --extra server)", file=sys.stderr)
         return 2
     if check:
+        matches, about = board_secret(settings)
+        if not matches:
+            print(f"the sign-in service cannot work as set: {about}", file=sys.stderr)
+            return 2
         print(f"sign-in service: {_sc.HOST}:{settings.port}, asks {settings.board_verify_url}, header {IDENTITY_HEADER}, timeout {settings.timeout_seconds:g}s, "
-              f"cache {settings.cache_seconds:g}s, machine token {'accepted' if settings.accept_portal_token else 'refused'} (config {_cfg.PATH})")
+              f"cache {settings.cache_seconds:g}s, machine token {'accepted' if settings.accept_portal_token else 'refused'}, verify secret {about} (config {_cfg.PATH})")
         return 0
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     serve(settings, app)

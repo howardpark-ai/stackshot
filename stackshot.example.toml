@@ -734,22 +734,27 @@ result_turn_cap_per_hour = 6                        # the most turns one session
 # oauth = { client_id_file = "...", client_secret_file = "...", scopes = ["read", "write"] }   #   OAuth client credentials (one credential per backend, never both)
 
 # [behind_frontdoor]                                # on a BOARD that sits behind the front door (docs/front-door.md, "A board behind the front door"); absent = the board as it always was. Each key works alone. Restart-only
-# identity_secret_file = "~/.config/stackshot/door-identity.key"   # the secret the front door signs the caller's identity with (private to the owner, mode 600): set = a call to /mcp without a valid signed identity is refused with HTTP 403
+# identity_secret_file = "~/.config/stackshot/frontdoor-identity.key"   # the secret the front door signs the caller's identity with: the same value as [frontdoor] identity_secret_file (private to the owner, mode 600): set = a call to /mcp without a valid signed identity is refused with HTTP 403
 # identity_max_age_seconds = 300                    # how old a signed identity may be (a number from 1 to 3600; anything else reads as 300); raise it for tools that run longer than this
 # members_file = "~/.config/stackshot/frontdoor-members.json"   # the front door's members file: set = this board's members are the ones it lists for board_name, read at each call ([[members]] is then not read)
 # board_name = "main"                               # this board's name in the front door's [[frontdoor.backends]] (required with members_file)
-# verify_secret_file = "~/.config/stackshot/frontdoor/verify.key"   # the secret the sign-in service signs a token check with (private to the owner, mode 600): set = the board answers GET /frontdoor/verify for a request carrying that signed header and a bearer token (who the board's own sign-in says the token is for); unset = no such route. Works alone
+# verify_secret_file = "~/.config/stackshot/frontdoor-verify.key"   # the secret the sign-in service signs a token check with (private to the owner, mode 600): set = the board answers GET /frontdoor/verify for a request carrying that signed header and a bearer token (who the board's own sign-in says the token is for); unset = no such route. Works alone
 
 # [frontdoor_signin]                                # the sign-in service the proxy's forward_auth asks (python -m stackshot.frontdoor.signin; docs/front-door.md, "The sign-in service"). A separate program on 127.0.0.1. Restart-only
 # listen_port = 8021                                # a whole number from 1 to 65535 (anything else reads as 8021)
 # board_verify_url = "http://127.0.0.1:8010/frontdoor/verify"  # REQUIRED: the token check of a board that sets [behind_frontdoor] verify_secret_file
-# verify_secret_file = "~/.config/stackshot/verify.key"  # REQUIRED: the same value as that board's verify_secret_file (private to the owner, mode 600; 16 characters or more); read at each request
+# verify_secret_file = "~/.config/stackshot/frontdoor-verify.key"  # REQUIRED: the same value as that board's verify_secret_file (private to the owner, mode 600; 16 characters or more); read at each request
 # members_file = "~/.config/stackshot/frontdoor-members.json"  # default: the [frontdoor] members_file; read at each request
 # identity_secret_file = "~/.config/stackshot/frontdoor-identity.key"   # default: the [frontdoor] identity_secret_file. The service does not start when the verify secret is this file or value
 # timeout_seconds = 5                               # the longest wait for the board's whole answer (above 0, up to 60); after it the answer is 503
 # cache_seconds = 5                                 # how long a 200 of the board is reused for the same token (0 to 60; 0 = off)
 # accept_portal_token = false                       # true: the board's own machine token ([auth] portal_identity) is passed on as that person's sign-in. Off: 403. It belongs to
 #                                                   # one board, and as an identity at the front door it reaches every board that person is a member of
+
+# [frontdoor_splitter]                              # the splitter: a Caddy on 127.0.0.1 that takes the port the board listened on before it moved behind the front door (docs/front-door.md, "The splitter").
+#                                                   # `./install.sh units` renders its unit and Caddyfile; no script enables or starts it. Needs [frontdoor] and [frontdoor_signin]. Restart-only
+# listen_port = 8020                                # REQUIRED: the port the board's clients connect to. Never the board's own port (the server table's): with that, no splitter is installed or started
+# caddy = "/usr/bin/caddy"                          # the Caddy the unit runs: 2.11.6 or later
 
 [step_proof]                                        # a step of an item's next that names the event which finishes it (a pull request merged or released) is ticked by the server (stackshot/model/step_proof.py).
                                                     # Without a switch, the first pass of the server's clock after a start only logs what it would do (and keeps it in <state>/step-proof-dry.json);

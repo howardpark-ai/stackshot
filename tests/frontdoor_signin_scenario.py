@@ -911,6 +911,30 @@ def start_part():
     refused_start("the verify secret is missing", good.replace(f'verify_secret_file = "{SFILE}"', f'verify_secret_file = "{T}/no-verify.key"'), "verify_secret_file")
     r = run(base + f'[frontdoor]\nidentity_secret_file = "{IFILE}"\n', "--check")
     check("secrets: with the front door's identity secret another file and value, the service could start", r.returncode == 0, (r.returncode, r.stderr[-300:]))
+    # the verify secret has to be the board's: --check compares the two where one config holds both and the board it asks is that config's own
+    def behind(path, port=8010):
+        return f'[server]\nport = {port}\n[behind_frontdoor]\nverify_secret_file = "{path}"\n'
+    def compared(label, toml, code, want):
+        r = run(toml, "--check")
+        said = r.stdout + r.stderr
+        check(f"verify secret: {label}: --check exits {code} and says so, printing neither value", r.returncode == code and want in (r.stdout if code == 0 else r.stderr)
+              and SECRET not in said and other_value not in said and IDENTITY not in said, (r.returncode, r.stdout[-300:], r.stderr[-300:]))
+        return r
+    other_value = "another-verify-value-" + "0123456789abcdef" * 2
+    other = secret_file("other-verify.key", other_value)
+    compared("one file for both", good + behind(SFILE), 0, "verify secret the same value as the board's")
+    compared("two files with one value", good + behind(same_value), 0, "verify secret the same value as the board's")
+    r = compared("two files with different values", good + behind(other), 2, "do not match: the board would refuse every token check")
+    check("verify secret: ... naming both settings and both files, as a thing that cannot work", "cannot work as set" in r.stderr and f"[frontdoor_signin] verify_secret_file {SFILE}" in r.stderr
+          and f"[behind_frontdoor] verify_secret_file {other}" in r.stderr and r.stdout == "", r.stderr)
+    for url in ("http://localhost:8010/frontdoor/verify", "http://127.0.0.1:8010/frontdoor/verify"):
+        compared(f"different values, the board asked on this machine ({url.split('/')[2]})", good.replace("http://127.0.0.1:8010/frontdoor/verify", url) + behind(other), 2, "do not match")
+    compared("the board's file is missing", good + behind(f"{T}/no-board-verify.key"), 2, f"{T}/no-board-verify.key")
+    compared("others can read the board's file", good + behind(secret_file("open-board-verify.key", SECRET, 0o644)), 2, "open-board-verify.key")
+    compared("the board's setting is no path", good + "[server]\nport = 8010\n[behind_frontdoor]\nverify_secret_file = 7\n", 2, "is not a path, so the board answers no token check")
+    compared("a config with no board secret", good, 0, "not compared with a board's: this config has no [behind_frontdoor] verify_secret_file")
+    compared("another port than this config's board", good + behind(other, port=8099), 0, "not compared with a board's: board_verify_url is not the board of this config's [server] port")
+    compared("a board on another machine", good.replace("http://127.0.0.1:8010", "https://board.example.invalid") + behind(other), 0, "not compared with a board's: board_verify_url is not the board")
     # serving refuses as --check does: it never listens
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0)); free = sock.getsockname()[1]
