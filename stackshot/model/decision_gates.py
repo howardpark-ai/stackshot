@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastmcp.exceptions import ToolError
 
@@ -109,40 +110,80 @@ def _gate_mockup(meta: dict[str, Any], description: str) -> None:
 
 # ----------------------------------------------------------------------------- a decision's link is a short decision page
 # The owner decides from the page the ask links. A link to a long project or notes page is unreadable as a decision, so the instance lists the prefixes of such pages ([ask] refuse_link_prefixes) and a write
-# that SETS an ask or an option holding a link that starts with one is refused (an ask only stored is never judged). The scheme and host match in any case, the path as written, a /tree/ page is the
-# same page as its /blob/ form, and a prefix without a path ends at its host. A link is a bare address or the address of a [words](url) link.
+# that SETS an ask or an option holding a link that starts with one is refused (an ask only stored is never judged). A link is a bare address or the address of a [words](url) link (the words are read as an
+# address too, so link text that is itself a listed address is refused). The link and the prefix are put in one form first (`_link_norm`), so the cheap spellings of one address meet; a prefix without a
+# closing slash ends at a path segment, a prefix with a query matches that query. A script's own question and the cold call's ask are not judged: a script cannot make a page (the callers skip the gate).
 _LONG_LINK_RX = re.compile(r"(?i:https?)://[^\s<>()\[\]\"'`]+")
-_LONG_LINK_FIX = ("link a short decision page made for this decision: an artifact, a document, or a mockup page from the web UI, with the decision, its choices and what is at stake on it. "
-                  "The long page stays on the project page, not in the ask or its options.")
+_LONG_LINK_PAGE = ("a short decision page made for this decision: an artifact, a document, or a mockup page from the web UI, with the decision, its choices and what is at stake on it. "
+                   "The long page stays on the project page, not in the ask or its options.")
+_LONG_LINK_FIX = "link " + _LONG_LINK_PAGE
+_LONG_LINK_FIX_OPTION = ("take the link out of the option and put the link to a short decision page in the ask's Decide part: an artifact, a document, or a mockup page from the web UI, made for this decision, "
+                         "with the decision, its choices and what is at stake on it. The long page stays on the project page, not in the ask or its options. The option's line says in words what it is.")
+_PCT_RX = re.compile(r"%([0-9A-Fa-f]{2})")
+_UNRESERVED = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+_CASELESS_REPO_HOSTS = ("github.com", "www.github.com")      # hosts whose owner and repository names are one name in any case: the first two path segments are lower-cased; every other path is kept as written
+
+
+def _pct(m: "re.Match[str]") -> str:
+    ch = chr(int(m.group(1), 16))
+    return ch if ch in _UNRESERVED or ch == "/" else m.group(0).upper()      # an unreserved character and an encoded slash are decoded; any other escape stays, in upper-case hex
+
+
+def _clean_path(path: str) -> str:
+    """The path of a link as compared: unreserved escapes and %2F decoded once, `.` and `..` segments resolved (a `..` at the root stays at the root), a run of slashes made one, the first tree or blob segment
+    read as blob (a /tree/ page is the same page as its /blob/ form, with or without a closing slash); an empty path is "/"; a closing slash stays."""
+    parts = _PCT_RX.sub(_pct, path).split("/")
+    out: list[str] = []
+    for k, seg in enumerate(parts):
+        last = k == len(parts) - 1
+        if seg == ".":
+            if last:
+                out.append("")
+        elif seg == "..":
+            if out:
+                out.pop()
+            if last:
+                out.append("")
+        elif seg or last:
+            out.append(seg)
+    for k, seg in enumerate(out):
+        if seg in ("tree", "blob"):
+            out[k] = "blob"
+            break
+    return "/" + "/".join(out)
 
 
 def _link_norm(url: str) -> str:
-    """A link as compared: http and https alike, host in lower case (urlsplit lowers it), a default port dropped, a /tree/ segment read as /blob/, a fragment dropped; "" when it has no host."""
-    from urllib.parse import urlsplit
+    """A link as compared: http and https alike, the host in lower case without a closing dot, a default port dropped, backslashes in the path read as slashes, the path cleaned (`_clean_path`), the owner and the
+    repository of a github.com path in lower case, a fragment dropped, the query kept as written; "" when it has no host. Not changed: any other path case, any other escape, an escape written twice (%252F), a
+    user name before the host, a host written another way (an IP address, a punycode name)."""
     if not isinstance(url, str):
         return ""
+    s = url.strip()
+    cut = min((i for i in (s.find("?"), s.find("#")) if i >= 0), default=len(s))
     try:
-        u = urlsplit(url.strip())
-        host, port = (u.hostname or ""), u.port
+        u = urlsplit(s[:cut].replace("\\", "/") + s[cut:])
+        host, port = (u.hostname or "").rstrip("."), u.port
     except ValueError:
         return ""
     if not host:
         return ""
     keep = port if port not in (None, 80, 443) else None
-    path = (u.path or "/").replace("/tree/", "/blob/", 1)
+    path = _clean_path(u.path)
+    if host in _CASELESS_REPO_HOSTS:
+        path = "/".join(x.lower() if k in (1, 2) else x for k, x in enumerate(path.split("/")))
     return f"https://{host}{':' + str(keep) if keep else ''}{path}" + (f"?{u.query}" if u.query else "")
 
 
 def _under(link: str, prefix: str) -> bool:
-    """`link` starts with `prefix`; a prefix that does not end with "/" ends at a path segment, a query or the end (a prefix of one page does not take a page whose name only starts the same)."""
-    return link.startswith(prefix) and (prefix.endswith("/") or link == prefix or link[len(prefix)] in "/?")
+    """`link` starts with `prefix`; a prefix that does not end with "/" ends at a path segment, a query or the end (a prefix of one page does not take a page whose name only starts the same); a prefix with a query
+    ends at the end of a query pair (`&` follows), so it takes that query and no other."""
+    return link.startswith(prefix) and (prefix.endswith("/") or link == prefix or link[len(prefix)] in ("&" if "?" in prefix else "/?"))
 
 
 def long_link_hit(text: Any, prefixes: Any = None) -> str:
     """The first link in `text` that starts with a listed prefix (the instance's [ask] refuse_link_prefixes when `prefixes` is None), as written and cut at 80 characters; "" when none does or none is listed."""
     pre = [n for n in (_link_norm(x) for x in (_cfg.ask_refuse_link_prefixes() if prefixes is None else prefixes)) if n]
-    if not pre:
-        return ""
     for m in _LONG_LINK_RX.finditer(str(text or "")):
         raw = m.group(0).rstrip(".,;:!?*_")
         norm = _link_norm(raw)
@@ -151,9 +192,9 @@ def long_link_hit(text: Any, prefixes: Any = None) -> str:
     return ""
 
 
-def long_link_refusal(hit: str, where: str = "the ask") -> str:
-    """The refusal of a link to a long page: `where` is "the ask" or "option N"."""
-    return f"Refused: {where} links a long page ({hit}), not a decision page. {OWNER} decides from the page the ask links, so " + _LONG_LINK_FIX
+def long_link_refusal(hit: str, where: str = "the ask", option: bool = False) -> str:
+    """The refusal of a link to a long page: `where` is "the ask" or "option N (label)". An option holds no link, so the refusal of one (`option`) says the short link goes in the ask's Decide part."""
+    return f"Refused: {where} links a long page ({hit}), not a decision page. {OWNER} decides from the page the ask links, so " + (_LONG_LINK_FIX_OPTION if option else _LONG_LINK_FIX)
 
 
 def _gate_ask_links(ask: Any) -> None:

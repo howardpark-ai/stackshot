@@ -95,9 +95,10 @@ def _option_gap(i: int, o: dict[str, Any], label: str, line: str) -> str:
     return f"Refused: option {i} has no {lacks}.{seen} Each option is one object with a label and a line: {_OPT_FORM}. An example that passes: {_OPT_EXAMPLE}"
 
 
-def _gate_options(options: Any) -> list[dict[str, Any]] | None:
+def _gate_options(options: Any, links: bool = True) -> list[dict[str, Any]] | None:
     """options as given → the stored list, [] to clear ("none", "clear", "-", or an empty list), None when not passed. Refuses
-    a misshaped list. A JSON string of the list is read as the list (a client that sends every argument as a string)."""
+    a misshaped list. A JSON string of the list is read as the list (a client that sends every argument as a string). `links` False (a script's question, the cold call's options) leaves out the refusal of a link to
+    a long page the instance lists; a link in an option is refused all the same."""
     if options is None:
         return None
     if isinstance(options, str):
@@ -126,9 +127,9 @@ def _gate_options(options: Any) -> list[dict[str, Any]] | None:
         if not label or not line:
             faults.append(_option_gap(i, o, label, line))
             continue
-        long_hit = _dg_long_link_hit(label + " " + line)
+        long_hit = _dg_long_link_hit(label + " " + line) if links else ""
         if long_hit:
-            faults.append(_dg_long_link_refusal(long_hit, f"option {i} ({label})"))
+            faults.append(_dg_long_link_refusal(long_hit, f"option {i} ({label})", option=True))
             continue
         hit = _OPTION_LINK.search(label + " " + line)
         if hit:

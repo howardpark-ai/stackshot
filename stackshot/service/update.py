@@ -689,8 +689,9 @@ def update_unlocked(
     if clear_ask and ask.strip() and ask.strip().lower() not in h.ask_none:
         fc.add("Refused: clear_ask drops the ask; it does not go with a new ask")
     clear_ask = clear_ask or ask.strip().lower() in h.ask_none       # ask="none" or clear_ask=true clears it, like due and wake
-    ask = "" if clear_ask else (fc.call(h.gate_ask, ask, default="") if ask else "")
-    opts = fc.call(h.gate_options, options)           # None: not passed; []: clear
+    own_links = not (_writes.question() or sender.strip() == _ho.COLD)       # a script's question and the cold call's ask link what they link: a script cannot make a decision page
+    ask = "" if clear_ask else (fc.call(h.gate_ask, ask, links=own_links, default="") if ask else "")
+    opts = fc.call(h.gate_options, options, links=own_links)           # None: not passed; []: clear
     if clear_options:                                 # the flag, like clear_wake: the same as options=[] / "none"
         if opts:
             fc.add("Refused: clear_options drops the options; it does not go with a new list")
@@ -1378,7 +1379,7 @@ def update_unlocked(
     watch_note = fc.call(h.watch_on_write, gid, item_was, meta, model_set, model_drop, debtor, sender.strip(), default="")   # the wait's record, the arrival that was shown
     fc.call(_gates.gate_metadata, meta, creating=False)
     lifted = "" if (ask or clear_ask or item.get("status") == "completed") else h.lift_ask(meta, refresh=bool(next), writer=next_writer, keeper=keeper_was)   # a client without the ask parameter
-    if lifted and meta.get("ask") != ask_was:                  # the ask this call sets by the first line of next is judged as an ask given as a parameter is
+    if lifted and own_links and meta.get("ask") != ask_was:                  # the ask this call sets by the first line of next is judged as an ask given as a parameter is
         fc.call(_dg._gate_ask_links, meta.get("ask"))
     steps_note = merged_note + reword_note
     steps_new = None                                            # the checklist this write leaves (set below when the write touches it): reads it

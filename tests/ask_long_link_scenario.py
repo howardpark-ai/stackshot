@@ -6,6 +6,8 @@ no live store, no network, no server socket. Every host is an example.invalid on
   2  the config reader: a list, one string, junk entries dropped, a missing or misshaped key reads as none
   3  the write gate: create and update refuse an ask that sets a listed link (markdown, bare, mixed case, /blob/ and /tree/), an option that holds one, and an ask the first line of next carries; the refusal text is pinned;
      an unlisted link, a mockup link and a claude.ai artifact are accepted; an update that sets no ask leaves a stored old ask alone; an empty list changes nothing
+  3b the script exemption: the question route (and any write the question flag marks) and the cold call's own write take a listed link in an ask, a link in an option stays refused; the repeat of a stored ask
+     as the first line of next is no write of the ask (not judged), a changed one is
   4  the tool text and the docs say it
 
     uv run tests/ask_long_link_scenario.py        → exit 0 / 1"""
@@ -87,7 +89,11 @@ SHORT = "https://short.example.invalid/decision/7"
 hit = lambda text, pre=None: _dg.long_link_hit(text, PREFIXES if pre is None else pre)
 def ask_with(link, tail=""): return f"Decide: ship the new layout [plan]({link}){tail}? · Recommend: yes · Stakes: low · By: Fri"
 def refusal(link, where="the ask"):
-    return (f"Refused: {where} links a long page ({link}), not a decision page. {OWNER} decides from the page the ask links, so link a short decision page made for this decision: "
+    head = f"Refused: {where} links a long page ({link}), not a decision page. {OWNER} decides from the page the ask links, so "
+    if where != "the ask":      # an option holds no link: the short link goes in the ask's Decide part
+        return (head + "take the link out of the option and put the link to a short decision page in the ask's Decide part: an artifact, a document, or a mockup page from the web UI, made for this decision, "
+                "with the decision, its choices and what is at stake on it. The long page stays on the project page, not in the ask or its options. The option's line says in words what it is.")
+    return (head + "link a short decision page made for this decision: "
             "an artifact, a document, or a mockup page from the web UI, with the decision, its choices and what is at stake on it. The long page stays on the project page, not in the ask or its options.")
 
 # ================================================================ 1. the matcher
@@ -113,6 +119,49 @@ check("1 text with no link, an empty text and None are no hit", hit("Decide: shi
 check("1 no list, an empty list: nothing is a hit", hit(LONG, []) == "" and hit(LONG, ()) == "")
 check("1 an entry that is no address is ignored, the others stand", hit(LONG, ["", "notes", 5, None, NOTES]) == LONG and hit(LONG, ["", "notes", 5]) == "")
 check("1 a hit is cut at 80 characters", len(hit(NOTES + "a" * 200)) == 80)
+
+# one address in its cheap spellings meets its prefix (each spelling a check of its own; the link and the prefix are put in one form alike)
+check("1 /tree and /blob alike: a prefix ending in /tree with no closing slash takes a /tree/ link and a /blob/ link", hit("https://git.example.invalid/org/brain/tree/main/x", ["https://git.example.invalid/org/brain/tree"]) != ""
+      and hit("https://git.example.invalid/org/brain/blob/main/x", ["https://git.example.invalid/org/brain/tree"]) != "")
+check("1 /tree and /blob alike: a prefix ending in /blob with no closing slash takes both forms", hit("https://git.example.invalid/org/brain/tree/main/x", ["https://git.example.invalid/org/brain/blob"]) != ""
+      and hit("https://git.example.invalid/org/brain/blob/main/x", ["https://git.example.invalid/org/brain/blob"]) != "")
+check("1 /tree and /blob alike: with a closing slash, both ways", hit("https://git.example.invalid/org/brain/tree/main/x", ["https://git.example.invalid/org/brain/tree/"]) != ""
+      and hit("https://git.example.invalid/org/brain/blob/main/x", ["https://git.example.invalid/org/brain/tree/"]) != ""
+      and hit("https://git.example.invalid/org/brain/tree/main/x", ["https://git.example.invalid/org/brain/blob/"]) != "")
+check("1 /tree and /blob alike: a link that ends at /tree, and a prefix whose name only starts the same, are told apart", hit("https://git.example.invalid/org/brain/tree", ["https://git.example.invalid/org/brain/blob"]) != ""
+      and hit("https://git.example.invalid/org/brain/trees/x", ["https://git.example.invalid/org/brain/tree"]) == "")
+check("1 only the first tree or blob segment is read as blob: a folder named tree further down is a folder", hit("https://git.example.invalid/org/brain/blob/main/tree/x", ["https://git.example.invalid/org/brain/blob/main/blob/"]) == "")
+check("1 dot segments are resolved: /./ and /../ in the link", hit("https://notes.example.invalid/./projects/alpha") != "" and hit("https://notes.example.invalid/other/../projects/alpha") != ""
+      and hit("https://notes.example.invalid/projects/x/../../other/y") == "" and hit("https://notes.example.invalid/projects/alpha/..") != "" and hit("https://notes.example.invalid/projects/./") != "")
+check("1 …a .. at the root stays at the root, and a .. that leaves a listed folder leaves it", hit("https://notes.example.invalid/../projects/alpha") != "" and hit("https://notes.example.invalid/projects/../other") == "")
+check("1 …and in the prefix", hit(LONG, ["https://notes.example.invalid/x/../projects/"]) == LONG)
+check("1 a run of slashes is one slash, in the link and in the prefix", hit("https://notes.example.invalid//projects///alpha") != "" and hit(LONG, ["https://notes.example.invalid//projects//"]) == LONG)
+check("1 an escape of a plain character is decoded: %70rojects, %2e%2e and the upper and lower case of the hex", hit("https://notes.example.invalid/%70rojects/alpha") != "" and hit("https://notes.example.invalid/%50rojects/alpha") == ""
+      and hit("https://notes.example.invalid/other/%2e%2e/projects/alpha") != "" and hit("https://notes.example.invalid/other/%2E%2E/projects/alpha") != "" and hit(LONG, ["https://notes.example.invalid/%70rojects/"]) == LONG)
+check("1 %2F is a slash, in the link and in the prefix", hit("https://notes.example.invalid/projects%2Falpha") != "" and hit("https://notes.example.invalid%2Fprojects/alpha") == "" and hit("https://notes.example.invalid/projects%2falpha") != ""
+      and hit(LONG, ["https://notes.example.invalid%2Fprojects/"]) == "" and hit(LONG, ["https://notes.example.invalid/projects%2F"]) == LONG)
+check("1 any other escape is kept as written, its hex in one case", hit("https://docs.example.invalid/page/a%3a", ["https://docs.example.invalid/page/a%3A"]) != "" and hit("https://docs.example.invalid/page/a%3a", ["https://docs.example.invalid/page/a:"]) == ""
+      and hit("https://notes.example.invalid/projects/%252Falpha") != "" and hit("https://notes.example.invalid/%2570rojects/alpha") == "")
+check("1 a closing dot on the host is no other host, in the link and in the prefix", hit("https://notes.example.invalid./projects/alpha") != "" and hit("https://Notes.Example.Invalid.:443/projects/a") != ""
+      and hit(LONG, ["https://notes.example.invalid./projects/"]) == LONG and hit("https://notes.example.invalid.evil.example/projects/a") == "")
+check("1 a backslash in the path is a slash, in the link and in the prefix", hit("https://notes.example.invalid\\projects\\alpha") != "" and hit("https://notes.example.invalid/projects\\alpha") != ""
+      and hit(LONG, ["https://notes.example.invalid\\projects\\"]) == LONG and hit("https://notes.example.invalid/other?next=\\projects\\alpha") == "")
+GH = "https://github.com/Org/Brain/blob/main/projects/"
+check("1 github.com: owner and repository in any case, in the link and in the prefix", hit("https://github.com/org/brain/blob/main/projects/p1", [GH]) != "" and hit("https://GitHub.com/ORG/BRAIN/tree/main/projects/p1", [GH]) != ""
+      and hit("https://github.com/org/brain/blob/main/projects/p1", ["https://github.com/org/brain/blob/main/projects/"]) != "" and hit("https://www.github.com/org/brain/blob/main/projects/p1", ["https://www.github.com/ORG/Brain/"]) != "")
+check("1 …a branch and a file name keep their case, another repository is another page, and another host keeps every case", hit("https://github.com/org/brain/blob/main/Projects/p1", [GH]) == "" and hit("https://github.com/org/brain/blob/Main/projects/p1", [GH]) == ""
+      and hit("https://github.com/org/other/blob/main/projects/p1", [GH]) == "" and hit("https://git.example.invalid/ORG/brain/blob/main/projects/p1", ["https://git.example.invalid/org/brain/blob/main/projects/"]) == "")
+Q = "https://docs.example.invalid/q?id=1"
+check("1 a prefix with a query takes that query, a longer query pair and the same with a fragment, and no other query", hit(Q, [Q]) != "" and hit(Q + "&x=2", [Q]) != "" and hit(Q + "#top", [Q]) != ""
+      and hit("https://docs.example.invalid/q?id=2", [Q]) == "" and hit("https://docs.example.invalid/q?id=10", [Q]) == "" and hit("https://docs.example.invalid/q", [Q]) == "" and hit("https://docs.example.invalid/q/sub?id=1", [Q]) == "")
+check("1 a link with a query still takes a prefix with none, and the query is kept as written", hit("https://docs.example.invalid/page?id=7&x=1") != "" and hit("https://docs.example.invalid/page/sub?id=7") != "" and hit("https://docs.example.invalid/q?ID=1", [Q]) == "")
+check("1 a fragment on the prefix is dropped", hit("https://docs.example.invalid/page/sub", ["https://docs.example.invalid/page#top"]) != "" and hit("https://docs.example.invalid/pages", ["https://docs.example.invalid/page#top"]) == "")
+check("1 a host with no path in the link meets a prefix that ends in a slash", hit("https://wiki.example.invalid", ["https://wiki.example.invalid/"]) != "" and hit("https://wiki.example.invalid?x=1", ["https://wiki.example.invalid/"]) != "" and hit("https://wiki.example.invalid/", ["https://wiki.example.invalid"]) != "")
+check("1 an address with no host is no prefix and no link, however it is spelled", hit("see https:///projects/x", [""]) == "" and hit("see https:///projects/x", ["https:///"]) == "" and hit("see https:///projects/x", ["https:///projects/"]) == ""
+      and hit("see https://:80/projects/x", ["https://:80/"]) == "")
+check("1 the words of a [words](url) link are an address too: a link text that is a listed address is refused, whatever the link is", hit(f"[{LONG}]({SHORT})") == LONG and hit(f"[see this]({SHORT})") == "")
+check("1 a port that is no number is no address", hit("https://notes.example.invalid:abc/projects/x") == "")
+check("1 a user name before the host does not hide a hit", hit("https://user@notes.example.invalid/projects/alpha") != "")
 
 # ================================================================ 2. the config reader
 cfg_ask = _cfg.CFG.setdefault("ask", {}); had = "refuse_link_prefixes" in cfg_ask; was = cfg_ask.get("refuse_link_prefixes")
@@ -212,16 +261,79 @@ setk(KeyError)
 out = mk(ask=ask_with(LONG))
 check("3 no key at all: nothing is refused", bool(re.match(r"created \w\d+", out)), out[:300])
 
+# ================================================================ 3b. a script's question, the cold call, the repeat of a stored ask
+from stackshot.service import question as _question_svc
+from stackshot.service import writes as _writes
+from stackshot.waits import handoff as _ho
+setk(PREFIXES)
+def post(ask, rid, options=None):
+    body = {"project": "projects/alpha", "ask": ask, "text": "The settings layout is ready to pick.", "subject": f"[home] script question {rid}", "request_id": rid, "sender": "size-watch"}
+    if options is not None: body["options"] = options
+    return _question_svc._question("testbox", body)
+def stored_ask(tag):
+    for f in sorted((T / "store").glob("*/*.json")):
+        d = json.loads(f.read_text())
+        if tag in d.get("subject", ""): return d["metadata"].get("ask")
+    return None
+st, out = post(ask_with(LONG), "q1")
+check("3b a script's question that links a listed page is filed, not refused", st == 200 and stored_ask("script question q1") == ask_with(LONG), (st, out))
+st, out = post(ask_with(LONG), "q2", options=OPTS)
+check("3b …with options too", st == 200 and stored_ask("script question q2") == ask_with(LONG), (st, out))
+st, out = post(ask_with(LONG), "q3", options=opts_with(f"Ship it, see {LONG}."))
+check("3b …but a link in an option is refused as in any write, with no word of a long page", st == 400 and "clickable card" in str(out) and "long page" not in str(out), (st, out))
+st, out = post("not in the form " + LONG, "q4")
+check("3b …and its ask is judged by its shape still: the shape refusal, not the link's", st == 400 and "Refused: ask must read" in str(out) and "long page" not in str(out), (st, out))
+_writes.QUESTION.on = True
+try: out = mk(ask="", next=ask_with(LONG) + "\nOliver: answer the ask")
+finally: _writes.QUESTION.on = False
+check("3b the question flag: an ask the first line of next carries is taken as it is", bool(re.match(r"created \w\d+", out)) and "taken as the ask" in out, out[:300])
+item(9, needs=["decision"], ask=ASK, mover="Oliver", then="team-back")
+_writes.QUESTION.on = True
+try: upd(9, ask=ask_with(LONG))
+finally: _writes.QUESTION.on = False
+check("3b the question flag: an update that sets the ask is not judged either", rd(9)["metadata"]["ask"] == ask_with(LONG), rd(9)["metadata"])
+refused("3b …and with the flag off the same write is refused", lambda: upd(9, ask=ask_with(LONG)), refusal(LONG))
+item(13, needs=["decision"], ask=ASK, mover="Oliver", then="team-back")
+_writes.QUESTION.on = True
+try: upd(13, next=ask_with(LONG) + "\nOliver: answer the ask")
+finally: _writes.QUESTION.on = False
+check("3b the question flag: an ask the first line of next carries on an update is not judged either", rd(13)["metadata"]["ask"] == ask_with(LONG), rd(13)["metadata"])
+item(11, needs=["decision"], ask=ASK, mover="Oliver", then="team-back")
+upd(11, sender=_ho.COLD, needs=["decision"], ask=ask_with(LONG), options=OPTS, next=f"{OWNER}: answer the ask on the item", clear_next=True)
+check("3b the cold call's ask that links a listed page is written, as the cold call", rd(11)["metadata"]["ask"] == ask_with(LONG) and len(rd(11)["metadata"].get("options") or []) == 2, rd(11)["metadata"])
+item(12, needs=["decision"], ask=ASK, mover="Oliver", then="team-back")
+refused_nw("3b …a session that writes the same ask is refused", 12, lambda: upd(12, sender="team-back", ask=ask_with(LONG)), refusal(LONG))
+refused_nw("3b …and a cold call's option that holds a link is refused as before", 12, lambda: upd(12, sender=_ho.COLD, options=opts_with(f"see {LONG}")), "clickable card")
+
+# the repeat of a stored ask as the first line of next is no write of the ask; a changed one is
+item(10, needs=["decision"], ask=ask_with(LONG), mover="Oliver", then="team-back")
+upd(10, next=ask_with(LONG) + "\nOliver: answer the ask")
+check("3b update: a stored ask that links a listed page, repeated as the first line of next, is no write of the ask: accepted, the ask as it was, the line out of next",
+      rd(10)["metadata"]["ask"] == ask_with(LONG) and ask_with(LONG) not in str(rd(10)["metadata"].get("next")), rd(10)["metadata"])
+refused_nw("3b update: …and the first line of next that changes the ask to another listed page is refused", 10, lambda: upd(10, next=ask_with(NOTES + "beta") + "\nOliver: answer the ask"), refusal(NOTES + "beta"))
+check("3b update: …the stored ask is as it was", rd(10)["metadata"]["ask"] == ask_with(LONG), rd(10)["metadata"])
+upd(10, next=ask_with(SHORT) + "\nOliver: answer the ask")
+check("3b update: …and one that changes it to a short decision page is taken", rd(10)["metadata"]["ask"] == ask_with(SHORT), rd(10)["metadata"])
+e = refusal(LONG, "option 1 (Approve)")
+check("3b the refusal of an option says where the link goes and no longer says to link the page in the option", "the ask's Decide part" in e and "take the link out of the option" in e and "so link a short decision page" not in e, e)
+check("3b the refusal of an ask keeps the words it had", "so link a short decision page made for this decision" in refusal(LONG) and "Decide part" not in refusal(LONG), refusal(LONG))
+setk(KeyError)
+
 # ================================================================ 4. the text and the docs
 snap = json.loads(pathlib.Path(STACK, "tests/tool_text.snapshot.json").read_text(encoding="utf-8"))["tools"]
 for tool in ("create", "update"):
     d = json.dumps(snap[tool], ensure_ascii=False)
     check(f"4 text: {tool} says an ask's link is a short decision page, never a long project or notes page", "A link in the ask goes to a short decision page made for it (an artifact, a document or a mockup page), never a long project or notes page." in d, tool)
-    check(f"4 text: {tool} says the instance may refuse such a link in an ask or an option", "where the instance lists such pages, an ask or an option that links one is refused when the write sets it" in d, tool)
+    check(f"4 text: {tool} says the instance may refuse such a link in an ask, and in an option, where the short link goes", "where the instance lists such pages, an ask that links one is refused when the write sets it, and so is an option that links one (an option holds no link: the short link goes in the ask's Decide part)" in d, tool)
 doc = pathlib.Path(STACK, "docs/configuration.md").read_text(encoding="utf-8")
 check("4 docs: the config key is in the configuration table", "`ask.refuse_link_prefixes` | `[]`" in doc)
 check("4 docs: the key is in the example file with an empty list", re.search(r"(?m)^refuse_link_prefixes = \[\]", pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")) is not None)
-check("4 docs: the asks page has the rule", "A decision's link is a short decision page" in pathlib.Path(STACK, "docs/asks-and-answers.md").read_text(encoding="utf-8"))
+docs_asks = pathlib.Path(STACK, "docs/asks-and-answers.md").read_text(encoding="utf-8")
+check("4 docs: the asks page has the rule", "A decision's link is a short decision page" in docs_asks)
+check("4 docs: …what is made equal and what is matched as written", "What is made equal:" in docs_asks and "What is matched as written" in docs_asks and "an escape written twice" in docs_asks and "the case of any other path" in docs_asks)
+check("4 docs: …the text of a link read as an address, the option's refusal, and the scripts left out", "link text that is itself a listed address is refused" in docs_asks and "put a link to a short decision page in the ask's Decide part" in docs_asks
+      and "A script's own question" in docs_asks and "the cold call's ask are not judged" in docs_asks)
+check("4 docs: the configuration page says a script's question and the cold call's ask are not judged", "A script's own question and the cold call's ask are not judged." in doc)
 
 setk(was) if had else setk(KeyError)
 if was_mock is None: cfg_cl.pop("mockup_hosts", None)
