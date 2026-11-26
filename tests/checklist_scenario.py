@@ -527,10 +527,10 @@ def apply_refused(name, i, new_next, *want):
     except S.StepError as e:
         check(name, all(w in str(e) for w in want), str(e))
 apply_refused("steps.apply (strict) prints the retry calls with the number filled in, in one line", 4, "home-agent: test it\n" + OL + "\nhome-agent: tell the keeper",
-              'Retry with done=[1], dropped=[1] or reword={1: "<new text>"}.', "a reworded line counts as a new step", "reword the step itself")
-apply_refused("…two steps: both numbers in each call", 4, "home-agent: test it\nhome-agent: tell the keeper", 'Retry with done=[1,3], dropped=[1,3] or reword={1: "<new text>", 3: "<new text>"}.')
+              'Send the call again with done=[1], dropped=[1] or reword={1: "<new text>"} (done if the work was done', "a reworded line in next counts as a new step", "clear_next=true wipes every line")
+apply_refused("…two steps: both numbers in each call", 4, "home-agent: test it\nhome-agent: tell the keeper", 'Send the call again with done=[1,3], dropped=[1,3] or reword={1: "<new text>", 3: "<new text>"} (done if')
 item(60); upd(60, done=[1])
-apply_refused("…the number is the step's position in the checklist, marked steps counted", 60, "home-agent: test it\nhome-agent: tell the keeper", 'Retry with done=[3], dropped=[3] or reword={3: "<new text>"}.', "3. Oliver:")
+apply_refused("…the number is the step's position in the checklist, marked steps counted", 60, "home-agent: test it\nhome-agent: tell the keeper", 'Send the call again with done=[3], dropped=[3] or reword={3: "<new text>"} (done if', "3. Oliver:")
 for empty in ({}, "{}", " ", ""):
     was58, was57 = rd(58), rd(57)
     r = upd(58, reword=empty)
