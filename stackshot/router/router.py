@@ -1272,28 +1272,39 @@ _REACHED = ("passed", "held")      # the rulings of a person's message that put 
 
 
 _MQ_WHO = re.compile(r"release \(a script on [A-Za-z0-9][A-Za-z0-9._-]{0,60}\)", re.ASCII)
-# the whole line the salamander release script writes for a PR merged through GitHub's merge queue (its tell()):
+# The release script's one-line notice for a pull request merged through the merge queue, pinned whole:
 #   [release] PR #<n> merged and deployed through GitHub's merge queue — <title> — main at <sha>; changed: <changed> · log <path>
-# one line, no control or format character, ASCII digits and a lower-case hex sha; the title and the changed list are free text.
-_MQ_LINE = re.compile(r"\[release\] PR #[0-9]{1,7} merged and deployed through GitHub's merge queue \u2014 (?P<title>[^\n]{1,300}?) \u2014 main at [0-9a-f]{7,12}; "
-                      r"changed: (?P<changed>[^\n]{1,500}?) \u00b7 log (?P<log>/[^\s]{1,200})")
-_MQ_MAX = 1200
+# <changed> is what the deploy prints: nothing, "see the log", or <sha>..<sha>, N commit(s), N file(s) (<up to six file names>[ …]); install.sh re-run|not needed.
+# The title, the file names and the path are plain characters only (ASCII letters, digits and a few marks; the title may hold the em dash); anything else is the call's.
+_MQ_PLAIN = r"[A-Za-z0-9 .,:()/_+'-]"
+_MQ_CHANGED = (r"(?:nothing|see the log|[0-9a-f]{7,12}\.\.[0-9a-f]{7,12}, [0-9]{1,5} commit\(s\), [0-9]{1,5} file\(s\)"
+               r"(?: \(" + _MQ_PLAIN + r"{1,400}(?: …)?\))?; install\.sh (?:re-run|not needed))")
+_MQ_LINE = re.compile(r"\[release\] PR #[0-9]{1,7} merged and deployed through GitHub's merge queue — (?P<title>[A-Za-z0-9 .,:()/_+'—-]{1,200}?) — main at "
+                      r"[0-9a-f]{7,12}; changed: " + _MQ_CHANGED + r" · log (?P<log>/[A-Za-z0-9._/-]{1,200})", re.ASCII)
 _MQ_FAIL = re.compile(r"fail|error|rolled back|rollback|unhealthy|not deployed", re.I)
+_MQ_FAIL_FOLD = re.compile(r"fail|error|rolledback|rollback|unhealthy|notdeployed|abort|partial|crash|revert")
+_MQ_BOARD = re.compile(r"board\s*#?\s*\d", re.I)
 
 
 def mq_release(n: dict[str, Any], cx: Context, root: str) -> bool:
     """The rule `merge-queue-release`: the release script's green report of a pull request merged through the merge queue. All of: a message
     whose sender label is exactly the release script's (`release (a script on <machine>)`; a notice carries no mark a session cannot set, so
-    the label alone is not proof), whose WHOLE text is the line the script writes (_MQ_LINE: one line of at most _MQ_MAX characters, no control
-    or format character, ASCII digits, a hex sha, every fixed word of the tail), that holds no failure word after NFKC normalizing and
-    collapsing spaces (fail, error, rolled back, unhealthy, not deployed), that names no item of the project, and that has no anchor, item or
-    target other than the project-wide one every message carries. Anything else goes on to the call as before."""
+    the label alone is not proof and the pin below is the guard), whose WHOLE text is the one line the script writes (_MQ_LINE: plain characters in the
+    title, the changed list and the path, ASCII digits, a hex sha, every fixed word, no control or format character, no `//`, no `..` in the path),
+    that holds no failure word, read after NFKC with spaces collapsed (fail, error, rolled back, unhealthy, not deployed) and again on its letters
+    alone (also abort, partial, crash, revert), that does not aim at the owner (strong_owner), that names no item of the project (cx.items_named,
+    or a `board #12` spelling), and that has no anchor, item or target other than the project-wide one every message carries. Anything else
+    goes on to the call as before."""
     text = str(n.get("text") or "")
-    if n.get("kind") != "message" or len(text) > _MQ_MAX or not _MQ_WHO.fullmatch(str(n.get("who") or "")):
+    if n.get("kind") != "message" or not _MQ_WHO.fullmatch(str(n.get("who") or "")):
         return False
-    if _MQ_LINE.fullmatch(text) is None or any(unicodedata.category(c)[0] == "C" for c in text):
+    m = _MQ_LINE.fullmatch(text)
+    if m is None or "//" in text or ".." in m.group("log") or any(unicodedata.category(c)[0] == "C" for c in text):
         return False
-    if _MQ_FAIL.search(" ".join(unicodedata.normalize("NFKC", text).split())):
+    fold = unicodedata.normalize("NFKC", text)
+    if _MQ_FAIL.search(" ".join(fold.split())) or _MQ_FAIL_FOLD.search("".join(c for c in fold if c.isalpha()).lower()):
+        return False
+    if strong_owner(text) or _MQ_BOARD.search(text):
         return False
     if n.get("anchor") or n.get("item") or str(n.get("target") or "") not in ("", "project-wide"):
         return False
@@ -1344,7 +1355,7 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
                     telling.tell_handback), for a mover that is one of the project's agents: passed to that mover, whatever the thin
                     call would make of it. Delivered as one line (router_live.compose), with the mark when the mover is a front agent.
       image         a notice whose text is only a file marker ("[files: image.png]"): archived, reason "image not read"; never passed.
-      merge-queue-release  a message from the release script (`release (a script on <machine>)`) whose whole text is the one line the script writes (`[release] PR #<n> merged and deployed through GitHub's merge queue — <title> — main at <sha>; changed: <changed> · log <path>`), with no failure word (fail, error, rolled back, unhealthy, not deployed, after NFKC), no item named in the text and no anchor, item or agent target: archived, no call. It is tried last, after message-item, repeat and for-agent, so a notice those rule keeps their ruling. Any other shape goes to the call.
+      merge-queue-release  a message from the release script (`release (a script on <machine>)`) whose whole text is the one line the script writes (`[release] PR #<n> merged and deployed through GitHub's merge queue — <title> — main at <sha>; changed: <changed> · log <path>`), pinned to one line of plain characters (the title, the changed list and the log path are limited to ASCII letters, digits and a few marks), with no failure word (fail, error, rolled back, unhealthy, not deployed, read after NFKC and on the letters alone, also abort, partial, crash, revert), not aimed at the owner, no item named in the text and no anchor, item or agent target: archived, no call. It is tried last, after message-item, repeat and for-agent, so a notice those rules rule keeps its ruling. The sender label alone is no proof (a session could send the same one): the pin is the guard. Any other shape goes to the call.
       release-self  a `[release]` message from the project's own maintainer (a sender named *-maintainer that the page lists as an
                     agent), green (no red, failed or error word, no [for <owner>]): merged, "log only: the maintainer's own release".
       anchor-builder  an anchor notice on a GitHub pull request whose head branch starts with a background agent's name and a slash
