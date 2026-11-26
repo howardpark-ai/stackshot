@@ -778,7 +778,12 @@ check("6x2: …the same in the reply of an fyi that was not passed on", out.star
 held.mark_client(A, "work-osprey-main")
 fresh(); n0 = len(pushes()); long_p = "Release 4.2 is live. " + "details " * 60 + "END-MARKER"
 out = _messaging._message(KEY, long_p, "home-beta", fyi=True); out_short = _messaging._message(KEY, "the release is live", "home-beta", fyi=True)
-check("6y: an fyi to a project longer than a status line is recorded for the router with no word of a cut (the router holds it whole)", out.startswith("held for the router") and "cut" not in out and str(held.LINE_MAX) not in out, out)
+def _no_id(t): return re.sub(r"\b[0-9a-f]{6}\b", "", t)  # the reply holds a random 6-hex notice id, which can hold the digits of LINE_MAX
+check("6y: an fyi to a project longer than a status line is recorded for the router with no word of a cut (the router holds it whole)", out.startswith("held for the router") and "cut" not in out and str(held.LINE_MAX) not in _no_id(out), out)
+_unlucky = f"held for the router \u2014 the router rules notice 3b{held.LINE_MAX}5 within about 60 s, and nothing is said of a cut"
+_fixed_trips, _old_trips = str(held.LINE_MAX) in _no_id(_unlucky), str(held.LINE_MAX) in _unlucky
+print("6y5 mutant: fixed expression trips =", _fixed_trips, "; unfixed expression trips =", _old_trips)
+check("6y5: a notice id that holds the digits of LINE_MAX (3b2605) does not trip the 6y check, and the unfixed expression does trip on it", not _fixed_trips and _old_trips, (_unlucky, _fixed_trips, _old_trips))
 check("6y2: …and a short one says the same", out_short.startswith("held for the router") and "cut" not in out_short, out_short)
 out = _messaging._message(KEY, long_p, "home-beta")
 check("6y3: …a message to a project without fyi is never held, so it says nothing about a cut", out.startswith("held for the router") and "cut" not in out, out)

@@ -287,7 +287,7 @@ ids = []
 for i in range(CAP):
     st, o = io_(marker=f"size:run{i}", **cp); ids.append(o.get("item") if st == 200 else None)
 check("ten different markers file ten open items on one project", all(ids) and len({*ids}) == CAP and len(item_open_svc._itemopen_open_items("projects/capped")) == CAP, ids)
-nc = len(items()); pushed.clear()
+nc = len(items()); settle(); pushed.clear()     # the ten creates' notices first: a late one is not the refused call's
 st, e = io_(marker="size:run-new", **cp)
 check("an eleventh marker is refused: 400 that names the cap and says an open item must close first; nothing filed, no one told", st == 400 and "cap is 10" in e["error"] and "must close" in e["error"] and len(items()) == nc, (st, e)); settle()
 check("…nobody was told of the refused call", pushed == [], pushed)
@@ -336,7 +336,7 @@ def shape(gid):
     return {"subject": i_["subject"], "status": i_["status"], "mover": m_.get("mover"), "then": m_.get("then"), "step": m_.get("step"), "state": m_.get("state"), "next": m_.get("next"), "needs": m_.get("needs"),
             "steps": [(x["text"], x["status"]) for x in _steps_mod.view(m_)], "project": m_.get("project"), "owner": m_.get("owner"), "item_sync": m_.get("item_sync"), "filed_by": i_.get("filed_by")}
 
-ns0 = len(items()); pushed.clear(); owed0 = json.dumps(_pdebts._owed_load(), sort_keys=True)
+ns0 = len(items()); settle(); pushed.clear(); owed0 = json.dumps(_pdebts._owed_load(), sort_keys=True)
 st, so = isy("open")
 check("item-sync open: 200, opened, the item as shown, the project, the person as mover, the agent as then, the project's -main agent as creator, repeat false", st == 200 and so["action"] == "opened" and so["marker"] == "plugin_sync:alpha"
       and so["project"] == "projects/alpha" and so["mover"] == "Oliver" and so["then"] == "home-sparrow-builder" and so["owner"] == "home-sparrow-main" and so["repeat"] is False and len(items()) == ns0 + 1
@@ -577,13 +577,21 @@ _real_create = _create_svc_t.create_item
 def _slow_create(*a, **kw):
     time.sleep(1.0); return _real_create(*a, **kw)
 st, ou = isy("open", marker="plugin_sync:unrelated"); gu = ou["item"]
-_create_svc_t.create_item = _slow_create
+# The create is held open until the update has returned, so the order of the two is what is checked, never how long the update takes: an update that waits for the create returns only after the hold runs out.
+in_create_, go_, gave_up_ = threading.Event(), threading.Event(), []
+def _held_create(*a, **kw):
+    in_create_.set()
+    if not go_.wait(60): gave_up_.append(True)
+    return _real_create(*a, **kw)
+_create_svc_t.create_item = _held_create
 try:
-    ts_ = threading.Thread(target=lambda: isy("open", marker="plugin_sync:slow"), daemon=True); ts_.start(); time.sleep(0.3)
-    t0_ = time.time(); _update_svc._update(_model_ids._norm_id(gu), description="- an unrelated update while the create is slow", sender="home-sparrow-builder"); waited = time.time() - t0_
-    ts_.join(10)
-finally: _create_svc_t.create_item = _real_create
-check("an unrelated update is not blocked while a new item's create is slow (the board's item lock is not held across the create)", waited < 0.5 and not ts_.is_alive() and len(sync_open("plugin_sync:slow")) == 1, (round(waited, 2), sync_open("plugin_sync:slow")))
+    ts_ = threading.Thread(target=lambda: isy("open", marker="plugin_sync:slow"), daemon=True); ts_.start(); held_ = in_create_.wait(60)
+    _update_svc._update(_model_ids._norm_id(gu), description="- an unrelated update while the create is slow", sender="home-sparrow-builder")
+    free_ = held_ and not gave_up_ and ts_.is_alive()
+    go_.set(); ts_.join(60)
+finally:
+    go_.set(); _create_svc_t.create_item = _real_create
+check("an unrelated update is not blocked while a new item's create is slow (the board's item lock is not held across the create)", free_ and not ts_.is_alive() and len(sync_open("plugin_sync:slow")) == 1, (held_, gave_up_, sync_open("plugin_sync:slow")))
 isy("close", marker="plugin_sync:slow"); isy("close", marker="plugin_sync:unrelated")
 n_dbl = len([1 for g, _p in _item_files_()]); _create_svc_t.create_item = _slow_create; dbl = []
 try:

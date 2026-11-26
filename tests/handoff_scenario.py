@@ -735,14 +735,14 @@ check("11 cold: …none is started while one runs", done2 == [] and len(COLD_MSG
 gate.set()
 first_calls = list(hcold_svc.HO_COLD_THREADS)
 for t in first_calls: t.join(30)
+gate = threading.Event()      # the second call is held too: one that is over before the pass reaches the third item is pruned from the list by that same pass
 done3 = tick(dd + 11 * MIN, 110, 111, 112)
 for _ in range(100):
     if len(COLD_MSGS) > n0 + 1: break
     time.sleep(0.05)
-for t in list(hcold_svc.HO_COLD_THREADS): t.join(30)      # the second call (a stub that returns at once) is over too, so the list is read at rest, not while it runs
 check("11 cold: …the next tick starts the next one, and the finished thread is pruned from the list (the first call's thread is gone, one in it, not two)",
       len(done3) == 1 and len(COLD_MSGS) == n0 + 2 and len(hcold_svc.HO_COLD_THREADS) == 1 and not any(t in hcold_svc.HO_COLD_THREADS for t in first_calls), (done3, len(hcold_svc.HO_COLD_THREADS)))
-drain(); tick(dd + 11 * MIN, 110, 111, 112); drain()
+gate.set(); drain(); tick(dd + 11 * MIN, 110, 111, 112); drain()
 check("11 cold: …and the third after it: all three were asked, one per tick", len(COLD_MSGS) == n0 + 3 and all("decision" in mt(i).get("needs", []) for i in (110, 111, 112)), [mt(i).get("needs") for i in (110, 111, 112)])
 hcold_svc.COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"}
 
