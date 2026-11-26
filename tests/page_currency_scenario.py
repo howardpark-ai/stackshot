@@ -689,8 +689,8 @@ try:
     check("owing: a write past the grace goes through (no exception) and its reply gets one line: which page, that the write went through, that the page is still owed and what settles it",
           note_pl == "\nThis write went through. Still owed by you: projects/gamma (since s9, 4 h ago); it stays owed until the page's Current state is edited."
           and note_pl.count("\n") == 1, note_pl)
-    check("owing: …and under the gbrain flavor the same line adds that the server's copy of the page has to have caught up",
-          note_gb == note_pl[:-1] + " and the server's copy of the page has caught up." and note_gb.count("\n") == 1, note_gb)
+    check("owing: …and under the gbrain flavor the same line adds that the server has to have seen the edit (not that its copy has caught up: it reads the remote's too)",
+          note_gb == note_pl[:-1] + " and the server has seen that edit." and note_gb.count("\n") == 1, note_gb)
     check("owing: …the debt is kept as it was (still in the ledger, still in the nag, still in pages owed)",
           B in _pdebts._owed_load().get("projects/gamma", {}) and "PROJECT PAGE owed by you: projects/gamma" in _pdebts._nag(B) and "projects/gamma" in _pdebts._nag(A), (_pdebts._owed_load(), _pdebts._nag(B)))
     check("owing: …the nag tells the writer that writes go through, and no longer that the server refuses the next one",

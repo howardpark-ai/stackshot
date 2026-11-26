@@ -67,12 +67,20 @@ def _page_ts(key: str) -> float:
         return 0.0
 
 
-def _upstream_settles(key: str, owner: str, e: dict[str, Any]) -> bool:
-    """For a debt the local copy of the pages leaves open: does an edit the copy has not pulled yet settle it (page_upstream)? Begins a fetch and never waits
-    for it, so a write is not slowed: what it reads is what an earlier fetch brought. False whenever it cannot tell."""
+def _upstream_ts(key: str) -> int:
+    """For a page whose local copy leaves a debt open: the time of the newest edit that the copy's remote holds and the copy has not pulled yet (page_upstream),
+    0 = none, or it cannot tell. Begins a fetch and never waits for it, so a write is not slowed: what it reads is what an earlier fetch brought."""
+    try:
+        return _upstream.edit_ts(key, 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _upstream_settles(key: str, owner: str, e: dict[str, Any], edit: int) -> bool:
+    """Does that edit (`edit`, _upstream_ts) settle this debt? False whenever it cannot tell."""
     try:
         since = int(float(e.get("ts", 0))) - _page_slack()
-        if not _upstream.edit_ts(key, since):
+        if not edit or edit < since:
             return False
         return not _debt_strict(owner, e) or _upstream.ct_changed(key, since)
     except Exception:  # noqa: BLE001
@@ -198,6 +206,7 @@ def _owed_settle() -> dict[str, dict[str, dict[str, Any]]]:
         if _owed_brain_skip(key):       # a second brain whose copy cannot be read: its debts are kept as they are, not settled or charged this run
             continue
         pt: float | None = None         # the page's time (a git log), read once per key
+        ahead: int | None = None        # the time of an edit the copy has not pulled (another git log), read once per key, and only for a debt the copy leaves open
         for o in list(snap[key]):
             e = snap[key][o]
             if e.get("retired_only"):       # an entry an earlier release wrote for a retired agent's line (stackshot removes that line itself now): it owes nothing
@@ -212,7 +221,10 @@ def _owed_settle() -> dict[str, dict[str, dict[str, Any]]]:
                 try:
                     local = _pages.ct_changed_since(key, int(ts))
                 except Exception: pass
-            if local or _upstream_settles(key, o, e):
+            if not local:
+                if ahead is None: ahead = _upstream_ts(key)
+                local = _upstream_settles(key, o, e, ahead)
+            if local:
                 drops.append((key, o, e.get("ts")))
     with _OWED_LOCK:
         d = _owed_load(); changed = False
@@ -302,7 +314,7 @@ def _nag(owner: str = "") -> str:
 def _owing_note(owner: str) -> str:
     """The one line a write's reply carries when the write went through while its writer had a page owed longer than the grace, else "". A board write is
     never refused or held for a page debt: the debt stays in the ledger (and in the brief and the pages owed) and settles as before, when the page's Current
-    state is edited and the server's copy of the page has caught up. Read before the write records its own debt."""
+    state is edited and the server has seen the edit, in its copy of the pages or in what it fetched of that copy's remote. Read before the write records its own debt."""
     if not owner:
         return ""
     try:
@@ -316,4 +328,4 @@ def _owing_note(owner: str) -> str:
         return ""
     return ("\nThis write went through. Still owed by you: " + ", ".join(f"{k} (since {e.get('item') or 'a board change'}, {_age(e['ts'])} ago)" for k, e in late)
             + "; it stays owed until the page's Current state is edited"
-            + (" and the server's copy of the page has caught up." if _cfg.page_flavor() == "gbrain" else "."))
+            + (" and the server has seen that edit." if _cfg.page_flavor() == "gbrain" else "."))

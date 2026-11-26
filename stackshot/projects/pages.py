@@ -1113,17 +1113,10 @@ def ct_now(key):
     try: return compiled_truth(open(os.path.join(_base(key), key + ".md"), encoding="utf-8").read())
     except Exception: return None
 
-def ct_in(key, rev):
-    """The compiled truth of the page as commit `rev` of the pages checkout holds it; None when it holds no such page."""
+def ct_at(key, ts):
+    """The compiled truth of the page's last commit at or before ts (read-only git in the pages checkout, [paths] brain); None = no version yet."""
     try:
-        r = subprocess.run(["git", "-C", _base(key), "show", f"{rev}:./{key}.md"], capture_output=True, text=True, timeout=20)
-        return compiled_truth(r.stdout) if r.returncode == 0 else None
-    except Exception: return None
-
-def ct_at(key, ts, rev="HEAD"):
-    """The compiled truth of the page's last commit at or before ts in `rev`'s history (read-only git in the pages checkout, [paths] brain); None = no version yet."""
-    try:
-        h = subprocess.run(["git", "-C", _base(key), "log", "-1", f"--before={int(ts)}", "--format=%H", rev, "--", key + ".md"],
+        h = subprocess.run(["git", "-C", _base(key), "log", "-1", f"--before={int(ts)}", "--format=%H", "--", key + ".md"],
                            capture_output=True, text=True, timeout=20).stdout.strip()
         if not h: return None
         # ./ = relative to the pages dir, not the repo root: the same at a repo root, right when the pages sit inside a larger repo
