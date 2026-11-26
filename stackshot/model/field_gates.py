@@ -169,32 +169,42 @@ def _next_line_max() -> int:
     return int(_cfg.CFG.get("metadata", {}).get("next", {}).get("line_max", 200)) if _bullets_on() else 0
 
 
-def fix_long_bullets(desc: str, stored: str | None = None) -> tuple[str, str]:
-    """A description whose bullets read over the limit, put right instead of refused: each long bullet is split at the gaps after its sentences into shorter bullets, and a clause still over the limit on its own at
-    its last comma, colon, spaced dash or opening parenthesis that leaves each piece within it (bullet_text.split_long_ex: no word is dropped, nothing is cut inside a link, a naked URL or a code span), and the reply says so
-    (call_log.fixed). → (the text, the History line the caller writes onto the item: the server changed it, "" when it did not). The text as given when it is within the form, when the fault is anything but a long bullet,
-    or when the split cannot be made (a clause with no cut that fits, more than the line cap): the gate then refuses it as before. A description with no bullet form required ([description] require_bullets = false) is
-    left alone. When the split text breaks the form some other way (a later line that is no bullet), the split text comes back with no note and no fix counted, so the gate refuses the fault that is left, not a long
-    bullet the server would have put right. `stored` is the description the item holds already (an update passes it): when the split gives exactly that text, the same long description has been sent before and is
-    stored as split, so the server changed nothing this time: no fix is counted, no reply line, no History line."""
+def fix_long_bullets(desc: str, stored: str | None = None, field: str = "description") -> tuple[str, str]:
+    """A description (or a close's outcome text, `field="outcome_text"`) whose bullets read over the limit, put right instead of refused: each long bullet is split at the gaps after its sentences into shorter bullets, a clause
+    still over the limit on its own at its last comma, colon, spaced dash or opening parenthesis that leaves each piece within it, and a bullet no such cut splits at its last space that fits, the rest on an indented `- ` line under
+    it (bullet_text.split_long_wrap: no word is dropped or cut, nothing is cut inside a link, a naked URL or a code span), and the reply says so (call_log.fixed: kind description-bullet or outcome-bullet for the first
+    two cuts, bullet-wrap or outcome-wrap for the last). -> (the text, the History line the caller writes onto the item: the server changed it, "" when it did not). The text as given when it is within the form, when the fault is anything
+    but a long bullet, or when the split cannot be made (a piece that is one unbroken token, a bullet with lines indented under it, more lines than the cap): the gate then refuses it as before. A text with no bullet form
+    required ([description] require_bullets = false) is left alone. When the split text breaks the form some other way (a later line that is no bullet), the split text comes back with no note and no fix counted, so
+    the gate refuses the fault that is left, not a long bullet the server would have put right. `stored` is the text the item holds already (an update passes it): when the split gives exactly that text, the same long
+    text has been sent before and is stored as split, so the server changed nothing this time: no fix is counted, no reply line, no History line."""
     if not desc or not _bullets_on():
         return desc, ""
     max_lines, line_max = _description_limits()
     bad = _bt.judge(desc, max_lines, line_max)
     if not bad or bad[0] != "long":
         return desc, ""
-    res = _bt.split_long_ex(desc, max_lines, line_max)
+    res = _bt.split_long_wrap(desc, max_lines, line_max)
     if not res:
         return desc, ""
-    new, n, soft = res
+    new, n, soft, wrapped = res
     if _bt.judge(new, max_lines, line_max):          # a split that still breaks the form (a later line not a bullet) is no fix: the gate refuses the fault that is left, and nothing is counted or told
         return new, ""
     if stored is not None and new.strip() == str(stored).strip():          # the same long text again, already stored as split: nothing is changed, so nothing is counted, told or noted
         return new, ""
-    where, hist = ("at the end of a sentence or at a comma, colon, dash or parenthesis", "at the end of a sentence or a comma, colon, dash or parenthesis") if soft else ("at the end of a sentence",) * 2
-    kept = "no word changed; a spaced dash at a cut is dropped" if soft else "no word changed"
-    _calls.fixed("description-bullet", f"{n} description bullet{'' if n == 1 else 's'} over {line_max} characters {'was' if n == 1 else 'were'} split {where} into shorter bullets, {kept}", fields=["description"], stored=new, sent=desc)
-    return new, f"description: {n} long bullet{'' if n == 1 else 's'} split by the server {hist}"
+    by_sentence = n - wrapped
+    hist: list[str] = []
+    if by_sentence:
+        where, h_ = ("at the end of a sentence or at a comma, colon, dash or parenthesis", "at the end of a sentence or a comma, colon, dash or parenthesis") if soft else ("at the end of a sentence",) * 2
+        kept = "no word changed; a spaced dash at a cut is dropped" if soft else "no word changed"
+        _calls.fixed("description-bullet" if field == "description" else "outcome-bullet",
+                     f"{by_sentence} {field} bullet{'' if by_sentence == 1 else 's'} over {line_max} characters {'was' if by_sentence == 1 else 'were'} split {where} into shorter bullets, {kept}", fields=[field], stored=new, sent=desc)
+        hist.append(f"{field}: {by_sentence} long bullet{'' if by_sentence == 1 else 's'} split by the server {h_}")
+    if wrapped:
+        _calls.fixed("bullet-wrap" if field == "description" else "outcome-wrap", f"{wrapped} {field} bullet{'' if wrapped == 1 else 's'} over {line_max} characters {'was' if wrapped == 1 else 'were'} cut at a space, the rest on an indented `- ` line under it, no word changed",
+                     fields=[field], stored=new, sent=desc)
+        hist.append(f"{field}: {wrapped} long bullet{'' if wrapped == 1 else 's'} continued on an indented line by the server, cut at a space")
+    return new, "; ".join(hist)
 
 
 def _step_line_room() -> int:
@@ -287,7 +297,8 @@ def description_faults(desc: str, field: str = "description") -> list[str]:
         elif kind == "marker":
             out.append(f"Refused: {field} line is not a `- ` bullet: \"{_clip_line(ln, 60)}\"; {fix}")
         else:
-            out.append(f"Refused: {field} bullet is {n} characters, the limit is {line_max} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; {fix}")
+            out.append(f"Refused: {field} bullet is {n} characters, the limit is {line_max} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; the server splits a long bullet at a sentence end or a space by itself, "
+                       f"and could not split this one (no ordinary space to cut at within a line: a word or link longer than a line, or text spaced only with non-breaking or wide spaces; a bullet with lines indented under it, or more than {max_lines} lines once split); {fix}")
     if field != "description":
         return out
     low = desc.lower()
@@ -331,7 +342,7 @@ def _sendable(desc: str) -> bool:
     max_lines, line_max = _description_limits()
     if not _bt.judge(desc, max_lines, line_max):
         return True
-    res = _bt.split_long_ex(desc, max_lines, line_max)
+    res = _bt.split_long_wrap(desc, max_lines, line_max)
     return bool(res) and not _bt.judge(res[0], max_lines, line_max)
 
 

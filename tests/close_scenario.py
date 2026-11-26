@@ -499,7 +499,7 @@ def part_keeps_description():
     check("update status=completed with outcome_text: the same", rd(2)["description"] == DESC and mt(2).get("outcome_text") == "- Not needed: the move made it moot" and mt(2).get("outcome") == "dropped", rd(2))
     refused("a close with no outcome text is refused and names it", lambda: _wt_complete.stackshot_complete("a3", outcome="done", reason="it works"), "needs outcome_text")
     refused("an outcome text that is not bullets is refused, named outcome_text", lambda: _wt_complete.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="It works now."), "outcome_text line is not a `- ` bullet")
-    refused("an outcome text over the line limit is refused, named outcome_text", lambda: _wt_complete.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="- " + "long " * 40), "outcome_text bullet is")
+    refused("an outcome text over the line limit that cannot be split (one unbroken token) is refused, named outcome_text", lambda: _wt_complete.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="- " + "long" * 40), "outcome_text bullet is")
     refused("outcome_text outside a close is refused", lambda: _update_svc._update("a3", outcome_text=NEW), "go with a close")
     check("…and nothing above touched the open item", rd(3)["status"] == "open" and rd(3)["description"] == DESC and "outcome_text" not in mt(3), rd(3))
     _wt_complete.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="- Resolved: the export moved\n- Done: the old bucket is empty")

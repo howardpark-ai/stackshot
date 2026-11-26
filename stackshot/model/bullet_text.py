@@ -521,7 +521,41 @@ def _soft_units(c: str, mark: str, line_max: int, cap: int) -> list[tuple[str, s
     return out
 
 
-def split_long_ex(text: str, max_lines: int, line_max: int) -> tuple[str, int, int] | None:
+_RX_SPACES = re.compile(r"[ \t]+")
+_CONT_INDENT = 2          # a continuation line sits two spaces deeper than its bullet: the form the parallel-bullets text names (a child bullet under one parent)
+
+
+def _wrap_words(ln: str, line_max: int, cap: int) -> list[str] | None:
+    """The last-resort cut of one bullet line that reads over `line_max`: cut at the last space whose first part reads within `line_max` (counted as `visible_len` counts a line: `- ` included, the ends trimmed, so the indent is free), the
+    rest put on a new line `<indent + 2 spaces>- <rest>`, a child bullet under the first (the form the gate takes: a line with no `- ` marker is refused as prose); the rest is cut again the same way while it reads
+    over. A cut is made only at a space, never inside a word, a link, a naked URL or a code span, so no word is changed. -> the lines, or None when a piece cannot be cut to fit (one unbroken token longer than a line),
+    or when the lines would pass `cap`. A line that fits comes back as it is."""
+    out: list[str] = []
+    cur = ln
+    while visible_len(cur) > line_max:
+        if len(out) + 1 >= cap:
+            return None
+        starts, ends = _merged(_spans(cur) + [m.span() for m in _RX_CODE_SPAN.finditer(cur)])
+        lead = _RX_LEAD.match(cur)
+        body_at = lead.end() if lead else 0
+        cut = None
+        for m in reversed(list(_RX_SPACES.finditer(cur))):
+            k = bisect.bisect_left(starts, m.start()) - 1
+            if m.start() <= body_at or m.end() >= len(cur) or (k >= 0 and m.start() < ends[k]):
+                continue                # no cut in the lead, after the last word, or inside a link, URL or code span
+            if cur.count("(", body_at, m.start()) > cur.count(")", body_at, m.start()) or cur.count("**", body_at, m.start()) % 2:
+                continue                # nor inside an open parenthesis or an unclosed `**` emphasis: the sentence cut's own balance rule (`_clauses`)
+            if visible_len(cur[:m.start()]) <= line_max and visible_len(cur[body_at:m.start()]) >= _SOFT_MIN:          # the first part is more than a label or a stub (as a clause cut's pieces are)
+                cut = m
+                break
+        if cut is None:
+            return None
+        out.append(cur[:cut.start()])
+        cur = " " * (_indent(cur) + (0 if len(out) > 1 else _CONT_INDENT)) + "- " + cur[cut.end():]
+    return out + [cur]
+
+
+def _split_long(text: str, max_lines: int, line_max: int, wrap: bool) -> tuple[str, int, int, int] | None:
     """A description whose only fault is bullets that read over `line_max`, put right without losing a word: each such bullet is cut at the gaps after a full stop or a semicolon (never inside a link, a naked
     URL or a code span) into the fewest bullets that each read within `line_max`, the same indent and dash on each. A clause that is over the limit on its own gets a second tier (`_soft_units`): it is cut at
     the last comma, colon, spaced dash or opening parenthesis that leaves each piece within the limit. → (the new text, how many bullets were split, how many of those needed the second tier), or None when it
@@ -529,7 +563,10 @@ def split_long_ex(text: str, max_lines: int, line_max: int) -> tuple[str, int, i
     made inside an open parenthesis or an open `**` emphasis, nor after an entity, an abbreviation (e.g., i.e., Mr., etc., St., No., U.S.) or a bare number. A `>` quote line, a fenced block and a line that is no
     bullet are left as they are (the gate still judges them). The text changes at the cut and nowhere else: each semicolon stays, the spaces between the clauses that stay together stay as written, and every
     line end (LF, CRLF or any other the text has) is kept; a cut puts that line's own end between its pieces. The bullets that need a split are summed up first: when what they read, spaces left out, cannot fit
-    `max_lines` lines of `line_max`, the answer is None before any bullet is scanned (the splitter runs under the item lock, so a pasted wall of text is refused at once)."""
+    `max_lines` lines of `line_max`, the answer is None before any bullet is scanned (the splitter runs under the item lock, so a pasted wall of text is refused at once).
+    `wrap` adds the last resort for a bullet the sentence and clause cuts cannot split (a clause with no cut that fits): the bullet is cut at its last space that fits and the rest goes on an indented child bullet
+    (`_wrap_words`: no word is cut, nothing inside a link, a URL or a code span). A bullet that has children under it, a result over `max_lines` lines and a piece that cannot be cut to fit are still None.
+    -> (text, bullets split, of those cut at a comma or dash, of those wrapped at a space)."""
     if not line_max:
         return None
     raw = str(text or "").splitlines(keepends=True)
@@ -549,7 +586,7 @@ def split_long_ex(text: str, max_lines: int, line_max: int) -> tuple[str, int, i
     if not long_at or dense > max_lines * line_max:
         return None
     out: list[str] = []
-    n = soft = 0
+    n = soft = wrapped = 0
     todo = set(long_at)
     for k, ln in enumerate(lines):
         if k not in todo:
@@ -560,14 +597,15 @@ def split_long_ex(text: str, max_lines: int, line_max: int) -> tuple[str, int, i
         below = next((x for x in lines[k + 1:] if x.strip()), "")
         if below and _indent(below) > _indent(ln):          # a bullet with children under it: the children belong to the whole, so no cut
             return None
-        pieces: list[str] = []
+        pieces: list[str] | None = []
         gap = ""
         soft_here = False
         for c, after in _clauses(body):
-            units = [(c, after)]
+            units: list[tuple[str, str]] | None = [(c, after)]
             if visible_len(mark + c) > line_max:
                 if (units := _soft_units(c, mark, line_max, max_lines)) is None:
-                    return None
+                    pieces = None
+                    break
                 units[-1] = (units[-1][0], after)
                 soft_here = True
             for u, g in units:
@@ -576,15 +614,35 @@ def split_long_ex(text: str, max_lines: int, line_max: int) -> tuple[str, int, i
                 else:
                     pieces.append(u)
                 gap = g
-        if len(pieces) < 2:
-            return None
         sep = ends[k] or default_end
-        out.extend(mark + p + (sep if i < len(pieces) - 1 else ends[k]) for i, p in enumerate(pieces))
+        if pieces is not None and len(pieces) >= 2:
+            out.extend(mark + p + (sep if i < len(pieces) - 1 else ends[k]) for i, p in enumerate(pieces))
+            n += 1
+            soft += soft_here
+            continue
+        wrapped_ = _wrap_words(ln, line_max, max_lines) if wrap else None
+        if wrapped_ is None:
+            return None
+        out.extend(w + (sep if i < len(wrapped_) - 1 else ends[k]) for i, w in enumerate(wrapped_))
         n += 1
-        soft += soft_here
+        wrapped += 1
     if not n or len([ln for ln in out if ln.strip()]) > max_lines:
         return None
-    return "".join(out), n, soft
+    return "".join(out), n, soft, wrapped
+
+
+def split_long_ex(text: str, max_lines: int, line_max: int) -> tuple[str, int, int] | None:
+    """`_split_long` with the sentence and clause cuts only: (the new text, how many bullets were split, how many of those needed the second tier), or None (see `_split_long`)."""
+    res = _split_long(text, max_lines, line_max, False)
+    return None if res is None else res[:3]
+
+
+def split_long_wrap(text: str, max_lines: int, line_max: int) -> tuple[str, int, int, int] | None:
+    """`_split_long` with the last resort on (a bullet no sentence or clause cut can split is cut at its last space that fits, the rest on an indented child bullet): (the new text, how many bullets were split,
+    how many of those needed the second tier, how many of those were cut at a space), or None. The write gates use this one."""
+    return _split_long(text, max_lines, line_max, True)
+
+
 
 
 def split_long(text: str, max_lines: int, line_max: int) -> tuple[str, int] | None:

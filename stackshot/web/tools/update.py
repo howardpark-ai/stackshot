@@ -9,7 +9,7 @@ from pydantic import Field
 from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.model import ask_leaves as _askl, model as _model, states as _states, step_split as _step_split, work as _work
-from stackshot.model.ids import _bare_id_ok, _norm_id
+from stackshot.model.ids import _norm_id
 from stackshot.service import gates as _gates, telling as _telling, wait_fixes as _wait_fixes, writes as _writes
 from stackshot.service.store import _load
 from stackshot.waits import until_write as _uw, wait_list_write as _wlw, waiting as _wt
@@ -35,7 +35,7 @@ _T = load_text("update", {
 def _backstop_field(item_id: str, status: str) -> str:
     """The working field a hand-off kept its date in ("wake" or "ask_by"), "" when the item a write has just saved stores its date as until (or none)."""
     try:
-        m = _load(_norm_id(item_id, bare=_bare_id_ok(status))).get("metadata") or {}
+        m = _load(_norm_id(item_id, bare=True)).get("metadata") or {}
     except Exception:  # noqa: BLE001
         return ""
     if _wt.stored_until(m):
@@ -194,7 +194,7 @@ def stackshot_update(
     try:
         if _model.clean(mover) or _model.clean(then) or _model.clean(post_wake_mover):
             try:
-                item_ = _load(_norm_id(item_id, bare=_bare_id_ok(status)))
+                item_ = _load(_norm_id(item_id, bare=True))
                 meta_ = (item_.get("metadata") or {})
             except Exception:  # noqa: BLE001
                 item_, meta_ = None, {}      # an unknown item is _update's to refuse
@@ -213,9 +213,9 @@ def stackshot_update(
                 raise _gates.waits_clash(old_)
         wake, ask_by, until_wait, alias_used, alias_date = _gates.until_in(item_id, status, until, wake, ask_by, hold, "list" if list_in else wait_kind)     # the date as the gates below read it; wake, ask_by and hold are aliases of until
         alias_ends = _wait_fixes._wait_alias_gate(alias_used)
-        _gates.gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=_wlw.judged_as(waits) if list_in else wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
+        _gates.gate_self_wait(_norm_id(item_id, bare=True), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=_wlw.judged_as(waits) if list_in else wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
                         status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
-        gid_ = _norm_id(item_id, bare=_bare_id_ok(status))
+        gid_ = _norm_id(item_id, bare=True)
         live_ = (lambda g_, who_: _busy_live(g_, who_)) if _busy_live is not None else None
         _gates.gate_busy_hold(gid_, sender, hold=hold, wake=wake, ask_by=ask_by, wait_kind="list" if list_in else wait_kind, needs=needs, after=after or "",
                               mover=mover, next_text=next, status=status, done=done, clear_hold=clear_hold, clear_wake=clear_wake, clear_wait=clear_wait, clear_needs=clear_needs, clear_after=clear_after,

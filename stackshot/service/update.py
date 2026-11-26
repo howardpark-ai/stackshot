@@ -50,7 +50,7 @@ from stackshot.model import steps as _steps
 from stackshot.model import wait_tells as _wtell
 from stackshot.model import work as _work
 from stackshot.model.bullet_text import RX_MD_LINK, RX_NAKED_URL, _clip_line, goal_of, goal_words, stated_goal
-from stackshot.model.ids import _bare_id_ok, _norm_id
+from stackshot.model.ids import _norm_id, name_read as _name_read
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
 from stackshot.service import anchor_offers as _anchor_offers
@@ -710,8 +710,10 @@ def update_unlocked(
         if opts:
             fc.add("Refused: clear_options drops the options; it does not go with a new list")
         opts = []
-    gid = _norm_id(item_id, bare=_bare_id_ok(status))
+    gid = _norm_id(item_id, bare=True)
     item = _load(gid)
+    if status == "completed":
+        _name_read(gid, str(item.get("subject") or ""))          # a close read from a bare number or #N says which item it is: its subject's first words
     answered_note = _answered_since_note(gid, item, sender)      # read now: the write below is the sender's too
     had_hold = bool((item.get("metadata") or {}).get("hold"))      # read before the unfold, which stands a basis or the kind time in as a hold
     was_until = _uw.unfold_item(item)                    # a stored until stands as the old working fields for this write's gates (until_write.py); it is folded back just before the save
@@ -914,6 +916,9 @@ def update_unlocked(
         else:
             outcome_text, description = description.strip(), ""
     if closing:                   # a close says how the item ended
+        outcome_text, ot_note = _fg.fix_long_bullets(outcome_text, None, "outcome_text")       # a bullet over the limit is split like a description's (a pure form fix; the reply says so, and History)
+        if ot_note:
+            _stall.note(meta, time.time(), ot_note)
         superseded_by = fc.call(_gates.gate_close, gid, item, outcome, reason, superseded_by, outcome_text, default="")
     elif outcome or reason or superseded_by or outcome_text:
         fc.add(f"Refused: outcome, outcome_text, reason and superseded_by go with a close (status=completed on an open item, or the complete tool)"
@@ -1724,7 +1729,7 @@ def said_preread(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
             return
         sess = str(got.get("sender") or "").strip()
         if not sess:
-            sess = str(got.get("owner") or "").strip() or _telling.holder(_load(_norm_id(str(got.get("item_id") or ""), bare=_bare_id_ok(str(got.get("status") or "")))))
+            sess = str(got.get("owner") or "").strip() or _telling.holder(_load(_norm_id(str(got.get("item_id") or ""), bare=True)))
         _gates.gate_said(said, sess, "", dry=True)
     except Exception:  # noqa: BLE001  — a lookup that failed is the write's own refusal, raised under the lock from the same (missing) answers
         pass
@@ -1763,13 +1768,13 @@ def complete_item(item_id: str, outcome: str = "", reason: str = "", description
     that replaces it there still reaches the close). The close ends the anchors it left with no open item in their scope and says so in the reply (update_unlocked, through anchor_sweep.on_close). The fields default to empty so that a pane with an older cached schema gets the refusal
     that says what is missing and how to close through the portal, not a schema error."""
     h = _hooks()
-    _load(_norm_id(item_id))          # an item that does not exist is refused here, before anything is written
+    _load(_norm_id(item_id, bare=True))          # an item that does not exist is refused here, before anything is written
     with _writes.close_write():      # the complete tool's own call: the close ticks the sender's own steps only (update_unlocked reads it, as it reads session_next for the update tool's)
         return h.update(item_id, description=description, status="completed", sender=sender, outcome=outcome, reason=reason, superseded_by=superseded_by, said=said, outcome_text=outcome_text)
 
 
 def confirm_item(item_id: str, sender: str = "") -> str:
-    """Mark an item still true: sets its `confirmed` clock only (the confirm tool without its identity and sender checks). item_id: board#N (a bare number N is read as board#N)."""
+    """Mark an item still true: sets its `confirmed` clock only (the confirm tool without its identity and sender checks). item_id: board#N (a bare number N or #N is read as board#N)."""
     h = _hooks()
     gid = _norm_id(item_id, bare=True)
     with _writes.ITEM_LOCK:         # read, changed and saved under the item lock: a write that lands between (an update, a pass in another process) is kept

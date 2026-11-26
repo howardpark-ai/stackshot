@@ -589,7 +589,7 @@ check("5 a semicolon ends a clause too: the clauses that fit together stay toget
 check("5 …the words and the semicolons are all there", " ".join(" ".join(d).replace("- ", "").split()) == "Goal: " + "c" * 50 + "; " + "d" * 50 + "; " + "e" * 40 + " Second bullet", d)
 refused("5 one long sentence has no end to split at: still refused with its length and the fix", lambda: create(bullet(121)), "description bullet is 121 characters", "limit is 120")
 refused("5 a clause of its own over the limit: still refused", lambda: create("- Goal: ok. " + "z" * 130), "description bullet is")
-refused("5 an end of sentence inside a link is no place to cut: still refused", lambda: create("- Goal: " + "x" * 100 + " [one. two](https://example.com/a) " + "y" * 30), "description bullet is")
+refused("5 an end of sentence inside a link is no place to cut, and no word of a bullet with no other cut is cut either: still refused", lambda: create("- Goal: " + "x" * 130 + "[one. two](https://example.com/a)"), "description bullet is")
 refused("5 a split that would pass the line cap is no fix: still refused", lambda: create("\n".join(["- Goal: " + "p" * 60 + ". " + "q" * 60] + [f"- fact {i}" for i in range(7)])), "description bullet is")
 refused("5 a long quoted line (his words) is never split: still refused", lambda: create("- Goal: ok\n> " + "w" * 70 + ". " + "v" * 70), "description bullet is")
 refused("5 a prose line is still no bullet: refused", lambda: create("- Goal: ok. " + "k" * 50 + "\nplain " + "m" * 130), "not a `- ` bullet")
@@ -761,7 +761,7 @@ _, fx = with_fixes(lambda: _update_svc._update(g6, description=f"- Goal: {A}: {B
 check("5d write: an update is put right the same way", _service_store._load(g6)["description"] == f"- Goal: {A}:\n- {B}" and [k for k, _ in fx] == ["description-bullet"], (_service_store._load(g6)["description"], fx))
 _, fx_r = with_fixes(lambda: _update_svc._update(g6, description=f"- Goal: {A}: {B}", sender=MAIN))
 check("5d write: …and the same text sent again is no new fix", fx_r == [], fx_r)
-refused("5d write: a bullet with no usable cut is refused as before, with its length and the limit", lambda: create("- Goal: " + "word " * 25), "description bullet is", "limit is 120")
+refused("5d write: a bullet with no usable cut at all is refused as before, with its length and the limit", lambda: create("- Goal: " + "w" * 125), "description bullet is", "limit is 120")
 (got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets(f"- Goal: {A}, {B}"))
 check("5d fix_long_bullets: the History line and the reply line name the comma; a sentence-only split keeps its old wording", got_n == "description: 1 long bullet split by the server at the end of a sentence or a comma, colon, dash or parenthesis" and "comma" in fx_d[0][1] and "at the end of a sentence into" in with_fixes(lambda: _fg.fix_long_bullets(LONG2))[1][0][1] and with_fixes(lambda: _fg.fix_long_bullets(LONG2))[1][0][1].endswith("no word changed"), (got_n, fx_d))
 (got_t, got_n), fx_d = with_fixes(lambda: _fg.fix_long_bullets(f"- Goal: {A}, {B}\nplain prose that is no bullet"))
@@ -878,5 +878,146 @@ check("5f confirmed: a first piece one over the limit is rejected by the full me
 check("5f confirmed: a first piece under the floor is rejected by the full measure", soft_slack("- " + "a" * 3 + ", " + "b" * 118, (6, 0)) is None, soft_slack("- " + "a" * 3 + ", " + "b" * 118, (6, 0)))
 check("5f confirmed: a last piece under the floor is rejected by the full measure", soft_slack("- " + "a" * 115 + ", " + "b" * 4, (6, 0)) is None, soft_slack("- " + "a" * 115 + ", " + "b" * 4, (6, 0)))
 check("5f confirmed: a rest that the table says fits but reads over is refused by the final measure, never handed on", soft_slack("- " + "a" * 20 + ", " + "b" * 122, (0, 6)) is None, soft_slack("- " + "a" * 20 + ", " + "b" * 122, (0, 6)))
+
+# ---- 6. a bullet that no sentence or clause cut splits is cut at its last space that fits, the rest on an indented child bullet; the same for a close's outcome_text
+LIM = 120
+vis = _fg._visible_len
+WORDS = " ".join(["wordy"] * 30)                         # 179 characters, no sentence end, no comma, no dash: only a space can cut it
+def words_of(t): return re.sub(r"[-\s]+", " ", t).split()
+def lines_of(gid): return _service_store._load(gid)["description"].splitlines()
+def kinds(fx): return [k for k, _ in fx]
+r, fx = with_fixes(lambda: create(f"- Goal: {WORDS}\n- Second bullet"))
+g6w = r[1]; d = lines_of(g6w)
+check("6 a long bullet with no sentence end or clause mark is cut at a space: the bullet, an indented `- ` line, the other bullet", len(d) == 3 and d[1].startswith("  - ") and d[2] == "- Second bullet" and d[0].startswith("- Goal: wordy"), d)
+check("6 …every line reads within the limit, and the first is cut at the LAST space that fits (the next word would not)", all(vis(x) <= LIM for x in d) and vis(d[0] + " wordy") > LIM, [vis(x) for x in d])
+check("6 …no word is changed or lost, and no word is cut", words_of(" ".join(d[:2])) == words_of(f"- Goal: {WORDS}") and all(w in ("Goal:", "wordy") for w in words_of(" ".join(d[:2]))), d)
+check("6 …counted once as bullet-wrap (not as description-bullet), the line names the limit, the indented line and no word changed",
+      kinds(fx) == ["bullet-wrap"] and "over 120 characters" in fx[0][1] and "indented" in fx[0][1] and "no word changed" in fx[0][1], fx)
+check("6 …and the reply carries the line", "cut at a space" in _CL.reply_note(fx), _CL.reply_note(fx))
+check("6 …the item's History says the server continued the bullet", "continued on an indented line by the server" in str(_service_store._load(g6w)["metadata"]), None)
+check("6 idempotent: the stored form keeps the form, and a second pass finds nothing to split", BT.judge(_service_store._load(g6w)["description"], 8, LIM) is None and BT.split_long_wrap(_service_store._load(g6w)["description"], 8, LIM) is None, None)
+# the limit, to the character
+b120 = "- Goal: " + " ".join(["abcd"] * 22)[:112].rstrip()        # exactly 120 as read, with spaces
+b120 = b120 + "x" * (120 - len(b120))
+check("fixture 6: the bullet reads 120", vis(b120) == 120 and " " in b120, vis(b120))
+r, fx = with_fixes(lambda: create(b120))
+check("6 limit: a bullet that reads exactly 120 is stored as written, no fix", lines_of(r[1]) == [b120] and fx == [], (lines_of(r[1]), fx))
+b121 = "- Goal: " + " ".join(["abcd"] * 22)[:109] + " zz"
+b121 = b121 if vis(b121) == 121 else b121 + "z" * (121 - vis(b121))
+check("fixture 6: the bullet reads 121", vis(b121) == 121, vis(b121))
+r, fx = with_fixes(lambda: create(b121))
+d = lines_of(r[1])
+check("6 limit: a bullet that reads 121 is cut (one over), the cut at a space, nothing lost", len(d) == 2 and d[1].startswith("  - ") and words_of(" ".join(d)) == words_of(b121) and kinds(fx) == ["bullet-wrap"], d)
+# a link's URL does not count, and a link or a URL is never cut
+URL = "https://example.com/" + "p" * 150
+lk = f"- Goal: " + " ".join(["wordy"] * 12) + f" [see the long page]({URL}) " + " ".join(["more"] * 12)
+check("fixture 6: the link bullet is over 120 as read and far over raw", vis(lk) > LIM and len(lk) > 250, (vis(lk), len(lk)))
+r, fx = with_fixes(lambda: create(lk))
+d = lines_of(r[1])
+check("6 URL: the link stays whole on one line, every line reads within the limit as read (the URL not counted), nothing lost", any(f"[see the long page]({URL})" in x for x in d) and all(vis(x) <= LIM for x in d) and words_of(" ".join(d)) == words_of(lk), d)
+check("6 URL: the first line is cut at the last space that fits as read (the URL not counted): the next word would not fit", len(d) >= 2 and vis(d[0] + " " + d[1].split("- ", 1)[1].split()[0]) > LIM, [vis(x) for x in d])
+lk2 = f"- Goal: " + " ".join(["wordy"] * 8) + f" [see the long page]({URL}) and more words to follow here ok"
+check("fixture 6: a link-heavy bullet is over 120 raw and within 120 as read", len(lk2) > LIM and vis(lk2) <= LIM, (len(lk2), vis(lk2)))
+r, fx = with_fixes(lambda: create(lk2))
+check("6 URL: a bullet over 120 raw but within 120 as read is stored as written, no fix (the URL is not counted)", lines_of(r[1]) == [lk2] and fx == [], (lines_of(r[1]), fx))
+sp_link = "- Goal: " + "w" * 100 + " [two words here](https://example.com/a) " + "tail " * 8
+r, fx = with_fixes(lambda: create(sp_link.rstrip()))
+d = lines_of(r[1])
+check("6 a link's own words are never cut at their spaces: it sits whole on one line", any("[two words here](https://example.com/a)" in x for x in d) and all(vis(x) <= LIM for x in d), d)
+r, fx = with_fixes(lambda: create("- Goal: " + "w" * 90 + " `a b c d e f g h` " + "tail " * 8 + "end"))
+d = lines_of(r[1])
+check("6 a code span is never cut either", any("`a b c d e f g h`" in x for x in d), d)
+# the rest of a cut that reads exactly 120 is left whole (and one that reads 121 is cut again)
+ex = "- " + "a" * 117 + " " + "r" * 118
+res = BT.split_long_wrap(ex, 8, LIM)
+check("6 limit: a rest that reads exactly 120 (`- ` counted, the indent not: the gate trims a line's ends) is not cut again", res is not None and res[0].splitlines() == ["- " + "a" * 117, "  - " + "r" * 118] and vis(res[0].splitlines()[1]) == 120, res)
+check("6 limit: ...and one that reads 121 is refused here, being one unbroken token", BT.split_long_wrap("- " + "a" * 117 + " " + "r" * 119, 8, LIM) is None, None)
+ex2 = "- " + "a" * 117 + " " + "r" * 100 + " " + "s" * 20
+res2 = BT.split_long_wrap(ex2, 8, LIM)
+check("6 limit: a rest of 125 with a space is cut again, at the last space that fits, under the same indent", res2 is not None and len(res2[0].splitlines()) == 3 and res2[0].splitlines()[2].startswith("  - s"), res2)
+# what stays refused
+refused("6 one unbreakable token (no space) is still refused, with its length", lambda: create("- Goal: " + "z" * 125), "description bullet is 133 characters", "limit is 120")
+refused("6 …a rest that is one unbreakable token over a line is still refused", lambda: create("- Goal: ok fine words here " + "z" * 130), "description bullet is")
+refused("6 …a cut that would leave only the label (`Goal:`) alone on the line is no cut", lambda: create("- Goal: " + "z" * 113), "description bullet is 121 characters")
+g6c = create()[1]
+refused("6 …a long bullet with a bullet indented under it is not cut", lambda: _update_svc._update(g6c, description=f"- Goal: {WORDS}\n  - child", sender=MAIN), "description bullet is")
+check("6 …the item keeps the description it had", "wordy" not in _service_store._load(g6c)["description"], None)
+refused("6 the line cap still holds: a cut that makes a 9th line is refused", lambda: create("\n".join([f"- Goal: {WORDS}"] + [f"- fact {i}" for i in range(7)])), "description bullet is")
+r, fx = with_fixes(lambda: create("\n".join([f"- Goal: {WORDS}"] + [f"- fact {i}" for i in range(6)])))
+check("6 …and 8 lines after the cut pass", len(lines_of(r[1])) == 8 and kinds(fx) == ["bullet-wrap"], lines_of(r[1]))
+long_next = "my-x: " + "word " * 60
+refused("6 a line of next over its limit is NOT cut: still refused", lambda: create(next=long_next), "a line of next is")
+refused("6 a long quote line is still not cut", lambda: create("- Goal: ok\n> " + " ".join(["quote"] * 30)), "description bullet is")
+# a sentence cut still goes first, and a mix reports both kinds
+r, fx = with_fixes(lambda: create(f"- {S1} {S2}\n- Problem: {WORDS}"))
+check("6 a bullet with sentence ends is split there (description-bullet) and a bullet with none at a space (bullet-wrap), both told", sorted(kinds(fx)) == ["bullet-wrap", "description-bullet"] and _service_store._load(r[1])["description"].splitlines()[:2] == [f"- {S1}", f"- {S2}"], (kinds(fx), lines_of(r[1])))
+# update and the stored text sent again
+g6u = create()[1]
+_, fx = with_fixes(lambda: _update_svc._update(g6u, description=f"- Goal: {WORDS}", sender=MAIN))
+check("6 update: a long description is cut the same way and counted as bullet-wrap", kinds(fx) == ["bullet-wrap"] and len(lines_of(g6u)) == 2, (kinds(fx), lines_of(g6u)))
+_, fx = with_fixes(lambda: _update_svc._update(g6u, description=f"- Goal: {WORDS}", sender=MAIN))
+check("6 update: the same text sent again is no new fix", fx == [], fx)
+# the close's outcome_text
+def closed(gid, ot, **kw):
+    return _wt_complete.stackshot_complete(gid, outcome="done", reason="finished", outcome_text=ot, sender=MAIN, **kw)
+def outcome(gid): return _service_store._load(gid)["metadata"]["outcome_text"].splitlines()
+g6o = create()[1]
+(out_), fx = with_fixes(lambda: closed(g6o, f"- {WORDS}\n- short"))
+o = outcome(g6o)
+check("6 complete: a long outcome_text bullet is cut at a space, the close goes through and the item is completed", _service_store._load(g6o)["status"] == "completed" and len(o) == 3 and o[1].startswith("  - ") and o[2] == "- short" and all(vis(x) <= LIM for x in o), o)
+check("6 …counted as outcome-wrap (its own kind, apart from a description's bullet-wrap), naming outcome_text, and the reply says it", kinds(fx) == ["outcome-wrap"] and "outcome_text bullet" in fx[0][1] and "cut at a space" in _CL.reply_note(fx), fx)
+g6p = create()[1]
+(_o), fx = with_fixes(lambda: _update_svc._update(g6p, status="completed", outcome="done", reason="finished", outcome_text=f"- {S1} {S2}", sender=MAIN))
+check("6 update status=completed: an outcome_text of two sentences is split at the sentence end, counted as outcome-bullet", outcome(g6p) == [f"- {S1}", f"- {S2}"] and kinds(fx) == ["outcome-bullet"] and "outcome_text bullet" in fx[0][1], (outcome(g6p), fx))
+g6q = create()[1]
+refused("6 complete: an unbreakable outcome_text bullet is refused, naming outcome_text, and the item stays open", lambda: closed(g6q, "- " + "z" * 130), "outcome_text bullet is 132 characters", "limit is 120")
+check("6 …still open", _service_store._load(g6q)["status"] == "open", None)
+check("6 the refusal says the server splits a long bullet itself and could not split this one", "splits a long bullet at a sentence end or a space by itself" in _fg.description_faults("- " + "z" * 130)[0], _fg.description_faults("- " + "z" * 130))
+check("6 call_log: an outcome_text refusal has its own kind", _CL.kind_of("Refused: outcome_text bullet is 132 characters, the limit is 120") == "an outcome_text bullet over its limit", None)
+# a description AND an outcome_text both wrapped in one call: both kinds are recorded (a kind is kept once per call, so the two fields are two kinds)
+(got_d, got_o), fx = with_fixes(lambda: (_fg.fix_long_bullets(f"- Goal: {WORDS}"), _fg.fix_long_bullets(f"- {WORDS}", None, "outcome_text")))
+check("6 both fields wrapped in one call: the call log records bullet-wrap AND outcome-wrap, each naming its field", sorted(kinds(fx)) == ["bullet-wrap", "outcome-wrap"] and any("description bullet" in n for k, n in fx if k == "bullet-wrap") and any("outcome_text bullet" in n for k, n in fx if k == "outcome-wrap"), fx)
+check("6 …both texts cut, both History lines made, and the reply carries both lines (one tool call cannot carry both fields: a close refuses a description, so the two fixes run in one logged call here)", len(got_d[0].splitlines()) == 2 and len(got_o[0].splitlines()) == 2 and "description" in got_d[1] and "outcome_text" in got_o[1] and _CL.reply_note(fx).count("cut at a space") == 2, (got_d, got_o, _CL.reply_note(fx)))
+# the cut keeps the balance the sentence cut keeps: never inside an open parenthesis or an unclosed ** emphasis
+KK = "k" * 60
+par = f"- Goal: {KK} (" + " ".join(["wordy"] * 12) + ")"
+res = BT._wrap_words(par, LIM, 8)
+check("6 balance: a cut is never inside an open parenthesis: the earlier space (before it) is the cut, the parenthesis whole on the next line", res is not None and res == [f"- Goal: {KK}", "  - (" + " ".join(["wordy"] * 12) + ")"], res)
+bold = f"- Goal: {KK} **" + " ".join(["wordy"] * 12) + "**"
+res = BT._wrap_words(bold, LIM, 8)
+check("6 balance: …nor inside an unclosed ** emphasis", res is not None and res == [f"- Goal: {KK}", "  - **" + " ".join(["wordy"] * 12) + "**"], res)
+check("6 balance: a space after the parenthesis is closed is a cut", BT._wrap_words(f"- Goal: (a b c d e f g h i j k l m n o p q r s t u v w x y z a b c d e f g h i j k l m n o p q r s t u v w x y z) {KK}", LIM, 8) is not None, None)
+check("6 balance: when the only possible cut is inside a parenthesis the bullet is refused as an unbreakable token", BT._wrap_words("- (" + " ".join(["wordy"] * 30) + ")", LIM, 8) is None, None)
+check("6 balance: …and inside an open **", BT._wrap_words("- **" + " ".join(["wordy"] * 30) + "**", LIM, 8) is None, None)
+refused("6 balance: …through the tool, refused with the bullet's length", lambda: create("- Goal: (" + " ".join(["wordy"] * 30) + ")"), "description bullet is")
+# a code span is not cut, even where it straddles the limit; a tab is a cut point; a trailing space is none; the wrap's own line cap
+cs = "- Goal: " + "w" * 100 + " `aaaa bbbb cccc dddd` " + "tail " * 6 + "end"
+res = BT.split_long_wrap(cs, 8, LIM)
+check("6 code span: a span that straddles the limit stays whole (the cut is before it), and the first line is the text up to it", res is not None and "`aaaa bbbb cccc dddd`" in res[0] and res[0].splitlines()[0] == "- Goal: " + "w" * 100 and all(vis(x) <= LIM for x in res[0].splitlines()), res)
+tabs = "- Goal: " + "\t".join(["wordy"] * 30)
+res = BT.split_long_wrap(tabs, 8, LIM)
+check("6 tab: a tab between words is a cut point as a space is, and the rest keeps its words", res is not None and all(vis(x) <= LIM for x in res[0].splitlines()) and words_of(res[0]) == words_of(tabs) and res[0].splitlines()[0].endswith("wordy"), res)
+trail = "- Goal: " + WORDS + "   "
+res = BT.split_long_wrap(trail, 8, LIM)
+check("6 trailing space: spaces at the end of the line are no cut (no empty continuation `- `), every line has words", res is not None and all(x.strip().split("- ", 1)[-1].strip() for x in res[0].splitlines()) and len(res[0].splitlines()) == 2, res)
+n_ = len(BT._wrap_words("- " + " ".join(["wordy"] * 90), LIM, 99) or [])
+check("fixture 6: the line needs 4 lines or more", n_ >= 4, n_)
+check("6 wrap's own cap: the lines the cut makes may reach the cap exactly", BT._wrap_words("- " + " ".join(["wordy"] * 90), LIM, n_) is not None, n_)
+check("6 …and one more than the cap is refused (None)", BT._wrap_words("- " + " ".join(["wordy"] * 90), LIM, n_ - 1) is None, n_)
+# the refusal for a bullet spaced only with non-breaking or ideographic spaces does not say a word is longer than a line
+NB, IDE = chr(0xA0), chr(0x3000)
+for nm_, sp_ in (("non-breaking", NB), ("ideographic", IDE)):
+    refused(f"6 text spaced only with {nm_} spaces is refused, and the message names the cause", lambda sp_=sp_: create("- Goal: " + sp_.join(["wordy"] * 30)), "description bullet is", "no ordinary space to cut at", "non-breaking or wide spaces")
+# the limits are the config's, not the splitter's
+sv_ = _cfg.CFG["description"].get("line_max")
+_cfg.CFG["description"]["line_max"] = 60
+try:
+    r, fx = with_fixes(lambda: create("- Goal: " + " ".join(["wordy"] * 20)))
+    d = lines_of(r[1])
+    check("6 config: the cut follows a smaller line_max (60), the limit itself is not changed", all(vis(x) <= 60 for x in d) and len(d) >= 2 and _cfg.CFG["description"]["line_max"] == 60, d)
+finally:
+    _cfg.CFG["description"]["line_max"] = sv_
+PARAMS = {t.name: json.dumps(t.parameters) for t in __import__("asyncio").run(server.mcp.list_tools())}
+check("6 tool text: create and update say a longer bullet is split for you, and complete says it of outcome_text", all("split for you" in TOOLS[t] for t in ("create", "update")) and "split for you" in PARAMS["complete"] and "split for you" in PARAMS["update"], None)
 
 print(("ok" if not fails else "FAILED") + f": bullets scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

@@ -145,7 +145,7 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
         known = {t["gid"]: t for t in _anc.items()}
         scope = []
         for i in items:
-            g = _norm_id(i)
+            g = _norm_id(i, bare=True)
             t = known.get(g)
             if not t:
                 raise ToolError(f"Refused: no item {g}")
