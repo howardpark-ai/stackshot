@@ -416,7 +416,7 @@ for what, name, sets in (("no host named, [server] box = false", "nohost.toml", 
     two([S], {K: {S: E()}})
     rc, out, calls = tb.clear(K, sid=S, config=tb.client_config(name, **sets))
     check(f"two boxes: {what} → no ssh call, exit 4, the command to run on the server box", rc == 4 and calls == [] and not tb.reminded(K, S) and S in led().get(K, {})
-          and "[release] deploy_ssh gives this box no plain host name" in out and f"on the server box: `env CLAUDE_CODE_SESSION_ID={S} python3 ~/stackshot/stackshot/projects/pages.py clear projects/delta`" in out
+          and "[release] deploy_ssh gives this box no plain host name" in out and f"on the server box: `env CLAUDE_CODE_SESSION_ID={S} python3 ~/stackshot/stackshot/projects/pages.py clear projects/delta --name=work-osprey`" in out
           and not (T / "pwned-host").exists(), (rc, out, calls))
 two([S], {K: {S: E()}})
 rc, out, calls = tb.clear(K, sid=S, config=tb.client_config("self.toml", deploy_ssh=socket.gethostname()))
@@ -446,6 +446,91 @@ check("two boxes: a debt with no page is only this box's reminder: no ssh call, 
 said = io.StringIO()
 with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said): rc = p.main(["pages.py", "clear-forwarded", K, "--other"])
 check("clear-forwarded: a word it does not know is refused (exit 1), nothing cleared", rc == 1 and "not understood" in said.getvalue(), (rc, said.getvalue()))
+# the command printed when the server cannot be asked carries the caller's name and permanent id: the server host, which names this session by neither, clears by them
+roles = tb.state / "roles.json"; P = "44444444-4444-4444-8444-444444444444"
+roles.write_text(json.dumps({"ids": {"work-osprey": P}}), encoding="utf-8")
+two([S], {K: {P: E(), "work-osprey": E(), B: E()}})
+rc, out, _ = tb.clear(K, sid=S, mode="down")
+words = shlex.split(shlex.split(_twobox.given_command(out))[-1]) if rc == 4 else []
+check("two boxes: the printed command carries the session's id, name and permanent id, and no --force", words[:1] == ["env"] and f"CLAUDE_CODE_SESSION_ID={S}" in words
+      and words[-3:] == [K, "--name=work-osprey", f"--id={P}"] and "--force" not in words, (rc, out, words))
+rc, said, _ = tb.run(shlex.split(_twobox.given_command(out)))
+check("two boxes: …and run as printed it clears the caller's name and permanent-id debts and keeps the other's (exit 3)", rc == 3 and list(led().get(K, {})) == [B] and "2 server owed entries" in said, (rc, said, led()))
+two([S], {K: {S: E()}})
+rc, out, calls = tb.clear(K, sid=S)
+check("two boxes: a plain permanent id goes with the call", rc == 0 and f" --id {P}" in calls[0][-1], (rc, out, calls))
+roles.write_text(json.dumps({"ids": {"work-osprey": f"x$(touch {T}/pwned-id)"}}), encoding="utf-8")
+two([S], {K: {S: E()}})
+rc, out, calls = tb.clear(K, sid=S)
+check("two boxes: a permanent id that is not plain is never sent, and the rest of the call goes", rc == 0 and len(calls) == 1 and "--id" not in calls[0][-1] and "pwned" not in calls[0][-1]
+      and "--name work-osprey" in calls[0][-1] and K not in led() and not (T / "pwned-id").exists(), (rc, out, calls))
+roles.unlink()
+# a name with spaces is one word on the far side
+names.write_text(json.dumps({S: {"name": "work osprey two", "machine": "a"}}), encoding="utf-8")
+two([], {K: {"work osprey two": E()}})
+rc, out, calls = tb.clear(K, sid=S)
+check("two boxes: a name with spaces is sent as one word, and the debt kept under it goes", rc == 0 and "--name 'work osprey two'" in calls[0][-1] and K not in led(), (rc, out, calls, led()))
+# a name that is not plain is not sent: where the server then keeps a debt, the reply says the name was left out and gives the command that clears it
+odd = f"osprey's pane: $(touch {T}/pwned-odd)"
+names.write_text(json.dumps({S: {"name": odd, "machine": "a"}}), encoding="utf-8")
+two([], {K: {odd: E(), B: E()}})
+rc, out, calls = tb.clear(K, sid=S)
+told = [x for x in out.split("\n") if "is not a plain name, so it was not sent" in x]
+check("two boxes: a name that is not plain is not sent, and the reply says so when the server keeps a debt (exit 3)", rc == 3 and "--name" not in calls[0][-1] and "pwned" not in calls[0][-1]
+      and set(led().get(K, {})) == {odd, B} and len(told) == 1 and odd in told[0] and out.index(told[0]) < out.index("clears every writer's"), (rc, out, calls, led()))
+rc, said, _ = tb.run(shlex.split(told[0][told[0].index("`") + 1:told[0].rindex("`")]) if told else ["false"])
+check("two boxes: …and that command, run as printed, clears the debt under the name, keeps the other's and runs nothing in it", rc == 3 and list(led().get(K, {})) == [B] and not (T / "pwned-odd").exists(), (rc, said, led()))
+two([], {K: {S: E()}})
+rc, out, _ = tb.clear(K, sid=S)
+check("two boxes: …and nothing is said of the name when the server kept nothing", rc == 0 and "not a plain name" not in out, (rc, out))
+# a name that reads as an option never turns the printed command into --force
+names.write_text(json.dumps({S: {"name": "--force", "machine": "a"}}), encoding="utf-8")
+two([], {K: {"--force": E(), B: E()}})
+rc, out, _ = tb.clear(K, sid=S, mode="down")
+rc2, said, _ = tb.run(shlex.split(_twobox.given_command(out)))
+check("two boxes: a session named like --force is carried as a name: only its own debt goes", rc == 4 and rc2 == 3 and list(led().get(K, {})) == [B], (rc, rc2, out, said, led()))
+names.write_text(kept_names, encoding="utf-8")
+# run by hand: the line saying no session could be told is printed once
+two([], {K: {B: E()}})
+rc, out, _ = tb.clear(K)
+check("two boxes: run outside a session, the no-session line is said once and every debt is kept (exit 3)", rc == 3 and out.count("No session could be told") == 1 and B in led().get(K, {}), (rc, out))
+# what ssh is given and what is taken from it
+two([S], {K: {S: E()}})
+rc, out, calls = tb.clear(K, sid=S, typed="the caller's own input\n")
+check("two boxes: ssh reads nothing of the caller's standard input", rc == 0 and len(calls) == 1 and tb.read.read_text(encoding="utf-8") == "", (rc, out, tb.read.exists() and tb.read.read_text(encoding="utf-8")))
+two([S], {K: {S: E()}})
+rc, out, calls = tb.clear(K, sid=S, path=tb.no_ssh)
+check("two boxes: no ssh on this box → the reminder here goes, exit 4, one line says why", rc == 4 and calls == [] and "stays: ssh could not be started (FileNotFoundError)" in out and not tb.reminded(K, S) and S in led().get(K, {}), (rc, out))
+RESULT = "cleared projects/delta for you: 0 session state(s), 1 server owed entry\n"
+for status in (1, 2, 4, 255):
+    two([S], {K: {S: E()}})
+    rc, out, _ = tb.clear(K, sid=S, said=[RESULT, "", status])
+    check(f"two boxes: a result line with exit {status} on the server is no answer (exit 4)", rc == 4 and "From the server host" not in out and "The server's entry for projects/delta stays" in out, (rc, out))
+two([S], {K: {S: E()}})
+rc, out, _ = tb.clear(K, sid=S, said=[RESULT, "", 3])
+check("two boxes: …and with exit 3 it is the answer (exit 3)", rc == 3 and "From the server host (server-host):\n" + RESULT in out, (rc, out))
+noise = ("motd: not a result\n\x1b]0;title\x07\n" + "cleared projects/delta for you:\x1b[2J 1 server owed entry\x07\n" + "No session could be told (said there)\n"
+         + "Traceback: not a result\n" + "Kept, not yours: projects/delta is still owed by x\x1b[31m\r\n")
+two([S], {K: {S: E()}})
+rc, out, _ = tb.clear(K, sid=S, said=[noise, "", 3])
+check("two boxes: only the result lines are printed, without their control characters", rc == 3 and "From the server host (server-host):\ncleared projects/delta for you:[2J 1 server owed entry\n"
+      "Kept, not yours: projects/delta is still owed by x[31m\nOnly if" in out and "motd" not in out and "Traceback" not in out and "said there" not in out and not [c for c in out if c != "\n" and not c.isprintable()], (rc, repr(out)))
+two([S], {K: {S: E()}})
+rc, out, _ = tb.clear(K, sid=S, said=["", "first\nrefused\x1b[31m there\x07\n\n", 2])
+check("two boxes: the reason a run gave is its last line, without its control characters", rc == 4 and "(exit 2: refused[31m there)" in out and "first" not in out and "\x1b" not in out, (rc, repr(out)))
+# the server host: a list that cannot be rewritten is a failure, never a count
+owe([S, B], {K: {S: E()}})
+LEDGER.write_text("not json", encoding="utf-8")
+rc, out = clear(K)
+check("one box: a list that cannot be read is exit 4 with the reason, no server count, the file as it was", rc == 4 and "The server's entry for projects/delta stays: the owed list could not be rewritten (JSONDecodeError)" in out
+      and str(LEDGER) in out and "server owed entr" not in out and "1 session state(s)\n" in out and not touched(S) and touched(B) and "Kept, not yours: projects/delta is still owed by home-beta" in out
+      and LEDGER.read_text(encoding="utf-8") == "not json", (rc, out))
+owe([S], {K: {S: E()}})
+blocker = pathlib.Path(str(LEDGER) + ".tmp"); blocker.mkdir()
+try:
+    rc, out = clear(K)
+    check("one box: a list that cannot be written is exit 4: no entry is counted as gone", rc == 4 and "could not be rewritten (IsADirectoryError)" in out and "server owed entr" not in out and S in led().get(K, {}), (rc, out, led()))
+finally: blocker.rmdir()
 # the owed list is rewritten only under the lock the server holds while it rewrites it
 two([], {K: {S: E()}})
 lock_file = pathlib.Path(p._cfg.state("ledger.lock")); lock_file.touch()
