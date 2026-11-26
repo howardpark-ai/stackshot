@@ -351,6 +351,11 @@ owe([S], {"projects/delta": 1700000000})
 rc, out = clear("projects/delta")
 check("clear: …and goes when nobody else owes", rc == 0 and "projects/delta" not in led() and not touched(S), (rc, out, led()))
 rc, _ = clear(); check("clear: no key → usage, exit 1", rc == 1)
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "clear"], capture_output=True, text=True)
+USAGE = "clear <key> [--force] [--name=<session name>] [--id=<permanent id>]..."
+check("clear: the usage line lists --name= and --id=", USAGE in r.stderr, r.stderr)
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "help"], capture_output=True, text=True)      # a word it does not know prints the text at the top
+check("clear: …and so does the text at the top of pages.py", USAGE in r.stdout, r.stdout[:200])
 
 # ---- 5c. two boxes: the sessions' box (its own state and reminders, [release] deploy_ssh naming the server host) and the server host (this fixture's
 # state, where the owed list is), with a fake `ssh` between them (tests/_twobox.py: nothing connects anywhere)
@@ -551,6 +556,88 @@ try:
 finally:
     p.CLEAR_LOCK_WAIT = was; os.close(held)
     if child and child.poll() is None: child.kill(); child.wait()
+# ---- 5d. the printed command is the one that clears: only control characters are taken out of it, a name cannot end its backticks, and it keeps --force
+stays_line = lambda out: next((x for x in out.split("\n") if x.startswith("The server's entry for ")), "")
+left_out_line = lambda out: next((x for x in out.split("\n") if "is not a plain name, so it was not sent" in x), "")
+def split(command):                                                    # a printed command's words; [] for one that was cut short or is not quoted for a shell
+    try: return shlex.split(command)
+    except ValueError: return []
+inner = lambda command: split(split(command)[-1]) if split(command) else []      # the words of the ssh form's far side
+for what, odd in (("a no-break space", "work" + chr(0xA0) + "osprey"), ("an ideographic space", "work" + chr(0x3000) + "osprey"), ("a zero-width joiner", "work" + chr(0x200D) + "osprey"),
+                  ("backticks", f"work `touch {T}/pwned-tick` osprey ``two``")):
+    names.write_text(json.dumps({S: {"name": odd, "machine": "a"}}), encoding="utf-8")
+    for line_of, mode, status in ((stays_line, "down", 4), (left_out_line, "run", 3)):
+        two([], {K: {odd: E(), B: E()}})
+        rc, out, _ = tb.clear(K, sid=S, mode=mode)
+        command = _twobox.code_span(line_of(out)) if line_of(out) else "false"
+        words = inner(command)
+        which = "the entry-stays line" if status == 4 else "the name-left-out line"
+        check(f"printed command: a name with {what} is in {which}'s command as it is", rc == status and f"--name={odd}" in words, (rc, out, words))
+        rc2, said, _ = tb.run(split(command) if words else ["false"])
+        check(f"printed command: …and run as printed it clears the debt under that name ({what}, {which}), keeps the other's and runs nothing in it",
+              rc2 == 3 and list(led().get(K, {})) == [B] and not (T / "pwned-tick").exists(), (rc2, said, led()))
+odd = "osprey" + chr(27) + "[31m" + chr(7) + " pane" + chr(0x9B)
+names.write_text(json.dumps({S: {"name": odd, "machine": "a"}}), encoding="utf-8")
+controls = lambda line: [c for c in line if ord(c) < 32 or 127 <= ord(c) < 160]
+for line_of, mode, status, which in ((stays_line, "down", 4, "entry-stays"), (left_out_line, "run", 3, "name-left-out")):
+    two([], {K: {odd: E(), B: E()}})
+    rc, out, _ = tb.clear(K, sid=S, mode=mode)
+    line = line_of(out)
+    check(f"printed command: the {which} line carries no control character of the name, in its words or its command", rc == status and "osprey[31m pane" in line and not controls(line), (rc, repr(out)))
+names.write_text(kept_names, encoding="utf-8")
+two([S], {K: {S: E()}})
+rc, out, _ = tb.clear(f"projects/x{chr(27)}[2J", sid=S)
+check("printed command: the entry-stays line carries no control character of the key", rc == 4 and "projects/x[2j stays" in stays_line(out).lower() and not controls(stays_line(out)), (rc, repr(out)))
+two([S], {K: {S: E(), B: E()}})
+rc, out, _ = tb.clear(K, "--force", sid=S, mode="down")
+command = _twobox.given_command(out)
+check("printed command: a --force clear that cannot reach the server prints a command that keeps --force", rc == 4 and inner(command)[-1] == "--force", (rc, out))
+rc2, said, _ = tb.run(split(command) or ["false"])
+check("printed command: …and run as printed it clears every writer's", rc2 == 0 and K not in led() and "for every writer (--force)" in said, (rc2, said, led()))
+odd = f"osprey two; $(touch {T}/pwned-local) `touch {T}/pwned-local` it's"
+names.write_text(json.dumps({S: {"name": odd, "machine": "a"}}), encoding="utf-8")
+two([], {K: {odd: E(), B: E()}})
+rc, out, calls = tb.clear(K, sid=S, config=tb.client_config("nohost-odd.toml", deploy_ssh="", box_false=True))
+command = _twobox.given_command(out)
+check("printed command: the server-box form is quoted for a shell: the name is one word of it", rc == 4 and calls == [] and "on the server box: `" in out and f"--name={odd}" in split(command), (rc, out))
+r = subprocess.run(["sh", "-c", command], capture_output=True, text=True, timeout=90,
+                   env={**tb.env(config=tb.server_config, fleet=tb.root / "no-fleet"), "HOME": str(tb.home)})       # as on the server box: its checkout, its config
+check("printed command: …and run there in a shell it clears the caller's debt, keeps the other's and runs nothing in the name",
+      r.returncode == 3 and list(led().get(K, {})) == [B] and not (T / "pwned-local").exists(), (r.returncode, r.stdout, r.stderr, led()))
+names.write_text(kept_names, encoding="utf-8")
+# --name= and --id= on the server host: a name is looked up for its permanent id only when no id is said, for it may belong to a later session by now
+host_roles = pathlib.Path(p._cfg.state("roles.json")); kept_roles = host_roles.read_text(encoding="utf-8") if host_roles.exists() else None
+OLD, NEW = "44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"
+try:
+    host_roles.write_text(json.dumps({"ids": {"far-name": OLD}}), encoding="utf-8")
+    owe([], {K: {OLD: E(), B: E()}})
+    rc, out = clear(K, "--name=far-name")
+    check("--name= on the server host: with no --id= the name is looked up, and the debt under its permanent id is the caller's", rc == 3 and list(led().get(K, {})) == [B], (rc, out, led()))
+    host_roles.write_text(json.dumps({"ids": {"far-name": NEW}}), encoding="utf-8")
+    owe([], {K: {OLD: E(), NEW: E()}})
+    rc, out = clear(K, "--name=far-name", f"--id={OLD}")
+    check("--name= with --id=: the name is not looked up, so a later session that took it keeps its debt", rc == 3 and list(led().get(K, {})) == [NEW], (rc, out, led()))
+    host_roles.write_text(json.dumps({"ids": {"work-osprey": NEW}}), encoding="utf-8")      # the name this host's own store gives the caller's conversation
+    owe([], {K: {OLD: E(), NEW: E()}})
+    rc, out = clear(K, f"--id={OLD}")
+    check("--id=: nor is the name this host knows the conversation by", rc == 3 and list(led().get(K, {})) == [NEW], (rc, out, led()))
+    for what, more in (("the name sent with it", ["--name", "work-osprey"]), ("the name this host knows the conversation by", [])):
+        owe([], {K: {OLD: E(), NEW: E()}}); said = io.StringIO()
+        with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said): rc = p.main(["pages.py", "clear-forwarded", K, "--session", S, *more, "--id", OLD])
+        check(f"clear-forwarded with --id: {what} is not looked up", rc == 3 and list(led().get(K, {})) == [NEW], (rc, said.getvalue(), led()))
+finally:
+    if kept_roles is None: host_roles.unlink(missing_ok=True)
+    else: host_roles.write_text(kept_roles, encoding="utf-8")
+# a list whose write fails only when the file is closed (here: past a file size limit, as on a full disk) is not put in place
+owe([], {K: {S: E(), **{f"writer-{i:02d}": E() for i in range(40)}}})
+whole = LEDGER.read_text(encoding="utf-8")
+assert 1500 < len(whole) < 8000, len(whole)       # larger than the limit below, smaller than the file's write buffer: only the close writes it
+limited = ("import resource, signal, sys; sys.path.insert(0, sys.argv[1]); from stackshot.projects import pages as p; signal.signal(signal.SIGXFSZ, signal.SIG_IGN); "
+           "resource.setrlimit(resource.RLIMIT_FSIZE, (1000, 1000)); sys.exit(p.main(['pages.py', 'clear', sys.argv[2]]))")
+r = subprocess.run([sys.executable, "-c", limited, STACK, K], capture_output=True, text=True, timeout=90, env={**os.environ, "CLAUDE_CODE_SESSION_ID": S})
+check("one box: a list whose write fails at the close is exit 4, and the list is left whole", r.returncode == 4 and "could not be rewritten (OSError)" in r.stdout
+      and LEDGER.read_text(encoding="utf-8") == whole, (r.returncode, r.stdout, r.stderr[-300:], len(LEDGER.read_text(encoding="utf-8"))))
+pathlib.Path(str(LEDGER) + ".tmp").unlink(missing_ok=True)
 for x in (S, A, B): p.save_state(x, {})
 if kept_ledger is None: LEDGER.unlink(missing_ok=True)
 else: LEDGER.write_text(kept_ledger, encoding="utf-8")
@@ -608,6 +695,14 @@ try:
           B in _pdebts._owed_load().get("projects/gamma", {}) and "PROJECT PAGE owed by you: projects/gamma" in _pdebts._nag(B) and "projects/gamma" in _pdebts._nag(A), (_pdebts._owed_load(), _pdebts._nag(B)))
     check("owing: …the nag tells the writer that writes go through, and no longer that the server refuses the next one",
           "Your board writes go through while it is owed." in _pdebts._nag(B) and "refuses your next board write" not in _pdebts._nag(B), _pdebts._nag(B))
+    said_cmd = f"python3 {_pdebts._HERE}/stackshot/projects/pages.py clear <key>"
+    note = _pdebts._nag(B)
+    check("the reminder names the command that drops a debt of a board-only edit, from this checkout", f"Board-only edit that changed no state: `{said_cmd}` (on another box, the same from the checkout there)." in note, note)
+    check("…and what another box's config needs for it, and what happens with neither", "Such a box needs `[release] deploy_ssh` in its config, naming the server host, so that the clear runs there, or `[server] box = false`, so that it prints the command to run there; "
+          "with neither it counts as the server host and the server's entry stays." in note, note)
+    r = subprocess.run(shlex.split(said_cmd.replace("<key>", "projects/gamma")), capture_output=True, text=True, env={**os.environ, "CLAUDE_CODE_SESSION_ID": B})
+    check("…and that command, run as the writer, drops its debt", r.returncode == 0 and "projects/gamma" not in _pdebts._owed_load(), (r.returncode, r.stdout, r.stderr, _pdebts._owed_load()))
+    _late_debt()
     check("owing: …the line is for the writer: another session and no session get none",
           _pdebts._owing_note(A) == "" and _pdebts._owing_note("") == "", (_pdebts._owing_note(A), _pdebts._owing_note("")))
     _late_debt(ts_ago=60); check("owing: …a debt inside the grace gets none", _pdebts._owing_note(B) == "", _pdebts._owing_note(B))

@@ -291,7 +291,9 @@ def _nag(owner: str = "") -> str:
                    + f" — a board change that reflects a state change is followed by a page update in the same turn ({_page_how()}). "
                    + (f"As a page keeper your debt settles only when the page's Current state changes: {_KEEPER_WHY}. " if any(_debt_strict(owner, e) for _k, e in mine) else "")
                    + "Your board writes go through while it is owed. "
-                   + f"Board-only edit that changed no state: `python3 {_HERE}/stackshot/projects/pages.py clear <key>` (on another box, the same from the checkout there).")
+                   + f"Board-only edit that changed no state: `python3 {_HERE}/stackshot/projects/pages.py clear <key>` (on another box, the same from the checkout there). "
+                     "Such a box needs `[release] deploy_ssh` in its config, naming the server host, so that the clear runs there, or `[server] box = false`, so that it prints the command to run there; "
+                     "with neither it counts as the server host and the server's entry stays.")
     if others:
         out.append("pages owed: " + ", ".join(f"{k} ({_session_label(o)}, {_age(e['ts'])}{', a keeper: settles on a Current-state edit' if _debt_strict(o, e) else ''})" for k, o, e in others))
     return ("\n\n" + "\n".join(out)) if out else ""
