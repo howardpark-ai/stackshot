@@ -106,9 +106,10 @@ def page(body: str, *, key: str, state: str, href: str, origins: list[str], lang
             "quiet": " ".join(_QUIET), "lines": json.dumps({"changed": _t("frame.changed"), "closed": _t("frame.closed"), "answered": _t("frame.sent"), "link": _t("frame.open_board")})}
     attrs = " ".join(f'data-{k}="{esc(v)}"' for k, v in data.items())      # everything the script reads is an escaped attribute: no value is written into script text
     font_css = str(_cfg.get("instance", "font_css") or "")
+    # _css(None): the board's stylesheet reads nothing of a board, and a signed-out page is drawn without opening the store
     out = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">'
            f'<base target="_blank"><title>{esc(_t("frame.title"))}</title>' + (f'<link rel="stylesheet" href="{esc(font_css)}">' if font_css else "") + _r._SST_HEAD
-           + f'<style>{_r.Board._css()}{_CSS}</style><noscript><style>form.hanswer{{display:none}}</style></noscript></head><body class="aframe"><main id="aframe" {attrs}><div id="afbody">{body}</div><div id="afmsg" role="status" aria-live="polite"></div></main>'
+           + f'<style>{_r.Board._css(None)}{_CSS}</style><noscript><style>form.hanswer{{display:none}}</style></noscript></head><body class="aframe"><main id="aframe" {attrs}><div id="afbody">{body}</div><div id="afmsg" role="status" aria-live="polite"></div></main>'
            + f'<noscript><p class="afline">{esc(_t("frame.noscript"))}</p>{_board_link(href, "frame.open_board")}</noscript>'
            + _r._CARDS_JS + _r._SENDKEY_JS + _r._COPY_JS + _SCRIPT + '</body></html>')
     out = _r.apply_lang(out, lang)

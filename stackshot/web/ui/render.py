@@ -3274,9 +3274,8 @@ class Board:
             else: print("_none_")
         return _b.getvalue()
 
-    @staticmethod
-    def _css():
-        """The site's stylesheet (the board, the routing pages and the answer frame share it; it reads nothing of the board's data). Every .badge is a GitHub-style label: a pill tinted 16% with its colour, 1px border in it, text
+    def _css(self):
+        """The site's stylesheet (the board and the routing pages share it). Every .badge is a GitHub-style label: a pill tinted 16% with its colour, 1px border in it, text
         in it too; a value sets only --bc to a theme token. --ink is how much of that colour the text keeps: 65% (the rest --fg)
         in light, where the raw tokens on their tint fall under 4.5:1 at 12px, all of it in dark, where they clear it. Priority runs
         red-yellow-green: p1 --p1, p2 --yellow, p3 --ok. --yellow is its own token because --warn
