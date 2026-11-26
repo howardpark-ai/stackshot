@@ -1,0 +1,192 @@
+"""behind_door.py: a board that sits behind a front door: what it reads from its own config and what it does with it.
+
+A front door (`stackshot/frontdoor/`, docs/front-door.md) calls a board with its own credential and adds the caller's identity as a signed header
+(`frontdoor_identity.HEADER`). A board that is told so by its config does two things with what the door holds, and nothing when it is not told:
+
+  * it checks the signed identity of every call to its MCP endpoint: `check(value)` says who the call is for, or why it is refused; a call with no identity, or one that
+    does not verify under the shared secret inside the replay window, is refused (`web/door_guard.py` is the ASGI wrapper that asks, `web/auth/oauth.py: _who` asks again
+    where a tool needs the caller);
+  * it reads its members from the front door's members file (one source): `members(cfg)` is the identities the file lists for this board, read at each call,
+    which `core/members.py` turns into the board's people.
+
+The `[behind_frontdoor]` table of the config:
+
+    identity_secret_file      the secret the front door signs with. Set: the board takes calls to /mcp through the front door only. Unset: no call is checked (the board as it was)
+    identity_max_age_seconds  the replay window: how old a signed identity may be (1 to 3600, default 300)
+    members_file              the front door's members file ({"alice": ["main", "side"]}, member -> the backends the member is on). Set: this file is the board's list of members
+    board_name                the name this board has in the front door's [[frontdoor.backends]] and in that file (required with members_file)
+
+Absent table: `settings()` is all off and every function here answers "not behind a front door". A key that is present but wrong is not read as absent: a board that was told to check
+identities and cannot read its secret refuses every call, and a board that was told to read its members and cannot refuses everyone (never the other way: an unreadable file lets nobody in).
+`notes` says what is wrong, as every other table's notes do.
+
+The module reads files and the config and imports nothing of fastmcp or the web layer (the board server does not import `stackshot/frontdoor/`; the shared code is in core/).
+"""
+from __future__ import annotations
+
+import os
+import sys
+import time
+from dataclasses import dataclass
+from typing import Any
+
+from stackshot.core import config as _cfg
+from stackshot.core import frontdoor_files as _files
+from stackshot.core import frontdoor_identity as _ident
+from stackshot.core.frontdoor_config import NAME
+
+TABLE = "behind_frontdoor"
+SCOPE_KEY = "stackshot.door_identity"        # the key of the request's ASGI scope the guard puts the verified identity on (a client cannot write a scope)
+MAX_AGE_LIMIT = 3600.0
+RACY_SECONDS = 2.0                           # a members file younger than this when it was read is read again next time, whatever its stamp says (a rewrite inside the clock's tick)
+
+# What a refused call is told. HTTP 403 with one of these as plain text: never 401, which would make a front door whose backend credential is an OAuth client ask for a new token and retry.
+NO_IDENTITY = "refused: this board takes calls through its front door only, and this call carries no signed identity."
+BAD_IDENTITY = ("refused: the signed identity of this call is not accepted (it is altered, signed with another secret, older than this board's replay window, "
+                "or dated ahead of its clock).")
+NO_SECRET = "refused: this board cannot read the secret that checks a signed identity, so it accepts no call until that is fixed (the board's log says why)."
+
+
+@dataclass(frozen=True)
+class Settings:
+    identity: bool = False          # check the signed identity of every call (the key identity_secret_file is present, whatever its value)
+    secret_file: str = ""
+    max_age: float = _ident.MAX_AGE
+    members: bool = False           # read the members from the front door's file (the key members_file is present, whatever its value)
+    members_file: str = ""
+    board: str = ""
+
+
+@dataclass(frozen=True)
+class Check:
+    who: str = ""                   # the identity the call is for ("" when refused)
+    refusal: str = ""               # the text the caller is told ("" when accepted)
+
+
+def _text(v: Any) -> str:
+    return v.strip() if isinstance(v, str) else ""
+
+
+def parse(cfg: dict[str, Any] | None = None, files: bool = False) -> tuple[Settings, list[str]]:
+    """(the settings, the problems) of the config `cfg` (the running one when None). Never raises. `files`: also stat the secret file for the problems (the notes do; a call never does)."""
+    t = _cfg.get(TABLE, cfg=cfg)
+    if t is None:
+        return Settings(), []
+    if not isinstance(t, dict):
+        return Settings(identity=True, members=True), [f"[{TABLE}] is not a table, so this board accepts no call and has no members until it is fixed: write [{TABLE}] with identity_secret_file, members_file and board_name"]
+    out: list[str] = []
+    identity, secret_file = "identity_secret_file" in t, _text(t.get("identity_secret_file"))
+    if identity:
+        if not secret_file:
+            out.append(f"[{TABLE}] identity_secret_file is not a path, so this board accepts no call until it is fixed: set it to the file that holds the secret the front door signs with")
+        elif files:
+            bad = _cfg.secret_file_mode_problem(os.path.expanduser(secret_file))
+            if bad:
+                out.append(f"[{TABLE}] identity_secret_file {os.path.expanduser(secret_file)} {bad}")
+    age = t.get("identity_max_age_seconds", _ident.MAX_AGE)
+    if isinstance(age, bool) or not isinstance(age, (int, float)) or not 1 <= age <= MAX_AGE_LIMIT or age != age:
+        out.append(f"[{TABLE}] identity_max_age_seconds = {str(age)[:60]!r} is not a number from 1 to {MAX_AGE_LIMIT:g}, so {_ident.MAX_AGE:g} is used")
+        age = _ident.MAX_AGE
+    members, members_file = "members_file" in t, _text(t.get("members_file"))
+    board = _text(t.get("board_name"))
+    if members:
+        if not members_file:
+            out.append(f"[{TABLE}] members_file is not a path, so this board has no members until it is fixed: set it to the front door's members file")
+        if not NAME.fullmatch(board):
+            out.append(f"[{TABLE}] board_name is {'missing' if not board else repr(board[:40])}, so this board has no members until it is fixed: set it to this board's name in the front door's "
+                       f"[[frontdoor.backends]] (letters, digits, '.', '_' and '-')")
+        if _cfg.get("members", cfg=cfg) is not None:
+            out.append(f"[[members]] is not read while [{TABLE}] members_file is set: the front door's list is the board's one list of members (the older "
+                       f"single-person keys of [instance] and [auth] allowed_emails name nobody to sign in either)")
+    elif "board_name" in t:
+        out.append(f"[{TABLE}] board_name is used only with members_file, which is not set")
+    return Settings(identity, secret_file, float(age), members, members_file, board), out
+
+
+def settings(cfg: dict[str, Any] | None = None) -> Settings:
+    return parse(cfg)[0]
+
+
+def notes(cfg: dict[str, Any] | None = None) -> list[str]:
+    """The `[behind_frontdoor]` lines of the config notes: [] when the config has no such table."""
+    return parse(cfg, files=True)[1]
+
+
+_told: set[str] = set()
+
+
+def _tell(msg: str) -> None:
+    """One line on standard error for each distinct message (a members file that stays unreadable is said once, not at every call)."""
+    if msg not in _told and len(_told) < 50:
+        _told.add(msg)
+        print(f"board behind a front door: {msg}", file=sys.stderr, flush=True)
+
+
+# ------------------------------------------------------------------------------------------------ the signed identity
+
+def check(value: str | None, cfg: dict[str, Any] | None = None, now: float | None = None) -> Check:
+    """Who the signed identity `value` (the header's text) is for, or the refusal text. Call it only for a board that checks (`settings().identity`): the secret is read now, so a rotated one applies to the next call."""
+    s = settings(cfg)
+    if not value or not value.strip():
+        return Check(refusal=NO_IDENTITY)
+    try:
+        secret = _files.read_secret(s.secret_file, "identity_secret_file")
+    except _files.FileError as e:
+        _tell(str(e))
+        return Check(refusal=NO_SECRET)
+    who = _ident.verify(secret.encode("utf-8"), value, now=now, max_age=s.max_age)
+    return Check(who=who) if who else Check(refusal=BAD_IDENTITY)
+
+
+def caller_of(scope: Any) -> str:
+    """The identity the guard verified for the request whose ASGI scope this is; "" when it verified none."""
+    v = scope.get(SCOPE_KEY) if hasattr(scope, "get") else None
+    return v if isinstance(v, str) else ""
+
+
+# ------------------------------------------------------------------------------------------------ the members
+
+_cache: dict[str, tuple[tuple[int, int, int, int], bool, dict[str, list[str]]]] = {}
+
+
+def _read_members(path: str) -> dict[str, list[str]]:
+    """The front door's members file, `{member: [backends]}`, read again only when its stamp changed (one stat per call), and always when it was written within RACY_SECONDS of being read.
+    A file that cannot be read is nobody (said once in the log), never everybody."""
+    p = os.path.expanduser(path)
+    try:
+        st = os.stat(p)
+        sig = (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino)
+    except OSError:
+        st, sig = None, (0, 0, 0, 0)
+    have = _cache.get(p)
+    if have is not None and st is not None and have[0] == sig and have[1]:
+        return have[2]
+    try:
+        data = _files.read_members(p)
+    except _files.FileError as e:
+        _tell(str(e))
+        _cache.pop(p, None)
+        return {}
+    if st is not None:
+        _cache[p] = (sig, time.time() - st.st_mtime > RACY_SECONDS, data)
+    return data
+
+
+def members(cfg: dict[str, Any] | None = None) -> tuple[str, ...] | None:
+    """The identities the front door's members file lists for this board, in the file's order; () when it lists none or cannot be read; None when this board does not read its members from a front door."""
+    s = settings(cfg)
+    if not s.members:
+        return None
+    if not s.members_file or not NAME.fullmatch(s.board):
+        return ()
+    out: list[str] = []
+    seen: dict[str, str] = {}
+    for m, boards in _read_members(s.members_file).items():
+        if s.board not in boards:
+            continue
+        if m.casefold() in seen:      # `Alice@x` after `alice@x`: names are unique without regard to case (as [[members]] names are), so the later one is left out, never a second person
+            _tell(f"members_file lists {m!r} and {seen[m.casefold()]!r} for this board: they are one name without regard to case, so only the first is a member")
+            continue
+        seen[m.casefold()] = m
+        out.append(m)
+    return tuple(out)

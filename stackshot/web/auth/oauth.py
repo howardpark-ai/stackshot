@@ -11,6 +11,7 @@ import sys
 
 from fastmcp.exceptions import ToolError
 
+from stackshot.core import behind_door as _door
 from stackshot.core import config as _cfg
 from stackshot.core import members as _members
 from stackshot.web.auth import signin as _signin
@@ -41,7 +42,10 @@ def _auth():
     from fastmcp.server.auth.providers.google import GoogleProvider
     scopes = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
     machine = _env("PORTAL_TOKEN").strip()          # the MCP portal's machine token (Cloudflare) — optional
-    identity = _cfg.CFG["auth"].get("portal_identity") or _members.emails()[0]
+    identity = _cfg.CFG["auth"].get("portal_identity")
+    if not identity:
+        mine = _members.emails()
+        identity = mine[0] if mine or not _door.settings().members else ""      # only a board that reads its members from a front door may list nobody at its start; any other still fails here as before
 
     class _Provider(GoogleProvider):
         """Google OAuth for every client (claude.ai, panes) PLUS one machine bearer token for the MCP portal:
@@ -91,7 +95,21 @@ def _auth():
 
 
 def _who() -> str:
-    """The signed-in identity, allow-listed; '' when auth is off."""
+    """The signed-in identity, allow-listed; '' when auth is off.
+
+    On a board behind a front door (`[behind_frontdoor] identity_secret_file`) the caller is the identity the front door signed for this request (the guard of web/door_guard.py verified it and
+    put it on the request's scope), whatever the sign-in mode: a request the guard did not pass has none and is refused, and an identity the board's members do not list is refused."""
+    if _door.settings().identity:
+        try:
+            from fastmcp.server.dependencies import get_http_request
+            who = _door.caller_of(get_http_request().scope)
+        except RuntimeError:
+            who = ""
+        if not who:
+            raise ToolError(_door.NO_IDENTITY)
+        if not _members.person_of_email(who):
+            raise ToolError(f"Refused: {who} is not allowed on this board")
+        return who
     if _signin._auth_mode() == "off":
         return ""
     from fastmcp.server.dependencies import get_access_token

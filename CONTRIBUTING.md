@@ -93,7 +93,7 @@ changed, why, and what a reader of the diff needs to know. No issue is opened ju
 | `stackshot/fleet` | one machine's half: `client`, `puller`, `push`, sessions, versions |
 | `stackshot/github` | the GitHub mirror |
 | `stackshot/audit` | the board audits |
-| `stackshot/frontdoor` | the front door: one MCP endpoint over several boards and a brain (`python -m stackshot.frontdoor`; its own program, never imported by the server; the `[frontdoor]` settings are parsed in `core/frontdoor_config.py`) |
+| `stackshot/frontdoor` | the front door: one MCP endpoint over several boards and a brain (`python -m stackshot.frontdoor`; its own program, never imported by the server; the `[frontdoor]` settings are parsed in `core/frontdoor_config.py`; what a board does behind it is `core/behind_door.py` and `web/door_guard.py`) |
 | `stackshot/web` | the MCP server (`server.py` is the entry only: the port, the start-time passes and the serve loop; `wiring.py` is the hook tables of the service areas and the build call; `app.py` builds the app and registers the tools and routes; the tools are in `tools/`), the board's pages (`ui/`), the HTTP routes (`routes/`), the sign-in (`auth/`), the publisher and search |
 | `stackshot/tools` | one-off and report tools; the ones that guard the repository itself (`tools/clean_text.py`, `tool_text.py`, `text_check.py`, `retired_terms.py`, `snapshot_regen.py`, `mq_replay*.py`) stay in `tools/` |
 

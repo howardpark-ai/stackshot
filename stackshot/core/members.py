@@ -7,6 +7,10 @@ sign-in addresses. The list is built from, in this order:
 2. else the old keys, as a list of one person: `[instance] owner`, `[instance] owner_aliases` and `[auth] allowed_emails` (all the addresses are that person's);
 3. else the placeholder, one person called `the owner` with no alias and no address (the board says so at its start).
 
+A board behind a front door that sets `[behind_frontdoor] members_file` reads none of the above: its people are the members the front door's file lists for it (`core/behind_door.py`),
+each named by the identity the file gives it (name and sign-in address alike), in the file's order, read at each call; a file that lists nobody for the board, or cannot be read, leaves
+the placeholder, which no address matches.
+
 The answer is built from the config as it stands: a suite or a reload that changes the inputs is read at the next call. The name is the key a person is
 stored under (a mover, a tick, a hand-off): unique without regard to case, and a restart-only setting like the old key it replaces.
 
@@ -75,14 +79,18 @@ def _address_list(raw: Any) -> tuple[str, ...]:
     return tuple(str(e) for e in raw) if isinstance(raw, list) else ()
 
 
-def _inputs(cfg: dict[str, Any] | None) -> tuple[Any, Any, Any, Any]:
-    """The four config values the list is built from, as the file holds them (host words resolved, as every setting is)."""
+def _inputs(cfg: dict[str, Any] | None) -> tuple[Any, Any, Any, Any, Any]:
+    """The values the list is built from: the four config values as the file holds them (host words resolved, as every setting is), and the identities the front door lists
+    for this board (None unless the board reads its members from a front door; imported at call time: that module reads the config, which reads this one)."""
+    from stackshot.core import behind_door as _door
     return (_cfg.get("members", cfg=cfg), _cfg.get("instance", "owner", cfg=cfg),
-            _cfg.get("instance", "owner_aliases", default=[], cfg=cfg), _cfg.get("auth", "allowed_emails", default=[], cfg=cfg))
+            _cfg.get("instance", "owner_aliases", default=[], cfg=cfg), _cfg.get("auth", "allowed_emails", default=[], cfg=cfg), _door.members(cfg))
 
 
-def _build(raw: tuple[Any, Any, Any, Any]) -> list[Person]:
-    listed, owner, aliases, emails = raw
+def _build(raw: tuple[Any, Any, Any, Any, Any]) -> list[Person]:
+    listed, owner, aliases, emails, door = raw
+    if door is not None:
+        return [Person(i, (), (i,)) for i in door] or [Person(PLACEHOLDER, declared=False)]
     if isinstance(listed, list) and listed:
         out = []
         for t in listed:
@@ -99,7 +107,7 @@ def build(cfg: dict[str, Any] | None = None) -> list[Person]:
     return _build(_inputs(cfg))
 
 
-_seen: tuple[tuple[Any, Any, Any, Any], list[Person]] | None = None
+_seen: tuple[tuple[Any, Any, Any, Any, Any], list[Person]] | None = None
 
 
 def members() -> list[Person]:
