@@ -202,7 +202,8 @@ res, made = fx(lambda: _wt_create._create(subject="[home] built by the server", 
 check("b a script's create is filed whatever its first bullet: stored as written, no fix", isinstance(res, str) and "- goal: x\n- b" == rd(gid_of(res))["description"] and kinds(made) == [], (str(res)[:200], made))
 item(110, desc="- A thing\n- It lives here")
 res, made = upd(110, description="- goal: the thing works\n- It lives here")
-check("b update: a replacement with `goal:` is stored as `Goal:`, one fix", not isinstance(res, ToolError) and rd(110)["description"] == "- Goal: the thing works\n- It lives here" and kinds(made) == ["description-goal"], (str(res)[:200], made))
+MOVED_NOTE = CL.NOTE + "goal-moved"      # a goal in other words than the stored ones, the subject as it was: the reply's note, kept beside the fixes and counted as none
+check("b update: a replacement with `goal:` is stored as `Goal:`, one fix (and the note that the goal moved)", not isinstance(res, ToolError) and rd(110)["description"] == "- Goal: the thing works\n- It lives here" and kinds(made) == ["description-goal", MOVED_NOTE], (str(res)[:200], made))
 res, made = upd(110, description="- Goal: the thing works\n- It lives here")
 check("b update: the stored text sent back changes nothing and counts no fix", kinds(made) == [] and rd(110)["description"] == "- Goal: the thing works\n- It lives here", made)
 item(111, desc="- goal: legacy label\n- It lives here")
@@ -263,7 +264,7 @@ item(113, desc="- Goal: the run finishes\n- It lives here")
 res, made = upd(113, description="- goal: the run finishes\n- It lives here")
 check("b update: a text that differs from the stored one only in the label's form changes nothing and counts no fix", kinds(made) == [] and rd(113)["description"] == "- Goal: the run finishes\n- It lives here", (str(res)[:200], made, rd(113)["description"]))
 res, made = upd(113, description="- goal: the run ends\n- It lives here")
-check("b update: …and one that also changes a word is a fix, stored with the new word", kinds(made) == ["description-goal"] and rd(113)["description"] == "- Goal: the run ends\n- It lives here", (str(res)[:200], made))
+check("b update: …and one that also changes a word is a fix, stored with the new word", kinds(made) == ["description-goal", MOVED_NOTE] and rd(113)["description"] == "- Goal: the run ends\n- It lives here", (str(res)[:200], made))
 
 # the refusal shows the corrected description, and sent back as shown it goes through
 SYM = "- The run fails when the disk is full\n- It lives here\n- Done when done"
