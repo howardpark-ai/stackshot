@@ -215,6 +215,7 @@ check("an unknown key and a bad key: the empty list, 400", json.loads(new1["nobo
 reset()
 _, n_a = count(lambda: get_all(NAMES))
 check(f"24 reads of one board open each item file about once, not once per read: {n_a} opens for {N_FILES} files", n_a <= 3 * N_FILES, n_a)
+pass_time(20)                                  # 20 s of the view's 30 pass: it is served at that age, not at the age it was built
 _, n_b = count(lambda: get_all(NAMES))
 check("…and 24 more reads of the unchanged board open no item file", n_b == 0, n_b)
 check("…the answers of the second round are the first round's", get_all(NAMES) == {k: new1[k] for k in NAMES})
@@ -336,7 +337,7 @@ st5 = item_path(i5).stat()
 r2 = get_all(KEYS[:1] + ["beta-front", "beta-other"])
 check("a file read within 200 ms of its write is rewritten at the same size, inode and mtime: the next read sees it (a view built from a fresh file is not kept)",
       fresh5 and st5.st_mtime_ns == t0 and st5.st_ino == ino0 and r2 == old_all(KEYS[:1] + ["beta-front", "beta-other"]) and r1 != r2, (fresh5, st5.st_mtime_ns == t0, r1 != r2, mv, swap(mv)))
-check("…while a view of files older than that is kept", (settle(), count(lambda: get_all(NAMES))[1])[1] == 0)
+check("…while a view of files older than that is kept", (settle(), pass_time(1), count(lambda: get_all(NAMES))[1])[2] == 0)
 
 # ---- 5b. a registry write inside the registry's own look at its directory
 reg_f = T / "links/a/session-registry.json"
