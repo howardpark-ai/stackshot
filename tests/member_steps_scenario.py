@@ -9,8 +9,10 @@ A board of two members (member-a, member-b), items whose checklist holds an open
     answerable, the notices, the answer code and its page notice, the line each session is told;
   * a member with no part in the step (on a step one member alone has had, and on one two have had), a question standing on the item, and a mail tick;
   * a bare sub-line a later write added reads as the member's whose line stands above it in next, not in the checklist;
+  * a bare line's member is settled when it is written and stays with it whatever later happens to other lines (marked, dropped, reworded, moved, merged, the step reworded, a note, a mail tick), through
+    the update tool and the answers; nothing is stored for a board of one member or an item one member alone has had a part in;
   * a project page, drawn for no member: no step and no form for an item two members have had a part in, the item page linked;
-  * the line `client.py get answer` prints after one member's answer to a step the item is still on;
+  * the line `client.py get answer` prints after one member's answer to a step the item stayed on, and that a later step does not change it;
   * one member: the notice only a board of several members answers with stays out of the home page and the item page, the project page keeps its step form and the answer line is as it was.
 
     tests/run-suite member_steps  → exit 0 / 1"""
@@ -125,7 +127,7 @@ from stackshot.web import board_home
 from stackshot.web import publish as _web_publish
 from stackshot.web.ui import render as ui_render
 from stackshot.web import page_debts as _web_page_debts
-from stackshot.web.tools import anchors as _wt_anchors, route as _wt_route
+from stackshot.web.tools import anchors as _wt_anchors, route as _wt_route, update as _wt_update
 from stackshot.web.auth import signin as _signin
 
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -278,7 +280,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     check("…the draft and the old wake's reason went with member-a's step", "draft" not in m and "watch_reason" not in m, m)
     check("…the then stays for the last Done", m.get("then") == "alpha-build", m)
     got = answer_line(2)
-    check("the answer line says who finished which step and who the step is with now", got[:3] == ["decision", "Done", f"member-a, on the step “{A_STEP}” (the item is still on a step, with member-b)"] and len(got) == 4, got)
+    check("the answer line says who finished which step and whose step the item stayed on", got[:3] == ["decision", "Done", f"member-a, on the step “{A_STEP}” (after this answer the item was still on a step, with member-b)"] and len(got) == 4, got)
     check("…its state clock moved", rd(2)["state_updated"] > before)
     check("…the sessions are told whose step it is now", any(re.search(r"member-a did their step on .*: sign the ALPHASEVEN form\. It goes to member-b for their step now", t) for t, _ in said(2)), said(2))
     check("…a bare Done is a progress notice, not a turn, and nothing is left pending", said(2) and all(how == "own-move" for _, how in said(2)) and not pending(2), (said(2), pending(2)))
@@ -304,7 +306,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     check("…the sessions are told it stays with member-a", any(re.search(r"member-b did their step on .*: countersign BRAVOSEVEN.*\. The item stays with member-a", t) for t, _ in said(3)), said(3))
     got = answer_line(3)
     check("…and so does the answer line after a Done that left the step", got[:2] == ["decision", "Done"] and got[2].startswith("member-b, on the step “countersign BRAVOSEVEN")
-          and got[2].endswith("” (the item is still on a step, with member-a)"), got)
+          and got[2].endswith("” (after this answer the item was still on a step, with member-a)"), got)
     A, B = home(ADA), home(BEA)
     check("…member-a still has it with their Done; member-b reads it as member-a's, with member-a's line", 3 in ids(A, "your-move") and 'value="done"' in row(A, 3) and 3 in ids(B, "waiting-list") and 3 not in ids(B, "your-move") and "<form" not in row(B, 3) and "ALPHASEVEN" in row(B, 3), (ids(B, "your-move"), row(B, 3)))
     shown = get("/items/a3?sent=partdone", BEA)
@@ -386,8 +388,221 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     r = post(13, ADA, act="done")
     check("a step that passes on needs no session to take the item", code(r) == "done" and meta(13).get("mover") == "member-b", (code(r), meta(13)))
 
+    # ---- 7b. a line's member is settled when it is written and stays with the line
+    def upd(i, sender="alpha-build", **kw):
+        out = _wt_update.stackshot_update(f"a{i}", sender=sender, **kw)
+        board_home._board_home_drop()
+        return out
+
+    def fresh(i, step="", asked="member-a", next_="alpha-build: prepare", **extra):
+        if step:
+            extra = {"state": "your-step", "step": step, "mover": asked, "then": "alpha-build", **extra}
+        else:
+            extra = {"needs": ["alpha-build"], **extra}
+        item(i, next=next_, **extra)
+
+    def whose(i):
+        cl, _at, who = _steps.member_rows(meta(i))
+        return sorted((_steps.first_line(s["text"]), w) for s, w in zip(cl, who) if s["status"] == _steps.OPEN)
+
+    def of_line(i, tag): return [w for line, w in whose(i) if tag in line]
+    def at(i, tag): return next(n for n, s in enumerate(_steps.view(meta(i)), 1) if tag in s["text"] and s["status"] == _steps.OPEN)
+    def settled(i): return [(_steps.first_line(s["text"]), s["of"]) for s in meta(i).get("steps") or [] if "of" in s]
+    def ticked_by(i, tag): return [by for t, by in done(i) if tag in t]
+    def bare_of(i, tag): return [w for line, w in whose(i) if tag in line and not line.startswith("member-")]      # without the line the server writes for a step it passes on
+
+    def still_a(i, tag):
+        return bare_of(i, tag) == ["member-a"] and set(of_line(i, tag)) == {"member-a"} and tag in block(page(i, ADA)) and tag not in block(page(i, BEA))
+
+    base = lambda i: f"member-b: countersign EX{i}\nmember-a: file EF{i}\n- use PEN{i}"
+    for i, label, change in ((50, "marked done", lambda i: upd(i, done=[at(i, f"EF{i}")])),
+                             (51, "dropped", lambda i: upd(i, dropped=[at(i, f"EF{i}")])),
+                             (52, "reworded", lambda i: upd(i, reword={at(i, f"EF{i}"): f"member-a: file EF{i} today"}))):
+        fresh(i, step=f"countersign EX{i}", asked="member-b")
+        upd(i, next=base(i))
+        check(f"a sub-line is stored as its writer wrote it, under a member's line (a{i})", settled(i) == [(f"use PEN{i}", "member-a")], settled(i))
+        change(i)
+        check(f"a sub-line stays its member's when the line above it is {label} (a{i})", of_line(i, f"PEN{i}") == ["member-a"], (whose(i), meta(i)["next"]))
+        r = post(i, BEA, act="done")
+        check(f"…the other member's Done neither ticks it nor takes it, and the step passes to its member (a{i})",
+              code(r) == "done" and not ticked_by(i, f"PEN{i}") and meta(i).get("mover") == "member-a" and meta(i).get("state") == "your-step" and still_a(i, f"PEN{i}"), (code(r), whose(i), done(i), meta(i)))
+        check(f"…who keeps it on Your move (a{i})", i in ids(home(ADA), "your-move") and i not in ids(home(BEA), "your-move"), (ids(home(ADA), "your-move"), ids(home(BEA), "your-move")))
+
+    fresh(53, step="countersign EX53", asked="member-b", next_="member-b: countersign EX53")
+    upd(53, next="member-a: file EF53\n- use PEN53\nmember-b: countersign EX53")
+    upd(53, done=[at(53, "EF53")])
+    check("a sub-line left first in next stays its member's, not both members'", of_line(53, "PEN53") == ["member-a"] and meta(53)["next"].startswith("- use PEN53") and still_a(53, "PEN53"), (whose(53), meta(53)["next"]))
+    r = post(53, BEA, act="done")
+    check("…and the other member's Done leaves it open", code(r) == "done" and not ticked_by(53, "PEN53") and still_a(53, "PEN53"), (code(r), done(53), whose(53)))
+
+    fresh(54, step="countersign EX54", asked="member-b")
+    upd(54, next=base(54))
+    r = post(54, ADA, act="note", text="ran it")
+    check("a member's note that says done ticks their line and its sub-line, never another's",
+          ticked_by(54, "EF54") == ["member-a"] and ticked_by(54, "PEN54") == ["member-a"] and not ticked_by(54, "EX54") and of_line(54, "EX54") == ["member-b"], (code(r), done(54), whose(54)))
+
+    fresh(55, step="sign WHY55", next_="member-a: sign WHY55", owner_step="member-a: sign WHY55")
+    upd(55, next="member-a: sign WHY55\n- use PEN55\nmember-b: countersign EX55")
+    upd(55, step="sign WHY55 in blue")
+    check("a reworded step moves the server's line to the end and the sub-line stays its member's", meta(55)["next"].rstrip().endswith("member-a: sign WHY55 in blue") and of_line(55, "PEN55") == ["member-a"], (meta(55)["next"], whose(55)))
+    r = post(55, BEA, act="done")
+    check("…the other member's Done leaves it open", code(r) == "partdone" and not ticked_by(55, "PEN55") and still_a(55, "PEN55"), (code(r), done(55), whose(55)))
+    r = post(55, ADA, act="done")
+    check("…and its member's Done ticks it", ticked_by(55, "PEN55") == ["member-a"], (code(r), done(55)))
+
+    fresh(56, next_="")
+    upd(56, step="sign WHY56", mover="member-a")      # the server writes its own line for the step
+    upd(56, sender="alpha-main", next="member-b: countersign EX56")
+    upd(56, next="member-a: sign WHY56\n- use PEN56")
+    check("a sub-line whose parent line was merged into another writer's is the parent's member's, though it lands under another member's line",
+          meta(56)["next"] == "member-a: sign WHY56\nmember-b: countersign EX56\n- use PEN56" and of_line(56, "PEN56") == ["member-a"], (meta(56)["next"], whose(56)))
+    upd(56, next="member-a: sign WHY56\n- use PEN56")
+    check("…and stays so when its writer writes the same text again", of_line(56, "PEN56") == ["member-a"], whose(56))
+    r = post(56, BEA, act="done")
+    check("…the other member's Done leaves it open", code(r) == "partdone" and not ticked_by(56, "PEN56") and still_a(56, "PEN56"), (code(r), done(56), whose(56)))
+
+    post(56, ADA, act="done")
+    check("…and its own member's Done leaves the ticked line that member's", ticked_by(56, "PEN56").count("member-a") >= 1
+          and [w for line, w in settled(56) if "PEN56" in line and not line.startswith("member-")] == ["member-a"], (done(56), settled(56)))
+
+    fresh(57)
+    upd(57, next="alpha-build: prepare\nmember-a: file EF57\n- use PEN57")
+    check("an item one member alone has had a part in stores no member on its lines", not settled(57), settled(57))
+    upd(57, done=[at(57, "EF57")])
+    check("…nor after its parent line is marked", not settled(57), settled(57))
+    upd(57, next="alpha-build: prepare\n- use PEN57\nmember-b: countersign EX57")
+    check("a line written while one member alone had a part is that member's when a second joins, wherever it stands by then", of_line(57, "PEN57") == ["member-a"] and dict(settled(57))["use PEN57"] == "member-a", (whose(57), settled(57)))
+    upd(57, step="countersign EX57", mover="member-b")
+    r = post(57, BEA, act="done")
+    check("…so the second member's Done leaves it open", not ticked_by(57, "PEN57") and still_a(57, "PEN57"), (code(r), done(57), whose(57)))
+
+    fresh(58, step="sign WHY58")
+    upd(58, next="member-a: sign WHY58\nmember-b: countersign EX58\n- hold CARD58")
+    upd(58, done=[at(58, "EX58")])
+    check("a sub-line left under another member's line stays its member's", of_line(58, "CARD58") == ["member-b"] and "CARD58" in block(page(58, BEA)) and "CARD58" not in block(page(58, ADA)), (meta(58)["next"], whose(58)))
+    out = mail(58)
+    check("…a mail tick does not tick it, and the step passes to its member", out == "done" and not ticked_by(58, "CARD58") and meta(58).get("mover") == "member-b", (out, done(58), meta(58)))
+
+    fresh(59, step="countersign EX59", asked="member-b")
+    upd(59, next="member-a: file EF59\n- check it\nmember-b: countersign EX59\n- check it")
+    two = lambda: sorted(w for line, w in whose(59) if line == "check it")
+    check("two sub-lines that say the same words are one each member's", two() == ["member-a", "member-b"], whose(59))
+    upd(59, next="member-b: countersign EX59\n- check it\nmember-a: file EF59\n- check it")
+    check("…and still are after their writer swaps the two sections", two() == ["member-a", "member-b"], whose(59))
+    r = post(59, BEA, act="done")
+    check("…a member's Done ticks their own copy and leaves the other's", two() == ["member-a"] and ticked_by(59, "check it") == ["member-b"], (code(r), done(59), whose(59)))
+
+    fresh(60)
+    upd(60, next="member-a: file EF60\n- check it")
+    upd(60, next="member-b: countersign EX60\n- check it\nmember-a: file EF60\n- check it")
+    check("a second member's new sub-line with the first's words is the second's, wherever it is written", sorted(w for line, w in whose(60) if line == "check it") == ["member-a", "member-b"], whose(60))
+    upd(60, sender="alpha-main", next="member-a: own SIXTY\n- alone SIXTY")
+    check("another session's sub-line under a member's line is that member's", of_line(60, "alone SIXTY") == ["member-a"], (meta(60)["next"], whose(60)))
+    upd(60, sender="alpha-main", reword={at(60, "alone SIXTY"): "member-b: take SIXTY"})
+    check("a sub-line reworded to name a member is that member's, with nothing stored on it", of_line(60, "take SIXTY") == ["member-b"] and not [x for x in settled(60) if "SIXTY" in x[0]], (whose(60), settled(60)))
+
+    leading = {"next": "member-a: A61\n- alone LEAD\nmember-b: B61", "steps": stored("member-a: A61", "member-b: B61", "- alone LEAD")}
+    _steps.settle_members(leading, {"next": "member-a: A61\nmember-b: B61", "steps": stored("member-a: A61", "member-b: B61")}, "- alone LEAD")
+    check("a new bare line a write's own text puts above every other line is read from where it stands in next", [s.get("of") for s in leading["steps"]] == [None, None, "member-a"], leading["steps"])
+
+    fresh(61)
+    upd(61, next="member-a: file EF61\n- use PEN61")
+    upd(61, clear_next=True, next="alpha-build: prepare\nmember-b: countersign EX61\n- use PEN61")
+    check("a wipe that lists the words again keeps the line, and its member", of_line(61, "PEN61") == ["member-a"] and settled(61) == [("use PEN61", "member-a")], (whose(61), settled(61)))
+    upd(61, dropped=[at(61, "PEN61")])
+    upd(61, next="alpha-build: prepare\nmember-b: countersign EX61\n- use PEN61")
+    check("a line dropped and written again under another member is a new line, that member's; the dropped one keeps whose it was",
+          of_line(61, "PEN61") == ["member-b"] and [w for line, w in settled(61) if line == "use PEN61"] == ["member-a", "member-b"], (whose(61), settled(61), meta(61)["next"]))
+
+    fresh(62, step="sign WHY62", next_="member-b: countersign EX62\nmember-a: sign WHY62\n- use PEN62", owner_step="member-a: sign WHY62")      # stored with no member on its lines
+    r = post(62, ADA, act="note", text="ran it")
+    check("a note on an item stored before members were: its sub-line is read before the answer takes a line out",
+          ticked_by(62, "PEN62") == ["member-a"] and not ticked_by(62, "EX62") and meta(62).get("mover") == "member-b", (code(r), done(62), meta(62)["next"]))
+
+    fresh(63, next_="member-a: file EF63\n- use PEN63\nmember-b: countersign EX63")      # the same, then a session's write
+    upd(63, done=[at(63, "EF63")])
+    check("a session's write to such an item settles its lines as they stood before it", of_line(63, "PEN63") == ["member-a"] and dict(settled(63)) == {"use PEN63": "member-a"}, (whose(63), settled(63)))
+
+    fresh(64, step="sign WHY64")
+    r = post(64, ADA, act="done")
+    upd(64, step="sign WHY64 once more", mover="member-a")
+    check("an answer that ended its step reads plain when a later step is set", code(r) == "done" and meta(64).get("state") == "your-step" and answer_line(64)[2] == "", answer_line(64))
+
+    pair(67)
+    post(67, BEA, act="done")
+    held = answer_line(67)
+    upd(67, step="none")
+    upd(67, step="sign WHY67 anew", mover="member-b")
+    check("…and one that left a step standing says so of its own time, whatever step is set later",
+          meta(67).get("step") == "sign WHY67 anew" and answer_line(67) == held and held[2].endswith("” (after this answer the item was still on a step, with member-a)"), (held, answer_line(67), meta(67).get("step")))
+
+    kept = lambda of: _steps.member_rows({"next": "- under", "steps": [{"text": "- under", "status": "open", "of": of}]})[2]
+    check("a stored member reads as stored: nobody's, a member's, and no member's Done for a name that is no member's now",
+          (kept(""), kept("MB"), kept("member-c")) == ([""], ["member-b"], [None]), (kept(""), kept("MB"), kept("member-c")))
+
+    fresh(68, next_="member-a: file EF68\nalpha-build: tidy\n- check SUB68", state="your-step", step="sign WHY68", mover="member-b", then="alpha-build", needs=[])
+    upd(68, done=[at(68, "EF68")])      # stored with the step asked of member-b and no line of theirs yet
+    check("the member a step is asked of has a part before any line of theirs, so a bare line nobody's then stays nobody's", dict(settled(68)).get("check SUB68") == "", (settled(68), meta(68)["next"]))
+
+    fresh(69)
+    upd(69, next="member-a: file EF69\n- check it\nmember-b: countersign EX69")
+    upd(69, next="member-a: file EF69\n- check it\nmember-b: countersign EX69\n- check it")
+    check("a new sub-line with the words of a stored one is its own writer's member's, and the stored one keeps its own",
+          [w for line, w in settled(69) if line == "check it"] == ["member-a", "member-b"], (settled(69), meta(69)["next"]))
+
+    done_line = {"text": "- check it", "status": "done", "by": "member-b", "at": now - 60}
+    item(70, next="member-a: file EF70\n- check it", steps=[{**stored("member-b: countersign EX70")[0], "status": "done", "by": "member-b", "at": now - 60}, done_line, *stored("member-a: file EF70", "- check it")])
+    upd(70, next="alpha-build: tidy\nmember-a: file EF70\n- check it")
+    check("a ticked line and an open one with the same words, stored before members were, each keep their reading", [w for line, w in settled(70) if line == "check it"] == ["member-b", "member-a"], settled(70))
+
+    item(71, next="member-a: file EF71\n- use PEN71\nmember-b: countersign EX71", steps=stored("member-a: file EF71", "member-b: countersign EX71", "- use PEN71"))
+    upd(71, done=[at(71, "PEN71")])
+    check("a sub-line a write marks on such an item is read as it stood before the mark", dict(settled(71)) == {"use PEN71": "member-a"}, settled(71))
+
+    fresh(73)
+    upd(73, next="member-a: file EF73\n- use PENA73\nmember-b: countersign EX73\n- use PENB73")
+    upd(73, next="alpha-build: prepare\nmember-b: countersign EX73\n- use PENB73\nmember-a: file EF73\n- use PENA73")
+    check("two sub-lines whose writer swaps their sections each stay their member's", dict(settled(73)) == {"use PENA73": "member-a", "use PENB73": "member-b"}, (settled(73), meta(73)["next"]))
+
+    held = [{**x, "of": "member-a"} for x in stored("- one", "- two")]
+    of = lambda steps: [x.get("of") for x in steps]
+    check("the stored member survives a mark, a wipe, an unlisted line and a reorder of the checklist, and a close",
+          (of(_steps.apply(held, None, [0], [1], "s", now)), of(_steps.apply(held, "alpha-build: x", [], [], "s", now, wipe=True))[:2], of(_steps.apply(held, "alpha-build: x", [], [], "s", now, strict=False))[:2],
+           of(_steps.apply([held[0], {**held[1], "of": "member-b"}], "- two\n- one", [], [], "s", now)), of(_steps.mark_open(held, "done", "s", now)))
+          == (["member-a"] * 2, ["member-a"] * 2, ["member-a"] * 2, ["member-b", "member-a"], ["member-a"] * 2),
+          (of(_steps.apply(held, None, [0], [1], "s", now)), of(_steps.apply([held[0], {**held[1], "of": "member-b"}], "- two\n- one", [], [], "s", now))))
+    gone = _steps.view_rows({"next": "member-a: here", "steps": [*stored("member-a: here"), {**stored("- gone")[0], "of": "member-b"}]})[0]
+    check("…and a view of a line that left next by itself", [(x["status"], x.get("of")) for x in gone] == [("open", None), ("dropped", "member-b")], gone)
+
+    nobodys = {"next": "member-a: AX\n- under", "steps": [*stored("member-a: AX"), {**stored("- under")[0], "of": ""}]}
+    ticked = {"next": "member-a: AX\nmember-b: BX", "steps": [*stored("member-a: AX", "member-b: BX"), {"text": "- under", "status": "done", "by": "member-a", "at": now}]}
+    _steps.settle_members(ticked, nobodys)
+    check("a stored member outlasts a tick that rebuilt the step without it, whoever alone had a part before", ticked["steps"][-1].get("of") == "", ticked["steps"])
+
+    # the question beside a step: another member's is not answered by a Done
+    pair_alone = dict(state="your-step", step=A_STEP, mover="member-a", then="alpha-build", next=f"member-a: {A_STEP}", needs=["decision"], ask=ASK, options=OPTS)
+    item(65, **pair_alone)
+    was = rd(65)
+    r = post(65, BEA, act="done")
+    check("a Done of another member beside a question on a step one member alone has had writes nothing", code(r) == "nostep" and rd(65) == was, (code(r), meta(65)))
+
+    text_of = lambda m, who: ui_render.Board.next_of(None, m, who)
+    mixed = {"steps": stored("member-a: LATER", "check NOBODY", "member-a: EARLIER"), "next": "member-a: EARLIER\nmember-a: LATER\ncheck NOBODY\nalpha-build: AGENT"}
+    check("a member's next text is their lines in the order of next, without the lines that name no one", text_of(mixed, "member-a") == "member-a: EARLIER\nmember-a: LATER", text_of(mixed, "member-a"))
+    check("…and the lines that name no one for a member with none", text_of(mixed, "member-b") == "check NOBODY", text_of(mixed, "member-b"))
+
+    passing = {"state": "your-step", "step": "sign PASSA", "mover": "member-a", "owner": OWNER_S,
+               "steps": [{"text": "member-b: BEFOREB", "status": "done", "by": "member-b", "at": now - 60}, *stored("member-a: sign PASSA", "alpha-build: AGENTFIRST", "member-b: countersign PASSB")],
+               "next": "member-a: sign PASSA\nalpha-build: AGENTFIRST\nmember-b: countersign PASSB"}
+    stays = answer_handover._share_step(passing, {"ts": now, "kind": "decision"}, "member-a", True, now)
+    check("a step passes to the member of the next open member line, not a ticked line or a session's", stays == "member-b" and passing["step"] == "countersign PASSB", (stays, passing.get("step")))
+
     # ---- 8. one member
     _cfg.CFG["members"] = [TWO[0]]
+    fresh(66, step="sign WHY66")
+    upd(66, next="member-a: sign WHY66\n- use PEN66\nmember-b: countersign EX66")
+    upd(66, done=[at(66, "EX66")])
+    check("one member: nothing is stored about whose a line is", "steps" in meta(66) and not settled(66), meta(66).get("steps"))
     board_home._board_home_drop()
     one = home(ADA)
     note = re.search(r'<div id="sent-notes"[^>]*>', one)
@@ -396,7 +611,8 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     check("…a typed ?sent=partdone shows no notice on the item page", "ALPHASEVEN" in typed and not re.search(r'<p class="isent[^"]*" role="status">', typed) and ui_render.Board(str(T / "store")).sent_msg("partdone") == "",
           re.findall(r'<p class="isent.{0,120}', typed))
     check("…the project page keeps the step and its Done", 'value="done"' in row(get("/projects/alpha", ADA), 1), row(get("/projects/alpha", ADA), 1))
-    check("…and the answer line is the answer as written", answer_line(4)[2] == "what is the form number?", answer_line(4))
+    r = post(21, ADA, act="done")
+    check("…and a one-member answer records no step the item stayed on", "left_with" not in meta(21)["answers"][-1], meta(21)["answers"][-1])
     _cfg.CFG["members"] = TWO
 
 print(f"\nmember_steps: {len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else "\nfailed: " + "; ".join(fails)))

@@ -39,6 +39,7 @@ from stackshot.model import item_project as _ip
 from stackshot.model import last_activity as _lastact
 from stackshot.model import migration as _mig
 from stackshot.model import model as _model
+from stackshot.model import steps as _checklist
 from stackshot.router import routing as _routing
 from stackshot.service import foryou_events as _fyev
 from stackshot.service.store import _path
@@ -248,8 +249,19 @@ def _stamp_last_activity(item: dict[str, Any], before: dict[str, Any] | None, wr
         print(f"last activity: {item.get('id')} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
+def _settle_members(gid: str, item: dict[str, Any], before: dict[str, Any] | None, written: str) -> None:
+    """steps.settle_members for an open item's save. A failure here never fails the write."""
+    meta = item.get("metadata")
+    if item.get("status") != "open" or not isinstance(meta, dict):
+        return
+    try:
+        _checklist.settle_members(meta, (before or {}).get("metadata"), written)
+    except Exception as e:  # noqa: BLE001
+        print(f"member steps: {gid} not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+
+
 def save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", author: tuple[str, str] | None = None, mirror: bool = True, background: bool = False, activity: str = "", activity_at: float | None = None,
-         ctx: WriteContext = PLAIN) -> None:
+         ctx: WriteContext = PLAIN, *, written: str = "") -> None:
     """Write the item's file. `writer` is the session whose write this is (a name or id; '' = the server's own act: a wake,
     a release, a migration). `note` is the server's own line on one of its passes that is an event on the item
     (a wake, a release from hold, a recycle done) and `author` = (name, id) of a write that is neither a session's nor the server's
@@ -261,7 +273,8 @@ def save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", autho
     is queued behind every live job (ghsync.on_change) and stays inside the reserve a live write keeps. `activity` files the save under an activity kind (activity.py) when the writer
     alone does not say: the confirm tool (`confirm`), an anchor event (`event`), a message written onto the item (`message`), the owner's comment on GitHub (`answer`); left blank a session's
     write is a `write`, the owner's board answer an `answer`, and a save with no writer the server's own bookkeeping, which does not move the item's `activity` clock. `activity_at`: when the
-    activity happened, for one the server reads later (the owner's GitHub comment): the clock takes that time, never later than now and never earlier than it already read (activity.stamp)."""
+    activity happened, for one the server reads later (the owner's GitHub comment): the clock takes that time, never later than now and never earlier than it already read (activity.stamp).
+    `written`: the next text the writer's call set, which says what each of its lines stood under (steps.settle_members, run on every save of an open item)."""
     steps = _steps
     if steps is None:
         raise RuntimeError("the write path has no steps installed (web/wiring.py installs them, called from web/server.py at its import)")
@@ -282,6 +295,7 @@ def save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", autho
         steps.owner_steps(item, before, writer, author)      # N2/N4/N5: an item that waits on him has his open step on its checklist, and one that stops waiting on him by a session's write loses it: every save, the server's own included
     elif ctx.settle == SETTLE_NAMED:
         steps.owner_steps(item, before, writer, author)      # an update that names the mover leaves the mover as written, but his step still follows the stored fields (a step= with a named mover in one call must leave a step of his for his note to tick); only a write that merely files or confirms (QUIET) leaves the checklist alone
+    _settle_members(gid, item, before, written)      # once the checklist is final: whose each bare step is, on an item two members have had a part in
     quiet = ctx.settle == SETTLE_QUIET
     record_writer(item, writer, author)     # every revision names who wrote it (the hand-off clock reads it)
     _stamp_activity(item, before, writer, author, activity, activity_at)      # the activity clock: only a real write about the work moves it (an audit's write and a bare confirm do not)

@@ -44,8 +44,9 @@ def _answer_line(item: dict[str, Any]) -> str:
     hides a decision, and a caller resumes on a decision only. The label is empty when he picked none, the text's line breaks are " / " and
     its tabs spaces, and `when` is when he gave it, an ISO time in the instance's timezone (empty when the answer carries none).
     metadata.answers is oldest first (as in the get tool); the line does not know which question it answers, so a caller files a new item
-    for each question. On a board of several members, while the item is still on a step, the text of an answer to a step opens with who
-    answered, which step, and who the step is with: one member's Done need not end the step (_share_step)."""
+    for each question. On a board of several members, the text of an answer to a step that another member had a part in opens with who
+    answered, which step, and whose step the item stayed on after it: one member's Done need not end the step (_share_step). That is read from
+    the answer's record (`left_with`), so it stays true of the answer when a later step is set."""
     ans = _hooks().answers_of(item)
     if not ans:
         return ""
@@ -55,9 +56,9 @@ def _answer_line(item: dict[str, Any]) -> str:
         when = dt.datetime.fromtimestamp(float(a["ts"]), _hooks().zone()).isoformat(timespec="seconds")
     except (KeyError, TypeError, ValueError, OverflowError, OSError):
         when = ""
-    text, step, meta = one(a.get("text")), one(a.get("step")), item.get("metadata") or {}
-    if len(_members.members()) > 1 and step and a.get("kind") != "comment" and meta.get("state") == "your-step":
-        part = f"{_members.recorded_by(a)}, on the step “{step}” (the item is still on a step, with {_steps.member_for(meta.get('step'), meta)})"
+    text, step, held = one(a.get("text")), one(a.get("step")), one(a.get("left_with"))
+    if held:
+        part = f"{_members.recorded_by(a)}, on the step “{step}” (after this answer the item was still on a step, with {held})"
         text = f"{part}: {text}" if text else part
     return f"{'comment' if a.get('kind') == 'comment' else 'decision'}\t{one(a.get('choice'))}\t{text}\t{when}"
 
@@ -189,7 +190,7 @@ def _check_his_step(meta: dict[str, Any], step: str, now: float, by: str = "", m
     (steps.is_his: named for him, or naming no one), whoever wrote them, the server's own line for the summary included (the block does not draw that line or a repeat, but his Done is his word that all of it is done). Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
     other lines staying. → the first checked step's first line, "" when none was his (nothing written). A note on the step (step-reply) never comes here: it ticks only the server's step (owner_steps.tick), and the session that takes the item
     marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Done finishes all of his open lines. `by` is the person whose Done it is (the first person when none is named).
-    `member` (a board of several members): the open steps that are that member's or name no one (steps.member_rows), never another member's."""
+    `member` (a board of several members): the open steps that are that member's or no member's (steps.member_rows), never another member's."""
     cl, _at, whose = _steps.member_rows(meta)
     mine = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN and (whose[i] in (member, "") if member else _steps.is_his(x["text"]))]      # the open lines render.his_open_steps starts from, before it leaves out the server's summary line and repeats
     if not mine:
@@ -203,7 +204,7 @@ def _check_his_step(meta: dict[str, Any], step: str, now: float, by: str = "", m
 
 def _share_step(meta: dict[str, Any], rec: dict[str, Any], member: str, done: bool, now: float) -> str:
     """`member`'s answer on a your-step that more than one member has a part in (a board of several members): what it ticks, and who the step is with after it → that member's name. Not `done` (a note
-    that does not say the step is done): nothing is ticked or moved. Done: the open steps that are `member`'s or name no one are ticked (_check_his_step), never another member's. A step asked of another
+    that does not say the step is done): nothing is ticked or moved. Done: the open steps that are `member`'s or no member's are ticked (_check_his_step), never another member's. A step asked of another
     member (steps.member_for) stays theirs, and the answer's record names the step `member` finished. A step asked of `member` passes on: the member of the next open step is the mover, that step is the
     item's `step`, and the item stays in your-step; the server's step is made for them by the save (owner_steps.ensure) and the draft goes with the step it belonged to."""
     asked = _steps.member_for(meta.get("step"), meta)

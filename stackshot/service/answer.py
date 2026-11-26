@@ -273,7 +273,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
     answer in the box sent with a reference other than the standing question's is no answer to it (`stale`, nothing written; with a note `stalenote`, the note kept as a comment, as for any answer to a question that changed,
     the pick named without its card letter); with no reference nothing is compared. `by` is the name of the person who answered (the route's signed-in person): it is stored on the answer as `by` (when it is not the first person, whose answers carry none), ticks his
     step and is the save's author; none stands for the first person, and a mail tick records no `by`. A page loaded before this form posts act=send (an empty box is a Done, a note is a step-reply, as ever) or act=comment (a comment only, the step stands).
-    On a board of several members a step two members have had a part in (steps.several_hold) is answered member by member. Done ticks the steps that are the answering member's or name no one, never another member's; a member with no part
+    On a board of several members a step two members have had a part in (steps.several_hold) is answered member by member. Done ticks the steps that are the answering member's or no member's, never another member's; a member with no part
     left in it (steps.takes_part) gets `nostep`. So does anyone while a question stands on such an item (a page drawn before the question was added: a Done passed on would take the question to the next
     member), on any other item anyone but the member asked while one stands, and a mail tick on a step asked of anyone but the first person. What such a person wrote is kept as a comment.
     An item only one member has had a part in is answered by another member as by that one, recorded under the sender's name. While another member has a part in the step too (_handover._share_step): a Done on the member's own step passes the item to the member of the next open step
@@ -347,6 +347,8 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             kind, choice, stepped, member = "comment", "", False, ""      # not theirs to finish (a page drawn before the item changed): what they wrote is kept as a comment
         elif outsider:
             member = ""      # only one member has had a part in the item: another's answer stands for theirs, under the sender's name
+        if member:
+            _steps.settle_members(meta, meta)      # whose each bare step is, read before this answer takes any line out
         shared = bool(member) and (member != _steps.member_for(meta.get("step"), meta) or any(m != member for m in _steps.open_members(meta)))      # another member has a part in it too
         stays, done, moved = "", False, False      # of a shared step: who it is with after this answer, whether the answer finished the member's part, and whether the step passed on
         eff = _watch.answer_effect(meta, choice, text, _pages.zone_now().date()) if kind == "decision" and not stepped else {"do": ""}     # a pick on a watcher ask, or his words in the box, acts on the item
@@ -395,7 +397,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
         if shared:                      # another member has a part in the step: it stays a step, with one of them
             done = kind == "decision" or bool(_noteread.read(text, _pages.zone_now(), _watch.parse_date)["done"])
             was = _steps.member_for(meta.get("step"), meta)
-            stays = _handover._share_step(meta, rec, member, done, now)
+            stays = rec["left_with"] = _handover._share_step(meta, rec, member, done, now)      # the item is still on a step, and whose: the answer line says so whenever it is read
             moved = stays != was
             if moved:
                 item["state_updated"] = item["confirmed"] = now

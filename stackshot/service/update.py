@@ -1566,7 +1566,7 @@ def update_unlocked(
         item["state_updated"] = item["updated"]   # filing edits (owner/project/priority/subject, and the ask line) leave the state clock alone
         item["confirmed"] = item["updated"]       # a state change confirms the item; a filing edit does not
     named = name_commit()                  # every gate has passed: the naming is stored as its own save, then this write's
-    _writes.save(gid, item, writer=debtor, ctx=_writes.QUIET if (filing_only or _writes.reformat()) else (_writes.NAMED if mover_named else _writes.PLAIN))
+    _writes.save(gid, item, writer=debtor, ctx=_writes.QUIET if (filing_only or _writes.reformat()) else (_writes.NAMED if mover_named else _writes.PLAIN), written=next if next_touch else "")
     now_held = h.is_held(item)
     now_parked = now_held or h.date_parked(item)
     if wake or clear_wake or hold or clear_hold or item.get("status") != was or now_parked != was_parked:
