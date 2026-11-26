@@ -7,6 +7,7 @@ registry, anchors, the config object), a clock past the view's age rebuilds, a f
 Also: a registry write inside the registry's own one-second look is read as the per-read path reads it, then at the next look; a store reached through a symlinked item file and a symlinked letter folder is stamped by its target; a write
 that lands during a scan is seen at the next read; readers of one view build each row once; a session that is a mover only by an alias; and the answers that move with the clock alone (a wait basis, a hold's wake, a dated wait,
 the day's end, a session leaving the fleet's grace, a registry file that stops being stood in for, a mover's second item quiet for an hour) are the per-read path's a few seconds past the moment they change; the first four also half a minute and hours past it.
+The clock the reads go through stands still until the suite moves it, and the mtime of a file that counts as just written is set against that clock: no answer depends on how fast the run is.
 
     tests/run-suite client_items        → exit 0 / 1"""
 import json, os, re, sys, pathlib, logging, time, threading, datetime as dt, collections
@@ -106,6 +107,8 @@ from stackshot.core import config as _cfg
 from stackshot.core import store as _store
 from stackshot.fleet import client
 from stackshot.fleet import sessions_registry as _sr
+from stackshot.fleet import liveness as _lvt
+from stackshot.service import audit_ticks as _aud
 from stackshot.web.routes import client_api as _rt_client
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 
@@ -181,6 +184,20 @@ def count(fn):
     finally: counting[0] = False
     return r, len(opens)
 
+# ---- the clock: from here to the route's checks `time.time`, `time.time_ns` and `time.monotonic` stand still until the suite moves them, so a view's age, a file's age and the moments a date comes are what a check
+# says they are, however long the reads take (a traced run is several times slower than a plain one)
+_real_clocks = time.time, time.time_ns, time.monotonic
+CLOCK = {"wall_ns": time.time_ns(), "mono": time.monotonic()}
+def at_clock(t): CLOCK["wall_ns"] = int(t * 1e9)                                  # the wall clock alone jumps to `t`
+def pass_time(s): CLOCK["wall_ns"] += int(s * 1e9); CLOCK["mono"] += s            # `s` seconds pass on both clocks
+time.time, time.time_ns, time.monotonic = (lambda: CLOCK["wall_ns"] / 1e9), (lambda: CLOCK["wall_ns"]), (lambda: CLOCK["mono"])
+JUST_NOW_NS = 199_000_000                                                         # the age of a file "just written": inside the 200 ms in which a view built from it is not kept
+def just_written(path):
+    """Give a file the mtime of a write `JUST_NOW_NS` before the clock; returns that mtime."""
+    t = time.time_ns() - JUST_NOW_NS; os.utime(path, ns=(t, t)); return t
+def newest(): return cr._board_stamp()[1]                                          # the newest mtime of what the view stands on
+age_all(); _sr.reset(); _aud._QUEUE_CACHE.update(at=0.0, map={})                   # nothing the start wrote, or read by the real clock, counts as fresh
+
 # ---- 1. the same answers as the per-read path, for every key
 reset()
 new1, n_cold = count(lambda: get_all(KEYS)); old1 = old_all(KEYS)
@@ -198,6 +215,7 @@ check("an unknown key and a bad key: the empty list, 400", json.loads(new1["nobo
 reset()
 _, n_a = count(lambda: get_all(NAMES))
 check(f"24 reads of one board open each item file about once, not once per read: {n_a} opens for {N_FILES} files", n_a <= 3 * N_FILES, n_a)
+pass_time(20)                                  # 20 s of the view's 30 pass: it is served at that age, not at the age it was built
 _, n_b = count(lambda: get_all(NAMES))
 check("…and 24 more reads of the unchanged board open no item file", n_b == 0, n_b)
 check("…the answers of the second round are the first round's", get_all(NAMES) == {k: new1[k] for k in NAMES})
@@ -311,14 +329,15 @@ check("…and a view stamped in the future (a clock that went back) is built aga
 reset()
 i5 = 905; d = jload(i5); mv = d["metadata"]["mover"]
 swap = lambda m: m.replace("-front", "-other") if m.endswith("-front") else m.replace("-other", "-front")
-item_path(i5).write_text(json.dumps(d, ensure_ascii=False)); t0 = item_path(i5).stat().st_mtime_ns; ino0 = item_path(i5).stat().st_ino
-r1 = get_all(KEYS[:1] + ["beta-front", "beta-other"])      # one scan, well inside the window
+item_path(i5).write_text(json.dumps(d, ensure_ascii=False)); t0 = just_written(item_path(i5)); ino0 = item_path(i5).stat().st_ino
+fresh5 = newest() == t0
+r1 = get_all(KEYS[:1] + ["beta-front", "beta-other"])      # inside the window
 d["metadata"]["mover"] = swap(mv); item_path(i5).write_text(json.dumps(d, ensure_ascii=False)); os.utime(item_path(i5), ns=(t0, t0))      # the same size, the same inode and the same mtime as at the read before
 st5 = item_path(i5).stat()
 r2 = get_all(KEYS[:1] + ["beta-front", "beta-other"])
 check("a file read within 200 ms of its write is rewritten at the same size, inode and mtime: the next read sees it (a view built from a fresh file is not kept)",
-      st5.st_mtime_ns == t0 and st5.st_ino == ino0 and r2 == old_all(KEYS[:1] + ["beta-front", "beta-other"]) and r1 != r2, (st5.st_mtime_ns == t0, r1 != r2, mv, swap(mv)))
-check("…while a view of files older than that is kept", (settle(), count(lambda: get_all(NAMES))[1])[1] == 0)
+      fresh5 and st5.st_mtime_ns == t0 and st5.st_ino == ino0 and r2 == old_all(KEYS[:1] + ["beta-front", "beta-other"]) and r1 != r2, (fresh5, st5.st_mtime_ns == t0, r1 != r2, mv, swap(mv)))
+check("…while a view of files older than that is kept", (settle(), pass_time(1), count(lambda: get_all(NAMES))[1])[2] == 0)
 
 # ---- 5b. a registry write inside the registry's own look at its directory
 reg_f = T / "links/a/session-registry.json"
@@ -327,33 +346,29 @@ def write_inside_window():
     """The alias written while the session registry still trusts its last look at its directory (a second), and read 0.35 s later without a reset: (that read, the per-read path's, whether both were inside the second, when the registry last looked)."""
     settle(); _sr.reset(); _sr.load(); t0 = time.monotonic()
     write_registry(alias=("alpha-main", "alpha-old")); age(reg_f)
-    time.sleep(0.35)
+    pass_time(0.35)
     got = get_all(TRIO); orc = old_all(TRIO)
     return got, orc, t0, time.monotonic() - t0 < 0.9
-for _try in range(6):
-    got_in, orc_in, t_look, inside = write_inside_window()
-    if inside: break
-    write_registry(); age(reg_f); _sr.reset()
+got_in, orc_in, t_look, inside = write_inside_window()
 check("a registry write inside the registry's own one-second look: the read 0.35 s later is the per-read path's (the alias not seen yet, by either), not the view of a registry newer than the lookups read", inside and got_in == orc_in and "a908" not in gids(got_in, "alpha-main"), (inside, [k for k in TRIO if got_in[k] != orc_in[k]][:3]))
-time.sleep(max(0.0, 1.1 - (time.monotonic() - t_look)))
+pass_time(1.1 - (time.monotonic() - t_look))
 got_out = get_all(KEYS); orc_out = old_all(KEYS)
 check("…and at the registry's next look the next read is the per-read path's with the write seen (the alias is the session's, its item is listed), not the view of the old registry kept to its age bound", got_out == orc_out and got_out[TRIO[0]] != got_in[TRIO[0]] and "a908" in gids(got_out, "alpha-main") and gids(got_out, "alpha-old") == gids(got_out, "alpha-main"), ([k for k in KEYS if got_out[k] != orc_out[k]][:3], got_out[TRIO[0]] == got_in[TRIO[0]]))
 write_registry(); age(reg_f); _sr.reset(); settle()
 
 # ---- 5c. a fleet file or a registry file written a moment ago is never kept either
-def touch_now(path):
-    t = time.time_ns(); os.utime(path, ns=(t, t))
-settle(); _sr.reset(); touch_now(reg_f); cr._client_items("alpha-main")      # one read, inside the window
-check("a view built while a session registry file is a moment old is not kept", cr._VIEW["v"] is None)
-settle(); touch_now(T / "fleet/a/machine.json"); cr._client_items("alpha-main")
-check("…nor while a fleet file is", cr._VIEW["v"] is None)
+settle(); _sr.reset(); t_ = just_written(reg_f); cr._client_items("alpha-main")      # one read, inside the window
+check("a view built while a session registry file is a moment old is not kept", newest() == t_ and cr._VIEW["v"] is None, (newest(), t_, cr._VIEW["v"]))
+settle(); t_ = just_written(T / "fleet/a/machine.json"); cr._client_items("alpha-main")
+check("…nor while a fleet file is", newest() == t_ and cr._VIEW["v"] is None, (newest(), t_, cr._VIEW["v"]))
 settle(); fl = T / "fleet/a/sessions.json"
-write_sessions(newbie=True); st_a = fl.stat(); reset()
-r_a = get_all([NEWBIE_ID, "alpha-main"])      # one scan, inside the window of the fleet file's write
+write_sessions(newbie=True); just_written(fl); st_a = fl.stat(); reset()
+fresh_fl = newest() == st_a.st_mtime_ns
+r_a = get_all([NEWBIE_ID, "alpha-main"])      # inside the window of the fleet file's write
 d_ = json.loads(fl.read_text()); d_[NEWBIE_ID]["name"] = "newbie-2"; fl.write_text(json.dumps(d_)); os.utime(fl, ns=(st_a.st_mtime_ns, st_a.st_mtime_ns))      # a session renamed in place: the same size, inode and mtime
 st_b = fl.stat()
 r_b = get_all([NEWBIE_ID, "alpha-main"])
-check("a fleet file rewritten in place at the same size, inode and mtime within 200 ms of the read before: the next read sees it", (st_b.st_mtime_ns, st_b.st_ino, st_b.st_size) == (st_a.st_mtime_ns, st_a.st_ino, st_a.st_size) and r_b == old_all([NEWBIE_ID, "alpha-main"]) and r_a != r_b, (r_a[NEWBIE_ID][2][:80], r_b[NEWBIE_ID][2][:80]))
+check("a fleet file rewritten in place at the same size, inode and mtime within 200 ms of the read before: the next read sees it", fresh_fl and (st_b.st_mtime_ns, st_b.st_ino, st_b.st_size) == (st_a.st_mtime_ns, st_a.st_ino, st_a.st_size) and r_b == old_all([NEWBIE_ID, "alpha-main"]) and r_a != r_b, (r_a[NEWBIE_ID][2][:80], r_b[NEWBIE_ID][2][:80]))
 write_sessions(); age(fl)
 
 # ---- 5d. a store reached through links: an item file that is a symlink, and a letter folder that is
@@ -417,14 +432,12 @@ check("the answers one view keeps are bounded; a key beyond the bound is answere
 check("one view is kept, not one per stamp", cr._VIEW["v"] is not None and len(cr._VIEW) == 1)
 
 # ---- 6b. the answers that move with the clock alone: a wait whose end passes, a hold's or a dated wait's wake coming within the hour, a dated step read against today, a session leaving the fleet's grace, a mover's quiet hour
-from stackshot.fleet import liveness as _lvt
-from stackshot.service import audit_ticks as _aud
-_real_time = time.time; OFF = [0.0]
+BASE = time.time()
 tz_ = _cfg.tz()
 def Wm(ep): return dt.datetime.fromtimestamp(ep, tz_).strftime("%Y-%m-%dT%H:%M")
 def day_of(ep): return dt.datetime.fromtimestamp(ep, tz_).date()
 def midnight_after(ep): return dt.datetime.combine(day_of(ep) + dt.timedelta(days=1), dt.time(), tz_).timestamp()
-B = (int(_real_time()) // 60 + 11) * 60                 # a minute about ten minutes ahead: the end of a wait below (a fake clock moves there), on a day with hours to spare before its midnight
+B = (int(BASE) // 60 + 11) * 60                         # a minute about ten minutes ahead: the end of a wait below (the clock moves there), on a day with hours to spare before its midnight
 while not 1 <= dt.datetime.fromtimestamp(B, tz_).hour < 20: B += 3600
 C, G, M = B + 1200, B + 2400, midnight_after(B)         # the moments a hold's wake comes within the hour, a session leaves the grace, and the day ends
 GHOST_ID = "88880000-0000-4000-8000-000000000001"
@@ -442,7 +455,6 @@ X = B + 600                                                              # the m
 def dep_q(i, at): dep(i, project="projects/beta", subject=f"[home] clock queue {i}", mover="qbot-1", next="qbot-1: carry on", last_activity={"at": at, "kind": "step_done", "what": "step 1 done"})
 dep_q(940, X + 25 - 3600); dep_q(941, X - 600)                           # one mover, two items: the first has been quiet for an hour 25 s after X (then it is queued behind the second), the second was active ten minutes before X
 DK = KEYS + ["ghost-1", GHOST_ID, "qbot-1", "zeta-main", "zeta-front", "zeta-other", "zeta-builder", "beta-front", "epsilon-other"]
-def at_clock(t): OFF[0] = t - _real_time()
 def clock_case(name, edge, pasts=(16, 31, 7200), lead=5):
     for past in pasts:
         at_clock(edge - lead); settle(); get_all(DK); before = old_all(DK)       # the view is built a few seconds before the moment
@@ -450,7 +462,6 @@ def clock_case(name, edge, pasts=(16, 31, 7200), lead=5):
         got = get_all(DK); orc = old_all(DK)
         check(f"{name}: the clock {past} s past the moment, the read is the per-read path's for every key", got == orc, [k for k in DK if got[k] != orc[k]][:4])
         if past == pasts[0]: check(f"…and the moment is a real one ({name}): some answer is not what it was before it", orc != before, None)
-time.time = lambda: _real_time() + OFF[0]
 try:
     clock_case("a wait whose reason is stated, at the wake", B)
     clock_case("a hold's and a dated wait's wake coming within the hour", C)
@@ -469,25 +480,21 @@ try:
     check("a mover's second item quiet for an hour while the view is young: the read is the per-read path's for every key (the queue map the rows read is the map now)", got_q == orc_q, [k for k in DK if got_q[k] != orc_q[k]][:4])
     check("…and the moment is a real one: the item is listed as waiting now, as it was on agent before", orc_q != before_q and any(r["list"] == "waiting" for r in json.loads(orc_q["qbot-1"][2])["items"]), None)
 finally:
-    time.time = _real_time; OFF[0] = 0.0; _aud._QUEUE_CACHE.update(at=0.0, map={})
+    at_clock(BASE); _aud._QUEUE_CACHE.update(at=0.0, map={})
 for i in (935, 936, 940, 941): item_path(i).unlink()
 write_sessions(); age(T / "fleet/a/sessions.json"); settle()
 
 # a registry file that stops reading (torn, mid-rewrite) is stood in for from its last good read for half an hour from its first failed read, then dropped: the view's own bound is that moment
-_real_mono = time.monotonic
 write_registry(alias=("alpha-main", "alpha-old")); age(reg_f); settle()
 reg_f.write_text("{torn"); age(reg_f); settle()                  # the first failed read: the alias is still the registry's
 stood_in = "a908" in gids(get_all(["alpha-main"]), "alpha-main")
-time.time = lambda: _real_time() + OFF[0]; time.monotonic = lambda: _real_mono() + OFF[0]
-try:
-    OFF[0] = 1780.0; settle(); get_all(DK); before_t = old_all(DK)       # the view is built 20 s before the registry stops standing in for the file
-    OFF[0] = 1803.0
-    got_t = get_all(DK); orc_t = old_all(DK)
-finally:
-    time.time = _real_time; time.monotonic = _real_mono; OFF[0] = 0.0
+pass_time(1780); settle(); get_all(DK); before_t = old_all(DK)       # the view is built 20 s before the registry stops standing in for the file
+pass_time(23)
+got_t = get_all(DK); orc_t = old_all(DK)
 check("a registry file that does not read: 23 s after a view was built, the registry has stopped standing in for its last good read, and the read is the per-read path's for every key", stood_in and got_t == orc_t, (stood_in, [k for k in DK if got_t[k] != orc_t[k]][:4]))
 check("…and the moment is a real one: the alias is the session's before it, not after", "a908" in gids(before_t, "alpha-main") and "a908" not in gids(orc_t, "alpha-main"), (gids(before_t, "alpha-main")[-2:], gids(orc_t, "alpha-main")[-2:]))
 write_registry(); age(reg_f); _sr.reset(); settle()
+time.time, time.time_ns, time.monotonic = _real_clocks      # the event loop below needs clocks that run
 
 # ---- 7. the route runs the read off the event loop
 from starlette.testclient import TestClient
