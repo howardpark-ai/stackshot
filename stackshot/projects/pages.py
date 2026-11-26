@@ -60,7 +60,8 @@ layer any session reads before acting. This script is the mechanism behind the r
   resolve <value>       print the normalized page key and whether it exists (0/1)
 
 Freshness = the page's last commit or write (local `git log -1` and the file's mtime on the server box; the server's answer
-through the client API on any other machine, since an earlier change the only source there) is not older than the board change minus
+through the client API on any other machine, since an earlier change the only source there; the server also counts an edit its copy has
+fetched and not yet pulled, page_upstream.py) is not older than the board change minus
 [page_rule] slack_seconds (300 s in the example). Both `gbrain put` (the host) and the connector's `put_page` land as write-through
 commits, so either path counts. Fail-open everywhere: a missing registry, a server out of reach (nag says "server unreachable"
 and check does not block), an unreadable payload — never block a board write for that; only a missing/unknown `metadata.project`
@@ -464,15 +465,16 @@ def git_ts(path, base=None):
         return int(out) if out else None
     except Exception: return None
 
-def page_ts(key):
+def page_ts(key, since=None):
     """The page's freshness (epoch): on the server box the later of the file's last commit and its write time; elsewhere the
-    server's answer (it knows both), else the registry's `updated`; None when nothing can say (the server away: UNREACHABLE)."""
+    server's answer (it knows both), else the registry's `updated`; None when nothing can say (the server away: UNREACHABLE).
+    `since`: the caller says the page is owed unless it was edited at or after this time, so the server also looks at what its copy has not pulled yet."""
     b = _brains.for_key(key); base = BRAIN if b.default else str(b.path)    # a second brain's page is read from its own copy
     local = os.path.join(base, key + ".md")
     if reads_local(base) and os.path.exists(local):
         t = git_ts(key + ".md", base)      # the coordinator commits a put some seconds to minutes later; the file is written at once
         return max(t or 0, int(os.path.getmtime(local)))   # same rule as the stackshot server's ledger
-    body = _api("page-ts", key)
+    body = _api("page-ts", key, **({"since": str(int(since))} if since else {}))
     if body:
         try:
             t = json.loads(body).get("ts")
@@ -1109,10 +1111,17 @@ def ct_now(key):
     try: return compiled_truth(open(os.path.join(_base(key), key + ".md"), encoding="utf-8").read())
     except Exception: return None
 
-def ct_at(key, ts):
-    """The compiled truth of the page's last commit at or before ts (read-only git in the pages checkout, [paths] brain); None = no version yet."""
+def ct_in(key, rev):
+    """The compiled truth of the page as commit `rev` of the pages checkout holds it; None when it holds no such page."""
     try:
-        h = subprocess.run(["git", "-C", _base(key), "log", "-1", f"--before={int(ts)}", "--format=%H", "--", key + ".md"],
+        r = subprocess.run(["git", "-C", _base(key), "show", f"{rev}:./{key}.md"], capture_output=True, text=True, timeout=20)
+        return compiled_truth(r.stdout) if r.returncode == 0 else None
+    except Exception: return None
+
+def ct_at(key, ts, rev="HEAD"):
+    """The compiled truth of the page's last commit at or before ts in `rev`'s history (read-only git in the pages checkout, [paths] brain); None = no version yet."""
+    try:
+        h = subprocess.run(["git", "-C", _base(key), "log", "-1", f"--before={int(ts)}", "--format=%H", rev, "--", key + ".md"],
                            capture_output=True, text=True, timeout=20).stdout.strip()
         if not h: return None
         # ./ = relative to the pages dir, not the repo root: the same at a repo root, right when the pages sit inside a larger repo
@@ -1123,7 +1132,7 @@ def ct_changed_since(key, ts):
     """True when the page's compiled truth differs from its version at ts - [page_rule] slack_seconds; a page with no version by then counts
     any put. Without the pages checkout (another machine) fall back to the timestamp rule."""
     if not reads_local(_base(key)):
-        pt = page_ts(key); return pt is not None and pt >= int(ts) - _slack()
+        since = int(ts) - _slack(); pt = page_ts(key, since); return pt is not None and pt >= since
     now = ct_now(key)
     if now is None: return False
     before = ct_at(key, int(ts) - _slack())
@@ -1416,7 +1425,7 @@ def stale_touches(sid, strict=False, skipped=None):
             if nb:
                 if skipped is not None: skipped[key] = nb
                 continue
-        pt = page_ts(key)
+        pt = page_ts(key, int(v.get("ts", 0)) - _slack())
         if pt is None and UNREACHABLE and not reads_local():
             UNKNOWN.append(key); continue        # the server cannot be reached from this machine: neither stale nor settled, checked again next time
         if pt is not None and pt >= int(v.get("ts", 0)) - _slack() and (not touch_strict(v, strict) or ct_changed_since(key, int(v.get("ts", 0)))):

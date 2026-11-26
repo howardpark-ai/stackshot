@@ -2846,7 +2846,7 @@ check("pane: a later next-only write never loosens it", _pg2.load_state(A)["touc
 up(X, {"item_id": "a1", "hold": True})
 check("pane: a hold counts, settled by any page write", (_pg2.load_state(X).get("touches", {}).get("projects/alpha") or {}).get("settle") == "any", _pg2.load_state(X))
 up(X, {"item_id": "a1", "priority": "p2"}); check("pane: a filing edit still owes nothing", _pg2.load_state(X)["touches"]["projects/alpha"].get("settle") == "any")
-_pg2.page_ts = lambda key: int(time.time()) + 5; _pg2.ct_changed_since = lambda key, ts: False      # a timeline line
+_pg2.page_ts = lambda key, since=None: int(time.time()) + 5; _pg2.ct_changed_since = lambda key, ts: False      # a timeline line
 check("pane: a timeline line settles the next-only debt", _pg2.stale_touches(X, strict=True) == [] and "projects/alpha" not in _pg2.load_state(X).get("touches", {}))
 check("pane: but not the state change, even for a session outside the currency", [k for k, _ in _pg2.stale_touches(A, strict=False)] == ["projects/alpha"])
 check("pane: and says so", "has no Current-state edit since" in _pg2.describe("projects/alpha", _pg2.load_state(A)["touches"]["projects/alpha"], strict=False))
