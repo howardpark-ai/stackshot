@@ -56,7 +56,7 @@ CATALOG: dict[str, str] = {
     "sent.empty": "Nothing sent: write something in the box, or pick an option.",
     "sent.emptynote": "Nothing sent: write a note to send it.",
     "sent.toolong": "Nothing sent: the text is too long.",
-    "sent.stale": "Nothing sent: the item no longer asks this (its options or its needs changed). Read it again below.",
+    "sent.stale": "Nothing sent: the item no longer asks this (its question, options or needs changed). Read it again below.",
     "sent.stale_home": "Nothing sent: the ask changed before your answer arrived; open the item to read it again.",
     "sent.askedback": "Sent: your note is on the item. I could not read a date from it, so the question is back below with days to pick from. Pick one, or write a date in the box.",
     "sent.askedback_home": "Sent: your note is on the item. I could not read a date from it; open the item to pick a day.",

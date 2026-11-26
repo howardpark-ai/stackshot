@@ -356,6 +356,12 @@ def part_on():
         check("board: an unsigned call is refused 403 with the sentence", (st, body) == (403, door.NO_IDENTITY), (st, body))
         st, body = post(URL, method="GET")
         check("board: an unsigned GET of the endpoint is refused, too", st == 403 and body == door.NO_IDENTITY, (st, body))
+        import urllib.error, urllib.request
+        try:
+            urllib.request.urlopen(URL, timeout=10).close(); refusal = None
+        except urllib.error.HTTPError as e:
+            refusal = (e.code, e.headers.get_all("x-frame-options"), e.headers.get_all("content-security-policy")); e.close()
+        check("board: the guard's refusal says who may frame it, as every response does", refusal == (403, ["SAMEORIGIN"], ["frame-ancestors 'self'"]), refusal)
         st, body = post(URL, {ident.HEADER: sig(ALICE, OTHER)})
         check("board: a call signed with another secret is refused 403, and the sentence tells neither secret", st == 403 and body == door.BAD_IDENTITY and SECRET not in body and OTHER not in body, (st, body))
         v = sig(ALICE); p = v.split(".")
