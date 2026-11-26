@@ -644,6 +644,10 @@ handback_hold_seconds = 180                          # the one line a front agen
 # locale_dir = "~/.config/stackshot/locales"        # a folder that holds a second language for the pages: `<code>.json` (e.g. ko.json), an object of string table key -> text, the keys of
                                                     # stackshot/web/i18n_catalog.py. Off by default: with no folder, or no file that loads, the pages are English and the side panel draws no language switch.
                                                     # The folder is outside this repository (it holds no text in another language). A missing folder, file or key is English for what is missing, with one warning in the log. Live (a changed file is read again)
+answer_frame_origins = []                           # the other sites of yours whose pages may show an item's answer block in a frame (GET /items/<key>/answer-frame?lang=…&theme=…;
+                                                    # docs/answer-frame.md), e.g. ["https://chat.example.com"]. Each entry is exactly https://<host> or https://<host>:<port>: no path, query,
+                                                    # wildcard or space; a bad entry is a config note and is ignored. Empty (the default): that page does not exist and no other site may frame
+                                                    # any page of the board. Live
 
 [for_you]                                           # the owner's For you list: rows on the board for what he should see; see docs/for-you-and-closed.md
 slack_command = ""                                  # an urgent row (a due date within 24 h) is also posted once to Slack by this command: an argv

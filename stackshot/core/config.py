@@ -939,6 +939,39 @@ def shell_url() -> str:
     return v if shell_url_ok(v) else ""
 
 
+# [ui] answer_frame_origins: the origins whose pages may show the answer frame (GET /items/<key>/answer-frame) in a frame. An entry is written into a response header and
+# into the frame's page as a postMessage target, so it is accepted only as exactly https://<host>[:<port>] with an ASCII host name or IPv4 address: no path (not even "/"),
+# query, fragment, user name, wildcard, IPv6 literal, space or punctuation a header would read as more than one origin.
+_FRAME_ORIGIN = re.compile(r"https://((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?::([1-9][0-9]{0,4}))?", re.I | re.A)
+
+
+def frame_origin(v: Any) -> str:
+    """The origin `v` names, written as a browser writes one (lower case, port 443 left out); "" when `v` is not exactly an https origin."""
+    m = _FRAME_ORIGIN.fullmatch(v) if isinstance(v, str) else None
+    if not m or len(m[1]) > 253 or (m[2] and int(m[2]) > 65535):
+        return ""
+    port = "" if m[2] in (None, "443") else ":" + m[2]
+    return f"https://{m[1].lower()}{port}"
+
+
+def answer_frame_origins(cfg: dict[str, Any] | None = None) -> list[str]:
+    """The origins that may frame the answer frame ([ui] answer_frame_origins), read live; [] (the default: the page does not exist) when unset or not a list. A bad
+    entry is left out (answer_frame_notes says so)."""
+    v = get("ui", "answer_frame_origins", default=[], cfg=cfg)
+    return list(dict.fromkeys(o for o in map(frame_origin, v if isinstance(v, list) else []) if o))
+
+
+def answer_frame_notes(cfg: dict[str, Any] | None = None) -> list[str]:
+    """notes()'s lines for [ui] answer_frame_origins: a value that is not a list, and each entry that is ignored."""
+    v = get("ui", "answer_frame_origins", default=None, cfg=cfg)
+    if v is None:
+        return []
+    if not isinstance(v, list):
+        return ['[ui] answer_frame_origins is not a list, so no other site may frame the answer frame: write it as answer_frame_origins = ["https://chat.example.com"]']
+    return [f"[ui] answer_frame_origins entry {i} ({repr(x)[:80]}) is not an https origin, so it is ignored: write https://<host> or https://<host>:<port>, with nothing after it"
+            for i, x in enumerate(v, 1) if not frame_origin(x)]
+
+
 def owner_aliases() -> list[str]:
     """The other names a session may open a line of next with for the owner's step (the owner's initials, a name in another language): [instance] owner_aliases, or the first person's aliases; [] by default.
     The name `you` is always one (a line `you: …` is the owner's) and is not listed here."""
@@ -1407,6 +1440,7 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     out: list[str] = stall_notes(cfg)
     out += keyword_notes(cfg)
     out += gmail_names_notes(cfg)
+    out += answer_frame_notes(cfg)
     if behind_door_settings(cfg).members:       # the front door's list is the board's members: the keys below name nobody (behind_door.notes says so)
         pass
     elif not _members().build(cfg)[0].declared:

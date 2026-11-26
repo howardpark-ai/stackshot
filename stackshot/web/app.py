@@ -36,6 +36,7 @@ from stackshot.web.routes import answers as _routes_answers
 from stackshot.web.routes import door_verify as _routes_door_verify
 from stackshot.web.routes import ui_api as _routes_ui_api
 from stackshot.web.routes import board_pages as _routes_board_pages
+from stackshot.web.routes import answer_frame as _routes_answer_frame
 
 _ICON = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMxZjFmMjEiLz48cGF0aCBkPSJNMTUgMzRsMTIgMTIgMjItMjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2YwYTA2YSIgc3Ryb2tlLXdpZHRoPSI4IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4K"  # the board's favicon (<state>/site/favicon.svg), same mark everywhere
 
@@ -220,5 +221,6 @@ def build(
     _routes_client_api.register(mcp, client_get=client_get, recycle_wanted_tokens=recycle_wanted_tokens)
     _routes_answers.register(mcp, answer=answer)
     _routes_ui_api.register(mcp, contact_label=contact_label, runner_status=runner_status, phase_sweep_status=phase_sweep_status)
+    _routes_answer_frame.register(mcp)      # before the catch-all of board_pages, which answers the address while [ui] answer_frame_origins is empty
     _routes_board_pages.register(mcp, contact_label=contact_label)
     return mcp

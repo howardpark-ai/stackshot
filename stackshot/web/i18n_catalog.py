@@ -5,6 +5,7 @@ One flat dict, `CATALOG`, of dotted key -> `str.format` template. The areas:
     state.*    the state words (Your move, On agent, ...), also the home page's headings and count cards
     panel.*    the side panel: its chrome, its sections and their cards, the audit card, the language switch
     home.*     the home page: count cards, lists, rows, waits, the answer and copy boxes, the connection notice
+    frame.*    the answer frame: the lines and links around an item's answer block in a frame on another site
     item.*     the item page: its state line, checklist, ask, sidebar, folds and the History's lines (item.log.*)
     wait.*     the item page's wait block (what it waits on, who watches, the chases) and the words that describe a wait
     answer.*   the item page's answer and comment boxes
@@ -407,6 +408,17 @@ CATALOG: dict[str, str] = {
     "home.pick_hint": "Pick an option or write a note",
     "home.recommended": "recommended",
     "home.options": "Options",
+
+    # ------------------------------------------------------------------ the answer frame (ui/answer_frame.py): one item's answer block in a frame on another site
+    "frame.title": "Answer",
+    "frame.signed_out": "Sign in to the board to answer.",
+    "frame.signed_out_link": "Open the item on the board to sign in",
+    "frame.changed": "The question changed since it was shown here.",
+    "frame.closed": "There is nothing to answer here now.",
+    "frame.answered_by": "Answered by {who}, {when}.",
+    "frame.sent": "Your answer was recorded.",
+    "frame.open_board": "Open on the board",
+    "frame.noscript": "Turn on JavaScript to answer here, or open the item on the board.",
 
     # ------------------------------------------------------------------ search page (ui/search.py)
     "search.heading": "Search",
