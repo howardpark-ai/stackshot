@@ -768,7 +768,7 @@ for nm, pg in ALLPG.items():
     hd = header_of(pg); m = _RL.search(hd)
     check(f"header: {nm} page: the rendered line sits in the title row, right after the site title, before the cards, once", bool(m) and hd.find('class="hbar"') < hd.find('<nav class="hcards"') and pg.count('id="rendered"') == 1, hd[:700])
     check(f"header: {nm} page: the line carries the stale threshold ({r2._stale_s()} s) and its title text", bool(m) and m.group(3) == str(r2._stale_s()) and (f"older than {r2._stale_s() // 60} minutes means the server has not published since" in m.group(4) if nm == "home"
-          else re.fullmatch(r"this page was drawn at \w{3} \w{3} \d+(?:st|nd|rd|th) \d\d:\d\d; reload for the current board", m.group(4)) is not None), m and m.group(0)[:300])
+          else re.fullmatch(r"this page was drawn at \w{3} \w{3} \d+(?:st|nd|rd|th)(?: \d{4})? \d\d:\d\d; reload for the current board", m.group(4)) is not None), m and m.group(0)[:300])
     check(f"header: {nm} page: its age is kept by the page ({'the home tick' if nm == 'home' else '_STAMP_JS'}), once", (r2._STAMP_JS in pg) == (nm != "home"), nm)
 check("header: a page drawn per request shows its own draw time on the line (a stamp with data-ts); home's shell has the line with no stamp", all(re.search(r'id="rendered"[^>]*><span class="tip" data-ts="\d+"', ALLPG[n]) for n in ALLPG if n != "home"))
 check("header: the stamp script finds the line wherever it is and does nothing on a page without it", "if(!s)return" in r2._STAMP_JS and "getElementById('rendered')" in r2._STAMP_JS and "classList.toggle('old'" in r2._STAMP_JS)
@@ -819,7 +819,7 @@ h12 = home_of(); w12 = lis(section(h12, "waiting-list"))
 slot12 = lambda li: re.search(r'<span class="tip ir-age ir-end[^"]*"([^>]*)>([^<]*)</span></div>', li)
 by12 = {re.search(r'<span class="ir-id">(a\w+)</span>', li).group(1): li for li in w12}
 check("Waiting end date: the slot shows 'until <day>' in the Mon Sep 28th form, with the time when the stored wake has one",
-      all(k in by12 for k in ("awk1", "awk2", "awk3")) and [slot12(by12[k]).group(2) for k in ("awk1", "awk2", "awk3")] == ["until Wed Mar 5th 09:00", "until Sun Mar 9th", "until Wed Mar 12th"], [(k, slot12(v).group(2)) for k, v in by12.items() if slot12(v)])
+      all(k in by12 for k in ("awk1", "awk2", "awk3")) and [slot12(by12[k]).group(2) for k in ("awk1", "awk2", "awk3")] == ["until Wed Mar 5th 2031 09:00", "until Sun Mar 9th 2031", "until Wed Mar 12th 2031"], [(k, slot12(v).group(2)) for k, v in by12.items() if slot12(v)])
 check("Waiting end date: a wait with no date says 'no end date', dimmed", all(k in by12 for k in ("awk4", "awk5")) and all(slot12(by12[k]).group(2) == "no end date" and "ir-end dim" in by12[k] for k in ("awk4", "awk5")), [by12.get(k, "")[:300] for k in ("awk4", "awk5")])
 check("Waiting end date: the slot is plain text (no data-ts, no live age) and the hover keeps the age ('waiting since <time>')",
       all("data-ts" not in slot12(v).group(0) and re.search(r'data-tip="waiting since \d{4}-\d\d-\d\d \d\d:\d\d (?:[A-Z]+|[+-]\d{2}(?::?\d{2})?)"', slot12(v).group(1)) for v in w12), [slot12(v).group(0) for v in w12][:3])
@@ -831,7 +831,7 @@ check("Waiting end date: the slot is the stored day of home.end_of (a wake with 
       {r["gid"]: r2._home.end_of(m) for r, m in l12 if r["gid"] in ("awk1", "awk2", "awk3", "awk4", "awk5")} == {"awk1": "2031-03-05T09:00", "awk2": "2031-03-09", "awk3": "2031-03-12", "awk4": None, "awk5": None}, [(r["gid"], r2._home.end_of(m)) for r, m in l12][-6:])
 y12 = lis(section(h12, "your-move")) + lis(section(h12, "agents-at-work"))
 check("Your move and On agent rows keep the age: a live stamp with data-ts, no end date", len(y12) >= 3 and all(re.search(r'<span class="tip [^"]*ir-age[^"]*" data-ts="\d+"', li) and "ir-end" not in li and "until " not in li.split('class="ir-who"')[0] for li in y12))
-check("Waiting end date: the detail line of a time wait is as before ('Until <day>: <why>' still leads it)", "Until Wed Mar 5th 09:00" in by12.get("awk1", "") and 'class="ir-det"><span class="hwait">Until' in by12.get("awk1", ""), by12.get("awk1", "")[-400:])
+check("Waiting end date: the detail line of a time wait is as before ('Until <day>: <why>' still leads it)", "Until Wed Mar 5th 2031 09:00" in by12.get("awk1", "") and 'class="ir-det"><span class="hwait">Until' in by12.get("awk1", ""), by12.get("awk1", "")[-400:])
 
 # ---- 13. page chrome: an unnamed sub-page's label, the in-place update's stamps and fingerprints, the pane-recycle line and badge,
 #          the answer and back-forward cache scripts, the first-paint fold script

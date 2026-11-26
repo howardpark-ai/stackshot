@@ -572,7 +572,7 @@ def fresh_pause():
 PAUSE_FILE = T / "state/stall_pause.json"
 H4 = 4 * 3600.0
 Q = float(int(T1 // 60) * 60 + 6 * 3600)                    # a whole minute (an ISO time here has no seconds)
-START = r"stall: paused until \w{3} \w{3} \d+(?:st|nd|rd|th) \d\d:\d\d " + re.escape(ZONE_ABBR) + r" \((.*)\)"
+START = r"stall: paused until \w{3} \w{3} \d+(?:st|nd|rd|th)(?: \d{4})? \d\d:\d\d " + re.escape(ZONE_ABBR) + r" \((.*)\)"
 cli_row("home-peer", "idle", IDLE0)
 stall_svc.stall_save({}); stall_svc.stall_write({"_pass": {"since": B}})
 fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)

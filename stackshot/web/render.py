@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg  # stackshot.toml: paths, fleet, scopes, the Machines panel, branding
+from stackshot.core import datewords as _datewords   # a date in words, and when it says its year
 from stackshot.core import members as _members
 from stackshot.core import legacy_owner as _lo   # an old version of an item (from the store's history) read as the current code reads it: History only, never written back
 from stackshot.web import item_history as _ihist   # the commits of an item's file in the store's git, kept per item (item_history.py)
@@ -384,12 +385,10 @@ def yesno_options(r):
 def option_lines(r):
     """The options as plain lines, "label (recommended): line", for a tool reply or a tooltip."""
     return [f'{_ol.listed(o["label"], i)}{" (recommended)" if o["recommended"] else ""}: {o["line"]}' for i, o in enumerate(options_of(r))]
-def when_words(t, clock=True):
-    """"Thu Mar 5th 18:30" (clock=False: "Thu Mar 5th"): the rulebook's form for a date a person reads. t = an aware datetime
-    (drawn in its own zone) or a date (no clock). Board.when and the server's replies use it."""
-    if not isinstance(t, datetime.datetime): clock = False
-    d = t.day
-    return f"{t:%a %b} {d}{'th' if 11 <= d % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(d % 10, 'th')}" + (f" {t:%H:%M}" if clock else "")
+def when_words(t, clock=True, today=None):
+    """"Thu Mar 5th 18:30" (clock=False: "Thu Mar 5th"), with the year when it is not the current one ("Fri Mar 5th 2027 18:30"): the rulebook's form for a date a person reads. t = an aware datetime
+    (drawn in its own zone) or a date (no clock); today = the caller's own now (core/datewords). Board.when and the server's replies use it."""
+    return _datewords.when_words(t, today, clock)
 def age_words(seconds):
     """An age in words: "12 min", "5 h", "2 d" (minutes below 90 min, hours below 36 h, days from then on)."""
     m = int(max(0.0, float(seconds)) // 60)
@@ -1215,7 +1214,7 @@ class Board:
         if isinstance(ts, datetime.datetime): t = ts.astimezone(self.now.tzinfo)
         elif isinstance(ts, datetime.date): t, clock = ts, False
         else: t = datetime.datetime.fromtimestamp(float(ts), self.now.tzinfo)
-        return when_words(t, clock)
+        return when_words(t, clock, self.now)
     def new_hold_words(self, r):
         """A new hold's words for the briefings: "set by my-x Sat Mar 21st 09:00 · wake Mon Mar 23rd · parked for after board#N",
         or "… · nothing holds it now" when no open after, recycle, needs external or item-scoped anchor holds it."""
@@ -1579,7 +1578,7 @@ class Board:
         def m_item(r):
             m = r["metadata"]; out = [f"<a id=\"{anchor(r)}\"></a>**{rid_full(r)} · {r['subject']}**" + (f" ({self.md_hold(r)})" if is_parked(r) else "")]
             k = "" if is_parked(r) else needs_kind(r)   # parked: its needs field waits with it
-            meta = ([f"**Due in {(due_of(r) - now.date()).days} d ({due_of(r):%m-%d %a})**"] if due_of(r) else []) + [m.get("priority") or "p2"]
+            meta = ([f"**Due in {(due_of(r) - now.date()).days} d ({_datewords.numeric_day(due_of(r), now)} {due_of(r):%a})**"] if due_of(r) else []) + [m.get("priority") or "p2"]
             if _home.wait_phrase(self.mod_of(r), "waiting on", shown_full): meta.append(_home.wait_phrase(self.mod_of(r), "waiting on", shown_full))      # the kind of its wait, in the model's words
             if r.get("_fresh") == "stale": meta.append("stale")                       # before the ask, whose own " · " would swallow it
             if k == "call" and open_ask(r): meta.append("ask: " + open_ask(r))
@@ -1695,7 +1694,7 @@ class Board:
                 for r in done:
                     oc, why, by = outcome_of(r)   # how it ended
                     print(f"- <a id=\"{anchor(r)}\"></a>**{rid_full(r)}** {r['subject']}" + (f" · **{outcome_word(oc)}**" + (f" by {shown_full(by)}" if by else "") + (f": {why}" if why else "") if oc else "")
-                          + (f" · {m_sref(r)}" if lab(r) else "") + f" · {r['_updated']:%m-%d %H:%M} {_cfg.tz_abbr(r['_updated'])}")
+                          + (f" · {m_sref(r)}" if lab(r) else "") + f" · {_datewords.numeric_day(r['_updated'], self.now)} {r['_updated']:%H:%M} {_cfg.tz_abbr(r['_updated'])}")
             else: print("_none_")
         return _b.getvalue()
 

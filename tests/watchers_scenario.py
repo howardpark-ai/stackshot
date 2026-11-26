@@ -140,7 +140,7 @@ check("ask: the relay question is the fixed text, the party's own event named", 
       and wk.relay_ask({"wait_event": "signature", "party": "Acme legal"}) == "Decide: has Acme legal's signature arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop"
       and wk.is_watcher_ask(wk.relay_ask({"wait_event": "x"})) and wk.is_watcher_ask(wk.drop_ask({"wait_event": "x"})) and not wk.is_watcher_ask("Decide: a · Recommend: b · Stakes: c · By: d"), wk.relay_ask({"wait_event": "x"}))
 D0 = datetime.date(2026, 11, 16)
-WHEN = [wk.ASK_AGAIN + wk.day_words(D0 + datetime.timedelta(days=7)), wk.ASK_AGAIN + wk.day_words(D0 + datetime.timedelta(days=14)), wk.ASK_AGAIN + wk.day_words(wk._add_months(D0, 1))]      # the three date buttons: a week, two weeks, a month
+WHEN = [wk.ASK_AGAIN + wk.day_words(D0 + datetime.timedelta(days=7), D0), wk.ASK_AGAIN + wk.day_words(D0 + datetime.timedelta(days=14), D0), wk.ASK_AGAIN + wk.day_words(wk._add_months(D0, 1), D0)]      # the three date buttons: a week, two weeks, a month
 RELAY_LABELS = ["arrived", *WHEN, "not yet, ask again on <date>", "drop"]; DROP_LABELS = ["drop", *WHEN, "keep waiting until <date>"]
 wrelay, wdrop = {"metadata": {"ask": wk.relay_ask({"wait_event": "x"}), "watch": {"asked": "relay"}, "options": wk.relay_options(D0)}}, {"metadata": {"ask": wk.drop_ask({"wait_event": "x"}), "watch": {"asked": "dropit"}, "options": wk.drop_options(D0)}}
 check("options: relay arrived / the three dates / not yet / drop; drop-it: drop / the three dates / keep waiting; the date buttons carry their day, no option is recommended",
@@ -735,7 +735,7 @@ check("refresh: a closed item and an agent's own ask are left alone", raw(312) =
 r_before = (raw(310), raw(311)); again = watching_svc.watch_refresh_asks(now0 + 3 * DAY)
 check("refresh: a second run writes nothing (idempotent: the date buttons are the mark)", again == [] and (raw(310), raw(311)) == r_before, again)
 SENT.clear(); r_ = rd(310); r_["metadata"]["answers"] = []; (T / "store/a/310.json").write_text(json.dumps(r_))
-out_ = answer_svc._answer("a310", wk.ASK_AGAIN + wk.day_words(D_ + datetime.timedelta(days=7)), "", "answer")
+out_ = answer_svc._answer("a310", wk.ASK_AGAIN + wk.day_words(D_ + datetime.timedelta(days=7), D_), "", "answer")
 check("refresh: a day button of the rebuilt question puts the wait back on that day, as on the follow-up", out_ != "askedback" and mt(310).get("wait_kind") == "relay" and ab_(mt(310)) == (D_ + datetime.timedelta(days=7)).isoformat() and "ask" not in mt(310), mt(310))
 
 # stale day buttons (a question that sat past its first button's day) are counted again from today; a fresh one is left alone
@@ -764,7 +764,7 @@ later = watching_svc.watch_refresh_asks(now0 + 8 * DAY)
 check("stale: a week later the rebuilt buttons are stale again and are counted again", {"a320", "a321", "a322", "a323"} <= set(later), later)
 SENT.clear(); r_ = rd(320); r_["metadata"]["answers"] = []; (T / "store/a/320.json").write_text(json.dumps(r_))
 D2_ = D_ + datetime.timedelta(days=8)
-out2_ = answer_svc._answer("a320", wk.ASK_AGAIN + wk.day_words(D2_ + datetime.timedelta(days=7)), "", "answer")
+out2_ = answer_svc._answer("a320", wk.ASK_AGAIN + wk.day_words(D2_ + datetime.timedelta(days=7), D2_), "", "answer")
 check("stale: a day button of a re-based question puts the wait back on that day (no refusal as for a past day)", out2_ != "askedback" and mt(320).get("wait_kind") == "relay" and ab_(mt(320)) == (D2_ + datetime.timedelta(days=7)).isoformat(), (out2_, mt(320)))
 
 # ================================================================ the example config documents the switches
