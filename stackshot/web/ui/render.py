@@ -1420,9 +1420,12 @@ def _named_only(r):
     """True when the item links a mockup: the board then draws its options by name alone and in the stored order. A mockup names its designs by name, and the server cannot read it (a claude.ai
     page or a fleet tool's page), so a letter the board drew from the options' places could read as another design's letter; with names only, no letter exists to cross."""
     return bool(mockup_url(r))
+def question_ref(r) -> str:
+    """The reference (model/ask_ref.py) of the question an item shows, its mockup link included: what its answer forms carry and what the answer path compares a posted one with, read the one way for both."""
+    return _askref.ref_of(r.get("metadata") or {}, mockup_url(r))
 def _ref_field(r) -> str:
-    """The hidden field of a form that answers the item's question: the reference of the question as this page shows it (model/ask_ref.py), which the answer path compares with the one that stands when the form arrives."""
-    return f'<input type="hidden" name="ref" value="{_askref.ref_of(r.get("metadata") or {})}">'
+    """The hidden field of a form that answers the item's question: the reference of the question as this page shows it, which the answer path compares with the one that stands when the form arrives."""
+    return f'<input type="hidden" name="ref" value="{question_ref(r)}">'
 def _cards_html(opts, named_only=False) -> str:
     """The option cards of the answer box: opts = [{"label", "line", "recommended"}] in the order drawn (_card_order). One label-wrapped radio (name=choice) per option,
     showing the label, the "recommended" badge on the recommended one and the whole text of the option; three or more options are lettered A, B, C by their place in the list and the radio's value is

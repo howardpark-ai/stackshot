@@ -25,7 +25,6 @@ from stackshot.core.instance import NAME, OWNER
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import ask_leaves as _askl
-from stackshot.model import ask_ref as _askref
 from stackshot.model import holders as _holders
 from stackshot.model import model as _model
 from stackshot.model import note_read as _noteread
@@ -251,8 +250,8 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
     own sentence} and no text: under the lock it is dropped, nothing written, unless the item is open, in your-step with that very step and clock (else `changed`, `closed`) and asks nothing beside it (an ask, options or a decision need: `beside`);
     the sentence is kept as `server_note`, never as his `text`; nobody is told it as his answer, a background agent is told plainly what the server did and a front agent nothing; no answer is left pending for escalation. Send note (act=note, text required) is his note on a step that stays open (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step);
     on an item with no step any more it is a comment, and with no text nothing is written (`emptynote`). `ref` is the reference of the question the form showed (model/ask_ref.py): while the item needs a decision, a pick or an
-    answer in the box sent with a reference other than the standing question's is no answer to it (`stale`, nothing written; with a note `stalenote`, the note kept as a comment, as for any answer to a question that changed);
-    with no reference nothing is compared. `by` is the name of the person who answered (the route's signed-in person): it is stored on the answer as `by` (when it is not the first person, whose answers carry none), ticks his
+    answer in the box sent with a reference other than the standing question's is no answer to it (`stale`, nothing written; with a note `stalenote`, the note kept as a comment, as for any answer to a question that changed,
+    the pick named without its card letter); with no reference nothing is compared. `by` is the name of the person who answered (the route's signed-in person): it is stored on the answer as `by` (when it is not the first person, whose answers carry none), ticks his
     step and is the save's author; none stands for the first person, and a mail tick records no `by`. A page loaded before this form posts act=send (an empty box is a Done, a note is a step-reply, as ever) or act=comment (a comment only, the step stands).
     """
     choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
@@ -276,9 +275,10 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
                 return "changed"
             if meta.get("ask") or meta.get("options") or "decision" in _needs_kinds(meta):
                 return "beside"         # a question for him stands beside the step: a mail is no answer to it, and a Done would take his decision need off
-        if ref and "decision" in _needs_kinds(meta) and (choice or (act == "answer" and text)) and ref != _askref.ref_of(meta):      # the question was rewritten after the page showed it: a label it kept is no pick of the new one
+        if ref and "decision" in _needs_kinds(meta) and (choice or (act == "answer" and text)) and ref != _answers()._question_ref(item):      # the question was rewritten after the page showed it: a label it kept is no pick of the new one
             late = "late, the question was rewritten after the page showed it"      # said in front of a note with no pick too: its reader must not take it for an answer to the new question
-            return _handover._keep_note(gid, item, text if choice else f"({late}) {text}", "stalenote", choice, late, by=who) if text else "stale"
+            pick = _answers()._posted_name(choice)      # never split against the item's options: they may stand in another order now
+            return _handover._keep_note(gid, item, text if pick else f"({late}) {text}", "stalenote", pick, late, by=who) if text else "stale"
         stepped, then, handed, letter, until = False, "", "", "", ""
         if choice:
             choice, letter = _answers()._split_letter(item, choice)      # the board's box posts "B · <label>": the label is the choice, the letter is kept beside it

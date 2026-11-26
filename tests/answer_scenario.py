@@ -998,8 +998,9 @@ from stackshot.model import ask_ref as _askref
 from stackshot.web import frame_guard as _frame, i18n as _i18n
 from stackshot.web.board_home import _board_home_drop
 Q = {"needs": ["decision"], "ask": ASK, "options": OPTS}
-Q0 = _askref.ref_of(Q)
-check("a question's reference is 32 hex digits, the same for the same question read again", re.fullmatch(r"[0-9a-f]{32}", Q0) is not None and _askref.ref_of(json.loads(json.dumps(Q))) == Q0, Q0)
+REF = lambda meta, mockup="": _askref.ref_of(meta, mockup)
+Q0 = REF(Q)
+check("a question's reference is 32 hex digits, the same for the same question read again", re.fullmatch(r"[0-9a-f]{32}", Q0) is not None and REF(json.loads(json.dumps(Q))) == Q0, Q0)
 _spread = lambda s: "  " + s.replace(" ", "\n   ") + " "
 for what, same in (
         ("the metadata's and an option's keys are written in another order", {"options": [dict(reversed(list(o.items()))) for o in OPTS], "ask": ASK, "needs": ["decision"]}),
@@ -1007,8 +1008,12 @@ for what, same in (
         ("the ask and the options are re-flowed (only whitespace differs)", {**Q, "ask": _spread(ASK), "options": [{**o, "label": _spread(o["label"]), "line": _spread(o["line"])} for o in OPTS]}),
         ("a session is named in needs beside the decision", {**Q, "needs": ["home-agent", "decision"]}),
         ("needs is the older single word", {**Q, "needs": "decision"}),
+        ("needs spells the decision with a capital", {**Q, "needs": ["Decision"]}),
+        ("the older single word is in capitals", {**Q, "needs": "DECISION"}),
+        ("the draft is empty, as with none", {**Q, "draft": ""}),
+        ("the draft is no text, which no page shows", {**Q, "draft": ["x"]}),
         ("an option gains a wake date", {**Q, "options": [{**OPTS[0], "wake": "2099-01-01"}, *OPTS[1:]]})):
-    check(f"the reference stays when {what}", _askref.ref_of(same) == Q0, same)
+    check(f"the reference stays when {what}", REF(same) == Q0, same)
 for what, other in (
         ("a word of the ask changes", {**Q, "ask": ASK.replace("whether to ship", "whether to delete")}),
         ("the ask goes", {"needs": ["decision"], "options": OPTS}),
@@ -1019,13 +1024,20 @@ for what, other in (
         ("an option is added", {**Q, "options": [*OPTS, {"label": "Ask", "line": "Ask first", "recommended": False}]}),
         ("two options change places", {**Q, "options": [OPTS[1], OPTS[0], OPTS[2]]}),
         ("the options go", {"needs": ["decision"], "ask": ASK}),
-        ("no decision is needed any more", {**Q, "needs": ["home-agent"]})):
-    check(f"the reference changes when {what}", _askref.ref_of(other) != Q0, other)
-_pair = lambda label, line: _askref.ref_of({**Q, "options": [{"label": label, "line": line, "recommended": True}]})
+        ("no decision is needed any more", {**Q, "needs": ["home-agent"]}),
+        ("a draft appears", {**Q, "draft": "Hello"})):
+    check(f"the reference changes when {what}", REF(other) != Q0, other)
+_pair = lambda label, line: REF({**Q, "options": [{"label": label, "line": line, "recommended": True}]})
 check("a word moved from an option's label to its line is another question", _pair("Ship it", "now") != _pair("Ship", "it now"))
+check("options stored as plain words count too", REF({**Q, "options": ["Wait", "Ship"]}) != REF({**Q, "options": ["Wait", "Drop"]}))
+for what, a_, b_ in (("a word", "Hi Sam", "Hi Pat"), ("a doubled space", "the total is 40", "the total  is 40"), ("a line break in place of a space", "Hi Sam, 40", "Hi Sam,\n40"),
+                     ("an indent", "total:\n40", "total:\n  40"), ("a trailing space", "40", "40 ")):
+    check(f"the draft counts character for character: {what}", REF({**Q, "draft": a_}) != REF({**Q, "draft": b_}), (a_, b_))
+M1, M2 = "https://claude.ai/artifact/design-one", "https://claude.ai/artifact/design-two"
+check("the mockup link beside the question counts", len({Q0, REF(Q, M1), REF(Q, M2)}) == 3 and REF(Q, M1) == REF(dict(Q), M1))
 
 LATE = "late, the question was rewritten after the page showed it"
-ref = lambda i: _askref.ref_of(rd("a", i)["metadata"])
+ref = lambda i: ui_render.question_ref(rd("a", i))
 raw_ = lambda i: (T / f"store/a/{i}.json").read_bytes()
 def edit(i, **meta):
     d = rd("a", i); d["metadata"].update(meta); (T / f"store/a/{i}.json").write_text(json.dumps(d))
@@ -1079,6 +1091,21 @@ check("an item that needs no decision any more answers as before, with or withou
 asked_item(218); d = rd("a", 218); d["status"] = "completed"; (T / "store/a/218.json").write_text(json.dumps(d))
 check("a closed item says closed, whatever the reference", answer_svc._answer("a218", "Ship", "", "answer", ref="0" * 32) == "closed")
 
+# the late note: who wrote it, and the option as it was posted (no card letter, and never read against the options that stand now)
+NOTE = "go with that one"
+asked_item(248); shown = ref(248); edit(248, options=[OPTS[1], OPTS[0], OPTS[2]])
+got = answer_svc._answer("a248", "B · Ship", NOTE, "answer", by="Second Person", ref=shown)
+check("the late note names the option without the card's letter, which would point into the new order", got == "stalenote" and said(248) == [("comment", None, f"({LATE}: Ship) {NOTE}")], (got, said(248)))
+check("the late note keeps who wrote it", (rd("a", 248)["metadata"].get("answers") or [{}])[-1].get("by") == "Second Person", rd("a", 248)["metadata"].get("answers"))
+BARE = [{"label": k_, "line": f"Design {k_}", "recommended": k_ == "A"} for k_ in "ABC"]
+asked_item(249, options=BARE); shown = ref(249); edit(249, options=[{**BARE[0], "line": "Another design"}, *BARE[1:]])
+got = answer_svc._answer("a249", "B", NOTE, "answer", ref=shown)
+check("a card known by its letter alone leaves no letter on the late note", got == "stalenote" and said(249) == [("comment", None, f"({LATE}) {NOTE}")], (got, said(249)))
+asked_item(250, options=[{"label": "A Report", "line": "Write it", "recommended": True}, {"label": "A Plan", "line": "Plan it", "recommended": False}]); shown = ref(250)
+edit(250, options=[{"label": k_, "line": "As written", "recommended": k_ == "A Report"} for k_ in ("A Report", "B Plan", "C Drop")])
+got = answer_svc._answer("a250", "A Report", NOTE, "answer", ref=shown)
+check("the late note names the option as it was posted, never as the new question's options read it", got == "stalenote" and said(250) == [("comment", None, f"({LATE}: A Report) {NOTE}")], (got, said(250)))
+
 # the forms carry it, and the route reads it
 FIELD = r'<input type="hidden" name="ref" value="([^"]*)">'
 forms = lambda html, cls: re.findall(rf'<form class="{cls}[^"]*"[^>]*>.*?</form>', html, re.S)
@@ -1087,6 +1114,8 @@ item("a", 234, needs=["decision"], ask=YESNO)
 item("a", 235, needs=["decision"], ask=YESNO, options=[{**o, "recommended": False} for o in YN])
 item("a", 236, mover="Oliver", ask=YESNO)
 item("a", 237, state="your-step", step=STEP, needs=["home-agent"])                     # a fresh item on his step
+DRAFT, DRAFT2 = "Hi Sam,\n\n  the total is 40.", "Hi Sam,\n\n  the total is 14."
+for i in (240, 241, 242, 243): asked_item(i, draft=DRAFT)                              # a text he is to send, shown under the ask
 snap("the reference's items")
 def drawn(g): return forms(ui_render.Board(str(STORE)).item_html(g, answer={**BOX, "action": f"/items/{g}/answer"}), "ianswer")
 for g, what in (("a230", "the option cards"), ("a234", "the Yes and No cards"), ("a235", "the box alone (stored options that draw no card)")):
@@ -1096,6 +1125,27 @@ for g, what in (("a3", "the comment box of an item on its agent"), ("a237", "the
     f_ = drawn(g)
     check(f"no reference on a form that answers no decision: {what}", len(f_) == 1 and not re.findall(FIELD, f_[0]), f_)
 check("the fixture: a235's form is the box alone", 'name="choice"' not in "".join(drawn("a235")) and 'value="answer"' in "".join(drawn("a235")))
+# the mockup link drawn beside the question is part of it, wherever the item names it
+ART = "https://claude.ai/artifact/"
+def reword(i, **top):
+    d = rd("a", i); d.update(top); (T / f"store/a/{i}.json").write_text(json.dumps(d))
+for i in (244, 245): asked_item(i); reword(i, description=f"{DESC} The mockup: {ART}design-one")
+asked_item(246, next=f"home-agent: draw {ART}design-one"); asked_item(247)
+page_ = {i: "".join(drawn(f"a{i}")) for i in (244, 245, 246, 247)}
+shown = {i: (re.findall(FIELD, f_) or [""])[0] for i, f_ in page_.items()}
+whole_ = ui_render.Board(str(STORE)).item_html("a246", answer={**BOX, "action": "/items/a246/answer"})
+check("a form's reference counts the mockup link its page draws beside the question, named in the Background or in Next",
+      f'class="mockup" href="{ART}design-one"' in whole_ and all(shown[i] == ref(i) != REF(rd("a", i)["metadata"]) for i in (244, 245, 246)) and shown[247] == ref(247) == REF(rd("a", 247)["metadata"]),
+      (shown, [ref(i) for i in shown]))
+reword(244, description=f"{DESC} One more sentence. The mockup: {ART}design-one")
+got = answer_svc._answer("a244", "Ship", "", "answer", ref=shown[244])
+check("a Background rewrite that keeps the mockup link does not refuse the pick", got == "decision" and said(244) == [("decision", "Ship", "")], (got, said(244)))
+reword(245, description=f"{DESC} The mockup: {ART}design-two")
+edit(246, next=f"home-agent: draw {ART}design-two")
+reword(247, description=f"{DESC} The mockup: {ART}design-one")
+for i, what in ((245, "another mockup link in the Background"), (246, "another mockup link in Next"), (247, "a mockup link where there was none")):
+    b4 = raw_(i); got = answer_svc._answer(f"a{i}", "Ship", "", "answer", ref=shown[i])
+    check(f"{what} makes a pick from the earlier page stale: nothing written", got == "stale" and raw_(i) == b4, (got, said(i)))
 _code = next(c_ for c_ in _i18n.LANGS if c_ != _i18n.DEFAULT)
 (T / "locale").mkdir()
 (T / f"locale/{_code}.json").write_text(json.dumps({"answer.your_answer": "[x:your answer]", "home.send": "[x:send]", "home.recommended": "[x:recommended]"}))
@@ -1140,6 +1190,34 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     b4 = raw_(233)
     r_ = post("/items/a233/answer", {"token": tok("a233"), "ref": "0" * 32, "choice": "B · Ship", "act": "answer", "text": ""})
     check("a posted reference that is not the question's writes nothing", r_.headers["location"] == "/items/a233?sent=stale" and raw_(233) == b4, (r_.headers.get("location"), said(233)))
+
+    hf = home_form("a247")
+    check("the home page's form counts a mockup link named in the Background, as the item page's does",
+          f'class="mockup" href="{ART}design-one"' in page("/").text and re.findall(FIELD, hf) == [ref(247)] != [REF(rd("a", 247)["metadata"])], (hf[:600], ref(247)))
+
+    # the draft under the ask, rewritten by a session between the page and the pick (the update tool, then the answer route)
+    pick_ = lambda g, shown_, **more: post(f"/items/{g}/answer", {"token": tok(g), "ref": shown_, "choice": "B · Ship", "act": "answer", "text": "", **more})
+    on_item = lambda p_: (re.findall(FIELD, "".join(forms(p_, "ianswer"))) or [""])[0]
+    p_ = page("/items/a240").text; shown = on_item(p_)
+    wrote = _wt_update.stackshot_update("a240", draft=DRAFT2, sender="home-agent")
+    b4 = raw_(240); told.clear(); r_ = pick_("a240", shown)
+    check("a pick posted from a page that showed the draft before a session rewrote it is stale and writes nothing",
+          "the total is 40" in p_ and shown and wrote.startswith("updated a240") and rd("a", 240)["metadata"].get("draft") == DRAFT2 and r_.headers["location"] == "/items/a240?sent=stale" and raw_(240) == b4 and not told,
+          (wrote[:300], r_.headers.get("location"), said(240)))
+    p_ = page("/items/a240").text; r_ = pick_("a240", on_item(p_))
+    check("... and the page then shows the new draft, from which the pick is taken", "the total is 14" in p_ and r_.headers["location"] == "/items/a240?sent=decision" and said(240) == [("decision", "Ship", "")],
+          (r_.headers.get("location"), said(240)))
+    hf = home_form("a241"); shown = (re.findall(FIELD, hf) or [""])[0]; before_ = page("/").text
+    spaced = DRAFT.replace("\n\n  the", "\n\n   the")
+    wrote = _wt_update.stackshot_update("a241", draft=spaced, sender="home-agent"); b4 = raw_(241); r_ = pick_("a241", shown, back="/")
+    check("a rewrite of the draft in its spacing alone refuses the pick of the home page drawn before it",
+          "the total is 40" in before_ and shown and wrote.startswith("updated a241") and rd("a", 241)["metadata"].get("draft") == spaced != DRAFT and r_.headers["location"].startswith("/?sent=stale&item=a241") and raw_(241) == b4,
+          (wrote[:300], r_.headers.get("location"), said(241)))
+    shown = on_item(page("/items/a242").text); wrote = _wt_update.stackshot_update("a242", draft=DRAFT, sender="home-agent"); r_ = pick_("a242", shown)
+    check("the same draft written again does not refuse the pick", wrote.startswith("updated a242") and r_.headers["location"] == "/items/a242?sent=decision", (wrote[:300], r_.headers.get("location")))
+    shown = on_item(page("/items/a243").text); wrote = _wt_update.stackshot_update("a243", clear_draft=True, sender="home-agent"); b4 = raw_(243); r_ = pick_("a243", shown)
+    check("a draft cleared after the page showed it refuses the pick", wrote.startswith("updated a243") and "draft" not in rd("a", 243)["metadata"] and r_.headers["location"] == "/items/a243?sent=stale" and raw_(243) == b4,
+          (wrote[:300], r_.headers.get("location"), said(243)))
 
     # ---- 13. who may frame what the server answers (web/frame_guard.py)
     for what, r_, status in (("an item's page", page("/items/a233"), 200), ("an item's page, not signed in", page("/items/a233", cookie=None), 200), ("the home page", page("/"), 200),

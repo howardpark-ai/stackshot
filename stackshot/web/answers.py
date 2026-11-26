@@ -78,6 +78,21 @@ def _mockup_url(item: dict[str, Any]) -> str:
     return _ui_render.mockup_url(item)
 
 
+def _question_ref(item: dict[str, Any]) -> str:
+    """The reference of the question the item asks now, as its page's answer forms carry it (ui/render.py `question_ref`)."""
+    from stackshot.web.ui import render as _ui_render
+    return _ui_render.question_ref(item)
+
+
+def _posted_name(choice: str) -> str:
+    """The option a form's posted `choice` names, with the card's letter taken off; "" when the letter is all there is. Read from the posted text alone, never against the item's options: for a pick
+    that arrives after the question was rewritten, a letter would point at a place in the new order."""
+    m = _LETTERED_CHOICE.fullmatch(choice)
+    if m:
+        return m[2]
+    return "" if len(choice) == 1 and choice.isascii() and choice.isalpha() else choice
+
+
 def _split_letter(item: dict[str, Any], choice: str) -> tuple[str, str]:
     """(label, letter) for the `choice` a form posted. The answer box of the board letters a question's options A, B, C when it has three or more, by their place in the order the owner
     stored them (the order a session writes its ask in: "Recommend: B, …"), and posts "B · <label>"; every other form posts the bare label. On an item that links a mockup the cards are drawn by name, without the badge, but post the same lettered value, so no label can pass for another's letter; the letter is then not kept beside the name. The lettered form is tried first: a
