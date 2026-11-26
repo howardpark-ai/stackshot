@@ -2,20 +2,24 @@
 
   1  the command    listed under `stackshot`, its help needs no config
   2  the stream     every file of the three folders and nothing else (each exclusion on its own file), private modes, no user names, the manifest last and true (hashes, next id, the board's head), a received tree verifies;
-                    nothing a file holds is printed, and the sources are left as they were
+                    a redirected file is 0600 before the first byte, the journal is refused; nothing a file holds is printed, and the sources are left as they were
   3  --out          the same tree in a directory, made beside it and renamed whole; a directory that holds something, or lies inside a source, is refused
-  4  --verify       a changed, missing or extra file or directory, a link in a file's place, a missing, cut or malformed manifest and a path that climbs out all exit 1; it needs no config
-  5  refusals       not the server box (deploy_ssh names another, [server] box = false), a read-only standby, the cross-process locks off, a terminal for the stream; a missing folder or runtime directory fails
-  6  the locks      every lock the package makes is one the command takes, in the order of core/xlock.py; each one held by another process fails the run in its time, naming it, with nothing written and the others free;
-                    a short hold is waited out; a holder that takes two locks the other way round is let through
+  4  --verify       a changed, missing or extra file or directory, a link in a file's place, a missing, cut or malformed manifest and a path that climbs out all exit 1; what the copy skipped is named; it needs no config
+  5  refusals       not the server box (deploy_ssh names another, [server] box = false, no host named and no pages checkout), a read-only standby, the cross-process locks off, a terminal for the stream; a missing or
+                    empty folder or runtime directory fails; a time limit that is not a finite number above 0 is a usage error
+  6  the locks      every lock the package makes is one the command takes, in the order of core/xlock.py, with the push queues'; each one held by another process fails the run in its time, naming it, with nothing
+                    written and the others free; every one is held all through the copy under the locks; a lock file that cannot be opened fails the run; one wait for all after the publish lock, inside the longest
+                    hold, the attempts given up measured; a short hold is waited out; a holder that takes two locks the other way round is let through
   7  concurrency    a writer saves under the locks, hands out item ids and appends to a log all the while: every copy is one moment of it (the control: an unlocked read of the same files is not)
-  8  between        what changes between the first copy and the locks is in the copy: lines added to a log, a log rewritten or replaced, a file changed with the same size and time, files added and removed, a folder for a file
-  9  failure        a write error in the staging directory, in the stream (a full device, a reader that leaves) and in --out; a folder that never settles; a file that goes mid-copy; the longest hold; every signal while a lock
-                    is waited for, while the locks are held and while the output is blocked: non-zero, no staging directory, no lock held, nothing partial taken for good; a killed run's leftover is removed by a later one
-  10 extra          --extra and [standby_copy] extra_dirs, copied with the locks free, until two scans match; one that never settles, is not there or overlaps a source fails
+  8  between        what changes between the first copy and the locks is in the copy: lines added to a log, a log rewritten or replaced, a file changed with the same size and time, files added and removed, a folder
+                    for a file; a log is cut at its last newline only while it is being written
+  9  failure        a write error in the staging directory, in the stream (a full device, a reader that leaves) and in --out; a folder that never settles; a file that goes mid-copy; the longest hold; every signal
+                    while a lock is waited for, while the locks are held and while the output is blocked: non-zero, no staging directory, no lock held, nothing partial taken for good; one run at a time; the output's
+                    time limit; what a killed run left is removed by a later one, and nothing else is
+ 10  extra          --extra and [standby_copy] extra_dirs, copied with the locks free, until two scans match; one that never settles, is not there or overlaps a source fails
 
     tests/run-suite standby_copy        -> exit 0 / 1"""
-import ast, errno, fcntl, hashlib, io, json, os, pathlib, pty, re, resource, shutil, signal, subprocess, sys, tarfile, time
+import ast, errno, fcntl, hashlib, io, json, os, pathlib, pty, re, resource, shutil, signal, socket, subprocess, sys, tarfile, time
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 sys.path.insert(0, SCR); sys.path.insert(0, STACK)
@@ -25,6 +29,8 @@ CHILD = len(sys.argv) > 1 and sys.argv[1] == "child"
 T = pathlib.Path(os.environ["COPY_TEST_TMP"] if CHILD else _scratch.mkdtemp(prefix="standbycopytest-"))
 STATE, REPO, SECRETS, RUN = T / "state", T / "repo", T / "secrets", T / "run"
 STORE = REPO / "board-data"
+QUEUES = ("queue", "queue-msg")      # the push queues, folders of fleet/push.py's own folder in the state dir
+LONG_AGO = 3600                      # seconds: a time this far back is nothing a run has just written
 
 
 # ---------------------------------------------------------------------------- the child processes
@@ -72,6 +78,14 @@ def child_record():
     from stackshot.projects import projects
     with projects.locked():
         hold_then("record")
+        time.sleep(60)
+
+
+def child_queue():
+    """Holds the push queue's lock the way fleet/push.py does while it appends."""
+    from stackshot.fleet import push
+    with push._queue_lock():
+        hold_then("queue")
         time.sleep(60)
 
 
@@ -142,6 +156,61 @@ def child_hooked(hook, argv):
             if seen["n"] == 3: raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), b)
             return real(a, b)
         s.shutil.copy2 = copy2
+    elif hook == "probe":                     # which locks are free at the start of the passes under the locks, during each copy there, and at their end
+        got = {"start": None, "end": None, "during": set(), "copies": 0}
+        real_settle = s.settle
+
+        def free_now():
+            return [n for n, path in lock_files((*s.LOCKS, "publish", "project-record")).items() if not path.exists() or free(path)]
+
+        def copy(src, dst, **k):
+            if k["locked"]:
+                got["during"] |= set(free_now()); got["copies"] += 1
+            return real_copy(src, dst, **k)
+
+        def settle(trees, check):
+            got["start"] = free_now()
+            real_settle(trees, check)
+            got["end"] = free_now()
+            (T / "probe.json").write_text(json.dumps({**got, "during": sorted(got["during"])}))
+        s.copy_file, s.settle = copy, settle
+    elif hook == "latehold":                  # the passes under the locks start with a long step
+        real_settle = s.settle
+
+        def settle(trees, check):
+            time.sleep(1.2)
+            return real_settle(trees, check)
+        s.settle = settle
+    elif hook == "grows":                     # a log grows while it is read, and its times then say it was last written long ago
+        real_pour = s._pour
+
+        def pour(src, dst, at, end, check):
+            done = real_pour(src, dst, at, end, check)
+            path = os.readlink(f"/proc/self/fd/{src}")
+            if path.endswith(os.sep + "grow.log"):
+                st = os.stat(path)
+                with open(path, "a", encoding="ascii") as f: f.write("x")
+                os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+            return done
+        s._pour = pour
+    elif hook == "journal":                   # the scratch socket stands for one of the journal's
+        s.JOURNAL_SOCKETS = str(T / "j") + os.sep
+    elif hook == "tar-mode":                  # the mode of the file the stream goes to, before its first byte
+        real_tar = s.write_tar
+
+        def write_tar(stage, dirs, files, out):
+            (T / "tar-mode").write_text(oct(os.fstat(out.fileno()).st_mode & 0o777))
+            return real_tar(stage, dirs, files, out)
+        s.write_tar = write_tar
+    elif hook in ("out-hang", "out-slow"):    # --out stops after its first file of the settings folder: for good (to be killed), or for longer than the output may take
+        real = shutil.copy2
+
+        def copy2(a, b):
+            done = real(a, b)
+            if os.sep + "settings" + os.sep in b:
+                hold_then("out"); time.sleep(60 if hook == "out-hang" else 20)
+            return done
+        s.shutil.copy2 = copy2
     elif hook == "boom":                      # an error nobody foresaw, whose text quotes a content
         def contents(trees):
             raise ValueError("MARKER-quoted-content")
@@ -166,11 +235,26 @@ def free(path):
         os.close(fd)
 
 
+def push_dir():
+    """The folder fleet/push.py keeps its queues in, from the module itself."""
+    from stackshot.fleet import push
+    return pathlib.Path(push.A)
+
+
+def lock_files(names):
+    """{the name a failure gives: the lock file}: the named store locks, the publish and record locks, the push queues' and the id counter."""
+    out = {n: STATE / f"{n}.lock" for n in names}
+    out.update({f"push {q}": push_dir() / q / ".lock" for q in QUEUES})
+    out["next-id"] = STORE / "next-id"
+    return out
+
+
 if CHILD:
     kind = sys.argv[2]
     if kind == "writer": child_writer()
     elif kind == "inverse": child_inverse()
     elif kind == "record": child_record()
+    elif kind == "queue": child_queue()
     elif kind == "hooked": child_hooked(sys.argv[3], sys.argv[4:])
     sys.exit(0)
 
@@ -248,11 +332,14 @@ def build():
     git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "first", cwd=REPO)
 
 
-build()
 os.environ.update(STACKSHOT_CONFIG=config(), STACKSHOT_AUTH="off", HOME=str(T / "home"), XDG_RUNTIME_DIR=str(RUN), XDG_CONFIG_HOME=str(T / "home/.config"),
                   XDG_STATE_HOME=str(T / "home/.state"), GIT_CONFIG_GLOBAL=os.devnull, GIT_CEILING_DIRECTORIES=str(T), COPY_TEST_TMP=str(T))
 for k in ("STACKSHOT_URL", "STACKSHOT_READ_ONLY", "BOARD_MCP_CONFIG"):
     os.environ.pop(k, None)
+in_state = push_dir().relative_to(STATE).as_posix()
+KEPT.update({f"state/{in_state}/{q}/s1.jsonl": f'{{"queue": "{q}"}}\n' for q in QUEUES})
+LEFT_OUT += [f"state/{in_state}/{q}/.lock" for q in QUEUES]
+build()
 
 PROCS = []
 
@@ -290,8 +377,30 @@ def staged():
 
 def locks_held():
     from stackshot.tools import standby_copy as s
-    held = [n for n in (*s.LOCKS, "publish", "project-record") if not free(STATE / f"{n}.lock")]
-    return held + ([] if free(STORE / "next-id") else ["next-id"])
+    return [n for n, path in lock_files((*s.LOCKS, "publish", "project-record")).items() if not free(path)]
+
+
+def held(path):
+    """A descriptor holding the flock on `path`, made when it is not there."""
+    fd = os.open(path, os.O_RDONLY | os.O_CREAT, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+
+def given_up(text):
+    """(attempts, ms held in all, ms held at most) as a message says them, or None."""
+    m = re.search(r"attempts given up: (\d+), holding locks (\d+) ms in all, (\d+) ms at most", text)
+    return m and tuple(int(x) for x in m.groups())
+
+
+def own_dir(path, mode=0o700, inside=("state",), age=0):
+    """A directory as a run leaves one: its mode, what stands at its top, how long ago it was last written."""
+    os.mkdir(path); os.chmod(path, mode)
+    for name in inside:
+        (path / name).mkdir()
+    if age:
+        os.utime(path, (time.time() - age,) * 2)
+    return path
 
 
 def clean(what):
@@ -352,15 +461,58 @@ def main():
     check("manifest: format, time, commits and the next id", m["format"] == 1 and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", m["time"]) and m["code_commit"] == head
           and m["board_head"] == git("rev-parse", "HEAD", cwd=REPO) and m["next_id"] == 12 and isinstance(m["lock_hold_ms"], int), {k: m.get(k) for k in ("format", "time", "code_commit", "board_head", "next_id", "lock_hold_ms")})
     check("manifest: a sha256 and a size for every file", set(m["files"]) == set(KEPT) and all(v == {"sha256": hashlib.sha256(KEPT[k].encode()).hexdigest(), "size": len(KEPT[k])} for k, v in m["files"].items()), m["files"])
+    check("manifest: no attempt at the locks was given up", m["lock_attempts_abandoned"] == {"count": 0, "held_ms": 0, "longest_ms": 0}, m.get("lock_attempts_abandoned"))
     check("manifest: what was not copied is listed with why", {x["path"]: x["reason"] for x in m["skipped"]} == SKIPPED, m["skipped"])
     check("manifest: and the command says how many", "3 entries not copied" in err and "locks held" in err, err)
     rc, _, err = standby("--verify", str(T / "got1"))
     check("stream: the received tree verifies", rc == 0 and f"verified: {len(KEPT)} files" in err, (rc, err))
+    unnamed = [f"{path}" for path, why in SKIPPED.items() if f"not in the copy ({why}): {path}" not in err]
+    check("verify: what the copy left out is named, the linked directory among it", not unnamed, (unnamed, err))
     check("stream: the sources are as they were", sources_now() == before)
     clean("stream")
     with open(T / "stream.tar", "wb") as f:
-        rc, _, err = standby(stdout=f)
+        os.fchmod(f.fileno(), 0o644)
+        rc, _, err = standby(stdout=f, hook="tar-mode")
     check("stream: into a file as well", rc == 0 and tarfile.is_tarfile(T / "stream.tar"), err)
+    check("stream: that file is 0600 before the first byte, and after", (T / "tar-mode").read_text() == "0o600" and (T / "stream.tar").stat().st_mode & 0o777 == 0o600,
+          ((T / "tar-mode").read_text(), oct((T / "stream.tar").stat().st_mode & 0o777)))
+    r, w = os.pipe()
+    try:
+        st = os.fstat(w)
+        p = start([sys.executable, "-m", "stackshot", "standby-copy", "--output-timeout", "5"], stdout=w, env={"JOURNAL_STREAM": f"{st.st_dev}:{st.st_ino}"})
+        err = p.communicate(timeout=60)[1].decode()
+        os.set_blocking(r, False)
+        try:
+            sent = os.read(r, 100)
+        except BlockingIOError:
+            sent = b""
+        check("journal: the stream systemd names as the journal's is refused, nothing sent", p.returncode == 3 and "journal" in err and not sent and not staged(), (p.returncode, err, sent))
+    finally:
+        os.close(r); os.close(w)
+    rc, out, err = standby(env={"JOURNAL_STREAM": "1:2"})
+    check("journal: a unit whose other stream goes to the journal is not refused", rc == 0 and out, (rc, err))
+    (T / "j").mkdir()
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        server.bind(str(T / "j/s")); server.listen(1); client.connect(str(T / "j/s"))
+        accepted = server.accept()[0]
+        p = start([sys.executable, __file__, "child", "hooked", "journal", "--output-timeout", "5"], stdout=client.fileno())
+        err = p.communicate(timeout=60)[1].decode()
+        accepted.close()
+        check("journal: a socket of the journal's is refused", p.returncode == 3 and "journal" in err and not staged(), (p.returncode, err))
+    finally:
+        server.close(); client.close()
+    near, far = socket.socketpair()
+    try:
+        p = start([sys.executable, "-m", "stackshot", "standby-copy"], stdout=near.fileno())
+        near.close()
+        far.settimeout(60)
+        got_bytes = b"".join(iter(lambda: far.recv(65536), b""))
+        err = p.communicate(timeout=60)[1].decode()
+        check("journal: another socket takes the stream (a remote shell's, say)", p.returncode == 0 and tarfile.is_tarfile(io.BytesIO(got_bytes)), (p.returncode, err))
+    finally:
+        near.close(); far.close()
 
     # ------------------------------------------------------------------ 3 --out
     dest = T / "outs/one"; dest.parent.mkdir()
@@ -406,6 +558,7 @@ def main():
     tampered("another format", lambda d: rewrite_manifest(d, lambda m: m.update(format=2)), "not a manifest of format")
     tampered("a path that climbs out", lambda d: rewrite_manifest(d, lambda m: m["files"].update({"../outside/real.json": {"sha256": "0", "size": 0}})), "malformed")
     tampered("an absolute directory", lambda d: rewrite_manifest(d, lambda m: m["dirs"].append("/etc")), "malformed")
+    tampered("no list of what was skipped", lambda d: rewrite_manifest(d, lambda m: m.pop("skipped")), "malformed")
     rc, _, err = standby("--verify", str(dest), env={"STACKSHOT_CONFIG": str(T / "no-such.toml")})
     check("verify: needs no config of the server", rc == 0, (rc, err))
     cut = T / "cut"
@@ -425,6 +578,11 @@ def main():
         check(f"refusal: {label}: no staging directory", not staged(), staged())
     refused("deploy_ssh names another box", "not the server host", env={"STACKSHOT_CONFIG": config("other.toml", [(r'(?m)^deploy_ssh = ""', 'deploy_ssh = "far-host"')])})
     refused("[server] box = false", "not the server host", env={"STACKSHOT_CONFIG": config("nobox.toml", [(r'(?m)^# box = true', 'box = false')])})
+    no_pages = [(r'(?m)^brain = "[^"]*"', f'brain = "{T / "no-pages"}"')]
+    refused("no host named, [server] box unset and no pages checkout", "no pages checkout", env={"STACKSHOT_CONFIG": config("nopages.toml", no_pages)})
+    for label, edits in (("[server] box = true", [(r'(?m)^# box = true', 'box = true')]), ("deploy_ssh naming this box", [(r'(?m)^deploy_ssh = ""', f'deploy_ssh = "{socket.gethostname()}"')])):
+        rc, out, err = standby(env={"STACKSHOT_CONFIG": config("server.toml", no_pages + edits)})
+        check(f"server box: {label} is enough with no pages checkout", rc == 0 and out, (rc, err))
     refused("a read-only standby", "read-only standby", env={"STACKSHOT_READ_ONLY": "1"})
     refused("the cross-process locks off", "cross_process", env={"STACKSHOT_CONFIG": config("nolocks.toml", [(r'(?m)^cross_process = true', 'cross_process = false')])})
     master, slave = pty.openpty()
@@ -446,6 +604,19 @@ def main():
         os.rename(T / "secrets.away", SECRETS)
     rc, out, err = standby(env={"STACKSHOT_CONFIG": config("nohead.toml", [(r'(?m)^repo = "[^"]*"', f'repo = "{T / "outside"}"')])})
     check("failure: the board's head cannot be read", rc == 1 and "head commit" in err and not out, (rc, err))
+    put(T / "fakebin/git", "#!/bin/sh\nexec sleep 8\n"); os.chmod(T / "fakebin/git", 0o755)
+    began = time.monotonic()
+    rc, out, err = standby("--max-hold", "0.5", env={"PATH": f"{T / 'fakebin'}{os.pathsep}{os.environ['PATH']}"})
+    check("failure: reading the board's head counts in the longest hold", rc == 1 and "was not read" in err and "within the 0.5 s" in err and not out and time.monotonic() - began < 6, (rc, err, time.monotonic() - began))
+    for key, label in (("state", "state"), ("store", "store")):
+        (T / f"empty-{key}").mkdir()
+        for what, folder, word in (("an empty", T / f"empty-{key}", "holds nothing to copy"), ("a missing", T / f"no-{key}", "is not there")):
+            rc, out, err = standby(env={"STACKSHOT_CONFIG": config("hollow.toml", [(rf'(?m)^{key} = "[^"]*"', f'{key} = "{folder}"')])})
+            check(f"failure: {what} {label} folder is no copy of a server", rc == 1 and f"the {label} folder" in err and word in err and not out, (rc, err))
+    for option in ("--lock-timeout", "--max-hold", "--output-timeout"):
+        for value in ("nan", "inf", "0", "-1", "soon"):
+            rc, out, err = standby(option, value, timeout=60)
+            check(f"usage: {option} {value} exits 2 and starts nothing", rc == 2 and "seconds" in err and not out and not staged(), (rc, err))
     clean("refusals")
 
     # ------------------------------------------------------------------ 6 the locks
@@ -466,7 +637,9 @@ def main():
     from stackshot.core import store as core_store
     from stackshot.web import publish
     check("locks: the publish lock and the id counter are the files their writers lock", publish.LOCK == STATE / "publish.lock" and core_store.NEXT_ID == STORE / "next-id", (publish.LOCK, core_store.NEXT_ID))
-    for name, path in [(n, STATE / f"{n}.lock") for n in s.LOCKS] + [("publish", publish.LOCK), ("next-id", core_store.NEXT_ID)]:
+    from stackshot.fleet import push
+    check("locks: the push queues are the ones the fleet's push module writes", s.QUEUE_DIRS == QUEUES and push_dir().parent == STATE and pathlib.Path(push.Q) == push_dir() / QUEUES[0], (s.QUEUE_DIRS, push.A, push.Q))
+    for name, path in lock_files((*s.LOCKS, "publish")).items():
         fd = os.open(path, os.O_RDONLY | os.O_CREAT, 0o644)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
@@ -496,6 +669,57 @@ def main():
     wait_for((T / "held-inverse").exists, "the inverse holder")
     rc, _, err = standby("--lock-timeout", "30")
     check("locks: a holder that takes two the other way round is let through, and the command follows", rc == 0 and holder.wait(timeout=30) == 0 and (T / "inverse-done").exists(), (rc, err))
+    holder = child("queue")
+    wait_for((T / "held-queue").exists, "the push queue holder")
+    rc, out, err = standby("--lock-timeout", "0.4")
+    check("locks: the push queue's writer holds the command off", rc == 1 and "the push queue lock was not free" in err and not out, (rc, err))
+    holder.kill(); holder.wait()
+    rc, _, err = standby("--out", str(T / "probed"), hook="probe")
+    seen_locks = json.loads((T / "probe.json").read_text()) if (T / "probe.json").exists() else {}
+    check("locks: every one is held when the passes under the locks start, during each copy there and when they end",
+          rc == 0 and seen_locks.get("start") == [] and seen_locks.get("during") == [] and seen_locks.get("end") == [] and seen_locks.get("copies", 0) > 0, (rc, err, seen_locks))
+    wake = STATE / "wake.lock"
+    wake.unlink(missing_ok=True); wake.mkdir()
+    try:
+        rc, out, err = standby(env={"STACKSHOT_XLOCK_STRICT": "0"})
+        check("locks: a lock file that cannot be opened fails the run, never a hold that keeps nobody out", rc == 1 and "xlock wake: no lock file" in err and not out, (rc, err))
+    finally:
+        wake.rmdir()
+
+    def late_release(argv, first, after, keep=None, hook=None):
+        """A run while `first` is held, let go `after` seconds past the publish lock being taken (and `keep` held throughout) -> (exit code, stderr)."""
+        one = held(STATE / f"{first}.lock"); other = held(STATE / f"{keep}.lock") if keep else -1
+        try:
+            args = [sys.executable, __file__, "child", "hooked", hook] if hook else [sys.executable, "-m", "stackshot", "standby-copy"]
+            p = start([*args, *argv], stdout=subprocess.DEVNULL)
+            wait_for(lambda: not free(publish.LOCK), "the publish lock to be taken")
+            time.sleep(after)
+            os.close(one); one = -1
+            err = p.communicate(timeout=60)[1].decode()
+            return p.returncode, err
+        finally:
+            for fd in (one, other):
+                if fd >= 0: os.close(fd)
+
+    rc, err = late_release(["--lock-timeout", "2.8"], "wake", 1.2, keep="stall")
+    took = given_up(err)
+    check("hold: the locks after the publish lock share one wait: an attempt holds about 2 s, not 2 s for each", rc == 1 and "the stall lock was not free" in err and took and 1800 <= took[2] <= 2450 and took[1] >= took[2], (rc, err))
+    fd = held(STATE / "stall.lock")
+    try:
+        rc, out, err = standby("--lock-timeout", "2.0", "--max-hold", "0.6")
+    finally:
+        os.close(fd)
+    took = given_up(err)
+    check("hold: no attempt waits past the longest hold", rc == 1 and took and took[0] >= 2 and took[2] <= 1300, (rc, err))
+    rc, _, err = standby("--max-hold", "1.8", hook="latehold")
+    check("hold: (the control: the long step alone fits in 1.8 s)", rc == 0, (rc, err))
+    rc, err = late_release(["--max-hold", "1.8"], "wake", 1.0, hook="latehold")
+    check("hold: the longest hold is counted from the publish lock, the wait for the others included", rc == 1 and "did not finish within 1.8 s of the first lock" in err, (rc, err))
+    rc, err = late_release(["--out", str(T / "late")], "item", 2.5)
+    m = manifest_of(T / "late") if rc == 0 else {}
+    gone_by = m.get("lock_attempts_abandoned") or {}
+    check("hold: a run that gets the locks at a later try says what the earlier ones held, in the manifest and its line",
+          rc == 0 and gone_by.get("count", 0) >= 1 and 1800 <= gone_by.get("longest_ms", 0) <= 2450 and gone_by.get("held_ms", 0) >= gone_by.get("longest_ms", 1) and m["lock_hold_ms"] < 1500 and given_up(err), (rc, err, gone_by, m.get("lock_hold_ms")))
     clean("locks")
 
     # ------------------------------------------------------------------ 7 concurrency
@@ -547,6 +771,16 @@ def main():
         check("between: it verifies", s.verify(str(d))[1] == [], s.verify(str(d))[1])
     (STORE / "next-id").write_text("12")
     clean("between")
+    logs = {"quiet.jsonl": ('{"a": 1}\n{"last": 2}', '{"a": 1}\n{"last": 2}', -LONG_AGO), "one.log": ("its only line", "its only line", -LONG_AGO),
+            "fresh.log": ("whole\nhalf", "whole\n", 600), "grow.log": ("a\nb\npartial", "a\nb\n", -LONG_AGO)}
+    for name, (text, _, when) in logs.items():
+        put(STATE / name, text); os.utime(STATE / name, (time.time() + when,) * 2)
+    rc, _, err = standby("--out", str(T / "logs"), hook="grows")
+    for (name, (_, want, _w)), label in zip(logs.items(), ("quiet, with no last newline, is whole", "of one line with no newline is whole", "just written is cut after its last newline", "that grows while it is read is cut after its last newline")):
+        got = (T / "logs/state" / name).read_text() if rc == 0 else None
+        check(f"logs: one {label}", got == want, (rc, got, err))
+    for name in logs:
+        (STATE / name).unlink()
 
     # ------------------------------------------------------------------ 9 failure
     put(STATE / "bulk.json", "b" * 3_000_000)
@@ -618,21 +852,73 @@ def main():
         clean(f"signal {signame} during the output")
     (STATE / "bulk.json").unlink()
 
-    old, held_old, young, other = (RUN / n for n in ("stackshot-standby-copy-old", "stackshot-standby-copy-held", "stackshot-standby-copy-young", "someone-else"))
-    for p_ in (old, held_old, young, other):
-        (p_ / "state").mkdir(parents=True)
-    past = time.time() - 3600
-    for p_ in (old, held_old, other):
-        os.utime(p_, (past, past))
-    fd = os.open(held_old, os.O_RDONLY)
+    put(STATE / "bulk.json", "b" * 3_000_000)
+    p = start([sys.executable, "-m", "stackshot", "standby-copy"])      # its output is blocked: nobody reads on
+    p.stdout.read(512)
+    rc, out, err = standby()
+    check("one run: while an earlier one is live the next is turned away and stages nothing", rc == 1 and "earlier run is still live" in err and not out and len(staged()) == 1, (rc, err, staged()))
+    p.kill(); p.wait(); p.stdout.close(); p.stderr.close()
+    rc, _, err = standby()
+    check("one run: once it is gone the next runs, and clears what it left", rc == 0 and "removed what an earlier run left" in err, (rc, err))
+    clean("one run")
+    began = time.monotonic()
+    p = start([sys.executable, "-m", "stackshot", "standby-copy", "--output-timeout", "1"])
+    p.stdout.read(512)
+    try:
+        p.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        p.kill(); p.wait()
+    err = p.stderr.read().decode(); p.stdout.close(); p.stderr.close()
+    check("time limit: a receiver that stalls ends the run", p.returncode == 1 and "was not written within 1 s" in err and time.monotonic() - began < 20, (p.returncode, err, time.monotonic() - began))
+    clean("time limit: the stream")
+    (T / "slow").mkdir()
+    rc, _, err = standby("--out", str(T / "slow/copy"), "--output-timeout", "1", hook="out-slow", timeout=60)
+    check("time limit: --out too, with no directory and nothing beside it", rc == 1 and "was not written within 1 s" in err and not list((T / "slow").iterdir()), (rc, err, list((T / "slow").iterdir())))
+    clean("time limit: --out")
+    (STATE / "bulk.json").unlink()
+
+    kd = T / "killed"; kd.mkdir()
+    (T / "held-out").unlink(missing_ok=True)
+    p = start([sys.executable, __file__, "child", "hooked", "out-hang", "--out", str(kd / "copy")])
+    wait_for((T / "held-out").exists, "the half-made tree")
+    p.kill(); p.wait(); p.stdout.close(); p.stderr.close()
+    left = [x.name for x in kd.iterdir()]
+    check("leftovers: a killed --out leaves its half-made tree beside the target, a settings file in it, and its staging copy",
+          len(left) == 1 and re.fullmatch(r"\.copy\.standby-copy-partial-[a-z0-9_]{8}", left[0]) is not None and any(x.is_file() for x in (kd / left[0] / "settings").rglob("*")) and len(staged()) == 1, (left, staged()))
+    mark = ".standby-copy-partial-"
+    stays = {"held by a process": own_dir(kd / f".a{mark}aaaaaaaa"), "with something else in it": own_dir(kd / f".b{mark}bbbbbbbb", inside=("state", "notes")),
+             "that is not 0700": own_dir(kd / f".c{mark}cccccccc", mode=0o755), "with a longer ending": own_dir(kd / f".e{mark}eeeeeeeee"), "with no leading dot": own_dir(kd / f"f{mark}ffffffff"),
+             "of another naming": own_dir(kd / ".copy.partial-gggggggg"), "empty and young": own_dir(kd / f".i{mark}iiiiiiii", inside=())}
+    own_dir(T / "elsewhere")
+    os.symlink(T / "elsewhere", kd / f".d{mark}dddddddd"); put(kd / f".h{mark}hhhhhhhh", "a file")
+    stays.update({"that is a link": kd / f".d{mark}dddddddd", "that is a file": kd / f".h{mark}hhhhhhhh"})
+    old_empty = own_dir(kd / f".j{mark}jjjjjjjj", inside=(), age=LONG_AGO)
+    fd = os.open(stays["held by a process"], os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        rc, _, err = standby("--out", str(kd / "next"))
+    finally:
+        os.close(fd)
+    check("leftovers: the next --out beside it removes the half-made tree, the staging copy and an old empty one",
+          rc == 0 and not (kd / left[0]).exists() and not old_empty.exists() and not staged() and (kd / "next/manifest.json").is_file(), (rc, err, list(kd.iterdir()), staged()))
+    for label, path in stays.items():
+        check(f"leftovers: a directory entry {label} stays", os.path.lexists(path), list(kd.iterdir()))
+    check("leftovers: what a link points to stays whole", (T / "elsewhere/state").is_dir())
+
+    mine = lambda n: RUN / f"stackshot-standby-copy-{n}"      # noqa: E731
+    removed = [own_dir(mine("old"), age=LONG_AGO), own_dir(mine("young")), own_dir(mine("old-empty"), inside=(), age=LONG_AGO)]
+    kept_ = {"held": own_dir(mine("held"), age=LONG_AGO), "empty and young": own_dir(mine("young-empty"), inside=()), "not 0700": own_dir(mine("open"), mode=0o755, age=LONG_AGO),
+             "with something else in it": own_dir(mine("foreign"), inside=("notes",), age=LONG_AGO), "another's name": own_dir(RUN / "someone-else", age=LONG_AGO)}
+    fd = os.open(kept_["held"], os.O_RDONLY)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         rc, _, err = standby()
-        check("leftovers: an old staging directory nobody holds is removed; a held one, a young one and another's stay", rc == 0 and not old.exists() and held_old.exists() and young.exists() and other.exists(), (rc, err, staged()))
+        check("leftovers: staging copies nobody holds are removed, a young one with files too", rc == 0 and not any(x.exists() for x in removed), (rc, err, staged()))
+        check("leftovers: a held, a young empty, an open one, one with other things and another's stay", all(x.exists() for x in kept_.values()), (staged(), [k for k, x in kept_.items() if not x.exists()]))
     finally:
         os.close(fd)
-        for p_ in (held_old, young, other):
-            shutil.rmtree(p_, ignore_errors=True)
+        for x in kept_.values():
+            shutil.rmtree(x, ignore_errors=True)
 
     # ------------------------------------------------------------------ 10 extra directories
     x1, x2 = T / "extra-src", T / "extra-two"
