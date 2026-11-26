@@ -1160,11 +1160,11 @@ def part_refusal_report():
             if who and target:
                 hit = next((o for o in reversed(mine) if RR._target(o) == target and str(o.get("sender") or "") in ("", who)), None)
                 if hit is not None:
-                    mine.remove(hit); out.append(r)
+                    del mine[next(i for i, o in enumerate(mine) if o is hit)]; out.append(r)          # the matched row itself (list.remove would take the first row equal to it)
             if r.get("ok") is False and target:
                 mine.append(r)
         return out
-    rnd = random.Random(1732)
+    rnd = random.Random(60417)
     same = True
     for _ in range(60):
         rs = [row(rnd.choice([0, 100, 400, 590, 600, 601, 1200, 1500]) + rnd.randint(0, 2000), rnd.choice(["update", "update", "create", "message", "get"]), rnd.random() < 0.5,
@@ -1182,32 +1182,63 @@ def part_refusal_report():
     check("10 report: a refused line with no text is counted under 'unknown' in the weekly and the daily count",
           dict(t_old["kinds"]) == {"unknown": 1} and dict(RR.daily_tally([old_line], [])["kinds"]) == {"unknown": 1} and "- the kinds of create and update refusals: unknown 1 (100%)" in RR.build(dt.date(2026, 11, 16), t_old, RR.tally([])), dict(t_old["kinds"]))
 
-    # 10f the monthly files are kept for the current month and the 12 before it
-    wipe(); CALLS.mkdir(parents=True, exist_ok=True)
-    for name in ("2025-09", "2025-10", "2025-11", "2025-12", "2026-06"): (CALLS / f"{name}.jsonl").write_text('{"t":1,"tool":"get","ok":true}\n', encoding="utf-8")
-    (CALLS / "open-fixes.json").write_text("{}", encoding="utf-8"); (CALLS / "2025-01.jsonl.bak").write_text("x", encoding="utf-8")
-    CL.record("get", True, now=epoch(2026, 11, 3))          # the first line of 2026-11: the files older than 2025-11 go
-    left = sorted(p.name for p in CALLS.iterdir())
-    check("10 retention: the first line of a new month deletes the monthly files before the 12 months back, and nothing else", left == ["2025-01.jsonl.bak", "2025-11.jsonl", "2025-12.jsonl", "2026-06.jsonl", "2026-11.jsonl", "open-fixes.json"], left)
+    # 10f the monthly files: the current month and the 12 before it are kept; every `now` below is given, none is the wall clock
+    def months(first, last):          # the month names from (y, m) to (y, m), both included
+        out, (y, m) = [], first
+        while (y, m) <= last:
+            out.append(f"{y:04d}-{m:02d}"); y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        return out
+    def stock(names, extra=()):
+        wipe(); CALLS.mkdir(parents=True, exist_ok=True)
+        for p in CALLS.iterdir(): p.unlink()          # whatever else the last stock left
+        for name in [*names, *extra]: (CALLS / (name if "." in name else name + ".jsonl")).write_text('{"t":1,"tool":"get","ok":true}\n', encoding="utf-8")
+    def have(): return sorted(p.name for p in CALLS.iterdir())
+    kept13 = [n + ".jsonl" for n in months((2025, 11), (2026, 11))]
+    stock(months((2024, 6), (2026, 10)), extra=("open-fixes.json", "2025-01.jsonl.bak"))
+    CL.record("get", True, now=epoch(2026, 11, 3))          # the first line of 2026-11: the files before 2025-11 go
+    check("10 retention: the first line of a new month deletes the monthly files before the 12 months back, and nothing else", have() == sorted(["2025-01.jsonl.bak", "open-fixes.json", *kept13]), have())
     (CALLS / "2024-01.jsonl").write_text("{}\n", encoding="utf-8")
     CL.record("get", True, now=epoch(2026, 11, 4))          # not the first line of the month: no pass
     check("10 retention: a line in a month's file that exists deletes nothing", (CALLS / "2024-01.jsonl").exists(), None)
-    res_p = CL.prune(epoch(2026, 11, 26))
-    check("10 retention: prune names how many it deleted, and the file of exactly 12 months back stays", res_p == 1 and not (CALLS / "2024-01.jsonl").exists() and (CALLS / "2025-11.jsonl").exists() and CL.prune(epoch(2026, 12, 1)) == 1 and not (CALLS / "2025-11.jsonl").exists() and (CALLS / "2025-12.jsonl").exists(), res_p)
-    (CALLS / "2020-01.jsonl").write_text("{}\n", encoding="utf-8")
-    RR.run_daily(dry=True, now=NOW, cfg=cfg_on, deliver=d_deliver, state=dst("prune-dry"))
-    check("10 retention: a dry run of the daily analysis deletes nothing", (CALLS / "2020-01.jsonl").exists(), None)
-    RR.run_daily(now=NOW, cfg=cfg_on, deliver=d_deliver, state=dst("prune"))
-    check("10 retention: the daily analysis deletes the files past it", not (CALLS / "2020-01.jsonl").exists(), sorted(p.name for p in CALLS.iterdir()))
-    (CALLS / "2020-01.jsonl").write_text("{}\n", encoding="utf-8")
-    real_state, real_unlink = CL._cfg.state, pathlib.Path.unlink
-    def boom(self, *a, **k): raise OSError("read-only")
-    pathlib.Path.unlink = boom
+    check("10 retention: prune names how many it deleted; the file of exactly 12 months back stays until the month after", CL.prune(epoch(2026, 11, 26)) == 1 and not (CALLS / "2024-01.jsonl").exists() and (CALLS / "2025-11.jsonl").exists(), have())
+    stock(["2025-10", "2025-11", "2026-10", "2026-11"])
+    CL.record("get", True, now=epoch(2030, 1, 5))          # a stamp far in the future: the new month's file is the only one the clock would keep
+    check("10 retention: a line with a far-future stamp deletes nothing (the 13 newest month files stay whatever the clock says)", have() == ["2025-10.jsonl", "2025-11.jsonl", "2026-10.jsonl", "2026-11.jsonl", "2030-01.jsonl"], have())
+    stock(months((2024, 1), (2025, 6)))
+    check("10 retention: a clock more than a month past the newest file deletes nothing, though every file is older than 12 months by it", CL.prune(epoch(2026, 11, 26)) == 0 and CL.prune(epoch(2025, 8, 10)) == 0 and len(have()) == 18 and CL.prune(epoch(2025, 7, 10)) == 5 and len(have()) == 13, have())
+    stock(months((2024, 1), (2026, 11)))
+    check("10 retention: a clock set back deletes nothing", CL.prune(epoch(2020, 1, 1)) == 0 and len(have()) == 35, len(have()))
+    odd = ["2020-13.jsonl", "2025-00.jsonl", "0000-01.jsonl", "".join(chr(0x0660 + int(c)) for c in "2020") + "-01.jsonl", "2020-1.jsonl", "2020-01.jsonl.bak"]
+    stock(["2024-01", *months((2025, 11), (2026, 11))], extra=odd)
+    check("10 retention: a name that is no real month in ASCII digits is never touched", CL.prune(epoch(2026, 11, 26)) == 1 and not (CALLS / "2024-01.jsonl").exists() and all((CALLS / n).exists() for n in odd), have())
+    stock(["2024-01", "2024-02", *months((2025, 11), (2026, 11))])
+    real_unlink = pathlib.Path.unlink
+    def stubborn(self, *a, **k):
+        if self.name == "2024-01.jsonl": raise OSError("read-only")
+        return real_unlink(self, *a, **k)
+    pathlib.Path.unlink = stubborn
     try:
-        stuck = CL.prune(NOW); CL.record("get", True, now=epoch(2027, 3, 1))          # a file that cannot be deleted: no count, no exception, the line is written
+        res_u = CL.prune(epoch(2026, 11, 26))
     finally:
         pathlib.Path.unlink = real_unlink
-    check("10 retention: a file that cannot be deleted never fails the call: the line is written", stuck == 0 and any(r["t"] == int(epoch(2027, 3, 1)) for r in lines("2027-03")), stuck)
+    check("10 retention: a file that cannot be deleted does not stop the pass: the next one is deleted", res_u == 1 and (CALLS / "2024-01.jsonl").exists() and not (CALLS / "2024-02.jsonl").exists(), have())
+    pathlib.Path.unlink = stubborn
+    try:
+        CL.record("get", True, now=epoch(2027, 3, 1))          # the line is written whatever the pass does
+    finally:
+        pathlib.Path.unlink = real_unlink
+    check("10 retention: a failing pass never fails the call: the line is written", any(r["t"] == int(epoch(2027, 3, 1)) for r in lines("2027-03")), None)
+    # the log's zone: a line stamped just after midnight of Dec 1st in the instance zone is Nov 30th in UTC; the file and the pass go by the zone
+    check("10 retention: (the instance zone is not UTC)", dt.datetime(2026, 12, 1, 0, 30, tzinfo=zone).utcoffset() != dt.timedelta(0), zone)
+    stock(months((2025, 1), (2026, 11)))
+    CL.record("get", True, now=epoch(2026, 12, 1, 0, 30))
+    check("10 retention: at a month edge in the log's zone the new file is of the zone's month and the files before 12 months back go by it", have() == [n + ".jsonl" for n in months((2025, 12), (2026, 12))], have())
+    stock(["2020-01", *months((2025, 11), (2026, 11))])
+    RR.run_daily(dry=True, now=NOW, cfg=cfg_on, deliver=d_deliver, state=dst("prune-dry"))
+    check("10 retention: a dry run of the daily analysis deletes nothing", (CALLS / "2020-01.jsonl").exists(), None)
+    RR.run_daily(now=NOW, cfg={**cfg_on, "enabled": False}, deliver=d_deliver, state=dst("prune"))
+    check("10 retention: the daily analysis deletes the files past it, whether or not [refusal_report] is enabled", not (CALLS / "2020-01.jsonl").exists() and len(have()) == 13, have())
+    real_state = CL._cfg.state
     CL._cfg.state = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no state"))
     try:
         nostate = CL.prune(NOW)
