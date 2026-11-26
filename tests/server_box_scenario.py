@@ -190,7 +190,7 @@ setbox(False); txt_false = pg.describe(KEY, v)
 check("describe, box = false with a clone on the disk: it says the machine does not read pages from a checkout, and never that it has none", "does not read pages from" in txt_false and "none of" not in txt_false, txt_false)
 for label, box in (("box = true", True), ("unset", None)):
     setbox(box); txt = pg.describe(KEY, v)
-    check(f"describe, {label} with the checkout on the disk: it names the file in the checkout", "does not read pages from" not in txt and "commit and push)" in txt and f"{KEY}.md" in txt, txt)
+    check(f"describe, {label} with the checkout on the disk: it names the file in the checkout", "does not read pages from" not in txt and "commit and push." in txt and f"{KEY}.md" in txt, txt)
 setbox(None, NOCLONE); txt = pg.describe(KEY, v)
 check("describe, unset with no checkout: the same wording as box = false", "does not read pages from" in txt, txt)
 

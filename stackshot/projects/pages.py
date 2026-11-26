@@ -15,16 +15,18 @@ layer any session reads before acting. This script is the mechanism behind the r
                         Only description/next/needs/status/due (and a create or complete) count — owner, project,
                         priority and subject edits are filing and owe nothing.
                         The turn's first such write also gets the end-of-turn board question as additionalContext,
-                        once per turn, so the reply carries its `Board:` lines and the Stop check asks nothing.
+                        once per turn, so the reply carries its `Board:` lines and the Stop check asks nothing. A call made inside a
+                        subagent (its hook input carries `agent_id`) asks nothing and keeps nothing: the open items are the calling session's.
                         A SendMessage (the matcher names it too) to a background agent that names an item is reported to the
                         server as a handover (POST /client/handover): the server names that agent in the item's needs, or, when that would
                         leave the item with a second mover, says so in its line and names nobody.
   nag                   UserPromptSubmit hook: print a reminder for every touched project whose page has not
-                        been committed since the board change (stdout = context for the model)
+                        been committed since the board change (stdout = context for the model). A debt the session was
+                        shown already (same page, same change) is one line: `still owed: <page> (<item>, <HH:MM>)`
   check                 Stop hook: the board check alone ([board_check] mode = block | note): a turn that did real work
                         while its session owns open items it did not update or confirm is asked once, unless its final message
                         says `Board: no change, <reason>` (block = exit 2 with the question; note = exit 0 and the question kept
-                        for nag to say at the next prompt; skipped when stop_hook_active, never a loop). It asks
+                        for nag to say at the next prompt as one line, `Board question unanswered last turn: <items>. Answer it in the reply.`; skipped when stop_hook_active, never a loop). It asks
                         nothing about pages: the page question at the end of a turn was retired (a
                         write-up mod covers the turn's end), and a page debt is said by nag at the next prompt
   clear <key> [--force] [--name=<session name>] [--id=<permanent id>]...
@@ -1425,28 +1427,40 @@ def stale_touches(sid, strict=False, skipped=None):
     save_state(sid, st)
     return out
 
-def describe(key, v, strict=False):
-    strict = touch_strict(v, strict)
+def _debt_when(v):
     when = datetime.datetime.fromtimestamp(int(v.get("ts", 0)), zone_now().tzinfo)
-    t = when.strftime("%H:%M") + " " + _cfg.tz_abbr(when)     # the instance's own zone label (e.g. UTC)
+    return when, when.strftime("%H:%M")
+
+def _debt_item(v):
     task = str(v.get("task") or "")
-    item = f"board item {shown_id(tid_of(task) or task)}" if task else "a board item"     # as shown, never g7
+    return shown_id(tid_of(task) or task) if task else ""
+
+def describe(key, v, strict=False):
+    """The page debt in full, said once: what changed (item, time), that the page has no Current-state edit since, how to edit it, and how
+    to clear it when no page change is due. A repeat of the same debt in the session is `describe_again`."""
+    strict = touch_strict(v, strict)
+    when, _hm = _debt_when(v)
+    t = _hm + " " + _cfg.tz_abbr(when)     # the instance's own zone label (e.g. UTC)
+    iid = _debt_item(v)
+    item = f"board item {iid}" if iid else "a board item"     # as shown, never g7
     if key.startswith(NO_PROJECT):
         return (f"{item} changed at {t} but carries no `metadata.project` — set it (TaskUpdate metadata) and update that page. "
                 f"Only if the item does carry one (the reply did not say it, and the server could not be asked): `python3 {HERE}/stackshot/projects/pages.py clear '{key}'`.")
-    head = (f"{item} changed at {t} but the project page `{key}` " + ("has no Current-state edit since (a timeline line alone does not settle it)" if strict else "has not been committed since") + " — update the page ")
+    head = f"{item} changed at {t}: page `{key}` " + ("has no Current-state edit since (a timeline line does not count). " if strict else "has not been committed since. ")
     kb = _brains.for_key(key)
     if _cfg.page_flavor() == "gbrain" or not kb.default:    # a second brain's page is written through gbrain only (its copy here is read-only)
-        how = ((f"in the second brain {kb.name}, through its own gbrain connector: " if not kb.default else "") + f"(a dated line: the gbrain connector's add_timeline_entry; any other edit: get_page with section or grep (the smallest read that shows the text to change; a whole read only for a rewrite or a change spanning the page), then edit_page "
-               f"with expected_revision (the read's revision) and edits [{{old_text, new_text}}]; put_page only for a whole rewrite; "
-               f"never edit or git inside the brain mirror). ")
-    else:
-        if reads_local():
-            how = f"(edit {plain_page_path(key)} (its Current state, and a dated line under its Timeline), commit and push). "
-        else:       # no pages copy on this machine (a client box): say where the page is, in one parenthesis
-            how = (f"(edit the page `{key}.md` in a checkout of the pages repository, which this machine does not read pages from: its Current state, "
-                   "and a dated line under its Timeline; commit and push). ")
-    return head + how + f"Only if the board edit needed no page change: `python3 {HERE}/stackshot/projects/pages.py clear {key}`."
+        how = ("Edit it " + (f"in the second brain {kb.name} through its gbrain connector " if not kb.default else "")
+               + "with edit_page and expected_revision (get_page first; add_timeline_entry for a dated line; never edit or git inside the brain mirror). ")
+    elif reads_local():
+        how = f"Edit {plain_page_path(key)} (Current state), commit and push. "
+    else:       # no pages copy on this machine (a client box): say where the page is
+        how = f"Edit `{key}.md` in a checkout of the pages repository (this machine does not read pages from it), commit and push. "
+    return head + how + f"If no page change is due: `python3 {HERE}/stackshot/projects/pages.py clear {key}`."
+
+def describe_again(key, v):
+    """The same debt, shown to this session already: one short line."""
+    return f"still owed: {key} ({_debt_item(v) or 'a board item'}, {_debt_when(v)[1]})"
+
 
 def page_link(key):
     """Where a reader opens the whole page: the mirror URL, or the file when no mirror is configured."""
@@ -1466,7 +1480,15 @@ def cmd_nag():
     sid = sid_of(payload); name = session_name(sid); pilot = in_currency(sid, name)
     brain_skip = {}
     stale = stale_touches(sid, strict=pilot, skipped=brain_skip)
-    for key, v in stale: print("[project-page] " + describe(key, v, strict=pilot))
+    if stale:
+        st0 = load_state(sid); tc0 = st0.get("touches") or {}; marked = False
+        for key, v in stale:
+            if v.get("shown") is not None and v.get("shown") == v.get("ts"):             # this debt (the page and the change, its stamp) was said to the session already: one line
+                print("[project-page] " + describe_again(key, v)); continue
+            print("[project-page] " + describe(key, v, strict=pilot))
+            cur = tc0.get(key)
+            if isinstance(cur, dict) and cur.get("ts") == v.get("ts"): cur["shown"] = cur.get("ts"); marked = True     # a later change to the page writes a new entry, which has no mark
+        if marked: save_state(sid, st0)
     if UNKNOWN:
         print(f"[project-page] server unreachable: the page gate could not check {', '.join(UNKNOWN)} from this machine ({_server_label()} did not answer); "
               "it checks again at the next prompt and does not block on it.")
@@ -1521,7 +1543,7 @@ def cmd_check():
         if bm == "block":
             line.append(q); board_log(sid, name, "block", [it["gid"] for it in due])
         else:
-            notes.append("[board] About your last turn: " + q); board_log(sid, name, "note", [it["gid"] for it in due])
+            notes.append("[board] " + board_unanswered(due) + rejected_text(bact.get("rejects") or [])); board_log(sid, name, "note", [it["gid"] for it in due])
     if foreign:                                         # a note in both modes, never a block
         notes.append("[board] About your last turn's Board lines: " + "; ".join(x for _, x in foreign) + ".")
         board_log(sid, name, "foreign", [g for g, _ in foreign])
@@ -1746,6 +1768,12 @@ def board_ask(why, due):
             "is not asked: a line `Board: no change, <reason>` for all of them, or a `Board:` line followed by one bullet per item, each on "
             "its own line, `- board#N: no change, <reason>` (in another language the instance has configured, the same lines with its own words); "
             "the reason is at least three words.)" + still_mover_note(due[:BOARD_LIST]))
+
+def board_unanswered(due):
+    """The note kept for the next prompt: the question the session did not answer in its last turn's reply, in one line (the full question
+    was asked when the turn first wrote, and again in block mode)."""
+    listed = ", ".join(f'{item_shown(it)} "{it.get("subject") or ""}"' for it in due[:BOARD_LIST]) + (f", and {len(due) - BOARD_LIST} more" if len(due) > BOARD_LIST else "")
+    return f"Board question unanswered last turn: {listed}. Answer it in the reply."
 
 def _server_label():
     try:

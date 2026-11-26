@@ -28,5 +28,9 @@ item, a bare `Board:` line followed by one bullet per item (`- <id>: no change, 
 least three words (the same line in the instance's own language, set under `[keywords.pages]` `board_label` and `no_change`, reads the same). Parked items are never asked
 about. The hook gets the session's open items with one read of the client API (`items?key=<session>`), only on a turn
 that wrote something; when the server does not answer, nothing is asked. With `mode = "note"` the same question does not
-hold the turn: `check` keeps it in the session's state and `nag` says it at the next prompt, which saves the extra model
-request a block costs. The page debt is said at every prompt while it is owed, whatever the board check's mode.
+hold the turn: `check` keeps it in the session's state and `nag` says it at the next prompt as one line (`Board question
+unanswered last turn: <items>. Answer it in the reply.`), which saves the extra model request a block costs. The turn's
+first write also gets the question early, as hook context, so the reply can carry the lines; a call made inside a subagent
+(its hook input carries `agent_id`) is never asked, since the open items are the calling session's. The page debt is said
+at every prompt while it is owed, whatever the board check's mode: in full the first time, and after that, while the same
+change stands, as one line `still owed: <page> (<item>, <HH:MM>)`.

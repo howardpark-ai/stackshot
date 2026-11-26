@@ -258,7 +258,23 @@ check("stop: nothing about pages is logged at Stop", not any(json.loads(l)["kind
 check("debt: a keeper's touched page is owed while its Current state is unedited", [k for k, _ in p.stale_touches(S, strict=True)] == ["projects/alpha"], p.load_state(S))
 out = nnag(S)
 check("debt: the next prompt says it", "[project-page] board item s9 changed at" in out and "`projects/alpha` has no Current-state edit since" in out, out[:300])
-check("debt: …and again at the following prompt while it is owed", "[project-page] board item s9 changed at" in nnag(S))
+hm9 = p._debt_when(p.load_state(S)["touches"]["projects/alpha"])[1]
+check("debt: the first fire carries the item, the time, the missing Current-state edit, how to edit the page and the clear command, in about 450 characters",
+      "board item s9 changed at" in out and "has no Current-state edit since (a timeline line does not count)" in out and "commit and push. If no page change is due:" in out
+      and "pages.py clear projects/alpha" in out and len(out.strip()) <= 470, (len(out.strip()), out[:600]))
+out2 = nnag(S)
+check("debt: the second fire of the same debt is the one line `still owed: <page> (<item>, <HH:MM>)`",
+      out2.strip() == f"[project-page] still owed: projects/alpha (s9, {hm9})", out2)
+check("debt: …and the third is the same line, the debt still owed", nnag(S).strip() == out2.strip() and "projects/alpha" in (p.load_state(S).get("touches") or {}))
+# a different debt (the same page, a later change) prints in full again; so does another page
+st_ = p.load_state(S); st_["touches"]["projects/alpha"] = {"ts": int(time.time()) + 5, "task": "s9"}; p.save_state(S, st_)
+out3 = nnag(S)
+check("debt: a later change to the same page is a different debt and is said in full", "board item s9 changed at" in out3 and "still owed" not in out3, out3[:300])
+st_ = p.load_state(S); st_["touches"]["projects/gamma"] = {"ts": int(time.time()), "task": "s8"}; p.save_state(S, st_)
+out4 = nnag(S)
+check("debt: another page's debt is said in full beside the one already shown, which stays a line",
+      "board item s8 changed at" in out4 and "`projects/gamma`" in out4 and "still owed: projects/alpha (s9," in out4 and out4.count("board item s9 changed at") == 0, out4[:500])
+st_ = p.load_state(S); st_["touches"].pop("projects/gamma", None); st_["touches"]["projects/alpha"] = {"ts": int(time.time()), "task": "s9"}; p.save_state(S, st_)
 rc, err = stop(S, transcript(NOTICE, TL))
 check("debt: the Stop hook neither says it nor holds the turn, and the debt stays", rc == 0 and err == "" and "projects/alpha" in (p.load_state(S).get("touches") or {}), (rc, err[:300], p.load_state(S)))
 f = T / "brain/projects/alpha.md"; f.write_text(f.read_text(encoding="utf-8").replace("- **Point 1:**", "- **Point 1 (changed):**"), encoding="utf-8")
@@ -649,20 +665,18 @@ RETIRED_SCRIPT = "example-page.sh"     # a retired script (invented name): no hi
 v = {"ts": int(time.time()), "task": "s7"}; tm = time.strftime("%H:%M", time.localtime(v["ts"]))
 plain = p.describe("projects/beta", v)
 check("flavor plain: the nag says edit the file, commit and push",
-      f"— update the page (edit {tmp}/brain/projects/beta.md (its Current state, and a dated line under its Timeline), commit and push). Only if" in plain
+      f"Edit {tmp}/brain/projects/beta.md (Current state), commit and push. If no page change is due:" in plain
       and "add_timeline_entry" not in plain and RETIRED_SCRIPT not in plain, plain)
 p._cfg.CFG["pages"]["flavor"] = "gbrain"
 gb = p.describe("projects/beta", v)
 old_tm = p.datetime.datetime.fromtimestamp(v["ts"], p.zone_now().tzinfo).strftime("%H:%M")
-check("flavor gbrain: the nag is today's text, byte for byte", gb == (
-      f"board item s7 changed at {old_tm} {ZONE_ABBR} but the project page `projects/beta` has not been committed since — update the page "
-      f"(a dated line: the gbrain connector's add_timeline_entry; any other edit: get_page with section or grep (the smallest read that shows the text to change; a whole read only for a rewrite or a change spanning the page), then edit_page "
-      f"with expected_revision (the read's revision) and edits [{{old_text, new_text}}]; put_page only for a whole rewrite; "
-      f"never edit or git inside the brain mirror). "
-      f"Only if the board edit needed no page change: `python3 {p.HERE}/stackshot/projects/pages.py clear projects/beta`."), gb)
-check("flavor gbrain: the nag names add_timeline_entry, then edit_page, and put_page only for a whole rewrite; no retired script, no push override",
-      gb.index("add_timeline_entry") < gb.index("edit_page")
-      and "put_page only for a whole rewrite" in gb and "with expected_revision" in gb
+check("flavor gbrain: the first fire is about 450 characters at most", len(gb) <= 450, len(gb))
+check("flavor gbrain: the nag's first-fire text, exactly", gb == (
+      f"board item s7 changed at {old_tm} {ZONE_ABBR}: page `projects/beta` has not been committed since. "
+      f"Edit it with edit_page and expected_revision (get_page first; add_timeline_entry for a dated line; never edit or git inside the brain mirror). "
+      f"If no page change is due: `python3 {p.HERE}/stackshot/projects/pages.py clear projects/beta`."), gb)
+check("flavor gbrain: the nag names edit_page with expected_revision, and add_timeline_entry for a dated line; no retired script, no push override",
+      "add_timeline_entry" in gb and "edit_page and expected_revision" in gb
       and RETIRED_SCRIPT not in gb and "EXAMPLE_PAGE_PUSH" not in gb and "on the server box only" not in gb, gb)
 p._cfg.CFG["pages"]["flavor"] = "plain"
 check("flavor gbrain: the server's wording is today's text, byte for byte", _pdebts._page_how("gbrain") ==
@@ -745,9 +759,9 @@ check("flavor gbrain: the keeper injection is today's text, byte for byte", p.in
 check("the Stop hook's page question is gone from the module", not hasattr(p, "steward_ask") and not hasattr(p, "verdicts") and not hasattr(p, "mode"))
 p._cfg.CFG["pages"]["flavor"] = "plain"; p.excerpts = saved_ex
 # F5: the time label is the configured zone's abbreviation, and a machine with no pages copy is told where the page is
-check("tz: Asia/Dubai prints its own abbreviation (the offset label, the zone having no letters)", p._cfg.tz_abbr() == ZONE_ABBR and f" {ZONE_ABBR} but " in p.describe("projects/beta", v), p.describe("projects/beta", v)[:60])
+check("tz: Asia/Dubai prints its own abbreviation (the offset label, the zone having no letters)", p._cfg.tz_abbr() == ZONE_ABBR and f" {ZONE_ABBR}: page " in p.describe("projects/beta", v), p.describe("projects/beta", v)[:60])
 p._cfg.CFG["instance"]["timezone"] = "UTC"
-check("tz: UTC prints UTC, never the instance zone's label", p._cfg.tz_abbr() == "UTC" and " UTC but " in p.describe("projects/beta", v) and ZONE_ABBR not in p.describe("projects/beta", v), p.describe("projects/beta", v)[:60])
+check("tz: UTC prints UTC, never the instance zone's label", p._cfg.tz_abbr() == "UTC" and " UTC: page " in p.describe("projects/beta", v) and ZONE_ABBR not in p.describe("projects/beta", v), p.describe("projects/beta", v)[:60])
 p._cfg.CFG["instance"]["timezone"] = "America/New_York"
 check("tz: a zone with daylight time takes the abbreviation of the moment", p._cfg.tz_abbr(p.datetime.datetime(2026, 1, 15, 12)) == "EST"
       and p._cfg.tz_abbr(p.datetime.datetime(2026, 7, 15, 12)) == "EDT", (p._cfg.tz_abbr(p.datetime.datetime(2026, 1, 15, 12)),))
@@ -755,8 +769,7 @@ p._cfg.CFG["instance"]["timezone"] = "Asia/Dubai"
 saved_brain = p.BRAIN; p.BRAIN = f"{tmp}/no-such-pages"
 nc = p.describe("projects/beta", v)
 check("flavor plain, no pages copy here: the nag names the page in a checkout of the pages repository, one parenthesis",
-      "— update the page (edit the page `projects/beta.md` in a checkout of the pages repository, which this machine does not read pages from: its Current state, "
-      "and a dated line under its Timeline; commit and push). Only if" in nc and "no copy" not in nc, nc)
+      "Edit `projects/beta.md` in a checkout of the pages repository (this machine does not read pages from it), commit and push. If no page change is due:" in nc and "no copy" not in nc, nc)
 p.BRAIN = saved_brain
 p._cfg.CFG.setdefault("pages", {})["flavor"] = "gbrain"; check("flavor: config gbrain is read", p._cfg.page_flavor() == "gbrain")
 p._cfg.CFG["pages"]["flavor"] = "nonsense"; check("flavor: an unknown value falls back to plain", p._cfg.page_flavor() == "plain")
@@ -938,10 +951,13 @@ rc, err = bstop(A, transcript("ship it", COMMIT)); check("board: every item touc
 fresh()
 rc, err = bstop(A, transcript("ship it", COMMIT), mode="note"); check("note: the board question does not hold the turn", rc == 0 and err == "", (rc, err[:200]))
 check("note: …and is logged as a note", blog("note") and blog("note")[-1]["items"] == ["s5", "s6"], blog("note")[-1:])
-out = nnag(A); check("note: the next prompt says the board question, about the last turn", out.count("[board] About your last turn: BOARD: this turn did real work (a commit)") == 1 and 's5 "[home] item 5"' in out, out[:300])
+out = nnag(A); check("note: the next prompt says the board question was unanswered, in one line", out.strip() == '[board] Board question unanswered last turn: s5 "[home] item 5", s6 "[home] item 6". Answer it in the reply.', out[:300])
+check("note: …and does not repeat the full question", "BOARD: this turn did real work" not in out and "Does anything from it change them" not in out and len(out) < 200, len(out))
 check("note: …once", "[board]" not in nnag(A), "said twice")
 rc, err = bstop(A, transcript("ship it", COMMIT), mode="note"); rc, err = bstop(A, transcript("ship it again", COMMIT), mode="note")
-out = nnag(A); check("note: two turns before a prompt: both questions, oldest first", out.count("[board] About your last turn") == 2, out[:300])
+out = nnag(A); check("note: two turns before a prompt: both lines, oldest first", out.count("[board] Board question unanswered last turn") == 2, out[:300])
+rc, err = bstop(A, transcript("ship it", COMMIT), mode="block")
+check("note: block mode still holds the turn with the full question", rc == 2 and err.startswith("BOARD: this turn did real work (a commit)") and "Does anything from it change them" in err, err[:200])
 fresh()
 rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\n\nBoard: no change, the commit is unrelated to them"))
 check("board: `Board: no change, <three words>` covers every item and is logged", rc == 0 and blog("verdict")[-1]["items"] == ["s5", "s6"]
@@ -1105,7 +1121,7 @@ rc, err = bstop(S, transcript(NOTICE, TL + COMMIT))
 check("board: a keeper's page write beside the work: the board question, no page question", rc == 2 and err.startswith("BOARD: this turn did real work (gbrain add_timeline_entry, a commit)")
       and "This turn wrote something" not in err and "Page" not in err and "### projects/" not in err, err[:400])
 rc, err = bstop(S, transcript(NOTICE, TL + COMMIT), mode="note"); out = nnag(S)
-check("note: the same, kept for the next prompt: the board question only", rc == 0 and err == "" and "[board] About your last turn: BOARD:" in out
+check("note: the same, kept for the next prompt: the board question only", rc == 0 and err == "" and "[board] Board question unanswered last turn: " in out
       and "[project-page] About your last turn" not in out and "Page:" not in out, (rc, err[:200], out[:400]))
 (T / "touch" / f"{S}.json").unlink()
 # ---- 9. the end-of-turn board question asked early (the item move 3): the turn's first
@@ -1131,6 +1147,8 @@ check("early: the examples name items as shown, `board#N`, never a store id", "`
 check("early (bullets): the question asks for a `Board:` line and one bullet per item for several items",
       "`Board: no change, <reason>` (3+ words) for all, or one bullet per item (`- board#N: no change, <reason>` / `- board#M: updated, <what>`)" in q
       and "If this turn changes one, update it or confirm it" in q and "Only items you move or are named in the needs of." in q, q)
+check("early: the fixed text is about 330 characters and keeps the three-word reason and the update-or-confirm instruction",
+      300 <= len(q.split(": s5")[0]) + len(q[q.index(". If this turn changes"):q.index("needs of.") + 9]) <= 360 and "(3+ words)" in q and "update it or confirm it" in q, q)
 rc, q2 = touch(A, tpa, {"item_id": "s6", "next": "and on"}); check("early: once per turn: the next write in the same turn gets nothing", rc == 0 and q2 == "", q2)
 time.sleep(1.1); rc, q3 = touch(A, transcript("next prompt", []), {"item_id": "s5", "next": "again"})
 check("early: a later turn is asked again", q3.startswith("[stackshot]"), q3)

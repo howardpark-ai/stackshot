@@ -268,8 +268,7 @@ r = subprocess.run([sys.executable, "-c", "import json, time; from stackshot.pro
                    capture_output=True, text=True, env=ENV, cwd=STACK)
 wd = json.loads(r.stdout) if r.returncode == 0 else r.stderr[-300:]
 check("plain, no pages copy: the nag says where the page is, without nested parentheses",
-      "(edit the page `projects/getting-started.md` in a checkout of the pages repository, which this machine does not read pages from: its Current state, and a dated line "
-      "under its Timeline; commit and push)." in wd, wd)
+      "Edit `projects/getting-started.md` in a checkout of the pages repository (this machine does not read pages from it), commit and push." in wd, wd)
 
 # ---- publish.py flush with no origin remote: committed is all there is
 fenv = {**ENV}
@@ -389,7 +388,7 @@ check("…writes the client's config from the server's settings", lc.get("instan
 check("…and says so, naming the timezone and flavor", "config → " in r.stdout and "timezone Asia/Dubai" in r.stdout and "flavor gbrain" in r.stdout, r.stdout[-500:])
 r = subprocess.run([sys.executable, "-c", "from stackshot.projects import pages; import time; print(pages.describe('projects/x', {'ts': int(time.time()), 'task': 's1'}))"],
                    capture_output=True, text=True, env=lenv, cwd=STACK)
-check("the client's nag speaks in the instance's zone and flavor", " +04 but the project page `projects/x`" in r.stdout and "add_timeline_entry" in r.stdout, r.stdout + r.stderr[-300:])
+check("the client's nag speaks in the instance's zone and flavor", " +04: page `projects/x`" in r.stdout and "add_timeline_entry" in r.stdout, r.stdout + r.stderr[-300:])
 before_c = (ls / "stackshot.toml").read_bytes()
 r = ss("client", "install", "--url", FURL, "--token-file", str(SEC / "client-tokens/laptop.token"), "--no-systemd", env=lenv)
 check("a second client install leaves the existing config alone", r.returncode == 0 and "this machine has one; left as it is" in r.stdout and (ls / "stackshot.toml").read_bytes() == before_c, r.stdout[-400:])
