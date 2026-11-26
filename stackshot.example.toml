@@ -317,6 +317,10 @@ cross_process = true                                # true: each is also a flock
                                                     # a lock file that cannot be had falls back to the thread lock and says so on stderr; with the environment variable STACKSHOT_XLOCK_STRICT=1 (what tests/run-suite sets) it raises instead,
                                                     # and so does a lock taken out of its order
 
+[standby_copy]                                      # `stackshot standby-copy`: one consistent copy of the server's data for a standby; see docs/standby-copy.md
+extra_dirs = []                                     # further directories every copy takes, beside those of --extra: ones written outside the store locks, such as the sign-in library's own client store.
+                                                    # Each is copied until a scan before and a scan after its copy find the same sizes and times; one that never settles, or is not there, fails the command
+
 [github]                                            # the board's GitHub mirror: the local store stays the working copy, an issue per item is the
 sync = false                                        # durable thread. true: an item's subject, open or closed, and description go, paced, through a queue on disk
                                                     # (<state>/github/queue/) to an issue in `issues_repo` (the issue carries nothing else: no comments,
