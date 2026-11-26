@@ -726,6 +726,7 @@ result_turn_cap_per_hour = 6                        # the most turns one session
 # identity_max_age_seconds = 300                    # how old a signed identity may be (a number from 1 to 3600; anything else reads as 300); raise it for tools that run longer than this
 # members_file = "~/.config/stackshot/frontdoor-members.json"   # the front door's members file: set = this board's members are the ones it lists for board_name, read at each call ([[members]] is then not read)
 # board_name = "main"                               # this board's name in the front door's [[frontdoor.backends]] (required with members_file)
+# verify_secret_file = "~/.config/stackshot/frontdoor/verify.key"   # the secret the sign-in service signs a token check with (private to the owner, mode 600): set = the board answers GET /frontdoor/verify for a request carrying that signed header and a bearer token (who the board's own sign-in says the token is for); unset = no such route. Works alone
 
 [step_proof]                                        # a step of an item's next that names the event which finishes it (a pull request merged or released) is ticked by the server (stackshot/model/step_proof.py).
                                                     # Without a switch, the first pass of the server's clock after a start only logs what it would do (and keeps it in <state>/step-proof-dry.json);
