@@ -16,10 +16,10 @@ What it measures, per run:
                  writes to .suitemap/map.json on main and CI keeps as the `suitemap` artifact): no second store of durations. A
                  suite the map has no time for is counted as untimed, and a time that is negative, not a finite number or above a year
                  (31,622,400 seconds) is ignored with a note naming the suite. Where the map comes from, first that applies:
-                   --fetch         the `suitemap` artifact of the newest successful push run of tests.yml on main, downloaded with
+                   --fetch         the `suitemap` artifact of the newest successful run of suitemap-refresh.yml (the scheduled map refresh) on main, downloaded with
                                    `gh` into a temporary folder that is removed again (two GitHub calls; --github names the
-                                   repository, default: the origin remote). CI keeps that artifact for 7 days, so a week with no
-                                   push to main leaves nothing to fetch. It wins over --map;
+                                   repository, default: the origin remote). CI keeps that artifact for 14 days, so two weeks of
+                                   failed refreshes leave nothing to fetch. It wins over --map;
                    --map FILE      this file;
                    otherwise       <root>/.suitemap/map.json.
                  With no readable map, one that lists no suites, or one with no usable time for any suite of the checkout, the minutes
@@ -174,13 +174,13 @@ def fetch_map(slug: str, folder: str) -> str:
         if r.returncode != 0:
             raise ValueError(f"gh {args[0]} {args[1]} failed: {(r.stderr or r.stdout).strip()[:200]}")
         return r.stdout
-    out = gh("run", "list", "--repo", slug, "--workflow", "tests.yml", "--branch", "main", "--event", "push",
+    out = gh("run", "list", "--repo", slug, "--workflow", "suitemap-refresh.yml", "--branch", "main",
              "--status", "success", "--limit", "1", "--json", "databaseId")
     try:
         runs = json.loads(out)
         run_id = str(runs[0]["databaseId"])
     except (ValueError, IndexError, KeyError, TypeError):
-        raise ValueError(f"no successful push run of tests.yml on main for {slug}")
+        raise ValueError(f"no successful run of suitemap-refresh.yml on main for {slug}")
     gh("run", "download", run_id, "--repo", slug, "--name", "suitemap", "--dir", folder)
     for dirpath, _dirs, files in os.walk(folder):
         if "map.json" in files:

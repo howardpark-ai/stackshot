@@ -81,7 +81,7 @@
 #                                 deploy.sh returns; fd 9 is closed for every child (a service a deploy leaves behind never inherits it). Only release.sh takes it: a deploy.sh run by hand does not;
 #                                 4a. ALREADY LIVE: when the live checkout contains the merge (a release that merged after this one's merge deployed past it, or deploy.sh was run by hand) there is nothing to deploy: the log says so, the session pick,
 #                                 the report and main's run for the merge follow as after a deploy, and the report says "already live";
-#                                 4b. DEPLOY GATE (deploy_gate): GitHub's merge queue ran the suites its selection picked for the merge group on the tree it made (a merge_group run, not every suite), so the merge deploys at once only when the queue made it
+#                                 4b. DEPLOY GATE (deploy_gate): GitHub's merge queue ran every suite, plainly, for the merge group on the tree it made (a merge_group run: tests.yml's shards, then the check that every suite ran once and none failed), so the merge deploys at once only when the queue made it
 #                                 (the enqueue went through the mutation: with the ruleset off the plain merge call merged it, and a rerun on a merged PR does not know, so both wait for main's tests, 4d) and what lies between the live checkout and the merge is not known to be bad:
 #                                 (a) the live checkout is an ancestor of the merge (deploy.sh fast-forwards; commits between them are merges of the queue or docs-only merges), (b) there is a last-good commit to roll back to ($LOGDIR/last-good, below) that is in the live history, and (c) no commit after it
 #                                 up to main's tip (a later member of the same merge group included) has a FAILED run on main (read from GitHub's list of runs, page after page, up to 10 of 100, until a run at or before the last-good commit; empty, crashed or never reaching it: unreadable; so is a run in the range cancelled after its job started,
@@ -96,8 +96,8 @@
 #                                 the rollback reached a verdict: a lock timeout keeps it); still pending, only cancelled runs, or no run found / GitHub unreadable (never a verdict) -> kept, and the gate stays closed until it is read (after two hours: unknown, a red report).
 #                                 Records are taken oldest deploy first. Main's run for the merge commit itself:
 #                                   pass: "main's tests passed on <sha>" in the log, the commit goes to last-good, the check that it is still
-#                                   in the live checkout and the record done under the deploy lock (a rollback cannot land between them); a note on the run (a selection
-#                                   miss, a suite that failed only when measured) goes to the keeper as a second message;
+#                                   in the live checkout and the record done under the deploy lock (a rollback cannot land between them); a note on the run (a step that failed
+#                                   besides the suites step; the selection audit and the measured-only failures are notes of suitemap-refresh.yml's runs now, not of main's) goes to the keeper as a second message;
 #                                   fail: ROLLED BACK. Under the lock again, ./deploy.sh goes back to the last-good commit (DEPLOY_ROLLBACK=1
 #                                   DEPLOY_TO=<it>, run by this script with the lock held; deploy.sh checks it, and runs the good tree's own
 #                                   deploy logic) and the red report is "FAILED at main's tests: rolled back to <sha>", which reaches the builder.
@@ -231,7 +231,7 @@ QUEUE_WAIT="${RELEASE_QUEUE_WAIT:-10800}"   # seconds a PR may stay in GitHub's 
 POLL_QUEUE="${RELEASE_POLL_QUEUE:-60}"      # seconds between two reads of the PR's merge-queue state while wait_merged waits (every read is a GitHub call from one shared hourly budget)
 QUEUE_GRACE="${RELEASE_QUEUE_GRACE:-180}"   # seconds after the enqueue call that GitHub may take to show the entry (eventually consistent); read every 10 s meanwhile, past it a PR that never showed is a failure
 START_MAX=4                                 # queued releases running at once (release.sh queue): release.sh's own number, not a setting
-WAIT_MAIN="${RELEASE_WAIT_MAIN:-5400}"   # seconds a covering run of main may be going (main_green: counted from when it starts, status in_progress). 90 min: main's full run, every suite measured, can be slow on a loaded host, so 60 min (3600) let a slow run end a release
+WAIT_MAIN="${RELEASE_WAIT_MAIN:-5400}"   # seconds a covering run of main may be going (main_green: counted from when it starts, status in_progress). 90 min: main's full run, every suite plainly in six shards, can be slow on a loaded host, so 60 min (3600) let a slow run end a release
 CAP_MAIN="${RELEASE_CAP_MAIN:-10800}"    # seconds from the merge, at most, that main_green waits for a run that covers it (3 h): a run queued behind others uses none of WAIT_MAIN, this keeps it from waiting forever
 WARM_TIMEOUT="${RELEASE_WARM_TIMEOUT:-1800}"   # seconds [release] suitemap_warm_cmd may run (warm_run), and a second warm waits for the first: a build of the index is a minute on the box that does it
 NOTICE_TIMEOUT="${RELEASE_NOTICE_TIMEOUT:-60}"   # seconds [fleet] notice_cmd may take (notice_send): past it the command is stopped and the notice counts as not sent, so the report loses its green flag and the next release starts
@@ -502,17 +502,16 @@ take_lock() {  # the deploy lock on fd 9 (exec: this shell's own), waited for up
 #   itself did not succeed (conclusion failure), with the suites step missing, still fails at once.
 # Two callers:
 #   main_green pre <M>     before a deploy whose gate is closed (4d at the top): its suites failing stops the release (merged, not deployed: fix forward); every suite
-#                          passing deploys, and what else the run found (a suite that failed only when measured and passed plainly, the audit's
-#                          selection miss, a later step that failed) goes in the report, which then goes to the keeper instead of green.
+#                          passing deploys, and what else the run found (a later step that failed; the audit's selection miss and a suite that failed only when measured are found by suitemap-refresh.yml now, and the code below still reads them should a run of tests.yml carry them) goes in the report, which then goes to the keeper instead of green.
 #                          The commit it passed on is left in $verified and the deploy is pinned to it (DEPLOY_TO), never to a newer tip with no passing run:
 #                          a merge another release lands meanwhile is deployed by that release, after its own run.
 #   main_green post <M>    after the deploy at the merge: M is the one deployed, whatever main's tip is by now. It never
 #                          fails the release; it returns 0 (the run passed; $audit_note holds what else it found) or 1, with $mg_kind
 #                          "fail" (its suites failed: the caller rolls back) or "unknown" (no run passed or failed in time; a cancelled run is the same as none): that one does not roll back,
 #                          and $mg_why, $mg_rid and $mg_rsha (the run, and the commit it ran on, which can be a newer one covering several merges).
-# A pass writes the commit to $LAST_GOOD (record_good). tests.yml's step names "run every suite, measured" and "audit the selection" are read here.
-# Both are steps of the `suites` job; on main that job runs after the `shards` plan and the `measure` matrix (main's measured run, split across runners) and its "run every suite, measured" passes only when
-# every shard passed and their merged map holds every suite once, so a failed shard reads here as a failed suites step. The shards' steps have other names.
+# A pass writes the commit to $LAST_GOOD (record_good). tests.yml's step name "run every suite, measured" is read here (and "audit the selection", which tests.yml no longer has: the audit moved to suitemap-refresh.yml, and a run without that step reads as one with no audit finding).
+# The name is kept though nothing is measured in tests.yml any more: it is a step of the `suites` job; on main that job runs after the `proof`, the `shards` plan and the `measure` matrix (main's plain run, split across runners) and its "run every suite, measured" passes only when
+# every shard passed and `tests/suitemap.py complete` found every suite once, none failed (or, when the proof job found the merge queue's green run of the same commit, at once, saying so), so a failed shard reads here as a failed suites step. The shards' steps have other names.
 run_state() {   # $1 = M. Prints "<run> pending <sha> running|queued", "<run> pass <sha> [what else it found]", "<run> fail <sha> <why>", "<run> cancelled <sha>" (only cancelled runs cover M) or
                 # "none" (no run covers it yet; "pending ... steps" is a run that is completed and green whose suites step has no conclusion yet); <sha> is the commit of the run that decided it. The rule is in the comment above. A line on stderr (the log) says which run decided when it is not the run on M itself
     TIP="$1" REPO="$REPO" GH_CACHE="$GH_CACHE" GH_TTL="$GH_TTL" python3 -c '
@@ -577,7 +576,7 @@ elif passed:
     r, jobs, bad = passed
     if stop and stop[1] == "fail":
         print("the run %s on %s failed after the pass on %s: judged by the oldest commit that failed, which is not this release, so the pass on %s decides" % (stop[0]["databaseId"], stop[0]["headSha"][:7], r["headSha"][:7], r["headSha"][:7]), file=sys.stderr)
-    flaky = []                        # tests/suitemap.py measure warns when a suite fails only when measured
+    flaky = []                        # tests/suitemap.py measure warns when a suite fails only when measured (a run of suitemap-refresh.yml; not one of tests.yml any more)
     for j in jobs:
         jid = j.get("databaseId")
         for a in js(gh("api", f"repos/{R}/check-runs/{jid}/annotations"), []) if jid else []:

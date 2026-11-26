@@ -232,8 +232,8 @@ CONF.write_text("")
 r = run(*base, "--fetch", "--github", "acme/widgets", env={"PATH": PATH2})
 check("--fetch: the artifact's map is used", r.returncode == 0 and "serial minutes: 22.5 (9 of 11 suites timed, 2 untimed)" in r.stdout, r.stdout + r.stderr)
 calls = GH_LOG.read_text().splitlines()
-check("--fetch: two gh calls, exactly: main's push run of tests.yml, then the suitemap artifact (the name is not a prefix of another)",
-      calls == ["run list --repo acme/widgets --workflow tests.yml --branch main --event push --status success --limit 1 --json databaseId",
+check("--fetch: two gh calls, exactly: main's newest successful run of the scheduled map refresh (suitemap-refresh.yml, any event), then the suitemap artifact (the name is not a prefix of another)",
+      calls == ["run list --repo acme/widgets --workflow suitemap-refresh.yml --branch main --status success --limit 1 --json databaseId",
                 f"run download 4242 --repo acme/widgets --name suitemap --dir {GH_DIR.read_text().strip()}"], calls)
 check("--fetch: the download folder is removed again", not pathlib.Path(GH_DIR.read_text().strip()).exists(), GH_DIR.read_text())
 r = run(*base, "--fetch", "--github", "acme/widgets", env={"PATH": PATH2, "GH_FAIL": "1"})

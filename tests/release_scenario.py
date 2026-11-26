@@ -1292,7 +1292,7 @@ check("--status of a release with no log: the unit's state and nothing else", st
 
 
 wf = pathlib.Path(STACK, ".github/workflows/tests.yml").read_text()
-check("the step names main_green reads are tests.yml's own", all(f"- name: {n}\n" in wf for n in ("run every suite, measured", "audit the selection")))
+check("the step name main_green reads is tests.yml's own (kept though nothing is measured there any more), and the audit step it also knows is not: the audit runs in suitemap-refresh.yml", "- name: run every suite, measured\n" in wf and "- name: audit the selection\n" not in wf)
 
 # ---- 12b. deploy.sh's restart plan for the package layout: the real deploy.sh, --dry-run, in a throwaway checkout of a throwaway origin;
 # the plan is what a change between two commits restarts (the units start the server and the hub through the project's pinned dependencies and stackshot/cli.py)

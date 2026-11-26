@@ -2,9 +2,10 @@
 """tests/suitemap.py — which scenario suites a change needs (Tue Oct 27th 2026). A tool, not a suite.
 
 Until every pull request ran all the tests/*_scenario.py suites, about 8 min of the one CI turn on box-a, for
-a docs fix as for a change to server.py. Now a push to main runs every suite MEASURED and keeps what each one touched (a
-"map", in GitHub's Actions cache); a pull request runs only the suites whose touched code or files its change reaches, and
-the next main run checks that choice against the merged code's own measurement (`audit`). The map is measured, never written:
+a docs fix as for a change to server.py. Now a scheduled workflow (suitemap-refresh.yml, every 3 hours) runs every suite MEASURED
+and keeps what each one touched (a "map", in GitHub's Actions cache, and as an artifact); a pull request runs only the suites whose
+touched code or files its change reaches, and each refresh checks the previous map's choice against the merged code's own
+measurement (`audit`). The merge queue and main's push run every suite PLAINLY (`run`), which is what decides a merge. The map is measured, never written:
 nobody keeps it by hand.
 
 What a suite touches, at two grains:
@@ -38,11 +39,13 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           exit 1 when a suite fails (a suite that fails only when measured
                                                           passes on a plain rerun: a warning, and the map marks it `ok: false`, keeping the
                                                           earlier clean measurement beside it as `carry` for a reader of the map; release.sh no longer reads it)
-  tests/suitemap.py run [-T secs] suite…                  run the suites plainly; exit 1 when one fails; exit 2 with one line on stderr when no
+  tests/suitemap.py run [-T secs] [--report FILE] suite…  run the suites plainly; exit 1 when one fails; exit 2 with one line on stderr when no
                                                           suite is named (a launch error, a variable that expanded to nothing, an empty `select`:
-                                                          never a green run of nothing; a caller whose selection may be empty tests it first)
+                                                          never a green run of nothing; a caller whose selection may be empty tests it first).
+                                                          With --report, the run also writes FILE: which commit and which suites ran, and
+                                                          whether each passed (what `complete` reads; not a map: `select` refuses it)
   tests/suitemap.py plan --of N [--map MAP] [--only [suite…]]
-                                                          the whole plan of main's measured run, made once: `shard0=a b c`, `shard1=…`
+                                                          the whole plan of a full run, made once: `shard0=a b c`, `shard1=…`
                                                           lines (the format of $GITHUB_OUTPUT) for the N shards (see *Shards*). With
                                                           --only it plans just the suites named (a pull request's selection; none is a
                                                           plan of nothing, never of every suite) and adds the line `large=true|false`:
@@ -51,12 +54,9 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
   tests/suitemap.py merge --map OUT SHARD…                one map out of the shards' maps (one commit); exit 1 when a suite is
                                                           in two of them or a suite of the checkout is in none (the map is
                                                           still written: a suite it lacks has no clean measurement, so it runs)
-  tests/suitemap.py stamp --map MAP --sha SHA [--tree T] [--out OUT]
-                                                          accept a merge-queue run's map as the proof of SHA (main's push, see the
-                                                          `proof` job of tests.yml): exit 0 and write the map for SHA to OUT when the
-                                                          map is of SHA or of a commit with the same tree (T: that commit's tree, for a
-                                                          checkout that lacks it), holds exactly the suites of SHA and marks none failed;
-                                                          else exit 1 with the reason (nothing is guessed: a refusal means the whole run follows)
+  tests/suitemap.py complete REPORT…                      the check that a full plain run ran every suite: the reports the shards wrote (`run --report`)
+                                                          are of this checkout's commit, every suite of the checkout is in exactly one of them and
+                                                          none failed; else exit 1 with each fault on stdout as an error line
   tests/suitemap.py select [--map MAP] [--to REV]         print `all`, or the suites to run separated by spaces (empty: none);
                                                           the reason for each changed file goes to stderr, and to
                                                           $GITHUB_STEP_SUMMARY when set. The change is git diff <map's commit> <REV>.
@@ -64,7 +64,7 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           stderr, one line: which commit of main the map is of and how far REV is from it, or,
                                                           when the pick is wider than CI's (no map, a map refused as corrupt or of another
                                                           format, a map whose commit this checkout lacks), that it is, and why
-  tests/suitemap.py fetch [--sha SHA] [--repo OWNER/NAME] download the map main's newest successful run of tests.yml published (the
+  tests/suitemap.py fetch [--sha SHA] [--repo OWNER/NAME] download the map main's newest successful run of suitemap-refresh.yml published (the
                                                           artifact `suitemap`) into `.suitemap-ci/map.json`: the newest run of a commit this
                                                           checkout descends from, or of SHA; an older one when an artifact has expired. Uses
                                                           `gh`, and an artifact of a public repository downloads only with a token, so it
@@ -307,22 +307,22 @@ SUITEMAP_CLASS_RULE=C1 (C2 by default; any other value is an error, checked when
 every edit did before C2. It is not simply a superset of C2: the plain `.x` readers in other modules that C2 adds are not looked for under C1.
 `audit` applies the same rule on both maps.
 
-Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
-and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs on the same labels, each `measure` over
-`shard --of SHARDS --index I`, and the `suites` job merges their maps (`merge`) and passes only when every shard passed and the
-merged map has every suite exactly once. `shard_plan` puts every suite in exactly one shard: with a map, the longest suites
+Shards (Mon Nov 2nd 2026). The full run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
+and every release waits for it. Now a full run is a matrix of SHARDS jobs, each over its list of the plan, and the closing job
+merges their results and passes only when every shard passed and every suite is in exactly one of them: the merge queue's and main's
+tests.yml run is plain (`run --report`, then `complete`), the scheduled refresh's is measured (`measure`, then `merge`, which also writes the map). `shard_plan` puts every suite in exactly one shard: with a map, the longest suites
 first, each into the shard with the least measured time so far (a suite the map does not know counts as the median; ties go by
 name and then the lower shard), so the shards end at about the same time; without a map (or one with no times), a stable hash
 of the name. The plan is made ONCE per run, by the `shards` job (`plan`, with the map from the cache, or none: a cache miss gives the hash
 plan, for all six lists alike), and handed to the `measure` matrix as job outputs; each shard runs the list it is given and
-does not plan, so a cache miss in one shard cannot make it plan differently from the others. `merge` still finds the suite that
+does not plan, so a cache miss in one shard cannot make it plan differently from the others. `merge` and `complete` find the suite that
 is in none or in two, and the run fails.
 
-A large pull request selection (Fri Nov 13th 2026). A pull request's selection of about 200 suites ran serially in the one `suites` job for 22.6 minutes, where a merge-queue entry runs the same suites in six shards in about 12. Now the
+A large pull request selection (Fri Nov 13th 2026). A pull request's selection of about 200 suites ran serially in the one `suites` job for 22.6 minutes, where a full run takes six shards about 10. Now the
 `shards` job of tests.yml makes the selection itself on a pull request (`select`), hands it to `plan --of SHARDS --only <the suites>` and reads the line `large=` it prints: true when the selection holds SHARD_MIN suites or more. Then the
 `measure` matrix runs the lists plainly (`run`: nothing is measured, no map is made or kept) and the `suites` job passes only when the plan and every shard passed; a smaller selection (and one that is empty) runs in the `suites` job as before, from
 the same selection, which the plan job hands on, so the two jobs cannot disagree about it. When the plan job fails, the `suites` job selects for itself and runs serially, as before this change. A selection that fails is every suite, as ever, and
-then a large selection. The merge-queue entry and main's run are unchanged.
+then a large selection. A merge-queue entry and main's push run the same shards plainly, whole.
 
 The index cache. `select` and `audit` index the code of two revisions (Names: every .py file of each, parsed and walked for the names it binds and reads), which
 took about a minute of CPU and 0.7 GB per call and was the same work for a revision the call before had indexed. Now the index is built from two layers
@@ -371,8 +371,10 @@ import argparse, ast, atexit, collections, contextlib, datetime, difflib, fcntl,
 
 FORMAT = 1
 CI_MAP_DIR = ".suitemap-ci"   # where `fetch` keeps main's map and `select` looks when no --map is named: NOT .suitemap/ (CI's, gitignored): a test runner's copy of the tree carries only the files git does not ignore
-CI_ARTIFACT, CI_WORKFLOW = "suitemap", ".github/workflows/tests.yml"   # what main's run publishes (see *The gate, per event* in CONTRIBUTING.md)
-TRACE_MAX_AGE = 24   # hours: a suite's files are traced again at least this often
+CI_ARTIFACT, CI_WORKFLOW = "suitemap", ".github/workflows/suitemap-refresh.yml"   # what the scheduled refresh publishes, and the workflow that does (see *The gate, per event* in CONTRIBUTING.md)
+# A suite's files are traced again when the change since the earlier map reaches it, and at least this often. The refresh runs every 3 hours, so a suite is traced again by the first run after this age
+# (about once a day, 27 hours at the longest: ages go 3, 6, … 24 and only more than 24 counts); a run in between traces only what changed. A pick never relies on a trace's age: `select` always adds the change since the map's commit.
+TRACE_MAX_AGE = 24   # hours
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.realpath(os.environ.get("SUITEMAP_ROOT") or os.path.dirname(HERE))
 INNER = {"scratch": ("rename", "redact", "lead", "migration")}   # outer suite -> the suites it runs itself (rule above)
@@ -2581,16 +2583,26 @@ def no_suites(args):
     return False
 
 
+RUN_REPORT = "run-report"   # the `kind` of a report `run --report` writes: not a map (no `format` key), so `select` and the shard plan never read one by mistake
+
+
 def run(args):
     if no_suites(args):
         return 2
     fail = 0
+    done = {}
     for name in args.suites:
         print(f"== {name}", flush=True)
-        rc, _ = run_suite(name, args.timeout)
+        rc, secs = run_suite(name, args.timeout)
+        done[name] = {"ok": rc == 0, "seconds": round(secs, 1)}
         if rc != 0:
             print(f"== {name}: FAILED", flush=True)
             fail = 1
+    if args.report:   # written after the last suite, so a run that was cut short leaves no report: the check that reads it then fails
+        out = {"kind": RUN_REPORT, "commit": git("rev-parse", "HEAD").strip(), "suites": done}
+        os.makedirs(os.path.dirname(os.path.abspath(args.report)), exist_ok=True)
+        with open(args.report, "w") as f:
+            json.dump(out, f, separators=(",", ":"))
     return fail
 
 
@@ -2693,52 +2705,53 @@ def merge(args):
     return rc
 
 
-def tree_of(commit):
-    """the tree id of a commit of the checkout, or None when the checkout does not have it"""
-    out = git("rev-parse", "--verify", "--quiet", f"{commit}^{{tree}}")
-    return out.strip() if out and out.strip() else None
-
-
-def stamp(args):
-    """accept a merge-queue run's map as the proof of --sha: exit 0 and write the map for --sha to --out, or exit 1 with the reason.
-    No GitHub call here: the workflow finds the run and downloads its map, and passes the tree of the map's commit when the checkout
-    has not got that commit (--tree). Every check must hold; anything doubtful is a refusal, and a refusal only means the whole run follows."""
-    def refuse(why):
-        print(f"suitemap stamp: refused: {why}", file=sys.stderr)
-        summary(["### Merge-queue proof", f"**Not proven:** {why}"])
+def complete(args):
+    """the check that a full plain run ran every suite: exit 0 when the reports (what `run --report` wrote, one a shard) are all of this checkout's commit, every suite of the checkout
+    is in exactly one of them and none failed; else exit 1, every fault on stdout as an error line. This is what the merge queue's and main's run stand on in place of a measured map:
+    a shard that was skipped, cut short or handed on nothing leaves its suites in no report, a list that overlaps another's leaves one in two, and a failed suite is named."""
+    reports, faults = [], []
+    for p in args.reports:
+        try:
+            with open(p) as f:
+                r = json.load(f)
+        except (OSError, ValueError) as e:
+            faults.append(f"{p} cannot be read as a report ({type(e).__name__})")
+            continue
+        if not isinstance(r, dict) or r.get("kind") != RUN_REPORT or not isinstance(r.get("suites"), dict) or not isinstance(r.get("commit"), str):
+            faults.append(f"{p} is not a report of a plain run")
+            continue
+        reports.append(r)
+    head = git("rev-parse", "HEAD").strip()
+    want = set(suites())
+    seen, twice, failed, other = set(), set(), set(), set()
+    for r in reports:
+        if r["commit"] != head:
+            other.add(r["commit"][:12])
+        for k, e in r["suites"].items():
+            if k in seen:
+                twice.add(k)
+            seen.add(k)
+            if not isinstance(e, dict) or e.get("ok") is not True:
+                failed.add(k)
+    if not args.reports:
+        faults.append("no report was handed on")
+    if other:
+        faults.append(f"a report is of another commit than this checkout's {head[:12]} ({', '.join(sorted(other))})")
+    if twice:
+        faults.append(f"in more than one report: {', '.join(sorted(twice))}")
+    if want - seen:
+        faults.append(f"in no report (not run): {', '.join(sorted(want - seen))}")
+    if seen - want:
+        faults.append(f"not a suite of this checkout: {', '.join(sorted(seen - want))}")
+    if failed:
+        faults.append(f"failed: {', '.join(sorted(failed))}")
+    for why in faults:
+        print(f"::error::suitemap complete: {why}", flush=True)
+    if faults:
+        summary(["### Every suite ran", *(f"**{why}**" for why in faults)])
         return 1
-    if not re.fullmatch(r"[0-9a-f]{40}", args.sha or ""):
-        return refuse(f"{args.sha!r} is not a full commit id")
-    m = load_map(args.map)
-    if m is None:
-        return refuse(f"{args.map} is not a map of this format")
-    mc = m["commit"]
-    if not isinstance(mc, str) or not re.fullmatch(r"[0-9a-f]{40}", mc):
-        return refuse("the map names no full commit id")
-    how = "the same commit"
-    if mc != args.sha:
-        theirs, ours = args.tree or tree_of(mc), tree_of(args.sha)
-        if not theirs or not ours:
-            return refuse(f"the map is of {mc[:12]}, and the tree of {'it' if not theirs else args.sha[:12]} is not known")
-        if theirs != ours:
-            return refuse(f"the map is of {mc[:12]}, whose tree differs from the tree of {args.sha[:12]}")
-        how = f"{mc[:12]}, a commit with the same tree"
-    want = suites_at(args.sha)
-    if not want:
-        return refuse(f"{args.sha[:12]} has no suite")
-    have_ = set(m["suites"])
-    if have_ != set(want):
-        return refuse(f"the map's suites differ from the commit's (missing: {', '.join(sorted(set(want) - have_)) or 'none'}; unknown: {', '.join(sorted(have_ - set(want))) or 'none'})")
-    bad = sorted(k for k, e in m["suites"].items() if not isinstance(e, dict) or e.get("failed"))
-    if bad:
-        return refuse(f"a suite failed in that run: {', '.join(bad)}")
-    out = dict(m, commit=args.sha)   # the commit `select` fetches and diffs against later: main's, which the checkout has
-    if args.out:
-        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-        with open(args.out, "w") as f:
-            json.dump(out, f, separators=(",", ":"))
-    print(f"suitemap stamp: accepted: the map holds all {len(want)} suites of {args.sha[:12]}, none failed ({how})", file=sys.stderr)
-    summary(["### Merge-queue proof", f"**Proven:** the merge queue ran all {len(want)} suites on {how}; none failed."])
+    print(f"suitemap complete: all {len(want)} suites of {head[:12]} ran once, in {len(reports)} report(s), and none failed", file=sys.stderr)
+    summary(["### Every suite ran", f"All {len(want)} suites ran once, in {len(reports)} shard(s); none failed."])
     return 0
 
 
@@ -3381,14 +3394,14 @@ def origin_repo():
 
 
 def fetch(args):
-    """download the map main's newest run of the tests workflow published (the artifact `suitemap`) into CI_MAP_DIR/map.json, so a test runner's copy of this tree picks the suites CI picks:
-    the newest successful push to main at or before HEAD (or --sha), the next older when its artifact is gone. Needs `gh` and a token (an artifact of a public repository downloads only with
+    """download the map main's newest run of the refresh workflow published (the artifact `suitemap`) into CI_MAP_DIR/map.json, so a test runner's copy of this tree picks the suites CI picks:
+    the newest successful run on main of a commit at or before HEAD (or --sha), the next older when its artifact is gone. Needs `gh` and a token (an artifact of a public repository downloads only with
     one), so it runs where the token is, before the tree is sent. Writes nothing on a failure; one line on stdout on success."""
     repo = args.repo or origin_repo()
     if not repo:
         print("suitemap: fetch: no repository: `origin` is not a GitHub remote; name it with --repo OWNER/NAME", file=sys.stderr)
         return 1
-    runs, err = gh_json(f"repos/{repo}/actions/runs?branch=main&event=push&status=success&per_page=100")
+    runs, err = gh_json(f"repos/{repo}/actions/workflows/{os.path.basename(CI_WORKFLOW)}/runs?branch=main&status=success&per_page=100")
     if err:
         print(f"suitemap: fetch: {err}\n  (an artifact needs a GitHub token even in a public repository: run `gh auth login`, or set GH_TOKEN)", file=sys.stderr)
         return 1
@@ -3398,7 +3411,7 @@ def fetch(args):
     else:   # a run of a commit this checkout descends from: its map is what a pull request on this base gets
         ours = [r for r in ours if git("merge-base", "--is-ancestor", str(r.get("head_sha", "")), "HEAD") is not None]
     if not ours:
-        print(f"suitemap: fetch: no successful run of {CI_WORKFLOW} on main {'at ' + args.sha if args.sha else 'at or before HEAD'} among the newest 100 pushes", file=sys.stderr)
+        print(f"suitemap: fetch: no successful run of {CI_WORKFLOW} on main {'at ' + args.sha if args.sha else 'at or before HEAD'} among the newest 100 runs", file=sys.stderr)
         return 1
     out = ci_map_path()
     os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -3503,12 +3516,12 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list")
     p = sub.add_parser("measure"); p.add_argument("--map", required=True); p.add_argument("--prev"); p.add_argument("-T", "--timeout", type=int, default=900); p.add_argument("suites", nargs="*")
-    p = sub.add_parser("run", description="run the named suites plainly; exit 1 when one fails. With no suite named it runs nothing and exits 2 with one line on stderr (pass names, or use `select` to list them): an empty list is never a green run.")
-    p.add_argument("-T", "--timeout", type=int, default=600); p.add_argument("suites", nargs="*")
+    p = sub.add_parser("run", description="run the named suites plainly; exit 1 when one fails. With no suite named it runs nothing and exits 2 with one line on stderr (pass names, or use `select` to list them): an empty list is never a green run. --report FILE writes which suites ran and whether each passed (`complete` reads it).")
+    p.add_argument("-T", "--timeout", type=int, default=600); p.add_argument("--report"); p.add_argument("suites", nargs="*")
     p = sub.add_parser("plan"); p.add_argument("--of", type=int, required=True); p.add_argument("--map"); p.add_argument("--only", nargs="*")
     p = sub.add_parser("shard"); p.add_argument("--of", type=int, required=True); p.add_argument("--index", type=int, required=True); p.add_argument("--map")
     p = sub.add_parser("merge"); p.add_argument("--map", required=True); p.add_argument("shards", nargs="+")
-    p = sub.add_parser("stamp"); p.add_argument("--map", required=True); p.add_argument("--sha", required=True); p.add_argument("--tree"); p.add_argument("--out")
+    p = sub.add_parser("complete"); p.add_argument("reports", nargs="*")
     p = sub.add_parser("select"); p.add_argument("--map"); p.add_argument("--to", default="HEAD")
     p = sub.add_parser("fetch"); p.add_argument("--sha"); p.add_argument("--repo")
     p = sub.add_parser("warm"); p.add_argument("--rev", default="HEAD")
@@ -3528,7 +3541,7 @@ def main():
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0
-    return {"measure": measure, "run": run, "plan": plan, "shard": shard, "merge": merge, "stamp": stamp, "select": select, "fetch": fetch, "audit": audit, "warm": warm}[args.cmd](args)
+    return {"measure": measure, "run": run, "plan": plan, "shard": shard, "merge": merge, "complete": complete, "select": select, "fetch": fetch, "audit": audit, "warm": warm}[args.cmd](args)
 
 
 if __name__ == "__main__":

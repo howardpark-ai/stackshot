@@ -79,7 +79,7 @@ elif a[:2] == ["run", "download"]:
     LOG = T / "gh.log"
 
     def runs(*rows): return json.dumps({"workflow_runs": [{"id": i, "head_sha": s, "path": p, "status": "completed", "conclusion": "success", "created_at": f"2026-11-2{n}T00:00:00Z"} for n, (i, s, p) in enumerate(rows)]})
-    WF = ".github/workflows/tests.yml"
+    WF = ".github/workflows/suitemap-refresh.yml"   # the scheduled refresh publishes the map; the gate (tests.yml) does not
     ENV = {k: v for k, v in os.environ.items() if not k.startswith(("COVERAGE_", "SUITEMAP_", "GITHUB_", "GH_", "STACKSHOT_TEST"))}
     ENV.update(SUITEMAP_ROOT=str(R), SUITEMAP_CACHE_DIR=str(T / "cache"), STACKSHOT_TEST_LAUNCHER="", GIT_SSH_COMMAND="false", GIT_TERMINAL_PROMPT="0", HOME=str(T / "home"),
                FAKE_GH_LOG=str(LOG), PATH=f"{BIN}:{os.environ['PATH']}")
@@ -94,12 +94,12 @@ elif a[:2] == ["run", "download"]:
     RUNS = runs((9, B, ".github/workflows/other.yml"), (8, FAR, WF), (7, A, WF))   # newest first: another workflow's run of HEAD itself, a commit HEAD does not descend from, then base A
     fresh(); r = tool("fetch", FAKE_GH_RUNS=RUNS, FAKE_GH_MAP=str(GOOD))
     dl = [c for c in calls() if c.startswith("run download")]
-    check("fetch: writes the map of the newest successful run of the tests workflow at or before HEAD, and says which main commit and run it is of",
+    check("fetch: writes the map of the newest successful run of the map refresh workflow at or before HEAD, and says which main commit and run it is of",
           r.returncode == 0 and MAPFILE.exists() and MAPFILE.read_bytes() == GOOD.read_bytes() and A[:12] in r.stdout and "run 7" in r.stdout and ".suitemap-ci/map.json" in r.stdout and r.stdout.count("\n") == 1, (r.returncode, r.stdout, r.stderr))
     check("fetch: it downloads the `suitemap` artifact of that run alone, from the repository `origin` names, never a run of a commit HEAD does not descend from nor of another workflow",
           len(dl) == 1 and dl[0].startswith("run download 7 --repo owner/name -n suitemap -D "), dl)
-    check("fetch: it asks for successful pushes to main, and the folder holds the map alone (its download folder is gone)",
-          any("branch=main" in c and "event=push" in c and "status=success" in c for c in calls()) and leftovers() == ["map.json"], (calls(), leftovers()))
+    check("fetch: it asks the refresh workflow's own runs (any event: a schedule is no push) that were successful on main, and the folder holds the map alone (its download folder is gone)",
+          any("actions/workflows/suitemap-refresh.yml/runs" in c and "branch=main" in c and "status=success" in c and "event=" not in c for c in calls()) and leftovers() == ["map.json"], (calls(), leftovers()))
 
     fresh(); r = tool("fetch", "--sha", A[:10], FAKE_GH_RUNS=runs((8, B, WF), (7, A, WF)), FAKE_GH_MAP=str(GOOD))
     check("fetch --sha: the run of that commit, not the newest one at or before HEAD", r.returncode == 0 and [c.split()[2] for c in calls() if c.startswith("run download")] == ["7"], (r.returncode, calls()))
