@@ -41,7 +41,7 @@ def state_of(board: Any, r: dict[str, Any], token: str, was: str, since: float) 
     """The frame's state of the item for a signed-in member, with what it draws: ("open", (question html, form html)), ("answered", the answer record), ("changed", None) or ("closed", None).
     `was` is the reference (model/ask_ref.py) of the question this frame first drew ("" when it has drawn none) and `since` when it was first drawn (epoch seconds): a refresh reads the state
     against them, a first load or a reload has neither question nor claim on an old one."""
-    if r.get("status") != "completed" and _home.list_of(board.mod_of(r)) == _home.YOUR_MOVE:      # on his move, by the same rule as the home page's list
+    if _home.list_of(board.mod_of(r)) == _home.YOUR_MOVE:      # on his move, by the same rule as the home page's list (a closed item is in none)
         ask = board.home_ask(r, token)
         if ask and (_r.open_options(r) or _r.yesno_options(r)):      # with cards to pick from
             return ("changed", None) if was and _r.question_ref(r) != was else ("open", ask)

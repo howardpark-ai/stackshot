@@ -41,13 +41,18 @@ var q=new URLSearchParams(location.search);if(q.get('frame'))add('f',q.get('fram
 POKE_PAGE = """<!doctype html><html><body><script>parent.frames[0].postMessage({source:'x',kind:'answer-frame',v:1,do:'theme',theme:'dark'},'*');document.title='poked'</script></body></html>"""
 
 
+class Quiet(http.server.ThreadingHTTPServer):
+    def handle_error(self, request, client_address):      # a browser drops a connection it opened ahead of need, and says so about the self-signed certificate: no finding of this check
+        if not isinstance(sys.exc_info()[1], (ssl.SSLError, ConnectionError)): super().handle_error(request, client_address)
+
+
 def parent_server():
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             body = (POKE_PAGE if self.path.startswith("/poke") else PARENT_PAGE.replace("__BOARD__", BOARD)).encode()
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
         def log_message(self, *a): pass
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H); srv.daemon_threads = True
+    srv = Quiet(("127.0.0.1", 0), H); srv.daemon_threads = True
     srv.socket = TLS.wrap_socket(srv.socket, server_side=True, do_handshake_on_connect=False)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv, f"https://localhost:{srv.server_address[1]}"
@@ -340,7 +345,6 @@ def run(br):
     drawn = [f for f in pg.frames if f.url.startswith(BOARD) and f.query_selector("#aframe")]
     check("nor a listed parent that an unlisted page frames", drawn == [] and mid.evaluate("window.got") == [] and any("frame-ancestors" in s for s in said), (drawn, mid.evaluate("window.got"), said))
     pg.close()
-    pg = ctx.new_page(); pg.goto(UNLISTED + "/"); pg.evaluate("(s) => add('mid', s)", UNLISTED + "/"); pg.wait_for_timeout(500); pg.close()
     check("nothing was recorded by any of it", answers(9) == [], answers(9))
     ctx.close()
 

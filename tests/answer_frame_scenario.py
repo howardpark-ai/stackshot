@@ -81,6 +81,7 @@ item("a", 14, answers=[OLD], ask_left={"at": now - 100, "why": "t"})            
 item("a", 15, status="completed", outcome="done", reason="r", answers=[{**OLD, "choice": f"B · {EVIL}", "letter": "B", "choice_line": f"cl {EVIL}", "text": f"note {EVIL}\nsecond line", "ask": f"Decide: q {EVIL} · Recommend: yes"}])
 ask_(16)                                                                     # answered through the frame by the second member
 ask_(17)
+item("a", 18, status="completed", outcome="done", reason="r", needs=["decision"], ask=ASK, options=OPTS)      # closed with its question still stored
 item("g", 5, needs=["decision"], ask=ASK, options=OPTS)                      # an item addressed by its number
 (T / "store/next-id").write_text("20"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
@@ -301,7 +302,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         ui_render.Board = real_board; rt_frame._item_gid = real_route_gid; _signin._auth_mode = real_mode; _cfg.CFG["auth"]["ui_open"] = False
 
     # ---- 7. the states, first load
-    for key, want, why in (("a3", "closed", "on an agent"), ("a4", "closed", "closed without a question"), ("a9", "closed", "a step: nothing to pick"), ("a10", "closed", "on hold"),
+    for key, want, why in (("a3", "closed", "on an agent"), ("a4", "closed", "closed without a question"), ("a18", "closed", "closed with its question still stored"), ("a9", "closed", "a step: nothing to pick"), ("a10", "closed", "on hold"),
                            ("a12", "closed", "only a mail tick, a comment and a step's Done"), ("a13", "closed", "an ask newer than the last answer, not on his move"), ("a14", "closed", "an ask the server took off after the last answer")):
         rr, pp = frame(key); bb = body_of(rr.text)
         check(f"{why}: closed, a line and a board link, nothing to press", pp.at["data-state"] == want and bb == f'<p class="afline">{i18n.EN["frame.closed"]}</p><p class="aflink"><a href="/items/{key}" target="_blank" rel="noopener">{i18n.EN["frame.open_board"]}</a></p>', (pp.at["data-state"], bb[:300]))
