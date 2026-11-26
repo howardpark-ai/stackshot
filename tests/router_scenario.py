@@ -533,6 +533,38 @@ check("release-self: a red one, another project's maintainer, a script's, one no
       all(sh[i]["source"] == "call" for i in (r_red, r_other, r_script, r_plain, r_mark)), [sh.get(i) for i in (r_red, r_other, r_script, r_plain, r_mark)])
 check("release-self: it started no call of its own", all(f'"id": "{r_ok}"' not in c["stdin"] for c in cl))
 
+# merge-queue-release: the release script's green merge-queue line is archived in code, no call
+MQ = "[release] PR #%d merged and deployed through GitHub's merge queue — router: quieter fronts — main at abc1234; changed: 111..abc1234, 2 commit(s), 3 file(s)"
+RS = "release (a script on box-a)"
+def _mq(text, who=RS, **kw):
+    return router.code_rule("projects/alpha", {"id": "mq", "ts": 1.0, "kind": "message", "to": "", "label": "message", "who": who, "text": text, "target": "project-wide", **kw}, "projects/alpha", router.Context(), [])
+mq_ok = [rec("projects/alpha", "message", MQ % 41, who=RS, target="project-wide"),
+         rec("projects/alpha", "message", MQ % 42 + " and 2 more words", who="release (a script on box-b)", target="project-wide"),
+         rec("projects/alpha", "message", "[release] PR #7 merged and deployed through GitHub's merge queue — a title", who=RS)]
+mq_near = {"failed": rec("projects/alpha", "message", "[release] PR #43 FAILED at the merge queue: merged and deployed through GitHub's merge queue — x", who=RS, target="project-wide"),
+           "failed-late": rec("projects/alpha", "message", MQ % 44 + "; the restart failed", who=RS, target="project-wide"),
+           "error": rec("projects/alpha", "message", MQ % 45 + " (healthz error)", who=RS, target="project-wide"),
+           "not-deployed": rec("projects/alpha", "message", MQ % 46 + " (not deployed)", who=RS, target="project-wide"),
+           "no-dash": rec("projects/alpha", "message", "[release] PR #47 merged and deployed through GitHub's merge queue: x", who=RS, target="project-wide"),
+           "sibling": rec("projects/alpha", "message", "[release] PR #48 merged and deployed — x — main at abc1234", who=RS, target="project-wide"),
+           "deployed-at": rec("projects/alpha", "message", "[release] PR #49 merged through GitHub's merge queue, deployed at abc1234", who=RS, target="project-wide"),
+           "other-sender": rec("projects/alpha", "message", MQ % 50, who="nightly-job (a script on box-a)", target="project-wide"),
+           "session": rec("projects/alpha", "message", MQ % 51, who="Dana", target="project-wide"),
+           "anchored": rec("projects/alpha", "message", MQ % 52, who=RS, anchor="github:example-org/tool#52", target="project-wide"),
+           "for-agent": rec("projects/alpha", "message", MQ % 53, who=RS, target="for work-osprey-lib"),
+           "no-digits": rec("projects/alpha", "message", "[release] PR #x merged and deployed through GitHub's merge queue — y", who=RS, target="project-wide"),
+           "not-start": rec("projects/alpha", "message", "FYI " + MQ % 54, who=RS, target="project-wide")}
+fake("echo"); n0 = len(calls()); H.tick(); sh = shadow(); cl = calls()[n0:]
+check("merge-queue-release: each exact-shape variation is archived in code, with no target", all(ln(i) == ("code", "merge-queue-release", "archived", "", False) for i in mq_ok), [sh.get(i) for i in mq_ok])
+check("merge-queue-release: the reason says this code rule ruled it", all(sh[i]["reason"] == "ruled archived by the merge-queue-release code rule: the release script's green merge-queue report" for i in mq_ok), sh.get(mq_ok[0]))
+check("merge-queue-release: no call is made for them (the model stub is not called)", all(f'"id": "{i}"' not in c["stdin"] for c in cl for i in mq_ok), len(cl))
+check("merge-queue-release: every near-miss reaches the call (a FAILED line, a failure word, no em dash, the sibling shape, deployed-at, another sender, a session, anchored, aimed at an agent, no digits, not at the start)",
+      all(sh[i]["rule"] != "merge-queue-release" and sh[i]["source"] == "call" for i in mq_near.values()), {k: sh.get(i) for k, i in mq_near.items() if sh[i]["source"] != "call"})
+check("merge-queue-release: the near-misses were sent to the model", all(any(f'"id": "{i}"' in c["stdin"] for c in cl) for i in mq_near.values()), [k for k, i in mq_near.items() if not any(f'"id": "{i}"' in c["stdin"] for c in cl)])
+check("merge-queue-release: the sibling shape already ruled by the server's automatic ruling keeps it (rule auto, merged)",
+      (lambda r: bool(r) and r["rule"] == "auto" and r["ruling"] == "merged")(_mq("[release] PR #48 merged and deployed — x", ruled_by=router.AUTO_RULER, ruling="merged")))
+check("merge-queue-release: an item on the notice keeps it from the rule", (_mq(MQ % 60) or {}).get("rule") == "merge-queue-release" and (_mq(MQ % 60, item="a1") or {}).get("rule") != "merge-queue-release")
+
 # for-agent: a message whose first line is "For <agent of the project>" goes to that agent, a front agent included (notices a1b2c6 and a1b2c7)
 fa_front = rec("projects/alpha", "message", "For work-osprey-main: you were renamed from work-osprey-old and are now a front agent of projects/alpha.\nYour brief is now ~/briefs/alpha-main.md. No action needed.", who="home-beta")
 fa_item = rec("projects/alpha", "message", "For WORK-OSPREY-DOCS, from home-beta (new front agent, Oliver's words). Ready to take a6 over: set owner to home-beta and give the hand-over point.", who="home-beta")

@@ -51,7 +51,7 @@ object with:
   project     the top-level page the notice belongs to           kind     anchor | board | message
   ts          when the router judged it (epoch)                   notice_ts  when the notice came in (epoch)
   source      code (a rule in code) | call (the thin call's own answer) | fallback (passed to -main, see 3 above)
-  rule        the rule in code that ruled it (auto · page-pass · watch · wake · close-words · hand-back · image · release-self · anchor-builder · anchor-ci · anchor-work · anchor-item · for-agent · message-item · repeat · quiet), clamp for a call
+  rule        the rule in code that ruled it (auto · page-pass · merge-queue-release · watch · wake · close-words · hand-back · image · release-self · anchor-builder · anchor-ci · anchor-work · anchor-item · for-agent · message-item · repeat · quiet), clamp for a call
               ruling the governor changed, "" for the rest of call and fallback
   ruling      passed | merged | archived | held | dropped          target   the agent it is passed to ("" for the others); `held` is router_live's
               alone (a hold for a session's next turn), the router's own rulings keep a notice from everyone as `archived`
@@ -1271,6 +1271,19 @@ def twin_line(n: dict[str, Any], key: str, root: str, ruled_id: str, ruled_root:
 _REACHED = ("passed", "held")      # the rulings of a person's message that put it before somebody: only a repeat of one of these is dropped
 
 
+def mq_release(n: dict[str, Any]) -> bool:
+    """The rule `merge-queue-release`: the release script's green report of a pull request merged through the merge queue. All of: the
+    sender is the release script's own kind (`release (a script on <machine>)`, how the server labels release.sh's message, as
+    released._release_green does), a message, the text begins exactly `[release] PR #<digits> merged and deployed through GitHub's merge
+    queue — ` and carries no failure word (FAILED, failed, error, not deployed), and the notice has no anchor, item or target other than
+    the project-wide one every message carries. Anything else goes on to the call as before."""
+    text = str(n.get("text") or "")
+    return (n.get("kind") == "message" and re.fullmatch(r"release \(a script on [^()]+\)", str(n.get("who") or "")) is not None
+            and re.match(r"\[release\] PR #\d+ merged and deployed through GitHub's merge queue \u2014 ", text) is not None
+            and re.search(r"FAILED|failed|error|not deployed", text, re.I) is None
+            and not n.get("anchor") and not n.get("item") and str(n.get("target") or "") in ("", "project-wide"))
+
+
 def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The ruling line for a notice a rule in code settles, or None (the thin call takes it): _code_rule's rules, with the read-first gate's guard on a person's message (person_notice). A rule that would
     archive, drop or merge one (the quiet-hour archive, a generic repeat of another source) holds it for the page's background agent instead (person_hold_line), except `gate-trivial` (a bare laugh or ack, read
@@ -1315,6 +1328,7 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
                     telling.tell_handback), for a mover that is one of the project's agents: passed to that mover, whatever the thin
                     call would make of it. Delivered as one line (router_live.compose), with the mark when the mover is a front agent.
       image         a notice whose text is only a file marker ("[files: image.png]"): archived, reason "image not read"; never passed.
+      merge-queue-release  a message from the release script (`release (a script on <machine>)`) whose text begins exactly `[release] PR #<n> merged and deployed through GitHub's merge queue — `, with no failure word (FAILED, failed, error, not deployed) and no anchor, item or agent target: archived, no call. Any other shape goes to the call.
       release-self  a `[release]` message from the project's own maintainer (a sender named *-maintainer that the page lists as an
                     agent), green (no red, failed or error word, no [for <owner>]): merged, "log only: the maintainer's own release".
       anchor-builder  an anchor notice on a GitHub pull request whose head branch starts with a background agent's name and a slash
@@ -1389,6 +1403,9 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
     kind = str(n.get("kind") or "")
     if kind == "message" and str(n.get("who") or "").lower().startswith(page_senders()) and "keeper:" in str(n.get("text") or ""):
         return _line(n, key, root, source="code", rule="page-pass", ruling="archived", reason="page pass")
+    if mq_release(n):
+        return _line(n, key, root, source="code", rule="merge-queue-release", ruling="archived",
+                     reason="ruled archived by the merge-queue-release code rule: the release script's green merge-queue report")
     watched = watch_map()
     if kind == "anchor" and (root, str(n.get("anchor") or "")) in watched:
         agent = watched[(root, str(n["anchor"]))]
