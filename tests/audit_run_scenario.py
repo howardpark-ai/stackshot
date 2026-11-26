@@ -1538,6 +1538,15 @@ r1 = go_at(one, t2)
 check("tightening: today counts the date's earlier run too: its finding and this run's make the top category", len(pushed) == 1 and "ask-missing is the top category 3 days running" in pushed[0][1] and "has the most findings" not in pushed[0][1], pushed)
 check("…while the record's own counts stay this run's", r1["by_category"] == {"ask-missing": 1, "next rules": 1} and r1["by_session"] == {"home-agent": 2}, (r1["by_category"], r1["by_session"]))
 rec_clear()
+# an odd record 90 days old ends no run: the run finishes with no error, tells each recipient once and sends its summary and the tightening message
+for back in (1, 2): seed(at_local(Dd - dt.timedelta(days=back), 5))
+seed(at_local(Dd - dt.timedelta(days=90), 5), ("a finding", {**fnd(903), "mover": ["home-agent"]}, {**fnd(904), "category": ["x"]}, {**fnd(905), "category": {"x": 1}}, {**fnd(906), "to": {"x": 1}}))
+try: r1 = go_at(two, t1)
+except Exception as e: r1 = {"error": f"{type(e).__name__}: {e}"}
+kept = json.loads(AR._record_path(t1).read_text(encoding="utf-8"))
+check("a record 90 days old with a list as a mover and a list or mapping as a check or `to` ends no run: no error, one tightening message, one summary",
+      "error" not in r1 and "error" not in kept and len(pushed) == 1 and "ask-missing is the top category 3 days running" in pushed[0][1] and len(summ()) == 1 and len(item_msgs()) == 2, (r1.get("error"), kept.get("error"), pushed, len(summ()), len(item_msgs())))
+rec_clear()
 
 # the rules themselves, on records by hand: `found(n, who)` is n distinct findings of one session, each of its own check unless one is given, so a session case trips no category
 _ids = iter(range(1000, 100000))
@@ -1603,6 +1612,48 @@ got = trips(two_rules, day(98, two_rules), day(97, two_rules))
 check("category: two rules of one report on one item are two findings", got == [CATEGORY("next rules")], got)
 got = AR.by_day([], [{"date": "d98", "findings": 4}], "d99")
 check("a record with no list of findings is a day that names nothing", got == [({}, {}), ({}, {})] and trips(c(2), [{"date": "d98", "findings": 4}], day(97, c(2))) == [], got)
+# records this script did not write: odd entries and odd values count for nothing, and end no run
+bad = [None, 5, "a finding", ["stale"], {}, {"id": "board#1", "mover": "a-agent"}, {"category": ""}, {"category": 7}, {"category": ["stale"]}, {"category": {"stale": 1}}]
+odd = [{**fnd(1, "stale"), "to": ["a-agent"], "mover": "b-agent"}, {**fnd(2, "stale"), "to": {"a": 1}, "mover": ["a-agent"]}, {**fnd(3, "stale"), "to": 4, "mover": {"a": 1}},
+       {**fnd(4, "stale"), "mover": None}, {"id": ["x"], "category": "stale", "detail": ["y"], "mover": "b-agent"}]
+def try_(f):
+    try: return f()
+    except Exception as e: return f"{type(e).__name__}: {e}"
+got = try_(lambda: AR.by_day([], [{"date": "d98", "findings": bad}], "d99"))
+check("tightening: an entry that is no mapping, or names no check as text, counts for nothing", got == [({}, {}), ({}, {})], got)
+got = try_(lambda: AR.by_day([], [{"date": "d98", "findings": odd}], "d99"))
+check("tightening: a `to` or `mover` that is no text is not read: the finding counts for its check, and for a session only by the text it has",
+      got == [({}, {}), ({"stale": 5}, {"b-agent": 2, "-": 3})], got)
+seven = [day(n, a2()) for n in range(98, 92, -1)]
+old = day(8, bad, odd)
+got = try_(lambda: (len(AR.by_day(a2(), [r for d in (*seven, day(92, a2()), old) for r in d], "d99")), trips(a2(), *seven, old), trips(a2(), day(98, a2()), day(97, a2()), old), trips(a2(), old)))
+check("tightening: 7 days with a run are read and no more; an odd record, far back or near, changes nothing", got == (7, [SESSION("a-agent")], [SESSION("a-agent")], []), got)
+class Unread(dict):
+    def get(self, k, d=None):
+        if k == "findings": raise AssertionError("an older day was read")
+        return super().get(k, d)
+got = try_(lambda: len(AR.by_day([], [*[r for d in seven for r in d], Unread(date="d92")], "d99")))
+check("…and the findings of an older day are not even looked at", got == 7, got)
+split = [day(n, found(2, f"q{n}-agent")) for n in (97, 96, 95, 94)]
+got = trips(a2(), day(98, a2()), *split, day(93, found(1)), day(93, found(1)))
+check("…both runs of the seventh day are read", got == [SESSION("a-agent")], got)
+para = RUBRIC_TEXT.split("\ngoal-unclear\n", 1)[1].split("\n\n", 1)[0]
+check("the rubric's goal-unclear paragraph asks for the same finished outcome as the tool text and flags an activity, a question, a topic or a symptom",
+      all(w in para for w in ("Both must name the same finished OUTCOME", "never an activity, a question, a topic or a symptom", 'a question ("Should X change?") or a topic ("X settings")')), para)
+# the audit agent's records name the session `owner` and have no `mover`
+def agents(n, who, **kw):
+    return [{**{k: v for k, v in f.items() if k not in ("mover", "detail")}, "owner": who, **kw} for f in found(n)]
+got = trips(a2(), day(98, agents(2, "a-agent")), day(97, agents(2, "a-agent")))
+check("session: a recorded finding with an `owner` and no `mover` counts for that session", got == [SESSION("a-agent")], got)
+got = [trips(agents(5, who), day(98, agents(5, who)), day(97, agents(5, who))) for who in ("Oliver", "", "-", "none", "None", "no owner", " No Owner ", ["a-agent"])]
+check("session: …never the instance owner, an empty name, none or no owner, nor a name that is no text", got == [[]] * 8, got)
+got = trips(a2(), day(98, agents(5, "Oliver"), agents(5, "none"), agents(2, "a-agent")), day(97, a2()))
+check("session: …and the session behind them is the one with the most", got == [SESSION("a-agent")], got)
+got = [trips(found(5, who) + a2(), day(98, found(5, who), a2()), day(97, found(5, who), a2())) for who in ("none", "NONE", "no owner", "  ")]
+check("session: a literal none or no owner as the mover is no session either", got == [[SESSION("a-agent")]] * 4, got)
+named = lambda who: [{**f, "owner": "a-agent", "mover": who} for f in found(2)]
+got = [trips(named(who), day(98, named(who)), day(97, named(who))) for who in ("", "none", None)]
+check("session: a finding that has a `mover` is read by it, not by its `owner`", got == [[]] * 3, got)
 got = (AR.tightening(10, found(3), [], "d99"), AR.tightening(10, found(2), [], "d99"))
 check("the share of open items stays as it was: more than 20% trips, 20% does not", got == (["3 of 10 open items flagged (30%, more than 20%)"], []), got)
 
