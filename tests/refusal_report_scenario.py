@@ -5,7 +5,7 @@ Part `refusal_report` - the count of refused board writes, and the small correct
 Checked here against a scratch state folder and config (no port, no real server, no message sent, no model call):
 
   1  call_log: one line per counted call (went through, went through with a correction, refused) in `<state>/calls/<YYYY-MM>.jsonl`; a refusal keeps tool, item, sender and the clipped, folded reason and
-     no other argument; an uncounted tool writes nothing; a line that does not parse is skipped on read; the range read takes the month files it spans; kind_of names the refusal kinds and folds the rest
+     no other argument; a tool that is no write is logged too, with sizes; a line that does not parse is skipped on read; the range read takes the month files it spans; kind_of names the refusal kinds and folds the rest
   2  the middleware (web/middleware.py _RefusalLog, run as _wmw._RefusalLog): a refused write is logged as refused and records no correction; a write that went through with a correction carries one reply line saying what the server
      did and how to keep the field as written, and is logged with the fix kinds; a write with none is logged plain and its reply is as it was
   3  the corrections: a bare item number is read as board#N; a full ISO wake (seconds, a fraction, Z or an offset) is converted to that minute in the instance zone; a subject with no scope prefix
@@ -103,7 +103,6 @@ def part_refusal_report():
     CL.record("update", True, now=now)
     CL.record("update", True, fixes=[("wake", "x"), ("item-id", "y")], now=now + 1)
     CL.record("create", False, item=BID(12), sender="my  x", why="Refused: line one\n  line two " + "w" * 400, now=now + 2)
-    CL.record("get", True, now=now + 3)                          # not a counted tool
     CL.record("update", False, item="a1", sender="s", why="Refused: next no longer lists 3", now=epoch(2026, 12, 1))   # next month
     rows = lines()
     check("1 call_log: counted calls only, one line each, in the month's file", [r["tool"] for r in rows] == ["update", "update", "create", "update"] and (CALLS / "2026-11.jsonl").exists() and (CALLS / "2026-12.jsonl").exists(), rows)
@@ -167,7 +166,7 @@ def part_refusal_report():
     check("2 middleware: …and the call is logged ok with the fix kinds, once each", len(r) == 1 and r[0]["ok"] is True and r[0]["fix"] == ["wake", "item-id"], r)
     out, err = run_mw("update", {"item_id": "12", "sender": "team-back"}, lambda: reply(f"updated {BID(12)}"))
     r = lines()
-    check("2 middleware: a write with no correction is logged plain and its reply is as the tool made it", out.content[0].text == f"updated {BID(12)}" and len(r) == 2 and r[1] == {"t": r[1]["t"], "tool": "update", "ok": True}, (out.content[0].text, r))
+    check("2 middleware: a write with no correction is logged plain and its reply is as the tool made it", out.content[0].text == f"updated {BID(12)}" and len(r) == 2 and {k: v for k, v in r[1].items() if k not in ("item", "sender", "req")} == {"t": r[1]["t"], "tool": "update", "ok": True}, (out.content[0].text, r))
     def refusing():
         CL.fixed("wake", "a correction made before the refusal")
         raise ToolError("Refused: next no longer lists 'a step'")
@@ -177,7 +176,7 @@ def part_refusal_report():
           isinstance(out, ToolError) and str(out).startswith("Refused: next no longer lists") and r[2]["ok"] is False and r[2]["item"] == BID(7) and r[2]["sender"] == "team-back" and "fix" not in r[2]
           and "SECRET" not in json.dumps(r[2]) and err.startswith(f"refused: update item={BID(7)} sender=team-back: "), (out, r[2:], err))
     out, err = run_mw("get", {"item_id": BID(7)}, lambda: reply("an item"))
-    check("2 middleware: an uncounted tool (get) is not logged", len(lines()) == 3 and out.content[0].text == "an item", lines())
+    check("2 middleware: a tool that is no counted write (get) is logged too, with the size of its arguments", len(lines()) == 4 and out.content[0].text == "an item" and lines()[3]["tool"] == "get" and lines()[3]["ok"] is True, lines())
     wipe()
 
     # ================================================================ 3. the corrections
@@ -597,7 +596,7 @@ def part_refusal_report():
     row = lines()[-1]
     check("8 call row: a write that went through with a fix names its item and sender, so a later difference in the writer's text can be explained", row.get("fix") == ["wake", "item-id"] and row.get("item") == "g12" and row.get("sender") == "team-back", row)
     out, err = run_mw("update", {"item_id": "12", "sender": "team-back", "next": "team-back: go"}, lambda: reply("updated " + BID(12)))
-    check("8 call row: …and one with no fix and no bounce-back stays as small as it was (no item, no sender)", "item" not in lines()[-1] and "sender" not in lines()[-1], lines()[-1])
+    check("8 call row: …and one with no fix and no bounce-back has no fix, bounce or note field (its item, sender and request size are the one line every call has)", not ({"fix", "bounce", "note", "why"} & set(lines()[-1])), lines()[-1])
     raw = OPENF.read_text(encoding="utf-8")
     check("8 open fixes: the file holds digests, not the session name nor the values (the key is item and a digest of the writer; the detail is digests and field names)",
           "team-back" not in raw and "2026-11-09" not in raw and f"12|{H('team-back')}" in raw and H("2026-11-09T12:00") in raw, raw[:300])
@@ -734,7 +733,7 @@ def part_refusal_report():
     r9 = lines()
     check("9 middleware: a refused message call is logged with its target, the refusal's kind and its text (newlines kept)", r9[0]["to"] == "a-main" and r9[0]["kind"] == "marked-no-turn" and r9[0]["text"] == "hello\nworld" and r9[0]["sender"] == "a-builder" and r9[0]["item"] == "", r9[0])
     check("9 middleware: …a ToolError that is none of the relay's sites is `unclassified`, with the text all the same", r9[1]["kind"] == "unclassified" and r9[1]["text"] == "words", r9[1])
-    check("9 middleware: …and no other tool logs a target or a text: an update's refusal is the row it was", set(r9[2]) == {"t", "tool", "ok", "item", "sender", "why"} and "SECRET" not in json.dumps(r9[2]), r9[2])
+    check("9 middleware: …and no other tool logs a target or a text: an update's refusal is the row it was", set(r9[2]) == {"t", "tool", "ok", "item", "sender", "why", "req", "rlen"} and "SECRET" not in json.dumps(r9[2]), r9[2])
     wipe()
 
     # the report on a fixture week: message calls, kinds, streaks, resends
@@ -849,6 +848,176 @@ def part_refusal_report():
     check("9i report: the lines say 1 of 3 message calls refused, the handled call by its kind, and the correction by its kind",
           "- message calls: 1 of 3 refused (33.3%)" in t9_ and "handled instead of refused (passed on, written onto an item or held, the sender told): 1 of 3 (33.3%), marked-no-turn 1" in t9_
           and "- corrected by the server instead of refused: 1 (page-key 1)" in t9_, t9_)
+    wipe()
+
+    # ================================================================ 10. every tool's calls, sizes, retries and the daily analysis
+    wipe(); reset_open()
+    # 10a the log: every tool, sizes only
+    t10 = epoch(2026, 11, 20)
+    CL.record("get", True, item=BID(9), sender="team-back", req=24, now=t10)
+    CL.record("sessions", False, why="Refused: " + "w" * 400, req=11, rlen=409, now=t10 + 1)
+    CL.record("Bad Tool!!" + "x" * 80, True, now=t10 + 2)
+    CL.record("", True, now=t10 + 3)
+    CL.record("update", True, item=BID(2), sender="s", now=t10 + 4)                     # a line with no size given is the plain one
+    r10 = lines()
+    check("10 call_log: a read's call is logged with its item, sender and the size of its request, and no content", r10[0] == {"t": int(t10), "tool": "get", "ok": True, "item": BID(9), "sender": "team-back", "req": 24}, r10[0])
+    check("10 call_log: …a refused read keeps the refusal's whole length beside the clipped text", r10[1]["ok"] is False and r10[1]["rlen"] == 409 and len(r10[1]["why"]) == CL.WHY_MAX and r10[1]["req"] == 11, r10[1])
+    check("10 call_log: …a tool name is folded to a slug and cut at TOOL_MAX, and a call with no name writes nothing", r10[2]["tool"] == ("badtool" + "x" * 80)[:CL.TOOL_MAX] and len(r10) == 4, [x["tool"] for x in r10])
+    check("10 call_log: …a call with no sizes given is the plain row it was (old and new lines read alike)", r10[3] == {"t": int(t10 + 4), "tool": "update", "ok": True}, r10[3])
+    check("10 call_log: size_of is the length of the arguments as sent, 0 for none or for what cannot be measured", CL.size_of({"a": "bc"}) == len('{"a":"bc"}') and CL.size_of({}) == 0 and CL.size_of(None) == 0 and CL.size_of({"a": object()}) > 0, CL.size_of({"a": "bc"}))
+    wipe()
+    # 10b the middleware: a read, a refused read, a read that errors, a log that cannot be written
+    SECRET = "SECRET-ARGUMENT-TEXT"
+    out, err = run_mw("get", {"item_id": BID(7), "sender": "team-back", "note": SECRET}, lambda: reply("an item"))
+    m10 = lines()
+    check("10 middleware: a read that went through is one line with its item, sender and request size, the reply unchanged and nothing on stderr",
+          out.content[0].text == "an item" and err == "" and len(m10) == 1 and m10[0]["tool"] == "get" and m10[0]["ok"] is True and m10[0]["item"] == BID(7) and m10[0]["sender"] == "team-back"
+          and m10[0]["req"] == CL.size_of({"item_id": BID(7), "sender": "team-back", "note": SECRET}) and SECRET not in json.dumps(m10[0]), m10)
+    out, err = run_mw("sessions", {"name": "my-x"}, lambda: reply("none"))
+    out, err = run_mw("anchors", {"project": "projects/alpha"}, lambda: reply("none"))
+    out, err = run_mw("brief", {}, lambda: reply("the board"))
+    m10 = lines()
+    check("10 middleware: sessions, anchors and brief are logged too: the item is the name or project it was given, a call with none has none, and none has a sender it did not pass",
+          [(x["tool"], x.get("item", "")) for x in m10[1:]] == [("sessions", "my-x"), ("anchors", "projects/alpha"), ("brief", "")] and all("sender" not in x for x in m10[1:]) and m10[3]["req"] == 0, m10[1:])
+    def gone(): raise ToolError("item not found: " + BID(404))
+    out, err = run_mw("get", {"item_id": BID(404), "sender": "team-back", "note": SECRET}, gone)
+    m10 = lines()
+    check("10 middleware: a read the server refuses is logged as refused with the text, its whole length and the request size, and the refusal reaches the caller", isinstance(out, ToolError) and m10[4]["ok"] is False and m10[4]["rlen"] == len("item not found: " + BID(404))
+          and m10[4]["why"].startswith("item not found") and m10[4]["item"] == BID(404) and m10[4]["sender"] == "team-back" and m10[4]["req"] > 0 and SECRET not in json.dumps(m10[4]), (out, m10[4:]))
+    out, err = run_mw("anchors", {"project": "projects/alpha"}, gone)
+    check("10 middleware: …a refused read with no item_id is about the project or name it was given", lines()[-1]["tool"] == "anchors" and lines()[-1]["item"] == "projects/alpha" and lines()[-1]["ok"] is False, lines()[-1])
+    wipe(); run_mw("get", {"item_id": BID(7)}, lambda: reply("x")); run_mw("sessions", {"name": "my-x"}, lambda: reply("x")); run_mw("anchors", {"project": "p"}, lambda: reply("x")); run_mw("brief", {}, lambda: reply("x")); run_mw("get", {"item_id": BID(404), "sender": "team-back", "note": SECRET}, gone)
+    def boom(): raise RuntimeError("the store is down")
+    async def run_raw(name, args, call):
+        async def nxt(ctx): return call()
+        ctx = types.SimpleNamespace(message=types.SimpleNamespace(name=name, arguments=args))
+        return await _wmw._RefusalLog().on_call_tool(ctx, nxt)
+    raised = None
+    with contextlib.redirect_stderr(io.StringIO()):
+        try: asyncio.run(run_raw("get", {"item_id": BID(8)}, boom))
+        except RuntimeError as e: raised = e
+    m10 = lines()
+    check("10 middleware: a read that errors is a refusal in the log (its error named), and the error still reaches the caller", raised is not None and str(raised) == "the store is down" and m10[5]["ok"] is False and m10[5]["why"] == "RuntimeError: the store is down" and m10[5]["item"] == BID(8), (raised, m10[5:]))
+    out, err = run_mw("update", {"item_id": BID(7), "sender": "team-back", "description": SECRET}, refusing)
+    m10 = lines()
+    check("10 middleware: a refused write keeps its request size and the refusal's whole length too", m10[6]["tool"] == "update" and m10[6]["req"] == CL.size_of({"item_id": BID(7), "sender": "team-back", "description": SECRET}) and m10[6]["rlen"] == len("Refused: next no longer lists 'a step'"), m10[6])
+    real_file = CL._file
+    def no_file(now): raise OSError("disk full")
+    CL._file = no_file
+    try:
+        out, err = run_mw("get", {"item_id": BID(7)}, lambda: reply("still here"))
+        out2, err2 = run_mw("get", {"item_id": BID(7)}, gone)
+    finally:
+        CL._file = real_file
+    check("10 middleware: a log that cannot be written never fails the call (a reply is still the reply, a refusal still the refusal)", out.content[0].text == "still here" and isinstance(out2, ToolError) and str(out2).startswith("item not found"), (out, out2))
+    wipe()
+    # 10c the weekly report still counts the writes only
+    for i in range(5): CL.record("get", False, item=BID(i), sender="team-back", why="Refused: item not found", req=10, rlen=23, now=epoch(2026, 11, 3, 9, i))
+    CL.record("update", True, now=epoch(2026, 11, 3, 10)); CL.record("update", False, item=BID(1), sender="team-back", why="Refused: next no longer lists 'a'", now=epoch(2026, 11, 3, 11))
+    c10, p10 = RR.collect(mon)
+    t10_ = RR.build(mon, c10, p10)
+    check("10 weekly: the reads in the log change nothing in the weekly count (calls, refused, other writes, senders)", c10["calls"] == {"update": 2} and c10["refused"] == {"update": 1} and "get 5" not in t10_ and "other writes refused" not in t10_ and "repeated refusals" not in t10_ and "create and update: 1 of 2 calls refused" in t10_, (c10["calls"], t10_))
+    wipe()
+
+    # 10d retries and the daily analysis, on a fixture day (the clock is held: NOW)
+    NOW = epoch(2026, 11, 26, 5)
+    Y = lambda hh, mm=0, ss=0: epoch(2026, 11, 25, hh, mm) + ss
+    NS = "Refused: next no longer lists 'a step'"          # a kind the hint table knows
+    GONE = "item not found: " + BID(9)                       # a kind it does not
+    def rec(tool, ok, at, item, sender, req, rlen=-1, why=""): CL.record(tool, ok, item=item, sender=sender, why=why, req=req, rlen=rlen, now=at)
+    rec("update", False, Y(10), BID(1), "team-back", 500, 400, NS)
+    rec("update", False, Y(10, 2), BID(1), "team-back", 520, 400, NS)               # retry 1: 2 minutes after a refusal
+    rec("update", True, Y(10, 4), BID(1), "team-back", 530)                           # retry 2: it went through, and the chain ends
+    rec("update", True, Y(10, 5), BID(1), "team-back", 77)                            # 1 minute after a success: no retry
+    rec("update", False, Y(11), BID(2), "home-front", 100, 300, NS)
+    rec("update", True, Y(11, 15), BID(2), "home-front", 100)                         # 15 minutes after the refusal: no retry (the window is 10)
+    rec("update", False, Y(11, 30), BID(5), "home-front", 90, 300, NS)                # another caller's and another item's refusals: not retries of the lines above
+    for i in range(3): rec("get", False, Y(12, 3 * i), BID(9), "home-front", 30, 41, GONE)          # a read refused three times: 2 retries
+    rec("sessions", True, Y(14), "my-x", "home-front", 10)
+    rec("get", True, Y(15), BID(3), "team-back", 20)
+    rec("get", True, Y(15, 1), BID(3), "", 20)                                        # no caller named: no call to match
+    CL.record("create", False, sender="team-back", why="Refused: some rare thing 5", call="aaaa", req=200, rlen=60, now=Y(16))
+    CL.record("create", False, sender="team-back", why="Refused: some rare thing 6", call="bbbb", req=200, rlen=60, now=Y(16, 5))       # a different call (digest): no retry; the same unhinted kind twice: no repeat
+    # older lines of the week: one with no sizes at all (a line from before they were kept)
+    CL.record("update", False, item=BID(4), sender="old-writer", why="Refused: next no longer lists 'x'", now=epoch(2026, 11, 22, 10))
+    CL.record("update", True, now=epoch(2026, 11, 22, 11))
+    CL.record("message", False, sender="team-back", why="Refused: x", to="a-main", kind="marked-no-turn", now=epoch(2026, 11, 23, 10))
+    CL.record("update", False, item=BID(4), sender="old-writer", why="Refused: next no longer lists 'x'", req=40, rlen=55, now=epoch(2026, 11, 18, 10))        # 8 days before NOW: out of the week
+    d24, d7 = RR.collect_daily(NOW)
+    check("10 daily: the last 24 hours count every tool's calls and refusals (reads included)", d24["calls"] == 15 and d24["refused"] == 9, (d24["calls"], d24["refused"]))
+    check("10 daily: …the last 7 days add the older lines, and not the line 8 days back", d7["calls"] == 18 and d7["refused"] == 11, (d7["calls"], d7["refused"]))
+    check("10 daily: …refusals per tool", dict(d24["tools"]) == {"update": 4, "get": 3, "create": 2} and dict(d7["tools"]) == {"update": 5, "get": 3, "create": 2, "message": 1}, (dict(d24["tools"]), dict(d7["tools"])))
+    check("10 daily: …refusals per rule kind (a message by its kind slug) and per caller session",
+          d24["kinds"][CL.kind_of(NS)] == 4 and d24["kinds"][CL.kind_of(GONE)] == 3 and d7["kinds"]["message: marked-no-turn"] == 1 and d24["senders"]["home-front"] == 5 and d24["senders"]["team-back"] == 4 and d7["senders"]["old-writer"] == 1, (dict(d24["kinds"]), dict(d24["senders"])))
+    check("10 daily: retries are the same caller's repeats of a tool on an item within 10 minutes after a refusal: 2 on the update (the second after a refusal, a success ends the chain) and 2 on the read, with their request sizes",
+          d24["retries"] == 4 and d24["retry_chars"] == 520 + 530 + 30 + 30 and d7["retries"] == 4, (d24["retries"], d24["retry_chars"], d7["retries"]))
+    check("10 daily: tokens are the refusal text plus the retried requests over four: whole lengths where kept, the clipped text for a line from before",
+          d24["refusal_chars"] == 400 + 400 + 300 + 300 + 3 * 41 + 120 and RR._tokens(d24) == round((d24["refusal_chars"] + 1110) / 4) and d7["refusal_chars"] == d24["refusal_chars"] + len("Refused: next no longer lists 'x'") + len("Refused: x"), (d24["refusal_chars"], RR._tokens(d24), d7["refusal_chars"]))
+    anon = [{"t": 1000, "tool": "get", "ok": False, "item": BID(3)}, {"t": 1010, "tool": "get", "ok": True, "item": BID(3)}, {"t": 1020, "tool": "get", "ok": True, "sender": "x"}]
+    check("10 daily: a call with no caller, or with no item, is matched to no retry", RR.retries(anon) == [], RR.retries(anon))
+    rep = RR.repeating(d24)
+    check("10 daily: a kind refused three times or more in the day repeats (a kind refused twice does not), each with its hint or 'needs a fix'",
+          [(k, n) for k, n, _ in rep] == [(CL.kind_of(NS), 4), (CL.kind_of(GONE), 3)] and rep[0][2] == RR.HINTS[CL.kind_of(NS)] and rep[1][2] == RR.NEEDS_FIX and CL.kind_of("Refused: some rare thing 5") not in dict((k, n) for k, n, _ in rep), rep)
+    check("10 daily: every hint is one plain line, and no hint is for a kind the log can no longer name", all(h and "\n" not in h and h == h.strip() for h in RR.HINTS.values()) and all(k in {n for _, n in CL._KINDS} or k.startswith("message: ") for k in RR.HINTS), [k for k in RR.HINTS if k not in {n for _, n in CL._KINDS}])
+    txt = RR.build_daily(NOW, d24, d7)
+    sample = txt
+    check("10 daily: the text names both spans, the estimate and the repeating kinds with their hints",
+          txt.startswith("Refusals and retries of board tool calls, the last 24 hours and the last 7 days up to Thu Nov 26th 05:00 (")
+          and "calls refused of all calls (every tool, a read that errors counts as refused): 24h 9 of 15 (60.0%) · 7d 11 of 18 (61.1%)" in txt
+          and "- refusals per tool, 24h: update 4 · get 3 · create 2" in txt and "- refusals per caller session, 24h: home-front 5 · team-back 4" in txt and "home-front 5" in txt and "old-writer 1" in txt
+          and "- retries (the same caller on the same tool and item within 10 minutes after a refusal): 24h 4 (1,110 request characters) · 7d 4 (1,110 request characters)" in txt
+          and "characters / 4: refusal text plus retried requests): 24h " in txt and "refusal characters + 1,110 retried request characters" in txt
+          and f"  - {CL.kind_of(NS)} 4: {RR.HINTS[CL.kind_of(NS)]}" in txt and f"  - {CL.kind_of(GONE)} 3: {RR.NEEDS_FIX}" in txt, txt)
+    print("---- the daily text of the fixture day ----\n" + sample + "\n----")
+    check("10 daily: a day with no kind at three shows that and no list", "no kind was refused 3 times" in RR.build_daily(NOW, RR.daily_tally([], []), d7), "")
+    # 10e the run: once a day, gated, to the weekly report's place, the background agent only when a kind needs a fix
+    d_sent, d_agent = [], []
+    def d_deliver(to, text_, sender): d_sent.append((to, text_, sender)); return True, "[200] ok"
+    def d_back(to, text_, sender): d_agent.append((to, text_, sender)); return True, "[200] ok"
+    dst = lambda n: T / f"state/refusal-report/daily-{n}.json"
+    res = RR.run_daily(now=NOW, cfg=cfg_on, deliver=d_deliver, deliver_agent=d_back, resolve=lambda to: "demo-builder", state=dst("a"))
+    check("10 run: the day's analysis is sent once to the configured place as the configured sender, and to the background agent with the ask (a kind needs a fix)",
+          res["sent"] and len(d_sent) == 1 and d_sent[0][0] == "my-x" and d_sent[0][2] == "stackshot refusal report" and d_sent[0][1] == txt and len(d_agent) == 1 and d_agent[0][0] == "demo-builder"
+          and d_agent[0][1].startswith(txt) and "needs a fix" in d_agent[0][1][len(txt):] and "demo-builder" in res["why"], (res, d_sent[:1], d_agent[:1]))
+    res = RR.run_daily(now=NOW + 15 * 3600, cfg=cfg_on, deliver=d_deliver, deliver_agent=d_back, resolve=lambda to: "demo-builder", state=dst("a"))
+    check("10 run: …the audit's second run of the day (20:00) finds it sent", not res["sent"] and res["why"] == "already sent" and len(d_sent) == 1, res)
+    res = RR.run_daily(now=NOW + 24 * 3600, cfg=cfg_on, deliver=d_deliver, deliver_agent=d_back, resolve=lambda to: "demo-builder", state=dst("a"))
+    check("10 run: …and the next day's first run goes on (this one finds the last 24 hours of the fixture empty of refusals and sends nothing)", not res["sent"] and res["why"] == "no refusals in the last 24 hours" and len(d_sent) == 1, res)
+    res = RR.run_daily(now=NOW, cfg=cfg_on, deliver=d_deliver, state=dst("b"), dry=True)
+    check("10 run: --dry-run returns the text and sends nothing, marks nothing", res["why"] == "dry run" and res["text"] and len(d_sent) == 1 and not dst("b").exists(), res)
+    res = RR.run_daily(now=NOW, cfg=dict(cfg_on, enabled=False), deliver=d_deliver, state=dst("c"))
+    check("10 run: enabled = false sends nothing, marks nothing and says so", not res["sent"] and res["why"].startswith("not enabled") and len(d_sent) == 1 and not dst("c").exists(), res)
+    res = RR.run_daily(now=NOW, cfg=cfg_on, deliver=lambda *a: (False, "[500] down"), state=dst("d"))
+    check("10 run: a send that fails is not marked sent", not res["sent"] and res["why"] == "[500] down" and not dst("d").exists(), res)
+    res = RR.run_daily(now=NOW, cfg=cfg_on, deliver=d_deliver, deliver_agent=d_back, resolve=lambda to: "demo-builder", state=dst("a"), force=True)
+    check("10 run: --force sends the day again", res["sent"] and len(d_sent) == 2, res)
+    done10 = json.loads(dst("a").read_text(encoding="utf-8"))
+    check("10 run: the days sent are kept beside the weeks in the same record, which an old record without them still reads", done10["days"] == ["2026-11-26"] and RR._read_sent(dst("a"))["weeks"] == [], done10)
+    dst("old").write_text(json.dumps({"weeks": ["2026-11-02"]}), encoding="utf-8")
+    res = RR.run_daily(now=NOW, cfg=cfg_on, deliver=d_deliver, deliver_agent=d_back, resolve=lambda to: "", state=dst("old"))
+    done10 = json.loads(dst("old").read_text(encoding="utf-8"))
+    check("10 run: …the weeks of an old record are kept when a day is added, and a project with no background agent gets the page copy alone", res["sent"] and done10 == {"weeks": ["2026-11-02"], "days": ["2026-11-26"]} and len(d_agent) == 2, (res, done10))
+    # only hinted kinds repeat: the background agent is not asked
+    wipe()
+    for i in range(3): rec("update", False, Y(9, 10 * i), BID(30 + i), "team-back", 100, 200, NS)
+    n_agent = len(d_agent)
+    res = RR.run_daily(now=NOW, cfg=cfg_on, deliver=d_deliver, deliver_agent=d_back, resolve=lambda to: "demo-builder", state=dst("e"))
+    check("10 run: when every repeating kind has a hint the page copy goes out and the background agent is not asked", res["sent"] and len(d_agent) == n_agent and "needs a fix" not in d_sent[-1][1], (res, d_sent[-1][1][-300:]))
+    wipe()
+    rec("get", False, Y(9), BID(1), "team-back", 10, 20, GONE)
+    res = RR.run_daily(now=NOW, cfg=cfg_on, deliver=d_deliver, state=dst("f"))
+    check("10 run: a day with a refusal but no repeating kind is still sent, and says none repeats", res["sent"] and "no kind was refused 3 times" in d_sent[-1][1], res)
+    # the audit verb and the command line (a dry run in a child process: the clock is the real one, so the fixture lines are out of both spans)
+    rc, out = cli(os.path.join(STACK, "stackshot/audit/audit.py"), "refusals", "daily", "--dry-run")
+    check("10 cli: audit.py refusals daily --dry-run runs the daily analysis alone and exits 0", rc == 0 and "refusal report (daily):" in out and "refusal report: " not in out.replace("refusal report (daily): ", ""), (rc, out[-300:]))
+    rc, out = cli(os.path.join(STACK, "stackshot/audit/audit.py"), "refusals", "--dry-run")
+    check("10 cli: audit.py refusals runs the weekly count and then the daily analysis", rc == 0 and "refusal report: " in out and "refusal report (daily):" in out and out.index("refusal report: ") < out.index("refusal report (daily):"), (rc, out[-300:]))
+    rc, out = cli(os.path.join(STACK, "stackshot/audit/audit.py"), "refusals", "--dry-run", "--week", mon.isoformat())
+    check("10 cli: --week asks for the weekly report alone", rc == 0 and "refusal report (daily)" not in out, (rc, out[-200:]))
+    rc, out = cli(os.path.join(STACK, "stackshot/tools/refusal_report.py"), "daily", "--week", mon.isoformat())
+    check("10 cli: daily takes no --week", rc == 2 and "usage: refusal_report.py" in out, (rc, out))
+    unit = pathlib.Path(STACK, "units/stackshot-audit.service.in").read_text(encoding="utf-8")
+    check("10 unit: no new unit line or timer for it: the audit unit still has the one refusals line", unit.count("stackshot audit refusals") == 1 and not list(pathlib.Path(STACK, "units").glob("*refusal*")), unit.count("stackshot audit refusals"))
     wipe()
 
     return ran, fails

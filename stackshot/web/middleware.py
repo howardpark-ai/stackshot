@@ -38,6 +38,14 @@ def _refusal_line(tool: str, args: Any, err: BaseException) -> str:
     return f"refused: {tool} item={item or '-'} sender={sender or '-'}: {reason}"
 
 
+def _read_target(a: dict[str, Any]) -> str:
+    """What a call of a tool that is no counted write is about, for the call log: the item, the project or the session name it was given ("" when none). A retry is a repeat on this."""
+    for k in ("item_id", "project", "name"):
+        if a.get(k):
+            return str(a[k])
+    return ""
+
+
 def _message_fields(args: dict[str, Any], err: BaseException) -> dict[str, str]:
     """call_log.record's `to`, `kind` and `text` for a refused message call (service/messaging.py `refusal_fields`); {} when they cannot be read, so the refusal is still counted."""
     try:
@@ -82,14 +90,32 @@ class _RefusalLog(_MW):
                 a = args if isinstance(args, dict) else {}
                 item_ = a.get("item_id")
                 more = _message_fields(a, e) if name == "message" else {}          # a refused message keeps its target, the refusal's kind and its text (the one call whose arguments are logged)
-                _calls.record(name, False, item=item_, sender=a.get("sender"), why=str(e), call=_calls._h(a.get("subject"))[:8] if name == "create" and not str(item_ or "").strip() else "", **more)
+                _calls.record(name, False, item=item_ if counted else _read_target(a), sender=a.get("sender"), why=str(e), call=_calls._h(a.get("subject"))[:8] if name == "create" and not str(item_ or "").strip() else "", req=_calls.size_of(a), rlen=len(str(e)), **more)
             except Exception as le:  # noqa: BLE001  — a log line is never worth losing the refusal
                 print(f"mcp refusal log failed: {le}", file=sys.stderr, flush=True)
+            raise
+        except Exception as e:          # an error that is no ToolError: a counted write is left to its own path as before; any other tool's call is logged as refused (a read that errors counts as a refusal)
+            if token is not None:
+                _calls.end(token)
+            else:
+                try:
+                    a = getattr(msg, "arguments", None)
+                    a = a if isinstance(a, dict) else {}
+                    _calls.record(name, False, item=_read_target(a), sender=a.get("sender"), why=f"{type(e).__name__}: {e}", req=_calls.size_of(a), rlen=len(str(e)))
+                except Exception as le:  # noqa: BLE001
+                    print(f"mcp call log failed: {le}", file=sys.stderr, flush=True)
             raise
         except BaseException:
             if token is not None:
                 _calls.end(token)
             raise
+        if token is None:          # a tool that is no counted write (get, brief, sessions, anchors, rules …): one line with the size of its arguments, and nothing else
+            try:
+                a = getattr(msg, "arguments", None)
+                a = a if isinstance(a, dict) else {}
+                _calls.record(name, True, item=_read_target(a), sender=a.get("sender"), req=_calls.size_of(a))
+            except Exception as le:  # noqa: BLE001  — a log line is never worth a lost reply
+                print(f"mcp call log failed: {le}", file=sys.stderr, flush=True)
         if token is not None:
             fixes, detail = _calls.end_detail(token)
             try:
@@ -109,7 +135,7 @@ class _RefusalLog(_MW):
                     sc = getattr(result, "structured_content", None)
                     if isinstance(sc, dict) and isinstance(sc.get("result"), str):
                         sc["result"] += note
-                _calls.record(name, True, item=gid, sender=who, fixes=fixes, to=str(a.get("to") or "") if name == "message" else "")      # a message the relay handled where it once refused keeps its target with the kind
+                _calls.record(name, True, item=gid, sender=who, fixes=fixes, to=str(a.get("to") or "") if name == "message" else "", req=_calls.size_of(a))      # a message the relay handled where it once refused keeps its target with the kind
             except Exception as le:  # noqa: BLE001
                 print(f"mcp call log failed: {le}", file=sys.stderr, flush=True)
         return result

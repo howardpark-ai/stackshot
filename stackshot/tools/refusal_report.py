@@ -7,7 +7,13 @@ server corrected instead of refusing (a bare item number or #N in any call that 
 a step left out of next kept open, a subject or a status line cut at its last word that fits, an ask-by with a time of day cut to its day, a bare address in a description written as a link, the server's own fixes of a wait), and how many of those fixes the writer sent back (call_log.bounces; of the fixes of the kinds that have the check, call_log.CHECKED), and the streaks: one writer refused STREAK_MIN (3) times or more on one call (the same tool and item) with each refusal within STREAK_WINDOW (15 minutes) of the one before, counted by kind and listed first, since a streak marks a gap in the tool text. Message calls have lines of their own (the message tool and the client route's script messages, `_message_lines`): the calls refused of all with the week before, the refusals by the kind slug the call log keeps (`service/messaging.py` `Refused`; `not recorded` for a line from before kinds were logged), the streaks of one sender refused MSG_STREAK_MIN (2) times or more on one target within MSG_STREAK_WINDOW (an hour) of the one before, how many of them also meet the rule above (3 within 15 minutes), and the refusals sent again within RESEND_WINDOW (an hour) with a similar text by the same sender (`similar`: difflib ratio of at least SIMILAR, 0.5), to the same target or another, looked for in the later refusals and in the delivered messages of the message log (`messages.jsonl`, `delivered`). One more line, when the week or the one before it had any: the wait loops the minute walk found (audit/wait_loops.py: items that wait on each other), counted from its log. Tokenless: no model call.
 
     refusal_report.py run [--dry-run] [--force] [--week YYYY-MM-DD]
-    audit.py refusals [--dry-run] [--force] [--week YYYY-MM-DD]       the same, from the audit's own entry point (the timer's unit runs it after the audit run)
+    audit.py refusals [--dry-run] [--force] [--week YYYY-MM-DD]       the same, from the audit's own entry point (the timer's unit runs it after the audit run); without --week it then runs the daily analysis below
+    refusal_report.py daily [--dry-run] [--force]                      the daily analysis alone
+
+  daily         every tool's calls (reads too: a read that errors counts as refused) for the last 24 hours and the last 7 days: refusals per tool, per rule kind and per caller session; the retries (the same caller repeating the same tool on the same item within
+                RETRY_WINDOW, 10 minutes, after a refusal); the tokens of refusal text plus retried requests (characters / 4, an estimate: the log keeps sizes, `req` and `rlen`, never content); and the kinds refused REPEAT_MIN (3) times or more in the
+                day, each with its line from HINTS or "needs a fix". Sent once per calendar day (the audit's 05:00 run; its 20:00 run finds it sent) to the same place as the weekly report, when there was a refusal in the last 24 hours; the background agent
+                gets it too when a repeating kind needs a fix. A line of the log from before sizes were kept counts as a call of no size. No new timer and no new config key: the days sent are kept in the weekly report's sent.json.
 
   run           the report of the last full week (Monday to Sunday) that has not been sent, sent once to `[refusal_report] to` (default: `[audit] summary_to`),
                 as a message that asks nothing (fyi). The audit's timer runs this twice a day, so the report goes out at the first run after the week ends, and
@@ -233,6 +239,7 @@ def tally(rows: list[dict[str, Any]], sent: list[dict[str, Any]] | None = None) 
     fixes: collections.Counter = collections.Counter()
     bounces: collections.Counter = collections.Counter()
     first = None
+    rows = [r for r in rows if str(r.get("tool") or "") in _cl.COUNTED]          # the log also holds every other tool's calls (reads): the weekly report counts the writes, as it always did; the daily analysis counts them all
     for r in rows:
         tool = str(r.get("tool") or "")
         calls[tool] += 1
@@ -359,6 +366,135 @@ def _write_sent(p: Path, d: dict[str, Any]) -> None:
     os.replace(tmp, p)
 
 
+# ---------------------------------------------------------------------------------------------------------------- the daily analysis
+RETRY_WINDOW = 600                       # seconds: a call by the same caller, on the same tool and item, this soon after a refusal of it is a retry
+REPEAT_MIN = 3                           # a kind refused this many times or more in the day repeats
+CHARS_PER_TOKEN = 4                      # the usual estimate: a token is about four characters
+DAY_HOURS = 24
+WEEK_DAYS = 7
+NEEDS_FIX = "needs a fix (no hint yet)"
+
+# kind of refusal → the one line a caller is told to avoid it. The keys are the kind names of call_log.kind_of (a message refusal: "message: " and its kind slug). A repeating kind with no entry is listed as needing a fix.
+HINTS: dict[str, str] = {
+    "a step left out of next with no done or dropped": "keep every step the item had in next, or mark it done or dropped; read the item first and send the whole list.",
+    "a description bullet over its limit": "keep each description bullet within its limit; split a long one into two bullets.",
+    "an outcome_text bullet over its limit": "keep each outcome_text bullet within its limit; split a long one into two bullets.",
+    "a description over its line limit": "cut the description to its line limit; move detail to the item's pages or its history.",
+    "a description that does not open with its goal": "open the description with its goal as the first bullet.",
+    "a changelog word in a description": "describe what the item is and where it lives, not what changed; changes belong in the status line.",
+    "a line of next over its limit": "keep each line of next within its limit; one step per line.",
+    "a subject over its limit": "shorten the subject to its limit; put detail in the description.",
+    "a subject without a scope prefix": "start the subject with the scope prefix of the project.",
+    "a wait on another item with no end date": "give a wait on another item an end date.",
+    "a wait set without its reason": "send wait_reason with a wait you set on your own item.",
+    "a wake in the wrong form": "write the wake as YYYY-MM-DDTHH:MM in the instance time.",
+    "an item id in the wrong form": "write the item id as the board shows it, with its prefix and number.",
+    "a hand-off with no check or date": "when you hand an item to another session, give the check or the date the hand-off is owed by.",
+    "a front agent named as mover": "name a background agent as mover, never a front agent.",
+    "a retired input": "this input is retired; read the tool text for the one that replaced it.",
+    "no sender": "pass sender= with your own session name on every write.",
+    "message: unknown-page-key": "send to a page key from the sessions or anchors listing, spelled as listed.",
+    "message: message-too-long": "keep a message within its limit; put the rest on the item and send its id.",
+}
+
+
+def _kind_of_row(r: dict[str, Any]) -> str:
+    """The kind a refused line is counted under in the daily analysis: a message by its kind slug (NO_KIND for a line from before kinds were logged), any other tool's refusal by the refusal's text (call_log.kind_of)."""
+    if str(r.get("tool") or "") == "message":
+        return "message: " + (str(r.get("kind") or "") or NO_KIND)
+    return _cl.kind_of(str(r.get("why") or ""))
+
+
+def _refusal_chars(r: dict[str, Any]) -> int:
+    """The length of a refusal's text: the whole length the log kept (`rlen`), else the clipped text of a line from before it was kept."""
+    v = r.get("rlen")
+    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else len(str(r.get("why") or ""))
+
+
+def _request_chars(r: dict[str, Any]) -> int:
+    v = r.get("req")
+    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else 0          # a line from before sizes were kept is a call of unknown size: it counts as none
+
+
+def retries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The lines that are retries: a call by the same caller (sender) of the same tool on the same item (for a refused create without one, its `call` digest) that comes within RETRY_WINDOW after a refusal of that call, went through or refused
+    (a retry that is refused again makes the next retry's anchor). A line with no caller or no item is no call to match. Request sizes are the lines' own."""
+    by: dict[tuple[str, str, str], list[dict[str, Any]]] = collections.defaultdict(list)
+    for r in rows:
+        who, call = str(r.get("sender") or ""), str(r.get("item") or "") or str(r.get("call") or "")
+        if who and call:
+            by[(who, str(r.get("tool") or ""), call)].append(r)
+    out: list[dict[str, Any]] = []
+    for got in by.values():
+        got.sort(key=lambda r: r["t"])
+        last = None          # the time of the refusal the next call would retry
+        for r in got:
+            if last is not None and 0 <= r["t"] - last <= RETRY_WINDOW:
+                out.append(r)
+            last = r["t"] if r.get("ok") is False else None
+    return out
+
+
+def daily_tally(rows: list[dict[str, Any]], again: list[dict[str, Any]]) -> dict[str, Any]:
+    """The counts of one window of call lines (every tool): {"calls", "refused", "tools": Counter of refusals by tool, "kinds": Counter by kind (`_kind_of_row`), "senders": Counter by caller,
+    "retries": the retries among `again` that fall inside the window's lines, "retry_chars": their request sizes, "refusal_chars": the refusals' text sizes}. `again` is `retries()` of a longer span, so a retry whose refusal came before the window still counts."""
+    tools: collections.Counter = collections.Counter()
+    kinds: collections.Counter = collections.Counter()
+    senders: collections.Counter = collections.Counter()
+    refused = rchars = 0
+    for r in rows:
+        if r.get("ok") is False:
+            refused += 1
+            tools[str(r.get("tool") or "?")] += 1
+            kinds[_kind_of_row(r)] += 1
+            senders[str(r.get("sender") or "-")] += 1
+            rchars += _refusal_chars(r)
+    ids = {id(r) for r in rows}
+    mine = [r for r in again if id(r) in ids]
+    return {"calls": len(rows), "refused": refused, "tools": tools, "kinds": kinds, "senders": senders,
+            "retries": len(mine), "retry_chars": sum(_request_chars(r) for r in mine), "refusal_chars": rchars}
+
+
+def collect_daily(now: float) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(the last 24 hours, the last 7 days) up to `now`, each from daily_tally."""
+    since = now - WEEK_DAYS * 86400
+    rows = list(_cl.read(since, now + 1))
+    again = retries(rows)
+    cut = now - DAY_HOURS * 3600
+    return daily_tally([r for r in rows if r["t"] >= cut], again), daily_tally(rows, again)
+
+
+def _tokens(t: dict[str, Any]) -> int:
+    return round((t["refusal_chars"] + t["retry_chars"]) / CHARS_PER_TOKEN)
+
+
+def repeating(day: dict[str, Any]) -> list[tuple[str, int, str]]:
+    """The kinds refused REPEAT_MIN times or more in the day → [(kind, n, hint or NEEDS_FIX)], the most refused first."""
+    return [(k, v, HINTS.get(k, NEEDS_FIX)) for k, v in day["kinds"].most_common() if v >= REPEAT_MIN]
+
+
+def build_daily(now: float, day: dict[str, Any], week: dict[str, Any], *, top: int = TOP_DEFAULT) -> str:
+    """The daily analysis text: the last 24 hours and the last 7 days up to `now`: calls and refusals, refusals by tool, by rule kind and by caller session, the retries, the tokens of refusal text and retried requests (characters / CHARS_PER_TOKEN: an estimate),
+    and the kinds that repeat in the day with the one-line hint for each, or "needs a fix"."""
+    at = dt.datetime.fromtimestamp(now, _cfg.tz())
+    both = (("24h", day), ("7d", week))
+    lines = [f"Refusals and retries of board tool calls, the last {DAY_HOURS} hours and the last {WEEK_DAYS} days up to {shown(at.date())} {at:%H:%M} ({_cfg.tz_abbr(at.replace(tzinfo=None))}):"]
+    lines.append("- calls refused of all calls (every tool, a read that errors counts as refused): " + " · ".join(f"{n} {w['refused']:,} of {w['calls']:,} ({_share(w['refused'], w['calls'])})" for n, w in both))
+    for label, key in (("tool", "tools"), ("rule kind", "kinds"), ("caller session", "senders")):
+        for n, w in both:
+            c = w[key]
+            lines.append(f"- refusals per {label}, {n}: " + (" · ".join(f"{k} {v:,}" for k, v in c.most_common(top)) + (f" · {sum(c.values()) - sum(v for _, v in c.most_common(top)):,} in others" if len(c) > top else "") if c else "none"))
+    lines.append(f"- retries (the same caller on the same tool and item within {RETRY_WINDOW // 60} minutes after a refusal): " + " · ".join(f"{n} {w['retries']:,} ({w['retry_chars']:,} request characters)" for n, w in both))
+    lines.append(f"- tokens spent on refusals and retries (estimate, characters / {CHARS_PER_TOKEN}: refusal text plus retried requests): " + " · ".join(f"{n} {_tokens(w):,} ({w['refusal_chars']:,} refusal characters + {w['retry_chars']:,} retried request characters)" for n, w in both))
+    rep = repeating(day)
+    if rep:
+        lines.append(f"- kinds refused {REPEAT_MIN} times or more in the last {DAY_HOURS} hours (each wants a same-day fix or hint):")
+        lines += [f"  - {k} {v:,}: {h}" for k, v, h in rep]
+    else:
+        lines.append(f"- no kind was refused {REPEAT_MIN} times or more in the last {DAY_HOURS} hours")
+    return "\n".join(lines)
+
+
 Deliver = Callable[[str, str, str], tuple[bool, str]]
 Resolve = Callable[[str], str]
 
@@ -430,9 +566,61 @@ def run(*, dry: bool = False, force: bool = False, week: dt.date | None = None, 
     return {"week": monday, "text": text, "sent": True, "why": f"sent to {cfg['to']}{also}"}
 
 
+ASK_DAILY = ("\n\nWhat I ask of you: the kinds marked 'needs a fix' repeat today and have no hint for the writers yet: file a write-time hint or a server fix for each, add its line to the hint table "
+             "(tools/refusal_report.py HINTS), or say in a line why none fits.")
+
+
+def run_daily(*, dry: bool = False, force: bool = False, now: float | None = None, cfg: dict[str, Any] | None = None, deliver: Deliver = deliver_client,
+              state: Path | None = None, deliver_agent: Deliver = deliver_agent_client, resolve: Resolve = background_agent) -> dict[str, Any]:
+    """→ {"day": the date, "text": the analysis, "sent": bool, "why": what happened}. The daily analysis of the last 24 hours and 7 days, sent once per calendar day (the first run of the day: the audit unit's 05:00 run) to the place the weekly
+    report goes ([refusal_report] to, as a message that asks nothing), and to the project's background agent too when a repeating kind has no hint. A day with no refusal in the last 24 hours sends nothing. Gated by [refusal_report] enabled like the weekly one;
+    the record of the days sent is the `days` list of the same sent.json."""
+    cfg = cfg or settings()
+    at = time.time() if now is None else now
+    today = dt.datetime.fromtimestamp(at, _cfg.tz()).date()
+    sp = state or state_file()
+    done = _read_sent(sp)
+    key = today.isoformat()
+    if key in done.get("days", []) and not force and not dry:
+        return {"day": today, "text": "", "sent": False, "why": "already sent"}
+    day, week = collect_daily(at)
+    if not day["refused"]:
+        return {"day": today, "text": "", "sent": False, "why": "no refusals in the last 24 hours"}
+    text = build_daily(at, day, week, top=cfg["top"])
+    if dry:
+        return {"day": today, "text": text, "sent": False, "why": "dry run"}
+    if not cfg["enabled"]:
+        return {"day": today, "text": text, "sent": False, "why": "not enabled ([refusal_report] enabled)"}
+    ok, said = deliver(cfg["to"], text, cfg["sender"])
+    if not ok:
+        return {"day": today, "text": text, "sent": False, "why": said}
+    also = ""
+    agent = resolve(cfg["to"]) if any(h == NEEDS_FIX for _, _, h in repeating(day)) else ""
+    if agent:
+        ok2, said2 = deliver_agent(agent, text + ASK_DAILY, cfg["sender"])
+        also = f" and to its background agent {agent}" if ok2 else f"; the message to its background agent {agent} failed: {said2}"
+    done["days"] = sorted({*done.get("days", []), key})[-60:]
+    try:
+        _write_sent(sp, done)
+    except OSError as e:
+        return {"day": today, "text": text, "sent": True, "why": f"sent to {cfg['to']}{also}, but not recorded ({e}): the next run will send it again until the record can be written"}
+    return {"day": today, "text": text, "sent": True, "why": f"sent to {cfg['to']}{also}"}
+
+
+def main_daily(dry: bool, force: bool) -> int:
+    res = run_daily(dry=dry, force=force)
+    if res["text"]:
+        print(res["text"])
+    print(f"refusal report (daily): {res['why']} ({res['day']})")
+    return 0 if res["sent"] or res["why"] in ("dry run", "already sent", "no refusals in the last 24 hours") or res["why"].startswith("not enabled") else 1
+
+
 def main(argv: list[str]) -> int:
     a = list(argv)
     if a and a[0] == "run":
+        a = a[1:]
+    only_daily = bool(a) and a[0] == "daily"
+    if only_daily:
         a = a[1:]
     dry, force, week = False, False, None
     while a:
@@ -441,20 +629,27 @@ def main(argv: list[str]) -> int:
             dry = True
         elif k == "--force":
             force = True
-        elif k == "--week" and a:
+        elif k == "--week" and a and not only_daily:
             try:
                 week = dt.date.fromisoformat(a.pop(0))
             except ValueError:
                 print("refusal report: --week takes a date, YYYY-MM-DD", file=sys.stderr)
                 return 2
         else:
-            print("usage: refusal_report.py run [--dry-run] [--force] [--week YYYY-MM-DD]", file=sys.stderr)
+            print("usage: refusal_report.py run [--dry-run] [--force] [--week YYYY-MM-DD]   |   refusal_report.py daily [--dry-run] [--force]", file=sys.stderr)
             return 2
+    if only_daily:
+        return main_daily(dry, force)
     res = run(dry=dry, force=force, week=week)
     if res["text"]:
         print(res["text"])
     print(f"refusal report: {res['why']}" + (f" (week of {res['week']})" if res.get("week") else ""))
-    return 0 if res["sent"] or res["why"] in ("dry run", "already sent", "no call records for the week") or res["why"].startswith("not enabled") else 1
+    rc = 0 if res["sent"] or res["why"] in ("dry run", "already sent", "no call records for the week") or res["why"].startswith("not enabled") else 1
+    if week is not None:          # a week asked for by name is the weekly report alone
+        return rc
+    print()
+    rc_daily = main_daily(dry, force)          # the daily analysis follows the weekly count in the same run, each sent once (the audit's 05:00 run sends it; its 20:00 run finds it sent)
+    return rc or rc_daily
 
 
 if __name__ == "__main__":
