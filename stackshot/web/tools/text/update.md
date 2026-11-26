@@ -241,7 +241,7 @@ open question; a non-empty list still takes 2 to 6 entries, exactly one recommen
 picking an option, the server clears the ask and the options itself and keeps his answer with the option's label and
 line. A client whose tool has no ask parameter refreshes the ask by writing the new line, in the ask's form, as the
 first line of next. When this work settles or changes a premise of another open item, update that one too, in the same
-turn. item_id: board#N; a bare number N is read as board#N, except in an update that closes the item. until takes YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, {{TZ_ABBR}}; a full ISO time with
+turn. item_id: board#N; a bare number N or #N is read as board#N (the reply says so), in a close too; the same for after and superseded_by. until takes YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, {{TZ_ABBR}}; a full ISO time with
 seconds or a UTC offset is converted to that minute in {{TZ_ABBR}}, and the reply says so. At that moment the server
 tells the item's mover and the sessions in its needs once and drops the date. A doing item whose date is over an hour away and whose every open step waits for a later date ("after Mar 2", "until
 Mar 2"; a deadline such as "by Mar 2" or "due Mar 2" is no wait) is listed as waiting, and the audit asks why the step

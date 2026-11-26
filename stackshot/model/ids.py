@@ -1,4 +1,4 @@
-"""ids.py: item ids and the places an id is read from: an id as a session writes it → the store's (`_norm_id`, `_bare_id_ok`, `_GID`), an item's address on the board (`_ITEM_KEY`, `_ITEM_PATH`, `_item_gid`),
+"""ids.py: item ids and the places an id is read from: an id as a session writes it → the store's (`_norm_id`, `_GID`), an item's address on the board (`_ITEM_KEY`, `_ITEM_PATH`, `_item_gid`),
 and the ids named in a free text: the matchers that blank what is not plain text before an id is read (`_CODE_FENCE`, `_CODE_SPAN`, `_QUOTED`, the merge queue's group numbers `_MQ_GROUP` with `_without_mq_groups`,
 and `_plain_text`), and the matcher of an id written as a plain word (`_ID_FORM`, `_ID_END`, `_ITEM_REF`).
 
@@ -31,22 +31,29 @@ def _without_mq_groups(text: str) -> str:
     return _MQ_GROUP.sub(lambda m: re.sub(r"[^\n]", "\0", m.group(0)), str(text or ""))
 
 
-def _bare_id_ok(status: str | None) -> bool:
-    """An update reads a bare item number unless it closes the item (status=completed): a close takes the same shown id the complete tool does."""
-    return str(status or "").strip().lower() != "completed"
+def _read_note(given: str, gid: str) -> None:
+    """Note that the id `given` was read as the item `gid` ("read N as board#N"). A call counts a kind of fix once, so a second id read in the same call (an item_id and a superseded_by) joins the one line
+    ("read N as board#N and M as board#M"), and the same id read again (the write reads its id at several steps) adds nothing."""
+    part = f"{given} as {_gh.shown(gid)}"
+    parts = [x for x in _calls.unfix("item-id").removeprefix("read ").split(" and ") if x]
+    if part not in parts:
+        parts.append(part)
+    _calls.fixed("item-id", "read " + " and ".join(parts))
 
 
 def _norm_id(item_id: str | int, bare: bool = False) -> str:
     """An id as a session writes it → the store's: a store id, c1; board#N and #7 → the issue-numbered item (ghsync.norm);
     board-tmp-<machine>#3 and board-tmp-<machine>-3 → l3, the temporary id of an item created while GitHub was down or the hour's writes were spent; a
-    migrated or re-keyed item's old id → its id now (the alias map). `bare=True` (the id of get, confirm and an update that does not close, the item a call is about) also reads a plain number N
-    as board#N and notes the correction; anywhere else (complete, an update with status=completed, after, items, a link) a bare number stays a bad id, since a close or a link is not undone by a resend."""
+    migrated or re-keyed item's old id → its id now (the alias map). `bare=True` (the id a tool call is about: get, confirm, complete, an update, an anchor's items, after, superseded_by) also reads a plain number N
+    or #N as board#N and notes what it read ("read N as board#N"); the passes that read ids from stored data keep the default, where a bare number is a bad id."""
     s = str(item_id).strip().lower()
     g = _gh.norm(s)
     if not g and bare and re.fullmatch(r"[0-9]+", s):            # a bare number is the issue number of a board item: board#N (ASCII digits only: int() takes them all)
         g = _gh.norm(f"board#{int(s)}")
         if g:
-            _calls.fixed("item-id", f"item {s} read as {_gh.shown(g)}")
+            _read_note(s, g)
+    elif g and bare and s.startswith("#"):          # #N is the same item: say what it was read as, as for a plain number
+        _read_note(s, g)
     if not g:
         m = _GID.match(s)
         if not m:

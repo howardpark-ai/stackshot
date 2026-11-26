@@ -17,7 +17,7 @@ silent and then every 6 hours; it is the server's own record of what it saw, not
 write by the mover.
 
 ## param item_id
-An item id (board#N; a bare number N is read as board#N; <letter><n> for an older item), or a notice id: the six hex
+An item id (board#N; a bare number N or #N is read as board#N; <letter><n> for an older item), or a notice id: the six hex
 characters a message to a project returns ("notice a1b2c3"), which shows the router's ruling of that notice.
 
 ## description get
