@@ -478,25 +478,27 @@ def date_only_wait(it: dict[str, Any], meta: dict[str, Any], mover: str, after_o
 
 def wait_end_gaps(gid: str, it: dict[str, Any], meta: dict[str, Any], mover: str, after_open: Callable[[dict[str, Any]], Any], by_shown: dict[str, str], items: dict[str, dict[str, Any]],
                   now: float, facts: Any) -> tuple[list[Any], set[str]]:
-    """The wait-end rule (wait_end.py) for one open item: the lines of its next that wait in words for something nothing tells the item has happened, and a stored wait no watcher can end → [wait_end.Gap]. Reads only.
-    Nothing for an item the owner or no session moves, a dead one, or with `[audit] wait_end = "off"`; a gap the mover sent back or the server fixed already (server_fixes.WAIT_END, declined or marked: the
+    """The wait-end rule (wait_end.py) for one open item: the lines of its next that wait in words for something nothing tells the item has happened, and a stored wait no watcher can end, one nothing wakes, or one
+    whose date passed → [wait_end.Gap]. Reads only. Nothing for a dead item or with `[audit] wait_end = "off"`; of an item the owner or no session moves, only a waiting one that nothing wakes or whose date passed
+    (its finding is routed as one that asks nothing of him); a gap the mover sent back or the server fixed already (server_fixes.WAIT_END, declined or marked: the
     same open line after the wait ended is not asked about again) is left out. `facts`: the wait_end.Facts of this pass, built once by the caller. → (the gaps, the lines of
     the steps the rule handled already: the generic reads-as-wait finding stays quiet about those lines and no others). One item's failure is printed and the item skipped."""
     from stackshot.waits import server_fixes as _sf  # noqa: PLC0415
-    if _cfg.audit_wait_end() == "off" or _no_session(mover) or it.get("status") != "open":
+    if _cfg.audit_wait_end() == "off" or it.get("status") != "open":
         return [], set()
+    nobody = _no_session(mover)
     try:
         mod = _model.derive(it, now, after_open)
     except Exception:  # noqa: BLE001  (an item the model cannot read has no wait to judge)
         return [], set()
-    if mod.state not in (_model.ALIVE, _model.WAITING):
+    if mod.state not in (_model.ALIVE, _model.WAITING) or (nobody and mod.state != _model.WAITING):
         return [], set()
     def open_item(ref: str) -> str:
         g = by_shown.get(str(ref))
         return g if g and (items.get(g) or {}).get("status") == "open" else ""
     try:
         gaps = _we.item_gaps(gid, meta, mover, "alive" if mod.state == _model.ALIVE else "waiting", facts, open_item, lambda a, b: _norm(a) == _norm(b), now,
-                             pending=lambda tok: _sf.declined(meta, _sf.WAIT_END, tok) or _sf.marked(meta, _sf.WAIT_END, tok))
+                             pending=lambda tok: _sf.declined(meta, _sf.WAIT_END, tok) or _sf.marked(meta, _sf.WAIT_END, tok), open_after=bool(after_open(it)), no_session=nobody)
         return gaps, handled_lines(meta)
     except Exception as e:  # noqa: BLE001  — one item's failure never stops the filing pass
         print(f"wait end: {gid} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -559,6 +561,7 @@ def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], n
             continue
         it, meta, after_open, mover = _item_view(items, gid)
         last = _br._last_write(it)
+        first = len(findings)
         se = check_stuck_elsewhere(it, meta, mover, known, last, after_open, now)
         if se:
             nm, line = se
@@ -583,10 +586,14 @@ def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], n
         asks = [g for g in wgaps if g.kind != _we.EVENT]
         if asks:
             fixable = wait_mode == "fix" and bool(asks[0].plan)
-            if not (fixable and now - last < _cfg.audit_wait_end_settle_minutes() * 60):      # a mover still at work on its next is left alone before the pass fixes anything
+            if not ((fixable or asks[0].fix) and now - last < _cfg.audit_wait_end_settle_minutes() * 60):      # a mover still at work on the item is left alone before the pass fixes it, or asks about a wait nothing ends
                 more = f" (and {len(asks) - 1} more: {'; '.join(_clip(g.evidence, 70) for g in asks[1:3])})" if len(asks) > 1 else ""
-                add(gid, meta, mover, "wait-end", asks[0].evidence + more)
-                findings[-1]["gap"] = asks[0] if fixable else None
+                said = next((f for f in findings[first:] if f["category"] == "board checks" and f["detail"].startswith("arbitrary-hold: ")), None) if asks[0].fix else None
+                if said:      # the arbitrary-hold check already says nothing holds this item: one line about it, which also names the write
+                    said["fix"] = f"{asks[0].fix}, or {said['fix']}"
+                else:
+                    add(gid, meta, mover, "wait-end", asks[0].evidence + more, fix=asks[0].fix)
+                    findings[-1]["gap"] = asks[0] if fixable else None
         if spoken:
             hits = [h for h in hits if _line_key(h[0]) not in spoken]       # the lines the rule words (or handled: fixed by the server, sent back by the mover): a second message for them would repeat it
             rest = "\n".join(ln for ln in str(meta.get("next") or "").splitlines() if _line_key(ln) not in spoken)

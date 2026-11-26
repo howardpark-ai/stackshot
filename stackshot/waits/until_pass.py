@@ -8,6 +8,7 @@ What a stored item gets (`plan_for`; the server's `one` refuses any item whose r
   ask_by, wait_kind    until = the ask-by day (a relay), or the earlier of ask_by and wake (an anchor, item or event wait); the kind stays
   ask_by / wake beside an after link with no kind    until = the date, wait_kind = item (as create and update store it)
   a bare wake (no hold, no kind, no wait_basis, no after link)    kept as it is: it is a backstop (a hand-off's, or one stored before until), not a wait, and as `until` it would park the item
+  an ask_by with nothing beside it (no wake either) on an item that waits    kept as it is and listed: no watcher and no wake pass reads that date, so nothing wakes the item until someone re-saves it with a date
   an item with no old date, or one that stores an until and an old date both    left as it is (the second is listed)
   a date the old code did not act on (an ask_by the old watchers did not read: they read it only for a relay, or as the backstop of an item wait, or of an anchor or event wait they could end, so one beside no kind, a time kind, an anchor wait with no anchor or an event wait with a bad phrase was never read; or a wake with no hold on a wait the watchers did not own (no kind, an anchor wait with no anchor, an event wait with a bad phrase), which only got a notice)
                        As until the watchers act on it. A date already past is NOT migrated (it would wake the item on the next tick): it is listed as "already due" for a person to re-save with the date meant;
@@ -28,6 +29,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot.model import ids as _ids
 from stackshot.model import migration as _mig
+from stackshot.model import model as _model
 from stackshot.waits import stall as _stall
 from stackshot.waits import until_write as _uw
 from stackshot.waits import waiting as _wt
@@ -62,11 +64,11 @@ def due_why(how: str) -> str:
     return (f"already due: not migrated (its date is past and was {how}: as until the watchers would act on it at once); re-save it with the date you mean")
 
 
-def plan_for(meta: dict[str, Any], keeps_hold: bool = False) -> dict[str, Any]:
+def plan_for(meta: dict[str, Any], keeps_hold: bool = False, waiting: bool = False) -> dict[str, Any]:
     """The plan for one open item → {"edits": {key: new value, None drops}, "form": the old fields in words, "new": what the wait is stored as, "kept": why it is left (""), "listed": True when the kept item is
     to be listed for a person, "until": the date it is stored as, "source": "wake" | "ask_by" (which old field the date comes from; the old
     wake pass read `wake`, nothing read an ask_by that stood without a kind)}.
-    `keeps_hold`: the hold waits on an anchor scoped to the item or on a pane recycle (the flag stays). Pure. Whether the date is one the watchers newly act on, and whether it is already due, is the server's
+    `keeps_hold`: the hold waits on an anchor scoped to the item or on a pane recycle (the flag stays). `waiting`: the item reads as waiting (the server's model reading), so a bare ask_by with no wake is listed. Pure. Whether the date is one the watchers newly act on, and whether it is already due, is the server's
     to say (`one`): it needs the watched reading before and after."""
     form = old_form(meta)
     out: dict[str, Any] = {"edits": {}, "form": form, "new": "", "kept": "", "listed": False, "until": "", "source": ""}
@@ -78,6 +80,9 @@ def plan_for(meta: dict[str, Any], keeps_hold: bool = False) -> dict[str, Any]:
         return out
     if _wt.stored_until(meta):
         out.update(kept="an until and an old date field are both stored: left as it is", listed=True)
+        return out
+    if _uw.is_bare(meta) and waiting and not _dated(meta.get("wake")):
+        out.update(kept="a bare ask_by on a waiting item: nothing reads this date, so nothing wakes the item. Kept as it is; re-save it with update(until=<date>) and what the item waits on", listed=True)
         return out
     if _uw.is_bare(meta):
         bare = {"wake": "a bare wake", "ask_by": "a bare ask_by", "wake + ask_by": "a bare wake and ask_by"}.get(form, "a bare date")
@@ -235,7 +240,10 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
             h0 = S._stamp_sha(data)
             meta = raw["metadata"]
             keeps = bool({"anchor", "recycle"} & set(S._wait_fixes._hold_held_by(gid, meta))) if meta.get("hold") else False
-            plan = plan_for(meta, keeps)
+            seen = {**copy.deepcopy(raw), "gid": gid}
+            S._legacy_hold(seen)
+            S._legacy_needs(seen)                    # the item as the board reads it (as `reading` does)
+            plan = plan_for(meta, keeps, waiting=S._item_read._model_of(seen).state == _model.WAITING)
             if not plan["edits"]:
                 return {"item": shown, "action": "kept" if plan["listed"] else "same", "why": plan["kept"], "form": plan["form"], "new": "", "before": {}, "after": {}, "due": False, "newly": "", "how": "", "differs": "", "sha256_before": h0}
             plan = with_history(meta, plan, time.time())

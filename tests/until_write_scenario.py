@@ -10,6 +10,8 @@ kind and no date is never refused (it takes a date); the server clears `until` a
   3  wait ends     the wake pass, the release of an `after` link, a clear_wait write and the watchers' end_wait clear `until` and `wait_kind` together; an item that stores the old fields keeps its kind
   4  readers       the four readers that read the old fields only: the window note prints the date it stands for; clear_hold on an item that stores only until drops the wait it stood on (ask_by, the
                    post-wake mover, the watcher stamps) and clear_wake keeps a relay's until; the basis is read against the until; the backstop gap reads until (the wait_end suite holds the write)
+  6  old dates     a write that sets a new end date replaces what the item stored: a past ask_by with no wait_kind never wakes the item or hands it over in that write or later (after + until on a held item,
+                   anchor wait + until), a hand-off write cannot leave an ask_by that nothing reads, and the guard with no end counts no ask_by without a wait_kind on a write that sets a wait
 
     tests/run-suite until_write        -> exit 0 / 1"""
 import datetime as dt, json, logging, os, pathlib, re, sys, time
@@ -437,6 +439,175 @@ upd14 = _wt_update._UPDATE_DESC + _wt_update._WAIT_FORM
 check("5.14 the update description says so: a bare date within the cap drops a basis, a park of the cap's days or less takes his recorded words, and a date does not leave an item active as a reminder",
       "A bare date within the cap is a wait on its own" in upd14 and "a basis sent with such a date is dropped, the reply saying so" in upd14 and "a date does not leave the item active as a reminder" in upd14 and not _re14.search(r"\bhold=true\b|\bask_by=", upd14), None)
 check("5.14 docs/item-model.md names until as the one date of a wait", "stored as `until`" in (root14 / "docs" / "item-model.md").read_text(encoding="utf-8"), None)
+
+# ================================================================ 6. a write that sets a new end date replaces what the item stored: an old date never fires on it
+AURL6 = "https://github.com/o/r/pull/5"
+_wt_anchors.stackshot_anchors(project="projects/alpha", add=[AURL6])
+PAST6, SOON6, NEW6 = w(-26), w(2), w(5)
+def tried6(i, **kw):
+    try:
+        return bupd(i, **kw)
+    except Exception as e_:
+        return "REFUSED " + str(e_)
+def quiet6(i):
+    """both passes run now: nothing woke the item, nobody was handed it, and it still waits until the new date"""
+    watching_svc.watch_pass(); wakes_svc.wake_pass()
+    m = mt(i)
+    return "woke" not in m and "handoff" not in m and W.stored_until(m) == NEW6
+item(601, needs=[BACK])
+# a held item with a wake ahead and a past ask_by, no kind; the write gives it a wait on an item
+for gid6, extra6 in ((602, dict(wait_kind="item")), (603, {})):
+    item(gid6, needs=[], hold=True, hold_set=now0 - DAY, wake=SOON6, ask_by=PAST6)
+    out6 = tried6(gid6, after=["a601"], until=NEW6, **extra6)
+    m6 = mt(gid6)
+    check(f"6 a held item with a past ask_by given an item wait with a new until ({gid6}) stores that date and neither old one",
+          W.stored_until(m6) == NEW6 and m6.get("wait_kind") == "item" and no_old(m6) and "came" not in out6, (out6[-500:], m6))
+    check(f"6 ...and neither pass wakes it or hands it over ({gid6})", quiet6(gid6), mt(gid6))
+# a past ask_by, no kind; the write gives it an anchor wait, no needs passed
+for gid6, stored6 in ((604, dict(needs=["external"])), (605, dict(needs=[])), (606, dict(needs=[], hold=True, hold_set=now0 - DAY, wake=SOON6))):
+    item(gid6, ask_by=PAST6, **stored6)
+    out6 = tried6(gid6, wait_kind="anchor", wait_anchor=AURL6, wait_event="PR merged", until=NEW6)
+    m6 = mt(gid6)
+    check(f"6 an item with a past ask_by given an anchor wait with a new until ({gid6}) stores that date and neither old one",
+          W.stored_until(m6) == NEW6 and m6.get("wait_kind") == "anchor" and no_old(m6) and "stayed silent" not in out6, (out6[-500:], m6))
+    check(f"6 ...and neither pass wakes it or hands it over ({gid6})", quiet6(gid6), mt(gid6))
+# the same with a stale date in the other field: it does not outlive a new relay or event date
+for gid6, kw6 in ((607, dict(wait_kind="relay", wait_event="the vendor's reply")), (608, dict(wait_kind="event", wait_event="recycle", post_wake_mover=BACK))):
+    item(gid6, needs=[BACK], wake=PAST6)
+    out6 = tried6(gid6, until=NEW6, **kw6)
+    m6 = mt(gid6)
+    check(f"6 a past bare wake does not outlive a new {kw6['wait_kind']} wait's date", W.stored_until(m6) == NEW6 and no_old(m6) and quiet6(gid6), (out6[-500:], m6))
+# an item that stores both until and the old fields: the write's date is the one that stands
+item(609, needs=[BACK], until=w(3), wait_kind="time", wake=PAST6, ask_by=PAST6)
+out6 = tried6(609, until=NEW6, wait_kind="relay", wait_event="the vendor's reply")
+check("6 an old field stored beside an until is dropped by a write of a new date", W.stored_until(mt(609)) == NEW6 and no_old(mt(609)) and quiet6(609), (out6[-500:], mt(609)))
+# a write that sets a wait with no date: a past ask_by the item never acted on is not its date
+item(610, needs=["external"], ask_by=PAST6)
+out6 = tried6(610, wait_kind="relay", wait_event="the vendor's reply")
+check("6 a wait set with no date takes a new one, never the past ask_by the item held with no kind", str(W.stored_until(mt(610)) or "") >= w(1) and no_old(mt(610)) and "came with no date" in out6, (out6[-500:], mt(610)))
+watching_svc.watch_pass(); wakes_svc.wake_pass()
+check("6 ...and neither pass wakes it", "woke" not in mt(610) and mt(610).get("wait_kind") == "relay", mt(610))
+item(611, needs=[], ask_by=PAST6); item(618, needs=[])
+out6, plain6 = tried6(611, after=["a601"]), tried6(618, after=["a601"])
+watching_svc.watch_pass(); wakes_svc.wake_pass()
+check("6 an after link alone on such an item is judged as on an item with no date (the past ask_by is no end for it)", out6.startswith("REFUSED") and "has no end" in out6 and plain6.startswith("REFUSED") and "has no end" in plain6 and "woke" not in mt(611), (out6[-300:], plain6[-300:], mt(611)))
+item(612, needs=["external"], ask_by=w(3))
+out6 = tried6(612, wait_kind="relay", wait_event="the vendor's reply")
+check("6 an ask_by still ahead stays the wait's date", (W.stored_until(mt(612)) or mt(612).get("ask_by")) == w(3), (out6[-500:], mt(612)))
+item(615, needs=[BACK], until=w(3), wait_kind="anchor", wait_anchor=AURL6, wait_event="PR merged", ask_by=PAST6, wake=PAST6)
+out6 = tried6(615, next=f"{BACK}: watch the pull request")
+check("6 an old field stored beside an until never becomes the until on an unrelated write", W.stored_until(mt(615)) == w(3) and no_old(mt(615)), (out6[-500:], mt(615)))
+item(616, needs=["external"], ask_by=PAST6)
+out6 = tried6(616, waits=[{"kind": "item", "after": "a601"}, {"kind": "anchor", "anchor": AURL6, "event": "PR merged"}])
+watching_svc.watch_pass(); wakes_svc.wake_pass()
+check("6 a list with no backstop day never takes the past ask_by as its backstop", out6.startswith("REFUSED") and "needs its backstop day" in out6 and "woke" not in mt(616), (out6[-700:], mt(616)))
+item(617, needs=["external"], ask_by=w(2))
+out6 = tried6(617, until=w(5), wait_kind="anchor", wait_anchor=AURL6, wait_event="PR merged")
+check("6 an ask_by still ahead is replaced by a later new date, not kept as the earlier end", W.stored_until(mt(617)) == w(5) and no_old(mt(617)), (out6[-500:], mt(617)))
+# an unrelated write leaves the stored date as it is
+item(613, needs=["external"], ask_by=PAST6)
+out6 = tried6(613, next=f"{BACK}: chase the vendor")
+check("6 a write that sets no wait leaves a bare ask_by as stored", mt(613).get("ask_by") == PAST6 and not W.stored_until(mt(613)), (out6[-500:], mt(613)))
+# clear_wait with a new date in the same write stores no ask_by without a kind
+item(614, needs=[BACK], wait_kind="relay", wait_event="the vendor's reply", until=w(4))
+out6 = tried6(614, clear_wait=True, until=w(3), mover=BACK)
+m6 = mt(614)
+check("6 clear_wait with an until on a relay wait is refused, so it leaves no ask_by without a kind", out6.startswith("REFUSED") and m6.get("wait_kind") == "relay" and not m6.get("ask_by"), (out6[-700:], m6))
+
+# no new write leaves a waiting item that nothing can wake (the two live shapes: an ask_by with no wait_kind, needs external)
+def stuck6(i):
+    """the item reads as waiting, no watcher owns its wait, and the wake pass has no date for it"""
+    it = rd(i)
+    return MODEL.derive({**it, "gid": f"a{i}"}).state == MODEL.WAITING and not WK.watches(it) and not W.wake_value(it["metadata"])
+item(620, needs=["external"], ask_by=PAST6, wait_event="the vendor's reply")
+item(621, needs=["external"], ask_by=PAST6, wait_anchor=AURL6, wait_event="PR merged")
+check("6 the two live shapes are waiting items nothing can wake", stuck6(620) and stuck6(621), (mt(620), mt(621)))
+SHAPES6 = (("ask_by alone", {}), ("ask_by with needs external", dict(needs=["external"])), ("ask_by with a hand-off by mover", dict(needs=["external"], mover="home-other")),
+           ("ask_by with a hand-off by next", dict(needs=["external"], next="home-other: chase the vendor")), ("ask_by with the relay words", dict(needs=["external"], wait_event="the vendor's reply")),
+           ("ask_by with the anchor", dict(needs=["external"], wait_anchor=AURL6, wait_event="PR merged")), ("ask_by with clear_wait", dict(clear_wait=True)),
+           ("ask_by with a hand-off by mover and the relay words", dict(needs=["external"], mover="home-other", wait_event="the vendor's reply", check="item_closed a601")),
+           ("ask_by with a hand-off by next and the relay words", dict(needs=["external"], next="home-other: chase the vendor", wait_event="the vendor's reply", check="item_closed a601")),
+           ("ask_by with a hand-off by next and no needs", dict(next="home-other: chase the vendor", check="item_closed a601")),
+           ("until with a hand-off by mover", dict(needs=["external"], mover="home-other")),
+           ("until with a hand-off by mover and the relay words", dict(needs=["external"], mover="home-other", wait_event="the vendor's reply", check="item_closed a601")),
+           ("ask_by with a hand-off by next and the anchor", dict(needs=["external"], next="home-other: watch it", wait_anchor=AURL6, wait_event="PR merged", check="item_closed a601")),
+           ("until with a hand-off by next and the relay words", dict(needs=["external"], next="home-other: chase the vendor", wait_event="the vendor's reply", check="item_closed a601")),
+           ("until with a hand-off by next and the anchor", dict(needs=["external"], next="home-other: watch it", wait_anchor=AURL6, wait_event="PR merged", check="item_closed a601")))
+for n6, (label6, kw6) in enumerate(SHAPES6):
+    gid6 = 630 + n6
+    item(gid6, needs=[BACK])
+    date6 = dict(until=w(3)) if label6.startswith("until") else dict(ask_by=w(3))
+    out6 = tried6(gid6, **date6, **kw6)
+    check(f"6 with the old parameters accepted, {label6} leaves no waiting item that nothing can wake", not stuck6(gid6), (out6[-600:], mt(gid6)))
+    if label6 != "ask_by with a hand-off by next and no needs":
+        check(f"6 ...and no ask_by stored where nothing reads it ({label6})", not (mt(gid6).get("ask_by") and not mt(gid6).get("wait_kind")), (out6[-600:], mt(gid6)))
+    if label6 == "ask_by with a hand-off by next and no needs":
+        check("6 ...a hand-off that leaves the item active keeps its ask_by backstop as given", not out6.startswith("REFUSED") and mt(gid6).get("ask_by") == w(3) and MODEL.derive({**rd(gid6), "gid": f"a{gid6}"}).state == MODEL.ALIVE and f"stored as ask_by={w(3)}" in out6, (out6[-600:], mt(gid6)))
+    if label6 in ("ask_by alone", "ask_by with a hand-off by next and the relay words"):
+        check(f"6 ...the write goes through with its date stored where it is read ({label6})", not out6.startswith("REFUSED") and w(3) in (mt(gid6).get("until"), mt(gid6).get("wake")), (out6[-600:], mt(gid6)))
+        if "hand-off" in label6:
+            check(f"6 ...and the reply names the field the hand-off's date went into ({label6})", f"stored as wake={w(3)}" in out6 and "stored as ask_by" not in out6, out6[-600:])
+item(721, needs=[BACK])
+out6 = tried6(721, ask_by=w(3), needs=["external"], wait_event="the vendor's reply")
+check("6 an ask_by that makes a relay wait on a clean item is taken as its end and stored as until", not out6.startswith("REFUSED") and not stuck6(721) and mt(721).get("until") == w(3) and not mt(721).get("ask_by"), (out6[-600:], mt(721)))
+item(722, needs=["external"], wait_event="the vendor's reply")
+out6 = tried6(722, until=w(4), wait_event="another reply")
+check("6 an until with no kind on a relay-like item that stored no ask_by is refused as before", out6.startswith("REFUSED") and "has no end" in out6, (out6[-600:], mt(722)))
+_wait_fixes_svc._wait_alias_until = lambda: dt.date(2020, 1, 1)
+try:
+    for n6, (label6, kw6) in enumerate(SHAPES6):
+        if label6.startswith("until"):
+            continue
+        gid6 = 650 + n6
+        item(gid6, needs=[BACK])
+        out6 = tried6(gid6, ask_by=w(3), **kw6)
+        check(f"6 after the window, {label6} is refused and nothing is written", out6.startswith("REFUSED") and "not a parameter any more" in out6 and not mt(gid6).get("ask_by"), (out6[-600:], mt(gid6)))
+    refused("6 after the window a create with ask_by alone is refused", lambda: create_svc.create_item(subject="[home] old name late", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the reply", needs=["external"], ask_by=w(4), request_id="uw-create-late-1"), "not a parameter any more")
+finally:
+    _wait_fixes_svc._wait_alias_until = real_gate
+try:
+    g6, out6 = create_svc.create_item(subject="[home] old name early", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the reply", needs=["external"], ask_by=w(4), request_id="uw-create-early-1")
+    it6 = _service_store._load(g6)
+    ok6, got6 = bool(WK.watches(it6) or W.wake_value(it6["metadata"])), it6["metadata"]
+except Exception as e_:
+    ok6, got6 = True, str(e_)
+check("6 with the old parameters accepted, a create with ask_by alone stores a wait something can end, or is refused", ok6, got6)
+
+# the no-end guard: an ask_by with no wait_kind is no end for a write that makes or restates the wait, and stays one for a write that sets nothing of it
+from stackshot.web.tools import complete as _wt_complete, message as _wt_message
+LIVE6 = dict(relay=dict(needs=["external"], wait_event="the vendor's reply"), anchor=dict(needs=["external"], wait_anchor=AURL6, wait_event="PR merged"))
+n6 = 700
+for shape6, stored6 in LIVE6.items():
+    for when6, day6 in (("past", PAST6), ("ahead", w(3))):
+        n6 += 1; item(n6, ask_by=day6, **stored6)
+        was6 = mt(n6)
+        for label6, kw6 in (("next", dict(next=f"{BACK}: chase the vendor")), ("the description", dict(description="- Goal: the thing works\n- Problem: the thing is still open\n- one more fact")), ("the subject", dict(subject=f"[home] item {n6} renamed")),
+                            ("the priority", dict(priority="p1")), ("the deadline", dict(due=w(9))), ("the mover", dict(mover="home-other"))):
+            out6 = tried6(n6, **kw6)
+            check(f"6 {shape6}-like item with an ask_by {when6} and no kind: a write of {label6} goes through", not out6.startswith("REFUSED") and mt(n6).get("ask_by") == day6 and not mt(n6).get("wait_kind"), (out6[-500:], mt(n6)))
+        try:
+            _wt_complete.stackshot_confirm(f"a{n6}", sender=BACK); c6 = ""
+        except Exception as e_:
+            c6 = str(e_)
+        try:
+            c6m = _wt_message.stackshot_message(BACK, f"a{n6}: is the vendor's reply in?", sender="home-other")
+        except Exception as e_:
+            c6m = str(e_)
+        check(f"6 ...a confirm and a message that names it are not refused by the guard ({n6})", not c6 and "has no end" not in c6m and mt(n6).get("ask_by") == day6, (c6, c6m[-400:], mt(n6)))
+        for label6, kw6 in (("needs", dict(needs=["external"])), ("the event", dict(wait_event="another reply"))):
+            out6 = tried6(n6, **kw6)
+            check(f"6 ...a write of {label6} alone restates the wait and is refused for its missing end ({n6}), naming until", out6.startswith("REFUSED") and "has no end" in out6 and "until=" in out6, (out6[-500:], mt(n6)))
+        out6 = tried6(n6, until=w(4), wait_event="another reply")
+        check(f"6 ...the same write with an until repairs it ({n6}): a wait something can end, no ask_by left over", not out6.startswith("REFUSED") and not stuck6(n6) and W.stored_until(mt(n6)) == w(4) and no_old(mt(n6)), (out6[-500:], mt(n6)))
+item(720, needs=["external"], ask_by=w(3), wait_event="the vendor's reply")
+out6 = tried6(720, wait_kind="relay")
+check("6 a kind given to an item with an ask_by ahead takes that date as its end", not out6.startswith("REFUSED") and WK.watches(rd(720)) and (W.stored_until(mt(720)) or mt(720).get("ask_by")) == w(3), (out6[-500:], mt(720)))
+
+check("6 a passed ask_by is dead only with no stored kind: a kind's own date, a date ahead and no date are not",
+      [WK.dead_ask_by(m_, time.time()) for m_ in (dict(ask_by=PAST6), dict(ask_by=PAST6, wait_kind="relay"), dict(ask_by=PAST6, wait_kind="event"), dict(ask_by=w(3)), {})] == [True, False, False, False, False])
+item(721, needs=["external"], ask_by=PAST6, wait_kind="relay", wait_event="the vendor's reply")
+out6 = tried6(721, wait_event="another reply")
+check("6 a stored kind's passed date is not dropped by a write that restates its wait", mt(721).get("ask_by") == PAST6 or W.stored_until(mt(721)) == PAST6, (out6[-500:], mt(721)))
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": until write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
