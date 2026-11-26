@@ -162,13 +162,18 @@ it leaves out an item that names no session. This read has no key and takes no q
 
 - **Auth.** `Authorization: Bearer <machine token>`, as for every read of `/client`: no token, an unknown or revoked token, a Basic credential or the token in the query string is 401. A caller's pass (docs, *A caller's own key*)
   opens only the form's calls and is 401 here. A read-only standby copy serves it like any other read.
-- **Shape.** 200 `{"items": [{"shown", "subject", "url", "ask", "updated"}], "group": {"en", "ko"}}`, `Cache-Control: no-store`. `shown` is the id as a person reads it (`board#N`); `subject` is the item's subject; `url` is the item's page under
+- **Shape.** 200 `{"items": [{"shown", "subject", "url", "ask", "updated", "scope"}], "group": {"en", "ko"}}`, `Cache-Control: no-store`. `shown` is the id as a person reads it (`board#N`); `subject` is the item's subject; `url` is the item's page under
   the instance's board address (`/items/<n>` alone when the instance has none); `ask` is the open ask line of a decision the owner is asked, and the empty string for an item with none (a step of his, or a decision whose ask is no longer open);
   `updated` is the item's last write, in epoch seconds (the item file's time for an old item that stores none). An empty group is `{"items": [], "group": {...}}`, never an error.
   The answer also carries `"group": {"en": "<name>", "ko": "<name>"}`, the group's own name: the heading the home page draws over the list (the string table's `state.you`, read through the same lookup the page uses), once for each language
   of the table (`i18n.LANGS`: today `en` and `ko`). The English text is the catalog's; the second language's is the one in the instance's locale folder (`[ui] locale_dir`), so no translation is in the repository. An install with
   no catalog for a language gets the table's own fallback for it, which is the English text: `ko` is present and equal to `en`, never absent, so a client reads one shape and can tell the two apart by comparing them. `group` is
   added to the answer, and every other key, value and the order of `items` are as they were.
+- **Each item's group.** `scope` is the name on the subsection the home page draws that item in, under Your move: a string, added to each row (the top-level `group` above is the list's name, not an item's), with every other key,
+  value and the order of `items` as they were. It is the scope of the board row the item's page rolls up to (a sub-page with no row of its own follows the page above it, a page with a `hub:` line its hub), read as
+  `get projects` reads a project's scope: the one set on purpose for that page, else the one derived from the project record, the key prefix, the page's `org`, names and tags, and its hub or parent page; an item with no project is in
+  the default scope. It is always one of the names in `[project_scopes] order`, as configured (`general` on an install without the setting), and present on an install with one scope too. `[scopes]`, which groups `board.md`, is another
+  setting and is not read. A reader that gets no `scope` (a server that predates it) treats the group as unknown.
 - **Which items.** The group the home page draws under its Your move heading: an open item that is alive with the owner as its mover, by the item model's reading and the board's queue rule. Whether the item names a session,
   and which, plays no part. It is built from the call the home page, `board.md` and the brief take their lists from (`home_pairs` of the board renderer), so the three cannot disagree; a suite compares this read with the page's own group.
 - **Order.** The group's order, which is the home page's: the item that has been the owner's longest first (the age the page paints amber past two days and red past five), items of one age by due date, then by id. It is not

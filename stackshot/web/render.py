@@ -1111,13 +1111,22 @@ class Board:
         if not k or k not in self.proj: return ""
         c = self.__dict__.setdefault("_lscope", {})
         if k not in c:
-            if "_lscope_id" not in self.__dict__:
-                try: ids = _prj.ids_by_key()
-                except ValueError: ids = {}                    # a damaged id file: the registry's own copy of the id answers
-                self.__dict__["_lscope_id"] = (ids, _prj.marks())
-            ids, mk = self.__dict__["_lscope_id"]
+            ids, mk = self.scope_ids()
             c[k] = _prj.label_scope(k, self.proj.get(k) or {}, self.proj, ids, mk)
         return c[k]
+    def scope_ids(self):
+        """(key → id, the marks by id) of the id file, read once for the draw."""
+        if "_scope_ids" not in self.__dict__:
+            try: ids = _prj.ids_by_key()
+            except ValueError: ids = {}                    # a damaged id file: the registry's own copy of the id answers
+            self.__dict__["_scope_ids"] = (ids, _prj.marks())
+        return self.__dict__["_scope_ids"]
+    def item_scope(self, r):
+        """The group the home page lists an item under, the name on its subsection there (ui/render.py scope_groups): the scope of the board row the item's page rolls up to (projects.scope_of), the default scope for an item
+        with no project. One of the names in [project_scopes] order, single-scope instances included; board.md's own grouping (proj_scope, [scopes]) is another setting."""
+        k = self.row_of(proj_key(r))
+        entry = self.proj.get(k)
+        return _prj.scope_of(k, entry if isinstance(entry, dict) else {}, self.proj, *self.scope_ids())
     def proj_mirror(self, k):
         return (self.proj.get(k) or {}).get("mirror") or ""
     def proj_scope(self, k):
@@ -1527,13 +1536,13 @@ class Board:
     def your_move(self) -> list:
         """The whole Your move group as the client read `your-move` serves it: one dict per item, in the group's own order (`home_pairs`, the call the home page's group, board.md and the brief draw from; the brief
         shows its first five, this shows all), {shown: the id as a person reads it, subject, url: the item's page (the path alone when the instance has no board address), ask: the open ask line or "", updated: epoch seconds of the
-        item's last write (the file's time for an item that stores none)}. No cap: the group is as long as the owner's queue."""
+        item's last write (the file's time for an item that stores none), scope: the group the home page lists it under (item_scope)}. No cap: the group is as long as the owner's queue."""
         out = []
         base = _inst.BOARD_URL.rstrip("/")
         for r, _m in self.home_pairs()[_home.YOUR_MOVE]:
             try: upd = float(r.get("updated") or 0) or r["_updated"].timestamp()
             except (TypeError, ValueError): upd = r["_updated"].timestamp()
-            out.append({"shown": rid_full(r), "subject": str(r.get("subject") or ""), "url": base + id_href(r["gid"]), "ask": open_ask(r), "updated": upd})
+            out.append({"shown": rid_full(r), "subject": str(r.get("subject") or ""), "url": base + id_href(r["gid"]), "ask": open_ask(r), "updated": upd, "scope": self.item_scope(r)})
         return out
 
     def brief(self) -> str:
