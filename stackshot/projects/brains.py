@@ -2,7 +2,7 @@
 
 Every project page used to live in one brain: the server read it from the local git copy at `[paths] brain` and wrote it
 through the gbrain CLI. An instance may now name more brains in `[[brains]]` (stackshot.example.toml). Each one is reached the
-same two ways as the first: a local git copy of its own (read only for stackshot: another process keeps it in sync) and the
+same two ways as the first: a local git copy of its own (read only for stackshot, but for page_upstream's fetch into a ref of its own: another process keeps it in sync) and the
 gbrain CLI run with that brain's home folder (environment GBRAIN_HOME=<home>, which carries the CLI's own sign-in).
 
     for_key("projects/acme-x")   → the Brain that holds the page (the default brain when no [[brains]] entry names it)

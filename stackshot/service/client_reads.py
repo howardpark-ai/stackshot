@@ -43,6 +43,7 @@ from stackshot.model import queued as _queued
 from stackshot.model import states as _states
 from stackshot.model.ids import _GID, _norm_id
 from stackshot.model.needs import _needs_of, _needs_sessions, _observers_of
+from stackshot.projects import page_upstream as _page_upstream
 from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import ROLES, _registry, _roles_sync_safe
 from stackshot.service import agents as _agents
@@ -107,6 +108,12 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
         if not re.fullmatch(_cfg.page_dirs_re() + r"/[\w./-]+", key) or ".." in key:
             return 400, "text/plain", "key = a page key, " + " or ".join(f"{d}/<slug>" for d in _cfg.page_dirs())
         ts = int(_hooks().page_ts(key))
+        since = str(params.get("since") or "")
+        if re.fullmatch(r"[0-9]{1,12}", since) and ts < int(since):     # the caller is about to call the page owed: an edit the copy has not pulled yet may settle that (waits a few seconds at most)
+            try:
+                ts = max(ts, _page_upstream.edit_ts(key, int(since), wait=_page_upstream.WAIT))
+            except Exception:  # noqa: BLE001  — the local copy's answer stands
+                pass
         return 200, "application/json", json.dumps({"key": key, "ts": ts or None})
     if what == "items":
         return _client_items(str(params.get("key") or ""))

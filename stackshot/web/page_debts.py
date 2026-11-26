@@ -23,6 +23,7 @@ from stackshot.core import xlock as _xlock
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.model.needs import _NEEDS_KINDS
 from stackshot.projects import brains as _brains
+from stackshot.projects import page_upstream as _upstream
 from stackshot.projects import pages as _pages
 from stackshot.projects import project_registry as _pr
 from stackshot.projects import projects as _prj
@@ -64,6 +65,18 @@ def _page_ts(key: str) -> float:
         return float(_pages.page_ts(key) or 0)
     except Exception:
         return 0.0
+
+
+def _upstream_settles(key: str, owner: str, e: dict[str, Any]) -> bool:
+    """For a debt the local copy of the pages leaves open: does an edit the copy has not pulled yet settle it (page_upstream)? Begins a fetch and never waits
+    for it, so a write is not slowed: what it reads is what an earlier fetch brought. False whenever it cannot tell."""
+    try:
+        since = int(float(e.get("ts", 0))) - _page_slack()
+        if not _upstream.edit_ts(key, since):
+            return False
+        return not _debt_strict(owner, e) or _upstream.ct_changed(key, since)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _owed_path() -> Path:
@@ -194,11 +207,12 @@ def _owed_settle() -> dict[str, dict[str, dict[str, Any]]]:
                 strips.append((key, o, False))
             ts = float(e.get("ts", 0))
             if pt is None: pt = _page_ts(key)
-            if pt >= ts - _page_slack():
-                if _debt_strict(o, e):
-                    try:
-                        if not _pages.ct_changed_since(key, int(ts)): continue
-                    except Exception: pass
+            local = pt >= ts - _page_slack()
+            if local and _debt_strict(o, e):
+                try:
+                    local = _pages.ct_changed_since(key, int(ts))
+                except Exception: pass
+            if local or _upstream_settles(key, o, e):
                 drops.append((key, o, e.get("ts")))
     with _OWED_LOCK:
         d = _owed_load(); changed = False

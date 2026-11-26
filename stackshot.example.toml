@@ -25,7 +25,7 @@ store = "~/stackshot-data/board-data"               # items <letter>/<n>.json, a
 markdown = "~/stackshot-data/board.md"              # the rendered board kept in the repo
 rules = "~/stackshot-data/RULES.md"                 # the rulebook the `rules` tool serves
 rules_parts = []                                    # skill files (SKILL.md) the `rules` tool appends after the rulebook, in this order, each under "## Part: <name>" (cloud and Cowork sessions get no hooks to load them). Example: ["~/skills/writing/SKILL.md"]. [] = none
-brain = "~/brain"                                   # the pages checkout (for example gbrain's managed mirror): the page registry and page freshness (the server box only)
+brain = "~/brain"                                   # the pages checkout (for example gbrain's managed mirror): the page registry and page freshness (the server box only). While it leaves a page debt open, the server fetches its branch's upstream into refs/stackshot/page-upstream and reads that too; nothing else there moves
 docs_merge_script = ""                            # the script that merges a change no test can exercise (docs, comments, runner settings) without release.sh; "" = none (release.sh does not read it)
 fleet_names = "~/stackshot-data/session-names.tsv"    # os hostname → fleet name → letter (a letter with no fleet state yet)
 state = "~/.local/state/stackshot"                  # everything the instance writes for itself: site/, ledger.json, requests.json, messages.jsonl, cloud-sessions.json, publish.lock, anchor-hub/, inbox/, clients/
@@ -39,7 +39,7 @@ dirs = ["projects"]                                 # the sub-directories that h
 flavor = "plain"                                    # how a session is told to update its page: plain = edit <paths.brain>/<key>.md, commit and push ·
                                                     # gbrain = through gbrain's tools (add_timeline_entry, get_page/edit_page/put_page)
                                                     # With plain, the server itself writes the pages as markdown files in paths.brain (a new project's page, the router's timeline
-                                                    # notes, the page-debt pass) and runs no git: committing and pushing that checkout is the instance's job. `stackshot/projects/rename_page.py` and
+                                                    # notes, the page-debt pass) and runs no git on them: committing and pushing that checkout is the instance's job. `stackshot/projects/rename_page.py` and
                                                     # `stackshot/projects/page_keeper.py` are gbrain tools and refuse under plain with a message that says so.
 template_page = ""                                  # the page whose "Part 2" holds the project template a new project's page is made from (a key under the dirs, e.g. "projects/template"); "" = the short built-in page
 rules_line = ""                                     # the bullet a new project's page carries to link the rules, written as given; "" = "- Not written yet."
@@ -483,7 +483,7 @@ mirror_url = "https://github.com/example/brain/blob/main/{key}.md"
 
 # [[brains]]: second notes brains that hold some projects' pages (stackshot/projects/brains.py). Optional: with no entry every page lives in the default brain
 # above ([paths] brain for reads, the gbrain CLI for writes), exactly as before. Each entry is reached the same two ways as the default one:
-# its own local git copy, read only for stackshot (another process keeps it synced), and the gbrain CLI run with GBRAIN_HOME=<home>, the home
+# its own local git copy, read only for stackshot (another process keeps it synced; the fetch into a ref of its own under [paths] brain applies here too), and the gbrain CLI run with GBRAIN_HOME=<home>, the home
 # folder that holds that brain's own configuration and sign-in. Every page read (the registry, create's page check, the page hook, pages owed,
 # the audit's page call, page links) resolves the slug to its brain and reads that brain's copy; every page write runs the CLI with its home.
 # A slug belongs to the first entry that lists it in `slugs` (a page key, or a bare slug read in the first [pages] dir; its sub-pages come
