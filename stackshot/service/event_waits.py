@@ -195,6 +195,7 @@ def evwait_poll(now: float | None = None, told: dict[str, str] | None = None) ->
     return fired + _evwait_poll_prs(now, told)
 
 
+@_live.reading()      # one pass: each [released.repos] checkout is read once (one on another machine costs ssh calls), and a machine that gives no answer is asked once
 def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
     """The catch-up for the pull-request events, which are states: an event wait on a PR's release or merge whose event happened while the server was down or was not told (the release hook is best
     effort) turns now. pr_released reads the checkout (last-good and HEAD, as sweep-released does; a [released.repos] repository's checkout HEAD); pr_merged reads GitHub at the done check's pace (checks.pr_merged). → the gids turned."""
@@ -233,17 +234,12 @@ def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
     elif rel is not None:
         EVW_SEEN[0] = (rel, named)
     seen: set[str] = set()
-    freads: dict[str, tuple[str, dict[int, tuple[str, float]]]] = {}      # each [released.repos] checkout is read once a pass (one on another machine costs ssh calls)
     for gid, sp in waits:
         try:
             n = _ew.pr_number(sp)
             repo = sp.key.rpartition("#")[0]
             if sp.kind == _ew.PR_RELEASED:
-                fhit = None
-                if repo != own and _live.released_foreign(repo) is not None:      # a [released.repos] repository: a merge in its checkout's HEAD is live
-                    if repo not in freads:
-                        freads[repo] = _live.foreign_prs(repo)
-                    fhit = freads[repo][1].get(n)
+                fhit = _live.foreign_prs(repo)[1].get(n) if repo != own and _live.released_foreign(repo) is not None else None      # a [released.repos] repository: a merge in its checkout's HEAD is live
                 hit = fhit or (evw_merge(rel[0], n) if rel is not None and repo == own else None)
                 if fhit:
                     fired += evwait_report(_evwait_pr_event(_ew.PR_RELEASED, repo, n, f"{_live.pr_shown(sp.key)} is live: merged at {fhit[0][:7]} on {_stallsvc.stall_when(fhit[1])}, in the checkout"), now, told)

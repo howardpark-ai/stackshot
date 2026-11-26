@@ -370,9 +370,11 @@ owner_login = ""                                    # the GitHub login the owner
                                                     # requests are released, as before. Uncomment the header and the lines you need. Read at each call: a reload applies it
                                                     # Name the checkout that RUNS the repository, never a copy that only follows its main branch. When it is on another machine, add `ssh`: the host as ssh takes it
                                                     # (a name, an alias of ~/.ssh/config, user@host) or a role word ("host:<role>", [hosts]), looked up at each read. The server then runs the same read-only
-                                                    # git there, over `ssh -o BatchMode=yes -o ConnectTimeout=5 <host>` (its account needs a key that machine accepts); nothing is copied or pulled. A machine
-                                                    # that gives no answer reads as "cannot be read": the report is refused, and the next pass reads again. The path there is absolute or starts with ~/.
-                                                    # A host that names the server's own machine is read directly
+                                                    # git there over ssh, with no password prompt (its account needs a key that machine accepts and the machine's host key in known_hosts; there: a POSIX
+                                                    # login shell that prints nothing of its own, `git` and `timeout`); nothing is copied or pulled. A read with no answer (no connection, 20 seconds in all,
+                                                    # a git error, a role whose lookup fails) is "cannot be read": the report is refused, and the next pass reads again. The path there is absolute or starts
+                                                    # with ~/. A host that is the server's own machine (its host name, localhost, a loopback address) is read directly. Add `ssh` only once the server runs a
+                                                    # version that knows it: an older one reads the path on its own machine. An entry with any other key is ignored. docs/configuration.md has the details
 # "me/my-sibling" = { checkout = "/home/me/my-sibling" }
 # "me/my-other" = { checkout = "/home/me/my-other", ssh = "my-other-box" }
 

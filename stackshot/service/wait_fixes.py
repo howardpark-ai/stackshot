@@ -42,6 +42,7 @@ from stackshot.service import mover_steps as _mover_steps
 from stackshot.service import owner_words as _owner_words
 from stackshot.service import proofs as _proofs
 from stackshot.service import released as _relsvc
+from stackshot.service import released_live as _rlive
 from stackshot.service import store as _svcstore
 from stackshot.service import wait_gates as _wait_gates
 from stackshot.service import wakes as _wakes
@@ -209,6 +210,7 @@ def _wait_end_sent_back(meta: dict[str, Any], kinds: "tuple[str, ...]") -> None:
             _sf.decline(meta, _sf.WAIT_END, tok)
 
 
+@_rlive.reading()      # one write: the read of another repository's checkout made before the lock is the one the gate uses
 def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, Any]":
     """The ten-minute filing pass's fix of a wait a next line states in words (audit_run.wait_end_pass; server_fixes.WAIT_END; wait_end.py): the item is read again under the lock and the gap found again
     from its words (a line that changed, a wait the mover sent back, a decision on the owner, a held item: nothing is written), then the plan is set through the gates a write passes: `after`

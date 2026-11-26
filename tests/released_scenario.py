@@ -395,9 +395,10 @@ def remote(co="~/sib live", host=HOST): _cfg.CFG["released"] = {"repos": {SIB: {
 def report(n):
     try: released_svc.released(surl(n), sha=SIBM[n]); return ""
     except ToolError as e: return str(e)
-def sent_git(c): return shlex.split(c[-1])
-def verbs(): return [sent_git(c)[3] for c in ssh.calls()]
-def head_reads(): return [c for c in ssh.calls() if sent_git(c)[3:] == ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]]
+def sent_git(c): return shlex.split(c[-1])      # ["timeout", "<seconds>", "git", "-C", <checkout>, <verb>, ...]
+def verbs(): return [sent_git(c)[5] for c in ssh.calls()]
+def head_reads(): return [c for c in ssh.calls() if sent_git(c)[5:] == ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]]
+SSH_ARGS = ["-n", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=3", "-o", "ServerAliveCountMax=2", "-o", "ControlMaster=no", "-o", "ControlPath=none", "--"]
 UNREADABLE = f"Refused: the checkout of {SIB} cannot be read; nothing written"
 try:
     with ssh:
@@ -406,8 +407,8 @@ try:
         check("remote: a merge the running checkout does not hold is not live, though a copy on the server's own machine holds it", e.startswith("Refused:") and "is not live: its merge" in e and "not deployed, or rolled back" in e
               and not fsame(f0) and len(pushes()) == p0, e)
         calls = ssh.calls()
-        check("remote: each read is one git read of that checkout over ssh, with no password prompt, no input and a connect timeout",
-              bool(calls) and all(c[:-1] == ["-n", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", HOST] and sent_git(c)[:3] == ["git", "-C", "sib live"] for c in calls)
+        check("remote: each read is one git read of that checkout over ssh, with no password prompt, no input, a connect timeout, a dead-link limit, no shared connection, the host after --, and an end there after its seconds",
+              bool(calls) and all(c[:-1] == [*SSH_ARGS, HOST] and sent_git(c)[:5] == ["timeout", "10", "git", "-C", "sib live"] for c in calls)
               and set(verbs()) == {"rev-parse", "log", "merge-base"}, calls)
         lg("merge", "-q", "--ff-only", "origin/pending")      # the deploy on the machine that runs it
         r = released_svc.released(surl(8), sha=SIBM[8])
@@ -433,13 +434,13 @@ try:
         check("remote: an ancestor question that gets no answer is 'cannot be read', never 'not deployed'", f"is not live: the checkout of {SIB} cannot be read" in e and "not deployed" not in e and not fsame(f0), e)
         rlive_svc.PROOF_GIT.clear(); ssh.mode("fail log --first-parent")
         h1, m1 = rlive_svc.foreign_prs(SIB); ssh.mode(""); h2, m2 = rlive_svc.foreign_prs(SIB)
-        check("remote: a log that failed after HEAD was read is not kept: the next read sees the merges of the same commit", h1 == h2 == lg("rev-parse", "HEAD") and m1 == {} and 7 in m2, (h1, m1, h2, m2))
+        check("remote: a log that failed after HEAD was read reads as nothing and is not kept: the next read sees the merges of the same commit", (h1, m1) == ("", {}) and h2 == lg("rev-parse", "HEAD") and 7 in m2, (h1, m1, h2, m2))
         ssh.clear(); h3, m3 = rlive_svc.foreign_prs(SIB)
         check("remote: ...a log that worked is kept by commit, and HEAD is read again", verbs() == ["rev-parse"] and (h3, m3) == (h2, m2), verbs())
 
         remote(co=str(LIVE)); ssh.clear(); h, _m = rlive_svc.foreign_prs(SIB)
-        check("remote: an absolute path is sent as written", h == h2 and sent_git(ssh.calls()[0])[:3] == ["git", "-C", str(LIVE)], ssh.calls())
-        check("remote: '~/' alone is the home folder there", shlex.split(rlive_svc.git_argv(("x",), _cfg.RemoteCheckout(HOST, "~/"))[-1]) == ["git", "-C", ".", "x"])
+        check("remote: an absolute path is sent as written", h == h2 and sent_git(ssh.calls()[0])[2:5] == ["git", "-C", str(LIVE)], ssh.calls())
+        check("remote: '~/' alone is the home folder there", shlex.split(rlive_svc.git_argv(("x",), _cfg.RemoteCheckout(HOST, "~/"))[-1]) == ["timeout", "10", "git", "-C", ".", "x"])
 
         _cfg.CFG["hosts"] = {"lookup": f"printf '%s\\n' {HOST} {{role}}"}; remote(host="host:sib-box"); ssh.clear(); h, _m = rlive_svc.foreign_prs(SIB)
         check("remote: a role word is looked up when git runs, and the table keeps the word", h == h2 and bool(ssh.calls()) and {c[-2] for c in ssh.calls()} == {HOST}
@@ -462,15 +463,139 @@ try:
 
     bad = {"example-owner/empty": {"checkout": str(SC), "ssh": ""}, "example-owner/option": {"checkout": str(SC), "ssh": "-oProxyCommand=x"}, "example-owner/words": {"checkout": str(SC), "ssh": "two words"},
            "example-owner/number": {"checkout": str(SC), "ssh": 5}, "example-owner/role": {"checkout": str(SC), "ssh": "host:two words"}, "example-owner/relative": {"checkout": "sib live", "ssh": HOST},
-           "example-owner/user-home": {"checkout": "~someone/sib", "ssh": HOST}, "example-owner/no-path": {"ssh": HOST}}
+           "example-owner/user-home": {"checkout": "~someone/sib", "ssh": HOST}, "example-owner/no-path": {"ssh": HOST},
+           "example-owner/misspelled": {"checkout": str(SC), "shh": HOST}, "example-owner/extra": {"checkout": "~/sib", "ssh": HOST, "branch": "main"}}
     _cfg.CFG["released"] = {"repos": bad}
-    check("config: an entry with a bad ssh host, or a path that cannot be sent, is ignored and said, so its path is never read on this machine instead",
-          _cfg.released_repos() == {} and len(_cfg.released_notes()) == len(bad) and all('ssh = "<host>"' in n for n in _cfg.released_notes()), (_cfg.released_repos(), _cfg.released_notes()))
+    check("config: an entry with a bad ssh host, a path that cannot be sent or a key that is not read (a misspelled ssh) is ignored and said, so its path is never read on this machine instead",
+          _cfg.released_repos() == {} and len(_cfg.released_notes()) == len(bad) and all('ssh = "<host>"' in n and "no other key is read" in n for n in _cfg.released_notes()), (_cfg.released_repos(), _cfg.released_notes()))
     _cfg.CFG["released"] = {"repos": {SIB: {"checkout": " ~/sib live ", "ssh": f" {HOST} "}}}
     check("config: a good one is a checkout on that machine, the spaces round its values dropped, with no note", _cfg.released_repos() == {SIB: _cfg.RemoteCheckout(HOST, "~/sib live")} and _cfg.released_notes() == [], _cfg.released_repos())
     check("...and client.py's help says such a checkout is read over ssh", "over ssh when it is on another machine" in " ".join(client.__doc__.split()))
 finally:
     _cfg.CFG.pop("released", None); _cfg.CFG.pop("hosts", None)
+
+# ---- 9. a read that gets no answer: nothing is known and nothing is kept; the reads have a time limit; a machine that gives no answer is asked once; a read is the request's, write's or pass's own
+SIB2 = "example-owner/second"
+def two(host2=HOST): _cfg.CFG["released"] = {"repos": {SIB: {"checkout": "~/sib live", "ssh": HOST}, SIB2: {"checkout": "~/sib two", "ssh": host2}}}
+def both():
+    with rlive_svc.reading(): return [rlive_svc.foreign_prs(SIB), rlive_svc.foreign_prs(SIB2), rlive_svc.foreign_prs(SIB)]
+def timed(f):
+    began = time.monotonic(); got = f(); return got, time.monotonic() - began
+NOTHING = ("", {})
+real_limits = (rlive_svc.READ_SECONDS, rlive_svc.REMOTE_SECONDS)
+try:
+    with ssh:
+        lg("reset", "-q", "--hard", SIBM[8]); remote(); ffix(); f0 = fsnap()      # the running checkout holds #7 and #8
+        for mode, what in (("cut log --first-parent", "a log that stops part way"), ("gitfail log --first-parent", "a log git ends with a failure")):
+            ssh.mode(mode); e = report(8)
+            check(f"no answer: {what} is 'cannot be read', never 'not merged', and nothing is written", e == UNREADABLE and not fsame(f0), e)
+        rlive_svc.PROOF_GIT.clear(); ssh.mode("cut log --first-parent"); got = rlive_svc.foreign_prs(SIB); ssh.mode(""); again = rlive_svc.foreign_prs(SIB)
+        check("no answer: ...and the merges it did print are not kept: the next read of the same commit has them all", got == NOTHING and again[0] == SIBM[8] and {7, 8} <= set(again[1]), (got, again))
+        ssh.mode("gitfail " + SIBM[7]); e = report(7)
+        check("no answer: the question about the reported sha left unanswered is 'cannot be read', never 'not a commit'", e == UNREADABLE and not fsame(f0), e)
+        ssh.mode("")
+        try: released_svc.released(surl(7), sha="0" * 40); e = ""
+        except ToolError as x: e = str(x)
+        check("no answer: ...while a sha the checkout answers it does not know is still said to be unknown", "is not a commit the checkout of" in e and not fsame(f0), e)
+        for asked, which in ((SIBM[7], "a commit it knows"), ("0" * 40, "a sha it does not know")):
+            ssh.mode("banner " + asked)
+            try: released_svc.released(surl(7), sha=asked); e = ""
+            except ToolError as x: e = str(x)
+            check(f"no answer: a line printed ahead of the answer about {which} is 'cannot be read', never 'not a commit'", e == UNREADABLE and not fsame(f0), e)
+        for mode, what in (("gitfail merge-base", "ends with git's failure"), ("hang merge-base", "never comes")):
+            rlive_svc.READ_SECONDS = 3; ssh.mode(mode); e = report(8); why = rlive_svc.foreign_live(SIB, SIBM[8])
+            check(f"no answer: an ancestor question whose answer {what} never counts as live", "cannot be read" in e and "cannot be read" in why and not fsame(f0), (e, why))
+        real_git = rlive_svc.git
+        def no_merge_base(*a, **k):
+            if a[0] == "merge-base": raise OSError("no process")
+            return real_git(*a, **k)
+        rlive_svc.git = no_merge_base; ssh.mode("")
+        try: why = rlive_svc.foreign_live(SIB, SIBM[8])
+        finally: rlive_svc.git = real_git
+        check("no answer: ...nor does an ancestor question that cannot be asked at all", "cannot be read" in why, why)
+
+        rlive_svc.READ_SECONDS = 1.5; ssh.mode("hang"); ssh.clear(); e, took = timed(lambda: report(7))
+        check("time limit: a machine that sends nothing is given up within the read's limit and not asked again", e == UNREADABLE and took < 8 and len(ssh.calls()) == 1 and not fsame(f0), (e, took, ssh.calls()))
+        two(); ssh.clear(); got, took = timed(both)
+        check("time limit: ...nor asked about a second repository in the same pass", got == [NOTHING] * 3 and took < 8 and len(ssh.calls()) == 1, (got, took, ssh.calls()))
+        ssh.clear(); got = [rlive_svc.foreign_prs(SIB), rlive_svc.foreign_prs(SIB2)]
+        check("time limit: ...and the next pass asks it again", got == [NOTHING] * 2 and len(ssh.calls()) == 2, (got, ssh.calls()))
+        rlive_svc.READ_SECONDS = real_limits[0]
+        ssh.mode("down"); ssh.clear(); got = both()
+        check("silent machine: one that gives no connection is asked once in a pass", got == [NOTHING] * 3 and len(ssh.calls()) == 1, ssh.calls())
+        two("other-host.invalid"); ssh.clear(); got = both()
+        check("silent machine: ...which says nothing of another machine", [c[-2] for c in ssh.calls()] == [HOST, "other-host.invalid"], ssh.calls())
+        two(); ssh.mode("gitfail rev-parse"); ssh.clear(); got = both()
+        check("silent machine: a git failure there silences nothing, so another checkout on it is still asked; a read that failed is not made again in the same pass",
+              got == [NOTHING] * 3 and [sent_git(c)[4] for c in ssh.calls()] == ["sib live", "sib two"], ssh.calls())
+        rlive_svc.REMOTE_SECONDS = 1; ssh.mode("stuck"); two(); ssh.clear(); got, took = timed(both)
+        check("time limit: a git that does not end over there is ended there after its seconds, and that machine is not asked again", got == [NOTHING] * 3 and took < _fake_ssh.STUCK_SECONDS - 2
+              and len(ssh.calls()) == 1 and sent_git(ssh.calls()[0])[:2] == ["timeout", "1"], (got, took, ssh.calls()))
+        remote(); e, took = timed(lambda: report(7))
+        check("time limit: ...and a report of it is 'cannot be read' as soon", e == UNREADABLE and took < _fake_ssh.STUCK_SECONDS - 2 and not fsame(f0), (e, took))
+        rlive_svc.REMOTE_SECONDS = real_limits[1]; rlive_svc.READ_SECONDS = 2.5; ssh.mode("slow 1"); ssh.clear(); e, took = timed(lambda: report(7))
+        check("time limit: the commands of one report share the limit, so answers that are each in time but slow end it", "cannot be read" in e and took < 6 and len(ssh.calls()) <= 3 and not fsame(f0), (e, took, ssh.calls()))
+        ssh.mode("")
+        check("time limit: ...and the next read has its own", rlive_svc.foreign_prs(SIB)[0] == SIBM[8])
+        rlive_svc.READ_SECONDS = real_limits[0]
+        check("time limit: one report's reads end well inside the minute its client waits, and a command is ended there before the read's limit",
+              rlive_svc.SSH_CONNECT < rlive_svc.REMOTE_SECONDS < rlive_svc.READ_SECONDS <= 30, (rlive_svc.SSH_CONNECT, rlive_svc.REMOTE_SECONDS, rlive_svc.READ_SECONDS))
+
+        ssh.clear(); bare = rlive_svc.foreign_prs_locked(SIB)
+        with rlive_svc.reading(): unread = rlive_svc.foreign_prs_locked(SIB)
+        check("under the item lock: with no read made by this write, a checkout on another machine is not read", bare == unread == NOTHING and ssh.calls() == [], (bare, unread, ssh.calls()))
+        with rlive_svc.reading():
+            before = rlive_svc.foreign_prs(SIB); n_calls = len(ssh.calls()); locked = rlive_svc.foreign_prs_locked(SIB)
+            with rlive_svc.reading(): inner = rlive_svc.foreign_prs(SIB)
+            after_inner = rlive_svc.foreign_prs_locked(SIB)
+        check("under the item lock: with one, that read is what is used, in a block inside it and after it too, with no further call", before[0] == SIBM[8] and locked == inner == after_inner == before
+              and len(ssh.calls()) == n_calls, (before[0], n_calls, ssh.calls()))
+        lg("reset", "-q", "--hard", SIBM[7]); ssh.clear(); after = rlive_svc.foreign_prs(SIB)
+        check("under the item lock: nothing of a read outlives its block, so a rollback shows in the next", after[0] == SIBM[7] and 8 not in after[1] and ssh.calls() != []
+              and rlive_svc.foreign_prs_locked(SIB) == NOTHING, (after, ssh.calls()))
+        _cfg.CFG["released"] = {"repos": {SIB: {"checkout": str(LIVE)}}}
+        check("under the item lock: a checkout on this machine with no earlier read is read there and then", rlive_svc.foreign_prs_locked(SIB)[0] == SIBM[7])
+
+        me = socket.gethostname(); short = me.split(".")[0]; like = f"{short}.example.invalid"
+        check("own machine: its name whole or short, in any case, localhost and a loopback address", all(rlive_svc.own_machine(h) for h in (me, me.upper(), short, "localhost", "localhost.localdomain", "127.0.0.1", "127.0.1.1", "::1")), me)
+        check("own machine: a name that only begins like it, another name or address, and a name with a user are not", not any(rlive_svc.own_machine(h) for h in (like, me + "x", f"someone@{me}", "192.0.2.7", "2001:db8::7", "127.example.invalid", HOST)), me)
+        remote(co=str(LIVE), host=like); ssh.clear(); h, _m = rlive_svc.foreign_prs(SIB)
+        check("own machine: so a host under another domain that begins like this one is asked over ssh", h == SIBM[7] and bool(ssh.calls()) and {c[-2] for c in ssh.calls()} == {like}, (h, ssh.calls()))
+        remote(co=str(LIVE), host="127.0.0.1"); ssh.clear(); h, _m = rlive_svc.foreign_prs(SIB)
+        check("own machine: and a loopback address is read directly", h == SIBM[7] and ssh.calls() == [], (h, ssh.calls()))
+
+        gone, where = T / "role-gone", T / "where.sh"
+        where.write_text(f"#!/bin/sh\n[ -e '{gone}' ] && exit 1\necho {HOST}\n", encoding="utf-8")
+        _cfg.CFG["hosts"] = {"lookup": f"sh '{where}' {{role}}", "cache_seconds": 0}; remote(host="host:moving-box"); ssh.clear()
+        h_ok, _m = rlive_svc.foreign_prs(SIB)
+        check("role: the lookup answers and the checkout is read on that host", h_ok == SIBM[7] and {c[-2] for c in ssh.calls()} == {HOST}, (h_ok, ssh.calls()))
+        gone.touch(); ssh.clear(); ffix(); f0 = fsnap()
+        with contextlib.redirect_stderr(io.StringIO()): first, second = report(7), report(7)      # the failing lookup, then its rest
+        check("role: while its lookup fails nothing is read, at the first failure and while it rests, though the other settings keep the last good host",
+              first == second == UNREADABLE and ssh.calls() == [] and not fsame(f0) and _cfg.host("host:moving-box") == HOST, (first, second, ssh.calls()))
+        gone.unlink(); _cfg._host_reset(); h_back, _m = rlive_svc.foreign_prs(SIB)
+        check("role: ...and it is read again once the lookup answers", h_back == SIBM[7], h_back)
+        _cfg.CFG.pop("hosts")
+finally:
+    rlive_svc.READ_SECONDS, rlive_svc.REMOTE_SECONDS = real_limits
+    _cfg.CFG.pop("released", None); _cfg.CFG.pop("hosts", None)
+
+class Dropping(dict):
+    def __setitem__(self, k, v): pass      # what a clear from another thread, right after the keep, looks like
+kept_was = rlive_svc.PROOF_GIT
+rlive_svc.PROOF_GIT = Dropping()
+try: got = rlive_svc.proof_git(("k",), lambda: {1: "x"})
+except KeyError as x: got = x
+finally: rlive_svc.PROOF_GIT = kept_was
+check("kept answers: the answer in hand is returned, whatever another thread did to the table meanwhile", got == {1: "x"}, got)
+real_git = rlive_svc.git
+def half_log(*a, **k): return subprocess.CompletedProcess(a, 128, "abc\t1\tMerge pull request #5 from x/y\n", "fatal: bad object")
+def no_git(*a, **k): raise OSError("no git")
+for fake, what in ((half_log, "ends with a failure after printing a line"), (no_git, "cannot be run")):
+    rlive_svc.git = fake; key = ("prs", "ab12cd34", what)
+    try: got = rlive_svc.proof_git(key, lambda: rlive_svc.merged_prs("ab12cd34"))
+    finally: rlive_svc.git = real_git
+    check(f"kept answers: a log of this checkout that {what} reads as no merges and is not kept", got == {} and key not in rlive_svc.PROOF_GIT, (got, rlive_svc.PROOF_GIT.get(key)))
 
 sent = []
 client.post = lambda what, body, timeout=30.0: (sent.append((what, body)), (200, {"pr": PR, "head": "abcdef1234", "good": "600d000aaa", "items": [

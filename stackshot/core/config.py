@@ -1231,15 +1231,23 @@ class RemoteCheckout:
 
 
 def ssh_target(value: str) -> str:
-    """`value` (a host name, or a role word looked up now) as the one word ssh takes as a host; "" when there is none (a role word with no answer included)."""
-    h = str(host(value))
+    """`value` (a host name, or a role word looked up now) as the one word ssh takes as a host, for the read of another repository's live checkout; "" when there is none. Unlike host(), a role whose lookup
+    does not answer gives none, whatever it answered before: the role may have moved, and the checkout it left is not the live one. An answer is trusted for [hosts] cache_seconds, as everywhere."""
+    h = str(host(value))      # for a role word: runs the lookup when one is due
+    role = _host_role(value)
+    if role is not None:
+        sec = CFG.get("hosts") if isinstance(CFG, dict) else None
+        key = (str((sec if isinstance(sec, dict) else {}).get("lookup")), role)
+        with _HOST_LOCK:
+            good = None if key in _HOST_FAILED else _HOST_GOOD.get(key)      # with the latest lookup failed, what host() gave is an old answer
+        h = good[0] if good else ""
     return h if _HOST_NAME.fullmatch(h) else ""
 
 
 def _released_checkout(v: Any) -> "Path | RemoteCheckout | None":
     """One [released.repos] value → where its checkout is, or None for a value that is ignored. With `ssh` present the checkout is another machine's and is never looked for here instead, so a bad `ssh`
-    drops the whole entry."""
-    co = v.get("checkout") if isinstance(v, dict) else None
+    drops the whole entry, and so does any other key (a misspelled `ssh` would read the path on this machine)."""
+    co = v.get("checkout") if isinstance(v, dict) and not set(v) - {"checkout", "ssh"} else None
     co = co.strip() if isinstance(co, str) else ""
     if not co:
         return None
@@ -1256,7 +1264,7 @@ def released_repos() -> "dict[str, Path | RemoteCheckout]":
     """[released.repos]: the other repositories whose pull requests count as released here, "owner/repo" (lower-cased, through [github.moved]) → the checkout that holds their live copy: a Path on this
     machine (`"owner/repo" = { checkout = "/abs/path" }`; ~ expanded, absolute), or a RemoteCheckout for one on another machine (`{ checkout = "/abs/path", ssh = "host" }`). A pull request of such a
     repository is live when its merge commit is an ancestor of that checkout's HEAD. Absent (no defaults are merged) = none: only this repository's pull requests are released. An entry whose key is not
-    owner/repo or whose value is neither of those forms is ignored, and so is a table that is not a table (released_notes says so). Read at each call: a reload applies it."""
+    owner/repo or whose value is neither of those forms (one with any other key included) is ignored, and so is a table that is not a table (released_notes says so). Read at each call: a reload applies it."""
     t = get("released", "repos")
     out: "dict[str, Path | RemoteCheckout]" = {}
     for k, v in (t.items() if isinstance(t, dict) else ()):
@@ -1277,7 +1285,7 @@ def released_notes(cfg: dict[str, Any] | None = None) -> list[str]:
     out = []
     for k, v in t.items():
         if not (_REPO_NAME.fullmatch(str(k).strip().lower()) and _released_checkout(v) is not None):
-            out.append(f"[released.repos] {k!r} is ignored: it needs the form \"owner/repo\" = {{ checkout = \"/absolute/path\" }}; a checkout on another machine adds ssh = \"<host>\" (its path may then start with ~/)")
+            out.append(f"[released.repos] {k!r} is ignored: it needs the form \"owner/repo\" = {{ checkout = \"/absolute/path\" }}; a checkout on another machine adds ssh = \"<host>\" (its path may then start with ~/); no other key is read")
     return out
 
 

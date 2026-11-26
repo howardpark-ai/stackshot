@@ -9,7 +9,7 @@ from pydantic import Field
 from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.model import step_split as _step_split
-from stackshot.service import create as _create_svc, gates as _gates, writes as _writes
+from stackshot.service import create as _create_svc, gates as _gates, released_live as _rlive, writes as _writes
 from stackshot.waits import wait_list_write as _wlw, waiting as _wt
 from stackshot.web.auth import oauth as _oauth
 from stackshot.web.tools.notes import _off_map_note, _owner_param
@@ -95,11 +95,12 @@ def stackshot_create(
         fix_note += n_; fixes += fx_
     mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
     _gates.gate_self_wait("", owner, next_text=next, mover=mover, needs=needs, after=after, wait_kind=_wlw.judged_as(waits) if _wlw.passed(waits) and not _wlw.clearing(waits) else wait_kind, wait_reason=wait_reason, creating={"subject": subject, "project": project})   # before the item lock: it may ask a model; a list names its blockers (its lines that are not dates)
-    _evwait_preread(wait_kind, wait_event)      # an event wait's facts (GitHub, git) are read before the item lock, not under it
-    for phrase_ in _wlw.event_phrases(waits):      # …and those of every event line of a list
-        _evwait_preread("event", phrase_)
-    with _writes.session_write():
-        return _create(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, until=until, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact, fixes=fixes, waits=waits, wait_mode=wait_mode) + fix_note + note + _off_map_note(owner, project)
+    with _rlive.reading():      # one write: a [released.repos] checkout its waits name is read once, before the lock, and the gate under it uses that read
+        _evwait_preread(wait_kind, wait_event)      # an event wait's facts (GitHub, git) are read before the item lock, not under it
+        for phrase_ in _wlw.event_phrases(waits):      # …and those of every event line of a list
+            _evwait_preread("event", phrase_)
+        with _writes.session_write():
+            return _create(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, until=until, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact, fixes=fixes, waits=waits, wait_mode=wait_mode) + fix_note + note + _off_map_note(owner, project)
 
 
 def _create(
