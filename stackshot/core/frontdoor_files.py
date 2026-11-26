@@ -20,6 +20,7 @@ import stat
 from dataclasses import dataclass
 
 from stackshot.core import config as _cfg
+from stackshot.core import members as _members
 
 MAX_BYTES = 64 * 1024            # a secret or a members file larger than this is refused unread (a secret is a few dozen bytes; a stray big file is no secret)
 MIN_SECRET = 16                  # a signing secret, a bearer token or an OAuth client secret shorter than this is not used
@@ -95,47 +96,71 @@ def _names(v: object) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _listed(v: object, what: str, said: list[str]) -> tuple[str, ...]:
+    """`_names(v)`, with a line in `said` for each entry of the list that is dropped as blank or no text; `what` names such an entry in the line."""
+    for x in v if isinstance(v, list) else ():
+        if not isinstance(x, str) or not x.strip():
+            said.append(f"members_file: {what} is {'blank' if isinstance(x, str) else 'not text'}, so it is not read")
+    return _names(v)
+
+
+def _fold(x: str) -> str:
+    """What two names or addresses of the members file are compared by. A name: as a board looks a name up (`members._clean`: white space collapsed, casefolded), so two spellings the lookup reads as one
+    name never belong to two members. Text with an `@` is an address: stripped and lower-cased only (casefold would make two distinct addresses one)."""
+    return x.strip().lower() if "@" in x else _members._clean(x)
+
+
 def read_member_records(path: str, notes: list[str] | None = None) -> dict[str, Member]:
     """The members file, `{member: value}`, as records. The key is the member's identity (the name the proxy sets the identity header to, and the name a board stores the person under). The value is
     either a list of backend names (the older form: `"alice@x": ["main", "side"]`, where the key is also the one sign-in address, as written) or an object
     `{"boards": ["main"], "aliases": ["PJ"], "emails": ["pat@x", "pat@y"]}` for a person who signs in with several addresses or is known by another name. The `emails` of an object are kept in lower case
     and each needs an `@`; an object with none and a key written like an address has the key as its address. A value that is neither a list nor an object is a member of nothing.
 
-    No name or address belongs to two members: a key comes first (compared without regard to case: of two such keys only the first is a member), then, in the file's order, an alias or address that
-    another member's key or an earlier member already has is dropped from the later one. Each thing dropped is a line appended to `notes`, when one is given.
+    No name or address belongs to two members (compared as `_fold` says). A key comes first: of two keys that fold to one only the first is a member. Then, in the file's order, an alias or address that
+    another member's key or an earlier member already has is dropped from the later one. An entry on no board (empty `boards`) comes after every member who is on one: it takes no alias or address from
+    them, by its key or by its lists. Each thing dropped, a blank alias or address or one that is no text included, is a line appended to `notes`, when one is given.
     Read at each call. FileError when the file is missing, too large or not a JSON object: the caller treats that as no one being a member."""
     said = notes if notes is not None else []
     parsed: list[tuple[str, Member]] = []
-    owner: dict[str, str] = {}                          # lower-cased name or address -> the key of the member that has it
+    keys: dict[str, str] = {}                           # folded key -> the key as written, of the member that has it
     for key, v in _members_object(path):
-        if key.lower() in owner:
-            said.append(f"members_file lists {key!r} and {owner[key.lower()]!r}: they are one name without regard to case, so only the first is a member")
+        if _fold(key) in keys:
+            said.append(f"members_file lists {key!r} and {keys[_fold(key)]!r}: they are one name (case and spacing aside), so only the first is a member")
             continue
-        owner[key.lower()] = key
+        keys[_fold(key)] = key
         if isinstance(v, dict):
             emails: list[str] = []
-            for e in _names(v.get("emails")):
+            for e in _listed(v.get("emails"), f"an entry of the emails of {key!r}", said):
                 if "@" in e:
                     emails.append(e.lower())
                 else:
                     said.append(f"members_file: an entry of the emails of {key!r} has no @, so it is not read")
             if not emails and "@" in key:
                 emails = [key]
-            parsed.append((key, Member(_names(v.get("boards")), _names(v.get("aliases")), tuple(dict.fromkeys(emails)))))
+            aliases = _listed(v.get("aliases"), f"an alias of {key!r}", said)
+            parsed.append((key, Member(_names(v.get("boards")), aliases, tuple(dict.fromkeys(emails)))))
         else:
             parsed.append((key, Member(_names(v), (), (key,))))
-    out: dict[str, Member] = {}
-    for key, m in parsed:
-        def own(values: tuple[str, ...], what: str) -> tuple[str, ...]:
-            kept = []
-            for x in values:
-                if owner.setdefault(x.lower(), key) == key:
-                    kept.append(x)
-                else:
-                    said.append(f"members_file: {what} of {key!r} is already {owner[x.lower()]!r}'s, so it is not read for {key!r}")
-            return tuple(kept)
-        out[key] = Member(m.boards, own(m.aliases, "an alias"), own(m.emails, "an address"))
-    return out
+    owner: dict[str, str] = {}                          # folded name or address -> the key of the member that has it
+
+    def own(key: str, values: tuple[str, ...], what: str) -> tuple[str, ...]:
+        kept = []
+        for x in values:
+            if owner.setdefault(_fold(x), key) == key:
+                kept.append(x)
+            else:
+                said.append(f"members_file: {what} of {key!r} is already {owner[_fold(x)]!r}'s, so it is not read for {key!r}")
+        return tuple(kept)
+
+    done: dict[str, Member] = {}
+    on_a_board = [(k, m) for k, m in parsed if m.boards]
+    on_none = [(k, m) for k, m in parsed if not m.boards]
+    for group in (on_a_board, on_none):                 # members on a board claim first, so an entry on no board takes nothing from them
+        for key, _m in group:
+            owner.setdefault(_fold(key), key)           # the keys of a group before any alias or address of it
+        for key, m in group:
+            done[key] = Member(m.boards, own(key, m.aliases, "an alias"), own(key, m.emails, "an address"))
+    return {key: done[key] for key, _m in parsed}       # in the file's order
 
 
 def _members_object(path: str) -> list[tuple[str, object]]:

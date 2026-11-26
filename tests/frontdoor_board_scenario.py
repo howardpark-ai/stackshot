@@ -1,7 +1,8 @@
 """Scenario test for a board behind the front door (stage 2 of the front door): the board checks the signed identity of a call, and reads its members from the front door's members file.
 
-Offline and hermetic: made-up config files, the real board server (`stackshot.web.server`) on 127.0.0.1 in this process, no store beyond one fixture item, no network. Two parts, each in a
-process of its own (the board reads its config and keeps module state at import): the board behind a front door (`on`) and a board with no `[behind_frontdoor]` table (`off`).
+Offline and hermetic: made-up config files, the real board server (`stackshot.web.server`) on 127.0.0.1 in this process, no store beyond one fixture item, no network. Three parts, each in a
+process of its own (the board reads its config and keeps module state at import): the board behind a front door (`on`), a board with no `[behind_frontdoor]` table (`off`) and a board with sign-in
+on that offers the sign-in service's token check (`verify`).
 
 Part `on` covers:
   * the settings (`core/behind_door.py`): an absent table is all off; every key read; a wrong value is told in the config notes and never read as "off" (a board told to check identities
@@ -24,10 +25,16 @@ Part `on` covers:
 Part `off` covers a board with no table: its `/mcp` is not wrapped, an unsigned call and one with a signed header are served as before, `_who` asks nothing of a request, `[[members]]` is the
 list, and the config notes say nothing about a front door.
 
+Part `verify` covers a board with `[auth] mode = "google"` (a made-up client), a portal machine token, `identity_secret_file` and `verify_secret_file`, whose sign-in is the board's own provider
+(no call reaches Google: only the portal's token and tokens the provider does not know are sent). Over HTTP: `GET /frontdoor/verify` is on the app, ahead of the pages' catch-all (an unsigned request
+is 403 with the check's sentence, never 404); the header `x-stackshot-verify` and the signed word `token-check`, written here as the sign-in service writes them, are accepted; the portal's token is 200
+`via: portal`; no bearer and an unknown token are 401; a bearer is read as `/mcp` reads it (two spaces are 401 on both); a non-ASCII bearer is 401 on the route and on `/mcp` (403 unsigned), never 500;
+the app's bearer middleware calls the provider on an unsigned request, which the route then refuses; a verify secret equal to the identity secret answers no check.
+
     tests/run-suite frontdoor_board        -> exit 0 / 1"""
 import os, subprocess, sys
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-PARTS = ("on", "off")
+PARTS = ("on", "off", "verify")
 
 
 def setup(part):
@@ -55,6 +62,10 @@ def setup(part):
         (T / "members.json").write_text(json.dumps({"alice@example.test": ["main", "side"], "bob@example.test": ["side"], "carol@example.test": ["main"]}))
         toml += (f'\n[behind_frontdoor]\nidentity_secret_file = "{paths["secret"]}"\nidentity_max_age_seconds = 120\n'
                  f'members_file = "{paths["members"]}"\nboard_name = "main"\n')
+    if part == "verify":
+        paths["verify"] = secret("verify.key", "verify-secret-0123456789abcdef")
+        toml, n = re.subn(r'(?m)^portal_identity = ""', 'portal_identity = "owner@example.test"', toml); assert n == 1
+        toml += f'\n[behind_frontdoor]\nidentity_secret_file = "{paths["secret"]}"\nverify_secret_file = "{paths["verify"]}"\n'
     (T / "stackshot.toml").write_text(toml, encoding="utf-8")
     (T / "RULES.md").write_text("# rules\n\n" + "- a rule the connector serves, long enough to count as a rulebook.\n" * 20, encoding="utf-8")
     os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
@@ -503,11 +514,93 @@ def part_off():
     return F.ran, F.fails
 
 
+# ================================================================ part verify: a board with sign-in on that offers the token check
+def part_verify():
+    import json
+    T, secret, paths = setup("verify")
+    F = Fixture(); check = F.check
+    PORTAL = "portal-token-for-the-test-0123456789abcdef"
+    os.environ.update(STACKSHOT_AUTH="google", STACKSHOT_GOOGLE_CLIENT_ID="client.example.test", STACKSHOT_GOOGLE_CLIENT_SECRET="made-up-client-value",
+                      STACKSHOT_PORTAL_TOKEN=PORTAL, FASTMCP_HOME=str(T / "fastmcp"))      # set before fastmcp is imported: the provider's own files stay in the scratch folder
+    import logging; logging.disable(logging.CRITICAL)
+    from stackshot.core import behind_door as door, frontdoor_identity as ident
+    from stackshot.web import server
+    from fastmcp.server.auth.providers.google import GoogleProvider
+    # the wire as the sign-in service writes it: the header's name and the signed word are literals here, never the board's constants
+    HEADER, WORD = "x-stackshot-verify", "token-check"
+    VSECRET, ISECRET = "verify-secret-0123456789abcdef", "door-secret-0123456789abcdef"
+    signed = lambda secret_=VSECRET: {HEADER: ident.sign(secret_.encode(), WORD)}
+    bearer = lambda value: {"Authorization": value}
+    INVALID = {"error": "invalid_token"}
+
+    provider = server.mcp.auth
+    check("verify: the board's sign-in is its own Google provider", isinstance(provider, GoogleProvider), type(provider).__name__)
+    asked, real_verify = [], provider.verify_token
+    async def counting(token):
+        asked.append(token)
+        return await real_verify(token)
+    provider.verify_token = counting
+    app = server.mcp.http_app()
+    srv, th, sock, port = serve(app)
+    BASE = f"http://127.0.0.1:{port}"
+    try:
+        def get(headers):
+            st, body = post(BASE + "/frontdoor/verify", headers, method="GET")
+            try: return st, json.loads(body)
+            except ValueError: return st, body
+        got = get({})
+        check("verify: an unsigned GET /frontdoor/verify is 403 with the check's sentence: the route is on the app, ahead of the pages' catch-all", got == (403, door.NO_VERIFY), got)
+        asked.clear()
+        got = get(bearer("Bearer unknown-unsigned-token"))
+        check("verify: an unsigned request with a bearer is 403 too", got == (403, door.NO_VERIFY), got)
+        check("verify: ...though the app's bearer middleware has asked the provider about that token before the route ran (once; the route asks nothing)", asked == ["unknown-unsigned-token"], asked)
+        got = get({**signed("another-secret-0123456789abc"), **bearer(f"Bearer {PORTAL}")})
+        check("verify: a header signed under another secret is 403", got == (403, door.BAD_VERIFY), got)
+        got = get({**signed(ISECRET), **bearer(f"Bearer {PORTAL}")})
+        check("verify: a header signed under the identity secret is 403", got == (403, door.BAD_VERIFY), got)
+        asked.clear()
+        got = get({**signed(), **bearer(f"Bearer {PORTAL}")})
+        check("verify: x-stackshot-verify signing token-check, with the portal's token, is 200 with the portal's identity", got == (200, {"email": "owner@example.test", "via": "portal"}), got)
+        check("verify: the middleware and then the route asked the provider about the same token", asked == [PORTAL, PORTAL], asked)
+        got = get({**signed(), **bearer(f"bearer {PORTAL}")})
+        check("verify: the scheme is read in any case", got == (200, {"email": "owner@example.test", "via": "portal"}), got)
+        got = get(signed())
+        check("verify: signed with no bearer is 401 invalid_token", got == (401, INVALID), got)
+        got = get({**signed(), **bearer("Bearer a-token-the-board-never-issued")})
+        check("verify: a token the board's provider does not know is 401 invalid_token", got == (401, INVALID), got)
+
+        def mcp(value):
+            return post(BASE + "/mcp", {ident.HEADER: ident.sign(ISECRET.encode(), "owner@example.test"), **bearer(value)})
+        st, body = mcp(f"Bearer {PORTAL}")
+        check("verify: /mcp takes the portal's token (the control for the refusals below)", st == 200 and "serverInfo" in body, (st, body[:200]))
+        st, body = mcp(f"Bearer  {PORTAL}")
+        got = get({**signed(), **bearer(f"Bearer  {PORTAL}")})
+        check("verify: a bearer with two spaces, which /mcp refuses with 401, is 401 on the check too", st == 401 and got == (401, INVALID), (st, body[:200], got))
+        odd = "Bearer caf" + chr(233) + "-token"      # a header is bytes on the wire: this one is sent as latin-1
+        got = get({**signed(), **bearer(odd)})
+        check("verify: a non-ASCII bearer on a signed check is 401 invalid_token, never 500", got == (401, INVALID), got)
+        got = get(bearer(odd))
+        check("verify: ...on an unsigned one 403, never 500", got == (403, door.NO_VERIFY), got)
+        st, body = mcp(odd)
+        check("verify: ...and on /mcp 401, never 500", st == 401, (st, body[:200]))
+
+        import pathlib
+        pathlib.Path(paths["verify"]).write_text(ISECRET + "\n")
+        got = get({**signed(ISECRET), **bearer(f"Bearer {PORTAL}")})
+        check("verify: a verify secret that is the identity secret answers no check: 403 with its sentence", got == (403, door.SAME_SECRET), got)
+        pathlib.Path(paths["verify"]).write_text(VSECRET + "\n")
+        got = get({**signed(), **bearer(f"Bearer {PORTAL}")})
+        check("verify: and with a secret of its own again the next check is answered", got[0] == 200, got)
+    finally:
+        stop(srv, th, sock)
+    return F.ran, F.fails
+
+
 MARK = "@@frontdoor_board part"
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--part":
         name = sys.argv[2]; assert name in PARTS, name
-        ran, fails = {"on": part_on, "off": part_off}[name]()
+        ran, fails = {"on": part_on, "off": part_off, "verify": part_verify}[name]()
         print(f"{MARK} {name} {len(ran)} {len(fails)}"); sys.stdout.flush()
         os._exit(0)      # nothing a thread of the part left behind holds the process (tests/_scratch.py removes the scratch folder first)
     total = bad = 0

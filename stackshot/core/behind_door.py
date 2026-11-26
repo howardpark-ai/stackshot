@@ -17,7 +17,7 @@ The `[behind_frontdoor]` table of the config:
     board_name                the name this board has in the front door's [[frontdoor.backends]] and in that file (required with members_file)
     verify_secret_file        the secret the sign-in service signs a token check with. Set: the board answers `GET /frontdoor/verify` (web/routes/door_verify.py) for a request that carries that signed
                               header and a bearer token: who the board's own sign-in says the token is for. Unset: the route does not exist. Independent of the other keys (a board can offer the check before it
-                              takes calls through the door only)
+                              takes calls through the door only). Its value must differ from identity_secret_file's: a board whose two files hold the same value answers no check
 
 Absent table: `settings()` is all off and every function here answers "not behind a front door". A key that is present but wrong is not read as absent: a board that was told to check
 identities and cannot read its secret refuses every call, and a board that was told to read its members and cannot refuses everyone (never the other way: an unreadable file lets nobody in).
@@ -27,6 +27,7 @@ The module reads files and the config and imports nothing of fastmcp or the web 
 """
 from __future__ import annotations
 
+import hmac
 import os
 import sys
 import time
@@ -51,6 +52,7 @@ NO_SECRET = "refused: this board cannot read the secret that checks a signed ide
 NO_VERIFY = "refused: this check takes a request from the sign-in service only, and this request carries no signed header."
 BAD_VERIFY = "refused: the signed header of this request is not accepted (it is altered, signed with another secret, older than this board's replay window, or dated ahead of its clock)."
 NO_VERIFY_SECRET = "refused: this board cannot read the secret that checks the sign-in service's header, so it answers no check until that is fixed (the board's log says why)."
+SAME_SECRET = "refused: this board's secret for the sign-in service's header is the same as its identity secret, so it answers no check until the two differ (the board's log says why)."
 VERIFY_HEADER = "x-stackshot-verify"   # the header the sign-in service signs a token check with (frontdoor_identity.sign of VERIFY_WHO under verify_secret_file)
 VERIFY_WHO = "token-check"             # what the signature covers: the header proves the sender holds the secret, and carries no person
 
@@ -164,9 +166,19 @@ def caller_of(scope: Any) -> str:
 
 # ------------------------------------------------------------------------------------------------ the token check
 
+def _holds(path: str, secret: str) -> bool:
+    """Whether the identity secret file `path` holds `secret`. A file that cannot be used holds nothing: the identity check then refuses every call by itself."""
+    try:
+        other = _files.read_secret(path, "identity_secret_file")
+    except _files.FileError:
+        return False
+    return hmac.compare_digest(other.encode("utf-8"), secret.encode("utf-8"))
+
+
 def check_verify(value: str | None, cfg: dict[str, Any] | None = None, now: float | None = None) -> Check:
     """Whether `value` (the header's text) was signed by the sign-in service: `Check(who=VERIFY_WHO)` or the refusal text. Call it only for a board that offers the check (`settings().verify`):
-    the secret is read now, so a rotated one applies to the next request. The same window as the signed identity's (`identity_max_age_seconds`)."""
+    the secret is read now, so a rotated one applies to the next request. The same window as the signed identity's (`identity_max_age_seconds`). A board that also checks identities and whose two
+    secret files hold the same value answers no check (the service holds the verify secret, and with the identity secret it could sign a call as anyone); only a correctly signed request is told that."""
     s = settings(cfg)
     if not value or not value.strip():
         return Check(refusal=NO_VERIFY)
@@ -176,7 +188,12 @@ def check_verify(value: str | None, cfg: dict[str, Any] | None = None, now: floa
         _tell(str(e))
         return Check(refusal=NO_VERIFY_SECRET)
     who = _ident.verify(secret.encode("utf-8"), value, now=now, max_age=s.max_age)
-    return Check(who=who) if who == VERIFY_WHO else Check(refusal=BAD_VERIFY)
+    if who != VERIFY_WHO:
+        return Check(refusal=BAD_VERIFY)
+    if s.identity and _holds(s.secret_file, secret):
+        _tell("verify_secret_file and identity_secret_file hold the same value, so this board answers no token check until they differ: give the sign-in service a secret of its own")
+        return Check(refusal=SAME_SECRET)
+    return Check(who=who)
 
 
 # ------------------------------------------------------------------------------------------------ the members

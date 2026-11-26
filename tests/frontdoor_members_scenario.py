@@ -10,15 +10,19 @@ Covers:
     object's `boards`; a file that is not JSON or not an object is a FileError;
   * `member_of_address`: found by any listed address in any case; the first member when two list one; "" for an address nobody has, an empty one and a name;
   * no name or address belongs to two members: keys first, then the file's order; what is dropped is told; an `emails` entry with no `@` is not read; the older list form is read as before;
+  * names are compared as the board looks them up (white space collapsed, casefolded: two spaces or a sharp s do not make a second name), anything with an `@` by case and surrounding spaces only;
+  * a member on no board takes no alias or address from a member who is on one, by its key or by its lists; a blank alias or address, or one that is no text, is told like the other drops;
+  * the board's log says each thing dropped from the file, once;
   * `behind_door.people` and `members`: the members of one board in the file's order, with their aliases and addresses; two keys that differ only in case are one member (the first); None for a board that
     does not read its members from a front door; () for a file that cannot be read;
   * `members.build`: a person named by the key with the aliases and addresses the file gives, `person_of_email` finds each address (and not another), `person_of` finds the name and an alias, the older
     address-keyed form builds the person it always built;
   * `oauth._who` on a board behind a door: the signed identity is matched to a member by the key alone, exactly (never an alias, another address or another case): the answer is one of the person's addresses, or the
-    signed name for a person with none; an alias or address of one member never takes another's call; the placeholder is nobody; a request with no identity is refused.
+    signed name for a person with none, and the signed address itself when it is one of the person's addresses, the second included; an alias or address of one member never takes another's call; the
+    placeholder is nobody; a request with no identity is refused.
 
     tests/run-suite frontdoor_members       -> exit 0 / 1"""
-import json, os, sys, tomllib
+import contextlib, io, json, os, sys, tomllib
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 sys.path.insert(0, SCR); sys.path.insert(0, STACK)
 import _scratch
@@ -103,6 +107,48 @@ r, said = read({"Alice@X.test": ["main"]})
 check("older form: a mixed-case address key keeps the address as written, and a sign-in service finds it in any case", r["Alice@X.test"].emails == ("Alice@X.test",) and files.member_of_address(r, "alice@x.test") == "Alice@X.test" and said == [], (r, said))
 check("unique: the older reader still lists every key as the file has it", files.read_members(write({"Pat": ["a"], "pat": ["b"]})) == {"Pat": ["a"], "pat": ["b"]})
 
+# ---- names are compared as the board looks them up; anything with an @ by case and surrounding spaces only
+SHARP, SS = "Stra" + chr(223) + "e", "STRASSE"
+for label, alias, key in (("two spaces", "Bob  Lee", "Bob Lee"), ("a tab and another case", "bob\tLEE", "Bob Lee"), ("a sharp s spelled ss", SS, SHARP), ("two spaces in the key", "Bob Lee", "Bob  Lee")):
+    r, said = read({"ann": {"boards": ["main"], "aliases": [alias, "Annie"], "emails": ["a@x.test"]}, key: {"boards": ["main"], "emails": ["b@x.test"]}})
+    check(f"fold: an alias that is another member's key but for {label} is dropped and told", r["ann"].aliases == ("Annie",) and len(said) == 1 and "an alias of 'ann'" in said[0], (r, said))
+r, said = read({"ann": {"boards": ["main"], "aliases": ["Jo Ann"]}, "cat": {"boards": ["main"], "aliases": ["jo   ann", "kitty"]}})
+check("fold: an alias an earlier member has but for its spacing is dropped from the later one", r["ann"].aliases == ("Jo Ann",) and r["cat"].aliases == ("kitty",) and len(said) == 1, (r, said))
+for label, first, second in (("repeated spaces and case", "Bob Lee", "bob  lee"), ("a sharp s spelled ss", SHARP, SS), ("surrounding spaces", "Bob Lee", " Bob Lee "),
+                             ("surrounding spaces and case on an address", "a@x.test", " A@X.test ")):
+    r, said = read({first: ["main"], second: ["side"]})
+    check(f"fold: two keys that differ only in {label} are one member, the first, with its boards alone", list(r) == [first] and r[first].boards == ("main",) and len(said) == 1 and "only the first is a member" in said[0], (r, said))
+street = "stra" + chr(223) + "e@x.test"
+r, said = read({street: ["main"], "strasse@x.test": ["main"]})
+check("fold: two address keys that only casefold would join are two members", list(r) == [street, "strasse@x.test"] and said == [], (r, said))
+r, said = read({"ann": {"boards": ["main"], "aliases": [street], "emails": [street]}, "bo": {"boards": ["main"], "aliases": ["strasse@x.test"], "emails": ["strasse@x.test"]}})
+check("fold: two addresses that only casefold would join stay each member's own, as aliases too", r["ann"].emails == (street,) and r["bo"].emails == ("strasse@x.test",) and r["bo"].aliases == ("strasse@x.test",) and said == [], (r, said))
+
+# ---- a member on no board takes nothing from a member who is on one
+r, said = read({"gone": {"boards": [], "aliases": ["Boss", "old"], "emails": ["shared@x.test", "gone@x.test"]}, "ann": {"boards": ["main"], "aliases": ["boss"], "emails": ["Shared@x.test"]}})
+check("no board: an earlier entry on no board takes no alias or address from a member who is on one, and is told",
+      r["ann"] == M(("main",), ("boss",), ("shared@x.test",)) and r["gone"] == M((), ("old",), ("gone@x.test",)) and len(said) == 2 and all("of 'gone' is already 'ann'" in n for n in said), (r, said))
+check("no board: the file's order is kept, and the address finds the member who is on a board, its own address the other",
+      list(r) == ["gone", "ann"] and files.member_of_address(r, "shared@x.test") == "ann" and files.member_of_address(r, "gone@x.test") == "gone", r)
+r, said = read({"shared@x.test": [], "Boss": "main", "ann": {"boards": ["main"], "aliases": ["boss"], "emails": ["shared@x.test"]}})
+check("no board: nor by its key (an empty list's address, a name of a value that is no list)",
+      r["ann"] == M(("main",), ("boss",), ("shared@x.test",)) and r["shared@x.test"].emails == () and r["Boss"].emails == () and files.member_of_address(r, "shared@x.test") == "ann" and len(said) == 2, (r, said))
+r, said = read({"gone": {"aliases": ["ann"], "emails": ["bo@x.test"]}, "ann": ["main"], "bo@x.test": ["main"]})
+check("no board: a key of a member who is on a board stays that member's, as ever", r["gone"] == M((), (), ()) and r["ann"].boards == ("main",) and r["bo@x.test"].emails == ("bo@x.test",) and len(said) == 2, (r, said))
+r, said = read({"g1": {"aliases": ["g2", "spare"], "emails": ["s@x.test"]}, "g2": {"emails": ["s@x.test"]}})
+check("no board: among the entries on no board the rule is the old one: keys first, then the file's order", r["g1"] == M((), ("spare",), ("s@x.test",)) and r["g2"] == M((), (), ()) and len(said) == 2, (r, said))
+r, said = read({"pat": [], "Pat": ["main"]})
+check("no board: of two keys that are one name the first is the member, also when it is the one on no board", list(r) == ["pat"] and r["pat"].boards == () and len(said) == 1, (r, said))
+
+# ---- a blank alias or address, or one that is no text, is told
+r, said = read({"ann": {"boards": ["main"], "aliases": ["", "  ", 5, None, "AA"], "emails": [7, " ", {"x": 1}, "a@x.test"]}})
+check("dropped: blank and non-text aliases and addresses are not read", r["ann"] == M(("main",), ("AA",), ("a@x.test",)), r)
+check("dropped: and each is a note that says which and why", sorted(said) == sorted(
+      ["members_file: an alias of 'ann' is blank, so it is not read"] * 2 + ["members_file: an alias of 'ann' is not text, so it is not read"] * 2
+      + ["members_file: an entry of the emails of 'ann' is not text, so it is not read"] * 2 + ["members_file: an entry of the emails of 'ann' is blank, so it is not read"]), said)
+r, said = read({"ann": {"boards": ["main"], "aliases": ["AA", " AA "], "emails": ["a@x.test", "A@x.test"]}, "bo": {"boards": ["main"]}})
+check("dropped: a repeat inside one entry, and lists that are not there, are nothing to tell", said == [], said)
+
 # ---- behind_door.people / members
 cfgd = tomllib.loads
 def table(path, board="main", extra=""):
@@ -117,6 +163,17 @@ check("people: a file that cannot be read lists nobody", door.people(table(os.pa
 p_case = write({"Alice@x.test": ["main"], "alice@x.test": ["main"], "zed": ["main"]})
 check("people: two keys that differ only in case are one member, the first", [n for n, _a, _e in door.people(table(p_case))] == ["Alice@x.test", "zed"])
 
+# ---- the board's log says what was dropped
+p_log = write({"ann": {"boards": ["main"], "aliases": ["Cat", ""], "emails": ["a@x.test", "nope"]}, "cat": ["main"], "CAT": ["side"]})
+door._told.clear()
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    door.people(table(p_log)); door._cache.clear(); door.people(table(p_log))
+lines = err.getvalue().splitlines()
+wanted = ("members_file lists 'CAT' and 'cat'", "an alias of 'ann' is blank", "an entry of the emails of 'ann' has no @", "an alias of 'ann' is already 'cat'")
+check("log: the board's log says each thing dropped from the members file, once however often the file is read",
+      len(lines) == len(wanted) and all(l.startswith("board behind a front door: members_file") for l in lines) and all(sum(w in l for l in lines) == 1 for w in wanted), lines)
+
 # ---- members.build
 built = mem.build(table(p))
 by_name = {x.name: x for x in built}
@@ -129,6 +186,10 @@ try:
     check("build: person_of_email finds each of a person's addresses, and not another", mem.person_of_email("pat@example.test") is how and mem.person_of_email("pat2@example.test") is how and mem.person_of_email("pat3@example.test") is None)
     check("build: person_of finds the name and an alias, in any case", mem.person_of("pat") is how and mem.person_of("pj") is how and mem.person_of(" H ") is how and mem.person_of("zzz") is None)
     check("build: signed_in names the person for any of their addresses", mem.signed_in("pat2@example.test") is how)
+    folded = mem.build(table(write({"ann": {"boards": ["main"], "aliases": ["Bob  Lee", SS]}, "Bob Lee": ["main"], SHARP: ["main"]})))
+    mem.members = lambda: folded
+    check("build: a name looked up on the board is the member whose key it is, never an earlier member's spelling of it", [getattr(mem.person_of(w), "name", None) for w in ("bob lee", "Bob  Lee", SS, SHARP)] == ["Bob Lee", "Bob Lee", SHARP, SHARP], folded)
+    mem.members = lambda: built
 
     # ---- oauth._who on a board behind a door
     import fastmcp.server.dependencies as deps
@@ -161,6 +222,9 @@ try:
             these = mem.build(table(write(obj)))
             mem.members = lambda these=these: these
             check(f"who: {label} does not take the call", who_of(signed) == want, (who_of(signed), these))
+        second = mem.build(table(write({"b@x.test": {"boards": ["main"], "emails": ["a@x.test", "b@x.test"]}})))
+        mem.members = lambda: second
+        check("who: a signed address key listed second in its own emails is answered as signed, not as the first address", who_of("b@x.test") == "b@x.test", (who_of("b@x.test"), second))
         mem.members = lambda: built
         p_none = mem.build(table(write({"nobody": {"boards": ["main"]}})))
         mem.members = lambda: p_none

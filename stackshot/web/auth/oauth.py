@@ -53,7 +53,8 @@ def _auth():
         grant is not that. The token stands for the owner (`auth.portal_identity`); the direct OAuth path is untouched."""
         async def verify_token(self, token: str):
             import hmac
-            if machine and len(machine) >= 32 and hmac.compare_digest(token, machine):
+            # compared as bytes: compare_digest raises TypeError on text with a non-ASCII character, which any client can send, and the app answered 500 instead of 401
+            if machine and len(machine) >= 32 and hmac.compare_digest(token.encode("utf-8", "surrogatepass"), machine.encode("utf-8", "surrogatepass")):
                 return AccessToken(token=token, client_id="mcp-portal", scopes=scopes, expires_at=None,
                                    claims={"email": identity, "via": "portal"})
             return await super().verify_token(token)
