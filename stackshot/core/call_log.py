@@ -18,6 +18,10 @@ goes through as a line that keeps the refusal site's kind and says so, so the we
 
     {"t": …, "tool": "message", "ok": true, "item": "", "sender": "my-x", "to": "other-y", "kind": "unmarked-not-for-owner", "outcome": "handled", "how": "passed-on"}
 
+A reply that tells its writer something to look at, with nothing corrected and nothing refused (`noted`: an update changed the words of the Goal sentence and left the subject), keeps its kind apart from the fixes:
+
+    {"t": …, "tool": "update", "ok": true, "note": ["goal-moved"], "item": "board#N", "sender": "my-x"}
+
 A correction (`fixed`) is a pure fact the server can put right without a judgment: a bare item number read as the board id, a wake with seconds or a UTC offset read as the
 instance time, a subject with no scope prefix given the one its project's scope names. The server stores the corrected field, adds one line to the reply saying what it did
 (`reply_note`), and counts it here. A mover who disagrees sends the field again as they want it and the server leaves it alone.
@@ -47,6 +51,7 @@ TO_MAX = 80                                                           # characte
 BOUNCE = "bounce:"            # a fix kind written as BOUNCE + kind is a bounce-back, not a fix (`bounced`)
 HANDLED = "handled:"          # a fix kind written as HANDLED + refusal kind + ":" + how is a message the relay handled where it once refused (`handled`): it is no fix and has no line in the reply
 HOW_MAX = 40                  # characters of the `how` of a handled message kept
+NOTE = "note:"                # a fix kind written as NOTE + kind is a line a reply gave its writer with nothing corrected (`noted`): it is no fix, and the line is the reply's own
 NO_RESEND = frozenset({"description-bullet", "step-none", "his-step-settled", "step-none-applied", "said-text", "step-kept", "subject-cut", "work-cut", "ask-by-day", "description-url", "wait-basis-dropped", "description-goal", "step-split", "step-split-dropped", "step-reworded"})   # fixes whose reply line does not invite a resend: the field sent again as written would be refused, fixed the same, change nothing, or be settled the same way (each line says how to change it)
 
 _FIXES: contextvars.ContextVar[list[tuple[str, str]] | None] = contextvars.ContextVar("call_log_fixes", default=None)
@@ -122,6 +127,12 @@ def rewind(n: int) -> None:
 def counted(kind: str, **detail: Any) -> None:
     """A fix of the server's own kind (server_fixes.record) whose reply already tells it in its own words: counted in the log, no line added to the reply."""
     fixed(kind, "", **detail)
+
+
+def noted(kind: str) -> None:
+    """The reply of the call that is running tells its writer something to look at, with nothing corrected and nothing refused: counted in the log under `note`, never as a fix, and no line is added to the reply (the caller wrote its own).
+    No call running: nothing is recorded."""
+    fixed(NOTE + kind, "")
 
 
 def handled(kind: str, how: str) -> None:
@@ -285,12 +296,15 @@ def record(tool: str, ok: bool, *, item: str = "", sender: str = "", why: str = 
     t = time.time() if now is None else now
     row: dict[str, Any] = {"t": int(t), "tool": tool, "ok": bool(ok)}
     if fixes:
-        made = [k for k, _ in fixes if not k.startswith((BOUNCE, HANDLED))]
+        made = [k for k, _ in fixes if not k.startswith((BOUNCE, HANDLED, NOTE))]
         back = [k[len(BOUNCE):] for k, _ in fixes if k.startswith(BOUNCE)]
+        told = [k[len(NOTE):] for k, _ in fixes if k.startswith(NOTE)]
         if made:
             row["fix"] = made
         if back:
             row["bounce"] = back
+        if told:
+            row["note"] = told
     h_kind, h_how = handled_of(fixes) if ok and tool == "message" else ("", "")
     if not ok or fixes:
         row["item"] = re.sub(r"\s+", " ", str(item or "")).strip()[:40]

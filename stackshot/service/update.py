@@ -49,7 +49,7 @@ from stackshot.model import step_commands as _sc
 from stackshot.model import steps as _steps
 from stackshot.model import wait_tells as _wtell
 from stackshot.model import work as _work
-from stackshot.model.bullet_text import RX_MD_LINK, RX_NAKED_URL, _clip_line
+from stackshot.model.bullet_text import RX_MD_LINK, RX_NAKED_URL, _clip_line, goal_of, goal_words, stated_goal
 from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
@@ -407,6 +407,19 @@ def _dropped_lines_note(old: Any, new: Any) -> str:
         shown.append(f"and {len(gone) - _DROPPED_NOTE_MAX} more")
     return (f"\n(note: this write dropped {len(gone)} line{'' if len(gone) == 1 else 's'} of the old description (a reworded line counts as dropped, its new wording as a new line); "
             f"put back any fact you meant to keep: {'; '.join(shown)})")
+
+
+def _goal_moved_note(item_was: dict[str, Any], item: dict[str, Any], sent: str) -> str:
+    """The reply line of a write that changed the words of the item's Goal sentence and left its subject as stored: the title and the `Goal:` bullet name one outcome, so the subject is quoted, with what to send when
+    the outcome moved. Counted in the call log (call_log.noted). Information only: nothing is refused or stored differently. `sent` is the description as the call passed it: the words must differ both there and as
+    stored, so neither the server's split of a long bullet nor a long Goal sent again and split the same way is a change. "" when the stored description opens with no `Goal:` bullet, the one it replaces gave no
+    sentence, the words are the same (a re-formatting, a label put right) or the write stored another subject."""
+    new, old, said = goal_of(item.get("description")), stated_goal(item_was.get("description")), stated_goal(sent)
+    subject = str(item.get("subject") or "")
+    if new is None or old is None or said is None or subject != str(item_was.get("subject") or "") or goal_words(old) in (goal_words(new), goal_words(said)):
+        return ""
+    _calls.noted("goal-moved")
+    return f'\n(note: the Goal changed and the subject did not; the stored subject is "{_clip_line(subject)}": send subject= if the outcome moved)'
 
 
 def _mark_next_stale(item_was: dict[str, Any], item: dict[str, Any], meta: dict[str, Any], writer: str, naming_added: list[str], next_passed: bool) -> None:
@@ -911,6 +924,7 @@ def update_unlocked(
     if draft_set and (status or item.get("status")) == "completed":
         fc.add("Refused: a completed item keeps no draft (a close drops it); draft goes with an open item")
     owing = h.owing_note(debtor) if state_change else ""      # a write is never refused or held for a page debt: the reply says the write went through and the page is still owed (read here, before this write records its own debt)
+    desc_sent = description      # as the call passed it, before the server's own form fixes (the Goal note compares it)
     description = _fg.fix_bare_urls(description, str(item_was.get("description") or ""), session=_writes.session_next())       # a bare address in a description becomes a link to itself (the reply says so); next and ask keep the refusal
     for f_ in _fg.bare_url_faults({"description": description, "next": next, "ask": ask}, {"description": item_was.get("description"), "next": meta.get("next"), "ask": ask_was}, session=_writes.session_next()):   # only the fields this call sets; a stored bare URL is no reason to refuse
         fc.add(f_, text=True)
@@ -1663,6 +1677,12 @@ def update_unlocked(
             dropped_note = _dropped_lines_note(item_was.get("description"), item.get("description"))      # lines of the old description the new one lacks: named with their old text, so the writer can put a fact back
         except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
             print(f"update: {gid} dropped-lines note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    goal_note = ""
+    if description.strip() and _writes.session_next() and not reformat and not sender.strip().startswith("a script on "):      # the writes the goal gate judges: a session's own words
+        try:
+            goal_note = _goal_moved_note(item_was, item, desc_sent)
+        except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
+            print(f"update: {gid} goal note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     machine_note = h.machine_note(gid, item, keeper_was)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     offer_note = _anchor_offers.item_line(gid, item, item_was)      # a relay wait this write set, or a source link it put in the description, that no anchor watches: one line with the ready anchors call, never a refusal
     if dropped_hold:
@@ -1670,7 +1690,7 @@ def update_unlocked(
                  + (f"; its date {_wt.wake_value(meta)} stays" if _wt.wake_value(meta) else "") + ")")
     return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
-                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + wait_note + machine_note + offer_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(not backstop and (hold or wake or until_wait or after_set or wait_kind.strip() or str(wait_basis or "").strip() or waits))) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
+                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + goal_note + wait_note + machine_note + offer_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(not backstop and (hold or wake or until_wait or after_set or wait_kind.strip() or str(wait_basis or "").strip() or waits))) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + answered_note + named + told + owing + h.nag(debtor))
 
 

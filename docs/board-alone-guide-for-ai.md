@@ -337,7 +337,7 @@ The new tool list reaches Claude Code only in a new session. Tell the user to st
 In the new session, call `create` with:
 
 - `subject`: starts with one of the configured prefixes, at most 80 characters
-- `description`: 1 to 8 lines, each starting `- `, at most 120 characters (no `resolved:` or `done:` words); the first bullet opens `Goal:` and states the outcome wanted (the subject names the same outcome, "Make X work when Y", never the symptom "X fails when Y"); a symptom goes in a later bullet that opens `Problem:`
+- `description`: 1 to 8 lines, each starting `- `, at most 120 characters (no `resolved:` or `done:` words); the first bullet opens `Goal:` and states the finished outcome (the subject names the same outcome, "Make X work when Y", never an activity, a question, a topic or the symptom "X fails when Y"); a symptom goes in a later bullet that opens `Problem:`
 - `project`: `projects/getting-started`
 - `sender`: a short stable name for this session
 - `mover`: the same name. A fresh page lists no agents, so the default mover (`fallback_mover` in stackshot/service/telling.py: the project's builder, else its `-main` agent, else the page's `display-name:` session) is the `display-name:` session, which nothing answers to on a solo install. `create` without `mover` is not refused there (observed on a fresh install): the item gets that nonexistent mover and the stall pass logs "nobody could take it". Only a page-less project (`prj_...`) is refused ("names no mover")
@@ -440,7 +440,7 @@ Start each session by reading the brief. The SessionStart hook injects it. Call 
 Rules that apply on every write:
 
 - Item = human-level: a deliverable, a decision, a blocker, a handoff. Never a working step.
-- Subject starts with a configured prefix, at most 80 characters. `description` is 1 to 8 short `- ` bullets of at most 120 characters, live state only; its first bullet opens `Goal:` with the outcome wanted (a create or a replaced description without it is refused), a symptom goes under a later `Problem:` bullet.
+- Subject starts with a configured prefix, at most 80 characters. `description` is 1 to 8 short `- ` bullets of at most 120 characters, live state only; its first bullet opens `Goal:` with the finished outcome the subject names (a create or a replaced description without it is refused), a symptom goes under a later `Problem:` bullet.
 - `due` only from a real deadline, `YYYY-MM-DD` in the instance timezone.
 - Every `next` line opens with who takes it (`<session>: ...`). A line naming no one is refused.
 - After a write that changes state (create, complete, or update of description, next, needs, status or due) on an item whose project has a page, update that page in the same turn when it is yours to update (the page's keeper, or the writer when `[pilot] writer_owes_page = true`): rewrite `Current state` where it changed, add a dated line under `Timeline`, commit and push. The hooks remind the session that owes it at the next prompt. A project with no page owes none.

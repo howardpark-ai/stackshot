@@ -10,6 +10,8 @@ Used by server.py's description and next gates, by the cold call's close (cold_c
                 (a `>` quote line is not held to the marker, a fenced block is held to nothing but the line count)
   first_bullet  the text of a description's first `- ` bullet (a fenced block and a `>` quote line are not bullets), None when it has none
   goal_of       the sentence a description's first bullet gives after its `Goal:` label (the label is case-sensitive and sits right after the dash), None when the first bullet does not open that way
+  stated_goal   the goal a stored description gives however it wrote it: `goal_of`, the same once the label in another form is put right (relabel_goal), else the first bullet
+  goal_words    the words of a goal sentence, for asking whether a rewrite changed them: case left out, spacing and punctuation only between words, a link as its words
   split_long    a description's long bullets cut at a sentence end (first tier), else at a comma, colon, spaced dash or opening parenthesis (second tier: `split_long_ex` also says how many needed it)
   clip_bullet   one bullet shortened to `line_max` visible characters at a word boundary that lies outside any link and any naked URL, then an ellipsis
   bullets       a text as `- ` bullets, split on lines only, each clipped, at most `max_lines` of them (the last says how many more there were)
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import bisect
 import re
+import unicodedata
 from typing import Any
 
 # A Markdown link: `[words](destination)`, the destination as `(url)`, `(url "title")`, `(url 'title')`, `(url (title))`, `(<a destination with spaces>)`, or a url that holds
@@ -688,6 +691,25 @@ def goal_of(text: str) -> str | None:
         return None
     rest = b[len(GOAL_LABEL):].strip()
     return rest or None
+
+
+def stated_goal(text: str) -> str | None:
+    """The goal a stored description gives, however it wrote it: `goal_of`; for a first bullet with the label in another form (relabel_goal), what follows the label; else the first bullet itself, so that a rewrite
+    that only puts the label before it changes no words. None when there is no bullet."""
+    if (got := goal_of(text)) is not None:
+        return got
+    if relabeled := relabel_goal(text):
+        return goal_of(relabeled[0])
+    return first_bullet(text)
+
+
+def goal_words(sentence: str) -> list[str]:
+    """The words of a goal sentence, to compare two writings of it: letters and digits, in any case, and each symbol (`<`, `=`, `+`, a currency sign) or percent sign as a word of its own; a link counts as its words.
+    Spacing, punctuation, quotes, dashes, emphasis marks and backticks only separate words, so a re-formatted sentence gives the same list; a word split or joined ("Re-run", "Rerun") gives another, and so does
+    a changed symbol (the `~` of strikethrough is one)."""
+    t = RX_MD_LINK.sub(r"\1", str(sentence or "")).replace("`", " ")
+    t = unicodedata.normalize("NFC", t).casefold()
+    return "".join(c if c.isalnum() or unicodedata.category(c)[0] == "M" else f" {c} " if c == "%" or unicodedata.category(c)[0] == "S" else " " for c in t).split()
 
 
 def clean_lines(text: str) -> list[str]:
