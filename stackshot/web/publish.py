@@ -8,6 +8,9 @@ brief()     the one-line brief + top items (session-start banner).
 flush       (CLI) publish, then verify board-data is committed and pushed — the item reboot hook's stop step.
 
 CLI:  publish.py publish | flush | bump [--host <fleet-name>] | brief | render [full|brief]
+publish, bump and flush run on the server host only: the board is rendered from this box's own copy of the store and its own state, so a box whose config names
+another server ([release] deploy_ssh, or [server] box = false) is refused with one line that says where to run it, before anything is fetched or written (publish()
+raises NotServerHost; the CLI exits 1). brief and render only read, and run anywhere.
 The server imports this and calls publish() after every write (debounced), on its timer and when the fleet state changes.
 _publish()  the debounced call the server makes after a write (with `_publish_now`, `_publish_if_idle`, the timer `_PUB_TIMER` and its lock); a burst of writes publishes once, a few seconds after the first.
 """
@@ -24,8 +27,10 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 
+from stackshot.core import agentbox as _agentbox  # noqa: E402
 from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.projects import pages as _pages  # noqa: E402
 from stackshot.projects import project_registry as _preg  # noqa: E402  — roles.json and projects.json follow a publish
@@ -183,9 +188,33 @@ def _gitsync(msg: str, *paths: str) -> None:
             _note("mergetree", f"publish: could not check the store against its mirror (git exit {mt.returncode}); nothing pushed")
 
 
+class NotServerHost(RuntimeError):
+    """The publisher was asked on a box that is not the server host. The message is the one line that says where it runs; nothing was fetched, written, committed or pushed."""
+
+
+def _server_address() -> str:
+    """The address this box's client reaches the server at, as scheme://host[:port] (never a user, a password or a path), or "" when it has none or the address is this box's own (a box that was the server keeps its loopback one)."""
+    try:
+        from stackshot.fleet import client as _client
+        u = urllib.parse.urlsplit(_client.server_url())
+        h = u.hostname or ""
+        if u.scheme not in ("http", "https") or not h or _agentbox.is_this_box(h):
+            return ""
+        return f"{u.scheme}://" + (f"[{h}]" if ":" in h else h) + (f":{u.port}" if u.port else "")
+    except Exception:  # noqa: BLE001 — the address is a help in the line, never a reason to lose the refusal
+        return ""
+
+
+def _check_host(argv: list[str]) -> None:
+    """Raise NotServerHost on a box that is not the server host (config.publish_host_refusal: the rule `./install.sh units` follows). Asked before anything is fetched or written; `argv`: the publisher's words to run on the server instead."""
+    if line := _cfg.publish_host_refusal(argv, _server_address):
+        raise NotServerHost(line)
+
+
 def publish(force_versions: bool = False, host: str = "") -> str:
     """Render + commit + push. Returns the brief's first line."""
     _ro.guard("publish: files, versions, registry, commit and push")
+    _check_host(["bump" if force_versions else "publish"])
     LOCK.parent.mkdir(parents=True, exist_ok=True)
     with open(LOCK, "w") as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)
@@ -235,6 +264,11 @@ def _publish_now(force_versions: bool = False, host: str = "") -> str:
     if _ro.is_read_only():                  # a standby copy renders in memory when asked (_ro_board), and publishes nothing
         return "(read-only standby: nothing published)"
     try:
+        _check_host(["bump" if force_versions else "publish"])
+    except NotServerHost as e:     # a server whose own config names another host: the debounced publish drops what is returned, so the log is told too
+        _note("host", str(e))
+        return f"({e})"               # before the try below: a refused publish writes no roles.json either
+    try:
         return publish(force_versions=force_versions, host=host)
     except Exception as e:  # never let a publish failure surface as a tool error
         return f"(publish failed: {e})"
@@ -271,6 +305,11 @@ def _publish_if_idle() -> bool:
 if __name__ == "__main__":
     a = sys.argv[1:]
     cmd = a[0] if a else "publish"
+    if cmd in ("publish", "bump", "flush") and not _ro.is_read_only():      # a standby refuses in its own words (publish's guard)
+        try:
+            _check_host(a or ["publish"])
+        except NotServerHost as e:
+            sys.exit(str(e))
     if cmd == "publish":
         print(publish())
     elif cmd == "bump":
@@ -298,4 +337,4 @@ if __name__ == "__main__":
     elif cmd == "render":
         sys.stdout.write(render(str(DATA), a[1] if len(a) > 1 else "full"))
     else:
-        sys.exit("usage: publish.py publish | flush | bump [--host H] | brief | render [full|brief]")
+        sys.exit("usage: publish.py publish | flush | bump [--host H] | brief | render [full|brief] (publish, flush and bump: on the server host only)")
