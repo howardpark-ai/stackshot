@@ -64,8 +64,9 @@ runs on every box.
                                 default, "mute" stops rows for it. A row leaves the list when he marks it seen on the board. Reads only.
                                 Exit 0 · 1 no token or not reached.
   client.py get your-move       every open item in {OWNER}'s Your move group, as JSON: {"items": [{shown ("board#N"), subject, url (the item's page), ask (the open ask line, "" for none), updated (epoch seconds
-                                of the item's last write)}]}. It is the home page's own list with no cap, in the home page's order (the item that has been his longest first; `get brief` shows the first
-                                five lines of the same list), and holds every item whose mover is him, whichever session it names or whether it names one. An empty group is {"items": []}. Reads only.
+                                of the item's last write)}], "group": {"en": <the group's name>, "ko": <its name in the second language>}}. It is the home page's own list with no cap, in the home page's order (the item that has been his longest first; `get brief` shows the first
+                                five lines of the same list), and holds every item whose mover is him, whichever session it names or whether it names one. An empty group is {"items": [], "group": {...}}.
+                                `group` is the heading the home page draws over the list in each language, as the string table gives it; a language with no catalog on the install has the English text. Reads only.
                                 Exit 0 · 1 no token or not reached.
   client.py post project-agent <project> <name> --role <role> (--front | --back) [--surface sala|slack] --mandate "<one line>" [--sender <session id | label>]
                                 ask to list a new agent of a project (<project> = its id, page key or bare slug). --surface is where a front agent talks with him: sala (the

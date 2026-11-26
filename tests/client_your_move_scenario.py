@@ -4,11 +4,11 @@ Covers: the read lists every item of the group, more than five, whichever way th
 the other two lists (an item an agent moves, one that waits on a date or on another item, a held one, a closed one, one in the retired on-hold status); the answer is the home page's own group: the same items in the same order as the
 ui renderer's Your move list, and its first five are the brief's five lines; the order is the page's (the longest-his first, items of one age by due date), not newest first; each row's fields (`shown`, `subject`, `url`, `ask`
 empty without an open ask, `updated` in epoch seconds with the file's time for an item that stores none), a url without the instance's board address; a decision that leaves the group and an item that joins it show at once;
-an empty group is {"items": []}; over HTTP: no token, a wrong token, the token in the query string, a Basic credential and a live caller's pass are 401, the machine's token is the read's own answer, no-store, answered in a
+an empty group is {"items": [], "group": {...}}; the group's name (`group`: {"en", "ko"}) is the string table's own Your move heading, as the home page draws it, with no second-language catalog (the English text for both), with an ASCII test locale, with a catalog that lacks the key or refuses its value; over HTTP: no token, a wrong token, the token in the query string, a Basic credential and a live caller's pass are 401, the machine's token is the read's own answer, no-store, answered in a
 worker thread, a read-only standby serves it and a write to it is refused; the 404 list and `client.py` name the read.
 
     tests/run-suite client_your_move        → exit 0 / 1"""
-import json, os, re, sys, pathlib, logging, time, threading
+import contextlib, io, json, os, re, sys, pathlib, logging, time, threading
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 sys.path.insert(0, STACK)
@@ -41,6 +41,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 
+from stackshot.core import config as _cfg
 from stackshot.core import instance as _inst
 from stackshot.core import readonly as _ro
 from stackshot.core import store as _store
@@ -51,6 +52,7 @@ from stackshot.service import client_reads as cr
 from stackshot.web import render as _rmod
 from stackshot.web import server
 from stackshot.web.routes import client_api as _rt_client
+from stackshot.web.ui import kit as _kit
 from stackshot.web.ui import render as _ui
 
 OWNER = _inst.OWNER
@@ -89,9 +91,48 @@ shown = lambda n: _gh.shown(f"a{n}")
 ui_group = lambda: [_gh.shown(r["gid"]) for r, _m in _ui.Board(str(_store.STORE)).home_lists()["your-move"]]
 rows = lambda: {x["shown"]: x for x in body()["items"]}
 
+# the group's name: the string table's own words, read through the page's lookup. The repository holds no second-language text, so the second language here is an ASCII test locale in a temporary folder
+# (the English text in a marker), written and removed by this suite; with none configured the table's fallback is the English text.
+from stackshot.web import i18n as _i18n
+LOC = T / "locales"; LOC.mkdir()
+MARK = lambda v: f"[x:{v}]"
+NAMES_EN = {"en": _i18n.EN["state.you"], "ko": _i18n.EN["state.you"]}
+def set_dir(v):
+    if v is None: _cfg.CFG.get("ui", {}).pop("locale_dir", None)
+    else: _cfg.CFG.setdefault("ui", {})["locale_dir"] = str(v)
+def write_ko(d): (LOC / "ko.json").write_text(json.dumps(d), encoding="utf-8")
+def drop_ko(): (LOC / "ko.json").unlink(missing_ok=True)
+def settle(): _i18n._LOADED.clear(); _i18n._WARNED.clear()
+def home_heading(lang):
+    """The words the home page draws over its Your move list, in `lang`."""
+    with _i18n.use(lang): page = _ui.Board(str(_store.STORE)).html()
+    return re.search(r'<section id="your-move">.*?<h2>(.*?) <span class="count">', page, re.S).group(1)
+
 j = body(); got = [x["shown"] for x in j["items"]]
 mine = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-check("the answer is {items: [...]}, nothing else", set(j) == {"items"} and isinstance(j["items"], list), j.keys())
+check("the answer is {items: [...], group: {...}}, nothing else", set(j) == {"items", "group"} and isinstance(j["items"], list) and isinstance(j["group"], dict), j.keys())
+set_dir(None); settle()
+check("group, no second-language catalog: both languages are named, in the table's order, and the second is the table's fallback, the English text (present, never absent)",
+      _i18n.available() == ["en"] and list(j["group"]) == list(_i18n.LANGS) == ["en", "ko"] and j["group"] == NAMES_EN and j["group"]["en"] == "Your move", (_i18n.available(), j["group"]))
+check("group, the English name is the catalog's state.you and the heading the home page draws, word for word", j["group"]["en"] == _i18n.EN["state.you"] == _kit.title(_kit.YOUR_MOVE, "en") == home_heading("en"), (j["group"], home_heading("en")))
+set_dir(LOC); settle(); write_ko({"state.you": MARK(_i18n.EN["state.you"]), "state.agent": MARK(_i18n.EN["state.agent"])})
+with contextlib.redirect_stderr(io.StringIO()): jk = body()
+check("group, a second language configured: the name in each language, the English one unchanged, the second the catalog's own word",
+      _i18n.available() == ["en", "ko"] and jk["group"] == {"en": "Your move", "ko": MARK("Your move")}, (_i18n.available(), jk["group"]))
+with contextlib.redirect_stderr(io.StringIO()): hk, he = home_heading("ko"), home_heading("en")
+check("group, each name is what the home page draws over the list in that language", (jk["group"]["ko"], jk["group"]["en"]) == (hk, he), (jk["group"], hk, he))
+check("group, a second language configured changes nothing else: every other key, each row and the order are as without it", set(jk) == {"items", "group"} and jk["items"] == j["items"] and [list(x) for x in jk["items"]] == [list(x) for x in j["items"]], (jk.keys(),))
+check("group, the rows are exactly what the renderer's your_move gives and nothing was added to a row", j["items"] == json.loads(json.dumps(_rmod.your_move(str(_store.STORE)))) and all(list(x) == ["shown", "subject", "url", "ask", "updated"] for x in j["items"]), (j["items"][:1],))
+write_ko({"state.agent": MARK(_i18n.EN["state.agent"])})                                                 # a catalog that lacks the key: the table's fallback for that key, English
+settle()
+with contextlib.redirect_stderr(io.StringIO()): jm = body()
+check("group, a second-language catalog without the key gives the English text for it", _i18n.available() == ["en", "ko"] and jm["group"] == NAMES_EN, (jm["group"],))
+write_ko({"state.you": "{nothing}"})                                                                       # a value naming a field the English text lacks is refused: English again
+settle()
+with contextlib.redirect_stderr(io.StringIO()): jr = body()
+check("group, a catalog value the table refuses gives the English text for it", jr["group"] == NAMES_EN, (jr["group"],))
+drop_ko(); set_dir(None); settle()
+check("group, the catalog gone again: back to the fallback", body()["group"] == NAMES_EN, body()["group"])
 check("every item of the group is in it, more than five, and nothing of the other lists", len(got) == 10 and set(got) == {shown(n) for n in mine}, got)
 check("an item no session moves or is named on, and one a session only created, are in it", shown(2) in got and shown(5) in got and shown(4) in got
       and not any(cr._client_get("items", {"key": k})[2].count(f'"shown": "{shown(2)}"') for k in ("alpha-main", "alpha-builder", SESS["alpha-main"])), got)
@@ -135,7 +176,7 @@ gone = sorted(mine | {22})                                                      
 saved = {n: (T / f"store/a/{n}.json").read_text() for n in gone}
 for n in gone: drop(n)
 st, ct, b = cr._client_get("your-move", {})
-check("an empty group is 200 {items: []}", st == 200 and json.loads(b) == {"items": []} and ui_group() == [], (st, b))
+check("an empty group is 200 {items: [], group: {...}}: the group's name is there with no item", st == 200 and json.loads(b) == {"items": [], "group": NAMES_EN} and ui_group() == [], (st, b))
 for n, t in saved.items(): (T / f"store/a/{n}.json").write_text(t)
 
 # the surface
@@ -176,12 +217,12 @@ finally: _rt_client._client_get = _real
 check("http: no token → 401, a wrong token → 401, the token in the query string → 401, a Basic credential → 401, a bare Authorization value → 401",
       [x.status_code for x in (r0, r1, r2, r3, r4)] == [401] * 5 and not any("subject" in x.text for x in (r0, r1, r2, r3, r4)), [x.status_code for x in (r0, r1, r2, r3, r4)])
 check("http: a live pass of an approved key is 401 (it opens the form's calls only)", live.startswith(_cp.MACHINE_PREFIX) and rp.status_code == 401 and "subject" not in rp.text, (live, rp.status_code, rp.text[:100]))
-check("http: the machine's token gets the read's own answer, no-store, JSON", ok.status_code == 200 and ok.json() == body() and ok.headers["cache-control"] == "no-store" and ok.headers["content-type"].startswith("application/json"), (ok.status_code, ok.text[:150]))
+check("http: the machine's token gets the read's own answer, no-store, JSON", ok.status_code == 200 and ok.json() == body() and ok.json()["group"] == NAMES_EN and ok.headers["cache-control"] == "no-store" and ok.headers["content-type"].startswith("application/json"), (ok.status_code, ok.text[:150]))
 check("http: it is answered in a worker thread, not on the event loop (it renders the board)", [w for w, t in seen_threads if w == "your-move"] and all("worker" in t.lower() or "anyio" in t.lower() for w, t in seen_threads if w == "your-move") and wh.status_code == 200, seen_threads)
 check("http: the 404 list of reads names it", nf.status_code == 404 and "your-move" in nf.text, nf.text[:200])
 check("a read-only standby copy serves it, as it serves the other reads, and a write is still refused", sb.status_code == 200 and sb.json() == body() and wr.status_code == 503 and "read-only standby" in wr.text, (sb.status_code, wr.status_code, wr.text[:120]))
 usage = open(client.__file__, encoding="utf-8").read().split('"""', 2)[1]
-check("client.py knows the read and its usage text names it and its fields", "your-move" in client.READS and "client.py get your-move" in usage and all(w in usage.split("client.py get your-move", 1)[1].split("client.py post project-agent", 1)[0] for w in ("shown", "subject", "url", "ask", "updated", "no cap")), usage[:100])
+check("client.py knows the read and its usage text names it and its fields", "your-move" in client.READS and "client.py get your-move" in usage and all(w in usage.split("client.py get your-move", 1)[1].split("client.py post project-agent", 1)[0] for w in ("shown", "subject", "url", "ask", "updated", "no cap", '"group": {"en"', "heading the home page draws over the list in each language", "no catalog on the install has the English text")), usage[:100])
 _get = client.get
 client.get = lambda what, key="", timeout=10.0, **k: (200, json.dumps({"items": []}) if what == "your-move" else "x")
 try:
