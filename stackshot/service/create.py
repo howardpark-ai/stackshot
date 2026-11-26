@@ -344,6 +344,8 @@ def create_item(
         meta["draft"] = draft_txt
     fc.call(_gates.gate_metadata, meta, creating=True)
     lifted = "" if ask else h.lift_ask(meta, writer=owner, keeper=owner)   # a client without the ask parameter: the ask's form as next's first line
+    if lifted:                  # the ask taken from the first line of next is judged as an ask given as a parameter is
+        fc.call(_dg._gate_ask_links, meta.get("ask"))
     asked = lifted + h.ask_owed(meta)       # needs=decision without an ask: a nag line, or refused from [ask] refuse_after
     fc.call_family(*_faults.DECISION, _dg._gate_one_decision, meta, description, bool(lifted))  # one decision per item, options in words: the ask is being written
     fc.call_family(*_faults.DECISION, _dg._gate_alternatives, meta, description)  # alternatives named, none listed

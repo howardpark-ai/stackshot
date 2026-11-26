@@ -41,6 +41,7 @@ from stackshot.model import states as _states
 from stackshot.model import steps as _steps
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.decision_gates import _MOCKUP_ASK, _OPT_FORM
+from stackshot.model.decision_gates import long_link_hit as _dg_long_link_hit, long_link_refusal as _dg_long_link_refusal
 from stackshot.model.field_gates import _close_reason_max, _fit
 from stackshot.router import routing as _routing
 from stackshot.service import checks as _checks
@@ -124,6 +125,10 @@ def _gate_options(options: Any) -> list[dict[str, Any]] | None:
         recs += rec is True
         if not label or not line:
             faults.append(_option_gap(i, o, label, line))
+            continue
+        long_hit = _dg_long_link_hit(label + " " + line)
+        if long_hit:
+            faults.append(_dg_long_link_refusal(long_hit, f"option {i} ({label})"))
             continue
         hit = _OPTION_LINK.search(label + " " + line)
         if hit:

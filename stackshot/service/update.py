@@ -1378,6 +1378,8 @@ def update_unlocked(
     watch_note = fc.call(h.watch_on_write, gid, item_was, meta, model_set, model_drop, debtor, sender.strip(), default="")   # the wait's record, the arrival that was shown
     fc.call(_gates.gate_metadata, meta, creating=False)
     lifted = "" if (ask or clear_ask or item.get("status") == "completed") else h.lift_ask(meta, refresh=bool(next), writer=next_writer, keeper=keeper_was)   # a client without the ask parameter
+    if lifted and meta.get("ask") != ask_was:                  # the ask this call sets by the first line of next is judged as an ask given as a parameter is
+        fc.call(_dg._gate_ask_links, meta.get("ask"))
     steps_note = merged_note + reword_note
     steps_new = None                                            # the checklist this write leaves (set below when the write touches it): reads it
     if steps_on and not closing and (next_touch or marks):      # the checklist follows next, and next follows a mark: a marked line leaves next with its writer

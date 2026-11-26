@@ -107,6 +107,62 @@ def _gate_mockup(meta: dict[str, Any], description: str) -> None:
                             f"ask=\"Decide: <what to decide> {_MOCKUP_ASK} \u00b7 Recommend: \u2026 \u00b7 Stakes: \u2026 \u00b7 By: \u2026\" (\u2264 {_rmod.ASK_MAX} chars, the link counted).")
 
 
+# ----------------------------------------------------------------------------- a decision's link is a short decision page
+# The owner decides from the page the ask links. A link to a long project or notes page is unreadable as a decision, so the instance lists the prefixes of such pages ([ask] refuse_link_prefixes) and a write
+# that SETS an ask or an option holding a link that starts with one is refused (an ask only stored is never judged). The scheme and host match in any case, the path as written, a /tree/ page is the
+# same page as its /blob/ form, and a prefix without a path ends at its host. A link is a bare address or the address of a [words](url) link.
+_LONG_LINK_RX = re.compile(r"(?i:https?)://[^\s<>()\[\]\"'`]+")
+_LONG_LINK_FIX = ("link a short decision page made for this decision: an artifact, a document, or a mockup page from the web UI, with the decision, its choices and what is at stake on it. "
+                  "The long page stays on the project page, not in the ask or its options.")
+
+
+def _link_norm(url: str) -> str:
+    """A link as compared: http and https alike, host in lower case (urlsplit lowers it), a default port dropped, a /tree/ segment read as /blob/, a fragment dropped; "" when it has no host."""
+    from urllib.parse import urlsplit
+    if not isinstance(url, str):
+        return ""
+    try:
+        u = urlsplit(url.strip())
+        host, port = (u.hostname or ""), u.port
+    except ValueError:
+        return ""
+    if not host:
+        return ""
+    keep = port if port not in (None, 80, 443) else None
+    path = (u.path or "/").replace("/tree/", "/blob/", 1)
+    return f"https://{host}{':' + str(keep) if keep else ''}{path}" + (f"?{u.query}" if u.query else "")
+
+
+def _under(link: str, prefix: str) -> bool:
+    """`link` starts with `prefix`; a prefix that does not end with "/" ends at a path segment, a query or the end (a prefix of one page does not take a page whose name only starts the same)."""
+    return link.startswith(prefix) and (prefix.endswith("/") or link == prefix or link[len(prefix)] in "/?")
+
+
+def long_link_hit(text: Any, prefixes: Any = None) -> str:
+    """The first link in `text` that starts with a listed prefix (the instance's [ask] refuse_link_prefixes when `prefixes` is None), as written and cut at 80 characters; "" when none does or none is listed."""
+    pre = [n for n in (_link_norm(x) for x in (_cfg.ask_refuse_link_prefixes() if prefixes is None else prefixes)) if n]
+    if not pre:
+        return ""
+    for m in _LONG_LINK_RX.finditer(str(text or "")):
+        raw = m.group(0).rstrip(".,;:!?*_")
+        norm = _link_norm(raw)
+        if norm and any(_under(norm, p) for p in pre):
+            return raw[:80]
+    return ""
+
+
+def long_link_refusal(hit: str, where: str = "the ask") -> str:
+    """The refusal of a link to a long page: `where` is "the ask" or "option N"."""
+    return f"Refused: {where} links a long page ({hit}), not a decision page. {OWNER} decides from the page the ask links, so " + _LONG_LINK_FIX
+
+
+def _gate_ask_links(ask: Any) -> None:
+    """Refuse an ask holding a link to a long page the instance lists. Judges only the text it is given: the caller passes the ask a call sets, never one stored."""
+    hit = long_link_hit(ask)
+    if hit:
+        raise ToolError(long_link_refusal(hit))
+
+
 # ----------------------------------------------------------------------------- one decision per item
 # An item once carried three decisions in one ask, with the options only in a chat ("Decide: … and choices 2-3 · Recommend:
 # …, 2b …, 3a …"). A decision ask is written so that he can decide from the item page alone, without hunting for what the choices are or asking a front agent:
