@@ -452,16 +452,28 @@ sys.path.insert(0, SCR); os.environ["SUITEMAP_ROOT"] = str(R)
 import suitemap as s
 
 # ---------------------------------------------------------------- the record is what the old pass over every node found
-tests_py = sorted(pathlib.Path(SCR).glob("*.py"))[:60] + [R / p for p in FIX if p.endswith(".py") and p != "bad.py"]
-trees = []
-for p in tests_py:
-    try: trees.append(ast.parse(p.read_text(encoding="utf-8")))
-    except (SyntaxError, ValueError, OSError): pass
-same_walk = all(len(a) == len(b) and all(x is y for x, y in zip(a, b)) for a, b in ((s.walk_nodes(t), list(ast.walk(t))) for t in trees))
-check("CACHE 1 walk_nodes gives the nodes of ast.walk, the same objects in the same order, on every file of the checkout's tests and of the fixtures", same_walk and len(trees) > 40, len(trees))
-names = [n for t in trees for n in ast.walk(t) if isinstance(n, (ast.Name, ast.Attribute))]
-check("CACHE 2 chain_of is dotted split into its parts, and None where dotted is None, on every name and attribute of those files",
-      all((s.chain_of(n) is None and s.dotted(n) is None) or ".".join(s.chain_of(n)) == s.dotted(n) for n in names) and len(names) > 5000, len(names))
+# EVERY .py file of tests/, never a part of them. These are read as text, and tests/suitemap.py picks a suite for a NEW file of a folder only when the suite read
+# every .py file the folder held (rule 6). Reading the first 60 by name, a new early-named helper joined them: main's next measured map said this suite reads it,
+# the pick made without that file had left the suite out, and the audit failed main's run as a selection miss.
+tests_py = sorted(pathlib.Path(SCR).glob("*.py")) + [R / p for p in FIX if p.endswith(".py") and p != "bad.py"]
+texts_read, parsed, names_seen, same_walk, same_chain = set(), 0, 0, True, True
+for p in tests_py:   # one file's tree at a time: all of them held at once took about 900 MB
+    try:
+        text = p.read_text(encoding="utf-8"); texts_read.add(str(p))
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, OSError): continue
+    parsed += 1
+    fast, nodes = s.walk_nodes(tree), list(ast.walk(tree))
+    same_walk = same_walk and len(fast) == len(nodes) and all(x is y for x, y in zip(fast, nodes))
+    for n in nodes:
+        if isinstance(n, (ast.Name, ast.Attribute)):
+            names_seen += 1
+            chain, dot = s.chain_of(n), s.dotted(n)
+            same_chain = same_chain and ((chain is None and dot is None) or (chain is not None and ".".join(chain) == dot))
+unread = sorted(n for n in os.listdir(SCR) if n.endswith(".py") and os.path.join(SCR, n) not in texts_read)
+check("CACHE 0 every .py file of the checkout's tests/ is read, not a part of them (a suite that reads only some is not picked for a new one: rule 6 of tests/suitemap.py)", not unread, (len(unread), unread[:5]))
+check("CACHE 1 walk_nodes gives the nodes of ast.walk, the same objects in the same order, on every file of the checkout's tests and of the fixtures", same_walk and parsed > 40, parsed)
+check("CACHE 2 chain_of is dotted split into its parts, and None where dotted is None, on every name and attribute of those files", same_chain and names_seen > 5000, names_seen)
 
 def ref_links(tree, mod, path, repo):
     """aliases, froms and froms_all as the old pass over every node made them"""
