@@ -533,3 +533,9 @@ def takes_part(meta: dict[str, Any] | None, member: str) -> bool:
     """Has `member` a part in the item's your-step: the step is theirs (member_for the stored `step`), or the checklist holds an open step of theirs."""
     m = meta or {}
     return member == member_for(m.get("step"), m) or member in open_members(view(m))
+
+
+def several_hold(meta: dict[str, Any] | None) -> bool:
+    """Have two members or more had a part in the item: a line of theirs on the checklist, open or not (member_of), or the stored `step` asked of them (member_for)?"""
+    m = meta or {}
+    return len({who for who in member_of(view(m)) if who} | {member_for(m.get("step"), m)}) > 1

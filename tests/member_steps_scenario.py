@@ -7,7 +7,7 @@ A board of two members (member-a, member-b), items whose checklist holds an open
     on it, and for its mover; the server's own line is left out among the viewer's lines only;
   * Done and Send note by the member the step is asked of and by another member: what is ticked (never another member's line), who the mover becomes, that the other's step stays open and
     answerable, the notices, the answer code and its page notice, the line each session is told;
-  * a member with no part in the step, a question of another member's standing on the item, and a mail tick;
+  * a member with no part in the step (on a step one member alone has had, and on one two have had), a question of another member's standing on the item, and a mail tick;
   * one member: the notice only a board of several members answers with stays out of the home page.
 
     tests/run-suite member_steps  → exit 0 / 1"""
@@ -79,6 +79,8 @@ item(17, state="your-step", step="member-a: sign SEVENTEEN", mover="member-b", t
 item(18, state="your-step", step="sign EIGHTEEN", mover="member-a", then="alpha-build", next="alpha-build: prepare FIRSTAGENT\nmember-a: sign EIGHTEEN")
 item(19, state="your-step", step="read the page", mover="member-a", then="alpha-build", next="alpha-build: prepare AGENTNINETEEN\ncheck PLAINNINETEEN")      # no line names a member
 item(20, state="your-step", step="sign TWENTYFIELD", mover="member-a", then="alpha-build", next="alpha-build: prepare AGENTTWENTY")      # only the step field says what member-a does
+item(23, state="your-step", step="sign the form on paper", mover="member-a", then="alpha-build", next="member-b: countersign BRAVOSEVEN")      # member-a's part is the step field alone
+item(24, state="your-step", step="sign the form on paper", mover="member-a", then="alpha-build", steps=[{"text": "member-b: countersign BRAVOSEVEN", "status": "done", "by": "member-b", "at": now - 60}])      # a ticked line of member-b's, and no line of member-a's
 pair(21, next=f"{NEXT}\ncheck SHAREDLINE")                                            # a line that names no one stands beside both members' lines
 pair(22, next=f"{NEXT}\n- file the BAREBRAVO slip")                                # a bullet that names no one, under member-b's line, is member-b's
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
@@ -258,6 +260,10 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     check("…and the home page carries that notice for a board of two", "partdone" in re.search(r'<div id="sent-notes"[^>]*>', B).group(0))
     r = post(3, BEA, act="done")
     check("…a second Done of member-b's, from an old page, writes nothing", code(r) == "nostep" and len(meta(3)["answers"]) == 1, (code(r), meta(3)["answers"]))
+    r = post(3, BEA, act="note", text="a word from the side")
+    m = meta(3)
+    check("…and a note of theirs, their own step done, is kept as a comment, member-a's step as it was", code(r) == "comment" and m["answers"][-1]["kind"] == "comment" and m["answers"][-1]["text"] == "a word from the side"
+          and m.get("state") == "your-step" and f"member-a: {A_STEP}" in lines(3, _steps.OPEN), (code(r), m))
     r = post(3, ADA, act="done")
     m = meta(3)
     check("…then member-a's Done ends the step and hands the item over", code(r) == "done" and m.get("state") != "your-step" and m.get("mover") == "alpha-build", (code(r), m))
@@ -282,12 +288,17 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     check("a note of member-b's that says done ticks their step alone", code(r) == "partdone" and done(7) and all(by == "member-b" for _, by in done(7)) and f"member-a: {A_STEP}" in lines(7, _steps.OPEN) and meta(7).get("mover") == "member-a", (code(r), done(7)))
 
     # ---- 5. who may not finish a step
-    was = rd(8)
     r = post(8, BEA, act="done")
-    check("a Done by a member with no part writes nothing", code(r) == "nostep" and rd(8) == was, code(r))
-    r = post(8, BEA, act="note", text="a word from the side")
     m = meta(8)
-    check("…their note is kept as a comment, the step as it was", code(r) == "comment" and m["answers"][-1]["kind"] == "comment" and m["answers"][-1]["text"] == "a word from the side" and m.get("state") == "your-step" and not done(8), (code(r), m))
+    check("a Done that arrives from a member with no part, on a step only one member has had, ends it for that member, under the sender's name",
+          code(r) == "done" and m.get("state") != "your-step" and m.get("mover") == "alpha-build" and m["answers"][-1]["by"] == "member-b" and done(8) == [(f"member-a: {A_STEP}", "member-b")], (code(r), done(8), m))
+    r = post(23, BEA, act="done")
+    check("a Done of member-b's own step beside a part that is the step field alone ticks theirs and leaves the step", code(r) == "partdone" and meta(23).get("state") == "your-step", (code(r), meta(23)))
+    r = post(23, BEA, act="done")
+    check("…and their second Done writes nothing", code(r) == "nostep" and meta(23).get("state") == "your-step", (code(r), meta(23)))
+    was = rd(24)
+    r = post(24, BEA, act="done")
+    check("a ticked line of one member and a step field asked of another are two parts: the first member's Done writes nothing", code(r) == "nostep" and rd(24) == was, (code(r), meta(24)))
     was = rd(9)
     r = post(9, BEA, act="done")
     check("a Done beside another member's question writes nothing: the question stands", code(r) == "nostep" and rd(9) == was and "decision" in meta(9)["needs"], (code(r), meta(9)))
