@@ -153,7 +153,7 @@ item(44, needs=[BACK], mover="team-back", subject="[home] the item that defers")
 LINE = "team-back: Once board#61 closes, ship it"
 FIX = ('after=["board#61"]',)
 refused_nw("1 refuse: a next line that defers on an open item in words is refused, with the fix after=[\"board#<n>\"]", 44, lambda: upd(44, next=LINE),
-           "Refused:", "next line", "defers on board#61 in words", 'after=["board#61"] with ask_by=YYYY-MM-DD', "does not wait after it", "nothing wakes its mover", "supplies=<one line: what its output gives this item>", "see board#61")
+           "Refused:", "next line", "defers on board#61 in words", 'after=["board#61"] with until=YYYY-MM-DD', "does not wait after it", "nothing wakes its mover", "supplies=<one line: what its output gives this item>", "see board#61")
 refused("1 refuse: …once board#<a> lands (a line the precise wait list also catches) is one refusal", lambda: upd(44, next="team-back: once board#61 lands, ship it"), "defers on board#61", none=("problems",))
 for w in ("after board#61 closes", "when board#61 is done", "until board#61 lands", "before board#61 ships", "as soon as board#61 closes"):
     refused_nw(f"1 refuse: …{w}", 44, lambda w=w: upd(44, next=f"team-back: ship it {w}"), "defers on board#61")

@@ -399,7 +399,7 @@ import re as _re14
 OLD14_ANY = _re14.compile("|".join((r"alone (?:is|was|stays) (?:only |just )?a (?:plain )?reminder", r"is a reminder that leaves the item active", r"check-back reminder", r"never a park", r"(?:wake|date) (?:that )?only reminds",
                                     r"(?<!hold=true, )until=\\*\"<when the (?:window|wait) ends>\\*\", wait_basis", r"shows? no wait", r"a reminder, never", r"check-back", r"wake[^.\n]{0,60}is a (?:plain )?reminder", r"reminder[^.\n]{0,40}leaves (?:it|the item) (?:on agent|in its lane|active)",
                                     r"reminder \(wake", r"reminders came due", r"set another wake", r"a reminder's leaves it alone", r"reminder (?:set to|cleared)\b", r"\(a reminder:", r"no session text suggests parking")), _re14.I)
-OLD14_TEXT = _re14.compile(r"hold=true, wake=")                  # the park form taught with the old name: in the docs and the served text only (a test calls the alias on purpose)
+OLD14_TEXT = _re14.compile(r"hold=true, wake=|hold=true with (?:its |a |the )?wake|park with hold=true|(?:ask_by|wake)=(?:<|YYYY)")      # the park and wait forms taught with the retired parameters: in the docs and the served text only (a test calls the alias on purpose)
 OLD14_FRONT_OK = _re14.compile(r"reminder wakes?\b", _re14.I)
 def old14_hit(line, text=True):
     """The old-model phrase a line carries, "" when none: a front agent's own reminder wake is the one allowed sense."""
@@ -411,7 +411,8 @@ def old14_hit(line, text=True):
 check("5.14 the check lets a front agent's reminder wake through and catches the same words elsewhere",
       not old14_hit("A front agent's own reminder wakes are refused, so a step it is given needs a mover") and not old14_hit("this suite sets a reminder wake on an alive item as home-front")
       and old14_hit("a reminder wake is sent to the mover") == "reminder wake" and old14_hit("N reminders came due for you") == "reminders came due" and old14_hit("reminder set to 2099-03-02") == "reminder set to"
-      and old14_hit("update(hold=true, wake=…, wait_basis=…)") == "hold=true, wake=", None)
+      and old14_hit("update(hold=true, wake=…, wait_basis=…)") == "hold=true, wake=" and old14_hit("hold=true with wake and wait_basis for a park") == "hold=true with wake"
+      and old14_hit("wait_event=\"x\", ask_by=<the day>") == "ask_by=<" and not old14_hit("update(until=\"2099-03-02\", wait_kind=\"time\", wait_basis=\"x\")"), None)
 hits14 = []
 for f14 in sorted([*(root14 / "docs").glob("*.md"), *[x for x in (root14 / "stackshot").rglob("*") if x.is_file() and x.suffix not in (".pyc",)], *(root14 / "tests").glob("*_scenario.py")]):
     if f14.name == "until_write_scenario.py":
@@ -433,8 +434,8 @@ check("5.14 a bare date within the cap drops a wait_basis and says so: the date 
 check("5.14 …a hold's wake takes it", bool(bupd(95, hold=True, wake=w(3), wait_basis=f"the vendor ships {w(3)}")) and bool(W.basis_of(mt(95))), mt(95))
 check("5.14 …and a date past the cap takes it", bool(bupd(96, until=w(40), wait_basis=f"the vendor ships {w(40)}")) and bool(W.basis_of(mt(96))), mt(96))
 upd14 = _wt_update._UPDATE_DESC + _wt_update._WAIT_FORM
-check("5.14 the update description says so: a bare date within the cap drops a basis unless the item is on hold or verifying, and a date no longer leaves an item active as a reminder",
-      "A bare date within the cap (until, or its old name wake) is a wait on its own" in upd14 and "dropped, the reply saying so, unless the item is parked (hold=true) or verifying" in upd14 and "a date no longer leaves the item active as a reminder" in upd14, None)
+check("5.14 the update description says so: a bare date within the cap drops a basis, a park of the cap's days or less takes his recorded words, and a date does not leave an item active as a reminder",
+      "A bare date within the cap is a wait on its own" in upd14 and "a basis sent with such a date is dropped, the reply saying so" in upd14 and "a date does not leave the item active as a reminder" in upd14 and not _re14.search(r"\bhold=true\b|\bask_by=", upd14), None)
 check("5.14 docs/item-model.md names until as the one date of a wait", "stored as `until`" in (root14 / "docs" / "item-model.md").read_text(encoding="utf-8"), None)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

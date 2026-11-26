@@ -200,7 +200,7 @@ def stall_cold_kept(gid: str, cold_at: float, mover: str, reason: str) -> None:
             _telling.tell_woken(gid, _hooks().session_id(mover) or mover,
                         f"[stackshot] {_gh.shown(gid)} \"{subject}\" is still yours: a fresh session read it and judged you the right one" + (f" ({why})" if why else "") + ". "
                         "If you are waiting on something to happen (a release, a PR's merge, a recycle or fleet op, a job's run), store the wait so the server watches it and the item stops reading as idle: "
-                        "update(wait_kind=\"event\", wait_event=\"<the event>\", ask_by=<the day it comes back anyway>, mover=<who takes it then>). Otherwise work it, hand it on or close it. "
+                        "update(wait_kind=\"event\", wait_event=\"<the event>\", until=<the day it comes back anyway>, mover=<who takes it then>). Otherwise work it, hand it on or close it. "
                         f"→ {_telling.notice_link(gid)}", tag="stall")
         print(f"stall: {gid} cold call named its mover {mover} as the right owner: left with it", file=sys.stderr, flush=True)
     except Exception as e:  # noqa: BLE001

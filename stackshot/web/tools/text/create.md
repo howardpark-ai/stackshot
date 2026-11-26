@@ -7,29 +7,29 @@ uuid, quote a piece of its attachment.prompt; stored as Done-by, kind acted, and
 within 24 hours after its date).
 
 ## text CAP_FORM lead trail
-A wake runs at most {{CAP_DAYS}} days from the item's last move: a wake further out is refused without {{OWNER}}'s
+An until date runs at most {{CAP_DAYS}} days from the item's last move: a date further out is refused without {{OWNER}}'s
 words. A due date is a deadline and is accepted as it is.
 
 ## text AGENT_DUE_FORM lead trail
 Agent work carries no expected time: a create sets none, and the item shows how long its work has run. Doing is work
 in hand (a session building, running tests, reviewing, a release running); a wait on a date, a timer, someone else's
 step or release is not doing: park it with update (until, adding wait_basis past the cap; or after=["board#N"]; or
-wait_kind="relay" with wait_event, ask_by and needs=["external"]). A bare date (until, or its old name wake) is a wait
+wait_kind="relay" with wait_event, until and needs=["external"]). A bare date (until) is a wait
 until then and the board lists the item as waiting; a hand-off makes the date only a backstop, no
-wait, unless hold, wait_kind, wait_basis or an after link is set. A stored doing
-item whose wake (one it still carries from before until) is more than {{DATED_WAIT_MIN_HOURS}} hour(s) away
+wait, unless the item is parked or wait_kind, wait_basis or an after link is set. A stored doing
+item whose date (one it still carries from before until) is more than {{DATED_WAIT_MIN_HOURS}} hour(s) away
 (`[waiting] dated_wait_min_hours`) while every open step of its next is dated for that day or later is listed as
 waiting too (one undated step means it can act now): date a step only when it really cannot run before then; the daily
 audit asks the item's mover why such a step cannot run now.
 
 ## param ASK_BY_PARAM_NEW
-The old name of until, accepted for now: the day a wait on another item, a relay or an event comes back to someone if
-it has not ended, YYYY-MM-DD, tomorrow at the earliest: ask_by="2099-03-02".
+Retired: a call that passes it is refused. The day a wait on another item, a relay or an event comes back to someone
+if it has not ended is until, YYYY-MM-DD, tomorrow at the earliest: until="<day, within {{CAP_DAYS}} days>".
 
 ## param UNTIL_PARAM_NEW
 The one date the new item's wait ends on, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM, in the board timezone (a
-relay or event wait takes the day alone, YYYY-MM-DD). wait_kind goes only beside it (none: the date alone). It
-replaces ask_by, still accepted for now. Beside waits it is the list's backstop day, required.
+relay or event wait takes the day alone, YYYY-MM-DD). wait_kind goes only beside it (none: the date alone). Beside
+waits it is the list's backstop day, required.
 
 ## param NEXT_CREATE
 The checklist, one step per line, each opening with who takes it: next="my-x: open the PR" (or several lines with \n).
@@ -51,9 +51,9 @@ With no options listed the Recommend is a yes or a no. The ask line never says I
 ## param wait_reason
 What the step waits on that is not available now (a reply, a build or test still running, a window the work needs, a
 resource that is down), at least {{WAIT_GUARD_REASON_MIN}} characters: wait_reason="the nightly run finishes at
-03:00". Required when this write sets a wake, or a line of your own next dated later than today, on an item you move,
+03:00". Required when this write sets an until, or a line of your own next dated later than today, on an item you move,
 or it is refused (a model may refuse it too when the step could be done now). Not stored on the item. A park
-(hold=true with wait_basis), a wait on another item (after) and needs decision or external need none. A date after by,
+(wait_kind="time" with wait_basis), a wait on another item (after) and needs decision or external need none. A date after by,
 due or before is a deadline, not a wait.
 
 ## description create
@@ -68,7 +68,7 @@ needs="decision", then="my-x" (who takes it after his answer), ask="Decide: whet
 Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099", options=[{"label": "Approve",
 "line": "Approve the schema", "recommended": true}, {"label": "Decline", "line": "Wait a week", "recommended":
 false}]; a step that waits on another item: next="my-x: ship the export once board#N closes", after=["board#N"],
-ask_by="2099-03-02"; work for the project's builder: leave mover out. subject: {{PFX}}, then the outcome wanted as a
+until="<day, within {{CAP_DAYS}} days>"; work for the project's builder: leave mover out. subject: {{PFX}}, then the outcome wanted as a
 task, never a topic or a symptom (a subject with no scope prefix is given the one its project's scope names, and the
 reply says so). project must exist (create the page first; a page in a second brain is looked up in that brain's own
 copy, and taken unchecked while that copy cannot be read); a sub-page counts and shows on its hub's row. sender: your

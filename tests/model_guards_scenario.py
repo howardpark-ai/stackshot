@@ -225,7 +225,13 @@ check("2 post-wake mover: …a relay's default is the owner, who always passes",
 
 # ================================================================ 3. a time wait carries his words or a real date
 item(68, needs=[BACK])
-refused_nw("3 snooze: a hold with a wake and no reason is refused, saying what counts", 68, lambda: upd(68, hold=True, wake=day(3)), "waits on a time (wake", "no reason", "wait_basis=", "Acked-by", "set no date")
+refused_nw("3 snooze: a hold with a wake and no reason is refused, saying what counts", 68, lambda: upd(68, hold=True, wake=day(3)), "waits on a time (until", "no reason", "wait_basis=", "Acked-by", "set no date")
+item(476, needs=[BACK])
+try:
+    upd(476, wait_kind="time", wake=day(3)); near_msg = ""
+except Exception as e_:
+    near_msg = str(e_)
+check("3 snooze: a park stated by wait_kind within the cap says it needs his recorded words (a basis sent with such a date is dropped), and shows no call with a basis", "no reason" in near_msg and "needs Oliver's recorded words" in near_msg and "is dropped" in near_msg and "send the same call again" not in near_msg and "hold=true" not in near_msg, near_msg[-400:])
 try:
     upd(68, hold=True, wake=day(3)); snooze_msg = ""
 except Exception as e_:
@@ -290,8 +296,8 @@ item(432, needs=[BACK], next=""); item(433, needs=[BACK], next="")
 out_alone = _update_svc._update("a432", sender=BACK, next=PARK_STEP, wake=day(3), wait_reason="the vendor replies after that date")
 out_basis = _update_svc._update("a433", sender=BACK, next=PARK_STEP, wake=day(3), wait_basis=f"the vendor visits {day(3)}", wait_reason="the vendor replies after that date")
 park_keys = ("hold", "wait_kind", "wake", "until", "phase", "waits_on")
-check("3 snooze: a wake alone with a step that waits for it is parked by the write", out_alone.count("(parked: wake") == 1 and hd_(mt(432)) is True and bool(W.basis_of(mt(432))), (out_alone[-300:], mt(432)))
-check("3 snooze: …and the same call with a basis the tool drops is parked the same way, the basis the wake's own reason", out_basis.count("(parked: wake") == 1 and {k: mt(432).get(k) for k in park_keys} == {k: mt(433).get(k) for k in park_keys} and "vendor visits" not in str(mt(433).get("wait_basis")), (out_basis[-300:], mt(433)))
+check("3 snooze: a wake alone with a step that waits for it is parked by the write", out_alone.count("(parked: until") == 1 and hd_(mt(432)) is True and bool(W.basis_of(mt(432))), (out_alone[-300:], mt(432)))
+check("3 snooze: …and the same call with a basis the tool drops is parked the same way, the basis the wake's own reason", out_basis.count("(parked: until") == 1 and {k: mt(432).get(k) for k in park_keys} == {k: mt(433).get(k) for k in park_keys} and "vendor visits" not in str(mt(433).get("wait_basis")), (out_basis[-300:], mt(433)))
 
 # ================================================================ 4. filler
 item(76, needs=[BACK])
@@ -327,7 +333,7 @@ check("5 end: a legacy outside item's chase day is its ask-by (a write that touc
 item(80, needs=[BACK])
 refused_nw("6 decision + hold: needs decision with a hold is refused, and the refusal says the way: hand the item to a session, hold with him as the mover, the ask and options come back", 80,
            lambda: upd(80, needs=["decision"], ask=ASK, hold=True, wake=day(3), wait_basis=f"visit on {day(4)}"),
-           "needs holds decision together with a park", "needs=[<session>]", "mover=", "the same ask and options", "clear_hold=true", none=("an ask for later is a time wait",))
+           "needs holds decision together with a park", "needs=[<session>]", "mover=", "its ask, if it had one", "clear_hold=true", none=("an ask for later is a time wait",))
 upd(80, needs=["decision"], ask=ASK)
 check("6 decision + hold: …a decision without the hold passes", "decision" in mt(80)["needs"], mt(80))
 item(81, needs=["decision"], ask=ASK, hold=True, wake=day(3))
@@ -390,6 +396,40 @@ try:
     refused_nw("6d park after the window: hold is no parameter any more, and the refusal names until", 121, lambda: upu(121, hold=True, wake=day(10), **NOKIND), "hold", "until=")
     item(127, needs=["decision"], ask=ASK, options=OPTS)
     refused_nw("6d park after the window: a date and a basis with him as the mover but no kind is refused, and the refusal names wait_kind time", 127, lambda: upu(127, until=day(10), **NOKIND), "wait_kind")
+finally:
+    _wf6._wait_alias_until = _window6
+# ---- 6f. the short-park refusal tells the truth about a basis: the update tool drops one sent with a date within the cap, unless the item already stores a time wait (gates.basis_held)
+_wf6._wait_alias_until = lambda: _dt6.date(2020, 1, 1)
+try:
+    item(477, needs=[BACK], until=day(10), wait_kind="time", wait_basis=f"the soak ends {day(10)}")      # stores a time wait with its basis
+    SOAK = f"the soak ends {day(3)}"
+    def tried(f):      # defined again further down (6e): a refusal shows as its text
+        try: return f()
+        except Exception as e: return f"REFUSED {e}"
+    out_k1 = tried(lambda: upu(477, until=day(3), wait_kind="time"))
+    check("6f short park, item stores a time wait: the refusal advises the basis (send the same call again with wait_basis), never says it is dropped", out_k1.startswith("REFUSED") and "send the same call again with wait_basis=" in out_k1 and "does not help" not in out_k1 and "is dropped" not in out_k1, out_k1[-400:])
+    out_k2 = tried(lambda: upu(477, until=day(3), wait_kind="time", wait_basis=SOAK))
+    check("6f short park, item stores a time wait: …and the call with the basis is accepted, the basis stored", not out_k2.startswith("REFUSED") and mt(477).get("until") == day(3) and _WT.basis_of(mt(477)) == SOAK, (mt(477), out_k2[-300:]))
+    item(478, needs=[BACK])      # stores no wait
+    out_n1 = tried(lambda: upu(478, until=day(3), wait_kind="time"))
+    check("6f short park, item stores no wait: the refusal says it needs his recorded words and that a basis is dropped, with no call to send again", out_n1.startswith("REFUSED") and "needs Oliver's recorded words" in out_n1 and "does not help" in out_n1 and "send the same call again" not in out_n1, out_n1[-400:])
+    out_n2 = tried(lambda: upu(478, until=day(3), wait_kind="time", wait_basis=SOAK))
+    check("6f short park, item stores no wait: …and the basis changes nothing (still refused, nothing stored)", out_n2.startswith("REFUSED") and "no reason" in out_n2 and not mt(478).get("until"), (mt(478), out_n2[-300:]))
+    item(479, needs=[BACK], hold=True, wake=day(3), wait_kind="time")      # a stored hold with a time wait inside the cap and no basis: the call below sends no date
+    out_l1 = tried(lambda: upu(479, mover=BACK))
+    check("6f no date in the call, a stored hold with a time wait inside the cap and no basis: the refusal advises the basis, never says it is dropped", out_l1.startswith("REFUSED") and "no reason" in out_l1 and "send the same call again with wait_basis=" in out_l1 and "does not help" not in out_l1 and "is dropped" not in out_l1, out_l1[-400:])
+    out_l2 = tried(lambda: upu(479, mover=BACK, wait_basis=SOAK))
+    check("6f …and the same call with a wait_basis is accepted, the basis stored", not out_l2.startswith("REFUSED") and _WT.basis_of(mt(479)) == SOAK, (mt(479), out_l2[-300:]))
+    item(480, needs=[BACK], hold=True, wake=day(3), wait_kind="time")
+    out_h1 = tried(lambda: upu(480, hold=True))
+    check("6f a bare hold=true on a stored time wait inside the cap with no basis: the refusal advises the basis, never says it is dropped", out_h1.startswith("REFUSED") and "send the same call again with wait_basis=" in out_h1 and "does not help" not in out_h1 and "is dropped" not in out_h1, out_h1[-400:])
+    out_h2 = tried(lambda: upu(480, hold=True, wait_basis=SOAK))
+    check("6f …and with a wait_basis it is accepted, the basis stored", not out_h2.startswith("REFUSED") and _WT.basis_of(mt(480)) == SOAK, (mt(480), out_h2[-300:]))
+    def _snooze_text(**kw):      # the guard itself, on a stored hold with a time wait inside the cap and no basis, as a write that gives a date leaves it
+        it_ = {"status": "open", "subject": "[home] x", "metadata": {"project": "projects/alpha", "owner": U["home-front"], "next": "home-front: do x", "needs": [BACK], "hold": True, "wake": day(3), "wait_kind": "time"}}
+        return " ".join(p.text for p in mg.check(it_, mg.Ctx(now=now0), touched=None, gid="a1", date_given=True, **kw)[0] if p.key == "snooze")
+    check("6f the guard on a hold given beside a date (hold_given) advises the basis, never says it is dropped: a hold's basis stands at any length", "send the same call again with wait_basis=" in _snooze_text(hold_given=True) and "does not help" not in _snooze_text(hold_given=True), _snooze_text(hold_given=True)[-300:])
+    check("6f …a park stated by the kind alone on an item that stores no time wait says it is dropped, and a stored time wait (basis_kept) takes the advice instead", "does not help" in _snooze_text() and "send the same call again" not in _snooze_text() and "send the same call again with wait_basis=" in _snooze_text(basis_kept=True), _snooze_text()[-300:])
 finally:
     _wf6._wait_alias_until = _window6
 item(113, needs=[BACK], mover=BACK)

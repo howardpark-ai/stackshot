@@ -202,7 +202,7 @@ runs on every box.
                                 {"ok", "item": "board#N", "state", "flags": {the whole map, as get for-you}} (404 an unknown item, 400 a bad
                                 state). Exit 1 and the reason on stderr when refused or not reached.
   client.py post state ...      retired: an item stores alive or waiting directly now, so no call sets or clears a state. It prints the refusal (exit 1) that names what to pass through update instead:
-                                mover=<who moves it>, hold=true with wake and wait_basis for a park, after=["board#N"] for another item, wait_kind with wait_event, ask_by and mover (who takes it then) for a wait on something
+                                mover=<who moves it>, until with wait_kind="time" and wait_basis for a park (within the wait cap's days a park needs his recorded words), after=["board#N"] for another item, wait_kind with wait_event, until and mover (who takes it then) for a wait on something
                                 outside, needs=["decision"] with ask for {OWNER}'s call, step=<one line, no command> for his own step. `get items` carries each item's `state` and `state_fields` {carry field: text} when
                                 an older item still stores a state, and neither when it stores none (the word an item reads as is not sent: its `list` and `get`'s model line say where it stands). It carries each item's `list` too: the home page's list the item is in, "your-move", "agents" or "waiting", so the items sheet groups as the page does.
   client.py post question --project <key|id|slug> --ask "<ask line>" --subject "<subject>" --request-id <token>
@@ -394,7 +394,7 @@ runs on every box.
                                 Exit 0 · 1 refused or not reached.
   client.py event --kind recycle|fleet_op|job_run [--machine M] [--verb V] [--name N] [--sessions N] [--result R] [--text "<what happened>"]
                                 a fleet script reports an event an item may wait on (an event wait: update(wait_kind="event",
-                                wait_event="fleet_op many", ask_by=<backstop day>)). The server turns every open item whose event wait this
+                                wait_event="fleet_op many", until=<backstop day>)). The server turns every open item whose event wait this
                                 one ends to its post-wake mover with what happened, and prints the items it woke. fleet_op needs --verb (the
                                 op: lane, provision, update, recycle …) and reports --sessions (how many sessions the op covered; "fleet_op
                                 many" waits for an op over more than one); job_run needs --name; --machine is the token's when left off. The

@@ -1659,10 +1659,10 @@ def part_write():
         check(f"7c a {k_} wait written on an item with no stored state is no model conflict (the state it would read as is the wait's own)", conflicts_("a320") == [] and not MODEL.derive({**rd(320), "gid": "a320"}).conflicts, conflicts_("a320"))
     item(320, needs=[BACK])
     bupd(320, wait_kind="anchor", wait_anchor=A1, wait_event="merged", until=w(6))
-    check("7c …a single anchor wait on such an item keeps its note, as before", len(conflicts_("a320")) == 1 and "update hold=true (a park ends" in conflicts_("a320")[0], conflicts_("a320"))
+    check("7c …a single anchor wait on such an item keeps its note, as before", len(conflicts_("a320")) == 1 and "a bare update hold=true (no date beside it): that park ends" in conflicts_("a320")[0], conflicts_("a320"))
     item(321, needs=[BACK], state="doing")
     bupd(321, waits=[Re("a"), Re("b")], until=w(6))
-    check("7c a list written on an item whose state is stored as doing keeps the note, and its advice says where hold=true goes (an update of its own: beside waits it is refused)", len(conflicts_("a321")) == 1 and "update hold=true in an update of its own, not beside waits" in conflicts_("a321")[0], conflicts_("a321"))
+    check("7c a list written on an item whose state is stored as doing keeps the note, and its advice says where the park goes (an update of its own: beside waits it is refused)", len(conflicts_("a321")) == 1 and "a bare update hold=true (no date beside it) in an update of its own, not beside waits" in conflicts_("a321")[0], conflicts_("a321"))
     refused("7c …and beside waits hold=true is refused", lambda: bupd(321, waits=[Re("a"), Re("b")], until=w(6), hold=True), "does not go with hold")
     bupd(321, hold=True)
     check("7c …on its own it ends the stored state and the note with it, the list is as it was", conflicts_("a321") == [] and listed(mt(321)) and mt(321).get("state") != "doing", (conflicts_("a321"), mt(321)))
@@ -1748,7 +1748,7 @@ def part_write():
     for n_ in ("create", "update"):
         d_ = tools_[n_].parameters["properties"]["waits"]["description"]
         check(f"7f {n_}: the waits text names every parameter a list does not go with (clear_* for the clears), the stored backstop, and says until is not the only way to give it",
-              all(x in d_ or (x.startswith("clear_") and "clear_*" in d_) for x in WLW.SINGLE if x != "until") and "wait_basis" in d_ and "Needs until, the backstop day (an update may omit it)" in d_ and "or the stored one" not in d_, d_)
+              all(x in d_ or (x.startswith("clear_") and "clear_*" in d_) for x in WLW.SINGLE if x not in ("until", "wake", "ask_by", "hold")) and "wait_basis" in d_ and "Needs until, the backstop day (an update may omit it)" in d_ and "or the stored one" not in d_, d_)
 
 
     return ran, fails

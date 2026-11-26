@@ -75,7 +75,7 @@ def _wake_window_note(meta: dict[str, Any]) -> str:
     found = _mg.reads_as_window(meta.get("next"), _wt.wake_value(meta))
     if not found:
         return ""
-    return (f"\n(note: wake {_wt.wake_value(meta)} alone is a wait until that date, and this item's next waits for that date (\"{found}\"), so the item waits until then, listed as waiting. "
+    return (f"\n(note: until {_wt.wake_value(meta)} alone is a wait until that date, and this item's next waits for that date (\"{found}\"), so the item waits until then, listed as waiting. "
             "To move the date: update(until=\"<when the window ends>\"); "
             "if you keep moving the work and a step can run now, drop the date with until=\"none\")")
 
@@ -120,8 +120,8 @@ def _date_only_wait(item: dict[str, Any], meta: dict[str, Any], next_after: Any,
                 _gates.gate_wait_basis({**item, "metadata": w}, text, w["wake"], held=True)
             except ToolError:
                 continue
-            return text, (f"\n(parked: wake {w['wake']} alone is a wait until that date (outside a hand-off), and your only open next line{'s' if len(found) > 1 else ''} wait{'' if len(found) > 1 else 's'} for it (\"{found[0]}\"), "
-                          f"so the item waits until then, stored as waiting on a time (reason: {_clip_line(text, 120)}); History has a line. If a step can run now, write it as the action and pass clear_hold=true: the server then leaves this wake alone)")
+            return text, (f"\n(parked: until {w['wake']} alone is a wait until that date (outside a hand-off), and your only open next line{'s' if len(found) > 1 else ''} wait{'' if len(found) > 1 else 's'} for it (\"{found[0]}\"), "
+                          f"so the item waits until then, stored as waiting on a time (reason: {_clip_line(text, 120)}); History has a line. If a step can run now, write it as the action and pass clear_hold=true: the server then leaves this date alone)")
     except Exception as e:  # noqa: BLE001  — the correction is an extra: a failure leaves the write as it was, with the note
         print(f"date-only wait: not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return "", ""
@@ -129,8 +129,8 @@ def _date_only_wait(item: dict[str, Any], meta: dict[str, Any], next_after: Any,
 
 def _wake_park_line(wake: str, basis: str) -> str:
     """The History line of a park the server made (server_fixes.WAKE_PARK): what it did, the reason it kept, and how the mover sends it back."""
-    return (f"parked: wake {wake} alone is a wait until that date (outside a hand-off) and the only open next line waits for it; the item waits until then (reason: {_clip_line(basis, 70)}). "
-            "clear_hold=true sends it back and the server leaves that wake alone")
+    return (f"parked: until {wake} alone is a wait until that date (outside a hand-off) and the only open next line waits for it; the item waits until then (reason: {_clip_line(basis, 70)}). "
+            "clear_hold=true sends it back and the server leaves that date alone")
 
 
 def _wake_park(gid: str, now: float) -> "dict[str, Any]":
@@ -333,10 +333,10 @@ def _wake_step_note(item: dict[str, Any], senders: tuple[str, ...], legacy_wake:
     found = _wake_step_found(item, senders, legacy_wake=legacy_wake)
     if not found:
         return ""
-    return (f"\n(note: wake {_wt.wake_value(meta)} alone is a wait until that date, and this item's only open next line{'s' if len(found) > 1 else ''} of yours wait{'' if len(found) > 1 else 's'} for a time or an event (\"{found[0]}\"), "
+    return (f"\n(note: until {_wt.wake_value(meta)} alone is a wait until that date, and this item's only open next line{'s' if len(found) > 1 else ''} of yours wait{'' if len(found) > 1 else 's'} for a time or an event (\"{found[0]}\"), "
             "so the item waits until then, listed as waiting. To move the date: update(until=\"<when the wait ends>\"), "
             "with wait_reason=<what the step waits on> when you set the date"
-            + ("; when it waits on a named person outside answering, park it as an outside wait instead of a plain park: needs=[\"external\"] with wait_kind=\"relay\", wait_event=<who> and ask_by=YYYY-MM-DD" if any(_mg.is_reply_trigger(f) for f in found) else "")
+            + ("; when it waits on a named person outside answering, park it as an outside wait instead of a plain park: needs=[\"external\"] with wait_kind=\"relay\", wait_event=<who> and until=YYYY-MM-DD" if any(_mg.is_reply_trigger(f) for f in found) else "")
             + "; if the step can run now, write it as the action and drop the date with until=\"none\")")
 
 

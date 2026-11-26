@@ -120,7 +120,7 @@ check("doing: …no page is owed for it", "page update" not in out.lower().repla
 item(2, needs=[BACK], state="doing")
 out = upd(2, expected_by=hrs(30), expected_reason="the builder runs the whole suite and the review")
 check("doing: expected_by and expected_reason, which older calls pass, are accepted and not stored: the item stays doing and the reply carries one note naming the park calls",
-      mt(2)["state"] == "doing" and "expected_by" not in mt(2) and "expected_reason" not in mt(2) and out.count("no longer kept") == 1 and "hold=true" in out and "until=" in out and "after=[" in out and "wait_kind=\"relay\"" in out, (mt(2), out[-500:]))
+      mt(2)["state"] == "doing" and "expected_by" not in mt(2) and "expected_reason" not in mt(2) and out.count("no longer kept") == 1 and "hold=true" not in out and "until=" in out and "after=[" in out and "wait_kind=\"relay\"" in out, (mt(2), out[-500:]))
 for n_, kw_ in ((92, dict(expected_by=hrs(-1))), (93, dict(expected_by="next week")), (94, dict(expected_by="2026-02-30")), (95, dict(expected_by=hrs(24 * 8), expected_reason="a long job that waits on a vendor"))):
     item(n_, needs=[BACK], state="doing"); o_ = upd(n_, **kw_)
     check(f"doing: …a time that was refused before (item {n_}: past, no date, a 7-day one) is no longer judged: accepted, not stored, with the note", mt(n_)["state"] == "doing" and "expected_by" not in mt(n_) and "no longer kept" in o_, (mt(n_), o_[-300:]))
@@ -468,7 +468,7 @@ check("dated wait: on Jan 5th a yearless step about Dec 28th (read as next Decem
 # the brief counts the items the board lists as waiting for this reason
 bf = render.Board(str(T / "store")).brief()
 nd = sum(1 for n in range(50, 81) if (T / f"store/g/{n}.json").exists() and _dw.of(dict(rd(n, "g"), gid=f"g{n}"), time.time()) is not None)
-check("dated wait: the brief says how many doing items are listed as waiting because every open step is dated for later, and what to do", f"{nd} of the doing items have a wake more than 1 h out and every open step dated for a later day" in bf and nd >= 4, (nd, [l for l in bf.splitlines() if "doing items" in l]))
+check("dated wait: the brief says how many doing items are listed as waiting because every open step is dated for later, and what to do", f"{nd} of the doing items have a date more than 1 h out and every open step dated for a later day" in bf and nd >= 4, (nd, [l for l in bf.splitlines() if "doing items" in l]))
 
 # a step that names its date in words ("after the Nov 30th launch") on an item with no stored state (a wake and a mover read as doing), and an on-hold doing item with a wake
 def md(n, full=False):                                                  # "Nov 4th" / "November 4th": the local day n days from the suite's start, month and day only

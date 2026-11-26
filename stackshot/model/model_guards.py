@@ -846,7 +846,7 @@ def _owner_display() -> str:
 
 
 # ---------------------------------------------------------------------------------------------------------------- the judgement
-WAIT_DROP_HINT = " If the item should not wait, drop the wait with update clear_wait=true (wait_kind, wait_anchor, wait_event and ask_by go together)."
+WAIT_DROP_HINT = " If the item should not wait, drop the wait with update clear_wait=true (wait_kind, wait_anchor, wait_event and until go together)."
 
 
 def counted_movers(needs: list[str], project: str, ctx: Ctx) -> list[str]:
@@ -866,14 +866,14 @@ def _wait_text(w: "_model.Wait") -> str:
 
 
 def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str] | None" = None, gid: str = "", after_open: Callable[[dict[str, Any]], Any] | None = None,
-          anchored: Callable[[dict[str, Any]], Any] | None = None, needs: list[str] | None = None, hold: bool | None = None, one_mover: bool = True, until_wait: bool = False, date_given: bool = False, hold_given: bool = False,
+          anchored: Callable[[dict[str, Any]], Any] | None = None, needs: list[str] | None = None, hold: bool | None = None, one_mover: bool = True, until_wait: bool = False, date_given: bool = False, hold_given: bool = False, basis_kept: bool = False,
           next_text: str | None = None, windows_text: str | None = None, creating: bool = False, defers_text: str | None = None,
           named_open: Callable[[str], str] | None = None, canon: Callable[[str], str] | None = None) -> tuple[list[Problem], list[str]]:
     """(what the item, as the write leaves it, has wrong, the broad wait words its next uses). `item` is the open item after the write (a dict with status, subject, metadata);
     `touched` the fields the write sets (None: all of them: a create, a report); `needs` and `hold` override what the metadata says (the server's own naming of the writer in
     needs is not a mover the writer made; a hold the old rule drops silently is still a hold the write set). `next_text`: the lines of next the write itself set, when next is kept by writer and the write left
     other sessions' lines in place: the text guards on next judge these, not lines another session wrote and this write did not touch (None: all of next). `windows_text`: the same for the Windows-command guard on his next lines, which
-    never rejudges a stored line: an update passes the lines it sets ("" when it leaves next alone, whatever else it judges whole), a create or the report None (all of next). `until_wait`: the wait stands on a stored `until` (a wait on the date alone carries no snooze reason: that guard judges a time wait stated as one). `date_given`, `hold_given`: this write gives the date, and hold=true beside it (the snooze guard judges only a date a write gives to a time wait stated as one). `creating`: the write is a create, whose refusals offer only the fixes a create can make (it takes no state and no clear_mover). `defers_text`, `named_open`, `canon`: the next_defers guard. `defers_text` = the lines of next the write sets ("" when it leaves next alone: a stored line is never rejudged; None, a create or the report, judges all of next);
+    never rejudges a stored line: an update passes the lines it sets ("" when it leaves next alone, whatever else it judges whole), a create or the report None (all of next). `until_wait`: the wait stands on a stored `until` (a wait on the date alone carries no snooze reason: that guard judges a time wait stated as one). `date_given`, `hold_given`: this write gives the date, and hold=true beside it (the snooze guard judges only a date a write gives to a time wait stated as one). `basis_kept`: the item as stored already holds a time wait (gates.basis_held), whose update keeps a wait_basis sent with a date within the cap instead of dropping it: the snooze refusal then advises the basis. `creating`: the write is a create, whose refusals offer only the fixes a create can make (it takes no state and no clear_mover). `defers_text`, `named_open`, `canon`: the next_defers guard. `defers_text` = the lines of next the write sets ("" when it leaves next alone: a stored line is never rejudged; None, a create or the report, judges all of next);
     `named_open("board#N")` → the store id of that item when it exists and is open, else "" (the guard is off without it); `canon(id)` → an id as `after` stores it. A closed item is never judged."""
     if item.get("status") == "completed":
         return [], []
@@ -946,10 +946,10 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                 head = f"next line {shown_dl!r} defers on {', '.join(ids)} in words (once, after, when, until or before, or the instance's own defer_after_id phrases after the id), but {what} does not wait after {it_}, so nothing wakes its mover when {'they close' if many else 'it closes'}. "
                 plain_ = f"If the item does not wait on {it_}, write the line without the deferring word ahead of the id (\"see {ids[0]}\"). Put file names, commands and code in backticks."
                 if "decision" in [str(x).lower() for x in nds]:      # his call is what the item waits on: it never waits after another item
-                    add("next_defers", head + f"{what} is on {H}'s call (needs decision), and an item on his call does not wait after another item (after=… with ask_by=… is not for it): write the line without the deferring word ahead of the id (\"see {ids[0]}\"), "
+                    add("next_defers", head + f"{what} is on {H}'s call (needs decision), and an item on his call does not wait after another item (after=… with until=… is not for it): write the line without the deferring word ahead of the id (\"see {ids[0]}\"), "
                                        f"or, when the other item carries the question, move the ask there. Put file names, commands and code in backticks.")
                 else:
-                    add("next_defers", head + f"Set the wait: after=[{quoted}] with ask_by=YYYY-MM-DD, the day it comes back to someone if {'they are' if many else 'it is'} still open "
+                    add("next_defers", head + f"Set the wait: after=[{quoted}] with until=YYYY-MM-DD, the day it comes back to someone if {'they are' if many else 'it is'} still open "
                                        f"(the item then waits for it and its mover, mover=<session> or else the one it has, is told when the last one closes"
                                        + ("" if creating else f"; add supplies=<one line: what {'their' if many else 'its'} output gives this item> to say what it takes from {it_}") + "). "
                                        f"When it only needs a look on a day and not another item's close, until=YYYY-MM-DD makes the item wait until then (outside a hand-off the date parks the item, and the board lists it as waiting). " + plain_)
@@ -960,7 +960,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                 line, why = hits[0]
                 shown_line = line if len(line) <= 90 else line[:87] + "..."
                 add("next_wait", f"next line {shown_line!r} reads as a wait ({why}) on an alive item, and next is only the action someone takes now. Either set the wait itself "
-                                 f"(hold=true with wake=YYYY-MM-DD and its reason: {_cfg.owner()}'s words, or for a window the work itself needs wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"; or after=[…], or wait_kind with its input; for an event the fleet reports (a release, a recycle, a sala op, a job) wait_kind=event with wait_event=<the event> and ask_by=YYYY-MM-DD) or write the action; what happened goes on the page. Put file names, commands and code in backticks.")
+                                 f"(until=YYYY-MM-DD with wait_kind=\"time\" and its reason: {_cfg.owner()}'s words, or for a window the work itself needs wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"; or after=[…], or wait_kind with its input; for an event the fleet reports (a release, a recycle, a sala op, a job) wait_kind=event with wait_event=<the event> and until=YYYY-MM-DD) or write the action; what happened goes on the page. Put file names, commands and code in backticks.")
             else:
                 flags = broad
     if not state_run or mod is None:
@@ -976,7 +976,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
     if "decision" in kinds and held:
         add("decision_hold", f"needs holds decision together with a park: an item on {H}'s call is on his move, and a park is not. To park the call for a date, hand the item to the session that waits "
                              f"(needs=[<session>]; the ask and options stay on the item as written) and park it with until=YYYY-MM-DD, wait_kind=\"time\", wait_basis=<what it waits for, with its date> and mover={H}: it shows as waiting until the date, "
-                             f"and at the date it is his call again, needs decision with the same ask and options, no rewrite. Or keep the item on his move and release the park (clear_hold=true).")
+                             f"and at the date it is his call again, needs decision with its ask, if it had one, and its options, no rewrite. Or keep the item on his move and release the park (clear_hold=true).")
     if mod.state == _model.ALIVE:
         clash = next((c for c in mod.conflicts if c.startswith("mover=")), "")
         if clash and mod.mover_explicit and not _model.is_owner(mod.mover) and _model.owner_state(m, mod.today):
@@ -1008,7 +1008,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
         miss: list[str] = []
         if w.kind == "time":
             if not w.until and not recycle:
-                miss.append("a time wait needs its wake: hold=true with wake=YYYY-MM-DD (a verifying state's end date is its wake)")
+                miss.append("a time wait needs its date: until=YYYY-MM-DD with wait_kind=\"time\" (a verifying state's end date is its until)")
         elif w.kind == "anchor":
             if not (w.anchor or (anchored(item) if anchored else False)):
                 miss.append("an anchor wait names its anchor: wait_anchor=<url>, or an anchor scoped to the item (anchors tool)")
@@ -1040,18 +1040,25 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
             quote = str(_wt.words_of(m).get("quote") or "")
             if not (w.basis or (quote and has_wait_words(quote))):
                 at_ = _wt.wake_epoch(wake)
-                far_ok = at_ is None or (at_ - time.time()) / 86400.0 <= _wt.BASIS_MAX_WAKE_DAYS      # the basis gate takes no wake further out than this: a call to send again with one would be refused
-                add("snooze", f"{what} waits on a time (wake {wake}) with no reason: a time wait carries {H}'s words (his answer on the item, or said=[{{tag: Acked-by, quote, msg}}] with a quote that "
-                              f"parks, waits, says until or names a date) or a real outside date (wait_basis=\"<what happens> YYYY-MM-DD\"). With neither, a park has no reason: when the work itself needs this window (a soak, "
-                              "a log or data collection, a trial week, a timer you started), add wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\" (a verifying item's wake takes it too, with no park; a park's wake does at any length); to only check back on work you keep moving, set no date: "
-                              "a date with no park is a wait until it (outside a hand-off) and the item reads as waiting (a front agent's own date on work another session moves is refused: that result lands through stackshot). "
-                              + (f"To keep the park, send the same call again with wait_basis=\"<what the window collects> ends {wake[:10]}\"." if far_ok
-                                 else f"A basis stands for a wake at most {_wt.BASIS_MAX_WAKE_DAYS} days out, and this wake ({wake[:10]}) is further: set a nearer one."))
+                days_ = None if at_ is None else (at_ - time.time()) / 86400.0
+                far_ok = days_ is None or days_ <= _wt.BASIS_MAX_WAKE_DAYS      # the basis gate takes no date further out than this: a call to send again with one would be refused
+                near_ = date_given and not hold_given and not basis_kept and days_ is not None and (not _wt.cap_needs_owner() or days_ <= _wt.cap_days())      # a park stated by wait_kind with a date this near, on an item that stores no time wait: the update tool drops a basis sent with it (gates.basis_unneeded), so only his words give it its reason (a hold's wake, the old form, and a stored time wait take the basis at any length)
+                head_ = (f"{what} waits on a time (until {wake}) with no reason: a time wait carries {H}'s words (his answer on the item, or said=[{{tag: Acked-by, quote, msg}}] with a quote that "
+                         "parks, waits, says until or names a date) or a real outside date (wait_basis=\"<what happens> YYYY-MM-DD\"). ")
+                tail_ = ("a date with no park is a wait until it (outside a hand-off) and the item reads as waiting (a front agent's own date on work another session moves is refused: that result lands through stackshot).")
+                if near_:
+                    add("snooze", head_ + f"A park of {_wt.cap_days():g} days or less needs {H}'s recorded words: a wait_basis sent with a date this near is dropped, so adding one does not help. Ask him to answer on the item, "
+                                  "or pass said=[...] with his words. To only check back on work you keep moving, set a bare until with wait_reason, or set no date: " + tail_)
+                else:
+                    add("snooze", head_ + "With neither, a park has no reason: when the work itself needs this window (a soak, a log or data collection, a trial week, a timer you started), "
+                                  "add wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\" (a verifying item's date takes it too, with no park); to only check back on work you keep moving, set no date: " + tail_ + " "
+                                  + (f"To keep the park, send the same call again with wait_basis=\"<what the window collects> ends {wake[:10]}\"." if far_ok
+                                     else f"A basis stands for a date at most {_wt.BASIS_MAX_WAKE_DAYS} days out, and this date ({wake[:10]}) is further: set a nearer one."))
         if w.kind in ("anchor", "item", "relay", "event"):
             end = clean(m.get("ask_by")) or (w.backstop if w.kind != "relay" else "") or (w.until if w.kind == "relay" else "")
             if not end:
-                add("no_end", f"{what}'s wait on {_wait_text(w)} has no end: set ask_by=YYYY-MM-DD, the day it comes back to someone when nothing has arrived"
-                              + (" (a backstop wake does the same)" if w.kind != "relay" else "") + "." + drop_hint)
+                add("no_end", f"{what}'s wait on {_wait_text(w)} has no end: set until=YYYY-MM-DD, the day it comes back to someone when nothing has arrived"
+                              + (" (a backstop date does the same)" if w.kind != "relay" else "") + "." + drop_hint)
     return out, flags
 
 

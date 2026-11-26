@@ -624,7 +624,7 @@ def part_examples():
         """The keyword arguments the fragments spell, as a dict: JSON words read as Python, the text's names swapped for the fixture's."""
         text = ", ".join(frags)
         for old, new in (swap or []) + [("my-x", "home-agent"), ("projects/widgets", "projects/alpha"), ("[work] ", "[home] "),
-                                         ("<tomorrow or later, within 7 days, YYYY-MM-DD>", D(1)), ("<last day of the window, YYYY-MM-DD>", D(3)), ("<that day>", D(3))]:
+                                         ("<tomorrow or later, within 7 days, YYYY-MM-DD>", D(1)), ("<day, within 7 days>", D(1)), ("<last day of the window, YYYY-MM-DD>", D(10)), ("<that day>", D(10))]:
             text = text.replace(old, new)
         text = re.sub(r"\btrue\b", "True", text); text = re.sub(r"\bfalse\b", "False", text)
         kw = eval(f"dict({text})", {"__builtins__": {"dict": dict}})
@@ -665,7 +665,7 @@ def part_examples():
                lambda **k: _wt_create.stackshot_create(**k))
 
     out = runs("create: a step that waits on another item", "create",
-               [[P, SUBJ, 'sender="my-x"', 'mover="my-x"', DESC_X], ['next="my-x: ship the export once board#N closes"', 'after=["board#N"]', 'ask_by="2099-03-02"']],
+               [[P, SUBJ, 'sender="my-x"', 'mover="my-x"', DESC_X], ['next="my-x: ship the export once board#N closes"', 'after=["board#N"]', 'until="<day, within 7 days>"']],
                lambda **k: _wt_create.stackshot_create(**k), swap=[("board#N", "a12")])
 
     out = runs("create: work for the builder (mover left out)", "create",
@@ -683,21 +683,21 @@ def part_examples():
     upd(41, 'dropped=[2]')
     upd(2, 'work={"text": "PR 83 up", "state": "in progress"}')
     check("update: a step status", "PR 83 up" in json.dumps(mt(2)), mt(2))
-    upd(3, 'hold=true', 'until="<last day of the window, YYYY-MM-DD>"', 'wait_basis="soak ends <that day>"')
-    check("update: a park", str(mt(3).get("until", "")).startswith(D(3)) and "hold" not in mt(3), mt(3))
+    upd(3, 'until="<last day of the window, YYYY-MM-DD>"', 'wait_kind="time"', 'wait_basis="soak ends <that day>"')
+    check("update: a park", str(mt(3).get("until", "")).startswith(D(10)) and "hold" not in mt(3), mt(3))
     upd(4, 'until="<tomorrow or later, within 7 days, YYYY-MM-DD>T04:00"', 'wait_reason="the nightly run finishes at 03:00"')
     check("update: a wait until a date on your own item", str(mt(4).get("until", "")).startswith(D(1)), mt(4))
-    upd(5, 'after=["board#N"]', 'ask_by="2099-03-02"', swap=[("board#N", "a12")])
+    upd(5, 'after=["board#N"]', 'until="<day, within 7 days>"', swap=[("board#N", "a12")])
     upd(6, DESC_X)
     check("update: a description", "takes 9 minutes" in rd(6)["description"], rd(6)["description"])
 
     # why the reminder example names a day inside the cap: a far wake with a reason and no wait_basis is refused
     item(9)
     try:
-        _wt_update.stackshot_update("a9", sender="home-agent", wake="2099-03-02T09:00", wait_reason="the nightly run finishes at 03:00"); check("update: a wake far past the cap without a wait_basis is refused", False)
+        _wt_update.stackshot_update("a9", sender="home-agent", until="2099-03-02T09:00", wait_reason="the nightly run finishes at 03:00"); check("update: a wake far past the cap without a wait_basis is refused", False)
     except ToolError as e:
         check("update: a wake far past the cap without a wait_basis is refused", "wait_basis" in str(e) or "days" in str(e), str(e))
-    check("update: …and the text says a wake past the cap needs a wait_basis", "needs a wait_basis" in SNAP["update"]["description"][:CLI_CUT] + SNAP["update"]["parameters"]["wake"]["description"])
+    check("update: …and the text says a date past the cap needs a wait_basis", "needs a wait_basis" in SNAP["update"]["description"][:CLI_CUT] + SNAP["update"]["parameters"]["until"]["description"])
 
     # ---------------------------------------------------------------------------------------------------------------------------------------------------- complete
     CLOSE = 'sender="my-x"'

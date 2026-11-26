@@ -379,12 +379,12 @@ check("wake: the rows are the residue with a field to set and the defaults to re
 wk_det = migsvc.migrate_wake(rows)
 wk_txt = {k: v["text"] for k, v in wk_det.items()}
 alltext = "\n".join(wk_txt.values())
-check("wake: grouped per owner, one text each, naming the exact field for each item", wk_txt and "wait_event=<who or what is waited for>" in alltext and "ask_by=YYYY-MM-DD" in alltext and "board#36" in alltext and "board#12" in alltext
+check("wake: grouped per owner, one text each, naming the exact field for each item", wk_txt and "wait_event=<who or what is waited for>" in alltext and "until=YYYY-MM-DD" in alltext and "board#36" in alltext and "board#12" in alltext
       and "wait_anchor=<the link it waits on>" in alltext, wk_txt)
 l36 = [x for x in alltext.splitlines() if x.startswith("- board#36 ")]
-check("wake: an item missing its input and its end is one line with both fields, and counted once in the owner's header", len(l36) == 1 and "wait_event=" in l36[0] and "ask_by=" in l36[0] and "a backstop of" in l36[0]
+check("wake: an item missing its input and its end is one line with both fields, and counted once in the owner's header", len(l36) == 1 and "wait_event=" in l36[0] and "until=" in l36[0] and "a backstop of" in l36[0]
       and all(re.search(r"\b(\d+) of \S+'s items", t) for t in wk_txt.values()), l36)
-check("wake: a stored default is said to be a default to replace", "DEFAULT backstop" in alltext and f"ask_by={exp3}" in alltext and "Replace it with the real day" in alltext, alltext[:600])
+check("wake: a stored default is said to be a default to replace", "DEFAULT backstop" in alltext and f"stored {exp3} as a DEFAULT" in alltext and "Replace it with the real day" in alltext, alltext[:600])
 check("wake: …and nothing is sent by the preview", not sent("migration"), SENT)
 SENT.clear()
 call("begin"); e2 = call("end", residue=rows)
@@ -657,9 +657,9 @@ rows_g1 = [{"item": "board#94", "kind": "default_end", "why": "w", "hand": False
 det_g1 = migsvc.migrate_wake(rows_g1)
 txt_g1 = "\n".join(v["text"] for v in det_g1.values())
 check("wake rows: a default_end row for an item whose stored ask_by is not that default (it was never written) is left out; one that matches stays",
-      "board#94" not in txt_g1 and f"ask_by={day(3)} as a DEFAULT" in txt_g1 and "board#95 " in txt_g1, txt_g1)
+      "board#94" not in txt_g1 and f"stored {day(3)} as a DEFAULT" in txt_g1 and "board#95 " in txt_g1, txt_g1)
 check("wake rows: an anchor_seen row stands only when the item stores an anchor wait on the anchor the row names", "board#96" not in txt_g1 and "board#97" in txt_g1, txt_g1)
-check("wake rows: a row that asks for a field to be set is dropped once every field it names is set on the item", "board#95" in txt_g1 and "set ask_by" not in txt_g1 and "Replace it with the real day" in txt_g1, txt_g1)
+check("wake rows: a row that asks for a field to be set is dropped once every field it names is set on the item", "board#95" in txt_g1 and "set until" not in txt_g1 and "Replace it with the real day" in txt_g1, txt_g1)
 call("begin"); e_g1 = call("end", residue=rows_g1); SENT.clear()
 check("wake rows: the same filter at `end`: nothing for the never-written item, and nothing is sent", "board#94" not in "\n".join(e_g1["wake"].values()) and not sent("migration"), e_g1.get("wake"))
 planned_g1 = {"board#94", "board#95", "board#98", "board#99", "board#19"}
@@ -772,7 +772,7 @@ w_s1 = LiveToServer(SND).call({"op": "wake_text", "pass_id": pid_s1, "rows": cra
 bad_words = ("IGNORE", "curl", "evil.example", "| sh")
 check("S1: three crafted rows (an injected why, default, field and kind) put none of it into a text: only the day, the count and the fields the item itself still lacks",
       "board#95" in txt_s1 and "board#97" in txt_s1 and "board#94" in txt_s1 and not any(w in txt_s1 for w in bad_words)
-      and f"ask_by={day(3)} as a DEFAULT" in txt_s1 and "logged 1 notice on https://example.org/pull/7" in txt_s1 and "set wait_event=<who or what is waited for>, ask_by=YYYY-MM-DD" in txt_s1, txt_s1)
+      and f"stored {day(3)} as a DEFAULT" in txt_s1 and "logged 1 notice on https://example.org/pull/7" in txt_s1 and "set wait_event=<who or what is waited for>, until=YYYY-MM-DD" in txt_s1, txt_s1)
 check("S1: …the same through `end`'s residue and through wake_text's rows", not any(w in "\n".join(e_s1["wake"].values()) for w in bad_words) and e_s1["wake"] == {k: v["text"] for k, v in det_s1.items()}
       and w_s1[0] == 200 and w_s1[1]["owners"] and not any(w in json.dumps(w_s1[1]) for w in bad_words), (e_s1["wake"], w_s1))
 rows_odd = [{"item": "board#95", "kind": "default_end", "default": "tomorrow"}, {"item": "board#97", "kind": "anchor_seen", "why": "https://elsewhere.example", "default": "2"}, {"item": "board#94", "kind": "wait_input", "fields": ["subject"]}]

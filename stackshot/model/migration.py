@@ -741,7 +741,7 @@ def _plan_waiting(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_mod
     if w.kind in ("anchor", "item", "relay") and any(p.key == "no_end" for p in problems(env, gid, after_state(it, set_, drop))):
         dflt, dwhy = default_end(env, it, w.kind)
         set_["ask_by"] = dflt
-        notes.append(f"a default ask_by {dflt} ({dwhy}) for its mover to replace")
+        notes.append(f"a default backstop day {dflt} ({dwhy}) for its mover to replace")
     for x in extra:
         plan.note(gid, "wait_input", x, fields=("wait_anchor",))
     for k in list(set_):
@@ -753,7 +753,7 @@ def _plan_waiting(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_mod
         if plan.outcome.get(gid) == "left":     # the state was not written, so no default is stored: the owner is told what it would have been
             plan.note(gid, "no_end", f"the wait has no end (a default of {dflt}, {dwhy}, would have been stored; the item is left whole until its input is set)", fields=("ask_by",), default=dflt)
         else:
-            plan.note(gid, "default_end", f"the wait had no end: ask_by {dflt} is a default ({dwhy}); its mover replaces it with the real day", hand=False, fields=("ask_by",), default=dflt)
+            plan.note(gid, "default_end", f"the wait had no end: {dflt} is a default backstop day ({dwhy}); its mover replaces it with the real day", hand=False, fields=("ask_by",), default=dflt)
 
 
 def plan_open(gid: str, it: dict[str, Any], env: Env, plan: Plan) -> None:
@@ -833,8 +833,8 @@ FIELD_HINTS = {
     "wait_event": "wait_event=<who or what is waited for>",
     "wait_anchor": "wait_anchor=<the link it waits on>",
     "after": 'after=["board#N", ...] (the items it waits after)',
-    "ask_by": "ask_by=YYYY-MM-DD (the day it comes back to someone when nothing has arrived)",
-    "wake": "wake=YYYY-MM-DD",
+    "ask_by": "until=YYYY-MM-DD (the day it comes back to someone when nothing has arrived)",
+    "wake": "until=YYYY-MM-DD",
 }
 
 
@@ -842,8 +842,8 @@ def wake_row(shown_id: str, subject: str, r: Residue) -> str:
     """One line of the residue wake for one item: what to set, with the exact field, and that a stored ask_by is a default to replace."""
     sets = ", ".join(FIELD_HINTS.get(f, f"{f}=<value>") for f in r.fields)
     if r.kind == "default_end":
-        return (f"- {shown_id} {subject}: its wait had no end, so the migration stored ask_by={r.default} as a DEFAULT backstop (not a date anyone chose). "
-                f"Replace it with the real day: update({shown_id}, ask_by=YYYY-MM-DD).")
+        return (f"- {shown_id} {subject}: its wait had no end, so the migration stored {r.default} as a DEFAULT backstop day (not a date anyone chose). "
+                f"Replace it with the real day: update({shown_id}, until=YYYY-MM-DD).")
     if r.kind == "anchor_seen":
         return (f"- {shown_id} {subject}: {r.why}. Nothing to set: read {'them' if r.default != '1' else 'it'} first; the person who takes the item when the wait ends is told what arrived.")
     tail = f" (a backstop of {r.default} is suggested)" if r.default and "ask_by" in r.fields else ""

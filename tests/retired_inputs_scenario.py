@@ -89,7 +89,7 @@ def refused(name, res, *want):
 check("module: an empty, false or null value is not passed", RI.passed({"state": "", "clear_state": False, "chase": None, "party": "  ", "proof": [], "end": {}}) == [], RI.passed({"state": ""}))
 check("module: a value is passed, in the refusal's order", RI.passed({"proof": "x", "state": "doing", "clear_state": True, "end": "2030-01-01"}) == ["state", "clear_state", "end", "proof"], RI.passed({"proof": "x", "state": "doing"}))
 check("module: not a dict is nothing to refuse", RI.passed(None) == [] and RI.refusal("x") == "" and RI.refusal({"next": "a"}) == "", None)
-WORD = {"doing": "mover=", "your-call": "needs=[\"decision\"]", "your-step": "step=", "outside": "wait_kind=\"relay\"", "blocked": "after=[", "parked": "hold=true", "verifying": "wait_basis=", "queued": "mover=<the builder>", "none": "clear_wait=true"}
+WORD = {"doing": "mover=", "your-call": "needs=[\"decision\"]", "your-step": "step=", "outside": "wait_kind=\"relay\"", "blocked": "after=[", "parked": "wait_kind=\"time\"", "verifying": "wait_basis=", "queued": "mover=<the builder>", "none": "clear_wait=true"}
 for w, want in WORD.items():
     msg = RI.refusal({"state": w}, OWN)
     check(f"module: state={w} names its replacement ({want})", msg.startswith("Refused: state is a retired input") and want in msg and "Nothing was written" in msg, msg)
@@ -115,7 +115,7 @@ check("update: …none of the refusals wrote anything", raw(1) == b1, None)
 refused("update: several retired inputs are one refusal", upd(1, state="outside", party="Acme", chase=day(3)), "state, chase, party are retired inputs")
 refused("update: …also next to arguments that would be fine alone", upd(1, priority="p2", next="team-back: carry on", state="doing"), "retired input", "state")
 check("update: …and the priority and next were not written either", raw(1) == b1, None)
-refused("update: a refusal names where the item model is", upd(1, state="parked"), "docs/design", "hold=true")
+refused("update: a refusal names where the item model is", upd(1, state="parked"), "docs/design", "wait_kind=\"time\"")
 err, text = call("create", subject="[home] new thing", description=DESC, project="projects/alpha", sender="home-front", mover=BACK, next="team-back: go", state="doing")
 refused("create: state is refused the same way", (err, text), "retired input", "state")
 check("create: …and nothing was made", not (T / "store/a/900.json").exists() and not any(p.name not in ("1.json", "2.json") for p in (T / "store/a").iterdir()), sorted(p.name for p in (T / "store/a").iterdir()))

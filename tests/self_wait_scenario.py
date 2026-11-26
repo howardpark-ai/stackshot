@@ -152,8 +152,8 @@ try:
     upd(3, wake=D(2)); no_reason_msg = ""
 except ToolError as e_:
     no_reason_msg = str(e_)
-check("no reason: the refusal shows the call again with wait_reason added, and the park for a date outside the work", f'To wait, send the same call again: wake="{D(2)}", wait_reason="<what the step waits on that is not available now>".' in no_reason_msg
-      and 'hold=true, until="YYYY-MM-DD" and wait_basis="<what happens> YYYY-MM-DD"' in no_reason_msg, no_reason_msg[-400:])
+check("no reason: the refusal shows the call again with wait_reason added, and the park for a date outside the work", f'To wait, send the same call again: until="{D(2)}", wait_reason="<what the step waits on that is not available now>".' in no_reason_msg
+      and 'until="YYYY-MM-DD", wait_kind="time" and wait_basis="<what happens> YYYY-MM-DD"' in no_reason_msg, no_reason_msg[-400:])
 reset(); item(41)
 passes("no reason: the shown call, sent again with a reason in place of the placeholder, goes through", lambda: upd(41, wake=D(2), wait_reason=REASON), 1)
 check("no reason: …and the wake is stored", wk_(mt(41)) == D(2), mt(41))
