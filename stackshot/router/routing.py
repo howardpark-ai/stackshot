@@ -65,7 +65,7 @@ def record(project: str, *, kind: str, to: str, label: str = "", who: str = "", 
     `head`, `author` (a GitHub pull request's anchor notice, anchor-hub): the PR's head branch and its author's login. The router's
     anchor-builder rule passes a notice on a branch prefixed with a background agent's name to that agent, not to the item's front keeper.
     `etype` (anchor-hub's event type at its source, `ci_failed`, `ci_passed`, `ci_activity`, `comment`, several joined with "+"): the router's
-    anchor-ci rule passes a CI notice to the project's builder; a notice recorded without it is read by its `who` ("CI").
+    anchor-ci rule passes a CI notice to the engineer who builds the pull request; a notice recorded without it is read by its `who` ("CI").
     `ekind`, `bot`, `thread` (the anchor listener, the read-first gate in router.py): the event's kind at its source (`slack`, `slack-edit`, `gmail`, `drive`, `notion`, `notion-edit`, `github`, ...), whether its author is a bot
     (the source says so: a Slack bot post, a GitHub account of type Bot; every sender of a burst), and whether it is a reply in a thread (a Slack thread reply). They are what the gate tells a machine's news from a person's message by;
     a record without them has no author kind, which the gate reads as a person's.

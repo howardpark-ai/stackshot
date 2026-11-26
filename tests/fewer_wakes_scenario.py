@@ -9,8 +9,8 @@ Covers the three fixes and their negatives:
   2. A CI or PR notice on a pull request whose head branch starts with a background agent's name and a slash goes to that builder (router rule
      anchor-builder), not to the item's front keeper; a branch of anyone else, a notice with no head, and a notice that names Oliver route as
      before; an identical repeat is dropped. anchor-hub puts the head and the commit author on the event, and the routing log keeps them.
-     A CI or check-run result on any pull request (anchor-ci: a CI result goes only to the engineer and never produces a front turn),
-     whoever's branch it is, goes to the project's builder; the replayed notice ci_up (an upstream PR, the item's anchor) is the case. The marker is the
+     A CI or check-run result on any other pull request (anchor-ci: a CI result goes only to an engineer and never produces a front turn)
+     goes to the project's builder when nothing ties another engineer to it (section 4); the replayed notice ci_up (an upstream PR, the item's anchor) is the case. The marker is the
      event type anchor-hub puts on the event and the routing log keeps (`etype`), else the sender `CI`; a person's notice, a project with no builder, a
      notice that names Oliver and a builder's own branch (anchor-builder) route as they did.
   2b. Build-side news on a GitHub anchor scoped to an item whose keeper of record is a front agent (a push, a review, a comment by someone else, a merge; anchor-item,
@@ -21,6 +21,10 @@ Covers the three fixes and their negatives:
   3. A hand-back to a front agent keeper is held; a close of the item inside the window drops it, so the keeper hears only the close; with no
      close the line is sent when the window ends (and survives a restart: it is a file); a second hand-back replaces the first; an item that
      moved on is not announced; 0 seconds sends at once.
+  4. anchor-ci's pick: a CI result goes to the engineer who builds the pull request (the mover the anchor's items store; else a single item's mover as its notices go;
+     else, with no item to read, the agent the notice's target names; each only when it builds, of any project; else the project's builder). An engineer the server named
+     in an item's needs for a message alone does not take it from the stored mover; a sub-page anchor's items are read under that page; and the live router delivers it to
+     an agent the item's page does not list.
 
     tests/run-suite fewer_wakes        → exit 0 / 1"""
 import json, logging, os, pathlib, re, subprocess, sys, threading, time, types
@@ -626,5 +630,113 @@ check("3l: the tick sends first and removes after: when the removal fails the li
       first == ["a21"] and len(hb_notes("a21", n0)) == 1 and len(held()) == 1, (first, hb_notes("a21", n0), held()))
 check("…and the next tick sends it again and clears the file", telling.handback_tick(now=time.time() + 999) == ["a21"] and len(hb_notes("a21", n0)) == 2 and held() == {}, (hb_notes("a21", n0), held()))
 
+# ---- 4. anchor-ci's pick (ci_engineer): a CI result goes to the engineer who builds the pull request, whichever project lists that agent
+from stackshot.fleet import sessions_registry as _sr
+from stackshot.router import router_live as _live
+cfg(True)
+reg_file = T / "store/projects.json"; reg_was = reg_file.read_text(encoding="utf-8")
+reg_ = json.loads(reg_was); alpha = reg_["pages"]["projects/alpha"]
+for name_, line_ in (("osprey-web", "builds the web pages"), ("osprey-research", "reads the papers and reports what it finds"), ("osprey-both", "builds the tools")):
+    alpha["agents"][name_] = line_; alpha["back_agents"][name_] = line_
+BETA = {"heron-main": "Oliver's point of contact for the second project", "osprey-both": "talks to Oliver about the tools", "heron-engineer": "builds, merges and releases the second project's code"}
+reg_["pages"]["projects/beta"] = {**alpha, "title": "Beta", "name": "Beta", "session": "heron", "agents": BETA, "back_agents": {"heron-engineer": BETA["heron-engineer"]}}
+SUB = "projects/alpha/sub"                                  # a sub-page of alpha: no agents of its own, an anchor and an item of its own
+reg_["pages"][SUB] = {"title": "Sub", "name": "Sub", "type": "project", "hub": KEY}
+reg_file.write_text(json.dumps(reg_), encoding="utf-8")
+for i, meta in ((50, {"mover": "heron-engineer"}), (51, {"mover": "osprey-web"}), (52, {"mover": "osprey-research"}), (53, {"mover": "osprey-main"}), (54, {"mover": "heron-main"}),
+                (55, {"needs": ["osprey-research"], "mover": "heron-engineer"}), (56, {"needs": ["osprey-web"], "mover": "heron-engineer"}), (57, {"mover": "heron-engineer"}),
+                (58, {"needs": ["decision"], "then": "heron-engineer"}), (59, {"mover": "osprey-both"}), (60, {"mover": "heron-engineer"}),
+                (62, {"status": "completed", "mover": "heron-engineer"}), (64, {"mover": "heron-engineer", "project": SUB})):
+    item(i, **meta)
+anchors_file = T / "store/anchors.json"; anchors_ = json.loads(anchors_file.read_text(encoding="utf-8"))
+anchors_[KEY] += [{"url": R_BASE + str(i), "items": [f"a{i}"]} for i in (*range(50, 61), 62)] + [{"url": R_BASE + str(pr), "items": gids} for pr, gids in
+                  ((63, ["a999"]), (70, ["a50", "a57"]), (71, ["a50", "a51"]), (72, ["a50", "a52"]), (73, ["a52", "a53"]))]
+anchors_[SUB] = [{"url": R_BASE + "64", "items": ["a64"]}]
+anchors_file.write_text(json.dumps(anchors_), encoding="utf-8")
+cx4 = _router.Context()
+def ci(nid, pr, target="project-wide", **kw):
+    return notice(nid, head=kw.pop("head", "chat-layer"), anchor=f"github:example-owner/stackshot#{pr}", url=R_BASE + f"{pr}/checks", target=target, etype=kw.pop("etype", "ci_failed"), **kw)
+def picked(n_, c=None):
+    ln_ = _router.code_rule(KEY, n_, KEY, c or cx4, [])
+    return (ln_["rule"], ln_["target"], ln_["item"]) if ln_ else None
+ln = _router.code_rule(KEY, ci("k1", 50, "for heron-engineer"), KEY, cx4, [])
+check("4a: the item stores another project's engineer as its mover and the notice's target names it: the CI result goes to that engineer, with the item, and the reason says what ties it",
+      ln and (ln["rule"], ln["ruling"], ln["target"], ln["item"], ln["for_owner"]) == ("anchor-ci", "passed", "heron-engineer", "a50", False) and "(the stored mover of a50)" in ln["reason"], ln)
+for what, n_, want in (
+        ("4b: the item's mover alone (target project-wide)", ci("k2", 50), ("anchor-ci", "heron-engineer", "a50")),
+        ("4c: the target alone (an anchor scoped to no item)", ci("k3", 99, "for heron-engineer"), ("anchor-ci", "heron-engineer", "")),
+        ("4c2: the one scoped item is closed, so there is no item to read: the target", ci("k28", 62, "for heron-engineer"), ("anchor-ci", "heron-engineer", "")),
+        ("4c3: the one scoped item is not on file: the target", ci("k29", 63, "for osprey-web"), ("anchor-ci", "osprey-web", "")),
+        ("4d: the project's second engineer moves the item: it, not the project's first builder", ci("k4", 51, "for osprey-web"), ("anchor-ci", "osprey-web", "a51")),
+        ("4e: the item's mover and the target name two engineers: the item's mover", ci("k5", 50, "for osprey-web"), ("anchor-ci", "heron-engineer", "a50")),
+        ("4f: the item's mover does not build (a researcher), the target names an engineer: the target is not read against the item: the project's builder", ci("k6", 52, "for heron-engineer"), ("anchor-ci", "osprey-x", "a52")),
+        ("4f2: both name the researcher: the project's builder", ci("k7", 52, "for osprey-research"), ("anchor-ci", "osprey-x", "a52")),
+        ("4g: the item's mover is a front agent of the project: the project's builder", ci("k8", 53, "for osprey-main"), ("anchor-ci", "osprey-x", "a53")),
+        ("4g2: a front agent of another project: the project's builder", ci("k9", 54, "for heron-main"), ("anchor-ci", "osprey-x", "a54")),
+        ("4g3: an agent that builds here and is a front agent on another page stays front: the project's builder", ci("k10", 59, "for osprey-both"), ("anchor-ci", "osprey-x", "a59")),
+        ("4g4: a front mover, the target names an engineer: the project's builder", ci("k11", 53, "for heron-engineer"), ("anchor-ci", "osprey-x", "a53")),
+        ("4h: a name no page lists: the project's builder", ci("k12", 99, "for nobody-knows"), ("anchor-ci", "osprey-x", "")),
+        ("4h2: the owner as the target: the project's builder", ci("k13", 99, "for Oliver"), ("anchor-ci", "osprey-x", "")),
+        ("4j: needs name one engineer, the item stores another as its mover and the target follows needs: the stored mover", ci("k14", 56, "for osprey-web"), ("anchor-ci", "heron-engineer", "a56")),
+        ("4j2: an item on the owner's decision whose `then` is an engineer: that engineer", ci("k15", 58), ("anchor-ci", "heron-engineer", "a58")),
+        ("4k: several items, the target names several agents: the project's builder, no item", ci("k16", 71, "for heron-engineer, osprey-web"), ("anchor-ci", "osprey-x", "")),
+        ("4k2: several items that store one engineer as their mover: that engineer, no item", ci("k17", 70, "for heron-engineer"), ("anchor-ci", "heron-engineer", "")),
+        ("4k3: ...with no target: the same", ci("k18", 70), ("anchor-ci", "heron-engineer", "")),
+        ("4k4: several items that store two engineers, the target naming one: the project's builder", ci("k32", 71, "for heron-engineer"), ("anchor-ci", "osprey-x", "")),
+        ("4k5: several items of which one stores a mover that builds: that engineer", ci("k33", 72), ("anchor-ci", "heron-engineer", "")),
+        ("4k6: several items none of which stores a mover that builds: the target is not read: the project's builder", ci("k34", 73, "for heron-engineer"), ("anchor-ci", "osprey-x", "")),
+        ("4l: the engineer the item and the target name wrote the notice: the project's builder", ci("k19", 50, "for heron-engineer", who="heron-engineer"), ("anchor-ci", "osprey-x", "a50")),
+        ("4m: a branch prefixed with an agent's name is still anchor-builder's, whatever the item's mover", ci("k20", 50, "for heron-engineer", head="osprey-x/topic"), ("anchor-builder", "osprey-x", "a50"))):
+    check(what, picked(n_) == want, picked(n_))
+ln = _router.code_rule(KEY, ci("k21", 55, "for osprey-research"), KEY, cx4, [])
+check("4j3: needs name a researcher while the item stores an engineer as mover: the stored mover", ln and (ln["rule"], ln["target"], ln["item"]) == ("anchor-ci", "heron-engineer", "a55") and "(the stored mover of a55)" in ln["reason"], ln)
+ln = _router.code_rule(KEY, ci("k35", 70), KEY, cx4, []); ln2 = _router.code_rule(KEY, ci("k36", 58), KEY, cx4, [])
+check("4j4: the reason names every item that stores the engineer, and says when the pick is the item's mover as its notices go (no stored mover: its `then`)",
+      ln and ln2 and "(the stored mover of a50, a57)" in ln["reason"] and "(the mover of a58)" in ln2["reason"], (ln, ln2))
+check("4l2: the project's builder wrote it and nothing else ties an engineer: not anchor-ci's (the rules below, as before)", (picked(ci("k22", 99, who="osprey-x")) or ("",))[0] != "anchor-ci", picked(ci("k22", 99, who="osprey-x")))
+check("4n: a CI notice marked for the owner keeps its route", (picked(ci("k23", 50, "for heron-engineer", text="[for Oliver] failed on 010ec0d")) or ("",))[0] != "anchor-ci", picked(ci("k23", 50, "for heron-engineer", text="[for Oliver] failed on 010ec0d")))
+was_retired = _sr.retired
+_sr.retired = lambda x: str(x) == "heron-engineer"
+try:
+    got_ = (picked(ci("k24", 50, "for heron-engineer")), picked(ci("k25", 50, "for osprey-web")), picked(ci("k30", 56, "for heron-engineer")))
+finally:
+    _sr.retired = was_retired
+check("4o: a retired stored mover is passed over: for the item's mover as its notices go when that one builds, else the project's builder, never for the target",
+      got_ == (("anchor-ci", "osprey-x", "a50"), ("anchor-ci", "osprey-x", "a50"), ("anchor-ci", "osprey-web", "a56")), got_)
+cx_nb4 = _router.Context(); page_ = cx_nb4.reg[KEY]; front_ = ("osprey-main", "osprey-front2", "osprey-research")
+cx_nb4.reg = {**cx_nb4.reg, KEY: {**page_, "agents": {k: v for k, v in page_["agents"].items() if k in front_}, "back_agents": {"osprey-research": page_["agents"]["osprey-research"]}}}
+got_ = (cx_nb4.builder(KEY), picked(ci("k26", 50), cx_nb4), (picked(ci("k27", 99), cx_nb4) or ("",))[0] != "anchor-ci")
+check("4p: a project with no builder of its own still passes it to the engineer the item names, and without one leaves it to the rules below", got_ == ("", ("anchor-ci", "heron-engineer", "a50"), True), got_)
+ln = _router.code_rule(SUB, ci("k31", 64, "for osprey-web"), KEY, cx4, [])      # the page holding the anchor is SUB, the page the notice is ruled for is its hub
+check("4r: a sub-page anchor's items are read under the notice's own page, not the hub the notice is ruled for: the stored mover, with the item",
+      ln and (ln["rule"], ln["target"], ln["item"]) == ("anchor-ci", "heron-engineer", "a64") and "(the stored mover of a64)" in ln["reason"], ln)
+# the live path: a pass to an agent the item's page does not list is delivered and ruled to it
+nid_ = routing.record(KEY, kind="anchor", to="", label='GitHub stackshot#50 "a thing"', who="CI", text="failed on 010ec0d: 1 of 5 checks — suites", url=R_BASE + "50/checks", target="for heron-engineer",
+                      pilot=True, anchor="github:example-owner/stackshot#50", live=True, head="chat-layer", etype="ci_failed")
+row_ = routing.lookup(nid_, KEY)[1]
+cx_l = _router.Context(); p0 = len(pushes())
+judged, _st = _live._judge(KEY, [(KEY, row_)], cx_l, None, 0.0)
+res_ = _live._act(row_, KEY, KEY, judged[0], cx_l, {})
+now_ = routing.lookup(nid_, KEY)[1]
+check("4q: live: the notice is delivered to that engineer and to nobody else, and ruled passed to it, with the item", res_["status"] == "ruled" and res_["outcome"].startswith("delivered") and not res_.get("error")
+      and (res_["rule"], res_["target"], res_["item"], res_["marked"]) == ("anchor-ci", "heron-engineer", "a50", False) and [x[0] for x in pushes()[p0:]] == ["heron-engineer"]
+      and (now_.get("ruling"), now_.get("ruled_to")) == ("passed", "heron-engineer"), (res_, pushes()[p0:], now_))
+# an engineer who only got a message about the item: the server names it in needs (the real handover path), and the CI result still goes to the stored mover
+from stackshot.service import agent_names as _names
+said_ = _names._name_on_handover("osprey-web", "a60: please look at why the web check is slow", "osprey-main"); settle()
+item_ = {**json.loads((T / "store/a/60.json").read_text(encoding="utf-8")), "gid": "a60"}
+target_ = sorted({r["target"] for r in _anc_y.routes()["github:example-owner/stackshot#60"]})
+check("4s premise: a handover message names a second engineer in the item's needs, so the item's mover as its notices go and the notice's target are now that engineer, while the stored mover stands",
+      "named osprey-web" in said_ and item_["metadata"]["mover"] == "heron-engineer" and _anc_y.mover_of(item_) == "osprey-web" and target_ == ["for osprey-web"], (said_, item_["metadata"], target_))
+nid_ = routing.record(KEY, kind="anchor", to="", label='GitHub stackshot#60 "a thing"', who="CI", text="failed on 010ec0d: 1 of 5 checks — suites", url=R_BASE + "60/checks", target="; ".join(target_),
+                      pilot=True, anchor="github:example-owner/stackshot#60", live=True, head="chat-layer", etype="ci_failed")
+row_ = routing.lookup(nid_, KEY)[1]
+cx_m = _router.Context(); p0 = len(pushes())
+judged, _st = _live._judge(KEY, [(KEY, row_)], cx_m, None, 0.0)
+res_ = _live._act(row_, KEY, KEY, judged[0], cx_m, {})
+check("4s: live: the CI result goes to the engineer the item stores as its mover, not to the one who only got a message about it",
+      res_["status"] == "ruled" and res_["outcome"].startswith("delivered") and (res_["rule"], res_["target"], res_["item"]) == ("anchor-ci", "heron-engineer", "a60")
+      and [x[0] for x in pushes()[p0:]] == ["heron-engineer"], (res_, pushes()[p0:]))
+reg_file.write_text(reg_was, encoding="utf-8")
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else f"; FAILED: {len(fails)}"))
 sys.exit(1 if fails else 0)
