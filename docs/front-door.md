@@ -1,6 +1,6 @@
 # The front door
 
-What this page covers: the front door, one MCP endpoint over several boards and a brain for people who sign in through a reverse proxy: how it is run, who the caller is, the one tool set and its `board` argument, every refusal text, the credential each backend is called with, the instructions text, the health route and what is checked. Back to the [README](../README.md).
+What this page covers: the front door, one MCP endpoint over several boards and a brain for people who sign in through a reverse proxy: how it is run, the sign-in service the proxy asks, who the caller is, the one tool set and its `board` argument, every refusal text, the credential each backend is called with, the instructions text, the health route and what is checked. Back to the [README](../README.md).
 
 The front door is a separate program (`python -m stackshot.frontdoor`, package `stackshot/frontdoor/`). The board server does not import it and does not read its settings. Nothing in it is installed or started by `setup`; a person who runs it writes the proxy and the unit themselves. A board takes part in it only when its own config says so (see [A board behind the front door](#a-board-behind-the-front-door)); a board with no such table behaves as it always did.
 
@@ -75,6 +75,46 @@ A 401 carries the `WWW-Authenticate` value the board's own `/mcp` sends for the 
 
 **What the sign-in service can rely on.** A 200 says the token is valid, not that the account is a member of any board: the sign-in service checks membership. The service treats any 5xx as a refusal. The signed header is bound to neither the token nor the request, so whoever gets hold of one can send it again, with any token, until it is older than `identity_max_age_seconds`: keep that hop as private as the one the signed identity takes. The verify secret and the identity secret must differ, because the service holds the verify secret and with the identity secret it could sign a call as any member: a board that checks identities and whose two files hold the same value answers no check, and its log says why.
 
+## The sign-in service
+
+`python -m stackshot.frontdoor.signin` (`stackshot/frontdoor/signin.py`) is the program the proxy's `forward_auth` asks about each request. It is a program of its own, nothing installs or starts it, and it listens on 127.0.0.1 only.
+
+```
+uv run --project <checkout> --locked --extra server python -m stackshot.frontdoor.signin            # serve
+uv run --project <checkout> --locked --extra server python -m stackshot.frontdoor.signin --check    # read the settings, print what would run, exit
+```
+
+The settings are the `[frontdoor_signin]` table ([Configuration: integrations](configuration-integrations.md), `frontdoor_signin.*`). It does not start (exit 2, the reason on standard error, never a secret) without a `board_verify_url`, a `verify_secret_file`, a `members_file` (its own, or the one of `[frontdoor]`) and an `identity_secret_file` (its own, the one of `[frontdoor]` or the one of `[behind_frontdoor]`). A service asks one board, and the tokens it accepts are the tokens that board accepts.
+
+The verify secret is a secret of its own. The service does not start when it is the same file as an identity secret its config names (`frontdoor_signin`, `frontdoor` or `behind_frontdoor` `identity_secret_file`, links resolved) or holds the same value, nor when it cannot read one of them: whoever holds the identity secret can sign any caller's identity to a board. The comparison is made at the start; restart the service after changing either secret.
+
+With Caddy in front of a front door on port 8020 whose `identity_header` is `x-forwarded-user`:
+
+```
+mcp.example.com {
+	forward_auth 127.0.0.1:8021 {
+		uri /verify
+		copy_headers X-Verified-User>X-Forwarded-User
+	}
+	reverse_proxy 127.0.0.1:8020
+}
+```
+
+`GET /verify` reads one thing of the request, the caller's `Authorization: Bearer <token>`. It sends that token to the board's [token check](#the-token-check-for-the-sign-in-service) with the signed header `x-stackshot-verify`, and answers by what the board says:
+
+| When | Answer |
+| --- | --- |
+| the board answers 200 with an address | 200, no body, `X-Verified-User: <identity>`: the key of the member whose sign-in addresses hold the address (compared in lower case), or the address in lower case when no member holds it |
+| the board answers 200, no member's sign-in addresses hold the address, and the members file has a key written exactly as that address | 403 with a sentence and no identity header: the front door matches keys exactly and would take the caller for that member. Add the address to that member's `emails` when it is theirs |
+| the board answers 401: no bearer, another scheme, a token it does not know, expired or revoked | 401 `{"error": "invalid_token"}`, with the `WWW-Authenticate` text of the board's answer when it has one. The service writes none of its own, and the token check described above sends none |
+| anything else: the board's 403 (the two secrets differ), 404 (a board with no sign-in), 5xx, a redirect, an answer that names no address, no whole answer in `timeout_seconds`, a board that cannot be reached; a secret or members file that cannot be read; an identity that is not printable ASCII; a fault of the service | 503 with a sentence and no identity header. Never 200, and never 401: a 401 tells a connector that its token is no good |
+
+A board's 200 says who the token is for, never that the person is a member: the service decides that from the members file. A person no member holds is not refused here (but for the 403 case above): the front door answers `you are not a member of any board.` A member's key goes into a header as it is, so a member who signs in through this service has a key of printable ASCII characters.
+
+A 200 of the board is reused for `cache_seconds` (5 by default, 0 turns it off), under a SHA-256 of the token, at most 1024 of them. Nothing else is kept, so a token the board refused is asked about again at the next request, and a token revoked at the board keeps working through the service for at most that long. The secret and the members file are read at each request, cached or not.
+
+Every answer is `Cache-Control: no-store`. A header the client sends is not repeated in the answer, whatever its name. With the Caddy lines above, an `X-Forwarded-User` of the client's own is replaced by the service's answer. The log names a request by the first 8 hex digits of a hash of the token and of the identity; no token, secret or address is written to it. It keeps no access log: Caddy's check carries the query string of the caller's own request, which the service neither reads nor writes. `GET /healthz` answers 200 `{"status": "ok"}` when the secret and the members file can be read and 503 `{"status": "degraded"}` when not; it does not ask the board.
+
 ## The one tool set
 
 The tool list is one board's tool list, whichever boards the caller is on, with each tool's schema as the board gives it plus one optional property, `board`. A caller on several boards must pass `board` on each call; a caller on one need not. When the caller is a member of the brain, the brain's tools are listed beside them (a brain tool takes no `board`). The list shows only the caller's own backends and lists each live, so a backend that is down is named in a warning to the client and left out, and the list fails only when none answers. With no caller (the server's own start) the list is empty.
@@ -127,3 +167,5 @@ The other scenarios cover the pieces, in one process:
 `tests/frontdoor_board_scenario.py` covers the board's side: the settings and their notes, the check of one signed identity (every refusal, the window, a rotated secret), the members read from the front door's file (the format, a change on an open session, a file that is missing or wrong), the guard as a wrapper, the real board over HTTP and the front door's own transport against it, a board with no table, which is as it was, and a real board with sign-in on that offers the token check (the route's place among the app's routes, the header's name and the signed word as the service writes them, the portal's machine token, a token the board does not know, a bearer that `/mcp` refuses, a 401's `WWW-Authenticate` against `/mcp`'s own; Google's own check of a grant is called by no test). `tests/frontdoor_scenario.py` (stand-in boards and a stand-in brain on loopback ports) covers the schema diff against a single board, the routing and every refusal text above, concurrent calls of several sessions with no cross-talk, that the caller's bearer never reaches a backend, streaming, a backend that is down, a backend that accepts a connection and never answers (initialize, list, call and `/healthz` return within the bound), a health URL that answers a byte at a time (the list, `/healthz` and 40 lists at once return within the bound and the next member is not held), a member removed from the members file on an open session, the instructions text, the signed identity, the no-caller list and the config notes.
 
 `tests/frontdoor_verify_scenario.py` covers the token check for the sign-in service: the `verify_secret_file` settings and notes, every refusal of the signed header, a rotated secret, a verify secret that is the identity secret, and the route over a stand-in sign-in provider (a good token, the portal's, no bearer, an unknown token, a token with no address, a check that raises, a board with no sign-in, that the route itself never asks about the token of a refused request, and that the bearer is read as the MCP library's middleware reads it).
+
+`tests/frontdoor_signin_scenario.py` covers the sign-in service over a stand-in board: the settings and their notes, the refusal to start on a shared secret, the identity for each form of member, the address written as a member's key, the 401 and its passed-on text, every case that is 503, the cache (reuse, expiry, bound, off, and that a refusal or a failure is never kept), what is sent to the board, and that nothing of the request is echoed or logged. `tests/frontdoor_signin_run_scenario.py` runs it with real processes (two boards, a front door and a service for each board): a caller's token is recorded on the boards under the member's key, and a board that is down, a restart of the service and a rotated secret answer as above. Where `caddy` is on the PATH it puts a real Caddy with the lines above in front; elsewhere it says that it skipped those checks.
