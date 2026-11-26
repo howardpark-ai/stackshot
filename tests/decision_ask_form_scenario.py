@@ -738,15 +738,16 @@ class _Slow(Exception):
 
 
 def _timed(fn, limit=3.0):
-    """(seconds, result), or (None, None) when fn is still running after `limit` seconds (the regex engine checks signals, so the alarm interrupts it)."""
+    """(CPU seconds of this thread, result), or (None, None) when fn is still running after `limit` seconds (the regex engine checks signals, so the alarm interrupts it). CPU time: what is bounded is the
+    pattern's work, and the time a busy machine leaves the thread waiting for a core is no part of it."""
     def _stop(*_a):
         raise _Slow()
     old = signal.signal(signal.SIGALRM, _stop)
     signal.setitimer(signal.ITIMER_REAL, limit)
-    t0 = time.perf_counter()
+    t0 = time.thread_time()
     try:
         r = fn()
-        return time.perf_counter() - t0, r
+        return time.thread_time() - t0, r
     except _Slow:
         return None, None
     finally:

@@ -1030,14 +1030,17 @@ _ghc["issues_repo"] = _repo
 log0 = len(F.log)
 _update_svc._update("s22", next="second step\nthird step", sender="home-here")
 _update_svc._update("s22", needs="none", sender="home-here")
-_update_svc._update("s22", hold=True, wake="2027-01-01", sender="home-here")
+import datetime as _dt
+def _ahead(days): return (_dt.date.today() + _dt.timedelta(days=days)).isoformat()      # a wake must be in the future: a date written here would pass one day
+_due = _ahead(28)
+_update_svc._update("s22", hold=True, wake=_ahead(36), sender="home-here")
 _update_svc._update("s22", clear_hold=True, sender="home-here")
 _wt_complete.stackshot_confirm("s22", sender="home-here")
-_update_svc._update("s22", needs="decision", ask=ASK, options=OPTS, due="2026-12-24", sender="home-here")
+_update_svc._update("s22", needs="decision", ask=ASK, options=OPTS, due=_due, sender="home-here")
 _update_svc._update("s22", work={"text": "migrating the ids"}, sender="home-here")
 m22 = rd("s", 22)["metadata"]
 check("a change of next, needs, a hold and a wake, the ask and options, the due date, a step status or a confirm is stored and queues no job; GitHub is not called at all",
-      m22["next"] == "second step\nthird step\nhome-here: migrating the ids" and "decision" in m22["needs"] and m22["due"] == "2026-12-24" and m22["ask"] == ASK and not m22.get("hold") and qlen() == 0 and len(F.log) == log0, (m22, qlen(), F.log[log0:]))
+      m22["next"] == "second step\nthird step\nhome-here: migrating the ids" and "decision" in m22["needs"] and m22["due"] == _due and m22["ask"] == ASK and not m22.get("hold") and qlen() == 0 and len(F.log) == log0, (m22, qlen(), F.log[log0:]))
 r = G.drain(GH, STORE, say=lambda s: None)
 check("…and a drain with nothing queued sends nothing", r == {"done": 0, "left": 0, "down": ""} and len(F.log) == log0 and issue(6)["labels"] == [] and not comments(6), (r, F.log[log0:]))
 _update_svc._update("s22", description=D("changed text"), sender="home-here")
@@ -1949,9 +1952,8 @@ refused("with the mirror off there is no queue to carry the create, so an outage
         lambda: _wt_create._create(subject="[home] no queue", description=DESC, project="projects/alpha", owner="home-here", next="x"), "GitHub did not answer", "issue_ids")
 F.down = False
 write_toml(sync=False, issue_ids=False); _cfg.reload(); F.log.clear()
-_update_svc._update(f"g{n1}", hold=True, wake="2026-12-01", sender="home-here")
-import datetime as _dt
-woke = wakes_svc.wake_pass(_dt.date(2027, 1, 1))
+_update_svc._update(f"g{n1}", hold=True, wake=_ahead(5), sender="home-here")
+woke = wakes_svc.wake_pass(_dt.date.today() + _dt.timedelta(days=36))
 check("the issue link: the mirror turned off again, the item's page shows none", not G.enabled() and ghl(ui_render.Board(str(STORE)).item_html(f"g{n1}")) == [],
       ghl(ui_render.Board(str(STORE)).item_html(f"g{n1}")))
 check("with sync off a wake pass releases the item and queues nothing, sends nothing", f"g{n1}" in woke and qlen() == 0 and not F.log, (woke, qlen(), F.log))

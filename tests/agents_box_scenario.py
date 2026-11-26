@@ -591,7 +591,7 @@ thr.join(); upd.update_unlocked = real_unlocked
 check("a said write against a box that refuses after a second: refused with the reason, and another write was not held up (%.2f s)" % other_wait,
       other_wait < 1.0 and len(slow_res) == 1 and "could not be read from the box" in slow_res[0] and not stored, (other_wait, slow_res, stored))
 # the lookups the write did not make before the lock are an error under it, not an ssh call
-fresh(); resetreg(); mode("ok"); setbox(**FAST); n0 = ncalls()
+fresh(); resetreg(); mode("ok"); setbox(**{**FAST, "cache_seconds": 30}); n0 = ncalls()     # the two writes' calls are counted, so no copy may expire between them however long the first one takes
 upd.update_unlocked = stub_update; stored.clear()
 try: upd.update_item("a1", said=[], sender="agent-one"); upd.update_item("a1", said=[SAY], sender="agent-one")
 finally: upd.update_unlocked = real_unlocked
