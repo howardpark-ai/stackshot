@@ -31,6 +31,6 @@ that wrote something; when the server does not answer, nothing is asked. With `m
 hold the turn: `check` keeps it in the session's state and `nag` says it at the next prompt as one line (`Board question
 unanswered last turn: <items>. Answer it in the reply.`), which saves the extra model request a block costs. The turn's
 first write also gets the question early, as hook context, so the reply can carry the lines; a call made inside a subagent
-(its hook input carries `agent_id`) is never asked, since the open items are the calling session's. The page debt is said
+(its hook input carries `agent_id`) is never asked, since the open items are the calling session's (in-process teammates carry `agent_id` too and are skipped alike). The note kept for the next prompt is that one line only when the full question was asked that turn; otherwise it is the full question. The page debt is said
 at every prompt while it is owed, whatever the board check's mode: in full the first time, and after that, while the same
-change stands, as one line `still owed: <page> (<item>, <HH:MM>)`.
+change stands and the full text is under 2 hours old, as one line `still owed: <page> (<item>, <HH:MM>)`.

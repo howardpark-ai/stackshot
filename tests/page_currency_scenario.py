@@ -277,6 +277,10 @@ check("debt: another page's debt is said in full beside the one already shown, w
 st_ = p.load_state(S); t_ = st_["touches"]["projects/alpha"]["ts"]; st_["touches"]["projects/alpha"] = {"ts": t_ + 9, "shown": t_, "task": "s9"}; p.save_state(S, st_)
 out5 = nnag(S)
 check("debt: a mark left from an earlier change does not make a different change a repeat", "board item s9 changed at" in out5 and "still owed: projects/alpha" not in out5, out5[:300])
+st_ = p.load_state(S); st_["touches"].pop("projects/gamma", None); t_ = st_["touches"]["projects/alpha"]["ts"]; st_["touches"]["projects/alpha"] = {"ts": t_, "shown": t_, "shown_at": int(time.time()) - p.REPEAT_SECONDS - 5, "task": "s9"}; p.save_state(S, st_)
+out6 = nnag(S)
+check("debt: a debt last said in full over 2 hours ago is said in full once more, then a line again", "board item s9 changed at" in out6 and "still owed" not in out6 and nnag(S).strip().startswith("[project-page] still owed: projects/alpha"), out6[:200])
+check("debt: the window is 2 hours", p.REPEAT_SECONDS == 7200)
 st_ = p.load_state(S); st_["touches"].pop("projects/gamma", None); st_["touches"]["projects/alpha"] = {"ts": int(time.time()), "task": "s9"}; p.save_state(S, st_)
 rc, err = stop(S, transcript(NOTICE, TL))
 check("debt: the Stop hook neither says it nor holds the turn, and the debt stays", rc == 0 and err == "" and "projects/alpha" in (p.load_state(S).get("touches") or {}), (rc, err[:300], p.load_state(S)))
@@ -676,10 +680,10 @@ old_tm = p.datetime.datetime.fromtimestamp(v["ts"], p.zone_now().tzinfo).strftim
 check("flavor gbrain: the first fire is about 450 characters at most", len(gb) <= 450, len(gb))
 check("flavor gbrain: the nag's first-fire text, exactly", gb == (
       f"board item s7 changed at {old_tm} {ZONE_ABBR}: page `projects/beta` has not been committed since. "
-      f"Edit it with edit_page and expected_revision (get_page first; add_timeline_entry for a dated line; never edit or git inside the brain mirror). "
+      f"Edit it with edit_page and expected_revision (get_page first; add_timeline_entry for a dated line; put_page only for a whole rewrite; never edit or git inside the brain mirror). "
       f"If no page change is due: `python3 {p.HERE}/stackshot/projects/pages.py clear projects/beta`."), gb)
 check("flavor gbrain: the nag names edit_page with expected_revision, and add_timeline_entry for a dated line; no retired script, no push override",
-      "add_timeline_entry" in gb and "edit_page and expected_revision" in gb
+      "add_timeline_entry" in gb and "edit_page and expected_revision" in gb and "put_page only for a whole rewrite" in gb
       and RETIRED_SCRIPT not in gb and "EXAMPLE_PAGE_PUSH" not in gb and "on the server box only" not in gb, gb)
 p._cfg.CFG["pages"]["flavor"] = "plain"
 check("flavor gbrain: the server's wording is today's text, byte for byte", _pdebts._page_how("gbrain") ==
@@ -952,13 +956,24 @@ rc, err = bstop(A, transcript("ship it", COMMIT)); check("board: an item given o
 fresh(s5={"confirmed": time.time()}, s6={"state_updated": time.time()})
 rc, err = bstop(A, transcript("ship it", COMMIT)); check("board: every item touched: no question", rc == 0 and err == "", err[:300])
 fresh()
-rc, err = bstop(A, transcript("ship it", COMMIT), mode="note"); check("note: the board question does not hold the turn", rc == 0 and err == "", (rc, err[:200]))
+def early_marked(tp):      # the turn's early question went out: the session's state carries the turn's start as its `early` mark
+    st = p.load_state(A); st["early"] = p.turn_activity(tp)["start"]; p.save_state(A, st); return tp
+tpn = transcript("ship it", COMMIT)
+rc, err = bstop(A, tpn, mode="note"); check("note: the board question does not hold the turn", rc == 0 and err == "", (rc, err[:200]))
 check("note: …and is logged as a note", blog("note") and blog("note")[-1]["items"] == ["s5", "s6"], blog("note")[-1:])
-out = nnag(A); check("note: the next prompt says the board question was unanswered, in one line", out.strip() == '[board] Board question unanswered last turn: s5 "[home] item 5", s6 "[home] item 6". Answer it in the reply.', out[:300])
-check("note: …and does not repeat the full question", "BOARD: this turn did real work" not in out and "Does anything from it change them" not in out and len(out) < 200, len(out))
+out = nnag(A)
+check("note: no early question was asked that turn: the next prompt says the full question, as before", out.count("[board] About your last turn: BOARD: this turn did real work (a commit)") == 1
+      and "Does anything from it change them" in out and 's5 "[home] item 5"' in out and "unanswered last turn" not in out, out[:300])
 check("note: …once", "[board]" not in nnag(A), "said twice")
+fresh(); rc, err = bstop(A, early_marked(transcript("ship it", COMMIT)), mode="note")
+out = nnag(A); check("note: the early question was asked that turn: the next prompt says it in one line", out.strip() == '[board] Board question unanswered last turn: s5 "[home] item 5", s6 "[home] item 6". Answer it in the reply.', out[:300])
+check("note: …and does not repeat the full question", "BOARD: this turn did real work" not in out and "Does anything from it change them" not in out and len(out) < 200, len(out))
+fresh(); rc, err = bstop(A, early_marked(transcript("ship it", COMMIT, "Pushed.\n\nBoard: no change, ok")), mode="note")
+out = nnag(A); check("note: the one line keeps the rejected-lines text", out.strip().endswith("Answer it in the reply. Not accepted from your reply: «Board: no change, ok» (the reason is under three words)."), out[-300:])
+_many = [{"gid": f"s{n}", "subject": f"item {n}"} for n in range(40, 50)]
+check("note: the one line names at most 8 items and counts the rest", p.board_unanswered(_many).endswith(", and 2 more. Answer it in the reply.") and "s47" in p.board_unanswered(_many) and "s48" not in p.board_unanswered(_many), p.board_unanswered(_many))
 rc, err = bstop(A, transcript("ship it", COMMIT), mode="note"); rc, err = bstop(A, transcript("ship it again", COMMIT), mode="note")
-out = nnag(A); check("note: two turns before a prompt: both lines, oldest first", out.count("[board] Board question unanswered last turn") == 2, out[:300])
+out = nnag(A); check("note: two turns before a prompt: both notes, oldest first", out.count("[board] About your last turn: BOARD:") == 2, out[:300])
 rc, err = bstop(A, transcript("ship it", COMMIT), mode="block")
 check("note: block mode still holds the turn with the full question", rc == 2 and err.startswith("BOARD: this turn did real work (a commit)") and "Does anything from it change them" in err, err[:200])
 fresh()
@@ -1124,7 +1139,7 @@ rc, err = bstop(S, transcript(NOTICE, TL + COMMIT))
 check("board: a keeper's page write beside the work: the board question, no page question", rc == 2 and err.startswith("BOARD: this turn did real work (gbrain add_timeline_entry, a commit)")
       and "This turn wrote something" not in err and "Page" not in err and "### projects/" not in err, err[:400])
 rc, err = bstop(S, transcript(NOTICE, TL + COMMIT), mode="note"); out = nnag(S)
-check("note: the same, kept for the next prompt: the board question only", rc == 0 and err == "" and "[board] Board question unanswered last turn: " in out
+check("note: the same, kept for the next prompt: the board question only", rc == 0 and err == "" and "[board] About your last turn: BOARD:" in out
       and "[project-page] About your last turn" not in out and "Page:" not in out, (rc, err[:200], out[:400]))
 (T / "touch" / f"{S}.json").unlink()
 # ---- 9. the end-of-turn board question asked early (the item move 3): the turn's first
@@ -1142,16 +1157,19 @@ fresh(); p.save_state(A, {}); p.save_state(S, {})
 tpa = transcript("ship it", [(ST + "update", {"item_id": "s5", "next": "x"})])
 rc, q = touch(A, tpa, {"item_id": "s5", "next": "go on"})
 check("early: the first board write of a turn gets the board question as context, in the reply's own words",
-      rc == 0 and q.startswith("[stackshot] Board question (once per turn). Open items not yet touched this turn: ") and 's6 "[home] item 6"' in q
+      rc == 0 and q.startswith("[stackshot] Board question (once per turn). Items untouched this turn: ") and 's6 "[home] item 6"' in q
       and "Page" not in q and "page" not in q
       and "`Board: no change, <reason>`" in q and "s7 " not in q and "s8 " not in q, q)
 check("early (quiet retired, Thu Oct 15th 2026): the question no longer advertises a [quiet] reply", "quiet" not in q.lower(), q)
 check("early: the examples name items as shown, `board#N`, never a store id", "`- board#N: no change, <reason>`" in q and "Board s5" not in q, q)
 check("early (bullets): the question asks for a `Board:` line and one bullet per item for several items",
-      "`Board: no change, <reason>` (3+ words) for all, or one bullet per item (`- board#N: no change, <reason>` / `- board#M: updated, <what>`)" in q
-      and "If this turn changes one, update it or confirm it" in q and "Only items you move or are named in the needs of." in q, q)
-check("early: the fixed text is about 330 characters and keeps the three-word reason and the update-or-confirm instruction",
-      300 <= len(q.split(": s5")[0]) + len(q[q.index(". If this turn changes"):q.index("needs of.") + 9]) <= 360 and "(3+ words)" in q and "update it or confirm it" in q, q)
+      "`Board: no change, <reason>` (3+ words) for all, or a `Board:` line plus one bullet per item on its own line (`- board#N: no change, <reason>` / `- board#M: updated, <what>`)" in q
+      and "If this turn changes one, update it (confirm only if still true)" in q and "Only items you move or are named in the needs of." in q, q)
+check("early: bullets go under a `Board:` line, each on its own line; confirm only when still true; the still-mover note is kept",
+      "a `Board:` line plus one bullet per item on its own line" in q and "confirm only if still true" in q
+      and "The role beside an item is the server's reading now" in q, q)
+check("early: the fixed text is under 400 characters and keeps the three-word reason and the update-or-confirm instruction",
+      300 <= len(q.split(": s5")[0]) + len(q[q.index(". If this turn changes"):q.index("needs of.") + 9]) <= 400 and "(3+ words)" in q and "update it (confirm only if still true)" in q, q)
 rc, q2 = touch(A, tpa, {"item_id": "s6", "next": "and on"}); check("early: once per turn: the next write in the same turn gets nothing", rc == 0 and q2 == "", q2)
 time.sleep(1.1); rc, q3 = touch(A, transcript("next prompt", []), {"item_id": "s5", "next": "again"})
 check("early: a later turn is asked again", q3.startswith("[stackshot]"), q3)
@@ -1200,8 +1218,17 @@ p.save_state(A, {}); time.sleep(1.05); tps = transcript("sub work", [])
 rc, out = atouch(A, tps, ST + "update", {"item_id": "s5", "next": "z"}, "updated [s5](https://x/items/s5).\nproject: projects/alpha")
 check("early: a board write inside a subagent asks nothing", rc == 0 and out.strip() == "", out)
 check("early: …and does not count as the turn's question (no early mark kept)", not p.load_state(A).get("early"), p.load_state(A))
+p.save_state(S, {}); items((10, S, {})); time.sleep(1.05)
+rc, out = atouch(S, transcript("keeper sub", []), ST + "update", {"item_id": "s10", "next": "z"}, "updated [s10](https://x/items/s10).\nproject: projects/alpha")
+check("early: a subagent's board write still records the page debt, and asks nothing", out.strip() == "" and (p.load_state(S).get("touches") or {}).get("projects/alpha", {}).get("task") == "s10", (out, p.load_state(S)))
+p.save_state(A, {}); fresh()
 rc, out = atouch(A, tps, "SendMessage", {}, "ok")
 check("early: any other write inside a subagent asks nothing and keeps no early mark", rc == 0 and out.strip() == "" and not p.load_state(A).get("early"), (out, p.load_state(A)))
+p.save_state(A, {}); time.sleep(1.05); tpt = transcript("agent session", [])
+pl_ = {"session_id": A, "transcript_path": tpt, "tool_name": "SendMessage", "tool_input": {}, "tool_response": "ok", "agent_type": "general-purpose"}
+r_ = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "touch"], input=json.dumps(pl_), capture_output=True, text=True, env={**os.environ, "BOARD_CHECK_MODE": "block"})
+check("early: a payload with agent_type and no agent_id (a main session started with --agent) is still asked", r_.returncode == 0 and "[stackshot] Board question" in r_.stdout, r_.stdout[:200])
+p.save_state(A, {}); time.sleep(1.05); tps = transcript("sub work 2", [])
 rc, q = touch(A, tps, {"item_id": "s5", "next": "z"})
 check("early: the same turn's main-session write after the subagent's is still asked", q.startswith("[stackshot] Board question"), q)
 # a page keeper (S keeps alpha and gamma): the early text carries the board question and nothing about its pages, and the board
