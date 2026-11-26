@@ -1281,6 +1281,19 @@ fresh(); p.save_state(A, {}); time.sleep(1.05); tpe = transcript("ship it", COMM
 q_ = otouch(A, tpe, "Bash", {"command": "git -C /x commit -qm y"})
 check("early-asked: asked: the question went out and `early_asked` is kept with the turn's start", q_.startswith("[stackshot] Board question") and p.load_state(A).get("early_asked") == p.load_state(A).get("early"), (q_[:60], p.load_state(A)))
 o_ = stop_note(tpe); check("early-asked: …and then the next prompt says it in one line", o_.strip().startswith(ONE_LINE) and "BOARD: this turn" not in o_, o_[:200])
+# a parallel hook saves state (a board write's page debt) while the early question waits on the server: the debt must survive, and `early_asked` is still set
+fresh(); p.save_state(A, {}); time.sleep(1.05); tpr = transcript("ship it", COMMIT)
+_real_owned = lambda sid: [{"gid": "s5", "subject": "[home] item 5", "state_updated": 1, "updated": 1}]; _orig_owned = p.owned_items
+def _racing_owned(sid):
+    r_ = _real_owned(sid); st_r = p.load_state(sid); st_r.setdefault("touches", {})["projects/racer"] = {"ts": int(time.time()), "task": "s5", "tool": "update"}; p.save_state(sid, st_r); return r_
+p.owned_items = _racing_owned; _bm0 = os.environ.get("BOARD_CHECK_MODE"); os.environ["BOARD_CHECK_MODE"] = "block"
+try: q_ = p.early_question({"session_id": A, "transcript_path": tpr, "tool_name": "Bash", "tool_input": {"command": "git -C /x commit -qm y"}, "tool_response": "ok"})
+finally:
+    p.owned_items = _orig_owned
+    if _bm0 is None: os.environ.pop("BOARD_CHECK_MODE", None)
+    else: os.environ["BOARD_CHECK_MODE"] = _bm0
+st_ = p.load_state(A)
+check("early-asked: a page debt saved by a parallel hook during the server call survives, and `early_asked` is set", q_.startswith("[stackshot] Board question") and "projects/racer" in (st_.get("touches") or {}) and st_.get("early_asked") == st_.get("early") and st_.get("early_asked"), (q_[:50], st_))
 p.save_state(A, {}); fresh()
 # a page keeper (S keeps alpha and gamma): the early text carries the board question and nothing about its pages, and the board
 # write's page debt is still recorded

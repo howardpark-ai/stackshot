@@ -979,7 +979,7 @@ def early_question(payload):
     due = [it for it in items if not it.get("held") and max(_num(it.get("state_updated")), _num(it.get("confirmed")), _num(it.get("updated"))) < start]
     if not due: return ""
     listed = ", ".join(f'{item_shown(it)} "{it.get("subject") or ""}"' + (f" ({r})" if (r := role_note(it)) else "") for it in due[:BOARD_LIST]) + (f", and {len(due) - BOARD_LIST} more" if len(due) > BOARD_LIST else "")
-    st["early_asked"] = start or int(time.time()); save_state(sid, st)       # the question really went out this turn (`early` only guards once per turn, and is set when nothing was asked too): the Stop note may then be one line
+    st = load_state(sid); st["early_asked"] = start or int(time.time()); save_state(sid, st)  # read again: the server call above may have taken seconds, and a parallel hook (a board write's page debt) saved state meanwhile     # the question really went out this turn (`early` only guards once per turn, and is set when nothing was asked too): the Stop note may then be one line
     return ("[stackshot] Board question (once per turn). Items untouched this turn: " + listed + ". If this turn changes one, "
             "update it (confirm only if still true); else end your reply with `Board: no change, <reason>` (3+ words) "
             "for all, or a `Board:` line plus one bullet per item on its own line (`- board#N: no change, <reason>` / `- board#M: updated, <what>`). "
