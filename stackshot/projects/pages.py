@@ -762,8 +762,16 @@ def save_state(sid, st):
         try: os.remove(state_path(sid))
         except FileNotFoundError: pass
         return
-    tmp = state_path(sid) + ".tmp"
-    json.dump(st, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1); os.replace(tmp, state_path(sid))
+    # a temp file of its own, closed by a `with` before it replaces the state: a write that fails at the flush raises here and the old state stays (a bare open() lost the error and left a cut file in place)
+    fd, tmp = tempfile.mkstemp(prefix=f".{sid}.", suffix=".tmp", dir=STATE)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(st, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, state_path(sid))
+    except BaseException:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
 
 STATE_FIELDS = ("description", "next", "needs", "clear_needs", "status", "due")
 HOLD_FIELDS = ("hold", "clear_hold", "wake", "clear_wake", "after")   # state on the server; the pane counts them for a pilot writer only (after since an earlier change)
@@ -1114,23 +1122,29 @@ def ct_now(key):
     except Exception: return None
 
 def ct_at(key, ts):
-    """The compiled truth of the page's last commit at or before ts (read-only git in the pages checkout, [paths] brain); None = no version yet."""
-    try:
-        h = subprocess.run(["git", "-C", _base(key), "log", "-1", f"--before={int(ts)}", "--format=%H", "--", key + ".md"],
-                           capture_output=True, text=True, timeout=20).stdout.strip()
-        if not h: return None
-        # ./ = relative to the pages dir, not the repo root: the same at a repo root, right when the pages sit inside a larger repo
-        return compiled_truth(subprocess.run(["git", "-C", _base(key), "show", f"{h}:./{key}.md"], capture_output=True, text=True, timeout=20).stdout)
-    except Exception: return None
+    """The compiled truth of the page's last commit at or before ts (read-only git in the pages checkout, [paths] brain); None = the page had no version then
+    (no commit by ts, or the last one removed it). Raises when git fails or takes too long: that is "cannot tell", never "no version"."""
+    base = _base(key)
+    def git(*a):
+        r = subprocess.run(["git", "-C", base, *a], capture_output=True, text=True, timeout=20)
+        if r.returncode != 0: raise OSError(f"git {a[0]} failed ({r.returncode}) in the pages checkout")
+        return r.stdout
+    h = git("log", "-1", f"--before={int(ts)}", "--format=%H", "--", key + ".md").strip()
+    if not h: return None
+    # ./ = relative to the pages dir, not the repo root: the same at a repo root, right when the pages sit inside a larger repo
+    if not git("ls-tree", "--name-only", h, "--", f"./{key}.md").strip(): return None
+    return compiled_truth(git("show", f"{h}:./{key}.md"))
 
 def ct_changed_since(key, ts):
     """True when the page's compiled truth differs from its version at ts - [page_rule] slack_seconds; a page with no version by then counts
-    any put. Without the pages checkout (another machine) fall back to the timestamp rule."""
+    any put. Without the pages checkout (another machine) fall back to the timestamp rule. A read of the checkout that fails or takes too long
+    cannot tell, and an answer that cannot be had is False: the debt stays (a reader that treated it as a change would settle on a broken read)."""
     if not reads_local(_base(key)):
         since = int(ts) - _slack(); pt = page_ts(key, since); return pt is not None and pt >= since
     now = ct_now(key)
     if now is None: return False
-    before = ct_at(key, int(ts) - _slack())
+    try: before = ct_at(key, int(ts) - _slack())
+    except Exception: return False
     return before is None or before != now
 
 def currency():
@@ -1762,8 +1776,15 @@ def caller_sid():
     session_id) into every Bash command's environment. Empty when run by hand outside a session."""
     return str(os.environ.get("CLAUDE_CODE_SESSION_ID") or "").strip()
 
+def _display_safe(s):
+    """A name as a line shows it: without control characters and without a character that makes the line wrap or read reordered (_is_shown_unsafe); a no-break space or a joiner stays."""
+    return "".join(c for c in str(s) if unicodedata.category(c) not in ("Cc", "Cs") and not _is_shown_unsafe(c))
+
 def _who(v):
-    """A writer as a reader knows it: its pane name with the id's first 8, else the value as stored."""
+    """A writer as a reader knows it: its pane name with the id's first 8, else the value as stored (the name as a line shows it, _display_safe)."""
+    return _display_safe(_who_raw(v))
+
+def _who_raw(v):
     v = str(v or "")
     if not v or v == "?": return "a writer the server could not name"
     nm = session_name(v)
@@ -1802,7 +1823,7 @@ def _is_mine(o, me, ids):
     except Exception: return False
 
 CLEAR_KEPT = 3                  # clear: another writer's debt was kept
-CLEAR_SERVER_STAYS = 4          # clear: the server's owed entry is still there, because the server host could not be asked or could not rewrite its list
+CLEAR_SERVER_STAYS = 4          # clear: a debt is still there: the server's owed entry (the server host could not be asked or could not rewrite its list), or a session state this box could not write
 CLEAR_CONNECT_TIMEOUT = 15      # seconds ssh waits to connect to the server host (release.sh's figure)
 CLEAR_SSH_TIMEOUT = 45          # seconds the whole run on the server host may take, connecting included
 CLEAR_LOCK_WAIT = 20.0          # seconds the run on the server host waits for the owed list's lock: it gives up well before the caller's ssh limit
@@ -1814,18 +1835,21 @@ _RESULT_STARTS = ("cleared ", "Kept, not yours:")        # the lines of the serv
 _NO_SESSION = "No session could be told (CLAUDE_CODE_SESSION_ID is not set: run by hand?), so no debt here counts as yours."
 
 def _clear_reminders(key, me, force):
-    """The session reminders kept on this box: drops those of the caller (`me`; every one with force) → (how many, [(writer, where)] kept)."""
-    n = 0; others = []
+    """The session reminders kept on this box: drops those of the caller (`me`; every one with force) → (how many, [(writer, where)] kept, [why a
+    reminder could not be written back]). A reminder whose state could not be written stays as it was and is not counted."""
+    n = 0; others = []; failed = []
     for p in glob.glob(os.path.join(STATE, "*.json")):
         try: st = json.load(open(p, encoding="utf-8"))
         except Exception: continue
         if key not in (st.get("touches") or {}): continue
         owner = os.path.basename(p)[:-5]
         if force or owner in me:
-            del st["touches"][key]; n += 1
-            save_state(owner, st)
+            del st["touches"][key]
+            try: save_state(owner, st)
+            except Exception as e: failed.append(f"the session state of {_who(owner)} could not be written ({type(e).__name__})"); continue
+            n += 1
         else: others.append((owner, "session reminder"))
-    return n, others
+    return n, others, failed
 
 def _clear_owed(key, me, ids, force, others, wait=None):
     """The server's owed list in this box's state folder: drops the caller's entries on `key` (every writer's with force) and adds another
@@ -1885,9 +1909,25 @@ def _words_before_command(s):
     """The words of a line that ends in a command: printable, and with no backtick, which would pair with one inside the command and open its code span too early."""
     return _printable(s).replace("`", "'")
 
+def _is_shown_unsafe(c):
+    """A character that makes a printed line wrap or read in another order: a line or paragraph separator, or a bidirectional control (embedding, override, isolate, mark)."""
+    return unicodedata.category(c) in ("Zl", "Zp") or c in "\u061c\u200e\u200f" or "\u202a" <= c <= "\u202e" or "\u2066" <= c <= "\u2069"
+
+def _escape_name(name):
+    """A name for the command's `--name-esc=` word: a backslash is doubled and each character of _is_shown_unsafe is written as \\uXXXX, which is how the line shows it. _unescape_name undoes it."""
+    return "".join("\\\\" if c == "\\" else f"\\u{ord(c):04x}" if _is_shown_unsafe(c) else c for c in name)
+
+def _unescape_name(text):
+    return re.sub(r"\\(\\|u[0-9a-fA-F]{4})", lambda m: "\\" if m.group(1) == "\\" else chr(int(m.group(1)[1:], 16)), text)
+
+def _name_word(name):
+    """The command word that carries a session name: `--name=<name>`, with the name as it is. A name with a character that would make the line shown wrap or
+    read reordered (_is_shown_unsafe) goes in `--name-esc=` instead, those characters written out as \\uXXXX: the same name reaches the command, and the line stays one line, in order."""
+    return f"--name-esc={_escape_name(name)}" if any(_is_shown_unsafe(c) for c in name) else f"--name={name}"
+
 def _command_text(command):
     """A command a reply prints, between backticks. Only control characters (and lone surrogates, which cannot be printed) are taken out of it: a no-break or ideographic space
-    or a joiner is part of a session name, and the command does not clear without it. The backticks are a run one longer than any inside, so a name cannot end them; the
+    or a joiner is part of a session name, and the command does not clear without it (a character that wraps or reorders the line is written out, _name_word). The backticks are a run one longer than any inside, so a name cannot end them; the
     command begins with a program's name and ends with a plain or quoted word, so none of its own touches them."""
     command = "".join(c for c in command if unicodedata.category(c) not in ("Cc", "Cs"))
     fence = "`" * (max((len(r) for r in re.findall("`+", command)), default=0) + 1)
@@ -1935,13 +1975,18 @@ def _server_command(key, sid, name, ids, force):
     needs no session registry to tell the caller's debts from another writer's. Each name and id is one word (--name=…, --id=…): a checkout there
     that is older than these words ignores them, and none of them can read as --force."""
     command = (f"env CLAUDE_CODE_SESSION_ID={shlex.quote(sid)} " if sid else "") + f"python3 {SERVER_CHECKOUT}/stackshot/projects/pages.py"
-    argv = ["clear", key] + ([f"--name={name}"] if name else []) + [f"--id={i}" for i in sorted(ids)] + (["--force"] if force else [])
+    argv = ["clear", key] + ([_name_word(name)] if name else []) + [f"--id={i}" for i in sorted(ids)] + (["--force"] if force else [])
     where = _cfg.record_host_where(command, argv)
     return _command_text(where) if where.startswith("ssh ") else "on the server box: " + _command_text(f"{command} {shlex.join(argv)}")
 
-def _clear_away(key, host, sid, name, ids, force, whose, n, others):
+def _stays_lines(key, bad):
+    """What a reply says of the session reminders this box could not write back (_clear_reminders)."""
+    return [_printable(f"The session reminder for {key} stays: {b}. Put that right, then run this clear again.") for b in bad]
+
+def _clear_away(key, host, sid, name, ids, force, whose, n, others, bad=()):
     """`clear` on a box that is not the server host, after this box's reminders were dropped: the server clears its own owed entry."""
     print(f"cleared {key}{whose}: {n} session state(s) on this box")
+    for l in _stays_lines(key, bad): print(l)
     if not sid and not force: print(_NO_SESSION)
     if others: print(f"Kept on this box, not yours: {key} is still owed by {_writers(others)}. That debt settles when they update the page.")
     rc, lines, why = _ask_server(key, host, sid, name, ids, force)
@@ -1953,7 +1998,7 @@ def _clear_away(key, host, sid, name, ids, force, whose, n, others):
             print(_words_before_command(f"This session's name ({name}) is not a plain name, so it was not sent: a debt the server keeps under it counts as another writer's above. "
                                         "To clear yours, run ") + _server_command(key, sid, name, ids, force))
     if others or rc == CLEAR_KEPT: print(_force_hint(key))
-    if why: return CLEAR_SERVER_STAYS
+    if why or bad: return CLEAR_SERVER_STAYS
     return CLEAR_KEPT if others or rc == CLEAR_KEPT else 0
 
 def cmd_clear(key, force=False, also_name="", also_ids=()):
@@ -1970,16 +2015,18 @@ def cmd_clear(key, force=False, also_name="", also_ids=()):
     ids |= set(also_ids) | (caller_ids("", also_name) if also_name and by_name else set())
     name = name or also_name
     away = None if key.startswith(NO_PROJECT) else _server_ssh_host()      # a debt with no page is only ever this box's reminder
-    n, others = _clear_reminders(key, me, force)
+    n, others, bad = _clear_reminders(key, me, force)
     whose = " for every writer (--force)" if force else (f" for you, {_who(sid)}" if sid else "")
-    if away is not None: return _clear_away(key, away, sid, name, ids, force, whose, n, others)
-    m, shared, why = _clear_owed(key, me, ids, force, others)
+    if away is not None: return _clear_away(key, away, sid, name, ids, force, whose, n, others, bad)
+    owed_me = {sid} if also_ids and sid else (set() if also_ids else me)      # with --id= only the permanent ids it names (and the caller's own transcript id) are the caller's: a plain name may belong to a later session by now
+    m, shared, why = _clear_owed(key, owed_me, ids, force, others)
     # a list that was not rewritten has no count to give: what was dropped in memory is still in the file
     print(f"cleared {key}{whose}: {n} session state(s)" + ("" if why else f", {m} server owed entr{'y' if m == 1 else 'ies'}"))
     if not sid and not force: print(_NO_SESSION)
-    if why:
+    if why or bad:
         if others: print(f"Kept, not yours: {key} is still owed by {_writers(others)}. That debt settles when they update the page.")
-        print(_printable(f"The server's entry for {key} stays: {why} ({_cfg.state('ledger.json')}). Put that right, then run this clear again."))
+        for l in _stays_lines(key, bad): print(l)
+        if why: print(_printable(f"The server's entry for {key} stays: {why} ({_cfg.state('ledger.json')}). Put that right, then run this clear again."))
         return CLEAR_SERVER_STAYS
     if not others: return 0
     print(_kept_line(key, others, shared) + " " + _force_hint(key))
@@ -2003,13 +2050,14 @@ def cmd_clear_forwarded(args):
     if not key:
         print("usage: pages.py clear-forwarded <key> [--session <id>] [--name <name>] [--id <permanent id>]... [--force]", file=sys.stderr); return 1
     key = norm(key); me = {x for x in (sid, name) if x}
+    owed_me = ({sid} if sid else set()) if ids else me      # with --id the permanent ids said are the caller's, no plain name (cmd_clear)
     if me: ids |= caller_ids(sid, "" if ids else name or session_name(sid))      # with --id the ids are said: no name is looked up (cmd_clear)
-    caller = f"{name} ({sid[:8]})" if name and sid else _who(sid or name)       # the calling box's name for the session, which this box may not know
+    caller = _display_safe(f"{name} ({sid[:8]})") if name and sid else _who(sid or name)       # the calling box's name for the session, which this box may not know
     whose = " for every writer (--force)" if force else (f" for you, {caller}" if me else "")
-    n, others = _clear_reminders(key, me, force)
-    m, shared, why = _clear_owed(key, me, ids, force, others, wait=CLEAR_LOCK_WAIT)
-    if why:
-        print(f"clear-forwarded: {why}", file=sys.stderr); return CLEAR_SERVER_STAYS
+    n, others, bad = _clear_reminders(key, me, force)
+    m, shared, why = _clear_owed(key, owed_me, ids, force, others, wait=CLEAR_LOCK_WAIT)
+    if why or bad:
+        print(f"clear-forwarded: {why or bad[0]}", file=sys.stderr); return CLEAR_SERVER_STAYS
     print(f"cleared {key}{whose}: {n} session state(s), {m} server owed entr{'y' if m == 1 else 'ies'}")
     if not others: return 0
     print(_kept_line(key, others, shared))
@@ -2033,10 +2081,10 @@ def main(argv):
     if cmd == "changed":           # changed <key> <epoch>: the item settle test, for the server and by hand
         ok = ct_changed_since(norm(argv[2]), int(argv[3])) if len(argv) > 3 else False; print(ok); return 0 if ok else 1
     if cmd == "clear":             # clear <key> [--force]: the caller's own debt; --force every writer's. --name=, --id=: see _server_command
-        rest = argv[2:]; force = "--force" in rest; also = [a.partition("=") for a in rest if a.startswith(("--name=", "--id="))]
-        rest = [a for a in rest if a != "--force" and not a.startswith(("--name=", "--id="))]
+        rest = argv[2:]; force = "--force" in rest; also = [a.partition("=") for a in rest if a.startswith(("--name=", "--name-esc=", "--id="))]
+        rest = [a for a in rest if a != "--force" and not a.startswith(("--name=", "--name-esc=", "--id="))]
         if not rest: print("usage: pages.py clear <key> [--force] [--name=<session name>] [--id=<permanent id>]...", file=sys.stderr); return 1
-        return cmd_clear(rest[0], force=force, also_name=next((v for k, _, v in also if k == "--name"), ""), also_ids={v for k, _, v in also if k == "--id" and v})
+        return cmd_clear(rest[0], force=force, also_name=next((v if k == "--name" else _unescape_name(v) for k, _, v in also if k in ("--name", "--name-esc")), ""), also_ids={v for k, _, v in also if k == "--id" and v})
     if cmd == "clear-forwarded": return cmd_clear_forwarded(argv[2:])      # `clear` on another box, run here over ssh: never forwards
     if cmd == "pending": return cmd_pending()
     if cmd == "agent-listed":      # agent-listed <name>: 0 fine · 3 not listed · 2 cannot tell (the fleet tool refuses on 3 only)

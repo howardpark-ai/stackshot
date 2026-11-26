@@ -460,7 +460,8 @@ words = shlex.split(shlex.split(_twobox.given_command(out))[-1]) if rc == 4 else
 check("two boxes: the printed command carries the session's id, name and permanent id, and no --force", words[:1] == ["env"] and f"CLAUDE_CODE_SESSION_ID={S}" in words
       and words[-3:] == [K, "--name=work-osprey", f"--id={P}"] and "--force" not in words, (rc, out, words))
 rc, said, _ = tb.run(shlex.split(_twobox.given_command(out)))
-check("two boxes: …and run as printed it clears the caller's name and permanent-id debts and keeps the other's (exit 3)", rc == 3 and list(led().get(K, {})) == [B] and "2 server owed entries" in said, (rc, said, led()))
+check("two boxes: …and run as printed it clears the caller's permanent-id debt, keeps the entry under the plain name (a later session may hold the name) and the other's (exit 3)",
+      rc == 3 and sorted(led().get(K, {})) == sorted(["work-osprey", B]) and "1 server owed entry" in said, (rc, said, led()))
 two([S], {K: {S: E()}})
 rc, out, calls = tb.clear(K, sid=S)
 check("two boxes: a plain permanent id goes with the call", rc == 0 and f" --id {P}" in calls[0][-1], (rc, out, calls))
@@ -576,6 +577,19 @@ for what, odd in (("a no-break space", "work" + chr(0xA0) + "osprey"), ("an ideo
         rc2, said, _ = tb.run(split(command) if words else ["false"])
         check(f"printed command: …and run as printed it clears the debt under that name ({what}, {which}), keeps the other's and runs nothing in it",
               rc2 == 3 and list(led().get(K, {})) == [B] and not (T / "pwned-tick").exists(), (rc2, said, led()))
+for what, bad in (("a line separator", chr(0x2028)), ("a paragraph separator", chr(0x2029)), ("a right-to-left override", chr(0x202E)), ("a right-to-left mark", chr(0x200F)), ("an isolate", chr(0x2067))):
+    odd = "work" + bad + "osprey" + bad + "back\\slash"
+    names.write_text(json.dumps({S: {"name": odd, "machine": "a"}}), encoding="utf-8")
+    for line_of, mode, status in ((stays_line, "down", 4), (left_out_line, "run", 3)):
+        two([], {K: {odd: E(), B: E()}})
+        rc, out, _ = tb.clear(K, sid=S, mode=mode)
+        line = line_of(out); command = _twobox.code_span(line) if line else "false"
+        shown = [c for c in out if c != "\n" and (c in "\u061c\u200e\u200f" or "\u202a" <= c <= "\u202e" or "\u2066" <= c <= "\u2069" or c in (chr(0x2028), chr(0x2029)))]
+        check(f"printed command: a name with {what} is shown written out, the line neither wraps nor reads reordered ({'entry-stays' if status == 4 else 'name-left-out'} line)",
+              rc == status and not shown and not [c for c in out.replace("\n", "") if not c.isprintable()] and "--name-esc=" in command and "work\\u" in command, (rc, repr(out)))
+        rc2, said, _ = tb.run(split(command) if inner(command) else ["false"])
+        check(f"printed command: …and run as printed it clears the debt under that exact name ({what}), keeps the other's",
+              rc2 == 3 and list(led().get(K, {})) == [B], (rc2, said, led()))
 odd = "osprey" + chr(27) + "[31m" + chr(7) + " pane" + chr(0x9B)
 names.write_text(json.dumps({S: {"name": odd, "machine": "a"}}), encoding="utf-8")
 controls = lambda line: [c for c in line if ord(c) < 32 or 127 <= ord(c) < 160]
@@ -621,6 +635,16 @@ try:
     owe([], {K: {OLD: E(), NEW: E()}})
     rc, out = clear(K, f"--id={OLD}")
     check("--id=: nor is the name this host knows the conversation by", rc == 3 and list(led().get(K, {})) == [NEW], (rc, out, led()))
+    owe([], {K: {OLD: E(), "far-name": E(), "work-osprey": E(), NEW: E()}})
+    rc, out = clear(K, "--name=far-name", f"--id={OLD}")
+    check("--name= with --id=: an entry keyed by the plain name (the one sent, the one this host knows the conversation by) stays; only the permanent id's entry goes",
+          rc == 3 and sorted(led().get(K, {})) == sorted(["far-name", "work-osprey", NEW]), (rc, out, led()))
+    owe([], {K: {OLD: E(), "far-name": E(), "work-osprey": E(), NEW: E()}}); said = io.StringIO()
+    with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said): rc = p.main(["pages.py", "clear-forwarded", K, "--session", S, "--name", "far-name", "--id", OLD])
+    check("clear-forwarded with --id: an entry keyed by the plain name stays too", rc == 3 and sorted(led().get(K, {})) == sorted(["far-name", "work-osprey", NEW]), (rc, said.getvalue(), led()))
+    owe([], {K: {"far-name": E(), "work-osprey": E()}})
+    rc, out = clear(K, "--name=far-name")
+    check("--name= with no --id=: the name's entries are still the caller's, as before", rc == 0 and K not in led(), (rc, out, led()))
     for what, more in (("the name sent with it", ["--name", "work-osprey"]), ("the name this host knows the conversation by", [])):
         owe([], {K: {OLD: E(), NEW: E()}}); said = io.StringIO()
         with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said): rc = p.main(["pages.py", "clear-forwarded", K, "--session", S, *more, "--id", OLD])
@@ -638,6 +662,17 @@ r = subprocess.run([sys.executable, "-c", limited, STACK, K], capture_output=Tru
 check("one box: a list whose write fails at the close is exit 4, and the list is left whole", r.returncode == 4 and "could not be rewritten (OSError)" in r.stdout
       and LEDGER.read_text(encoding="utf-8") == whole, (r.returncode, r.stdout, r.stderr[-300:], len(LEDGER.read_text(encoding="utf-8"))))
 pathlib.Path(str(LEDGER) + ".tmp").unlink(missing_ok=True)
+# a session's reminder state whose write fails at the close (the same limit) is exit 4, and the state is left whole: no touch is lost
+owe([], {})
+p.save_state(S, {"touches": {**{f"projects/page{i:02d}": {"ts": int(time.time()), "task": f"s{i}"} for i in range(30)}, "projects/delta": {"ts": int(time.time()), "task": "s11"}}})
+state_file = T / "touch" / f"{S}.json"; whole = state_file.read_bytes()
+assert 1500 < len(whole) < 8000, len(whole)
+r = subprocess.run([sys.executable, "-c", limited, STACK, K], capture_output=True, text=True, timeout=90, env={**os.environ, "CLAUDE_CODE_SESSION_ID": S})
+check("one box: a reminder state whose write fails at the close is exit 4, and the state is left whole (no touch lost)", r.returncode == 4 and "session reminder for projects/delta stays" in r.stdout
+      and state_file.read_bytes() == whole, (r.returncode, r.stdout, r.stderr[-300:], state_file.stat().st_size))
+check("…and it leaves no temporary file behind", not [f.name for f in (T / "touch").iterdir() if f.name.endswith(".tmp")], [f.name for f in (T / "touch").iterdir()])
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "clear", K], capture_output=True, text=True, timeout=90, env={**os.environ, "CLAUDE_CODE_SESSION_ID": S})
+check("…and without the limit the same clear drops only the touch of that page", r.returncode == 0 and not touched(S) and len(p.load_state(S)["touches"]) == 30, (r.returncode, r.stdout))
 for x in (S, A, B): p.save_state(x, {})
 if kept_ledger is None: LEDGER.unlink(missing_ok=True)
 else: LEDGER.write_text(kept_ledger, encoding="utf-8")

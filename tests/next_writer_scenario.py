@@ -33,7 +33,7 @@ U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate(NAMES, 1
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a"} for n, u in U.items()}))
 (T / "store/next-id").write_text("10"); (T / "store/anchors.json").write_text("{}")
-(T / "brain/projects/example.md").write_text("---\ntype: project\ntitle: Stackshot\ndisplay-name: falcon\nagents:\n  falcon-main: builds it\n---\n\n# x\n", encoding="utf-8")
+(T / "brain/projects/example.md").write_text("---\ntype: project\ntitle: Stackshot\ndisplay-name: falcon\nagents:\n  falcon-main: builds it\n---\n\n# x\n", encoding="utf-8"); import subprocess as _sp; [_sp.run(["git", "-C", f"{tmp}/brain", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True) for a in (("init", "-q"), ("add", "-A"), ("commit", "-q", "-m", "pages"))]      # the pages are a git checkout, as an instance's are: a debt settles on a read of it that works
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 fails = []; ran = []
 def check(name, cond, got=None):
