@@ -1271,17 +1271,33 @@ def twin_line(n: dict[str, Any], key: str, root: str, ruled_id: str, ruled_root:
 _REACHED = ("passed", "held")      # the rulings of a person's message that put it before somebody: only a repeat of one of these is dropped
 
 
-def mq_release(n: dict[str, Any]) -> bool:
-    """The rule `merge-queue-release`: the release script's green report of a pull request merged through the merge queue. All of: the
-    sender is the release script's own kind (`release (a script on <machine>)`, how the server labels release.sh's message, as
-    released._release_green does), a message, the text begins exactly `[release] PR #<digits> merged and deployed through GitHub's merge
-    queue — ` and carries no failure word (FAILED, failed, error, not deployed), and the notice has no anchor, item or target other than
-    the project-wide one every message carries. Anything else goes on to the call as before."""
+_MQ_WHO = re.compile(r"release \(a script on [A-Za-z0-9][A-Za-z0-9._-]{0,60}\)", re.ASCII)
+# the whole line the salamander release script writes for a PR merged through GitHub's merge queue (its tell()):
+#   [release] PR #<n> merged and deployed through GitHub's merge queue — <title> — main at <sha>; changed: <changed> · log <path>
+# one line, no control or format character, ASCII digits and a lower-case hex sha; the title and the changed list are free text.
+_MQ_LINE = re.compile(r"\[release\] PR #[0-9]{1,7} merged and deployed through GitHub's merge queue \u2014 (?P<title>[^\n]{1,300}?) \u2014 main at [0-9a-f]{7,12}; "
+                      r"changed: (?P<changed>[^\n]{1,500}?) \u00b7 log (?P<log>/[^\s]{1,200})")
+_MQ_MAX = 1200
+_MQ_FAIL = re.compile(r"fail|error|rolled back|rollback|unhealthy|not deployed", re.I)
+
+
+def mq_release(n: dict[str, Any], cx: Context, root: str) -> bool:
+    """The rule `merge-queue-release`: the release script's green report of a pull request merged through the merge queue. All of: a message
+    whose sender label is exactly the release script's (`release (a script on <machine>)`; a notice carries no mark a session cannot set, so
+    the label alone is not proof), whose WHOLE text is the line the script writes (_MQ_LINE: one line of at most _MQ_MAX characters, no control
+    or format character, ASCII digits, a hex sha, every fixed word of the tail), that holds no failure word after NFKC normalizing and
+    collapsing spaces (fail, error, rolled back, unhealthy, not deployed), that names no item of the project, and that has no anchor, item or
+    target other than the project-wide one every message carries. Anything else goes on to the call as before."""
     text = str(n.get("text") or "")
-    return (n.get("kind") == "message" and re.fullmatch(r"release \(a script on [^()]+\)", str(n.get("who") or "")) is not None
-            and re.match(r"\[release\] PR #\d+ merged and deployed through GitHub's merge queue \u2014 ", text) is not None
-            and re.search(r"FAILED|failed|error|not deployed", text, re.I) is None
-            and not n.get("anchor") and not n.get("item") and str(n.get("target") or "") in ("", "project-wide"))
+    if n.get("kind") != "message" or len(text) > _MQ_MAX or not _MQ_WHO.fullmatch(str(n.get("who") or "")):
+        return False
+    if _MQ_LINE.fullmatch(text) is None or any(unicodedata.category(c)[0] == "C" for c in text):
+        return False
+    if _MQ_FAIL.search(" ".join(unicodedata.normalize("NFKC", text).split())):
+        return False
+    if n.get("anchor") or n.get("item") or str(n.get("target") or "") not in ("", "project-wide"):
+        return False
+    return not cx.items_named(text, root)
 
 
 def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -1328,7 +1344,7 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
                     telling.tell_handback), for a mover that is one of the project's agents: passed to that mover, whatever the thin
                     call would make of it. Delivered as one line (router_live.compose), with the mark when the mover is a front agent.
       image         a notice whose text is only a file marker ("[files: image.png]"): archived, reason "image not read"; never passed.
-      merge-queue-release  a message from the release script (`release (a script on <machine>)`) whose text begins exactly `[release] PR #<n> merged and deployed through GitHub's merge queue — `, with no failure word (FAILED, failed, error, not deployed) and no anchor, item or agent target: archived, no call. Any other shape goes to the call.
+      merge-queue-release  a message from the release script (`release (a script on <machine>)`) whose whole text is the one line the script writes (`[release] PR #<n> merged and deployed through GitHub's merge queue — <title> — main at <sha>; changed: <changed> · log <path>`), with no failure word (fail, error, rolled back, unhealthy, not deployed, after NFKC), no item named in the text and no anchor, item or agent target: archived, no call. It is tried last, after message-item, repeat and for-agent, so a notice those rule keeps their ruling. Any other shape goes to the call.
       release-self  a `[release]` message from the project's own maintainer (a sender named *-maintainer that the page lists as an
                     agent), green (no red, failed or error word, no [for <owner>]): merged, "log only: the maintainer's own release".
       anchor-builder  an anchor notice on a GitHub pull request whose head branch starts with a background agent's name and a slash
@@ -1403,9 +1419,6 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
     kind = str(n.get("kind") or "")
     if kind == "message" and str(n.get("who") or "").lower().startswith(page_senders()) and "keeper:" in str(n.get("text") or ""):
         return _line(n, key, root, source="code", rule="page-pass", ruling="archived", reason="page pass")
-    if mq_release(n):
-        return _line(n, key, root, source="code", rule="merge-queue-release", ruling="archived",
-                     reason="ruled archived by the merge-queue-release code rule: the release script's green merge-queue report")
     watched = watch_map()
     if kind == "anchor" and (root, str(n.get("anchor") or "")) in watched:
         agent = watched[(root, str(n["anchor"]))]
@@ -1532,6 +1545,9 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
         if for_agent or (kind == "anchor" and str(n.get("anchor") or "").startswith("drive:")):
             return _line(n, key, root, source="code", rule="quiet", ruling="archived",
                          reason=f"archived for the digest: quiet hour, one digest to {quiet} after the quiet hour, not for {_cfg.owner()}")
+    if mq_release(n, cx, root):          # last: every rule above keeps its old ruling for such a notice
+        return _line(n, key, root, source="code", rule="merge-queue-release", ruling="archived",
+                     reason="ruled archived by the merge-queue-release code rule: the release script's green merge-queue report")
     return None
 
 
