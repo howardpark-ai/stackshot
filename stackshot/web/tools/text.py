@@ -136,7 +136,7 @@ _MODEL_FORM = _T.piece("MODEL_FORM")
 _SELF_WAIT_FORM = _T.piece("SELF_WAIT_FORM")
 _STEP_PROOF_FORM = _T.piece("STEP_PROOF_FORM")
 _ASK_RULE = _T.piece("ASK_RULE")      # what the server does with an ask on its own: the close text and the update text carry the same words
-_CLOSE_REFUSAL = _T.piece("CLOSE_REFUSAL")      # the full close rule a refused close appends; the tool text carries the shorter CLOSE_FORM
+_CLOSE_REFUSAL = _T.piece("CLOSE_REFUSAL")      # the full close rule (a refused close no longer appends it: it shows the accepted call); the tool text carries the shorter CLOSE_FORM
 _CLOSE_FORM = _T.piece("CLOSE_FORM")
 _GMAIL_TERMS = _T.piece("GMAIL_TERMS")
 

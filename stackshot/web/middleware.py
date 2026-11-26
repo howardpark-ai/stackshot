@@ -50,7 +50,16 @@ def _strings(v: Any) -> Iterator[str]:
             yield from _strings(x)
 
 
-def _scrub(text: str, a: dict[str, Any], writes: bool) -> str:
+_QUOTED = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
+_MAILBOX = re.compile(r"[\w.+-]+@[\w.-]+")
+
+
+def _spellings(x: str) -> set[str]:
+    """The ways a refusal can quote a string argument: as it is, and as repr() or JSON write it (newlines, tabs, backslashes and a quote of either kind escaped)."""
+    return {x, repr(x)[1:-1], json.dumps(x, ensure_ascii=False)[1:-1]}
+
+
+def _scrub(text: str, a: dict[str, Any], writes: bool, tool: str = "") -> str:
     """A refusal's text for the call log without the arguments it echoes: a refused read or write can quote the item it was given, a project or an anchor's text, and the log keeps the kind of refusal, never what the caller sent. Every string argument of a tool that is
     no counted write (`writes` false) is replaced where it stands in the text; for a counted write only an item_id that is no id at all is (a valid id stays: the weekly kinds fold it anyway). A real id is replaced by ZERO_ID (an item id of 0), anything else by `<arg>`."""
     out = text
@@ -61,19 +70,18 @@ def _scrub(text: str, a: dict[str, Any], writes: bool) -> str:
         for x in _strings(v):
             x = x.strip()
             if len(x) >= 2 and not (k == "item_id" and writes and _ID_LIKE.fullmatch(x)):
-                pairs.append((x, ZERO_ID if k == "item_id" and _ID_LIKE.fullmatch(x) else "<arg>"))
+                pairs += [(s, ZERO_ID if k == "item_id" and _ID_LIKE.fullmatch(x) else "<arg>") for s in _spellings(x) if len(s) >= 2]
     for x, to in sorted(set(pairs), key=lambda p: -len(p[0])):
         out = out.replace(x, to)
+    if tool == "anchors":          # an anchors refusal quotes a part of an address (the mailbox of gmail:q@<mailbox>:<query>, a name): any quoted or mailbox-looking part goes, the kind stays
+        out = _MAILBOX.sub("<arg>", _QUOTED.sub("'<arg>'", out))
     return out
 
 
 def _read_target(a: dict[str, Any]) -> str:
-    """What a call of a tool that is no counted write is about, for the call log: the item (when it is an id), the project or the session name it was given ("" when none). A retry is a repeat on this."""
-    for k in ("item_id", "project", "name"):
-        if a.get(k):
-            v = str(a[k]).strip()
-            return "" if k == "item_id" and not _ID_LIKE.fullmatch(v) else v          # an item_id that is no id is a caller's text: it is not kept
-    return ""
+    """What a call is about, for the call log: its item_id when that is an id ("" otherwise: a project, a session name or an item_id that is no id is the caller's text and is not kept). A retry is a repeat on this."""
+    v = str(a.get("item_id") or "").strip()
+    return v if _ID_LIKE.fullmatch(v) else ""
 
 
 def _message_fields(args: dict[str, Any], err: BaseException) -> dict[str, str]:
@@ -120,7 +128,7 @@ class _RefusalLog(_MW):
                 a = args if isinstance(args, dict) else {}
                 item_ = a.get("item_id")
                 more = _message_fields(a, e) if name == "message" else {}          # a refused message keeps its target, the refusal's kind and its text (the one call whose arguments are logged)
-                _calls.record(name, False, item=item_ if counted else _read_target(a), sender=a.get("sender"), why=_scrub(str(e), a, counted), call=_calls._h(a.get("subject"))[:8] if name == "create" and not str(item_ or "").strip() else "", req=_calls.size_of(a), rlen=len(str(e)), **more)
+                _calls.record(name, False, item=_read_target({"item_id": item_}) if counted else _read_target(a), sender=a.get("sender"), why=_scrub(str(e), a, counted, name), call=_calls._h(a.get("subject"))[:8] if name == "create" and not str(item_ or "").strip() else "", req=_calls.size_of(a), rlen=len(str(e)), **more)
             except Exception as le:  # noqa: BLE001  — a log line is never worth losing the refusal
                 print(f"mcp refusal log failed: {le}", file=sys.stderr, flush=True)
             raise

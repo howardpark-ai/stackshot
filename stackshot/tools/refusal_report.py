@@ -3,7 +3,7 @@
 Reads the call log the server keeps (call_log.py: one line per call of every tool, went through or refused, in `<paths.state>/calls/<YYYY-MM>.jsonl`; the weekly count below reads the lines of the five
 writes, create, update, complete, confirm and message, the daily analysis all of them) and reports, for one calendar week Monday to Sunday in the instance timezone: how many create and update calls
 were refused of how many, the share, the week before it, the kinds of refusal that make most of them, the sessions that were refused most, and what the
-server corrected instead of refusing (a bare item number or #N in any call that takes an item id, a close included, read as board#N, a message's page key spelled another way, a wake with seconds or an offset, a subject with no scope prefix, a long description or outcome_text bullet split at its sentence ends or, for one clause, at a comma, colon, dash or parenthesis, or, with no such cut, cut at a space onto an indented line under it (bullet-wrap, or outcome-wrap for an outcome_text),
+server corrected instead of refusing (a bare item number or #N in any call that takes an item id, a close included, read as board#N, a close that names its replacing item and no outcome read as superseded (outcome-superseded), a message's page key spelled another way, a wake with seconds or an offset, a subject with no scope prefix, a long description or outcome_text bullet split at its sentence ends or, for one clause, at a comma, colon, dash or parenthesis, or, with no such cut, cut at a space onto an indented line under it (bullet-wrap, or outcome-wrap for an outcome_text),
 a step left out of next kept open, a subject or a status line cut at its last word that fits, an ask-by with a time of day cut to its day, a bare address in a description written as a link, the server's own fixes of a wait), and how many of those fixes the writer sent back (call_log.bounces; of the fixes of the kinds that have the check, call_log.CHECKED), and the streaks: one writer refused STREAK_MIN (3) times or more on one call (the same tool and item) with each refusal within STREAK_WINDOW (15 minutes) of the one before, counted by kind and listed first, since a streak marks a gap in the tool text. Message calls have lines of their own (the message tool and the client route's script messages, `_message_lines`): the calls refused of all with the week before, the refusals by the kind slug the call log keeps (`service/messaging.py` `Refused`; `not recorded` for a line from before kinds were logged), the streaks of one sender refused MSG_STREAK_MIN (2) times or more on one target within MSG_STREAK_WINDOW (an hour) of the one before, how many of them also meet the rule above (3 within 15 minutes), and the refusals sent again within RESEND_WINDOW (an hour) with a similar text by the same sender (`similar`: difflib ratio of at least SIMILAR, 0.5), to the same target or another, looked for in the later refusals and in the delivered messages of the message log (`messages.jsonl`, `delivered`). One more line, when the week or the one before it had any: the wait loops the minute walk found (audit/wait_loops.py: items that wait on each other), counted from its log. Tokenless: no model call.
 
     refusal_report.py run [--dry-run] [--force] [--week YYYY-MM-DD]
@@ -37,6 +37,7 @@ import collections
 import datetime as dt
 import difflib
 import json
+import math
 import os
 import re
 import sys
@@ -374,6 +375,7 @@ CHARS_PER_TOKEN = 4                      # the usual estimate: a token is about 
 DAY_HOURS = 24
 WEEK_DAYS = 7
 NEEDS_FIX = "needs a fix (no hint yet)"
+READS = ("get", "brief", "sessions", "anchors", "rules")          # the tools that only read: an error of one is a read error (route and bump_versions write)
 READ_PREFIX = "read: "          # a read that errors is counted under its text with this before it
 READ_HINT = "an error of a read, not a rule of the board: check the item id, project or name before reading, and read the list first when unsure."
 
@@ -406,7 +408,7 @@ def _kind_of_row(r: dict[str, Any]) -> str:
     tool = str(r.get("tool") or "")
     if tool == "message":
         return "message: " + (str(r.get("kind") or "") or NO_KIND)
-    if tool not in _cl.COUNTED:          # a read that errors (no such item, a bad argument) is no rule of the board: its own kinds, with one hint for them all
+    if tool in READS:          # a read that errors (no such item, a bad argument) is no rule of the board: its own kinds, with one hint for them all
         return READ_PREFIX + _cl.kind_of(str(r.get("why") or ""))
     return _cl.kind_of(str(r.get("why") or ""))
 
@@ -414,19 +416,36 @@ def _kind_of_row(r: dict[str, Any]) -> str:
 def _refusal_chars(r: dict[str, Any]) -> int:
     """The length of a refusal's text: the whole length the log kept (`rlen`), else the clipped text of a line from before it was kept."""
     v = r.get("rlen")
-    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else len(str(r.get("why") or ""))
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        if not math.isfinite(v):          # Infinity or NaN in a line: a size that is none (it never aborts the analysis)
+            return 0
+        if v >= 0:
+            return int(v)
+    return len(str(r.get("why") or ""))
 
 
 def _request_chars(r: dict[str, Any]) -> int:
     v = r.get("req")
-    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else 0          # a line from before sizes were kept is a call of unknown size: it counts as none
+    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0 else 0          # a line from before sizes were kept is a call of unknown size: it counts as none
+
+
+def _issues_letter() -> str:
+    """The store letter of issue-numbered items ([github] issues_letter, default g): the letter a bare board id is stored under."""
+    try:
+        from stackshot.github import ghsync as _gh  # noqa: PLC0415
+        return _gh.letter()
+    except Exception:  # noqa: BLE001
+        return "g"
 
 
 def _item_key(v: Any) -> str:
-    """An item as one key however it was written: `board#N`, `#N`, `N` and the store id `gN` are the same item (a refused call keeps the item as the caller sent it, a call that went through the store's id)."""
+    """An item as one key however it was written: `board#N`, `#N`, `N` and the store id (the issues letter and N) are the same item (a refused call keeps the item as the caller sent it, a call that went through the store's id)."""
     t = str(v or "").strip().lower()
     m = re.fullmatch(r"(?:board)?#?(\d+)", t)
-    return f"g{m.group(1)}" if m else t
+    if m:
+        return f"{_issues_letter()}{m.group(1)}"
+    m = re.fullmatch(r"([a-z])(\d+)", t)
+    return f"{m.group(1)}{m.group(2)}" if m else t
 
 
 def _target(r: dict[str, Any]) -> str:

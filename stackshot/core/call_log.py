@@ -1,12 +1,13 @@
-"""call_log.py — the count of board writes the server refused, and the small corrections it made instead of refusing.
+"""call_log.py — the count of board calls the server refused, and the small corrections it made instead of refusing.
 
-The server writes one line per call of a counted write tool (create, update, complete, confirm, message) to `<paths.state>/calls/<YYYY-MM>.jsonl`:
+The server writes one line per call of every tool (the counted writes create, update, complete, confirm and message, and every other tool, a read too) to `<paths.state>/calls/<YYYY-MM>.jsonl`:
 
     {"t": epoch seconds, "tool": "update", "ok": true}                                          the call went through
     {"t": …, "tool": "update", "ok": true, "fix": ["wake", "item-id"]}                           it went through after the server corrected a field itself (see `fixed`)
     {"t": …, "tool": "update", "ok": false, "item": "board#N", "sender": "my-x", "why": "…"}    the server refused it (the ToolError's text, whitespace folded, clipped)
 
-`tools/refusal_report.py` reads these lines for its weekly report. The call's other arguments are never logged: a description, a draft or a said line stays out. The one exception is a refused message call, which also keeps
+`tools/refusal_report.py` reads these lines for its weekly report (the five writes) and its daily analysis (every tool). What a line holds of a call: the tool, the caller (`sender`, when the call passed one), ok or refused, the sizes (`req`, `rlen`), the item only when it is an id,
+and for a refusal its text with the arguments it quotes removed (an anchors refusal also loses any quoted or mailbox-looking part), clipped. The call's other arguments are never logged: a description, a draft, a project, a session name or a said line stays out. The one exception is a refused message call, which also keeps
 what it was about, so refusals can be told apart later (the message tool's text is a record its sender may want back, and a refusal leaves no other copy of it):
 
     {"t": …, "tool": "message", "ok": false, "item": "", "sender": "my-x", "why": "…", "to": "other-y", "kind": "marked-no-turn", "text": "…"}      to: the target as the sender wrote it; kind: the refusal site's slug (service/messaging.py `Refused`); text: the message as a delivered row keeps it, clipped to TEXT_MAX
@@ -61,7 +62,7 @@ BOUNCE = "bounce:"            # a fix kind written as BOUNCE + kind is a bounce-
 HANDLED = "handled:"          # a fix kind written as HANDLED + refusal kind + ":" + how is a message the relay handled where it once refused (`handled`): it is no fix and has no line in the reply
 HOW_MAX = 40                  # characters of the `how` of a handled message kept
 NOTE = "note:"                # a fix kind written as NOTE + kind is a line a reply gave its writer with nothing corrected (`noted`): it is no fix, and the line is the reply's own
-NO_RESEND = frozenset({"item-id", "description-bullet", "outcome-bullet", "bullet-wrap", "outcome-wrap", "step-none", "his-step-settled", "step-none-applied", "said-text", "step-kept", "subject-cut", "work-cut", "ask-by-day", "description-url", "wait-basis-dropped", "description-goal", "step-split", "step-split-dropped", "step-reworded"})   # fixes whose reply line does not invite a resend: the field sent again as written would be refused, fixed the same, change nothing, or be settled the same way (each line says how to change it)
+NO_RESEND = frozenset({"item-id", "description-bullet", "outcome-bullet", "bullet-wrap", "outcome-wrap", "step-none", "his-step-settled", "step-none-applied", "said-text", "step-kept", "subject-cut", "work-cut", "ask-by-day", "description-url", "wait-basis-dropped", "description-goal", "step-split", "step-split-dropped", "step-reworded", "outcome-superseded"})   # fixes whose reply line does not invite a resend: the field sent again as written would be refused, fixed the same, change nothing, or be settled the same way (each line says how to change it)
 
 _FIXES: contextvars.ContextVar[list[tuple[str, str]] | None] = contextvars.ContextVar("call_log_fixes", default=None)
 _DETAIL: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = contextvars.ContextVar("call_log_detail", default=None)
@@ -378,7 +379,8 @@ def read(since: float, until: float) -> Iterator[dict[str, Any]]:
     for name in months:
         p = _cfg.state("calls") / f"{name}.jsonl"
         try:
-            lines = newline_lines(p.read_text(encoding="utf-8", errors="replace"))          # a line torn in the middle of a character reads as a line that does not parse, and is skipped          # a refused message's text may hold a character `splitlines` cuts at (core/lines.py)
+            lines = newline_lines(p.read_text(encoding="utf-8", errors="replace"))          # a line torn in the middle of a character reads as a line that does not parse, and is skipped
+            # a refused message's text may hold a character `splitlines` cuts at (core/lines.py)
         except OSError:
             continue
         for ln in lines:

@@ -877,15 +877,15 @@ def part_refusal_report():
     out, err = run_mw("anchors", {"project": "projects/alpha"}, lambda: reply("none"))
     out, err = run_mw("brief", {}, lambda: reply("the board"))
     m10 = lines()
-    check("10 middleware: sessions, anchors and brief are logged too: the item is the name or project it was given, a call with none has none, and none has a sender it did not pass",
-          [(x["tool"], x.get("item", "")) for x in m10[1:]] == [("sessions", "my-x"), ("anchors", "projects/alpha"), ("brief", "")] and all("sender" not in x for x in m10[1:]) and m10[3]["req"] == 0, m10[1:])
+    check("10 middleware: sessions, anchors and brief are logged too: a session name or a project is the caller's text and is not kept as the item, and none has a sender it did not pass",
+          [(x["tool"], x.get("item", "")) for x in m10[1:]] == [("sessions", ""), ("anchors", ""), ("brief", "")] and all("sender" not in x for x in m10[1:]) and m10[3]["req"] == 0, m10[1:])
     def gone(): raise ToolError("item not found: " + BID(404))
     out, err = run_mw("get", {"item_id": BID(404), "sender": "team-back", "note": SECRET}, gone)
     m10 = lines()
     check("10 middleware: a read the server refuses is logged as refused with the text, its whole length and the request size, and the refusal reaches the caller", isinstance(out, ToolError) and m10[4]["ok"] is False and m10[4]["rlen"] == len("item not found: " + BID(404))
           and m10[4]["why"].startswith("item not found") and m10[4]["item"] == BID(404) and m10[4]["sender"] == "team-back" and m10[4]["req"] > 0 and SECRET not in json.dumps(m10[4]), (out, m10[4:]))
     out, err = run_mw("anchors", {"project": "projects/alpha"}, gone)
-    check("10 middleware: …a refused read with no item_id is about the project or name it was given", lines()[-1]["tool"] == "anchors" and lines()[-1]["item"] == "projects/alpha" and lines()[-1]["ok"] is False, lines()[-1])
+    check("10 middleware: …a refused read with no item_id keeps no project as its item", lines()[-1]["tool"] == "anchors" and lines()[-1]["item"] == "" and lines()[-1]["ok"] is False and "projects/alpha" not in json.dumps(lines()[-1]), lines()[-1])
     wipe(); run_mw("get", {"item_id": BID(7)}, lambda: reply("x")); run_mw("sessions", {"name": "my-x"}, lambda: reply("x")); run_mw("anchors", {"project": "p"}, lambda: reply("x")); run_mw("brief", {}, lambda: reply("x")); run_mw("get", {"item_id": BID(404), "sender": "team-back", "note": SECRET}, gone)
     def boom(): raise RuntimeError("the store is down")
     async def run_raw(name, args, call):
@@ -965,10 +965,42 @@ def part_refusal_report():
         try: asyncio.run(run_raw("get", {"item_id": "SECRETINPUT"}, lambda: (_ for _ in ()).throw(ValueError("1 validation error input_value='SECRETINPUT'"))))
         except ValueError: pass
     q10 = lines()
-    check("10 privacy: a refused read keeps the kind of its refusal and not the project, anchor text or item it was given", "SECRET" not in json.dumps(q10[:3] + q10[4:]) and "SECRET" not in q10[3]["why"] and q10[1]["item"] == "" and q10[0]["why"] == "Refused: anchor '<arg>' of <arg> is not a session" and q10[2]["why"] == "item not found: " + BH + "0", [x.get("why") for x in q10])
+    check("10 privacy: a refused read keeps the kind of its refusal and not the project, anchor text or item it was given", "SECRET" not in json.dumps(q10) and q10[1]["item"] == "" and q10[3]["item"] == "" and q10[0]["why"] == "Refused: anchor '<arg>' of <arg> is not a session" and q10[2]["why"] == "item not found: " + BH + "0", [x.get("why") for x in q10])
     check("10 privacy: …a write's refusal loses only an item_id that is no id; an id and the rest of the text stay", q10[3]["why"] == "Refused: bad item id '<arg>'" and CL.kind_of(q10[3]["why"]) == "an item id in the wrong form" and q10[4]["why"] == "Refused: next no longer lists 'a' in " + BID(3), (q10[3]["why"], q10[4]["why"]))
     check("10 privacy: …an error that is no refusal is logged by its class name alone", q10[6]["why"] == "ValueError" and q10[6]["ok"] is False and q10[6]["rlen"] > len("ValueError") and q10[5]["why"] == "Refused: next no longer lists 'my step'", (q10[5], q10[6]))
     wipe()
+    # the quoted forms: a refusal quotes repr(argument), which escapes newlines, tabs, backslashes and a quote of either kind
+    nm = "line1\nSECRETNL\tSECRETTAB \\back"
+    run_mw("sessions", {"name": nm}, lambda: (_ for _ in ()).throw(ToolError(f"no session named {nm!r}")))
+    both = "it's \"SECRETBOTH\" ok"
+    run_mw("get", {"item_id": both}, lambda: (_ for _ in ()).throw(ToolError(f"bad item id {both!r}")))
+    run_mw("anchors", {"project": "projects/alpha", "add": ["gmail:q@SECRETBOX:the query"]}, lambda: (_ for _ in ()).throw(ToolError("Refused: 'SECRETBOX' is no mailbox the anchors service reads; the mailboxes are a, b. The form is gmail:q@<mailbox>:<query>")))
+    run_mw("anchors", {"project": "projects/alpha", "add": ["gmail:q@:x"]}, lambda: (_ for _ in ()).throw(ToolError("Refused: gmail:q@SECRETBOX2 names the box")))
+    run_mw("sessions", {"name": "SECRETNAME"}, lambda: reply("ok"))
+    run_mw("anchors", {"project": "SECRETPROJECT"}, lambda: reply("ok"))
+    z10 = lines()
+    check("10 privacy: a refusal that quotes an argument as repr writes it (newline, tab, backslash, both kinds of quote) loses it", "SECRET" not in json.dumps(z10[:2]) and z10[0]["why"] == "no session named '<arg>'" and z10[1]["why"] == "bad item id '<arg>'", [x.get("why") for x in z10[:2]])
+    check("10 privacy: …an anchors refusal that quotes only part of an address (the mailbox) loses it, and keeps its kind", "SECRET" not in json.dumps(z10[2:4]) and "is no mailbox the anchors service reads" in z10[2]["why"] and "names the box" in z10[3]["why"], [x.get("why") for x in z10[2:4]])
+    check("10 privacy: …a session name or a project of a read is never the item", "SECRET" not in json.dumps(z10[4:]) and all(x["item"] == "" if "item" in x else True for x in z10[4:]) and all("item" not in x or x["item"] == "" for x in z10), z10[4:])
+    wipe()
+    # the issues letter, a size that is no finite number, and the label of a read error
+    from stackshot.github import ghsync as _ghs
+    real_letter = _ghs.letter
+    _ghs.letter = lambda: "k"
+    try: keys = [RR._item_key(v) for v in (BH + "5", "5", "#5", "k5", "g5", "a1")]
+    finally: _ghs.letter = real_letter
+    check("10 retries: a bare item number is keyed with the configured issues letter (and a store id of another letter is another item)", keys == ["k5", "k5", "k5", "k5", "g5", "a1"] and RR._item_key("5") == "g5", keys)
+    inf_rows = [{"t": 1, "tool": "update", "ok": False, "why": "Refused: x", "rlen": float("inf"), "req": float("inf")}, {"t": 2, "tool": "update", "ok": False, "why": "Refused: y", "rlen": float("nan")}, {"t": 3, "tool": "get", "ok": False, "why": "no", "rlen": 7, "req": float("-inf")}]
+    try: tl = RR.daily_tally(inf_rows, inf_rows); raised = None
+    except Exception as e: tl, raised = None, e
+    check("10 daily: a size that is Infinity or NaN counts as none and never aborts the analysis", raised is None and tl["refusal_chars"] == 7 and tl["retry_chars"] == 0, (raised, tl))
+    f_inf = CALLS / "2026-11.jsonl"; f_inf.parent.mkdir(parents=True, exist_ok=True)
+    f_inf.write_text('{"t": %d, "tool": "update", "ok": false, "why": "Refused: x", "rlen": Infinity, "req": 5}\n' % int(epoch(2026, 11, 25, 12)), encoding="utf-8")
+    try: d_inf = RR.collect_daily(epoch(2026, 11, 26, 5)); raised = None
+    except Exception as e: d_inf, raised = None, e
+    check("10 daily: …a line that holds Infinity, read from the file", raised is None and d_inf[0]["refused"] == 1 and d_inf[0]["refusal_chars"] == 0, (raised, d_inf))
+    wipe()
+    check("10 daily: a read error is labelled as one, and a write tool's error (route) is not", RR._kind_of_row({"tool": "get", "ok": False, "why": "no such thing"}).startswith(RR.READ_PREFIX) and not RR._kind_of_row({"tool": "route", "ok": False, "why": "Refused: no such notice"}).startswith(RR.READ_PREFIX), "")
     # a log that fails never fails the call, at each layer
     class Bad:
         def __str__(self): raise RuntimeError("no text")
