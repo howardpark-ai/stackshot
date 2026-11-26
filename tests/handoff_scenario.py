@@ -398,6 +398,16 @@ cold({"action": "ask_owner", "ask": ASK, "options": [{"label": "ship", "line": "
 tick(d42 + 11 * MIN, 42); drain()
 check("5 cold: …ask Oliver: a decision with its ask and its options, as cold-call, the item his", "decision" in mt(42).get("needs", []) and mt(42).get("ask") == ASK and len(mt(42).get("options") or []) == 2 and rd(42).get("written_by") == "cold-call"
       and ho(42).get("to") == OWN and ho(42).get("no_clock") is True, (mt(42), ho(42)))
+# …and an ask that links a page the instance lists as too long to decide from ([ask] refuse_link_prefixes) is written as the cold call made it: a script cannot make a decision page, so the link rule is not applied to it
+_cfg.CFG.setdefault("ask", {})["refuse_link_prefixes"] = ["https://notes.example.invalid/projects/"]
+ASK_LONG = "Decide: ship the thing [plan](https://notes.example.invalid/projects/alpha) now \u00b7 Recommend: yes \u00b7 Stakes: a week of delay \u00b7 By: no date"
+item(1990, project="projects/gamma", owner=U["home-gamma-front"], needs=[])
+hand(1990, "home-peer"); drain(); d_ll = ho(1990)["delivered_at"]
+cold({"action": "ask_owner", "ask": ASK_LONG, "options": [{"label": "ship", "line": "Ship it now.", "recommended": True}, {"label": "wait", "line": "Hold it a week.", "recommended": False}]})
+tick(d_ll + 11 * MIN, 1990); drain()
+check("5 cold: …ask Oliver with a link to a page the instance lists as too long: written as cold-call, the ask as it was, not refused and not sent to the builder",
+      mt(1990).get("ask") == ASK_LONG and "decision" in mt(1990).get("needs", []) and rd(1990).get("written_by") == "cold-call" and ho(1990).get("to") == OWN and not recovery_pushes(1990), (mt(1990), ho(1990)))
+_cfg.CFG["ask"].pop("refuse_link_prefixes", None)
 # an item stored in state doing (a session at work: needs names a session) whose cold call asks Oliver reaches him with needs decision and the ask (no stored state: the cold call no longer writes your-call), not back to its sender
 item(84, project="projects/gamma", owner=U["home-gamma-front"], needs=["home-send"], mover="home-send", state="doing", expected_by=time.strftime("%Y-%m-%d 23:59", time.gmtime(now0 + ZONE_OFFSET + 3600)))
 hand(84, "home-peer"); drain(); d_l = ho(84)["delivered_at"]

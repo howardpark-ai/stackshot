@@ -242,10 +242,10 @@ def create_item(
         fc.add(f_, text=True)
     ask = "" if ask.strip().lower() in h.ask_none else ask
     if ask:
-        ask = fc.call(h.gate_ask, ask, default="")
+        ask = fc.call(h.gate_ask, ask, links=not _writes.question(), default="")      # a script's question links what it links: a script cannot make a decision page
     for f_ in _fg.bare_url_faults({"description": description, "next": next, "ask": ask}, session=_writes.session_next()):
         fc.add(f_, text=True)
-    opts = fc.call(h.gate_options, options)
+    opts = fc.call(h.gate_options, options, links=not _writes.question())
     needs_l = fc.call(_gates.gate_needs, needs, project, owner, default=[]) if (needs if isinstance(needs, list) else needs.strip()) and str(needs).strip().lower() not in h.ask_none else []
     if agent.strip() and agent.strip().lower() not in h.ask_none:    # the older form writes the session into needs
         if (got_agent := fc.call(_gates.gate_needs_session, agent, project, owner, "", owner, _gates.lazy_said(said, owner), "create")) is not None:      # `by` the creator: a live front agent of the project handing the item to a sibling on his words in `said` (as update does)
@@ -344,7 +344,7 @@ def create_item(
         meta["draft"] = draft_txt
     fc.call(_gates.gate_metadata, meta, creating=True)
     lifted = "" if ask else h.lift_ask(meta, writer=owner, keeper=owner)   # a client without the ask parameter: the ask's form as next's first line
-    if lifted:                  # the ask taken from the first line of next is judged as an ask given as a parameter is
+    if lifted and not _writes.question():                  # the ask taken from the first line of next is judged as an ask given as a parameter is (a script's question is not)
         fc.call(_dg._gate_ask_links, meta.get("ask"))
     asked = lifted + h.ask_owed(meta)       # needs=decision without an ask: a nag line, or refused from [ask] refuse_after
     fc.call_family(*_faults.DECISION, _dg._gate_one_decision, meta, description, bool(lifted))  # one decision per item, options in words: the ask is being written

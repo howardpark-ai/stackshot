@@ -85,10 +85,12 @@ def _ask_fault(ask: str) -> tuple[str, str]:
     return why, _ASK_EXAMPLE
 
 
-def _gate_ask(ask: str) -> str:
+def _gate_ask(ask: str, links: bool = True) -> str:
     """An ask as given → its stored form; the shape refusal whatever the stage. The refusal names the test the ask failed and shows an ask that passes it: the writer's own parts in the form when they are all there, else an example.
-    A link to a page the instance lists as too long to decide from is refused first ([ask] refuse_link_prefixes): the shape refusal would hand the link back in the corrected ask."""
-    _dg._gate_ask_links(ask)
+    A link to a page the instance lists as too long to decide from is refused first ([ask] refuse_link_prefixes): the shape refusal would hand the link back in the corrected ask.
+    `links` False (a script's question, the cold call's ask: a script cannot make a decision page) skips that refusal."""
+    if links:
+        _dg._gate_ask_links(ask)
     if _hooks().parse_ask(ask) is None:
         why, fixed = _ask_fault(ask)
         mine = fixed != _ASK_EXAMPLE

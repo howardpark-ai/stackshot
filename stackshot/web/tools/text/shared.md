@@ -121,7 +121,7 @@ ask's Decide part too, or the write is refused: the home row and the item page s
 question. A mockup link goes in the ask only: an option label or line holding a markdown link or an http(s) URL is
 refused. The link in an ask is a short decision page made for it (an artifact, a document, or a mockup page of the web UI)
 with the decision, its choices and what is at stake on it, never a long project or notes page: where the instance lists
-such pages, an ask or an option that links one is refused when the write sets it. options: for a pick between alternatives, one per line, {{OPT_FORM}}; the ask's Recommend
+such pages, an ask that links one is refused when the write sets it, and so is an option that links one (an option holds no link: the short link goes in the ask's Decide part). options: for a pick between alternatives, one per line, {{OPT_FORM}}; the ask's Recommend
 names the recommended one's label. The server refuses a needs=decision item whose
 ask or description names alternatives while it lists none: words such as "which of the two", "pick one", "x, y or z",
 "x vs y", "Option A", and labeled choices in the Decide part ("A or B", "A (…) or B (…)", "A: … or B: …"); put each
