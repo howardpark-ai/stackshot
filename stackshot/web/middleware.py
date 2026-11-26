@@ -9,7 +9,7 @@ import json
 import re
 import sys
 import time
-from typing import Any
+from typing import Any, Iterator
 
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware as _MW
@@ -38,11 +38,41 @@ def _refusal_line(tool: str, args: Any, err: BaseException) -> str:
     return f"refused: {tool} item={item or '-'} sender={sender or '-'}: {reason}"
 
 
+ZERO_ID = "board" + "#" + "0"          # what the log keeps in place of an item id a refusal quotes
+_ID_LIKE = re.compile(r"(?:board(?:-tmp-[\w-]+)?)?#?\d+|[a-z]\d+", re.I)
+
+
+def _strings(v: Any) -> Iterator[str]:
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, (list, tuple)):
+        for x in v:
+            yield from _strings(x)
+
+
+def _scrub(text: str, a: dict[str, Any], writes: bool) -> str:
+    """A refusal's text for the call log without the arguments it echoes: a refused read or write can quote the item it was given, a project or an anchor's text, and the log keeps the kind of refusal, never what the caller sent. Every string argument of a tool that is
+    no counted write (`writes` false) is replaced where it stands in the text; for a counted write only an item_id that is no id at all is (a valid id stays: the weekly kinds fold it anyway). A real id is replaced by ZERO_ID (an item id of 0), anything else by `<arg>`."""
+    out = text
+    pairs = []
+    for k, v in a.items():
+        if k == "sender" or (writes and k != "item_id"):
+            continue
+        for x in _strings(v):
+            x = x.strip()
+            if len(x) >= 2 and not (k == "item_id" and writes and _ID_LIKE.fullmatch(x)):
+                pairs.append((x, ZERO_ID if k == "item_id" and _ID_LIKE.fullmatch(x) else "<arg>"))
+    for x, to in sorted(set(pairs), key=lambda p: -len(p[0])):
+        out = out.replace(x, to)
+    return out
+
+
 def _read_target(a: dict[str, Any]) -> str:
-    """What a call of a tool that is no counted write is about, for the call log: the item, the project or the session name it was given ("" when none). A retry is a repeat on this."""
+    """What a call of a tool that is no counted write is about, for the call log: the item (when it is an id), the project or the session name it was given ("" when none). A retry is a repeat on this."""
     for k in ("item_id", "project", "name"):
         if a.get(k):
-            return str(a[k])
+            v = str(a[k]).strip()
+            return "" if k == "item_id" and not _ID_LIKE.fullmatch(v) else v          # an item_id that is no id is a caller's text: it is not kept
     return ""
 
 
@@ -71,7 +101,7 @@ def _written_item(tool: str, args: dict[str, Any], result: Any) -> str:
 class _RefusalLog(_MW):
     """a write refused inside a Code Mode script shows its reason only if the script returns it, so the server keeps it too: one stderr line (the journal)
     for every ToolError a tool call ends in, innermost of the middleware so the reason is the tool's own text, before _LinkIds rewrites its ids. The same
-    middleware counts the call (call_log.py: one line per counted write, went through or refused, for the weekly refused count) and adds the one reply line
+    middleware counts the call (call_log.py: one line for every tool's call, went through or refused, a read that errors included, with the size of its arguments; the weekly refused count reads the five writes, the daily analysis all of them) and adds the one reply line
     for a correction the server made itself instead of refusing (call_log.fixed)."""
     async def on_call_tool(self, context, call_next):  # type: ignore[override]
         msg = context.message
@@ -90,7 +120,7 @@ class _RefusalLog(_MW):
                 a = args if isinstance(args, dict) else {}
                 item_ = a.get("item_id")
                 more = _message_fields(a, e) if name == "message" else {}          # a refused message keeps its target, the refusal's kind and its text (the one call whose arguments are logged)
-                _calls.record(name, False, item=item_ if counted else _read_target(a), sender=a.get("sender"), why=str(e), call=_calls._h(a.get("subject"))[:8] if name == "create" and not str(item_ or "").strip() else "", req=_calls.size_of(a), rlen=len(str(e)), **more)
+                _calls.record(name, False, item=item_ if counted else _read_target(a), sender=a.get("sender"), why=_scrub(str(e), a, counted), call=_calls._h(a.get("subject"))[:8] if name == "create" and not str(item_ or "").strip() else "", req=_calls.size_of(a), rlen=len(str(e)), **more)
             except Exception as le:  # noqa: BLE001  — a log line is never worth losing the refusal
                 print(f"mcp refusal log failed: {le}", file=sys.stderr, flush=True)
             raise
@@ -101,7 +131,7 @@ class _RefusalLog(_MW):
                 try:
                     a = getattr(msg, "arguments", None)
                     a = a if isinstance(a, dict) else {}
-                    _calls.record(name, False, item=_read_target(a), sender=a.get("sender"), why=f"{type(e).__name__}: {e}", req=_calls.size_of(a), rlen=len(str(e)))
+                    _calls.record(name, False, item=_read_target(a), sender=a.get("sender"), why=type(e).__name__, req=_calls.size_of(a), rlen=len(str(e)))
                 except Exception as le:  # noqa: BLE001
                     print(f"mcp call log failed: {le}", file=sys.stderr, flush=True)
             raise

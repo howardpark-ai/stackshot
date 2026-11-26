@@ -897,7 +897,7 @@ def part_refusal_report():
         try: asyncio.run(run_raw("get", {"item_id": BID(8)}, boom))
         except RuntimeError as e: raised = e
     m10 = lines()
-    check("10 middleware: a read that errors is a refusal in the log (its error named), and the error still reaches the caller", raised is not None and str(raised) == "the store is down" and m10[5]["ok"] is False and m10[5]["why"] == "RuntimeError: the store is down" and m10[5]["item"] == BID(8), (raised, m10[5:]))
+    check("10 middleware: a read that errors is a refusal in the log (its error named), and the error still reaches the caller", raised is not None and str(raised) == "the store is down" and m10[5]["ok"] is False and m10[5]["why"] == "RuntimeError" and m10[5]["item"] == BID(8), (raised, m10[5:]))
     out, err = run_mw("update", {"item_id": BID(7), "sender": "team-back", "description": SECRET}, refusing)
     m10 = lines()
     check("10 middleware: a refused write keeps its request size and the refusal's whole length too", m10[6]["tool"] == "update" and m10[6]["req"] == CL.size_of({"item_id": BID(7), "sender": "team-back", "description": SECRET}) and m10[6]["rlen"] == len("Refused: next no longer lists 'a step'"), m10[6])
@@ -919,6 +919,82 @@ def part_refusal_report():
     check("10 weekly: the reads in the log change nothing in the weekly count (calls, refused, other writes, senders)", c10["calls"] == {"update": 2} and c10["refused"] == {"update": 1} and "get 5" not in t10_ and "other writes refused" not in t10_ and "repeated refusals" not in t10_ and "create and update: 1 of 2 calls refused" in t10_, (c10["calls"], t10_))
     wipe()
 
+    BH = "board" + "#"                                           # the id text built in code
+    # 10c2 a retry found through the real middleware: the refused line keeps the item as sent, the line that went through the store's id (the clock is held)
+    FAKE = [0.0]
+    def at(sec): FAKE[0] = epoch(2026, 11, 24, 9) + sec
+    CL.time = types.SimpleNamespace(time=lambda: FAKE[0])
+    try:
+        at(0); run_mw("update", {"item_id": BH + "5", "sender": "team-back"}, refusing)
+        at(30); run_mw("update", {"item_id": "5", "sender": "team-back"}, lambda: reply("updated " + BH + "5"))                                  # the same item written another way: a retry
+        at(100); run_mw("create", {"subject": "[home] a thing", "sender": "team-back"}, lambda: (_ for _ in ()).throw(ToolError("Refused: some rare thing")))
+        at(160); run_mw("create", {"subject": "[home] a thing, cut", "sender": "team-back"}, lambda: reply("created " + BH + "12 [home] a thing"))   # a create: no item before, an id after, another digest
+        at(200); run_mw("message", {"to": "a-main", "text": "hi", "sender": "a-builder"}, refuse("marked-no-turn"))
+        at(260); run_mw("message", {"to": "a-main", "text": "hi again", "sender": "a-builder"}, lambda: reply("sent"))                          # a message: the same target
+        at(300); run_mw("update", {"item_id": BH + "8"}, refusing)                                                                           # refused for naming no sender
+        at(330); run_mw("update", {"item_id": "8", "sender": "team-back"}, lambda: reply("updated " + BH + "8"))                                  # …and sent again with one
+        at(400); run_mw("update", {"item_id": BH + "9", "sender": "team-back"}, lambda: reply("updated " + BH + "9"))                            # no refusal before it: no retry
+        at(430); run_mw("get", {"item_id": BH + "5", "sender": "team-back"}, lambda: reply("x"))                                              # the refusal of " + BH + "5 was retried already: no retry
+        at(440); run_mw("update", {"item_id": BH + "6", "sender": "team-back"}, refusing)
+        at(450); run_mw("update", {"item_id": BH + "7", "sender": "team-back"}, lambda: reply("updated " + BH + "7"))                            # another item: no retry
+    finally:
+        CL.time = time
+    r10 = lines()
+    got = RR.retries(r10)
+    check("10 retries: through the middleware a refusal retried and gone through is a retry: the item written another way, a create, a message, a write refused for naming no sender",
+          sorted(int(x["t"] - epoch(2026, 11, 24, 9)) for x in got) == [30, 160, 260, 330] and r10[0]["item"] == BH + "5" and r10[1]["item"] != BH + "5" and r10[1]["item"].endswith("5"), ([x["t"] for x in got], r10[:2]))
+    check("10 retries: …a call after a retry that went through, and a call on another item, are none", all(x["tool"] != "get" and x.get("item") not in (BH + "7", "g7", "g9") for x in got), got)
+    check("10 retries: the one item is one key however it was written", {RR._item_key(v) for v in (BH + "5", "#5", "5", "g5", " " + BH.title() + "5 ")} == {"g5"} and RR._item_key("a1") == "a1" and RR._item_key("") == "", "")
+    # a line torn in the middle of a character (a crash mid-write) never raises in a reader
+    f10 = next(iter(sorted(CALLS.glob("*.jsonl"))))
+    f10.write_bytes(f10.read_bytes() + b'{"t": 1795000000, "tool": "update", "why": "\xed\x95')
+    n10 = len(r10)
+    try:
+        again = list(CL.read(0, 4e9)); daily = RR.collect_daily(epoch(2026, 11, 25)); weekly = RR.collect(dt.date(2026, 11, 23)); raised = None
+    except Exception as e: raised = e
+    check("10 call_log: a line torn in the middle of a character is skipped by every reader and raises in none", raised is None and len(again) == n10 and daily[1]["calls"] >= 1, raised)
+    wipe()
+    # what a read's refusal quotes of its arguments stays out of the log
+    run_mw("anchors", {"project": "projects/alpha", "add": ["SECRETANCHOR text"]}, lambda: (_ for _ in ()).throw(ToolError("Refused: anchor 'SECRETANCHOR text' of projects/alpha is not a session")))
+    run_mw("get", {"item_id": "zzzSECRETITEMzzz"}, lambda: (_ for _ in ()).throw(ToolError("bad item id 'zzzSECRETITEMzzz'")))
+    run_mw("get", {"item_id": BID(404)}, lambda: (_ for _ in ()).throw(ToolError("item not found: " + BID(404))))
+    run_mw("update", {"item_id": "SECRETGARBAGE-ITEM", "sender": "team-back"}, lambda: (_ for _ in ()).throw(ToolError("Refused: bad item id 'SECRETGARBAGE-ITEM'")))
+    run_mw("update", {"item_id": BID(3), "sender": "team-back", "description": "SECRETDESC"}, lambda: (_ for _ in ()).throw(ToolError("Refused: next no longer lists 'a' in " + BID(3))))
+    run_mw("update", {"item_id": BID(3), "sender": "team-back", "next": "my step"}, lambda: (_ for _ in ()).throw(ToolError("Refused: next no longer lists 'my step'")))
+    with contextlib.redirect_stderr(io.StringIO()):
+        try: asyncio.run(run_raw("get", {"item_id": "SECRETINPUT"}, lambda: (_ for _ in ()).throw(ValueError("1 validation error input_value='SECRETINPUT'"))))
+        except ValueError: pass
+    q10 = lines()
+    check("10 privacy: a refused read keeps the kind of its refusal and not the project, anchor text or item it was given", "SECRET" not in json.dumps(q10[:3] + q10[4:]) and "SECRET" not in q10[3]["why"] and q10[1]["item"] == "" and q10[0]["why"] == "Refused: anchor '<arg>' of <arg> is not a session" and q10[2]["why"] == "item not found: " + BH + "0", [x.get("why") for x in q10])
+    check("10 privacy: …a write's refusal loses only an item_id that is no id; an id and the rest of the text stay", q10[3]["why"] == "Refused: bad item id '<arg>'" and CL.kind_of(q10[3]["why"]) == "an item id in the wrong form" and q10[4]["why"] == "Refused: next no longer lists 'a' in " + BID(3), (q10[3]["why"], q10[4]["why"]))
+    check("10 privacy: …an error that is no refusal is logged by its class name alone", q10[6]["why"] == "ValueError" and q10[6]["ok"] is False and q10[6]["rlen"] > len("ValueError") and q10[5]["why"] == "Refused: next no longer lists 'my step'", (q10[5], q10[6]))
+    wipe()
+    # a log that fails never fails the call, at each layer
+    class Bad:
+        def __str__(self): raise RuntimeError("no text")
+    real_rec = CL.record
+    def rec_fails(*a, **k): raise OSError("log is down")
+    CL.record = rec_fails
+    try:
+        out, err = run_mw("get", {"item_id": BID(1)}, lambda: reply("read ok"))
+        out2, err2 = run_mw("get", {"item_id": BID(1)}, gone)
+        buf = io.StringIO(); raised = None
+        with contextlib.redirect_stderr(buf):
+            try: asyncio.run(run_raw("get", {"item_id": BID(8)}, boom))
+            except RuntimeError as e: raised = e
+        out3, err3 = run_mw("update", {"item_id": BID(1), "sender": "s"}, lambda: reply("write ok"))
+    finally:
+        CL.record = real_rec
+    check("10 layers: the log line of a read that went through failing leaves the reply as it was", out.content[0].text == "read ok" and "mcp call log failed" in err, (out, err))
+    check("10 layers: …of a refused call leaves the refusal as it was", isinstance(out2, ToolError) and str(out2).startswith("item not found") and "mcp refusal log failed" in err2, (out2, err2))
+    check("10 layers: …of a read that errors leaves the error as it was", str(raised) == "the store is down" and "mcp call log failed" in buf.getvalue(), (raised, buf.getvalue()))
+    check("10 layers: …of a write that went through leaves its reply as it was", out3.content[0].text == "write ok" and "mcp call log failed" in err3, (out3, err3))
+    CL._file = no_file
+    try: res_ = CL.record("get", True, req=1)
+    finally: CL._file = real_file
+    check("10 layers: record swallows a file that cannot be written, and size_of an argument that cannot be measured (the call goes through)", res_ is None and CL.size_of({"a": Bad()}) == 0 and run_mw("get", {"item_id": BID(1), "x": Bad()}, lambda: reply("fine"))[0].content[0].text == "fine", res_)
+    wipe()
+
     # 10d retries and the daily analysis, on a fixture day (the clock is held: NOW)
     NOW = epoch(2026, 11, 26, 5)
     Y = lambda hh, mm=0, ss=0: epoch(2026, 11, 25, hh, mm) + ss
@@ -937,37 +1013,43 @@ def part_refusal_report():
     rec("get", True, Y(15), BID(3), "team-back", 20)
     rec("get", True, Y(15, 1), BID(3), "", 20)                                        # no caller named: no call to match
     CL.record("create", False, sender="team-back", why="Refused: some rare thing 5", call="aaaa", req=200, rlen=60, now=Y(16))
-    CL.record("create", False, sender="team-back", why="Refused: some rare thing 6", call="bbbb", req=200, rlen=60, now=Y(16, 5))       # a different call (digest): no retry; the same unhinted kind twice: no repeat
+    CL.record("create", False, sender="team-back", why="Refused: some rare thing 6", call="bbbb", req=200, rlen=60, now=Y(16, 5))       # a create is matched on sender and tool: this is the retry of the one above (a corrected subject changes the digest)
+    CL.record("create", False, sender="home-front", why="Refused: some rare thing 7", call="cccc", req=200, rlen=60, now=Y(17))       # another caller's: the third refusal of an unhinted kind
     # older lines of the week: one with no sizes at all (a line from before they were kept)
     CL.record("update", False, item=BID(4), sender="old-writer", why="Refused: next no longer lists 'x'", now=epoch(2026, 11, 22, 10))
     CL.record("update", True, now=epoch(2026, 11, 22, 11))
     CL.record("message", False, sender="team-back", why="Refused: x", to="a-main", kind="marked-no-turn", now=epoch(2026, 11, 23, 10))
     CL.record("update", False, item=BID(4), sender="old-writer", why="Refused: next no longer lists 'x'", req=40, rlen=55, now=epoch(2026, 11, 18, 10))        # 8 days before NOW: out of the week
     d24, d7 = RR.collect_daily(NOW)
-    check("10 daily: the last 24 hours count every tool's calls and refusals (reads included)", d24["calls"] == 15 and d24["refused"] == 9, (d24["calls"], d24["refused"]))
-    check("10 daily: …the last 7 days add the older lines, and not the line 8 days back", d7["calls"] == 18 and d7["refused"] == 11, (d7["calls"], d7["refused"]))
-    check("10 daily: …refusals per tool", dict(d24["tools"]) == {"update": 4, "get": 3, "create": 2} and dict(d7["tools"]) == {"update": 5, "get": 3, "create": 2, "message": 1}, (dict(d24["tools"]), dict(d7["tools"])))
+    check("10 daily: the last 24 hours count every tool's calls and refusals (reads included)", d24["calls"] == 16 and d24["refused"] == 10, (d24["calls"], d24["refused"]))
+    check("10 daily: …the last 7 days add the older lines, and not the line 8 days back", d7["calls"] == 19 and d7["refused"] == 12, (d7["calls"], d7["refused"]))
+    check("10 daily: …refusals per tool", dict(d24["tools"]) == {"update": 4, "get": 3, "create": 3} and dict(d7["tools"]) == {"update": 5, "get": 3, "create": 3, "message": 1}, (dict(d24["tools"]), dict(d7["tools"])))
     check("10 daily: …refusals per rule kind (a message by its kind slug) and per caller session",
-          d24["kinds"][CL.kind_of(NS)] == 4 and d24["kinds"][CL.kind_of(GONE)] == 3 and d7["kinds"]["message: marked-no-turn"] == 1 and d24["senders"]["home-front"] == 5 and d24["senders"]["team-back"] == 4 and d7["senders"]["old-writer"] == 1, (dict(d24["kinds"]), dict(d24["senders"])))
+          d24["kinds"][CL.kind_of(NS)] == 4 and d24["kinds"][RR.READ_PREFIX + CL.kind_of(GONE)] == 3 and d7["kinds"]["message: marked-no-turn"] == 1 and d24["senders"]["home-front"] == 6 and d24["senders"]["team-back"] == 4 and d7["senders"]["old-writer"] == 1, (dict(d24["kinds"]), dict(d24["senders"])))
     check("10 daily: retries are the same caller's repeats of a tool on an item within 10 minutes after a refusal: 2 on the update (the second after a refusal, a success ends the chain) and 2 on the read, with their request sizes",
-          d24["retries"] == 4 and d24["retry_chars"] == 520 + 530 + 30 + 30 and d7["retries"] == 4, (d24["retries"], d24["retry_chars"], d7["retries"]))
+          d24["retries"] == 5 and d24["retry_chars"] == 520 + 530 + 30 + 30 + 200 and d7["retries"] == 5, (d24["retries"], d24["retry_chars"], d7["retries"]))
     check("10 daily: tokens are the refusal text plus the retried requests over four: whole lengths where kept, the clipped text for a line from before",
-          d24["refusal_chars"] == 400 + 400 + 300 + 300 + 3 * 41 + 120 and RR._tokens(d24) == round((d24["refusal_chars"] + 1110) / 4) and d7["refusal_chars"] == d24["refusal_chars"] + len("Refused: next no longer lists 'x'") + len("Refused: x"), (d24["refusal_chars"], RR._tokens(d24), d7["refusal_chars"]))
+          d24["refusal_chars"] == 400 + 400 + 300 + 300 + 3 * 41 + 180 and RR._tokens(d24) == round((d24["refusal_chars"] + 1310) / 4) and d7["refusal_chars"] == d24["refusal_chars"] + len("Refused: next no longer lists 'x'") + len("Refused: x"), (d24["refusal_chars"], RR._tokens(d24), d7["refusal_chars"]))
+    capped = RR.build_daily(NOW, d24, d7, top=2)
+    check("10 daily: the list of repeating kinds shows `top` of them and says how many more", capped.count("\n  - ") == 3 and "  - and 1 more kinds repeat" in capped and len(RR.repeating(d24)) == 3, capped[-500:])
+    many = RR.daily_tally([{"t": 1, "tool": "update", "ok": False, "why": f"Refused: odd{chr(97 + i)}{chr(97 + j)} thing"} for i in range(8) for j in range(8) for _ in range(3)], [])
+    big = RR.build_daily(NOW, many, many)
+    check("10 daily: 64 repeating kinds make a text of the report's size, not of the kinds' number", len(RR.repeating(many)) == 64 and big.count("\n  - ") == 7 and "  - and 58 more kinds repeat" in big and len(big) < 4000, (len(big), big.count("\n  - ")))
     anon = [{"t": 1000, "tool": "get", "ok": False, "item": BID(3)}, {"t": 1010, "tool": "get", "ok": True, "item": BID(3)}, {"t": 1020, "tool": "get", "ok": True, "sender": "x"}]
     check("10 daily: a call with no caller, or with no item, is matched to no retry", RR.retries(anon) == [], RR.retries(anon))
     rep = RR.repeating(d24)
     check("10 daily: a kind refused three times or more in the day repeats (a kind refused twice does not), each with its hint or 'needs a fix'",
-          [(k, n) for k, n, _ in rep] == [(CL.kind_of(NS), 4), (CL.kind_of(GONE), 3)] and rep[0][2] == RR.HINTS[CL.kind_of(NS)] and rep[1][2] == RR.NEEDS_FIX and CL.kind_of("Refused: some rare thing 5") not in dict((k, n) for k, n, _ in rep), rep)
+          [(k, n) for k, n, _ in rep] == [(CL.kind_of(NS), 4), (RR.READ_PREFIX + CL.kind_of(GONE), 3), (CL.kind_of("Refused: some rare thing 5"), 3)] and rep[0][2] == RR.HINTS[CL.kind_of(NS)] and rep[1][2] == RR.READ_HINT and rep[2][2] == RR.NEEDS_FIX, rep)
     check("10 daily: every hint is one plain line, and no hint is for a kind the log can no longer name", all(h and "\n" not in h and h == h.strip() for h in RR.HINTS.values()) and all(k in {n for _, n in CL._KINDS} or k.startswith("message: ") for k in RR.HINTS), [k for k in RR.HINTS if k not in {n for _, n in CL._KINDS}])
     txt = RR.build_daily(NOW, d24, d7)
     sample = txt
     check("10 daily: the text names both spans, the estimate and the repeating kinds with their hints",
           txt.startswith("Refusals and retries of board tool calls, the last 24 hours and the last 7 days up to Thu Nov 26th 05:00 (")
-          and "calls refused of all calls (every tool, a read that errors counts as refused): 24h 9 of 15 (60.0%) · 7d 11 of 18 (61.1%)" in txt
-          and "- refusals per tool, 24h: update 4 · get 3 · create 2" in txt and "- refusals per caller session, 24h: home-front 5 · team-back 4" in txt and "home-front 5" in txt and "old-writer 1" in txt
-          and "- retries (the same caller on the same tool and item within 10 minutes after a refusal): 24h 4 (1,110 request characters) · 7d 4 (1,110 request characters)" in txt
-          and "characters / 4: refusal text plus retried requests): 24h " in txt and "refusal characters + 1,110 retried request characters" in txt
-          and f"  - {CL.kind_of(NS)} 4: {RR.HINTS[CL.kind_of(NS)]}" in txt and f"  - {CL.kind_of(GONE)} 3: {RR.NEEDS_FIX}" in txt, txt)
+          and "calls refused of all calls (every tool, a read that errors counts as refused): 24h 10 of 16 (62.5%) · 7d 12 of 19 (63.2%)" in txt
+          and "- refusals per tool, 24h: update 4 · get 3 · create 3" in txt and "- refusals per caller session, 24h: home-front 6 · team-back 4" in txt and "home-front 6" in txt and "old-writer 1" in txt
+          and "- retries (the same caller on the same tool and item within 10 minutes after a refusal): 24h 5 (1,310 request characters) · 7d 5 (1,310 request characters)" in txt
+          and "characters / 4: refusal text plus retried requests): 24h " in txt and "refusal characters + 1,310 retried request characters" in txt
+          and f"  - {CL.kind_of(NS)} 4: {RR.HINTS[CL.kind_of(NS)]}" in txt and f"  - {RR.READ_PREFIX}{CL.kind_of(GONE)} 3: {RR.READ_HINT}" in txt and f"  - {CL.kind_of('Refused: some rare thing 5')} 3: {RR.NEEDS_FIX}" in txt, txt)
     print("---- the daily text of the fixture day ----\n" + sample + "\n----")
     check("10 daily: a day with no kind at three shows that and no list", "no kind was refused 3 times" in RR.build_daily(NOW, RR.daily_tally([], []), d7), "")
     # 10e the run: once a day, gated, to the weekly report's place, the background agent only when a kind needs a fix

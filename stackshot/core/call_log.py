@@ -336,6 +336,8 @@ def record(tool: str, ok: bool, *, item: str = "", sender: str = "", why: str = 
             row["sender"] = one_sender
     if req >= 0:
         row["req"] = int(req)
+        if ok and tool == "message" and to and not h_kind:          # a message that went through names its target too: the retry of a refused message is matched on it
+            row["to"] = re.sub(r"\s+", " ", str(to)).strip()[:TO_MAX]
     if h_kind:          # a message the relay handled where it once refused: the refusal site's kind, the target and what was done, so the weekly count can show it as handled
         row["to"] = re.sub(r"\s+", " ", str(to or "")).strip()[:TO_MAX]
         row["kind"] = re.sub(r"[^a-z0-9-]+", "-", h_kind.lower()).strip("-")[:40]
@@ -376,7 +378,7 @@ def read(since: float, until: float) -> Iterator[dict[str, Any]]:
     for name in months:
         p = _cfg.state("calls") / f"{name}.jsonl"
         try:
-            lines = newline_lines(p.read_text(encoding="utf-8"))          # a refused message's text may hold a character `splitlines` cuts at (core/lines.py)
+            lines = newline_lines(p.read_text(encoding="utf-8", errors="replace"))          # a line torn in the middle of a character reads as a line that does not parse, and is skipped          # a refused message's text may hold a character `splitlines` cuts at (core/lines.py)
         except OSError:
             continue
         for ln in lines:
