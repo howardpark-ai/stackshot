@@ -456,24 +456,27 @@ import suitemap as s
 # every .py file the folder held (rule 6). Reading the first 60 by name, a new early-named helper joined them: main's next measured map said this suite reads it,
 # the pick made without that file had left the suite out, and the audit failed main's run as a selection miss.
 tests_py = sorted(pathlib.Path(SCR).glob("*.py")) + [R / p for p in FIX if p.endswith(".py") and p != "bad.py"]
-texts_read, parsed, names_seen, same_walk, same_chain = set(), 0, 0, True, True
+texts_read, unparsed, walked, chained, names_seen, same_walk, same_chain = set(), [], 0, 0, 0, True, True
 for p in tests_py:   # one file's tree at a time: all of them held at once took about 900 MB
     try:
         text = p.read_text(encoding="utf-8"); texts_read.add(str(p))
         tree = ast.parse(text)
-    except (SyntaxError, ValueError, OSError): continue
-    parsed += 1
+    except (SyntaxError, ValueError, OSError) as e:
+        unparsed.append(f"{p.name}: {type(e).__name__}"); continue   # a failure of CACHE 0, never a file quietly left out
     fast, nodes = s.walk_nodes(tree), list(ast.walk(tree))
     same_walk = same_walk and len(fast) == len(nodes) and all(x is y for x, y in zip(fast, nodes))
+    walked += 1
     for n in nodes:
         if isinstance(n, (ast.Name, ast.Attribute)):
             names_seen += 1
             chain, dot = s.chain_of(n), s.dotted(n)
             same_chain = same_chain and ((chain is None and dot is None) or (chain is not None and ".".join(chain) == dot))
+    chained += 1
 unread = sorted(n for n in os.listdir(SCR) if n.endswith(".py") and os.path.join(SCR, n) not in texts_read)
-check("CACHE 0 every .py file of the checkout's tests/ is read, not a part of them (a suite that reads only some is not picked for a new one: rule 6 of tests/suitemap.py)", not unread, (len(unread), unread[:5]))
-check("CACHE 1 walk_nodes gives the nodes of ast.walk, the same objects in the same order, on every file of the checkout's tests and of the fixtures", same_walk and parsed > 40, parsed)
-check("CACHE 2 chain_of is dotted split into its parts, and None where dotted is None, on every name and attribute of those files", same_chain and names_seen > 5000, names_seen)
+check("CACHE 0 every .py file of the checkout's tests/ is read, not a part of them (a suite that reads only some is not picked for a new one: rule 6 of tests/suitemap.py), and each of them and of the fixtures parses",
+      not unread and not unparsed, (len(unread), unread[:5], len(unparsed), unparsed[:5]))
+check("CACHE 1 walk_nodes gives the nodes of ast.walk, the same objects in the same order, on every file of the checkout's tests and of the fixtures", same_walk and walked == len(tests_py) > 40, (walked, len(tests_py)))
+check("CACHE 2 chain_of is dotted split into its parts, and None where dotted is None, on every name and attribute of those files", same_chain and chained == len(tests_py) and names_seen > 5000, (chained, len(tests_py), names_seen))
 
 def ref_links(tree, mod, path, repo):
     """aliases, froms and froms_all as the old pass over every node made them"""
