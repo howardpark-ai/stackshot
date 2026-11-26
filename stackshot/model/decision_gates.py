@@ -156,7 +156,7 @@ def _clean_path(path: str) -> str:
 def _link_norm(url: str) -> str:
     """A link as compared: http and https alike, the host in lower case without a closing dot, a default port dropped, backslashes in the path read as slashes, the path cleaned (`_clean_path`), the owner and the
     repository of a github.com path in lower case, a fragment dropped, the query kept as written; "" when it has no host. Not changed: any other path case, any other escape, an escape written twice (%252F), a
-    user name before the host, a host written another way (an IP address, a punycode name)."""
+    host written another way (an IP address, a punycode name). A user name before the host is dropped with the rest of the authority (urlsplit's `hostname`)."""
     if not isinstance(url, str):
         return ""
     s = url.strip()
@@ -177,7 +177,9 @@ def _link_norm(url: str) -> str:
 
 def _under(link: str, prefix: str) -> bool:
     """`link` starts with `prefix`; a prefix that does not end with "/" ends at a path segment, a query or the end (a prefix of one page does not take a page whose name only starts the same); a prefix with a query
-    ends at the end of a query pair (`&` follows), so it takes that query and no other."""
+    ends at the end of a query pair (`&` follows), so it takes that query and no other; a prefix that ends with "/" is the folder: it also takes the folder's own link written without the closing slash."""
+    if prefix.endswith("/") and "?" not in prefix and (link == prefix[:-1] or link.startswith(prefix[:-1] + "?")):
+        return True
     return link.startswith(prefix) and (prefix.endswith("/") or link == prefix or link[len(prefix)] in ("&" if "?" in prefix else "/?"))
 
 

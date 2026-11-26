@@ -7,7 +7,7 @@ records the change where others read it (the For you list, the Landed list, the 
 means and is kept as it was in server.py.
 
 What a write must do differently from the usual one is the `WriteContext` passed to `save`: `settle`. It was a thread-local flag set around the save (`_NO_SETTLE`); it is an argument now, so
-nothing a save does depends on what else the thread did before it. The per-write flags the gates read (`SESSION_NEXT`, `CLOSE_TOOL`, `QUESTION`, `REFORMAT`, `TERMINAL_ROW`) live here too, as thread-locals the routes and tools set
+nothing a save does depends on what else the thread did before it. The per-write flags the gates read (`SESSION_NEXT`, `CLOSE_TOOL`, `QUESTION`, `COLD_ASK`, `REFORMAT`, `TERMINAL_ROW`) live here too, as thread-locals the routes and tools set
 with `.on` around a write (`session_write` is the create and update tools' own); they are read by the create and update tools and the gates, never by this save. The flags of the telling (`CLOSE_WAS`, `FRONT_HINT`,
 `MENTIONED`, `HO_STATE`) are on service/telling.py.
 
@@ -49,6 +49,7 @@ ITEM_LOCK = _xlock.XLock("item")      # a session's update and a failed delivery
 SESSION_NEXT = threading.local()  # around the create and update tools' own calls: only a session's write is judged by the write checks of Next (N1, N3, N6; next_rules.py), and by the bare-URL check; a script's, the re-bullet route's and the minute loop's writes are not
 TERMINAL_ROW = threading.local()  # set by the terminal-prompt and job-gap routes around their writes: the row is a script's notification of its own, so it owes no page and no session is told of it (create_item, _update, the tell_* notices; a job-gap item's builder is told by the needs notice of its create, which this does not stop)
 QUESTION = threading.local()     # set by the script question route around its create: guard 11 (alarming words) does not judge a headless run's own question text, so it is never stranded on a wording refusal
+COLD_ASK = threading.local()     # set by the cold call's own write (service/handoff_cold.py, `cold_write`, in a try/finally) and by nothing else: the ask it writes links what it links, a script cannot make a decision page. No tool parameter reaches it
 CLOSE_TOOL = threading.local()   # around the complete tool's own call: its close is a session's, so it ticks only the sender's own open steps (read by the update with `close_tool()`)
 REFORMAT = threading.local()    # set by the re-bullet route around its update: a description written in bullets with the same content is a filing edit, no state change
 
@@ -66,6 +67,11 @@ def close_tool() -> bool:
 def question() -> bool:
     """Is this the script question route's create?"""
     return bool(getattr(QUESTION, "on", False))
+
+
+def cold_ask() -> bool:
+    """Is this the cold call's own write (the server's, in the cold call's thread)? Never a label a caller passes."""
+    return bool(getattr(COLD_ASK, "on", False))
 
 
 def reformat() -> bool:
@@ -87,6 +93,17 @@ def close_write():
         yield
     finally:
         CLOSE_TOOL.on = was
+
+
+@contextlib.contextmanager
+def cold_write():
+    """Marks the cold call's own write (COLD_ASK) for the thread running it; restored on exit, whatever the write does. Only service/handoff_cold.py uses it."""
+    was = getattr(COLD_ASK, "on", False)
+    COLD_ASK.on = True
+    try:
+        yield
+    finally:
+        COLD_ASK.on = was
 
 
 @contextlib.contextmanager

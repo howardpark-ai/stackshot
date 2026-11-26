@@ -140,16 +140,17 @@ def handoff_cold(gid: str, cold_at: float) -> None:
             def write() -> None:                         # one attempt, built from the item as it stands now (a retry re-reads it), not as the call began
                 cur = _load(gid)
                 cmeta = cur.get("metadata") or {}
-                if ans["action"] == "hand_to":
-                    kinds = [k for k in _needs_kinds(cmeta) if k != "decision"]
-                    to_front = _telling.front_keeper(ans["to"], str(cmeta.get("project") or ""))[0]      # a user-facing agent is never named in needs (only a mover): the item goes to it by mover=
-                    _hooks().update(gid, needs=[*kinds] if to_front else [*kinds, ans["to"]], sender=_ho.COLD, **({"mover": ans["to"]} if (cmeta.get("mover") or to_front) else {}),
-                            **({"clear_needs": True} if to_front and not kinds else {}))      # a stored doing or verifying state stands on a session in needs, and a front agent is never named there: the write drops the state (_state_apply) and the item reads as derived
-                elif ans["action"] == "close":
-                    _hooks().update(gid, status="completed", outcome=ans["outcome"], reason=_fg._fit(_shown_ids(ans["reason"]), _fg._close_reason_max()), outcome_text=ans["outcome_text"], sender=_ho.COLD)     # the model's reason is cut to the limit after its ids are expanded (g7 to board#N, which _update does), never refused
-                else:
-                    _hooks().update(gid, needs=["decision"], ask=ans["ask"], options=ans["options"], next=f"{OWNER}: answer the ask on the item", clear_next=True, sender=_ho.COLD,    # his item's next is this line alone, as before: the server's own write wipes the others
-                            **({"clear_mover": True} if cmeta.get("mover") else {}))      # a stored mover would stay the mover beside decision
+                with _writes.cold_write():      # the cold call's own write, flagged by the server: its ask links what it links (a script cannot make a decision page); the flag is the thread's own, never a sender label a tool call passes
+                    if ans["action"] == "hand_to":
+                        kinds = [k for k in _needs_kinds(cmeta) if k != "decision"]
+                        to_front = _telling.front_keeper(ans["to"], str(cmeta.get("project") or ""))[0]      # a user-facing agent is never named in needs (only a mover): the item goes to it by mover=
+                        _hooks().update(gid, needs=[*kinds] if to_front else [*kinds, ans["to"]], sender=_ho.COLD, **({"mover": ans["to"]} if (cmeta.get("mover") or to_front) else {}),
+                                **({"clear_needs": True} if to_front and not kinds else {}))      # a stored doing or verifying state stands on a session in needs, and a front agent is never named there: the write drops the state (_state_apply) and the item reads as derived
+                    elif ans["action"] == "close":
+                        _hooks().update(gid, status="completed", outcome=ans["outcome"], reason=_fg._fit(_shown_ids(ans["reason"]), _fg._close_reason_max()), outcome_text=ans["outcome_text"], sender=_ho.COLD)     # the model's reason is cut to the limit after its ids are expanded (g7 to board#N, which _update does), never refused
+                    else:
+                        _hooks().update(gid, needs=["decision"], ask=ans["ask"], options=ans["options"], next=f"{OWNER}: answer the ask on the item", clear_next=True, sender=_ho.COLD,    # his item's next is this line alone, as before: the server's own write wipes the others
+                                **({"clear_mover": True} if cmeta.get("mover") else {}))      # a stored mover would stay the mover beside decision
             refused, how = handoff_write(gid, f"the cold call's {ans['action']}", write)
             if refused:                                  # refused twice, or an error inside the write: the item is not returned to its sender over a write stackshot's own ladder could not make; the fleet's builder is asked, with the text
                 why = f"the cold call's answer ({ans['action']}) {how}: {_clip_line(refused, 160)}"

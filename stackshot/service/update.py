@@ -689,7 +689,7 @@ def update_unlocked(
     if clear_ask and ask.strip() and ask.strip().lower() not in h.ask_none:
         fc.add("Refused: clear_ask drops the ask; it does not go with a new ask")
     clear_ask = clear_ask or ask.strip().lower() in h.ask_none       # ask="none" or clear_ask=true clears it, like due and wake
-    own_links = not (_writes.question() or sender.strip() == _ho.COLD)       # a script's question and the cold call's ask link what they link: a script cannot make a decision page
+    own_links = not (_writes.question() or _writes.cold_ask())       # a script's question and the cold call's ask link what they link: a script cannot make a decision page; both are flags the server sets around its own write, never a label a caller passes (the sender is free text)
     ask = "" if clear_ask else (fc.call(h.gate_ask, ask, links=own_links, default="") if ask else "")
     opts = fc.call(h.gate_options, options, links=own_links)           # None: not passed; []: clear
     if clear_options:                                 # the flag, like clear_wake: the same as options=[] / "none"

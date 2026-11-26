@@ -286,9 +286,13 @@ leaves = true                                       # true: the server takes an 
                                                     # item after/once/when/until/waiting for/depends on; anything else stands; false: never removes (the reminder and the check on his notes still show)
 refuse_link_prefixes = []                            # URL prefixes of pages too long to decide from (a project's notes or a repository's folder of them): a write that sets an ask, or an option, holding a link that starts with one is refused,
                                                     # with the words that say to link a short decision page instead. The scheme and host are matched in any case, a /blob/ and a /tree/ form are the same page, and the cheap spellings of one
-                                                    # address are made equal (a closing dot on the host, a default port, a backslash or doubled slash, . and .. segments, %2F and the escape of a plain character, a fragment, the owner and repository
-                                                    # of a github.com path in any case); any other path is matched as written, case included. End a prefix with "/" to mean the folder, else it means that page and what is under it. [] (the default): no
-                                                    # link is refused. Read at each write, so a change needs no restart. Only the write that sets the ask or the option is judged, never one stored, and never a script's own question or the cold call's ask
+                                                    # address are made equal (a closing dot on the host, a default port, a user name before the host, a backslash or doubled slash, . and .. segments, %2F and the escape of a plain character, a
+                                                    # fragment, the owner and repository of a github.com path in any case); any other path is matched as written, case included. A prefix that ends with "/" means the folder: it takes what is under it
+                                                    # and the folder's own link without the closing slash; one that does not end with "/" means that page and what is under it. A prefix with a query takes that query, in the order written.
+                                                    # Not read as the same address: a percent-encoded or fullwidth host, https:///host, https:/host, the /raw/, /blame/ and /edit/ forms, a raw-content host, a .git suffix; a prefix holding
+                                                    # ( ) [ ] " ' or a backtick never matches (the link reader stops there); %2F, doubled slashes and /tree/ for /blob/ are made equal on every host (too wide fails closed). A listed prefix is a guard
+                                                    # against the common forms, not a security boundary. [] (the default): no link is refused. Read at each write, so a change needs no restart. Only the write that sets the ask or the option is
+                                                    # judged, never one stored, and never a script's own question or the cold call's ask
 
 [freshness]                                         # an active open item reads stale when it has gone this many days without being confirmed (computed, never sent):
 call_days = 1                                       # needs decision (your call)

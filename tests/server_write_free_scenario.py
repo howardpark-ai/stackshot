@@ -30,7 +30,7 @@ def locals_made(tree):
 # ---------------------------------------------------------------- 1. flags
 in_web = [f"{p.name}:{n.lineno}" for p in sorted(PKG.glob("web/*.py")) for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))) if is_local(n)]
 check("1 no thread-local is made or named in web/ (the per-write flags left the server)", not in_web, in_web)
-check("1 the flags the gates and the services read are on service/writes.py", locals_made(parse("service/writes.py")) == ["CLOSE_TOOL", "QUESTION", "REFORMAT", "SESSION_NEXT", "TERMINAL_ROW"], locals_made(parse("service/writes.py")))
+check("1 the flags the gates and the services read are on service/writes.py", locals_made(parse("service/writes.py")) == ["CLOSE_TOOL", "COLD_ASK", "QUESTION", "REFORMAT", "SESSION_NEXT", "TERMINAL_ROW"], locals_made(parse("service/writes.py")))
 check("1 the telling's own are on service/telling.py", locals_made(parse("service/telling.py")) == ["CLOSE_WAS", "FRONT_HINT", "HO_STATE", "MENTIONED"], locals_made(parse("service/telling.py")))
 others = {p.name: locals_made(ast.parse(p.read_text(encoding="utf-8"))) for p in sorted(PKG.glob("service/*.py")) if p.name not in ("writes.py", "telling.py")}
 check("1 no other service module keeps one", not any(others.values()), {k: v for k, v in others.items() if v})
