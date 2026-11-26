@@ -103,6 +103,14 @@ def shown(d: dt.date) -> str:
     return f"{d:%a %b} {_ord(d.day)}"
 
 
+NO_WHY = "unknown"                       # a refused line of the first format has no text: it is counted and shown under this, not as an empty kind
+
+
+def _kind_of_why(why: str) -> str:
+    """call_log.kind_of, NO_WHY for a refusal with no text."""
+    return _cl.kind_of(why) or NO_WHY
+
+
 def streaks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The streaks in the refused lines of `rows`: one writer (sender) refused STREAK_MIN times or more on one call (the same tool and item, for a create the same `call` digest), each refusal within STREAK_WINDOW of the one before it.
     → [{"kind": the kind most of its refusals are counted under (the later one on a tie), "tool", "sender", "item", "n": its refusals}]; a call that is not create or update has its tool before the kind."""
@@ -120,7 +128,7 @@ def streaks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 run_.append(r)
                 continue
             if len(run_) >= STREAK_MIN:
-                kinds = [_cl.kind_of(str(x.get("why") or "")) for x in run_]
+                kinds = [_kind_of_why(str(x.get("why") or "")) for x in run_]
                 most = collections.Counter(kinds)
                 kind = [k for k in kinds if most[k] == max(most.values())][-1]
                 out.append({"kind": kind if tool in HEADLINE else f"{tool}: {kind}", "tool": tool, "sender": who, "item": item, "n": len(run_)})
@@ -249,7 +257,7 @@ def tally(rows: list[dict[str, Any]], sent: list[dict[str, Any]] | None = None) 
         if r.get("ok") is False:
             refused[tool] += 1
             if tool in HEADLINE:
-                kinds[_cl.kind_of(str(r.get("why") or ""))] += 1
+                kinds[_kind_of_why(str(r.get("why") or ""))] += 1
                 senders[str(r.get("sender") or "-")] += 1
         else:
             for k in r.get("fix") or []:
@@ -409,8 +417,8 @@ def _kind_of_row(r: dict[str, Any]) -> str:
     if tool == "message":
         return "message: " + (str(r.get("kind") or "") or NO_KIND)
     if tool in READS:          # a read that errors (no such item, a bad argument) is no rule of the board: its own kinds, with one hint for them all
-        return READ_PREFIX + _cl.kind_of(str(r.get("why") or ""))
-    return _cl.kind_of(str(r.get("why") or ""))
+        return READ_PREFIX + _kind_of_why(str(r.get("why") or ""))
+    return _kind_of_why(str(r.get("why") or ""))
 
 
 def _refusal_chars(r: dict[str, Any]) -> int:
@@ -462,18 +470,23 @@ def retries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The lines that are retries: a call by the same caller (sender) of the same tool on the same target (`_target`) that comes within RETRY_WINDOW after a refusal of that call, went through or refused; each refusal is retried once (a call that goes
     through ends the chain, a retry that is refused again anchors the next). A refusal with no caller (a write refused for naming none) is retried by a call that names one. A line with no caller of its own, or no target, is no call to match."""
     out: list[dict[str, Any]] = []
-    open_: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)          # the refusals not yet retried, by tool
-    for r in sorted(rows, key=lambda r: r["t"]):
+    # the refusals not yet retried, by (tool, target, sender): each bucket is in time order, so its newest entry is its last; an entry older than RETRY_WINDOW is never matched again (rows are read in time order), and a bucket drops its expired front as it is looked at
+    open_: dict[tuple[str, str, str], collections.deque[tuple[int, dict[str, Any]]]] = collections.defaultdict(collections.deque)
+    for seq, r in enumerate(sorted(rows, key=lambda r: r["t"])):
         tool, who, target = str(r.get("tool") or ""), str(r.get("sender") or ""), _target(r)
-        mine = open_[tool]
-        mine[:] = [o for o in mine if r["t"] - o["t"] <= RETRY_WINDOW]
         if who and target:
-            hit = next((o for o in reversed(mine) if _target(o) == target and str(o.get("sender") or "") in ("", who)), None)
-            if hit is not None:
-                mine.remove(hit)
+            best: collections.deque[tuple[int, dict[str, Any]]] | None = None
+            for s in {"", who}:          # a refusal with no caller is retried by any call that names one; a refusal with a caller only by that caller
+                q = open_.get((tool, target, s))
+                while q and r["t"] - q[0][1]["t"] > RETRY_WINDOW:
+                    q.popleft()
+                if q and (best is None or q[-1][0] > best[-1][0]):
+                    best = q
+            if best is not None:
+                best.pop()
                 out.append(r)
         if r.get("ok") is False and target:
-            mine.append(r)
+            open_[(tool, target, who)].append((seq, r))
     return out
 
 
@@ -628,6 +641,8 @@ def run_daily(*, dry: bool = False, force: bool = False, now: float | None = Non
     if key in done.get("days", []) and not force and not dry:
         return {"day": today, "text": "", "sent": False, "why": "already sent"}
     day, week = collect_daily(at)
+    if not dry:
+        _cl.prune(at)          # the call log keeps the current month and the 12 before it (call_log.KEEP_MONTHS); never raises
     if not day["refused"]:
         return {"day": today, "text": "", "sent": False, "why": "no refusals in the last 24 hours"}
     text = build_daily(at, day, week, top=cfg["top"])

@@ -1134,6 +1134,88 @@ def part_refusal_report():
     check("10 unit: no new unit line or timer for it: the audit unit still has the one refusals line", unit.count("stackshot audit refusals") == 1 and not list(pathlib.Path(STACK, "units").glob("*refusal*")), unit.count("stackshot audit refusals"))
     wipe()
 
+    # 10e the retry match: who may retry whom, the same results as the plain scan, and a flood day in seconds
+    import collections, random, time as _time
+    def row(t, tool, ok, item="", sender="", to=""):
+        d = {"t": t, "tool": tool, "ok": ok, "item": item, "sender": sender}
+        if to: d["to"] = to
+        return d
+    refused_a = row(1000, "update", False, BID(5), "writer-a")
+    check("10 retries: another caller's call on a refused item is no retry of it (a call that names a sender other than the refused one's)", RR.retries([refused_a, row(1010, "update", True, BID(5), "writer-b")]) == [], RR.retries([refused_a, row(1010, "update", True, BID(5), "writer-b")]))
+    check("10 retries: …the refused caller's own call on it is one", len(RR.retries([refused_a, row(1010, "update", True, BID(5), "writer-a")])) == 1, None)
+    nobody = row(1000, "update", False, BID(5), "")
+    check("10 retries: a refusal with no caller is retried by a call that names one, on the same tool and item only",
+          len(RR.retries([nobody, row(1010, "update", True, BID(5), "writer-b")])) == 1 and RR.retries([nobody, row(1010, "update", True, BID(6), "writer-b")]) == [] and RR.retries([nobody, row(1010, "complete", True, BID(5), "writer-b")]) == []
+          and RR.retries([nobody, row(1010, "update", True, BID(5), "")]) == [], None)
+    check("10 retries: …and it is retried once: the second call of another caller is none", len(RR.retries([nobody, row(1010, "update", True, BID(5), "writer-b"), row(1020, "update", True, BID(5), "writer-c")])) == 1, None)
+    check("10 retries: a message refused to one target is not retried by a message to another (left unmatched: the target is the key), and a call after the window is none",
+          RR.retries([row(1000, "message", False, "", "writer-a", "page-one"), row(1010, "message", True, "", "writer-a", "page-two")]) == [] and RR.retries([refused_a, row(1000 + RR.RETRY_WINDOW + 1, "update", True, BID(5), "writer-a")]) == []
+          and len(RR.retries([refused_a, row(1000 + RR.RETRY_WINDOW, "update", True, BID(5), "writer-a")])) == 1, None)
+    def plain_scan(rows):          # the scan the report used before it was indexed: the same answers on any lines
+        out, open_ = [], collections.defaultdict(list)
+        for r in sorted(rows, key=lambda r: r["t"]):
+            tool, who, target = str(r.get("tool") or ""), str(r.get("sender") or ""), RR._target(r)
+            mine = open_[tool]
+            mine[:] = [o for o in mine if r["t"] - o["t"] <= RR.RETRY_WINDOW]
+            if who and target:
+                hit = next((o for o in reversed(mine) if RR._target(o) == target and str(o.get("sender") or "") in ("", who)), None)
+                if hit is not None:
+                    mine.remove(hit); out.append(r)
+            if r.get("ok") is False and target:
+                mine.append(r)
+        return out
+    rnd = random.Random(1732)
+    same = True
+    for _ in range(60):
+        rs = [row(rnd.choice([0, 100, 400, 590, 600, 601, 1200, 1500]) + rnd.randint(0, 2000), rnd.choice(["update", "update", "create", "message", "get"]), rnd.random() < 0.5,
+                  rnd.choice([BID(1), BID(2), "2", "g1", ""]), rnd.choice(["", "a", "a", "b"]), rnd.choice(["p", "q", ""])) for _ in range(40)]
+        same = same and [id(x) for x in RR.retries(rs)] == [id(x) for x in plain_scan(rs)]
+    check("10 retries: the same lines as the plain scan on 60 random fixtures (ties in time, no caller, the one item written four ways, the window's edge)", same, None)
+    flood = [row(1000 + i * 0.03, "update", False, f"{BH}{i}", f"writer-{i % 7}") for i in range(20000)] + [row(1000.01 + i * 0.03, "update", True, f"{BH}{100000 + i}", f"writer-{i % 7}") for i in range(20000)]
+    flood.append(row(1500, "update", True, f"{BH}3", "writer-3"))
+    t0 = _time.monotonic(); got_flood = RR.retries(flood); took = _time.monotonic() - t0
+    check("10 retries: a flood day (20,000 refusals and 20,000 calls on other items inside ten minutes) is read in seconds, not minutes, and finds its one retry", took < 20 and len(got_flood) == 1 and got_flood[0]["item"] == f"{BH}3", (took, len(got_flood)))
+
+    # the refusal with no text (a line of the first format) is shown as unknown, never as an empty kind
+    old_line = {"t": epoch(2026, 11, 17, 10), "tool": "update", "ok": False, "item": BID(12), "sender": "old-writer"}
+    t_old = RR.tally([old_line])
+    check("10 report: a refused line with no text is counted under 'unknown' in the weekly and the daily count",
+          dict(t_old["kinds"]) == {"unknown": 1} and dict(RR.daily_tally([old_line], [])["kinds"]) == {"unknown": 1} and "- the kinds of create and update refusals: unknown 1 (100%)" in RR.build(dt.date(2026, 11, 16), t_old, RR.tally([])), dict(t_old["kinds"]))
+
+    # 10f the monthly files are kept for the current month and the 12 before it
+    wipe(); CALLS.mkdir(parents=True, exist_ok=True)
+    for name in ("2025-09", "2025-10", "2025-11", "2025-12", "2026-06"): (CALLS / f"{name}.jsonl").write_text('{"t":1,"tool":"get","ok":true}\n', encoding="utf-8")
+    (CALLS / "open-fixes.json").write_text("{}", encoding="utf-8"); (CALLS / "2025-01.jsonl.bak").write_text("x", encoding="utf-8")
+    CL.record("get", True, now=epoch(2026, 11, 3))          # the first line of 2026-11: the files older than 2025-11 go
+    left = sorted(p.name for p in CALLS.iterdir())
+    check("10 retention: the first line of a new month deletes the monthly files before the 12 months back, and nothing else", left == ["2025-01.jsonl.bak", "2025-11.jsonl", "2025-12.jsonl", "2026-06.jsonl", "2026-11.jsonl", "open-fixes.json"], left)
+    (CALLS / "2024-01.jsonl").write_text("{}\n", encoding="utf-8")
+    CL.record("get", True, now=epoch(2026, 11, 4))          # not the first line of the month: no pass
+    check("10 retention: a line in a month's file that exists deletes nothing", (CALLS / "2024-01.jsonl").exists(), None)
+    res_p = CL.prune(epoch(2026, 11, 26))
+    check("10 retention: prune names how many it deleted, and the file of exactly 12 months back stays", res_p == 1 and not (CALLS / "2024-01.jsonl").exists() and (CALLS / "2025-11.jsonl").exists() and CL.prune(epoch(2026, 12, 1)) == 1 and not (CALLS / "2025-11.jsonl").exists() and (CALLS / "2025-12.jsonl").exists(), res_p)
+    (CALLS / "2020-01.jsonl").write_text("{}\n", encoding="utf-8")
+    RR.run_daily(dry=True, now=NOW, cfg=cfg_on, deliver=d_deliver, state=dst("prune-dry"))
+    check("10 retention: a dry run of the daily analysis deletes nothing", (CALLS / "2020-01.jsonl").exists(), None)
+    RR.run_daily(now=NOW, cfg=cfg_on, deliver=d_deliver, state=dst("prune"))
+    check("10 retention: the daily analysis deletes the files past it", not (CALLS / "2020-01.jsonl").exists(), sorted(p.name for p in CALLS.iterdir()))
+    (CALLS / "2020-01.jsonl").write_text("{}\n", encoding="utf-8")
+    real_state, real_unlink = CL._cfg.state, pathlib.Path.unlink
+    def boom(self, *a, **k): raise OSError("read-only")
+    pathlib.Path.unlink = boom
+    try:
+        stuck = CL.prune(NOW); CL.record("get", True, now=epoch(2027, 3, 1))          # a file that cannot be deleted: no count, no exception, the line is written
+    finally:
+        pathlib.Path.unlink = real_unlink
+    check("10 retention: a file that cannot be deleted never fails the call: the line is written", stuck == 0 and any(r["t"] == int(epoch(2027, 3, 1)) for r in lines("2027-03")), stuck)
+    CL._cfg.state = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no state"))
+    try:
+        nostate = CL.prune(NOW)
+    finally:
+        CL._cfg.state = real_state
+    check("10 retention: a state folder that cannot be read is no failure either", nostate == 0, nostate)
+    wipe()
+
     return ran, fails
 
 

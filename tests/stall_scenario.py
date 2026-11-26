@@ -434,7 +434,7 @@ def _lines_of(ats, now=_now):
 _o, _same = _lines_of([_now - 30 * _DAY, _now - 20 * _DAY, _now - 2 * _DAY, _now - _DAY, _now - 60])
 check("10 get: stall lines are the last three of the last 7 days, oldest first, and one line counts the earlier ones", [l.split(" ")[0] for l in _o] == ["2", "stall:", "stall:", "stall:"] and _o[0] == "2 earlier stall lines hidden" and [l.rsplit(" ", 1)[1] for l in _o[1:]] == ["2", "3", "4"] and _same, _o)
 _o, _ = _lines_of([_now - 7 * _DAY + 5, _now - 7 * _DAY - 5])
-check("10 get: the window is 7 days: an entry 7 days minus 5 seconds old is shown, one 7 days plus 5 seconds old is hidden", len(_o) == 2 and _o[0] == "1 earlier stall lines hidden" and _o[1].endswith("step 0"), _o)
+check("10 get: the window is 7 days: an entry 7 days minus 5 seconds old is shown, one 7 days plus 5 seconds old is hidden", len(_o) == 2 and _o[0] == "1 earlier stall line hidden" and _o[1].endswith("step 0"), _o)
 _o, _ = _lines_of([_now - 3600, _now - 60])
 check("10 get: nothing hidden, no count line", len(_o) == 2 and all(l.startswith("stall: ") for l in _o), _o)
 _o, _ = _lines_of([_now - 30 * _DAY, _now - 29 * _DAY])
