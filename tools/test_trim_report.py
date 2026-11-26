@@ -22,9 +22,9 @@ What it measures, per run:
                                    push to main leaves nothing to fetch. It wins over --map;
                    --map FILE      this file;
                    otherwise       <root>/.suitemap/map.json.
-                 With no readable map (or one that lists no suites) the minutes are reported as n/a, the two minute
-                 thresholds are not checked, the report says why, and the status is 4 (one line on stderr), so a scheduled run that
-                 could not get its data fails instead of looking like a quiet week.
+                 With no readable map, one that lists no suites, or one with no usable time for any suite of the checkout, the minutes
+                 are reported as n/a (or 0.0 with every suite untimed), the report says why, and the status is 4 (one line on stderr; also
+                 with --dry-run and --json), so a scheduled run that could not get its data fails instead of looking like a quiet week.
   * since the previous run   suites added and deleted by name, test lines added and deleted (per suite, the rise or fall of its
                  count; a new suite adds all its lines, a deleted one deletes all).
 
@@ -464,6 +464,9 @@ def build(args, now: dt.datetime, work: list[str]) -> tuple[str, dict, str]:
         args.no_times = str(e)
 
     timed = sorted(((n, round(secs[n] / 60, 2)) for n in suites if secs is not None and n in secs), key=lambda x: (-x[1], x[0]))
+    if secs is not None and suites and not timed:       # a map was read, but none of its times belongs to a suite of this checkout (other names, or every time unusable)
+        args.no_times = f"the suite map has no usable time for any of the {len(suites)} suites"
+        notes.append(f"no suite times: {args.no_times}")
     test_lines = sum(suites.values())
     rec = {"format": FORMAT, "repo": repo, "generated": now.isoformat(timespec="seconds"), "suites": suites,
            "suite_count": len(suites), "test_lines": test_lines, "commit": head_commit(root), "map_commit": map_commit or None,
