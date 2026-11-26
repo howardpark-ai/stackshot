@@ -13,7 +13,8 @@ Covers:
     wrongly signed one is told what it always was), and answers once the two differ;
   * the bearer: the route asks about exactly the token the MCP library's own bearer middleware (`BearerAuthBackend`) reads from the same header, for each spelling of it;
   * the route: only on a board that offers the check (otherwise nothing is registered); the gate comes before the token (a bad header answers 403 whatever the bearer is, and the route does not ask the
-    library about it);
+    library about it); a 401 carries the `WWW-Authenticate` of the app's own guarded route (its form for no `Authorization` header and for a refused one), 503, 404, 403 and 200 carry none, and an
+    app with no such route still answers 401, without the header;
     a good token is 200 with the address in lower case and `via`, and nothing else; the portal's token says `portal`; no bearer, an empty one, `Basic` and an unknown token are 401 `invalid_token`;
     a token with no address is 401; a check that raises is 503, never 401; a board with no auth object answers 404 to a signed request; every answer is `no-store`; no answer holds the token.
 
@@ -23,8 +24,12 @@ SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 sys.path.insert(0, SCR); sys.path.insert(0, STACK)
 import _scratch
 
+from fastmcp.server.auth.middleware import RequireAuthMiddleware
 from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend
+from pydantic import AnyHttpUrl
+from starlette.applications import Starlette
 from starlette.requests import HTTPConnection
+from starlette.routing import Route
 
 from stackshot.core import behind_door as door, frontdoor_identity as ident
 from stackshot.web.routes import door_verify as route
@@ -169,9 +174,9 @@ TABLE_OF_TOKENS = {
 }
 
 
-def call(mcp, headers, path="/frontdoor/verify"):
+def call(mcp, headers, path="/frontdoor/verify", app=None):
     from starlette.requests import Request
-    scope = {"type": "http", "method": "GET", "path": path, "raw_path": path.encode(), "query_string": b"", "headers": [(k.lower().encode(), v.encode("latin-1")) for k, v in headers.items()], "server": ("127.0.0.1", 1), "scheme": "http"}
+    scope = {"type": "http", "method": "GET", "path": path, "raw_path": path.encode(), "query_string": b"", "headers": [(k.lower().encode(), v.encode("latin-1")) for k, v in headers.items()], "server": ("127.0.0.1", 1), "scheme": "http", **({"app": app} if app is not None else {})}
     fn = mcp.routes[("/frontdoor/verify", ("GET",))]
     resp = asyncio.run(fn(Request(scope)))
     return resp.status_code, resp.body.decode(), {k.lower(): v for k, v in resp.headers.items()}
@@ -244,6 +249,27 @@ try:
         check(f"bearer: {value!r} is {'200' if theirs == 'good-google' else '401'}", st == (200 if theirs == "good-google" else 401), (st, body))
     st, body, _ = call(m, H(None, extra={"Authorization": "Bearer  good-google"}))
     check("bearer: two spaces before a good token is 401, as /mcp refuses it", st == 401 and json.loads(body) == {"error": "invalid_token"}, (st, body))
+    # the challenge of a 401 is the app's own guard's (the real library class on a made-up app; the real board's is checked by the board scenario)
+    guarded = RequireAuthMiddleware(None, ["s1"], AnyHttpUrl("https://board.example.test/.well-known/oauth-protected-resource/mcp"), ["s1"])
+    app = Starlette(routes=[Route("/healthz", lambda r: None), Route("/mcp", endpoint=guarded, methods=["POST"])])
+    meta = 'scope="s1", resource_metadata="https://board.example.test/.well-known/oauth-protected-resource/mcp"'
+    no_sign_in = offered(CFG, None)
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        st, body, hd = call(m, H(None), app=app)
+        check("challenge: no Authorization header is 401, the same body, and the guard's challenge with no error", st == 401 and json.loads(body) == {"error": "invalid_token"} and hd.get("www-authenticate") == f"Bearer {meta}", (st, body, hd))
+        for tok in ("nope", "no-address", ""):
+            st, body, hd = call(m, H(tok), app=app)
+            got = hd.get("www-authenticate", "")
+            check(f"challenge: a bearer that is not accepted ({tok!r}) is 401 with the guard's invalid_token challenge", st == 401 and got.startswith('Bearer error="invalid_token", error_description="') and got.endswith(meta) and hd.get("cache-control") == "no-store", (st, hd))
+        for label, want, got_ in (("200", 200, call(m, H(), app=app)), ("403", 403, call(m, H(signed=False), app=app)), ("503", 503, call(m, H("boom"), app=app)), ("404", 404, call(no_sign_in, H(), app=app))):
+            check(f"challenge: {label} carries no WWW-Authenticate", got_[0] == want and "www-authenticate" not in got_[2], got_)
+    check("challenge: nothing was said of a missing challenge", "WWW-Authenticate" not in err.getvalue(), err.getvalue())
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        st, body, hd = call(m, H(None), app=Starlette(routes=[]))
+    check("challenge: an app with no guarded route answers 401 without the header, and says so", st == 401 and "www-authenticate" not in hd and "no WWW-Authenticate for a 401" in err.getvalue(), (st, hd, err.getvalue()))
+
     secret_file("identity-same.key", SECRET)
     door.settings = lambda cfg=None: saved_settings(both(SAME))
     door._told.clear(); n0 = len(auth.calls)

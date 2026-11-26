@@ -12,6 +12,7 @@ Covers:
   * no name or address belongs to two members: keys first, then the file's order; what is dropped is told; an `emails` entry with no `@` is not read; the older list form is read as before;
   * names are compared as the board looks them up (white space collapsed, casefolded: two spaces or a sharp s do not make a second name), anything with an `@` by case and surrounding spaces only;
   * a member on no board takes no alias or address from a member who is on one, by its key or by its lists; a blank alias or address, or one that is no text, is told like the other drops;
+  * a key with a character outside printable ASCII is noted (the front door's headers cannot carry it) and read like any other, and the board logs it;
   * the board's log says each thing dropped from the file, once;
   * `behind_door.people` and `members`: the members of one board in the file's order, with their aliases and addresses; two keys that differ only in case are one member (the first); None for a board that
     does not read its members from a front door; () for a file that cannot be read;
@@ -88,9 +89,15 @@ twice = {"a@x.test": M(("main",), (), ("shared@x.test",)), "b@x.test": M(("main"
 check("address: two members that list one address, the first in the file's order is it", files.member_of_address(twice, "shared@x.test") == "a@x.test")
 
 # ---- no name or address belongs to two members
+NOT_ASCII = "is not printable ASCII"
+def cfgd_of(path):
+    return tomllib.loads(f'[behind_frontdoor]\nmembers_file = "{path}"\nboard_name = "main"\n')
 def read(obj):
     said = []
     return files.read_member_records(write(obj), said), said
+def dropped(said):
+    """The notes about what was dropped: all but the warning about a key the front door cannot carry (checked on its own below)."""
+    return [n for n in said if NOT_ASCII not in n]
 r, said = read({"alice": {"boards": ["main"], "aliases": ["Bob", "AL"], "emails": ["a@x.test"]}, "bob": {"boards": ["main"], "emails": ["b@x.test"]}})
 check("unique: an alias that is another member's key (in any case) is dropped and told", r["alice"].aliases == ("AL",) and r["bob"].emails == ("b@x.test",) and any("alias" in n and "'bob'" in n for n in said), (r, said))
 r, said = read({"ann": {"boards": ["main"], "emails": ["bo@x.test", "ann@x.test"]}, "bo@x.test": ["main"]})
@@ -111,16 +118,16 @@ check("unique: the older reader still lists every key as the file has it", files
 SHARP, SS = "Stra" + chr(223) + "e", "STRASSE"
 for label, alias, key in (("two spaces", "Bob  Lee", "Bob Lee"), ("a tab and another case", "bob\tLEE", "Bob Lee"), ("a sharp s spelled ss", SS, SHARP), ("two spaces in the key", "Bob Lee", "Bob  Lee")):
     r, said = read({"ann": {"boards": ["main"], "aliases": [alias, "Annie"], "emails": ["a@x.test"]}, key: {"boards": ["main"], "emails": ["b@x.test"]}})
-    check(f"fold: an alias that is another member's key but for {label} is dropped and told", r["ann"].aliases == ("Annie",) and len(said) == 1 and "an alias of 'ann'" in said[0], (r, said))
+    check(f"fold: an alias that is another member's key but for {label} is dropped and told", r["ann"].aliases == ("Annie",) and len(dropped(said)) == 1 and "an alias of 'ann'" in dropped(said)[0], (r, said))
 r, said = read({"ann": {"boards": ["main"], "aliases": ["Jo Ann"]}, "cat": {"boards": ["main"], "aliases": ["jo   ann", "kitty"]}})
 check("fold: an alias an earlier member has but for its spacing is dropped from the later one", r["ann"].aliases == ("Jo Ann",) and r["cat"].aliases == ("kitty",) and len(said) == 1, (r, said))
 for label, first, second in (("repeated spaces and case", "Bob Lee", "bob  lee"), ("a sharp s spelled ss", SHARP, SS), ("surrounding spaces", "Bob Lee", " Bob Lee "),
                              ("surrounding spaces and case on an address", "a@x.test", " A@X.test ")):
     r, said = read({first: ["main"], second: ["side"]})
-    check(f"fold: two keys that differ only in {label} are one member, the first, with its boards alone", list(r) == [first] and r[first].boards == ("main",) and len(said) == 1 and "only the first is a member" in said[0], (r, said))
+    check(f"fold: two keys that differ only in {label} are one member, the first, with its boards alone", list(r) == [first] and r[first].boards == ("main",) and len(dropped(said)) == 1 and "only the first is a member" in dropped(said)[0], (r, said))
 street = "stra" + chr(223) + "e@x.test"
 r, said = read({street: ["main"], "strasse@x.test": ["main"]})
-check("fold: two address keys that only casefold would join are two members", list(r) == [street, "strasse@x.test"] and said == [], (r, said))
+check("fold: two address keys that only casefold would join are two members", list(r) == [street, "strasse@x.test"] and dropped(said) == [], (r, said))
 r, said = read({"ann": {"boards": ["main"], "aliases": [street], "emails": [street]}, "bo": {"boards": ["main"], "aliases": ["strasse@x.test"], "emails": ["strasse@x.test"]}})
 check("fold: two addresses that only casefold would join stay each member's own, as aliases too", r["ann"].emails == (street,) and r["bo"].emails == ("strasse@x.test",) and r["bo"].aliases == ("strasse@x.test",) and said == [], (r, said))
 
@@ -139,6 +146,24 @@ r, said = read({"g1": {"aliases": ["g2", "spare"], "emails": ["s@x.test"]}, "g2"
 check("no board: among the entries on no board the rule is the old one: keys first, then the file's order", r["g1"] == M((), ("spare",), ("s@x.test",)) and r["g2"] == M((), (), ()) and len(said) == 2, (r, said))
 r, said = read({"pat": [], "Pat": ["main"]})
 check("no board: of two keys that are one name the first is the member, also when it is the one on no board", list(r) == ["pat"] and r["pat"].boards == () and len(said) == 1, (r, said))
+
+# ---- a key the front door's headers cannot carry is warned about, and read as before
+E, GREEK, NBSP = chr(0xE9), chr(0x391) + chr(0x3BD) + chr(0x3BD) + chr(0x3B1), chr(0xA0)
+for label, key in (("an accented letter", "Ren" + E), ("a script outside ASCII", GREEK), ("an address", "ren" + E + "@x.test"), ("a no-break space inside", "Bo" + NBSP + "Lee"),
+                   ("a tab inside", "Bo\tLee"), ("a delete character", "Bo" + chr(127) + "b")):
+    r, said = read({key: {"boards": ["main"], "aliases": ["Other " + label], "emails": ["k@x.test"]}, "plain": ["main"]})
+    check(f"ascii: a key with {label} is warned about once, naming the way out", len(said) == 1 and NOT_ASCII in said[0] and repr(key) in said[0] and "use an ASCII key and put the other spelling in aliases" in said[0], said)
+    check(f"ascii: ...and the entry with {label} is read as before, never dropped", list(r) == [key, "plain"] and r[key] == M(("main",), ("Other " + label,), ("k@x.test",)), r)
+r, said = read({" a b~!@x.test ": ["main"], "O'Neil (2)": {"boards": ["main"], "aliases": [GREEK, "Ren" + E]}})
+check("ascii: every printable ASCII key is fine, and an alias or a spelling outside ASCII is no matter", said == [] and r["O'Neil (2)"].aliases == (GREEK, "Ren" + E), (r, said))
+r, said = read({"Ren" + E: [], "REN" + chr(0xC9): ["main"]})
+check("ascii: a key that is not read (a second spelling of one name) is told once, as that", len(said) == 2 and sum(NOT_ASCII in n for n in said) == 1 and sum("only the first is a member" in n for n in said) == 1, said)
+p_ascii = write({"Ren" + E: ["main"]})
+door._told.clear()
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    on_main = door.people(cfgd_of(p_ascii))
+check("ascii: the board logs the warning like the other notes, and the member is on the board", [n for n, _a, _e in on_main] == ["Ren" + E] and err.getvalue().count(NOT_ASCII) == 1 and err.getvalue().startswith("board behind a front door: members_file: the key "), (on_main, err.getvalue()))
 
 # ---- a blank alias or address, or one that is no text, is told
 r, said = read({"ann": {"boards": ["main"], "aliases": ["", "  ", 5, None, "AA"], "emails": [7, " ", {"x": 1}, "a@x.test"]}})

@@ -9,7 +9,9 @@ The route exists only on a board whose `[behind_frontdoor]` table names a `verif
 is HTTP 403 and the route says nothing about its token: it does not ask the sign-in about it. The token is still read on such a request: FastMCP's bearer middleware wraps the whole app and calls the board's
 `verify_token` on every request that carries a bearer, before any route runs. The bearer is read as that middleware reads it for `/mcp` (`_bearer`). With the header:
   * the token is the board's: 200 `{"email": <lower case>, "via": "portal" | "google"}`; the answer holds no token and no claim beyond these two;
-  * it is not (unknown, expired, revoked, signed by another key, no `Authorization: Bearer` at all): 401 `{"error": "invalid_token"}`, which the service turns into the 401 a connector needs;
+  * it is not (unknown, expired, revoked, signed by another key, no `Authorization: Bearer` at all): 401 `{"error": "invalid_token"}`, which the service turns into the 401 a connector needs. The 401
+    carries the `WWW-Authenticate` value the board's own `/mcp` answers the same `Authorization` header (or none) with, the `resource_metadata` address a connector discovers the sign-in by included
+    (`_challenge`: taken from the library's guard on that route, nothing of it written here); no other answer carries one;
   * the board has no auth object (`[auth] mode` off): 404, so a board that signs nobody in says nothing about tokens.
 Every answer is `Cache-Control: no-store`. A check that raises is 503 `{"error": "unavailable"}`, never 401. What FastMCP's own Google check swallows (it reads a network failure as "no such token", as it does for a direct call to the
 board today) arrives here as 401: the route adds no distinction the library does not make.
@@ -25,6 +27,7 @@ from __future__ import annotations
 import sys
 from typing import Any
 
+from mcp.server.auth.middleware.bearer_auth import RequireAuthMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
@@ -49,6 +52,38 @@ def _bearer(request: Request) -> str:
     return h[len("bearer "):] if h.lower().startswith("bearer ") else ""
 
 
+async def _challenge(request: Request) -> str:
+    """The `WWW-Authenticate` value the board's own MCP path refuses a request with these headers by: the library's guard on that route of this app (`RequireAuthMiddleware`, FastMCP's subclass of it) is
+    asked, with the request's headers and no signed-in user, so it can only refuse; it is the guard that tells a request with no `Authorization` header from one with a bearer it does not take, and that
+    holds the `resource_metadata` address and the scopes. "" when the app has no such route or the guard cannot be asked (said on standard error): the 401 then goes without the header."""
+    try:
+        routes = getattr(request.scope.get("app"), "routes", ())
+        guard = next((g for g in (getattr(r, "app", None) for r in routes) if isinstance(g, RequireAuthMiddleware)), None)
+        if guard is None:
+            raise LookupError("no guarded route")
+        sent: list[Any] = []
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.disconnect"}
+
+        async def send(message: Any) -> None:
+            sent.append(message)
+        await guard({"type": "http", "method": request.method, "path": request.url.path, "headers": request.scope.get("headers", [])}, receive, send)
+        return next(v.decode("latin-1") for k, v in sent[0]["headers"] if k.lower() == b"www-authenticate")
+    except Exception as e:  # noqa: BLE001  — the header helps a connector find the sign-in; the verdict on the token stands without it
+        print(f"board token check: no WWW-Authenticate for a 401: {e.__class__.__name__}", file=sys.stderr, flush=True)
+        return ""
+
+
+async def _refused(request: Request) -> Response:
+    """401 `invalid_token`, with the challenge `/mcp` would send."""
+    resp = _json(401, {"error": "invalid_token"})
+    value = await _challenge(request)
+    if value:
+        resp.headers["www-authenticate"] = value
+    return resp
+
+
 def make(mcp: Any):
     async def verify(request: Request) -> Response:
         res = _door.check_verify(request.headers.get(_door.VERIFY_HEADER))
@@ -59,7 +94,7 @@ def make(mcp: Any):
             return _text(404, "not found")
         token = _bearer(request)
         if not token:
-            return _json(401, {"error": "invalid_token"})
+            return await _refused(request)
         try:
             at = await auth.verify_token(token)
         except Exception as e:  # noqa: BLE001  — a check that could not be made is not a verdict on the token
@@ -68,7 +103,7 @@ def make(mcp: Any):
         claims = getattr(at, "claims", None) or {}
         email = str(claims.get("email") or "").strip().lower()
         if at is None or not email:
-            return _json(401, {"error": "invalid_token"})
+            return await _refused(request)
         return _json(200, {"email": email, "via": "portal" if claims.get("via") == "portal" else "google"})
     return verify
 

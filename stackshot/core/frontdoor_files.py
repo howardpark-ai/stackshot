@@ -118,7 +118,8 @@ def read_member_records(path: str, notes: list[str] | None = None) -> dict[str, 
 
     No name or address belongs to two members (compared as `_fold` says). A key comes first: of two keys that fold to one only the first is a member. Then, in the file's order, an alias or address that
     another member's key or an earlier member already has is dropped from the later one. An entry on no board (empty `boards`) comes after every member who is on one: it takes no alias or address from
-    them, by its key or by its lists. Each thing dropped, a blank alias or address or one that is no text included, is a line appended to `notes`, when one is given.
+    them, by its key or by its lists. Each thing dropped, a blank alias or address or one that is no text included, is a line appended to `notes`, when one is given; so is a key with a character outside
+    printable ASCII (U+0020 to U+007E), which the front door's headers cannot carry (the member cannot sign in through it; the entry is read like any other).
     Read at each call. FileError when the file is missing, too large or not a JSON object: the caller treats that as no one being a member."""
     said = notes if notes is not None else []
     parsed: list[tuple[str, Member]] = []
@@ -128,6 +129,9 @@ def read_member_records(path: str, notes: list[str] | None = None) -> dict[str, 
             said.append(f"members_file lists {key!r} and {keys[_fold(key)]!r}: they are one name (case and spacing aside), so only the first is a member")
             continue
         keys[_fold(key)] = key
+        if any(not " " <= c <= "~" for c in key):
+            said.append(f"members_file: the key {key!r} is not printable ASCII, which the front door's headers cannot carry, so that member cannot sign in through it: "
+                        f"use an ASCII key and put the other spelling in aliases")
         if isinstance(v, dict):
             emails: list[str] = []
             for e in _listed(v.get("emails"), f"an entry of the emails of {key!r}", said):

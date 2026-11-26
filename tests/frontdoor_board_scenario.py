@@ -29,7 +29,9 @@ Part `verify` covers a board with `[auth] mode = "google"` (a made-up client), a
 (no call reaches Google: only the portal's token and tokens the provider does not know are sent). Over HTTP: `GET /frontdoor/verify` is on the app, ahead of the pages' catch-all (an unsigned request
 is 403 with the check's sentence, never 404); the header `x-stackshot-verify` and the signed word `token-check`, written here as the sign-in service writes them, are accepted; the portal's token is 200
 `via: portal`; no bearer and an unknown token are 401; a bearer is read as `/mcp` reads it (two spaces are 401 on both); a non-ASCII bearer is 401 on the route and on `/mcp` (403 unsigned), never 500;
-the app's bearer middleware calls the provider on an unsigned request, which the route then refuses; a verify secret equal to the identity secret answers no check.
+the app's bearer middleware calls the provider on an unsigned request, which the route then refuses; every 401 of the route carries the one `WWW-Authenticate` value `/mcp` sends for the same
+`Authorization` header (none, an unknown bearer, two spaces, an empty one, `Basic`, a non-ASCII one), with the `resource_metadata` address, and a 200, a 403 and a 503 carry none; a verify secret
+equal to the identity secret answers no check.
 
     tests/run-suite frontdoor_board        -> exit 0 / 1"""
 import os, subprocess, sys
@@ -123,16 +125,24 @@ def stop(srv, th, sock):
     except OSError: pass
 
 
-def post(url, headers=None, body=b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}', method="POST"):
+INITIALIZE = b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}'
+
+
+def post(url, headers=None, body=INITIALIZE, method="POST"):
     """(status, text) of one raw request; a refusal's body is read."""
+    return exchange(url, headers, body, method)[:2]
+
+
+def exchange(url, headers=None, body=INITIALIZE, method="POST"):
+    """(status, text, the answer's WWW-Authenticate values) of one raw request."""
     import urllib.error, urllib.request
     h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream", **(headers or {})}
     req = urllib.request.Request(url, data=body if method == "POST" else None, headers=h, method=method)
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
-            return r.status, r.read(2000).decode("utf-8", "replace")
+            return r.status, r.read(2000).decode("utf-8", "replace"), r.headers.get_all("www-authenticate") or []
     except urllib.error.HTTPError as e:
-        return e.code, e.read(2000).decode("utf-8", "replace")
+        return e.code, e.read(2000).decode("utf-8", "replace"), e.headers.get_all("www-authenticate") or []
 
 
 # ================================================================ part on: the board behind a front door
@@ -583,6 +593,41 @@ def part_verify():
         check("verify: ...on an unsigned one 403, never 500", got == (403, door.NO_VERIFY), got)
         st, body = mcp(odd)
         check("verify: ...and on /mcp 401, never 500", st == 401, (st, body[:200]))
+
+        # a 401 of the check carries the WWW-Authenticate value /mcp sends for the same Authorization header
+        def challenges(value):
+            """((status, header values) of /mcp, the same of the check) for the Authorization header `value`, None for none."""
+            auth = {} if value is None else bearer(value)
+            door_st, _body, door_h = exchange(BASE + "/mcp", {ident.HEADER: ident.sign(ISECRET.encode(), "owner@example.test"), **auth})
+            st_, _body, h = exchange(BASE + "/frontdoor/verify", {**signed(), **auth}, method="GET")
+            return (door_st, door_h), (st_, h)
+        seen = {}
+        for label, value in (("no Authorization header", None), ("an unknown bearer", "Bearer a-token-the-board-never-issued"), ("two spaces", f"Bearer  {PORTAL}"), ("an empty bearer", "Bearer "),
+                             ("a Basic header", "Basic Zm9vOmJhcg=="), ("a non-ASCII bearer", odd)):
+            theirs, ours = challenges(value)
+            seen[label] = ours[1]
+            check(f"challenge: {label}: /mcp and the check both answer 401 with one WWW-Authenticate value, the same", theirs[0] == ours[0] == 401 and len(ours[1]) == 1 and ours[1] == theirs[1], (theirs, ours))
+        none, bad = (seen["no Authorization header"] or [""])[0], (seen["an unknown bearer"] or [""])[0]
+        metadata = 'resource_metadata="https://stackshot.example.com/.well-known/oauth-protected-resource/mcp"'
+        check("challenge: with no Authorization header it names no error, and the board's resource metadata address", none.startswith("Bearer ") and "error=" not in none and metadata in none, none)
+        check("challenge: with a bearer the board does not take it says invalid_token, and the same address", bad.startswith('Bearer error="invalid_token"') and metadata in bad, bad)
+        st, _body, h = exchange(BASE + "/.well-known/oauth-protected-resource/mcp", method="GET")
+        check("challenge: the address it names is served by the board", st == 200 and "authorization_servers" in _body, (st, _body[:200]))
+        for label, headers, want in (("a 200", {**signed(), **bearer(f"Bearer {PORTAL}")}, 200), ("an unsigned 403", bearer("Bearer a-token-the-board-never-issued"), 403), ("an unsigned 403 with no bearer", {}, 403)):
+            st, _body, h = exchange(BASE + "/frontdoor/verify", headers, method="GET")
+            check(f"challenge: {label} carries no WWW-Authenticate", st == want and h == [], (st, h))
+        inner, calls = provider.verify_token, []
+        async def fails_the_second_time(token):
+            calls.append(token)
+            if len(calls) > 1:      # the first call is the app's middleware, the second the route's
+                raise RuntimeError("made to fail")
+            return await real_verify(token)
+        provider.verify_token = fails_the_second_time
+        try:
+            st, _body, h = exchange(BASE + "/frontdoor/verify", {**signed(), **bearer(f"Bearer {PORTAL}")}, method="GET")
+        finally:
+            provider.verify_token = inner
+        check("challenge: a 503 carries no WWW-Authenticate", st == 503 and json.loads(_body) == {"error": "unavailable"} and h == [], (st, _body, h))
 
         import pathlib
         pathlib.Path(paths["verify"]).write_text(ISECRET + "\n")
