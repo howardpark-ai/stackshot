@@ -8,7 +8,7 @@ sign-in addresses. The list is built from, in this order:
 3. else the placeholder, one person called `the owner` with no alias and no address (the board says so at its start).
 
 A board behind a front door that sets `[behind_frontdoor] members_file` reads none of the above: its people are the members the front door's file lists for it (`core/behind_door.py`),
-each named by the identity the file gives it (name and sign-in address alike), in the file's order, read at each call; a file that lists nobody for the board, or cannot be read, leaves
+each named by the identity the file gives it (its key), with the aliases and sign-in addresses the file gives it (a key written like an address is its own address), in the file's order, read at each call; a file that lists nobody for the board, or cannot be read, leaves
 the placeholder, which no address matches.
 
 The answer is built from the config as it stands: a suite or a reload that changes the inputs is read at the next call. The name is the key a person is
@@ -84,13 +84,13 @@ def _inputs(cfg: dict[str, Any] | None) -> tuple[Any, Any, Any, Any, Any]:
     for this board (None unless the board reads its members from a front door; imported at call time: that module reads the config, which reads this one)."""
     from stackshot.core import behind_door as _door
     return (_cfg.get("members", cfg=cfg), _cfg.get("instance", "owner", cfg=cfg),
-            _cfg.get("instance", "owner_aliases", default=[], cfg=cfg), _cfg.get("auth", "allowed_emails", default=[], cfg=cfg), _door.members(cfg))
+            _cfg.get("instance", "owner_aliases", default=[], cfg=cfg), _cfg.get("auth", "allowed_emails", default=[], cfg=cfg), _door.people(cfg))
 
 
 def _build(raw: tuple[Any, Any, Any, Any, Any]) -> list[Person]:
     listed, owner, aliases, emails, door = raw
     if door is not None:
-        return [Person(i, (), (i,)) for i in door] or [Person(PLACEHOLDER, declared=False)]
+        return [Person(name, _alias_list(list(aliases), name), tuple(addresses)) for name, aliases, addresses in door] or [Person(PLACEHOLDER, declared=False)]
     if isinstance(listed, list) and listed:
         out = []
         for t in listed:

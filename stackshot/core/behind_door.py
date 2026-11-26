@@ -146,11 +146,11 @@ def caller_of(scope: Any) -> str:
 
 # ------------------------------------------------------------------------------------------------ the members
 
-_cache: dict[str, tuple[tuple[int, int, int, int], bool, dict[str, list[str]]]] = {}
+_cache: dict[str, tuple[tuple[int, int, int, int], bool, dict[str, _files.Member]]] = {}
 
 
-def _read_members(path: str) -> dict[str, list[str]]:
-    """The front door's members file, `{member: [backends]}`, read again only when its stamp changed (one stat per call), and always when it was written within RACY_SECONDS of being read.
+def _read_members(path: str) -> dict[str, _files.Member]:
+    """The front door's members file, `{member: Member}` (`frontdoor_files.read_member_records`), read again only when its stamp changed (one stat per call), and always when it was written within RACY_SECONDS of being read.
     A file that cannot be read is nobody (said once in the log), never everybody."""
     p = os.path.expanduser(path)
     try:
@@ -162,7 +162,10 @@ def _read_members(path: str) -> dict[str, list[str]]:
     if have is not None and st is not None and have[0] == sig and have[1]:
         return have[2]
     try:
-        data = _files.read_members(p)
+        said: list[str] = []
+        data = _files.read_member_records(p, said)
+        for line in said:
+            _tell(line)
     except _files.FileError as e:
         _tell(str(e))
         _cache.pop(p, None)
@@ -172,21 +175,18 @@ def _read_members(path: str) -> dict[str, list[str]]:
     return data
 
 
-def members(cfg: dict[str, Any] | None = None) -> tuple[str, ...] | None:
-    """The identities the front door's members file lists for this board, in the file's order; () when it lists none or cannot be read; None when this board does not read its members from a front door."""
+def people(cfg: dict[str, Any] | None = None) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] | None:
+    """The members the front door's members file lists for this board, in the file's order, each as (name, aliases, sign-in addresses); () when it lists none or cannot be read; None when this board does not
+    read its members from a front door. The name is the member's key in the file, which is also the identity the front door signs for the member's calls."""
     s = settings(cfg)
     if not s.members:
         return None
     if not s.members_file or not NAME.fullmatch(s.board):
         return ()
-    out: list[str] = []
-    seen: dict[str, str] = {}
-    for m, boards in _read_members(s.members_file).items():
-        if s.board not in boards:
-            continue
-        if m.casefold() in seen:      # `Alice@x` after `alice@x`: names are unique without regard to case (as [[members]] names are), so the later one is left out, never a second person
-            _tell(f"members_file lists {m!r} and {seen[m.casefold()]!r} for this board: they are one name without regard to case, so only the first is a member")
-            continue
-        seen[m.casefold()] = m
-        out.append(m)
-    return tuple(out)
+    return tuple((m, rec.aliases, rec.emails) for m, rec in _read_members(s.members_file).items() if s.board in rec.boards)
+
+
+def members(cfg: dict[str, Any] | None = None) -> tuple[str, ...] | None:
+    """The identities the front door's members file lists for this board, in the file's order; () when it lists none or cannot be read; None when this board does not read its members from a front door."""
+    p = people(cfg)
+    return None if p is None else tuple(name for name, _a, _e in p)
