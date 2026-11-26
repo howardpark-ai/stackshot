@@ -1806,7 +1806,7 @@ SERVER_CHECKOUT = "~/stackshot"        # the checkout on the server host, where 
 _PLAIN_KEY = re.compile(r"\w[\w./-]{0,299}")          # a page key as it may be sent to the server host
 _PLAIN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")        # a session id, transcript or permanent
 _PLAIN_NAME = re.compile(r"\w[\w.@ -]{0,127}")        # a session name
-_RESULT_STARTS = ("cleared ", "Kept, not yours:", "No session could be told")        # the lines of the server host's run that are its result
+_RESULT_STARTS = ("cleared ", "Kept, not yours:")        # the lines of the server host's run that are its result
 _NO_SESSION = "No session could be told (CLAUDE_CODE_SESSION_ID is not set: run by hand?), so no debt here counts as yours."
 
 def _clear_reminders(key, me, force):
@@ -1912,41 +1912,56 @@ def _ask_server(key, host, sid, name, ids, force):
     if rc == 1 and not last: last = "a checkout there that is older than this one does not take the call"
     return rc, [], f"the run on {host} gave no result (exit {rc}" + (f": {last}" if last else "") + ")"
 
+def _server_command(key, sid, name, ids, force):
+    """How a person runs this caller's clear on the server host, as a reply names it. It carries the session id, name and permanent ids, so that host
+    needs no session registry to tell the caller's debts from another writer's. Each name and id is one word (--name=…, --id=…): a checkout there
+    that is older than these words ignores them, and none of them can read as --force."""
+    command = (f"env CLAUDE_CODE_SESSION_ID={shlex.quote(sid)} " if sid else "") + f"python3 {SERVER_CHECKOUT}/stackshot/projects/pages.py"
+    argv = ["clear", key] + ([f"--name={name}"] if name else []) + [f"--id={i}" for i in sorted(ids)] + (["--force"] if force else [])
+    where = _cfg.record_host_where(command, argv)
+    return f"`{where}`" if where.startswith("ssh ") else f"on the server box: `{command} {shlex.join(argv)}`"
+
 def _clear_away(key, host, sid, name, ids, force, whose, n, others):
     """`clear` on a box that is not the server host, after this box's reminders were dropped: the server clears its own owed entry."""
     print(f"cleared {key}{whose}: {n} session state(s) on this box")
     if not sid and not force: print(_NO_SESSION)
     if others: print(f"Kept on this box, not yours: {key} is still owed by {_writers(others)}. That debt settles when they update the page.")
     rc, lines, why = _ask_server(key, host, sid, name, ids, force)
-    if why:
-        command = (f"env CLAUDE_CODE_SESSION_ID={shlex.quote(sid)} " if sid else "") + f"python3 {SERVER_CHECKOUT}/stackshot/projects/pages.py"
-        argv = ["clear", key] + (["--force"] if force else [])
-        where = _cfg.record_host_where(command, argv)
-        where = f"`{where}`" if where.startswith("ssh ") else f"on the server box: `{command} {shlex.join(argv)}`"
-        print(_printable(f"The server's entry for {key} stays: {why}. To clear it, run {where}"))
+    if why: print(_printable(f"The server's entry for {key} stays: {why}. To clear it, run {_server_command(key, sid, name, ids, force)}"))
     else:
         print(f"From the server host ({host}):")
         for l in lines: print(l)
+        if rc == CLEAR_KEPT and name and not _PLAIN_NAME.fullmatch(name):      # _ask_server left it out
+            print(_printable(f"This session's name ({name}) is not a plain name, so it was not sent: a debt the server keeps under it counts as another writer's above. "
+                             f"To clear yours, run {_server_command(key, sid, name, ids, force)}"))
     if others or rc == CLEAR_KEPT: print(_force_hint(key))
     if why: return CLEAR_SERVER_STAYS
     return CLEAR_KEPT if others or rc == CLEAR_KEPT else 0
 
-def cmd_clear(key, force=False):
+def cmd_clear(key, force=False, also_name="", also_ids=()):
     """Drop a page debt for a board edit that needed no page change. By default only the caller's own: its session state and
     its entry in the server's owed list, which is kept per writer ({page: {writer: {...}}}, server._owed_mark). Another
     writer's debt on the same page is named and kept (a clear once wiped a keeper's reminder); --force drops every writer's, as clear did before.
-    On a box that is not the server host the owed list is the server's, so the same clear is run there (_clear_away). Exit 0 = nothing of anyone
-    else's was left standing, 3 = another writer's debt kept, 4 = the server's entry stays."""
+    On a box that is not the server host the owed list is the server's, so the same clear is run there (_clear_away). `also_name` and `also_ids`:
+    what else the caller goes by, from the command another box printed (_server_command). Exit 0 = nothing of anyone else's was left standing,
+    3 = another writer's debt kept, 4 = the server's entry stays."""
     key = key.strip() if key.strip().startswith(NO_PROJECT) else norm(key)     # "(no project)" is a key of its own, not a page
-    sid = caller_sid(); name = session_name(sid) if sid else ""; me = {x for x in (sid, name) if x}
+    sid = caller_sid(); name = session_name(sid) if sid else ""; me = {x for x in (sid, name, also_name) if x}
     ids = caller_ids(sid, name) if sid else set()      # the server's owed list is keyed by the permanent id once the registry knows the caller
+    ids |= set(also_ids) | (caller_ids("", also_name) if also_name else set())
+    name = name or also_name
     away = None if key.startswith(NO_PROJECT) else _server_ssh_host()      # a debt with no page is only ever this box's reminder
     n, others = _clear_reminders(key, me, force)
     whose = " for every writer (--force)" if force else (f" for you, {_who(sid)}" if sid else "")
     if away is not None: return _clear_away(key, away, sid, name, ids, force, whose, n, others)
-    m, shared, _why = _clear_owed(key, me, ids, force, others)
-    print(f"cleared {key}{whose}: {n} session state(s), {m} server owed entr{'y' if m == 1 else 'ies'}")
+    m, shared, why = _clear_owed(key, me, ids, force, others)
+    # a list that was not rewritten has no count to give: what was dropped in memory is still in the file
+    print(f"cleared {key}{whose}: {n} session state(s)" + ("" if why else f", {m} server owed entr{'y' if m == 1 else 'ies'}"))
     if not sid and not force: print(_NO_SESSION)
+    if why:
+        if others: print(f"Kept, not yours: {key} is still owed by {_writers(others)}. That debt settles when they update the page.")
+        print(_printable(f"The server's entry for {key} stays: {why} ({_cfg.state('ledger.json')}). Put that right, then run this clear again."))
+        return CLEAR_SERVER_STAYS
     if not others: return 0
     print(_kept_line(key, others, shared) + " " + _force_hint(key))
     return CLEAR_KEPT
@@ -1977,7 +1992,6 @@ def cmd_clear_forwarded(args):
     if why:
         print(f"clear-forwarded: {why}", file=sys.stderr); return CLEAR_SERVER_STAYS
     print(f"cleared {key}{whose}: {n} session state(s), {m} server owed entr{'y' if m == 1 else 'ies'}")
-    if not me and not force: print(_NO_SESSION)
     if not others: return 0
     print(_kept_line(key, others, shared))
     return CLEAR_KEPT
@@ -1999,10 +2013,11 @@ def main(argv):
     if cmd == "keeper": return cmd_keeper()
     if cmd == "changed":           # changed <key> <epoch>: the item settle test, for the server and by hand
         ok = ct_changed_since(norm(argv[2]), int(argv[3])) if len(argv) > 3 else False; print(ok); return 0 if ok else 1
-    if cmd == "clear":             # clear <key> [--force]: the caller's own debt; --force every writer's
-        rest = argv[2:]; force = "--force" in rest; rest = [a for a in rest if a != "--force"]
+    if cmd == "clear":             # clear <key> [--force]: the caller's own debt; --force every writer's. --name=, --id=: see _server_command
+        rest = argv[2:]; force = "--force" in rest; also = [a.partition("=") for a in rest if a.startswith(("--name=", "--id="))]
+        rest = [a for a in rest if a != "--force" and not a.startswith(("--name=", "--id="))]
         if not rest: print("usage: pages.py clear <key> [--force]", file=sys.stderr); return 1
-        return cmd_clear(rest[0], force=force)
+        return cmd_clear(rest[0], force=force, also_name=next((v for k, _, v in also if k == "--name"), ""), also_ids={v for k, _, v in also if k == "--id" and v})
     if cmd == "clear-forwarded": return cmd_clear_forwarded(argv[2:])      # `clear` on another box, run here over ssh: never forwards
     if cmd == "pending": return cmd_pending()
     if cmd == "agent-listed":      # agent-listed <name>: 0 fine · 3 not listed · 2 cannot tell (the fleet tool refuses on 3 only)

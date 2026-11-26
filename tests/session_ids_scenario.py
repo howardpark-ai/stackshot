@@ -13,7 +13,7 @@ the name, a hold listing the id holds it); roles.json (the extra `ids` map, `ses
 run changes nothing, holds and roles.json follow).
 
     tests/run-suite session_ids        → exit 0 / 1"""
-import hashlib, json, os, re, sys, pathlib, tempfile, logging, subprocess, time
+import hashlib, json, os, re, shlex, sys, pathlib, tempfile, logging, subprocess, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="sidtest-"); T = pathlib.Path(tmp)
@@ -529,6 +529,24 @@ LEDGER.write_text(json.dumps({"projects/alpha": {S["main"]: E(), S["docs"]: E()}
 rc, out, calls = tb.clear("alpha", sid=Tr["main_b"], server=blind)
 check("two boxes: the caller's permanent id goes with the call, and only the caller's entry goes (exit 3 for the other's)",
       rc == 3 and list(led().get("projects/alpha", {})) == [S["docs"]] and len(calls) == 1 and f"--id {S['main']}" in calls[0][-1] and f"--session {Tr['main_b']}" in calls[0][-1], (rc, out, led(), calls))
+LEDGER.write_text(json.dumps({"projects/alpha": {S["main"]: E(), S["docs"]: E()}}), encoding="utf-8")
+rc, out, _ = tb.clear("alpha", sid=Tr["main_b"], mode="down")
+rc2, said_, _ = tb.run(shlex.split(_twobox.given_command(out)), server=blind)
+check("two boxes: the printed command carries the permanent id: a server host with no registry clears the caller's entry by it",
+      rc == 4 and rc2 == 3 and list(led().get("projects/alpha", {})) == [S["docs"]], (rc, rc2, out, said_, led()))
+# the server files a debt under an id of its own, not the caller's conversation id: where only the server host has the registry, the session's name finds it
+unaware = tb.client_config("client-unaware.toml", session_links="")      # a sessions' box with no registry: it sends no permanent id
+named = T / "fleet-named"; (named / "a").mkdir(parents=True)                    # a fleet store that knows the fresh conversation by the session's name
+(named / "a/sessions.json").write_text(json.dumps({Tr["fresh"]: {"name": "home-sparrow-main", "machine": "a"}}), encoding="utf-8")
+for what, how, sent in (("the calling box names the session", {"fleet": named}, True), ("only the server host names the session", {"server_fleet": named}, False)):
+    LEDGER.write_text(json.dumps({"projects/alpha": {S["main"]: E(), S["docs"]: E()}}), encoding="utf-8")
+    rc, out, calls = tb.clear("alpha", sid=Tr["fresh"], config=unaware, **how)
+    check(f"two boxes: {what} → the server host clears the entry it filed under the session's permanent id, by name",
+          rc == 3 and list(led().get("projects/alpha", {})) == [S["docs"]] and len(calls) == 1 and "--id" not in calls[0][-1] and ("--name home-sparrow-main" in calls[0][-1]) == sent, (rc, out, led(), calls))
+LEDGER.write_text(json.dumps({"projects/alpha": {S["main"]: E(), S["docs"]: E()}}), encoding="utf-8")
+rc, out = clear("alpha", sid_=Tr["fresh"], env_extra={"STACKSHOT_FLEET_DIR": str(named)})
+check("pages clear on the server host: a conversation the registry does not list is matched to its permanent-id debt by name",
+      rc == 3 and list(led().get("projects/alpha", {})) == [S["docs"]], (rc, out, led()))
 SALA.unlink(); RJ.write_text(json.dumps({"generated": j["generated"], "sessions": j["sessions"], "ids": {"home-sparrow-main": S["main"]}}))
 LEDGER.write_text(json.dumps({"projects/alpha": {S["main"]: E()}}), encoding="utf-8")
 rc, out = clear("alpha")

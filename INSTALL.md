@@ -363,9 +363,11 @@ is local, but the owed list is the server's, so a box that is not the server hos
 there, carrying the session's id, name and permanent id, with `--force` passed on. Set `[release] deploy_ssh` on every box that only runs
 sessions and give its user an ssh key that logs in to the server host with no prompt. The
 command prints the server's own result lines. Exit 0: cleared. Exit 3: another writer's debt was kept, on either box. Exit 4: the server's
-entry stays (no plain host name in `deploy_ssh`, ssh or the run there failed, or the server's checkout is older than this feature); the
-reminders on this box are dropped all the same, and the line that says so gives the command to run on the server host. A box with neither
-`deploy_ssh` nor `[server] box = false` is read as the server host, and clears only what it holds itself.
+entry stays (no plain host name in `deploy_ssh`, ssh or the run there failed, the server's checkout is older than this feature, or the
+server host could not rewrite its owed list, also when the clear runs there); the reminders on the box it ran on are dropped all the same.
+Off the server host, the line that says so gives the command to run there, which carries the session's id, name and permanent id. A session
+name that is not a plain name is never sent by `clear` itself: when the server then keeps a debt, the reply says so and gives that command.
+A box with neither `deploy_ssh` nor `[server] box = false` is read as the server host, and clears only what it holds itself.
 
 A box that runs `release.sh` for a server on another box sets `[release] deploy_ssh` to that box. The release deploys there and copies its
 last-good record there, which the server reads to settle released items. When the record was already made before the setting, run
