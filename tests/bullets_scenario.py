@@ -46,6 +46,7 @@ from stackshot.service import wait_gates as wait_gates_svc
 from stackshot.service import update as _update_svc
 from stackshot.service import store as _service_store
 from stackshot.core import config as _cfg
+from stackshot.core import call_log as _CL
 from stackshot.core import instance as _core_instance
 from stackshot.web import render as _rmod
 from fastmcp.exceptions import ToolError
@@ -99,7 +100,9 @@ refused("a star bullet is not a `- ` bullet", lambda: create("* A thing"), "not 
 refused("a bullet of 121 characters is refused, with its length, the limit and the fix", lambda: create(bullet(121)),
         "description bullet is 121 characters", "limit is 120", FIX, "URL does not count")
 passes("a bullet of 120 characters passes", lambda: create(bullet(120)))
-refused("the line cap stays: 9 bullets", lambda: create("\n".join(f"- fact {i}" for i in range(9))), "description has 9 lines", "limit is 8", FIX)
+refused("the line cap stays: 9 bullets", lambda: create("\n".join(f"- fact {i}" for i in range(9))), "description has 9 lines", "limit is 8", "cut 1", "accepted form: `- Goal: <the result you want>`")
+refused("the line cap, nested bullets counted: the refusal says so, and gives no parent bullet as the way down", lambda: create("- Goal: a\n" + "\n".join(f"  - fact {i}" for i in range(9))), "description has 10 lines", "cut 2", "nested ones counted")
+check("the line-cap refusal is one line and keeps its kind", "\n" not in _fg.description_faults("\n".join(f"- f{i}" for i in range(12)))[0] and "parent bullet" not in _fg.description_faults("\n".join(f"- f{i}" for i in range(12)))[0] and _CL.kind_of(_fg.description_faults("\n".join(f"- f{i}" for i in range(12)))[0]) == "a description over its line limit", None)
 passes("8 bullets pass", lambda: create("\n".join(f"- fact {i}" for i in range(8))))
 passes("blank lines between bullets are free (they are not lines)", lambda: create("- one\n\n- two\n\n\n- three\n\n- four\n- five\n- six"))
 passes("a nested bullet counts as a bullet", lambda: create("- one\n  - nested\n- two"))
@@ -112,13 +115,15 @@ passes("a long URL on a link is not counted", lambda: create("- Lives at [the do
 _r_url, _g_url = create("- Lives at https://example.com/a")
 check("a naked URL in a description is written as a link to itself, however short (it is never drawn as a link for sure), with no naked-URL note after it",
       "Lives at [https://example.com/a](https://example.com/a)" in _r_url and "naked URL" not in _r_url, _r_url[:400])
-refused("the forbidden tokens still refuse", lambda: create("- resolved: it works"), "contains 'resolved:'")
+refused("the forbidden tokens still refuse", lambda: create("- resolved: it works"), "contains 'resolved:'", "the word 'resolved:' anywhere in it", '"- Goal: resolved: it works"', "write `- PR 12 is merged and live`")
+refused("the 'done:' token still refuses, in any case and inside a longer word, and the refusal shows the line that holds it", lambda: create("- Goal: ship it\n- Undone: the last part"), "contains 'done:'", '"- Undone: the last part"')
+check("the changelog refusal is one line, keeps its kind", (lambda f: "\n" not in f and _CL.kind_of(f) == "a changelog word in a description")(_fg.description_faults("- Goal: x\n- Done: y")[0]), _fg.description_faults("- Goal: x\n- Done: y"))
 
 # ---- 2. next lines on create
 n_ok, n_long = "home-other: " + "w" * 200, "home-other: " + "w" * 201
 check("fixture: next lines of exactly 200 and 201 characters after the `<actor>: ` prefix", len(n_ok.split(": ", 1)[1]) == 200 and len(n_long.split(": ", 1)[1]) == 201)
 refused("a next line of 201 characters is refused, with its length, the limit and the fix", lambda: create(next=n_long),
-        "a line of next is 201 characters after its `<actor>: ` prefix", "limit is 200", "one short line per next action", "project page")
+        "a line of next is 201 characters after its `<actor>: ` prefix", "limit is 200", "cut it by 1 character:", "e.g. `my-x: merge PR 12 once CI is green`", "one short line per next action", "project page")
 passes("a next line of 200 characters passes", lambda: create(next=n_ok))
 LONGNAME = "falcon-engineer-with-a-very-long-name (builder): "
 passes("the limit counts after the `<actor>: ` prefix: a 200-character action behind a long actor name passes (the whole line is over 250)", lambda: create(next=LONGNAME + "w" * 200))

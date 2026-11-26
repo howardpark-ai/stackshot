@@ -1572,7 +1572,9 @@ def gate_close(gid: str, item: dict[str, Any], outcome: str, reason: str, supers
     if outcome == "superseded" and not superseded_by.strip():
         missing.append("superseded_by")
     if missing:
-        faults.append(f"Refused: closing {gid} needs {', '.join(missing)}. " + h.close_refusal + h.relaunch)
+        form = (f"accepted form: complete(item_id=\"{gid}\", sender=\"my-x\", outcome=\"done\", reason=\"<one line: the end state and why it closes>\", outcome_text=\"- <how it ended>\"); "
+                "outcome is done | dropped | superseded, and superseded takes superseded_by=\"board#M\" too")
+        faults.append(f"Refused: closing {gid} needs {', '.join(missing)}; {form}." + (h.relaunch if {"outcome", "reason", "outcome_text"} <= set(missing) else ""))
     if outcome == "unrecorded":
         faults.append("Refused: outcome unrecorded means the item closed before the model with no outcome in its record; only the migration writes it. A close says how it ended: "
                       f"{' | '.join(h.outcomes)}")

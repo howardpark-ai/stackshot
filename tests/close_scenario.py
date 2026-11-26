@@ -143,6 +143,33 @@ def part_close():
     refused("superseded_by with outcome done", lambda: _wt_complete.stackshot_complete("a1", outcome="done", reason="it works", outcome_text=NEW, superseded_by="a2"), "superseded_by goes with outcome=superseded")
     refused("superseded by itself", lambda: _wt_complete.stackshot_complete("a1", outcome="superseded", reason="moved", outcome_text=NEW, superseded_by="A1"), "cannot be superseded by itself")
     refused("superseded by an item that does not exist", lambda: _wt_complete.stackshot_complete("a1", outcome="superseded", reason="moved", outcome_text=NEW, superseded_by="a99"), "a99, which does not exist")
+
+    # ---- 1b. a close that names its replacing item and no outcome is read as superseded, and the reply says so (fix kind outcome-superseded); every other gap is still a refusal
+    from stackshot.core import call_log as _CL
+    def with_fixes(f):
+        tok = _CL.begin()
+        try:
+            out = f()
+        except BaseException:
+            _CL.end(tok)
+            raise
+        return out, _CL.end(tok)
+    item(10, **LIVE)
+    refused("superseded_by with no outcome and no reason is still refused for the reason", lambda: _wt_complete.stackshot_complete("a10", superseded_by="a2", outcome_text=NEW), "needs reason")
+    refused("superseded_by with no outcome and no outcome_text is still refused for the outcome_text", lambda: _wt_complete.stackshot_complete("a10", superseded_by="a2", reason="moved"), "needs outcome_text")
+    refused("no outcome and no superseded_by is still refused for the outcome, with the accepted form shown", lambda: _wt_complete.stackshot_complete("a10", reason="moved", outcome_text=NEW), "needs outcome;", 'accepted form: complete(item_id="a10", sender="my-x", outcome="done"')
+    refused("superseded_by beside another outcome is still refused", lambda: _wt_complete.stackshot_complete("a10", outcome="dropped", superseded_by="a2", reason="moved", outcome_text=NEW), "superseded_by goes with outcome=superseded")
+    check("…and the item stayed open", rd(10)["status"] == "open", rd(10)["status"])
+    out10, fx10 = with_fixes(lambda: _wt_complete.stackshot_complete("a10", superseded_by="a2", reason="merged into a2", outcome_text=NEW))
+    check("superseded_by with no outcome: the item closes as superseded by that item", rd(10)["status"] == "completed" and rd(10)["metadata"].get("outcome") == "superseded" and rd(10)["metadata"].get("superseded_by") == "a2" and rd(10)["metadata"].get("reason") == "merged into a2", rd(10))
+    check("…counted as the fix kind outcome-superseded, and the reply carries its one line", [k for k, _ in fx10] == ["outcome-superseded"] and "the outcome is superseded" in _CL.reply_note(fx10), fx10)
+    check("…and its line invites no resend (the same call sent again is fixed the same)", "outcome-superseded" in _CL.NO_RESEND and "send it again" not in _CL.reply_note(fx10), _CL.reply_note(fx10))
+    item(11, **LIVE)
+    out11, fx11 = with_fixes(lambda: _wt_complete.stackshot_complete("a11", outcome="superseded", superseded_by="a2", reason="merged into a2", outcome_text=NEW))
+    check("a close that gives the outcome itself makes no such fix", rd(11)["metadata"].get("outcome") == "superseded" and [k for k, _ in fx11] == [], fx11)
+    item(12, **LIVE)
+    out12, fx12 = with_fixes(lambda: _update_svc._update("a12", status="completed", superseded_by="a2", reason="merged into a2", outcome_text=NEW))
+    check("update status=completed reads it the same way", rd(12)["metadata"].get("outcome") == "superseded" and [k for k, _ in fx12] == ["outcome-superseded"], (rd(12)["metadata"], fx12))
     refused("outcome on an open item without a close", lambda: _update_svc._update("a1", outcome="done"), "go with a close")
     refused("outcome_text on an open item without a close", lambda: _update_svc._update("a1", outcome_text=NEW), "go with a close")
     refused("reason outside a close", lambda: _update_svc._update("a1", next="x", reason="why"), "go with a close")

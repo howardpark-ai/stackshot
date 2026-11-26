@@ -919,6 +919,9 @@ def update_unlocked(
         outcome_text, ot_note = _fg.fix_long_bullets(outcome_text, None, "outcome_text")       # a bullet over the limit is split like a description's (a pure form fix; the reply says so, and History)
         if ot_note:
             _stall.note(meta, time.time(), ot_note)
+        if not outcome and superseded_by:      # a replacing item names the outcome: superseded_by goes with no other (an outcome of done or dropped beside it is still refused)
+            outcome = "superseded"
+            _calls.fixed("outcome-superseded", "no outcome was given and superseded_by names the replacing item, so the outcome is superseded")
         superseded_by = fc.call(_gates.gate_close, gid, item, outcome, reason, superseded_by, outcome_text, default="")
     elif outcome or reason or superseded_by or outcome_text:
         fc.add(f"Refused: outcome, outcome_text, reason and superseded_by go with a close (status=completed on an open item, or the complete tool)"

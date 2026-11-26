@@ -292,8 +292,9 @@ def description_faults(desc: str, field: str = "description") -> list[str]:
     bad = _description_fault(desc)
     if bad:
         kind, ln, n = bad
-        if kind == "lines":
-            out.append(f"Refused: {field} has {n} lines, the limit is {max_lines}; {fix}")
+        if kind == "lines":      # nested bullets count toward the cap too, so the way down is fewer facts or more per bullet, never a parent bullet
+            out.append(f"Refused: {field} has {n} lines, the limit is {max_lines}: cut {n - max_lines} (merge related facts into one bullet, or move detail to the project page); "
+                       f"accepted form: `- Goal: <the result you want>` then short `- ` bullets, one fact each, at most {line_max} characters, {max_lines} lines in all, nested ones counted")
         elif kind == "marker":
             out.append(f"Refused: {field} line is not a `- ` bullet: \"{_clip_line(ln, 60)}\"; {fix}")
         else:
@@ -304,7 +305,9 @@ def description_faults(desc: str, field: str = "description") -> list[str]:
     low = desc.lower()
     for tok in d.get("forbid_tokens", []):
         if tok.lower() in low:
-            out.append(f"Refused: description contains {tok!r} — a description is the live state, never a changelog; fold the resolution into the state")
+            at = next((ln for ln in desc.splitlines() if tok.lower() in ln.lower()), "")
+            out.append(f"Refused: description contains {tok!r} — a description is the live state, never a changelog; fold the resolution into the state, the word {tok!r} anywhere in it: \"{_clip_line(at, 60)}\" "
+                       "(write `- PR 12 is merged and live`, not `- Done: PR 12 merged`)")
             break
     return out
 
@@ -452,7 +455,7 @@ def next_faults(next_: str, has_ask: bool = False, session: bool = False) -> lis
         fault = ""
         if (n := _next_len(ln)) > limit:
             fault = (f"Refused: a line of next is {n} characters after its `<actor>: ` prefix, the limit is {limit} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; "
-                     "next is one short line per next action, each naming who takes it; results and detail go on the project page (Current state or a timeline line)")
+                     f"cut it by {n - limit} character{'' if n - limit == 1 else 's'}: next is one short line per next action, each naming who takes it, e.g. `my-x: merge PR 12 once CI is green`; results and detail go on the project page (Current state or a timeline line)")
         elif (whole := _visible_len(ln)) > limit + NEXT_PREFIX_ROOM:         # the prefix is a name of up to three words of any length: the line as a whole is capped too
             fault = (f"Refused: a line of next is {whole} characters in all, the limit for the whole line is {limit + NEXT_PREFIX_ROOM} (the {limit} counts after its `<actor>: ` prefix, which has {NEXT_PREFIX_ROOM} characters of room; "
                      f"a link's URL does not count): \"{_clip_line(ln, 60)}\"; next is one short line per next action, each naming who takes it, with a short name; results and detail go on the project page (Current state or a timeline line)")
