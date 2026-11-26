@@ -44,7 +44,7 @@ def list_of(mod: "_model.Model", viewer: str = "", meta: dict[str, Any] | None =
             return AGENTS
         if not viewer or _model.names_member(mod.mover, viewer):
             return YOUR_MOVE
-        return YOUR_MOVE if meta is not None and viewer in _steps.open_members(_steps.view(meta)) else WAITING
+        return YOUR_MOVE if meta is not None and viewer in _steps.open_members(meta) else WAITING
     return ""
 
 

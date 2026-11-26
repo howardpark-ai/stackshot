@@ -45,7 +45,9 @@ runs on every box.
                                 only when he has decided nothing, his newest comment (kind comment). A caller resumes only on a line
                                 whose kind is decision, and keeps waiting on a comment. The label is empty when he picked none, the
                                 text's line breaks are " / ", and <when> is when he gave it, an ISO time in the instance's timezone
-                                (cut -f1, -f2, -f3, -f4 take it apart). The line does not say which question it answers: an item that was
+                                (cut -f1, -f2, -f3, -f4 take it apart). On a board of several members, while the item is still on a step,
+                                the text of an answer to a step opens with who answered, which step, and who the step is with now: one
+                                member's Done need not end the step. The line does not say which question it answers: an item that was
                                 answered before a question was filed on it returns that old answer, so
                                 a caller files a fresh item for each question (client.py post question). Prints nothing and exits 0 while he has not answered. Exit 1,
                                 the reason on stderr and nothing on stdout: no id given (usage; the server's 400 for an empty key),

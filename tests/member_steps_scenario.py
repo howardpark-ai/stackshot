@@ -7,8 +7,11 @@ A board of two members (member-a, member-b), items whose checklist holds an open
     on it, and for its mover; the server's own line is left out among the viewer's lines only;
   * Done and Send note by the member the step is asked of and by another member: what is ticked (never another member's line), who the mover becomes, that the other's step stays open and
     answerable, the notices, the answer code and its page notice, the line each session is told;
-  * a member with no part in the step (on a step one member alone has had, and on one two have had), a question of another member's standing on the item, and a mail tick;
-  * one member: the notice only a board of several members answers with stays out of the home page.
+  * a member with no part in the step (on a step one member alone has had, and on one two have had), a question standing on the item, and a mail tick;
+  * a bare sub-line a later write added reads as the member's whose line stands above it in next, not in the checklist;
+  * a project page, drawn for no member: no step and no form for an item two members have had a part in, the item page linked;
+  * the line `client.py get answer` prints after one member's answer to a step the item is still on;
+  * one member: the notice only a board of several members answers with stays out of the home page and the item page, the project page keeps its step form and the answer line is as it was.
 
     tests/run-suite member_steps  → exit 0 / 1"""
 import json, logging, os, pathlib, re, subprocess, sys, time
@@ -83,6 +86,17 @@ item(23, state="your-step", step="sign the form on paper", mover="member-a", the
 item(24, state="your-step", step="sign the form on paper", mover="member-a", then="alpha-build", steps=[{"text": "member-b: countersign BRAVOSEVEN", "status": "done", "by": "member-b", "at": now - 60}])      # a ticked line of member-b's, and no line of member-a's
 pair(21, next=f"{NEXT}\ncheck SHAREDLINE")                                            # a line that names no one stands beside both members' lines
 pair(22, next=f"{NEXT}\n- file the BAREBRAVO slip")                                # a bullet that names no one, under member-b's line, is member-b's
+
+def stored(*lines): return [{"text": t, "status": "open", "by": "", "at": 0} for t in lines]
+
+
+# a later write added the bare sub-line: the checklist holds it last, next holds it under member-a's line
+item(30, state="your-step", step="sign THIRTYA", mover="member-a", then="alpha-build", steps=stored("member-a: sign THIRTYA", "member-b: countersign THIRTYB"),
+     next="member-a: sign THIRTYA\n- file SUBTHIRTY\nmember-b: countersign THIRTYB")
+item(31, state="your-step", step="sign THIRTYONEA", mover="member-a", then="alpha-build", steps=stored("member-a: sign THIRTYONEA", "member-b: countersign THIRTYONEB", "alpha-build: write AGENTLAST"),
+     next="member-a: sign THIRTYONEA\n- file SUBTHIRTYONE\nmember-b: countersign THIRTYONEB\nalpha-build: write AGENTLAST")
+item(32, state="your-step", step=A_STEP, mover="member-a", then="alpha-build", next=f"member-a: {A_STEP}", needs=["decision"], ask=ASK, options=OPTS)      # a question beside a step one member alone has had
+pair(33, needs=["decision"], ask=ASK, options=OPTS)                                   # a question added to a two-member step after its page was drawn
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
@@ -104,10 +118,12 @@ from stackshot.core import config as _cfg
 from stackshot.model import states as _states
 from stackshot.model import steps as _steps
 from stackshot.service import answer as answer_svc
+from stackshot.service import answer_handover
 from stackshot.service import telling
 from stackshot.web import answers as _web_answers
 from stackshot.web import board_home
 from stackshot.web import publish as _web_publish
+from stackshot.web.ui import render as ui_render
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors, route as _wt_route
 from stackshot.web.auth import signin as _signin
@@ -157,6 +173,7 @@ def block(page):
 
 
 def meta(i): return rd(i)["metadata"]
+def answer_line(i): return answer_handover._answer_line(rd(i)).split("\t")
 def lines(i, status): return [_steps.first_line(x["text"]) for x in _steps.view(meta(i)) if x["status"] == status]
 def done(i): return [(_steps.first_line(x["text"]), x["by"]) for x in _steps.view(meta(i)) if x["status"] == _steps.DONE]
 def said(i): return [(text, how) for gid, text, how in told if gid == f"a{i}"]
@@ -219,6 +236,36 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     r = post(22, ADA, act="done")
     check("…so the other member's Done leaves it open", code(r) == "done" and any("BAREBRAVO" in x for x in lines(22, _steps.OPEN)) and not any("BAREBRAVO" in t for t, _ in done(22)), (code(r), lines(22, _steps.OPEN), done(22)))
 
+    for i, tag, other in ((30, "SUBTHIRTY", "THIRTYB"), (31, "SUBTHIRTYONE", "THIRTYONEB")):
+        a_block, b_block = block(page(i, ADA)), block(page(i, BEA))
+        check(f"a sub-line a later write added under member-a's line is drawn for member-a alone (a{i})", tag in a_block and tag not in b_block and other in b_block, (a_block, b_block))
+        check(f"…and on their own rows (a{i})", tag in row(home(ADA), i) and tag not in row(home(BEA), i), (row(home(ADA), i), row(home(BEA), i)))
+        r = post(i, BEA, act="done")
+        check(f"…member-b's Done leaves it open (a{i})", code(r) == "partdone" and any(tag in x for x in lines(i, _steps.OPEN)) and not any(tag in t for t, _ in done(i)), (code(r), lines(i, _steps.OPEN), done(i)))
+        r = post(i, ADA, act="done")
+        check(f"…and member-a's Done ticks it (a{i})", code(r) == "done" and any(tag in t and by == "member-a" for t, by in done(i)), (code(r), done(i)))
+    check("…a session's line that stood last stays open through both", any("AGENTLAST" in x for x in lines(31, _steps.OPEN)), lines(31, _steps.OPEN))
+
+    whose = lambda nxt: _steps.member_rows({"next": nxt})[2]
+    check("a bare line under a member's line is that member's", whose("member-a: one\n- under") == ["member-a", "member-a"], whose("member-a: one\n- under"))
+    check("…under a line that names no one it is no one's, though a member's line stands higher", whose("member-a: one\ncheck the plain one\n- under") == ["member-a", "", ""], whose("member-a: one\ncheck the plain one\n- under"))
+    check("…and so under a session's line", whose("member-a: one\nalpha-build: two\n- under") == ["member-a", None, ""], whose("member-a: one\nalpha-build: two\n- under"))
+    field = {"state": "your-step", "step": "sign STEPFIELD", "mover": "member-a", "next": "alpha-build: prepare"}
+    check("a member's next text is the step field only for the member the step is asked of",
+          ui_render.Board.next_of(None, field, "member-a") == "sign STEPFIELD" and ui_render.Board.next_of(None, field, "member-b") == "", (ui_render.Board.next_of(None, field, "member-a"), ui_render.Board.next_of(None, field, "member-b")))
+    direct = {"state": "your-step", "step": "sign DIRECTA", "mover": "member-a", "then": "alpha-build", "owner": OWNER_S, "owner_step": "member-a: sign DIRECTA", "step_lines": ["a line"], "draft": "a draft",
+              "next": "member-a: sign DIRECTA\nmember-b: countersign DIRECTB"}
+    stays = answer_handover._share_step(direct, {"ts": now, "kind": "decision"}, "member-a", True, now)
+    check("a step that passes on drops what belonged to it: the server's line record, the step's lines and the draft",
+          stays == "member-b" and direct["mover"] == "member-b" and direct["step"] == "countersign DIRECTB" and not [k for k in ("owner_step", "step_lines", "draft") if k in direct], (stays, direct))
+
+    project = get("/projects/alpha", ADA)
+    shared_row = row(project, 1)
+    check("a project page draws no step, draft or form for a step two members have had a part in", shared_row and "<form" not in shared_row and 'value="done"' not in shared_row
+          and not [x for x in ("ALPHASEVEN", "BRAVOSEVEN", "ALPHADRAFT", "fleet countersign") if x in shared_row], shared_row or project[:600])
+    check("…its row says why and links the item page", bool(re.search(r'<a href="[^"]*/items/a1">More than one member has a part in this step: open the item for yours\.</a>', shared_row)), shared_row)
+    check("…and keeps the step and its Done where one member alone has a part", 'value="done"' in row(project, 8) and "ALPHASEVEN" in row(project, 8), row(project, 8))
+
     # ---- 2. Done by the member the step is asked of
     before = rd(2)["state_updated"]
     told.clear()
@@ -230,6 +277,8 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     check("…member-b is the mover, the item stays a step that is theirs", m.get("state") == "your-step" and m.get("mover") == "member-b" and m.get("step", "").startswith("countersign BRAVOSEVEN") and m.get("owner_step", "").startswith("member-b: countersign BRAVOSEVEN"), m)
     check("…the draft and the old wake's reason went with member-a's step", "draft" not in m and "watch_reason" not in m, m)
     check("…the then stays for the last Done", m.get("then") == "alpha-build", m)
+    got = answer_line(2)
+    check("the answer line says who finished which step and who the step is with now", got[:3] == ["decision", "Done", f"member-a, on the step “{A_STEP}” (the item is still on a step, with member-b)"] and len(got) == 4, got)
     check("…its state clock moved", rd(2)["state_updated"] > before)
     check("…the sessions are told whose step it is now", any(re.search(r"member-a did their step on .*: sign the ALPHASEVEN form\. It goes to member-b for their step now", t) for t, _ in said(2)), said(2))
     check("…a bare Done is a progress notice, not a turn, and nothing is left pending", said(2) and all(how == "own-move" for _, how in said(2)) and not pending(2), (said(2), pending(2)))
@@ -253,6 +302,9 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     check("…the mover, the step, its draft and the server's line are as they were", m.get("state") == "your-step" and m.get("mover") == "member-a" and m.get("step") == A_STEP and m.get("draft") and m.get("owner_step") == f"member-a: {A_STEP}" and rd(3)["state_updated"] == before, m)
     check("…the record names the step member-b did", m["answers"][-1]["by"] == "member-b" and m["answers"][-1]["step"].startswith("countersign BRAVOSEVEN"), m["answers"])
     check("…the sessions are told it stays with member-a", any(re.search(r"member-b did their step on .*: countersign BRAVOSEVEN.*\. The item stays with member-a", t) for t, _ in said(3)), said(3))
+    got = answer_line(3)
+    check("…and so does the answer line after a Done that left the step", got[:2] == ["decision", "Done"] and got[2].startswith("member-b, on the step “countersign BRAVOSEVEN")
+          and got[2].endswith("” (the item is still on a step, with member-a)"), got)
     A, B = home(ADA), home(BEA)
     check("…member-a still has it with their Done; member-b reads it as member-a's, with member-a's line", 3 in ids(A, "your-move") and 'value="done"' in row(A, 3) and 3 in ids(B, "waiting-list") and 3 not in ids(B, "your-move") and "<form" not in row(B, 3) and "ALPHASEVEN" in row(B, 3), (ids(B, "your-move"), row(B, 3)))
     shown = get("/items/a3?sent=partdone", BEA)
@@ -267,6 +319,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     r = post(3, ADA, act="done")
     m = meta(3)
     check("…then member-a's Done ends the step and hands the item over", code(r) == "done" and m.get("state") != "your-step" and m.get("mover") == "alpha-build", (code(r), m))
+    check("…and the answer line of a finished step is the plain one", answer_line(3)[:3] == ["decision", "Done", ""], answer_line(3))
 
     # ---- 4. notes
     told.clear()
@@ -285,6 +338,10 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     check("a note of member-b's that does not say done: nothing ticked, the item stays with member-a", code(r) == "comment" and not done(6) and meta(6).get("mover") == "member-a"
           and any("member-b sent a note on their step" in t and "countersign BRAVOSEVEN" in t and "stays with member-a" in t for t, _ in said(6)), (code(r), done(6), said(6)))
     r = post(7, BEA, act="note", text="ran it")
+    check("…the answer line carries their words after who and which step", answer_line(7)[2].startswith("member-b, on the step “countersign BRAVOSEVEN") and answer_line(7)[2].endswith("with member-a): ran it"), answer_line(7))
+    plain = lambda rec: answer_handover._answer_line({"metadata": {"state": "your-step", "step": A_STEP, "answers": [{"ts": now, "via": "board", **rec}]}}).split("\t")[2]
+    check("a comment's answer line and one of an answer that names no step are the plain ones",
+          plain({"kind": "comment", "step": A_STEP, "text": "a word"}) == "a word" and plain({"kind": "decision", "choice": "Ship it"}) == "", (plain({"kind": "comment", "step": A_STEP, "text": "a word"}), plain({"kind": "decision", "choice": "Ship it"})))
     check("a note of member-b's that says done ticks their step alone", code(r) == "partdone" and done(7) and all(by == "member-b" for _, by in done(7)) and f"member-a: {A_STEP}" in lines(7, _steps.OPEN) and meta(7).get("mover") == "member-a", (code(r), done(7)))
 
     # ---- 5. who may not finish a step
@@ -302,6 +359,16 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     was = rd(9)
     r = post(9, BEA, act="done")
     check("a Done beside another member's question writes nothing: the question stands", code(r) == "nostep" and rd(9) == was and "decision" in meta(9)["needs"], (code(r), meta(9)))
+    was = rd(33)
+    r = post(33, ADA, act="done")
+    check("a Done of the member asked, from a page drawn before the question was added, writes nothing on a two-member step: nobody else is handed the question",
+          code(r) == "nostep" and rd(33) == was and meta(33)["mover"] == "member-a", (code(r), meta(33)))
+    r = post(33, ADA, act="note", text="ran it")
+    m = meta(33)
+    check("…and their note is kept as a comment, the step and the question as they were", code(r) == "comment" and m["answers"][-1]["kind"] == "comment" and m["answers"][-1]["text"] == "ran it"
+          and m["mover"] == "member-a" and m["step"] == A_STEP and "decision" in m["needs"] and not done(33), (code(r), m))
+    r = post(32, ADA, act="done")
+    check("beside a question on a step one member alone has had, that member's Done counts as before", code(r) == "done" and meta(32).get("state") != "your-step", (code(r), meta(32)))
 
     # ---- 6. a mail tick
     was = rd(10)
@@ -325,6 +392,11 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     one = home(ADA)
     note = re.search(r'<div id="sent-notes"[^>]*>', one)
     check("one member: the home page's notices are what they were", bool(note) and "partdone" not in note.group(0) and "nostep" in note.group(0), note.group(0)[:200] if note else one[:200])
+    typed = get("/items/a1?sent=partdone", ADA)
+    check("…a typed ?sent=partdone shows no notice on the item page", "ALPHASEVEN" in typed and not re.search(r'<p class="isent[^"]*" role="status">', typed) and ui_render.Board(str(T / "store")).sent_msg("partdone") == "",
+          re.findall(r'<p class="isent.{0,120}', typed))
+    check("…the project page keeps the step and its Done", 'value="done"' in row(get("/projects/alpha", ADA), 1), row(get("/projects/alpha", ADA), 1))
+    check("…and the answer line is the answer as written", answer_line(4)[2] == "what is the form number?", answer_line(4))
     _cfg.CFG["members"] = TWO
 
 print(f"\nmember_steps: {len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else "\nfailed: " + "; ".join(fails)))

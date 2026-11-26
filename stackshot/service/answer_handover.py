@@ -44,7 +44,8 @@ def _answer_line(item: dict[str, Any]) -> str:
     hides a decision, and a caller resumes on a decision only. The label is empty when he picked none, the text's line breaks are " / " and
     its tabs spaces, and `when` is when he gave it, an ISO time in the instance's timezone (empty when the answer carries none).
     metadata.answers is oldest first (as in the get tool); the line does not know which question it answers, so a caller files a new item
-    for each question."""
+    for each question. On a board of several members, while the item is still on a step, the text of an answer to a step opens with who
+    answered, which step, and who the step is with: one member's Done need not end the step (_share_step)."""
     ans = _hooks().answers_of(item)
     if not ans:
         return ""
@@ -54,7 +55,11 @@ def _answer_line(item: dict[str, Any]) -> str:
         when = dt.datetime.fromtimestamp(float(a["ts"]), _hooks().zone()).isoformat(timespec="seconds")
     except (KeyError, TypeError, ValueError, OverflowError, OSError):
         when = ""
-    return f"{'comment' if a.get('kind') == 'comment' else 'decision'}\t{one(a.get('choice'))}\t{one(a.get('text'))}\t{when}"
+    text, step, meta = one(a.get("text")), one(a.get("step")), item.get("metadata") or {}
+    if len(_members.members()) > 1 and step and a.get("kind") != "comment" and meta.get("state") == "your-step":
+        part = f"{_members.recorded_by(a)}, on the step “{step}” (the item is still on a step, with {_steps.member_for(meta.get('step'), meta)})"
+        text = f"{part}: {text}" if text else part
+    return f"{'comment' if a.get('kind') == 'comment' else 'decision'}\t{one(a.get('choice'))}\t{text}\t{when}"
 
 
 def _client_answer(key: str) -> tuple[int, str, str]:
@@ -184,9 +189,8 @@ def _check_his_step(meta: dict[str, Any], step: str, now: float, by: str = "", m
     (steps.is_his: named for him, or naming no one), whoever wrote them, the server's own line for the summary included (the block does not draw that line or a repeat, but his Done is his word that all of it is done). Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
     other lines staying. → the first checked step's first line, "" when none was his (nothing written). A note on the step (step-reply) never comes here: it ticks only the server's step (owner_steps.tick), and the session that takes the item
     marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Done finishes all of his open lines. `by` is the person whose Done it is (the first person when none is named).
-    `member` (a board of several members): the open steps that are that member's or name no one (steps.member_of), never another member's."""
-    cl = _steps.view(meta)
-    whose = _steps.member_of(cl)
+    `member` (a board of several members): the open steps that are that member's or name no one (steps.member_rows), never another member's."""
+    cl, _at, whose = _steps.member_rows(meta)
     mine = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN and (whose[i] in (member, "") if member else _steps.is_his(x["text"]))]      # the open lines render.his_open_steps starts from, before it leaves out the server's summary line and repeats
     if not mine:
         return ""
@@ -204,8 +208,8 @@ def _share_step(meta: dict[str, Any], rec: dict[str, Any], member: str, done: bo
     item's `step`, and the item stays in your-step; the server's step is made for them by the save (owner_steps.ensure) and the draft goes with the step it belonged to."""
     asked = _steps.member_for(meta.get("step"), meta)
     if member != asked:      # the record names their own step, whatever the answer says about it
-        cl = _steps.view(meta)
-        own = next(x for x, who in zip(cl, _steps.member_of(cl)) if x["status"] == _steps.OPEN and who == member)
+        cl, _at, whose = _steps.member_rows(meta)
+        own = next(x for x, who in zip(cl, whose) if x["status"] == _steps.OPEN and who == member)
         rec["step"] = _steps.strip_owner(_steps.first_line(own["text"]))
     if not done:
         return asked
@@ -214,8 +218,8 @@ def _share_step(meta: dict[str, Any], rec: dict[str, Any], member: str, done: bo
     _check_his_step(meta, str(meta.get("step") or ""), now, by=member, member=member)
     if member != asked:
         return asked
-    cl = _steps.view(meta)
-    line, other = next((x["text"], who) for x, who in zip(cl, _steps.member_of(cl)) if x["status"] == _steps.OPEN and who and who != member)
+    cl, _at, whose = _steps.member_rows(meta)
+    line, other = next((x["text"], who) for x, who in zip(cl, whose) if x["status"] == _steps.OPEN and who and who != member)
     meta["mover"], meta["step"] = other, _steps.strip_owner(_steps.first_line(line))
     for k in ("step_lines", "draft", _hs.KEY):
         meta.pop(k, None)

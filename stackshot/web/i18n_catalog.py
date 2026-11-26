@@ -383,6 +383,7 @@ CATALOG: dict[str, str] = {
     "home.no_end": "no end date",
     "home.picks_up": "{who} picks it up",
     "home.theirs": "{who} picks it up · on {name}'s move",
+    "home.shared_step": "More than one member has a part in this step: open the item for yours.",
     "home.acts_for": "acts for {name}",
     "home.owner_then": "{who}, then {then}",
     "home.nobody_picks": "nobody set to pick it up",

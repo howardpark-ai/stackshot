@@ -499,18 +499,17 @@ def is_bare(text: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------------------------------------------- which member's step it is (a board of several members)
-def member_of(steps: list[dict[str, Any]]) -> list[str | None]:
-    """Whose each step of the checklist is, among the members: the name of the member its opener names; None when the opener names anyone else (a session, an outside party); "" when it names no one.
-    A bullet or numbered line that names no one (is_bare) reads as a sub-step of the line above, so under a member's step it is that member's."""
+def _members_down(texts: list[str]) -> list[str | None]:
+    """member_rows' reading of lines that stand one under another."""
     out: list[str | None] = []
     above = ""
-    for s in steps:
-        name = opener(s["text"])
+    for text in texts:
+        name = opener(text)
         if name:
             p = _members.person_of(name)
             who = p.name if p else None
             above = who or ""
-        elif is_bare(s["text"]):
+        elif is_bare(text):
             who = above
         else:
             who = above = ""
@@ -518,9 +517,23 @@ def member_of(steps: list[dict[str, Any]]) -> list[str | None]:
     return out
 
 
-def open_members(steps: list[dict[str, Any]]) -> list[str]:
-    """The members who have an open step on the checklist (member_of), each once, in the checklist's order."""
-    return list(dict.fromkeys(who for s, who in zip(steps, member_of(steps)) if who and s["status"] == OPEN))
+def member_rows(meta: dict[str, Any] | None) -> tuple[list[dict[str, Any]], list[int | None], list[str | None]]:
+    """(the checklist, each step's line position in next (view_rows), whose each step is among the members): the name of the member its opener names; None when the opener names anyone else (a session,
+    an outside party); "" when it names no one. A bullet or numbered line that names no one (is_bare) reads as a sub-step of the line above, so under a member's step it is that member's. The line
+    above an open step is the one above it in next, never in the checklist, which puts a line a later write added after all the stored ones; a step with no line in next (done, dropped) reads in the
+    checklist's order."""
+    cl, at = view_rows(meta)
+    whose = _members_down([s["text"] for s in cl])
+    lines = sorted((i for i, j in enumerate(at) if j is not None), key=lambda i: at[i])
+    for i, who in zip(lines, _members_down([cl[i]["text"] for i in lines])):
+        whose[i] = who
+    return cl, at, whose
+
+
+def open_members(meta: dict[str, Any] | None) -> list[str]:
+    """The members who have an open step on the checklist (member_rows), each once, in the checklist's order."""
+    cl, _at, whose = member_rows(meta)
+    return list(dict.fromkeys(who for s, who in zip(cl, whose) if who and s["status"] == OPEN))
 
 
 def member_for(text: Any, meta: dict[str, Any] | None = None) -> str:
@@ -532,10 +545,10 @@ def member_for(text: Any, meta: dict[str, Any] | None = None) -> str:
 def takes_part(meta: dict[str, Any] | None, member: str) -> bool:
     """Has `member` a part in the item's your-step: the step is theirs (member_for the stored `step`), or the checklist holds an open step of theirs."""
     m = meta or {}
-    return member == member_for(m.get("step"), m) or member in open_members(view(m))
+    return member == member_for(m.get("step"), m) or member in open_members(m)
 
 
 def several_hold(meta: dict[str, Any] | None) -> bool:
-    """Have two members or more had a part in the item: a line of theirs on the checklist, open or not (member_of), or the stored `step` asked of them (member_for)?"""
+    """Have two members or more had a part in the item: a line of theirs on the checklist, open or not (member_rows), or the stored `step` asked of them (member_for)?"""
     m = meta or {}
-    return len({who for who in member_of(view(m)) if who} | {member_for(m.get("step"), m)}) > 1
+    return len({who for who in member_rows(m)[2] if who} | {member_for(m.get("step"), m)}) > 1

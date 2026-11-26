@@ -2654,10 +2654,13 @@ class Board:
                   "nostep": ("warn", "sent.nostep", "sent.nostep_home")}
     _SENT = {k: (v[0], *[_i18n.EN[x] for x in v[1:]]) for k, v in _SENT_KEYS.items()}      # the English view of the table above (what the tests read)
     _SENT_SHARED = {"partdone": ("ok", "sent.partdone")}      # codes only a board of several members answers with, as above: left out of the home page's notices while the board has one member
+    def sent_keys(self):
+        """The ?sent= codes this board knows: _SENT_KEYS, and with several members the ones only such a board answers with."""
+        return {**self._SENT_KEYS, **(self._SENT_SHARED if len(_members.members()) > 1 else {})}
     def sent_msg(self, code, taken_by="") -> str:
         """The notice of a ?sent= code (a key of _SENT_KEYS) in the request's language, as plain text (not escaped): the item page's wording (the home page's own, where a code has one, is read by sent_notes_html).
         After Done or a note on the step, `taken_by` (who moves the item now) names them. "" for a code that is none."""
-        v = self._SENT_KEYS.get(code) or self._SENT_SHARED.get(code)
+        v = self.sent_keys().get(code)
         if not v: return ""
         if taken_by and code == "done": return _t("js.sent_done", who=taken_by)
         if taken_by and code == "donenote": return _t("js.sent_done_note", who=taken_by)
@@ -2732,7 +2735,7 @@ class Board:
     def sent_html(self, answer, taken_by="") -> str:
         """The short notice after a POST (?sent=<code>): sent, or why nothing was. After Done or a note on the step `taken_by` is who moves the item now."""
         k = str((answer or {}).get("sent") or "")
-        known = self._SENT.get(k) or self._SENT_SHARED.get(k)
+        known = self.sent_keys().get(k)
         if not known: return ""
         cls = known[0]
         msg = self.sent_msg(k, taken_by)
@@ -3606,15 +3609,15 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return out
     def his_open_steps(self, r, member=""):
         """His open steps of the checklist (the lines of next that open with his name, or with none) as (first line without its opener, the lines under it), each said once, in order. On a board of several
-        members, drawn for `member`: the open steps that are that member's or name no one (steps.member_of), never another member's, and the line skipped below is looked for among those, name and all. The line the
+        members, drawn for `member`: the open steps that are that member's or name no one (steps.member_rows), never another member's, and the line skipped below is looked for among those, name and all. The line the
         server made on the checklist for a your-step item (the step's summary, recorded as metadata.owner_step, with his name in front of it or not) is not drawn: the summary stays where space is short.
         Only that line is skipped, never a separate step of his that happens to say the same words, and a line that repeats an earlier one of his (any case, with or without his name) reads as one.
         A line whose first line is empty after his name takes the first line under it as its own. [] when he has none."""
         meta = r["metadata"] or {}
         lk = lambda t: _steps.loose_key(t).casefold()
         cand = []
-        cl = _steps.view(meta)
-        for x, whose in zip(cl, _steps.member_of(cl)):
+        cl, _at, who = _steps.member_rows(meta)
+        for x, whose in zip(cl, who):
             if x["status"] != _steps.OPEN or not (whose in (member, "") if member else _steps.is_his(x["text"])): continue
             ls = [ln for ln in str(x["text"]).split("\n") if ln.strip()]
             if ls: cand.append((x, ls))
@@ -3928,7 +3931,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         a draft under it), On agent the immediate next step, Waiting "Until <when>: <what>" and the chases, then "after the wait: <next step>"; a `woke:` line shows until the mover writes. The actions under the detail: on Your move the answer form, drawn hidden
         for the page script to show with a token (_HOME_JS); the title is the link to the item. named=True (home) draws the project's name above the title (project_line) and the item's owner after it (row_line); a project page's rows show the owner alone, the page says the project.
         The card's left edge takes the list's color (Your move, On agent, Queued for release, Waiting).
-        flags=True (the project page's lists) keeps what an item's line there carried: the due badge, the stale ⚠ and the "waits for recycle" badge, on the who line.
+        flags=True (the project page's lists) keeps what an item's line there carried: the due badge, the stale ⚠ and the "waits for recycle" badge, on the who line. That page is drawn for no member:
+        on a board of several members a step two members have had a part in (steps.several_hold) is not drawn there and has no form; the row links the item page, where each member has their own.
         On a member's Home (self.viewer) a Waiting row may be another member's move (home.list_of): "<member> picks it up · on <member>'s move", the age in the slot, the question or the next step, and
         nothing to answer or copy; and a row of a session that acts as a member ends its who line with "acts for <member>". A Your move row there draws the viewer's part alone: their next step (next_of), the
         answer form only for a question asked of them, the step and its form only when they have a part in it (home_step), and the draft only on an item whose member they are."""
@@ -3976,6 +3980,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             detail = f'<span class="hnext hq">{self.md_line(q, gid)}{mockup_link(r, q)}</span>' if q is not None else f'<span class="hnext">{nxt}</span>'
         elif which == _home.WAITING: detail = f'<span class="hwait">{self.home_wait(r, mod)}</span>' + (f'<span class="hnext hafter"><span class="dim">{esc(_t("home.after_wait"))}</span> {nxt}</span>' if step else "")
         elif ask: detail, actions = f'<span class="hnext hq">{ask[0]}</span>{dr}', ask[1]
+        elif stp and flags and _steps.several_hold(m):      # a project page is no member's: it cannot draw, or finish, one member's part
+            detail = f'<span class="hnext"><a href="{e(item_href(r))}">{e(_t("home.shared_step"))}</a></span>'
         elif stp: detail, actions = f'<span class="hnext">{stp[0]}</span>', stp[1]      # a your-step item: the step itself in place of the next line, with the note box and its Done and Send note buttons
         else: detail = f'<span class="hnext">{nxt}</span>{dr}'
         return _ui.row(href=item_href(r), rid=rid(r), title=self.bare(r["subject"]), age_html=age, who_html=" · ".join(x for x in who if x),
@@ -3983,10 +3989,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                        project_html=self.row_line(r, project=named), edge=RELEASE_LIST if which == RELEASE_LIST else _ui.kind_of_list(which),
                        act_html=act[1] if act else "")
     def next_of(self, meta, member):
-        """The next text a member's row reads its line from, on a board of several members: the open steps that are `member`'s (steps.member_of), else the ones that name no one, in the order of next, else
+        """The next text a member's row reads its line from, on a board of several members: the open steps that are `member`'s (steps.member_rows), else the ones that name no one, in the order of next, else
         the step of a your-step asked of `member` (steps.member_for). Never a line of another member, a session or an outside party."""
-        cl, at = _steps.view_rows(meta)
-        rows = sorted((j, s["text"], who) for s, j, who in zip(cl, at, _steps.member_of(cl)) if s["status"] == _steps.OPEN)
+        rows = sorted((j, s["text"], who) for s, j, who in zip(*_steps.member_rows(meta)) if s["status"] == _steps.OPEN)
         text = "\n".join([t for _j, t, who in rows if who == member] or [t for _j, t, who in rows if who == ""])
         if text or meta.get("state") != "your-step" or member != _steps.member_for(meta.get("step"), meta):
             return text
@@ -4007,7 +4012,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
     def sent_notes_html(self):
         """The hidden element the home page's script (_HOME_JS) reads to show the notice of an answer sent from a row: the item page's own notices (one text per ?sent= code, the home wording where it has
         one) and the prefix an issue-numbered id is written with. The home page and the project page carry it, both draw answer forms in their rows; the notice shows after #counts, else after this element."""
-        table = {**self._SENT_KEYS, **(self._SENT_SHARED if len(_members.members()) > 1 else {})}
+        table = self.sent_keys()
         return (f'<div id="sent-notes" hidden data-hash="{esc(shown("g1")[:-1])}" data-notes="'
                 + esc(json.dumps({k: [v[0], _t(v[-1])] for k, v in table.items()})) + '"></div>')
     def scope_groups(self, items, row=lambda x: x):
