@@ -98,7 +98,8 @@ def _who() -> str:
     """The signed-in identity, allow-listed; '' when auth is off.
 
     On a board behind a front door (`[behind_frontdoor] identity_secret_file`) the caller is the identity the front door signed for this request (the guard of web/door_guard.py verified it and
-    put it on the request's scope), whatever the sign-in mode: a request the guard did not pass has none and is refused, and an identity the board's members do not list is refused."""
+    put it on the request's scope), whatever the sign-in mode: a request the guard did not pass has none and is refused, and an identity the board's members do not list is refused. The identity is
+    the member's key in the front door's file (an address, or a name); the answer is always one of the person's sign-in addresses, which is what the rest of the board reads."""
     if _door.settings().identity:
         try:
             from fastmcp.server.dependencies import get_http_request
@@ -107,9 +108,10 @@ def _who() -> str:
             who = ""
         if not who:
             raise ToolError(_door.NO_IDENTITY)
-        if not _members.person_of_email(who):
+        person = _members.person_of_email(who) or _members.person_of(who)      # the front door signs the member's key: an address, or the name a person with several addresses is stored under
+        if not person:
             raise ToolError(f"Refused: {who} is not allowed on this board")
-        return who
+        return who if who in person.emails else (person.emails[0] if person.emails else who)      # the address the rest of the board knows the person by (`signed_in` reads it)
     if _signin._auth_mode() == "off":
         return ""
     from fastmcp.server.dependencies import get_access_token

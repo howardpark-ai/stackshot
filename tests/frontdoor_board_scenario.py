@@ -9,7 +9,7 @@ Part `on` covers:
   * the check of one signed identity (`check`): accepted inside the replay window; refused with no identity, an altered one, one signed with another secret, one older than the window, one dated
     ahead of the clock, a secret that is missing, group-readable or too short; a custom window; a rotated secret applies at once; no refusal text holds a secret or says which part was wrong;
   * the members read from the front door's file: only the members listed for this board's name, in the file's order; the placeholder (which no address matches) when the file lists nobody,
-    cannot be read, is no JSON object or the board has no name; a change applies to the next call, also a rewrite of the same size inside the clock's tick and a removal from a file old enough to be cached; two identities that differ only in case are one member; the file's format
+    cannot be read, is no JSON object or the board has no name; a change applies to the next call, also a rewrite of the same size inside the clock's tick and a removal from a file old enough to be cached; two identities that differ only in case are one member (its sign-in address is the lower-case one: the sign-in service lower-cases every address); the file's format
     (member -> boards) read for this board, and the old `[[members]]` list set aside;
   * the guard (`web/door_guard.py`) as an ASGI wrapper: the MCP path is guarded with and without a trailing slash and every method, another path and a lifespan are not, the verified identity is put
     on the scope and a client-written header of any name cannot put one there, a refusal is HTTP 403 with the sentence and the wrapped app is never reached;
@@ -285,7 +285,7 @@ def part_on():
     check("members: the identity matches as written (another case is another address, as a sign-in always was)", mem.person_of_email("ALICE@example.test") is None)
     mfile.write_text(json.dumps({"Alice@example.test": ["main"], "alice@example.test": ["main"], "carol@example.test": ["main"]}))
     check("members: two identities that differ only in case are one member, the first listed (names are unique without regard to case, and a name is looked up without it): never two people",
-          listed() == ("Alice@example.test", CAROL) and mem.emails() == ["Alice@example.test", CAROL] and mem.person_of("alice@example.test") is mem.person_of("Alice@example.test") and mem.person_of_email("alice@example.test") is None,
+          listed() == ("Alice@example.test", CAROL) and mem.emails() == ["alice@example.test", CAROL] and mem.person_of("alice@example.test") is mem.person_of("Alice@example.test") and mem.person_of_email("alice@example.test") is mem.person_of("Alice@example.test"),
           (listed(), mem.emails()))
     mfile.write_text(json.dumps({"alice@example.test": ["main"], "Alice@example.test": ["main"], "carol@example.test": ["main"]}))
     check("members: ... and the first of the file is the one kept, whichever case it is in", listed() == (ALICE, CAROL) and mem.person_of_email("Alice@example.test") is None, listed())
