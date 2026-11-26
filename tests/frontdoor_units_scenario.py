@@ -6,7 +6,7 @@ Covers: a config with none of the front door's tables renders and installs no fr
 installs the files and never enables or starts one, --start included; --restart and --start restart one whose file changed only when it runs already, once;
 the splitter is neither rendered nor installed while [server] port gives the board its port, without the tables it points at, or with another MCP path, an
 installed one stays and is said to; the unit files' lines that keep a restart with the board and a deliberate start; the rendered ExecStartPre line, run with
-the system's python3: passes only for the values the config still says and a Caddy of 2.11.6 or later, and refuses after the config gave the port back (a reboot
+the system's python3: passes only for the values the config still says and a Caddy of 2.11.8 or later, and refuses after the config gave the port back (a reboot
 after an undo); the Caddyfile's lines. With a `caddy` on PATH the rendered Caddyfile is run against stand-in services: client identity headers are removed,
 the token check path is refused, the MCP path is checked and goes to the front door, everything else to the board, on the loopback address only.
 
@@ -47,7 +47,7 @@ def fake_caddy(name, line, status=0):
     p = T / name
     p.write_text(f'#!/bin/sh\n[ "$1" = version ] || exit 64\nprintf "%s\\n" {shlex.quote(line)}\nexit {status}\n'); p.chmod(0o755)
     return str(p)
-CADDY = fake_caddy("caddy-new", "v2.11.6 h1:abcdef=")
+CADDY = fake_caddy("caddy-new", "v2.11.8 h1:abcdef=")
 
 ENV = {k: v for k, v in os.environ.items() if k not in ("STACKSHOT_CONFIG", "BOARD_MCP_CONFIG")}
 ENV.update({"PATH": f"{T}/bin:" + os.environ.get("PATH", ""), "STACKSHOT_SYSTEM_UNIT_DIR": str(T / "etc-systemd")})
@@ -244,17 +244,19 @@ def with_caddy(path):
     cfg = conf("caddy-" + pathlib.Path(path).name + ".toml", ALL, caddy=path)
     return cfg, [*pre[:-1], path]
 for name, line, status, ok, why in (
-        ("caddy-old", "v2.11.4 h1:x=", 0, False, "is Caddy v2.11.4: the splitter needs 2.11.6 or later"),
-        ("caddy-older", "v2.9.9", 0, False, "needs 2.11.6 or later"),
-        ("caddy-beta", "v2.11.6-beta.1 h1:x=", 0, False, "is Caddy v2.11.6-beta.1: the splitter needs 2.11.6 or later"),
-        ("caddy-next-patch", "v2.11.7 h1:x=", 0, True, ""),
+        ("caddy-old", "v2.11.4 h1:x=", 0, False, "is Caddy v2.11.4: the splitter needs 2.11.8 or later"),
+        ("caddy-older", "v2.9.9", 0, False, "needs 2.11.8 or later"),
+        ("caddy-cuts-streams", "v2.11.6 h1:x=", 0, False, "is Caddy v2.11.6: the splitter needs 2.11.8 or later"),
+        ("caddy-one-short", "v2.11.7 h1:x=", 0, False, "is Caddy v2.11.7: the splitter needs 2.11.8 or later"),
+        ("caddy-beta", "v2.11.8-beta.1 h1:x=", 0, False, "is Caddy v2.11.8-beta.1: the splitter needs 2.11.8 or later"),
+        ("caddy-next-patch", "v2.11.9 h1:x=", 0, True, ""),
         ("caddy-minor", "v2.12.0-beta.1 h1:x=", 0, True, ""),
         ("caddy-ten", "v2.100.0", 0, True, ""),
         ("caddy-major", "v3.0.0", 0, True, ""),
-        ("caddy-no-v", "2.11.6", 0, True, ""),
+        ("caddy-no-v", "2.11.8", 0, True, ""),
         ("caddy-words", "unknown", 0, False, "gave no version that can be read (exit 0)"),
         ("caddy-silent", "", 0, False, "gave no version that can be read"),
-        ("caddy-broken", "v2.11.6 h1:x=", 1, False, "gave no version that can be read (exit 1)")):
+        ("caddy-broken", "v2.11.8 h1:x=", 1, False, "gave no version that can be read (exit 1)")):
     cfg, argv = with_caddy(fake_caddy(name, line, status))
     if ok:
         r = start_check(cfg, argv)
@@ -263,7 +265,7 @@ for name, line, status, ok, why in (
         refused(f"Caddy answering {line!r} (exit {status})", cfg, why, argv)
 cfg, argv = with_caddy(str(T / "caddy-absent"))
 refused("a Caddy that is not there", cfg, "could not be run (FileNotFoundError)", argv)
-(T / "caddy-noexec").write_text("#!/bin/sh\necho v2.11.6\n")
+(T / "caddy-noexec").write_text("#!/bin/sh\necho v2.11.8\n")
 cfg, argv = with_caddy(str(T / "caddy-noexec"))
 refused("a Caddy that cannot be executed", cfg, "could not be run (PermissionError)", argv)
 

@@ -1,6 +1,6 @@
 # The splitter's Caddyfile (stackshot-splitter.service): Caddy on the port the board listened on before it moved behind the front door
 # (docs/front-door.md). The MCP path is checked by the sign-in service and goes to the front door; everything else goes to the board.
-# Needs Caddy 2.11.6 or later. A client's own identity headers are removed before anything reads the request, the board's token check
+# Needs Caddy 2.11.8 or later. A client's own identity headers are removed before anything reads the request, the board's token check
 # (/frontdoor/*) is refused here, the admin API is off, and it listens on the loopback address only.
 {
 	admin off

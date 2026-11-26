@@ -14,7 +14,8 @@ reads its token file at each request, so it needs no restart; between the restar
 The token is read from oauth.env as the board reads it, and written to a new file beside the target, readable by its owner only, which then takes the target's
 place in one step: a reader sees the old file or the new one, never a part. The value is never printed, never an argument of a program and never in a message.
 
---board names the [[frontdoor.backends]] board. Left out, it is the one whose url is this machine's own board (a loopback address on [server] port).
+--board names the [[frontdoor.backends]] board. Left out, it is the one whose url is this machine's own board (a loopback address on [server] port). A named board
+whose url is not such an address is refused before anything is read or written: the token of this oauth.env is this machine's board's, and no other's.
 
 Exit 0: the file holds the board's token (written now, or already). 1: --check found that it does not. 2: nothing was done, and the line says why.
 """
@@ -62,7 +63,7 @@ def board_token(env_file: str) -> str:
 
 
 def backend(settings: _fc.Settings, name: str) -> _fc.Backend:
-    """The board whose token file is meant."""
+    """The board whose token file is meant: one of this machine's own, since the token copied is the one of this machine's oauth.env."""
     boards = settings.boards()
     if name:
         found = [b for b in boards if b.name == name]
@@ -75,6 +76,9 @@ def backend(settings: _fc.Settings, name: str) -> _fc.Backend:
     b = found[0]
     if b.oauth:
         raise Refused(f"board {b.name} is reached with OAuth client credentials, so the front door has no token file for it")
+    if not _config.is_own_board(b.url):
+        raise Refused(f"board {b.name} is not this machine's own board (its url is no loopback address on [server] port), and the token in oauth.env is this machine's board's: "
+                      f"if {b.name} is this machine's board, give its entry such a url")
     return b
 
 
@@ -165,8 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     except Refused as e:
         print(f"nothing copied: {e}", file=sys.stderr)
         return 2
-    note = "" if _config.is_own_board(b.url) else f"; note: its url is not on this config's [server] port, so make sure board {b.name} is the board of this oauth.env"
-    print(f"board {b.name}: wrote the board's machine token of {env_file} to {target} (mode 600){note}")
+    print(f"board {b.name}: wrote the board's machine token of {env_file} to {target} (mode 600)")
     return 0
 
 

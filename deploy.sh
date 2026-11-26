@@ -49,7 +49,8 @@
 #   anchor-hub.service       stackshot/anchors/anchor_hub.py, stackshot/anchors/anchorhub/*, anchors.py, project_registry.py, projects.py (apply() reaches it), push.py, fleet.py, liveness.py, routing.py, inbox.py, sessions_registry.py, interp.py, config.py (all under stackshot/), or its unit
 #   stackshot-puller.service stackshot/fleet/puller.py, stackshot/fleet/client.py, stackshot/core/config.py, or its unit
 #   stackshot-frontdoor.service, stackshot-signin.service (docs/front-door.md): whatever restarts stackshot.service, or the unit's own template; and only a unit its
-#                            owner has turned on (installed, and enabled or running: installing one turns nothing on). Restarted after the server, by name, with `reset-failed` first;
+#                            owner has turned on (installed, and enabled or running: installing one turns nothing on, and a failed unit that is not enabled is off, since `disable --now`
+#                            leaves that state behind). Restarted after the server, by name, with `reset-failed` first;
 #                            a restart that fails is a WARNING line, and the check below then says what does not answer
 #   stackshot-splitter.service  its own templates (units/stackshot-splitter.*), and only while it runs: nothing here ever starts it, and a server restart leaves it running
 #                            (it holds the port the clients connect to)
@@ -132,11 +133,10 @@ files="$($G diff --name-only "$OLD" "$NEW")"
 if [ -n "$ROLLBACK" ]; then echo "rolling back $(git rev-parse --short "$OLD") to $(git rev-parse --short "$NEW"), taking out:"; $G log --oneline "$NEW..$OLD" | sed 's/^/  /'
 else echo "deploying $(git rev-parse --short "$OLD")..$(git rev-parse --short "$NEW"):"; $G log --oneline "$OLD..$NEW" | sed 's/^/  /'; fi
 server=0; minute=0; hub=0; puller=0; door=0; signin=0; splitter=0
-front_on() {   # a front door unit its owner has turned on: installed (install.sh), and enabled or running
+front_on() {   # a front door unit its owner has turned on: installed (install.sh), and enabled or running now
     [ -f "$HOME/.config/systemd/user/$1" ] || return 1
     case "$(systemctl --user is-enabled "$1" 2>/dev/null || true)" in enabled|enabled-runtime) return 0 ;; esac
-    case "$(systemctl --user is-active "$1" 2>/dev/null || true)" in active|activating|reloading|failed) return 0 ;; esac
-    return 1
+    front_running "$1"      # not enabled: it counts only while it runs. A failed one does not: `disable --now` leaves the failed state behind, and its owner turned it off
 }
 front_running() {   # an installed front door unit that runs now
     [ -f "$HOME/.config/systemd/user/$1" ] || return 1

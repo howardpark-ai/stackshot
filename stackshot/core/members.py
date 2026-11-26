@@ -11,9 +11,10 @@ A board behind a front door that sets `[behind_frontdoor] members_file` reads no
 each named by the identity the file gives it (its key), with the aliases and sign-in addresses the file gives it (a key written like an address is its own address), in the file's order, read at each call; a file that lists nobody for the board, or cannot be read, leaves
 the placeholder, which no address matches.
 
-One exception, for naming alone (`naming`, behind `names`, `names_cf`, `person_of` and `opener_person`): on a machine where that members file is not there at all, a line of
-text is still read against the configured `[instance] owner` and `owner_aliases`, so the owner's steps are recognized where only the board's text is read. `members`, the
-sign-in addresses and everything that decides who may do what stay with the file: absent means nobody.
+One exception, for what a name means (`naming`, behind `names`, `names_cf`, `person_of` and `opener_person`): on a machine where that members file is not there at all, a line of
+text is still read against the configured `[instance] owner` and `owner_aliases`, so the owner's steps are recognized where only the board's text is read. Whatever asks one of
+those four reads the owner there, the writers' rules among them (`model.is_owner`, `model.norm_who`: whether a mover or a step is the owner's, and the spelling a mover is
+stored with). Who is a member (`members`, `first`) and which address signs in (`person_of_email`) stay with the file: absent means nobody.
 
 The answer is built from the config as it stands: a suite or a reload that changes the inputs is read at the next call. The name is the key a person is
 stored under (a mover, a tick, a hand-off): unique without regard to case, and a restart-only setting like the old key it replaces.
@@ -130,8 +131,9 @@ def first() -> Person:
 
 def naming() -> list[Person]:
     """The people a line of text is read against: `members()`, except where the front door's members file the config names is absent (`behind_door.members_file_absent`),
-    and then the configured `[instance] owner` with its aliases and no sign-in address, followed by the placeholder (so "the owner" still reads). Never empty. For names
-    only: nothing that decides membership, a sign-in or what is recorded asks here."""
+    and then the configured `[instance] owner` with its aliases and no sign-in address, followed by the placeholder (so "the owner" still reads). Never empty. Membership and
+    a sign-in never ask here; what reads or writes a name does, through `person_of` among others (`model.norm_who`, so there a mover given as an alias of the owner is
+    stored under the owner's name)."""
     people = members()
     if len(people) != 1 or people[0].declared:
         return people

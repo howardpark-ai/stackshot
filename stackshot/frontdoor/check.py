@@ -22,8 +22,10 @@ is read from the file the front door holds it in ([[frontdoor.backends]] token_f
 never an argument of a program, never part of a message, and it is not sent over plain http to another machine. Addresses are reached directly, never through a
 proxy of the environment.
 
---board names one [[frontdoor.backends]] board. Left out: this machine's own board (a loopback url on [server] port), and for --door every board when none
-can be told to be it.
+--board names one [[frontdoor.backends]] board. Left out: this machine's own board (a loopback url on [server] port), else the only one listed, and for --door every
+board when none can be told to be it. The sign-in service and the splitter need one board for its machine token. By address, the check is refused without one (name it
+with --board). --installed, which takes no --board, checks what needs no board's token, and the part's line says that the rest was not tried. With no board listed,
+--installed asks the front door's /healthz alone and says so.
 
 Exit 0: everything asked for passed. 1: something did not, and the last line says what. 2: the arguments or the config allow no check.
 """
@@ -55,6 +57,9 @@ LABEL = {"signin": "sign-in service", "door": "front door", "splitter": "splitte
 UNITS = {"signin": "stackshot-signin.service", "door": "stackshot-frontdoor.service", "splitter": "stackshot-splitter.service"}
 INITIALIZE = (b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},'
               b'"clientInfo":{"name":"stackshot-front-door-check","version":"1"}}}')
+
+
+UNTOLD = "none of the [[frontdoor.backends]] boards can be told to be this machine's own (to have it tried, give exactly one of them a loopback url on [server] port)"
 
 
 class Failed(Exception):
@@ -126,31 +131,38 @@ class Setup:
         if not self.door.present:
             raise Unusable("the config has no [frontdoor] table, which names the boards, the identity header and the token files a check uses")
 
+    def own(self) -> _fc.Backend | None:
+        """The board meant when none is named: this machine's own, else the only one listed; None when that cannot be told."""
+        found = _config.own_boards(self.door)
+        if len(found) != 1:
+            found = list(self.door.boards())
+        return found[0] if len(found) == 1 else None
+
     def boards(self, name: str, every: bool) -> list[_fc.Backend]:
-        """The boards a check calls: the one named, else this machine's own, else (only with `every`) all of them."""
+        """The boards a check calls: the one named, else `own`, else (only with `every`) all of them."""
         if name:
             found = [b for b in self.door.boards() if b.name == name]
             if not found:
                 raise Unusable(f"no [[frontdoor.backends]] board is named {name!r} (the boards: {', '.join(b.name for b in self.door.boards()) or 'none'})")
             return found
-        own = _config.own_boards(self.door)
-        if len(own) == 1:
-            return own
-        if len(self.door.boards()) == 1 or (every and self.door.boards()):
+        own = self.own()
+        if own is not None:
+            return [own]
+        if every and self.door.boards():
             return list(self.door.boards())
         raise Unusable("none of the [[frontdoor.backends]] boards can be told to be this machine's own (a loopback url on [server] port): name one with --board")
 
     def member(self, board: str) -> str:
-        """A member of `board` by the front door's members file, whose key can be sent in a header."""
+        """A member of `board` (of any board when "") by the front door's members file, whose key can be sent in a header."""
         if not self.door.members_file:
             raise Failed("[frontdoor] names no members_file, so no identity can be sent")
         try:
             members = _config.read_members(self.door.members_file)
         except _config.FileError as e:
             raise Failed(str(e)) from None
-        fits = sorted(k for k, boards in members.items() if board in boards and k == k.strip() and k.isascii() and k.isprintable())
+        fits = sorted(k for k, boards in members.items() if (not board or board in boards) and k == k.strip() and k.isascii() and k.isprintable())
         if not fits:
-            raise Failed(f"the members file lists no member of board {board} whose key can be sent in a header")
+            raise Failed(f"the members file lists no member{f' of board {board}' if board else ''} whose key can be sent in a header")
         return next((k for k in fits if "@" in k), fits[0])
 
     def token(self, b: _fc.Backend) -> str:
@@ -188,7 +200,8 @@ def check_door(s: Setup, base: str, boards: list[_fc.Backend], who: str = "") ->
     return f"tool call {TOOL} answered on board{'s' if len(boards) > 1 else ''} {', '.join(b.name for b in boards)}"
 
 
-def check_signin(s: Setup, base: str, board: _fc.Backend, installed: bool) -> str:
+def check_signin(s: Setup, base: str, board: _fc.Backend | None, installed: bool) -> str:
+    """`board`: whose machine token is asked about; None (--installed only) when that cannot be told."""
     got = status(base + "/healthz")
     if got != 200:
         raise Failed(f"/healthz answered {got}, not 200")
@@ -199,6 +212,8 @@ def check_signin(s: Setup, base: str, board: _fc.Backend, installed: bool) -> st
     got = status(base + "/verify")
     if got != 401:
         raise Failed(f"a token check that carries no token was answered {got}, not 401 (503: the board does not answer the check, or the verify secrets differ)")
+    if board is None:
+        return f"/healthz 200 and a request with no token refused; no board's machine token was tried: {UNTOLD}"
     token = s.token(board)
     want = 200 if s.signin.accept_portal_token else 403
     got = status(base + "/verify", headers={"Authorization": "Bearer " + token})
@@ -208,18 +223,21 @@ def check_signin(s: Setup, base: str, board: _fc.Backend, installed: bool) -> st
     return f"the token check of board {board.name}'s machine token answered {got}" + ("" if want == 200 else " (refused as set: accept_portal_token is off)")
 
 
-def check_splitter(s: Setup, base: str, board: _fc.Backend, installed: bool) -> str:
+def check_splitter(s: Setup, base: str, board: _fc.Backend | None, installed: bool) -> str:
+    """`board`: the board the tool call is made on; None (--installed only) when that cannot be told."""
     if not s.door.identity_header:
         raise Failed("[frontdoor] names no usable identity_header")
     got = status(base + "/healthz")
     if got != 200:
         raise Failed(f"/healthz answered {got}, not 200 (it is the board's, behind the splitter)")
-    got = status(base + "/mcp", "POST", {s.door.identity_header: s.member(board.name)})
+    got = status(base + "/mcp", "POST", {s.door.identity_header: s.member(board.name if board else "")})
     if got != 401:
         raise Failed(f"a call that carries the identity header and no token was answered {got}, not 401")
     got = status(base + "/frontdoor/verify")
     if got != 404:
         raise Failed(f"the board's token check path /frontdoor/verify was answered {got}, not 404")
+    if board is None:
+        return f"routes as set; no tool call was tried: {UNTOLD}"
     if not s.signin.accept_portal_token:
         refusal = "no tool call can be made through the splitter with the board's machine token: [frontdoor_signin] accept_portal_token is off"
         if not installed:
@@ -244,14 +262,15 @@ def _systemctl(*args: str) -> str:
 
 
 def installed_parts() -> list[str]:
-    """The parts whose unit this user has turned on: enabled, or running now. A unit that is only installed is not checked: installing one turns nothing on."""
+    """The parts whose unit this user has turned on: enabled, or running now. A unit that is only installed is not checked: installing one turns nothing on. Nor is a
+    failed unit that is not enabled: `disable --now` leaves the failed state behind, and its owner turned it off."""
     try:
         r = subprocess.run(["systemctl", "--user", "show-environment"], capture_output=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as e:
         raise Failed(f"systemctl --user could not be run ({e.__class__.__name__}), so which parts run here is unknown") from None
     if r.returncode != 0:
         raise Failed("systemctl --user cannot reach the user manager, so which parts run here is unknown")
-    return [p for p in PARTS if _systemctl("is-enabled", UNITS[p]) in ("enabled", "enabled-runtime") or _systemctl("is-active", UNITS[p]) in ("active", "activating", "reloading", "failed")]
+    return [p for p in PARTS if _systemctl("is-enabled", UNITS[p]) in ("enabled", "enabled-runtime") or _systemctl("is-active", UNITS[p]) in ("active", "activating", "reloading")]
 
 
 def installed_checks() -> list[tuple[str, Callable[[], str]]]:
@@ -267,15 +286,21 @@ def installed_checks() -> list[tuple[str, Callable[[], str]]]:
     def part(p: str) -> Callable[[], str]:
         def run() -> str:
             if p == "door":
-                return check_door(s, "http://" + _sp.address(s.door.host, s.door.port), s.boards("", every=True))
+                base = "http://" + _sp.address(s.door.host, s.door.port)
+                if not s.door.boards():
+                    got = status(base + "/healthz")
+                    if got != 200:
+                        raise Failed(f"/healthz answered {got}, not 200")
+                    return "/healthz 200; no tool call was tried: no [[frontdoor.backends]] board is listed"
+                return check_door(s, base, s.boards("", every=True))
             if p == "signin":
                 if not s.signin.present:
                     raise Failed("its unit is on, but the config has no [frontdoor_signin] table")
-                return check_signin(s, "http://" + _sp.address(_sc.HOST, s.signin.port), s.boards("", every=False)[0], installed=True)
+                return check_signin(s, "http://" + _sp.address(_sc.HOST, s.signin.port), s.own(), installed=True)
             why = _sp.blocking(s.splitter)
             if why:
                 raise Failed(f"its unit is on, but the config allows no splitter: {'; '.join(why)} (turn it off: systemctl --user disable --now {UNITS['splitter']})")
-            return check_splitter(s, "http://" + _sp.address(_sc.HOST, s.splitter.port), s.boards("", every=False)[0], installed=True)
+            return check_splitter(s, "http://" + _sp.address(_sc.HOST, s.splitter.port), s.own(), installed=True)
         return run
     return [(p, part(p)) for p in parts]
 

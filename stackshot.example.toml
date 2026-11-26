@@ -754,7 +754,7 @@ result_turn_cap_per_hour = 6                        # the most turns one session
 # [frontdoor_splitter]                              # the splitter: a Caddy on 127.0.0.1 that takes the port the board listened on before it moved behind the front door (docs/front-door.md, "The splitter").
 #                                                   # `./install.sh units` renders its unit and Caddyfile; no script enables or starts it. Needs [frontdoor] and [frontdoor_signin]. Restart-only
 # listen_port = 8020                                # REQUIRED: the port the board's clients connect to. Never the board's own port (the server table's): with that, no splitter is installed or started
-# caddy = "/usr/bin/caddy"                          # the Caddy the unit runs: 2.11.6 or later
+# caddy = "/usr/bin/caddy"                          # the Caddy the unit runs: 2.11.8 or later
 
 [step_proof]                                        # a step of an item's next that names the event which finishes it (a pull request merged or released) is ticked by the server (stackshot/model/step_proof.py).
                                                     # Without a switch, the first pass of the server's clock after a start only logs what it would do (and keeps it in <state>/step-proof-dry.json);

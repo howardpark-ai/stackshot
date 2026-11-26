@@ -224,12 +224,13 @@ case "$*" in
 esac
 exit 0
 '''); (T / "bin/systemctl").chmod(0o755)
-def turned_on(enabled=(), active=()):
+def turned_on(enabled=(), active=(), failed=()):
     for d in ("enabled", "active"):
         for p in (UNITS / d).iterdir(): p.unlink()
     (UNITS / "no-manager").unlink(missing_ok=True)
     for u in enabled: (UNITS / "enabled" / f"stackshot-{u}.service").write_text("enabled\n")
     for u in active: (UNITS / "active" / f"stackshot-{u}.service").write_text("active\n")
+    for u in failed: (UNITS / "active" / f"stackshot-{u}.service").write_text("failed\n")
 
 def check_argv(*args): return [server, "-m", "stackshot.frontdoor.check", *args]
 def check_env(cfg=CFG, **more): return own_env(STACKSHOT_CONFIG=cfg, PATH=f"{T}/bin:" + os.environ.get("PATH", ""), **more)
@@ -355,6 +356,60 @@ mcp.run(transport="http", host="127.0.0.1", port=int(sys.argv[1]), show_banner=F
     rc, out = run("--installed", cfg=config("no-behind.toml", behind=False))
     check("--installed, the config's board with no verify secret: the sign-in service's health only, and it says so", rc == 0 and "its token check was not tried" in out, (rc, out))
 
+    # a failed unit: checked while it is enabled, left alone once it is not (`disable --now` leaves the failed state behind)
+    turned_on(failed=("signin", "frontdoor", "splitter"))
+    rc, out = run("--installed")
+    check("--installed, every unit failed and none enabled: nothing to check, exit 0", rc == 0 and "nothing to check: no front door unit is enabled or running" in out, (rc, out))
+    turned_on(enabled=("frontdoor",), failed=("signin",))
+    rc, out = run("--installed", cfg=config("failed-off.toml", signin=dead_port))
+    check("--installed: a failed unit that is not enabled is not checked beside one that is", rc == 0 and last(out) == "front door check: passed (front door)", (rc, out))
+    turned_on(enabled=("signin",), failed=("signin",))
+    rc, out = run("--installed", cfg=config("failed-on.toml", signin=dead_port))
+    check("--installed: a failed unit that is enabled is checked, and fails the check", rc == 1 and last(out).startswith("front door check: FAILED: sign-in service: "), (rc, out))
+
+    # no board can be told to be this machine's own: what needs no board's token is checked, and the line says what was not tried
+    def two_boards(name, main=None, other="https://other.example.invalid/mcp", **kw):
+        return config(name, backend_url=main, extra=f'\n[[frontdoor.backends]]\nname = "second"\nurl = "{other}"\ntoken_file = "{ROOT}/door/second.token"\n', **kw)
+    far_two = two_boards("far-two.toml", main="https://board.example.invalid/mcp")
+    own_two = two_boards("own-two.toml", other=f"http://127.0.0.1:{bport}/mcp")
+    for label, cfg in (("two boards elsewhere", far_two), ("two boards on this machine's port", own_two)):
+        turned_on(enabled=("signin", "splitter"))
+        rc, out = run("--installed", cfg=cfg)
+        check(f"--installed, {label}: passes, and both parts say the token was not tried and what would have it tried",
+              rc == 0 and "ok: sign-in service: /healthz 200 and a request with no token refused; no board's machine token was tried: none of the [[frontdoor.backends]] boards can be told" in out
+              and "ok: splitter: routes as set; no tool call was tried: none of the [[frontdoor.backends]] boards can be told" in out and "give exactly one of them a loopback url on [server] port" in out
+              and "--board" not in out and last(out) == "front door check: passed (sign-in service, splitter)", (rc, out))
+        for flag, url in (("--signin", S), ("--splitter", L)):
+            rc, out = run(flag, url, cfg=cfg)
+            check(f"{flag} by address, {label}: not checked, and --board is the remedy", rc == 2 and "name one with --board" in out, (rc, out))
+    rc, out = run("--signin", S, cfg=config("one-elsewhere.toml", backend_url="https://board.example.invalid/mcp"))
+    check("--signin, one board listed and not on this machine's port: it is the one meant", rc == 0 and "the token check of board main's machine token answered 200" in out, (rc, out))
+    rc, out = run("--signin", S, "--board", "main", cfg=own_two)
+    check("--signin by address with --board among several: that board's token is tried", rc == 0 and "the token check of board main's machine token answered 200" in out, (rc, out))
+    turned_on(enabled=("signin",))
+    rc, out = run("--installed", cfg=two_boards("one-own.toml"))
+    check("--installed, one of two boards this machine's own: its token is tried", rc == 0 and "the token check of board main's machine token answered 200" in out, (rc, out))
+    srv = Server(("127.0.0.1", 0), Open); threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        for label, part, answers, word in (("a splitter that lets the identity header through", "splitter", {}, "carries the identity header and no token was answered 200, not 401"),
+                                           ("a splitter that passes the token check path on", "splitter", {"/mcp": 401}, "/frontdoor/verify was answered 200, not 404"),
+                                           ("a sign-in service that accepts no token", "signin", {}, "a token check that carries no token was answered 200, not 401")):
+            Open.answers = answers
+            turned_on(enabled=(part,))
+            rc, out = run("--installed", cfg=two_boards("untold-open.toml", main="https://board.example.invalid/mcp", **{part: srv.server_address[1]}))
+            check(f"--installed, no board told apart: {label} still fails", rc == 1 and word in out, (rc, out))
+        # a front door that serves no board
+        brain = config("brain-only.toml", door=False, extra=f'\n[frontdoor]\nlisten_port = {srv.server_address[1]}\nidentity_header = "X-Forwarded-User"\nidentity_secret_file = "{ROOT}/identity.key"\n'
+                       f'members_file = "{MEMBERS}"\n\n[[frontdoor.backends]]\nname = "notes"\nkind = "brain"\nurl = "https://notes.example.invalid/mcp"\ntoken_file = "{TOKEN_FILE}"\n')
+        Open.answers = {}; turned_on(enabled=("frontdoor",))
+        rc, out = run("--installed", cfg=brain)
+        check("--installed, a front door with no board: its health route, and it says no tool call was tried", rc == 0 and "ok: front door: /healthz 200; no tool call was tried: no [[frontdoor.backends]] board is listed" in out, (rc, out))
+        Open.answers = {"/healthz": 503}
+        rc, out = run("--installed", cfg=brain)
+        check("--installed, a front door with no board whose health route is not 200: fails", rc == 1 and "front door: /healthz answered 503, not 200" in out, (rc, out))
+    finally:
+        Open.answers = {}; srv.shutdown(); srv.server_close()
+
     # ------------------------------------------------------------ no check possible: exit 2
     for label, args, cfg, word in (
             ("no [frontdoor] table", ("--door", D), config("nodoor2.toml", door=False), "no [frontdoor] table"),
@@ -477,8 +532,13 @@ fresh(f"STACKSHOT_PORTAL_TOKEN={TOKEN}")
 refused("an unknown board", "no [[frontdoor.backends]] board is named 'elsewhere'", args=("--board", "elsewhere"))
 refused("a config with no [frontdoor] table", "no [frontdoor] table", cfg=config("t-nodoor.toml", door=False))
 refused("no board of this machine and no --board", "no [[frontdoor.backends]] board is this machine's own", cfg=config("t-far.toml", backend_url="https://board.example.invalid/mcp"))
-r = boardtoken("--board", "main", cfg=config("t-far2.toml", backend_url="https://board.example.invalid/mcp"))
-check("token --board for a url that is not this machine's: written, with a note", r.returncode == 0 and "note: its url is not on this config's [server] port" in r.stdout, (r.returncode, r.stdout, r.stderr))
+for label, url in (("elsewhere", "https://board.example.invalid/mcp"), ("on this machine at another port", f"http://127.0.0.1:{dead_port}/mcp")):
+    fresh(f"STACKSHOT_PORTAL_TOKEN={TOKEN}"); write_private(TOKEN_FILE, WRONG)       # that board's own token, which must stay
+    for args in (("--board", "main"), ("--board", "main", "--check")):
+        refused(f"{' '.join(args)} for a board {label}, and leaves its token file as it was", "board main is not this machine's own board", args=args, cfg=config("t-far2.toml", backend_url=url))
+OAUTH.unlink()
+refused("a named board that is not this machine's own before oauth.env is read", "is not this machine's own board", args=("--board", "main"), cfg=config("t-far2.toml", backend_url="https://board.example.invalid/mcp"))
+fresh(f"STACKSHOT_PORTAL_TOKEN={TOKEN}")
 two = f'\n[[frontdoor.backends]]\nname = "second"\nurl = "http://localhost:{bport}/mcp"\ntoken_file = "{ROOT}/door/second.token"\n'
 refused("two boards of this machine and no --board", "more than one", cfg=config("t-two.toml", extra=two))
 def with_backend(name, body):
@@ -582,7 +642,10 @@ for label, kw, files, want in (
         ("a server change, all turned on and the splitter running", dict(enabled=FU, active=FU), CODE, [SV, DOOR_U, SIGN_U]),
         ("a server change, the door and the sign-in service running but not enabled", dict(active=(DOOR_U, SIGN_U)), CODE, [SV, DOOR_U, SIGN_U]),
         ("a server change, enabled but stopped", dict(enabled=(DOOR_U, SIGN_U)), CODE, [SV, DOOR_U, SIGN_U]),
-        ("a server change, one failed", dict(failed=(SIGN_U,)), CODE, [SV, SIGN_U]),
+        ("a server change, one failed and enabled", dict(enabled=(SIGN_U,), failed=(SIGN_U,)), CODE, [SV, SIGN_U]),
+        ("a server change, one failed and not enabled", dict(failed=(SIGN_U,)), CODE, [SV]),
+        ("the sign-in unit file, failed and not enabled", dict(failed=(SIGN_U,)), ("units/stackshot-signin.service.in",), []),
+        ("the front door's unit file, failed and enabled", dict(enabled=(DOOR_U,), failed=(DOOR_U,)), ("units/stackshot-frontdoor.service.in",), [DOOR_U]),
         ("a server change, installed and never turned on", dict(), CODE, [SV]),
         ("a server change, turned on but not installed", dict(installed=(), enabled=FU, active=FU), CODE, [SV]),
         ("the front door's unit file", dict(enabled=FU, active=FU), ("units/stackshot-frontdoor.service.in",), [DOOR_U]),
@@ -591,6 +654,7 @@ for label, kw, files, want in (
         ("the splitter's Caddyfile, running", dict(active=(SPLIT_U,)), ("units/stackshot-splitter.Caddyfile.in",), [SPLIT_U]),
         ("the splitter's Caddyfile, enabled and stopped: never started", dict(enabled=(SPLIT_U,)), ("units/stackshot-splitter.Caddyfile.in",), []),
         ("the splitter's Caddyfile, failed", dict(failed=(SPLIT_U,)), ("units/stackshot-splitter.Caddyfile.in",), []),
+        ("the splitter's Caddyfile, enabled and failed: never started", dict(enabled=(SPLIT_U,), failed=(SPLIT_U,)), ("units/stackshot-splitter.Caddyfile.in",), []),
         ("a doc", dict(enabled=FU, active=FU), ("docs/a.md",), [])):
     rc, out, log = deploy(files, dry=True, **kw)
     check(f"deploy plan: {label}: {want or 'nothing'}", rc == 0 and planned(out) == want, (rc, out[-500:]))
@@ -617,6 +681,12 @@ for u in FU:
     check(f"deploy: {u} alone turned on is enough for the check", rc == 1 and len(checks(log)) == 1, (rc, checks(log), out[-300:]))
 rc, out, log = deploy(CODE, check_rc=1)
 check("deploy: no unit turned on: no check, the deploy as before", rc == 0 and checks(log) == [] and "front door" not in out, (rc, checks(log), out[-500:]))
+rc, out, log = deploy(CODE, failed=FU, check_rc=1)
+check("deploy: every unit failed and none enabled: none is reset or restarted, and no check", rc == 0 and checks(log) == [] and restarted(log) == [SV]
+      and not [l for l in log if re.search(r"(reset-failed|restart|start|enable) .*stackshot-(frontdoor|signin|splitter)", l)], (rc, log, out[-500:]))
+for u in FU:
+    rc, out, log = deploy(("docs/a.md",), enabled=(u,), failed=(u,), check_rc=1)
+    check(f"deploy: {u} failed and enabled is enough for the check", rc == 1 and len(checks(log)) == 1, (rc, checks(log), out[-300:]))
 rc, out, log = deploy(CODE, installed=(), enabled=FU, active=FU, check_rc=1)
 check("deploy: no front door unit installed: no check and no systemctl question about one", rc == 0 and checks(log) == [] and not [l for l in log if "frontdoor" in l or "signin" in l or "splitter" in l], (rc, log))
 rc, out, log = deploy(CODE, enabled=FU, active=FU, restart_fails=(DOOR_U,), check_rc=0)

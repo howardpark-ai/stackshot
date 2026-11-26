@@ -17,7 +17,7 @@ import re
 import subprocess
 import sys
 
-MIN_CADDY = (2, 11, 6)
+MIN_CADDY = (2, 11, 8)       # why this one: docs/front-door.md, "Caddy in front"
 _VERSION = re.compile(r"v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z][0-9A-Za-z.+~-]*)?")
 CADDY_TIMEOUT = 20.0
 
