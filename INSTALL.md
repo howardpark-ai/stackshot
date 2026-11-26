@@ -347,6 +347,7 @@ On the new server box:
 | `[fleet] publisher_letter` | The key of the Machines panel's first column. Set it: a box whose hostname has no row in `paths.fleet_names` and no fleet machine of that name is otherwise keyed by its lower-cased hostname, and `reboot-hooks/reboot-queue.py` and `push.py` use the same key. The letter must not belong to another machine of the fleet. The server box's own puller takes this letter when it first registers, and any other machine registering first takes another one, so the panel shows one card for the server. The cleanest route for a new server box is still `stackshot setup` there, which writes the box's row in `paths.fleet_names` with this letter, or a row you add by hand (`<os hostname>`, `<fleet name>`, `<letter>`, tab-separated). |
 | `[paths]` | `repo`, `store`, `brain` and `fleet_names` point at this box's checkouts and files, which are copied or cloned here first. `brain` is the pages checkout the server keeps fresh. |
 | `[server] host`, `port`; `[instance] board_url`; `[auth] base_url` | The address the server binds and the one the board and the sign-in answer to. |
+| `[release] deploy_ssh` | Empty, or this box's own hostname. Any other value (one left over from the time this box ran releases for another server, an address, an ssh alias) makes the publisher's commands refuse here, the deploy's republish and the reboot hook's flush among them; the running server publishes all the same. |
 
 On every box that only runs sessions:
 
@@ -369,6 +370,24 @@ Off the server host, the line that says so gives the command to run there, which
 name that is not a plain name is never sent by `clear` itself: when the server then keeps a debt, the reply says so and gives that command.
 A box with neither `deploy_ssh` nor `[server] box = false` is read as the server host, and clears only what it holds itself.
 
+The publisher's commands run on the server host only. `stackshot publish publish`, `bump` and `flush` render the board from the box's own
+copy of the store and its own state, then commit and push it, so on a box that is not the server host (`[release] deploy_ssh` names another
+box, or `[server] box = false` with no host named) each prints one line, exits 1 and fetches, writes, commits and pushes nothing; a script or
+a pass run by hand that reaches the publisher is refused the same way. The line names the server (the host in `deploy_ssh`; without a plain
+host name, the address this box's client reaches it at, when that is another box's) and the command that runs there. A script that publishes
+after a change of its own runs that command on the server, for example `ssh <server> '~/stackshot/bin/stackshot publish bump'`. `brief` and
+`render` only read, and run on any box. The decision is the one `./install.sh units` makes (below), with no `--force-host`: a config that
+names no server host (a one-box or a fresh install) refuses nothing, a host word whose lookup does not resolve refuses, and a check that
+cannot run at all refuses nothing. A box with neither setting is read as the server host, so set one on every box that only runs sessions, a
+former server box first.
+
+The running server and `stackshot minute` publish without that check: after a write, on the timer and for the `bump_versions` tool, whatever
+the config calls their box. So a server that `deploy_ssh` names by an address or an ssh alias goes on publishing, and only the commands are
+refused there: `deploy.sh`'s republish ends in a warning and the server's timer publishes, and `reboot-hooks/stackshot-hook flush-stop`
+fails and leaves the server running. Name the server host by its hostname and the commands run too. The other side of it: a server started on
+a box that is not the server host publishes that box's copy, so start it on the server host only (`./install.sh units` refuses elsewhere;
+`--force-host`, which `stackshot setup` and `stackshot doctor` pass, installs it anyway).
+
 A box that runs `release.sh` for a server on another box sets `[release] deploy_ssh` to that box. The release deploys there and copies its
 last-good record there, which the server reads to settle released items. When the record was already made before the setting, run
 `./release.sh --copy-record` on that box once, or wait for its next release. While a release runs it also tells the server box so, over the same
@@ -390,6 +409,7 @@ Some limits of the check, all on the safe side (a refusal, never a wrong install
   this box, and `deploy_ssh` naming this box that way is refused. Name this box by its hostname in `deploy_ssh`, or pass `--force-host`.
 - A host word (`host:<role>`) whose `[hosts]` lookup does not resolve (no lookup configured, or it failed) stays a word and names no box this one
   can be, so `units` refuses and says the lookup did not resolve. Fix the lookup or name the host, or pass `--force-host`.
+- The publisher's check (above) shares the first two limits and takes no flag: name the server host by its hostname.
 - A `deploy_ssh` that names another box wins over `[server] box = true`: the box is refused all the same.
 - If the config cannot be read for the check (the check itself fails), nothing is refused and the install goes on: the check only stops a known
   wrong host, it never blocks an install it cannot judge.

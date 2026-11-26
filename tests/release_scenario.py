@@ -1386,7 +1386,7 @@ rc, units_, got, out = plan_units("units/stackshot-minute.service.in", home=HOME
 check("deploy.sh --dry-run of a rollback of the minute unit's own file: it alone", rc == 0 and units_ == [M_], (rc, got, out[-300:]))
 
 OLD_DEPLOY = '#!/bin/sh\n# a deploy.sh from before the minute unit: it knows the rollback hand-off (DEPLOY_ROLLED_BACK_FROM) and nothing of the unit\necho "old deploy.sh ran from=${DEPLOY_ROLLED_BACK_FROM:-none}" >> "$RT_LOG"\n[ -z "${RT_OLD_FAILS:-}" ] || exit 1\nexit 0\n'
-def real_deploy(files, home, rollback=False, tripped=False, runner="", standby=False, predates=False, active="active", beat="fresh", off_fails=False, wait=None, mainpid=4242, beatpid=None, old_fails=False, timeout=120):
+def real_deploy(files, home, rollback=False, tripped=False, runner="", standby=False, predates=False, active="active", beat="fresh", off_fails=False, wait=None, mainpid=4242, beatpid=None, old_fails=False, timeout=120, refused=""):
     """The real deploy.sh, run for real (not --dry-run) in a throwaway checkout, with systemctl, the server's control, install.sh, uv and curl stubs that log to one file → (rc, stdout, the log's lines).
     The home is a copy (the stub install.sh removes the minute unit's file there, as the real one does). `predates`: the rollback's target has no template of the minute unit and an older deploy.sh (a stub that only logs).
     The systemctl stub answers is-active for the minute unit with `active` ("active", "inactive", "failed"), its MainPID with `mainpid`, and writes its heartbeat (status.json under RT_STATE/minute) at its restart as `beat` says: "fresh", "none" or
@@ -1417,11 +1417,12 @@ def real_deploy(files, home, rollback=False, tripped=False, runner="", standby=F
                  '  *is-active*stackshot-minute*) echo "$RT_ACTIVE"; [ "$RT_ACTIVE" = active ] || exit 3 ;;\n'
                  'esac\nexit 0')
     if tripped: (d / "tripped").write_text("")
-    for n, body in (("systemctl", systemctl), ("uv", 'echo "uv $*" >> "$RT_LOG"; echo published'), ("curl", "exit 0")):
+    uv = 'echo "uv $*" >> "$RT_LOG"\nif [ -n "$RT_REFUSED" ]; then echo "$RT_REFUSED" >&2; exit 1; fi\necho published'      # `refused`: the republish's one line on stderr, and its exit 1
+    for n, body in (("systemctl", systemctl), ("uv", uv), ("curl", "exit 0")):
         (d / "bin" / n).write_text("#!/bin/sh\n" + body + "\n"); (d / "bin" / n).chmod(0o755)
     env = {**genv, "PATH": f"{d}/bin:" + os.environ.get("PATH", ""), "HOME": str(h), "RT_LOG": str(d / "log"), "RT_TRIP": str(d / "tripped"), "RT_RUNNER": runner, "RT_STANDBY": "1" if standby else "",
            "RT_STATE": str(d / "state"), "RT_ACTIVE": active, "RT_BEAT": beat, "RT_OFF_FAILS": "1" if off_fails else "", "DEPLOY_MINUTE_WAIT": str(wait if wait is not None else 20),
-           "RT_MAINPID": str(mainpid), "RT_BEATPID": str(mainpid if beatpid is None else beatpid), "RT_OLD_FAILS": "1" if old_fails else ""}
+           "RT_MAINPID": str(mainpid), "RT_BEATPID": str(mainpid if beatpid is None else beatpid), "RT_OLD_FAILS": "1" if old_fails else "", "RT_REFUSED": refused}
     cmd = ["bash", str(b / "deploy.sh")]
     if rollback: env.update(DEPLOY_ROLLBACK="1", DEPLOY_TO=base, DEPLOY_LOCK_FILE=str(d / "deploy.lock")); cmd = ["flock", str(d / "deploy.lock")] + cmd
     rc_, text_ = run_alarm(cmd, timeout, cwd=b, env=env)
@@ -1438,6 +1439,11 @@ check("deploy.sh reinstalls the units with --force-host and never a bare `instal
 rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_NONE)
 check("deploy.sh, no minute unit installed, the same change: the server restarted, nothing asked about the minute unit, nothing said about it", rc == 0 and "server_ctl restart stackshot.service" in log
       and not any("minute" in l for l in log) and "stackshot-minute" not in out, (rc, log, out[-300:]))
+REFUSED = "publish: refused on box-a, which is not the server host: [release] deploy_ssh says the server runs on 192.0.2.7. Nothing was fetched, written, committed or pushed"
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_NONE, refused=REFUSED)
+warns = [l for l in out.splitlines() if "republish" in l]
+check("deploy.sh, the republish refused (a server its own config names by an address): the deploy exits 0 with one warning line that carries the refusal and says the server publishes on its own at its next timer mark",
+      rc == 0 and warns == [f"  WARNING: the republish failed ({REFUSED}); the deploy itself is done and the server publishes on its own at its next timer mark ([publish] every_minutes, 10 min by default)"], (rc, warns, out[-400:]))
 rc, out, log, gone = real_deploy(("units/stackshot-minute.service.in",), HOME_MIN)
 check("deploy.sh, minute unit installed, only its unit file changed: the minute unit restarted, the server not (no republish either)", rc == 0 and f"systemctl --user restart {M_}" in log
       and not any(l.startswith("server_ctl restart") or l.startswith("uv run") for l in log), (rc, log, out[-300:]))

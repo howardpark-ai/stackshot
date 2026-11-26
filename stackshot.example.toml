@@ -110,7 +110,7 @@ suitemap_warm_cmd = ""                              # the command, as words, tha
                                                     # Stopped after 30 minutes; one at a time; a failure or a missing command is a line in <state>/releases/suitemap-warm-<sha>.log and nothing else.
                                                     # "" = none: the release log says so and goes on. Contract: none (a command that is run).
 deploy_ssh = ""                                     # the ssh host release.sh runs deploy.sh on (and the rollback), when the server runs on another box than release.sh: `ssh -o BatchMode=yes -o ConnectTimeout=15 <host> 'cd ~/stackshot && ...'`;
-                                                    # this box's checkout then follows to the same commit and only its puller restarts; a checkout that cannot follow (local changes) pauses the release queue and reports red, `release.sh queue --resume` goes on once it is clean. While it runs, a release also tells that box so (the busy hold and the Queued for release label read it). "" = deploy here (a one-box install). Set to another box, it also makes `./install.sh units` refuse there (`--force-host` overrides). Contract: none (a command that is run).
+                                                    # this box's checkout then follows to the same commit and only its puller restarts; a checkout that cannot follow (local changes) pauses the release queue and reports red, `release.sh queue --resume` goes on once it is clean. While it runs, a release also tells that box so (the busy hold and the Queued for release label read it). "" = deploy here (a one-box install). Set to another box, it also makes `./install.sh units` refuse there (`--force-host` overrides) and `stackshot publish publish`, `bump` and `flush` refuse there (no override; a running server publishes all the same, whatever this value calls its box). Contract: none (a command that is run).
 
 [subject]
 prefixes = ["[work] ", "[home] "]                   # every subject starts with one of these
@@ -994,7 +994,7 @@ port = 8020
 path = "/mcp"
 # box = true                                        # whether this machine is the server box: it then reads the page registry, page times and the board's brief from its own checkouts
                                                     # ([paths] brain, store). false = never (a pane hook always asks the server's client API, whatever clones the machine holds): set it on
-                                                    # a machine that only runs sessions (`./install.sh units` refuses there too; `--force-host` overrides). Unset (the default): a machine that holds the pages checkout is taken for the server box
+                                                    # a machine that only runs sessions (`./install.sh units` refuses there too, `--force-host` overrides; so do `stackshot publish publish`, `bump` and `flush`; a running server publishes all the same). Unset (the default): a machine that holds the pages checkout is taken for the server box
 
 [items_api]                                         # what the items API (`items?key=<session>`, which the fleet tool's web board reads) emits
 owner_mover_kind = "legacy"                         # the `mover.kind` of an item that is the owner's move. "legacy" (the default) = a legacy owner label that stays supported: the owner's
