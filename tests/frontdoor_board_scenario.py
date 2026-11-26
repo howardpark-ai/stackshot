@@ -1,7 +1,8 @@
 """Scenario test for a board behind the front door (stage 2 of the front door): the board checks the signed identity of a call, and reads its members from the front door's members file.
 
-Offline and hermetic: made-up config files, the real board server (`stackshot.web.server`) on 127.0.0.1 in this process, no store beyond one fixture item, no network. Two parts, each in a
-process of its own (the board reads its config and keeps module state at import): the board behind a front door (`on`) and a board with no `[behind_frontdoor]` table (`off`).
+Offline and hermetic: made-up config files, the real board server (`stackshot.web.server`) on 127.0.0.1 in this process, no store beyond one fixture item, no network. Three parts, each in a
+process of its own (the board reads its config and keeps module state at import): the board behind a front door (`on`), a board with no `[behind_frontdoor]` table (`off`) and a board with sign-in
+on that offers the sign-in service's token check (`verify`).
 
 Part `on` covers:
   * the settings (`core/behind_door.py`): an absent table is all off; every key read; a wrong value is told in the config notes and never read as "off" (a board told to check identities
@@ -24,10 +25,18 @@ Part `on` covers:
 Part `off` covers a board with no table: its `/mcp` is not wrapped, an unsigned call and one with a signed header are served as before, `_who` asks nothing of a request, `[[members]]` is the
 list, and the config notes say nothing about a front door.
 
+Part `verify` covers a board with `[auth] mode = "google"` (a made-up client), a portal machine token, `identity_secret_file` and `verify_secret_file`, whose sign-in is the board's own provider
+(no call reaches Google: only the portal's token and tokens the provider does not know are sent). Over HTTP: `GET /frontdoor/verify` is on the app, ahead of the pages' catch-all (an unsigned request
+is 403 with the check's sentence, never 404); the header `x-stackshot-verify` and the signed word `token-check`, written here as the sign-in service writes them, are accepted; the portal's token is 200
+`via: portal`; no bearer and an unknown token are 401; a bearer is read as `/mcp` reads it (two spaces are 401 on both); a non-ASCII bearer is 401 on the route and on `/mcp` (403 unsigned), never 500;
+the app's bearer middleware calls the provider on an unsigned request, which the route then refuses; every 401 of the route carries the one `WWW-Authenticate` value `/mcp` sends for the same
+`Authorization` header (none, an unknown bearer, two spaces, an empty one, `Basic`, a non-ASCII one), with the `resource_metadata` address, and a 200, a 403 and a 503 carry none; a verify secret
+equal to the identity secret answers no check.
+
     tests/run-suite frontdoor_board        -> exit 0 / 1"""
 import os, subprocess, sys
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-PARTS = ("on", "off")
+PARTS = ("on", "off", "verify")
 
 
 def setup(part):
@@ -55,6 +64,10 @@ def setup(part):
         (T / "members.json").write_text(json.dumps({"alice@example.test": ["main", "side"], "bob@example.test": ["side"], "carol@example.test": ["main"]}))
         toml += (f'\n[behind_frontdoor]\nidentity_secret_file = "{paths["secret"]}"\nidentity_max_age_seconds = 120\n'
                  f'members_file = "{paths["members"]}"\nboard_name = "main"\n')
+    if part == "verify":
+        paths["verify"] = secret("verify.key", "verify-secret-0123456789abcdef")
+        toml, n = re.subn(r'(?m)^portal_identity = ""', 'portal_identity = "owner@example.test"', toml); assert n == 1
+        toml += f'\n[behind_frontdoor]\nidentity_secret_file = "{paths["secret"]}"\nverify_secret_file = "{paths["verify"]}"\n'
     (T / "stackshot.toml").write_text(toml, encoding="utf-8")
     (T / "RULES.md").write_text("# rules\n\n" + "- a rule the connector serves, long enough to count as a rulebook.\n" * 20, encoding="utf-8")
     os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
@@ -112,16 +125,24 @@ def stop(srv, th, sock):
     except OSError: pass
 
 
-def post(url, headers=None, body=b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}', method="POST"):
+INITIALIZE = b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}'
+
+
+def post(url, headers=None, body=INITIALIZE, method="POST"):
     """(status, text) of one raw request; a refusal's body is read."""
+    return exchange(url, headers, body, method)[:2]
+
+
+def exchange(url, headers=None, body=INITIALIZE, method="POST"):
+    """(status, text, the answer's WWW-Authenticate values) of one raw request."""
     import urllib.error, urllib.request
     h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream", **(headers or {})}
     req = urllib.request.Request(url, data=body if method == "POST" else None, headers=h, method=method)
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
-            return r.status, r.read(2000).decode("utf-8", "replace")
+            return r.status, r.read(2000).decode("utf-8", "replace"), r.headers.get_all("www-authenticate") or []
     except urllib.error.HTTPError as e:
-        return e.code, e.read(2000).decode("utf-8", "replace")
+        return e.code, e.read(2000).decode("utf-8", "replace"), e.headers.get_all("www-authenticate") or []
 
 
 # ================================================================ part on: the board behind a front door
@@ -356,6 +377,12 @@ def part_on():
         check("board: an unsigned call is refused 403 with the sentence", (st, body) == (403, door.NO_IDENTITY), (st, body))
         st, body = post(URL, method="GET")
         check("board: an unsigned GET of the endpoint is refused, too", st == 403 and body == door.NO_IDENTITY, (st, body))
+        import urllib.error, urllib.request
+        try:
+            urllib.request.urlopen(URL, timeout=10).close(); refusal = None
+        except urllib.error.HTTPError as e:
+            refusal = (e.code, e.headers.get_all("x-frame-options"), e.headers.get_all("content-security-policy")); e.close()
+        check("board: the guard's refusal says who may frame it, as every response does", refusal == (403, ["SAMEORIGIN"], ["frame-ancestors 'self'"]), refusal)
         st, body = post(URL, {ident.HEADER: sig(ALICE, OTHER)})
         check("board: a call signed with another secret is refused 403, and the sentence tells neither secret", st == 403 and body == door.BAD_IDENTITY and SECRET not in body and OTHER not in body, (st, body))
         v = sig(ALICE); p = v.split(".")
@@ -503,11 +530,128 @@ def part_off():
     return F.ran, F.fails
 
 
+# ================================================================ part verify: a board with sign-in on that offers the token check
+def part_verify():
+    import json
+    T, secret, paths = setup("verify")
+    F = Fixture(); check = F.check
+    PORTAL = "portal-token-for-the-test-0123456789abcdef"
+    os.environ.update(STACKSHOT_AUTH="google", STACKSHOT_GOOGLE_CLIENT_ID="client.example.test", STACKSHOT_GOOGLE_CLIENT_SECRET="made-up-client-value",
+                      STACKSHOT_PORTAL_TOKEN=PORTAL, FASTMCP_HOME=str(T / "fastmcp"))      # set before fastmcp is imported: the provider's own files stay in the scratch folder
+    import logging; logging.disable(logging.CRITICAL)
+    from stackshot.core import behind_door as door, frontdoor_identity as ident
+    from stackshot.web import server
+    from fastmcp.server.auth.providers.google import GoogleProvider
+    # the wire as the sign-in service writes it: the header's name and the signed word are literals here, never the board's constants
+    HEADER, WORD = "x-stackshot-verify", "token-check"
+    VSECRET, ISECRET = "verify-secret-0123456789abcdef", "door-secret-0123456789abcdef"
+    signed = lambda secret_=VSECRET: {HEADER: ident.sign(secret_.encode(), WORD)}
+    bearer = lambda value: {"Authorization": value}
+    INVALID = {"error": "invalid_token"}
+
+    provider = server.mcp.auth
+    check("verify: the board's sign-in is its own Google provider", isinstance(provider, GoogleProvider), type(provider).__name__)
+    asked, real_verify = [], provider.verify_token
+    async def counting(token):
+        asked.append(token)
+        return await real_verify(token)
+    provider.verify_token = counting
+    app = server.mcp.http_app()
+    srv, th, sock, port = serve(app)
+    BASE = f"http://127.0.0.1:{port}"
+    try:
+        def get(headers):
+            st, body = post(BASE + "/frontdoor/verify", headers, method="GET")
+            try: return st, json.loads(body)
+            except ValueError: return st, body
+        got = get({})
+        check("verify: an unsigned GET /frontdoor/verify is 403 with the check's sentence: the route is on the app, ahead of the pages' catch-all", got == (403, door.NO_VERIFY), got)
+        asked.clear()
+        got = get(bearer("Bearer unknown-unsigned-token"))
+        check("verify: an unsigned request with a bearer is 403 too", got == (403, door.NO_VERIFY), got)
+        check("verify: ...though the app's bearer middleware has asked the provider about that token before the route ran (once; the route asks nothing)", asked == ["unknown-unsigned-token"], asked)
+        got = get({**signed("another-secret-0123456789abc"), **bearer(f"Bearer {PORTAL}")})
+        check("verify: a header signed under another secret is 403", got == (403, door.BAD_VERIFY), got)
+        got = get({**signed(ISECRET), **bearer(f"Bearer {PORTAL}")})
+        check("verify: a header signed under the identity secret is 403", got == (403, door.BAD_VERIFY), got)
+        asked.clear()
+        got = get({**signed(), **bearer(f"Bearer {PORTAL}")})
+        check("verify: x-stackshot-verify signing token-check, with the portal's token, is 200 with the portal's identity", got == (200, {"email": "owner@example.test", "via": "portal"}), got)
+        check("verify: the middleware and then the route asked the provider about the same token", asked == [PORTAL, PORTAL], asked)
+        got = get({**signed(), **bearer(f"bearer {PORTAL}")})
+        check("verify: the scheme is read in any case", got == (200, {"email": "owner@example.test", "via": "portal"}), got)
+        got = get(signed())
+        check("verify: signed with no bearer is 401 invalid_token", got == (401, INVALID), got)
+        got = get({**signed(), **bearer("Bearer a-token-the-board-never-issued")})
+        check("verify: a token the board's provider does not know is 401 invalid_token", got == (401, INVALID), got)
+
+        def mcp(value):
+            return post(BASE + "/mcp", {ident.HEADER: ident.sign(ISECRET.encode(), "owner@example.test"), **bearer(value)})
+        st, body = mcp(f"Bearer {PORTAL}")
+        check("verify: /mcp takes the portal's token (the control for the refusals below)", st == 200 and "serverInfo" in body, (st, body[:200]))
+        st, body = mcp(f"Bearer  {PORTAL}")
+        got = get({**signed(), **bearer(f"Bearer  {PORTAL}")})
+        check("verify: a bearer with two spaces, which /mcp refuses with 401, is 401 on the check too", st == 401 and got == (401, INVALID), (st, body[:200], got))
+        odd = "Bearer caf" + chr(233) + "-token"      # a header is bytes on the wire: this one is sent as latin-1
+        got = get({**signed(), **bearer(odd)})
+        check("verify: a non-ASCII bearer on a signed check is 401 invalid_token, never 500", got == (401, INVALID), got)
+        got = get(bearer(odd))
+        check("verify: ...on an unsigned one 403, never 500", got == (403, door.NO_VERIFY), got)
+        st, body = mcp(odd)
+        check("verify: ...and on /mcp 401, never 500", st == 401, (st, body[:200]))
+
+        # a 401 of the check carries the WWW-Authenticate value /mcp sends for the same Authorization header
+        def challenges(value):
+            """((status, header values) of /mcp, the same of the check) for the Authorization header `value`, None for none."""
+            auth = {} if value is None else bearer(value)
+            door_st, _body, door_h = exchange(BASE + "/mcp", {ident.HEADER: ident.sign(ISECRET.encode(), "owner@example.test"), **auth})
+            st_, _body, h = exchange(BASE + "/frontdoor/verify", {**signed(), **auth}, method="GET")
+            return (door_st, door_h), (st_, h)
+        seen = {}
+        for label, value in (("no Authorization header", None), ("an unknown bearer", "Bearer a-token-the-board-never-issued"), ("two spaces", f"Bearer  {PORTAL}"), ("an empty bearer", "Bearer "),
+                             ("a Basic header", "Basic Zm9vOmJhcg=="), ("a non-ASCII bearer", odd)):
+            theirs, ours = challenges(value)
+            seen[label] = ours[1]
+            check(f"challenge: {label}: /mcp and the check both answer 401 with one WWW-Authenticate value, the same", theirs[0] == ours[0] == 401 and len(ours[1]) == 1 and ours[1] == theirs[1], (theirs, ours))
+        none, bad = (seen["no Authorization header"] or [""])[0], (seen["an unknown bearer"] or [""])[0]
+        metadata = 'resource_metadata="https://stackshot.example.com/.well-known/oauth-protected-resource/mcp"'
+        check("challenge: with no Authorization header it names no error, and the board's resource metadata address", none.startswith("Bearer ") and "error=" not in none and metadata in none, none)
+        check("challenge: with a bearer the board does not take it says invalid_token, and the same address", bad.startswith('Bearer error="invalid_token"') and metadata in bad, bad)
+        st, _body, h = exchange(BASE + "/.well-known/oauth-protected-resource/mcp", method="GET")
+        check("challenge: the address it names is served by the board", st == 200 and "authorization_servers" in _body, (st, _body[:200]))
+        for label, headers, want in (("a 200", {**signed(), **bearer(f"Bearer {PORTAL}")}, 200), ("an unsigned 403", bearer("Bearer a-token-the-board-never-issued"), 403), ("an unsigned 403 with no bearer", {}, 403)):
+            st, _body, h = exchange(BASE + "/frontdoor/verify", headers, method="GET")
+            check(f"challenge: {label} carries no WWW-Authenticate", st == want and h == [], (st, h))
+        inner, calls = provider.verify_token, []
+        async def fails_the_second_time(token):
+            calls.append(token)
+            if len(calls) > 1:      # the first call is the app's middleware, the second the route's
+                raise RuntimeError("made to fail")
+            return await real_verify(token)
+        provider.verify_token = fails_the_second_time
+        try:
+            st, _body, h = exchange(BASE + "/frontdoor/verify", {**signed(), **bearer(f"Bearer {PORTAL}")}, method="GET")
+        finally:
+            provider.verify_token = inner
+        check("challenge: a 503 carries no WWW-Authenticate", st == 503 and json.loads(_body) == {"error": "unavailable"} and h == [], (st, _body, h))
+
+        import pathlib
+        pathlib.Path(paths["verify"]).write_text(ISECRET + "\n")
+        got = get({**signed(ISECRET), **bearer(f"Bearer {PORTAL}")})
+        check("verify: a verify secret that is the identity secret answers no check: 403 with its sentence", got == (403, door.SAME_SECRET), got)
+        pathlib.Path(paths["verify"]).write_text(VSECRET + "\n")
+        got = get({**signed(), **bearer(f"Bearer {PORTAL}")})
+        check("verify: and with a secret of its own again the next check is answered", got[0] == 200, got)
+    finally:
+        stop(srv, th, sock)
+    return F.ran, F.fails
+
+
 MARK = "@@frontdoor_board part"
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--part":
         name = sys.argv[2]; assert name in PARTS, name
-        ran, fails = {"on": part_on, "off": part_off}[name]()
+        ran, fails = {"on": part_on, "off": part_off, "verify": part_verify}[name]()
         print(f"{MARK} {name} {len(ran)} {len(fails)}"); sys.stdout.flush()
         os._exit(0)      # nothing a thread of the part left behind holds the process (tests/_scratch.py removes the scratch folder first)
     total = bad = 0

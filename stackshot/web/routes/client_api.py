@@ -656,7 +656,7 @@ async def _client_api_read(request: Request, machine: str, what: str):
             return JSONResponse(await run_in_threadpool(_project_activity.payload), headers={"Cache-Control": "no-store"})
         except _project_activity.Unreadable as e:   # a record it needs cannot be read: an error with the reason, never a smaller answer
             return PlainTextResponse(str(e), status_code=503, headers={"Cache-Control": "no-store"})
-    if what in ("items", "open-records", "inbox-holds", "inbox-waiting", "your-move"):   # a scan of the board, a read of the hold files, a walk of the inbox and a render of the board: off the event loop, so the pages keep answering while it runs
+    if what in ("items", "involved", "open-records", "inbox-holds", "inbox-waiting", "your-move"):   # a scan of the board, a read of the hold files, a walk of the inbox and a render of the board: off the event loop, so the pages keep answering while it runs
         from starlette.concurrency import run_in_threadpool
         status, ctype, body = await run_in_threadpool(_client_get, what, dict(request.query_params))
     else:

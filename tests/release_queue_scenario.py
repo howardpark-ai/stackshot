@@ -883,6 +883,18 @@ check("the deploy of the merge fails (healthz): FAILED at deploy, one red report
 s = grp("on-group-ssh-follow-skipped", deploy_ssh="deploy-host", localdiff="stackshot/fleet/puller.py", dirty=" M release.sh", files=QF(["23", "25", "35"], started=["23"]))
 check("a group release deployed over ssh whose checkout here cannot follow: FAILED at deploy, one red report that says the server is live and this checkout could not follow, the release queue paused, the third PR not started, no `done:` line",
       s["rc"] == 1 and s["deploys"] == [M2] and "FAILED at deploy" in glog(s) and "could not follow" in glog(s) and s["paused"] and not s["started"] and len(red(s)) == 1 and all("done: " not in prlog(s, n) for n in (23, 25)), (s["rc"], s["deploys"], glog(s)[-500:], s["paused"], s["started"]))
+REC_STALE = "57a1e000000000000000000000000000000057a1"; REC_SEED = {"remote/releases/last-good": REC_STALE + "\n"}
+s = grp("on-group-record", deploy_ssh="deploy-host", files={**QF(["23", "25"], started=["23"]), **REC_SEED})
+check("a group release with the server on another box: its record there is the group's merge, there before each PR's items are asked about, and copied again when the release ends",
+      s["rc"] == 0 and s["lastgood"] == M2 and s["remote_lastgood"] == M2 and len(s["released"]) == 2 and s["remote_at_released"] == [M2, M2] and written(s) == [M2, M2, M2] and set(s["record_fds"]) == {"none"} and not_copied(s) == [],
+      (s["rc"], s["lastgood"], s["remote_lastgood"], s["remote_at_released"], written(s), s["msgs"]))
+s = grp("on-group-record-fail", deploy_ssh="deploy-host", record_fails="99", files={**QF(["23", "25"], started=["23"]), **REC_SEED})
+check("…and when the copy fails, one message for the whole group names its PRs, the release stays green",
+      s["rc"] == 0 and len(records(s)) == 3 and s["remote_lastgood"] == REC_STALE and len(not_copied(s)) == 1 and "[release] the group release of PRs #23 #25:" in not_copied(s)[0] and red(s) == [], (s["rc"], records(s), s["msgs"]))
+s = grp("on-group-record-deploy-fails", deploy_ssh="deploy-host", deploy_fail="1", files={**QF(["23", "25"], started=["23"]), **REC_SEED})
+check("…a group release that fails at its deploy still copies the record as it stands when it ends, never the merge whose run was not read",
+      s["rc"] == 1 and "FAILED at deploy" in glog(s) and s["released"] == [] and s["remote_lastgood"] == s["lastgood"] != M2 and written(s) == [s["lastgood"]], (s["rc"], s["lastgood"], s["remote_lastgood"], written(s)))
+
 s = grp("on-group-main-fails", main="fail", heads=f"{BASE},{M2}", live=M2, removed=GLOG, covered=GLOG, files=QF(["23", "25"], started=["23"]))
 check("main's run fails on the group's merge after the fast deploy: rolled back to the last good commit, FAILED at main's tests, the release queue paused (pause on disk before the lock is let go), the PRs not marked released",
       s["rc"] == 1 and "FAILED at main's tests" in glog(s) and s["deploys"][-1].startswith("rollback") and s["paused"] and s["paused_at_rollback"] == "present" and not s["released"], (s["rc"], s["deploys"], glog(s)[-700:], s["paused"], s["paused_at_rollback"]))

@@ -3,7 +3,7 @@
 A pass looks at every open item, and a look at one item asks for things that do not depend on the item: every session's role, the session registry, the fleet's session rows. Asked again
 for each item they were recomputed from the files each time, which was most of the minute set's work. Inside `scope()` such a value is computed once and handed to the rest of the pass.
 
-    with passmemo.scope():                  # the runner opens one around each tick; a pass called on its own opens its own
+    with passmemo.scope():                  # the runner opens one around each tick; a pass called on its own opens its own, and so does a read that looks at every open item (service/client_reads.py)
         ...
         roles = passmemo.once("roles", build, stamp=files_stamp)
 

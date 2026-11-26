@@ -3,7 +3,7 @@
 The page-debt call and its fallback to the page's keeper (`_pilot_fallback_tick`) live in service/page_debt.py, the start-up migrations and the migration route's passes in service/migrations.py, the inbox flag and the fleet helpers in service/fleet_events.py, the reads of the client API in
 service/client_reads.py and the recycle bookkeeping in service/recycle.py (the merge-progress pass, service/merge_progress.py, reaches nothing here). A few
 things they use are still the surface's, because other code on the surface shares them: the ledger of the page debts and its lock, the grace minutes, the session ids, the project's -main and builder agents, the item
-model's readers, the write path's flags, the stamp, retire and project-id passes the migration route dispatches to (they use the migrations' pass record, so the migrations cannot import them), the publish, the time zone, the renderer's words and tests (the brief, a time in words, when an item was confirmed, a recycle wait and a hold for the recycle alone), the home page's list rule, the rulebook text, the notice's ruling and the report of holds, the page's time, the queue map and the board's ids as shown. They are reached through `Hooks`, which web/wiring.py fills once
+model's readers, the write path's flags, the stamp, retire and project-id passes the migration route dispatches to (they use the migrations' pass record, so the migrations cannot import them), the publish, the time zone, the renderer's words and tests (the brief, a time in words, when an item was confirmed, a recycle wait and a hold for the recycle alone), the home page's list rule and its reading of a wait's end, the rulebook text, the notice's ruling and the report of holds, the page's time, the queue map and the board's ids as shown. They are reached through `Hooks`, which web/wiring.py fills once
 with `install` (web/server.py calls it at its import; these modules cannot import server.py: the surface sits above them). A hook is looked up on its owner module (by web/wiring.py) when it runs, so a suite that replaces one there reaches the passes; a suite that replaces a
 function of the passes sets it on the module that owns it. A hook leaves this table when the area that holds it moves under service/.
 
@@ -22,6 +22,7 @@ class Hooks:
     grace_min: Callable[..., Any]  # server._grace_min
     holds_report: Callable[..., Any]  # server._holds_report
     home_agents: Callable[[], Any]  # web.home.AGENTS
+    home_end_of: Callable[..., Any]  # web.home.end_of
     home_list_of: Callable[..., Any]  # web.home.list_of
     main_agent: Callable[..., Any]  # agents._main_agent
     model_guards_on: Callable[..., Any]  # item_read._model_guards_on

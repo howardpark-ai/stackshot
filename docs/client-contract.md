@@ -178,6 +178,47 @@ it leaves out an item that names no session. This read has no key and takes no q
   needs more of one item reads it by its id (`item-record`).
 - `stackshot/fleet/client.py get your-move` prints the JSON and exits 0, or exits 1 with `[<status>] <reason>` when there is no token or the server is not reached. It is answered off the event loop, as `items` is, since it renders the board.
 
+## The open items a session is the contact of or an observer on
+
+`GET /client/involved?key=<session>` returns the open items a session has been named on as the item's contact or as one of its observers, whoever moves them, for a page that lists what a session has taken on and
+should bring back. `items?key=<session>` is the items a session *moves*, takes after an answer or is named on in the needs; this read is the other two roles, which `items` does not list for them.
+
+- **Auth.** `Authorization: Bearer <machine token>`, as for every read of `/client`: no token, an unknown or revoked token, a Basic credential or the token in the query string is 401. A caller's pass (docs, *A caller's own key*)
+  opens only the form's calls and is 401 here. A read-only standby copy serves it like any other read. It writes nothing.
+- **Key.** `key` is the session as `items?key=` reads it: a pane name, a transcript uuid, a cse_ id or a permanent session id (at most 200 characters, one line). A missing, blank, over-long or multi-line key is 400 with a plain line, as for
+  `items`. A key that names no session, or a session that is neither contact nor observer of an open item, is 200 `{"items": []}`, never an error.
+- **Which items.** An open item whose contact is the session, or that lists the session among its observers (`metadata.observers`), or both (it is then one row). A closed item is never in it. The contact is the item's contact as it stands now,
+  the one the row shows: the stored contact while it is still a front agent, else the project's `-main` agent. A session is matched the way `items?key=` matches one: the key and what it resolves to against each stored name and what that
+  resolves to, so a session that was renamed is still found by its old or its new name. Whether the item has a mover, who it is, or what list the item is in plays no part.
+- **Shape.** 200 `{"items": [{"shown", "subject", "url", "mover", "contact", "observers", "list", "held", "until", "state_updated", "updated"}]}`, `Cache-Control: no-store`.
+  `shown`, `subject`, `contact`, `list`, `held`, `state_updated` and `updated` are the fields of an `items` row under the same names and in the same format, taken from the same function, so the two reads cannot disagree:
+  `shown` is the id as a person reads it (`board#N`); `contact` is the contact's name now, `""` when the project names none; `mover` is the name of whoever moves the item now by the item model's reading, as `item-facts` gives it (a session by
+  the name it has now, the owner as the model names him, and for an item that waits the one who takes it when the wait ends; `""` when the reading fails), a string and not the `mover` object of an `items` row, which is an older reading
+  kept for the readers written against it and can name a session for an item the owner moves;
+  `list` is the home page's list the item is in, `"your-move"`, `"agents"` or `"waiting"`, never empty; `held` is true for a parked item, one that waits on another open item and a doing item waiting for a wake that states its reason;
+  `state_updated` and `updated` are epoch seconds (`updated` is any write, `state_updated` the last change of state), `null` for an old item that stores none. `url` is the item's page as `your-move` gives it: under the instance's board address,
+  `/items/<n>` alone when the instance has none. `observers` is the list of the item's observers by the name each session has now, in the stored order, without repeats, `[]` for none.
+- **The day it comes back.** `until` is `"YYYY-MM-DD"`, the day a held item comes back: the end date the home page's Waiting row shows after "until" (the one reader that row and its sort use), so a parked item's date, the date a time wait ends
+  on, the backstop day of an item that waits on another open item and the wake of a doing item waiting for it. It is a day in the instance's own time zone, as the item stores it; a stored time of day is left off. `null` for an item
+  that is not held (`held` false), whatever date it stores, and for a held item whose wait ends on no date. An item can wait without being held (news the owner relays, an anchor's event, a time wait stored
+  only as the older `wake` field): its `list` is `"waiting"`, `held` false and `until` `null`, though the home page shows such a wait's date.
+- **Order.** The last write first (`updated`, and `state_updated` for an item that stores no `updated`); items of one time keep the store's order.
+- **Size.** No cap and no truncation flag, as `items` has none: a row is a few hundred bytes and the answer is as long as the session's open items.
+- **What is not in it.** Closed items, the item's description, ask, steps and project, the roles `items?key=` carries, and the time the item was opened (the item record stores none); a page that needs more of one item reads it by its id
+  (`item-record`).
+- `stackshot/fleet/client.py get involved <session>` prints the JSON and exits 0, or exits 1 with `[<status>] <reason>` when there is no token, the key is refused or the server is not reached. It is answered off the event loop, as `items` is,
+  since it scans the board. Example, a session `work-a` that is the contact of two items and an observer on a third:
+
+  ```json
+  {"items": [
+    {"shown": "board#<n>", "subject": "[home] ship the report", "url": "https://board.example.invalid/items/<n>", "mover": "swift-jaunty-charm",
+     "contact": "work-a", "observers": ["work-b"], "list": "agents", "held": false, "until": null, "state_updated": 1790000000.0, "updated": 1790003600.0},
+    {"shown": "board#<m>", "subject": "[home] a question", "url": "https://board.example.invalid/items/<m>", "mover": "the owner",
+     "contact": "work-c", "observers": ["work-a"], "list": "your-move", "held": false, "until": null, "state_updated": 1789900000.0, "updated": 1789900000.0},
+    {"shown": "board#<p>", "subject": "[home] a parked check", "url": "https://board.example.invalid/items/<p>", "mover": "swift-jaunty-charm",
+     "contact": "work-a", "observers": [], "list": "waiting", "held": true, "until": "2026-10-05", "state_updated": 1789800000.0, "updated": 1789800000.0}]}
+  ```
+
 ## A pane waiting in its terminal
 
 When a session's permission prompt cannot be answered by a hook (a question to the owner, a guarded file, plan mode), the pane waits in its terminal. The fleet tool (sala) tells stackshot,

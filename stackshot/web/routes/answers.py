@@ -72,7 +72,7 @@ async def item_answer(request: Request):
         return PlainTextResponse("refused: the form's token does not match; reload the item's page and send again", status_code=403)
     from starlette.concurrency import run_in_threadpool
     who = _members.signed_in(email).name      # the person the signed-in address belongs to: the answer is recorded under that name
-    code = await run_in_threadpool(_answer, gid, f("choice"), f("text"), f("act"), "board", None, who)
+    code = await run_in_threadpool(_answer, gid, f("choice"), f("text"), f("act"), "board", None, who, f("ref"))      # ref: the question the form showed; a form drawn before it carried one sends none
     back = _answer_back(f("back"))
     if back:      # from the home page's row: back to the page the form was on, with the item named for its notice
         path, frag = back
