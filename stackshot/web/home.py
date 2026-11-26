@@ -7,8 +7,8 @@ Every open item is exactly one of alive or waiting (model.py), so it sits in exa
   agents      alive, and a session or the project's background agent is the mover: oldest first by the age the row shows (the longest-running item leads); the mover's name is on the row and plays no part in the order
   waiting     waiting on a time, an anchor's event, another item's close or news only the owner relays: by end date
 
-On a board of several members the home page is drawn for the member who is signed in (`viewer`, model.board_viewer): Your move holds only what names that member, and another member's move is
-listed first under Waiting, oldest first, with no answer form (the row says who picks it up). With no viewer (one member, nobody signed in, board.md and the brief) any member's move is Your move.
+On a board of several members the home page is drawn for the member who is signed in (`viewer`, model.board_viewer): Your move holds only what names that member (the mover, or an open step on
+the checklist), and any other member's move is listed first under Waiting, oldest first, with no answer form (the row says who picks it up). With no viewer (one member, nobody signed in, board.md and the brief) any member's move is Your move.
 
 This module is the pure half: which list an item is in, the row's immediate next step (the first `next` line, its `<mover>: ` prefix stripped), when its state began, the
 age's colour, who watches a wait, the sorts. The HTML is render.py's (Board.home_html). Pure functions of items, the model's reading and a clock: no server import, so the
@@ -23,6 +23,7 @@ from stackshot.waits import handoff as _ho
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model import queued as _queued
+from stackshot.model import steps as _steps
 from stackshot.waits import waiting as _wt
 
 YOUR_MOVE, AGENTS, WAITING = "your-move", "agents", "waiting"
@@ -33,15 +34,17 @@ WATCHED_BY = {"time": "the scheduler", "relay": "the scheduler", "anchor": "the 
 _FAR = float("inf")
 
 
-def list_of(mod: "_model.Model", viewer: str = "") -> str:
+def list_of(mod: "_model.Model", viewer: str = "", meta: dict[str, Any] | None = None) -> str:
     """Which list an open item is in, from the model's reading: waiting → Waiting; alive with a member as the mover → Your move, or, drawn for the member `viewer`, Waiting when the mover is
-    another member; any other alive item → Agents at work. A dead item is in none ("")."""
+    another member and the checklist holds no open step of the viewer's (`meta`: the item's metadata; steps.open_members); any other alive item → Agents at work. A dead item is in none ("")."""
     if mod.state == _model.WAITING:
         return WAITING
     if mod.state == _model.ALIVE:
         if not _model.is_owner(mod.mover):
             return AGENTS
-        return YOUR_MOVE if not viewer or _model.names_member(mod.mover, viewer) else WAITING
+        if not viewer or _model.names_member(mod.mover, viewer):
+            return YOUR_MOVE
+        return YOUR_MOVE if meta is not None and viewer in _steps.open_members(_steps.view(meta)) else WAITING
     return ""
 
 
@@ -165,7 +168,7 @@ def classify(rows: list[dict[str, Any]], derive: Callable[[dict[str, Any]], "_mo
             continue
         try:
             mod = derive(r)
-            which = list_of(mod, viewer)
+            which = list_of(mod, viewer, r.get("metadata") or {})
         except Exception:  # noqa: BLE001
             mod, which = _model.Model(_model.ALIVE), ""
         if not which:

@@ -15,7 +15,7 @@ One fixture store is drawn for a board of one member and for a board of two (mem
 
     tests/run-suite home_members            -> exit 0 / 1
     tests/run-suite home_members --write    -> write the snapshot again (after a deliberate change of what a board of one member shows)"""
-import contextlib, datetime, json, logging, os, pathlib, re, subprocess, sys, threading, time
+import contextlib, datetime, json, logging, os, pathlib, re, subprocess, sys, threading, time, types
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
@@ -102,7 +102,7 @@ def group(name):
 
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.core import config as _cfg
+from stackshot.core import config as _cfg, readonly
 from stackshot.web import i18n
 from stackshot.web.ui import render as r2, releasing
 
@@ -258,6 +258,7 @@ with group("two members, outside waits"):
     check("an outside wait whose next line names member-b is picked up by member-b", who(A, 22).startswith('<span class="hwho">member-b</span> picks it up'), who(A, 22))
     check("an outside wait that names no member stays the first member's", who(A, 23).startswith('<span class="hwho own">member-a</span>') and who(B, 23).startswith('<span class="hwho">member-a</span>'), (who(A, 23), who(B, 23)))
     check("a wait keeps its end date in the slot", "ir-end" in row(A, 21) and "ir-end" in row(A, 20))
+    check("the shared page names the member a wait is stored for, not the first", who(S, 21).startswith('<span class="hwho own">member-b</span> picks it up'), who(S, 21))
 
 with group("two members, who is a viewer"):
     base = blocks(S)
@@ -349,6 +350,54 @@ with group("the server"):
                 slots[("en", who_)].update(html=f"<p>{who_}</p>", drawn=stamp, at=time.time(), sig=i18n.signature())
             got_ts = [get("/render-stamp", p).json().get("ts") for p in (ADA, BEA)]
             check("the render stamp answers for the viewer's own draw", got_ts == [111, 222], got_ts)
+        shared_ids = [1, 3, 6, 2, 4, 5]
+        from stackshot.web import app as web_app
+        real_members = web_app._members
+
+        def unreadable(address):
+            raise RuntimeError("the address cannot be read")
+
+        slots.clear(); board_home._board_home_drop()
+        web_app._members = types.SimpleNamespace(members=real_members.members, first=real_members.first, person_of_email=unreadable)
+        try:
+            lost = get("/", BEA)
+        finally:
+            web_app._members = real_members
+        check("a viewer that cannot be worked out reads the shared page, not another member's", lost.status_code == 200 and ids(lost.text, "your-move") == shared_ids, (lost.status_code, ids(lost.text, "your-move")))
+        readonly._reload_for_test(True)
+        try:
+            standby = get("/", BEA)
+        finally:
+            readonly._reload_for_test(False)
+        check("a standby copy draws the signed-in member's home too", standby.status_code == 200 and ids(standby.text, "your-move") == [3, 4, 5], (standby.status_code, standby.text[:200]))
+        slots.clear(); board_home._board_home_drop()
+        c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE[BEA])
+        head = c.head("/", follow_redirects=False)
+        check("a HEAD draws the member's own home", head.status_code == 200 and bool(slots.get(("en", "member-b"), {}).get("html")), (head.status_code, list(slots)))
+        get("/", None)      # the shared page is drawn and fresh
+        slots.clear()
+        with board_home.use_viewer("member-b"):
+            board_pages._board_home_kick()
+        drawn()
+        got = slots.get(("en", "member-b"), {}).get("html")
+        check("a background draw is made for a member with none, however fresh the shared page is", bool(got) and ids(got, "your-move") == [3, 4, 5], list(slots))
+        slots.clear()
+        real_html = r2.Board.html
+
+        def crowded(self, *a, **k):      # while member-a's page is drawn, as many other viewers come as there is room for
+            page = real_html(self, *a, **k)
+            for n in range(board_home._VIEWER_SLOTS_MAX):
+                board_home._board_home_slot("en", f"c{n}")
+            return page
+
+        r2.Board.html = crowded
+        try:
+            with board_home.use_viewer("member-a"):
+                served = board_pages._board_home()
+        finally:
+            r2.Board.html = real_html
+        check("a draw whose slot was dropped for room is still served", ("en", "member-a") not in slots and bool(served) and ids(served, "your-move") == [1, 6, 2], (("en", "member-a") in slots, str(served)[:100]))
+        slots.clear()
 
 with group("the kept draws are bounded"):
     board_home._BOARD_HOME_VIEWERS.clear()
@@ -381,6 +430,8 @@ with group("a wait that ends"):
     check("a relay's day turns to the member who picks it up", m.get("needs") == ["decision"] and m.get("mover") == "member-b" and (m.get("woke") or {}).get("to") == "member-b", m)
     page = draw(viewer="member-b"); other = draw(viewer="member-a")
     check("…and is on that member's Your move, not the first member's", 41 in ids(page, "your-move") and 41 in ids(other, "waiting-list") and 41 not in ids(other, "your-move"), (ids(page, "your-move"), ids(other, "your-move")))
+    note41 = re.search(r'<div class="hnote">(.*?)</div>', row(draw(), 41), re.S)
+    check("…and the shared page's note of the wake names that member", bool(note41) and ">member-b</span>" in note41.group(1) and "member-a" not in note41.group(1), note41.group(1) if note41 else row(draw(), 41))
     item(42, "a wait a session picks up, b named", D, needs=["external"], wait_kind="relay", wait_event="the answer", ask_by=past, mover="alpha-build", next="MB: forward it")
     m = fire(42, "relay")
     check("a relay a session picks up asks the member its next line names", m.get("mover") == "member-b" and m.get("then") == "alpha-build" and m["woke"]["to"] == "member-b", m)
@@ -398,6 +449,15 @@ with group("a wait that ends"):
     m = fire(44, "relay")
     check("one member: no mover is stored, the item is the member's as before", "mover" not in m and m["needs"] == ["decision"] and m["woke"]["to"] == "member-a", m)
     _cfg.CFG["members"] = TWO
+
+with group("a design question of another member's"):
+    item(47, "pick the layout", D, needs=["decision"], mover="member-b", ask=ask("which layout?"), next="member-b: pick one")
+    path = T / "store/a/47.json"
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    stored["description"] = "- A fixture item. The design: https://claude.ai/artifact/fixture-layout"
+    path.write_text(json.dumps(stored), encoding="utf-8")
+    theirs = row(draw(viewer="member-a"), 47)
+    check("another member's design question keeps its mockup link", "picks it up" in theirs and 'class="mockup" href="https://claude.ai/artifact/fixture-layout"' in theirs, theirs)
 
 # ---- 5. the config
 with group("the config"):

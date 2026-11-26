@@ -2,7 +2,7 @@
 
 The helpers the answer path and the wait passes share: `_hand_to_mover` is the one place an answer or a Done gives an item to its then-mover (mover = the session, `then` cleared, the session named first in needs);
 `_then_live` is the test every hand-over to a stored `then` makes (a background agent of the item's project, or a session live or in the cloud); `_decision_hand_over` takes the item out of his hands once his decision is in (the stored `then`, a time wait for a parked item, the default mover); `_check_his_step` ticks the lines of his own that his Done
-finishes; `_keep_note` keeps an answer note that has no decision to go with it as his comment and tells the mover; `_answer_line` and `_client_answer` are the line `client.py get answer` prints.
+finishes; `_share_step` is a step answered by one member while more than one has a part in it (a board of several members); `_keep_note` keeps an answer note that has no decision to go with it as his comment and tells the mover; `_answer_line` and `_client_answer` are the line `client.py get answer` prints.
 
 A service module: it reads the store and writes an item only through `writes.save`, under the locks the caller holds. The delivery of the answer, the form's note words and the renderer's reader of the answers are the
 surface's (the answer form, web/answers.py and web/server.py `_answer_deliver`), reached through service/save_hooks.py. A suite that replaces one of these sets it on this module (and `time` here, since this module reads its own).
@@ -18,10 +18,12 @@ from typing import Any
 from fastmcp.exceptions import ToolError
 
 from stackshot.core import members as _members
-from stackshot.core.instance import OWNER
+from stackshot.core.instance import NAME, OWNER
+from stackshot.model import holders as _holders
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model import nextlines as _nl
+from stackshot.model import owner_steps as _hs
 from stackshot.model import steps as _steps
 from stackshot.model.ids import _norm_id
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store
@@ -32,6 +34,7 @@ from stackshot.service import writes as _writes
 from stackshot.service.save_hooks import hooks as _hooks
 from stackshot.waits import until_write as _uw
 from stackshot.waits import waiting as _wt
+from stackshot.waits import watchers as _watch
 
 
 def _answer_line(item: dict[str, Any]) -> str:
@@ -176,13 +179,15 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
     return ""
 
 
-def _check_his_step(meta: dict[str, Any], step: str, now: float, by: str = "") -> str:
+def _check_his_step(meta: dict[str, Any], step: str, now: float, by: str = "", member: str = "") -> str:
     """his Done (his word that his step is done; an empty Send from a page loaded earlier is the same) checks the open steps of the item's checklist that are his, the lines the Your step block shows
     (steps.is_his: named for him, or naming no one), whoever wrote them, the server's own line for the summary included (the block does not draw that line or a repeat, but his Done is his word that all of it is done). Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
     other lines staying. → the first checked step's first line, "" when none was his (nothing written). A note on the step (step-reply) never comes here: it ticks only the server's step (owner_steps.tick), and the session that takes the item
-    marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Done finishes all of his open lines. `by` is the person whose Done it is (the first person when none is named)."""
+    marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Done finishes all of his open lines. `by` is the person whose Done it is (the first person when none is named).
+    `member` (a board of several members): the open steps that are that member's or name no one (steps.member_of), never another member's."""
     cl = _steps.view(meta)
-    mine = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN and _steps.is_his(x["text"])]      # the open lines render.his_open_steps starts from, before it leaves out the server's summary line and repeats
+    whose = _steps.member_of(cl)
+    mine = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN and (whose[i] in (member, "") if member else _steps.is_his(x["text"]))]      # the open lines render.his_open_steps starts from, before it leaves out the server's summary line and repeats
     if not mine:
         return ""
     for i in mine:
@@ -190,6 +195,32 @@ def _check_his_step(meta: dict[str, Any], step: str, now: float, by: str = "") -
     _nl.prune(meta, [cl[i]["text"] for i in mine], str(meta.get("owner") or ""))
     meta["steps"] = _steps.stored(cl)
     return _steps.first_line(cl[mine[0]]["text"])
+
+
+def _share_step(meta: dict[str, Any], rec: dict[str, Any], member: str, done: bool, now: float) -> str:
+    """`member`'s answer on a your-step that more than one member has a part in (a board of several members): what it ticks, and who the step is with after it → that member's name. Not `done` (a note
+    that does not say the step is done): nothing is ticked or moved. Done: the open steps that are `member`'s or name no one are ticked (_check_his_step), never another member's. A step asked of another
+    member (steps.member_for) stays theirs, and the answer's record names the step `member` finished. A step asked of `member` passes on: the member of the next open step is the mover, that step is the
+    item's `step`, and the item stays in your-step; the server's step is made for them by the save (owner_steps.ensure) and the draft goes with the step it belonged to."""
+    asked = _steps.member_for(meta.get("step"), meta)
+    if member != asked:      # the record names their own step, whatever the answer says about it
+        cl = _steps.view(meta)
+        own = next(x for x, who in zip(cl, _steps.member_of(cl)) if x["status"] == _steps.OPEN and who == member)
+        rec["step"] = _steps.strip_owner(_steps.first_line(own["text"]))
+    if not done:
+        return asked
+    if member == asked and rec["kind"] == "step-reply":      # N4: their note on their own step is their answer, so the server's step shows the words
+        _hs.tick(meta, str(meta.get("owner") or ""), member, now, _hs.answer_words("", rec.get("text")), make=_holders._owner_want(meta), writer=NAME, add=False)
+    _check_his_step(meta, str(meta.get("step") or ""), now, by=member, member=member)
+    if member != asked:
+        return asked
+    cl = _steps.view(meta)
+    line, other = next((x["text"], who) for x, who in zip(cl, _steps.member_of(cl)) if x["status"] == _steps.OPEN and who and who != member)
+    meta["mover"], meta["step"] = other, _steps.strip_owner(_steps.first_line(line))
+    for k in ("step_lines", "draft", _hs.KEY):
+        meta.pop(k, None)
+    _watch.end_wait(meta)
+    return other
 
 
 def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str = "", why: str = "", by: str = "") -> str:

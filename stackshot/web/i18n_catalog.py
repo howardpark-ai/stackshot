@@ -69,6 +69,7 @@ CATALOG: dict[str, str] = {
     "sent.donenote": "Done: the item goes on to its next mover, and your note went along.",
     "sent.stepreply": "Sent: your note is on the item and its next mover has it. It decides whether the step is done, and hands the item back to you if it was a question.",
     "sent.stepreply_by": "Sent: {who} has your note and decides whether the step is done.",
+    "sent.partdone": "Done: your step is ticked. The item stays where it is for the steps still open.",
     "sent.nomover": "Nobody is set to take this item next, so nothing was recorded. Write a comment instead.",
     "sent.nostep": "Nothing sent: the item has no step for you any more. Read it again below.",
     "sent.nostep_home": "Nothing sent: the item has no step for you any more; open the item to read it again.",

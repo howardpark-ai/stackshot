@@ -24,6 +24,7 @@ import re
 from typing import Any, Callable
 
 from stackshot.core import config as _cfg
+from stackshot.core import members as _members
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model import nextlines as _nl
@@ -495,3 +496,40 @@ def is_bare(text: Any) -> bool:
     so the page draws it without the item's mover put in front of it."""
     first = next((ln for ln in str(text or "").splitlines() if ln.strip()), "")
     return bool(_MARKER.match(first)) and not opener(first)
+
+
+# ---------------------------------------------------------------------------------------------------------------- which member's step it is (a board of several members)
+def member_of(steps: list[dict[str, Any]]) -> list[str | None]:
+    """Whose each step of the checklist is, among the members: the name of the member its opener names; None when the opener names anyone else (a session, an outside party); "" when it names no one.
+    A bullet or numbered line that names no one (is_bare) reads as a sub-step of the line above, so under a member's step it is that member's."""
+    out: list[str | None] = []
+    above = ""
+    for s in steps:
+        name = opener(s["text"])
+        if name:
+            p = _members.person_of(name)
+            who = p.name if p else None
+            above = who or ""
+        elif is_bare(s["text"]):
+            who = above
+        else:
+            who = above = ""
+        out.append(who)
+    return out
+
+
+def open_members(steps: list[dict[str, Any]]) -> list[str]:
+    """The members who have an open step on the checklist (member_of), each once, in the checklist's order."""
+    return list(dict.fromkeys(who for s, who in zip(steps, member_of(steps)) if who and s["status"] == OPEN))
+
+
+def member_for(text: Any, meta: dict[str, Any] | None = None) -> str:
+    """The member a step or a question of the item is asked of: the one `text` opens with, else the item's member (model.item_person)."""
+    p = _members.person_of(opener(text))
+    return p.name if p else _model.item_person(meta).name
+
+
+def takes_part(meta: dict[str, Any] | None, member: str) -> bool:
+    """Has `member` a part in the item's your-step: the step is theirs (member_for the stored `step`), or the checklist holds an open step of theirs."""
+    m = meta or {}
+    return member == member_for(m.get("step"), m) or member in open_members(view(m))
