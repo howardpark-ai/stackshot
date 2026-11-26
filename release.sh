@@ -65,8 +65,9 @@
 #                                 or no helper: the release fails, the reason in one more log line. At most RELEASE_REGEN_MAX (1) time in a release, so it cannot loop;
 #                                 3. ENQUEUE: one GraphQL read decides the way, `repository.mergeQueue(branch:"main")`. Present (the ruleset's queue is on): the PR goes in with the mutation `enqueuePullRequest(pullRequestId, expectedHeadOid)`,
 #                                 pinned to the head the checks ran on, so a push after the checks cannot ride in; its required checks have passed (step 2). `gh pr merge` is not used with the queue on: it asks for auto-merge, which this repository does not
-#                                 allow (cli/cli#13398), and auto-merge stays off. Absent (the ruleset is off, the way back): `gh pr merge --merge --admin --match-head-commit <head>` (no --delete-branch) merges at once, and the log says so. When the call errors (a
-#                                 GitHub 504 after the PR was queued or merged), the PR's state is read again for up to about 50 s: queued or merged carries on, anything else fails "merge" with the original error. An answer that cannot be read fails "merge";
+#                                 allow (cli/cli#13398), and auto-merge stays off. Absent (the ruleset is off, the way back): `gh pr merge --merge --admin --match-head-commit <head>` (no --delete-branch) merges at once, and the log says so. When GitHub's server fails the call
+#                                 (a 5xx, a GraphQL error of type INTERNAL, "something went wrong", a timeout or a reset), the PR's state is read first (queued or merged carries on: the call may have gone through), else the call is made again, up to 4 attempts with waits of 5, 15 and 45 s
+#                                 (RELEASE_ENQUEUE_WAITS, a space-separated list, overrides the waits), one log line per retry. A refusal (a 4xx, "not mergeable", "already in the queue", a conflict, a failed required check) is never retried. After the last attempt, and for a refusal, the PR's state is read again for up to about 50 s: queued or merged carries on, anything else fails "merge" with the error of the last call. An answer that cannot be read fails "merge";
 #                                 3a. WAIT FOR THE MERGE: GraphQL `pullRequest { state mergeCommit { oid } mergeQueueEntry { state position } }`, read every POLL_QUEUE s (60) for up to QUEUE_WAIT (RELEASE_QUEUE_WAIT, 3 h), the log saying where the PR is in the queue every 5 min (one read is
 #                                 one GitHub call from the hour's shared budget, so it is not polled faster; the first looks after the call come every 10 s until the entry shows, QUEUE_GRACE, 3 min). MERGED: the merge commit GitHub made is the one to deploy. A PR that was in the queue and is not any more, and is not merged
 #                                 (GitHub confirms it on a second read 10 s later, and three more reads 10 s apart find it still not MERGED): the reason GitHub gave is read from the timeline (`RemovedFromMergeQueueEvent` dated at or after the enqueue call: an older event is an earlier enqueue's),
@@ -2014,17 +2015,21 @@ run() {
     enqueue_pr() {   # 3. What GitHub says about the branch decides how the PR goes in: `repository.mergeQueue(branch:"main")` present (the ruleset's queue is on) -> the GraphQL mutation enqueuePullRequest, pinned to the head the checks
                      # ran on (expectedHeadOid), so a push after the checks cannot ride in; absent (the ruleset is off, the way back) -> `gh pr merge --merge --admin --match-head-commit <head>`, which merges at once. `gh pr merge` is never used with
                      # the queue on: it would ask for auto-merge, which this repository does not allow (cli/cli#13398). $via_queue says which way it went; $enq_epoch is the second of the call, for the removal event
-        local out tries
+        local out tries waits=(${RELEASE_ENQUEUE_WAITS:-5 15 45}) att=1 attmax why seen   # the waits (seconds) between the attempts at the enqueue call: one more attempt than waits; RELEASE_ENQUEUE_WAITS overrides the list (the tests give it "0 0 0")
+        attmax=$((${#waits[@]} + 1))
         gq_mq=""; gq_prid=""
         for tries in 1 2 3; do ghq_target "$pr" && break; [ $tries = 3 ] || sleep 10; done
         [ -n "$gq_mq" ] || fail "merge" "GitHub's answer about the repository's merge queue and the PR cannot be read, so it is not known whether the PR goes into the queue or is merged at once"
         enq_epoch="$(date +%s)"
         if [ "$gq_mq" = 1 ]; then
             via_queue=1
-            if out="$(gh api graphql -f query='mutation($id:ID!,$h:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$h}){mergeQueueEntry{state position}}}' -f id="$gq_prid" -f h="$headsha" 2>&1 9>&-)" \
-               && echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if not d.get("errors") and (d.get("data") or {}).get("enqueuePullRequest") else 1)' 2>/dev/null; then
-                say "enqueued: the merge queue accepted the head ${headsha:0:7}"
-            else   # gh prints the error body on stdout and its message on stderr: the report gets GitHub's messages (a red check, a ref rule), or the last line when there is no body
+            while :; do
+                if out="$(gh api graphql -f query='mutation($id:ID!,$h:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$h}){mergeQueueEntry{state position}}}' -f id="$gq_prid" -f h="$headsha" 2>&1 9>&-)" \
+                   && echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if not d.get("errors") and (d.get("data") or {}).get("enqueuePullRequest") else 1)' 2>/dev/null; then
+                    say "enqueued: the merge queue accepted the head ${headsha:0:7}"; break
+                fi
+                why="$(enq_transient "$out")"   # GitHub's server failed (5xx, INTERNAL, "something went wrong", a timeout or a reset), as against a refusal; empty for a refusal
+                # gh prints the error body on stdout and its message on stderr: the report gets GitHub's messages (a red check, a ref rule), or the last line when there is no body
                 out="$(echo "$out" | python3 -c '
 import json, sys
 lines = [l for l in sys.stdin.read().splitlines() if l.strip()]
@@ -2033,8 +2038,18 @@ for l in lines:
     try: msgs += [e.get("message", "") for e in (json.loads(l).get("errors") or [])]
     except Exception: pass
 print("; ".join(m for m in msgs if m) or (lines[-1] if lines else "no answer"))' 2>/dev/null)"
-                enq_failed "$out"
-            fi
+                # a refusal, or the last attempt: as before (enq_failed reads the PR's state again and fails with the error)
+                if [ -z "$why" ] || [ $att -ge $attmax ]; then enq_failed "$out"; break; fi
+                # the call may have gone through before it failed (a timeout, a reset, a 504): the PR's state is read before another call
+                if ghq_read "$pr" && { [ "$gq_state" = MERGED ] || [ -n "$gq_entry" ]; }; then
+                    seen="${gq_state}${gq_entry:+, in the merge queue ($gq_entry)}"
+                    say "the enqueue call errored: $out; reading the PR's state again"
+                    say "the enqueue call errored ($out) but the PR is $seen; carrying on"
+                    merge_note="$merge_note; the enqueue call errored ($out) but the PR was $seen"; break
+                fi
+                say "merge queue call answered $why; retrying in ${waits[$((att - 1))]} s (attempt $((att + 1)) of $attmax)"
+                sleep "${waits[$((att - 1))]}"; att=$((att + 1))
+            done
         else
             # --admin: with the bot-only ruleset active and main not excluded from it, a green PR reads BLOCKED and a plain `gh pr merge` fails with "the base branch policy prohibits the merge";
             # --admin lets the bot merge a green PR, and GitHub still refuses a failing or pending one, so the required check holds. --match-head-commit keeps the head pin
@@ -2042,6 +2057,19 @@ print("; ".join(m for m in msgs if m) or (lines[-1] if lines else "no answer"))'
             if out="$(gh pr merge "$pr" --repo "$REPO" --merge --admin --match-head-commit "$headsha" 2>&1 9>&-)"; then say "no merge queue on main (the ruleset is off): merged at once, the plain merge call accepted the head ${headsha:0:7} ($(echo "$out" | tail -1 | cut -c1-160))"
             else enq_failed "$(echo "$out" | tail -1)"; fi
         fi
+    }
+    enq_transient() {   # $1 = what the enqueue call printed (stdout and stderr). A short reason when GitHub's server failed and the same call may work a moment later: a 5xx, a GraphQL error of type INTERNAL, "something went wrong", a timeout, a reset or a cut connection.
+                        # Empty (nothing is retried) for anything else: a 4xx, "not mergeable", "already in the queue", a conflict, a failed required check, a ref rule, an answer that says nothing
+        echo "$1" | python3 -c '
+import re, sys
+t = sys.stdin.read(); low = t.lower()
+if re.search(r"\"type\"\s*:\s*\"internal\"", low): print("a GraphQL INTERNAL error"); sys.exit(0)
+if re.search(r"http 4\d\d|not mergeable|already|conflict|failing|required status|protected ref|not enabled", low): sys.exit(0)
+m = re.search(r"http (5\d\d)", low)
+if m: print("HTTP " + m.group(1)); sys.exit(0)
+for pat, name in (("something went wrong", "an error (something went wrong)"), ("timed out|timeout|deadline exceeded", "a timeout"), ("connection reset|connection refused|broken pipe|unexpected eof|\\beof\\b|tls handshake", "a cut connection"),
+                  ("bad gateway|service unavailable|gateway time-?out", "a gateway error")):
+    if re.search(pat, low): print(name); sys.exit(0)' 2>/dev/null
     }
     enq_failed() {   # $1 = the call's last line. The call can error after the PR was queued or merged (a 504, or a PR queued already): GitHub's answer is eventually consistent, so ask again
         local err="$1" i seen="" what; what="$([ "$gq_mq" = 1 ] && echo enqueue || echo merge)"
