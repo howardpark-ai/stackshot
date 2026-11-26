@@ -15,7 +15,7 @@ dependencies = []
 
 [project.optional-dependencies]
 # the MCP server and the board (stackshot/web/server.py), the publisher and ghmigrate, and the tools that read the board
-server = ["fastmcp>=4.0,<5", "markdown-it-py>=4,<5", "cryptography>=44"]  # cryptography: the caller-key signature check (stackshot/service/caller_pass.py)
+server = ["fastmcp>=4.0,<5", "markdown-it-py>=4,<5", "cryptography>=44", "httpx2>=2.13,<3"]  # cryptography: the caller-key signature check (stackshot/service/caller_pass.py); httpx2: the sign-in service's client (stackshot/frontdoor/signin.py)
 # the Slack, Notion, Google and GitHub receiver, and its one-time Google sign-in
 anchor-hub = [
     "slack-sdk>=3.33",
