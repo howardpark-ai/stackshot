@@ -4,7 +4,8 @@ Covers: an item matches when the session is its contact, when it is one of its o
 there with held true, and an item waiting on another open item too; the row's `list` is each of your-move, agents and waiting (the same word `items` gives for the item, and the Your move group of the home page's own renderer agrees); the
 rows come last write first (an item that stores no `updated` by its `state_updated`) and not in the store's order; a session is found as the board finds one for `items?key=`: by its name, its transcript id, its permanent id, an old name (an
 alias), whether the item stores a name or an id; the contact is the live one (a stored contact that is no front agent, and none stored, read as the project's -main agent); the row's fields are those of the `items` row for the same
-item under the same names and in the same format; `url` as `your-move` gives it, with and without a board address; `observers` are names, in the stored order and without repeats; no cap (more rows than `open-records` gives); an unknown key is
+item under the same names and in the same format; `until` is the day a held item comes back (a parked item, a time wait, a wait on an open item with a backstop day, a doing item waiting for a stated wake), the day the board's own
+Waiting row shows, as stored in the instance's time zone, and null for an item that is not held, whatever date it stores, for a held one with no date and when the reading fails (a closed item with a date is not in the answer); `url` as `your-move` gives it, with and without a board address; `observers` are names, in the stored order and without repeats; no cap (more rows than `open-records` gives); an unknown key is
 `{"items": []}`; a blank, over-long or multi-line key is 400; the read writes nothing and changes no other read's answer; over HTTP: no token, a wrong token, the token in the query string, a Basic credential and a live caller's pass are 401, the
 machine's token is the read's own answer, no-store, answered in a worker thread, a missing key is 400, a read-only standby serves it and a write to it is refused; the 404 list, `client.py` and the contract name the read.
 
@@ -55,8 +56,11 @@ from stackshot.core import readonly as _ro
 from stackshot.core import store as _store
 from stackshot.fleet import client
 from stackshot.github import ghsync as _gh
+from stackshot.model import model as _model
 from stackshot.service import caller_pass as _cp
 from stackshot.service import client_reads as cr
+from stackshot.service import item_read as _item_read
+from stackshot.web import home as _home
 from stackshot.web import render as _rmod
 from stackshot.web import server
 from stackshot.web.routes import client_api as _rt_client
@@ -87,7 +91,7 @@ put(22, subject="[home] observer under an old name", age=10, contact=M, observer
 put(23, subject="[home] a file that stores no update time", age=3, state_age=2.5, updated=False, contact=A, mover=S)
 put(24, subject="[home] waits on an open item", age=4.5, contact=A, mover=S, after=["a11"])
 FOR_A = [18, 12, 23, 13, 16, 24, 11, 17]; FOR_B = {12, 13, 14, 17, 18, 21, 22}; FOR_M = {14, 19, 20, 22}
-FIELDS = ["shown", "subject", "url", "mover", "contact", "observers", "list", "held", "state_updated", "updated"]
+FIELDS = ["shown", "subject", "url", "mover", "contact", "observers", "list", "held", "until", "state_updated", "updated"]
 
 def inv(key):
     """(status, parsed body) of the read, a raise as (599, its text)."""
@@ -121,7 +125,7 @@ check("…the times of the rows are non-increasing", lambda: (lambda ts: ts == s
 
 # the row
 r = rows(A)
-check("a row has exactly the ten fields, in this order", lambda: all(list(x) == FIELDS for x in r.values()) and len(r) == len(FOR_A), [list(x) for x in r.values()][:1])
+check("a row has exactly the eleven fields, in this order", lambda: all(list(x) == FIELDS for x in r.values()) and len(r) == len(FOR_A), [list(x) for x in r.values()][:1])
 check("shown is the id as a person reads it, subject the item's", lambda: r[shown(11)]["subject"] == "[home] contact only, the owner moves it" and all(k == x["shown"] for k, x in r.items()), r.get(shown(11)))
 check("contact is the contact's name now, observers the names of the observers: a stored name, a permanent id (as the name in use), an old name (as the current one), once each, in the stored order",
       lambda: r[shown(11)]["contact"] == A and r[shown(11)]["observers"] == [] and r[shown(13)]["observers"] == [A, B] and r[shown(18)]["observers"] == [A] and rows(B)[shown(21)]["observers"] == [B] and rows(B)[shown(22)]["observers"] == [B],
@@ -150,6 +154,50 @@ try:
     _inst.BOARD_URL = ""
     check("…and the path alone while the instance has no board address", lambda: all(rows(A)[shown(n)]["url"] == f"/items/{_gh.href_id(f'a{n}')}" for n in FOR_A), rows(A)[shown(11)])
 finally: _inst.BOARD_URL = _was
+
+# the day it comes back
+check("until is null for an item with no date to come back on: held with none (parked, waiting on an open item) and not held",
+      lambda: all(r[shown(n)]["until"] is None for n in (11, 12, 13, 16, 18, 23, 24)), {k: x["until"] for k, x in r.items()})
+check("…and for a wait stored as a wake alone, which the board lists as waiting but does not hold", lambda: r[shown(17)]["list"] == "waiting" and r[shown(17)]["held"] is False and r[shown(17)]["until"] is None, r.get(shown(17)))
+dated = {30: dict(subject="[home] parked to a day", mover=S, hold=True, wake=D(3)),
+         31: dict(subject="[home] a time wait", mover=S, wait_kind="time", until=D(4)),
+         32: dict(subject="[home] a day and an early hour", mover=S, until=D(5) + "T00:30"),
+         33: dict(subject="[home] a day and a late hour", mover=S, until=D(6) + "T23:30"),
+         34: dict(subject="[home] waits on an open item, back by a day", mover=S, after=["a11"], wait_kind="item", until=D(7)),
+         35: dict(subject="[home] doing, waiting for a stated wake", mover=S, state="doing", wake=D(8), wait_basis={"text": "the vendor answers " + D(8), "wake": D(8), "by": S}),
+         36: dict(subject="[home] news relayed, with a day", mover=S, wait_kind="relay", wait_event="their answer", until=D(9)),
+         37: dict(subject="[home] an anchor, with a backstop day", mover=S, wait_kind="anchor", wait_anchor="https://repo.example.invalid/pull/1", until=D(10)),
+         38: dict(subject="[home] a day beside a decision he owes", mover=OWNER, needs="decision", ask="which one?", hold=True, wake=D(11)),
+         39: dict(subject="[home] doing, with a backstop wake and no reason", mover=S, state="doing", wake=D(12), steps=[{"text": "work-a: write it", "status": "open"}])}
+for n, meta in dated.items(): put(n, age=30 + n / 100, contact=A, **meta)
+put(40, subject="[home] closed with a day", status="completed", age=2, contact=A, mover=S, hold=True, wake=D(13), until=D(13), outcome="done")
+try:
+    u = rows(A); got = lambda n: (u[shown(n)]["held"], u[shown(n)]["until"])
+    say = lambda ns: {n: (u.get(shown(n), Rows())["list"], got(n)) for n in ns}
+    check("until: a parked item gives the day of its wake", lambda: got(30) == (True, D(3)), say((30,)))
+    check("until: a time wait gives the day it ends on", lambda: got(31) == (True, D(4)) and u[shown(31)]["list"] == "waiting", say((31,)))
+    check("until: a stored time of day is left off and no time zone moves the day (the instance's zone is not UTC)", lambda: got(32) == (True, D(5)) and got(33) == (True, D(6)), say((32, 33)))
+    check("until: a wait on an open item gives the day it comes back anyway, a doing item that waits for a stated wake that day", lambda: got(34) == (True, D(7)) and got(35) == (True, D(8)), say((34, 35)))
+    check("until: a waiting item that is not held (relayed news, an anchor) is null, though the board shows its day", lambda: all(u[shown(n)]["list"] == "waiting" and got(n) == (False, None) for n in (36, 37)), say((36, 37)))
+    check("until: an item that stores a day and is not held (a decision he owes, a doing item's backstop) is null", lambda: all(got(n) == (False, None) for n in (38, 39)), say((38, 39)))
+    check("until: a closed item that stores a day is not in the answer", lambda: shown(40) not in u and len(u) == len(FOR_A) + len(dated), sorted(u))
+    def board_days():
+        out = {}
+        for n in (30, 31, 32, 33, 34, 35, 36, 37):
+            it = {**json.loads((T / f"store/a/{n}.json").read_text()), "gid": f"a{n}"}
+            end = _home.end_of(_model.view(it, _item_read._model_of(it), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {})))
+            out[n] = end[:10] if end else None
+        return out
+    check("until is the day the home page's own reader gives for the item, and that reader gives the two waits that are not held a day", lambda: (lambda d: all(u[shown(n)]["until"] == d[n] for n in range(30, 36)) and d[36] == D(9) and d[37] == D(10))(board_days()), {k: x["until"] for k, x in u.items()})
+    check("until is a string \"YYYY-MM-DD\" or null in every row", lambda: all(x["until"] is None or (isinstance(x["until"], str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", x["until"])) for x in u.values()), {k: x["until"] for k, x in u.items()})
+    _end = _home.end_of
+    def _boom(mod): raise ValueError("no reading")
+    _home.end_of = _boom
+    try:
+        check("until: a reading that fails gives null for the row and the rest of the answer stands", lambda: inv(A)[0] == 200 and len(inv(A)[1]["items"]) == len(FOR_A) + len(dated) and all(x["until"] is None for x in inv(A)[1]["items"]))
+    finally: _home.end_of = _end
+finally:
+    for n in list(dated) + [40]: drop(n)
 
 # unknown and bad keys
 check("a key that names nobody, and a session that is neither contact nor observer of an open item, is 200 {items: []}", lambda: inv("nobody-at-all") == (200, {"items": []}) and inv(S) == (200, {"items": []}) and inv("00000000-0000-4000-8000-0000000000ff") == (200, {"items": []}), (inv("nobody-at-all"), inv(S)))
@@ -236,7 +284,7 @@ check("http: the 404 list of reads names it", lambda: nf.status_code == 404 and 
 check("a read-only standby copy serves it, as it serves the other reads, and a write is still refused", lambda: sb.status_code == 200 and sb.json() == inv(A)[1] and wr.status_code == 503 and "read-only standby" in wr.text, (sb.status_code, wr.status_code, wr.text[:120]))
 usage = open(client.__file__, encoding="utf-8").read().split('"""', 2)[1]
 part = usage.split("client.py get involved", 1)[1].split("client.py get your-move", 1)[0] if "client.py get involved" in usage else ""
-check("client.py knows the read, and its usage text names the form and each field", lambda: "involved" in client.READS and "involved <session>" in usage and all(w in part for w in ("shown", "subject", "url", "mover", "contact", "observers", "list", "held", "state_updated", "updated", "newest write first", "400")), part[:200])
+check("client.py knows the read, and its usage text names the form and each field", lambda: "involved" in client.READS and "involved <session>" in usage and all(w in part for w in ("shown", "subject", "url", "mover", "contact", "observers", "list", "held", "until (the day a held item comes back", "YYYY-MM-DD", "null for an item that is not held", "state_updated", "updated", "newest write first", "400")), part[:200])
 _get = client.get; got_args = []
 def fake_get(what, key="", timeout=10.0, **k): got_args.append((what, key)); return 200, json.dumps({"items": []})
 client.get = fake_get
@@ -248,7 +296,11 @@ check("client.py get involved <session> asks for the read with the key, prints t
 doc = open(os.path.join(STACK, "docs", "client-contract.md"), encoding="utf-8").read()
 HEAD = "## The open items a session is the contact of or an observer on"
 sec = doc.split(HEAD, 1)[1].split("\n## ", 1)[0] if HEAD in doc else ""
-check("the contract describes the read: the route, the auth, each field, the order and the client's form", lambda: "GET /client/involved?key=<session>" in sec and "Bearer <machine token>" in sec and all(f"\"{f}\"" in sec for f in FIELDS) and "last write first" in sec and "get involved <session>" in sec, sec[:200])
+SHAPE = '{"items": [{' + ", ".join(f'"{f}"' for f in FIELDS) + '}]}'
+example = lambda: json.loads(sec.split("```json", 1)[1].split("```", 1)[0])["items"]
+check("the contract's shape line lists exactly the row's fields, in order", lambda: SHAPE in sec, sec[:200])
+check("the contract's example rows carry exactly those fields, a day on the held row and null on the others", lambda: all(list(x) == FIELDS for x in example()) and all((x["until"] is not None) == x["held"] for x in example()) and any(x["held"] for x in example()), sec[-600:])
+check("the contract describes the read: the route, the auth, each field, the order and the client's form", lambda: "GET /client/involved?key=<session>" in sec and "Bearer <machine token>" in sec and all(f"\"{f}\"" in sec for f in FIELDS) and "last write first" in sec and "get involved <session>" in sec and "`until` is `\"YYYY-MM-DD\"`" in sec and "that is not held" in sec and "instance's own time zone" in sec, sec[:200])
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": client involved scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))

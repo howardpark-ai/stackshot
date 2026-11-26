@@ -6,7 +6,7 @@ surface that serves it); `_client_items`, `_client_involved` and `_client_item_f
 `_item_list` are the readers of an item's mover, its `then`, its wait and its list that those two (and the wake passes, the update's hand-over and the tools that probe an item) share.
 
 A service module: it reads the store and writes nothing. What it still reaches in the surface (the rulebook text, the renderer's brief and words, the notice's ruling, the report of holds, the page's time, the board's
-ids as shown, the home page's list rule, the queue map and the time zone) comes through `Hooks` in service/passes_hooks.py, which web/wiring.py fills (web/server.py calls it at its import). A suite that replaces one of these functions sets it on this
+ids as shown, the home page's list rule and its reading of a wait's end, the queue map and the time zone) comes through `Hooks` in service/passes_hooks.py, which web/wiring.py fills (web/server.py calls it at its import). A suite that replaces one of these functions sets it on this
 module (and `time` here, since this module reads its own clock).
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/."""
@@ -437,14 +437,26 @@ def _client_items(key: str) -> tuple[int, str, str]:
     return 200, "application/json", _items_view().body_for(k)
 
 
+def _back_on(item: dict[str, Any]) -> str | None:
+    """The day a waiting item comes back, "YYYY-MM-DD": the end date the home page's Waiting row shows after "until" (web.home.end_of, the one reader the row and its sort use), on the item model as the board displays it.
+    A stored date is a wall-clock day of the instance's own time zone, with or without a time of day, so its first ten characters are the day and nothing is converted. None when the item is not waiting, its wait ends on no date or
+    the reading fails (the queue is not read: a queued item's wait has no date)."""
+    try:
+        end = _hooks().home_end_of(_model.view(item, _item_read._model_of(item), after_open=lambda i_: _item_read._after_open(i_.get("metadata") or {})))
+    except Exception:  # noqa: BLE001  — a reading that fails gives no day, never a failed answer
+        return None
+    return str(end).strip()[:10] if end else None
+
+
 def _client_involved(key: str) -> tuple[int, str, str]:
-    """`involved?key=<session>`: the open items the session is the contact of or an observer on, whoever moves them, newest write first -> {"items": [{shown, subject, url, mover, contact, observers, list, held, state_updated, updated}]}.
+    """`involved?key=<session>`: the open items the session is the contact of or an observer on, whoever moves them, newest write first -> {"items": [{shown, subject, url, mover, contact, observers, list, held, until, state_updated, updated}]}.
     key = a session as `items?key=` reads it (a transcript uuid, a cse_ id, a pane name or a permanent id), matched the way that read matches a session: the key and what it resolves to (`anchors.canonical`) against the
     stored name and what that resolves to, so a renamed session is still found. An item matches when its contact (the live one: the stored contact while it is still a front agent, else the project's -main agent, as the row's
     `contact` shows it) is the session, or the session is one of its observers (`metadata.observers`); closed items never. A row carries the fields `items` rows carry under the same names and in the same format (`shown`, `subject`,
     `contact`, `list` "your-move" | "agents" | "waiting", `held`, `state_updated`, `updated`: all taken from `_item_row`, so the two reads cannot disagree), `mover` as `item-facts` gives it (the name of whoever the item model says
     moves the item now; for a waiting item who takes it when the wait ends; the owner as the model names him; "" for none: not the `mover` object of an `items` row, the older reading that still names a session for an item the owner moves),
-    `url` as `your-move` gives it (the item's page under the board address, the path alone when the instance has none) and `observers`, the item's observers by the name each session has now. The order is the last write first (`updated`, an item that stores none
+    `url` as `your-move` gives it (the item's page under the board address, the path alone when the instance has none), `observers`, the item's observers by the name each session has now, and `until`, the day a held item comes back
+    (`_back_on`; null for an item that is not held, whatever date it stores, and for a held one whose wait ends on no date). The order is the last write first (`updated`, an item that stores none
     by `state_updated`), items of one time in the store's order. No cap, as `items` has none. An unknown session is `{"items": []}`; a blank, over-long or multi-line key is 400, as for `items`. One scan of the store per call, which
     reads the same files and applies the same readers as `_items_pass`; it writes nothing."""
     k = str(key or "").strip()
@@ -489,7 +501,7 @@ def _client_involved(key: str) -> tuple[int, str, str]:
         r = _item_row(gid, p, it, ctx, queue)
         names = list(dict.fromkeys(_sr._session_label(o) or o for o in observers))
         row = {"shown": r["shown"], "subject": r["subject"], "url": f"{base}/items/{_gh.href_id(gid)}", "mover": _item_mover_label(dict(it, gid=gid), nm), "contact": r["contact"], "observers": names,
-               "list": r["list"], "held": r["held"], "state_updated": r["state_updated"], "updated": r["updated"]}
+               "list": r["list"], "held": r["held"], "until": _back_on(dict(it, gid=gid)) if r["held"] else None, "state_updated": r["state_updated"], "updated": r["updated"]}
         found.append((float(r["updated"] or r["state_updated"] or 0.0), row))
     found.sort(key=lambda t: -t[0])
     return 200, "application/json", json.dumps({"items": [row for _t, row in found]}, ensure_ascii=False)

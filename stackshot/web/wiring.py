@@ -380,13 +380,14 @@ def install_late() -> None:
 
     # What the page-debt call, the migrations, the fleet events, the client reads and the recycle bookkeeping still reach on this module (service/page_debt.py, service/migrations.py, service/fleet_events.py,
     # service/client_reads.py, service/recycle.py): the ledger of the page debts, the grace minutes, the session ids, the project's agents, the item model's readers, and for the client reads and the recycle the
-    # renderer's words and tests, the home page's list rule, the rulebook text, the notice's ruling and the holds report, the page's time and the queue map. A hook leaves this table when the area that holds it moves under service/.
+    # renderer's words and tests, the home page's list rule and wait end, the rulebook text, the notice's ruling and the holds report, the page's time and the queue map. A hook leaves this table when the area that holds it moves under service/.
     _passes_hooks.install(_passes_hooks.Hooks(
         after_open=_late_in(_item_read, "_after_open"),
         builder_agent=_late_in(_agents, "_builder_agent"),
         grace_min=_late_in(_pdebts, "_grace_min"),
         holds_report=lambda *a, **k: _tool_notes._holds_report(*a, **k),
         home_agents=lambda: _home.AGENTS,
+        home_end_of=lambda *a, **k: _home.end_of(*a, **k),
         home_list_of=lambda *a, **k: _home.list_of(*a, **k),
         main_agent=_late_in(_agents, "_main_agent"),
         model_guards_on=_late_in(_item_read, "_model_guards_on"),
