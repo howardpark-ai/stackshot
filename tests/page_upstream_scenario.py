@@ -4,8 +4,10 @@ and pushes, and the server's checkout is a second clone that nothing here pulls.
 Covers: a client box's reminder is dropped at the first prompt after a pushed edit; the client API's page-ts answers with the fetched edit when the caller says since
 when it needs one, off the event loop, and fetches nothing without that or when the copy already satisfies it; the server's own debt settles on a fetched edit
 without a board write ever waiting, a strict one only on a Current-state edit; the checkout's working tree, branch, remote-tracking ref and FETCH_HEAD stay as they
-were; one fetch at a time, throttled; a remote that hangs costs a caller at most the wait and is ended at the limit; a failed fetch, a copy with no upstream and a
-read-only standby answer as the copy does.
+were; the fetch brings no tags, starts no housekeeping and asks for no password; one fetch at a time (calls at once included), throttled; a remote that hangs costs a
+caller at most the wait and is ended at the limit; a failed fetch, a copy with no upstream and a read-only standby answer as the copy does; fetches that fail come
+further apart, and a lock file left on the ref is removed once it is old; a page new, removed or put back on the remote under a strict debt; a read that fails
+settles nothing; the fetched edit is read once a page, however many owe it.
 
     tests/run-suite page_upstream        -> exit 0 / 1"""
 import contextlib, io, json, os, re, subprocess, sys, threading, time, pathlib, logging
@@ -118,10 +120,33 @@ check("client box: the first prompt after the pushed edit drops the reminder", s
 check("…and it said since when it needs the edit", SENT and all(w == "page-ts" and k == KEY and e == {"since": str(SINCE)} for w, k, e in SENT), SENT)
 
 # ---- 4. the server's own debt (a board write's reply, the nag, the move to the keeper)
-fresh(); git(BRAIN, "update-ref", "-d", up.REF); owe()
-d, secs = took(pdebts._owed_settle)
-check("server: with nothing fetched yet the call does not wait for the fetch it begins", up._RUNS and secs < 1.0, secs)
-done(); check("server: once fetched, the Current-state edit settles the strict debt", KEY not in pdebts._owed_settle() and not owed(), pdebts._owed_load())
+delayed, runs = T / "delayed-upload-pack", T / "delayed.log"        # the remote's end of a fetch: notes the run and what it was told about prompts, then answers after 2 s
+delayed.write_text(f'#!/bin/sh\necho "prompt=$GIT_TERMINAL_PROMPT" >> {runs}\nsleep 2\nexec git upload-pack "$@"\n'); delayed.chmod(0o755)
+def delayed_runs(): return runs.read_text().split() if runs.exists() else []
+git(WRITER, "tag", "fixture-tag"); git(WRITER, "push", "-q", "origin", "fixture-tag")
+git(BRAIN, "config", "remote.origin.uploadpack", str(delayed))
+words = []; _Popen = subprocess.Popen
+class Spy(_Popen):
+    def __init__(self, args, *a, **k):
+        if "fetch" in args: words.append(list(args))
+        super().__init__(args, *a, **k)
+kept_prompt = os.environ.get("GIT_TERMINAL_PROMPT"); os.environ["GIT_TERMINAL_PROMPT"] = "1"
+fresh(); git(BRAIN, "update-ref", "-d", up.REF); owe(); subprocess.Popen = Spy
+try:
+    d, secs = took(pdebts._owed_settle)
+    check("server: with nothing fetched yet the call does not wait for the fetch it begins", up._RUNS and not up._RUNS[pg.BRAIN][1].is_set() and secs < 1.0 and owed(), secs)
+    done()
+finally:
+    subprocess.Popen = _Popen
+    if kept_prompt is None: os.environ.pop("GIT_TERMINAL_PROMPT")
+    else: os.environ["GIT_TERMINAL_PROMPT"] = kept_prompt
+check("the fetch is told never to ask for a password, whatever the server's own environment says", delayed_runs() == ["prompt=0"], delayed_runs())
+check("…brings no tag with it", git(BRAIN, "tag", "-l") == "", git(BRAIN, "tag", "-l"))
+check("…and starts no housekeeping of the repository, fetches no submodule and writes no FETCH_HEAD", len(words) == 1 and "gc.auto=0" in words[0] and "maintenance.auto=false" in words[0]
+      and all(words[0][words[0].index(v) - 1] == "-c" for v in ("gc.auto=0", "maintenance.auto=false")) and words[0].index("maintenance.auto=false") < words[0].index("fetch")
+      and {"--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--refmap="} <= set(words[0]), words)
+git(BRAIN, "config", "--unset", "remote.origin.uploadpack")
+check("server: once fetched, the Current-state edit settles the strict debt", KEY not in pdebts._owed_settle() and not owed(), pdebts._owed_load())
 check("…the checkout is still as it was", untouched() == before)
 owe(ts=t0 + 3600); fresh(); pdebts._owed_settle(); done()
 check("server: a fetched edit older than a later board write settles nothing", KEY in pdebts._owed_settle())
@@ -143,6 +168,16 @@ every, up.EVERY = up.EVERY, 0.0
 got = up.edit_ts(KEY, t0 + 8000, wait=10)
 check("…and after it the next call fetches again", up._RUNS[pg.BRAIN] is not first and got == t0 + 9000, got)
 up.EVERY = every
+git(BRAIN, "config", "remote.origin.uploadpack", str(delayed)); runs.unlink()
+fresh(); every, up.EVERY = up.EVERY, 0.0          # no pause between fetches: only the one under way holds the others back
+gate = threading.Barrier(12)
+def at_once(): gate.wait(10); up.refresh(pg.BRAIN)
+many = [threading.Thread(target=at_once) for _ in range(12)]
+for x in many: x.start()
+for x in many: x.join(20)
+done(); up.EVERY = every
+check("twelve calls at once begin one fetch", len(delayed_runs()) == 1, delayed_runs())
+git(BRAIN, "config", "--unset", "remote.origin.uploadpack")
 git(BRAIN, "pull", "-q", "--ff-only")
 check("once the copy has pulled, nothing is left that only the fetched ref holds", up.edit_ts(KEY, 0) == 0 and pg.page_ts(KEY) >= t0 + 9000)
 for f in BRAIN.glob("projects/*.md"): os.utime(f, (t0 - 3000, t0 - 3000))
@@ -157,12 +192,13 @@ up.LIMIT, up.END_GRACE = 6.0, 1.0
 late = t0 + 9400
 fresh(); err = io.StringIO()
 with contextlib.redirect_stderr(err):
+    owe("any", ts=late + 300); _, write = took(pdebts._owed_settle)          # the call that begins the fetch: the whole wait is still ahead
+    under_way = not up._RUNS[pg.BRAIN][1].is_set()
     got, one = took(lambda: page_ts(late))
     got2, two = took(lambda: page_ts(late))
-    owe("any", ts=late + 300); _, write = took(pdebts._owed_settle)
-    check("hanging remote: the first read waits the bounded time and answers the copy's time", got < late and wait - 0.2 <= one < wait + 1.5, (got, one))
+    check("hanging remote: a board write's settle begins the fetch and never waits for it", under_way and write < 1.0 and owed(), (write, under_way))
+    check("hanging remote: the first read waits the bounded time and answers the copy's time", got < late and wait - write - 0.3 <= one < wait + 1.5, (got, one, write))
     check("…a read after the wait has passed answers at once", got2 == got and two < 1.0, two)
-    check("…and a board write's settle never waits", write < 1.0 and owed(), write)
     done()
 print(f"hanging remote: first page-ts {one:.2f} s, the next {two:.2f} s, the server's settle {write:.2f} s")
 pids = slowlog.read_text().split()
@@ -180,7 +216,7 @@ git(BRAIN, "config", "--unset", "remote.origin.uploadpack")
 
 # ---- 7. what cannot be fetched answers as the copy does
 url = git(BRAIN, "config", "remote.origin.url")
-up._FAILED.clear(); git(BRAIN, "config", "remote.origin.url", str(T / "gone.git"))
+up._FAILS.clear(); git(BRAIN, "config", "remote.origin.url", str(T / "gone.git"))
 err = io.StringIO(); every, up.EVERY = up.EVERY, 0.0
 with contextlib.redirect_stderr(err):
     fresh(); a_ = page_ts(late); done(); b_ = page_ts(late); done()
@@ -188,7 +224,40 @@ check("a remote that is not there: the copy's time, each time", a_ == b_ and a_ 
 check("…said once while it lasts", err.getvalue().count("page upstream:") == 1 and "git fetch ended with status" in err.getvalue(), err.getvalue())
 git(BRAIN, "config", "remote.origin.url", url)
 fresh(); check("…and read again once the remote is back", page_ts(late) == t0 + 9500)
+done(); check("a fetch that works clears the count of failed ones", pg.BRAIN not in up._FAILS, up._FAILS)
+git(BRAIN, "config", "remote.origin.url", str(T / "gone.git")); err = io.StringIO()
+with contextlib.redirect_stderr(err): fresh(); up.refresh(pg.BRAIN, 10); done()
+check("…so the next failure is said again", err.getvalue().count("page upstream:") == 1, err.getvalue())
+
+# fetches that fail come further apart: EVERY, then double with each failure in a row, up to BACKOFF
+def aged(seconds):
+    done(); up._RUNS[pg.BRAIN] = (time.monotonic() - seconds, up._RUNS[pg.BRAIN][1])
+def begins():
+    was = up._RUNS[pg.BRAIN]; up.refresh(pg.BRAIN, 10); done(); return up._RUNS[pg.BRAIN] is not was
+up.EVERY = 100.0
+with contextlib.redirect_stderr(io.StringIO()):
+    up._FAILS.clear(); fresh(); up.refresh(pg.BRAIN, 10)          # one failure
+    aged(150); a_ = begins(); aged(201); b_ = begins()             # the next after 200
+    aged(250); c_ = begins(); aged(301); d_ = begins()             # then 300, the most
+    for _ in range(4): aged(301); begins()
+    aged(301); e_ = begins()
+check("after one failed fetch the next comes after twice the pause, not before", (a_, b_) == (False, True), (a_, b_))
+check("…and the pause grows no further than BACKOFF, however many have failed", (c_, d_, e_) == (False, True, True), (c_, d_, e_))
+git(BRAIN, "config", "remote.origin.url", url)
+aged(301); a_ = begins(); aged(101); b_ = begins()
+check("…and a fetch that works puts the pause back", (a_, b_) == (True, True), (a_, b_))
 up.EVERY = every
+
+# a lock file a fetch ended outright left on the ref
+lock = pathlib.Path(git(BRAIN, "rev-parse", "--path-format=absolute", "--git-path", f"{up.REF}.lock")); lock.parent.mkdir(parents=True, exist_ok=True)
+push(page(state="- one more thing."), at=t0 + 9600)
+lock.write_text(""); err = io.StringIO(); up._FAILS.clear()
+with contextlib.redirect_stderr(err): fresh(); got = page_ts(t0 + 9550); done()
+check("a lock file on the ref that could still be a fetch's is left alone: the fetch fails, the copy answers", got < t0 + 9550 and lock.exists() and up._FAILS.get(pg.BRAIN) == 1, (got, err.getvalue()))
+os.utime(lock, (time.time() - up.STALE - 60,) * 2); err = io.StringIO()
+with contextlib.redirect_stderr(err): fresh(); got = page_ts(t0 + 9550); done()
+check("one left behind longer than STALE is removed, said, and the fetch works again", got == t0 + 9600 and not lock.exists() and pg.BRAIN not in up._FAILS
+      and "removed a lock file left behind" in err.getvalue(), (got, lock.exists(), err.getvalue()))
 
 git(BRAIN, "update-ref", "-d", up.REF); git(BRAIN, "branch", "--unset-upstream")
 err = io.StringIO()
@@ -197,7 +266,7 @@ check("a branch with no upstream: nothing is fetched, nothing is said", got < la
 git(BRAIN, "branch", "--set-upstream-to=origin/main")
 
 fresh(); _ro._reload_for_test(True)
-try: got = page_ts(late); owe("any", ts=late + 300); pdebts._upstream_settles(KEY, A, pdebts._owed_load()[KEY][A])
+try: got = page_ts(late); owe("any", ts=late + 300); pdebts._upstream_settles(KEY, A, pdebts._owed_load()[KEY][A], pdebts._upstream_ts(KEY))
 finally: _ro._reload_for_test(False)
 check("a read-only standby begins no fetch", got < late and not up._RUNS, (got, up._RUNS))
 check("a copy that is not there begins no fetch", up.refresh(str(T / "no-such-copy"), 1) is None and not up._RUNS)
@@ -216,9 +285,60 @@ try:
         no = c.get("/client/page-ts", params={"key": KEY, "since": str(late)})
         c.portal.call(lambda: threads.append(threading.current_thread()))        # the event loop's own thread
 finally: routes._client_get = _real
-check("http: the machine's token gets the fetched edit's time", r.status_code == 200 and r.json() == {"key": KEY, "ts": t0 + 9500}, (r.status_code, r.text))
+check("http: the machine's token gets the fetched edit's time", r.status_code == 200 and r.json() == {"key": KEY, "ts": t0 + 9600}, (r.status_code, r.text))
 check("http: no token is refused as before", no.status_code == 401, no.status_code)
 check("http: the read runs off the event loop", len(threads) == 2 and threads[0] is not threads[1], threads)
+done()
+
+# ---- 9. a strict debt on a page that is new, removed or put back on the remote
+def remote_commit(at, what):
+    git(WRITER, "add", "-A"); git(WRITER, "commit", "-qm", what, at=at); git(WRITER, "push", "-q", "origin", "main")
+def owe_on(key, ts, settle="ct"): pdebts._owed_save({key: {A: {"ts": ts, "item": "a1", "settle": settle}}})
+def settled(key):
+    """A settle with the remote's state fetched."""
+    fresh(); up.refresh(pg.BRAIN, 10); done(); return key not in pdebts._owed_settle()
+BETA, NEW = "projects/beta", "projects/gamma"
+(WRITER / "projects/beta.md").unlink(); remote_commit(t0 + 10000, "remove beta")
+(WRITER / "projects/beta.md").write_text(page(state="- beta is back.")); (WRITER / "projects/gamma.md").write_text(page(state="- gamma starts.")); remote_commit(t0 + 11000, "beta back, gamma new")
+owe_on(NEW, t0 + 11000); check("strict: a page that is new on the remote settles the debt", settled(NEW), pdebts._owed_load())
+owe_on(BETA, t0 + 11000); check("strict: a page removed before the board write and put back after it settles the debt", settled(BETA), pdebts._owed_load())
+(WRITER / "projects/beta.md").write_text(page(state="- beta changed again.")); remote_commit(t0 + 12000, "beta changes")
+(WRITER / "projects/beta.md").unlink(); remote_commit(t0 + 12010, "beta removed")
+owe_on(BETA, t0 + 12000); check("strict: a page the remote no longer holds settles nothing", not settled(BETA), pdebts._owed_load())
+
+# ---- 10. a read that fails or is slow cannot tell, and the debt stays
+push(page(state="- the order went out."), at=t0 + 13000)
+fresh(); up.refresh(pg.BRAIN, 10); done()
+_run = subprocess.run
+READS = (("the look for the version at the board write", lambda a: any(str(x).startswith("--before=") for x in a)),
+         ("the look for the page in that version", lambda a: "ls-tree" in a),
+         ("the read of that version", lambda a: "show" in a and not str(a[-1]).startswith(up.REF)),
+         ("the read of the fetched version", lambda a: "show" in a and str(a[-1]).startswith(up.REF)))
+for what, hit in READS:
+    for how in ("is slow", "fails"):
+        met = []
+        def broken(args, *a, **k):
+            if isinstance(args, list) and hit(args):
+                met.append(args)
+                if how == "is slow": raise subprocess.TimeoutExpired(args, up.READ_LIMIT)
+                return subprocess.CompletedProcess(args, 128, "", "fatal: no")
+            return _run(args, *a, **k)
+        owe(ts=t0 + 13000); subprocess.run = broken
+        try: left = pdebts._owed_settle()
+        finally: subprocess.run = _run
+        check(f"strict: when {what} {how}, the debt stays", KEY in left and owed() and met, (met, left))
+owe(ts=t0 + 13000); check("strict: …and with every read answered the same edit settles it", KEY not in pdebts._owed_settle())
+
+# ---- 11. the fetched edit is read once a page, whoever owes it, and each debt judged by its own time
+B, C = "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"
+E = lambda ts, settle="any": {"ts": ts, "item": "a1", "settle": settle}
+pdebts._owed_save({KEY: {A: E(t0 + 13000, "ct"), B: E(t0 + 13100), C: E(t0 + 13600)}, BETA: {A: E(t0 + 20000), B: E(t0 + 20000)}})
+asked = []; _edit_ts = up.edit_ts
+up.edit_ts = lambda key, *a, **k: (asked.append(key), _edit_ts(key, *a, **k))[1]
+try: left = pdebts._owed_settle()
+finally: up.edit_ts = _edit_ts
+check("one read of the fetched edit a page in a settle, with several writers owing it", sorted(asked) == [KEY, BETA], asked)
+check("…and each debt judged by its own time", list(left.get(KEY, {})) == [C] and sorted(left.get(BETA, {})) == [A, B], left)
 done()
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
