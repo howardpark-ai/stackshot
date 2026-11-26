@@ -1378,7 +1378,7 @@ sus, _skip = AR.suspects(mixed, now, env())
 check("why-not-now: ranks after the other checks (a wrong-needs suspect comes first)", sus[0]["id"] == f"board#{BID_05}" and all(s["priority"] == 3 for s in sus[1:]), [(s["id"], s["priority"]) for s in sus[:3]])
 rec_clear()
 
-# ---- 28b. goal-unclear: an open item whose subject and `Goal:` bullet are new or reworded is asked "do both name an outcome wanted?"
+# ---- 28b. goal-unclear: an open item whose subject and `Goal:` bullet are new or reworded is asked "do both name a finished outcome?"
 GU = "goal-unclear"
 def gitem(i, subject="[home] Make the nightly run finish by 06:00", goal="The nightly run finishes by 06:00", status="open", **kw):
     k, d = clean(i) if status == "open" else item(i, status=status, wrote=now - 2 * H)
@@ -1399,7 +1399,7 @@ check("goal-unclear: a yes is a finding from the model on the item's mover, with
 check("goal-unclear: one call, whose message names the check with the subject and the Goal sentence, and the rubric carries the check",
       len(calls()) == 1 and rec["calls"]["made"] == 1 and f"- {GU}: the subject and the Goal bullet are new or reworded" in calls()[0]["stdin"] and "Goal: The nightly run finishes by 06:00" in calls()[0]["stdin"]
       and "\ngoal-unclear\n  An item states its goal twice" in RUBRIC_TEXT and RUBRIC_TEXT in calls()[0]["argv"], calls())
-check("goal-unclear: delivered as '<id> · goal-unclear · <reason> · <fix>' to the mover", any(to == "home-agent" and f"board#{BID_04} · goal-unclear · the subject names the failure" in t and "reword the subject to the outcome wanted and the first bullet to `Goal:" in t for to, t, fy in sent), sent)
+check("goal-unclear: delivered as '<id> · goal-unclear · <reason> · <fix>' to the mover", any(to == "home-agent" and f"board#{BID_04} · goal-unclear · the subject names the failure" in t and "reword the subject to the finished outcome and the first bullet to `Goal:" in t for to, t, fy in sent), sent)
 check("goal-unclear: the verdict and the (subject, Goal) stamp are on the record", rec["judged"][f"board#{BID_04}"]["verdict"] == "yes" and rec["judged"][f"board#{BID_04}"]["gsig"] == sus[0]["gsig"] and rec["goal_judged"] == {f"board#{BID_04}": sus[0]["gsig"]},
       (rec["judged"], rec.get("goal_judged")))
 

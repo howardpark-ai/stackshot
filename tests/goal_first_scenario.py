@@ -2,7 +2,7 @@
 
 Covers: a session's create is refused unless the description's first `- ` bullet opens `Goal:` (case-sensitive, the label right after the dash, with a sentence after it):
 no bullet at all, another label, a bare `Goal:` and a goal that sits second are all refused, each with a refusal that names the
-first words it saw, says the subject and the first bullet state the outcome wanted, sends a symptom, cause or trigger to a later `Problem:` bullet, gives the before and after
+first words it saw, says the subject and the first bullet name the same finished outcome, sends a symptom, cause or trigger to a later `Problem:` bullet, gives the before and after
 example and the retry hint, and files nothing; the same description with `- Goal: …` first passes (a leading quote line or a later `Problem:` bullet is fine; the first `- ` bullet
 is the one read); an update that replaces the description is judged the same, an update that leaves the description out, sends the stored text back, closes the item or sets a
 new subject alone is not; the items a script files (the question route, the server's own `_create`, a script's sender on update, the re-bullet route) are filed whatever their first
@@ -102,7 +102,7 @@ check("create refused: an empty description is no goal either", e.startswith("Re
 e = refusal(lambda: create("- A thing"))
 check("the refusal names the outcome form, the Problem bullet, the example and the retry hint",
       "`- Goal: <the result you want, in a sentence>`" in e and "opens `Problem:`" in e and "“Fix X fails when Y”" in e and "“Make X work when Y”" in e
-      and "`- Goal: X works when Y`" in e and "`- Problem: X fails when Y`" in e and "case-sensitive" in e and "Retry the call" in e and "MCP Portal" in e and "The subject and the first bullet" in e, e)
+      and "`- Goal: X works when Y`" in e and "`- Problem: X fails when Y`" in e and "case-sensitive" in e and "Retry the call" in e and "MCP Portal" in e and "The subject and the first bullet name the same finished outcome" in e, e)
 check("…and long first words are cut to six words", f"{SEEN} “one two three four five six”" in refusal(lambda: create("- one two three four five six seven eight")), None)
 check("every refusal above filed nothing", n_items() == n0, n_items() - n0)
 e = refusal(lambda: create("A thing. It lives here."))
@@ -185,8 +185,12 @@ check("…and back on by default", "must open with its goal" in refusal(lambda: 
 # ---- 7. the text sessions learn the rule from
 TOOLS = {t.name: t.description for t in __import__("asyncio").run(server.mcp.list_tools())}
 for t in ("create", "update"):
-    check(f"the {t} tool's text says the subject is the outcome and the first bullet opens `Goal:`, a symptom goes under `Problem:`",
-          "the outcome wanted" in TOOLS[t] and "opens `Goal:`" in TOOLS[t] and "opens `Problem:`" in TOOLS[t] and "never the symptom" in TOOLS[t] and "is put right" in TOOLS[t], TOOLS[t][:300])
+    one_line = " ".join(TOOLS[t].split())
+    check(f"the {t} tool's text says the subject is the finished outcome the Goal sentence says, the first bullet opens `Goal:`, a symptom goes under `Problem:`",
+          'the finished outcome ("Make X work when Y", "X is live", "Y no longer happens"), the same one the Goal sentence says' in one_line and 'never an activity ("Investigate X"), a question ("Should X change?"), a topic ("X settings") or the symptom ("X fails when Y")' in one_line
+          and "with that finished outcome in a sentence" in one_line and "opens `Goal:`" in one_line and "opens `Problem:`" in one_line and "is put right" in one_line and "outcome wanted" not in one_line, one_line[:300])
+check("the create tool's own sentence on the subject says the same: the finished outcome of the Goal bullet, never an activity, a question, a topic or a symptom",
+      "then the finished outcome, the one the `Goal:` bullet says, never an activity, a question, a topic or a symptom" in " ".join(TOOLS["create"].split()), TOOLS["create"][:300])
 check("the shared form says an update that leaves the description out is never judged", "an update that leaves description out is never judged" in _wt_text._ITEM_FORM, None)
 
 print(("ok" if not fails else "FAILED") + f": goal_first scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

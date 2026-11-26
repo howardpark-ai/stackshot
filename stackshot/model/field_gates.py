@@ -67,7 +67,7 @@ def subject_faults(subject: str, current: str | None = None) -> list[str]:
         out.append(f"Refused: subject must start with one of {s['prefixes']} — got {subject[:40]!r}")
     lim = _subject_max()
     if lim and len(subject) > lim and subject != current:
-        out.append(f"Refused: the subject is {len(subject)} characters and the limit is {lim}, the scope prefix counted. Shorten it to the action and its object; "
+        out.append(f"Refused: the subject is {len(subject)} characters and the limit is {lim}, the scope prefix counted. Shorten it to the finished outcome; "
                    "the detail goes in the description bullets (and the project page's timeline).")
     return out
 
@@ -336,7 +336,7 @@ def _sendable(desc: str) -> bool:
 
 
 def goal_fault(desc: str) -> str:
-    """The refusal text `_gate_goal` raises for `desc`, "" when the description opens with its goal (or the form checks are off). A session's new description, or one it rewrites, opens with the goal: the first `- ` bullet starts `Goal:` (case-sensitive, right after the dash) and says the outcome wanted;
+    """The refusal text `_gate_goal` raises for `desc`, "" when the description opens with its goal (or the form checks are off). A session's new description, or one it rewrites, opens with the goal: the first `- ` bullet starts `Goal:` (case-sensitive, right after the dash) and says the finished outcome;
     a symptom, cause or trigger goes in a later bullet that opens `Problem:`. Why: an item once carried a title and bullets that described the trouble and never said what result was wanted.
     Judged on the text written in the call only (the callers run it for a session's create and for an update that replaces the description with other text), after the form gate.
     The first bullet is the first `- ` line (bullet_text.first_bullet); a description with no bullet is refused the same way. [description] require_bullets = false switches it off with the other form checks."""
@@ -347,8 +347,8 @@ def goal_fault(desc: str) -> str:
     ex = _bt.goal_example(desc)
     if ex is not None and not _sendable(ex):      # a corrected description the form gate would refuse again is no example to copy
         ex = None
-    shown = (f" Send the description again with that bullet as the goal:\n{ex}\n" + "If that bullet names a symptom, a cause or a trigger, write the outcome you want as the goal and move the bullet to a later bullet that opens `Problem:`.") if ex else ""
-    return (f"Refused: the description must open with its goal, and {saw}.{shown} The subject and the first bullet state the outcome wanted: `- Goal: <the result you want, in a sentence>`; "
+    shown = (f" Send the description again with that bullet as the goal:\n{ex}\n" + "If that bullet names a symptom, a cause or a trigger, write the finished outcome as the goal and move the bullet to a later bullet that opens `Problem:`.") if ex else ""
+    return (f"Refused: the description must open with its goal, and {saw}.{shown} The subject and the first bullet name the same finished outcome: `- Goal: <the result you want, in a sentence>`; "
                     "a symptom, a cause or a trigger goes in a later bullet that opens `Problem:`. "
                     "Example: the symptom title “Fix X fails when Y” becomes the outcome title “Make X work when Y”, with `- Goal: X works when Y` as the first bullet "
                     "and `- Problem: X fails when Y` as the second. `Goal:` is case-sensitive and sits right after the dash." + _GOAL_RETRY)

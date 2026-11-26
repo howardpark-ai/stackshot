@@ -186,6 +186,12 @@ allow = [
     "`dropped`, `rank`)",
 ]
 
+# ---- the subject: the finished outcome, the one the Goal sentence says. "A task" read as leave to name an activity, which the audit's goal-unclear check flags.
+[[term]]
+retired = "outcome wanted"
+use = "the finished outcome (the subject and the `Goal:` bullet name the same one, never an activity, a question, a topic or a symptom)"
+allow = []
+
 [[scan]]
 files = ["*.py", "anchorhub/*.py", "tests/tool_text.snapshot.json"]
 skip_keys = ["name", "type"]
