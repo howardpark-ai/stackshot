@@ -6,10 +6,11 @@ An item its mover is moving is not paused: a hold says "nothing happens here unt
 The proof is the one the hourly audit uses (audit/hourly.py, audit/subagent_tie.py): the subagent as the fleet's last agent-state snapshot lists it, a running one whose description (else its brief) names the item or a pull request
 anchored to it, read against every open item the mover has, so a subagent that works on another item of the mover is not tied to this one. Nothing is read from GitHub. A main CI run of an
 anchored pull request and the release queue file are NOT read as proof: the server records the events of a pull request when they end (a CI result, a merge: model/last_activity.py), never that a run is in flight, and an event record is no proof
-of one running, so a refusal on it would rest on a guess; the release script's own unit is the proof of a running release (below).
+of one running, so a refusal on it would rest on a guess; the release script's own unit, or what the release says of itself to this box, is the proof of a running release (below).
 
 A second proof: a release of a pull request tied to THIS item that is running (`live_release`). release.sh runs each release as the user unit stackshot-release-<n>.service and it stays active from its checks through
-the merge queue, the merge, the deploy and main's run, so "that unit is active" is "a release of PR n is running" (the unit list web/ui/releasing.py `release_units` reads for the board's Queued for release label; the caller passes it in). The pull request is
+the merge queue, the merge, the deploy and main's run, so "that unit is active" is "a release of PR n is running" (the list web/ui/releasing.py `release_units` reads for the board's Queued for release label; the caller passes it in). With [release] deploy_ssh
+release.sh runs on another box than the server: there the release tells this box that it runs and how its log stands (core/release_running.py), which both reads below take as they take a unit and a log of this box. The pull request is
 tied to the item by three things only (an anchor scoped to the item, an open step's URL, `PR #n` or stored proof, the status line of an open step), never to every item and never by free text (the description, a done step or a mention elsewhere ties nothing); an anchored pull request with no running
 unit never counts, and a pull request that none of those names ties nothing (a false negative, never a false refusal). A running unit with a log that has not been written for `RELEASE_FRESH_S`
 is a release that is stuck, so it counts for nothing and the mover is never trapped. Nothing is read from GitHub; no log is read while no unit runs.
@@ -26,6 +27,7 @@ from typing import Any, Callable
 from stackshot.audit import audit_checks as _ac
 from stackshot.audit import subagent_tie as _tie
 from stackshot.core import config as _cfg
+from stackshot.core import release_running as _told
 from stackshot.model import steps as _steps
 
 DESC_MAX = 80      # characters of a subagent's description the refusal quotes
@@ -95,8 +97,12 @@ def stage_of(text: str) -> str:
 
 
 def release_log(n: int) -> "tuple[float, str] | None":
-    """The log release.sh keeps of the release of PR `n` (<state>/releases/pr-<n>.log) → (when it was last written, the end of it), None when there is none or it cannot be read."""
+    """The log release.sh keeps of the release of PR `n` → (when it was last written, the end of it), None when there is none or it cannot be read. What a release box told this one (core/release_running.py) comes first: a running release says it
+    of itself, while a file of that name here may be an old copy. Else this box's <state>/releases/pr-<n>.log."""
     try:
+        told = _told.running().get(int(n))
+        if told:
+            return told
         p = Path(_cfg.state("releases", f"pr-{int(n)}.log"))
         with open(p, "rb") as f:
             size = f.seek(0, 2)
@@ -174,9 +180,9 @@ def live_release(gid: str, *, units: Callable[[], Any], anchored: Callable[[], d
                  canon: Callable[[str], str], step_prs: Callable[[dict[str, Any]], Any], log: Callable[[int], "tuple[float, str] | None"],
                  now: Callable[[], float]) -> str:
     """The words for a release of a pull request tied to item `gid` that is running ("a release of PR #12 tied to this item is running (unit stackshot-release-12.service, its log written 3 min ago, in the merge queue (QUEUED position 1))"),
-    "" when none is or none can be told. Running = the unit `stackshot-release-<n>.service` is active (`units()`, web/ui/releasing.py `release_units`: one systemctl call, an empty set on any failure) AND its log was written within
+    "" when none is or none can be told. Running = the unit `stackshot-release-<n>.service` is active, here or on the release box that says so (`units()`, web/ui/releasing.py `release_units`: one systemctl call and the entries told to this box) AND its log was written within
     `RELEASE_FRESH_S` (a unit whose log is older, or missing, is stuck or unknown: the mover is not held for it). The pull request is tied to the item by `tied_releases`; the stage is the log's own words when its last lines
-    name one (`stage_of`). Nothing runs on a box with no unit (a failover box has none), and then no log is read at all. With several, the one written to most recently is named. The units carry no owner, so the proof is of the item, never of the mover: the words say a release tied to this item runs, not that it is the mover's own.
+    name one (`stage_of`). Nothing runs on a box with no unit and nothing told to it (a failover box has neither), and then no log is read at all. With several, the one written to most recently is named. The units carry no owner, so the proof is of the item, never of the mover: the words say a release tied to this item runs, not that it is the mover's own.
     Every input is passed in, so a suite gives fakes. Unknown (a failure of any input) is "", never a refusal."""
     try:
         running = {int(n) for n in (units() or ())}

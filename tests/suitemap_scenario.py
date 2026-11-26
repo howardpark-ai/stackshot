@@ -1944,6 +1944,8 @@ DOCUSE_ALLOW = {
     ("tests/audit_run_scenario.py", ".prompt("): (3, "AR.prompt(...) is the audit's own function that builds a text, not a registry"),
     ("tests/release_queue_scenario.py", "import *"): (1, "the release harness's own helpers; no function of the checkout is read through them by a docstring"),
     ("tests/release_scenario.py", "import *"): (1, "the release harness's own helpers; no function of the checkout is read through them by a docstring"),
+    ("tests/release_running_scenario.py", "import *"): (1, "the release harness's own helpers; no function of the checkout is read through them by a docstring"),
+    ("tests/release_running_scenario.py", ".command("): (5, "release_running.command(n, limit) is the module's own function that builds the ssh command, not a registry"),
     ("tests/event_wait_scenario.py", "__doc__"): (2, "client.__doc__ twice, a module docstring: read by name, unchanged rule"),
     ("tests/locale_pages_scenario.py", "__doc__"): (1, "i18n.__doc__, a module docstring: read by name, unchanged rule"),
     ("tests/model_scenario.py", "__doc__"): (1, "_wt_get.stackshot_get.__doc__, a decorated tool: unchanged rule"),
