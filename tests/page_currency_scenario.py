@@ -1123,14 +1123,14 @@ fresh(); p.save_state(A, {}); p.save_state(S, {})
 tpa = transcript("ship it", [(ST + "update", {"item_id": "s5", "next": "x"})])
 rc, q = touch(A, tpa, {"item_id": "s5", "next": "go on"})
 check("early: the first board write of a turn gets the board question as context, in the reply's own words",
-      rc == 0 and q.startswith("[stackshot] The end-of-turn board question, asked now so it costs no second reply (once per turn): Your other open items") and 's6 "[home] item 6"' in q
+      rc == 0 and q.startswith("[stackshot] Board question (once per turn). Open items not yet touched this turn: ") and 's6 "[home] item 6"' in q
       and "Page" not in q and "page" not in q
       and "`Board: no change, <reason>`" in q and "s7 " not in q and "s8 " not in q, q)
 check("early (quiet retired, Thu Oct 15th 2026): the question no longer advertises a [quiet] reply", "quiet" not in q.lower(), q)
-check("early: the examples name items as shown, `Board board#5: …`", "`Board board#N: no change, <reason>`" in q and "Board s5" not in q, q)
+check("early: the examples name items as shown, `board#N`, never a store id", "`- board#N: no change, <reason>`" in q and "Board s5" not in q, q)
 check("early (bullets): the question asks for a `Board:` line and one bullet per item for several items",
-      "a `Board:` line followed by one bullet per item, each on its own line: `- board#N: no change, <reason>` (or `- board#M: updated, <what>`)" in q
-      and "In another language the instance has configured the same lines read with its own words" in q, q)
+      "`Board: no change, <reason>` (3+ words) for all, or one bullet per item (`- board#N: no change, <reason>` / `- board#M: updated, <what>`)" in q
+      and "If this turn changes one, update it or confirm it" in q and "Only items you move or are named in the needs of." in q, q)
 rc, q2 = touch(A, tpa, {"item_id": "s6", "next": "and on"}); check("early: once per turn: the next write in the same turn gets nothing", rc == 0 and q2 == "", q2)
 time.sleep(1.1); rc, q3 = touch(A, transcript("next prompt", []), {"item_id": "s5", "next": "again"})
 check("early: a later turn is asked again", q3.startswith("[stackshot]"), q3)
@@ -1173,7 +1173,7 @@ rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "next": "x"}, bm="not
 # write's page debt is still recorded
 p.save_state(S, {}); items((10, S, {}))
 rc, q = touch(S, transcript("keeper ships", []), {"item_id": "s10", "next": "x"}, resp="updated [s10](https://x/items/s10).\nproject: projects/alpha")
-check("early: a keeper gets the board question only: no Page line, no pages it keeps, no page owed", q.startswith("[stackshot] The end-of-turn board question")
+check("early: a keeper gets the board question only: no Page line, no pages it keeps, no page owed", q.startswith("[stackshot] Board question")
       and 's10 "[home] item 10"' in q and "Page" not in q and "Pages you keep" not in q and "owe `projects/alpha`" not in q, q)
 check("early: the touch still records the page debt and the item id from a linked reply", (p.load_state(S).get("touches") or {}).get("projects/alpha", {}).get("task") == "s10", p.load_state(S))
 rc, q = touch(S, transcript("keeper ships again", []), {"item_id": "s10", "next": "y"}, resp="updated [s10](https://x/items/s10).\nproject: projects/alpha", bm="off")

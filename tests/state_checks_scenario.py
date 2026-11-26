@@ -406,7 +406,7 @@ pg.turn_activity = lambda path: {"start": int(time.time()) + 10, "writes": True}
 pg.board_mode = lambda: "block"
 pg.load_state = lambda sid: {}; pg.save_state = lambda sid, st: None
 q = pg.early_question({"session_id": "s", "tool_name": "mcp__x__update", "tool_response": "updated a1", "transcript_path": "/none"})
-check("7: the early question (the hook text `Your other open items…`) ends with no hint lines", q.startswith("[stackshot] The end-of-turn board question") and "Your other open items" in q and "Items with no stored state" not in q, q[-400:])
+check("7: the early question (the hook text `Open items not yet touched…`) ends with no hint lines", q.startswith("[stackshot] Board question") and "Open items not yet touched this turn" in q and "Items with no stored state" not in q, q[-400:])
 
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

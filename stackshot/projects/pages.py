@@ -976,14 +976,9 @@ def early_question(payload):
     due = [it for it in items if not it.get("held") and max(_num(it.get("state_updated")), _num(it.get("confirmed")), _num(it.get("updated"))) < start]
     if not due: return ""
     listed = ", ".join(f'{item_shown(it)} "{it.get("subject") or ""}"' + (f" ({r})" if (r := role_note(it)) else "") for it in due[:BOARD_LIST]) + (f", and {len(due) - BOARD_LIST} more" if len(due) > BOARD_LIST else "")
-    return ("[stackshot] The end-of-turn board question, asked now so it costs no second reply (once per turn): "
-            "Your other open items, not yet touched this turn: " + listed + ". If this turn changes one, update it (or confirm it "
-            "when it is still true as it stands); if not, end your reply with `Board: no change, <reason>` for all of them, or with a "
-            "`Board:` line followed by one bullet per item, each on its own line: `- board#N: no change, <reason>` (or `- board#M: updated, "
-            "<what>`). One item may stay a single line: `Board board#N: no change, <reason>`. "
-            "In another language the instance has configured the same lines read with its own words. The reason is at least three words. Board lines cover these "
-            "items only: an item you do not move and are not named in the needs of is its mover's to report."
-            " With these in your reply, the check at the end of the turn asks nothing." + still_mover_note(due[:BOARD_LIST]))
+    return ("[stackshot] Board question (once per turn). Open items not yet touched this turn: " + listed + ". If this turn changes one, "
+            "update it or confirm it; otherwise end your reply with `Board: no change, <reason>` (3+ words) for all, or one bullet per item "
+            "(`- board#N: no change, <reason>` / `- board#M: updated, <what>`). Only items you move or are named in the needs of." + still_mover_note(due[:BOARD_LIST]))
 
 # The other writes a turn ends on (a keeper: "most keeper turns end in a message or a page write"): they owe no page
 # themselves, but the turn's first of them gets the early question too, once the hook's matcher names them (the settings are
