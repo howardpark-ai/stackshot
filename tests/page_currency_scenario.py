@@ -1169,6 +1169,20 @@ rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "priority": "p1"}); c
 rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "next": "x"}, resp="Refused: something"); check("early: a refused write asks nothing", q == "", q)
 rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "next": "x"}, bm="off"); check("early: the board check off: nothing asked", q == "", q)
 rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "next": "x"}, bm="note"); check("early: note mode asks the same, early", 's6 "[home] item 6"' in q, q)
+# a call made inside a subagent carries agent_id in its hook input: it asks nothing and keeps no early mark
+def atouch(sid, tp, tool, inp, resp):
+    pl = {"session_id": sid, "transcript_path": tp, "tool_name": tool, "tool_input": inp, "tool_response": resp, "agent_id": "ag1", "agent_type": "general-purpose"}
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "touch"], input=json.dumps(pl), capture_output=True, text=True,
+                       env={**os.environ, "BOARD_CHECK_MODE": "block"})
+    return r.returncode, r.stdout
+p.save_state(A, {}); time.sleep(1.05); tps = transcript("sub work", [])
+rc, out = atouch(A, tps, ST + "update", {"item_id": "s5", "next": "z"}, "updated [s5](https://x/items/s5).\nproject: projects/alpha")
+check("early: a board write inside a subagent asks nothing", rc == 0 and out.strip() == "", out)
+check("early: …and does not count as the turn's question (no early mark kept)", not p.load_state(A).get("early"), p.load_state(A))
+rc, out = atouch(A, tps, "SendMessage", {}, "ok")
+check("early: any other write inside a subagent asks nothing and keeps no early mark", rc == 0 and out.strip() == "" and not p.load_state(A).get("early"), (out, p.load_state(A)))
+rc, q = touch(A, tps, {"item_id": "s5", "next": "z"})
+check("early: the same turn's main-session write after the subagent's is still asked", q.startswith("[stackshot] Board question"), q)
 # a page keeper (S keeps alpha and gamma): the early text carries the board question and nothing about its pages, and the board
 # write's page debt is still recorded
 p.save_state(S, {}); items((10, S, {}))

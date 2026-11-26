@@ -963,6 +963,7 @@ def still_mover_note(rows):
 # question (`Page: no change, <reason>`); the owner retired that one, and a write-up mod covers the turn's end.
 def early_question(payload):
     """→ the board question for this turn's first write, or "" (asked already this turn, nothing to ask, or the check off)."""
+    if payload.get("agent_id"): return ""      # a call made inside a subagent (its hook input carries agent_id): the open items are the calling session's, so nothing is asked and nothing is kept
     text = response_text(payload)
     if text.lstrip().startswith("Refused") or "\"isError\": true" in text: return ""
     if board_mode() not in ("block", "note"): return ""
