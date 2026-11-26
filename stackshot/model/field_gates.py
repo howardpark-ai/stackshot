@@ -173,7 +173,7 @@ def fix_long_bullets(desc: str, stored: str | None = None, field: str = "descrip
     """A description (or a close's outcome text, `field="outcome_text"`) whose bullets read over the limit, put right instead of refused: each long bullet is split at the gaps after its sentences into shorter bullets, a clause
     still over the limit on its own at its last comma, colon, spaced dash or opening parenthesis that leaves each piece within it, and a bullet no such cut splits at its last space that fits, the rest on an indented `- ` line under
     it (bullet_text.split_long_wrap: no word is dropped or cut, nothing is cut inside a link, a naked URL or a code span), and the reply says so (call_log.fixed: kind description-bullet or outcome-bullet for the first
-    two cuts, bullet-wrap for the last). -> (the text, the History line the caller writes onto the item: the server changed it, "" when it did not). The text as given when it is within the form, when the fault is anything
+    two cuts, bullet-wrap or outcome-wrap for the last). -> (the text, the History line the caller writes onto the item: the server changed it, "" when it did not). The text as given when it is within the form, when the fault is anything
     but a long bullet, or when the split cannot be made (a piece that is one unbroken token, a bullet with lines indented under it, more lines than the cap): the gate then refuses it as before. A text with no bullet form
     required ([description] require_bullets = false) is left alone. When the split text breaks the form some other way (a later line that is no bullet), the split text comes back with no note and no fix counted, so
     the gate refuses the fault that is left, not a long bullet the server would have put right. `stored` is the text the item holds already (an update passes it): when the split gives exactly that text, the same long
@@ -201,7 +201,7 @@ def fix_long_bullets(desc: str, stored: str | None = None, field: str = "descrip
                      f"{by_sentence} {field} bullet{'' if by_sentence == 1 else 's'} over {line_max} characters {'was' if by_sentence == 1 else 'were'} split {where} into shorter bullets, {kept}", fields=[field], stored=new, sent=desc)
         hist.append(f"{field}: {by_sentence} long bullet{'' if by_sentence == 1 else 's'} split by the server {h_}")
     if wrapped:
-        _calls.fixed("bullet-wrap", f"{wrapped} {field} bullet{'' if wrapped == 1 else 's'} over {line_max} characters {'was' if wrapped == 1 else 'were'} cut at a space, the rest on an indented `- ` line under it, no word changed",
+        _calls.fixed("bullet-wrap" if field == "description" else "outcome-wrap", f"{wrapped} {field} bullet{'' if wrapped == 1 else 's'} over {line_max} characters {'was' if wrapped == 1 else 'were'} cut at a space, the rest on an indented `- ` line under it, no word changed",
                      fields=[field], stored=new, sent=desc)
         hist.append(f"{field}: {wrapped} long bullet{'' if wrapped == 1 else 's'} continued on an indented line by the server, cut at a space")
     return new, "; ".join(hist)
@@ -298,7 +298,7 @@ def description_faults(desc: str, field: str = "description") -> list[str]:
             out.append(f"Refused: {field} line is not a `- ` bullet: \"{_clip_line(ln, 60)}\"; {fix}")
         else:
             out.append(f"Refused: {field} bullet is {n} characters, the limit is {line_max} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; the server splits a long bullet at a sentence end or a space by itself, "
-                       f"and could not split this one (a word or link longer than a line, a bullet with lines indented under it, or more than {max_lines} lines once split); {fix}")
+                       f"and could not split this one (no ordinary space to cut at within a line: a word or link longer than a line, or text spaced only with non-breaking or wide spaces; a bullet with lines indented under it, or more than {max_lines} lines once split); {fix}")
     if field != "description":
         return out
     low = desc.lower()

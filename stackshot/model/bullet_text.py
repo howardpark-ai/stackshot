@@ -543,6 +543,8 @@ def _wrap_words(ln: str, line_max: int, cap: int) -> list[str] | None:
             k = bisect.bisect_left(starts, m.start()) - 1
             if m.start() <= body_at or m.end() >= len(cur) or (k >= 0 and m.start() < ends[k]):
                 continue                # no cut in the lead, after the last word, or inside a link, URL or code span
+            if cur.count("(", body_at, m.start()) > cur.count(")", body_at, m.start()) or cur.count("**", body_at, m.start()) % 2:
+                continue                # nor inside an open parenthesis or an unclosed `**` emphasis: the sentence cut's own balance rule (`_clauses`)
             if visible_len(cur[:m.start()]) <= line_max and visible_len(cur[body_at:m.start()]) >= _SOFT_MIN:          # the first part is more than a label or a stub (as a clause cut's pieces are)
                 cut = m
                 break

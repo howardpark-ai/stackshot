@@ -212,12 +212,12 @@ def part_refusal_report():
     tok = CL.begin()
     try: out_c = _wt_complete.stackshot_complete("6", outcome="done", reason="because", sender="team-back", outcome_text="- it ended")
     finally: fx = CL.end(tok)
-    check("3 id: complete reads a bare number and closes the item, and says what it read", rd(6)["status"] == "completed" and [k for k, _ in fx] == ["item-id"] and fx[0][1] == f"read 6 as {BID(6)}" and f"read 6 as {BID(6)}" in CL.reply_note(fx), (rd(6)["status"], fx))
+    check("3 id: complete reads a bare number and closes the item, and says what it read", rd(6)["status"] == "completed" and [k for k, _ in fx] == ["item-id"] and fx[0][1] == f"read 6 as {BID(6)} ([home] item 6)" and f"read 6 as {BID(6)} ([home] item 6)" in CL.reply_note(fx), (rd(6)["status"], fx))
     check("3 id: …the line is told once however many times the server read the id, and invites no resend of the id", CL.reply_note(fx).count("read 6 as") == 1 and "send it again" not in CL.reply_note(fx), CL.reply_note(fx))
     tok = CL.begin()
     try: _wt_complete.stackshot_complete("#7", outcome="done", reason="because", sender="team-back", outcome_text="- it ended")
     finally: fx = CL.end(tok)
-    check("3 id: complete reads #N too, and says so", rd(7)["status"] == "completed" and fx and fx[0][1] == f"read #7 as {BID(7)}", (rd(7)["status"], fx))
+    check("3 id: complete reads #N too, and says so", rd(7)["status"] == "completed" and fx and fx[0][1] == f"read #7 as {BID(7)} ([home] item 7)", (rd(7)["status"], fx))
     try: _wt_complete.stackshot_complete("8x", outcome="done", reason="because", sender="team-back", outcome_text="- it ended"); cref = ""
     except ToolError as e: cref = str(e)
     check("3 id: complete still refuses what is no number (8x), and the item stays open", cref.startswith("bad item id '8x'") and rd(8)["status"] == "open", (cref, rd(8)["status"]))
@@ -228,7 +228,7 @@ def part_refusal_report():
     tok = CL.begin()
     try: _wt_complete.stackshot_complete("8", outcome="superseded", reason="because", superseded_by="5", sender="team-back", outcome_text="- it ended")
     finally: fx = CL.end(tok)
-    check("3 id: superseded_by reads a bare number too, and says so", rd(8)["status"] == "completed" and rd(8)["metadata"].get("superseded_by") and [n for _, n in fx] == [f"read 8 as {BID(8)} and 5 as {BID(5)}"], (rd(8)["status"], fx))
+    check("3 id: superseded_by reads a bare number too, and says so", rd(8)["status"] == "completed" and rd(8)["metadata"].get("superseded_by") and [n for _, n in fx] == [f"read 8 as {BID(8)} ([home] item 8) and 5 as {BID(5)}"], (rd(8)["status"], fx))
     tok = CL.begin()
     try: _wt_complete.stackshot_confirm("5", sender="team-back")
     finally: fx = CL.end(tok)
@@ -254,6 +254,31 @@ def part_refusal_report():
     try: _update_svc._update("5", sender="team-back", priority="p2")
     finally: fx = CL.end(tok)
     check("3 id: update reads a bare number, and says so", rd5()["metadata"].get("priority") == "p2" and "item-id" in [k for k, _ in fx], (rd5()["metadata"], fx))
+    # a close names the item it read: the first 60 characters of its subject, so a wrong item is seen at once; a plain read (get, confirm, a note-only update) carries no name
+    long_subj = "[home] " + "w" * 30 + " " + "z" * 40
+    (T / "store/g/10.json").write_text(json.dumps({"id": "10", "subject": long_subj, "description": DESC, "status": "open", "updated": time.time(), "state_updated": time.time(), "confirmed": 1.0,
+                                                   "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "team-back: do the thing"}}))
+    tok = CL.begin()
+    try: _wt_complete.stackshot_complete("10", outcome="done", reason="because", sender="team-back", outcome_text="- it ended")
+    finally: fx = CL.end(tok)
+    check("3 id: a close names the item by the first 60 characters of its subject (no more), and tells it once", [n for _, n in fx] == [f"read 10 as {BID(10)} ({long_subj[:60]})"] and len(long_subj) > 60 and "z" * 23 not in fx[0][1] and "z" * 22 in fx[0][1], fx)
+    check("3 id: …and the item read is closed (item 10)", rd(10)["status"] == "completed", rd(10)["status"])
+    tok = CL.begin()
+    try: _wt_complete.stackshot_confirm("5", sender="team-back")
+    finally: fx = CL.end(tok)
+    check("3 id: a confirm of a bare number names no subject (only a close does)", [n for _, n in fx] == [f"read 5 as {BID(5)}"], fx)
+    # check="item_closed <n>" and the ask's lead-in read a bare number too
+    from stackshot.service import checks as _checks
+    got_chk, fx = collect(lambda: _checks.parse_check("item_closed 5", "g9"))
+    check("3 id: check=item_closed reads a bare number (stored as the item's id) and says so", got_chk == f"item_closed {_model_ids._norm_id(BID(5))}" and [n for _, n in fx] == [f"read 5 as {BID(5)}"], (got_chk, fx))
+    got_chk, fx = collect(lambda: _checks.parse_check("item_closed #5", "g9"))
+    check("3 id: …and #N", got_chk == f"item_closed {_model_ids._norm_id(BID(5))}", got_chk)
+    try: _checks.parse_check("item_closed 5x", "g9"); bad_chk = ""
+    except ToolError as e: bad_chk = str(e)
+    check("3 id: …while what is no number is still refused", "item_closed names a board item" in bad_chk, bad_chk)
+    got_ask, fx = collect(lambda: _gates.ask_pre("5"))
+    check("3 id: ask_pre reads a bare number (an update's ask tail is not skipped), and the stored id comes back", got_ask.get("gid") == _model_ids._norm_id(BID(5)) and "old" in got_ask, got_ask)
+    check("3 id: …and an id that is no item still gives {}", _gates.ask_pre("zz") == {}, None)
     # the wake
     iso = lambda s: wakes_svc.parse_wake(s)
     day = (dt.datetime.now(zone) + dt.timedelta(days=3)).strftime("%Y-%m-%d")
@@ -460,7 +485,7 @@ def part_refusal_report():
     # the fix kinds of the bare item number in a close and of a bullet cut at a space: counted, checked for a send-back, worded in the report
     d_ot = {"fields": ["outcome_text"], "stored": H("- one\n  - two")}
     check("5 kinds: outcome-bullet and bullet-wrap have the send-back check (the same field written again with other words), item-id has none",
-          all(k in CL.CHECKED for k in ("outcome-bullet", "bullet-wrap")) and "item-id" not in CL.CHECKED
+          all(k in CL.CHECKED for k in ("outcome-bullet", "bullet-wrap", "outcome-wrap")) and "item-id" not in CL.CHECKED and CL.undone("outcome-wrap", d_ot, {"outcome_text": "- other"}) and "outcome-wrap" in CL.NO_RESEND
           and CL.undone("bullet-wrap", d_ot, {"outcome_text": "- one\n- three"}) and not CL.undone("bullet-wrap", d_ot, {"outcome_text": "- one\n  - two"}) and CL.undone("outcome-bullet", d_ot, {"outcome_text": "- other"}), CL.CHECKED)
     wipe()
     add("update", True, 3, mon + dt.timedelta(days=1), fixes=[("item-id", "read 5 as " + BID(5))]); add("update", True, 2, mon + dt.timedelta(days=1), fixes=[("bullet-wrap", "w")])

@@ -50,7 +50,7 @@ from stackshot.model import steps as _steps
 from stackshot.model import wait_tells as _wtell
 from stackshot.model import work as _work
 from stackshot.model.bullet_text import RX_MD_LINK, RX_NAKED_URL, _clip_line, goal_of, goal_words, stated_goal
-from stackshot.model.ids import _norm_id
+from stackshot.model.ids import _norm_id, name_read as _name_read
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
 from stackshot.service import anchor_offers as _anchor_offers
@@ -712,6 +712,8 @@ def update_unlocked(
         opts = []
     gid = _norm_id(item_id, bare=True)
     item = _load(gid)
+    if status == "completed":
+        _name_read(gid, str(item.get("subject") or ""))          # a close read from a bare number or #N says which item it is: its subject's first words
     answered_note = _answered_since_note(gid, item, sender)      # read now: the write below is the sender's too
     had_hold = bool((item.get("metadata") or {}).get("hold"))      # read before the unfold, which stands a basis or the kind time in as a hold
     was_until = _uw.unfold_item(item)                    # a stored until stands as the old working fields for this write's gates (until_write.py); it is folded back just before the save

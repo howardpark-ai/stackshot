@@ -52,7 +52,7 @@ BOUNCE = "bounce:"            # a fix kind written as BOUNCE + kind is a bounce-
 HANDLED = "handled:"          # a fix kind written as HANDLED + refusal kind + ":" + how is a message the relay handled where it once refused (`handled`): it is no fix and has no line in the reply
 HOW_MAX = 40                  # characters of the `how` of a handled message kept
 NOTE = "note:"                # a fix kind written as NOTE + kind is a line a reply gave its writer with nothing corrected (`noted`): it is no fix, and the line is the reply's own
-NO_RESEND = frozenset({"item-id", "description-bullet", "outcome-bullet", "bullet-wrap", "step-none", "his-step-settled", "step-none-applied", "said-text", "step-kept", "subject-cut", "work-cut", "ask-by-day", "description-url", "wait-basis-dropped", "description-goal", "step-split", "step-split-dropped", "step-reworded"})   # fixes whose reply line does not invite a resend: the field sent again as written would be refused, fixed the same, change nothing, or be settled the same way (each line says how to change it)
+NO_RESEND = frozenset({"item-id", "description-bullet", "outcome-bullet", "bullet-wrap", "outcome-wrap", "step-none", "his-step-settled", "step-none-applied", "said-text", "step-kept", "subject-cut", "work-cut", "ask-by-day", "description-url", "wait-basis-dropped", "description-goal", "step-split", "step-split-dropped", "step-reworded"})   # fixes whose reply line does not invite a resend: the field sent again as written would be refused, fixed the same, change nothing, or be settled the same way (each line says how to change it)
 
 _FIXES: contextvars.ContextVar[list[tuple[str, str]] | None] = contextvars.ContextVar("call_log_fixes", default=None)
 _DETAIL: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = contextvars.ContextVar("call_log_detail", default=None)
@@ -154,7 +154,7 @@ def handled_of(fixes: list[tuple[str, str]] | None) -> tuple[str, str]:
 # A bounce-back is the writer reacting to a fix it was told about: a later write by the same writer, on the same item, within OPEN_WINDOW, that undoes the fix or writes the fixed field again as it wants it.
 # A plain retry after a refusal is none (nothing was fixed). The middleware keeps each fix that has a check open (`remember`) and asks of each later write by that writer on that item whether it undid one (`bounces`).
 # The check per kind is cheap and reads only the later call's arguments against what the fix left:
-#   wake, subject-prefix, description-bullet, outcome-bullet, bullet-wrap, subject-cut, description-url   the later call writes the same field with a value other than the one the server stored and the one the writer sent first (the same text again is no send-back)
+#   wake, subject-prefix, description-bullet, outcome-bullet, bullet-wrap, outcome-wrap, subject-cut, description-url   the later call writes the same field with a value other than the one the server stored and the one the writer sent first (the same text again is no send-back)
 #   wake_park                                  the later call sends clear_hold or clear_wake, or a wake other than the parked one
 #   wait_reason                                the later call sends a wait_basis, clear_wait_basis, clear_hold or clear_wake
 #   front_mover                                the later call names the front agent again in the field the server substituted
@@ -162,7 +162,7 @@ def handled_of(fixes: list[tuple[str, str]] | None) -> tuple[str, str]:
 # audit's passes make (no writer, so no fix is counted either; their send-back stays in metadata.fix_declined). A write that began before the fix was made could not have read its note: it is no bounce-back.
 # What open-fixes.json holds: per writer and item, the kind, the time, and digests (never text) of the value stored and sent; a writer's name is a digest in the key. It errs low by design: a record
 # goes after an hour, past OPEN_KEEP for one writer or past OPEN_TOTAL in all.
-CHECKED = ("wake", "subject-prefix", "description-bullet", "outcome-bullet", "bullet-wrap", "subject-cut", "description-url", "wake_park", "wait_reason", "front_mover")
+CHECKED = ("wake", "subject-prefix", "description-bullet", "outcome-bullet", "bullet-wrap", "outcome-wrap", "subject-cut", "description-url", "wake_park", "wait_reason", "front_mover")
 
 
 def _arg(a: dict[str, Any], k: str) -> str:
@@ -172,7 +172,7 @@ def _arg(a: dict[str, Any], k: str) -> str:
 
 def undone(kind: str, d: dict[str, Any], a: dict[str, Any]) -> bool:
     """Does a later call with arguments `a` undo or redo the fix `kind` that left `d` (the detail `fixed` was given: its stored, sent and token are digests)?"""
-    if kind in ("wake", "subject-prefix", "description-bullet", "outcome-bullet", "bullet-wrap", "subject-cut", "description-url"):
+    if kind in ("wake", "subject-prefix", "description-bullet", "outcome-bullet", "bullet-wrap", "outcome-wrap", "subject-cut", "description-url"):
         for f in d.get("fields") or []:
             v = _arg(a, f)
             if v and _h(v) != d.get("stored") and _h(v) != d.get("sent"):

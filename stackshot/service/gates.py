@@ -1421,7 +1421,7 @@ def ask_pre(item_id: str) -> "dict[str, Any]":
     """What an update needs to know of the ask before the write: the item, the ask that stood and its record, where the owner's notes are looked for from, and the text the item held (every text it
     keeps, one line each), so that only a line new in the write is read as its author's word. {} when the item cannot be read."""
     try:
-        gid = _norm_id(item_id)
+        gid = _norm_id(item_id, bare=True)
         item = _load(gid)
     except ToolError:
         return {}

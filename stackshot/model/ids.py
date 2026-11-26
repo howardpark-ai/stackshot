@@ -36,9 +36,23 @@ def _read_note(given: str, gid: str) -> None:
     ("read N as board#N and M as board#M"), and the same id read again (the write reads its id at several steps) adds nothing."""
     part = f"{given} as {_gh.shown(gid)}"
     parts = [x for x in _calls.unfix("item-id").removeprefix("read ").split(" and ") if x]
-    if part not in parts:
+    if part not in parts and not any(p.startswith(part + " (") for p in parts):          # the same id read again adds nothing, named or not
         parts.append(part)
     _calls.fixed("item-id", "read " + " and ".join(parts))
+
+
+NAME_LEN = 60          # how much of an item's subject the note of a bare id that closes it shows
+
+
+def name_read(gid: str, subject: str) -> None:
+    """A close that read its item's id from a bare number or #N says which item that was: the note becomes "read N as board#N (<the first 60 characters of the subject>)", so a wrong item is seen at once.
+    Nothing changes when the call read no such id for `gid`."""
+    parts = [x for x in _calls.unfix("item-id").removeprefix("read ").split(" and ") if x]
+    shown = _gh.shown(gid)
+    tag = " (" + " ".join(str(subject or "").split())[:NAME_LEN] + ")"
+    parts = [p + tag if p.endswith(" as " + shown) else p for p in parts]
+    if parts:
+        _calls.fixed("item-id", "read " + " and ".join(parts))
 
 
 def _norm_id(item_id: str | int, bare: bool = False) -> str:

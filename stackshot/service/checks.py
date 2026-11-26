@@ -144,7 +144,7 @@ def parse_check(text: str, gid: str = "") -> str:
         return f"pr_merged {m.group(1)}/{m.group(2)}#{m.group(3)}"
     if kind == "item_closed":
         try:
-            g = _norm_id(arg)
+            g = _norm_id(arg, bare=True)
         except ToolError:
             raise bad("item_closed names a board item by its id (or <letter><n> for an older item)")
         if not _path(g).exists():
