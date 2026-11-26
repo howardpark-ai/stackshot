@@ -120,7 +120,7 @@ def _router_live_after(project: str, n: dict[str, Any]) -> None:
 
 def _busy_live(gid: str, mover: str) -> str:
     """What of `mover`'s own runs on the item `gid` right now, in the words of the refusal of a hold on it (audit/busy_hold.py, service/gates.py `gate_busy_hold`): a running subagent of the mover tied to the item as the hourly audit
-    ties one (`_audit_ticks._mover_subagents`, the anchors `_rlive.released_anchors`), else a release of a pull request tied to the item that is running (its unit `stackshot-release-<n>` active and its log written within 15 minutes: `release_units`,
+    ties one (`_audit_ticks._mover_subagents`, the anchors `_rlive.released_anchors`), else a release of a pull request tied to the item that is running (its unit `stackshot-release-<n>` active, here or as the release box tells it, and its log written within 15 minutes: `release_units`,
     the anchors, the item's open steps and their status lines). "" when none is, or when it cannot be told (a mover whose subagents cannot be read is unknown, never a refusal)."""
     from stackshot.audit import busy_hold as _bh
     from stackshot.tools import next_report as _nr

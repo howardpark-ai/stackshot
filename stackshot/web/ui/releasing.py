@@ -1,6 +1,7 @@
 """releasing.py — which pull requests are in the release script's queue, for the redesigned pages' "Queued for release" label.
 
-The signal is release.sh's own transient unit. `release.sh <pr>` (and each release the queue starts) runs `release.sh --run <pr>` as the user unit
+The signal is release.sh's own transient unit, and on a server box that release.sh does not run on ([release] deploy_ssh) what the release itself tells this box (core/release_running.py: an entry it writes here while it
+runs and marks ended as it exits, which counts for 5 minutes after the last write, so a release that died holds nothing for long). A group release has one unit, and one entry, under its first pull request. `release.sh <pr>` (and each release the queue starts) runs `release.sh --run <pr>` as the user unit
 stackshot-release-<pr>.service and it stays until that release ends (a deploy and main's run after it, a failure, a stop): waiting for the update lock,
 for its checks, for the deploy lock, for main's run. So "a release for this PR is started and has not ended" is "that unit is active", one `systemctl
 --user list-units` call: no log parsing, no GitHub call. (The queue file, <state>/releases/queue, lists PRs that may not have started yet, so it is not the
@@ -11,10 +12,10 @@ An item is linked to a pull request three ways, any one is enough (Board.queued_
   1. an anchor scoped to the item that is the PR's URL;
   2. an open step's proof (metadata.step_proof) naming pr_released or pr_merged of the PR;
   3. an open step's words (next or checklist) that link the PR's URL or say "PR #N" / "pull request #N". Done and dropped steps and the description do not count: they say what was, not what is next.
-So a builder's step "release [PR #12](…)" puts its item in the section while PR #12's release unit runs, with no anchor needed.
+So a builder's step "release [PR #12](…)" puts its item in the section while PR #12's release runs, with no anchor needed.
 
-Read once per page render (Board.queued_release_ids); an answer that cannot be had (no systemctl, no user bus, a timeout) is "nothing queued": a page never
-fails or waits on it."""
+Read once per page render (Board.queued_release_ids); an answer that cannot be had (no systemctl, no user bus, a timeout) is "nothing queued" from the units here, and what a release box told this box is read
+from files: a page never fails or waits on it."""
 from __future__ import annotations
 
 import re
@@ -23,6 +24,7 @@ from pathlib import Path
 
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg
+from stackshot.core import release_running as _told   # the releases another box says it runs
 from stackshot.model import step_proof as _sp   # a step's stored proof ("pr_released owner/repo#n") and the kinds of event it names
 from stackshot.model import steps as _steps     # the checklist behind an item's next: which steps are open
 
@@ -40,12 +42,13 @@ def _run(argv: list[str]) -> str:
 
 
 def release_units() -> set[int]:
-    """The pull request numbers whose release unit is running now: active (started and running) or activating."""
+    """The pull request numbers whose release is running now: its unit is active (started and running) or activating on this box, or the box it runs on told this one (core/release_running.py)."""
+    told = set(_told.running())
     try:
         out = _run(["systemctl", "--user", "list-units", "--plain", "--no-legend", "--no-pager", "--state=active,activating", "stackshot-release-*.service"])      # i18n: skip  (a systemd unit glob)
     except (OSError, subprocess.SubprocessError):
-        return set()
-    return {int(n) for n in _UNIT_RX.findall(str(out or ""))}
+        return told
+    return told | {int(n) for n in _UNIT_RX.findall(str(out or ""))}
 
 
 def own_repo() -> str:

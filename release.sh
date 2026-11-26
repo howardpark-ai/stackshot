@@ -17,7 +17,7 @@
 #     (`release.sh --group N N...`, which the release queue starts itself): one deploy and one `done:` line per PR; one queued PR is released alone. GitHub's queue is the default (no host file, or mode off).
 #   - A PR whose branch is behind main is not touched: the merge queue builds it on main's tip. A PR that conflicts with main only on the generated tests/tool_text.snapshot.json is mended (2a below).
 #     Watch a release with `release.sh --status N`: the log's newest line says what is waited for.
-#   - With [release] deploy_ssh set, a release copies its last-good record to the server box itself; after a copy that failed, `release.sh --copy-record` does it now (4c-record).
+#   - With [release] deploy_ssh set, a release copies its last-good record to the server box itself; after a copy that failed, `release.sh --copy-record` does it now (4c-record). It also tells that box that it runs (4c-running).
 #   - Auto mode also refuses a loop of release.sh runs.
 #
 #   ./release.sh <pr> [--recycle | --no-recycle]
@@ -128,8 +128,14 @@
 #                                 4c-record. THE SERVER BOX'S COPY OF THE LAST-GOOD RECORD (record_sync, only with [release] deploy_ssh): the server runs on that host and reads ITS OWN <state>/releases/last-good, so the record made here is copied
 #                                 there over the same ssh: before step 6 asks the server (so after the deploy that put the commit there) and when a release or a group release ends, however it ends (a rollback, a failed deploy and a failed check
 #                                 included). The copy is whatever this record holds at that moment, read under $LAST_GOOD.sync.lock so a later copy never carries an older value: a commit record_good wrote, so one whose run on main passed. The host
-#                                 writes it only for a commit its checkout knows (it fetches main once when it does not: a record can be ahead of the deploy). The whole ssh is cut after RELEASE_RECORD_TIMEOUT s (90). A copy that fails is a log line
+#                                 writes it only for a commit its checkout knows (it fetches main once when it does not: a record can be ahead of the deploy), and never over a later one: under its flock on its own last-good.lock, a record there that
+#                                 already holds this commit and more stays, said in the log (to move that box's record back, delete the file there). The whole ssh is cut after RELEASE_RECORD_TIMEOUT s (90), the command there 20 s before that. A copy that fails is a log line
 #                                 and one message to report_to, never a failed release; every later copy tries again, and `release.sh --copy-record` does it by hand. Unset (one box): no copy, no ssh, no lock file;
+#                                 4c-running. THE SERVER BOX IS TOLD THAT THE RELEASE RUNS (running_start, running_end, only with [release] deploy_ssh): the server holds a step as busy and labels an item Queued for release while a release runs, which on
+#                                 one box it reads from this unit and its log. Over the same ssh a release (a group release: under its lead, as its unit is named) sends an entry when it starts and every RELEASE_RUNNING_BEAT s (60), with the end of
+#                                 its log and that log's age, and one marked ended as it exits (core/release_running.py). An entry counts for 300 s there, so a release that died without a word holds nothing for long. Each send is cut after
+#                                 RELEASE_RUNNING_LIMIT s (20), and the command there after that less the connect and 2 s. The sends before the end run beside the release and never delay it; a send that fails never fails it (a line in
+#                                 <state>/releases/running-publish.log, said once; a last word that fails is a line in the release log). Unset (one box): no process, no ssh, no file;
 #                                 4e. THE PICKER'S INDEX (suitemap_warm_start, `--warm`): right after a deploy (not after a release that found its merge already live), [release] suitemap_warm_cmd is started on the deployed
 #                                 commit in a transient user unit of its own (stackshot-suitemap-warm-<sha>, output <state>/releases/suitemap-warm-<sha>.log) and never waited for: the unit runs `release.sh --warm <sha>`,
 #                                 which makes a worktree of the commit, runs the command in it (one at a time, stopped after RELEASE_WARM_TIMEOUT, 1800 s) and removes the worktree. The command is the test runner's: it sends the
@@ -239,6 +245,9 @@ PENDING_FILE=""; pv_block=""
 LAST_GOOD="$LOGDIR/last-good"            # the newest commit whose run on main passed: what a failing main run rolls back to; one sha, written by record_good
 RECORD_TIMEOUT="${RELEASE_RECORD_TIMEOUT:-90}"   # seconds the copy of $LAST_GOOD to [release] deploy_ssh may take (record_sync): the 15 s connect, a 30 s fetch over there and the write fit inside; past it the ssh is stopped and the copy counts as failed
 SYNC_WHO=""; SYNC_TOLD=""                # record_sync's message: which release it names, and whether this process has sent it (one a process)
+RUN_BEAT="${RELEASE_RUNNING_BEAT:-60}"      # [release] deploy_ssh: seconds between two entries a release sends the server box to say it runs (4c-running); an entry counts 300 s there (core/release_running.py EXPIRE_S)
+RUN_LIMIT="${RELEASE_RUNNING_LIMIT:-20}"    # seconds one such send may take in all (a 10 s connect and at most 8 s of the command there fit inside); past it the ssh is stopped
+RUN_PID=""; RUN_PR=""; RUN_LOG=""           # the process that sends them (running_start), and what it sends
 QUEUE="$LOGDIR/queue"                    # the release queue (release.sh queue): PR numbers, one a line, in order; $QUEUE.lock its flock, $QUEUE.started the PRs whose release the queue started, $QUEUE.paused why it is paused, $QUEUE.log what it did
 MQ_ON_ADD_TIMEOUT="${RELEASE_MQ_ON_ADD_TIMEOUT:-60}"   # seconds `salamander mq add` may take in mode on (it starts the queue's driver unit, and a refusal is an answer, so a slow one is an error: THE TWO MERGE QUEUES at the top)
 MQ_WAIT_CAP="${RELEASE_MQ_WAIT_CAP:-18000}"       # seconds a group release waits for the salamander merge queue's verdicts (5 h: a queue run takes up to 100 min, and a PR behind a failure in the chain is tested again after the restack)
@@ -623,8 +632,9 @@ record_good() {   # $1 = a commit main's run passed on. Read, compare and write 
 }
 # record_sync (4c-record): copy $LAST_GOOD to the host [release] deploy_ssh names, whose server reads its own copy (service/released_live.py). Called before client.py released and when a release ends. 0 that host holds the record, or there is
 # nothing to copy (deploy_ssh unset: this box's file is the one the server reads; or no record yet). 1 it does not: a log line, and one message a process. It never changes this box's record and never fails a release.
-# The record is read inside the flock on $LAST_GOOD.sync.lock, held until the host has answered, so of two releases the later write is never the older record. Over there the write is atomic and only for a commit that checkout knows, so the
-# server never reads a record it cannot resolve; the one fetch is bounded below this ssh's own limit, so a write cannot land after this copy was given up.
+# The record is read inside the flock on $LAST_GOOD.sync.lock, held until the host has answered, so of two releases of this box the later write is never the older record. Over there the write is atomic and only for a commit that checkout knows,
+# so the server never reads a record it cannot resolve. It is never moved back there either: under that box's flock on its last-good.lock, a record that is a later commit than this one (another release box's, or this copy arriving after a newer
+# one) stays, which counts as copied and is said in the log. The whole command there is cut 20 s before this ssh is (its 15 s connect and the 5 s of timeout -k fit), so it does not outlive a copy that was given up.
 record_sync() {
     [ -n "$DEPLOY_SSH" ] || return 0
     local out rc=0
@@ -633,9 +643,12 @@ record_sync() {
         read_good; case $? in 1) exit 0 ;; 2) echo "$LAST_GOOD holds something this checkout cannot read as a commit"; exit 1 ;; esac
         [[ "$DEPLOY_SSH" =~ ^[A-Za-z0-9_][A-Za-z0-9._@:-]*$ ]] || { echo "[release] deploy_ssh = \"$DEPLOY_SSH\" is not an ssh host name"; exit 1; }
         c="\"$good^{commit}\""
-        cmd='cd ~/stackshot && { git cat-file -e '"$c"' 2>/dev/null || { timeout 30 git fetch --quiet origin main >/dev/null 2>&1; git cat-file -e '"$c"' 2>/dev/null; } || { echo "the checkout there does not have that commit, and a fetch of main there did not bring it"; exit 1; }; } && d="$(python3 stackshot/core/config.py state releases)" && mkdir -p "$d" && { printf "%s\n" '"$good"' > "$d/last-good.$$" && mv -f "$d/last-good.$$" "$d/last-good" || { rm -f "$d/last-good.$$"; echo "the record could not be written there"; exit 1; }; }'
+        script='{ git cat-file -e '"$c"' 2>/dev/null || { timeout 30 git fetch --quiet origin main >/dev/null 2>&1; git cat-file -e '"$c"' 2>/dev/null; } || { echo "the checkout there does not have that commit, and a fetch of main there did not bring it"; exit 1; }; } && d="$(python3 stackshot/core/config.py state releases)" && mkdir -p "$d" && exec 8>>"$d/last-good.lock" && { flock -w 10 8 || { echo "the record there stayed locked"; exit 1; }; } && { cur="$(cat "$d/last-good" 2>/dev/null)"; if [ "$cur" != '"$good"' ] && echo "$cur" | grep -Eqx "[0-9a-f]{7,64}" && git merge-base --is-ancestor '"$good"' "$cur" 2>/dev/null; then echo "newer-there $cur"; else printf "%s\n" '"$good"' > "$d/last-good.$$" && mv -f "$d/last-good.$$" "$d/last-good" || { rm -f "$d/last-good.$$"; echo "the record could not be written there"; exit 1; }; fi; }'   # it goes to that box inside single quotes, so it holds none
+        there=$(( RECORD_TIMEOUT > 21 ? RECORD_TIMEOUT - 20 : 1 ))   # the seconds the whole command may take there
+        cmd="cd ~/stackshot && exec timeout -k 5 $there sh -c '$script'"
         said="$(timeout -k 5 "$RECORD_TIMEOUT" ssh -o BatchMode=yes -o ConnectTimeout=15 "$DEPLOY_SSH" "$cmd" </dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-)" || { rc=$?; echo "${good:0:7} was not written there (exit status $rc): $(echo "$said" | tail -1)"; exit 1; }
-        echo "${good:0:7}"
+        newer="$(echo "$said" | sed -n 's/^newer-there \([0-9a-f]*\)$/\1/p' | tail -1)"
+        if [ -n "$newer" ]; then echo "it holds a newer one, ${newer:0:7}, which stays (here: ${good:0:7})"; else echo "${good:0:7}"; fi
     ) 2>&1 5>>"$LAST_GOOD.sync.lock" )" || rc=$?
     out="$(echo "$out" | tail -1)"
     if [ $rc -eq 0 ]; then [ -z "$out" ] || say "last-good record on $DEPLOY_SSH: $out"; return 0; fi
@@ -643,6 +656,22 @@ record_sync() {
     [ -n "$SYNC_TOLD" ] || { SYNC_TOLD=1
         tell "[release] $SYNC_WHO: the last-good record was NOT copied to the server box ($DEPLOY_SSH): $out. Until it is, the server reads an older record and settles nothing merged after it. A later copy in this or the next release tries again; $HERE/release.sh --copy-record does it now, and client.py sweep-released then settles what was refused"; }
     return 1
+}
+# running_start, running_end (4c-running): with [release] deploy_ssh the server is on another box, where this release's unit and log are not, so the release tells that box it runs (core/release_running.py). running_start starts the process that
+# says so now and every RUN_BEAT s until this shell is gone; it holds none of the release's descriptors and writes to a file of its own, never to the release log (whose age says whether the release moves). running_end, as the release exits, stops
+# that process and says once that the release ended. Neither fails the release, and running_start waits for nothing; running_end waits RUN_LIMIT s at most, after everything else the release does.
+running_start() {   # $1 = the PR, $2 = its release log
+    [[ "$DEPLOY_SSH" =~ ^[A-Za-z0-9_][A-Za-z0-9._@:-]*$ ]] || return 0   # unset: one box, nothing to tell; not a host name: record_sync says so when the release ends
+    RUN_PR="$1"; RUN_LOG="$2"
+    ( exec python3 stackshot/core/release_running.py beat "$RUN_PR" "$RUN_LOG" "$DEPLOY_SSH" --parent $$ --every "$RUN_BEAT" --limit "$RUN_LIMIT" ) </dev/null >>"$LOGDIR/running-publish.log" 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
+    RUN_PID=$!
+}
+running_end() {
+    [ -n "$RUN_PID" ] || return 0
+    local why
+    kill "$RUN_PID" 2>/dev/null; wait "$RUN_PID" 2>/dev/null; RUN_PID=""   # gone, with any send of its own, before the last word: what a send of it still does over there is older than the last word and changes nothing
+    why="$(python3 stackshot/core/release_running.py end "$RUN_PR" "$RUN_LOG" "$DEPLOY_SSH" --limit "$RUN_LIMIT" </dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-)" ||
+        say "$DEPLOY_SSH was not told that this release ended ($(echo "$why" | tail -1 | mq_plain)): it may count it as running for up to 5 more minutes"
 }
 failed_runs() {   # the main push runs that FAILED on a commit in $1..$2: "<run> <sha>" per line and a last line "ok"; "unreadable" when GitHub's answer cannot be read, its pages (up to 10 of 100
                   # runs, newest first) do not reach a run at or before $1, or a run in the range was cancelled after its job started (a "cancelled <run> <sha>" line before it: unknown); a caller takes anything but a last line "ok" (empty, a crash) as unreadable too
@@ -1603,7 +1632,8 @@ run_group() {   # $@ = the PRs of one group, in queue order (two or more, at mos
         tell "[release] $who FAILED at $1: $2$q_note · log $glog"
         exit 1
     }
-    SYNC_WHO="the group release of PRs $names"; trap record_sync EXIT   # deploy_ssh: however this release ends, the server box gets the record (4c-record); a subshell does not run it
+    SYNC_WHO="the group release of PRs $names"; trap 'record_sync; running_end' EXIT   # deploy_ssh: however this release ends, the server box gets the record (4c-record) and is told the release ended (4c-running); a subshell does not run it
+    running_start "$lead" "$LOGDIR/pr-$lead.log"   # one unit, the lead's, so one entry (4c-running)
     mq_settle() {   # $1 = a PR: let go of it in the queue (best effort). Its marker goes once the queue no longer holds it: dropped, or "is not in the line" (never added: the add was refused, or it settled already), or no active entry in `mq status`
         local k="$1" o rc st act
         o="$(timeout 20 salamander mq drop "$k" --repo "$REPO" 2>&1 4>&- 6>&- 7>&- 8>&- 9>&-)"; rc=$?
@@ -1917,7 +1947,8 @@ run() {
     say "release of PR #$pr starts in $HERE ($REPO)"
     ! q_is_started "$pr" || qstart=1   # the queue started this release (it wrote the mark before the start): its pause and its pre-enqueue stop apply to it
     fail() { say "FAILED at $1: $2"; queue_after_fail "$1"; tell "[release] PR #$pr FAILED at $1: $2$q_note · log $log"; exit 1; }
-    SYNC_WHO="PR #$pr"; trap record_sync EXIT   # deploy_ssh: however this release ends, the server box gets the record (4c-record); a subshell does not run it
+    SYNC_WHO="PR #$pr"; trap 'record_sync; running_end' EXIT   # deploy_ssh: however this release ends, the server box gets the record (4c-record) and is told the release ended (4c-running); a subshell does not run it
+    running_start "$pr" "$log"
     recover_pending   # a deploy of an earlier release whose process ended before main's run was read (killed, the box restarted): looked at first
     local mqmode; mqmode="$(mq_host_mode)"   # THE TWO MERGE QUEUES: only `on` changes this release (off, shadow, no file and a file that does not read are GitHub's queue, below)
     mq_line_check() {   # every mode: a PR the salamander merge queue holds (the marker of a group release) is never merged here, whatever the host file says now (a mode changed mid-group does not take the PR out of that queue)

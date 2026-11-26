@@ -369,7 +369,8 @@ reminders on this box are dropped all the same, and the line that says so gives 
 
 A box that runs `release.sh` for a server on another box sets `[release] deploy_ssh` to that box. The release deploys there and copies its
 last-good record there, which the server reads to settle released items. When the record was already made before the setting, run
-`./release.sh --copy-record` on that box once, or wait for its next release.
+`./release.sh --copy-record` on that box once, or wait for its next release. While a release runs it also tells the server box so, over the same
+ssh and with nothing more to set, once both checkouts hold `stackshot/core/release_running.py`.
 
 The server's units belong on the server host only, so `./install.sh units` checks it once, first, before it touches lingering or any unit.
 The config names the server host in `[release] deploy_ssh` (the host the server runs on, for a box that only runs `release.sh`; a name, an

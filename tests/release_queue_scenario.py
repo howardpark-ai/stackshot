@@ -888,7 +888,10 @@ s = grp("on-group-record", deploy_ssh="deploy-host", files={**QF(["23", "25"], s
 check("a group release with the server on another box: its record there is the group's merge, there before each PR's items are asked about, and copied again when the release ends",
       s["rc"] == 0 and s["lastgood"] == M2 and s["remote_lastgood"] == M2 and len(s["released"]) == 2 and s["remote_at_released"] == [M2, M2] and written(s) == [M2, M2, M2] and set(s["record_fds"]) == {"none"} and not_copied(s) == [],
       (s["rc"], s["lastgood"], s["remote_lastgood"], s["remote_at_released"], written(s), s["msgs"]))
-s = grp("on-group-record-fail", deploy_ssh="deploy-host", record_fails="99", files={**QF(["23", "25"], started=["23"]), **REC_SEED})
+check("…and that box is told the group runs under its first pull request only, as its unit is named: one entry, marked ended once the release ended",
+      sorted(p.name for p in (s["dir"] / "remote/releases/running").glob("pr-*")) == ["pr-23"] and json.loads((s["dir"] / "remote/releases/running/pr-23").read_text())["ended"] is True
+      and {l.split()[-1] for l in (s["dir"] / "ssh.log").read_text().splitlines() if "release_running.py" in l} == {"23"}, (s["dir"] / "ssh.log").read_text())
+s = grp("on-group-record-fail",deploy_ssh="deploy-host", record_fails="99", files={**QF(["23", "25"], started=["23"]), **REC_SEED})
 check("…and when the copy fails, one message for the whole group names its PRs, the release stays green",
       s["rc"] == 0 and len(records(s)) == 3 and s["remote_lastgood"] == REC_STALE and len(not_copied(s)) == 1 and "[release] the group release of PRs #23 #25:" in not_copied(s)[0] and red(s) == [], (s["rc"], records(s), s["msgs"]))
 s = grp("on-group-record-deploy-fails", deploy_ssh="deploy-host", deploy_fail="1", files={**QF(["23", "25"], started=["23"]), **REC_SEED})

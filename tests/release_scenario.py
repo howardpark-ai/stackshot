@@ -1845,10 +1845,12 @@ check("two boxes, a green release: the server box's record is the one made here,
 check("…it had the record when it was asked to settle the items (the copy comes before `client.py released`)", s["released"] == [RELEASED_ARGS + MERGE] and s["remote_at_released"] == [MERGE], (s["released"], s["remote_at_released"]))
 check("…copied twice, before `released` and when the release ends, both after the deploy, each over `ssh -o BatchMode=yes -o ConnectTimeout=15 <host>` in the checkout there",
       written(s) == [MERGE, MERGE] and len(where(s, "record")) == 2 and where(s, "record")[0] > where(s, f"deploy:{MERGE}")[0] and all(l.startswith(f"-o BatchMode=yes -o ConnectTimeout=15 {SSHH} cd ~/stackshot && ") for l in records(s)), (written(s), s["order"], records(s)))
-WRITE = ('cd ~/stackshot && { git cat-file -e "M^{commit}" 2>/dev/null || { timeout 30 git fetch --quiet origin main >/dev/null 2>&1; git cat-file -e "M^{commit}" 2>/dev/null; } || { echo "the checkout there does not have that commit, and a fetch of main there did not bring it"; exit 1; }; } && '
-         'd="$(python3 stackshot/core/config.py state releases)" && mkdir -p "$d" && { printf "%s\\n" M > "$d/last-good.$$" && mv -f "$d/last-good.$$" "$d/last-good" || { rm -f "$d/last-good.$$"; echo "the record could not be written there"; exit 1; }; }').replace("M", MERGE)
-check("…the command there writes only a commit that checkout knows, beside the record and moved over it (a reader never sees half of it), in the state folder its own config names",
-      records(s)[:1] == [f"-o BatchMode=yes -o ConnectTimeout=15 {SSHH} {WRITE}"] and sorted(p.name for p in (s["dir"] / "remote/releases").iterdir()) == ["last-good"], (records(s)[:1], sorted(p.name for p in (s["dir"] / "remote/releases").iterdir())))
+SCRIPT = ('{ git cat-file -e "M^{commit}" 2>/dev/null || { timeout 30 git fetch --quiet origin main >/dev/null 2>&1; git cat-file -e "M^{commit}" 2>/dev/null; } || { echo "the checkout there does not have that commit, and a fetch of main there did not bring it"; exit 1; }; } && '
+          'd="$(python3 stackshot/core/config.py state releases)" && mkdir -p "$d" && exec 8>>"$d/last-good.lock" && { flock -w 10 8 || { echo "the record there stayed locked"; exit 1; }; } && '
+          '{ cur="$(cat "$d/last-good" 2>/dev/null)"; if [ "$cur" != M ] && echo "$cur" | grep -Eqx "[0-9a-f]{7,64}" && git merge-base --is-ancestor M "$cur" 2>/dev/null; then echo "newer-there $cur"; else printf "%s\\n" M > "$d/last-good.$$" && mv -f "$d/last-good.$$" "$d/last-good" || { rm -f "$d/last-good.$$"; echo "the record could not be written there"; exit 1; }; fi; }').replace("M", MERGE)
+WRITE = f"cd ~/stackshot && exec timeout -k 5 70 sh -c '{SCRIPT}'"
+check("…the command there writes only a commit that checkout knows, beside the record and moved over it (a reader never sees half of it), in the state folder its own config names, under that box's record lock, never back to an older commit, and all of it under a time limit 20 s below the ssh's",
+      records(s)[:1] == [f"-o BatchMode=yes -o ConnectTimeout=15 {SSHH} {WRITE}"] and sorted(p.name for p in (s["dir"] / "remote/releases").iterdir()) == ["last-good", "last-good.lock", "running"], (records(s)[:1], sorted(p.name for p in (s["dir"] / "remote/releases").iterdir())))
 check("…a checkout that has the commit is not fetched, one green report and no other message, the log says what the server box holds",
       not (s["dir"] / "remote-fetches").exists() and len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS) and f"last-good record on {SSHH}: 0106c0d" in s["log"], (s["msgs"], s["log"][-300:]))
 check("…the copy's ssh holds none of the release's descriptors (3 to 9, its own lock included), and no lock is left held",
@@ -1893,6 +1895,45 @@ check("the server box's checkout does not have the recorded commit (a record can
 s = split("rec-lacks-nofetch", remote_lacks=MERGE, remote_fetch_fail="1")
 check("…and when the fetch does not bring it, nothing is written there (a server never reads a record it cannot resolve): said, with the reason, the release green",
       s["rc"] == 0 and s["remote_lastgood"] == STALE and len(not_copied(s)) == 1 and "does not have that commit" in not_copied(s)[0] and red(s) == [], (s["remote_lastgood"], s["msgs"]))
+def there(s): return s["dir"] / "remote/releases/last-good"
+s = split("rec-newer", files={"remote/releases/last-good": NEWER + "\n"})
+check("the server box already holds a later commit (another release box wrote it, or a given-up copy arrived late): it stays, never moved back to an older one",
+      s["rc"] == 0 and s["lastgood"] == MERGE and s["remote_lastgood"] == NEWER and s["remote_at_released"] == [NEWER] and written(s) == [MERGE, MERGE], (s["rc"], s["remote_lastgood"], s["remote_at_released"], s["msgs"]))
+check("…which counts as copied: said in the log with both commits, no message of a failed copy, the release green and `released` asked",
+      f"last-good record on {SSHH}: it holds a newer one, 0107c0d, which stays (here: 0106c0d)" in s["log"] and not_copied(s) == [] and "NOT copied" not in s["log"] and len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS) and s["released"] == [RELEASED_ARGS + MERGE], (s["msgs"], s["log"][-500:]))
+s = split("rec-older", files={"remote/releases/last-good": GOOD + "\n"})
+check("the server box holds an earlier commit: it is moved on", s["rc"] == 0 and s["remote_lastgood"] == MERGE and "holds a newer one" not in s["log"], (s["remote_lastgood"], s["log"][-300:]))
+s = split("rec-same", files={"remote/releases/last-good": MERGE + "\n"})
+check("the server box holds this very commit: written again and said as copied, never as a newer one there", s["rc"] == 0 and s["remote_lastgood"] == MERGE and f"last-good record on {SSHH}: 0106c0d" in s["log"] and "holds a newer one" not in s["log"] and not_copied(s) == [], (s["remote_lastgood"], s["log"][-300:]))
+s = split("rec-notsha", files={"remote/releases/last-good": "main\n"}, history=HIST + ",main")
+check("a record there that is not a commit id (a name git would resolve) is no later commit: it is replaced", s["rc"] == 0 and s["remote_lastgood"] == MERGE and "holds a newer one" not in s["log"], (s["remote_lastgood"], s["log"][-300:]))
+
+s = scenario("rec-there-lock", raw=["--copy-record"], deploy_ssh=SSHH, lastgood=MERGE, files=SEED, history=HIST)
+there(s).write_text(STALE + "\n")
+theirs = open(s["dir"] / "remote/releases/last-good.lock", "a"); fcntl.flock(theirs, fcntl.LOCK_EX); copied = threading.Event(); waited = []
+def another_box_writes_meanwhile():   # once the command there waits on that box's lock, another writer puts a later commit there, then lets the lock go
+    ino = f":{os.fstat(theirs.fileno()).st_ino} "
+    end = time.time() + 60
+    while time.time() < end and not copied.is_set():
+        if any("->" in l and ino in l for l in open("/proc/locks")): waited.append(1); break
+        time.sleep(0.05)
+    there(s).write_text(NEWER + "\n"); fcntl.flock(theirs, fcntl.LOCK_UN)
+other = threading.Thread(target=another_box_writes_meanwhile); other.start()
+s2 = scenario("rec-there-lock-2", raw=["--copy-record"], deploy_ssh=SSHH, history=HIST, reuse=s)
+copied.set(); other.join(); theirs.close()
+check("the record there is read and written under that box's lock: a copy that waited for it sees the later commit written meanwhile and leaves it",
+      s2["rc"] == 0 and waited == [1] and s2["remote_lastgood"] == NEWER and "it holds a newer one, 0107c0d, which stays" in s2["out"], (s2["rc"], waited, s2["remote_lastgood"], s2["out"][-400:]))
+there(s).write_text(STALE + "\n")
+theirs = open(s["dir"] / "remote/releases/last-good.lock", "a"); fcntl.flock(theirs, fcntl.LOCK_EX)
+s4 = scenario("rec-there-busy", raw=["--copy-record"], deploy_ssh=SSHH, history=HIST, reuse=s); theirs.close()
+check("a record lock there that stays taken for 10 s: the copy fails, saying so, and writes nothing", s4["rc"] == 1 and "(exit status 1): the record there stayed locked" in s4["out"] and s4["remote_lastgood"] == STALE, (s4["rc"], s4["out"][-400:]))
+theirs = open(s["dir"] / "remote/releases/last-good.lock", "a"); fcntl.flock(theirs, fcntl.LOCK_EX)
+t0 = time.time()
+s3 = scenario("rec-there-limit", raw=["--copy-record"], deploy_ssh=SSHH, history=HIST, reuse=s, extra={"RELEASE_RECORD_TIMEOUT": "22"})
+took = time.time() - t0; theirs.close()
+check("the command there has a time limit of its own, 20 s below the ssh's (here 2 s): one that cannot finish is cut on that box (status 124) and writes nothing",
+      s3["rc"] == 1 and "(exit status 124)" in s3["out"] and "exec timeout -k 5 2 sh -c" in records(s3)[-1] and s3["remote_lastgood"] == STALE and took < 18, (s3["rc"], took, s3["out"][-400:], records(s3)[-1][:120]))
+
 s = split("rec-hang", record_hang="1", extra={"RELEASE_RECORD_TIMEOUT": "2"})
 check("a copy that never answers is stopped after RELEASE_RECORD_TIMEOUT: said as failed (status 124), the release goes on to `released` and ends green",
       s["rc"] == 0 and s["secs"] < 50 and s["remote_lastgood"] == STALE and s["released"] == [RELEASED_ARGS + MERGE] and len(not_copied(s)) == 1 and "(exit status 124)" in not_copied(s)[0], (s["rc"], s["secs"], s["msgs"], s["remote_lastgood"]))

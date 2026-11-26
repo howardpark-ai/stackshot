@@ -3529,7 +3529,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         """The heading of one of the four lists, the home page's own words (ui/kit.py title)."""
         return {_home.YOUR_MOVE: _ui.title(_ui.YOUR_MOVE), _home.AGENTS: _ui.title(_ui.AGENT), RELEASE_LIST: _ui.title(_ui.RELEASE), _home.WAITING: _ui.title(_ui.WAITING)}[which]
     def queued_release_ids(self):
-        """The ids of the items linked to a pull request whose release is in the release script's queue (ui/releasing.py: that release's unit is running; the link is an anchor, an open step's proof or an open step's words): read once per Board, one systemctl call, no GitHub call."""
+        """The ids of the items linked to a pull request whose release is in the release script's queue (ui/releasing.py: that release is running; the link is an anchor, an open step's proof or an open step's words): read once per Board, one systemctl call, no GitHub call."""
         if getattr(self, "_rel_ids", None) is None: self._rel_ids = _rel.queued_items(self.scoped_urls(), self.rows)
         return self._rel_ids
     def home_lists(self, rows=None):

@@ -283,6 +283,7 @@ SLEEP = '#!/bin/sh\necho "$*" >> "$RT_DIR/sleep.log"\n'
 DATE = ('#!/bin/sh\nif [ "$1" = "+%s" ]; then\n  [ -f "$RT_DIR/clock-base" ] || /usr/bin/date +%s > "$RT_DIR/clock-base"\n'
         '  add=$(cat "$RT_DIR/sleep.log" "$RT_DIR/clock-extra" 2>/dev/null | awk \'{s+=$1} END{print s+0}\')\n  echo $(( $(cat "$RT_DIR/clock-base") + add ))\nelse exec /usr/bin/date "$@"; fi\n')
 CONFIG = ('import os, sys\nif sys.argv[1:] == ["state", "releases"]: print(os.environ["RT_DIR"] + ("/remote/releases" if os.environ.get("RT_REMOTE") else "/releases"))\n'
+          'def state(*parts): return os.path.join(os.environ["RT_DIR"] + ("/remote" if os.environ.get("RT_REMOTE") else ""), *parts)\n'   # what core/release_running.py asks (put, on "the other box")
           'def recycle_when_idle(): return os.environ.get("RT_IDLE", "").split()\n'   # [fleet] recycle_when_idle: RT_IDLE, unset = none
           'def notice_cmd(): return os.environ.get("RT_NOTICE", "").split()\n'       # [fleet] notice_cmd: RT_NOTICE, unset = none
           'def release_report_to(): return os.environ.get("RT_REPORT_TO", "")\n'     # [release] report_to: RT_REPORT_TO, unset = "" (release.sh then falls back to the stand-in page)
@@ -410,6 +411,11 @@ DEPLOY = ('#!/bin/sh\ntouch "$RT_DIR/deployed"\necho "${DEPLOY_TO:-}" > "$RT_DIR
 # release holds on this side is never the one the remote command takes. Never a real ssh.
 SSH = ('#!/bin/sh\nprintf "%s\\n" "$*" >> "$RT_DIR/ssh.log"\n[ -z "${RT_SSH_FAIL:-}" ] || { echo "ssh: connect to host failed: Connection timed out" >&2; exit 255; }\n'
        'while [ "${1:-}" = -o ]; do shift 2; done\nhost=$1; cmd=$2\nmkdir -p "$RT_DIR/login"; ln -sfn "$RT_DIR/box" "$RT_DIR/login/stackshot"\n'
+       'case "$cmd" in *release_running.py*)\n'   # an entry the release tells the server box (core/release_running.py): which of fds 3 to 9 the ssh holds, and its pid; RT_RUNNING_HANG: it never answers; RT_RUNNING_FAILS: the connection fails
+       '  f=; for n in 3 4 5 6 7 8 9; do [ -e /proc/$/fd/$n ] && f="$f open$n"; done; echo "$ none$f" >> "$RT_DIR/running_calls"\n'
+       '  [ -z "${RT_RUNNING_HANG:-}" ] || exec /usr/bin/sleep 30\n'
+       '  [ -z "${RT_RUNNING_FAILS:-}" ] || { echo "ssh: connect to host failed: Connection timed out" >&2; exit 255; } ;;\n'
+       'esac\n'
        'case "$cmd" in *last-good*)\n'   # the copy of the last-good record (record_sync): which of fds 3 to 9 it holds; RT_RECORD_HANG: it never answers; RT_RECORD_FAILS: that many copies fail (255) first
        '  echo record >> "$RT_DIR/order.log"\n'
        '  f=; for n in 3 4 5 6 7 8 9; do [ -e /proc/$$/fd/$n ] && f="$f open$n"; done; echo "none$f" >> "$RT_DIR/record_fds"\n'
@@ -512,6 +518,7 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
     if env.get("marker"): (d / "releases").mkdir(exist_ok=True); (d / "releases" / f"pr-{pr}.rolledback").write_text(env.pop("marker") + "\n")   # another release's failure rolled this one back
     if env.get("pre_lockdir"): (d / "releases/last-good.lock").mkdir(parents=True); env.pop("pre_lockdir")                                 # the record's lock file is unusable
     shutil.copy(os.path.join(STACK, "release.sh"), box / "release.sh")
+    (box / "stackshot/core").mkdir(parents=True, exist_ok=True); shutil.copy(os.path.join(STACK, "stackshot/core/release_running.py"), box / "stackshot/core/release_running.py")   # the real one: what a release with deploy_ssh runs on both sides
     for rel, text in (files or {}).items(): (d / rel).parent.mkdir(parents=True, exist_ok=True); (d / rel).write_text(text)
     if units is not None:
         for p, body in ((d / "bin/systemctl", SYSTEMCTL), (d / "bin/systemd-run", SYSTEMD_RUN)): p.write_text(body); p.chmod(0o755)
