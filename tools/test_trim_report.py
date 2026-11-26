@@ -22,7 +22,9 @@ What it measures, per run:
                                    push to main leaves nothing to fetch. It wins over --map;
                    --map FILE      this file;
                    otherwise       <root>/.suitemap/map.json.
-                 With no readable map the minutes are reported as n/a, the two minute thresholds are not checked, and the report says why.
+                 With no readable map (or one that lists no suites) the minutes are reported as n/a, the two minute
+                 thresholds are not checked, the report says why, and the status is 4 (one line on stderr), so a scheduled run that
+                 could not get its data fails instead of looking like a quiet week.
   * since the previous run   suites added and deleted by name, test lines added and deleted (per suite, the rise or fall of its
                  count; a new suite adds all its lines, a deleted one deletes all).
 
@@ -59,7 +61,8 @@ over from with a one-line note, and this run's record replaces it. --dry-run pri
 record instead of the text. `--now ISO` sets the clock, for tests.
 
 Exit status: 0 the report was made (triggers included, and their item opened or answered, or not sent for --no-open), 1 the state folder or
-file cannot be written, 2 a usage, config or checkout problem, 3 the report was made but the item was not opened. SIGTERM ends the run cleanly (the download folder is removed first; status 143)."""
+file cannot be written, 2 a usage, config or checkout problem, 3 the report was made but the item was not opened, 4 the report was made
+and its state kept, but the suite times could not be fetched or read (3 wins when both happen; both are on stderr). SIGTERM ends the run cleanly (the download folder is removed first; status 143)."""
 from __future__ import annotations
 
 import argparse
@@ -137,6 +140,8 @@ def read_map(path: str) -> tuple[dict[str, float], str, list[str]]:
         raise ValueError(f"{path} is not JSON: {e}")
     if not isinstance(m, dict) or m.get("format") != 1 or not isinstance(m.get("suites"), dict):
         raise ValueError(f"{path} is not a suite map of format 1")
+    if not m["suites"]:
+        raise ValueError(f"{path} lists no suites")
     secs: dict[str, float] = {}
     bad: list[str] = []
     for name, e in m["suites"].items():
@@ -430,6 +435,7 @@ def build(args, now: dt.datetime, work: list[str]) -> tuple[str, dict, str]:
         raise Fail(f"no {SUITE_GLOB} under {root}: run it from a checkout, or pass --root")
     repo = re.sub(r"[^\w.-]", "_", args.repo or os.path.basename(root)) or "repo"
     args.item_dest = {}
+    args.no_times = None                 # why the suite times could not be had: the report is made without them, and the status says so
     th = load_thresholds(config_path(args.config), repo, bool(args.config), args.item_dest)
     state_dir = args.state_dir or default_state_dir()
     if not args.dry_run:
@@ -455,6 +461,7 @@ def build(args, now: dt.datetime, work: list[str]) -> tuple[str, dict, str]:
                          + (f", and {len(bad) - LIST_MAX} more" if len(bad) > LIST_MAX else ""))
     except ValueError as e:
         notes.append(f"no suite times: {e}")
+        args.no_times = str(e)
 
     timed = sorted(((n, round(secs[n] / 60, 2)) for n in suites if secs is not None and n in secs), key=lambda x: (-x[1], x[0]))
     test_lines = sum(suites.values())
@@ -644,6 +651,11 @@ def main(argv: list[str] | None = None) -> int:
             print(text)
             if res:
                 print(render_item(res))
+        if args.no_times:
+            if failure:
+                print(f"test_trim_report: no suite times: {args.no_times}", file=sys.stderr)    # both problems are said; the status is the item's
+            else:
+                raise Fail(f"no suite times: {args.no_times}", 4)
         if failure:
             raise failure
         return 0
