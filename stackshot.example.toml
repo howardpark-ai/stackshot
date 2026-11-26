@@ -245,7 +245,7 @@ max_calls = 30                                      # model calls in any rolling
 timeout_seconds = 30                                # one call, seconds; the write goes through unjudged when it runs longer
 model = ""                                          # the call's model; "" = the [router] model
 
-[rulebook_scan]                                     # the nightly scan of the instruction files sessions read (stackshot/tools/rulebook_scan.py): it runs from the audit's timer
+[rulebook_scan]                                     # the scan of the instruction files sessions read (stackshot/tools/rulebook_scan.py), run after each of the audit's two daily runs (the audit's timer; the sala checks are skipped, with one line, on a machine with no `sala` command)
 enabled = false                                     # (stackshot/audit/audit.py scan, after the run) and sends each file's keeper one note about a stackshot tool or parameter, a sala verb or flag, or a
                                                     # retired term the file names and no longer exists; a finding already sent and unchanged is not sent again. false (the default): nothing
                                                     # is sent (`stackshot/audit/audit.py scan --dry-run` still prints what it finds). The keys below are read at each run, so a change needs no restart.

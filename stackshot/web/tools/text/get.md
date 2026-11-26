@@ -1,5 +1,6 @@
 ## text STALL_FORM lead
-A `stall:` line is a step the stall pass took because the item's mover had no turn running (for a background agent as
+A `stall:` line is a step the stall pass took because the item's mover had no turn running (a read shows the last 3 of the
+last 7 days, then `N earlier stall lines hidden`; for a background agent as
 mover, follow-ups after the first notice go by the item's step status, not its pane): resend (the notice again), cold
 (a call named who takes it, or closed it), builder (handed to the project's builder), recovery (nobody could take it:
 one message goes to the project's -main agent when the project has no builder, to the fleet's builder

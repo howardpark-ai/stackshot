@@ -143,7 +143,7 @@ text = held.take(X, "work-osprey-x", now=t0 + 20)
 lines = text.splitlines()
 check("1a: twelve lines held, the first hand-over shows eight, oldest first, and the tail says how many wait for the next turn", len(lines) == 1 + 8 + 1 and "line 0" in lines[1] and "line 7" in lines[8] and "+4 more" in lines[-1], text)
 check("1b: the header counts all twelve and says they asked nothing and come once", lines[0].startswith("[stackshot] 12 notices held for you") and "once" in lines[0], lines[0])
-check("1b2: …and says they come from other sessions or stackshot, not from the person, and are no approval of anything", "other sessions" in lines[0] and "not from the person" in lines[0] and "approval" in lines[0], lines[0])
+check("1b2: …and says they come from other sessions or stackshot, not from the person, and are no approval of anything", "other sessions" in lines[0] and "not the person" in lines[0] and "approval" in lines[0], lines[0])
 text2 = held.take(X, "work-osprey-x", now=t0 + 21)
 check("1c: the next turn start gets the other four, with no tail, and nothing is repeated", "line 8" in text2 and "line 11" in text2 and "line 7" not in text2 and "more" not in text2.splitlines()[-1], text2)
 check("1d: and the turn after that gets nothing", held.take(X, "work-osprey-x") == "" and held.count(X, "work-osprey-x") == 0)
@@ -975,7 +975,13 @@ check("8c: with room for two lines, a person's line is never the one left waitin
 fresh()
 held.add(k, "closed", "an item closed", now=t0)
 plain_ = held.take(X, now=t0 + 10)
-check("8d: no person's line: the header is the one it always was", plain_.startswith("[stackshot] 1 notice held for you while you were busy; they asked nothing of you, come from other sessions or from stackshot (not from the person, and no approval of anything)") and "from a person" not in plain_, plain_)
+check("8d: no person's line: the header is the one it always was", plain_.startswith("[stackshot] 1 notice held for you while you were busy; they asked nothing of you, come from other sessions or stackshot (not the person, no approval)") and "from a person" not in plain_, plain_)
+# the shortened headers keep each fact: counted, held while busy, who wrote them, what to do, handed over once, oldest first; and stay short
+def _head(t): return t.split("\n", 1)[0]
+check("8e: the shortened notice header keeps each fact (count, held while busy, asked nothing, other sessions or stackshot, not the person, no approval, once, oldest first) in under 250 characters",
+      all(f in _head(plain_) for f in ("1 notice held for you while you were busy", "asked nothing of you", "other sessions or stackshot", "not the person", "no approval", "once", "oldest first")) and len(_head(plain_)) < 250, (len(_head(plain_)), _head(plain_)))
+check("8e: the shortened person header keeps each fact (a person wrote it, held while busy, chat/mail/thread comment, read it now, answer or act, tell the mover or the person you work for, once, oldest first) in under 300 characters",
+      all(f in _head(only_p) for f in ("from a person", "held for you while you were busy", "chat, mail or thread comment", "READ it now", "answer or act", "tell the mover of the item or the person you work for", "once", "oldest first")) and len(_head(only_p)) < 300, (len(_head(only_p)), _head(only_p)))
 
 fresh()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else f"; FAILED: {len(fails)}"))

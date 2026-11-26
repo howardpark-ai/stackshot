@@ -654,16 +654,19 @@ def _body(n: dict[str, Any]) -> str:
     return " · ".join(x for x in (str(n.get("label") or ""), str(n.get("who") or "")) if x) + f": {n.get('text') or ''}" + (f" → {n['url']}" if n.get("url") else "")
 
 
+RULED_FOOTER = "Router ruled it; no ruling to wait for. Act within your mandate."      # the one line under a passed notice: the router has decided, nothing more is owed to the agent
+
+
 def compose(n: dict[str, Any], root: str, target: str, reason: str, mark: bool, body: str | None = None) -> str:
     """What a pass delivers: the router's line (notice id, project, why), then the notice as the keeper would have read it (`body`:
     the part of it that is this target's, for a split batch)."""
     if body is not None:
         head = f"[stackshot] router: notice {n['id']} on {root} is passed to you" + (f": {reason}" if reason else ".")
-        return (f"{_owner_mark()} " if mark else "") + head + "\n" + body + "\nThe router ruled it: no ruling is owed. Act on it within your mandate."
+        return (f"{_owner_mark()} " if mark else "") + head + "\n" + body + "\n" + RULED_FOOTER
     if n.get("handback"):       # an item handed back to its mover alone (router.py hand-back): the one line the server wrote, nothing around it. (A close with the owner's own words is no pass any more: it is a For you row.)
         return (f"{_owner_mark()} " if mark else "") + _body(n)
     head = f"[stackshot] router: notice {n['id']} on {root} is passed to you" + (f": {reason}" if reason else ".")
-    return (f"{_owner_mark()} " if mark else "") + head + "\n" + _body(n) + "\nThe router ruled it: no ruling is owed. Act on it within your mandate."
+    return (f"{_owner_mark()} " if mark else "") + head + "\n" + _body(n) + "\n" + RULED_FOOTER
 
 
 # ----------------------------------------------------------------------------- the live log

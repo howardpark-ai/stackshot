@@ -422,6 +422,29 @@ shown = _get_tool._fmt({**rd(27), "gid": "a27"})
 check("10 get: the last steps are shown on the item", re.search(r"stall: .*sent to it again", shown) is not None, shown[-600:])
 new = S.new_entries({"stall": {"log": []}}, mt(27))
 check("10 history: a new log entry is one History line (new_entries), an old one is not repeated", len(new) == 1 and not S.new_entries(mt(27), mt(27)), new)
+# get shows a session the stall lines of the last 7 days, at most three, and counts the older ones; the stored log and the item are not touched
+_G = _get_tool
+_now = 1_000_000_000.0
+_DAY = 86400.0
+def _lines_of(ats, now=_now):
+    meta = {"stall": {"log": [{"at": a, "text": f"step {k}"} for k, a in enumerate(ats)]}}
+    before = repr(meta)
+    out = _G.stall_lines(meta, now)
+    return out, repr(meta) == before
+_o, _same = _lines_of([_now - 30 * _DAY, _now - 20 * _DAY, _now - 2 * _DAY, _now - _DAY, _now - 60])
+check("10 get: stall lines are the last three of the last 7 days, oldest first, and one line counts the earlier ones", [l.split(" ")[0] for l in _o] == ["2", "stall:", "stall:", "stall:"] and _o[0] == "2 earlier stall lines hidden" and [l.rsplit(" ", 1)[1] for l in _o[1:]] == ["2", "3", "4"] and _same, _o)
+_o, _ = _lines_of([_now - 7 * _DAY + 5, _now - 7 * _DAY - 5])
+check("10 get: the window is 7 days: an entry 7 days minus 5 seconds old is shown, one 7 days plus 5 seconds old is hidden", len(_o) == 2 and _o[0] == "1 earlier stall lines hidden" and _o[1].endswith("step 0"), _o)
+_o, _ = _lines_of([_now - 3600, _now - 60])
+check("10 get: nothing hidden, no count line", len(_o) == 2 and all(l.startswith("stall: ") for l in _o), _o)
+_o, _ = _lines_of([_now - 30 * _DAY, _now - 29 * _DAY])
+check("10 get: all entries older than 7 days: only the count line", _o == ["2 earlier stall lines hidden"], _o)
+_o, _ = _lines_of([])
+check("10 get: no log, no line", _o == [], _o)
+_old = {**rd(27), "gid": "a27"}
+_old["metadata"] = {**(_old.get("metadata") or {}), "stall": {"log": [{"at": time.time() - 40 * _DAY, "text": "asked long ago"} for _ in range(5)] + [{"at": time.time() - 60, "text": "asked now"}]}}
+_shown = _get_tool._fmt(_old)
+check("10 get: _fmt carries the hidden-count line and only the recent entry; the item's own log keeps all six", "5 earlier stall lines hidden" in _shown and "asked now" in _shown and "asked long ago" not in _shown and len(_old["metadata"]["stall"]["log"]) == 6, _shown[-400:])
 close(27)
 
 # ================================================================ 12. a deploy: no flood

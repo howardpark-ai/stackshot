@@ -949,7 +949,7 @@ check("14: the second front agent gets both its items, the other front agent its
 check("14: every message keeps the batch's opening line and the relay's closing paragraph, and names the notice",
       all(HEAD in t and "— Relayed by " in t and f"notice {b14[0]['id']}" in t for t in by14.values()), by14[ZP][:400])
 check("14: a front agent's message carries the mark a front pane takes, the background agent's is unmarked and ends as a task (\"act on it within your mandate\")",
-      all(by14[k].startswith("[for Oliver] ") for k in (ZM, ZP, ZT)) and not by14[ZL].startswith("[for Oliver]") and by14[ZL].rstrip().endswith("Act on it within your mandate."), [by14[k][:40] for k in by14])
+      all(by14[k].startswith("[for Oliver] ") for k in (ZM, ZP, ZT)) and not by14[ZL].startswith("[for Oliver]") and by14[ZL].rstrip().endswith("Router ruled it; no ruling to wait for. Act within your mandate."), [by14[k][:40] for k in by14])
 r14 = rule_of(b14[0]["id"], "projects/zeta"); l14 = [x for x in lines() if x.get("id") == b14[0]["id"]][-1]
 check("14: ruled passed once by the router, `to` (the \"passed to\" line) listing every owner including the background agent, by a rule in code (audit-owners); the live line records what each was sent, none held",
       r14["ruling"] == "passed" and r14["ruled_by"] == live.BY and sorted(x.strip() for x in r14["ruled_to"].split(",")) == sorted([ZM, ZP, ZT, ZL])
@@ -1007,7 +1007,7 @@ check("14 (a): the front mover and the background mover are both messaged at onc
       and not re.search(r"\ba41\b", g[ZL]) and not re.search(r"\ba43\b", g[ZP]), {k: lines_of(v) for k, v in g.items()})      # whole-word: a message names its notice by a random six-hex-digit id, which can hold an item's id as a substring
 check("14 (a): the builder's lines are whole (a finding's continued line and the batch's opening and closing paragraph with them), a normal notice that asks it to act, unmarked, and nothing is held for it",
       "continued evidence of a43" in g[ZL] and "Counts: 60 items read" in g[ZL] and "— Relayed by stackshot" in g[ZL] and not g[ZL].startswith("[for Oliver]")
-      and g[ZL].rstrip().endswith("Act on it within your mandate.") and "asked nothing" not in g[ZL] and held.count(ZL) == 0, (g[ZL], held.count(ZL)))
+      and g[ZL].rstrip().endswith("Router ruled it; no ruling to wait for. Act within your mandate.") and "asked nothing" not in g[ZL] and held.count(ZL) == 0, (g[ZL], held.count(ZL)))
 l_b = [x for x in lines() if x.get("id") == n14g][-1]; r_b = rule_of(n14g, "projects/zeta")
 check("14 (b): ruled passed, `to` lists both recipients, the builder included, none held",
       r_b["ruling"] == "passed" and sorted(x.strip() for x in r_b["ruled_to"].split(",")) == sorted([ZP, ZL]) and "held" not in r_b["ruled_to"] and "held" not in r_b["reason"]
