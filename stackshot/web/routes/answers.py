@@ -49,7 +49,8 @@ def _answer_back(v: str) -> tuple[str, str] | None:
 
 async def item_answer(request: Request):
     """The owner's answer from an item's page. 403 unless signed in to the board, with the page's token, from the
-    board's own origin; 404 for an address that names no item. Then 303 back to the item's page, ?sent=<what happened>."""
+    board's own origin; 404 for an address that names no item. Then 303 back to the item's page, ?sent=<what happened>
+    (a request whose Accept is application/json gets {"sent": <what happened>} instead)."""
     raw = str(request.path_params.get("key") or "")
     if not re.fullmatch(_ITEM_KEY, raw):
         return PlainTextResponse("no such item", status_code=404)
@@ -73,6 +74,8 @@ async def item_answer(request: Request):
     from starlette.concurrency import run_in_threadpool
     who = _members.signed_in(email).name      # the person the signed-in address belongs to: the answer is recorded under that name
     code = await run_in_threadpool(_answer, gid, f("choice"), f("text"), f("act"), "board", None, who, f("ref"))      # ref: the question the form showed; a form drawn before it carried one sends none
+    if request.headers.get("accept", "").strip().lower() == "application/json":      # a script that asks for the code itself (the answer frame's) gets it in place of the redirect; every gate above is the same for it
+        return JSONResponse({"sent": code}, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
     back = _answer_back(f("back"))
     if back:      # from the home page's row: back to the page the form was on, with the item named for its notice
         path, frag = back

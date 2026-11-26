@@ -1410,6 +1410,10 @@ document.addEventListener('click',function(e){var i=e.target;if(!i||!i.matches||
 if(f._was===i.value){i.checked=false;f._was=''}else f._was=i.value;sync(f)},true);
 document.addEventListener('input',function(e){var t=e.target;if(t&&t.matches&&t.matches('form[data-cards] textarea,form[data-step] textarea'))sync(t.form)});
 document.addEventListener('stackshot:swapped',all);window.addEventListener('pageshow',all);window.ssCards={sync:sync,all:all};all()})();</script>"""
+def decide_words(ask):
+    """The question an ask line puts: its Decide part; an ask with no Recommend, Stakes or By (a watcher's relay or drop-it ask) its whole question."""
+    pa = parse_ask(ask)
+    return pa["decide"] if pa else re.sub(r"^Decide:\s*", "", ask).split(" · Options:")[0].strip()
 def _card_order(opts, mockup=False):
     """The options in the order the answer box draws them. Three or more are drawn, and lettered, in the order the owner stored them, because a session writes its ask ("Recommend: B, …")
     in that order and the letter on a card has to agree with it; the recommended card keeps its badge wherever it sits. Two (Approve and Decline, Yes and No) carry no letters and keep the
@@ -3754,22 +3758,21 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 f'<div class="abtns"><button type="submit" class="b main" name="act" value="done" disabled>{esc(_t("home.step_done"))}</button>'
                 f'<button type="submit" class="b" name="act" value="note" title="{esc(_t("home.step_send_note_hint"))}" data-hint="{esc(_t("home.step_send_note_hint"))}" data-needs-text disabled>{esc(_t("home.step_send_note"))}</button></div></form>')
         return self.your_step_html(r, home=True), form
-    def home_ask(self, r):
-        """(the question as the row shows it, its answer form) for an open decision of the owner's, None when the item carries none. The question is the ask's Decide part (a watcher's
+    def home_ask(self, r, token=""):
+        """(the question as the row shows it, its answer form) for an open decision of the owner's, None when the item carries none; `token` fills the form's token for a page drawn per signed-in viewer (the answer frame, ui/answer_frame.py), and is empty on the pages the script fills. The question is the ask's Decide part (a watcher's
         relay or drop-it ask, which has no Recommend, Stakes or By, its whole question); the form is the item page's: a card per stored option (_cards_html; Approve and Decline
         appear only as listed options; with none listed, Yes and No), the recommended one first, an optional note, one "Send" (greyed until a card is picked or the note has text). It is drawn hidden: the page script (_HOME_JS) asks GET /answer-tokens for the signed-in viewer's tokens and shows the form
         only when it gets one, so the static page carries no token; until then (and for a viewer who is not signed in) the row links the item page."""
         if "decision" not in [x.lower() for x in needs_of(r)]: return None
         ask = open_ask(r)
         if not ask: return None
-        pa = parse_ask(ask)
-        q = pa["decide"] if pa else re.sub(r"^Decide:\s*", "", ask).split(" · Options:")[0].strip()
+        q = decide_words(ask)
         stored = open_options(r)
         opts = _card_order(stored or yesno_options(r), _named_only(r))      # with no stored options, Yes and No
         cards = _cards_html(opts, _named_only(r)) if opts else ""
         hint = esc(_t("home.note_optional" if cards else "home.write_answer"))
         send = (f'<button type="submit" class="b main" name="act" value="answer" disabled>{esc(_t("home.send"))}</button>' + (f'<span class="ahint" hidden>{esc(_t("home.pick_hint"))}</span>' if cards else ""))
-        form = (f'<form class="hanswer" {"data-cards " if cards else ""}method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value=""><input type="hidden" name="back" value="">{_ref_field(r)}{cards}'
+        form = (f'<form class="hanswer" {"data-cards " if cards else ""}method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value="{esc(token)}"><input type="hidden" name="back" value="">{_ref_field(r)}{cards}'
                 + _abox(f'<textarea id="atext-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="{hint}" placeholder="{hint}"></textarea>', f'atext-{esc(r["gid"])}') +
                 f'<div class="abtns{"-send" if cards else ""}">{send}</div></form>')
         return self.md_line(q, r["gid"]) + mockup_link(r, q), form       # the mockup a design decision is about, beside the question
