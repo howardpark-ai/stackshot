@@ -58,6 +58,7 @@ from stackshot.service import checks as _checks
 from stackshot.service import gates as _gates
 from stackshot.service import handoff as _handoff
 from stackshot.service import proofs as _proofs
+from stackshot.service import released_live as _rlive
 from stackshot.service import step_settle as _settle
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
@@ -1709,6 +1710,7 @@ def said_preread(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
         pass
 
 
+@_rlive.reading()      # one write: a [released.repos] checkout its waits name is read once, before the lock, and the gate under it uses that read
 def update_item(*args: Any, **kwargs: Any) -> str:
     """update_unlocked under the item lock (a failed delivery's record writes items from another thread; an
     update reads, changes and saves, so they take turns). The one entry of the update write: the update and complete tools, and every write of an item that the server makes (a wake, a cold call, a script's row)

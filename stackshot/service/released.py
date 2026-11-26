@@ -57,6 +57,7 @@ def released_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry
     return _proofs.proof_item(gid, n, key, live, anchored, dry, now, _sp.PR_RELEASED, sends=sends)
 
 
+@_live.reading()      # one request: all its reads of another repository's checkout share one time limit
 def released(pr: str, sha: str = "", dry: bool = False) -> dict[str, Any]:
     """`client.py released --pr <url> --sha <merge>`: release.sh saw main's full run pass on the merge of `pr` and recorded it as last-good. Refused, before
     anything is written, unless `pr` is a pull request of this repository, `sha` is given and holds its merge, and that merge is in last-good and in HEAD
@@ -73,16 +74,25 @@ def released(pr: str, sha: str = "", dry: bool = False) -> dict[str, Any]:
     co = _live.released_foreign(repo) if foreign else None
     if not str(sha or "").strip() and not foreign:
         raise ToolError(f"Refused: PR #{n} has no merge commit given (--sha <merge commit>), so it cannot be read as merged and passed; nothing written")
+    cannot = f"Refused: the checkout of {repo} cannot be read; nothing written"
     if foreign:      # the merge is an ancestor of the checkout's HEAD; a sha the caller did not give is found in the checkout's own log
-        head = _live.git_commit("HEAD", co)
-        full = _live.git_commit(str(sha).strip(), co) if str(sha or "").strip() else head
+        try:
+            head = _live.git_commit("HEAD", co)
+            if not head:
+                raise ToolError(cannot)
+            full = _live.git_commit(str(sha).strip(), co) if str(sha or "").strip() else head
+        except _live.Unread:
+            raise ToolError(cannot) from None
         if not full:
-            raise ToolError(f"Refused: " + (f"the merge commit {str(sha)[:40]!r} of {shown} is not a commit the checkout of {repo} knows" if str(sha or "").strip() else f"the checkout of {repo} cannot be read") + "; nothing written")
+            raise ToolError(f"Refused: the merge commit {str(sha)[:40]!r} of {shown} is not a commit the checkout of {repo} knows; nothing written")
     else:
         full = _live.git_commit(str(sha).strip())
         if not full:
             raise ToolError(f"Refused: the merge commit {str(sha)[:40]!r} of PR #{n} is not a commit this checkout knows; nothing written")
-    merged = _live.merged_prs(full, limit=50 if str(sha or "").strip() else 3000, **({"cwd": co} if co else {}))
+    try:
+        merged = _live.merged_prs(full, limit=50 if str(sha or "").strip() else 3000, **({"cwd": co} if co else {}))
+    except _live.Unread:
+        raise ToolError(cannot) from None
     if n not in merged:
         raise ToolError(f"Refused: {shown} is not merged: {full[:7]} holds no merge commit for it (\"Merge pull request #{n} from …\"); nothing written")
     msha, mct = merged[n]

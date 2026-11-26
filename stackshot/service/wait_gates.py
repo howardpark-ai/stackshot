@@ -210,9 +210,10 @@ def _evw_box_spec(sp: "_ew.Spec") -> "_ew.Spec":
 
 
 def _evwait_preread(kind: Any, phrase: Any) -> None:
-    """Before the item lock: the facts an event wait's write gate reads (_evwait_gate), so the gate itself makes no GitHub call and no git log under the lock every other write waits on. A pr_merged
-    wait reads its pull request on GitHub (paced like the done check: checks.pr_merged, kept in _evwaits.EVW_GH); a pr_released wait warms the git answers for the last-good commit. A failure is the gate's
-    case of 'cannot be read': the wait is stored and the catch-up reads it later."""
+    """Before the item lock: the facts an event wait's write gate reads (_evwait_gate), so the gate itself makes no GitHub call, no ssh call and no git log under the lock every other write waits on. A
+    pr_merged wait reads its pull request on GitHub (paced like the done check: checks.pr_merged, kept in _evwaits.EVW_GH); a pr_released wait warms the git answers for the last-good commit, or reads a
+    [released.repos] checkout (over ssh when it is on another machine), once for the whole write: the caller holds released_live.reading() round this and the gate. A failure is the gate's case of
+    'cannot be read': the wait is stored and the catch-up reads it later."""
     k = str(kind or "").strip().lower()
     if (k and k != "event") or not str(phrase or "").strip():
         return
@@ -222,7 +223,7 @@ def _evwait_preread(kind: Any, phrase: Any) -> None:
             with _gb.tag("event_wait"):
                 _checks.pr_merged(sp.key, time.time(), _evwaits.EVW_GH)
         elif sp.kind == _ew.PR_RELEASED and sp.key.rpartition("#")[0] != _cfg.canon_repo(_relsvc._own_repo()):
-            _rlive.foreign_prs(sp.key.rpartition("#")[0])      # a [released.repos] repository: warm the checkout's merges
+            _rlive.foreign_prs(sp.key.rpartition("#")[0])      # a [released.repos] repository: its checkout's merges
         elif sp.kind == _ew.PR_RELEASED:
             good, head = _rlive.released_live_base()
             hit = _evwaits.evw_merge(good, _ew.pr_number(sp))
@@ -263,7 +264,7 @@ def _evwait_gate(old: dict[str, Any], meta: dict[str, Any], creating: bool = Fal
         try:
             if foreign:
                 good, head = "", ""
-                hit = _rlive.foreign_prs(repo)[1].get(n)       # a merge in the checkout's HEAD is live
+                hit = _rlive.foreign_prs_locked(repo)[1].get(n)       # a merge in the checkout's HEAD is live (as this write's read before the lock found it)
             else:
                 good, head = _rlive.released_live_base()
                 hit = _evwaits.evw_merge(good, n)

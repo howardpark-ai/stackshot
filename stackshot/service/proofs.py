@@ -500,6 +500,7 @@ def proof_final(ref: str, *stores: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+@_live.reading()      # one pass: each [released.repos] checkout is read once (one on another machine costs ssh calls), and a machine that gives no answer is asked once
 def sweep_proofs(dry: bool = False, only: set[str] | None = None, tick: bool = False, save: bool | None = None) -> dict[str, Any]:
     """The pass and `client.py sweep-step-proof [--dry-run]`: every open item whose open step names an event that has already happened is settled (proof_item). → {"head", "good", "items": [rows, each with
     "pr" and "kind"]}. `dry` writes and tells nothing (it still reads git and GitHub; `save` says whether the GitHub answers are kept, by default when not `dry`). A pull request released is one whose merge is in

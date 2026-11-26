@@ -9,7 +9,7 @@ means and is kept as it was in server.py.
 What a write must do differently from the usual one is the `WriteContext` passed to `save`: `settle`. It was a thread-local flag set around the save (`_NO_SETTLE`); it is an argument now, so
 nothing a save does depends on what else the thread did before it. The per-write flags the gates read (`SESSION_NEXT`, `CLOSE_TOOL`, `QUESTION`, `COLD_ASK`, `REFORMAT`, `TERMINAL_ROW`) live here too, as thread-locals the routes and tools set
 with `.on` around a write (`session_write` is the create and update tools' own); they are read by the create and update tools and the gates, never by this save. The flags of the telling (`CLOSE_WAS`, `FRONT_HINT`,
-`MENTIONED`, `HO_STATE`) are on service/telling.py.
+`MENTIONED`, `HO_STATE`) are on service/telling.py. `RELEASED_READS` holds what one request, write or pass has read of another repository's checkout (released_live.reading sets it and restores it).
 
 The steps that still read server.py's own code (the mover's settling, his step, the ask record, the three hand-off steps, the phase, the search index, the
 hand-back line, the pending answer) are reached through `Steps`, which web/wiring.py fills once with `install` (web/server.py calls it at its import): this module cannot import server.py (the surface sits above it), and each of those
@@ -52,6 +52,7 @@ QUESTION = threading.local()     # set by the script question route around its c
 COLD_ASK = threading.local()     # set by the cold call's own write (service/handoff_cold.py, `cold_write`, in a try/finally) and by nothing else: the ask it writes links what it links, a script cannot make a decision page. No tool parameter reaches it
 CLOSE_TOOL = threading.local()   # around the complete tool's own call: its close is a session's, so it ticks only the sender's own open steps (read by the update with `close_tool()`)
 REFORMAT = threading.local()    # set by the re-bullet route around its update: a description written in bullets with the same content is a filing edit, no state change
+RELEASED_READS = threading.local()   # `.now`: what the request, write or pass running on this thread has read of the [released.repos] checkouts (released_live.reading sets it round that work and restores it)
 
 
 def session_next() -> bool:

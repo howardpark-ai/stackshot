@@ -3,8 +3,8 @@
 The write path (create, update, close and the telling of who hears a write) runs from service/. It used to keep its per-write state in thread-locals on the web module and
 to reach the notices through hooks. This suite holds what is true now:
 
-  1  flags       no thread-local is made in web/ (a `threading.local` call or reference), the five per-write flags the gates and the services read are on service/writes.py, the telling's four
-                 are on service/telling.py, and no other service module makes one
+  1  flags       no thread-local is made in web/ (a `threading.local` call or reference), the per-write flags the gates and the services read (with what a write has read of another repository's
+                 checkout) are on service/writes.py, the telling's four are on service/telling.py, and no other service module makes one
   2  tables      the fourteen hook tables the server installs (the item readers', the For you rows', the save steps' and the owner's words', the write path's four, the telling's, the minute set's, the wake passes', the hand-off passes', the stall pass's, the done check's and the page-debt call's, the migrations' and the fleet events') are installed at import, once each, by the two install steps of web/wiring.py (`install_early`, `install_late`), which web/server.py calls once each at the top of its module (never inside a function)
   3  values      what a table takes as a plain value (not a function, not a late lookup) is a constant of the module that cannot change after the install, so a copy taken at the install cannot go stale; a late
                  lookup (`_late_in(module, "name")`, a call in web/wiring.py) is a lookup by name made on the owner module when the hook runs, so it captures nothing, and each one must name a function or value that module defines; no table looks
@@ -30,7 +30,7 @@ def locals_made(tree):
 # ---------------------------------------------------------------- 1. flags
 in_web = [f"{p.name}:{n.lineno}" for p in sorted(PKG.glob("web/*.py")) for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))) if is_local(n)]
 check("1 no thread-local is made or named in web/ (the per-write flags left the server)", not in_web, in_web)
-check("1 the flags the gates and the services read are on service/writes.py", locals_made(parse("service/writes.py")) == ["CLOSE_TOOL", "COLD_ASK", "QUESTION", "REFORMAT", "SESSION_NEXT", "TERMINAL_ROW"], locals_made(parse("service/writes.py")))
+check("1 the flags the gates and the services read are on service/writes.py", locals_made(parse("service/writes.py")) == ["CLOSE_TOOL", "COLD_ASK", "QUESTION", "REFORMAT", "RELEASED_READS", "SESSION_NEXT", "TERMINAL_ROW"], locals_made(parse("service/writes.py")))
 check("1 the telling's own are on service/telling.py", locals_made(parse("service/telling.py")) == ["CLOSE_WAS", "FRONT_HINT", "HO_STATE", "MENTIONED"], locals_made(parse("service/telling.py")))
 others = {p.name: locals_made(ast.parse(p.read_text(encoding="utf-8"))) for p in sorted(PKG.glob("service/*.py")) if p.name not in ("writes.py", "telling.py")}
 check("1 no other service module keeps one", not any(others.values()), {k: v for k, v in others.items() if v})

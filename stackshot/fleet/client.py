@@ -381,7 +381,8 @@ runs on every box.
                                 merged, --sha is missing or holds no merge of it, or the merge is not in the last-good commit and the
                                 checkout's HEAD (a main run still going, a rollback). A PR of another repository counts only when the
                                 server's [released.repos] lists it (else refused, naming the ones it lists): its merge must then be an
-                                ancestor of that repository's checkout HEAD (it has no last-good). Only a release step counts: one that says it releases
+                                ancestor of that repository's checkout HEAD (it has no last-good; the server reads the checkout the entry
+                                names, over ssh when it is on another machine). Only a release step counts: one that says it releases
                                 the PR ("release PR #N", "release #N", or "release" before the PR's URL; never "not release", "don't release"
                                 or "pre-release"), on an item anchored to the PR or naming its URL. A step is a pure release only when
                                 nothing follows the release phrase or only a short parenthetical naming nothing to do ("(in its turn)",

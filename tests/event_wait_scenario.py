@@ -19,7 +19,7 @@ pass and was finally raised to the owner. An event wait is stored, watched by co
 import contextlib, datetime, io, json, os, re, sys, pathlib, time, logging
 BID_A = 9154
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch, _instance, _midnight
+import _scratch, _instance, _midnight, _fake_ssh
 tmp = _scratch.mkdtemp(prefix="eventwaittest-"); T = pathlib.Path(tmp)
 toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml
@@ -68,6 +68,8 @@ from stackshot.web import server; from stackshot.web.tools import anchors as _wt
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import recycle as recycle_svc
 from stackshot.service import wait_gates as wait_gates_svc
+from stackshot.service import wait_fixes as wait_fixes_svc
+from stackshot.web.tools import create as create_tool, update as update_tool
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc
 from stackshot.core import config as _cfg
@@ -483,7 +485,7 @@ check("every PR an event wait read on GitHub (the write gate's early read and th
       GH_TAGS and set(GH_TAGS) == {"event_wait"} and _gbud.current() == "", (len(GH_TAGS), set(GH_TAGS), _gbud.current()))
 
 # ================================================================ a [released.repos] repository: a PR is live when its merge is in the sibling checkout's HEAD (real git, a scratch repo)
-import subprocess
+import subprocess, types
 SIB = "example-owner/sibling"; SC = T / "sib"
 SENV = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "HOME": tmp}
 def sg(*a): return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *a], cwd=SC, env=SENV, capture_output=True, text=True, check=True).stdout.strip()
@@ -517,6 +519,81 @@ try:
     _cfg.CFG["released"] = {"repos": {SIB.upper(): {"checkout": "~/sib-checkout"}}}
     check("foreign: names are lower-cased and ~ is expanded", _cfg.released_repos() == {SIB: pathlib.Path(os.path.expanduser("~/sib-checkout"))} and _cfg.released_notes() == [], _cfg.released_repos())
 finally:
+    _cfg.CFG.pop("released", None)
+    rlive_svc.merged_prs, rlive_svc.git_commit = (lambda head, limit=3000: {}), (lambda ref: "f" * 40 if ref else "")
+
+# ================================================================ the same checkout on another machine, read over ssh (a stand-in ssh): never while the item lock is held
+HOST = "sib-host.invalid"
+ssh = _fake_ssh.FakeSsh(T / "other-machine")
+subprocess.run(["git", "clone", "-q", str(SC), str(ssh.home / "sib")], env=SENV, check=True, capture_output=True)
+def lg(*a): return subprocess.run(["git", *a], cwd=ssh.home / "sib", env=SENV, capture_output=True, text=True, check=True).stdout.strip()
+lg("reset", "-q", "--hard", "HEAD~1")      # the running checkout holds #7, not #8
+rlive_svc.merged_prs, rlive_svc.git_commit = REAL_MERGED_PRS, REAL_GIT_COMMIT; rlive_svc.PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
+_cfg.CFG["released"] = {"repos": {SIB: {"checkout": "~/sib", "ssh": HOST}}}
+REAL_GIT = rlive_svc.git
+UNDER_LOCK: list[bool] = []      # for each read of the other machine's checkout: was the item lock held?
+def watched_git(*a, **k):
+    if isinstance(k.get("cwd"), _cfg.RemoteCheckout): UNDER_LOCK.append(writes.ITEM_LOCK._is_owned())
+    return REAL_GIT(*a, **k)
+rlive_svc.git = watched_git
+try:
+    with ssh:
+        out = wgate(f"pr_released {SIB}#7")
+        check("remote gate: with no early read the wait is stored and the gate itself runs no ssh", "event wait: the server watches for" in out and ssh.calls() == [], (out, ssh.calls()))
+        with rlive_svc.reading():      # one write: the early read and the gate
+            wait_gates_svc._evwait_preread("event", f"pr_released {SIB}#7"); n_calls = len(ssh.calls())
+            refused("remote gate: after the early read a PR the other machine's checkout holds is refused as already live", lambda: wgate(f"pr_released {SIB}#7"), "already merged and live")
+            check("...from what the early read found, with no further ssh", n_calls > 0 and len(ssh.calls()) == n_calls, (n_calls, ssh.calls()))
+        ssh.clear(); out = wgate(f"pr_released {SIB}#7")
+        check("remote gate: the next write takes nothing from that read (the checkout may have been rolled back since)", "event wait: the server watches for" in out and ssh.calls() == [], (out, ssh.calls()))
+        ssh.mode("down"); ssh.clear()
+        with rlive_svc.reading():
+            wait_gates_svc._evwait_preread("event", f"pr_released {SIB}#7"); ssh.mode("")
+            out = wgate(f"pr_released {SIB}#7")
+        check("remote gate: an early read that gets no answer leaves the wait stored, and the gate does not ask again", "event wait: the server watches for" in out and len(ssh.calls()) == 1, (out, ssh.calls()))
+        item(92, mover=BACK, subject="[home] will wait for a release on another machine")
+        UNDER_LOCK.clear()
+        refused("remote write: update refuses a wait for a PR already live on the other machine",
+                lambda: _update_svc._update("a92", sender=BACK, wait_kind="event", wait_event=f"pr_released {SIB}#7", ask_by=day(5), post_wake_mover=BACK, mover="none"), "already merged and live")
+        out = _update_svc._update("a92", sender=BACK, wait_kind="event", wait_event=f"pr_released {SIB}#8", ask_by=day(5), post_wake_mover=BACK, mover="none")
+        check("remote write: a wait for a PR the running checkout does not hold is stored", mt(92).get("wait_event") == f"pr_released {SIB}#8" and "event wait:" in out, (mt(92), out[-300:]))
+        check("remote write: every read of the other machine's checkout was made without the item lock", bool(UNDER_LOCK) and not any(UNDER_LOCK), UNDER_LOCK)
+        lines = [{"kind": "event", "event": f"pr_released {SIB}#{n}"} for n in (8, 9, 10)]
+        def listed(i): return update_tool.stackshot_update(f"a{i}", sender=BACK, waits=lines, wait_mode="all", until=day(5), wait_reason="the releases come only after that day", post_wake_mover=BACK, mover="none")
+        item(96, mover=BACK, subject="[home] will wait for three releases"); rlive_svc.PROOF_GIT.clear(); ssh.clear(); UNDER_LOCK.clear()
+        listed(96)
+        check("remote write: an update whose list names the repository on three lines reads it once (its HEAD and its log), without the item lock", len(mt(96).get("waits") or []) == 3
+              and len(ssh.calls()) == 2 and bool(UNDER_LOCK) and not any(UNDER_LOCK), (mt(96).get("waits"), ssh.calls()))
+        item(97, mover=BACK, subject="[home] will wait for three releases, machine away"); ssh.mode("down"); ssh.clear()
+        listed(97); ssh.mode("")
+        check("remote write: ...and asks a machine that gives no answer once, the waits stored", len(mt(97).get("waits") or []) == 3 and len(ssh.calls()) == 1, (mt(97).get("waits"), ssh.calls()))
+        ssh.clear(); rlive_svc.PROOF_GIT.clear(); UNDER_LOCK.clear()
+        GOAL_DESC = "- Goal: the releases are live\n- It lives here\n- Done when done"
+        out = create_tool.stackshot_create(subject="[home] filed waiting on three releases", description=GOAL_DESC, project="projects/alpha", sender=BACK, mover="none", next="team-back: nothing", goal="Done when they are live.",
+                                           waits=lines, wait_mode="all", until=day(5), post_wake_mover=BACK, request_id="evw-remote-list")
+        check("remote write: a create whose list names the repository on three lines reads it once too", "created " in out and len(ssh.calls()) == 2 and bool(UNDER_LOCK) and not any(UNDER_LOCK), (out[:300], ssh.calls()))
+        ssh.clear()
+        refused("remote write: ...and a create waiting on a PR already live there is refused", lambda: create_tool.stackshot_create(subject="[home] filed waiting on a live release", description=GOAL_DESC, project="projects/alpha",
+                sender=BACK, mover="none", next="team-back: nothing", goal="Done when it is live.", wait_kind="event", wait_event=f"pr_released {SIB}#7", ask_by=day(5), post_wake_mover=BACK, request_id="evw-remote-live"), "already merged and live")
+        item(98, mover=BACK, subject="[home] says it waits for a release there"); ssh.clear(); UNDER_LOCK.clear()
+        real_gaps = wait_fixes_svc._we.item_gaps
+        wait_fixes_svc._we.item_gaps = lambda *a, **k: [types.SimpleNamespace(token="stand-in", plan={"op": "event"}, pos=1, line="")]      # finding the gap in an item's words is the wait_end suite's matter
+        try: fix = wait_fixes_svc._wait_end_fix("a98", {"token": "stand-in", "op": "event", "phrase": f"pr_released {SIB}#7"}, now0)
+        finally: wait_fixes_svc._we.item_gaps = real_gaps
+        check("remote write: the filing pass's own wait write is refused for a PR already live there, from its read before the lock", fix["fixed"] is False and "already merged and live" in fix["why"]
+              and bool(UNDER_LOCK) and not any(UNDER_LOCK) and not mt(98).get("wait_event"), (fix, ssh.calls()))
+        for i, n in ((93, 7), (94, 8), (95, 8)):
+            item(i, wait_kind="event", wait_event=f"pr_released {SIB}#{n}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject=f"[home] waits on the other machine, {i}")
+        reset(); ssh.clear(); UNDER_LOCK.clear()
+        fired = evwaits_svc.evwait_poll(now0 + 600)
+        heads = [c for c in ssh.calls() if c[-1].endswith("rev-parse --verify --quiet 'HEAD^{commit}'")]
+        check("remote poll: the wait for the PR the running checkout holds turns, the waits for the one it lacks do not", "a93" in fired and not {"a92", "a94", "a95"} & set(fired), fired)
+        check("remote poll: the checkout's HEAD is read once a pass, however many waits name the repository, and not under the item lock", len(heads) == 1 and bool(UNDER_LOCK) and not any(UNDER_LOCK), (heads, UNDER_LOCK))
+        lg("merge", "-q", "--ff-only", "origin/main")      # the deploy on the other machine
+        fired = evwaits_svc.evwait_poll(now0 + 660)
+        check("remote poll: after the deploy there the other waits turn", {"a92", "a94", "a95"} <= set(fired), fired)
+finally:
+    rlive_svc.git = REAL_GIT
     _cfg.CFG.pop("released", None)
     rlive_svc.merged_prs, rlive_svc.git_commit = (lambda head, limit=3000: {}), (lambda ref: "f" * 40 if ref else "")
 

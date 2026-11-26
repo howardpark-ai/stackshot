@@ -195,6 +195,7 @@ def evwait_poll(now: float | None = None, told: dict[str, str] | None = None) ->
     return fired + _evwait_poll_prs(now, told)
 
 
+@_live.reading()      # one pass: each [released.repos] checkout is read once (one on another machine costs ssh calls), and a machine that gives no answer is asked once
 def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
     """The catch-up for the pull-request events, which are states: an event wait on a PR's release or merge whose event happened while the server was down or was not told (the release hook is best
     effort) turns now. pr_released reads the checkout (last-good and HEAD, as sweep-released does; a [released.repos] repository's checkout HEAD); pr_merged reads GitHub at the done check's pace (checks.pr_merged). → the gids turned."""
