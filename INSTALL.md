@@ -357,6 +357,16 @@ On every box that only runs sessions:
 
 Left unset, `[server] box` keeps the older rule: a machine that holds the pages checkout is taken for the server box.
 
+A session that changed the board without needing a page change drops its page debt with `pages.py clear <key>`. The reminder on its own box
+is local, but the owed list is the server's, so a box that is not the server host (`[release] deploy_ssh` names another box, or
+`[server] box = false`) runs the same clear on the server host: `ssh -o BatchMode=yes <[release] deploy_ssh>`, in the checkout `~/stackshot`
+there, carrying the session's id, name and permanent id, with `--force` passed on. Set `[release] deploy_ssh` on every box that only runs
+sessions and give its user an ssh key that logs in to the server host with no prompt. The
+command prints the server's own result lines. Exit 0: cleared. Exit 3: another writer's debt was kept, on either box. Exit 4: the server's
+entry stays (no plain host name in `deploy_ssh`, ssh or the run there failed, or the server's checkout is older than this feature); the
+reminders on this box are dropped all the same, and the line that says so gives the command to run on the server host. A box with neither
+`deploy_ssh` nor `[server] box = false` is read as the server host, and clears only what it holds itself.
+
 The server's units belong on the server host only, so `./install.sh units` checks it once, first, before it touches lingering or any unit.
 The config names the server host in `[release] deploy_ssh` (the host the server runs on, for a box that only runs `release.sh`; a name, an
 alias, `user@host` or a host word) and says "not this box" with `[server] box = false`. On a box that is not that host, `units` prints one line
