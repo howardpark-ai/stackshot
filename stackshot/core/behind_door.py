@@ -162,7 +162,10 @@ def _read_members(path: str) -> dict[str, _files.Member]:
     if have is not None and st is not None and have[0] == sig and have[1]:
         return have[2]
     try:
-        data = _files.read_member_records(p)
+        said: list[str] = []
+        data = _files.read_member_records(p, said)
+        for line in said:
+            _tell(line)
     except _files.FileError as e:
         _tell(str(e))
         _cache.pop(p, None)
@@ -180,17 +183,7 @@ def people(cfg: dict[str, Any] | None = None) -> tuple[tuple[str, tuple[str, ...
         return None
     if not s.members_file or not NAME.fullmatch(s.board):
         return ()
-    out: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
-    seen: dict[str, str] = {}
-    for m, rec in _read_members(s.members_file).items():
-        if s.board not in rec.boards:
-            continue
-        if m.casefold() in seen:      # `Alice@x` after `alice@x`: names are unique without regard to case (as [[members]] names are), so the later one is left out, never a second person
-            _tell(f"members_file lists {m!r} and {seen[m.casefold()]!r} for this board: they are one name without regard to case, so only the first is a member")
-            continue
-        seen[m.casefold()] = m
-        out.append((m, rec.aliases, rec.emails))
-    return tuple(out)
+    return tuple((m, rec.aliases, rec.emails) for m, rec in _read_members(s.members_file).items() if s.board in rec.boards)
 
 
 def members(cfg: dict[str, Any] | None = None) -> tuple[str, ...] | None:

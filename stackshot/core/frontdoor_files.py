@@ -2,7 +2,7 @@
 
     read_secret(path, ...)   -> the one value in a secret file, or FileError naming the path and the reason (never the content)
     read_members(path)       -> {member: [backend names]} from the members file, read at each call
-    read_member_records(path) -> {member: Member} the same file with each member's aliases and sign-in addresses, when the file gives them
+    read_member_records(path) -> {member: Member} the same file with each member's aliases and sign-in addresses, no name or address in two members
 
 A secret file is read through one opened descriptor, as a brain's `secret_file` is (`projects/brains.py: secret`): it must be a regular file, private
 to its owner (a file group or others can read is refused, the one wording of `core/config.py: secret_mode_text`), at most MAX_BYTES, text whose first
@@ -80,7 +80,7 @@ def read_secret(path: str, what: str = "secret_file", min_len: int = MIN_SECRET)
 
 @dataclass(frozen=True)
 class Member:
-    """One member of the members file: the backends the member is on, the other names a line of a board's `next` may open with, and the sign-in addresses (lower case) that are this member."""
+    """One member of the members file: the backends the member is on, the other names a line of a board's `next` may open with, and the sign-in addresses that are this member."""
     boards: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     emails: tuple[str, ...] = ()
@@ -95,12 +95,51 @@ def _names(v: object) -> tuple[str, ...]:
     return tuple(out)
 
 
-def read_member_records(path: str) -> dict[str, Member]:
-    """The members file, `{member: value}`, as records. The key is the member's identity (the name the proxy sets the identity header to, and the name a board stores the person under); the value is
-    either a list of backend names (the older form: `"alice@x": ["main", "side"]`, where the key is also the one sign-in address) or an object
-    `{"boards": ["main"], "aliases": ["PJ"], "emails": ["pat@x", "pat@y"]}` for a person who signs in with several addresses or is known by another name. Sign-in addresses are compared in
-    lower case, so they are stored so. A key written like an address and given no `emails` is its own address. A value that is neither a list nor an object is a member of nothing.
+def read_member_records(path: str, notes: list[str] | None = None) -> dict[str, Member]:
+    """The members file, `{member: value}`, as records. The key is the member's identity (the name the proxy sets the identity header to, and the name a board stores the person under). The value is
+    either a list of backend names (the older form: `"alice@x": ["main", "side"]`, where the key is also the one sign-in address, as written) or an object
+    `{"boards": ["main"], "aliases": ["PJ"], "emails": ["pat@x", "pat@y"]}` for a person who signs in with several addresses or is known by another name. The `emails` of an object are kept in lower case
+    and each needs an `@`; an object with none and a key written like an address has the key as its address. A value that is neither a list nor an object is a member of nothing.
+
+    No name or address belongs to two members: a key comes first (compared without regard to case: of two such keys only the first is a member), then, in the file's order, an alias or address that
+    another member's key or an earlier member already has is dropped from the later one. Each thing dropped is a line appended to `notes`, when one is given.
     Read at each call. FileError when the file is missing, too large or not a JSON object: the caller treats that as no one being a member."""
+    said = notes if notes is not None else []
+    parsed: list[tuple[str, Member]] = []
+    owner: dict[str, str] = {}                          # lower-cased name or address -> the key of the member that has it
+    for key, v in _members_object(path):
+        if key.lower() in owner:
+            said.append(f"members_file lists {key!r} and {owner[key.lower()]!r}: they are one name without regard to case, so only the first is a member")
+            continue
+        owner[key.lower()] = key
+        if isinstance(v, dict):
+            emails: list[str] = []
+            for e in _names(v.get("emails")):
+                if "@" in e:
+                    emails.append(e.lower())
+                else:
+                    said.append(f"members_file: an entry of the emails of {key!r} has no @, so it is not read")
+            if not emails and "@" in key:
+                emails = [key]
+            parsed.append((key, Member(_names(v.get("boards")), _names(v.get("aliases")), tuple(dict.fromkeys(emails)))))
+        else:
+            parsed.append((key, Member(_names(v), (), (key,))))
+    out: dict[str, Member] = {}
+    for key, m in parsed:
+        def own(values: tuple[str, ...], what: str) -> tuple[str, ...]:
+            kept = []
+            for x in values:
+                if owner.setdefault(x.lower(), key) == key:
+                    kept.append(x)
+                else:
+                    said.append(f"members_file: {what} of {key!r} is already {owner[x.lower()]!r}'s, so it is not read for {key!r}")
+            return tuple(kept)
+        out[key] = Member(m.boards, own(m.aliases, "an alias"), own(m.emails, "an address"))
+    return out
+
+
+def _members_object(path: str) -> list[tuple[str, object]]:
+    """The (key, value) pairs of the members file in its order, a key trimmed and none empty. FileError as `read_member_records` says."""
     raw = _read_text(path, "members_file")
     try:
         d = json.loads(raw)
@@ -108,32 +147,22 @@ def read_member_records(path: str) -> dict[str, Member]:
         raise FileError(f"members_file {os.path.expanduser(path)} is not valid JSON") from None
     if not isinstance(d, dict):
         raise FileError(f"members_file {os.path.expanduser(path)} is not a JSON object of member -> [boards]")
-    out: dict[str, Member] = {}
-    for k, v in d.items():
-        key = str(k).strip()
-        if not key:
-            continue
-        if isinstance(v, dict):
-            emails = tuple(dict.fromkeys(e.casefold() for e in _names(v.get("emails"))))
-            out[key] = Member(_names(v.get("boards")), _names(v.get("aliases")), emails or ((key.casefold(),) if "@" in key else ()))
-        else:
-            out[key] = Member(_names(v), (), (key.casefold(),) if "@" in key else ())
-    return out
+    return [(str(k).strip(), v) for k, v in d.items() if str(k).strip()]
 
 
 def read_members(path: str) -> dict[str, list[str]]:
     """{member: [backend names]}: a JSON object whose keys are the members' identities (as the proxy sets the identity header) and whose values are lists of backend names
     (`{"alice": ["a"], "bob": ["a", "b", "brain"]}`), or objects with a `boards` list (`read_member_records`). Read at each call, so a change applies to the next request. A member whose value is no list of
-    names is a member of nothing. FileError when the file is missing, too large or not a JSON object: the caller treats that as no one being a member."""
-    return {k: list(m.boards) for k, m in read_member_records(path).items()}
+    names is a member of nothing. Every key as the file has it (the front door looks an identity up exactly). FileError when the file is missing, too large or not a JSON object: the caller treats that as no one being a member."""
+    return {k: list(_names(v.get("boards") if isinstance(v, dict) else v)) for k, v in _members_object(path)}
 
 
 def member_of_address(records: dict[str, Member], address: str) -> str:
-    """The member (the key of `records`) whose sign-in address is `address` (compared in lower case), or "" when none has it. The first in the file's order when two list one."""
-    a = str(address or "").strip().casefold()
-    if not a:
+    """The member (the key of `records`) whose sign-in address is `address` (compared without regard to case), or "" when none has it or `address` is no address."""
+    a = str(address or "").strip().lower()
+    if "@" not in a:
         return ""
     for k, m in records.items():
-        if a in m.emails:
+        if a in (e.lower() for e in m.emails):
             return k
     return ""
