@@ -1,12 +1,13 @@
-"""call_log.py — the count of board writes the server refused, and the small corrections it made instead of refusing.
+"""call_log.py — the count of board calls the server refused, and the small corrections it made instead of refusing.
 
-The server writes one line per call of a counted write tool (create, update, complete, confirm, message) to `<paths.state>/calls/<YYYY-MM>.jsonl`:
+The server writes one line per call of every tool (the counted writes create, update, complete, confirm and message, and every other tool, a read too) to `<paths.state>/calls/<YYYY-MM>.jsonl`:
 
     {"t": epoch seconds, "tool": "update", "ok": true}                                          the call went through
     {"t": …, "tool": "update", "ok": true, "fix": ["wake", "item-id"]}                           it went through after the server corrected a field itself (see `fixed`)
     {"t": …, "tool": "update", "ok": false, "item": "board#N", "sender": "my-x", "why": "…"}    the server refused it (the ToolError's text, whitespace folded, clipped)
 
-`tools/refusal_report.py` reads these lines for its weekly report. The call's other arguments are never logged: a description, a draft or a said line stays out. The one exception is a refused message call, which also keeps
+`tools/refusal_report.py` reads these lines for its weekly report (the five writes) and its daily analysis (every tool). What a line holds of a call: the tool, the caller (`sender`, when the call passed one), ok or refused, the sizes (`req`, `rlen`), the item only when it is an id,
+and for a refusal its text with the arguments it quotes removed (an anchors refusal also loses any quoted or mailbox-looking part), clipped. The call's other arguments are never logged: a description, a draft, a project, a session name or a said line stays out. The one exception is a refused message call, which also keeps
 what it was about, so refusals can be told apart later (the message tool's text is a record its sender may want back, and a refusal leaves no other copy of it):
 
     {"t": …, "tool": "message", "ok": false, "item": "", "sender": "my-x", "why": "…", "to": "other-y", "kind": "marked-no-turn", "text": "…"}      to: the target as the sender wrote it; kind: the refusal site's slug (service/messaging.py `Refused`); text: the message as a delivered row keeps it, clipped to TEXT_MAX
@@ -21,6 +22,14 @@ goes through as a line that keeps the refusal site's kind and says so, so the we
 A reply that tells its writer something to look at, with nothing corrected and nothing refused (`noted`: an update changed the words of the Goal sentence and left the subject), keeps its kind apart from the fixes:
 
     {"t": …, "tool": "update", "ok": true, "note": ["goal-moved"], "item": "board#N", "sender": "my-x"}
+
+Every other tool's call (get, brief, sessions, anchors, rules, route …) is logged the same way, and a read that errors is logged as refused. Every line the server writes also carries the sizes that let the daily analysis
+(tools/refusal_report.py `daily`) put a token estimate on refusals and retries, and no content:
+
+    {"t": …, "tool": "get", "ok": true, "item": "board#N", "sender": "my-x", "req": 24}                         req: the call's arguments as sent, in characters (item and sender only when the call had them)
+    {"t": …, "tool": "update", "ok": false, …, "why": "…", "req": 812, "rlen": 1450}                         rlen: the refusal's whole text in characters (`why` is clipped to WHY_MAX)
+
+A line written before these fields existed has neither: it reads as a call of unknown size.
 
 A correction (`fixed`) is a pure fact the server can put right without a judgment: a bare item number read as the board id, a wake with seconds or a UTC offset read as the
 instance time, a subject with no scope prefix given the one its project's scope names. The server stores the corrected field, adds one line to the reply saying what it did
@@ -43,7 +52,8 @@ from typing import Any, Iterator
 from stackshot.core import config as _cfg
 from stackshot.core.lines import MSG_MAX, newline_lines
 
-COUNTED = ("create", "update", "complete", "confirm", "message")      # the write tools whose calls are counted
+COUNTED = ("create", "update", "complete", "confirm", "message")      # the write tools whose calls get a correction pass and are counted in the weekly report (every other tool's calls are logged too: see `record`)
+TOOL_MAX = 30                                                         # characters of a tool's name kept
 WHY_MAX = 300                                                         # characters of a refusal's text kept
 TEXT_MAX = MSG_MAX                                                    # characters of a refused message's text kept: the message tool's own limit, so a message it takes is kept whole
 TO_MAX = 80                                                           # characters of a refused message's target kept
@@ -286,12 +296,23 @@ def _file(now: float) -> Path:
     return _cfg.state("calls") / (dt.datetime.fromtimestamp(now, _cfg.tz()).strftime("%Y-%m") + ".jsonl")
 
 
-def record(tool: str, ok: bool, *, item: str = "", sender: str = "", why: str = "", fixes: list[tuple[str, str]] | None = None, call: str = "", to: str = "", kind: str = "", text: str = "", now: float | None = None) -> None:
-    """Append the line of one call. Never raises: a log line is not worth a lost reply. A call that went through with a fix or a bounce-back also names its item and sender (a later diff of the
+def size_of(args: Any) -> int:
+    """The size in characters of a call's arguments as sent (their JSON text); 0 when there are none or they cannot be measured. Only the size is kept, never the arguments."""
+    try:
+        return len(json.dumps(args, ensure_ascii=False, default=str, separators=(",", ":"))) if args else 0
+    except Exception:  # noqa: BLE001 — a size that cannot be taken is no reason to lose the line
+        return 0
+
+
+def record(tool: str, ok: bool, *, item: str = "", sender: str = "", why: str = "", fixes: list[tuple[str, str]] | None = None, call: str = "", to: str = "", kind: str = "", text: str = "", req: int = -1, rlen: int = -1, now: float | None = None) -> None:
+    """Append the line of one call. Never raises: a log line is not worth a lost reply. Every tool's call is logged, a read too (a read that errors is a refusal). `req` is the size in characters of the call's arguments as sent
+    (`size_of`) and `rlen` the length of a refusal's whole text before `why` clips it, each only when given: sizes, never content. A line with a `req` also names its item and sender when the call had them (a retry is found by them).
+    A call that went through with a fix or a bounce-back also names its item and sender (a later diff of the
     writer's text is then explainable); a refused create has no item, so `call` (a short digest of what it was about) tells one refused create from another. A refused message call names its target (`to`), the refusal's
     kind slug (`kind`) and the message (`text`, newlines kept, clipped to TEXT_MAX), each only when given. A message call the relay handled where it once refused (`handled` among `fixes`) goes through with its sender, target (`to`),
     the kind of the refusal it replaced, `outcome: handled` and `how`."""
-    if tool not in COUNTED:
+    tool = re.sub(r"[^a-z0-9_-]+", "", str(tool or "").lower())[:TOOL_MAX]
+    if not tool:
         return
     t = time.time() if now is None else now
     row: dict[str, Any] = {"t": int(t), "tool": tool, "ok": bool(ok)}
@@ -306,9 +327,18 @@ def record(tool: str, ok: bool, *, item: str = "", sender: str = "", why: str = 
         if told:
             row["note"] = told
     h_kind, h_how = handled_of(fixes) if ok and tool == "message" else ("", "")
+    one_item, one_sender = re.sub(r"\s+", " ", str(item or "")).strip()[:40], re.sub(r"\s+", " ", str(sender or "")).strip()[:80]
     if not ok or fixes:
-        row["item"] = re.sub(r"\s+", " ", str(item or "")).strip()[:40]
-        row["sender"] = re.sub(r"\s+", " ", str(sender or "")).strip()[:80]
+        row["item"], row["sender"] = one_item, one_sender
+    elif req >= 0:
+        if one_item:
+            row["item"] = one_item
+        if one_sender:
+            row["sender"] = one_sender
+    if req >= 0:
+        row["req"] = int(req)
+        if ok and tool == "message" and to and not h_kind:          # a message that went through names its target too: the retry of a refused message is matched on it
+            row["to"] = re.sub(r"\s+", " ", str(to)).strip()[:TO_MAX]
     if h_kind:          # a message the relay handled where it once refused: the refusal site's kind, the target and what was done, so the weekly count can show it as handled
         row["to"] = re.sub(r"\s+", " ", str(to or "")).strip()[:TO_MAX]
         row["kind"] = re.sub(r"[^a-z0-9-]+", "-", h_kind.lower()).strip("-")[:40]
@@ -319,6 +349,8 @@ def record(tool: str, ok: bool, *, item: str = "", sender: str = "", why: str = 
             row["call"] = re.sub(r"\s+", "", str(call))[:16]
         why = re.sub(r"\s+", " ", str(why or "")).strip()
         row["why"] = why if len(why) <= WHY_MAX else why[:WHY_MAX - 1].rstrip() + "…"
+        if rlen >= 0:
+            row["rlen"] = int(rlen)
         if to:
             row["to"] = re.sub(r"\s+", " ", str(to)).strip()[:TO_MAX]
         if kind:
@@ -347,7 +379,8 @@ def read(since: float, until: float) -> Iterator[dict[str, Any]]:
     for name in months:
         p = _cfg.state("calls") / f"{name}.jsonl"
         try:
-            lines = newline_lines(p.read_text(encoding="utf-8"))          # a refused message's text may hold a character `splitlines` cuts at (core/lines.py)
+            lines = newline_lines(p.read_text(encoding="utf-8", errors="replace"))          # a line torn in the middle of a character reads as a line that does not parse, and is skipped
+            # a refused message's text may hold a character `splitlines` cuts at (core/lines.py)
         except OSError:
             continue
         for ln in lines:
