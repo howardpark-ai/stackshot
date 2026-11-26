@@ -87,7 +87,7 @@ class Hooks:
     ask_none: Any            # the closed list of words that clear an ask (server._ASK_NONE)
     ask_stands: Callable[..., Any]
     basis_words: Any
-    close_refusal: Any            # the full close rule a refused close appends (server._CLOSE_REFUSAL)
+    close_refusal: Any            # the full close rule (server._CLOSE_REFUSAL); a refused close no longer appends it: it shows the accepted call, the tool text carries the rule
     contact_alive: Callable[..., Any]
     contact_fronts: Callable[..., Any]
     contact_same: Callable[..., Any]

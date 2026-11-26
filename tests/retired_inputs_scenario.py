@@ -96,6 +96,7 @@ for w, want in WORD.items():
 wmsg = RI.refusal({"state": " Waiting "}, OWN)
 check("module: state=waiting (any case) is answered with the three exact forms of a wait, in one line", "state=waiting: waiting is stored from what the item waits on" in wmsg and "wait_kind=\"time\", wait_basis=\"<what the date is> YYYY-MM-DD\"" in wmsg
       and "wait_kind=\"relay\", wait_event=\"<who or what>\", until=\"YYYY-MM-DD\", mover=\"<who takes it then>\"" in wmsg and "\n" not in wmsg, wmsg)
+check("module: …the wait on another item says it holds only within 7 days of the item's last move, then needs wait_basis or the owner's words", "only within 7 days of the item's last move; later it needs wait_basis or " + OWN + "'s words" in wmsg, wmsg)
 check("module: …and the word an item has no state for still gets the generic answer", "alive or waiting is stored directly" in RI.refusal({"state": "sleeping"}, OWN), RI.refusal({"state": "sleeping"}, OWN))
 for f in ("clear_state", "chase", "chase_note", "party", "end", "proof"):
     msg = RI.refusal({f: "x" if f != "clear_state" else True}, OWN)

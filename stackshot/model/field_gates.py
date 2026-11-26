@@ -306,8 +306,7 @@ def description_faults(desc: str, field: str = "description") -> list[str]:
     for tok in d.get("forbid_tokens", []):
         if tok.lower() in low:
             at = next((ln for ln in desc.splitlines() if tok.lower() in ln.lower()), "")
-            out.append(f"Refused: description contains {tok!r} — a description is the live state, never a changelog; fold the resolution into the state, the word {tok!r} anywhere in it: \"{_clip_line(at, 60)}\" "
-                       "(write `- PR 12 is merged and live`, not `- Done: PR 12 merged`)")
+            out.append(f"Refused: description contains {tok!r} — a description is the live state, never a changelog, so {tok!r} may not appear anywhere in it, in any case, even inside a longer word: \"{_clip_line(at, 60)}\". Write the state instead, e.g. `- PR 12 is merged and live`, not `- Done: PR 12 merged`")
             break
     return out
 

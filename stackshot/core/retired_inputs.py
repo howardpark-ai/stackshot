@@ -28,7 +28,7 @@ _STATE_WORDS = {
     "parked": "until=<YYYY-MM-DD or YYYY-MM-DDTHH:MM> with wait_kind=\"time\" and wait_basis=<what the date is, with its date YYYY-MM-DD> (a park within the wait cap needs {owner}'s recorded words: within it, send a bare until with wait_reason)",
     "verifying": "until=<the day the check ends> with wait_basis=<what it waits for, with its date YYYY-MM-DD>, and mover=<the session that checks>",
     "queued": "a builder starts every item handed to it at its next turn: mover=<the builder>",
-    "waiting": "waiting is stored from what the item waits on, so pass that: a date with `until=\"YYYY-MM-DD\", wait_kind=\"time\", wait_basis=\"<what the date is> YYYY-MM-DD\"`; another item with `after=[\"board#N\"], until=\"YYYY-MM-DD\"`; "
+    "waiting": "waiting is stored from what the item waits on, so pass that: a date with `until=\"YYYY-MM-DD\", wait_kind=\"time\", wait_basis=\"<what the date is> YYYY-MM-DD\"`; another item with `after=[\"board#N\"], until=\"YYYY-MM-DD\"` (only within 7 days of the item's last move; later it needs wait_basis or {owner}'s words); "
                "something outside with `wait_kind=\"relay\", wait_event=\"<who or what>\", until=\"YYYY-MM-DD\", mover=\"<who takes it then>\"`",
     "none": "no state is stored, so there is none to clear: drop a stored wait with clear_wait=true",
 }

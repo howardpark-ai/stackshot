@@ -919,10 +919,12 @@ def update_unlocked(
         outcome_text, ot_note = _fg.fix_long_bullets(outcome_text, None, "outcome_text")       # a bullet over the limit is split like a description's (a pure form fix; the reply says so, and History)
         if ot_note:
             _stall.note(meta, time.time(), ot_note)
-        if not outcome and superseded_by:      # a replacing item names the outcome: superseded_by goes with no other (an outcome of done or dropped beside it is still refused)
+        read_superseded = not outcome and bool(superseded_by)      # a replacing item names the outcome: superseded_by goes with no other (an outcome of done or dropped beside it is still refused)
+        if read_superseded:
             outcome = "superseded"
-            _calls.fixed("outcome-superseded", "no outcome was given and superseded_by names the replacing item, so the outcome is superseded")
         superseded_by = fc.call(_gates.gate_close, gid, item, outcome, reason, superseded_by, outcome_text, default="")
+        if read_superseded and superseded_by:      # told only when the close passed its gate, with the item it read (a typo that is a real item would otherwise go unseen) and how to undo it
+            _calls.fixed("outcome-superseded", f"no outcome was given, so {_gh.shown(gid)} closed as superseded by {_gh.shown(superseded_by)}; to undo: reopen with status=open and a next line, then close again with the outcome you mean")
     elif outcome or reason or superseded_by or outcome_text:
         fc.add(f"Refused: outcome, outcome_text, reason and superseded_by go with a close (status=completed on an open item, or the complete tool)"
                + (f"; {gid} is already completed: to correct its close, reopen it (status=open with a next) and close it again"

@@ -162,14 +162,30 @@ def part_close():
     check("…and the item stayed open", rd(10)["status"] == "open", rd(10)["status"])
     out10, fx10 = with_fixes(lambda: _wt_complete.stackshot_complete("a10", superseded_by="a2", reason="merged into a2", outcome_text=NEW))
     check("superseded_by with no outcome: the item closes as superseded by that item", rd(10)["status"] == "completed" and rd(10)["metadata"].get("outcome") == "superseded" and rd(10)["metadata"].get("superseded_by") == "a2" and rd(10)["metadata"].get("reason") == "merged into a2", rd(10))
-    check("…counted as the fix kind outcome-superseded, and the reply carries its one line", [k for k, _ in fx10] == ["outcome-superseded"] and "the outcome is superseded" in _CL.reply_note(fx10), fx10)
+    check("…counted as the fix kind outcome-superseded, and the reply carries its one line", [k for k, _ in fx10] == ["outcome-superseded"] and "a10 closed as superseded by a2" in _CL.reply_note(fx10), fx10)
+    check("…the line names the item it read, says no outcome was given, and says how to undo", "no outcome was given" in fx10[0][1] and "to undo: reopen with status=open and a next line, then close again with the outcome you mean" in fx10[0][1], fx10)
+    item(13, **LIVE)
+    out13, fx13 = with_fixes(lambda: _wt_complete.stackshot_complete("a13", superseded_by="A2", reason="merged into a2", outcome_text=NEW))
+    check("…a replacing id written another way is named as the item it was read as", "a13 closed as superseded by a2;" in fx13[0][1], fx13)
+    item(14, **LIVE)
+    try:
+        _, fx14 = with_fixes(lambda: _wt_complete.stackshot_complete("a14", superseded_by="a2", outcome_text=NEW))
+    except ToolError:
+        fx14 = None
+    check("…a close the gate refuses (no reason) tells no fix", fx14 is None and rd(14)["status"] == "open", fx14)
+    try:
+        _wt_complete.stackshot_complete("a1", reason="moved", outcome_text=NEW)
+        hint_only_outcome = None
+    except ToolError as e:
+        hint_only_outcome = str(e)
+    check("a close missing only the outcome carries no cached-tool-list hint, and one missing all three does", hint_only_outcome is not None and "needs outcome;" in hint_only_outcome and "cached tool list" not in hint_only_outcome and "portal_codemode_execute" not in hint_only_outcome, hint_only_outcome)
     check("…and its line invites no resend (the same call sent again is fixed the same)", "outcome-superseded" in _CL.NO_RESEND and "send it again" not in _CL.reply_note(fx10), _CL.reply_note(fx10))
     item(11, **LIVE)
     out11, fx11 = with_fixes(lambda: _wt_complete.stackshot_complete("a11", outcome="superseded", superseded_by="a2", reason="merged into a2", outcome_text=NEW))
     check("a close that gives the outcome itself makes no such fix", rd(11)["metadata"].get("outcome") == "superseded" and [k for k, _ in fx11] == [], fx11)
     item(12, **LIVE)
     out12, fx12 = with_fixes(lambda: _update_svc._update("a12", status="completed", superseded_by="a2", reason="merged into a2", outcome_text=NEW))
-    check("update status=completed reads it the same way", rd(12)["metadata"].get("outcome") == "superseded" and [k for k, _ in fx12] == ["outcome-superseded"], (rd(12)["metadata"], fx12))
+    check("update status=completed reads it the same way", rd(12)["metadata"].get("outcome") == "superseded" and [k for k, _ in fx12] == ["outcome-superseded"] and "a12 closed as superseded by a2" in fx12[0][1], (rd(12)["metadata"], fx12))
     refused("outcome on an open item without a close", lambda: _update_svc._update("a1", outcome="done"), "go with a close")
     refused("outcome_text on an open item without a close", lambda: _update_svc._update("a1", outcome_text=NEW), "go with a close")
     refused("reason outside a close", lambda: _update_svc._update("a1", next="x", reason="why"), "go with a close")

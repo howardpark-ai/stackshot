@@ -115,7 +115,7 @@ passes("a long URL on a link is not counted", lambda: create("- Lives at [the do
 _r_url, _g_url = create("- Lives at https://example.com/a")
 check("a naked URL in a description is written as a link to itself, however short (it is never drawn as a link for sure), with no naked-URL note after it",
       "Lives at [https://example.com/a](https://example.com/a)" in _r_url and "naked URL" not in _r_url, _r_url[:400])
-refused("the forbidden tokens still refuse", lambda: create("- resolved: it works"), "contains 'resolved:'", "the word 'resolved:' anywhere in it", '"- Goal: resolved: it works"', "write `- PR 12 is merged and live`")
+refused("the forbidden tokens still refuse", lambda: create("- resolved: it works"), "contains 'resolved:'", "'resolved:' may not appear anywhere in it", '"- Goal: resolved: it works"', "e.g. `- PR 12 is merged and live`")
 refused("the 'done:' token still refuses, in any case and inside a longer word, and the refusal shows the line that holds it", lambda: create("- Goal: ship it\n- Undone: the last part"), "contains 'done:'", '"- Undone: the last part"')
 check("the changelog refusal is one line, keeps its kind", (lambda f: "\n" not in f and _CL.kind_of(f) == "a changelog word in a description")(_fg.description_faults("- Goal: x\n- Done: y")[0]), _fg.description_faults("- Goal: x\n- Done: y"))
 
