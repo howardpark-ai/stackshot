@@ -75,9 +75,11 @@ def released(pr: str, sha: str = "", dry: bool = False) -> dict[str, Any]:
         raise ToolError(f"Refused: PR #{n} has no merge commit given (--sha <merge commit>), so it cannot be read as merged and passed; nothing written")
     if foreign:      # the merge is an ancestor of the checkout's HEAD; a sha the caller did not give is found in the checkout's own log
         head = _live.git_commit("HEAD", co)
+        if not head:
+            raise ToolError(f"Refused: the checkout of {repo} cannot be read; nothing written")
         full = _live.git_commit(str(sha).strip(), co) if str(sha or "").strip() else head
         if not full:
-            raise ToolError(f"Refused: " + (f"the merge commit {str(sha)[:40]!r} of {shown} is not a commit the checkout of {repo} knows" if str(sha or "").strip() else f"the checkout of {repo} cannot be read") + "; nothing written")
+            raise ToolError(f"Refused: the merge commit {str(sha)[:40]!r} of {shown} is not a commit the checkout of {repo} knows; nothing written")
     else:
         full = _live.git_commit(str(sha).strip())
         if not full:

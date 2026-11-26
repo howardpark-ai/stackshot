@@ -40,6 +40,7 @@ import sys
 import threading
 import time
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from stackshot import paths as _paths
@@ -1221,18 +1222,48 @@ def canon_repo(name: Any) -> str:
     return r
 
 
-def released_repos() -> dict[str, Path]:
-    """[released.repos]: the other repositories whose pull requests count as released here, "owner/repo" (lower-cased, through [github.moved]) → the local checkout that holds their live copy
-    (`"owner/repo" = { checkout = "/abs/path" }`; ~ expanded, absolute). A pull request of such a repository is live when its merge commit is an ancestor of that checkout's HEAD. Absent (no
-    defaults are merged) = none: only this repository's pull requests are released. An entry whose key is not owner/repo or whose checkout is not an absolute path is ignored, and so is a table
-    that is not a table (released_notes says so). Read at each call: a reload applies it."""
+@dataclass(frozen=True)
+class RemoteCheckout:
+    """A [released.repos] checkout that is on another machine, read over ssh (released_live.git): `ssh` is the entry's host as written (a name ssh takes, or a role word "host:<role>", looked up each time git
+    runs), `path` the checkout there, absolute or "~/..." (the home folder over there)."""
+    ssh: str
+    path: str
+
+
+def ssh_target(value: str) -> str:
+    """`value` (a host name, or a role word looked up now) as the one word ssh takes as a host; "" when there is none (a role word with no answer included)."""
+    h = str(host(value))
+    return h if _HOST_NAME.fullmatch(h) else ""
+
+
+def _released_checkout(v: Any) -> "Path | RemoteCheckout | None":
+    """One [released.repos] value → where its checkout is, or None for a value that is ignored. With `ssh` present the checkout is another machine's and is never looked for here instead, so a bad `ssh`
+    drops the whole entry."""
+    co = v.get("checkout") if isinstance(v, dict) else None
+    co = co.strip() if isinstance(co, str) else ""
+    if not co:
+        return None
+    if "ssh" not in v:
+        local = os.path.expanduser(co)
+        return Path(local) if os.path.isabs(local) else None
+    h = v["ssh"].strip() if isinstance(v["ssh"], str) else ""
+    if not (_HOST_NAME.fullmatch(h) or _host_role(h)) or not co.startswith(("/", "~/")):
+        return None
+    return RemoteCheckout(h, co)
+
+
+def released_repos() -> "dict[str, Path | RemoteCheckout]":
+    """[released.repos]: the other repositories whose pull requests count as released here, "owner/repo" (lower-cased, through [github.moved]) → the checkout that holds their live copy: a Path on this
+    machine (`"owner/repo" = { checkout = "/abs/path" }`; ~ expanded, absolute), or a RemoteCheckout for one on another machine (`{ checkout = "/abs/path", ssh = "host" }`). A pull request of such a
+    repository is live when its merge commit is an ancestor of that checkout's HEAD. Absent (no defaults are merged) = none: only this repository's pull requests are released. An entry whose key is not
+    owner/repo or whose value is neither of those forms is ignored, and so is a table that is not a table (released_notes says so). Read at each call: a reload applies it."""
     t = get("released", "repos")
-    out: dict[str, Path] = {}
+    out: "dict[str, Path | RemoteCheckout]" = {}
     for k, v in (t.items() if isinstance(t, dict) else ()):
-        co = v.get("checkout") if isinstance(v, dict) else None
+        co = _released_checkout(v)
         a = str(k).strip().lower()
-        if isinstance(k, str) and _REPO_NAME.fullmatch(a) and isinstance(co, str) and co.strip() and os.path.isabs(os.path.expanduser(co.strip())):
-            out[canon_repo(a)] = Path(os.path.expanduser(co.strip()))
+        if isinstance(k, str) and _REPO_NAME.fullmatch(a) and co is not None:
+            out[canon_repo(a)] = co
     return out
 
 
@@ -1245,9 +1276,8 @@ def released_notes(cfg: dict[str, Any] | None = None) -> list[str]:
         return ["[released.repos] is not a table, so no other repository's pull requests are read as released: write each as \"owner/repo\" = { checkout = \"/abs/path\" }"]
     out = []
     for k, v in t.items():
-        co = v.get("checkout") if isinstance(v, dict) else None
-        if not (_REPO_NAME.fullmatch(str(k).strip().lower()) and isinstance(co, str) and os.path.isabs(os.path.expanduser(co.strip()))):
-            out.append(f"[released.repos] {k!r} is ignored: it needs the form \"owner/repo\" = {{ checkout = \"/absolute/path\" }}")
+        if not (_REPO_NAME.fullmatch(str(k).strip().lower()) and _released_checkout(v) is not None):
+            out.append(f"[released.repos] {k!r} is ignored: it needs the form \"owner/repo\" = {{ checkout = \"/absolute/path\" }}; a checkout on another machine adds ssh = \"<host>\" (its path may then start with ~/)")
     return out
 
 

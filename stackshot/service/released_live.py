@@ -1,7 +1,7 @@
 """released_live.py: what is live in a checkout, read from git, and the pull requests anchored to an item.
 
 The release settle (service/released.py) and the step proofs (service/proofs.py) read the same facts: the last-good commit that release.sh records, the checkout's HEAD, the merge commits of a repository
-(this one, or a configured one in [released.repos]), whether a merge is passed and live, the pull requests anchored to each item, and whether an item that names a release is left alone (on hold, or waiting on someone
+(this one, or a configured one in [released.repos], which may be on another machine and is then read over ssh), whether a merge is passed and live, the pull requests anchored to each item, and whether an item that names a release is left alone (on hold, or waiting on someone
 else). They are read here, kept by commit (`proof_git`: a commit never changes, so a pass with the same commits costs no git call), and shared by the two passes and the event waits.
 
 What it still reaches in server.py comes through `Hooks` in service/checks_hooks.py, looked up when it runs. A suite that replaces a function of this module sets it here.
@@ -10,7 +10,9 @@ Imports point down only: this module imports the domain, core and the services b
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import re
+import shlex
 import subprocess
 from typing import Any
 
@@ -18,6 +20,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot import paths as _paths
 from stackshot.anchors import anchors as _anc
+from stackshot.core import agentbox as _agentbox
 from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.fleet.sessions_registry import _session_label
@@ -47,23 +50,41 @@ def released_anchors() -> dict[str, set[str]]:
 HERE = _paths.ROOT      # this checkout: a suite or a one-off tool that points the reads at another checkout sets it here
 
 
-def git(*args: str, timeout: float = 30, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+SSH_CONNECT = 5      # seconds ssh is given to reach the machine of a checkout that is not on this one
+
+
+def git_argv(args: "tuple[str, ...]", cwd: "Path | _cfg.RemoteCheckout | None" = None) -> list[str]:
+    """The command that runs `git args` in this checkout, or in `cwd`. For a checkout on another machine it is the same git, run there over ssh (which never asks for a password); a host that is this
+    machine is read here. Raises OSError, running nothing, when the entry's host cannot be named (a role word with no answer)."""
+    if not isinstance(cwd, _cfg.RemoteCheckout):
+        return ["git", "-C", str(cwd or HERE), *args]
+    host = _cfg.ssh_target(cwd.ssh)
+    if not host:
+        raise OSError(f"no host is known for {cwd.ssh!r}")
+    if "@" not in host and _agentbox.is_this_box(host):
+        return ["git", "-C", os.path.expanduser(cwd.path), *args]
+    there = (cwd.path[2:] or ".") if cwd.path.startswith("~/") else cwd.path      # ssh starts in the home folder there, so "~/x" is sent as "x"
+    return ["ssh", "-n", "-T", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={SSH_CONNECT}", host, shlex.join(["git", "-C", there, *args])]
+
+
+def git(*args: str, timeout: float = 30, cwd: "Path | _cfg.RemoteCheckout | None" = None) -> subprocess.CompletedProcess[str]:
     """git in this checkout, or in `cwd`: only a configured checkout ([released.repos]) is ever passed, never a path a client sent. Reads only."""
-    return subprocess.run(["git", "-C", str(cwd or HERE), *args], capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(git_argv(args, cwd), capture_output=True, text=True, timeout=timeout)
 
 
-def git_commit(ref: str, cwd: Path | None = None) -> str:
-    """`ref` as a full commit sha of this checkout (or of `cwd`), or "" when it is no sha or a commit that checkout does not know."""
+def git_commit(ref: str, cwd: "Path | _cfg.RemoteCheckout | None" = None) -> str:
+    """`ref` as a full commit sha of this checkout (or of `cwd`), or "" when it is no sha, a commit that checkout does not know, or the checkout cannot be read."""
     if not re.fullmatch(r"[0-9a-f]{7,64}|HEAD", ref or ""):
         return ""
     try:
         r = git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", cwd=cwd)
     except Exception:  # noqa: BLE001
         return ""
-    return r.stdout.strip() if r.returncode == 0 else ""
+    sha = r.stdout.strip()      # anything else printed on the way (a login message of another machine's shell) is no commit
+    return sha if r.returncode == 0 and re.fullmatch(r"[0-9a-f]{40,64}", sha) else ""
 
 
-def git_ancestor(a: str, b: str, cwd: Path | None = None) -> bool:
+def git_ancestor(a: str, b: str, cwd: "Path | _cfg.RemoteCheckout | None" = None) -> bool:
     try:
         return git("merge-base", "--is-ancestor", a, b, cwd=cwd).returncode == 0
     except Exception:  # noqa: BLE001
@@ -98,8 +119,8 @@ def released_is_live(sha: str, good: str, head: str) -> str:
     return ""
 
 
-def released_foreign(repo: str) -> Path | None:
-    """The checkout [released.repos] names for another repository (through [github.moved]), None when it lists none for it."""
+def released_foreign(repo: str) -> "Path | _cfg.RemoteCheckout | None":
+    """The checkout [released.repos] names for another repository (through [github.moved]), on this machine or another; None when it lists none for it."""
     return _cfg.released_repos().get(_cfg.canon_repo(repo))
 
 
@@ -109,25 +130,53 @@ def released_foreign_why() -> str:
 
 
 def foreign_live(repo: str, sha: str) -> str:
-    """"" when merge commit `sha` of a configured repository is live: an ancestor of its checkout's HEAD (read now, with a timeout); else why not."""
+    """"" when merge commit `sha` of a configured repository is live: an ancestor of its checkout's HEAD (read now, with a timeout); else why not. A checkout that gives no answer "cannot be read"."""
     co = released_foreign(repo)
     head = git_commit("HEAD", co) if co else ""
-    if not head:
+    code = None
+    if head:
+        try:
+            code = git("merge-base", "--is-ancestor", sha, head, cwd=co).returncode
+        except Exception:  # noqa: BLE001
+            code = None
+    if code not in (0, 1):      # merge-base answers 0 (yes) or 1 (no); any other exit, ssh's own 255 included, is no answer
         return f"the checkout of {repo} cannot be read"
-    if not git_ancestor(sha, head, co):
+    if code:
         return f"its merge {sha[:7]} is not in the live checkout of {repo} ({head[:7]}) yet (not deployed, or rolled back)"
     return ""
 
 
 def foreign_prs(repo: str) -> tuple[str, dict[int, tuple[str, float]]]:
     """(HEAD, {N: (merge sha, time)}) for a configured repository: the pull requests merged into its checkout's HEAD, kept by commit (proof_git); ("", {}) when it is not listed or cannot be read.
-    A merge in HEAD's first-parent history is live by that fact."""
+    A merge in HEAD's first-parent history is live by that fact. HEAD is read at each call, so a deploy and a rollback both show at once."""
     co = released_foreign(repo)
     head = git_commit("HEAD", co) if co else ""
-    return (head, proof_git(("fprs", str(co), head), lambda: merged_prs(head, cwd=co))) if head else ("", {})
+    if not head:
+        return "", {}
+    key = ("fprs", str(co), head)
+    found = proof_git(key, lambda: merged_prs(head, cwd=co))
+    if not found:      # a log that failed after HEAD was read looks like no merges: it is not kept, so the next call reads again
+        PROOF_GIT.pop(key, None)
+    return head, found
 
 
-def merged_prs(head: str, limit: int = 3000, cwd: Path | None = None) -> dict[int, tuple[str, float]]:
+FOREIGN_EARLY: dict[str, tuple[str, dict[int, tuple[str, float]]]] = {}      # repository → foreign_prs as the early read of a write last took it
+
+
+def foreign_prs_early(repo: str) -> None:
+    """Before the item lock: read a configured repository's checkout for the write gate that follows (a read that fails replaces the earlier one with nothing)."""
+    FOREIGN_EARLY[_cfg.canon_repo(repo)] = foreign_prs(repo)
+
+
+def foreign_prs_locked(repo: str) -> tuple[str, dict[int, tuple[str, float]]]:
+    """foreign_prs for a caller that holds the item lock: a checkout on this machine is read now; one on another machine only as the early read left it (("", {}) when there was none), so no ssh call is
+    made while every other write waits."""
+    if isinstance(released_foreign(repo), _cfg.RemoteCheckout):
+        return FOREIGN_EARLY.get(_cfg.canon_repo(repo), ("", {}))
+    return foreign_prs(repo)
+
+
+def merged_prs(head: str, limit: int = 3000, cwd: "Path | _cfg.RemoteCheckout | None" = None) -> dict[int, tuple[str, float]]:
     """The pull requests merged into `head` (its first-parent merge commits "Merge pull request #N from …", the newest `limit`) → {N: (merge sha, commit time)}; {} when git cannot read it."""
     if not re.fullmatch(r"[0-9a-f]{7,64}", head or ""):
         return {}

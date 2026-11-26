@@ -11,12 +11,13 @@ told. Held items, items whose needs name a decision or a session other than the 
 passed: the API refuses, writing nothing, a PR that is not merged, a missing or unknown merge sha, a merge not yet in last-good (main's run still
 going) and a merge rolled back out of HEAD; the one-off sweep (client write `sweep-released`) reads the merges in last-good and HEAD, so a merge after
 last-good or one rolled back closes nothing. A rerun of released or of the sweep never sends a mover a second notice for the same PR (the item is
-stamped). The same over HTTP with the machine's token; the client verbs' usage and lines.
+stamped). The same over HTTP with the machine's token; the client verbs' usage and lines. A [released.repos] repository's PR is live by its checkout's HEAD, and a checkout on another machine is read there over ssh (a stand-in ssh):
+a copy on the server's own machine never counts for it, a deploy and a rollback there show at once, and a machine that gives no answer settles nothing.
 
     tests/run-suite released        → exit 0 / 1"""
-import json, os, re, sys, pathlib, subprocess, time, logging, io, contextlib
+import json, os, re, sys, pathlib, subprocess, time, logging, io, contextlib, shlex, socket
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
-import _scratch, _instance
+import _scratch, _instance, _fake_ssh
 tmp = _scratch.mkdtemp(prefix="releasedtest-"); T = pathlib.Path(tmp)
 toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store
@@ -382,6 +383,94 @@ ffix(); f0 = fsnap()
 try: released_svc.released(surl(7), sha=SIBM[7]); check("with the table gone again the feature is off: refused", False)
 except ToolError as e: check("with the table gone again the feature is off: refused, nothing written", "none is configured" in str(e) and not fsame(f0), str(e))
 drain()
+
+# ---- 8. a [released.repos] checkout on another machine: the checkout that runs the repository is read over ssh (a stand-in ssh on PATH runs the command in a folder that plays that machine's home folder)
+HOST = "sib-host.invalid"
+ssh = _fake_ssh.FakeSsh(T / "other-machine")
+LIVE = ssh.home / "sib live"      # a space in the name: the command sent over ssh is quoted
+subprocess.run(["git", "clone", "-q", str(SC), str(LIVE)], env=genv, check=True, capture_output=True)      # it runs main: #7 is deployed; #8's commits are there, not deployed
+def lg(*a): return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *a], cwd=LIVE, env=genv, capture_output=True, text=True, check=True).stdout.strip()
+sg("merge", "-q", "--ff-only", "pending")      # a copy on the server's own machine that follows main already holds #8
+def remote(co="~/sib live", host=HOST): _cfg.CFG["released"] = {"repos": {SIB: {"checkout": co, "ssh": host}}}
+def report(n):
+    try: released_svc.released(surl(n), sha=SIBM[n]); return ""
+    except ToolError as e: return str(e)
+def sent_git(c): return shlex.split(c[-1])
+def verbs(): return [sent_git(c)[3] for c in ssh.calls()]
+def head_reads(): return [c for c in ssh.calls() if sent_git(c)[3:] == ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]]
+UNREADABLE = f"Refused: the checkout of {SIB} cannot be read; nothing written"
+try:
+    with ssh:
+        remote(); ffix(); f0 = fsnap(); p0 = len(pushes()); ssh.clear()
+        e = report(8)
+        check("remote: a merge the running checkout does not hold is not live, though a copy on the server's own machine holds it", e.startswith("Refused:") and "is not live: its merge" in e and "not deployed, or rolled back" in e
+              and not fsame(f0) and len(pushes()) == p0, e)
+        calls = ssh.calls()
+        check("remote: each read is one git read of that checkout over ssh, with no password prompt, no input and a connect timeout",
+              bool(calls) and all(c[:-1] == ["-n", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", HOST] and sent_git(c)[:3] == ["git", "-C", "sib live"] for c in calls)
+              and set(verbs()) == {"rev-parse", "log", "merge-base"}, calls)
+        lg("merge", "-q", "--ff-only", "origin/pending")      # the deploy on the machine that runs it
+        r = released_svc.released(surl(8), sha=SIBM[8])
+        check("remote: the same report is accepted as soon as the running checkout holds the merge, and the item built for it settles",
+              rd(33)["status"] == "completed" and f"in the checkout at {lg('rev-parse', 'HEAD')[:7]}" in rd(33)["metadata"]["reason"], (r, rd(33)["metadata"]))
+        drain()
+        lg("reset", "-q", "--hard", SIBM[7]); ffix(); f0 = fsnap()      # a rollback there
+        e = report(8)
+        check("remote: after a rollback there the report is refused again (HEAD is read at each call)", "not deployed, or rolled back" in e and not fsame(f0), e)
+        ssh.clear()
+        d = proofs_svc.sweep_proofs()
+        acts = {x["item"]: x["action"] for x in d["items"] if x.get("kind") == "pr_released"}
+        check("remote sweep: the items are settled by what the running checkout holds, and its HEAD is read once a pass however many pull requests wait",
+              acts.get("a30") == "closed" and acts.get("a40") == "closed" and "a33" not in acts and raw(33) == f0[33] and len(head_reads()) == 1, (acts, head_reads()))
+        drain()
+
+        for mode, what in (("down", "a machine that gives no answer"), ("banner", "a machine whose shell prints a line before every answer")):
+            ssh.mode(mode); ssh.clear(); ffix(); f0 = fsnap(); e = report(7)
+            check(f"remote: {what} reads as 'cannot be read' after one read, nothing written", e == UNREADABLE and not fsame(f0) and len(ssh.calls()) == 1, (e, ssh.calls()))
+        ssh.mode("down"); ffix(); f0 = fsnap(); d = proofs_svc.sweep_proofs()
+        check("remote sweep: nothing is settled while the machine gives no answer", not [x for x in d["items"] if x.get("kind") == "pr_released" and x["item"] in ("a30", "a31", "a40", "a41")] and not fsame(f0), d["items"])
+        ssh.mode("fail merge-base"); e = report(7)
+        check("remote: an ancestor question that gets no answer is 'cannot be read', never 'not deployed'", f"is not live: the checkout of {SIB} cannot be read" in e and "not deployed" not in e and not fsame(f0), e)
+        rlive_svc.PROOF_GIT.clear(); ssh.mode("fail log --first-parent")
+        h1, m1 = rlive_svc.foreign_prs(SIB); ssh.mode(""); h2, m2 = rlive_svc.foreign_prs(SIB)
+        check("remote: a log that failed after HEAD was read is not kept: the next read sees the merges of the same commit", h1 == h2 == lg("rev-parse", "HEAD") and m1 == {} and 7 in m2, (h1, m1, h2, m2))
+        ssh.clear(); h3, m3 = rlive_svc.foreign_prs(SIB)
+        check("remote: ...a log that worked is kept by commit, and HEAD is read again", verbs() == ["rev-parse"] and (h3, m3) == (h2, m2), verbs())
+
+        remote(co=str(LIVE)); ssh.clear(); h, _m = rlive_svc.foreign_prs(SIB)
+        check("remote: an absolute path is sent as written", h == h2 and sent_git(ssh.calls()[0])[:3] == ["git", "-C", str(LIVE)], ssh.calls())
+        check("remote: '~/' alone is the home folder there", shlex.split(rlive_svc.git_argv(("x",), _cfg.RemoteCheckout(HOST, "~/"))[-1]) == ["git", "-C", ".", "x"])
+
+        _cfg.CFG["hosts"] = {"lookup": f"printf '%s\\n' {HOST} {{role}}"}; remote(host="host:sib-box"); ssh.clear(); h, _m = rlive_svc.foreign_prs(SIB)
+        check("remote: a role word is looked up when git runs, and the table keeps the word", h == h2 and bool(ssh.calls()) and {c[-2] for c in ssh.calls()} == {HOST}
+              and _cfg.released_repos()[SIB] == _cfg.RemoteCheckout("host:sib-box", "~/sib live"), (h, ssh.calls()))
+        _cfg.CFG["hosts"] = {"lookup": "false {role}"}; remote(host="host:gone-box"); ssh.clear()
+        with contextlib.redirect_stderr(io.StringIO()): e = report(7)
+        check("remote: a role word with no answer reads as 'cannot be read', and ssh is not run", e == UNREADABLE and ssh.calls() == [], (e, ssh.calls()))
+        _cfg.CFG.pop("hosts")
+
+        remote(co=str(LIVE), host=socket.gethostname()); ssh.clear(); h, _m = rlive_svc.foreign_prs(SIB)
+        check("remote: a host that names the server's own machine is read directly, with no ssh", h == h2 and ssh.calls() == [], (h, ssh.calls()))
+        home_was = os.environ.get("HOME"); os.environ["HOME"] = str(ssh.home)
+        try:
+            remote(host="localhost"); ssh.clear(); h, _m = rlive_svc.foreign_prs(SIB)
+            check("remote: ...and '~/' is then this process's home folder", h == h2 and ssh.calls() == [], (h, ssh.calls()))
+        finally:
+            os.environ.pop("HOME") if home_was is None else os.environ.__setitem__("HOME", home_was)
+        remote(host="someone@localhost"); ssh.clear(); h, _m = rlive_svc.foreign_prs(SIB)
+        check("remote: a host written with a user is asked over ssh as that user, even when it names this machine", h == h2 and bool(ssh.calls()) and ssh.calls()[0][-2] == "someone@localhost", ssh.calls())
+
+    bad = {"example-owner/empty": {"checkout": str(SC), "ssh": ""}, "example-owner/option": {"checkout": str(SC), "ssh": "-oProxyCommand=x"}, "example-owner/words": {"checkout": str(SC), "ssh": "two words"},
+           "example-owner/number": {"checkout": str(SC), "ssh": 5}, "example-owner/role": {"checkout": str(SC), "ssh": "host:two words"}, "example-owner/relative": {"checkout": "sib live", "ssh": HOST},
+           "example-owner/user-home": {"checkout": "~someone/sib", "ssh": HOST}, "example-owner/no-path": {"ssh": HOST}}
+    _cfg.CFG["released"] = {"repos": bad}
+    check("config: an entry with a bad ssh host, or a path that cannot be sent, is ignored and said, so its path is never read on this machine instead",
+          _cfg.released_repos() == {} and len(_cfg.released_notes()) == len(bad) and all('ssh = "<host>"' in n for n in _cfg.released_notes()), (_cfg.released_repos(), _cfg.released_notes()))
+    _cfg.CFG["released"] = {"repos": {SIB: {"checkout": " ~/sib live ", "ssh": f" {HOST} "}}}
+    check("config: a good one is a checkout on that machine, the spaces round its values dropped, with no note", _cfg.released_repos() == {SIB: _cfg.RemoteCheckout(HOST, "~/sib live")} and _cfg.released_notes() == [], _cfg.released_repos())
+    check("...and client.py's help says such a checkout is read over ssh", "over ssh when it is on another machine" in " ".join(client.__doc__.split()))
+finally:
+    _cfg.CFG.pop("released", None); _cfg.CFG.pop("hosts", None)
 
 sent = []
 client.post = lambda what, body, timeout=30.0: (sent.append((what, body)), (200, {"pr": PR, "head": "abcdef1234", "good": "600d000aaa", "items": [

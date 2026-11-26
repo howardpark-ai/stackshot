@@ -543,6 +543,7 @@ def sweep_proofs(dry: bool = False, only: set[str] | None = None, tick: bool = F
     reads = [0]
     seen: set[str] = set()
     facts: dict[tuple[str, str], tuple[str, str]] = {}      # (kind, key) → ("yes", when) | ("dead", why) | ("no", "")
+    freads: dict[str, tuple[str, dict[int, tuple[str, float]]]] = {}      # each [released.repos] checkout is read once a pass (one on another machine costs ssh calls)
 
     def prs(sha: str) -> dict[int, tuple[str, float]]:
         return _live.proof_git(("prs", sha), lambda: _live.merged_prs(sha)) if sha else {}
@@ -558,7 +559,9 @@ def sweep_proofs(dry: bool = False, only: set[str] | None = None, tick: bool = F
                 if not _live.proof_git(("live", good, head, sha), lambda: _live.released_is_live(sha, good, head)):
                     res = ("yes", f"merged at {sha[:7]} on {_stallsvc.stall_when(ct)}, in the last-good commit {good[:7]}")
             elif repo != own and _live.released_foreign(repo) is not None:      # a [released.repos] repository: a merge in its checkout's HEAD is live
-                fhead, fprs = _live.foreign_prs(repo)
+                if repo not in freads:
+                    freads[repo] = _live.foreign_prs(repo)
+                fhead, fprs = freads[repo]
                 if n in fprs:
                     res = ("yes", f"merged at {fprs[n][0][:7]} on {_stallsvc.stall_when(fprs[n][1])}, in the checkout at {fhead[:7]}")
         elif repo == own and (n in prs(head) or (om and n in prs(om))):
