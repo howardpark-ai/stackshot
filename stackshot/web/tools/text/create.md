@@ -46,6 +46,7 @@ one question per ask, whose answers are the options (no ";" between decisions, n
 it and, if so, start Monday" is one decision and passes). An ask that approves or picks a design, plan, proposal, draft or spec
 links it in the ask itself, [design](https://…), never a path on a machine or a summary alone; a short link text keeps room under
 the limit (a subscription or payment plan, software package or compound such as "the design system rollout" needs none).
+A link in the ask goes to a short decision page made for it (an artifact, a document or a mockup page), never a long project or notes page.
 With no options listed the Recommend is a yes or a no. The ask line never says I, you or me.
 
 ## param wait_reason

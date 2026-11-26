@@ -384,6 +384,17 @@ def ask_refuse_after() -> str:
         return ""
 
 
+def ask_refuse_link_prefixes() -> tuple[str, ...]:
+    """[ask] refuse_link_prefixes: URL prefixes whose pages are too long to decide from. A write that sets an ask (or an option) holding a link that starts with one is refused (model/decision_gates.py
+    `_gate_ask_links`). A list, or one string; an entry that is not an http(s) URL is ignored, so is anything else. Empty (the default) = nothing refused. Read at each use: a reload is live."""
+    v = get("ask", "refuse_link_prefixes")
+    if isinstance(v, str):
+        v = [v]
+    if not isinstance(v, (list, tuple)):
+        return ()
+    return tuple(t for t in (x.strip() for x in v if isinstance(x, str)) if re.match(r"(?i)https?://[^\s/]+", t) and not re.search(r"\s", t))
+
+
 def board_check_mode() -> str:
     """[board_check] mode: the end-of-turn board check (pages.py check). "block" = a turn that
     did real work while its session owns open items it did not touch is asked once, at its Stop, to update or confirm them or

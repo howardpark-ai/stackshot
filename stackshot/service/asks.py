@@ -24,6 +24,7 @@ from stackshot.core.instance import OWNER
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import ask_leaves as _askl
+from stackshot.model import decision_gates as _dg
 from stackshot.model import holders as _holders
 from stackshot.model import model as _model
 from stackshot.model import nextlines as _nl
@@ -85,7 +86,9 @@ def _ask_fault(ask: str) -> tuple[str, str]:
 
 
 def _gate_ask(ask: str) -> str:
-    """An ask as given → its stored form; the shape refusal whatever the stage. The refusal names the test the ask failed and shows an ask that passes it: the writer's own parts in the form when they are all there, else an example."""
+    """An ask as given → its stored form; the shape refusal whatever the stage. The refusal names the test the ask failed and shows an ask that passes it: the writer's own parts in the form when they are all there, else an example.
+    A link to a page the instance lists as too long to decide from is refused first ([ask] refuse_link_prefixes): the shape refusal would hand the link back in the corrected ask."""
+    _dg._gate_ask_links(ask)
     if _hooks().parse_ask(ask) is None:
         why, fixed = _ask_fault(ask)
         mine = fixed != _ASK_EXAMPLE
