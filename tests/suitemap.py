@@ -33,7 +33,8 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           run the suites measured (all when none is named), write the map
                                                           (SUITEMAP_STRACE=0: coverage only, so files are not measured; with
                                                           --prev, strace only the suites the change since that map reaches
-                                                          and those traced over 24 h ago, the rest keep their file half);
+                                                          and those traced over 24 h ago, the rest keep their file half,
+                                                          with its `globs` as judged when it was traced: rule 6);
                                                           exit 1 when a suite fails (a suite that fails only when measured
                                                           passes on a plain rerun: a warning, and the map marks it `ok: false`, keeping the
                                                           earlier clean measurement beside it as `carry` for a reader of the map; release.sh no longer reads it)
@@ -98,17 +99,22 @@ The rules, per changed file F (git diff --name-status -M), the first that applie
      those that read the names its module-level changes bind (and, when a def or class the change adds is read by a module-level
      statement of the file, the suites that ran the file's module level: no map measured the new callee; a new file: whoever imports it changed too; one named like a
      module the suites import, which it could shadow → all); a new .py file (added, or a rename's new side) also reaches the
-     suites that read as text every .py file the directory held at the map's commit: such a suite globs the directory (a
-     scenario that parses every module of service/), so it reads the new file too, and no earlier measurement could have
-     named it. The directory listing is no signal for this: the import machinery lists a package directory for every suite
-     that imports from it (216 of 262 suites listed stackshot/service), so the whole-file reads are the signal. The limit: it
-     holds for a suite whose reads cover every .py file of the folder. A glob that skips files by name before it reads them
-     (`__init__.py`, a name filter) did not read all, so this rule does not choose it for a new file.
+     suites that read as text every .py file the directory held at the map's commit, or every one it held when their reads
+     were traced: such a suite globs the directory (a scenario that parses every module of service/), so it reads the new file
+     too, and no earlier measurement could have named it. The second half is for `measure --prev`, which keeps the reads of a
+     suite the change does not reach: a new suite or *_check.py reaches no reader (rules 3 and 4), so the kept reads lack it
+     while the map's commit holds it. The map keeps that verdict beside the reads, per suite, as `globs`: the folders whose
+     every .py file the traced run read, and "*" when that is each folder that held one (a map without the key is judged by
+     the map's commit alone). The directory listing is no signal for this: the import machinery lists a package directory for
+     every suite that imports from it (216 of 262 suites listed stackshot/service), so the whole-file reads are the signal.
+     The limit: it holds for a suite whose reads cover every .py file of the folder. A glob that skips files by name before it
+     reads them (`__init__.py`, a name filter) did not read all, so this rule does not choose it for a new file.
      A directory that held no .py file (a folder of docs or of text files) has no glob of its own: it reaches the suites that
-     read every .py file of the checkout (a recursive glob) and the suites that listed that folder (the listers of rule 7, a
-     small set there). The suite that reads a new file through a narrower glob (every .py of stackshot/, say) and never
-     listed the folder can still be missed. A new .py at the top of a checkout that held none reaches every suite: the
-     listers of the top are nearly all of them, and a new root .py is rare, so every glob of the root may read it
+     read every .py file of the checkout (a recursive glob, judged in the same two ways) and the suites that listed that folder
+     (the listers of rule 7, a small set there). The suite that reads a new file through a narrower glob (every .py of
+     stackshot/, say) and never listed the folder can still be missed. A new .py at the top of a checkout that held none
+     reaches every suite: the listers of the top are nearly all of them, and a new root .py is rare, so every glob of the root
+     may read it
   7. any other file → the suites that touched it; added, deleted or renamed: also the suites that listed its directory;
      a data file of the DATA table (stackshot.example.toml) is first read by what it holds, not by who touched it: see *The example config*
   A suite the map has no clean measurement for (new since, or `ok: false`) always runs. When the union is every suite: all.
@@ -2417,6 +2423,17 @@ def read_strace(path, tracked, tdirs, datapids):
 CARRY_KEYS = ("py", "files", "whole", "dirs", "traced")
 
 
+def globbed(whole, tracked):
+    """the folders every .py file of which is among `whole`, of the tracked files of the commit those reads were traced at ("" is the top; a subfolder is a folder
+    of its own), then "*" when that is every folder that holds one: a suite's `globs` in the map, which rule 6 of the selection goes by for a file added later"""
+    read, held = set(whole), collections.defaultdict(set)
+    for p in tracked:
+        if p.endswith(".py"):
+            held[os.path.dirname(p)].add(p)
+    got = sorted(d for d, files in held.items() if files <= read)
+    return got + ["*"] if held and len(got) == len(held) else got
+
+
 def carried(prev, name):
     """what the earlier map knew of suite `name` that is worth keeping beside a measurement that is not clean: its last clean
     measurement ({py, files, whole, dirs, traced} and `at`, the commit it was made at), or the carry it already had; else None"""
@@ -2497,11 +2514,12 @@ def measure(args):
             entry["carry"] = carried(prev, name)   # failed only when measured (a timeout of a slow suite): this measurement is partial, the last clean one is not lost
         if name in trace:
             files, whole, dirs, unm = read_strace(os.path.join(d, "strace"), tracked, tdirs, pids)
-            entry.update(files=sorted(files), whole=sorted(whole), dirs=sorted(dirs), unmeasured=len(unm),
+            entry.update(files=sorted(files), whole=sorted(whole), dirs=sorted(dirs), globs=globbed(whole, tracked), unmeasured=len(unm),
                          traced=now.isoformat(timespec="seconds"))
         elif use_strace:
             e = prev["suites"][name]
-            entry.update({k: e[k] for k in ("files", "whole", "dirs", "unmeasured", "traced") if k in e})
+            # `globs` stays as it was judged when the suite was traced, never judged against this commit: a file added since is not in its `whole`
+            entry.update({k: e[k] for k in ("files", "whole", "dirs", "globs", "unmeasured", "traced") if k in e})
         out["suites"][name] = entry
         shutil.rmtree(d, ignore_errors=True)
     os.makedirs(os.path.dirname(os.path.abspath(args.map)), exist_ok=True)
@@ -3200,22 +3218,24 @@ def selection(m, a, b, pathspec=(), skip_b=False):
             hit |= {s for s, e in S.items() if any(p in e.get("whole", ()) for p in (old, new) if p)}
             if added:
                 # a suite that read as text every .py file of the directory (a glob over it) reads the new one too; the files are those of the
-                # map's commit (not those of its subfolders). A directory that held none (a folder of docs or of text files) has no glob of its
-                # own: what reads a file added there is a suite that read every .py file of the checkout (a recursive glob, a walk) or one that
-                # listed the folder (a glob of a part of the checkout that holds it), so those are chosen then; a suite that reads it through a
-                # glob of a larger folder and never listed this one can still be missed (see the docstring)
+                # map's commit (not those of its subfolders), or those of the commit the suite's reads were traced at (its `globs`: reads that
+                # `measure --prev` carried lack a file added since by a change that did not reach it, a new suite or *_check.py among them). A
+                # directory that held none (a folder of docs or of text files) has no glob of its own: what reads a file added there is a suite
+                # that read every .py file of the checkout (a recursive glob, a walk) or one that listed the folder (a glob of a part of the
+                # checkout that holds it), so those are chosen then; a suite that reads it through a glob of a larger folder and never listed
+                # this one can still be missed (see the docstring)
                 d = os.path.dirname(added)
                 def pyfiles(*spec): return {p for p in (git("ls-tree", "--name-only", *spec) or "").split("\n") if p.endswith(".py")}
                 sib = pyfiles(a, *([d + "/"] if d else []))
                 if sib:
-                    hit |= {s for s, e in S.items() if sib <= set(e.get("whole", ()))}
+                    hit |= {s for s, e in S.items() if sib <= set(e.get("whole", ())) or d in e.get("globs", ())}
                 elif not d:
                     # the listers of the top are nearly every suite (the import machinery lists the checkout), a new root .py is rare, and any
                     # glob of the root may read it: every suite
                     return "all", why + [(f, "a new .py at the top of a checkout that held none: every glob of the root may read it")]
                 else:
                     every = pyfiles("-r", a)
-                    hit |= {s for s, e in S.items() if (every and every <= set(e.get("whole", ()))) or d in e.get("dirs", ())}
+                    hit |= {s for s, e in S.items() if (every and every <= set(e.get("whole", ()))) or "*" in e.get("globs", ()) or d in e.get("dirs", ())}
             if names is None:
                 names = (Names(a), Names(b, skip_cheap=skip_b))
             fns, bound, own, whole, docs = py_change(names, S, a, b, old, new)
