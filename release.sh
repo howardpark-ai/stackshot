@@ -128,7 +128,8 @@
 #                                 4c-record. THE SERVER BOX'S COPY OF THE LAST-GOOD RECORD (record_sync, only with [release] deploy_ssh): the server runs on that host and reads ITS OWN <state>/releases/last-good, so the record made here is copied
 #                                 there over the same ssh: before step 6 asks the server (so after the deploy that put the commit there) and when a release or a group release ends, however it ends (a rollback, a failed deploy and a failed check
 #                                 included). The copy is whatever this record holds at that moment, read under $LAST_GOOD.sync.lock so a later copy never carries an older value: a commit record_good wrote, so one whose run on main passed. The host
-#                                 writes it only for a commit its checkout knows (it fetches main once when it does not: a record can be ahead of the deploy). The whole ssh is cut after RELEASE_RECORD_TIMEOUT s (90). A copy that fails is a log line
+#                                 writes it only for a commit its checkout knows (it fetches main once when it does not: a record can be ahead of the deploy), and never over a later one: under its flock on its own last-good.lock, a record there that
+#                                 already holds this commit and more stays, said in the log (to move that box's record back, delete the file there). The whole ssh is cut after RELEASE_RECORD_TIMEOUT s (90), the command there 20 s before that. A copy that fails is a log line
 #                                 and one message to report_to, never a failed release; every later copy tries again, and `release.sh --copy-record` does it by hand. Unset (one box): no copy, no ssh, no lock file;
 #                                 4c-running. THE SERVER BOX IS TOLD THAT THE RELEASE RUNS (running_start, running_end, only with [release] deploy_ssh): the server holds a step as busy and labels an item Queued for release while a release runs, which on
 #                                 one box it reads from this unit and its log. Over the same ssh a release (a group release: under its lead, as its unit is named) sends an entry when it starts and every RELEASE_RUNNING_BEAT s (60), with the end of
@@ -631,8 +632,9 @@ record_good() {   # $1 = a commit main's run passed on. Read, compare and write 
 }
 # record_sync (4c-record): copy $LAST_GOOD to the host [release] deploy_ssh names, whose server reads its own copy (service/released_live.py). Called before client.py released and when a release ends. 0 that host holds the record, or there is
 # nothing to copy (deploy_ssh unset: this box's file is the one the server reads; or no record yet). 1 it does not: a log line, and one message a process. It never changes this box's record and never fails a release.
-# The record is read inside the flock on $LAST_GOOD.sync.lock, held until the host has answered, so of two releases the later write is never the older record. Over there the write is atomic and only for a commit that checkout knows, so the
-# server never reads a record it cannot resolve; the one fetch is bounded below this ssh's own limit, so a write cannot land after this copy was given up.
+# The record is read inside the flock on $LAST_GOOD.sync.lock, held until the host has answered, so of two releases of this box the later write is never the older record. Over there the write is atomic and only for a commit that checkout knows,
+# so the server never reads a record it cannot resolve. It is never moved back there either: under that box's flock on its last-good.lock, a record that is a later commit than this one (another release box's, or this copy arriving after a newer
+# one) stays, which counts as copied and is said in the log. The whole command there is cut 20 s before this ssh is (its 15 s connect and the 5 s of timeout -k fit), so it does not outlive a copy that was given up.
 record_sync() {
     [ -n "$DEPLOY_SSH" ] || return 0
     local out rc=0
@@ -641,9 +643,12 @@ record_sync() {
         read_good; case $? in 1) exit 0 ;; 2) echo "$LAST_GOOD holds something this checkout cannot read as a commit"; exit 1 ;; esac
         [[ "$DEPLOY_SSH" =~ ^[A-Za-z0-9_][A-Za-z0-9._@:-]*$ ]] || { echo "[release] deploy_ssh = \"$DEPLOY_SSH\" is not an ssh host name"; exit 1; }
         c="\"$good^{commit}\""
-        cmd='cd ~/stackshot && { git cat-file -e '"$c"' 2>/dev/null || { timeout 30 git fetch --quiet origin main >/dev/null 2>&1; git cat-file -e '"$c"' 2>/dev/null; } || { echo "the checkout there does not have that commit, and a fetch of main there did not bring it"; exit 1; }; } && d="$(python3 stackshot/core/config.py state releases)" && mkdir -p "$d" && { printf "%s\n" '"$good"' > "$d/last-good.$$" && mv -f "$d/last-good.$$" "$d/last-good" || { rm -f "$d/last-good.$$"; echo "the record could not be written there"; exit 1; }; }'
+        script='{ git cat-file -e '"$c"' 2>/dev/null || { timeout 30 git fetch --quiet origin main >/dev/null 2>&1; git cat-file -e '"$c"' 2>/dev/null; } || { echo "the checkout there does not have that commit, and a fetch of main there did not bring it"; exit 1; }; } && d="$(python3 stackshot/core/config.py state releases)" && mkdir -p "$d" && exec 8>>"$d/last-good.lock" && { flock -w 10 8 || { echo "the record there stayed locked"; exit 1; }; } && { cur="$(cat "$d/last-good" 2>/dev/null)"; if [ "$cur" != '"$good"' ] && echo "$cur" | grep -Eqx "[0-9a-f]{7,64}" && git merge-base --is-ancestor '"$good"' "$cur" 2>/dev/null; then echo "newer-there $cur"; else printf "%s\n" '"$good"' > "$d/last-good.$$" && mv -f "$d/last-good.$$" "$d/last-good" || { rm -f "$d/last-good.$$"; echo "the record could not be written there"; exit 1; }; fi; }'   # it goes to that box inside single quotes, so it holds none
+        there=$(( RECORD_TIMEOUT > 21 ? RECORD_TIMEOUT - 20 : 1 ))   # the seconds the whole command may take there
+        cmd="cd ~/stackshot && exec timeout -k 5 $there sh -c '$script'"
         said="$(timeout -k 5 "$RECORD_TIMEOUT" ssh -o BatchMode=yes -o ConnectTimeout=15 "$DEPLOY_SSH" "$cmd" </dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-)" || { rc=$?; echo "${good:0:7} was not written there (exit status $rc): $(echo "$said" | tail -1)"; exit 1; }
-        echo "${good:0:7}"
+        newer="$(echo "$said" | sed -n 's/^newer-there \([0-9a-f]*\)$/\1/p' | tail -1)"
+        if [ -n "$newer" ]; then echo "it holds a newer one, ${newer:0:7}, which stays (here: ${good:0:7})"; else echo "${good:0:7}"; fi
     ) 2>&1 5>>"$LAST_GOOD.sync.lock" )" || rc=$?
     out="$(echo "$out" | tail -1)"
     if [ $rc -eq 0 ]; then [ -z "$out" ] || say "last-good record on $DEPLOY_SSH: $out"; return 0; fi
