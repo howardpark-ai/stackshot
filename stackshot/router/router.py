@@ -8,7 +8,7 @@ the first two, and router_live.py is the third (it takes the notices, applies th
   1. RULES IN CODE for what is checkable (code_rule): a notice already ruled automatically by the turn-rule builds, a page proposal from a
      job named in [router] page_senders (archived for the page pass), a wake notice for the item's own mover (dropped), a close with the owner's own words on the item (merged: a row on his For you list, server._foryou_on_save, made in foryou_events.py, not a pass to its mover), an item handed back to its front agent mover alone (passed to it), an anchor notice on
      a filtered anchor (`#mention=<text>`: every notice on it goes to the agent the page's lead names for the work, anchor-work),
-     an item's own anchor (a notice on a pull request whose head branch is a background agent's, `<agent>/<topic>`, goes to that builder instead: anchor-builder; a CI or check-run result on any pull request goes to the project's builder, never to a front agent: anchor-ci),
+     an item's own anchor (a notice on a pull request whose head branch is a background agent's, `<agent>/<topic>`, goes to that builder instead: anchor-builder; a CI or check-run result on any other pull request goes to the engineer who builds it, never to a front agent: anchor-ci),
      a message that names one open item (to whoever does the item's work, item_route; archived when it only names the owner), an exact repeat
      of an anchor notice, a notice that is only an image or a file (archived: "image not read"), a maintainer's own `[release]`
      message (merged).
@@ -276,6 +276,17 @@ class Context:
         if self._back is None:
             self._back = {k.lower(): k for k, v in _anc.session_roles(self.reg).items() if v.get("role") == "back"}
         return self._back.get(nm, "")
+
+    def builds(self, name: str) -> str:
+        """The page's own spelling of an agent that builds and can take a pass, "" otherwise (ci_engineer's test of an agent an item or a notice ties to a pull request): a background agent of any project
+        (background), not gone (gone), that some page lists in `background:` with a mandate line saying build, maintain, merge or engineer (_BUILDER, the words that make a project's builder; the whole line
+        is read, so a line that only names an engineer counts, as it does for a project's builder). Being a particular project's builder is not asked: a project's second engineer builds too. An agent only
+        the project record holds as pending (its page line still owed) has no mandate line to read and does not count."""
+        n = self.background(name)
+        if not n or self.gone(n):
+            return ""
+        lines = (str((e.get("agents") or {}).get(n) or "") for e in self.reg.values() if isinstance(e, dict) and n in (e.get("back_agents") or {}))
+        return n if any(_BUILDER.search(m) for m in lines) else ""
 
     def gone(self, name: str) -> bool:
         """Is an agent no place for a held line: a retired session (the fleet's registry lists it and no live row) or a surface agent (not a session of the fleet: no hook of it reads held lines)? A doubt is never "gone"."""
@@ -851,6 +862,35 @@ def _ci_repeat(n: dict[str, Any], peers: list[dict[str, Any]]) -> dict[str, Any]
     return last if (float(n.get("ts", 0)) - float(last.get("ts", 0)) <= REPEAT_WINDOW and all(last.get(f) == n.get(f) for f in ("who", "text", "url"))) else None
 
 
+def target_owners(n: dict[str, Any]) -> list[str]:
+    """The agents an anchor notice's `target` names (`for <agent>, …`, anchors.routes), [] for `project-wide` and for a notice with none."""
+    m = re.fullmatch(r"for (.+)", str(n.get("target") or ""))
+    return [x.strip() for x in m.group(1).split(",")] if m else []
+
+
+def ci_engineer(key: str, n: dict[str, Any], root: str, cx: Context) -> tuple[str, str]:
+    """Who takes a CI result that is not the branch's builder's (anchor-ci, whose rule text states the order and what happens when the sources differ) → (the agent, what ties it to the pull request),
+    ("", "") when nobody can. `key` is the page holding the anchor, `root` the page the notice is ruled for."""
+    items = _anchor_items(key, n, cx)
+    stored: dict[str, list[str]] = {}      # an agent that builds → the scoped items that store it as their mover
+    for t in items:
+        agent = cx.builds(str((t.get("metadata") or {}).get("mover") or ""))
+        if agent:
+            stored.setdefault(agent, []).append(cx.shown(t["gid"]))
+    ties = [(agent, f"the stored mover of {', '.join(refs)}") for agent, refs in stored.items()] if len(stored) == 1 else []
+    if len(items) == 1:      # mover_of reads needs first, where the server also names an agent that was only sent a message or wrote on the item: it comes after the stored mover
+        ties.append((_anc.mover_of(items[0]), f"the mover of {cx.shown(items[0]['gid'])}"))
+    named = target_owners(n)
+    if not items and len(named) == 1:      # the target is written from mover_of too, and may be older than the board: it is never read against an item that can be read
+        ties.append((named[0], "named by the notice's target"))
+    for who, how in ties:
+        agent = cx.builds(who)
+        if agent and not _is_sender(n, agent, cx):
+            return agent, how
+    builder = cx.builder(_import_live().agent_root(root, cx.reg))      # a sub-page's builder is its hub's, as for anchor-work
+    return (builder, "the project's builder") if builder and not _is_sender(n, builder, cx) else ("", "")
+
+
 def _same_anchor_repeat(n: dict[str, Any], peers: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The earlier notice on the same anchor with the same sender, text and link that came in within REPEAT_WINDOW (the repeat rule's test), else None. When several match, one that was ruled passed or held
     (_REACHED: it reached somebody) is the one returned, else the first."""
@@ -1283,13 +1323,28 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
                     repeat within an hour is dropped. A notice with no head, a branch of anyone else and a notice that names the owner
                     go on to the rules below as before.
       anchor-ci     an anchor notice that reports a CI or check-run result (anchor-hub's etype ci_failed, ci_passed or ci_activity; `who` "CI"
-                    for a record without an etype) and is not itself for the owner ([for <owner>] or needs: decision): passed to the project's
-                    builder (a sub-page's: its hub's), whatever item or keeper the anchor has and whoever's branch it is (a PR's CI run
-                    goes only to the engineer and never produces a front turn); the item id rides along when the anchor is
-                    scoped to exactly one open item. It follows anchor-builder (a builder's own branch wins); `watch` and `image` come first.
-                    It applies also when the item waits on the owner's decision (a CI result is never his). A CI notice is a repeat, and dropped,
-                    only when the latest earlier CI notice on the anchor is identical within the hour (_ci_repeat). A project with no builder,
-                    a builder that is the sender, and a notice that is [for <owner>] or needs: decision go on to the rules below as before.
+                    for a record without an etype) and is not itself for the owner ([for <owner>] or needs: decision): passed to the engineer who
+                    builds the pull request, whatever item or keeper the anchor has (a PR's CI run goes only to an engineer and never produces a
+                    front turn). It follows anchor-builder (a branch prefixed with a background agent's name is that agent's); `watch` and `image`
+                    come first. For every other branch it picks in this order (ci_engineer), each candidate only when it is an agent that builds
+                    (Context.builds: a background agent of any project, so also one this page does not list, never a name held as a front agent
+                    anywhere, not retired, whose mandate line says build, maintain, merge or engineer):
+                      the mover stored on the open items the anchor is scoped to, when those that build are one agent;
+                      else, for a scope of one open item, that item's mover as its notices go (anchors.mover_of: the first session its needs
+                      name, else its stored mover, else its `then`, else the stand-in of the item's project);
+                      else, only when no open item of the scope can be read (a project-wide anchor, every scoped item closed or unread), the one
+                      agent the notice's `target` names (`for <agent>`, which anchor-hub writes from anchors.mover_of over the page's own open
+                      items in the scope, as it last read them);
+                      last the project's builder (a sub-page's: its hub's).
+                    The stored mover comes first because the needs list also holds an agent the server named for a message about the item or a
+                    write on it, and the target, built from that list too, is never read against an item that can be read. A candidate that does
+                    not qualify (a front agent, the owner, a background agent that does not build such as a researcher, a retired session, a name
+                    no page lists) is passed over for the next, and so is one that is the notice's sender; items of one scope that store
+                    different building movers settle nothing, so the project's builder takes it; a target that names several agents is read as
+                    none. The item id rides along when the anchor is scoped to exactly one open item. It applies also when the item waits on the owner's decision (a CI result is never his). A CI notice is a
+                    repeat, and dropped, only when the latest earlier CI notice on the anchor is identical within the hour (_ci_repeat). A notice
+                    with nobody to take it (no source qualifies, and the project has no builder or its builder is the sender), and a notice that is
+                    [for <owner>] or needs: decision go on to the rules below as before.
       anchor-work   an anchor notice from an anchor that carries a `#mention=<text>` filter: passed to the agent the
                     page's lead names for the work (the one agent of the project's agents map, front or background, other than its -main
                     agent; the registry's `lead_agents`, Context.work_agent), without the thin call's judgment, also when the notice names
@@ -1400,15 +1455,14 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
             return _line(n, key, root, source="code", rule="anchor-builder", ruling="passed", target=builder, item=shown(open_items[0]["gid"]) if len(open_items) == 1 else "",
                          reason=f"the pull request's branch {_clean(n.get('head'), 80)} is {builder}'s: the notice goes to the builder, not to the item's mover")
     if kind == "anchor" and is_ci_notice(n) and not strong_owner(n.get("text")):
-        from stackshot.router import router_live as _live        # at call time: router_live imports this module
-        builder = cx.builder(_live.agent_root(root, cx.reg))      # a sub-page's builder is its hub's, as for anchor-work
-        if builder and not _is_sender(n, builder, cx):
+        engineer, tie = ci_engineer(key, n, root, cx)
+        if engineer:
             rp = _ci_repeat(n, peers)
             if rp:
                 return _line(n, key, root, source="code", rule="repeat", ruling="dropped", reason=f"a repeat of notice {rp['id']} (same anchor, sender, text and link, within an hour)")
             open_items = _anchor_items(key, n, cx)
-            return _line(n, key, root, source="code", rule="anchor-ci", ruling="passed", target=builder, item=shown(open_items[0]["gid"]) if len(open_items) == 1 else "",
-                         reason=f"a CI result is the builder's to act on: the notice goes to {builder}, not to the item's mover or a front agent")
+            return _line(n, key, root, source="code", rule="anchor-ci", ruling="passed", target=engineer, item=shown(open_items[0]["gid"]) if len(open_items) == 1 else "",
+                         reason=f"a CI result is an engineer's to act on: the notice goes to {engineer} ({tie}), not to a front agent")
     aw = anchor_work_rule(key, n, root, cx, peers)
     if aw:
         return aw
@@ -1416,8 +1470,7 @@ def _code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[
     if gt:
         return gt
     if kind == "anchor":
-        m = re.fullmatch(r"for (.+)", str(n.get("target") or ""))
-        owners = [x.strip() for x in m.group(1).split(",")] if m else []
+        owners = target_owners(n)
         if len(owners) == 1 and n.get("anchor"):
             open_items = _anchor_items(key, n, cx)
             if len(open_items) == 1:
