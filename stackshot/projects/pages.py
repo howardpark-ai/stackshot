@@ -75,7 +75,7 @@ import os as _os, sys as _sys
 if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py): the checkout must be importable
     _here = _os.path.dirname(_os.path.abspath(__file__))
     _sys.path[:] = [_os.path.dirname(_os.path.dirname(_here))] + [p for p in _sys.path if _os.path.abspath(p or ".") != _here]
-import glob, json, os, re, shlex, subprocess, sys, tempfile, time, datetime, unicodedata
+import math, glob, json, os, re, shlex, subprocess, sys, tempfile, time, datetime, unicodedata
 
 HOME = os.path.expanduser("~")
 from stackshot import paths as _paths
@@ -979,6 +979,7 @@ def early_question(payload):
     due = [it for it in items if not it.get("held") and max(_num(it.get("state_updated")), _num(it.get("confirmed")), _num(it.get("updated"))) < start]
     if not due: return ""
     listed = ", ".join(f'{item_shown(it)} "{it.get("subject") or ""}"' + (f" ({r})" if (r := role_note(it)) else "") for it in due[:BOARD_LIST]) + (f", and {len(due) - BOARD_LIST} more" if len(due) > BOARD_LIST else "")
+    st["early_asked"] = start or int(time.time()); save_state(sid, st)       # the question really went out this turn (`early` only guards once per turn, and is set when nothing was asked too): the Stop note may then be one line
     return ("[stackshot] Board question (once per turn). Items untouched this turn: " + listed + ". If this turn changes one, "
             "update it (confirm only if still true); else end your reply with `Board: no change, <reason>` (3+ words) "
             "for all, or a `Board:` line plus one bullet per item on its own line (`- board#N: no change, <reason>` / `- board#M: updated, <what>`). "
@@ -1458,6 +1459,14 @@ def describe(key, v, strict=False):
         how = f"Edit `{key}.md` in a checkout of the pages repository (this machine does not read pages from it), commit and push. "
     return head + how + f"If no page change is due: `python3 {HERE}/stackshot/projects/pages.py clear {key}`."
 
+def _repeat_ok(v, now=None):
+    """Was this debt said in full lately: `shown_at` a finite number, not in the future, less than REPEAT_SECONDS old? Anything else (a garbled value, a clock that went back) says it in full."""
+    try: at = float(v.get("shown_at"))
+    except (TypeError, ValueError, OverflowError): return False
+    if not math.isfinite(at): return False
+    age = (time.time() if now is None else now) - at
+    return 0 <= age < REPEAT_SECONDS
+
 def describe_again(key, v):
     """The same debt, shown to this session already: one short line."""
     return f"still owed: {key} ({_debt_item(v) or 'a board item'}, {_debt_when(v)[1]})"
@@ -1484,7 +1493,7 @@ def cmd_nag():
     if stale:
         st0 = load_state(sid); tc0 = st0.get("touches") or {}; marked = False
         for key, v in stale:
-            if v.get("shown") is not None and v.get("shown") == v.get("ts") and time.time() - float(v.get("shown_at") or 0) < REPEAT_SECONDS:   # this debt (the page and the change, its stamp) was said in full to the session lately: one line; after REPEAT_SECONDS once in full again
+            if v.get("shown") is not None and v.get("shown") == v.get("ts") and _repeat_ok(v):   # this debt (the page and the change, its stamp) was said in full to the session lately: one line; after REPEAT_SECONDS once in full again
                 print("[project-page] " + describe_again(key, v)); continue
             print("[project-page] " + describe(key, v, strict=pilot))
             cur = tc0.get(key)
@@ -1544,7 +1553,7 @@ def cmd_check():
         if bm == "block":
             line.append(q); board_log(sid, name, "block", [it["gid"] for it in due])
         else:
-            asked_early = bool(int(activity().get("start") or 0)) and int(load_state(sid).get("early") or 0) == int(activity().get("start") or 0)   # the full question went out this turn as hook context: the note says it in a line; else it is the first time and in full
+            asked_early = bool(int(activity().get("start") or 0)) and int(load_state(sid).get("early_asked") or 0) == int(activity().get("start") or 0)   # the full question went out this turn as hook context: the note says it in a line; else it is the first time and in full
             notes.append("[board] " + (board_unanswered(due) + rejected_text(bact.get("rejects") or []) if asked_early else "About your last turn: " + q)); board_log(sid, name, "note", [it["gid"] for it in due])
     if foreign:                                         # a note in both modes, never a block
         notes.append("[board] About your last turn's Board lines: " + "; ".join(x for _, x in foreign) + ".")

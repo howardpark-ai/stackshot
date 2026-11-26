@@ -274,13 +274,33 @@ st_ = p.load_state(S); st_["touches"]["projects/gamma"] = {"ts": int(time.time()
 out4 = nnag(S)
 check("debt: another page's debt is said in full beside the one already shown, which stays a line",
       "board item s8 changed at" in out4 and "`projects/gamma`" in out4 and "still owed: projects/alpha (s9," in out4 and out4.count("board item s9 changed at") == 0, out4[:500])
-st_ = p.load_state(S); t_ = st_["touches"]["projects/alpha"]["ts"]; st_["touches"]["projects/alpha"] = {"ts": t_ + 9, "shown": t_, "task": "s9"}; p.save_state(S, st_)
+st_ = p.load_state(S); t_ = st_["touches"]["projects/alpha"]["ts"]; st_["touches"]["projects/alpha"] = {"ts": t_ + 9, "shown": t_, "shown_at": int(time.time()), "task": "s9"}; p.save_state(S, st_)
 out5 = nnag(S)
 check("debt: a mark left from an earlier change does not make a different change a repeat", "board item s9 changed at" in out5 and "still owed: projects/alpha" not in out5, out5[:300])
 st_ = p.load_state(S); st_["touches"].pop("projects/gamma", None); t_ = st_["touches"]["projects/alpha"]["ts"]; st_["touches"]["projects/alpha"] = {"ts": t_, "shown": t_, "shown_at": int(time.time()) - p.REPEAT_SECONDS - 5, "task": "s9"}; p.save_state(S, st_)
 out6 = nnag(S)
 check("debt: a debt last said in full over 2 hours ago is said in full once more, then a line again", "board item s9 changed at" in out6 and "still owed" not in out6 and nnag(S).strip().startswith("[project-page] still owed: projects/alpha"), out6[:200])
 check("debt: the window is 2 hours", p.REPEAT_SECONDS == 7200)
+_n0 = 1_800_000_000
+check("debt: the window's edge: a line at 7199 s, the full text at exactly 7200 s", p._repeat_ok({"shown_at": _n0}, _n0 + 7199) is True and p._repeat_ok({"shown_at": _n0}, _n0 + 7200) is False and p._repeat_ok({"shown_at": _n0}, _n0) is True)
+check("debt: a shown_at in the future (the clock went back) is not a repeat", p._repeat_ok({"shown_at": _n0 + 5}, _n0) is False)
+check("debt: a garbled shown_at (text, list, dict, none, inf, nan) never raises and is said in full",
+      all(p._repeat_ok({"shown_at": bad}, _n0) is False for bad in ("abc", "", [1], {"a": 1}, None, float("inf"), float("-inf"), float("nan"), "inf", "nan")) and p._repeat_ok({}, _n0) is False)
+st_ = p.load_state(S); st_["touches"].pop("projects/gamma", None); t_ = st_["touches"]["projects/alpha"]["ts"]
+st_["touches"]["projects/alpha"] = {"ts": t_, "shown": t_, "shown_at": [1, 2], "task": "s9"}; p.save_state(S, st_)
+out7 = nnag(S)
+check("debt: a garbled shown_at in the state does not crash the nag: the debt is said in full", "board item s9 changed at" in out7 and "Traceback" not in out7, out7[:200])
+# the mark is written only to the entry the debt was said for: a debt whose stamp differs from the stored entry's gets no mark
+import io as _io, contextlib as _cl
+st_ = p.load_state(S); t_ = int(time.time()); st_["touches"]["projects/alpha"] = {"ts": t_, "task": "s9"}; p.save_state(S, st_)
+_saved_stale = p.stale_touches; _saved_in = sys.stdin
+p.stale_touches = lambda sid, strict=False, skipped=None: [("projects/alpha", {"ts": t_ - 5, "task": "s9"})]
+sys.stdin = _io.StringIO(json.dumps({"session_id": S}))
+try:
+    with _cl.redirect_stdout(_io.StringIO()): p.cmd_nag()
+finally: p.stale_touches = _saved_stale; sys.stdin = _saved_in
+check("debt: the mark is not written to a stored entry of another change", "shown" not in p.load_state(S)["touches"]["projects/alpha"], p.load_state(S))
+st_ = p.load_state(S); st_["touches"]["projects/alpha"] = {"ts": t_, "task": "s9"}; p.save_state(S, st_)
 st_ = p.load_state(S); st_["touches"].pop("projects/gamma", None); st_["touches"]["projects/alpha"] = {"ts": int(time.time()), "task": "s9"}; p.save_state(S, st_)
 rc, err = stop(S, transcript(NOTICE, TL))
 check("debt: the Stop hook neither says it nor holds the turn, and the debt stays", rc == 0 and err == "" and "projects/alpha" in (p.load_state(S).get("touches") or {}), (rc, err[:300], p.load_state(S)))
@@ -957,7 +977,7 @@ fresh(s5={"confirmed": time.time()}, s6={"state_updated": time.time()})
 rc, err = bstop(A, transcript("ship it", COMMIT)); check("board: every item touched: no question", rc == 0 and err == "", err[:300])
 fresh()
 def early_marked(tp):      # the turn's early question went out: the session's state carries the turn's start as its `early` mark
-    st = p.load_state(A); st["early"] = p.turn_activity(tp)["start"]; p.save_state(A, st); return tp
+    st = p.load_state(A); st["early"] = st["early_asked"] = p.turn_activity(tp)["start"]; p.save_state(A, st); return tp
 tpn = transcript("ship it", COMMIT)
 rc, err = bstop(A, tpn, mode="note"); check("note: the board question does not hold the turn", rc == 0 and err == "", (rc, err[:200]))
 check("note: …and is logged as a note", blog("note") and blog("note")[-1]["items"] == ["s5", "s6"], blog("note")[-1:])
@@ -971,6 +991,9 @@ check("note: …and does not repeat the full question", "BOARD: this turn did re
 fresh(); rc, err = bstop(A, early_marked(transcript("ship it", COMMIT, "Pushed.\n\nBoard: no change, ok")), mode="note")
 out = nnag(A); check("note: the one line keeps the rejected-lines text", out.strip().endswith("Answer it in the reply. Not accepted from your reply: «Board: no change, ok» (the reason is under three words)."), out[-300:])
 _many = [{"gid": f"s{n}", "subject": f"item {n}"} for n in range(40, 50)]
+_nine = [{"gid": f"s{n}", "subject": f"item {n}"} for n in range(40, 49)]
+_eight = _nine[:8]
+check("note: nine items are eight and `and 1 more`; eight are all named", p.board_unanswered(_nine).endswith(", and 1 more. Answer it in the reply.") and "more" not in p.board_unanswered(_eight), (p.board_unanswered(_nine), p.board_unanswered(_eight)))
 check("note: the one line names at most 8 items and counts the rest", p.board_unanswered(_many).endswith(", and 2 more. Answer it in the reply.") and "s47" in p.board_unanswered(_many) and "s48" not in p.board_unanswered(_many), p.board_unanswered(_many))
 rc, err = bstop(A, transcript("ship it", COMMIT), mode="note"); rc, err = bstop(A, transcript("ship it again", COMMIT), mode="note")
 out = nnag(A); check("note: two turns before a prompt: both notes, oldest first", out.count("[board] About your last turn: BOARD:") == 2, out[:300])
@@ -1231,6 +1254,34 @@ check("early: a payload with agent_type and no agent_id (a main session started 
 p.save_state(A, {}); time.sleep(1.05); tps = transcript("sub work 2", [])
 rc, q = touch(A, tps, {"item_id": "s5", "next": "z"})
 check("early: the same turn's main-session write after the subagent's is still asked", q.startswith("[stackshot] Board question"), q)
+# the Stop note is one line only when the early question really went out that turn: the `early` mark alone (set when nothing was asked) is not that
+_url0 = os.environ["STACKSHOT_URL"]
+def note_after(setup, early_url=None):
+    fresh(**setup); p.save_state(A, {}); time.sleep(1.05); tpe = transcript("ship it", COMMIT)
+    if early_url: os.environ["STACKSHOT_URL"] = early_url
+    try: q_ = otouch(A, tpe, "Bash", {"command": "git -C /x commit -qm y"})
+    finally: os.environ["STACKSHOT_URL"] = _url0
+    return q_, tpe
+def stop_note(tpe):
+    rc_, err_ = bstop(A, tpe, mode="note"); return nnag(A)
+FULL_NOTE = "[board] About your last turn: BOARD: this turn did real work"
+ONE_LINE = "[board] Board question unanswered last turn: "
+q_, tpe = note_after({}, early_url="http://127.0.0.1:9")
+check("early-asked: the server did not answer at the early call: nothing asked, an `early` mark but no `early_asked`", q_ == "" and p.load_state(A).get("early") and not p.load_state(A).get("early_asked"), (q_, p.load_state(A)))
+o_ = stop_note(tpe); check("early-asked: …so the next prompt says the full question, not the one line", FULL_NOTE in o_ and ONE_LINE not in o_, o_[:200])
+items(); p.save_state(A, {}); time.sleep(1.05); tpe = transcript("ship it", COMMIT)
+q_ = otouch(A, tpe, "Bash", {"command": "git -C /x commit -qm y"}); fresh()
+check("early-asked: the server gave an empty item list at the early call: nothing asked, no `early_asked`", q_ == "" and p.load_state(A).get("early") and not p.load_state(A).get("early_asked"), (q_, p.load_state(A)))
+o_ = stop_note(tpe); check("early-asked: …so the next prompt says the full question", FULL_NOTE in o_ and ONE_LINE not in o_, o_[:200])
+fresh(s5={"confirmed": time.time() + 600}, s6={"state_updated": time.time() + 600}); p.save_state(A, {}); time.sleep(1.05); tpe = transcript("ship it", COMMIT)
+q_ = otouch(A, tpe, "Bash", {"command": "git -C /x commit -qm y"}); fresh()
+check("early-asked: nothing due at the early call: nothing asked, no `early_asked`", q_ == "" and p.load_state(A).get("early") and not p.load_state(A).get("early_asked"), (q_, p.load_state(A)))
+o_ = stop_note(tpe); check("early-asked: …so the next prompt says the full question", FULL_NOTE in o_ and ONE_LINE not in o_, o_[:200])
+fresh(); p.save_state(A, {}); time.sleep(1.05); tpe = transcript("ship it", COMMIT)
+q_ = otouch(A, tpe, "Bash", {"command": "git -C /x commit -qm y"})
+check("early-asked: asked: the question went out and `early_asked` is kept with the turn's start", q_.startswith("[stackshot] Board question") and p.load_state(A).get("early_asked") == p.load_state(A).get("early"), (q_[:60], p.load_state(A)))
+o_ = stop_note(tpe); check("early-asked: …and then the next prompt says it in one line", o_.strip().startswith(ONE_LINE) and "BOARD: this turn" not in o_, o_[:200])
+p.save_state(A, {}); fresh()
 # a page keeper (S keeps alpha and gamma): the early text carries the board question and nothing about its pages, and the board
 # write's page debt is still recorded
 p.save_state(S, {}); items((10, S, {}))
