@@ -6,7 +6,7 @@ The enqueue and the wait (sections 1 to 9): a clean enqueue (the GraphQL mutatio
 state (GraphQL: state, mergeCommit, mergeQueueEntry) every 60 s until it is MERGED, and the release deploys the commit GitHub made. The first reads come every 10 s until the entry shows (3 min of grace), a read
 that fails is waited out, a PR that never shows or stays past the limit fails "merge queue", a PR closed meanwhile fails "pr state", with no queue on main (the ruleset is
 off, the rollback case) the plain `gh pr merge --merge --admin --match-head-commit <head>` is the call, and the deploy waits for main's tests, since no merge_group run tested that merge. A PR that leaves the queue without merging is believed on the second read, the reason GitHub gave (the timeline's RemovedFromMergeQueueEvent)
-goes into the failure, and nothing is deployed. A merge call that errors (a 504) after the PR was queued or merged carries on; one that leaves the PR plainly open fails "merge" with the call's error.
+goes into the failure, and nothing is deployed. An enqueue call that GitHub's server fails (a 5xx, INTERNAL, a timeout, a reset) is made again, up to 4 attempts with waits of 5, 15 and 45 s and a read of the PR's state before each retry; a refusal is never retried (section 2a). A merge call that errors (a 504) after the PR was queued or merged carries on; one that leaves the PR plainly open fails "merge" with the call's error.
 A conflict that is only the generated tool-text snapshot is mended once, before the enqueue or after a removal from the queue (the stub of tools/snapshot_regen.py answers; its own decisions are
 tested in snapshot_regen_scenario.py), the PR's tests are waited for on the new head, and the PR is enqueued again. The head branch (a stacked PR closed when its base merged): the open PRs
 based on it are retargeted to main first and only then is the branch deleted. --recycle, mergeable UNKNOWN (read again every 10 s for 3 min), CONFLICTING, the front door and --help.
@@ -123,14 +123,45 @@ check("504: the log says the call errored and the PR is in the queue; the head b
 s = scenario("recovered-merged", merge="fail", gq="merged")
 check("504, the PR reads MERGED already: carries on, deploys, the report names the error", s["rc"] == 0 and s["deployed"] and "the enqueue call errored" in s["msg"] and "but the PR was MERGED" in s["msg"], (s["out"], s["msg"]))
 s = scenario("recovered-late", merge="fail", gq="open,open,queued,merged")
-check("504, the PR shows in the queue on the third read (GitHub's answer is eventually consistent): two sleeps of 10 s, then it carries on",
-      s["rc"] == 0 and s["deployed"] and s["sleeps"][:2] == ["10", "10"], (s["sleeps"], s["out"]))
+check("504 every time, the PR shows in the queue on the third read (GitHub's answer is eventually consistent): the read before each retry, waits of 5 s and 15 s, then it carries on without a third call",
+      s["rc"] == 0 and s["deployed"] and s["sleeps"][:2] == ["5", "15"] and len(enqueues(s)) == 3, (s["sleeps"], s["out"], enqueues(s)))
 s = scenario("open", merge="fail", gq="open", branch="present")
 check("504 and the PR stays plainly open: exits 1, never deploys", s["rc"] == 1 and not s["deployed"], s["out"])
 check("504 and open: FAILED at merge with the original error's last line, no deploy report",
       "PR #23 FAILED at merge: HTTP 504: We couldn't respond to your request in time." in s["msg"] and "merged and deployed" not in s["msg"], s["msg"])
-check("504 and open: six reads over five 10 s sleeps (about 50 s), one enqueue call", s["gq_reads"] == 6 and s["sleeps"] == ["10"] * 5 and len(enqueues(s)) == 1, (s["gq_reads"], s["sleeps"]))
+check("504 and open: four enqueue calls with waits of 5, 15 and 45 s and a read of the PR before each retry, then six reads over five 10 s sleeps (as before)",
+      s["gq_reads"] == 9 and s["sleeps"] == ["5", "15", "45"] + ["10"] * 5 and len(enqueues(s)) == 4, (s["gq_reads"], s["sleeps"], len(enqueues(s))))
 check("504 and open: the branch is left alone, the red report goes without --release", not refchecks(s) and not deletes(s) and s["msg"].rstrip("\n").endswith("| --sender | release") and "--release" not in s["msg"], (s["gh"], s["msg"]))
+
+# ---- 2a. the enqueue call is retried when GitHub's server fails (a 5xx, INTERNAL, "something went wrong", a timeout, a reset), never when GitHub refuses it
+RETRY = lambda k, n: f"merge queue call answered {k}; retrying in {n} s"
+s = scenario("enq-retry-ok", enq_fails="2", enq_kind="504", gq="open,open,merged")
+check("a 504 twice, then accepted: three enqueue calls, merged and deployed, no failure",
+      s["rc"] == 0 and s["deployed"] and len(enqueues(s)) == 3 and "FAILED" not in s["log"] and "enqueued: the merge queue accepted the head abc1234" in s["log"], (s["rc"], enqueues(s), s["log"]))
+check("...two retry lines, in the log's style, each with its wait and attempt, and the waits are the list's first two (5 s, 15 s)",
+      s["log"].count("merge queue call answered") == 2 and RETRY("HTTP 504", 5) + " (attempt 2 of 4)" in s["log"] and RETRY("HTTP 504", 15) + " (attempt 3 of 4)" in s["log"] and s["sleeps"][:2] == ["5", "15"], (s["log"], s["sleeps"]))
+s = scenario("enq-retry-env", enq_fails="3", enq_kind="502", gq="open,open,open,merged", extra={"RELEASE_ENQUEUE_WAITS": "1 2 3"})
+check("RELEASE_ENQUEUE_WAITS replaces the list: waits of 1, 2 and 3 s, four calls (the fourth accepted), a 502 named as such",
+      s["rc"] == 0 and s["deployed"] and s["sleeps"][:3] == ["1", "2", "3"] and len(enqueues(s)) == 4 and RETRY("HTTP 502", 3) + " (attempt 4 of 4)" in s["log"], (s["sleeps"], s["log"]))
+for kind, word in (("internal", "a GraphQL INTERNAL error"), ("wrong", "an error (something went wrong)"), ("timeout", "a timeout"), ("reset", "a cut connection")):
+    s = scenario(f"enq-retry-{kind}", enq_fails="1", enq_kind=kind, gq="open,merged")
+    check(f"a transient error of kind {kind} is retried once and then accepted, named {word}", s["rc"] == 0 and s["deployed"] and len(enqueues(s)) == 2 and RETRY(word, 5) in s["log"], (s["rc"], enqueues(s), s["log"]))
+s = scenario("enq-retry-four", enq_fails="all", enq_kind="last504", gq="open")
+check("a 5xx on every call: four attempts, waits 5, 15, 45 s (and no fifth call), then FAILED at merge with the last call's error, nothing deployed",
+      s["rc"] == 1 and not s["deployed"] and len(enqueues(s)) == 4 and s["sleeps"][:3] == ["5", "15", "45"] and "PR #23 FAILED at merge: HTTP 504: attempt 4" in s["msg"], (s["rc"], enqueues(s), s["sleeps"], s["msg"]))
+check("...three retry lines, the last for attempt 4 of 4, and no line for a fifth", s["log"].count("merge queue call answered") == 3 and "(attempt 4 of 4)" in s["log"] and "attempt 5" not in s["log"], s["log"])
+for kind, err in (("422", "HTTP 422: Pull request is not mergeable"), ("already", "Pull request is already in the merge queue"), ("conflict", "Pull request has merge conflicts"), ("403", "HTTP 403")):
+    s = scenario(f"enq-refused-{kind}", enq_fails="all", enq_kind=kind, gq="open")
+    check(f"a refusal ({kind}) is not retried: one call, no retry line, no wait for it, FAILED at merge with GitHub's words",
+          s["rc"] == 1 and not s["deployed"] and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"] and s["sleeps"][:1] != ["5"] and f"FAILED at merge: {err}" in s["msg"], (s["rc"], enqueues(s), s["sleeps"], s["msg"]))
+s = scenario("enq-refused-red", enqueue="red", gq="open")
+check("a failed required check is not retried either: one call, no retry line", s["rc"] == 1 and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"] and "failing required statuses" in s["msg"], (enqueues(s), s["log"]))
+s = scenario("enq-timeout-queued", enq_fails="all", enq_kind="timeout", gq="queued,merged")
+check("a timeout after which the PR is already in the queue: the PR is read before another call, none is made, the release carries on and deploys",
+      s["rc"] == 0 and s["deployed"] and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"] and "but the PR is OPEN, in the merge queue (QUEUED position 1); carrying on" in s["log"] and s["sleeps"][:1] != ["5"], (s["rc"], enqueues(s), s["log"], s["sleeps"]))
+check("...and the report names the error that was tolerated", "the enqueue call errored" in s["msg"] and "but the PR was OPEN, in the merge queue" in s["msg"] and "FAILED" not in s["msg"], s["msg"])
+s = scenario("enq-reset-merged", enq_fails="all", enq_kind="reset", gq="merged")
+check("a reset after which the PR is MERGED: carried on with one call", s["rc"] == 0 and s["deployed"] and len(enqueues(s)) == 1 and "but the PR was MERGED" in s["msg"], (enqueues(s), s["msg"]))
 
 # ---- 3. MERGED, but the branch deletion fails: still green; the branch already gone; a cross-repository PR
 s = scenario("delfail", merge="ok", branch="present", delete="fail")
