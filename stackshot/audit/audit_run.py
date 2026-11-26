@@ -1799,8 +1799,8 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
 # ---------- the front-step rule (part of the filing pass) ----------
 def _moved_text(f: dict[str, Any], opener: str, kind: str, hrs: float, line: str, now: float) -> str:
     """The one message to the mover of a step the rule moved to it."""
-    return (f"[stackshot] Filing check {_stamp(now)}: {f['id']}: the first open step is now yours ({_clip(line, 110)}). It opened with {opener}, {kind}, and stayed open {hrs:g} hours with the stuck-elsewhere finding "
-            f"unanswered, so stackshot reworded it to open with you; the item's History has the original opener. Do it, hand it on or mark it done.")
+    return (f"[stackshot] Filing check {_stamp(now)}: {f['id']}: the first open step is now yours ({_clip(line, 110)}). It opened with {opener}, {kind}, and stayed open {hrs:g} hours with its stuck-elsewhere finding "
+            f"unanswered, so stackshot reworded it to open with you (History has the original). Do it, hand it on or mark it done.")
 
 
 def _shown(gid: str) -> str:
