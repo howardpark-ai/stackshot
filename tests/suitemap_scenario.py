@@ -940,6 +940,24 @@ git("checkout", "-q", "-B", "nopy", base); git("rm", "-q", *_root_py); _nopy = c
 _g = json.loads(MAP.read_text()); _g["commit"] = _nopy; _g["suites"]["z"]["whole"] = ls_py("-r", _nopy); (T / "glob_nopy.json").write_text(json.dumps(_g))
 out, err = sel_with(T / "glob_nopy.json", lambda: write("newroot.py", "def x(): return 1\n"), "new module at the top of a checkout with none", frm=_nopy)
 check("a new .py file at a top that held none reaches every suite", out == "all" and "every glob of the root" in err, (out, err))
+# `globs`: the folders a suite read in full, as judged when its reads were traced. Reads that `measure --prev` kept lack a file added since by a change that reached no reader
+# (a new suite, a new *_check.py), so they no longer cover the folder as the map's commit holds it: the suite is chosen by what it read in full when it was traced
+def kept(name, whole, globs):
+    g = json.loads(MAP.read_text()); z = g["suites"]["z"]; z["whole"] = whole; z["globs"] = globs; (T / name).write_text(json.dumps(g)); return T / name
+_helper = lambda: write("tests/extra_mod.py", "def x(): return 1\n")
+out, err = sel_with(kept("kept_tests.json", _tests_py[1:], ["tests"]), _helper, "new module, a reader whose kept reads lack a file")
+check("a new .py file reaches the suite whose `globs` name its folder, though its kept reads lack a file the folder holds now (z)", out == "z" and "→ 1 suite(s)" in err, (out, err))
+out, err = sel_with(kept("kept_other.json", _tests_py[1:], [""]), _helper, "new module, a reader that globbed another folder")
+check("...not one whose `globs` name another folder only", out == "", (out, err))
+out, err = sel_with(kept("kept_top.json", _root_py[1:], [""]), lambda: write("newmod.py", "def x(): return 1\n"), "new module at the top, a reader whose kept reads lack a file")
+check("...and the top is \"\" in `globs` (z)", out == "z", (out, err))
+out, err = sel_with(kept("kept_modify.json", [], ["", "tests", "*"]), lambda: sub("tmod.py", "Tag = int", "Tag = int  # a note"), "edit of a module, a globbing reader")
+check("`globs` choose nothing for a modified file: only a new one", "z" not in out.split(), (out, err))
+_doc = lambda: write("docs/extra.py", "def x(): return 1\n")
+out, err = sel_with(kept("kept_checkout.json", _all_py[1:], ["", "tests", "*"]), _doc, "new module in a folder of docs, a reader of the checkout whose kept reads lack a file")
+check("a new .py file in a directory that held none reaches the suite whose `globs` say it read every .py file of the checkout, \"*\" (z), beside the lister (c)", out.split() == ["c", "z"], (out, err))
+out, err = sel_with(kept("kept_no_star.json", _all_py[1:], ["", "tests"]), _doc, "new module in a folder of docs, a reader without the star")
+check("...not one without \"*\" (only the lister)", out.split() == ["c"], (out, err))
 out, err, _ = sel_after(lambda: write("json.py", "x = 1\n"), "shadowing module")
 check("a new module named like one the suites import (json) runs all", out == "all" and "'json'" in err, (out, err))
 out, err, _ = sel_after(lambda: sub("tests/run-suite", "exec", "exec "), "harness")
@@ -1314,6 +1332,36 @@ if use_strace:
     check("measure: failing measured again keeps the same carry (the commit of the clean measurement, not of the unclean map)", e4.get("ok") is False and e4.get("carry") == e3.get("carry"), (r.stderr[-400:], e4))
     git("checkout", "-q", "main")
 
+    # a suite that reads every .py file of tests/ is still picked for a new one after `measure --prev` kept its reads past a change that adds a suite file or a *_check.py
+    # (rules 3 and 4: neither reaches a reader). Judged by the map's commit alone, the kept reads lacked that file, so the next helper picked no reader, and the audit
+    # against a map made that way reported no miss
+    git("checkout", "-q", "-B", "globs", base)
+    write("tests/g_scenario.py", '''
+        import glob, os
+        for p in glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), "*.py")):
+            open(p).read()
+    ''')
+    gbase = commit("a suite that reads every .py file of tests/")
+    def suites_of(path): return json.loads(path.read_text())["suites"] if path.exists() else {}
+    G0 = T / "g0.json"
+    r = tool("measure", "--map", str(G0), "-T", "120", "g", "z")
+    g0, z0 = suites_of(G0).get("g", {}), suites_of(G0).get("z", {})
+    check("measure: the map says which folders a suite read in full (`globs`): tests/ for g, which reads every .py file of it, not for z",
+          r.returncode == 0 and "tests" in g0.get("globs", []) and "globs" in z0 and "tests" not in z0["globs"], (r.returncode, r.stderr[-800:], g0.get("globs"), z0.get("globs")))
+    for kind, added in (("suite", "tests/n_scenario.py"), ("check", "tests/n_check.py")):
+        git("checkout", "-q", "-B", f"globs-{kind}", gbase); write(added, "print('n')\n"); h1 = commit(f"a new {kind} file")
+        G1 = T / f"g1-{kind}.json"
+        r = tool("measure", "--prev", str(G0), "--map", str(G1), "-T", "120", "g", "z")
+        g1 = suites_of(G1).get("g", {})
+        check(f"measure --prev: past a change that adds a {kind} file, g keeps its reads, which lack that file, with the `globs` judged when it was traced",
+              r.returncode == 0 and g1.get("traced") == g0.get("traced") and added not in g1.get("whole", [added]) and g1.get("globs") == g0.get("globs") and "tests" in g1.get("globs", []),
+              (r.returncode, r.stderr[-800:], g1))
+        write("tests/n_helper.py", "N = 1\n"); h2 = commit(f"a helper after the new {kind} file")
+        r = tool("select", "--map", str(G1), "--to", h2)
+        check(f"...and the next new .py file of tests/ still picks g (not z), by the map that came past the new {kind} file",
+              "g" in r.stdout.split() and "z" not in r.stdout.split(), (r.stdout, r.stderr[-800:]))
+    git("checkout", "-q", "main")
+
 # strace's log, read: threads belong to their process, a Python that left no coverage data is read whole, a split clone
 sys.path.insert(0, SCR); os.environ["SUITEMAP_ROOT"] = str(R)
 import importlib; sm = importlib.import_module("suitemap")
@@ -1326,6 +1374,10 @@ check("shard plan: a suite that timed out measured is planned by its measured ti
 check("carried: a clean entry is kept with the commit of its map; an unclean one gives up the carry it has; none for one that failed plainly, lacks a file half, has no carry or is unknown",
       sm.carried(pv, "clean") == {**{k: cl[k] for k in sm.CARRY_KEYS}, "at": "c" * 40} and sm.carried(pv, "bad") == {**cl, "at": "d" * 40}
       and all(sm.carried(pv, n) is None for n in ("bad0", "gone", "nofiles", "nosuch")) and sm.carried(None, "clean") is None, [sm.carried(pv, n) for n in pv["suites"]])
+_tracked = ["a.py", "t/x.py", "t/y.py", "p/q.py", "p/sub/r.py", "d/n.md"]
+_globs = [sm.globbed(r, _tracked) for r in (["a.py", "t/x.py", "p/q.py", "d/n.md"], _tracked, ["p/sub/r.py", "t/y.py"], [])] + [sm.globbed(["d/n.md"], ["d/n.md"])]
+check("globbed: the folders whose every .py file was read, \"\" the top and a subfolder one of its own, \"*\" when that is each folder that holds one; nothing for none read, or none held",
+      _globs == [["", "p"], ["", "p", "p/sub", "t", "*"], ["p/sub"], [], []], _globs)
 log = T / "strace.log"
 log.write_text(textwrap.dedent(f"""\
     100 execve("{sys.executable}", ["python", "x"], 0x0 /* 1 vars */) = 0
