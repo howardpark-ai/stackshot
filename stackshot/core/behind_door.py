@@ -15,6 +15,9 @@ The `[behind_frontdoor]` table of the config:
     identity_max_age_seconds  the replay window: how old a signed identity may be (1 to 3600, default 300)
     members_file              the front door's members file ({"alice": ["main", "side"]}, member -> the backends the member is on). Set: this file is the board's list of members
     board_name                the name this board has in the front door's [[frontdoor.backends]] and in that file (required with members_file)
+    verify_secret_file        the secret the sign-in service signs a token check with. Set: the board answers `GET /frontdoor/verify` (web/routes/door_verify.py) for a request that carries that signed
+                              header and a bearer token: who the board's own sign-in says the token is for. Unset: the route does not exist. Independent of the other keys (a board can offer the check before it
+                              takes calls through the door only)
 
 Absent table: `settings()` is all off and every function here answers "not behind a front door". A key that is present but wrong is not read as absent: a board that was told to check
 identities and cannot read its secret refuses every call, and a board that was told to read its members and cannot refuses everyone (never the other way: an unreadable file lets nobody in).
@@ -45,6 +48,11 @@ NO_IDENTITY = "refused: this board takes calls through its front door only, and 
 BAD_IDENTITY = ("refused: the signed identity of this call is not accepted (it is altered, signed with another secret, older than this board's replay window, "
                 "or dated ahead of its clock).")
 NO_SECRET = "refused: this board cannot read the secret that checks a signed identity, so it accepts no call until that is fixed (the board's log says why)."
+NO_VERIFY = "refused: this check takes a request from the sign-in service only, and this request carries no signed header."
+BAD_VERIFY = "refused: the signed header of this request is not accepted (it is altered, signed with another secret, older than this board's replay window, or dated ahead of its clock)."
+NO_VERIFY_SECRET = "refused: this board cannot read the secret that checks the sign-in service's header, so it answers no check until that is fixed (the board's log says why)."
+VERIFY_HEADER = "x-stackshot-verify"   # the header the sign-in service signs a token check with (frontdoor_identity.sign of VERIFY_WHO under verify_secret_file)
+VERIFY_WHO = "token-check"             # what the signature covers: the header proves the sender holds the secret, and carries no person
 
 
 @dataclass(frozen=True)
@@ -55,6 +63,8 @@ class Settings:
     members: bool = False           # read the members from the front door's file (the key members_file is present, whatever its value)
     members_file: str = ""
     board: str = ""
+    verify: bool = False            # offer the token check to the sign-in service (the key verify_secret_file is present, whatever its value)
+    verify_file: str = ""
 
 
 @dataclass(frozen=True)
@@ -73,7 +83,7 @@ def parse(cfg: dict[str, Any] | None = None, files: bool = False) -> tuple[Setti
     if t is None:
         return Settings(), []
     if not isinstance(t, dict):
-        return Settings(identity=True, members=True), [f"[{TABLE}] is not a table, so this board accepts no call and has no members until it is fixed: write [{TABLE}] with identity_secret_file, members_file and board_name"]
+        return Settings(identity=True, members=True, verify=True), [f"[{TABLE}] is not a table, so this board accepts no call, answers no token check and has no members until it is fixed: write [{TABLE}] with identity_secret_file, members_file and board_name"]
     out: list[str] = []
     identity, secret_file = "identity_secret_file" in t, _text(t.get("identity_secret_file"))
     if identity:
@@ -83,6 +93,14 @@ def parse(cfg: dict[str, Any] | None = None, files: bool = False) -> tuple[Setti
             bad = _cfg.secret_file_mode_problem(os.path.expanduser(secret_file))
             if bad:
                 out.append(f"[{TABLE}] identity_secret_file {os.path.expanduser(secret_file)} {bad}")
+    verify, verify_file = "verify_secret_file" in t, _text(t.get("verify_secret_file"))
+    if verify:
+        if not verify_file:
+            out.append(f"[{TABLE}] verify_secret_file is not a path, so this board answers no token check until it is fixed: set it to the file that holds the secret the sign-in service signs a check with")
+        elif files:
+            bad = _cfg.secret_file_mode_problem(os.path.expanduser(verify_file))
+            if bad:
+                out.append(f"[{TABLE}] verify_secret_file {os.path.expanduser(verify_file)} {bad}")
     age = t.get("identity_max_age_seconds", _ident.MAX_AGE)
     if isinstance(age, bool) or not isinstance(age, (int, float)) or not 1 <= age <= MAX_AGE_LIMIT or age != age:
         out.append(f"[{TABLE}] identity_max_age_seconds = {str(age)[:60]!r} is not a number from 1 to {MAX_AGE_LIMIT:g}, so {_ident.MAX_AGE:g} is used")
@@ -100,7 +118,7 @@ def parse(cfg: dict[str, Any] | None = None, files: bool = False) -> tuple[Setti
                        f"single-person keys of [instance] and [auth] allowed_emails name nobody to sign in either)")
     elif "board_name" in t:
         out.append(f"[{TABLE}] board_name is used only with members_file, which is not set")
-    return Settings(identity, secret_file, float(age), members, members_file, board), out
+    return Settings(identity, secret_file, float(age), members, members_file, board, verify, verify_file), out
 
 
 def settings(cfg: dict[str, Any] | None = None) -> Settings:
@@ -142,6 +160,23 @@ def caller_of(scope: Any) -> str:
     """The identity the guard verified for the request whose ASGI scope this is; "" when it verified none."""
     v = scope.get(SCOPE_KEY) if hasattr(scope, "get") else None
     return v if isinstance(v, str) else ""
+
+
+# ------------------------------------------------------------------------------------------------ the token check
+
+def check_verify(value: str | None, cfg: dict[str, Any] | None = None, now: float | None = None) -> Check:
+    """Whether `value` (the header's text) was signed by the sign-in service: `Check(who=VERIFY_WHO)` or the refusal text. Call it only for a board that offers the check (`settings().verify`):
+    the secret is read now, so a rotated one applies to the next request. The same window as the signed identity's (`identity_max_age_seconds`)."""
+    s = settings(cfg)
+    if not value or not value.strip():
+        return Check(refusal=NO_VERIFY)
+    try:
+        secret = _files.read_secret(s.verify_file, "verify_secret_file")
+    except _files.FileError as e:
+        _tell(str(e))
+        return Check(refusal=NO_VERIFY_SECRET)
+    who = _ident.verify(secret.encode("utf-8"), value, now=now, max_age=s.max_age)
+    return Check(who=who) if who == VERIFY_WHO else Check(refusal=BAD_VERIFY)
 
 
 # ------------------------------------------------------------------------------------------------ the members

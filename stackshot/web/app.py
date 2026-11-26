@@ -33,6 +33,7 @@ from stackshot.web import door_guard as _door_guard, requestlog as _requestlog
 from stackshot.web.middleware import _Fingerprint, _LinkIds, _ReadOnly, _RefusalLog, _RetiredInputs
 from stackshot.web.routes import client_api as _routes_client_api
 from stackshot.web.routes import answers as _routes_answers
+from stackshot.web.routes import door_verify as _routes_door_verify
 from stackshot.web.routes import ui_api as _routes_ui_api
 from stackshot.web.routes import board_pages as _routes_board_pages
 
@@ -214,6 +215,7 @@ def build(
     _tool_anchors.register(mcp, evw_boxes=evw_boxes, machine_state=machine_state)
     _tool_rules.register(mcp)
     _signin.register(mcp)
+    _routes_door_verify.register(mcp)      # `GET /frontdoor/verify` for the sign-in service, only on a board whose [behind_frontdoor] names a verify_secret_file (web/routes/door_verify.py)
     _routes_client_api.register(mcp, client_get=client_get, recycle_wanted_tokens=recycle_wanted_tokens)
     _routes_answers.register(mcp, answer=answer)
     _routes_ui_api.register(mcp, contact_label=contact_label, runner_status=runner_status, phase_sweep_status=phase_sweep_status)

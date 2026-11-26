@@ -51,6 +51,23 @@ The board's server needs no front door code: both sides share `stackshot/core/fr
 
 When a board refuses a call, the front door shows it the way it shows any backend that does not answer: `board '<b>' did not answer (error: ...)` on a call and `board '<b>' did not list its tools (...)` on a list, with the status in the front door's log, so a board with the wrong secret is told from one that is down by `/healthz`, which stays open.
 
+## The token check for the sign-in service
+
+A reverse proxy asks a sign-in service who a connector's bearer token is for before it lets the call reach the front door. The service holds neither the board's Google client nor a copy of the board's token store: it asks the board, which already checks its own tokens. A board offers that check with `verify_secret_file` in its `[behind_frontdoor]` table; the key works alone (a board can offer the check before it takes calls through the door only), and without it the board has no such route.
+
+`GET /frontdoor/verify` answers a request that carries two things: the sign-in service's signed header, `x-stackshot-verify` (the same signing as the signed identity, `frontdoor_identity.sign`, under the secret in `verify_secret_file`, of the fixed word `token-check`, with the same replay window), and the caller's `Authorization: Bearer <token>`. The route is reachable wherever the board is (the tunnel and the proxy deliver to one address), so the signed header is the gate and the address is not: a request without a valid header is refused 403 with a sentence, and its token is never looked at. The proxy in front of the board also blocks the path to everything from outside.
+
+| When | Answer |
+| --- | --- |
+| no header, an altered one, another secret, older than the window, dated ahead | 403 `refused: ...` (a sentence that names neither secret) |
+| the board cannot read the verify secret | 403 `refused: this board cannot read the secret that checks the sign-in service's header...` |
+| a token the board's sign-in accepts | 200 `{"email": "<lower case>", "via": "google"}`, or `"via": "portal"` for the portal's machine token |
+| no bearer, an empty one, not `Bearer`, a token the board does not know, expired or revoked, or one with no address | 401 `{"error": "invalid_token"}` |
+| the check itself raised | 503 `{"error": "unavailable"}`, never 401 |
+| the board has no sign-in (`[auth] mode` off) | 404 |
+
+The check is the board's own `verify_token`, the call its browser sign-in makes: the token's signature, the stored mapping, and Google's own check of the grant at every call, so a grant revoked at Google is refused at once. What the library swallows (a network failure reads as "no such token") arrives as 401, as it does for a direct call to the board. Every answer is `Cache-Control: no-store`, and no answer holds the token.
+
 ## The one tool set
 
 The tool list is one board's tool list, whichever boards the caller is on, with each tool's schema as the board gives it plus one optional property, `board`. A caller on several boards must pass `board` on each call; a caller on one need not. When the caller is a member of the brain, the brain's tools are listed beside them (a brain tool takes no `board`). The list shows only the caller's own backends and lists each live, so a backend that is down is named in a warning to the client and left out, and the list fails only when none answers. With no caller (the server's own start) the list is empty.
@@ -98,6 +115,8 @@ Streaming progress and log notifications of a tool call pass through as they arr
 - The signing secret rotated in the files of the boards and of the door, one after another with no restart: while they differ the board refuses the door's call, when they agree the call is served and an identity signed with the old secret is refused.
 - A board with no `[behind_frontdoor]` table serves an unsigned call, ignores a header that looks like a signed identity and records no person.
 
-The other two scenarios cover the pieces, in one process:
+The other scenarios cover the pieces, in one process:
 
 `tests/frontdoor_board_scenario.py` covers the board's side: the settings and their notes, the check of one signed identity (every refusal, the window, a rotated secret), the members read from the front door's file (the format, a change on an open session, a file that is missing or wrong), the guard as a wrapper, the real board over HTTP and the front door's own transport against it, and a board with no table, which is as it was. `tests/frontdoor_scenario.py` (stand-in boards and a stand-in brain on loopback ports) covers the schema diff against a single board, the routing and every refusal text above, concurrent calls of several sessions with no cross-talk, that the caller's bearer never reaches a backend, streaming, a backend that is down, a backend that accepts a connection and never answers (initialize, list, call and `/healthz` return within the bound), a health URL that answers a byte at a time (the list, `/healthz` and 40 lists at once return within the bound and the next member is not held), a member removed from the members file on an open session, the instructions text, the signed identity, the no-caller list and the config notes.
+
+`tests/frontdoor_verify_scenario.py` covers the token check for the sign-in service: the `verify_secret_file` settings and notes, every refusal of the signed header, a rotated secret, and the route over a stand-in sign-in provider (a good token, the portal's, no bearer, an unknown token, a token with no address, a check that raises, a board with no sign-in, and that a refused request never reaches the token check).
