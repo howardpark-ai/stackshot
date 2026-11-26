@@ -196,7 +196,7 @@ refresh().then(function(s){if(s&&s!=='open'&&s!=='signed_out')say('','')});retur
 var m=msgs[res.code]||['warn',''];
 if(quiet.indexOf(res.code)>=0){lock(false);to('open');say(m[0],m[1]);return}
 delete drafts[ref];var s=++seq;
-load().then(function(n){if(s!==seq)return;var f=form();if(f){box(f).value='';put(f,{pick:'',note:''})}lock(false);delete drafts[ref];state='sent';show(n);say(m[0],m[1])},
+load().then(function(n){if(s!==seq)return;var f=form();if(f){box(f).value='';put(f,{pick:'',note:''})}lock(false);show(n);delete drafts[ref];say(m[0],m[1])},
 function(){if(s!==seq)return;busy=false;say(m[0],m[1]);fall(res.code)})}
 function send(f,submitter){var ref=A('ref'),data=new URLSearchParams(new FormData(f)),ctl=window.AbortController?new AbortController():null,timer=ctl&&setTimeout(function(){ctl.abort()},60000);
 if(!picked(f)&&!box(f).value.trim())return;
