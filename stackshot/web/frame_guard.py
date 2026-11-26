@@ -4,7 +4,8 @@ Only the server's own origin may. Every HTTP response leaves with `X-Frame-Optio
 refusals, and the JSON and MCP answers too, where the two headers mean nothing. One place, so a new route has them with no line of its own. No other policy is added.
 
 A response that already says who may frame it (an `X-Frame-Options`, or a policy with `frame-ancestors`) is left as it is: a browser that reads `frame-ancestors` ignores `X-Frame-Options`, so adding
-'self' to a page that says DENY (the sign-in library's consent page does) would loosen it.
+'self' to a page that says DENY (the sign-in library's consent page does) would loosen it. One page of the board states a wider policy of its own, and only when the instance lists origins for it: the answer
+frame (web/routes/answer_frame.py, docs/answer-frame.md).
 
 The wrapper reads no body and buffers nothing. Unlike the request log's it is installed on a warm standby copy too, which serves the same pages.
 """

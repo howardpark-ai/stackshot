@@ -21,7 +21,8 @@ An old id's address answers the item it names now. A decision answer nobody it w
 the project's keeper once after 30 min; the owner's write settles it. History shows "Oliver (board): …". The update,
 complete and confirm tools refuse a sender that names itself Oliver.
 A form that answers a decision carries the reference of the question it shows (model/ask_ref.py): a pick sent with another reference is no decision, writes nothing without a note and keeps a note as a comment;
-with no reference an answer is taken as before. Every response, the pages and the answer routes included, says that only the board's own origin may frame it (web/frame_guard.py).
+with no reference an answer is taken as before. Every response, the pages and the answer routes included, says that only the board's own origin may frame it (web/frame_guard.py); the answer frame, which can name
+other origins, is tests/answer_frame_scenario.py.
 
     tests/run-suite answer        → exit 0 / 1"""
 import json, logging, os, pathlib, re, subprocess, sys, tempfile, time

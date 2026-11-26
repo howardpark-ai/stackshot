@@ -136,7 +136,8 @@ body.aframe::before,body.aframe::after{display:none}
 
 # The frame's script. What it holds: the state and what the parent is told of it (post: height, state, typing; only ever to a configured origin by name), the parent's two requests (refresh,
 # theme; accepted only from window.parent at a configured origin), the send (the board's own answer path, asked for its code as JSON), the refresh (this page again, read against the question
-# first drawn), and what two frames of one item share (BroadcastChannel on the board's origin: the pick, the note, a send under way and how it ended). Nothing it posts to the parent or reads
+# first drawn), and what two frames of one item share (BroadcastChannel on the board's origin: the pick, the note, a send under way and how it ended; only a person's own press or typing shares,
+# never a field's `change`, which a box left for the other frame fires with what it held before that press). Nothing it posts to the parent or reads
 # from it holds a word of the item, the answer or the token.
 _SCRIPT = r"""<script>(function(){
 var M=document.getElementById('aframe');if(!M)return;
@@ -209,7 +210,6 @@ function(){return {why:SST('js.answer.no_answer')}})
 document.addEventListener('submit',function(e){var f=e.target;if(f!==form())return;e.preventDefault();if(!busy&&state==='open')send(f,e.submitter)});
 document.addEventListener('input',function(e){if(!M.contains(e.target))return;if(isNote(e.target))grow(e.target);share();post()});
 document.addEventListener('click',function(e){var t=e.target;if(t&&t.matches&&t.matches('form.hanswer input[name=choice]')){share();post()}});
-document.addEventListener('change',function(e){if(M.contains(e.target))share()});
 function focus(on){if(typing!==on){typing=on;post()}}
 document.addEventListener('focusin',function(e){focus(isNote(e.target))});
 document.addEventListener('focusout',function(e){if(isNote(e.target))focus(false)});
