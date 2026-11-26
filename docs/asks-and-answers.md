@@ -32,13 +32,14 @@ existed keeps its "Park until <day>" button, which the server still applies itse
 fallback). The older `[idle] hours` key is no longer read.
 
 On a board of several members a step is answered member by member (`steps.member_rows`, `steps.settle_members`, `answer_handover._share_step`; `tests/member_steps_scenario.py`). A line of `next` that names
-no one and starts with a bullet or a number is a member's as it was written: the member whose line stands above it in the text that wrote it, also when that parent line was merged into another writer's. Once
-two members have had a part in the item, whose each such line is gets stored on its step (`of`, set by every save of an open item) and stays with the line whatever later happens to the other lines (one marked
-done, dropped, reworded or moved). A line goes to another member when it is reworded to name them, or dropped and written again under theirs. A line written while one member alone had a part in the item is
-that member's when a second joins. A step stored before `of` was reads as the member's whose line stands above it in `next`, and on an item two members already had a
-part in the next save stores that reading as it stood before that save, so no
-stored item needs a data pass; a server that does not know `of` ignores it, drops it when it saves the item and reads the line by its place. As before, a new line whose words equal another writer's open line
-is not added a second time. Done ticks the answering member's open steps, those lines of theirs among them, and the ones that are no member's.
+no one and starts with a bullet or a number belongs to the line it was written under: the member that line names, no member when it names anyone else (a session, an outside party), or no one when it stands
+under no named line. That is stored on its step (`of`: the member's name, `-` or empty) by the first save of the open item that holds the line, however many members have had a part in the item, and stays with
+the line whatever later happens to the other lines (one marked done, dropped, reworded or moved) and whoever joins. It is read from the text that wrote the line, also when that parent line was merged into
+another writer's. A member's line under their own is theirs. A line under no member's is shown to no member and ticked by none once two members have had a part; while one member alone has had one, it goes
+with that member's step as on a board of one. A line goes to another member when it is reworded to name them, or dropped and written again under theirs. A step stored before `of` was is read where it stands
+in `next`, under the line above it (when every line over it has been marked, under the nearest of those in the checklist), and the next save stores that reading as it stood before that save, so no stored item
+needs a data pass; a server that does not know `of` ignores it, drops it when it saves the item and reads the line by its place. As before, a new line whose words equal another writer's open line
+is not added a second time. Done ticks the answering member's open steps, those lines of theirs among them, and the ones that are no one's.
 While another member has a part in the step, the item stays in `your-step`: a Done by the member the step is asked of passes it to the member of the next open step (the answer
 reads `done`, and the sessions are told whose step it is now), a Done by another member answers `?sent=partdone` and moves nothing, and a note that does not say the step is done answers
 `?sent=comment`. A member with no part left in a step two members have had one in (`steps.several_hold`) gets `?sent=nostep`, and a note of theirs is kept as a comment. So does anyone answering the step of such an item while a question

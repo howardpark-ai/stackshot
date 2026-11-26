@@ -3609,7 +3609,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return out
     def his_open_steps(self, r, member=""):
         """His open steps of the checklist (the lines of next that open with his name, or with none) as (first line without its opener, the lines under it), each said once, in order. On a board of several
-        members, drawn for `member`: the open steps that are that member's or name no one (steps.member_rows), never another member's, and the line skipped below is looked for among those, name and all. The line the
+        members, drawn for `member`: the open steps that are that member's or no one's (steps.member_rows), never another member's, and the line skipped below is looked for among those, name and all. The line the
         server made on the checklist for a your-step item (the step's summary, recorded as metadata.owner_step, with his name in front of it or not) is not drawn: the summary stays where space is short.
         Only that line is skipped, never a separate step of his that happens to say the same words, and a line that repeats an earlier one of his (any case, with or without his name) reads as one.
         A line whose first line is empty after his name takes the first line under it as its own. [] when he has none."""
@@ -3810,8 +3810,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return self.md_line(q, r["gid"]) + mockup_link(r, q), form       # the mockup a design decision is about, beside the question
     def ask_question(self, r):
         """The question of an open decision as a row words it (home_ask), None when the item carries none."""
-        if "decision" not in [x.lower() for x in needs_of(r)]: return None
-        ask = open_ask(r)
+        ask = open_ask(r)      # "" unless the item is open and needs a decision
         return decide_words(ask) if ask else None
     def home_wait(self, r, mod):
         """A waiting row's detail line, as HTML: what it waits on and until when, in the words the row leads with: "Until Sun Mar 1st 07:00: <why>" for a time (his words or the basis, or
@@ -3989,7 +3988,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                        project_html=self.row_line(r, project=named), edge=RELEASE_LIST if which == RELEASE_LIST else _ui.kind_of_list(which),
                        act_html=act[1] if act else "")
     def next_of(self, meta, member):
-        """The next text a member's row reads its line from, on a board of several members: the open steps that are `member`'s (steps.member_rows), else the ones that name no one, in the order of next, else
+        """The next text a member's row reads its line from, on a board of several members: the open steps that are `member`'s (steps.member_rows), else the ones that are no one's, in the order of next, else
         the step of a your-step asked of `member` (steps.member_for). Never a line of another member, a session or an outside party."""
         rows = sorted((j, s["text"], who) for s, j, who in zip(*_steps.member_rows(meta)) if s["status"] == _steps.OPEN)
         text = "\n".join([t for _j, t, who in rows if who == member] or [t for _j, t, who in rows if who == ""])

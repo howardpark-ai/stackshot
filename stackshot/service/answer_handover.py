@@ -190,7 +190,7 @@ def _check_his_step(meta: dict[str, Any], step: str, now: float, by: str = "", m
     (steps.is_his: named for him, or naming no one), whoever wrote them, the server's own line for the summary included (the block does not draw that line or a repeat, but his Done is his word that all of it is done). Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
     other lines staying. → the first checked step's first line, "" when none was his (nothing written). A note on the step (step-reply) never comes here: it ticks only the server's step (owner_steps.tick), and the session that takes the item
     marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Done finishes all of his open lines. `by` is the person whose Done it is (the first person when none is named).
-    `member` (a board of several members): the open steps that are that member's or no member's (steps.member_rows), never another member's."""
+    `member` (a board of several members): the open steps that are that member's or no one's (steps.member_rows), never another member's."""
     cl, _at, whose = _steps.member_rows(meta)
     mine = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN and (whose[i] in (member, "") if member else _steps.is_his(x["text"]))]      # the open lines render.his_open_steps starts from, before it leaves out the server's summary line and repeats
     if not mine:
@@ -204,7 +204,7 @@ def _check_his_step(meta: dict[str, Any], step: str, now: float, by: str = "", m
 
 def _share_step(meta: dict[str, Any], rec: dict[str, Any], member: str, done: bool, now: float) -> str:
     """`member`'s answer on a your-step that more than one member has a part in (a board of several members): what it ticks, and who the step is with after it → that member's name. Not `done` (a note
-    that does not say the step is done): nothing is ticked or moved. Done: the open steps that are `member`'s or no member's are ticked (_check_his_step), never another member's. A step asked of another
+    that does not say the step is done): nothing is ticked or moved. Done: the open steps that are `member`'s or no one's are ticked (_check_his_step), never another member's. A step asked of another
     member (steps.member_for) stays theirs, and the answer's record names the step `member` finished. A step asked of `member` passes on: the member of the next open step is the mover, that step is the
     item's `step`, and the item stays in your-step; the server's step is made for them by the save (owner_steps.ensure) and the draft goes with the step it belonged to."""
     asked = _steps.member_for(meta.get("step"), meta)
