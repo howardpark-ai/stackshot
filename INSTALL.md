@@ -357,6 +357,10 @@ On every box that only runs sessions:
 
 Left unset, `[server] box` keeps the older rule: a machine that holds the pages checkout is taken for the server box.
 
+A box that runs `release.sh` for a server on another box sets `[release] deploy_ssh` to that box. The release deploys there and copies its
+last-good record there, which the server reads to settle released items. When the record was already made before the setting, run
+`./release.sh --copy-record` on that box once, or wait for its next release.
+
 The server's units belong on the server host only, so `./install.sh units` checks it once, first, before it touches lingering or any unit.
 The config names the server host in `[release] deploy_ssh` (the host the server runs on, for a box that only runs `release.sh`; a name, an
 alias, `user@host` or a host word) and says "not this box" with `[server] box = false`. On a box that is not that host, `units` prints one line

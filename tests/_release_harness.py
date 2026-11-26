@@ -256,7 +256,8 @@ case "$*" in
   "-c core.hooksPath=/dev/null worktree add "*) eval "mkdir -p \"\${$(( $# - 1 ))}\"" ;;   # the index build's checkout (release.sh warm_run): a folder, so the command can run in it
   "reset --keep "*) [ -z "${RT_RESET_FAIL:-}" ] || { echo "fatal: could not reset, aborting." >&2; exit 128; }; [ -z "${RT_MOVE_FAIL:-}" ] || { echo "fatal: Not possible to fast-forward, aborting." >&2; exit 128; } ;;   # RT_RESET_FAIL: only the rollback's move fails
   "merge --ff-only "*) [ -z "${RT_MOVE_FAIL:-}" ] || { echo "fatal: Not possible to fast-forward, aborting." >&2; exit 128; } ;;
-  "cat-file -e "*) [ -z "${RT_NOHEAD:-}" ] || case "$*" in *"$RT_NOHEAD"*) exit 1 ;; esac ;;
+  "cat-file -e "*) if [ -n "${RT_REMOTE:-}" ] && [ -n "${RT_REMOTE_LACKS:-}" ]; then case "$*" in *"$RT_REMOTE_LACKS"*) [ -f "$RT_DIR/remote-fetched" ] || exit 1 ;; esac; fi   # RT_REMOTE_LACKS: a commit the other box's checkout has only after a fetch there
+    [ -z "${RT_NOHEAD:-}" ] || case "$*" in *"$RT_NOHEAD"*) exit 1 ;; esac ;;
   "merge-base --is-ancestor "*)   # A is an ancestor of B in a linear history, oldest first: RT_HISTORY (comma-separated); B = HEAD is the live checkout, RT_LIVE (unset: A is in it)
     set -- $*; ia=0; ib=0; i=0
     if [ "$4" = HEAD ]; then
@@ -271,6 +272,7 @@ case "$*" in
   "fetch --quiet origin main refs/pull/"*)   # fetch_retry with the PR head (regen_snapshot): RT_PRFETCH_FAIL makes it fail every time
     [ -z "${RT_PRFETCH_FAIL:-}" ] || { echo "fatal: couldn't find remote ref refs/pull/23/head" >&2; exit 1; } ;;
   "fetch --quiet origin main")   # RT_FETCH_FAILS: that many fetches fail first, as one racing another release's fetch in the same checkout does
+    if [ -n "${RT_REMOTE:-}" ]; then echo fetch >> "$RT_DIR/remote-fetches"; [ -z "${RT_REMOTE_FETCH_FAIL:-}" ] || exit 1; : > "$RT_DIR/remote-fetched"; exit 0; fi   # a fetch on the other box: counted apart; RT_REMOTE_FETCH_FAIL: it brings nothing
     n=$(( $(cat "$RT_DIR/fetches" 2>/dev/null || echo 0) + 1 )); echo $n > "$RT_DIR/fetches"
     [ $n -gt "${RT_FETCH_FAILS:-0}" ] || { echo "error: fetching ref refs/remotes/origin/main failed: incorrect old value provided" >&2; exit 1; } ;;
   *) exit 0 ;;
@@ -290,7 +292,8 @@ CONFIG = ('import os, sys\nif sys.argv[1:] == ["state", "releases"]: print(os.en
           ' def release_deploy_ssh():\n  return os.environ.get("RT_DEPLOY_SSH", "")\n'
           'if os.environ.get("RT_WARM_CFG") != "missing":\n'                        # [release] suitemap_warm_cmd, as words: RT_WARM (unset = none); RT_WARM_CFG = crash (the call raises) | missing (a config.py that predates the key)
           ' def release_suitemap_warm():\n  if os.environ.get("RT_WARM_CFG") == "crash": raise RuntimeError("config unreadable")\n  return os.environ.get("RT_WARM", "").split()\n')
-CLIENT = ('import os, sys\nif sys.argv[1:2] == ["released"]: open(os.environ["RT_DIR"] + "/released.log", "a").write(" | ".join(sys.argv[1:]) + "\\n"); print("stackshot: closed a1"); sys.exit(1 if os.environ.get("RT_RELEASED") == "fail" else 0)\n'   # the items call is logged apart: the report order below is about deploys and reports
+CLIENT = ('import os, sys\nif sys.argv[1:2] == ["released"]:\n r = os.environ["RT_DIR"] + "/remote/releases/last-good"; open(os.environ["RT_DIR"] + "/remote_at_released", "a").write((open(r).read().strip() if os.path.isfile(r) else "-") + "\\n")\n'   # the server box's record at the moment it is asked
+          'if sys.argv[1:2] == ["released"]: open(os.environ["RT_DIR"] + "/released.log", "a").write(" | ".join(sys.argv[1:]) + "\\n"); print("stackshot: closed a1"); sys.exit(1 if os.environ.get("RT_RELEASED") == "fail" else 0)\n'   # the items call is logged apart: the report order below is about deploys and reports
           'open(os.environ["RT_DIR"] + "/messages.log", "a").write(" | ".join(sys.argv[1:]) + "\\n")\n'
           'open(os.environ["RT_DIR"] + "/order.log", "a").write("client:" + sys.argv[1] + "\\n")\n'
           'if os.environ.get("RT_BG"):\n import subprocess; open(os.environ["RT_DIR"] + "/bgpids", "a").write(str(subprocess.Popen(["/usr/bin/sleep", "9"], start_new_session=True, close_fds=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).pid) + "\\n")\n'
@@ -405,8 +408,15 @@ DEPLOY = ('#!/bin/sh\ntouch "$RT_DIR/deployed"\necho "${DEPLOY_TO:-}" > "$RT_DIR
 # `ssh -o BatchMode=yes -o ConnectTimeout=15 <host> '<command>'` (release.sh deploy_run, [release] deploy_ssh): one line per call in ssh.log; RT_SSH_FAIL = the connection fails (255). Otherwise the command runs here, as the host would run it, but in the
 # environment a login there has: no DEPLOY_LOCK_FILE, HOME = a folder whose stackshot is the scenario's checkout, and the state folder of "the other box" (config.py's `state releases` under remote/ while RT_REMOTE is set), so a lock the
 # release holds on this side is never the one the remote command takes. Never a real ssh.
-SSH = ('#!/bin/sh\necho "$*" >> "$RT_DIR/ssh.log"\n[ -z "${RT_SSH_FAIL:-}" ] || { echo "ssh: connect to host failed: Connection timed out" >&2; exit 255; }\n'
+SSH = ('#!/bin/sh\nprintf "%s\\n" "$*" >> "$RT_DIR/ssh.log"\n[ -z "${RT_SSH_FAIL:-}" ] || { echo "ssh: connect to host failed: Connection timed out" >&2; exit 255; }\n'
        'while [ "${1:-}" = -o ]; do shift 2; done\nhost=$1; cmd=$2\nmkdir -p "$RT_DIR/login"; ln -sfn "$RT_DIR/box" "$RT_DIR/login/stackshot"\n'
+       'case "$cmd" in *last-good*)\n'   # the copy of the last-good record (record_sync): which of fds 3 to 9 it holds; RT_RECORD_HANG: it never answers; RT_RECORD_FAILS: that many copies fail (255) first
+       '  echo record >> "$RT_DIR/order.log"\n'
+       '  f=; for n in 3 4 5 6 7 8 9; do [ -e /proc/$$/fd/$n ] && f="$f open$n"; done; echo "none$f" >> "$RT_DIR/record_fds"\n'
+       '  [ -z "${RT_RECORD_HANG:-}" ] || exec /usr/bin/sleep 30\n'
+       '  n=$(( $(cat "$RT_DIR/record-n" 2>/dev/null || echo 0) + 1 )); echo $n > "$RT_DIR/record-n"\n'
+       '  [ $n -gt "${RT_RECORD_FAILS:-0}" ] || { echo "ssh: connect to host failed: Connection timed out" >&2; exit 255; } ;;\n'
+       'esac\n'
        'exec env -u DEPLOY_LOCK_FILE HOME="$RT_DIR/login" RT_REMOTE=1 sh -c "$cmd"\n')
 POLLS = []   # (scenario, sleeps): checked at the end, see MAX_POLLS
 MAX_POLLS = 200   # a scenario that waits main's run out to the default RELEASE_CAP_MAIN (3 h) polls 540 times: 40 s plainly, past
@@ -599,6 +609,7 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
             "client_fd9": rd("client_fd9").split(), 
 "deploy_to": rd("deploy_to").strip(), "gq_reads": int(rd("gqreads").strip() or 0), "gq_reason_reads": len(rd("gq_reason_reads")), "gq_args": rd("gq_args").splitlines(), "enqueue_args": rd("enqueue_args").splitlines(), "wrong_calls": rd("wrong_calls").splitlines(), "mq_reads": len(rd("mq_reads")),
             "deploys": rd("deploys").splitlines(), "locks": rd("locks").split(), "order": rd("order.log").split(), "lastgood": rd("releases/last-good").strip(),
+            "remote_lastgood": rd("remote/releases/last-good").strip(), "remote_at_released": rd("remote_at_released").split(), "record_fds": rd("record_fds").splitlines(),   # the server box's copy of that record (deploy_ssh)
             "msgs": [l for l in rd("messages.log").splitlines() if l.startswith("message |")],
             "pending_files": sorted(p.name for p in (d / "releases/pending-verify").iterdir()) if (d / "releases/pending-verify").is_dir() else [],
             "pending_at_view": rd("pending_at_view").split(), "pending_at_deploy": rd("pending_at_deploy").split(), "fd7": rd("fd7").strip(),
@@ -663,6 +674,11 @@ def fast(name, **kw):   # an open deploy gate: the live checkout at BASE (an anc
     elif kw["runs"] != "not json" and not noreach: kw["runs"] = json.dumps([*json.loads(kw["runs"]), GOOD_RUN])
     return scenario(name, **{**dict(base=BASE, history=HIST, heads=BASE, lastgood=GOOD, good=GOOD), **kw})
 def red(s): return [m for m in s["msgs"] if "FAILED" in m]
+def ssh_all(s): return (s["dir"] / "ssh.log").read_text().splitlines() if (s["dir"] / "ssh.log").exists() else []   # every ssh the release made
+def ssh_calls(s): return [l for l in ssh_all(s) if "deploy.sh" in l]   # the deploys and rollbacks
+def records(s): return [l for l in ssh_all(s) if "last-good" in l]     # the copies of the last-good record
+def written(s): return [m.group(1) for l in records(s) for m in [re.search(r'printf "%s\\n" ([0-9a-f]+) >', l)] if m]   # the commit each copy asked the server box to write
+def not_copied(s): return [m for m in s["msgs"] if "was NOT copied" in m]
 def lock_views(s): return (s["dir"] / "lock_at_view").read_text().split() if (s["dir"] / "lock_at_view").exists() else []
 NEWPR = "b0b0000000000000000000000000000000000b0b"
 MD = "diff --git a/docs/x.md b/docs/x.md\n--- a/docs/x.md\n+++ b/docs/x.md\n@@ -1 +1 @@\n-old\n+new"

@@ -1759,15 +1759,14 @@ SSHH = "deploy-host"
 SSH_FWD = f"-o BatchMode=yes -o ConnectTimeout=15 {SSHH} cd ~/stackshot && DEPLOY_TO={MERGE} ./deploy.sh"
 SSH_RB = (f'-o BatchMode=yes -o ConnectTimeout=15 {SSHH} cd ~/stackshot && L="$(python3 stackshot/core/config.py state releases)/deploy.lock" && mkdir -p "$(dirname "$L")" && '
           f'exec flock "$L" env DEPLOY_LOCK_FILE="$L" DEPLOY_ROLLBACK=1 DEPLOY_TO={GOOD} ./deploy.sh')
-def ssh_calls(s): return (s["dir"] / "ssh.log").read_text().splitlines() if (s["dir"] / "ssh.log").exists() else []
 def restarts(s): return [l for l in ((s["dir"] / "systemctl.log").read_text().splitlines() if (s["dir"] / "systemctl.log").exists() else []) if " restart " in f" {l} "]
 s = fast("ssh-unset", merge="ok", localdiff="stackshot/fleet/puller.py")
 check("deploy_ssh unset: the deploy runs here (one deploy, pinned), no ssh call, this checkout is not moved and nothing is restarted: a one-box install is as before",
-      s["rc"] == 0 and s["deploys"] == [MERGE] and ssh_calls(s) == [] and "merge --ff-only" not in s["git"] and "reset --keep" not in s["git"] and restarts(s) == [] and "over ssh" not in s["out"], (s["rc"], s["deploys"], ssh_calls(s), s["git"][-300:]))
+      s["rc"] == 0 and s["deploys"] == [MERGE] and ssh_all(s) == [] and "merge --ff-only" not in s["git"] and "reset --keep" not in s["git"] and restarts(s) == [] and "over ssh" not in s["out"], (s["rc"], s["deploys"], ssh_calls(s), s["git"][-300:]))
 s = fast("ssh-unset-rb", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", localdiff="stackshot/fleet/puller.py")
-check("deploy_ssh unset: a rollback is also local, under the lock, no ssh call", s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and s["locks"] == ["held", "held"] and ssh_calls(s) == [] and "reset --keep" not in s["git"], (s["rc"], s["deploys"], s["locks"], ssh_calls(s)))
+check("deploy_ssh unset: a rollback is also local, under the lock, no ssh call", s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and s["locks"] == ["held", "held"] and ssh_all(s) == [] and "reset --keep" not in s["git"], (s["rc"], s["deploys"], s["locks"], ssh_calls(s)))
 s = scenario("ssh-cfg-missing", merge="ok", checks="pending,pass", deploy_ssh=SSHH, deploy_ssh_cfg="missing", extra={"SALA_CODEX_REVIEW": "off"})
-check("a config.py that predates the key reads as unset: the deploy runs here", s["rc"] == 0 and s["deployed"] and ssh_calls(s) == [], (s["rc"], ssh_calls(s)))
+check("a config.py that predates the key reads as unset: the deploy runs here", s["rc"] == 0 and s["deployed"] and ssh_all(s) == [], (s["rc"], ssh_all(s)))
 s = fast("ssh-fwd", merge="ok", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py,docs/x.md")
 check("deploy_ssh set: the deploy is one ssh call, BatchMode and a 15 s connect timeout, the host, the checkout there and DEPLOY_TO pinned to the merge; deploy.sh ran once, on the far side of it",
       s["rc"] == 0 and ssh_calls(s) == [SSH_FWD] and s["deploys"] == [MERGE] and "deploying on deploy-host over ssh" in s["out"], (s["rc"], ssh_calls(s), s["deploys"], s["out"][-400:]))
@@ -1805,7 +1804,9 @@ check("deploy_ssh set, deploy.sh itself fails over there: its exit status and la
       s["rc"] == 1 and s["deploys"] == [MERGE] and len(red(s)) == 1 and "healthz did not answer" in red(s)[0] and "merge --ff-only" not in s["git"] and restarts(s) == [], (s["rc"], s["deploys"], s["msgs"], s["git"][-200:]))
 s = fast("ssh-badhost", merge="ok", deploy_ssh="-oProxyCommand=evil")
 check("deploy_ssh that is not a host name (an option): the deploy is refused before any ssh call, merged and not live",
-      s["rc"] == 1 and ssh_calls(s) == [] and s["deploys"] == [] and len(red(s)) == 1 and "is not an ssh host name" in red(s)[0], (s["rc"], ssh_calls(s), s["msgs"]))
+      s["rc"] == 1 and ssh_all(s) == [] and s["deploys"] == [] and len(red(s)) == 1 and "is not an ssh host name" in red(s)[0], (s["rc"], ssh_all(s), s["msgs"]))
+check("…and the record is not copied to it either: no ssh at all, one message that says why",
+      ssh_all(s) == [] and len(not_copied(s)) == 1 and "is not an ssh host name" in not_copied(s)[0], (ssh_all(s), s["msgs"]))
 s = fast("ssh-rb", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py")
 check("deploy_ssh set, main fails: the rollback is a second ssh call, DEPLOY_ROLLBACK=1 and DEPLOY_TO the last good commit, inside a flock of the far side's own deploy lock",
       s["rc"] == 1 and ssh_calls(s) == [SSH_FWD, SSH_RB] and s["deploys"] == [MERGE, f"rollback {GOOD}"], (s["rc"], ssh_calls(s), s["deploys"], s["out"][-500:]))
@@ -1821,6 +1822,109 @@ s = fast("ssh-rb-dirty", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}"
 check("deploy_ssh set, main fails, the rollback ran over there but this checkout cannot follow (the reset fails): the server is rolled back, the report is red as for a rollback and says this checkout could not follow, and the queue pause is the rollback's own",
       s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and "FAILED at main's tests: rolled back to 600d000" in red(s)[0] and "but this checkout is at" in red(s)[0] and "could not be moved to 600d000 (exit status 128)" in red(s)[0]
       and "release.sh queue --resume goes on once it is clean" in red(s)[0] and "main still holds the failing merge" in red(s)[0] and lock_free(s), (s["rc"], s["deploys"], red(s)))
+
+# ---- 20. the server box's copy of the last-good record (record_sync, [release] deploy_ssh): the server there reads its own <state>/releases/last-good, so the record made here is copied over the same ssh, before `client.py released` asks and when the
+# release ends. In the harness "the other box" is the state folder remote/ (config.py under RT_REMOTE), seeded with an older record (STALE) so a copy that did not happen shows. Never a commit whose run did not pass; a copy that fails is loud and never fails the release.
+STALE = "57a1e000000000000000000000000000000057a1"
+SEED = {"remote/releases/last-good": STALE + "\n"}
+def split(name, **kw):
+    kw.setdefault("files", SEED)
+    return fast(name, **{"merge": "ok", "deploy_ssh": SSHH, **kw})
+def sync_lock(s): return s["dir"] / "releases/last-good.sync.lock"
+def where(s, what): return [i for i, w in enumerate(s["order"]) if w == what]
+
+s = fast("rec-unset", merge="ok")
+check("one box (deploy_ssh unset): a green release is as before: no ssh, no copy's lock file, no line about a copy, one green report, `released` asked once",
+      s["rc"] == 0 and ssh_all(s) == [] and not sync_lock(s).exists() and "last-good record on" not in s["log"] and "NOT copied" not in s["log"] and s["released"] == [RELEASED_ARGS + MERGE]
+      and len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS) and s["lastgood"] == MERGE, (s["rc"], ssh_all(s), s["msgs"], s["log"][-300:]))
+s = scenario("rec-unset-byhand", raw=["--copy-record"], lastgood=GOOD)
+check("one box: --copy-record says there is nothing to copy and does nothing", s["rc"] == 0 and "nothing to copy: [release] deploy_ssh is unset" in s["out"] and ssh_all(s) == [] and not sync_lock(s).exists() and s["msgs"] == [], (s["rc"], s["out"], ssh_all(s)))
+
+s = split("rec-green")
+check("two boxes, a green release: the server box's record is the one made here, the merge whose run on main passed", s["rc"] == 0 and s["lastgood"] == MERGE and s["remote_lastgood"] == MERGE, (s["rc"], s["lastgood"], s["remote_lastgood"], s["log"][-500:]))
+check("…it had the record when it was asked to settle the items (the copy comes before `client.py released`)", s["released"] == [RELEASED_ARGS + MERGE] and s["remote_at_released"] == [MERGE], (s["released"], s["remote_at_released"]))
+check("…copied twice, before `released` and when the release ends, both after the deploy, each over `ssh -o BatchMode=yes -o ConnectTimeout=15 <host>` in the checkout there",
+      written(s) == [MERGE, MERGE] and len(where(s, "record")) == 2 and where(s, "record")[0] > where(s, f"deploy:{MERGE}")[0] and all(l.startswith(f"-o BatchMode=yes -o ConnectTimeout=15 {SSHH} cd ~/stackshot && ") for l in records(s)), (written(s), s["order"], records(s)))
+WRITE = ('cd ~/stackshot && { git cat-file -e "M^{commit}" 2>/dev/null || { timeout 30 git fetch --quiet origin main >/dev/null 2>&1; git cat-file -e "M^{commit}" 2>/dev/null; } || { echo "the checkout there does not have that commit, and a fetch of main there did not bring it"; exit 1; }; } && '
+         'd="$(python3 stackshot/core/config.py state releases)" && mkdir -p "$d" && { printf "%s\\n" M > "$d/last-good.$$" && mv -f "$d/last-good.$$" "$d/last-good" || { rm -f "$d/last-good.$$"; echo "the record could not be written there"; exit 1; }; }').replace("M", MERGE)
+check("…the command there writes only a commit that checkout knows, beside the record and moved over it (a reader never sees half of it), in the state folder its own config names",
+      records(s)[:1] == [f"-o BatchMode=yes -o ConnectTimeout=15 {SSHH} {WRITE}"] and sorted(p.name for p in (s["dir"] / "remote/releases").iterdir()) == ["last-good"], (records(s)[:1], sorted(p.name for p in (s["dir"] / "remote/releases").iterdir())))
+check("…a checkout that has the commit is not fetched, one green report and no other message, the log says what the server box holds",
+      not (s["dir"] / "remote-fetches").exists() and len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS) and f"last-good record on {SSHH}: 0106c0d" in s["log"], (s["msgs"], s["log"][-300:]))
+check("…the copy's ssh holds none of the release's descriptors (3 to 9, its own lock included), and no lock is left held",
+      s["record_fds"] == ["none", "none"] and lock_free(s) and sync_lock(s).exists() and file_free(sync_lock(s)), (s["record_fds"], lock_free(s)))
+
+s = scenario("rec-main-first", merge="ok", checks="pending,pass", deploy_ssh=SSHH, files=SEED, extra={"SALA_CODEX_REVIEW": "off"})
+check("two boxes, the deploy waited for main's tests: the record made before the deploy reaches the server box after it, before `released` is asked",
+      s["rc"] == 0 and "not deployed at the merge yet" in s["log"] and s["lastgood"] == s["deploy_to"] != "" and s["remote_lastgood"] == s["deploy_to"] and s["remote_at_released"] == [s["deploy_to"]] and where(s, "record")[0] > where(s, f"deploy:{s['deploy_to']}")[0],
+      (s["rc"], s["lastgood"], s["deploy_to"], s["remote_lastgood"], s["remote_at_released"], s["order"]))
+
+s = split("rec-rollback", main="fail", heads=f"{BASE},{BASE},{MERGE}")
+check("two boxes, main fails and the deploy is rolled back: the server box reads the record made here, the last good commit, copied after the rollback; the failing merge was never copied",
+      s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and s["lastgood"] == GOOD and s["remote_lastgood"] == GOOD and written(s) == [GOOD] and where(s, "record")[0] > where(s, f"deploy:{GOOD}")[0] and s["released"] == [] and len(red(s)) == 1,
+      (s["rc"], s["deploys"], s["remote_lastgood"], written(s), s["order"], s["msgs"]))
+s = split("rec-rollback-fail", main="fail", heads=f"{BASE},{BASE},{MERGE}", rollback_fail="1")
+check("two boxes, the rollback itself fails: the server box still gets the record, never the failing merge", s["rc"] == 1 and "the rollback to 600d000 failed" in red(s)[-1] and s["remote_lastgood"] == GOOD and written(s) == [GOOD], (s["rc"], s["remote_lastgood"], written(s), s["msgs"]))
+s = split("rec-deploy-fail", deploy_fail="1")
+check("two boxes, the deploy fails: the server box gets the record as it stands (the last good commit), not the merge", s["rc"] == 1 and s["remote_lastgood"] == GOOD and written(s) == [GOOD] and len(s["msgs"]) == 1, (s["rc"], s["remote_lastgood"], written(s), s["msgs"]))
+s = split("rec-main-unread", main="pending", extra={"RELEASE_CAP_MAIN": "60"})
+check("two boxes, main's run is not read in time: nothing new is recorded here and the server box gets only the old last good commit, never the unread merge",
+      s["rc"] == 1 and "NOT rolled back" in red(s)[0] and s["lastgood"] == GOOD and s["remote_lastgood"] == GOOD and written(s) == [GOOD] and s["released"] == [], (s["rc"], s["lastgood"], s["remote_lastgood"], written(s), s["msgs"]))
+s = split("rec-checks-fail", checks="fail")
+check("two boxes, a release that fails before its merge still brings the server box up to date when it ends (a copy that failed earlier is made good by the next release)",
+      s["rc"] == 1 and s["deploys"] == [] and s["remote_lastgood"] == GOOD and written(s) == [GOOD] and len(s["msgs"]) == 1 and len(red(s)) == 1, (s["rc"], s["remote_lastgood"], written(s), s["msgs"]))
+s = split("rec-recovery", runs=RUNS67, pending=PEND, main6="pass")
+check("two boxes, an earlier release's unread run is found passed: the server box has that commit when that PR's items are asked about, then this release's merge",
+      s["rc"] == 0 and s["released"][0].endswith("/pull/26 | --sha | " + BASE) and s["remote_at_released"] == [BASE, MERGE] and s["remote_lastgood"] == MERGE and written(s) == [BASE, MERGE, MERGE] and set(s["record_fds"]) == {"none"},
+      (s["rc"], s["released"], s["remote_at_released"], written(s), s["record_fds"]))
+
+s = split("rec-fail", record_fails="99")
+check("the copy fails every time: the release is still green and asks `released`; this box's record is the merge, the server box's is untouched",
+      s["rc"] == 0 and red(s) == [] and any(m.endswith(GREEN_ARGS) for m in s["msgs"]) and s["released"] == [RELEASED_ARGS + MERGE] and s["lastgood"] == MERGE and s["remote_lastgood"] == STALE and s["remote_at_released"] == [STALE], (s["rc"], s["msgs"], s["remote_lastgood"], s["released"]))
+check("…and it is loud: a log line for each try, and one message (not one per try) naming the release, the box, the commit, ssh's own words, what is affected and the two commands that mend it",
+      len(records(s)) == 2 and s["log"].count("the last-good record was NOT copied to deploy-host") >= 2 and len(not_copied(s)) == 1 and all(w in not_copied(s)[0] for w in ("[release] PR #23:", "(deploy-host)", "0106c0d was not written there (exit status 255)", "Connection timed out", "settles nothing merged after it", "release.sh --copy-record", "client.py sweep-released"))
+      and len(s["msgs"]) == 2, (records(s), s["msgs"], s["log"][-600:]))
+s = split("rec-fail-once", record_fails="1")
+check("the copy fails once: the copy when the release ends brings the server box up to date, and the failure was still said once",
+      s["rc"] == 0 and s["remote_at_released"] == [STALE] and s["remote_lastgood"] == MERGE and len(not_copied(s)) == 1, (s["remote_at_released"], s["remote_lastgood"], s["msgs"]))
+s = split("rec-lacks", remote_lacks=MERGE)
+check("the server box's checkout does not have the recorded commit (a record can be ahead of the deploy): it fetches main once and writes it",
+      s["rc"] == 0 and s["remote_lastgood"] == MERGE and (s["dir"] / "remote-fetches").read_text().split() == ["fetch"] and not_copied(s) == [], (s["remote_lastgood"], s["msgs"]))
+s = split("rec-lacks-nofetch", remote_lacks=MERGE, remote_fetch_fail="1")
+check("…and when the fetch does not bring it, nothing is written there (a server never reads a record it cannot resolve): said, with the reason, the release green",
+      s["rc"] == 0 and s["remote_lastgood"] == STALE and len(not_copied(s)) == 1 and "does not have that commit" in not_copied(s)[0] and red(s) == [], (s["remote_lastgood"], s["msgs"]))
+s = split("rec-hang", record_hang="1", extra={"RELEASE_RECORD_TIMEOUT": "2"})
+check("a copy that never answers is stopped after RELEASE_RECORD_TIMEOUT: said as failed (status 124), the release goes on to `released` and ends green",
+      s["rc"] == 0 and s["secs"] < 50 and s["remote_lastgood"] == STALE and s["released"] == [RELEASED_ARGS + MERGE] and len(not_copied(s)) == 1 and "(exit status 124)" in not_copied(s)[0], (s["rc"], s["secs"], s["msgs"], s["remote_lastgood"]))
+s = split("rec-nowrite", files={"remote/releases": "a file where the state folder goes\n"})
+check("the server box cannot write the record: said as failed, nothing else changed", s["rc"] == 0 and len(not_copied(s)) == 1 and "0106c0d was not written there (exit status 1)" in not_copied(s)[0] and (s["dir"] / "remote/releases").read_text() == "a file where the state folder goes\n", (s["rc"], s["msgs"]))
+s = split("rec-unreadable", lastgood="not-a-commit", checks="fail")
+check("a record here that is not a commit is not copied: no ssh for it, the server box keeps its own, and it is said",
+      records(s) == [] and s["remote_lastgood"] == STALE and len(not_copied(s)) == 1 and "cannot read as a commit" in not_copied(s)[0], (records(s), s["remote_lastgood"], s["msgs"]))
+s = scenario("rec-none", merge="ok", checks="fail", deploy_ssh=SSHH, files=SEED)
+check("no record here yet: nothing to copy, nothing said, the server box's file left alone", s["rc"] == 1 and records(s) == [] and s["remote_lastgood"] == STALE and not_copied(s) == [] and "NOT copied" not in s["log"], (s["rc"], records(s), s["msgs"]))
+s = scenario("rec-byhand", raw=["--copy-record"], deploy_ssh=SSHH, lastgood=GOOD, files=SEED)
+check("--copy-record copies this box's record to the server box now, with no release and no message",
+      s["rc"] == 0 and s["remote_lastgood"] == GOOD and written(s) == [GOOD] and f"last-good record on {SSHH}: 600d000" in s["out"] and s["msgs"] == [] and s["deploys"] == [] and s["gh"] == "", (s["rc"], s["out"], s["msgs"]))
+held = open(s["dir"] / "releases/last-good.sync.lock", "a"); fcntl.flock(held, fcntl.LOCK_EX); copied = threading.Event(); waited = []
+def newer_record_meanwhile():   # once the copy below waits on the lock (a waiter /proc/locks shows with this file's inode), the record moves on, then the lock is let go
+    ino = f":{os.fstat(held.fileno()).st_ino} "
+    end = time.time() + 60
+    while time.time() < end and not copied.is_set():
+        if any("->" in l and ino in l for l in open("/proc/locks")): waited.append(1); break
+        time.sleep(0.05)
+    (s["dir"] / "releases/last-good").write_text(MERGE + "\n"); fcntl.flock(held, fcntl.LOCK_UN)
+mover = threading.Thread(target=newer_record_meanwhile); mover.start()
+s2 = scenario("rec-byhand-held", raw=["--copy-record"], deploy_ssh=SSHH, reuse=s)
+copied.set(); mover.join(); held.close()
+check("one copy at a time, and the record is read once the copy has its turn: a copy that waited for another sends the record as it stands then, never an older one",
+      s2["rc"] == 0 and waited == [1] and s2["remote_lastgood"] == MERGE and written(s2) == [GOOD, MERGE], (s2["rc"], waited, s2["remote_lastgood"], written(s2), s2["out"]))
+s = scenario("rec-byhand-fail", raw=["--copy-record"], deploy_ssh=SSHH, lastgood=GOOD, files=SEED, record_fails="99")
+check("--copy-record that fails exits 1 and says why on the terminal, with no message", s["rc"] == 1 and "was NOT copied to deploy-host" in s["out"] and "Connection timed out" in s["out"] and s["msgs"] == [] and s["remote_lastgood"] == STALE, (s["rc"], s["out"], s["msgs"]))
+s = scenario("rec-byhand-norecord", raw=["--copy-record"], deploy_ssh=SSHH)
+check("--copy-record with no record yet: says so, no ssh", s["rc"] == 0 and "nothing to copy: no last-good record" in s["out"] and ssh_all(s) == [], (s["rc"], s["out"]))
+s = scenario("rec-byhand-usage", raw=["--copy-record", "now"], deploy_ssh=SSHH, lastgood=GOOD)
+check("--copy-record takes no argument: usage, exit 2, no ssh", s["rc"] == 2 and "usage: release.sh --copy-record" in s["out"] and ssh_all(s) == [], (s["rc"], s["out"]))
 
 long = [f"{n} ({k})" for n, k in POLLS if k > MAX_POLLS]
 check(f"no scenario polls more than {MAX_POLLS} times (one that waits main's run out to the 3 h cap: pass RELEASE_CAP_MAIN, as most do)", not long, long)
