@@ -17,6 +17,7 @@
 #     (`release.sh --group N N...`, which the release queue starts itself): one deploy and one `done:` line per PR; one queued PR is released alone. GitHub's queue is the default (no host file, or mode off).
 #   - A PR whose branch is behind main is not touched: the merge queue builds it on main's tip. A PR that conflicts with main only on the generated tests/tool_text.snapshot.json is mended (2a below).
 #     Watch a release with `release.sh --status N`: the log's newest line says what is waited for.
+#   - With [release] deploy_ssh set, a release copies its last-good record to the server box itself; after a copy that failed, `release.sh --copy-record` does it now (4c-record).
 #   - Auto mode also refuses a loop of release.sh runs.
 #
 #   ./release.sh <pr> [--recycle | --no-recycle]
@@ -124,6 +125,11 @@
 #                                 deployed commit (git reset --keep for a rollback), and stackshot-puller.service is restarted when the move touched the puller's files; stackshot.service and the other units are never started here. A checkout with local
 #                                 changes, or one that cannot move, is a failed release (the server is live at the commit, this checkout is not): the queue is paused and the red report says so, and `release.sh queue --resume` goes on once the checkout is clean
 #                                 (a rollback that this checkout could not follow keeps its own red report, with that line added);
+#                                 4c-record. THE SERVER BOX'S COPY OF THE LAST-GOOD RECORD (record_sync, only with [release] deploy_ssh): the server runs on that host and reads ITS OWN <state>/releases/last-good, so the record made here is copied
+#                                 there over the same ssh: before step 6 asks the server (so after the deploy that put the commit there) and when a release or a group release ends, however it ends (a rollback, a failed deploy and a failed check
+#                                 included). The copy is whatever this record holds at that moment, read under $LAST_GOOD.sync.lock so a later copy never carries an older value: a commit record_good wrote, so one whose run on main passed. The host
+#                                 writes it only for a commit its checkout knows (it fetches main once when it does not: a record can be ahead of the deploy). The whole ssh is cut after RELEASE_RECORD_TIMEOUT s (90). A copy that fails is a log line
+#                                 and one message to report_to, never a failed release; every later copy tries again, and `release.sh --copy-record` does it by hand. Unset (one box): no copy, no ssh, no lock file;
 #                                 4e. THE PICKER'S INDEX (suitemap_warm_start, `--warm`): right after a deploy (not after a release that found its merge already live), [release] suitemap_warm_cmd is started on the deployed
 #                                 commit in a transient user unit of its own (stackshot-suitemap-warm-<sha>, output <state>/releases/suitemap-warm-<sha>.log) and never waited for: the unit runs `release.sh --warm <sha>`,
 #                                 which makes a worktree of the commit, runs the command in it (one at a time, stopped after RELEASE_WARM_TIMEOUT, 1800 s) and removes the worktree. The command is the test runner's: it sends the
@@ -231,6 +237,8 @@ GH_TTL="${RELEASE_GH_TTL:-45}"           # seconds an answer of those reads is r
 PENDING_DIR="$LOGDIR/pending-verify"      # one record per deploy whose main run is not read yet: a watch that is killed leaves it, the next release start finishes the job
 PENDING_FILE=""; pv_block=""
 LAST_GOOD="$LOGDIR/last-good"            # the newest commit whose run on main passed: what a failing main run rolls back to; one sha, written by record_good
+RECORD_TIMEOUT="${RELEASE_RECORD_TIMEOUT:-90}"   # seconds the copy of $LAST_GOOD to [release] deploy_ssh may take (record_sync): the 15 s connect, a 30 s fetch over there and the write fit inside; past it the ssh is stopped and the copy counts as failed
+SYNC_WHO=""; SYNC_TOLD=""                # record_sync's message: which release it names, and whether this process has sent it (one a process)
 QUEUE="$LOGDIR/queue"                    # the release queue (release.sh queue): PR numbers, one a line, in order; $QUEUE.lock its flock, $QUEUE.started the PRs whose release the queue started, $QUEUE.paused why it is paused, $QUEUE.log what it did
 MQ_ON_ADD_TIMEOUT="${RELEASE_MQ_ON_ADD_TIMEOUT:-60}"   # seconds `salamander mq add` may take in mode on (it starts the queue's driver unit, and a refusal is an answer, so a slow one is an error: THE TWO MERGE QUEUES at the top)
 MQ_WAIT_CAP="${RELEASE_MQ_WAIT_CAP:-18000}"       # seconds a group release waits for the salamander merge queue's verdicts (5 h: a queue run takes up to 100 min, and a PR behind a failure in the chain is tested again after the restack)
@@ -272,6 +280,7 @@ released() {  # $1 = a PR, $2 = its merge commit: main's full run passed on it a
                # with no session turn; one with another open step has the release step ticked and its mover told once, a real notice (the green report is log-only).
                # Never fails the run; what it did, and why an item was left alone, is a log line
     local out
+    record_sync   # deploy_ssh: the server reads its own copy of the record, so it has to have it before it is asked
     if out="$(python3 stackshot/fleet/client.py released --pr "https://github.com/$REPO/pull/$1" --sha "$2" 2>&1 9>&- 8>&- 7>&- 6>&-)"; then say "items of PR #$1: $(echo "$out" | sed 's/^stackshot: //' | paste -sd ';' -)"
     else say "the items of PR #$1 were not settled: $(echo "$out" | tail -1 | sed 's/^stackshot: //')"; fi
     return 0
@@ -611,6 +620,29 @@ record_good() {   # $1 = a commit main's run passed on. Read, compare and write 
         *) say "could not write $LAST_GOOD"; tell "[release] PR #$pr: could not write $LAST_GOOD, so ${1:0:7}, whose run on main passed, is not recorded as the last good commit" ;;
     esac
     return $rc
+}
+# record_sync (4c-record): copy $LAST_GOOD to the host [release] deploy_ssh names, whose server reads its own copy (service/released_live.py). Called before client.py released and when a release ends. 0 that host holds the record, or there is
+# nothing to copy (deploy_ssh unset: this box's file is the one the server reads; or no record yet). 1 it does not: a log line, and one message a process. It never changes this box's record and never fails a release.
+# The record is read inside the flock on $LAST_GOOD.sync.lock, held until the host has answered, so of two releases the later write is never the older record. Over there the write is atomic and only for a commit that checkout knows, so the
+# server never reads a record it cannot resolve; the one fetch is bounded below this ssh's own limit, so a write cannot land after this copy was given up.
+record_sync() {
+    [ -n "$DEPLOY_SSH" ] || return 0
+    local out rc=0
+    out="$( (
+        flock -w "$((RECORD_TIMEOUT + 30))" 5 || { echo "$LAST_GOOD.sync.lock was not free"; exit 1; }
+        read_good; case $? in 1) exit 0 ;; 2) echo "$LAST_GOOD holds something this checkout cannot read as a commit"; exit 1 ;; esac
+        [[ "$DEPLOY_SSH" =~ ^[A-Za-z0-9_][A-Za-z0-9._@:-]*$ ]] || { echo "[release] deploy_ssh = \"$DEPLOY_SSH\" is not an ssh host name"; exit 1; }
+        c="\"$good^{commit}\""
+        cmd='cd ~/stackshot && { git cat-file -e '"$c"' 2>/dev/null || { timeout 30 git fetch --quiet origin main >/dev/null 2>&1; git cat-file -e '"$c"' 2>/dev/null; } || { echo "the checkout there does not have that commit, and a fetch of main there did not bring it"; exit 1; }; } && d="$(python3 stackshot/core/config.py state releases)" && mkdir -p "$d" && { printf "%s\n" '"$good"' > "$d/last-good.$$" && mv -f "$d/last-good.$$" "$d/last-good" || { rm -f "$d/last-good.$$"; echo "the record could not be written there"; exit 1; }; }'
+        said="$(timeout -k 5 "$RECORD_TIMEOUT" ssh -o BatchMode=yes -o ConnectTimeout=15 "$DEPLOY_SSH" "$cmd" </dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-)" || { rc=$?; echo "${good:0:7} was not written there (exit status $rc): $(echo "$said" | tail -1)"; exit 1; }
+        echo "${good:0:7}"
+    ) 2>&1 5>>"$LAST_GOOD.sync.lock" )" || rc=$?
+    out="$(echo "$out" | tail -1)"
+    if [ $rc -eq 0 ]; then [ -z "$out" ] || say "last-good record on $DEPLOY_SSH: $out"; return 0; fi
+    say "the last-good record was NOT copied to $DEPLOY_SSH: $out"
+    [ -n "$SYNC_TOLD" ] || { SYNC_TOLD=1
+        tell "[release] $SYNC_WHO: the last-good record was NOT copied to the server box ($DEPLOY_SSH): $out. Until it is, the server reads an older record and settles nothing merged after it. A later copy in this or the next release tries again; $HERE/release.sh --copy-record does it now, and client.py sweep-released then settles what was refused"; }
+    return 1
 }
 failed_runs() {   # the main push runs that FAILED on a commit in $1..$2: "<run> <sha>" per line and a last line "ok"; "unreadable" when GitHub's answer cannot be read, its pages (up to 10 of 100
                   # runs, newest first) do not reach a run at or before $1, or a run in the range was cancelled after its job started (a "cancelled <run> <sha>" line before it: unknown); a caller takes anything but a last line "ok" (empty, a crash) as unreadable too
@@ -1571,6 +1603,7 @@ run_group() {   # $@ = the PRs of one group, in queue order (two or more, at mos
         tell "[release] $who FAILED at $1: $2$q_note · log $glog"
         exit 1
     }
+    SYNC_WHO="the group release of PRs $names"; trap record_sync EXIT   # deploy_ssh: however this release ends, the server box gets the record (4c-record); a subshell does not run it
     mq_settle() {   # $1 = a PR: let go of it in the queue (best effort). Its marker goes once the queue no longer holds it: dropped, or "is not in the line" (never added: the add was refused, or it settled already), or no active entry in `mq status`
         local k="$1" o rc st act
         o="$(timeout 20 salamander mq drop "$k" --repo "$REPO" 2>&1 4>&- 6>&- 7>&- 8>&- 9>&-)"; rc=$?
@@ -1884,6 +1917,7 @@ run() {
     say "release of PR #$pr starts in $HERE ($REPO)"
     ! q_is_started "$pr" || qstart=1   # the queue started this release (it wrote the mark before the start): its pause and its pre-enqueue stop apply to it
     fail() { say "FAILED at $1: $2"; queue_after_fail "$1"; tell "[release] PR #$pr FAILED at $1: $2$q_note · log $log"; exit 1; }
+    SYNC_WHO="PR #$pr"; trap record_sync EXIT   # deploy_ssh: however this release ends, the server box gets the record (4c-record); a subshell does not run it
     recover_pending   # a deploy of an earlier release whose process ended before main's run was read (killed, the box restarted): looked at first
     local mqmode; mqmode="$(mq_host_mode)"   # THE TWO MERGE QUEUES: only `on` changes this release (off, shadow, no file and a file that does not read are GitHub's queue, below)
     mq_line_check() {   # every mode: a PR the salamander merge queue holds (the marker of a group release) is never merged here, whatever the host file says now (a mode changed mid-group does not take the PR out of that queue)
@@ -2167,9 +2201,14 @@ case "${1:-}" in
             || { echo "could not start stackshot-release-$1 (systemd-run failed): nothing was started" >&2; exit 1; }
         echo "started stackshot-release-$1: hands the PRs $* to the merge queue as one group, deploys what it merges once, and reports to $REPORT_TO · log $LOGDIR/group-$1.log (and each PR's pr-N.log)"; exit 0 ;;
     queue) shift; queue_cmd "$@"; exit $? ;;
+    --copy-record)   # [release] deploy_ssh: copy the last-good record to the server box now (4c-record; a release does it on its own: this is for a copy that failed with no release coming)
+        [ $# -eq 1 ] || { echo "usage: release.sh --copy-record" >&2; exit 2; }
+        [ -n "$DEPLOY_SSH" ] || { echo "nothing to copy: [release] deploy_ssh is unset, so the server reads this box's record"; exit 0; }
+        [ -s "$LAST_GOOD" ] || { echo "nothing to copy: no last-good record in $LAST_GOOD"; exit 0; }
+        SYNC_TOLD=1; record_sync; exit $? ;;   # by hand: the output is the report, no message
     ''|-h|--help) sed -n '2,/^set -uo pipefail/{/^set -uo pipefail/!p}' "$0"; exit 2 ;;   # the header comment, up to the first line of code
     *)
-        pr="$1"; [[ "$pr" =~ ^[0-9]+$ ]] && [[ "${2:-}" =~ ^(|--recycle|--no-recycle)$ ]] && [ $# -le 2 ] || { echo "usage: release.sh <pr> [--recycle | --no-recycle] | --status [pr] | --run <pr> [--recycle | --no-recycle] | --pick <pr> | --pick-files <file>... | queue N [N...] | queue --list | queue --drop N | queue --resume | --group N N..." >&2; sed -n '/^# How to run it/,/^#   - Auto mode/p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+        pr="$1"; [[ "$pr" =~ ^[0-9]+$ ]] && [[ "${2:-}" =~ ^(|--recycle|--no-recycle)$ ]] && [ $# -le 2 ] || { echo "usage: release.sh <pr> [--recycle | --no-recycle] | --status [pr] | --run <pr> [--recycle | --no-recycle] | --pick <pr> | --pick-files <file>... | queue N [N...] | queue --list | queue --drop N | queue --resume | --group N N... | --copy-record" >&2; sed -n '/^# How to run it/,/^#   - Auto mode/p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
         if systemctl --user is-active --quiet "stackshot-release-$pr.service" 2>/dev/null; then echo "release of PR #$pr is already running (release.sh --status $pr)"; exit 1; fi
         systemd-run --user --quiet --collect --unit "stackshot-release-$pr" -p WorkingDirectory="$HERE" \
             --setenv=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" "$HERE/release.sh" --run "$pr" ${2:+"$2"} \
