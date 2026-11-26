@@ -31,6 +31,8 @@ from stackshot.model import steps as _steps   # the checklist behind next: done,
 from stackshot.waits import dated_wait as _dw   # a stored doing item whose open steps are all dated for a later day reads as waiting (dated_wait.py)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
 from stackshot.model import queued as _queued   # a mover busy on another item: its other items on an agent read waiting, queued behind it (queued.py)
+from stackshot.web import i18n as _i18n   # the languages the pages' string table names (LANGS)
+from stackshot.web.ui import kit as _kit   # the state words: the heading the home page draws over each list (kit.title)
 from stackshot.web import home as _home   # the home page's three lists on that model: Your move, On agent, Waiting (home.py); board.md and the brief count from them
 from stackshot.audit import hourly_log as _hlog   # the hourly audit lines written on an item (History lines)
 from stackshot.waits import stall as _stall   # the steps of the stall pass written on an item (History lines)
@@ -64,6 +66,12 @@ def render_all(data_dir: str) -> dict:
 def your_move(data_dir: str) -> list:
     """The owner's whole Your move group, one dict per item (Board.your_move), for the client read `your-move`."""
     return Board(data_dir).your_move()
+
+
+def your_move_group() -> dict:
+    """The name of the Your move group in each language of the string table, {code: the heading the home page draws over the list}. It is `kit.title`, the lookup the page itself uses, asked once per language, so the
+    words are the page's own and none is copied here. A language with no catalog on this install gives what the page gives in that case: the English text."""
+    return {lang: _kit.title(_kit.YOUR_MOVE, lang) for lang in _i18n.LANGS}
 
 
 def receiver_type(st, k):

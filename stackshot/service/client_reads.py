@@ -435,11 +435,12 @@ def _client_items(key: str) -> tuple[int, str, str]:
 
 
 def _client_your_move() -> tuple[int, str, str]:
-    """`your-move`: every open item in the owner's Your move group, whoever the item's session mover is or whether it has one -> {"items": [{shown, subject, url, ask, updated}]}, in the order the home page draws the
+    """`your-move`: every open item in the owner's Your move group, whoever the item's session mover is or whether it has one -> {"items": [{shown, subject, url, ask, updated}], "group": {<language code>: <the group's name>}}, the items in the order the home page draws the
     group (the brief's first five lines are the head of the same list). The group is the renderer's own (`Board.your_move`, built on `home_pairs`, the call the home page, board.md and the brief all take their lists from), so
     this read has no selection rule of its own and cannot drift from them. `ask` is the open ask line, "" for an item with none; `updated` is the item's last write in epoch seconds. No cap: the group is as long as the queue,
-    and a row is a few hundred bytes. An empty group is `{"items": []}`."""
-    return 200, "application/json", json.dumps({"items": _hooks().rmod_your_move(str(_store.STORE))}, ensure_ascii=False)
+    and a row is a few hundred bytes. An empty group is `{"items": [], "group": {...}}`. `group` is the heading the home page draws over the list, in each language of the string table (`your_move_group`, the page's own
+    lookup asked once per language); a language with no catalog on the install gets the English text, as the page does."""
+    return 200, "application/json", json.dumps({"items": _hooks().rmod_your_move(str(_store.STORE)), "group": _hooks().rmod_your_move_group()}, ensure_ascii=False)
 
 
 def _then_label_raw(item: dict[str, Any]) -> str:

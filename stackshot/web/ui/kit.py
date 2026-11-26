@@ -43,14 +43,14 @@ def kind_of_outcome(oc: str) -> str:
     return _OF_OUTCOME.get(oc, CLOSED)
 
 
-def word(kind: str) -> str:
-    """The state word of a kind, as every page says it (in the request's language)."""
-    return _i18n.t(f"state.{kind}")
+def word(kind: str, lang: str | None = None) -> str:
+    """The state word of a kind, as every page says it (in the request's language, or in `lang` when one is given)."""
+    return _i18n.t(f"state.{kind}", lang)
 
 
-def title(kind: str) -> str:
-    """The heading and count-card word of one of the four lists (the state word of its kind, in the request's language)."""
-    return _i18n.t(f"state.{kind}")
+def title(kind: str, lang: str | None = None) -> str:
+    """The heading and count-card word of one of the four lists (the state word of its kind, in the request's language, or in `lang` when one is given)."""
+    return _i18n.t(f"state.{kind}", lang)
 
 
 def tag(kind: str) -> str:
