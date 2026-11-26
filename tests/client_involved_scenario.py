@@ -3,7 +3,8 @@
 Covers: an item matches when the session is its contact, when it is one of its observers and when it is both (one row); an item that names the session in neither, and a closed item that names it in both, are not in the answer; a held item is
 there with held true, and an item waiting on another open item too; the row's `list` is each of your-move, agents and waiting (the same word `items` gives for the item, and the Your move group of the home page's own renderer agrees); the
 rows come last write first (an item that stores no `updated` by its `state_updated`) and not in the store's order; a session is found as the board finds one for `items?key=`: by its name, its transcript id, its permanent id, an old name (an
-alias), whether the item stores a name or an id; the contact is the live one (a stored contact that is no front agent, and none stored, read as the project's -main agent); the row's fields are those of the `items` row for the same
+alias), whether the item stores a name or an id, and a name is matched whole and as written (a part of it, a longer name and other letter case name nobody); an item queued behind another of its mover reads waiting, and an item stored
+with the retired on-hold status is an open, held one; the session roles are built once for a read, with the queue rule on and off, and again at the next read, with the same answer as without that memo; the contact is the live one (a stored contact that is no front agent, and none stored, read as the project's -main agent); the row's fields are those of the `items` row for the same
 item under the same names and in the same format; `until` is the day a held item comes back (a parked item, a time wait, a wait on an open item with a backstop day, a doing item waiting for a stated wake), the day the board's own
 Waiting row shows, as stored in the instance's time zone, and null for an item that is not held, whatever date it stores, for a held one with no date and when the reading fails (a closed item with a date is not in the answer); `url` as `your-move` gives it, with and without a board address; `observers` are names, in the stored order and without repeats; no cap (more rows than `open-records` gives); an unknown key is
 `{"items": []}`; a blank, over-long or multi-line key is 400; the read writes nothing and changes no other read's answer; over HTTP: no token, a wrong token, the token in the query string, a Basic credential and a live caller's pass are 401, the
@@ -50,13 +51,18 @@ def check(name, cond, got=None):
     if not ok: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 
+from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.core import instance as _inst
+from stackshot.core import passmemo as _passmemo
 from stackshot.core import readonly as _ro
 from stackshot.core import store as _store
 from stackshot.fleet import client
 from stackshot.github import ghsync as _gh
+from stackshot.model import last_activity as _la
 from stackshot.model import model as _model
+from stackshot.projects import projects as _prj
+from stackshot.service import audit_ticks as _audit_ticks
 from stackshot.service import caller_pass as _cp
 from stackshot.service import client_reads as cr
 from stackshot.service import item_read as _item_read
@@ -204,6 +210,59 @@ check("a key that names nobody, and a session that is neither contact nor observ
 check("a blank key, a missing key, a key with a line break or a tab and a key over 200 characters are 400", lambda: all(cr._client_get("involved", p)[0] == 400 for p in ({"key": ""}, {"key": "   "}, {}, {"key": "a\nb"}, {"key": "a\tb"}, {"key": "x" * 201})), [cr._client_get("involved", p)[0] for p in ({"key": ""}, {}, {"key": "x" * 201})])
 check("the 400 is a plain line naming the key, as items gives it", lambda: cr._client_get("involved", {})[1] == "text/plain" and "key" in cr._client_get("involved", {})[2], cr._client_get("involved", {}))
 check("a key of 200 characters is a key: 200 {items: []}", lambda: inv("x" * 200) == (200, {"items": []}))
+
+# a name is matched whole, and as written
+check(f"a key that is only the start of stored names names nobody (`work` against `{A}` and `{B}`)", lambda: inv("work") == (200, {"items": []}), inv("work"))
+check(f"a key that a stored name is only the start of names nobody (`{A}-2`)", lambda: inv(A + "-2") == (200, {"items": []}), inv(A + "-2"))
+check(f"a key that is a stored name in other letter case names nobody (`{A.upper()}`)", lambda: inv(A.upper()) == (200, {"items": []}), inv(A.upper()))
+
+# the two readings a row's list also rests on: the queue rule and the retired on-hold status
+def queue_rule(on):
+    if on: _cfg.CFG.setdefault("model", {})["queued_behind"] = True
+    else: _cfg.CFG.get("model", {}).pop("queued_behind", None)
+    forget_queue()
+def forget_queue(): _audit_ticks._QUEUE_CACHE.update(at=0.0, map={})          # the queue map is kept for some seconds: the next read works it out again
+def roles_builds(call):
+    """How many times the session roles were built while `call` ran (anchors.session_roles reads the projects waiting for their page once per build)."""
+    n = [0]; real = _prj.with_pending
+    def counted(*a, **k):
+        if sys._getframe(1).f_code.co_name == "session_roles": n[0] += 1
+        return real(*a, **k)
+    _prj.with_pending = counted
+    try: call()
+    finally: _prj.with_pending = real
+    return n[0]
+put(50, subject="[home] the item a session has in hand", age=0.01, contact=A, mover=S, last_activity={"at": now0, "kind": _la.STATE_CHANGE, "what": "moved"})
+put(51, subject="[home] an idle item of the same session", age=2.1, contact=A, mover=S)
+put(52, status="on_hold", subject="[home] stored with the retired status", age=2.2, contact=A, mover=S)
+try:
+    queue_rule(False)
+    check("with the queue rule off the idle item of a busy session is an agent's", lambda: rows(A)[shown(51)]["list"] == "agents", rows(A).get(shown(51)))
+    queue_rule(True)
+    check("an item queued behind another of its mover is listed waiting, as `items?key=` lists it; it is not held and has no day, and the item in hand is the agents'",
+          lambda: (lambda u: u[shown(51)]["list"] == "waiting" == items_row(51, S)["list"] and u[shown(51)]["held"] is False and u[shown(51)]["until"] is None and u[shown(50)]["list"] == "agents")(rows(A)),
+          {n: rows(A).get(shown(n)) for n in (50, 51)})
+    queue_rule(False)
+    check("an item stored with the retired on-hold status is in the answer as an open item that is held, listed as `items?key=` lists it, with no day",
+          lambda: (lambda x, y: x["held"] is True and y["held"] is True and x["list"] == y["list"] == "waiting" and x["until"] is None)(rows(A)[shown(52)], items_row(52, S)), (rows(A).get(shown(52)), items_row(52, S)))
+    check("…and the read left its file as it was stored", lambda: json.loads((T / "store/a/52.json").read_text())["status"] == "on_hold")
+
+    # the session roles are worked out once for a read, not once for each item it looks at
+    check("the counter of role builds counts one build for each call outside a pass memo", lambda: not _passmemo.active() and roles_builds(lambda: [_anc.session_roles() for _ in range(3)]) == 3)
+    for on in (False, True):
+        queue_rule(on); word = "on" if on else "off"
+        def one(): forget_queue(); inv(A)
+        def two(): one(); one()
+        check(f"the session roles are built once for a read, however many open items it looks at (queue rule {word})", lambda: roles_builds(one) == 1, roles_builds(one))
+        check(f"…and once more for the next read: the memo ends with its request (queue rule {word})", lambda: roles_builds(two) == 2 and not _passmemo.active(), roles_builds(two))
+        def same():
+            forget_queue(); with_memo = cr._client_get("involved", {"key": A})
+            forget_queue(); without = cr._client_involved(A)
+            return with_memo == without and with_memo[0] == 200 and len(json.loads(with_memo[2])["items"]) == len(FOR_A) + 3
+        check(f"…and the answer is byte for byte the answer without the memo (queue rule {word})", same)
+finally:
+    queue_rule(False)
+    for n in (50, 51, 52): drop(n)
 
 # the read writes nothing and changes no other read
 def snap(): return {str(p): (p.read_bytes(), p.stat().st_mtime_ns) for p in sorted((T / "store").rglob("*")) if p.is_file()}

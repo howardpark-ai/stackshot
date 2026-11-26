@@ -5,6 +5,9 @@ What a machine's hooks read: the page registry, the brief, the rulebook, a page'
 surface that serves it); `_client_items`, `_client_involved` and `_client_item_facts` read the store once per call; `_wait_fields`, `_then_label_raw`, `_item_mover_model`, `_item_mover`, `_item_mover_label`, `_basis_wait_of` and
 `_item_list` are the readers of an item's mover, its `then`, its wait and its list that those two (and the wake passes, the update's hand-over and the tools that probe an item) share.
 
+A read that looks at every open item can ask for the session roles once per item (`involved`: its contact lookup; `your-move`: the queue rule's front-agent test, while the rule is on), so `_client_get` runs those two inside a pass
+memo (core/passmemo.py): the roles are worked out once for the request and dropped when it ends.
+
 A service module: it reads the store and writes nothing. What it still reaches in the surface (the rulebook text, the renderer's brief and words, the notice's ruling, the report of holds, the page's time, the board's
 ids as shown, the home page's list rule and its reading of a wait's end, the queue map and the time zone) comes through `Hooks` in service/passes_hooks.py, which web/wiring.py fills (web/server.py calls it at its import). A suite that replaces one of these functions sets it on this
 module (and `time` here, since this module reads its own clock).
@@ -26,6 +29,7 @@ from fastmcp.exceptions import ToolError
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.core import instance as _inst
+from stackshot.core import passmemo as _passmemo
 from stackshot.core import store as _store
 from stackshot.core.store import _item_files
 from stackshot.fleet import fleet as _fleet
@@ -107,7 +111,8 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
     if what == "items":
         return _client_items(str(params.get("key") or ""))
     if what == "involved":              # the open items a session is the contact of or an observer on, newest write first (client.py get involved <session>)
-        return _client_involved(str(params.get("key") or ""))
+        with _passmemo.scope():         # its contact lookup asks for the session roles once per open item: built once for the read
+            return _client_involved(str(params.get("key") or ""))
     if what == "item-facts":
         return _client_item_facts(str(params.get("key") or ""), str(params.get("ids") or ""))
     if what == "item-record":           # one item's stored record, as the file holds it (client.py get item-record <id>)
@@ -127,7 +132,8 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
         except ToolError as e:
             return 404, "text/plain", str(e)
     if what == "your-move":             # the owner's whole Your move group, the home page's own list with no cap (client.py get your-move)
-        return _client_your_move()
+        with _passmemo.scope():         # with the queue rule on, the group asks for the session roles once per item an agent moves: built once for the read
+            return _client_your_move()
     if what == "holds":                 # the open items on hold whose hold names no reason: read only, each mover releases its own
         return 200, "text/plain; charset=utf-8", _hooks().holds_report()
     if what == "inbox-holds":           # what is held on sessions' inboxes (fleet/inbox_holds.py): {holds: [{kind, key, origin, since, expires}]}, one key's with ?key=
@@ -491,10 +497,7 @@ def _client_involved(key: str) -> tuple[int, str, str]:
         if it.get("status") != "open":
             continue
         m = it.get("metadata") or {}
-        try:
-            contact = _contacts._contact_of(m)
-        except Exception:  # noqa: BLE001  — a contact that cannot be read names nobody
-            contact = ""
+        contact = _contacts._contact_of(m)
         observers = _observers_of(m)
         if not ((contact and is_me(contact)) or any(is_me(o) for o in observers)):
             continue
