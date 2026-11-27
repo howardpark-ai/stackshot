@@ -399,14 +399,26 @@ line sent again whole from before is not new), is exactly one sentence, "The ask
 only "now", "anymore" or a full stop after it) removes the ask, its options and his stored your-call, hands the item
 back to its author, says so in History and in the reply, and keeps his late answer as a comment. Any other new line or
 sentence in that write (a hedge, a label such as Note:, a quote, a question, another language) means no word, and a
-write with no sender counts for nothing. A decision whose proposal is being redrawn, or that waits on a number, is not on
-his move meanwhile, but this rule is narrow: only a `step` or a `next` that is ONE line holding exactly ONE sentence counts, and anything else keeps the ask (a second line or
-sentence, a header or list, any description write, a finished step, the options, said and draft text, a write that sets an ask). The sentence, after one "- " bullet or number, your own "name:" lead
-and before the full stop, must be, whole, one of these shapes: "I am|we are|I will|now|still" or a bare imperative with redraw|rebuild|redo|rework|redesign (also -ing) and
-"the|this|his|her|our" and mockup, proposal, options, design, ask, or "pick|ask|decision|question" before page or card, with "now", "again" or "from his pick" at most after it ("I am rebuilding the
-proposal now."); "the mockup is being rebuilt" or "will be" redrawn|rebuilt|redone|reworked|redesigned, with the same ending; a bare "is redrawn" only with ", then the pick goes back to him" or "so the ask
-waits for his answer" after it (a sentence that only reports the work finished never counts); or "not decided until the number is in", which must end its sentence. Any other word in the sentence keeps the ask: "for
-the CLI", "to use argparse", "next month", "in a branch", ", but the ask stands", "the ask button", "the options parser", or a bare "The page is being redrawn" (a page or card needs the decision named in front of it).
+write with no sender counts for nothing. A decision whose proposal is being redrawn, or that is not decided until the
+numbers are in, is not on his move meanwhile, but this rule is narrow: only a BARE call counts, one that carries nothing
+but the item id, your sender and exactly one of `step` or `next`, ONE line holding exactly ONE sentence. Any other
+parameter in the call keeps the ask, whatever it says (description, options, clear_options, draft, subject, goal, said,
+done, dropped, work, needs, mover, a wait field, any other), and so does a second line or sentence, a header or list,
+or a question. The sentence, after one "- " bullet or number, your own "name:" lead and before the full stop, must be,
+whole, one of these shapes: "I am|we are|I will|now|still" or a bare imperative with
+redraw|rebuild|redo|rework|redesign (also -ing) and "the|this|his|her|our" and mockup, proposal, options, design, ask,
+or "pick|ask|decision|question" before page or card, with "now" or "again" at most after it ("I am rebuilding the
+proposal now."); "the mockup is being rebuilt" or "will be" redrawn|rebuilt|redone|reworked|redesigned, with the same
+ending; a bare "is redrawn" only with ", then the pick goes back to him" or "so the ask waits for his answer" after it
+(a sentence that only reports the work finished never counts); or the number wait, whose head is the decision itself:
+"Not decided until the numbers are in.", "Nothing is decided until the number is in." or "The decision waits until the
+numbers are in." (the number is "the number" or "the replay|final|latest|new number", in or back, and ends the
+sentence; never a bare "until" fragment, a person, a pronoun or a possessive, or another kind of number). Work planned
+for after his pick ("redo the proposal from his pick") and any other word keep the ask: "for the CLI", "to use
+argparse", "next month", "in a branch", ", but the ask stands", "the ask button", "the options parser", or a bare "The
+page is being redrawn" (a page or card needs the decision named in front of it). Sent as the step, the sentence does
+not make the item his step: the step and its your-step state go with the ask, his line of next goes, and the sentence
+is kept as your own line of next.
 The server
 takes the ask off the same way (clear_ask yourself when you know), and you ask again with the new proposal. A dropped dependency removes nothing: a gate is a precondition, so a dropped
 gate often makes the ask more live. When an ask whose text names an item after/once/when/until/waiting for/depends on

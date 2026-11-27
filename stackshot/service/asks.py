@@ -3,7 +3,7 @@
 The ask is the one line the owner reads on his move (metadata.ask). This module is the I/O half of what the server does with it: the shape gate (`_gate_ask`), the form of the line in `next` for a client whose tool has no
 ask parameter (`_ASK_IN_NEXT`, `_next_put`, `_lift_ask`), the nag for an item that needs a decision and has no valid ask (`_ask_owed`), and the leaves of a wrong or moot ask (the pure half is model/ask_leaves.py): the
 record of who wrote the ask and when (`_ask_stamp`, a `writes.save` step), the ask that stands now (`_ask_stands`), the lookup of the board item an ask waits on (`_ask_lookup`), the sessions whose word about the ask counts
-(`_ask_authors`), the take-off of an ask its author calls wrong (`_ask_leave`) and the tail an update adds for the ask on its item (`_ask_after_write`).
+(`_ask_authors`), the take-off of an ask its author calls wrong or says is being redrawn (`_ask_leave`) and the tail an update adds for the ask on its item (`_ask_after_write`).
 
 A service module: it reads the store and writes an item only through `writes.save`, under the item lock. The page's parser of an ask line, the board's words for a time and its time zone, and the debounced publish are the
 surface's, reached through service/save_hooks.py; the hand-over after his decision is service/answer_handover.py's. A suite that replaces one of these sets it on this module (and `time` here, since this module reads its own).
@@ -147,8 +147,8 @@ def _ask_owed(meta: dict[str, Any]) -> str:
     return (f'\n[ask] a needs=decision item carries an ask line: ask="{_hooks().ask_form()}" (≤ {_hooks().ask_max()} chars'
             + (f"; refused from {_hooks().when_words(dt.date.fromisoformat(after))}" if after else "") + ")\n[ask] " + _ASK_IN_NEXT)
 
-# ----------------------------------------------------------------------------- an ask that is wrong or moot leaves the owner's move (ask_leaves.py)
-# The server may take off his move what its author calls wrong, in one plain sentence, and apply what he said. It only removes from his move or applies his word: it never writes an ask,
+# ----------------------------------------------------------------------------- an ask that is wrong, moot or being redrawn leaves the owner's move (ask_leaves.py)
+# The server may take off his move what its author calls wrong, in one plain sentence, or says is being redrawn or waits on the numbers, in the one sentence of a bare step or next, and apply what he said. It only removes from his move or applies his word: it never writes an ask,
 # closes an item or answers for him, and it acts on the author's own plain sentence, nothing else a session writes. Everything it does is a line in History and in the reply. A board item the
 # ask waits on being dropped removes nothing: the author's next write to the item carries a line saying so (_ask_after_write).
 def _ask_stamp(item: dict[str, Any], before: dict[str, Any] | None, writer: str) -> None:
@@ -218,11 +218,18 @@ def _ask_authors(item: dict[str, Any]) -> "list[str]":
     return [x for x in (_telling.holder(item), str(meta.get("owner") or "")) if x and not _model.is_owner(x)]
 
 
-def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "", redrawn: bool = False) -> str:
+def _same_text(a: Any, b: Any) -> bool:
+    return " ".join(str(a or "").split()) == " ".join(str(b or "").split())
+
+
+def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "", redrawn: bool = False, via: str = "", sent: str = "") -> str:
     """Take the standing ask off the owner's move: the ask, its options and his stored your-call go, `decision` leaves needs, the item goes back to its author (a live session; else as any answered
     decision's hand-over leaves it), one History line says what and why, and metadata.ask_left keeps the ask and its options so that his late answer is kept as a comment (_answer). Only its
     author's own plain sentence (`why`) calls for it; `expect` = the ask the caller saw, so a write that changed it meanwhile leaves it alone. The server's own save: it
-    answers nothing for him, writes no ask and closes nothing. → the reply line ("" when nothing was taken off)."""
+    answers nothing for him, writes no ask and closes nothing. → the reply line ("" when nothing was taken off).
+    `via` = "step" (the redraw sentence came as the whole `step` of a bare call, `sent` its text): that step made the item his step, so it goes too, as a step="none" would take it (the step and its
+    your-step state; the save then hands his mover back and drops his line of next), and the sentence is kept as the author's own line of next, `<author>: <sentence>`, written by the author. A stored
+    step that is no longer the one sent (a later write changed it) leaves everything as it is."""
     with _writes.ITEM_LOCK:
         try:
             item = _svcstore._load(gid)
@@ -232,6 +239,8 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "", redrawn: 
         ask = _ask_stands(item)
         if not isinstance(meta, dict) or not ask or (expect and ask != expect):
             return ""
+        if via == "step" and not (sent.strip() and _same_text(meta.get("step"), sent)):
+            return ""
         now = time.time()
         rec = _askl.rec_of(meta)
         authors = _ask_authors(item)
@@ -239,13 +248,23 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "", redrawn: 
         shown_opts = _hooks().options_of(item)
         meta.pop("ask", None); meta.pop("options", None); meta.pop("idle", None)
         _holders._state_end(meta, "your-call")
+        own_line = ""
+        if via == "step":
+            if meta.get("state") == "your-step":
+                meta.pop("state", None)
+            meta.pop("step", None); meta.pop("step_lines", None)      # as step="none" takes it (mover_steps._state_apply_core); the save drops his line of next (_owner_steps_on_save)
+            keeper = str(meta.get("owner") or "")
+            own_line = f"{_sr._session_label(sender) or sender.strip()}: {why}"
+            if not any(_nl.norm(e) == _nl.norm(own_line) for e, _ in _nl.resolve(meta, keeper)):
+                _nl.append(meta, own_line, _hooks().session_id(sender), keeper)
         _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))
         if back and _handover._then_live(back, meta):
             meta["then"] = back      # the author takes the item back; read below, so the hand-over sees the `then` set here and not the one stored before
         mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # after the line above: _decision_hand_over reads the then that stands now
-        meta[_askl.LEFT] = {"at": now, "ask": ask, "how": "redrawn" if redrawn else "word", "why": why[:200], "by": str(rec.get("by") or ""), **({"options": shown_opts} if shown_opts else {})}
+        meta[_askl.LEFT] = {"at": now, "ask": ask, "how": "redrawn" if redrawn else "word", "why": why[:200], "by": str(rec.get("by") or ""), **({"via": via} if via else {}), **({"options": shown_opts} if shown_opts else {})}
         _handover._decision_hand_over(meta, mover_in, then_in, parked=False, waiting=_item_read._model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
-        _stall.note(meta, now, f"ask taken off {OWNER}'s move by the server (its author said so: {_clip_line(why, 110)}): \"{_clip_line(ask, 90)}\"")
+        _stall.note(meta, now, f"ask taken off {OWNER}'s move by the server (its author said so: {_clip_line(why, 110)}): \"{_clip_line(ask, 90)}\""
+                    + (f"; the step went with it, kept as the author's own line of next: \"{_clip_line(own_line, 120)}\"" if own_line else ""))
         item["metadata"] = meta
         item["updated"] = item["state_updated"] = item["confirmed"] = now
         _writes.save(gid, item, note="ask taken off his move")
@@ -261,15 +280,20 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "", redrawn: 
         except Exception as e:  # noqa: BLE001  — the ask is off his move; a notice that fails is a stderr line
             print(f"ask: {gid} mover not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     print(f"ask: {gid} taken off the owner's move (its author's word): {why}", file=sys.stderr, flush=True)
-    return (f"\n(the server took the ask off {OWNER}'s move: you said {said}, \"{_clip_line(why, 110)}\". "
+    step_said = (f" The step you sent did not stay his: the item is not in his step (the step and its state your-step are gone), and your sentence is kept as "
+                 f"your own line of next, \"{own_line}\"." if own_line else "")
+    return (f"\n(the server took the ask off {OWNER}'s move: you said {said}, \"{_clip_line(why, 110)}\".{step_said} "
             f"The item is back with {_sr._session_label(to) if to else 'its default mover'}; History says so. His late answer, if one comes, is kept as a comment.)")
 
 
-def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bool, texts: "list[str]", own: "list[str] | None" = None) -> str:
+def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bool, texts: "list[str]", own: "list[str] | None" = None, via: str = "") -> str:
     """An update's tail for the ask on its item (the reply's extra lines). Three things, in this order:
       a write that sets an ask → the ask-time check: his comments and notes since the item's last ask are shown, so one that already answers the ask is seen at the write;
       a write by the ask's author whose ENTIRE new text (every text parameter of the call, _ASK_TEXT_PARAMS in web/tools/update.py; a line the item already held whole is not new) is one plain sentence, "the ask is wrong|moot|stale|...", the closed shape of
         ask_leaves.author_says_wrong → the server takes the ask off his move (_ask_leave);
+      a BARE call by the ask's author, one that carried nothing but the item id, the sender and exactly one of `step` or `next` (`own` = that text and `via` = which, given only for such a call:
+        update.py's _ask_own_texts), whose text is one new line of one sentence saying the proposal behind the ask is being redrawn or that the decision is not made until the numbers are in
+        (ask_leaves.author_says_redrawn) → the server takes the ask off his move too, and a step it came as goes with it (_ask_leave);
       a write by the session that wrote the ask, moves the item or created it, while the ask still stands → the one-line reminder to withdraw it if it is wrong or moot, with his notes since the ask; for the
         ask's author it also says which board item the ask waits on was dropped after the ask was written (ask_leaves.dropped_deps), the only thing the server does about a dropped dependency.
     A write that clears the ask, or leaves none, adds nothing. Never fails the write: the update is saved."""
@@ -292,9 +316,10 @@ def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bo
         if _cfg.ask_leaves_on():
             fresh = _askl.new_lines(texts, str(pre.get("old") or "")) if mine and pre.get("ask") == now_ask else []
             word = _askl.author_says_wrong(fresh)
-            redrawn = "" if word or not fresh else _askl.author_says_redrawn(own or [], who, str(pre.get("old") or ""))      # the author's step or next, one line, one sentence: the proposal is being redrawn, or the pick waits on a number: it is not on his move meanwhile
+            bare = via in ("step", "next") and bool(own)      # only a call that carried nothing but this one text (update.py's _ask_own_texts); any other parameter keeps the ask
+            redrawn = "" if word or not fresh or not bare else _askl.author_says_redrawn(own or [], who, str(pre.get("old") or ""))      # one line, one sentence: the proposal is being redrawn, or the decision is not made until the numbers are in
             if word or redrawn:
-                out = _ask_leave(gid, word or redrawn, sender=who, expect=now_ask, redrawn=bool(redrawn))
+                out = _ask_leave(gid, word or redrawn, sender=who, expect=now_ask, redrawn=bool(redrawn), via=via if redrawn else "", sent=(own or [""])[0] if redrawn else "")
                 if out:
                     return out
         if mine or (who and _handoff.ho_same(who, _telling.holder(item))) or (who and _handoff.ho_same(who, str(meta.get("owner") or ""))):

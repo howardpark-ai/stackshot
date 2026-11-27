@@ -367,7 +367,7 @@ def page_flavor() -> str:
 
 
 def ask_leaves_on() -> bool:
-    """[ask] leaves: true (the default) lets the server take an ask off the owner's move when its author's write is, whole, one plain sentence saying it is wrong (ask_leaves.py); a dropped dependency only reminds its author; a sentence saying the proposal is being redrawn or waits on a number also takes it off (author_says_redrawn). false = never removes: the
+    """[ask] leaves: true (the default) lets the server take an ask off the owner's move when its author's write is, whole, one plain sentence saying it is wrong (ask_leaves.py); a dropped dependency only reminds its author; a bare step or next (the call carries nothing else) whose one sentence says the proposal is being redrawn, or the decision is not made until the numbers are in, also takes it off (author_says_redrawn). false = never removes: the
     reminder and the ask-time check on the owner's notes still show, nothing is taken off his move."""
     return get("ask", "leaves", default=True) is not False
 

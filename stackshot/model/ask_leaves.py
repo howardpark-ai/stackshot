@@ -1,8 +1,10 @@
 """ask_leaves.py — a wrong ask leaves the owner's move on its own, a dropped dependency reminds its author (a pure module, no config and no store).
 
-An ask that stands on an item is the owner's move. The server removes it from his move in ONE case: its author writes, alone, one plain sentence saying the ask is wrong or moot. A board item the ask
-waits on being dropped only reminds the author, on his next write to the item: a gate is a precondition, not the thing asked, so a dropped gate often makes the ask more live, and only the author can
-tell. Four things are read here, each from what the item already holds; the server's writes are in service/asks.py (`_ask_leave`, `_ask_after_write`).
+An ask that stands on an item is the owner's move. The server removes it from his move in TWO cases, both on its author's own sentence: the author writes, alone, one plain sentence saying the ask
+is wrong or moot (`author_says_wrong`); or the author's bare call, nothing but one of step or next, is one sentence saying the proposal behind the ask is being redrawn or that the decision is not made
+until the numbers are in (`author_says_redrawn`). A board item the ask waits on being dropped only reminds the author, on his next write to the item: a gate is a precondition, not the thing asked, so a
+dropped gate often makes the ask more live, and only the author can tell. These things are read here, each from what the item already holds; the server's writes are in service/asks.py (`_ask_leave`,
+`_ask_after_write`).
 
   the record of an ask   `metadata.ask_rec` = {by, at, text}: who wrote the ask, when, and its text. Stamped by `stamp` on every save that changes the ask (the author is the writing session; a
                          server save has none); a new ask also drops `ask_left`, the record of the one taken off. It counts only while its text is the ask's, so a stale record is never read.
@@ -10,14 +12,17 @@ tell. Four things are read here, each from what the item already holds; the serv
                          ("- ") before it and a full stop after it: "the|this|my ask is wrong|moot|stale|void|obsolete|no longer needed|no longer valid" or "this|my question is ...", with "now" or
                          "anymore" at most after it. Any other new line or sentence in the write, a label ("Note:", "Fix:", "Pat's review:", "infra-reviewer:"), a quote, a hedge, a question or another
                          language leaves the ask standing. Only text that is new in the write is read (`new_lines`): a line that is, whole, a line the item already held (compared line by line, never as a
-                         part of a longer line) is not the author's word again. The server acts on this and on nothing else a session writes.
+                         part of a longer line) is not the author's word again.
+  the redraw             `author_says_redrawn(texts, who, old)`: the one text of a bare call by the ask's author (its step or its next, nothing else in the call), one line of one sentence of a few closed
+                         shapes: the proposal, mockup, options or design being redrawn, rebuilt, redone, reworked or redesigned, or the decision not made until the numbers are in.
   the dependency         `depends_on(ask)`: the board ids the ask's text names after a gate form, "after|once|when|until|following board#N lands|is merged|is live|is done|...", "waiting for|on board#N to
                          land|merge|finish|complete" or "depends on board#N landing|merging|finishing". `dropped_deps(ask, lookup, ask_at)`: those of them closed as DROPPED AFTER the ask was written (a
                          superseded item continues in its replacement, so it counts only when the chain ends in a dropped item, which `lookup` follows; with no ask time nothing is found). Only a
                          reminder reads them (`dropped_line`), never a removal.
   the owner's notes      `notes_since(meta, since)`: his comments and notes on a step since a time, for the author to read at an ask-time check and in the reminder.
 
-The server only takes the ask off his move on the author's plain sentence (and keeps what he wrote as comments); it never writes an ask, closes an item or answers for him.
+The server only takes the ask off his move on the author's own sentence (and keeps what he wrote as comments); it acts on nothing else a session writes, and it never writes an ask, closes an item or
+answers for him.
 """
 from __future__ import annotations
 
@@ -61,7 +66,7 @@ _OBJ = rf"(?:{_PRE}(?:page|card)s?|mock-?ups?|proposals?|options?|designs?|ask)"
 _LEAD = r"(?:(?:i|we)(?:\s+will|\s+am|\s+are|'ll|'m|'re)?\s+(?:now\s+)?|now\s+|still\s+)?"
 _VERB = r"(?:re-?draw(?:ing|s)?|rebuild(?:ing|s)?|redo(?:ing)?|rework(?:ing|s)?|redesign(?:ing|s)?)"
 _PP = r"(?:re-?drawn|redone|rebuilt|reworked|redesigned)"
-_TAIL = r"(?:\s+(?:now|again|from\s+(?:his|her|the|(?-i:[A-Z][a-z]+'s))\s+pick))?"      # the only words that may follow the noun
+_TAIL = r"(?:\s+(?:now|again))?"      # the only words that may follow the noun (never work planned for after the pick, "from his pick")
 _HAND = (r"(?:\s*[,;]\s*(?:and\s+)?(?:then|so)\s+the\s+(?:pick|ask|decision|question)\s+"      # an explicit later hand-back: "..., then the pick goes back to him", "..., so the ask waits for his answer"
          r"(?:(?:goes|comes|is\s+sent|will\s+go|will\s+come)\s+back\s+to\s+(?:him|her|(?-i:[A-Z][a-z]+))|waits\s+for\s+(?:him|her|his\s+answer)))")
 _END = r"\s*[.!]*\s*$"
@@ -69,27 +74,27 @@ _REDRAW = (rf"{_LEAD}{_VERB}\s+(?:{_DET})?{_OBJ}{_TAIL}(?:{_HAND})?"      # "red
            rf"|{_DET}{_OBJ}\s+(?:(?:is|are|gets?)\s+being|will\s+be)\s+{_PP}{_TAIL}(?:{_HAND})?"      # "the proposal is being redrawn", "will be redrawn"
            rf"|{_DET}{_OBJ}\s+(?:is|are|gets?)\s+{_PP}{_TAIL}{_HAND}")      # a bare "is redrawn" only with the hand-back (else it reports finished work)
 _REDRAW_RX = re.compile(rf"^(?:{_REDRAW}){_END}", re.I)
-_STOP = r"(?:if|unless|maybe|might|could|should|would|after|once|when|whenever|before|while|next|later|eventually|someday|in|until)"
-_NUM = (r"until\s+(?:(?:the|a|an)\s+)?(?:(?!" + _STOP + r"\b)[\w']+\s+){0,3}?(?:numbers?|figures?|measurements?|results?)"
-        r"\s+(?:is|are|come|comes|arrive|arrives|land|lands)\s+(?:in|back)\s*[.,;!]?\s*$")
-_WAITS_RX = re.compile(      # the decision itself waits on the number, to the end of the sentence: "not decided until", "nothing is decided until", "I will not decide until", "the decision waits until", or the bare "until the (replay) number is in"
-    rf"^(?:(?:this|that|it|the\s+(?:decision|pick|choice))\s+(?:is|stays|remains)\s+)?not\s+(?:yet\s+)?decided\s+{_NUM}"
-    rf"|^nothing\s+(?:is|gets|will\s+be)\s+decided\s+{_NUM}"
-    rf"|^(?:i|we)\s+(?:will\s+not|won't|do\s+not|don't|am\s+not\s+going\s+to|are\s+not\s+going\s+to)\s+(?:decide|pick|choose)(?:\s+anything)?\s+{_NUM}"
-    rf"|^(?:the\s+)?(?:decision|pick|choice)\s+(?:waits|is\s+waiting|stays\s+open|stays\s+undecided)\s+(?:on\s+it\s+)?{_NUM}"
-    r"|^until\s+(?:(?:the|a|an)\s+)?(?:(?!" + _STOP + r"\b)[\w']+\s+){0,3}?numbers?\s+(?:is|are|come|comes|arrive|arrives|land|lands)\s+(?:in|back)\s*[.,;!]?\s*$", re.I)      # bare: only a "number", never "results" or "measurement" ("until the CI results are in" is a gate on something else)
+_NUM = r"until\s+the\s+(?:(?:replay|final|latest|new)\s+)?numbers?\s+(?:is|are)\s+(?:in|back)\s*[.!]?\s*$"      # "the number(s)", one of four qualifiers at most: no person, no possessive, no other kind of number
+_WAITS_RX = re.compile(      # the sentence itself says the decision is not made until the numbers are in, its head the decision: "not decided until", "nothing is decided until", "the decision waits until"
+    rf"^(?:the\s+(?:decision|pick|choice)\s+(?:is|stays|remains)\s+)?not\s+(?:yet\s+)?decided\s+{_NUM}"
+    rf"|^nothing\s+(?:is|will\s+be)\s+decided\s+{_NUM}"
+    rf"|^the\s+(?:decision|pick|choice)\s+(?:waits|is\s+waiting|stays\s+open)\s+{_NUM}", re.I)
 _ITEM_RX = re.compile(r"^(?:[-*•]|\d+[.)])\s+")
 MAX_SENT = 400      # a sentence over this is never a removal: the reader is linear in what it is given, and what is longer than a note is not one
 
 
 def author_says_redrawn(texts: list[str], who: str = "", old: str = "") -> str:
-    """The sentence in which the author of a write says the proposal behind the ask is being redrawn, or that the decision waits on a number, "" when none does. `texts` are the author's step and next of the
-    write (nothing else: never the description). A text counts only when it is ONE line holding exactly ONE sentence, after one list bullet or number, the author's own `who:` lead and the full stop, and that
-    sentence is, whole, one of a few shapes: "I am|we are|I will|now|still redrawing|rebuilding|redoing|reworking|redesigning (or the imperative) the|this|his|her|our mockup|proposal|options|design|ask|pick page|ask card"
-    with "now", "again" or "from his pick" at most after it; "the proposal is being redrawn" or "will be redrawn" (same ending); a bare "is redrawn" only with ", then the pick goes back to him" or "waits for his
-    answer" after it; or the number wait ("not decided until the numbers are in"). Anything else keeps the ask: any other word, a second line or sentence before or after, a header, a quote, a label, a question, a
-    past tense. A line the item already held (`old`) is not the author's new word. The ask is then not his to answer: the server takes it off his move, and its author asks again with the new proposal. The reader
-    is linear and a sentence over 400 characters is never read."""
+    """The sentence in which the author of a write says the proposal behind the ask is being redrawn, or that the decision is not made until the numbers are in, "" when none does. `texts` is the one
+    text of a bare call (its step or its next, given by the caller only when the call carried nothing else: service/asks.py `_ask_after_write`). A text counts only when it is ONE line holding exactly ONE
+    sentence, after one list bullet or number, the author's own `who:` lead and the full stop, and that sentence is, whole, one of a few shapes:
+      "I am|we are|I will|now|still redrawing|rebuilding|redoing|reworking|redesigning (or the imperative) the|this|his|her|our mockup|proposal|options|design|ask|pick page|ask card", with "now" or
+        "again" at most after it (never work planned for after the pick, "from his pick");
+      "the proposal is being redrawn" or "will be redrawn" (the same ending);
+      a bare "is redrawn" only with ", then the pick goes back to him" or "so the pick waits for his answer" after it;
+      the number wait, whose head is the decision itself: "not decided|nothing is decided|the decision is not decided|the decision waits|stays open until the number(s) is|are in|back", the number
+        being "the number(s)" or "the replay|final|latest|new number(s)" and nothing else (no person or pronoun, no possessive, no pull request, invoice or phone number, no bare "until" fragment).
+    Anything else keeps the ask: any other word, a second line or sentence before or after, a header, a quote, a label, a question, a past tense. A line the item already held (`old`) is not the author's
+    new word. The ask is then not his to answer: the server takes it off his move, and its author asks again with the new proposal. The reader is linear and a sentence over 400 characters is never read."""
     lead = re.compile(rf"^{re.escape(who.strip())}:\s*", re.I) if who.strip() else None
     held = {_norm_line(ln) for ln in str(old or "").replace("’", "'").splitlines()} - {""}
     for t in texts:

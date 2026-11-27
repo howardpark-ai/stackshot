@@ -1,6 +1,7 @@
 """update.py: the `update` tool: the change of an existing item, its text, parameters and form pieces."""
 from __future__ import annotations
 
+import inspect
 from typing import Annotated, Any
 
 from fastmcp.exceptions import ToolError
@@ -65,10 +66,34 @@ _ASK_NONTEXT_PARAMS = (
     "clear_then", "clear_wait", "clear_draft", "clear_next", "clear_check")                                   # switches
 
 
-def _ask_own_texts(params: "dict[str, Any]") -> "list[str]":
-    """The strings of a write that the redraw reader (ask_leaves.author_says_redrawn) may read: the `step` (not a finished one, written with `done`) and the `next`, each a text of its own. The description and every other text never
-    take an ask off his move."""
-    return [x for n in ("step", "next") if not (n == "step" and params.get("done")) for x in _askl.text_leaves(params.get(n))]
+_ASK_BARE = frozenset({"item_id", "sender"})      # what a bare call carries besides its one sentence
+
+
+def _carried(args: "dict[str, Any]") -> "frozenset[str]":
+    """The parameters a call carried: each parameter of the update signature whose value in `args` (the call's own values, read before the body changes any) is not its default; the item id, which
+    has none, always. Read from the signature, so a parameter added to update later counts with no list to keep. A value that cannot be compared with its default counts as carried."""
+    out = set()
+    for n, p in _UPDATE_PARAMS.items():
+        if n not in args:
+            continue
+        try:
+            same = p.default is not inspect.Parameter.empty and bool(args[n] == p.default)
+        except Exception:  # noqa: BLE001  — carried: the safe side keeps the ask
+            same = False
+        if not same:
+            out.add(n)
+    return frozenset(out)
+
+
+def _ask_own_texts(params: "dict[str, Any]", carried: "frozenset[str] | set[str]") -> "tuple[str, list[str]]":
+    """The one text of a write that the redraw reader (ask_leaves.author_says_redrawn) may read, and the parameter it came in: ("step" | "next", its strings) only when the call carried nothing but
+    the item id, the sender and exactly one of `step` or `next` (`carried`: `_carried` of the call); else ("", []). Any other parameter in the call (a description, options, a finished or dropped
+    step, a wait, a mover, any parameter added later, even one sent with the value the item already holds) keeps the ask on his move."""
+    rest = set(carried) - _ASK_BARE
+    if len(rest) != 1 or not rest <= {"step", "next"}:
+        return "", []
+    via = rest.pop()
+    return via, _askl.text_leaves(params.get(via))
 
 
 def _ask_write_texts(params: "dict[str, Any]") -> "list[str]":
@@ -189,6 +214,7 @@ def stackshot_update(
     wait_mode: _WAIT_MODE_PARAM = "",
 ) -> str:
     """The update tool; its description is _UPDATE_DESC + _SELF_WAIT_FORM + _WAIT_FORM."""
+    carried = _carried(locals())      # first, before the body reassigns a parameter: what the call itself carried (the ask tail reads it, _ask_own_texts)
     if rank or clear_rank:
         raise ToolError(RANK_RETIRED)       # a stale caller is told, never silently ignored
     _oauth._who()
@@ -239,9 +265,13 @@ def stackshot_update(
                            **({"busy_note": busy_note} if busy_note is not None else {})) + fix_note
             if alias_used:
                 out += _uw.alias_note(alias_used, _model.clean(alias_date), alias_ends, _backstop_field(item_id, status))
-            return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()), own=_ask_own_texts(locals()))
+            via, own = _ask_own_texts({"step": step, "next": next}, carried)
+            return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()), own=own, via=via)
     finally:
         _telling.HO_STATE.handback = set()      # the flag is this write's: a later write on this thread starts without it
+
+
+_UPDATE_PARAMS = inspect.signature(stackshot_update).parameters      # _carried's reading of a call
 
 
 def register(mcp, *, ask_after_write, sender_not_owner, update, busy_live=None) -> None:
