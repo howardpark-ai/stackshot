@@ -2172,6 +2172,9 @@ DOCUSE_ALLOW = {
     ("tests/script_post_kinds_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and terminal_prompt_svc._terminal_prompt.__doc__ (a function it names: the name rule selects the suite)"),
     ("tests/step_proof_scenario.py", "__doc__"): (2, "client.__doc__ twice, a module docstring: read by name, unchanged rule"),
     ("tests/standby_copy_scenario.py", "getmembers"): (1, "TarFile.getmembers on the stream under test, a tar archive's member list: no function's docstring is read"),
+    ("tools/frontdoor_cutover.py", ".command("): (7, "frontdoor_switch.command(script, *args) builds the shell line a person pastes to run the undo script, not a registry"),
+    ("tools/frontdoor_snapshot.py", ".command("): (1, "frontdoor_switch.command(script, *args) builds a shell line a person pastes, not a registry"),
+    ("tools/frontdoor_undo.py", ".command("): (8, "frontdoor_switch.command(script, *args) builds the shell line a person pastes to run the undo script again, not a registry"),
 }
 def doc_uses(files):
     """(file, form, uses found, uses pinned) for every form of {path: source} whose number of uses is not the number the allow list pins"""
