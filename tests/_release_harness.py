@@ -110,7 +110,7 @@ def iso(t):
 if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which query it is, by its text:
     q = " ".join(a)   # - the timeline (ghq_reason, RemovedFromMergeQueueEvent): RT_GQ_REASON = the reason (GitHub's values: merged, failed_checks, manual, merge_conflict, branch_protection_failure; any other text is passed through), "none" = no event of this enqueue, "fail" = the read errors; RT_GQ_REASON_AGE = how many seconds before "now" the event is dated
                       #   (default 0: after the enqueue); RT_GQ_STALE = the text of an event dated a day before, listed AFTER the other (an earlier enqueue's removal)
-                      # - the enqueue mutation (enqueuePullRequest): accepted unless RT_MQ=off (no queue on the branch: GitHub refuses it, and the test sees `wrong_calls`); RT_ENQUEUE=fail (or RT_MERGE=fail) a 504 every time, RT_ENQ_FAILS=n (or all) with RT_ENQ_KIND = 504 | 502 | wrong | internal | timeout | reset | 422 | already | conflict | 403 | last504 (numbered) the first n calls failing that way, RT_ENQUEUE=red | ref the refusals GitHub gave
+                      # - the enqueue mutation (enqueuePullRequest): accepted unless RT_MQ=off (no queue on the branch: GitHub refuses it, and the test sees `wrong_calls`); RT_ENQUEUE=fail (or RT_MERGE=fail) a 504 every time, RT_ENQ_FAILS=n (or all) with RT_ENQ_KIND = text:<any text> | internal:<message of an INTERNAL error> | 504 | 502 | wrong | internal | timeout | reset | 422 | already | conflict | 403 | last504 (numbered) the first n calls failing that way, RT_ENQUEUE=red | ref the refusals GitHub gave
                       # - the read of the repository's queue (ghq_target): RT_MQ = on (default) | off (no mergeQueue: the ruleset is off) | fail | garbage
                       # - the state query (ghq_read): one answer per read, the last repeated: RT_GQ, comma-separated, of
                       #   queued (OPEN, entry QUEUED position 1) | awaiting (OPEN, entry AWAITING_CHECKS position 1, about 12 s after queued) | unmergeable (OPEN, entry UNMERGEABLE: seen on a conflict) | open (OPEN, no entry) | merged (MERGED, the merge commit RT_MERGE_OID) | mergednocommit (MERGED, no merge commit yet)
@@ -135,6 +135,10 @@ if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which q
                       "timeout": 'Post "https://api.github.com/graphql": context deadline exceeded (Client.Timeout exceeded while awaiting headers)', "reset": "read tcp: read: connection reset by peer",
                       "422": "HTTP 422: Pull request is not mergeable", "already": "Pull request is already in the merge queue", "conflict": "Pull request has merge conflicts", "403": "HTTP 403: Resource not accessible by integration",
                       "last504": f"HTTP 504: attempt {en}"}
+                if env("RT_ENQ_KIND", "").startswith("text:"):   # a text of the test's own: printed as it is
+                    print(env("RT_ENQ_KIND")[5:], file=sys.stderr); sys.exit(1)
+                if env("RT_ENQ_KIND", "").startswith("internal:"):   # a GraphQL INTERNAL error with a message of the test's own
+                    m = env("RT_ENQ_KIND")[9:]; print(json.dumps({"data": {"enqueuePullRequest": None}, "errors": [{"type": "INTERNAL", "message": m}]})); print("gh: " + m, file=sys.stderr); sys.exit(1)
                 if env("RT_ENQ_KIND") == "internal":
                     m = "Something went wrong"; print(json.dumps({"data": {"enqueuePullRequest": None}, "errors": [{"type": "INTERNAL", "message": m}]})); print("gh: " + m, file=sys.stderr); sys.exit(1)
                 print(EK[env("RT_ENQ_KIND") or "504"], file=sys.stderr); sys.exit(1)

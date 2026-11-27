@@ -2015,7 +2015,8 @@ run() {
     enqueue_pr() {   # 3. What GitHub says about the branch decides how the PR goes in: `repository.mergeQueue(branch:"main")` present (the ruleset's queue is on) -> the GraphQL mutation enqueuePullRequest, pinned to the head the checks
                      # ran on (expectedHeadOid), so a push after the checks cannot ride in; absent (the ruleset is off, the way back) -> `gh pr merge --merge --admin --match-head-commit <head>`, which merges at once. `gh pr merge` is never used with
                      # the queue on: it would ask for auto-merge, which this repository does not allow (cli/cli#13398). $via_queue says which way it went; $enq_epoch is the second of the call, for the removal event
-        local out tries waits=(${RELEASE_ENQUEUE_WAITS:-5 15 45}) att=1 attmax why seen   # the waits (seconds) between the attempts at the enqueue call: one more attempt than waits; RELEASE_ENQUEUE_WAITS overrides the list (the tests give it "0 0 0")
+        local out tries waits att=1 attmax why seen   # the waits (seconds) between the attempts at the enqueue call: one more attempt than waits; RELEASE_ENQUEUE_WAITS overrides the list (the tests give it "0 0 0")
+        read -r -a waits <<< "${RELEASE_ENQUEUE_WAITS:-5 15 45}"
         attmax=$((${#waits[@]} + 1))
         gq_mq=""; gq_prid=""
         for tries in 1 2 3; do ghq_target "$pr" && break; [ $tries = 3 ] || sleep 10; done
@@ -2063,8 +2064,8 @@ print("; ".join(m for m in msgs if m) or (lines[-1] if lines else "no answer"))'
         echo "$1" | python3 -c '
 import re, sys
 t = sys.stdin.read(); low = t.lower()
+if re.search(r"http 4\d\d|not mergeable|already|conflict|failing|required status|protected ref|not enabled", low): sys.exit(0)   # a refusal first: its text may hold a transient word too
 if re.search(r"\"type\"\s*:\s*\"internal\"", low): print("a GraphQL INTERNAL error"); sys.exit(0)
-if re.search(r"http 4\d\d|not mergeable|already|conflict|failing|required status|protected ref|not enabled", low): sys.exit(0)
 m = re.search(r"http (5\d\d)", low)
 if m: print("HTTP " + m.group(1)); sys.exit(0)
 for pat, name in (("something went wrong", "an error (something went wrong)"), ("timed out|timeout|deadline exceeded", "a timeout"), ("connection reset|connection refused|broken pipe|unexpected eof|\\beof\\b|tls handshake", "a cut connection"),

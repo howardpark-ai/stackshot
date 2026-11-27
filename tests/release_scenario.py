@@ -154,6 +154,15 @@ for kind, err in (("422", "HTTP 422: Pull request is not mergeable"), ("already"
     s = scenario(f"enq-refused-{kind}", enq_fails="all", enq_kind=kind, gq="open")
     check(f"a refusal ({kind}) is not retried: one call, no retry line, no wait for it, FAILED at merge with GitHub's words",
           s["rc"] == 1 and not s["deployed"] and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"] and s["sleeps"][:1] != ["5"] and f"FAILED at merge: {err}" in s["msg"], (s["rc"], enqueues(s), s["sleeps"], s["msg"]))
+# the refusal list is checked first: a refusal whose text also holds a word of a transient failure (a 5xx, a timeout) is a refusal, one call and no retry, whichever list word it carries and also when it comes as a GraphQL INTERNAL error
+for word, text in (("http 4xx", "HTTP 404: bad gateway"), ("not mergeable", "Pull request is not mergeable: the merge check timed out"), ("already", "Pull request is already queued: HTTP 503"), ("conflict", "Pull request has a merge conflict: HTTP 502"),
+                   ("failing", "Pull request has failing checks: timeout"), ("required status", "Required status check missing: timeout"), ("protected ref", "Cannot update this protected ref: HTTP 500"), ("not enabled", "Merge queue is not enabled: HTTP 500")):
+    s = scenario("enq-mixed-" + word.replace(" ", "-"), enq_fails="all", enq_kind="text:" + text, gq="open")
+    check(f"a refusal ({word}) that also holds a transient word is not retried: one call, no retry line", s["rc"] == 1 and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"], (s["rc"], enqueues(s), s["log"]))
+s = scenario("enq-mixed-internal", enq_fails="all", enq_kind="internal:Pull request is not mergeable", gq="open")
+check("an INTERNAL error whose message is a refusal is not retried: the refusal list is read before INTERNAL", s["rc"] == 1 and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"], (s["rc"], enqueues(s), s["log"]))
+s = scenario("enq-waits-spaces", enq_fails="2", enq_kind="504", gq="open,open,merged", extra={"RELEASE_ENQUEUE_WAITS": "  7   8 "})
+check("RELEASE_ENQUEUE_WAITS is split on its spaces into a list of waits (read -a): waits 7 and 8 (the list is of two, so three calls)", s["rc"] == 0 and s["sleeps"][:2] == ["7", "8"] and len(enqueues(s)) == 3, (s["sleeps"], enqueues(s)))
 s = scenario("enq-refused-red", enqueue="red", gq="open")
 check("a failed required check is not retried either: one call, no retry line", s["rc"] == 1 and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"] and "failing required statuses" in s["msg"], (enqueues(s), s["log"]))
 s = scenario("enq-timeout-queued", enq_fails="all", enq_kind="timeout", gq="queued,merged")

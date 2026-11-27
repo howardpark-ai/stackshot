@@ -109,7 +109,8 @@ def stall_lines(m: dict[str, Any], now: float) -> list[str]:
     recent = [x for x in log if float(x.get("at") or 0) >= now - STALL_DAYS * 86400][-STALL_MAX:]
     out = [f"stall: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), _wttext.ZONE))} {x.get('text') or ''}" for x in recent]
     if len(log) > len(recent):
-        out.insert(0, f"{len(log) - len(recent)} earlier stall lines hidden")
+        hidden = len(log) - len(recent)
+        out.insert(0, f"{hidden} earlier stall line{'' if hidden == 1 else 's'} hidden")
     return out
 
 

@@ -362,10 +362,39 @@ def record(tool: str, ok: bool, *, item: str = "", sender: str = "", why: str = 
         p = _file(t)
         with _LOCK:
             p.parent.mkdir(parents=True, exist_ok=True)
+            first = not p.exists()
             with open(p, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+        if first:          # the first line of a month: the files past the retention go
+            prune(t)
     except Exception:  # noqa: BLE001 — a log line is never worth a lost reply
         pass
+
+
+KEEP_MONTHS = 12            # the monthly files kept besides the current one
+_MONTH_FILE = re.compile(r"((?!0000)[0-9]{4})-(0[1-9]|1[0-2])\.jsonl")          # ASCII digits and a real month only
+
+
+def prune(now: float | None = None) -> int:
+    """Delete the monthly call-log files older than the current month and the KEEP_MONTHS before it → how many were deleted. Never raises (a log that cannot be pruned is no reason to fail a call).
+    A deletion cannot be undone, so the clock is not trusted alone: the KEEP_MONTHS + 1 newest month files by name stay whatever `now` says, and nothing is deleted when `now` is more than a month past the newest file."""
+    gone = 0
+    try:
+        at = dt.datetime.fromtimestamp(time.time() if now is None else now, _cfg.tz())
+        here = at.year * 12 + at.month
+        found = sorted((m.group(0), int(m.group(1)) * 12 + int(m.group(2))) for p in _cfg.state("calls").iterdir() if (m := _MONTH_FILE.fullmatch(p.name)))
+        if not found or here > found[-1][1] + 1:
+            return 0
+        for name, idx in found[:-(KEEP_MONTHS + 1)]:
+            if idx < here - KEEP_MONTHS:
+                try:
+                    (_cfg.state("calls") / name).unlink()
+                    gone += 1
+                except OSError:
+                    pass
+    except Exception:  # noqa: BLE001
+        pass
+    return gone
 
 
 def read(since: float, until: float) -> Iterator[dict[str, Any]]:
