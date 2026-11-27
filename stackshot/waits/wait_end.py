@@ -383,7 +383,7 @@ def stored_gap(meta: dict[str, Any], facts: Facts, gid: str, now: float) -> Gap 
     if kind == "item":
         return Gap(STORED, 0, "after", kind, "the item waits on other items but names none in `after` and has no backstop day, so nothing ends the wait", {}, token(STORED, "item", "after"))
     if kind == "anchor":
-        urls = list(facts.item_anchors(gid) or ())
+        urls = [u for u in (facts.item_anchors(gid) or ()) if facts.anchor_url(u)]
         if len(urls) == 1:
             return Gap(STORED, 0, "anchor", kind, f"the item waits on an anchor and names none in wait_anchor; it has one anchor scoped to it ({_clip(urls[0], 60)})", {"op": "anchor_pick", "url": urls[0]}, token(STORED, "anchor", urls[0]))
         return Gap(STORED, 0, "anchor", kind, "the item waits on an anchor and names none in wait_anchor" + ("" if not urls else f" (it has {len(urls)} anchors scoped to it: say which)"), {}, token(STORED, "anchor", "none"))
@@ -407,8 +407,11 @@ def _dates(meta: dict[str, Any]) -> list[tuple[str, str, float]]:
 def _unwoken_fix(meta: dict[str, Any], facts: Facts, gid: str) -> str:
     """The write that gives a waiting item something that ends it, by what it waits on: a link, news from outside, another item, a day. Short, and the date first: a held note clips the line."""
     external = "external" in [str(x).lower() for x in _wt.needs_of(meta)]
-    urls = [u for u in (str(meta.get("wait_anchor") or "").strip(),) if u] or list(facts.item_anchors(gid) or ())
-    if str(meta.get("wait_anchor") or "").strip() or (external and urls):
+    stored = str(meta.get("wait_anchor") or "").strip()
+    if stored and facts.anchor_url(stored):          # a link the anchors tool takes (the caller's shared accept test); any other link is no anchor to propose
+        return f'update(until="YYYY-MM-DD", wait_kind="anchor", wait_event="<what it brings>", wait_anchor="{stored}")'
+    urls = [u for u in (facts.item_anchors(gid) or ()) if facts.anchor_url(u)]
+    if external and urls:
         return f'update(until="YYYY-MM-DD", wait_kind="anchor", wait_event="<what it brings>", wait_anchor="{urls[0] if len(urls) == 1 else "<link>"}")'
     if external:
         return f'update(until="YYYY-MM-DD", wait_kind="relay", wait_event="<the news>") if only {_cfg.owner()} can bring it, else a time or anchor wait'
