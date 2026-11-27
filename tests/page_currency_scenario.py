@@ -997,7 +997,7 @@ check("board: a turn that wrote nothing: no call, no question", rc == 0 and not 
 rc, err = bstop(A, transcript("ship it", COMMIT), mode="off")
 check("board: mode off: no call, no question", rc == 0 and not CALLS and err == "", (rc, err[:200], CALLS))
 rc, err = bstop(A, transcript("ship it", COMMIT))
-check("board: one call, keyed by the session", CALLS == [("items", A)], CALLS)
+check("board: the items read and the asks a message named, once each, keyed by the session", CALLS == [("items", A), ("asks-named", A)], CALLS)
 check("board: an untouched owned item is asked about, by id, subject and next", rc == 2 and err.startswith("BOARD: this turn did real work (a commit) while you are the mover or the `then` of open items it did not touch: ")
       and 's5 "[home] item 5" (you are still its mover; next: step one of s5)' in err and "PROJECT PAGE" not in err, (rc, err[:400]))
 check("board: an owner stored by name is the same session", 's6 "[home] item 6"' in err, err[:400])
@@ -1150,7 +1150,7 @@ check("board: the payload's last message is read first", rc == 0, err[:200])
 items(*[(n, A, {}) for n in range(20, 30)])
 rc, err = bstop(A, transcript("ship it", COMMIT)); check("board: at most eight are named, the rest counted", rc == 2 and "s27 " in err and "s28 " not in err and "; … and 2 more. Does anything" in err, err[:900])
 fresh(); CALLS.clear()
-rc, err = bstop(S, transcript("ship it", COMMIT)); check("board: a session that owns nothing open: one call, no question", rc == 0 and CALLS == [("items", S)], (rc, err[:200], CALLS))
+rc, err = bstop(S, transcript("ship it", COMMIT)); check("board: a session that owns nothing open and was named nothing: those two calls, no question", rc == 0 and CALLS == [("items", S), ("asks-named", S)], (rc, err[:200], CALLS))
 # the item: an item whose stored
 # agent is this session is asked about too, marked as such; the default keeper link (no agent stored) never draws the question
 items((11, A, {"meta": {"needs": ["work-osprey"]}}), (12, A, {}))
@@ -1354,6 +1354,172 @@ rc, err = bstop(S, tps); check("early: a reply with the Board line and no Page l
 rc, err = bstop(S, transcript("keeper ships", [(ST + "update", {"item_id": "s10", "next": "x"})], "Updated."))
 check("early: without it, the Stop check is still the board fallback, with no page part", rc == 2 and err.startswith("BOARD:") and "PROJECT PAGE" not in err, (rc, err[:200]))
 p.save_state(S, {})
+fresh()
+
+# ---- 9b. an open ask on the owner's move that a message of this turn named: the question lists it on its own with its ask, for the session that wrote the ask or moves the item
+import datetime
+from stackshot.service import agent_names as _names_svc
+from stackshot.service import ask_named as _ask_named_svc
+from stackshot.service import messaging as _msg_svc
+from stackshot.waits import held as _held_t
+gl_items()
+OWNER = p._cfg.owner()
+def asked_item(by, then, ask="Decide: pick the blue one", at=OLD, needs=("decision",), **extra):
+    """An item on the owner's move: `by` wrote its ask at `at`; `then` takes it after the owner."""
+    meta = {"owner": B, "mover": OWNER, "then": then, "needs": list(needs), "ask": ask, "ask_rec": {"by": by, "at": at, "text": ask}}
+    return {"meta": meta, **extra}
+def asks_fixture(**over):
+    """50: A wrote the ask, B takes it after · 51: B wrote it, A takes it after · 52: B wrote it and takes it · 53: A's, no ask · 54: A's, an ask with no decision asked for; 5: A's own plain item."""
+    rows = {"s50": asked_item(A, B), "s51": asked_item(B, A), "s52": asked_item(B, B), "s53": {"meta": {"mover": A}}, "s54": asked_item(A, A, needs=())}
+    rows.update(over)
+    items((5, A, {}), *[(int(k[1:]), B, dict(v, meta=dict(v["meta"]))) for k, v in rows.items()])
+def logged(*rows):
+    """Rewrite the message log: (recipient, text, seconds ago, outcome), oldest first."""
+    os.makedirs(os.path.dirname(_msg_svc.MSG_LOG), exist_ok=True)
+    with open(_msg_svc.MSG_LOG, "w", encoding="utf-8") as f:
+        for to, text, ago, outcome in rows:
+            f.write(json.dumps({"t": datetime.datetime.fromtimestamp(time.time() - ago, datetime.timezone.utc).isoformat(timespec="seconds"), "from": B, "to": to, "outcome": outcome, "text": text}) + "\n")
+    shutil.rmtree(_held_t.dir_() / "reached", ignore_errors=True)
+def named(key=A, since=None):
+    st_, _, body_ = client_reads_svc._client_get("asks-named", {"key": key, "since": str(since or time.time() - 60)})
+    return [r["gid"] for r in json.loads(body_)["items"]] if st_ == 200 else st_
+SAY = "please look at s50, s51, s52, s53 and s54 again"
+def tell(text=SAY, to=A, ago=40, outcome="delivered"): logged((to, text, ago, outcome))
+asks_fixture(); tell()
+check("asks: named in a message to the session: the ask it wrote and the ask on the item it takes after, no other", named() == ["s50", "s51"], named())
+st_, _, body_ = client_reads_svc._client_get("asks-named", {"key": A, "since": str(time.time() - 60)})
+check("asks: …each row with its id as shown, its subject and its ask", json.loads(body_)["items"][0] == {"gid": "s50", "shown": "s50", "subject": "[home] item 50", "ask": "Decide: pick the blue one"}, body_)
+check("asks: the session is matched by its name too", named("work-osprey") == [] and (tell(to="work-osprey"), asks_fixture(s50=asked_item("work-osprey", B), s51=asked_item(B, B)), named(S))[2] == ["s50"], named(S))
+asks_fixture(); logged(); check("asks: no message: nothing", named() == [], named())
+logged((A, SAY, 200, "delivered")); check("asks: a message delivered before the turn began: nothing", named() == [], named())
+logged((A, "see s51", 85, "delivered")); check("asks: …the message that opens the turn is recorded a moment before it: counted", named() == ["s51"], named())
+logged((A, "see s51", 95, "delivered")); check("asks: …but not further back than the grace", named() == [], named())
+tell(to=B); check("asks: a message to another session: nothing for this one", named() == [] and named(B) == ["s50", "s51", "s52"], (named(), named(B)))
+for o_ in ("failed: push", "not passed on (fyi: x)", "held for its next turn (fyi)", "held for the router", "archived"):
+    tell(outcome=o_); check(f"asks: a message that reached nobody ({o_}): nothing", named() == [], named())
+for o_ in ("delivered (router pass, result turn)", "queued (paused)", "inbox (puller)"):
+    tell(outcome=o_); check(f"asks: a message that reached it ({o_})", named() == ["s50", "s51"], named())
+tell("the draft says `s51` and nothing else"); check("asks: an id in code names no item", named() == [], named())
+tell(); asks_fixture(s50=asked_item(A, B, at=time.time()), s51=asked_item(B, A, ask="", needs=()))
+check("asks: an ask rewritten this turn, and one cleared: neither is listed", named() == [], named())
+asks_fixture(s50=asked_item(A, B, status="completed")); check("asks: a closed item has no open ask", named() == ["s51"], named())
+old_ = asked_item(A, B); old_["meta"].pop("ask_rec"); old2_ = asked_item(B, A); old2_["meta"].pop("ask_rec"); asks_fixture(s50=old_, s51=old2_)
+check("asks: an ask stored with no record of its writer: listed for the session that moves it only", named() == ["s51"], named())
+for bad_ in ({"since": "5"}, {"key": A}, {"key": A, "since": "x"}, {"key": A, "since": "nan"}, {"key": A, "since": "inf"}, {"key": A, "since": "0"}, {"key": "a\nb", "since": "5"}, {"key": "k" * 201, "since": "5"}):
+    check(f"asks: the read refuses {str(bad_)[:60]}", client_reads_svc._client_get("asks-named", bad_)[0] == 400)
+check("asks: client.py knows the read", "asks-named" in _client.READS)
+_cap0 = _ask_named_svc.ITEMS_MAX; _ask_named_svc.ITEMS_MAX = 1
+try: asks_fixture(); tell(); check("asks: the answer is capped", named() == ["s50"], named())
+finally: _ask_named_svc.ITEMS_MAX = _cap0
+# held lines: they reach the session when its hook acknowledges them, not while they wait
+_machine = socket.gethostname()
+asks_fixture(); logged(); _held_t.add(_held_t.key_of(A), "fyi", "about s51"); _, ids_ = _held_t.lease(A)
+check("asks: a held line its session has not printed: nothing", ids_ and named() == [], (ids_, named()))
+_on0 = _rt_client._clients.sessions_on; _rt_client._clients.sessions_on = lambda m: {A: {"name": "home-work"}}      # the route takes only a session the server holds for the machine
+try: st_, r_ = _rt_client._client_post(_machine, "held", {"uuid": A, "ack": ids_})
+finally: _rt_client._clients.sessions_on = _on0
+check("asks: …printed and acknowledged by its hook: listed", st_ == 200 and r_ == {"removed": 1} and named() == ["s51"] and named(B) == [], (st_, r_, named()))
+check("asks: …and a held line shown before the turn began is not", named(since=time.time() + 60) == [], named(since=time.time() + 60))
+logged(); _held_t.add(_held_t.key_of(A), "fyi", "about s51"); _held_t.take(A)
+check("asks: a held line taken at once counts too", named() == ["s51"], named())
+logged(); _held_t.add(_held_t.key_of(A), "fyi", "about s51"); _, ids_ = _held_t.lease(A); n_ = _held_t.ack(A, ids=ids_)
+check("asks: a held line removed without being shown (moved to another session) is not counted", n_ == 1 and named() == [], (n_, named()))
+logged(); _names_svc._router_delivered("home-beta", "about s50", "delivered (uds)")
+check("asks: a router pass delivered to a session, by its name", named(B) == ["s50"] and named() == [], (named(B), named()))
+logged(); _names_svc._router_delivered(A, "about s51", "failed: x"); check("asks: a router pass that failed is not counted", named() == [], named())
+logged(); _held_t.note_reached(A, ["about s50"]); _held_t.note_reached(A, ["about s51"])
+check("asks: a later line is recorded beside the earlier one", named() == ["s50", "s51"], named())
+logged(); _t0 = time.time(); _held_t.note_reached(A, ["about s50"], now=_t0 - _held_t.REACHED_KEEP - 5); _held_t.note_reached(A, ["about s51"], now=_t0)
+check("asks: the record drops lines past its age", _held_t.reached_since(0, A) == ["about s51"], _held_t.reached_since(0, A))
+_max0 = _held_t.REACHED_MAX; _held_t.REACHED_MAX = 2
+try: _held_t.note_reached(A, ["one", "two"]); check("asks: …and keeps a bounded number per session, the newest", _held_t.reached_since(0, A) == ["one", "two"], _held_t.reached_since(0, A))
+finally: _held_t.REACHED_MAX = _max0
+_rf = next((_held_t.dir_() / "reached").glob("*.jsonl")); os.utime(_rf, (OLD - _held_t.REACHED_KEEP, OLD - _held_t.REACHED_KEEP))
+with _held_t._locked(): _held_t._sweep(time.time())
+check("asks: …and the sweep removes a session's record that has not been written for that long", not _rf.exists(), _rf)
+# the hook: the end-of-turn question, early and at Stop
+ASKED = lambda g: (f'\n{g} "[home] item {g[1:]}" (ask: Decide: pick the blue one): still on {OWNER}\'s move: withdraw it now (update with clear_ask) if it can no longer be answered as written, '
+                   f'else answer `- {g}: ask stands, <reason>` in the Board block.')
+HOW = "\nThe Board block is a `Board:` line, then one bullet per item on its own line; the reason is at least three words."
+def turn(final="done"): return transcript("ship it", COMMIT, final)
+def early(tp=None):
+    p.save_state(A, {}); return otouch(A, tp or turn(), "Bash", {"command": "git -C /x commit -qm y"})
+NOWISH = {"updated": time.time() + 600}
+asks_fixture(); logged(); base_early = early(); base_rc, base_err = bstop(A, turn())
+check("asks: with no naming message the question is as before", base_early.startswith("[stackshot] Board question (once per turn). Items untouched this turn: ") and "ask stands" not in base_early + base_err
+      and base_rc == 2 and 's51 "[home] item 51"' in base_err, (base_early, base_err))
+tell("s50 and s51: the plan changed"); q_ = early()
+check("asks: the early question lists each on its own line with its ask, and leaves it out of the untouched list", q_.endswith(ASKED("s50") + ASKED("s51")) and "s51 " not in q_.split("\n")[0] and "s5 " in q_.split("\n")[0], q_)
+rc, err = bstop(A, turn())
+check("asks: the Stop check in block mode holds the turn as before and lists them on their own", rc == 2 and err.startswith("BOARD: this turn did real work (a commit) while you are the mover") and err.rstrip().endswith(ASKED("s50") + ASKED("s51"))
+      and "s51 " not in err.split("\n")[0] and blog("block")[-1]["items"] == ["s5", "s51", "s53", "s54", "s50"], (err, blog("block")[-1:]))
+touched_ = {f"s{n}": NOWISH for n in (5, 53, 54)}
+def all_touched():
+    asks_fixture(s50=asked_item(A, B, **NOWISH), s51=asked_item(B, A, **NOWISH), s53={"meta": {"mover": A}, **NOWISH}, s54=asked_item(A, A, needs=(), **NOWISH))
+    f = T / "store/s/5.json"; d = json.loads(f.read_text()); d.update(NOWISH); f.write_text(json.dumps(d))
+all_touched(); tpa_ = turn(); q_ = early(tpa_)
+check("asks: listed though the turn updated the item; asked alone, with how the Board block is written", q_ == "[stackshot] Board question (once per turn)." + ASKED("s50") + ASKED("s51") + HOW and p.load_state(A).get("early_asked"), q_)
+rc, err = bstop(A, tpa_); out = nnag(A)
+check("asks: an open ask alone never holds the turn, in block mode too: the note says it", rc == 0 and err == "" and "[board] Board question unanswered last turn." + ASKED("s50") + ASKED("s51") in out and "unanswered last turn: " not in out, (rc, err, out))
+check("asks: …logged as a note", blog("note")[-1]["items"] == ["s50", "s51"], blog("note")[-1:])
+p.save_state(A, {}); rc, err = bstop(A, turn(), mode="note"); out = nnag(A)
+check("asks: …without an early question the note is the full one", rc == 0 and "[board] About your last turn: BOARD: this turn did real work (a commit)." + ASKED("s50") + ASKED("s51") + HOW in out and "did not touch" not in out, out)
+asks_fixture(); tpn = turn(); ts_ = p.turn_activity(tpn)["start"]; p.save_state(A, {"early": ts_, "early_asked": ts_}); bstop(A, tpn, mode="note"); out = nnag(A)
+check("asks: the one-line note names the untouched items once and the asked ones on their own", 'unanswered last turn: s5 "[home] item 5", s53 "[home] item 53", s54 "[home] item 54". Answer it in the reply.' + ASKED("s50") + ASKED("s51") in out, out)
+def answered(final):
+    all_touched(); p.save_state(A, {}); CALLS.clear(); rc, err = bstop(A, turn("Done.\n" + final), mode="note"); return rc, nnag(A)
+rc, out = answered("Board:\n- s50: ask stands, the choice is still open\n- s51: ask stands, nothing in it moved")
+check("asks: `- <id>: ask stands, <reason>` answers it, and the writer who does not move the item is not told to leave it out", out.strip() == "" and rc == 0 and blog("verdict")[-1]["items"] == ["s50", "s51"], (out, blog("verdict")[-1:]))
+rc, out = answered("Board s50, s51: ask stands, the choice is still open"); check("asks: …on one line too", out.strip() == "", out)
+rc, out = answered("Board: no change, the question is still right"); check("asks: a `no change` line answers it as it answers the rest", out.strip() == "", out)
+rc, out = answered("Board:\n- s50: Ask stands, the choice is still open")
+check("asks: one answered, the other still asked", ASKED("s51") in out and ASKED("s50") not in out, out)
+rc, out = answered("Board:\n- s50: ask stands, still open\n- s51: updated, rewrote the next line")
+check("asks: too short a reason and an `updated` line do not answer it, and are quoted with why", ASKED("s50") in out and ASKED("s51") in out and "«- s50: ask stands, still open» (the reason is under three words)" in out
+      and "«- s51: updated, rewrote the next line» (not a `no change, <reason>` line" in out, out)
+tell(); all_touched(); p.save_state(A, {}); rc, err = bstop(A, turn(), mode="note", last_assistant_message="Board:\n- s50: ask stands, the choice is still open\n- s51: ask stands, nothing in it moved"); out = nnag(A)
+check("asks: the answer is read from the reply the hook is handed, too", rc == 0 and out.strip() == "", out)
+# an item the session wrote the ask on but does not move, whose shown form is not its store id: the row's shown form resolves the Board line
+_get1 = client_reads_svc._client_get
+FAR = "z7"
+client_reads_svc._client_get = lambda what, q: (200, "application/json", json.dumps({"items": [{"gid": "s50", "shown": FAR, "subject": "far", "ask": "Decide: x"}]})) if what == "asks-named" else _get1(what, q)
+try: rc, out = answered(f"Board:\n- {FAR}: ask stands, the choice is still open")
+finally: client_reads_svc._client_get = _get1
+check("asks: a listed item is answered by its id as shown, one the session does not own included", rc == 0 and out.strip() == "" and blog("verdict")[-1]["items"] == ["s50"], (out, blog("verdict")[-1:]))
+asks_fixture(); logged(); rc, err = bstop(A, turn("Done.\nBoard: ask stands, the choice is still open"))
+check("asks: `ask stands` covers no item that was not listed for its ask", rc == 2 and "s5 " in err and "s51 " in err and "Not accepted" in err, err)
+tell("s51 moved"); rc, err = bstop(A, turn("Done.\nBoard: ask stands, the choice is still open"))
+check("asks: …a general `ask stands` line answers the listed ask and nothing else", rc == 2 and ASKED("s51") not in err and "s5 " in err and "s51 " not in err, err)
+all_touched(); tell("s50 moved"); p.save_state(A, {}); rc, err = bstop(A, transcript("talk", [], "Nothing to do."))
+check("asks: a turn that wrote nothing is not asked", rc == 0 and err == "" and nnag(A).strip() == "", err)
+asks_fixture(s50=asked_item(A, B, at=time.time() + 5), s51=asked_item(B, A, ask="", needs=(), **NOWISH)); tell("s50 and s51 changed"); q_ = early()
+check("asks: cleared or rewritten this turn: not listed", "ask stands" not in q_ and "s5 " in q_, q_)
+long_ = "Decide: " + "very " * 80 + "long"; asks_fixture(s51=asked_item(B, A, ask=long_)); tell("s51"); q_ = early()
+check("asks: a long ask is cut", f"(ask: {long_[:199].rstrip()}…)" in q_, q_)
+many_ = [asked_item(A, B) for _ in range(10)]; items(*[(60 + i, B, v) for i, v in enumerate(many_)]); tell(" ".join(f"s{60 + i}" for i in range(10))); q_ = early()
+check("asks: a session that owns no open item is asked about its own asks; at most eight are named, the rest counted", q_.startswith("[stackshot] Board question (once per turn).\ns60 ") and "\ns67 " in q_ and "\ns68 " not in q_ and "… and 2 more with an open ask." in q_, q_)
+p.save_state(A, {}); rc, err = bstop(A, turn(), mode="note"); out = nnag(A)
+check("asks: …and at the end of its turn too", rc == 0 and "\ns60 " in out and "… and 2 more with an open ask." in out, out)
+check("asks: no listed item, no text", p.asked_lines([], alone=True) == "" and p.asked_lines([]) == "")
+# an older server, a failing one and an answer that cannot be read: as before
+_get0 = client_reads_svc._client_get
+def answering(reply):
+    def fake(what, q):
+        if what != "asks-named": return _get0(what, q)
+        if reply is None: raise RuntimeError("the read failed")
+        return reply
+    client_reads_svc._client_get = fake
+for label_, reply_ in (("an older server (no such read)", (404, "text/plain", "no such read")), ("a server error", (500, "text/plain", "boom")), ("a dropped connection", None),
+                       ("an answer that is not JSON", (200, "application/json", "<html>")), ("an answer of another shape", (200, "application/json", '{"items": "x"}')),
+                       ("a row without an ask", (200, "application/json", '{"items": [{"gid": "s51"}, 7, {"ask": "x"}]}'))):
+    asks_fixture(); tell(); answering(reply_); IS.handle_error = lambda *a: None
+    try: q_ = early(); rc, err = bstop(A, turn())
+    finally: client_reads_svc._client_get = _get0
+    check(f"asks: {label_}: the question as before", q_ == base_early and rc == 2 and err == base_err, (q_, err))
+asks_fixture(); tell(); CALLS.clear(); tp0 = turn(); rows0 = [json.loads(x) for x in pathlib.Path(tp0).read_text().splitlines()]; rows0.pop(0)
+pathlib.Path(tp0).write_text("\n".join(json.dumps(r) for r in rows0) + "\n"); p.save_state(A, {}); q_ = otouch(A, tp0, "Bash", {"command": "git -C /x commit -qm y"})
+check("asks: a turn whose start cannot be told reads nothing", "ask stands" not in q_ and not [c for c in CALLS if c[0] == "asks-named"], (q_, CALLS))
+logged(); p.save_state(A, {})
 fresh()
 
 os.environ["STACKSHOT_URL"] = "http://127.0.0.1:9"      # nothing listens: no answer, no block
