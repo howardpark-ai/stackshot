@@ -1756,7 +1756,7 @@ main.audits-page .atw{overflow-x:auto;border:1px solid var(--line);border-radius
 main.audits-page .atw table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}main.audits-page .atw th,main.audits-page .atw td{padding:6px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
 main.audits-page .atw th{font-weight:400;color:var(--mut)}main.audits-page .atw tr:last-child td{border-bottom:0}main.audits-page .atw td.warn{color:var(--warn);font-weight:600}
 @media(max-width:520px){main.audits-page .atw th,main.audits-page .atw td{padding:6px 8px}}
-main.audits-page .anote{max-width:70ch;margin:16px 0 0;font-size:13px;color:var(--mut)}
+main.audits-page .anote{max-width:70ch;margin:16px 0 0;font-size:13px;color:var(--mut)}main.audits-page>.anote:last-child{padding-right:56px}
 """   # the Audits page (GET /audits): the paces, the audit groups (a native details each), the latest findings and the runs, on the theme's tokens, so light and dark need no rule of their own
 
 _RUN_CSS = """
