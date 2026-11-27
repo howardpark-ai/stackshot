@@ -241,7 +241,12 @@ check("B: a held wake under the cap takes a basis (a time wait carries a reason 
 item(28, hold=True, recycle=True, recycle_at=now0)                          # a hold with no date of its own
 refused("B: a hold with no date has no wake for a basis to explain: refused", lambda: _update_svc._update("a28", wait_basis=B(33), sender="home-owner"), "no wake date")
 item(64)
-refused("B: …nor an item with no hold or wake, nor hold=true in the same call without a wake", lambda: _update_svc._update("a64", hold=True, wait_basis=B(33), sender="home-owner"), "no wake date")
+refused("B: …nor an item with no hold or wake", lambda: _update_svc._update("a64", wait_basis=B(33), sender="home-owner"), "no wake date")
+item(2064)      # hold=true with a basis and no wake: main refused the park for its missing date; the server's default ends it on the date ahead the basis names
+_update_svc._update("a2064", hold=True, wait_basis=B(33), sender="home-owner")
+m2064 = rd(2064)["metadata"]
+check("B: hold=true with a basis and no wake ends the park on the date the basis names, marked as the server's", _WT.stored_until(m2064) == day(33) and m2064.get("until_server") == day(33) and _WT.basis_of(m2064) == B(33), m2064)
+(T / "store/a/2064.json").unlink()      # out of the board, page and digest counts below
 item(29, hold=True, wake=day(30))
 refused("B: a reason with no date is a way around the rule: refused", lambda: _update_svc._update("a29", wait_basis="waiting for the vendor to answer", sender="home-owner"), "YYYY-MM-DD")
 refused("B: a date before the wake day is no basis for waiting until the wake", lambda: _update_svc._update("a29", wait_basis=f"vendor answered on {day(10)}", sender="home-owner"), "none of its dates")
