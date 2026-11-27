@@ -470,11 +470,7 @@ def shown_full(g): return _gh.shown(g)                             # an id as a 
 def shown(g):                                                      # an id on the board itself: #7 ("board" crowds the UI), the rest as shown_full
     t = shown_full(g); return t[len("board"):] if t.startswith("board#") else t
 def rid_full(r): return shown_full(r["gid"])                       # board.md and the brief, which sessions read and quote: board#N
-def _page_key(v):
-    v = str(v or "").strip().strip("/")
-    if not v: return ""
-    if v.endswith(".md"): v = v[:-3]
-    return v if "/" in v else _cfg.page_dirs()[0] + "/" + v   # items store the full page key; a bare value is legacy and means <first [pages] dir>/<slug>
+def _page_key(v): return _anc.page_key(v)                           # an item's stored project as the page key the board reads (anchors.page_key)
 def proj_key(r):
     """The PAGE the item is filed on (its plain detail link): the key every reader that needs the page reads (the board row, the keeper, the anchors, the project page's items and sub-page badge)."""
     return _page_key(_iproj.key_of(r["metadata"]))
@@ -747,7 +743,6 @@ def outcome_of(r):
     return str(m.get("outcome") or ""), str(m.get("reason") or ""), str(m.get("superseded_by") or "")
 from stackshot.anchors.anchors import KINDS as _KIND     # an anchor id's prefix → its type; the one table, shared with anchor-hub
 from stackshot.anchors import anchors as _anc   # roles.json's live flag per session (roles_live)
-from stackshot.anchors.anchors import hub_of as _hub_of   # the page a key belongs to on the board (a `hub:` line, else its top-level page)
 _KIND_ORDER = ["Slack", "Notion", "Gmail", "Drive", "GitHub", "Link"]
 # The board as an installed app (Chrome "Install page as app", display standalone). The manifest (/manifest.webmanifest,
 # served by server.py) is fetched with credentials: Chrome fetches a manifest without cookies unless the link says
@@ -1076,15 +1071,8 @@ class Board:
         k = proj_key(r)
         return k, (self.proj.get(k) if k else None)
     def row_of(self, k):
-        """The board row a page key rolls up to: itself or the nearest ancestor with `board_row: true`, else its hub page: the
-        page a `hub:` line in its chain names (ops/hub sits on the hub project's row, with its keeper and
-        agents), else the top-level page."""
-        if not k: return ""
-        parts = k.split("/")
-        for n in range(len(parts), 2, -1):
-            cand = "/".join(parts[:n])
-            if (self.proj.get(cand) or {}).get("board_row"): return cand
-        return _hub_of(k, self.proj)
+        """The board row a page key rolls up to: itself or the nearest ancestor with `board_row: true`, else its hub page (anchors.board_row_of)."""
+        return _anc.board_row_of(k, self.proj)
     def proj_label(self, k):
         """An item's project as the card says it: the scope and the row's name, then the sub-page's when the item sits below the row, with plain
         slashes ("ops/hub/sharing/sub-page", "home/general")."""
@@ -1110,13 +1098,20 @@ class Board:
         if not k or k not in self.proj: return ""
         c = self.__dict__.setdefault("_lscope", {})
         if k not in c:
-            if "_lscope_id" not in self.__dict__:
-                try: ids = _prj.ids_by_key()
-                except ValueError: ids = {}                    # a damaged id file: the registry's own copy of the id answers
-                self.__dict__["_lscope_id"] = (ids, _prj.marks())
-            ids, mk = self.__dict__["_lscope_id"]
+            ids, mk = self.scope_ids()
             c[k] = _prj.label_scope(k, self.proj.get(k) or {}, self.proj, ids, mk)
         return c[k]
+    def scope_ids(self):
+        """(key → id, the marks by id) of the id file, read once for the draw."""
+        if "_scope_ids" not in self.__dict__:
+            try: ids = _prj.ids_by_key()
+            except ValueError: ids = {}                    # a damaged id file: the registry's own copy of the id answers
+            self.__dict__["_scope_ids"] = (ids, _prj.marks())
+        return self.__dict__["_scope_ids"]
+    def item_scope(self, r):
+        """The group the home page lists an item under, the name on its subsection there (ui/render.py scope_groups): anchors.item_scope, the reading the client reads share with this renderer (the home page in ui/render.py keeps its own copy of the rule, which the your-move scenario compares with this one). One of the names in
+        [project_scopes] order, single-scope instances included; board.md's own grouping (proj_scope, [scopes]) is another setting."""
+        return _anc.item_scope(r["metadata"], self.proj, *self.scope_ids())
     def proj_mirror(self, k):
         return (self.proj.get(k) or {}).get("mirror") or ""
     def proj_scope(self, k):
@@ -1526,13 +1521,13 @@ class Board:
     def your_move(self) -> list:
         """The whole Your move group as the client read `your-move` serves it: one dict per item, in the group's own order (`home_pairs`, the call the home page's group, board.md and the brief draw from; the brief
         shows its first five, this shows all), {shown: the id as a person reads it, subject, url: the item's page (the path alone when the instance has no board address), ask: the open ask line or "", updated: epoch seconds of the
-        item's last write (the file's time for an item that stores none)}. No cap: the group is as long as the owner's queue."""
+        item's last write (the file's time for an item that stores none), scope: the group the home page lists it under (item_scope)}. No cap: the group is as long as the owner's queue."""
         out = []
         base = _inst.BOARD_URL.rstrip("/")
         for r, _m in self.home_pairs()[_home.YOUR_MOVE]:
             try: upd = float(r.get("updated") or 0) or r["_updated"].timestamp()
             except (TypeError, ValueError): upd = r["_updated"].timestamp()
-            out.append({"shown": rid_full(r), "subject": str(r.get("subject") or ""), "url": base + id_href(r["gid"]), "ask": open_ask(r), "updated": upd})
+            out.append({"shown": rid_full(r), "subject": str(r.get("subject") or ""), "url": base + id_href(r["gid"]), "ask": open_ask(r), "updated": upd, "scope": self.item_scope(r)})
         return out
 
     def brief(self) -> str:
