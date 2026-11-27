@@ -3,7 +3,7 @@
 A timer's script that finds a condition only the person can fix (a plugin sync that fell behind, say) opens one board item for him with his step, keeps its description current on every run
 that still finds the condition, and closes it when a later run finds the condition gone. The item is marked with the caller's marker (`metadata.item_sync`): that mark is the whole of what the
 route may touch, so it cannot refresh or close an item it did not open. `open` files an item whose mover is the person and whose `then` is an agent of the project (the agent takes it when he has
-done his step), with his step as the one step on the checklist; while an item with the marker is open a repeat `open` is a `refresh`, and once it is closed an `open` files a new item (the condition recurs).
+done his step), with his step as the one step on the checklist; while an item with the marker is open a repeat `open` is a `refresh` (and a new step, see below), and once it is closed an `open` files a new item (the condition recurs).
 `refresh` rewrites the description of the open item and nothing else; `close` completes it as done, through the update tool's own close. With no open item `refresh` and `close` do nothing and say so.
 `_ITEMSYNC_LOCK` makes the look for an open item and the write one step against another call of this route (two opens of one marker file one item). A refresh, a close and a repeat open also hold the board's item lock
 (`ITEM_LOCK`) from the look to the write, so a session's close cannot land between them; a new item is created without the board's lock, because the create reaches GitHub for the item number and no other writer of the board waits for that. The markers, the sender and the description rules are item_open.py's; the helpers the row is filed with are service/terminal_prompt.py's.
@@ -25,6 +25,7 @@ from stackshot.core.store import _item_files
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model
+from stackshot.model import owner_steps as _hs
 from stackshot.model import states as _states
 from stackshot.model import steps as _steps
 from stackshot.model.field_gates import _close_reason_max, _fit
@@ -85,7 +86,7 @@ def _itemsync_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
     reason (one line, cut to [close] reason_max; default says the script saw the condition gone). Any other key is refused.
     open: the item is filed through create_item (service/create.py), the create tool's own code, so the create tool's subject and next gates, the project page and the GitHub mirror all apply and a refusal is the tool's text (400); the description's line count and line length are item-open's own pre-checks; the caller picks no
     field the route does not take (no needs, ask, priority or date). The mover is the person, the item's `then` the agent, its creator the project's front agent (its -main first), its only step his; the state is your-step, as the terminal prompt's row.
-    Marked metadata.item_sync = <marker>. While an item with the marker is open (the marker is global: refresh and close carry no project), a repeat open rewrites that item's description as refresh does and changes nothing else; an open on another project than the
+    Marked metadata.item_sync = <marker>. While an item with the marker is open (the marker is global: refresh and close carry no project), a repeat open rewrites that item's description as refresh does, and sets its step again (his move again) only when the step is new: not the open step of his that stands, nor the last one he finished (compared as the board stores it, so the same words sent again change nothing); an open on another project than the
     open item's is a 400. After the item is closed an open files a new one. A project holds at most 10 open items of this route (a repeat never counts). The row owes no page and tells no session, as every script route's.
     refresh: rewrites the description of the marker's open item (the caller's bullets, then who opened it) and nothing else: not his step, not the mover, not the subject; no open item is a 200 that does nothing. A script's write is not judged by the Goal-first rule a session's
     description is (the board's way with script rows): the checks are item-open's (the line count and the length of a line), so the first bullet need not state a goal.
@@ -165,6 +166,8 @@ def _itemsync_plan(texts: dict[str, str]) -> tuple[dict[str, Any], tuple[int, di
     step = _steps.without_owner(step)
     if not step:
         return {}, (400, {"error": "step is empty once his name is taken off it: say what he does"})
+    if len(step) > _states.LINE_MAX:      # checked before anything is written: a repeat open that is refused leaves the description and the steps as they were
+        return {}, (400, {"error": f"step is one line of at most {_states.LINE_MAX} characters — got {len(step)}; say what he does in one line"})
     try:
         recs = _prj.refs(project, _registry("projects"))
     except ValueError as e:
@@ -211,8 +214,23 @@ def _itemsync_answer(gid: str, marker: str, action: str, repeat: bool) -> dict[s
             "then": _sr._session_label(str(meta.get("then") or "")), "owner": _sr._session_label(str(meta.get("owner") or "")), "repeat": repeat}
 
 
+def _itemsync_step_is_new(meta: dict[str, Any], step: str) -> bool:
+    """Is a repeat open's step new for this item: neither the open step of his that stands nor the last one he finished. Compared as the board stores it: his name once (owner_steps.line_of, owner_key), the
+    answer after the arrow of a finished step left off, so the same words sent again are the same step."""
+    want = _steps.owner_key(_hs.line_of(step, meta))
+    his = [s for s in _steps.view(meta) if _steps.is_his(s["text"], unnamed_is_his=False)]
+    if any(s["status"] == _steps.OPEN and _steps.owner_key(s["text"]) == want for s in his):
+        return False
+    finished = [s for s in his if s["status"] == _steps.DONE]
+    if finished:
+        last = finished[-1]["text"]
+        if want in {_steps.owner_key(last), _steps.owner_key(last.split(_hs.ARROW, 1)[0])}:
+            return False
+    return True
+
+
 def _itemsync_open(found: list[tuple[str, str]], projects: list[str], marker: str, desc: str, plan: dict[str, Any], by: str, sender: str) -> tuple[int, dict[str, Any]]:
-    """open, under the lock: a repeat of an open marker is a refresh; else a new item with the person as mover, the agent as then and his step."""
+    """open, under the lock: a repeat of an open marker is a refresh (its description rewritten) and, when its step is new or the item's state was never written, the step is set again so it is his move; else a new item with the person as mover, the agent as then and his step."""
     key = plan["key"]
     if found:
         gid, was = found[0]
@@ -220,8 +238,10 @@ def _itemsync_open(found: list[tuple[str, str]], projects: list[str], marker: st
             return 400, {"error": f"{marker} is already open on {was}: a marker belongs to one item at a time; close it there first, or use another marker for {key}"}
         _update_svc._update(gid, description=desc, sender=by)
         meta = _svcstore._load(gid).get("metadata") or {}
-        if (any(s["status"] == _steps.OPEN and _steps.is_his(s["text"], unnamed_is_his=False) for s in _steps.view(meta))
-                and (meta.get("state") != "your-step" or not _states.clean(meta.get("step")))):      # an item a crash left between its create and its state write is made whole here (his step is still open, as the create made it); once he has answered, his step is done and it is left alone
+        his_open = any(s["status"] == _steps.OPEN and _steps.is_his(s["text"], unnamed_is_his=False) for s in _steps.view(meta))
+        if his_open and (meta.get("state") != "your-step" or not _states.clean(meta.get("step"))):      # an item a crash left between its create and its state write is made whole here (his step is still open, as the create made it)
+            _update_svc._update(gid, step=plan["step"], sender=by)
+        elif _itemsync_step_is_new(meta, plan["step"]):      # a step the item does not hold open or has not just finished: set, which replaces his open step (owner_steps.ensure drops it) so one stays
             _update_svc._update(gid, step=plan["step"], sender=by)
         return 200, _itemsync_answer(gid, marker, "refreshed", True)
     if projects.count(key) >= _ITEMSYNC_OPEN_MAX:

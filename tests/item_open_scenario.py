@@ -354,7 +354,7 @@ check("…the row tells no one and owes no page (the debts are as they were befo
 sgid = so["item"]; shape0 = shape(sgid)
 
 # a second open of a marker whose item is open is a refresh: no duplicate, only the description changes
-st, so2 = isy("open", subject="Another subject", step="something else", then="home-sparrow-notes", description=["- Now 4 versions behind"])
+st, so2 = isy("open", subject="Another subject", then="home-sparrow-notes", description=["- Now 4 versions behind"])
 settle()
 check("a second open with the same marker: 200, the same item, refreshed, repeat true, nothing filed, no one told", st == 200 and so2["item"] == sgid and so2["action"] == "refreshed" and so2["repeat"] is True and len(items()) == ns0 + 1 and pushed == [], (st, so2, pushed))
 check("…only the description changed: the subject, step, mover, then and checklist are as they were", item(sgid)["description"].splitlines() == ["- Now 4 versions behind", "- Opened by demo-timer (a script on a client machine)"] and shape(sgid) == shape0, (item(sgid)["description"], shape(sgid), shape0))
@@ -515,6 +515,53 @@ st, o9b = isy("open", marker="plugin_sync:handed2"); g9b = o9b["item"]
 _answer_svc._answer(_model_ids._norm_id(g9b), "", "", "done")
 st, c9c = isy("close", marker="plugin_sync:handed2")
 check("a close after his Done with no other step open completes the item as before", st == 200 and c9c["action"] == "closed" and item(g9b)["status"] == "completed", (st, c9c))
+
+# a repeat open sets its step again only when the step is new (his move again); one open step of his remains
+def his_open(g): return [t for t, s_ in steps_of(g) if s_ == "open" and t.startswith("Oliver: ")]
+def edit_meta(g, fn):
+    p_ = _service_store._path(g); d_ = json.loads(p_.read_text(encoding="utf-8")); fn(d_["metadata"]); p_.write_text(json.dumps(d_), encoding="utf-8")
+S1, S2, S3 = "open the plugin page and press Sync", "press Sync on the plugin page again", "press Sync and check the version"
+settle(); pushed.clear()
+st, r1 = isy("open", marker="plugin_sync:rules"); settle(); gr = r1["item"]
+check("rules setup: the open files his step as the one open step", st == 200 and steps_of(gr) == [("Oliver: " + S1, "open")], (st, steps_of(gr)))
+st, r1b = isy("open", marker="plugin_sync:rules", step=S2); settle()
+check("rule 1: a new step on a repeat open is set again: 200, refreshed, repeat, exactly one open step of his, the new one; the old one is dropped; the item waits on him", st == 200 and r1b["action"] == "refreshed" and r1b["repeat"] is True and his_open(gr) == ["Oliver: " + S2] and ("Oliver: " + S1, "dropped") in steps_of(gr) and item(gr)["metadata"].get("state") == "your-step" and pushed == [], (st, r1b, steps_of(gr), pushed))
+before = steps_of(gr); pushed.clear()
+st, r2 = isy("open", marker="plugin_sync:rules", step=S2); settle()
+check("rule 2: the step that stands open on him, sent again while the item waits on him: left alone, the steps and state as they were", st == 200 and r2["repeat"] is True and steps_of(gr) == before and item(gr)["metadata"].get("state") == "your-step" and pushed == [], (st, steps_of(gr), before))
+st, ans = isy("open", marker="plugin_sync:rules", step="Oliver: " + S2); settle()
+check("rule 2: his name on the step sent is taken off, so the same step sent with his name is the same step: left alone", st == 200 and steps_of(gr) == before, (st, steps_of(gr)))
+_answer_svc._answer(_model_ids._norm_id(gr), "", "", "done"); settle(); pushed.clear()
+check("setup for rule 3: he answers Done, so the step he finished is S2 and no step of his is open", his_open(gr) == [] and ("Oliver: " + S2, "done") in steps_of(gr), steps_of(gr))
+before = steps_of(gr)
+st, r3 = isy("open", marker="plugin_sync:rules", step=S2); settle()
+check("rule 3: the step he last finished, sent again with no open step of his: left alone, nothing opened", st == 200 and steps_of(gr) == before and his_open(gr) == [] and pushed == [], (st, steps_of(gr)))
+st, r3b = isy("open", marker="plugin_sync:rules", step=S3); settle()
+check("rule 1 after a finished step: a step that differs from the finished one is set, as his open step, and the item waits on him again", st == 200 and his_open(gr) == ["Oliver: " + S3] and item(gr)["metadata"].get("state") == "your-step" and ("Oliver: " + S2, "done") in steps_of(gr), (st, steps_of(gr)))
+
+# rule 4: his open step stands but the state write never happened (state not your-step): the step is set
+st, r4 = isy("open", marker="plugin_sync:rule4"); settle(); g4 = r4["item"]
+edit_meta(g4, lambda m_: (m_.__setitem__("state", "doing"), m_.__setitem__("step", "")))
+st, r4b = isy("open", marker="plugin_sync:rule4"); settle()
+check("rule 4: his open step with no state written is made whole by a repeat open: the state is your-step, the step set, one open step of his", st == 200 and r4b["repeat"] is True and item(g4)["metadata"].get("state") == "your-step" and his_open(g4) == ["Oliver: " + S1], (st, r4b, item(g4)["metadata"].get("state"), steps_of(g4)))
+
+# a long step: over one line's limit it is refused before anything is written; the limit itself is kept
+st, rl = isy("open", marker="plugin_sync:long"); settle(); gl = rl["item"]
+before_d = item(gl)["description"]; before_s = steps_of(gl)
+long_step = "run the long sync " + "x" * 290
+st, e_l = isy("open", marker="plugin_sync:long", step=long_step); settle()
+check("a step over the limit on a repeat open is refused with the limit named; the description and steps are unchanged", st == 400 and "at most 300" in e_l["error"] and item(gl)["description"] == before_d and steps_of(gl) == before_s, (st, e_l))
+edge = "Press Sync " + "y" * 290
+st, r_e = isy("open", marker="plugin_sync:long", step=edge); settle()
+check("a step of exactly the limit (300 characters) on a repeat open is set", st == 200 and his_open(gl) == ["Oliver: " + edge] and len(edge) == 300, (st, steps_of(gl)))
+
+# a step with ';' sent twice: set the first time, left alone the second
+semi = "run the sync; then press Sync; confirm the version"
+st, r_s1 = isy("open", marker="plugin_sync:long", step=semi); settle()
+check("a ';' step on a repeat open is set as sent", st == 200 and his_open(gl) == ["Oliver: " + semi], (st, steps_of(gl)))
+before = steps_of(gl)
+st, r_s2 = isy("open", marker="plugin_sync:long", step=semi); settle()
+check("the same ';' step sent again is left alone: the steps are as they were", st == 200 and steps_of(gl) == before and len(his_open(gl)) == 1, (st, steps_of(gl)))
 
 # the reason is cut to the board's limit, never refused for its length
 st, o10 = isy("open", marker="plugin_sync:longreason")
