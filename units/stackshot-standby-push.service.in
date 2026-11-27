@@ -1,0 +1,22 @@
+# stackshot-standby-push.service — one push of the server's data to a standby (`stackshot standby-push`): `stackshot standby-copy` piped into ssh, which hands the stream to the receiver on the other box
+# (the receiver is the key's forced command there). The settings are in [standby_copy] (push_to, push_key, push_known_hosts, push_timeout); the run keeps its result in <paths.state>/standby-push.json.
+# A run while an earlier one is live exits 1 and changes nothing. Started by stackshot-standby-push.timer. Install: ./install.sh units (only with [standby_copy] push_to set)
+[Unit]
+Description=stackshot — push the server's data to a standby
+# model lane: none — no model is called: the unit copies files and sends them over ssh
+X-Model-Lane=none
+X-Model-Note=no model call: copies the server's data and sends it over ssh
+# the job's project, as the Agents tab shows it (<scope>/<project>); a timer without it is reported as no-project
+X-Project=@AUDIT_PROJECT@
+X-Runs-With=servers
+# X-Runs-With=servers: the job runs with the stackshot server and moves when the server moves
+
+[Service]
+Type=oneshot
+# the command ends a push after [standby_copy] push_timeout (300 s) by itself; this is the ceiling above it
+TimeoutStartSec=10min
+WorkingDirectory=@CHECKOUT@
+Environment=STACKSHOT_CONFIG=@CONFIG@
+# ~/.local/bin first, as in the other units (a user manager started after a reboot has no ~/.local/bin on its PATH); ssh is found on it too
+Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=@UV@ run --project @CHECKOUT@ --locked stackshot standby-push
