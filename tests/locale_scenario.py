@@ -431,7 +431,7 @@ check("apply_lang: English comes back as it was, and a page already done is not 
 check("apply_lang: the script table holds the keys the scripts ask for, in the language", json.loads(re.search(r"window.SSI=(\{.*?\});</script>", out, re.S).group(1))["js.copied"] == MARK("Copied"))
 check("the English table in every page head is the catalog's own (a script never carries a copy of a word)", r2._SST_HEAD.count("window.SSD=") == 1 and json.dumps(i18n.js_table("en")).replace("</", "<\\/") in r2._SST_HEAD)
 _asked = {k for p in pathlib.Path(i18n.__file__).parent.rglob("*.py") for k in re.findall(r"""SST\(\s*['"]([A-Za-z0-9_.]+)['"]\s*[,)]""", p.read_text(encoding="utf-8"))}
-check("every key a page script asks for by name is in the table a page carries (else the script draws the key itself)", {"explain.about", "panel.audit.dash_help"} <= _asked <= set(i18n.js_table("en")), sorted(_asked - set(i18n.js_table("en"))))
+check("every key a page script asks for by name is in the table a page carries (else the script draws the key itself)", {"js.colors.help", "panel.audit.dash_help"} <= _asked <= set(i18n.js_table("en")), sorted(_asked - set(i18n.js_table("en"))))
 
 # ---- 7. ui.render imported for the first time while a request's language is not English: its module-level words are the English ones
 IMPORT_PROBE = r"""
@@ -862,11 +862,11 @@ with i18n.use("ko"): rl_twice = _rl()
 write_ko(test_locale(**{"home.rendered_line": "drawn lately"})); set_dir(LOC); reset_warned()
 with i18n.use("ko"): rl_none = _rl()
 write_ko(test_locale()); set_dir(LOC); reset_warned()
-check("the rendered line in English: 'rendered' before the age, byte for byte what it always was",
-      rl_en == f'<p class="rline"><span class="rw">rendered </span><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span></p>', rl_en)
-check("…a template that puts the age first puts it first, the age's span intact and its words after it", rl_ko == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span><span class="rw"> was drawn</span></p>', rl_ko)
-check("…a template of the age alone draws no words around it", rl_bare == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span></p>', rl_bare)
-_span = f'<span id="rendered" data-stale="{_st}" title="T"><b>S</b></span>'
+check("the rendered line in English: 'rendered' before the age, byte for byte (data-xt-also: its time's popup says when the page is stale too)",
+      rl_en == f'<p class="rline"><span class="rw">rendered </span><span id="rendered" data-stale="{_st}" title="T" data-xt-also><b>S</b></span></p>', rl_en)
+check("…a template that puts the age first puts it first, the age's span intact and its words after it", rl_ko == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T" data-xt-also><b>S</b></span><span class="rw"> was drawn</span></p>', rl_ko)
+check("…a template of the age alone draws no words around it", rl_bare == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T" data-xt-also><b>S</b></span></p>', rl_bare)
+_span = f'<span id="rendered" data-stale="{_st}" title="T" data-xt-also><b>S</b></span>'
 check("…REGRESSION: a template with the age twice draws the age's span once, at the first place; the second place is empty and no marker leaks into its words (the old code let the marker into the second span)",
       rl_twice == f'<p class="rline">{_span}<span class="rw"> was drawn, </span></p>' and rl_twice.count('id="rendered"') == 1, rl_twice)
 check("…characterization (the old code gave the same): a template with no age at all draws the age's span once, words first and the span after (it carries the stale colour, the title and the tick)",

@@ -763,7 +763,7 @@ check("header: home's cards keep their own #anchors and the click that filters i
 check("header: home's header runs buttons, connection notice, title (the h1) with the rendered line beside it, cards, search box", hc.find("<header") < hc.find('id="theme"') < hc.find('id="conn"') < hc.find('<h1 class="site">') < hc.find('<p class="rline">') < hc.find('<nav class="hcards"')
       < hc.find('class="sbox"') < hc.find("</header>") and '<p class="sub">rendered' not in hc, hc[:200])
 # the rendered line is one helper's markup on every page with the header: in the header's title row (beside the title, before the cards), the stale threshold and the title text on it, and the age kept by the page: home's tick, every other page's _STAMP_JS
-_RL = re.compile(r'<div class="hbar">(<(?:h1|p) class="site">.*?</(?:h1|p)>)(<p class="rline"><span class="rw">rendered </span><span id="rendered" data-stale="(\d+)" title="([^"]*)">(.*?)</span></p>)</div>', re.S)
+_RL = re.compile(r'<div class="hbar">(<(?:h1|p) class="site">.*?</(?:h1|p)>)(<p class="rline"><span class="rw">rendered </span><span id="rendered" data-stale="(\d+)" title="([^"]*)" data-xt-also>(.*?)</span></p>)</div>', re.S)
 for nm, pg in ALLPG.items():
     hd = header_of(pg); m = _RL.search(hd)
     check(f"header: {nm} page: the rendered line sits in the title row, right after the site title, before the cards, once", bool(m) and hd.find('class="hbar"') < hd.find('<nav class="hcards"') and pg.count('id="rendered"') == 1, hd[:700])

@@ -543,13 +543,13 @@ check("not a hub: the keeper's line stays on the Projects page", "<li>work-ospre
 bs.proj["projects/alpha"]["agents"] = {"work-osprey-main": "does the work", "work-osprey-x": "keeps the kept page"}
 bs.proj["projects/alpha"]["back_agents"] = {"work-osprey-x": "keeps the kept page"}   # the registry's shape: agents = all, back_agents = the background subset
 ar = alpha_rows(bs)
-check("hub row: a keeper that owns nothing and is not listed has no line; the -main agent is the one front line, untagged", '<li title="does the work">work-osprey-main</li>' in ar and ">work-osprey</li>" not in ar and 'class="rtag"' not in ar.split("work-osprey-main")[0] and "steward" not in ar.lower(), ar)
-check("hub row: the lead shows the full label, and no suffix is built on a keeper that does not lead", ">work-osprey-main</li>" in ar and ">-main</li>" not in ar, ar)
+check("hub row: a keeper that owns nothing and is not listed has no line; the -main agent is the one front line, untagged", re.search(r'<li>work-osprey-main <span class="xp"[^>]*>.*?>does the work</span></span></li>', ar) is not None and ">work-osprey</li>" not in ar and 'class="rtag"' not in ar.split("work-osprey-main")[0] and "steward" not in ar.lower(), ar)
+check("hub row: the lead shows the full label, and no suffix is built on a keeper that does not lead", '<li>work-osprey-main <span class="xp"' in ar and ">-main</li>" not in ar and ">-main <" not in ar, ar)
 check("hub row: a running background agent follows the front agents, dimmed and tagged", 0 <= ar.find("work-osprey-main") < ar.find("work-osprey-x")
-      and re.search(r'<li class=dimline title="keeps the kept page">work-osprey-x <span class="rtag"[^>]*>background</span></li>', ar) is not None, ar)
+      and re.search(r'<li class=dimline>work-osprey-x <span class="rtag"[^>]*>background</span> <span class="xp"[^>]*>.*?>keeps the kept page</span></span></li>', ar) is not None, ar)
 bm = ui_render.Board(f"{tmp}/store"); bm.proj["projects/alpha"]["agents"] = {"work-osprey-aaa": "helps", "work-osprey-main": "does the work"}
 _am = alpha_rows(bm)
-check("hub row: the -main agent leads, even when another agent sorts before it", 0 <= _am.find(">work-osprey-main</li>") < _am.find(">work-osprey-aaa</li>"), _am)
+check("hub row: the -main agent leads, even when another agent sorts before it", 0 <= _am.find(">work-osprey-main ") < _am.find(">work-osprey-aaa "), _am)
 check("board.md lists the background agent, not the keeper that owns nothing and is not listed", "`a/work-osprey`" not in bs.markdown() and "-x`" in bs.markdown(), [l for l in bs.markdown().splitlines() if "alpha" in l][:4])
 check("lines() carries a background agent's mandate", {x[0]: x[6] for x in bs.lines("projects/alpha", bs.by_proj["projects/alpha"])}.get("a/work-osprey-x") == "keeps the kept page")
 _r0 = bs.by_proj["projects/alpha"][0]
@@ -584,9 +584,9 @@ _sc = lambda b: re.findall(r'<td class="sess">(.*?)</td>', idx(b))
 am = alpha_rows(bsm)
 am = alpha_rows(bsm)
 _ilm = il(bsm); _lm = [x[0] for x in _ilm]
-check("hub row, keeper = -main: it appears once, as the plain lead line with its full label", _lm.count("a/work-osprey-main") == 1 and _lm[0] == "a/work-osprey-main" and _ilm[0][7] == "" and _ilm[0][6] == "does the work" and am.count("work-osprey-main") == 1 and 'rtag">keeper' not in am, (_lm, am))
+check("hub row, keeper = -main: it appears once, as the plain lead line with its full label", _lm.count("a/work-osprey-main") == 1 and _lm[0] == "a/work-osprey-main" and _ilm[0][7] == "" and _ilm[0][6] == "does the work" and am.count(">work-osprey-main ") == 1 and 'rtag">keeper' not in am, (_lm, am))
 check("…the other agents follow as lines of their own, the background one with an item tagged; the Projects page lists them with the front agent before the background one",
-      "a/work-osprey-aaa" in _lm and {x[0]: x[7] for x in _ilm}.get("a/work-osprey-x") == "background" and 0 <= am.find(">work-osprey-main</li>") < am.find(">work-osprey-aaa</li>") < am.find("work-osprey-x"), (_lm, am))
+      "a/work-osprey-aaa" in _lm and {x[0]: x[7] for x in _ilm}.get("a/work-osprey-x") == "background" and 0 <= am.find(">work-osprey-main ") < am.find(">work-osprey-aaa ") < am.find("work-osprey-x"), (_lm, am))
 check("…and nothing on the index says steward (a role no session has any more)", "steward" not in " ".join(_sc(bsm)).lower() and "steward" not in ui_render._ROLE_TIP and "steward" not in ui_render._ROLE_TIP.get("background", ""), _sc(bsm))
 _pm = bsm.routing_html("projects/alpha"); _sm = _pm[_pm.find("<h2>Sessions"):_pm.find("<h2>Anchors")]
 check("…the project page lists it once under Agents, with no Steward group", _sm.count("work-osprey-main</span>") == 1 and _sm.find(">Agents</h3>") < _sm.find("work-osprey-main</span>") < _sm.find(">Background agents</h3>") and "steward" not in _sm.lower(), re.sub(r"<[^>]*>", "|", _sm))

@@ -104,8 +104,10 @@ names = {x[0].split("/", 1)[-1] for x in bd.index_lines("projects/live", bd.by_p
 check("index_lines: live agents and the owner of an open item are kept, a not-live agent that owns nothing is dropped", "work-live-main" in names and "work-live-gone" in names and "work-live-idle" not in names, names)
 check("index: a not-live agent that owns nothing is absent", "work-live-idle" not in sec, text(sec)[:500])
 AH = '<details class="fold sfold" data-fold="projects.archived"><summary><h3 class="iscope">Archived <span class="count">1</span></h3></summary>'
+def at(nm):     # where an agent's name is drawn; a "?" may follow it after a space
+    return re.search(">" + re.escape(nm) + "[ <]", sec).start()
 check("index: the archived project sits in one closed Archived fold (home's heading and count), after the active projects", sec.count(AH) == 1
-      and sec.index(AH) < sec.index(">work-done-main<") and sec.index(">work-live-main<") < sec.index(AH) and sec.index(">work-solo<") < sec.index(AH), text(sec)[:600])
+      and sec.index(AH) < at("work-done-main") and at("work-live-main") < sec.index(AH) and at("work-solo") < sec.index(AH), text(sec)[:600])
 check("index: the group is not open", not re.search(r'<details class="fold sfold" data-fold="projects.archived"[^>]*\bopen', sec))
 check("index: the markup stays balanced (details and tables)", sec.count("<details") == sec.count("</details>") and sec.count("<table") == sec.count("</table>"), (sec.count("<details"), sec.count("</details>"), sec.count("<table"), sec.count("</table>")))
 roles(None); sec2 = index_of(board())
