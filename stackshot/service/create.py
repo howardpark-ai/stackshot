@@ -334,6 +334,7 @@ def create_item(
     if _uw.needs_date(meta):                                     # a kind with no date is never refused: the item's own words, else a suggestion, else tomorrow
         fb_d, _fb_how, fb_note = h.fallback_wait_date(meta, next, description, due)
         meta["until"] = fb_d
+        meta[_model.SERVER_END_KEY] = fb_d                       # the server chose this day, not the caller: the reads mark it so
         wait_note += fb_note
     if _wt.stored_until(meta) and not _uw.kind_of(meta) and _wt.after_of(meta):
         meta["wait_kind"] = "item"         # a date beside an after link is that wait's backstop (as ask_by was): the wait stays on the item

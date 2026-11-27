@@ -249,8 +249,8 @@ bupd(8, hold=True, wake=w(3))
 check("3 hold=true + wake on an anchor wait keeps the hold flag and the date", mt(8).get("hold") is True and W.stored_until(mt(8)) == w(3), mt(8))
 item(10, needs=[BACK])
 res10 = _wt_update.stackshot_update("a10", sender=BACK, hold=True)
-check("3 a hold with no date on an item with a scoped anchor is accepted; the item is not read as an outside wait here (needs names the back, not external), so it gets the plain time-wait default, stamped as a time wait, no hold flag left",
-      "hold" not in mt(10) and W.stored_until(mt(10)) == w(14) and mt(10).get("wait_kind") == "time", (res10, mt(10)))
+check("3 a hold with no date on an item with a scoped anchor is accepted with the server's backstop day; the hold flag stays (the anchor's notice releases a hold) and no time kind is stamped",
+      mt(10).get("hold") is True and W.stored_until(mt(10)) == w(14) and mt(10).get("until_server") == w(14) and "wait_kind" not in mt(10), (res10, mt(10)))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

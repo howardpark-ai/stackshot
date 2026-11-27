@@ -1,6 +1,8 @@
 """Scenario test for two defaults a call may leave out (fixture data, no live store, no network, no server socket): a close with no outcome on an item whose every step is done or dropped
-is closed as done with the server's words, and a wait on an item, anchor, relay or event with no end gets the default backstop day, marked as the server's; a time wait with no date, an open step,
-no steps at all and a date in the past stay refused; two writers racing on the same item end in one consistent state.
+is closed as done with the server's words, marked as the server's, unless the call sends new work, a need, an ask or a check with it, or the item still waits on an ask to the owner or a done
+check; a wait with nothing that can wake it (on an item, anchor, relay or event with no end, or a time wait, park or hold with no date) gets the default backstop day, marked as the server's
+and shown so in the agent reads; an open step, no steps at all, a date in the past and a day the caller gives past the cap or with no reason stay refused, whichever old name carries it;
+an anchor's notice still releases what it released before; two writers racing on the same item end in one consistent state.
 
     tests/run-suite close_wait_defaults  -> exit 0 / 1"""
 import asyncio, contextlib, datetime, importlib.util, io, json, os, re, sys, pathlib, tempfile, time, logging, hashlib
@@ -75,6 +77,11 @@ ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._owing_note = lambda debtor: ""
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
+def _pr_open(ref, now, gh_st):
+    """No network: a pull request an event wait names reads as open, not merged (the wait's end day is what this suite is about, not the PR; event_wait reads PRs)."""
+    gh_st[checks_svc.check_ref(ref)] = {"merged": False, "err": "", "next": now + 300}
+    return False, ""
+checks_svc.pr_merged = _pr_open
 FB = telling.fallback_mover("projects/alpha")      # the project's builder, else its -main agent (here its first front agent): what an item nothing else names is moved by, never its creator
 assert FB == "home-front", FB
 ST = T / "state/waiting.json"
@@ -353,7 +360,7 @@ for label, kw in (("outside party", dict(needs=["external"], next="external: the
     check(f"create ({label}): closing it clears the end and the mark", not err and not any(k in m for k in ("until", "until_server", "wait_kind")), (err, m))
 n, letter, r, f = made(subject="[home] created with an explicit time kind", wait_kind="time")
 m = rd(int(n), letter)["metadata"]
-check("create: an explicit wait_kind=time with no date keeps the existing next-day fallback (no server mark, not the 14-day backstop)", m.get("until") and m.get("until") != EXP14 and "until_server" not in m, m)
+check("create: an explicit wait_kind=time with no date keeps the existing next-day fallback (not the 14-day backstop), marked as the server's day", m.get("until") and m.get("until") != EXP14 and m.get("until_server") == m.get("until"), m)
 
 # the dates the caller gives keep the cap rules: a time wait given 20 days out is still held to them
 item(204, needs=[BACK], subject="[home] caller's own far day", state="doing")
@@ -386,7 +393,7 @@ check("wait: a wait with an end but a missing input is refused for that input an
 # L5: the event form with a wait_kind and no day gets the next-day fallback, not the 14-day backstop
 item(213, needs=[BACK], subject="[home] event form, no day")
 out, fx = with_fixes(lambda: updt(213, wait_kind="event", wait_event="pr_merged acme/repo#9", mover=BACK))
-check("event form: wait_kind=event with no day takes the fallback day (not the 14-day backstop) and carries no server mark", (_WT.stored_until(mt(213)) or "") not in ("", EXP14) and "until_server" not in mt(213) and "wait-end-defaulted" not in [k for k, _ in fx], (mt(213), fx))
+check("event form: wait_kind=event with no day takes the fallback day (not the 14-day backstop), marked as the server's day, and is not told as the backstop", (_WT.stored_until(mt(213)) or "") not in ("", EXP14) and mt(213).get("until_server") == _WT.stored_until(mt(213)) and "wait-end-defaulted" not in [k for k, _ in fx], (mt(213), fx))
 
 # L8: the caller's own end given as wake pops the mark; the fix kinds invite no resend; nine open steps say "and more"
 item(212, needs=[BACK], subject="[home] given as wake")
@@ -403,7 +410,150 @@ check("close: when every step was dropped the server's reason and bullet say don
 done_item(97, "done", "done")
 out, fx = with_fixes(lambda: comp(97, outcome="done"))
 check("close: an explicit outcome=done with no reason or bullet is filled in, and the reply says what was left out", rd(97)["metadata"].get("reason") == "closed with every step done (set by the server)" and "left out reason, outcome_text" in fx[0][1] and _CL.reply_note(fx).startswith("\n(fixed for you: ") and "left out reason, outcome_text" in _CL.reply_note(fx), (fx, out[:300]))
-refused("close: the refusal reads as sentences: Nothing... Mark them...", lambda: comp(91 if False else 95), ". Mark them in the same call")
+refused("close: through update the refusal reads as sentences and names the marks update takes: Nothing... Mark them...", lambda: upd(95, status="completed"), ". Mark them in the same call (done=[...] or dropped=[...])")
+try:
+    comp(95); e95 = ""
+except Exception as e:
+    e95 = str(e)
+check("close: complete's refusal names only what complete takes (outcome, reason, outcome_text), never the step marks it has no parameter for", "Pass outcome, reason, outcome_text yourself" in e95 and not any(w in e95 for w in ("done=[", "dropped=[", "Mark them", "add the steps")), e95)
+try:
+    comp(93); e93 = ""
+except Exception as e:
+    e93 = str(e)
+check("close: ...and so for no steps at all: complete's refusal does not tell it to add and mark steps", "no steps and no outcome" in e93 and "Pass them yourself" in e93 and "add the steps" not in e93, e93)
+
+# ---- a close that would throw away what the same call sends, or an ask or a check still open, is not defaulted: the refusal names what is in the way, and nothing is written
+def unchanged(label, i, was_):
+    check(f"{label}: ...nothing is written: the item stays open with its steps as they were", raw(i) == was_ and rd(i)["status"] == "open", rd(i)["metadata"])
+done_item(150, "done", "done"); was = raw(150)
+refused("close+work: new work in next beside a close with no outcome is refused, naming it", lambda: upd(150, status="completed", next="home-front: a new step"),
+        "Nothing is written and the item stays open", "this call adds work in next (\"home-front: a new step\"), which would be left open", "or send the new work in an update of its own")
+unchanged("close+work", 150, was)
+done_item(151, "done", "done"); was = raw(151)
+refused("close+need: a new need and an ask beside the close are refused, each named", lambda: upd(151, status="completed", needs=["decision"], ask=ASK), "this call sets needs", "this call sets an ask")
+unchanged("close+need", 151, was)
+done_item(152, "done", "done"); was = raw(152)
+refused("close+status: a work status that is not done is refused, naming it", lambda: upd(152, status="completed", work={"text": "building it", "state": "in progress"}), "a step status that is not done (work: in progress)")
+unchanged("close+status", 152, was)
+done_item(153, "done", "open"); was = raw(153)
+refused("close+mark+work: marking the last step done does not let new work through", lambda: upd(153, status="completed", done=[2], next="home-front: another"), "this call adds work in next")
+unchanged("close+mark+work", 153, was)
+done_item(156, "done", "open"); was = raw(156)
+refused("close+work+open step: the refusal names the new work and the open step together", lambda: upd(156, status="completed", next="home-front: brand new"), "this call adds work in next", "step 2 is still open")
+unchanged("close+work+open step", 156, was)
+done_item(154, "done", "done", needs=["decision"], ask=ASK); was = raw(154)
+try:
+    comp(154); e154 = ""
+except Exception as e:
+    e154 = str(e)
+check(f"close+open ask: an item that still waits on {OWN}'s answer is not closed by default; complete's refusal names the ask and only what complete takes", f"the item still waits on {OWN}'s answer to its ask" in e154 and "Pass outcome, reason, outcome_text yourself" in e154 and "send the new work" not in e154, e154)
+unchanged("close+open ask", 154, was)
+done_item(155, "done", "done", check="item_closed a70"); was = raw(155)
+refused("close+check: a done check that has not passed is not closed over by default", lambda: comp(155), "the item's done check (item_closed a70) has not passed")
+unchanged("close+check", 155, was)
+done_item(157, "done", "done"); was = raw(157)
+refused("close+check given: a done check sent with the close is not closed over either", lambda: upd(157, status="completed", check="item_closed a70"), "this call sets a done check")
+unchanged("close+check given", 157, was)
+
+# ---- the server's close words are marked as the server's in metadata and in get; a reopen drops the mark
+check("mark: a close the server filled lists the fields it wrote (outcome_server)", mt(60).get("outcome_server") == ["outcome", "reason", "outcome_text"] and mt(61).get("outcome_server") == ["outcome", "outcome_text"], (mt(60).get("outcome_server"), mt(61).get("outcome_server")))
+check("mark: a close with every field given carries no mark", "outcome_server" not in mt(63), mt(63))
+g60 = _wt_get.stackshot_get("a60")
+check("mark: get marks the server's outcome, and words that already say so are not marked twice", "outcome: done (set by the server)" in g60 and "(set by the server) (set by the server)" not in g60, g60[:600])
+done_item(170, "done", "done")
+comp(170, reason="shipped in the release", outcome_text=NEWB)
+g170 = _wt_get.stackshot_get("a170")
+check("mark: get marks only the field the server wrote: the outcome, not the caller's reason or bullets", mt(170).get("outcome_server") == ["outcome"] and "outcome: done (set by the server)" in g170
+      and "reason: shipped in the release\n" in g170 and "outcome text:\n" in g170, g170[:600])
+try:
+    updt(170, status="open", next="home-front: one more step"); e170 = ""
+except Exception as e:
+    e170 = str(e)
+check("mark: a reopen drops the mark with the close fields", not e170 and rd(170)["status"] == "open" and "outcome_server" not in mt(170), (e170[:300], mt(170)))
+
+# ---- the old names of a park's date are judged as the date they stand for: ask_by beside hold=true, clear_wake or a time wait keeps the future, the cap and the reason rules
+for n_, d_, want in ((140, PAST, "must be in the future"), (141, day(300), "a wait runs at most"), (142, day(3), "with no reason")):
+    item(n_, needs=[BACK], subject="[home] hold with ask_by", state="doing"); was = raw(n_)
+    refused(f"hold+ask_by: hold=true with ask_by={d_} is refused as the same day given as until is ({want})", lambda: updt(n_, hold=True, ask_by=d_), want)
+    check(f"hold+ask_by ({d_}): ...nothing is stored", raw(n_) == was, mt(n_))
+    item(n_, needs=[BACK], subject="[home] hold with until", state="doing")
+    refused(f"hold+until ({d_}): (the same day as until is refused for the same reason)", lambda: updt(n_, hold=True, until=d_), want)
+item(143, needs=[BACK], subject="[home] time wait with ask_by", state="doing"); was = raw(143)
+refused("time+ask_by: wait_kind=time with a past ask_by is refused as a past day", lambda: updt(143, wait_kind="time", ask_by=PAST), "must be in the future")
+check("time+ask_by: ...nothing is stored", raw(143) == was, mt(143))
+item(144, needs=[BACK], subject="[home] a hold stored the old way", hold=True, wake=day(4)); was = raw(144)
+refused("clear_wake+ask_by: a past ask_by sent with clear_wake on a stored hold is refused as a past day", lambda: updt(144, clear_wake=True, ask_by=PAST), "must be in the future")
+check("clear_wake+ask_by: ...the hold and its day stand", raw(144) == was, mt(144))
+item(146, needs=[BACK], subject="[home] hold with ask_by and a reason", state="doing")
+updt(146, hold=True, ask_by=day(3), wait_basis=f"the soak collects its logs ends {day(3)}")
+check("hold+ask_by: a day inside the cap with its reason is accepted and stored as until, no ask_by beside it", mt(146).get("until") == day(3) and "ask_by" not in mt(146) and "until_server" not in mt(146), mt(146))
+
+# ---- clear_wake on a hold stored the old way ends the park; clear_after on a defaulted item wait ends it with its server day
+item(145, needs=[BACK], subject="[home] a hold stored the old way", hold=True, wake=day(4))
+updt(145, clear_wake=True)
+check("clear_wake: on a hold stored as hold and wake, it ends the park: no hold, no date, no server day put in its place", not any(k in mt(145) for k in ("hold", "hold_set", "wake", "until", "until_server", "wait_kind")), mt(145))
+item(166, needs=[BACK], subject="[home] defaulted item wait")
+upd(166, after=["a70"])
+g166 = _wt_get.stackshot_get("a166")
+check("mark: get's until line marks the server's day", f"until: {EXP14} (set by the server)" in g166, g166[:600])
+out166 = updt(166, clear_after=True)
+check("clear_after: ending the item wait drops the server's day, its mark and its kind with it", not any(k in mt(166) for k in ("until", "until_server", "wait_kind", "after", "hold", "wake", "ask_by")), mt(166))
+check("clear_after: ...and the reply says so", f"the backstop day {EXP14} the server had set for that wait went with it" in out166 and "no longer waits" in out166, out166[-600:])
+
+# ---- a bare hold ends a stored state as a hold with a date does, is never stamped a time wait, and sent again is accepted
+item(165, needs=[BACK], subject="[home] hold, no date, sent twice", state="doing")
+out165 = updt(165, hold=True)
+check("hold: a bare hold on a doing item ends the stored state, as a hold with a date does, and says so", "state" not in mt(165) and "stored state doing dropped" in out165, (mt(165), out165[-500:]))
+check("hold: ...it is a park on the server's day, not stamped a time wait", "wait_kind" not in mt(165) and mt(165).get("until") == EXP14 and mt(165).get("until_server") == EXP14, mt(165))
+out, fx = with_fixes(lambda: updt(165, hold=True))
+check("hold: hold=true sent again with no date is accepted: the server's day and its mark stand, nothing told twice", mt(165).get("until") == EXP14 and mt(165).get("until_server") == EXP14 and "hold" not in mt(165) and "wait-end-defaulted" not in [k for k, _ in fx], (mt(165), fx))
+
+# ---- an anchor scoped to the item: its notice still releases what the server parked
+from stackshot.service import wakes as _wakes_svc
+A9 = "https://github.com/o/r/pull/909"
+_anc.save({"projects/alpha": [{"url": A9, "items": ["a160", "a161", "a162"], "added": now0 - 20 * DAY, "by": "x"}]})
+_wake_notify_was = _wakes_svc.wake_notify
+_wakes_svc.wake_notify = lambda *a, **k: []
+try:
+    item(160, needs=["external"], subject="[home] outside, scoped anchor")
+    out, fx = with_fixes(lambda: updt(160, wait_event="the vendor ships"))
+    check("anchor: a wait read from a scoped anchor alone (no wait_anchor) gets the server's day but is not stamped an anchor wait", "wait_kind" not in mt(160) and mt(160).get("until") == EXP14 and mt(160).get("until_server") == EXP14 and [k for k, _ in fx] == ["wait-end-defaulted"], (mt(160), fx))
+    item(161, needs=[BACK], subject="[home] bare hold, scoped anchor", state="doing")
+    out161, fx161 = with_fixes(lambda: updt(161, hold=True))
+    check("anchor: a bare hold on an item an anchor is scoped to keeps its hold flag beside the server's day", mt(161).get("hold") is True and mt(161).get("until") == EXP14 and mt(161).get("until_server") == EXP14 and "wait_kind" not in mt(161), mt(161))
+    check("anchor: ...and the reply says the notice still releases it first", "the notice of the anchor scoped to the item still releases it first" in out161 + _CL.reply_note(fx161), (out161[-500:], fx161))
+    m162 = {"owner": U["home-front"], "project": "projects/alpha", "next": "home-front: wait", "needs": ["external"], "wake": FUT}
+    told162 = _gates_svc._default_wait_end({"status": "open", "subject": "[home] x", "metadata": m162}, "a162", False, True)
+    check("anchor: a date the write already gave is kept, and an anchor read from a scoped anchor alone is not stamped there either", told162 == "" and m162.get("wake") == FUT and "wait_kind" not in m162 and "until_server" not in m162, m162)
+    n9 = {"kind": "anchor", "anchor": A9, "to": "home-stew", "ruling": "passed", "ruled_at": time.time() + 30, "ts": time.time() + 30, "id": "cwd160"}
+    rel = _wakes_svc.anchor_release("projects/alpha", n9)
+    check("anchor: the anchor's notice releases both", {"a160", "a161"} <= set(rel), rel)
+    check("anchor: ...the server's day and its mark go with the release", not any(k in mt(160) for k in ("until", "until_server")) and not any(k in mt(161) for k in ("hold", "until", "until_server")), (mt(160), mt(161)))
+finally:
+    _wakes_svc.wake_notify = _wake_notify_was
+    _anc.save({})
+
+# ---- a day the server takes from an awaited item's expected-by far out says how far and why
+item(175, needs=[BACK], subject="[home] blocker expected far out", state="doing", expected_by=day(40))
+item(176, needs=[BACK], subject="[home] waits after the far one")
+out, fx = with_fixes(lambda: upd(176, after=["a175"]))
+check("far: the day is the awaited item's expected-by plus two days, and the reply says how far out and why", mt(176).get("until") == day(42) and any("that is 42 days out, later than the usual 14, because the item it waits after is expected then" in t for _, t in fx), (mt(176), fx))
+
+# ---- the mark counts only while the stored end is the server's day
+SM, STALE = {"until": EXP14, "until_server": EXP14}, {"until": day(6), "until_server": EXP14}
+check("mark: server_end reads the mark only while the stored end is that day", model.server_end(SM) == EXP14 and model.server_end(STALE) == "" and model.server_end({"until_server": EXP14}) == "", None)
+item(181, needs=[BACK], subject="[home] a stale mark", after=["a70"], wait_kind="item", until=day(6), until_server=EXP14)
+g181 = _wt_get.stackshot_get("a181")
+check("mark: get shows no server mark beside a day that is not the server's", "set by the server" not in g181 and day(6) in g181, g181[:600])
+item(180, needs=[BACK], subject="[home] a stale mark, written", after=["a70"], wait_kind="item", until=day(6), until_server=EXP14)
+upd(180, next="home-front: look again")
+check("mark: a write drops a mark that no longer matches the stored end, and the end stays", "until_server" not in mt(180) and mt(180).get("until") == day(6), mt(180))
+from stackshot.tools import board_report as _board_report
+from stackshot.audit import audit_run as _audit_run
+check("mark: board.md's parked mark and the brief's parked line mark the server's day (render.server_mark), not another", render.server_mark({"metadata": SM}) == " (set by the server)" and render.server_mark({"metadata": STALE}) == "", None)
+check("mark: the board report's wake words mark the server's day, not another", _board_report._wake_words(SM) == f"until {EXP14} (set by the server)" and _board_report._wake_words(STALE) == f"until {day(6)}", (_board_report._wake_words(SM), _board_report._wake_words(STALE)))
+check("mark: the audit's stored-wait text marks the server's day, not another", f"ends on {EXP14} (set by the server)" in _audit_run.stored_wait_text({"metadata": SM}) and "set by the server" not in _audit_run.stored_wait_text({"metadata": STALE}),
+      (_audit_run.stored_wait_text({"metadata": SM}), _audit_run.stored_wait_text({"metadata": STALE})))
 
 # ================================================================ 3. two writers
 def race(fa, fb):

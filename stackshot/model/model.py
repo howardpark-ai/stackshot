@@ -59,6 +59,16 @@ def server_end(m: dict[str, Any]) -> str:
     the wait stands on (until, else the working ask_by or wake) is still that day."""
     d = clean(m.get(SERVER_END_KEY))[:10]
     return d if d and d in {clean(m.get(k))[:10] for k in ("until", "ask_by", "wake")} else ""
+
+
+OUTCOME_SERVER_KEY = "outcome_server"      # metadata of a closed item: the fields of its close (outcome, reason, outcome_text) the server wrote because the close left them out; a reopen drops it with them
+SERVER_SET = "(set by the server)"         # the words every read puts beside a value the server wrote in the caller's place
+
+
+def server_outcome(m: dict[str, Any]) -> list[str]:
+    """The close fields the server wrote (OUTCOME_SERVER_KEY), those of outcome, reason and outcome_text the item still stores; [] when it wrote none."""
+    v = m.get(OUTCOME_SERVER_KEY)
+    return [k for k in (v if isinstance(v, list) else []) if k in ("outcome", "reason", "outcome_text") and clean(m.get(k))]
 MODEL_FIELDS = ("goal", "mover", "then", *WAIT_GROUP, LEGACY_PICKER_KEY)
 DROP_ON_CLOSE = ("mover", "then", *WAIT_GROUP, LEGACY_PICKER_KEY)            # a closed item has no mover and waits on nothing; its goal stays as the record
 LINE_MAX = 300

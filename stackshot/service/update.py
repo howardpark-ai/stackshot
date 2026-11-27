@@ -185,13 +185,17 @@ CLOSE_REASON_DROPPED = "closed with every step done or dropped (set by the serve
 CLOSE_TEXT_DROPPED = "- every step is done or dropped (set by the server)"
 
 
-def _close_default(gid: str, item_was: dict[str, Any], keeper: str, done: Any, dropped: Any, work_tick: int, outcome: str, reason: str, outcome_text: str, superseded_by: str) -> tuple[str, str, str, str, str]:
+def _close_default(gid: str, item_was: dict[str, Any], keeper: str, done: Any, dropped: Any, work_tick: int, outcome: str, reason: str, outcome_text: str, superseded_by: str,
+                   blockers: list[str] | None = None, tool: bool = False) -> tuple[str, str, str, str, str, list[str]]:
     """A close that leaves out its outcome, reason or outcome_text, on an item whose every step is done or dropped (counting the steps this call marks), is accepted: the server
     writes outcome done, the reason CLOSE_REASON_DEFAULT and the bullet CLOSE_TEXT_DEFAULT for the parts the caller left out (the parts it gave stay as given). → (outcome, reason, outcome_text,
-    the line that tells what the server wrote ("" when nothing was defaulted), why nothing could be ("" when the close is complete, or is not one this default reads: another outcome than done, or a replacing item)).
-    An open step, or no step at all, leaves the close as the caller sent it: the gate refuses it and says why."""
+    the line that tells what the server wrote ("" when nothing was defaulted), why nothing could be ("" when the close is complete, or is not one this default reads: another outcome than done, or a replacing item),
+    the fields the server wrote (the item's mark, OUTCOME_SERVER_KEY)).
+    An open step, or no step at all, leaves the close as the caller sent it: the gate refuses it and says why. So do `blockers`: what the call or the item says that a close with no word
+    of its end would throw away (new work this call sends, a new need or ask, an ask to the owner it does not answer, a done check that has not passed), each in words for the refusal.
+    `tool`: the complete tool's own close, which takes no marks: its refusal names only what it takes."""
     if (outcome and reason and outcome_text) or superseded_by or outcome not in ("", "done"):
-        return outcome, reason, outcome_text, "", ""
+        return outcome, reason, outcome_text, "", "", []
     try:
         steps = _steps.view(item_was.get("metadata"), keeper=keeper)
         dropped_now = set(_steps.resolve(steps, dropped, "dropped"))
@@ -199,23 +203,59 @@ def _close_default(gid: str, item_was: dict[str, Any], keeper: str, done: Any, d
         if work_tick >= 0:
             marked.add(work_tick)
     except _steps.StepError:
-        return outcome, reason, outcome_text, "", ""      # the marks cannot be read: they are refused on their own, and no default is guessed past them
+        return outcome, reason, outcome_text, "", "", []      # the marks cannot be read: they are refused on their own, and no default is guessed past them
     wrote = [n for n, v in (("outcome", outcome), ("reason", reason), ("outcome_text", outcome_text)) if not v]
+    them = "them" if len(wrote) > 1 else "it"
     open_ix = [i + 1 for i, st in enumerate(steps) if st["status"] == _steps.OPEN and i not in marked]
+    many = len(open_ix) > 1
+    open_words = f"step{'s' if many else ''} {', '.join(str(i) for i in open_ix[:8])}{' and more' if len(open_ix) > 8 else ''} {'are' if many else 'is'} still open"
+    if blockers:
+        return outcome, reason, outcome_text, "", (f"Nothing is written and the item stays open: the server fills in {', '.join(wrote)} only on a close that leaves nothing behind, and "
+                                                   + "; ".join([*blockers, *([open_words] if open_ix else [])]) + f". Pass {', '.join(wrote)} yourself"
+                                                   + ("" if tool else ", or send the new work in an update of its own")), []
     if open_ix:
-        many = len(open_ix) > 1
-        return outcome, reason, outcome_text, "", (f"Nothing is written and the item stays open: step{'s' if many else ''} "
-                                                   f"{', '.join(str(i) for i in open_ix[:8])}{' and more' if len(open_ix) > 8 else ''} {'are' if many else 'is'} still open, so the server cannot fill in {', '.join(wrote)} "
-                                                   f"(it does that only when every step is done or dropped). Mark {'them' if many else 'it'} in the same call (done=[...] or dropped=[...]) and leave out what you want filled, or pass {', '.join(wrote)} yourself")
+        return outcome, reason, outcome_text, "", (f"Nothing is written and the item stays open: {open_words}, so the server cannot fill in {', '.join(wrote)} "
+                                                   + (f"(it does that only when every step is done or dropped). Pass {', '.join(wrote)} yourself" if tool else
+                                                      f"(it does that only when every step is done or dropped). Mark {'them' if many else 'it'} in the same call (done=[...] or dropped=[...]) and leave out what you want filled, or pass {', '.join(wrote)} yourself")), []
     if not steps:
         return outcome, reason, outcome_text, "", ("Nothing is written and the item stays open: " + ("it has no steps and no outcome, so the server cannot fill in " if len(wrote) == 3 else "it has no steps, so the server cannot fill in ")
-                                                   + f"{', '.join(wrote)}. Pass {'them' if len(wrote) > 1 else 'it'} yourself, or add the steps and mark them")
+                                                   + f"{', '.join(wrote)}. Pass {them} yourself" + ("" if tool else ", or add the steps and mark them")), []
     any_dropped = any(st["status"] == _steps.DROPPED for st in steps) or bool(dropped_now)
     reason_d, text_d = (CLOSE_REASON_DROPPED, CLOSE_TEXT_DROPPED) if any_dropped else (CLOSE_REASON_DEFAULT, CLOSE_TEXT_DEFAULT)      # a step dropped is no step done: the words say "done or dropped"
     told = (f"{_gh.shown(gid)} closed as done with every step done or dropped; the call left out {', '.join(wrote)}, so the server wrote "
             + "; ".join({"outcome": "outcome done", "reason": f"the reason \"{reason_d}\"", "outcome_text": f"the outcome bullet \"{text_d}\""}[n] for n in wrote)
             + "; to give the real end state, reopen with status=open and a next line, then close again with outcome, reason and outcome_text")
-    return outcome or "done", reason or reason_d, outcome_text or text_d, told, ""
+    return outcome or "done", reason or reason_d, outcome_text or text_d, told, "", wrote
+
+
+def _close_blockers(item_was: dict[str, Any], keeper: str, *, next_text: str, work_spec: dict[str, Any] | None, needs_set: bool, ask: str, clear_ask: bool, clear_needs: bool,
+                    check_new: bool, check_cleared: bool) -> list[str]:
+    """What stops the server filling in a close's outcome (`_close_default`), in words for the refusal: the new work, need, ask or check the call sends with the close (a line of next that is no
+    step the item already has, a step status that is not done, needs, an ask, a check), an ask to the owner the item still waits on that the call does not take back (clear_ask or clear_needs),
+    and a done check on the item that has not passed (one that has closes the item itself) that the call does not clear. [] when none."""
+    m = item_was.get("metadata") or {}
+    out: list[str] = []
+    try:
+        known = {_steps.key(st["text"]) for st in _steps.view(m, keeper=keeper)}
+    except Exception:  # noqa: BLE001  — an unreadable checklist: every line sent reads as new
+        known = set()
+    new_lines = [ln for ln in _steps.split(next_text or "") if _steps.key(ln) not in known]
+    if new_lines:
+        out.append(f"this call adds work in next (\"{_clip_line(_steps.first_line(new_lines[0]), 70)}\"{' and more' if len(new_lines) > 1 else ''}), which would be left open")
+    if work_spec is not None and not work_spec.get("remove") and work_spec.get("state") != "done":
+        out.append(f"this call sets a step status that is not done (work: {work_spec.get('state') or 'in progress'})")
+    if needs_set:
+        out.append("this call sets needs, a new need the close would drop")
+    if ask.strip():
+        out.append("this call sets an ask, which the close would drop")
+    elif _waits_decision(m) and str(m.get("ask") or "").strip() and not (clear_ask or clear_needs):
+        out.append(f"the item still waits on {OWNER}'s answer to its ask, which this call does not answer")
+    chk = " ".join(str(m.get("check") or "").split())
+    if check_new:
+        out.append("this call sets a done check, which has not passed")
+    elif chk and not check_cleared:
+        out.append(f"the item's done check ({_clip_line(chk, 60)}) has not passed")
+    return out
 
 
 def _wait_is_bare(m: dict[str, Any]) -> bool:
@@ -756,8 +796,15 @@ def update_unlocked(
     answered_note = _answered_since_note(gid, item, sender)      # read now: the write below is the sender's too
     had_hold = bool((item.get("metadata") or {}).get("hold"))      # read before the unfold, which stands a basis or the kind time in as a hold
     was_until = _uw.unfold_item(item)                    # a stored until stands as the old working fields for this write's gates (until_write.py); it is folded back just before the save
+    park_kind = wait_kind.strip().lower() if wait_kind.strip() and wait_kind.strip().lower() not in h.ask_none else _uw.kind_of(item.get("metadata") or {})
+    if ((hold or clear_wake or park_kind == "time") and not wake and ask_by.strip() and ask_by.strip().lower() not in h.ask_none and _uw.slot_of(park_kind) == "wake"
+            and park_kind not in ("anchor", "item", "list") and not (_wlw.passed(waits) and not _wlw.clearing(waits))):
+        wake, ask_by, clear_wake = ask_by.strip(), "", False      # ask_by beside hold=true, clear_wake or a time wait (no relay, event, anchor or item kind) is that park's date, the old name of until: it is judged as the wake it stands for (the future, the cap, the reason), as a wake or an until is; with clear_wake it replaces the date, it does not drop it
     if was_until and clear_wake and _uw.kind_of(item["metadata"]) in ("", "time") and not had_hold:
         clear_hold = True                                # the date of a wait on the date alone is the whole wait: dropping it ends the wait, the hold it stands as goes with it
+    elif (clear_wake and not hold and not (wake or ask_by.strip()) and had_hold and not was_until and _uw.kind_of(item["metadata"]) in ("", "time") and str((item.get("metadata") or {}).get("wake") or "").strip()
+          and not ({"anchor", "recycle"} & set(h.hold_held_by(gid, item.get("metadata") or {})))):
+        clear_hold = True                                # …and so for a hold stored the old way (hold and wake, no until) that nothing else holds: its wake is its whole wait, so dropping it ends the park rather than leaving a hold with no date for the server's backstop day to fill
     item_was = json.loads(json.dumps(item))             # the item as it stood, for the state checks (a re-park, a decision asked again, a stale next)
     meta = dict(item.get("metadata") or {})
     old_ask = bool(str(meta.get("ask_by") or "").strip()) and not _watch.stored_kind(meta)      # an ask_by with no wait_kind, as stored before this write
@@ -852,10 +899,16 @@ def update_unlocked(
     after_set = after is not None and not clear_after and bool(after if isinstance(after, list) else after.strip())
     if clear_after and after is not None and (after if isinstance(after, list) else str(after).strip()) and not (isinstance(after, str) and after.strip().lower() in h.ask_none):
         fc.add("Refused: clear_after drops the after list; it does not go with a new one")
+    after_end_note = ""
     if clear_after:
         meta.pop("after", None)
         if _uw.kind_of(meta) == "item" and not wait_kind.strip() and not clear_wait and was_until and _uw.date_of(meta):
             meta.pop("wait_kind", None)                  # the wait on the item ended with its link; the date it carried stays as a wait on the date alone
+            if (srv_d := _model.server_end(meta)) and not (wake or ask_by.strip() or hold):
+                for k_ in ("wake", "ask_by", _model.SERVER_END_KEY):
+                    meta.pop(k_, None)                   # …unless that date is the backstop the server set for the wait on the item: it was no day of the caller's, so it ends with the wait it stood for
+                after_end_note = (f"\n(the wait on the item ended with its after link, and the backstop day {srv_d} the server had set for that wait went with it: "
+                                  "the item no longer waits; give until=<date> to wait on a date)")
         h.wait_end_sent_back(meta, (_we.ITEM,))          # a wait the server set from the line's words, sent back: the server leaves that line alone
     elif after_set:
         if (got_after := fc.call(_gates.gate_after, after, gid)) is not None:
@@ -962,9 +1015,14 @@ def update_unlocked(
         outcome_text, ot_note = _fg.fix_long_bullets(outcome_text, None, "outcome_text")       # a bullet over the limit is split like a description's (a pure form fix; the reply says so, and History)
         if ot_note:
             _stall.note(meta, time.time(), ot_note)
-        outcome, reason, outcome_text, close_told, no_default = _close_default(gid, item_was, keeper_was, done, dropped, work_tick, outcome, reason, outcome_text, superseded_by)
+        chk_call = " ".join(str(check or "").split()).lower()
+        blockers = _close_blockers(item_was, keeper_was, next_text=next, work_spec=work_spec, needs_set=needs_set, ask=ask, clear_ask=clear_ask, clear_needs=clear_needs,
+                                   check_new=bool(chk_call) and chk_call not in h.ask_none, check_cleared=clear_check or chk_call in h.ask_none)
+        outcome, reason, outcome_text, close_told, no_default, server_wrote = _close_default(gid, item_was, keeper_was, done, dropped, work_tick, outcome, reason, outcome_text, superseded_by,
+                                                                                               blockers, _writes.close_tool())
         if close_told:
             _calls.fixed("outcome-defaulted", close_told)
+            meta[_model.OUTCOME_SERVER_KEY] = server_wrote      # the fields of the close the server wrote, so a read tells them from the caller's (get draws "(set by the server)" beside each)
         read_superseded = not outcome and bool(superseded_by)      # a replacing item names the outcome: superseded_by goes with no other (an outcome of done or dropped beside it is still refused)
         if read_superseded:
             outcome = "superseded"
@@ -1278,6 +1336,7 @@ def update_unlocked(
         if q_why and q_text:
             h.cap_ok_put(meta, "wake", str(meta["wake"]), q_why, quote=q_text, source=q_src)
     hold_pre = bool(meta.get("hold"))     # the hold as this write leaves it, before the old rule below drops it beside a decision (the model guards refuse that pair instead)
+    server_hold = False
     dropped_hold = item.get("status") == "open" and bool(meta.get("hold")) and _waits_decision(meta)
     if dropped_hold:              # an item waiting on the owner's call is never on hold: any write drops a stored flag (its date stays)
         meta.pop("hold", None); meta.pop("hold_set", None)
@@ -1289,6 +1348,7 @@ def update_unlocked(
         fc.skip("the check that a park names what it waits for", "it reads the wake, the after list, the wait's arguments or the wait_basis, which are refused above")
     elif meta.get("hold") and not meta.get("wake") and (hold or clear_wake or after_set or clear_after or clear_recycle) and not h.after_open(meta) and not meta.get("recycle"):
         fc.call(_gates._default_wait_end, {**item, "metadata": meta}, gid, False, True, default="")      # a park with nothing that can wake it is not refused: the server stores its default backstop day and says so, or, when a real date already sits in one of its old working fields (a repeat write on a park the server itself defaulted), it is read and kept there silently (no line told): either way this leaves an end in place, and only its absence still refuses
+        server_hold = bool(hold) and not meta.get("hold") and bool(meta.get("wake") or meta.get("until") or meta.get("ask_by"))      # the bare hold became a park on the server's day (its flag folded into the date): it ends a stored state as a hold with a date does
         if not (meta.get("wake") or meta.get("until") or meta.get("ask_by")):
             if h.scoped_anchors(str(meta.get("project") or ""), gid):
                 fc.add(f"Refused: a park that waits on a notice from the anchor scoped to {gid} still carries a backstop date, at most {_wt.cap_days():g} "
@@ -1369,7 +1429,7 @@ def update_unlocked(
         if superseded_by:
             meta["superseded_by"] = superseded_by
     if reopening:                 # the close's record leaves the live item; the store's git history keeps it
-        for k in ("outcome", "outcome_text", "reason", "superseded_by"):
+        for k in ("outcome", "outcome_text", "reason", "superseded_by", _model.OUTCOME_SERVER_KEY):
             meta.pop(k, None)
     if clear_ask:
         meta.pop("ask", None)
@@ -1427,7 +1487,7 @@ def update_unlocked(
         if was_until and not (wake or hold):
             for k_ in _uw.LEGACY_FIELDS:                # clear_wait drops the stored until (model.WAIT_GROUP); the old working fields it stood as go with it
                 meta.pop(k_, None)
-    wait_note = alias_note
+    wait_note = alias_note + after_end_note
     if list_plan is not None:
         wait_note += list_plan.note + _list_note(list_plan, meta, item.get("status") == "open")
     elif _wlw.clearing(waits) and not _wl.stored(item_was.get("metadata") or {}):
@@ -1444,6 +1504,7 @@ def update_unlocked(
     if item.get("status") == "open" and "wait_kind" in model_set and _uw.needs_date(meta) and not meta.get("recycle") and not (meta.get("state") == "verifying" and meta.get("end")):
         fb_d, _fb_how, fb_note = h.fallback_wait_date(meta, next_after, description or item.get("description"), meta.get("due"))      # a kind with no date is never refused: the item's own words, else a suggestion, else tomorrow
         meta[_uw.slot_of(_uw.kind_of(meta))] = fb_d
+        meta[_model.SERVER_END_KEY] = fb_d                      # the server chose this day, not the caller: the reads mark it so
         if _uw.kind_of(meta) == "time":
             meta["hold"] = True                                 # a wait on a time stands as a hold with its wake
         until_wait = True
@@ -1528,7 +1589,7 @@ def update_unlocked(
     if item.get("status") != "completed" and (ask or opts):
         asked += _dg._options_note(meta) + _dg._actor_note(meta, options=bool(opts), ask=bool(ask))
     hold_note = ""
-    if ((hold and meta.get("hold") and meta.get("state") in _states.STATES and meta["state"] != "parked")
+    if ((hold and (meta.get("hold") or server_hold) and meta.get("state") in _states.STATES and meta["state"] != "parked")
             or (relay_hold and meta.get("state") in _model.ALIVE_STATES)) and not state_st:     # a hold makes the item read parked: a state of another kind cannot stand beside it; a relay or event wait stores no flag, so the hold ends only the alive states the model's conflict line names (a waiting state stands beside the wait and keeps its fields)
         hold_note = f"\n(stored state {meta['state']} dropped: a park ends it; the item reads " + ("as its relay or event wait" if relay_hold else "parked") + ")"
         h.state_end(meta)
@@ -1575,9 +1636,10 @@ def update_unlocked(
         full_judgement = reopening or (h.switchover_on() and not filing_only)     # step 4's switchover: every write is judged whole, old items included; a bookkeeping write (a page rename) still only by what it touches
         if wake or ask_by.strip():
             meta.pop(_model.SERVER_END_KEY, None)      # an end day this call gives is the caller's, whatever the server stored before
+        server_parked = bool(hold) and was_until and not (wake or ask_by.strip()) and bool(_model.server_end(meta))      # hold=true sent again, with no date, on a park whose day the server set: that day stands, as on the first call, and is not judged as a date the caller gave
         desc_note = fc.call(_gates.gate_model, item_now, None if full_judgement else touched_m, gid, needs=[x for x in _needs_of(meta) if x not in naming_added], hold=hold_pre, desc_set=bool(description.strip()),
                             next_text=next_judged if next_touch else None, windows_text=next_judged if next_touch else "", defers_text=next_judged if next_touch else "",
-                            until_wait=until_wait or (was_until and not (wake or hold or clear_wait_basis or str(wait_basis or "").strip())), date_given=bool(wake), hold_given=bool(hold), basis_kept=bool(wake) and not str(wait_basis or "").strip() and _gates.basis_held({**item, "status": status or item.get("status")}, hold=hold, verifying=state_st == "verifying"),
+                            until_wait=until_wait or (was_until and not (wake or (hold and not server_parked) or clear_wait_basis or str(wait_basis or "").strip())), date_given=bool(wake), hold_given=bool(hold), basis_kept=bool(wake) and not str(wait_basis or "").strip() and _gates.basis_held({**item, "status": status or item.get("status")}, hold=hold, verifying=state_st == "verifying"),
                             old_end_ok=gave_ask or not (reopening or touched_m & _mg.WAIT_SETTING), date_ends=old_ask and bool(wake), default="")   # the write guards of the item model; his lines' Windows check judges only the lines this write sets; a wait on an until carries no snooze reason
         desc_note += mover_note
         fc.call(h.anchor_wait_gate, item_was.get("metadata") or {}, meta, gid)      # an anchor wait newly set or moved: its anchor must be on the project's list already (after the model guards)

@@ -243,6 +243,10 @@ def wake_of(r):
     "until friday evening"), or None. Board.when() draws either: "Fri Mar 6th" or "Fri Mar 6th 12:00"."""
     md = r.get("metadata") or {}
     return _when_of(str(md.get("until") or "").strip() or str(md.get("wake", "")).strip())      # a stored `until` first, else the wake
+def server_mark(r):
+    """" (set by the server)" beside a wait's date that the server stored because the call gave none (model.server_end: only while the date is still that day), "" otherwise: the agent reads
+    (board.md's parked mark, the brief's newly parked line) tell it from a date the caller gave."""
+    return f" {_model.SERVER_SET}" if _model.server_end(r.get("metadata") or {}) else ""
 def wait_date_of(r):
     """The date an item's wait ends on as History compares it between two versions: its wake as above, else the date the old fields give for its kind (a relay's ask_by), so that rewriting a stored wait as
     `until` (the data migration) reads as no change of date."""
@@ -1215,7 +1219,7 @@ class Board:
         or "… · nothing holds it now" when no open after, recycle, needs external or item-scoped anchor holds it."""
         h, w = hold_set_of(r), wake_of(r)
         why = hold_whys(r, self.scoped_urls(r["gid"]), self.after_words(r))
-        return " · ".join([f"set by {hold_by(r) or 'unknown'} {self.when(hold_at(r))}", f"wake {self.when(w)}" if w else "no wake date", "parked for " + ", ".join(why) if why else "nothing holds it now"])
+        return " · ".join([f"set by {hold_by(r) or 'unknown'} {self.when(hold_at(r))}", f"wake {self.when(w)}{server_mark(r)}" if w else "no wake date", "parked for " + ", ".join(why) if why else "nothing holds it now"])
     def after_words(self, r):
         """"after board#N" (several: "after board#N, board#M"): the open items an item waits on, "" when none."""
         a = after_open(r)
@@ -1223,7 +1227,7 @@ class Board:
     def md_hold(self, r):
         """board.md's mark on a parked item: "parked, wake Thu Mar 12th 09:30", "parked, no wake date", or "after board#N"."""
         w = wake_of(r); parts = []
-        if is_held(r): parts.append("parked, " + (f"wake {self.when(w)}" if w else "no wake date"))
+        if is_held(r): parts.append("parked, " + (f"wake {self.when(w)}{server_mark(r)}" if w else "no wake date"))
         if after_open(r): parts.append(self.after_words(r))
         return "; ".join(parts)
     # ---------------- the trailers: his words on an item ----------------

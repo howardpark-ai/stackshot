@@ -11,7 +11,7 @@ A wrong `stall:` step is undone with update (mover, next, clear_needs); the whol
 A wait is one stored date, until, with wait_kind beside it when it stands on more than the date. An item with an until
 is waiting; the server clears both when the wait ends. wake and ask_by, and hold beside a date, are retired parameters: a call that passes
 one is refused, and the date goes in until. A wait_kind with no date is never refused: the server takes a date from the
-item's words, else a suggested one, else tomorrow, and says which. A wait that this write leaves with no end day, and that
+item's words, else a suggested one, else tomorrow, marks it as set by the server, and says which. A wait that this write leaves with no end day, and that
 passes no wait_kind (an after link, a wait stored earlier, needs=external, a park or a wait on a time with no date), is
 not refused either: the server stores its default backstop day (for a wait after other items the latest expected-by of
 the open items it waits after plus two days, else 14 days from today; any other wait 14 days from today), marks it as
@@ -260,8 +260,9 @@ Park his call instead, from a decision item or a doing item: needs=["<session>"]
 with its date YYYY-MM-DD>" and mover={{OWNER}}; the ask and options stay on the item, and at the date they come back to him: a decision item returns with its ask and options, a doing item with its ask if it had one. Without wait_kind an
 item with him as mover and a date is refused as having nothing for him to do. A park of {{CAP_DAYS}} days or less needs his recorded words (said=[Acked-by …], or his answer on the item); a longer one needs a wait_basis. {{OWNER}} parks on his word. A park always names what it
 waits for: {{OWNER}}'s words, the items that must close first (after), a notice from an anchor scoped to the item, a
-pane recycle (recycle=true), or the end of a window the work itself needs; an unconditional or indefinite park is
-refused. Work moving in real time stays on agent however long it takes (a build, tests, a review, a release or its
+pane recycle (recycle=true), or the end of a window the work itself needs; a park with a date and none of these is
+refused. A park with no date is not refused: the server stores a backstop day 14 days out (marked as set by the server, said in
+the reply), and its mover replaces it with the real day. Work moving in real time stays on agent however long it takes (a build, tests, a review, a release or its
 queue, a run or subagent of yours): do not park it: its mover's park is refused while its subagent runs on it. A
 session parks its own item when the work itself needs a wait-and-see window (a soak, a log or data collection window,
 a trial week, a timer it started): until=<when the window ends>, wait_kind="time", wait_basis="<what the window collects>

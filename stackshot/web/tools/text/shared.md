@@ -19,7 +19,8 @@ item counts as waiting without a park, and when the last one closes it wakes and
 mover) are told; a dropped one releases it too, a superseded one is followed to its replacement; a loop is refused;
 after="none" clears. after is for a real dependency (this item needs that one's output), never for the order a builder
 takes its items in. A park (until with wait_kind="time") names what it waits for (a date, after items, an anchor notice, a recycle, or a
-wait_basis window); one with none is refused. An item waiting on {{OWNER}} carries needs=decision
+wait_basis window); one that names none and gives no date is not refused: the server stores a backstop day 14 days out, marked
+as set by the server, and says so (replace it with the real day). An item waiting on {{OWNER}} carries needs=decision
 with its ask, or after=<the item that carries the ask>; to park his call, see update (until with wait_kind="time", mover={{OWNER}}). needs names only who can move now.{{MEMBERS_NOTE}} An item that waits on
 {{OWNER}} and on a session at once: where his answer could change with the session's work, or its work with his
 answer, the session goes first and adds decision when it is done (or the decision is its own item, linked with
@@ -260,7 +261,8 @@ has steps and every step is done or dropped: the server then closes it as done a
 ("closed with every step done (set by the server)" as the reason, "- every step is done (set by the server)" as the
 outcome bullet; "done or dropped" in both when a step was dropped), and the reply says so. The same fill-in applies when
 you send outcome="done" alone, with the reason or the bullet left out. With an open step, or no step at all, a close with no outcome is refused and
-nothing is written.
+nothing is written; so is one that sends new work with it (a new line of next, a work status not done, needs, an ask or a
+check), or leaves the item's open decision ask unanswered or a done check not passed: the refusal names what.
 
 ## param REASON
 One line, at most {{CLOSE_REASON_MAX}} characters (longer is refused): the end state reached and why. Goes with
@@ -416,7 +418,8 @@ can't) | superseded (replaced by another item: reworded, merged or split), with 
 id (open or completed). A close that leaves out outcome, reason and outcome_text is accepted when the item has at least
 one step and every step is done or dropped: the server closes it as done, writes "closed with every step done (set by the
 server)" and "- every step is done (set by the server)" for the parts left out (also when you send outcome="done" with the reason or the bullet left out; "done or dropped" when a step was dropped), and the reply says so; with an open step
-(named by number) or no step, it is refused and nothing is written. reason: one line, the end state reached and why, at most {{CLOSE_REASON_MAX}} characters
+(named by number) or no step, or with new work, a need, an ask or a check sent in the same call, an open decision ask
+left unanswered or a done check not passed, it is refused and nothing is written. reason: one line, the end state reached and why, at most {{CLOSE_REASON_MAX}} characters
 (longer is refused); and outcome_text: how it ended, as short `- ` bullets (at most {{DESC_MAX_LINES}} lines of
 {{DESC_LINE_MAX}} characters), shown in the Outcome block. A close leaves the description as it was (a description
 passed with a close is stored as outcome_text) and clears next, ask and needs (and any park, until date or recycle wait);
@@ -446,8 +449,9 @@ outcome, reason and outcome_text is accepted when the item has at least one step
 marked in the same call count): the server closes it as done, writes "closed with every step done (set by the server)" as
 the reason and "- every step is done (set by the server)" as the outcome bullet for the parts left out ("done or dropped"
 when a step was dropped; also for outcome="done" sent with the reason or the bullet left out), keeps the parts
-given, and says so in the reply; with an open step (named by number) or no step at all, nothing is written and the item
-stays open.
+given, and says so in the reply; with an open step (named by number) or no step at all, or with new work, a need, an
+ask or a check sent in the same call, an open decision ask left unanswered or a done check not passed, nothing is written and
+the item stays open.
 {{ASK_RULE}}
 
 ## param OUTCOME_TEXT
