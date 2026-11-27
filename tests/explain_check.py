@@ -2,7 +2,7 @@
 tests/explain_scenario.py; this is what only a browser shows. The board's renderers write fixture pages into a temporary folder (no live store, no network) and the browser opens
 the files. It checks that:
 
-  - on a phone (360 px, touch, light and dark) every "?" is a 44 px target that a tap opens and a second tap closes; the popup is whole inside the screen, nothing lies over it,
+  - on a phone (360 px, touch, light and dark) every "?" is a 44 px target that a tap opens, without moving the page, and a second tap closes; the popup is whole inside the screen, nothing lies over it,
     its text contrasts with its ground, and the page does not scroll sideways; a tap outside and Escape close it;
   - at 360 and 1280 px no "?" lies over words or a control beside it, so a tap on those opens nothing;
   - the color panel (dark theme, whether the page opened dark or turned dark) holds its note behind a "?"; its popup stays inside the panel, and Escape closes it before the panel;
@@ -85,17 +85,14 @@ STATE = r"""id => { const b = document.getElementById(id), p = document.getEleme
   const a = lum(s.color), g = lum(s.backgroundColor), over = [];
   if (!p.hidden) for (const [x, y] of [[r.left + 3, r.top + 3], [r.right - 3, r.top + 3], [r.left + r.width / 2, r.top + r.height / 2], [r.left + 3, r.bottom - 3], [r.right - 3, r.bottom - 3]]) {
     const e = document.elementFromPoint(x, y); if (e !== p) over.push(Math.round(x) + ',' + Math.round(y) + ' ' + (e ? e.tagName + '.' + e.className : 'nothing')); }
-  return {at: [br.top, br.bottom, scrollY, document.documentElement.scrollHeight, visualViewport.offsetTop, visualViewport.height, visualViewport.scale, p.style.top, p.offsetParent && p.offsetParent.className],
-    open: !p.hidden && s.display !== 'none', expanded: b.getAttribute('aria-expanded'), left: r.left, right: r.right, top: r.top, bottom: r.bottom, vw: document.documentElement.clientWidth, vh: innerHeight,
+  return {open: !p.hidden && s.display !== 'none', expanded: b.getAttribute('aria-expanded'), left: r.left, right: r.right, top: r.top, bottom: r.bottom, vw: document.documentElement.clientWidth, vh: innerHeight,
     sw: document.documentElement.scrollWidth, over: over, contrast: (Math.max(a, g) + 0.05) / (Math.min(a, g) + 0.05), ground: s.backgroundColor, words: p.textContent.length, bw: br.width, bh: br.height,
     path: [br.left + br.width / 2, r.top + r.height / 2]}; }"""
 # every "?" a reader can see, by id
 BUTTONS = "() => [...document.querySelectorAll('button.xp-b')].filter(b => b.getClientRects().length && getComputedStyle(b).visibility !== 'hidden').map(b => b.id)"
 CENTER = "id => document.getElementById(id).scrollIntoView({block: 'center', behavior: 'instant'})"
-TRACE = r"""() => { window.__log = []; const who = e => e && (e.id || e.className || e.nodeName) || String(e);
-  for (const n of ['scroll', 'pointerdown', 'touchstart', 'focusin', 'click']) addEventListener(n, e => __log.push([n, who(e.target), Math.round(scrollY), Math.round(performance.now())]), true);
-  for (const [o, m] of [[window, 'scrollTo'], [window, 'scrollBy'], [Element.prototype, 'scrollIntoView'], [Element.prototype, 'scrollIntoViewIfNeeded'], [HTMLElement.prototype, 'focus']]) { const f = o[m]; if (!f) continue;
-    o[m] = function (...a) { __log.push([m, who(this), Math.round(scrollY), JSON.stringify(a), String(new Error().stack).split('\n').slice(2, 4).join(' ').slice(-120)]); return f.apply(this, a); }; } }"""
+# where the page was as the finger came down, after whatever scrolling the tap itself needed to reach the button
+FINGER = "() => addEventListener('pointerdown', () => { window.__y = scrollY; }, true)"
 inside = lambda s: s["left"] >= -0.5 and s["right"] <= s["vw"] + 0.5 and s["top"] >= -0.5 and s["bottom"] <= s["vh"] + 0.5
 WANT = {"projects": 1, "closed": 2, "audits": 13, "audits-log-off": 14, "project": 1, "list-wait": 2, "relay-wait": 1, "runners": 1}      # the fewest "?" each page shows
 # the Audit card's status read, answered by the check once it sets window.__AUDIT; every other request fails, as it does for a file
@@ -129,19 +126,16 @@ with sync_playwright() as p:
         for name, path in FILES.items():
             tag = f"{name} 360 {scheme}"
             ctx = br.new_context(viewport={"width": 360, "height": 760}, color_scheme=scheme, has_touch=True, is_mobile=True); pg = ctx.new_page(); errs = []
-            pg.on("pageerror", lambda e, errs=errs: errs.append(str(e))); pg.goto(path.as_uri()); pg.wait_for_timeout(100)
+            pg.on("pageerror", lambda e, errs=errs: errs.append(str(e))); pg.goto(path.as_uri()); pg.wait_for_timeout(100); pg.evaluate(FINGER)
             ids = pg.evaluate(BUTTONS)
             check(f"{tag}: at least {WANT[name]} explainers show", len(ids) >= WANT[name], ids)
             c = pg.evaluate(COVERS); check(f"{tag}: no ? lies over words or a control", c["things"] > 5 and not c["bad"], c)
             for n, i in enumerate(ids):
-                pg.evaluate(CENTER, i); before = pg.evaluate(STATE, i)["at"]
-                if name == "audits-log-off" and i == "xpb-audit-log-off": pg.evaluate(TRACE)
-                pg.tap(f"#{i}"); pg.wait_for_timeout(30); s = pg.evaluate(STATE, i)
-                if name == "audits-log-off" and i == "xpb-audit-log-off": print("TRACE", pg.evaluate("() => window.__log"), flush=True)
-                ok = s["open"] and s["expanded"] == "true" and s["words"] > 0 and inside(s) and not s["over"] and s["sw"] <= 360
-                check(f"{tag}: {i}: a tap opens it, whole inside the screen, nothing over it, no sideways scroll", ok, {"before": before, **s})
-                if not ok and SHOTS:
-                    os.makedirs(SHOTS, exist_ok=True); pg.screenshot(path=os.path.join(SHOTS, f"fail-{name}-{i}-{scheme}.png"))
+                pg.evaluate(CENTER, i); pg.tap(f"#{i}"); pg.wait_for_timeout(30); s = pg.evaluate(STATE, i)
+                moved = pg.evaluate("() => scrollY - window.__y")
+                check(f"{tag}: {i}: opening it leaves the page where it was", abs(moved) <= 1, moved)
+                check(f"{tag}: {i}: a tap opens it, whole inside the screen, nothing over it, no sideways scroll",
+                      s["open"] and s["expanded"] == "true" and s["words"] > 0 and inside(s) and not s["over"] and s["sw"] <= 360, s)
                 check(f"{tag}: {i}: a 44 px target, and words that contrast with their ground", s["bw"] >= 43.5 and s["bh"] >= 43.5 and s["contrast"] >= 4.5, s)
                 grounds.setdefault(scheme, set()).add(s["ground"])
                 if n == 0 and SHOTS:

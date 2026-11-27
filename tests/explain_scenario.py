@@ -241,7 +241,7 @@ class El {
   closest(s) { assert(s[0] === '.', s); for (let n = this; n; n = n.parentElement) if (n.classList.contains(s.slice(1))) return n; return null; }
   matches(s) { assert(s === ':focus-visible', s); return this.keyboard; }
   focus() { if (active === this) return; const was = active; active = this; if (was) fire('focusout', was, {relatedTarget: this}); fire('focusin', this); }
-  get offsetWidth() { const m = parseFloat(this.style.maxWidth); return Math.min(isNaN(m) ? 1e9 : m, 320); }
+  get offsetWidth() { this.measured = this.style.position; const m = parseFloat(this.style.maxWidth); return Math.min(isNaN(m) ? 1e9 : m, 320); }
   get offsetHeight() { return 60; }
   getBoundingClientRect() { const r = this.rect; return {left: r.left, top: r.top, width: r.width, height: r.height, right: r.left + r.width, bottom: r.top + r.height}; }
 }
@@ -318,6 +318,9 @@ fire('click', glyph(A)); A.lastElementChild.focus(); A.firstElementChild.keyboar
 
 tap(A); tap(B); check('one is open at a time', shut(A) && open(B), [state(A), state(B)]); away();
 tap(A); over(B); check('...also when the next one opens on hover', shut(A) && open(B), [state(A), state(B)]); leave(B); away();
+
+const MF = make('measured', 324, 100); tap(MF); const mp = MF.lastElementChild;
+check('the popup is measured while fixed to the screen, so it never reaches past the window edge, then set back by its button', mp.measured === 'fixed' && mp.style.position === '', [mp.measured, mp.style.position]); away();
 
 // where the popup goes: the wrapper's left plus the popup's own offset is its place in the window
 const at = w => ({left: w.rect.left + parseFloat(w.lastElementChild.style.left), top: w.rect.top + parseFloat(w.lastElementChild.style.top), width: w.lastElementChild.offsetWidth});

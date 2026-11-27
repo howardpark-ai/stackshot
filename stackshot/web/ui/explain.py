@@ -51,6 +51,8 @@ dl.iwl{align-items:baseline}
 
 # O is the one open popup: {k: its key, h: how it opened ('hover', 'focus' or 'pin')}. A tap or click pins it; hover and focus open only a popup that is not open, so they
 # never undo its pin. stackshotExplain is explain()'s markup for a script that adds an explainer to markup the server did not draw (ui/colortool.py).
+# place() measures the popup while it is fixed to the screen: one that reaches past the right edge even for the one measuring pass widens a phone's layout viewport for
+# that pass, which pulls a page scrolled near its end back up.
 JS = r"""(function(){var O=null,quiet=false;
 window.stackshotExplain=function(key,text,label){function el(t,a,x){var n=document.createElement(t);for(var k in a)n.setAttribute(k,a[k]);if(x!==undefined)n.textContent=x;return n}
 var w=el('span',{'class':'xp','data-xp':key}),b=el('button',{type:'button','class':'xp-b',id:'xpb-'+key,'aria-label':label,'aria-expanded':'false','aria-controls':'xp-'+key,'aria-describedby':'xp-'+key});
@@ -58,13 +60,14 @@ b.appendChild(el('span',{'aria-hidden':'true'},'?'));w.appendChild(b);w.appendCh
 function wrap(t){return t&&t.closest?t.closest('.xp'):null}
 function find(k){return document.querySelector('.xp[data-xp="'+k+'"]')}
 function set(w,on){w.firstElementChild.setAttribute('aria-expanded',String(on));w.lastElementChild.hidden=!on}
-function place(w){var b=w.firstElementChild,p=w.lastElementChild,L=0,R=document.documentElement.clientWidth,T=0,H=window.innerHeight;
+function place(w){var b=w.firstElementChild,p=w.lastElementChild;p.style.position='fixed';p.style.left='0px';p.style.top='0px';
+var L=0,R=document.documentElement.clientWidth,T=0,H=window.innerHeight;
 for(var n=w.parentElement;n&&n!==document.body&&n!==document.documentElement;n=n.parentElement){var s=window.getComputedStyle(n),c=n.getBoundingClientRect();if(s.display==='contents')continue;
 if(s.overflowX!=='visible'){L=Math.max(L,c.left);R=Math.min(R,c.right)}if(s.overflowY!=='visible'){T=Math.max(T,c.top);H=Math.min(H,c.bottom)}}
-p.style.left='0px';p.style.top='0px';p.style.maxWidth=Math.max(0,Math.min(320,R-L-16))+'px';
+p.style.maxWidth=Math.max(0,Math.min(320,R-L-16))+'px';
 var r=b.getBoundingClientRect(),o=w.getBoundingClientRect(),W=p.offsetWidth,h=p.offsetHeight,x=Math.max(L+8,Math.min(r.left+r.width/2-W/2,R-8-W)),y=r.bottom;
 if(y+h>H-8&&r.top-h>=T+8)y=r.top-h;
-p.style.left=(x-o.left)+'px';p.style.top=(y-o.top)+'px'}
+p.style.position='';p.style.left=(x-o.left)+'px';p.style.top=(y-o.top)+'px'}
 function hide(){if(!O)return;var w=find(O.k);O=null;if(w)set(w,false)}
 function show(w,how){var k=w.getAttribute('data-xp');if(O&&O.k!==k)hide();O={k:k,h:how};set(w,true);place(w)}
 function is(w){return !!O&&O.k===w.getAttribute('data-xp')}
