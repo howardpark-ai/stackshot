@@ -30,6 +30,7 @@ from stackshot.model import steps as _steps
 KEY = "owner_step"                 # metadata: the first line of the step the server made (see THE STORAGE)
 ROUTE_KEY = "item_sync_step"       # metadata: the open step a script's route added itself (service/item_sync.py), as the route sent it; it says which open line is the route's own, and goes when that line is no longer open or the item closes (states.CLOSE_EXTRA)
 SENT_KEY = "item_sync_sent"        # metadata: the step that route last sent and had on the item, which it never asks again; it stays when the line goes, but is stored empty when a wait took it unanswered
+ANSWERED_KEY = "item_sync_answered"      # metadata: true once he answered the step of an item such a route filed; the route then asks him nothing more on that item
 
 
 def recorded(meta: dict[str, Any]) -> str:
@@ -164,6 +165,12 @@ def forget_closed(meta: dict[str, Any], keeper: str) -> None:
         meta.pop(KEY, None)
 
 
+def route_answered(meta: dict[str, Any]) -> None:
+    """He answered the step of an item a script's route filed (a Done, or a note that names no later time): kept on the item (ANSWERED_KEY), also when a wait had taken the line and nothing was left to tick."""
+    if "item_sync" in meta:
+        meta[ANSWERED_KEY] = True
+
+
 def route_writes(meta: dict[str, Any], own: str, sent: str, sets_step: bool) -> None:
     """The record a script's route stores with its write (service/item_sync.py): `own`, the step of the open line that is the route's own ("" when none is), and `sent`, the step it sent. A write that
     sets the step (`sets_step`) also lets the server's line for the step before it go, not reworded, so a line that is not the route's stays open (the route drops its own line itself, with a dropped mark)."""
@@ -192,7 +199,7 @@ def route_line(meta: dict[str, Any], keeper: str) -> str:
 
 
 def route_settled(meta: dict[str, Any], step: str) -> None:
-    """`step`, which the item stores, was answered by him or replaced or withdrawn by a session. When a wait had taken its line unanswered (SENT_KEY stored empty), it counts as sent again."""
+    """`step`, which the item stores, was replaced or withdrawn by a session. When a wait had taken its line unanswered (SENT_KEY stored empty), it counts as sent again."""
     if meta.get(SENT_KEY) == "" and _steps.clean(step):
         meta[SENT_KEY] = _steps.clean(step)
 

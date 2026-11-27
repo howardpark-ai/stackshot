@@ -3,7 +3,7 @@
 A timer's script that finds a condition only the person can fix (a plugin sync that fell behind, say) opens one board item for him with his step, keeps its description current on every run
 that still finds the condition, and closes it when a later run finds the condition gone. The item is marked with the caller's marker (`metadata.item_sync`): that mark is the whole of what the
 route may touch, so it cannot refresh or close an item it did not open. `open` files an item whose mover is the person and whose `then` is an agent of the project (the agent takes it when he has
-done his step), with his step as the one step on the checklist; while an item with the marker is open a repeat `open` is a `refresh` that may also set the step (_itemsync_step_write), and once it is closed an `open` files a new item (the condition recurs).
+done his step), with his step as the one step on the checklist; while an item with the marker is open a repeat `open` is a `refresh` that may also set the step (_itemsync_step_write; never once he has finished or answered on the item), and once it is closed an `open` files a new item (the condition recurs).
 `refresh` rewrites the description of the open item and nothing else; `close` completes it as done, through the update tool's own close. With no open item `refresh` and `close` do nothing and say so.
 `_ITEMSYNC_LOCK` makes the look for an open item and the write one step against another call of this route (two opens of one marker file one item). A refresh, a close and a repeat open also hold the board's item lock
 (`ITEM_LOCK`) from the look to the write, so a session's close cannot land between them; a new item is created without the board's lock, because the create reaches GitHub for the item number and no other writer of the board waits for that. The markers, the sender and the description rules are item_open.py's; the helpers the row is filed with are service/terminal_prompt.py's.
@@ -239,26 +239,13 @@ def _itemsync_record(meta: dict[str, Any], checklist: list[dict[str, Any]]) -> t
     return "", ""
 
 
-def _itemsync_reads_as(done: dict[str, Any], line: str, answers: Any) -> bool:
-    """Is the done checklist step the line `line`: in its own words, or with his answer after them (` → …`, owner_steps.with_answer), the answer being one the item records at the moment the step
-    was marked. Any other arrow is part of the step's words."""
-    key = _steps.owner_key(done["text"])
-    if key == _steps.owner_key(line):
-        return True
-    for rec in answers if isinstance(answers, list) else []:
-        if isinstance(rec, dict) and rec.get("ts") == done["at"]:
-            words = _hs.answer_words(rec.get("choice"), rec.get("text"))
-            if words and key == _steps.owner_key(_hs.with_answer(line, words)):
-                return True
-    return False
-
-
 def _itemsync_step_write(item: dict[str, Any], step: str) -> dict[str, Any]:
     """What a repeat open's write adds to the description for its step, {} when nothing is added.
 
-    Nothing is added for none, clear or -; for the step the route last sent (_itemsync_record), whatever became of its line since; while the item reads as waiting, or a decision ask to him is
-    pending; for the step he marked done last (every step he marked at that moment: one Done can tick two); and while an open line of his that is not the route's own stands and none of his open lines
-    reads as the sent step. A step that none of these stops is recorded as the last sent.
+    Nothing is added once he has finished or answered on the item: a step of his that he marked done himself (a session's tick does not count), or his answer to the item's step (owner_steps.route_answered).
+    A script that repeats while its condition lasts, with a version or a count in its step, would otherwise put the item back on his list after every answer; the close, and a new item when the condition
+    recurs, ask him again. Nothing is added either for none, clear or -; for the step the route last sent (_itemsync_record), whatever became of its line since; while the item reads as waiting, or a
+    decision ask to him is pending; and while an open line of his that is not the route's own stands and none of his open lines reads as the sent step. A step that none of these stops is recorded as the last sent.
 
     The step is then written (the update's step=) when no open line reads as it, when the item does not ask him now (its state is not your-step with a step), or when the step it asks is the route's own
     older one. A session's current step is never written over: the line that reads as the sent step is on his list beside it. The route's own older line is dropped, and no other line. The route's own step
@@ -267,6 +254,8 @@ def _itemsync_step_write(item: dict[str, Any], step: str) -> dict[str, Any]:
     if step.lower() in _update_svc._hooks().ask_none:
         return {}
     checklist = _steps.view(meta)
+    if meta.get(_hs.ANSWERED_KEY) or any(s["status"] == _steps.DONE and _steps.is_his(s["text"], unnamed_is_his=False) and _model.is_owner(s["by"]) for s in checklist):
+        return {}      # finished or answered by him: this item is not put on his list again
     own, sent = _itemsync_record(meta, checklist)
     line = _hs.line_of(step, meta)
     want = _steps.owner_key(line)
@@ -276,10 +265,6 @@ def _itemsync_step_write(item: dict[str, Any], step: str) -> dict[str, Any]:
         return {}      # a step written onto a parked or held item asks him nothing: not recorded, so the next open after the wait sets it
     if meta.get("state") == "your-call" or "decision" in _states.kinds_of(meta):
         return {}      # a step set over a pending ask would take its Decide line off the list
-    finished = [s for s in checklist if s["status"] == _steps.DONE and _steps.is_his(s["text"], unnamed_is_his=False) and _model.is_owner(s["by"])]
-    latest = max((s["at"] for s in finished), default=0)
-    if any(s["at"] == latest and _itemsync_reads_as(s, line, meta.get("answers")) for s in finished):
-        return {}
     lines = [(n, _steps.owner_key(s["text"])) for n, s in enumerate(checklist, 1) if s["status"] == _steps.OPEN and _steps.is_his(s["text"], unnamed_is_his=False)]      # positions as dropped= takes them
     own_key = _steps.owner_key(_hs.line_of(own, meta)) if own and not meta.get("step_lines") else ""      # while a long step is split into lines it is a session's current step, whatever its summary reads
     own_at = next((n for n, k in lines if k == own_key), 0)
