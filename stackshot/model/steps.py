@@ -375,11 +375,9 @@ def apply(old: list[dict[str, Any]], new_next: str | None, done: list[int], drop
         if mine and strict:
             lost = "; ".join(f"{i + 1}. {first_line(steps[i]['text'])[:90]}" for i in mine)
             one = len(mine) == 1
-            raise StepError(f"next no longer lists {len(mine)} of your open step{'' if one else 's'} and the call does not say what became of {'it' if one else 'them'}: {lost}.\n"
-                            f"Retry with {retry_call([i + 1 for i in mine])}.\n"
-                            f"Mark {'it' if one else 'each'} in the same update, done if the work was done or dropped if it is no longer wanted (positions in the checklist or exact line text), reword {'it' if one else 'each'} to change its words, or keep the line in next; "
-                            "a reworded line counts as a new step, so reword the step itself (reword), or mark the old one (dropped=[n]) and write the new text; clear_next=true wipes every line and marks them dropped. "
-                            "If this tool shows no done/dropped/reword parameter, call stackshot_update through the MCP Portal's Code Mode (portal_codemode_execute with codemode.stackshot_update({…, done:[…]})), or use clear_next=true")
+            raise StepError(f"next no longer lists {len(mine)} of your open step{'' if one else 's'} and the call does not say what became of {'it' if one else 'them'}: {lost}. "
+                            f"Send the call again with {retry_call([i + 1 for i in mine])} (done if the work was done, dropped if no longer wanted, reword to change the words; a reworded line in next counts as a new step), or keep the line in next; "
+                            "clear_next=true wipes every line and marks them dropped. If this tool shows no done/dropped/reword parameter, call stackshot_update through the MCP Portal's Code Mode (portal_codemode_execute with codemode.stackshot_update({…, done:[…]}))")
         for i in gone:
             steps[i] = _with_tag(_step(steps[i]["text"], DROPPED), tag_of(steps[i]))
     open_idx = [i for i in open_idx if i in used]

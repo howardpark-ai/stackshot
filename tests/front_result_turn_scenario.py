@@ -150,7 +150,8 @@ def why(fn):
     try: fn(); return ""
     except ToolError as e: return str(e)
 def fresh():
-    """Empty the held store and the push log between scenarios."""
+    """Empty the held store and the push log between scenarios, once the sends of the one before are over (a late one would write into the next)."""
+    settle()
     for p in held.dir_().glob("*.jsonl"): p.unlink()
     push_log.unlink(missing_ok=True); kind_log.unlink(missing_ok=True)
 
@@ -186,7 +187,7 @@ def log_row(frm, to, ago_min=1.0, text="a question?", outcome="delivered", quest
     t = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=ago_min)).isoformat(timespec="seconds")
     with open(_messaging.MSG_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps({"t": t, "from": frm, "auth": "", "to": to, "outcome": outcome, "error": "", "text": text, **({"question": True} if question else {})}, ensure_ascii=False) + "\n")
-def no_log(): _messaging.MSG_LOG.unlink(missing_ok=True)
+def no_log(): settle(); _messaging.MSG_LOG.unlink(missing_ok=True)
 def unstamp(uuid): (T / "state/prompts" / uuid).unlink(missing_ok=True)
 def act2(n, target, key=KEY, **ln):
     line = {"id": n["id"], "ruling": "passed", "target": target, "reason": "it fits", "for_owner": False, "source": "code", "rule": "test", "item": "", **ln}
@@ -265,9 +266,12 @@ FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * 86400 + 86400))      # a 
 from stackshot.web.tools import create as _wt_create
 pane(BACK, X); pane(DOCS, D); pane(STRANGER, B)
 def handover(i, writer=FRONT, to=BACK, owner=A, **kw):
-    """A real hand-over: item `i` is open and moved by `writer`, who then writes mover=`to` through the update service, which stamps the item's hand-off record (metadata.handoff)."""
+    """A real hand-over: item `i` is open and moved by `writer`, who then writes mover=`to` through the update service, which stamps the item's hand-off record (metadata.handoff). It returns once the hand-over's
+    send is over: that writes to the message log and the item, which the caller then clears or edits."""
     item(i, owner=owner, mover=writer, **kw)
-    return _update_svc._update(f"a{i}", sender=writer, mover=to, next=f"{to}: carry on", **({} if writer == FRONT else {"wake": FUT}))
+    out = _update_svc._update(f"a{i}", sender=writer, mover=to, next=f"{to}: carry on", **({} if writer == FRONT else {"wake": FUT}))
+    settle()
+    return out
 def hrec(i): return rd(i)["metadata"].get("handoff") or {}
 def made_gid(r): return r.split()[1] if str(r).startswith("created") else ""
 TXT = lambda i: f"a{i}: the build is merged, the suites pass."

@@ -18,6 +18,7 @@ flagged; a verdict stands until the evidence's signature changes; the cap holds.
 
 Two runs a day ([audit] at with two times): a second run on one date keeps the first one's record and is not refused, names itself in its messages (`<date> 20:00`), sends nothing the first sent, chases an unmoved item against the
 run 9 hours before it once, and the tightening history counts days, not runs; the rulebook scan is none of the run's business.
+The tightening conditions: a day counts the distinct findings of all its runs; the most is at least 2 and no tie; the owner and findings with no owner never count as the session.
 
     tests/run-suite audit_run        → exit 0 / 1"""
 import contextlib, datetime as dt, fcntl, io, json, os, pathlib, re, signal, subprocess, sys, threading, time, tomllib
@@ -1377,7 +1378,7 @@ sus, _skip = AR.suspects(mixed, now, env())
 check("why-not-now: ranks after the other checks (a wrong-needs suspect comes first)", sus[0]["id"] == f"board#{BID_05}" and all(s["priority"] == 3 for s in sus[1:]), [(s["id"], s["priority"]) for s in sus[:3]])
 rec_clear()
 
-# ---- 28b. goal-unclear: an open item whose subject and `Goal:` bullet are new or reworded is asked "do both name an outcome wanted?"
+# ---- 28b. goal-unclear: an open item whose subject and `Goal:` bullet are new or reworded is asked "do both name a finished outcome?"
 GU = "goal-unclear"
 def gitem(i, subject="[home] Make the nightly run finish by 06:00", goal="The nightly run finishes by 06:00", status="open", **kw):
     k, d = clean(i) if status == "open" else item(i, status=status, wrote=now - 2 * H)
@@ -1398,7 +1399,7 @@ check("goal-unclear: a yes is a finding from the model on the item's mover, with
 check("goal-unclear: one call, whose message names the check with the subject and the Goal sentence, and the rubric carries the check",
       len(calls()) == 1 and rec["calls"]["made"] == 1 and f"- {GU}: the subject and the Goal bullet are new or reworded" in calls()[0]["stdin"] and "Goal: The nightly run finishes by 06:00" in calls()[0]["stdin"]
       and "\ngoal-unclear\n  An item states its goal twice" in RUBRIC_TEXT and RUBRIC_TEXT in calls()[0]["argv"], calls())
-check("goal-unclear: delivered as '<id> · goal-unclear · <reason> · <fix>' to the mover", any(to == "home-agent" and f"board#{BID_04} · goal-unclear · the subject names the failure" in t and "reword the subject to the outcome wanted and the first bullet to `Goal:" in t for to, t, fy in sent), sent)
+check("goal-unclear: delivered as '<id> · goal-unclear · <reason> · <fix>' to the mover", any(to == "home-agent" and f"board#{BID_04} · goal-unclear · the subject names the failure" in t and "reword the subject to the finished outcome and the first bullet to `Goal:" in t for to, t, fy in sent), sent)
 check("goal-unclear: the verdict and the (subject, Goal) stamp are on the record", rec["judged"][f"board#{BID_04}"]["verdict"] == "yes" and rec["judged"][f"board#{BID_04}"]["gsig"] == sus[0]["gsig"] and rec["goal_judged"] == {f"board#{BID_04}": sus[0]["gsig"]},
       (rec["judged"], rec.get("goal_judged")))
 
@@ -1501,9 +1502,10 @@ heads = lambda: [t.splitlines()[0] for to, t, fy in sent if "Board audit" in t.s
 dig = lambda: [t for to, t, fy in sent if to == "alpha-builder" and "chase the mover" in t]
 summ = lambda: [t for to, t, fy in sent if to == "projects/example"]
 
-# the tightening history counts days: yesterday's two runs are one day (a record whose top category is ask-missing)
-def seed(t, cat="ask-missing"):
-    AR._record_path(t).write_text(json.dumps({"started": t, "finished": t + 600, "items_read": 14, "findings": [], "by_session": {}, "by_category": {cat: 2}, "stuck": [], "idle_pass": [], "judged": {}}))
+# the tightening history counts days: yesterday's two runs are one day (records whose top category is ask-missing)
+def fnd(i, cat="ask-missing", mover="home-agent", detail="x"): return {"id": f"board#{i}", "project": "projects/alpha", "owner": mover, "mover": mover, "category": cat, "detail": detail}
+def seed(t, found=(fnd(901), fnd(902))):
+    AR._record_path(t).write_text(json.dumps({"started": t, "finished": t + 600, "items_read": 14, "findings": list(found), "by_session": {}, "by_category": {}, "stuck": [], "idle_pass": [], "judged": {}}))
 rec_clear()
 seed(at_local(Dd - dt.timedelta(days=1), 5)); seed(at_local(Dd - dt.timedelta(days=1), 20))
 r1 = go_at(two, t1)
@@ -1511,10 +1513,149 @@ check("two runs a day: yesterday's two records are one day of history, so 'the t
 seed(at_local(Dd - dt.timedelta(days=2), 5))
 rec_clear_run = AR._record_path(t1); rec_clear_run.unlink()
 r1 = go_at(two, t1)
-check("…and with a second earlier day on top, it is (3 days running)", len(pushed) == 1 and "ask-missing is the top category 3 days running" in pushed[0][1], pushed)
-hist_ = [{"date": "d4", "started": 4}, {"date": "d3", "started": 31}, {"date": "d3", "started": 30}, {"date": "d2", "started": 21}, {"date": "d2", "started": 20}, {"date": "d1", "started": 10}]
-check("by_day: the newest record of each earlier day, the run's own date left out", [(h["date"], h["started"]) for h in AR.by_day(hist_, "d4")] == [("d3", 31), ("d2", 21), ("d1", 10)]
-      and AR.by_day([], "d4") == [] and [h["date"] for h in AR.by_day(hist_[1:], "d3")] == ["d2", "d1"], AR.by_day(hist_, "d4"))
+check("…and with a second earlier day on top, it is (3 days running), which the message says with the rule; the session with two findings on each of those days is named too", len(pushed) == 1
+      and "ask-missing is the top category 3 days running (at least 2 findings each day, no tie)" in pushed[0][1] and "home-agent has the most findings on 3 of the last 7 days (at least 2 on each of those days, no tie)" in pushed[0][1], pushed)
+# a day counts the distinct findings of all its runs: each earlier day below has one finding a run, a different one in each of its two runs, so no run alone would name anything
+rec_clear()
+for back in (1, 2):
+    seed(at_local(Dd - dt.timedelta(days=back), 5), (fnd(901),)); seed(at_local(Dd - dt.timedelta(days=back), 20), (fnd(902),))
+r1 = go_at(two, t1)
+check("tightening: a run reads every run of an earlier date, not the newest alone", len(pushed) == 1 and "ask-missing is the top category 3 days running" in pushed[0][1], pushed)
+rec_clear()
+for back in (1, 2):
+    seed(at_local(Dd - dt.timedelta(days=back), 5), (fnd(901),)); seed(at_local(Dd - dt.timedelta(days=back), 20), (fnd(901),))
+r1 = go_at(two, t1)
+check("tightening: the same item and check in two runs of a day is one finding, so such a day names nothing", pushed == [], pushed)
+# today counts the earlier runs of the date with this one: this run finds one thing of each of two checks, the 05:00 run found another of one of them
+one = build(itemW(2, state="your-call", needs=["decision"], mover="home-agent", next="home-agent: pick one"), *[cleanW(10 + k) for k in range(12)])
+theirs = lambda i: fnd(i, mover="b-agent")
+rec_clear()
+for back in (1, 2): seed(at_local(Dd - dt.timedelta(days=back), 5), (theirs(901), theirs(902)))
+r1 = go_at(one, t2)
+check("tightening: one finding of a check today alone names no category", pushed == [] and r1["by_category"] == {"ask-missing": 1, "next rules": 1}, (pushed, r1["by_category"]))
+AR._record_path(t2).unlink(); seed(t1, (theirs(901),))
+r1 = go_at(one, t2)
+check("tightening: today counts the date's earlier run too: its finding and this run's make the top category", len(pushed) == 1 and "ask-missing is the top category 3 days running" in pushed[0][1] and "has the most findings" not in pushed[0][1], pushed)
+check("…while the record's own counts stay this run's", r1["by_category"] == {"ask-missing": 1, "next rules": 1} and r1["by_session"] == {"home-agent": 2}, (r1["by_category"], r1["by_session"]))
+rec_clear()
+# an odd record 90 days old ends no run: the run finishes with no error, tells each recipient once and sends its summary and the tightening message
+for back in (1, 2): seed(at_local(Dd - dt.timedelta(days=back), 5))
+seed(at_local(Dd - dt.timedelta(days=90), 5), ("a finding", {**fnd(903), "mover": ["home-agent"]}, {**fnd(904), "category": ["x"]}, {**fnd(905), "category": {"x": 1}}, {**fnd(906), "to": {"x": 1}}))
+try: r1 = go_at(two, t1)
+except Exception as e: r1 = {"error": f"{type(e).__name__}: {e}"}
+kept = json.loads(AR._record_path(t1).read_text(encoding="utf-8"))
+check("a record 90 days old with a list as a mover and a list or mapping as a check or `to` ends no run: no error, one tightening message, one summary",
+      "error" not in r1 and "error" not in kept and len(pushed) == 1 and "ask-missing is the top category 3 days running" in pushed[0][1] and len(summ()) == 1 and len(item_msgs()) == 2, (r1.get("error"), kept.get("error"), pushed, len(summ()), len(item_msgs())))
+rec_clear()
+
+# the rules themselves, on records by hand: `found(n, who)` is n distinct findings of one session, each of its own check unless one is given, so a session case trips no category
+_ids = iter(range(1000, 100000))
+def found(n, who="a-agent", cat=None, **kw):
+    out = []
+    for _ in range(n):
+        i = next(_ids); out.append({**fnd(i, cat or f"check-{i}", who), **kw})
+    return out
+def day(n, *lists): return [{"date": f"d{n}", "findings": [f for fs in lists for f in fs]}]
+def trips(today, *days): return AR.tightening(10000, today, [r for d in days for r in d], "d99")
+SESSION = lambda who: f"{who} has the most findings on 3 of the last 7 days (at least 2 on each of those days, no tie)"
+CATEGORY = lambda cat: f"{cat} is the top category 3 days running (at least 2 findings each day, no tie)"
+a2 = lambda: found(2)
+got = trips(a2(), day(98, a2()), day(97, found(2, "b-agent")), day(96, a2()))
+check("session: the most today and on 2 of the 6 days before", got == [SESSION("a-agent")], got)
+got = trips(a2(), day(98, a2()), day(97, found(2, "b-agent")))
+check("session: on 1 earlier day only, nothing", got == [], got)
+quiet_days = [day(n, found(2, f"q{n}-agent")) for n in (97, 96, 95, 94)]
+got = trips(a2(), day(98, a2()), *quiet_days, day(93, a2()))
+check("session: the sixth day back still counts", got == [SESSION("a-agent")], got)
+got = trips(a2(), day(98, a2()), *quiet_days, day(93, found(2, "r-agent")), day(92, a2()))
+check("session: the seventh day back does not", got == [], got)
+got = trips(found(2, "b-agent"), day(98, a2()), day(97, a2()))
+check("session: today's most is another's, nothing", got == [], got)
+got = trips(a2() + found(2, "z-agent"), day(98, a2()), day(97, a2()))
+check("session: a tie today names no one, the alphabetically first included", got == [], got)
+got = trips(a2(), day(98, a2()), day(97, a2(), found(2, "z-agent")))
+check("session: a tie on an earlier day counts for neither", got == [], got)
+got = trips(found(1), day(98, a2()), day(97, a2()))
+check("session: one finding is no most, today", got == [], got)
+got = trips(a2(), day(98, a2()), day(97, found(1)))
+check("session: one finding is no most, on an earlier day", got == [], got)
+owner5 = lambda: found(5, "Oliver")
+got = trips(owner5() + a2(), day(98, owner5(), a2()), day(97, owner5(), a2()))
+check("session: the owner never counts; the session behind him is the one with the most", got == [SESSION("a-agent")], got)
+got = trips(owner5(), day(98, found(5, "oliver")), day(97, found(5, "OLIVER")))
+check("session: the owner alone, in any case of the name, is never named", got == [] and trips(owner5(), day(98, owner5()), day(97, owner5())) == [], got)
+nobody = lambda: found(5, "")
+got = trips(nobody() + a2(), day(98, nobody(), a2()), day(97, nobody(), a2()))
+check("session: findings with no owner never count; the session behind them does", got == [SESSION("a-agent")] and trips(nobody(), day(98, nobody()), day(97, nobody())) == [], got)
+sent_on = lambda: found(2, "b-agent", to="a-agent")
+got = trips(sent_on(), day(98, sent_on()), day(97, a2()))
+check("session: a finding that goes to a session other than the mover counts for that session", got == [SESSION("a-agent")], got)
+mine = found(2); theirs = [{**f, "mover": "b-agent", "owner": "b-agent"} for f in mine]
+got = (trips(mine, [{"date": "d99", "findings": theirs}], day(98, a2()), day(97, a2())), trips(theirs, [{"date": "d99", "findings": mine}], day(98, a2()), day(97, a2())))
+check("session: a finding in two runs of a day counts once, for the newest run's session", got == ([SESSION("a-agent")], []), got)
+c = lambda n, cat="stale": found(n, "", cat)
+got = trips(c(2), day(98, c(2)), day(97, c(3)))
+check("category: the top one today and on each of the 2 days before", got == [CATEGORY("stale")], got)
+got = trips(c(2), day(98, c(3, "next rules")), day(97, c(2)))
+check("category: a day between with another on top breaks the run", got == [], got)
+got = trips(c(2) + c(2, "zz"), day(98, c(2)), day(97, c(2)))
+check("category: a tie today names none", got == [], got)
+got = trips(c(2), day(98, c(2), c(2, "aa")), day(97, c(2)))
+check("category: a tie on an earlier day names none", got == [], got)
+got = (trips(c(1), day(98, c(2)), day(97, c(2))), trips(c(2), day(98, c(1)), day(97, c(2))), trips(c(2), day(98, c(2)), day(97, c(1))))
+check("category: one finding is no top, on any of the 3 days", got == ([], [], []), got)
+same = c(1)
+got = (trips(c(1), [{"date": "d99", "findings": c(1)}], day(98, c(2)), day(97, c(2))), trips(same, [{"date": "d99", "findings": same}], day(98, c(2)), day(97, c(2))))
+check("category: today's runs are counted together, and one finding found twice stays one", got == ([CATEGORY("stale")], []), got)
+two_rules = [fnd(1, "next rules", "", "N1: a"), fnd(1, "next rules", "", "N3: b")]
+got = trips(two_rules, day(98, two_rules), day(97, two_rules))
+check("category: two rules of one report on one item are two findings", got == [CATEGORY("next rules")], got)
+got = AR.by_day([], [{"date": "d98", "findings": 4}], "d99")
+check("a record with no list of findings is a day that names nothing", got == [({}, {}), ({}, {})] and trips(c(2), [{"date": "d98", "findings": 4}], day(97, c(2))) == [], got)
+# records this script did not write: odd entries and odd values count for nothing, and end no run
+bad = [None, 5, "a finding", ["stale"], {}, {"id": "board#1", "mover": "a-agent"}, {"category": ""}, {"category": 7}, {"category": ["stale"]}, {"category": {"stale": 1}}]
+odd = [{**fnd(1, "stale"), "to": ["a-agent"], "mover": "b-agent"}, {**fnd(2, "stale"), "to": {"a": 1}, "mover": ["a-agent"]}, {**fnd(3, "stale"), "to": 4, "mover": {"a": 1}},
+       {**fnd(4, "stale"), "mover": None}, {"id": ["x"], "category": "stale", "detail": ["y"], "mover": "b-agent"}]
+def try_(f):
+    try: return f()
+    except Exception as e: return f"{type(e).__name__}: {e}"
+got = try_(lambda: AR.by_day([], [{"date": "d98", "findings": bad}], "d99"))
+check("tightening: an entry that is no mapping, or names no check as text, counts for nothing", got == [({}, {}), ({}, {})], got)
+got = try_(lambda: AR.by_day([], [{"date": "d98", "findings": odd}], "d99"))
+check("tightening: a `to` or `mover` that is no text is not read: the finding counts for its check, and for a session only by the text it has",
+      got == [({}, {}), ({"stale": 5}, {"b-agent": 2, "-": 3})], got)
+seven = [day(n, a2()) for n in range(98, 92, -1)]
+old = day(8, bad, odd)
+got = try_(lambda: (len(AR.by_day(a2(), [r for d in (*seven, day(92, a2()), old) for r in d], "d99")), trips(a2(), *seven, old), trips(a2(), day(98, a2()), day(97, a2()), old), trips(a2(), old)))
+check("tightening: 7 days with a run are read and no more; an odd record, far back or near, changes nothing", got == (7, [SESSION("a-agent")], [SESSION("a-agent")], []), got)
+class Unread(dict):
+    def get(self, k, d=None):
+        if k == "findings": raise AssertionError("an older day was read")
+        return super().get(k, d)
+got = try_(lambda: len(AR.by_day([], [*[r for d in seven for r in d], Unread(date="d92")], "d99")))
+check("…and the findings of an older day are not even looked at", got == 7, got)
+split = [day(n, found(2, f"q{n}-agent")) for n in (97, 96, 95, 94)]
+got = trips(a2(), day(98, a2()), *split, day(93, found(1)), day(93, found(1)))
+check("…both runs of the seventh day are read", got == [SESSION("a-agent")], got)
+para = RUBRIC_TEXT.split("\ngoal-unclear\n", 1)[1].split("\n\n", 1)[0]
+check("the rubric's goal-unclear paragraph asks for the same finished outcome as the tool text and flags an activity, a question, a topic or a symptom",
+      all(w in para for w in ("Both must name the same finished OUTCOME", "never an activity, a question, a topic or a symptom", 'a question ("Should X change?") or a topic ("X settings")')), para)
+# the audit agent's records name the session `owner` and have no `mover`
+def agents(n, who, **kw):
+    return [{**{k: v for k, v in f.items() if k not in ("mover", "detail")}, "owner": who, **kw} for f in found(n)]
+got = trips(a2(), day(98, agents(2, "a-agent")), day(97, agents(2, "a-agent")))
+check("session: a recorded finding with an `owner` and no `mover` counts for that session", got == [SESSION("a-agent")], got)
+got = [trips(agents(5, who), day(98, agents(5, who)), day(97, agents(5, who))) for who in ("Oliver", "", "-", "none", "None", "no owner", " No Owner ", ["a-agent"])]
+check("session: …never the instance owner, an empty name, none or no owner, nor a name that is no text", got == [[]] * 8, got)
+got = trips(a2(), day(98, agents(5, "Oliver"), agents(5, "none"), agents(2, "a-agent")), day(97, a2()))
+check("session: …and the session behind them is the one with the most", got == [SESSION("a-agent")], got)
+got = [trips(found(5, who) + a2(), day(98, found(5, who), a2()), day(97, found(5, who), a2())) for who in ("none", "NONE", "no owner", "  ")]
+check("session: a literal none or no owner as the mover is no session either", got == [[SESSION("a-agent")]] * 4, got)
+named = lambda who: [{**f, "owner": "a-agent", "mover": who} for f in found(2)]
+got = [trips(named(who), day(98, named(who)), day(97, named(who))) for who in ("", "none", None)]
+check("session: a finding that has a `mover` is read by it, not by its `owner`", got == [[]] * 3, got)
+got = (AR.tightening(10, found(3), [], "d99"), AR.tightening(10, found(2), [], "d99"))
+check("the share of open items stays as it was: more than 20% trips, 20% does not", got == (["3 of 10 open items flagged (30%, more than 20%)"], []), got)
 
 # the chain: 05:00, 20:00 the same date, 05:00 the next date
 rec_clear(); fake()

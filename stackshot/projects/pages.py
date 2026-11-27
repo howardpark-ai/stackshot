@@ -15,22 +15,26 @@ layer any session reads before acting. This script is the mechanism behind the r
                         Only description/next/needs/status/due (and a create or complete) count — owner, project,
                         priority and subject edits are filing and owe nothing.
                         The turn's first such write also gets the end-of-turn board question as additionalContext,
-                        once per turn, so the reply carries its `Board:` lines and the Stop check asks nothing.
+                        once per turn, so the reply carries its `Board:` lines and the Stop check asks nothing. A call made inside a
+                        subagent (its hook input carries `agent_id`) asks nothing and keeps no early mark (its page debt is still recorded): the open items are the calling session's. In-process teammates carry agent_id too and are skipped alike.
                         A SendMessage (the matcher names it too) to a background agent that names an item is reported to the
                         server as a handover (POST /client/handover): the server names that agent in the item's needs, or, when that would
                         leave the item with a second mover, says so in its line and names nobody.
   nag                   UserPromptSubmit hook: print a reminder for every touched project whose page has not
-                        been committed since the board change (stdout = context for the model)
+                        been committed since the board change (stdout = context for the model). A debt the session was
+                        shown in full lately (same page, same change, under 2 hours) is one line: `still owed: <page> (<item>, <HH:MM>)`
   check                 Stop hook: the board check alone ([board_check] mode = block | note): a turn that did real work
                         while its session owns open items it did not update or confirm is asked once, unless its final message
                         says `Board: no change, <reason>` (block = exit 2 with the question; note = exit 0 and the question kept
-                        for nag to say at the next prompt; skipped when stop_hook_active, never a loop). It asks
+                        for nag to say at the next prompt as one line, `Board question unanswered last turn: <items>. Answer it in the reply.`; skipped when stop_hook_active, never a loop). It asks
                         nothing about pages: the page question at the end of a turn was retired (a
                         write-up mod covers the turn's end), and a page debt is said by nag at the next prompt
-  clear <key> [--force] drop your own pending touch and your own entry in the server's owed list (only for a board-only edit
+  clear <key> [--force] [--name=<session name>] [--id=<permanent id>]...
+                        drop your own pending touch and your own entry in the server's owed list (only for a board-only edit
                         that needed no page change). You are the session in CLAUDE_CODE_SESSION_ID, which Claude Code sets for
                         every Bash command. Another writer's debt on the same page is named and kept (exit 3); --force clears
-                        every writer's, as clear did before.
+                        every writer's, as clear did before. --name= and --id= (repeatable) say what else you go by; the command
+                        printed for the server box carries them. With --id=, no name is looked up for a permanent id.
                         On a box that is not the server host ([release] deploy_ssh names another box, or [server] box = false) the owed
                         list is the server's: your reminders here are dropped, and the same clear runs on that host over
                         `ssh -o BatchMode=yes <[release] deploy_ssh>` in the checkout ~/stackshot there, carrying your session id, name and
@@ -71,7 +75,7 @@ import os as _os, sys as _sys
 if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py): the checkout must be importable
     _here = _os.path.dirname(_os.path.abspath(__file__))
     _sys.path[:] = [_os.path.dirname(_os.path.dirname(_here))] + [p for p in _sys.path if _os.path.abspath(p or ".") != _here]
-import glob, json, os, re, shlex, subprocess, sys, tempfile, time, datetime
+import math, glob, json, os, re, shlex, subprocess, sys, tempfile, time, datetime, unicodedata
 
 HOME = os.path.expanduser("~")
 from stackshot import paths as _paths
@@ -961,6 +965,7 @@ def still_mover_note(rows):
 # question (`Page: no change, <reason>`); the owner retired that one, and a write-up mod covers the turn's end.
 def early_question(payload):
     """→ the board question for this turn's first write, or "" (asked already this turn, nothing to ask, or the check off)."""
+    if payload.get("agent_id"): return ""      # a call made inside a subagent (its hook input carries agent_id): the open items are the calling session's, so nothing is asked and nothing is kept
     text = response_text(payload)
     if text.lstrip().startswith("Refused") or "\"isError\": true" in text: return ""
     if board_mode() not in ("block", "note"): return ""
@@ -974,14 +979,11 @@ def early_question(payload):
     due = [it for it in items if not it.get("held") and max(_num(it.get("state_updated")), _num(it.get("confirmed")), _num(it.get("updated"))) < start]
     if not due: return ""
     listed = ", ".join(f'{item_shown(it)} "{it.get("subject") or ""}"' + (f" ({r})" if (r := role_note(it)) else "") for it in due[:BOARD_LIST]) + (f", and {len(due) - BOARD_LIST} more" if len(due) > BOARD_LIST else "")
-    return ("[stackshot] The end-of-turn board question, asked now so it costs no second reply (once per turn): "
-            "Your other open items, not yet touched this turn: " + listed + ". If this turn changes one, update it (or confirm it "
-            "when it is still true as it stands); if not, end your reply with `Board: no change, <reason>` for all of them, or with a "
-            "`Board:` line followed by one bullet per item, each on its own line: `- board#N: no change, <reason>` (or `- board#M: updated, "
-            "<what>`). One item may stay a single line: `Board board#N: no change, <reason>`. "
-            "In another language the instance has configured the same lines read with its own words. The reason is at least three words. Board lines cover these "
-            "items only: an item you do not move and are not named in the needs of is its mover's to report."
-            " With these in your reply, the check at the end of the turn asks nothing." + still_mover_note(due[:BOARD_LIST]))
+    st = load_state(sid); st["early_asked"] = start or int(time.time()); save_state(sid, st)  # read again: the server call above may have taken seconds, and a parallel hook (a board write's page debt) saved state meanwhile     # the question really went out this turn (`early` only guards once per turn, and is set when nothing was asked too): the Stop note may then be one line
+    return ("[stackshot] Board question (once per turn). Items untouched this turn: " + listed + ". If this turn changes one, "
+            "update it (confirm only if still true); else end your reply with `Board: no change, <reason>` (3+ words) "
+            "for all, or a `Board:` line plus one bullet per item on its own line (`- board#N: no change, <reason>` / `- board#M: updated, <what>`). "
+            "Only items you move or are named in the needs of." + still_mover_note(due[:BOARD_LIST]))
 
 # The other writes a turn ends on (a keeper: "most keeper turns end in a message or a page write"): they owe no page
 # themselves, but the turn's first of them gets the early question too, once the hook's matcher names them (the settings are
@@ -1111,17 +1113,10 @@ def ct_now(key):
     try: return compiled_truth(open(os.path.join(_base(key), key + ".md"), encoding="utf-8").read())
     except Exception: return None
 
-def ct_in(key, rev):
-    """The compiled truth of the page as commit `rev` of the pages checkout holds it; None when it holds no such page."""
+def ct_at(key, ts):
+    """The compiled truth of the page's last commit at or before ts (read-only git in the pages checkout, [paths] brain); None = no version yet."""
     try:
-        r = subprocess.run(["git", "-C", _base(key), "show", f"{rev}:./{key}.md"], capture_output=True, text=True, timeout=20)
-        return compiled_truth(r.stdout) if r.returncode == 0 else None
-    except Exception: return None
-
-def ct_at(key, ts, rev="HEAD"):
-    """The compiled truth of the page's last commit at or before ts in `rev`'s history (read-only git in the pages checkout, [paths] brain); None = no version yet."""
-    try:
-        h = subprocess.run(["git", "-C", _base(key), "log", "-1", f"--before={int(ts)}", "--format=%H", rev, "--", key + ".md"],
+        h = subprocess.run(["git", "-C", _base(key), "log", "-1", f"--before={int(ts)}", "--format=%H", "--", key + ".md"],
                            capture_output=True, text=True, timeout=20).stdout.strip()
         if not h: return None
         # ./ = relative to the pages dir, not the repo root: the same at a repo root, right when the pages sit inside a larger repo
@@ -1434,28 +1429,48 @@ def stale_touches(sid, strict=False, skipped=None):
     save_state(sid, st)
     return out
 
-def describe(key, v, strict=False):
-    strict = touch_strict(v, strict)
+def _debt_when(v):
     when = datetime.datetime.fromtimestamp(int(v.get("ts", 0)), zone_now().tzinfo)
-    t = when.strftime("%H:%M") + " " + _cfg.tz_abbr(when)     # the instance's own zone label (e.g. UTC)
+    return when, when.strftime("%H:%M")
+
+def _debt_item(v):
     task = str(v.get("task") or "")
-    item = f"board item {shown_id(tid_of(task) or task)}" if task else "a board item"     # as shown, never g7
+    return shown_id(tid_of(task) or task) if task else ""
+
+def describe(key, v, strict=False):
+    """The page debt in full, said once: what changed (item, time), that the page has no Current-state edit since, how to edit it, and how
+    to clear it when no page change is due. A repeat of the same debt in the session is `describe_again`."""
+    strict = touch_strict(v, strict)
+    when, _hm = _debt_when(v)
+    t = _hm + " " + _cfg.tz_abbr(when)     # the instance's own zone label (e.g. UTC)
+    iid = _debt_item(v)
+    item = f"board item {iid}" if iid else "a board item"     # as shown, never g7
     if key.startswith(NO_PROJECT):
         return (f"{item} changed at {t} but carries no `metadata.project` — set it (TaskUpdate metadata) and update that page. "
                 f"Only if the item does carry one (the reply did not say it, and the server could not be asked): `python3 {HERE}/stackshot/projects/pages.py clear '{key}'`.")
-    head = (f"{item} changed at {t} but the project page `{key}` " + ("has no Current-state edit since (a timeline line alone does not settle it)" if strict else "has not been committed since") + " — update the page ")
+    head = f"{item} changed at {t}: page `{key}` " + ("has no Current-state edit since (a timeline line does not count). " if strict else "has not been committed since. ")
     kb = _brains.for_key(key)
     if _cfg.page_flavor() == "gbrain" or not kb.default:    # a second brain's page is written through gbrain only (its copy here is read-only)
-        how = ((f"in the second brain {kb.name}, through its own gbrain connector: " if not kb.default else "") + f"(a dated line: the gbrain connector's add_timeline_entry; any other edit: get_page with section or grep (the smallest read that shows the text to change; a whole read only for a rewrite or a change spanning the page), then edit_page "
-               f"with expected_revision (the read's revision) and edits [{{old_text, new_text}}]; put_page only for a whole rewrite; "
-               f"never edit or git inside the brain mirror). ")
-    else:
-        if reads_local():
-            how = f"(edit {plain_page_path(key)} (its Current state, and a dated line under its Timeline), commit and push). "
-        else:       # no pages copy on this machine (a client box): say where the page is, in one parenthesis
-            how = (f"(edit the page `{key}.md` in a checkout of the pages repository, which this machine does not read pages from: its Current state, "
-                   "and a dated line under its Timeline; commit and push). ")
-    return head + how + f"Only if the board edit needed no page change: `python3 {HERE}/stackshot/projects/pages.py clear {key}`."
+        how = ("Edit it " + (f"in the second brain {kb.name} through its gbrain connector " if not kb.default else "")
+               + "with edit_page and expected_revision (get_page first; add_timeline_entry for a dated line; put_page only for a whole rewrite; never edit or git inside the brain mirror). ")
+    elif reads_local():
+        how = f"Edit {plain_page_path(key)} (Current state), commit and push. "
+    else:       # no pages copy on this machine (a client box): say where the page is
+        how = f"Edit `{key}.md` in a checkout of the pages repository (this machine does not read pages from it), commit and push. "
+    return head + how + f"If no page change is due: `python3 {HERE}/stackshot/projects/pages.py clear {key}`."
+
+def _repeat_ok(v, now=None):
+    """Was this debt said in full lately: `shown_at` a finite number, not in the future, less than REPEAT_SECONDS old? Anything else (a garbled value, a clock that went back) says it in full."""
+    try: at = float(v.get("shown_at"))
+    except (TypeError, ValueError, OverflowError): return False
+    if not math.isfinite(at): return False
+    age = (time.time() if now is None else now) - at
+    return 0 <= age < REPEAT_SECONDS
+
+def describe_again(key, v):
+    """The same debt, shown to this session already: one short line."""
+    return f"still owed: {key} ({_debt_item(v) or 'a board item'}, {_debt_when(v)[1]})"
+
 
 def page_link(key):
     """Where a reader opens the whole page: the mirror URL, or the file when no mirror is configured."""
@@ -1475,7 +1490,15 @@ def cmd_nag():
     sid = sid_of(payload); name = session_name(sid); pilot = in_currency(sid, name)
     brain_skip = {}
     stale = stale_touches(sid, strict=pilot, skipped=brain_skip)
-    for key, v in stale: print("[project-page] " + describe(key, v, strict=pilot))
+    if stale:
+        st0 = load_state(sid); tc0 = st0.get("touches") or {}; marked = False
+        for key, v in stale:
+            if v.get("shown") is not None and v.get("shown") == v.get("ts") and _repeat_ok(v):   # this debt (the page and the change, its stamp) was said in full to the session lately: one line; after REPEAT_SECONDS once in full again
+                print("[project-page] " + describe_again(key, v)); continue
+            print("[project-page] " + describe(key, v, strict=pilot))
+            cur = tc0.get(key)
+            if isinstance(cur, dict) and cur.get("ts") == v.get("ts"): cur["shown"] = cur.get("ts"); cur["shown_at"] = int(time.time()); marked = True     # a later change to the page writes a new entry, which has no mark
+        if marked: save_state(sid, st0)
     if UNKNOWN:
         print(f"[project-page] server unreachable: the page gate could not check {', '.join(UNKNOWN)} from this machine ({_server_label()} did not answer); "
               "it checks again at the next prompt and does not block on it.")
@@ -1530,7 +1553,8 @@ def cmd_check():
         if bm == "block":
             line.append(q); board_log(sid, name, "block", [it["gid"] for it in due])
         else:
-            notes.append("[board] About your last turn: " + q); board_log(sid, name, "note", [it["gid"] for it in due])
+            asked_early = bool(int(activity().get("start") or 0)) and int(load_state(sid).get("early_asked") or 0) == int(activity().get("start") or 0)   # the full question went out this turn as hook context: the note says it in a line; else it is the first time and in full
+            notes.append("[board] " + (board_unanswered(due) + rejected_text(bact.get("rejects") or []) if asked_early else "About your last turn: " + q)); board_log(sid, name, "note", [it["gid"] for it in due])
     if foreign:                                         # a note in both modes, never a block
         notes.append("[board] About your last turn's Board lines: " + "; ".join(x for _, x in foreign) + ".")
         board_log(sid, name, "foreign", [g for g, _ in foreign])
@@ -1556,6 +1580,7 @@ def cmd_check():
 # wrote something; no answer from the server = no check, never a block. [board_check] mode: off (default) | block | note (the
 # question goes to the next prompt instead of holding the turn).
 BOARD_LOG = os.path.join(STATE, "board-log.jsonl")
+REPEAT_SECONDS = 7200   # a page debt already said in full is a one-line repeat for this long; then it is said in full once more (a compacted or resumed session)
 BOARD_LIST = 8   # items named in the question; the rest are counted
 # Item ids in a Board line: as an item is written for a person since then, board#N (or #N) for an issue-numbered
 # item and board-tmp-<machine>#3 (or -3) for a temporary one, and the store id (g7, l3, s5; s#5 too) as before. Every form is
@@ -1756,6 +1781,12 @@ def board_ask(why, due):
             "its own line, `- board#N: no change, <reason>` (in another language the instance has configured, the same lines with its own words); "
             "the reason is at least three words.)" + still_mover_note(due[:BOARD_LIST]))
 
+def board_unanswered(due):
+    """The note kept for the next prompt: the question the session did not answer in its last turn's reply, in one line (the full question
+    was asked when the turn first wrote, and again in block mode)."""
+    listed = ", ".join(f'{item_shown(it)} "{it.get("subject") or ""}"' for it in due[:BOARD_LIST]) + (f", and {len(due) - BOARD_LIST} more" if len(due) > BOARD_LIST else "")
+    return f"Board question unanswered last turn: {listed}. Answer it in the reply."
+
 def _server_label():
     try:
         from stackshot.fleet import client as _client
@@ -1861,7 +1892,9 @@ def _clear_owed(key, me, ids, force, others, wait=None):
                 if force or not others:
                     del d[k]; m += 1; dirty = True
             if dirty:
-                tmp = owed + ".tmp"; json.dump(d, open(tmp, "w", encoding="utf-8")); os.replace(tmp, owed)
+                tmp = owed + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f: json.dump(d, f)      # a write that fails at the close raises here, before the list is replaced
+                os.replace(tmp, owed)
         finally: lock.release()
     except Exception as e: return m, shared, f"the owed list could not be rewritten ({type(e).__name__})"
     return m, shared, ""
@@ -1883,6 +1916,18 @@ def _force_hint(key):
 
 def _printable(s):
     return "".join(c for c in str(s) if c.isprintable())
+
+def _words_before_command(s):
+    """The words of a line that ends in a command: printable, and with no backtick, which would pair with one inside the command and open its code span too early."""
+    return _printable(s).replace("`", "'")
+
+def _command_text(command):
+    """A command a reply prints, between backticks. Only control characters (and lone surrogates, which cannot be printed) are taken out of it: a no-break or ideographic space
+    or a joiner is part of a session name, and the command does not clear without it. The backticks are a run one longer than any inside, so a name cannot end them; the
+    command begins with a program's name and ends with a plain or quoted word, so none of its own touches them."""
+    command = "".join(c for c in command if unicodedata.category(c) not in ("Cc", "Cs"))
+    fence = "`" * (max((len(r) for r in re.findall("`+", command)), default=0) + 1)
+    return f"{fence}{command}{fence}"
 
 def _server_ssh_host():
     """None when `clear` acts here (this box is the server host, the config names none, or the check cannot run), else the ssh host that reaches
@@ -1928,7 +1973,7 @@ def _server_command(key, sid, name, ids, force):
     command = (f"env CLAUDE_CODE_SESSION_ID={shlex.quote(sid)} " if sid else "") + f"python3 {SERVER_CHECKOUT}/stackshot/projects/pages.py"
     argv = ["clear", key] + ([f"--name={name}"] if name else []) + [f"--id={i}" for i in sorted(ids)] + (["--force"] if force else [])
     where = _cfg.record_host_where(command, argv)
-    return f"`{where}`" if where.startswith("ssh ") else f"on the server box: `{command} {shlex.join(argv)}`"
+    return _command_text(where) if where.startswith("ssh ") else "on the server box: " + _command_text(f"{command} {shlex.join(argv)}")
 
 def _clear_away(key, host, sid, name, ids, force, whose, n, others):
     """`clear` on a box that is not the server host, after this box's reminders were dropped: the server clears its own owed entry."""
@@ -1936,13 +1981,13 @@ def _clear_away(key, host, sid, name, ids, force, whose, n, others):
     if not sid and not force: print(_NO_SESSION)
     if others: print(f"Kept on this box, not yours: {key} is still owed by {_writers(others)}. That debt settles when they update the page.")
     rc, lines, why = _ask_server(key, host, sid, name, ids, force)
-    if why: print(_printable(f"The server's entry for {key} stays: {why}. To clear it, run {_server_command(key, sid, name, ids, force)}"))
+    if why: print(_words_before_command(f"The server's entry for {key} stays: {why}. To clear it, run ") + _server_command(key, sid, name, ids, force))
     else:
         print(f"From the server host ({host}):")
         for l in lines: print(l)
         if rc == CLEAR_KEPT and name and not _PLAIN_NAME.fullmatch(name):      # _ask_server left it out
-            print(_printable(f"This session's name ({name}) is not a plain name, so it was not sent: a debt the server keeps under it counts as another writer's above. "
-                             f"To clear yours, run {_server_command(key, sid, name, ids, force)}"))
+            print(_words_before_command(f"This session's name ({name}) is not a plain name, so it was not sent: a debt the server keeps under it counts as another writer's above. "
+                                        "To clear yours, run ") + _server_command(key, sid, name, ids, force))
     if others or rc == CLEAR_KEPT: print(_force_hint(key))
     if why: return CLEAR_SERVER_STAYS
     return CLEAR_KEPT if others or rc == CLEAR_KEPT else 0
@@ -1956,8 +2001,9 @@ def cmd_clear(key, force=False, also_name="", also_ids=()):
     3 = another writer's debt kept, 4 = the server's entry stays."""
     key = key.strip() if key.strip().startswith(NO_PROJECT) else norm(key)     # "(no project)" is a key of its own, not a page
     sid = caller_sid(); name = session_name(sid) if sid else ""; me = {x for x in (sid, name, also_name) if x}
-    ids = caller_ids(sid, name) if sid else set()      # the server's owed list is keyed by the permanent id once the registry knows the caller
-    ids |= set(also_ids) | (caller_ids("", also_name) if also_name else set())
+    by_name = not also_ids      # with --id= the command says which permanent ids are the caller's: a name may belong to a later session by now, so none is looked up
+    ids = caller_ids(sid, name if by_name else "") if sid else set()      # the server's owed list is keyed by the permanent id once the registry knows the caller
+    ids |= set(also_ids) | (caller_ids("", also_name) if also_name and by_name else set())
     name = name or also_name
     away = None if key.startswith(NO_PROJECT) else _server_ssh_host()      # a debt with no page is only ever this box's reminder
     n, others = _clear_reminders(key, me, force)
@@ -1993,7 +2039,7 @@ def cmd_clear_forwarded(args):
     if not key:
         print("usage: pages.py clear-forwarded <key> [--session <id>] [--name <name>] [--id <permanent id>]... [--force]", file=sys.stderr); return 1
     key = norm(key); me = {x for x in (sid, name) if x}
-    if me: ids |= caller_ids(sid, name or session_name(sid))
+    if me: ids |= caller_ids(sid, "" if ids else name or session_name(sid))      # with --id the ids are said: no name is looked up (cmd_clear)
     caller = f"{name} ({sid[:8]})" if name and sid else _who(sid or name)       # the calling box's name for the session, which this box may not know
     whose = " for every writer (--force)" if force else (f" for you, {caller}" if me else "")
     n, others = _clear_reminders(key, me, force)
@@ -2025,7 +2071,7 @@ def main(argv):
     if cmd == "clear":             # clear <key> [--force]: the caller's own debt; --force every writer's. --name=, --id=: see _server_command
         rest = argv[2:]; force = "--force" in rest; also = [a.partition("=") for a in rest if a.startswith(("--name=", "--id="))]
         rest = [a for a in rest if a != "--force" and not a.startswith(("--name=", "--id="))]
-        if not rest: print("usage: pages.py clear <key> [--force]", file=sys.stderr); return 1
+        if not rest: print("usage: pages.py clear <key> [--force] [--name=<session name>] [--id=<permanent id>]...", file=sys.stderr); return 1
         return cmd_clear(rest[0], force=force, also_name=next((v for k, _, v in also if k == "--name"), ""), also_ids={v for k, _, v in also if k == "--id" and v})
     if cmd == "clear-forwarded": return cmd_clear_forwarded(argv[2:])      # `clear` on another box, run here over ssh: never forwards
     if cmd == "pending": return cmd_pending()

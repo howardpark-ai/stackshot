@@ -1039,6 +1039,7 @@ PROGRAMS = {
     "requests": ("stackshot.tools.request_summary", "the server's request log: `requests summary` (p50 and p95 per route, the slowest calls, the errors, the starts)"),
     "frontdoor-token": ("stackshot.frontdoor.boardtoken", "copy the board's machine token into the front door's token file, after a new token (docs/front-door.md)"),
     "publish": ("stackshot.web.publish", "the stackshot publisher"),
+    "standby-copy": ("stackshot.tools.standby_copy", "one consistent copy of the server's data for a standby, and `standby-copy --verify DIR` to check a received one (docs/standby-copy.md)"),
     "render": ("stackshot.web.render", "the board's text renderer"),
 }
 

@@ -53,12 +53,13 @@ id, a test count, a merged, live or deployed status or a "since 09:30" stamp is 
 notes it.
 
 ## text ITEM_FORM
-subject (a create's, or one an update sets): the outcome wanted ("Make X work when Y"), never the symptom ("X fails
-when Y"); at most {{SUBJECT_MAX}} characters, the scope prefix counted; a longer one is cut at a word (the reply says so): the
+subject (a create's, or one an update sets): the finished outcome ("Make X work when Y", "X is live", "Y no longer
+happens"), the same one the Goal sentence says; never an activity ("Investigate X"), a question ("Should X change?"), a
+topic ("X settings") or the symptom ("X fails when Y"); at most {{SUBJECT_MAX}} characters, the scope prefix counted; a longer one is cut at a word (the reply says so): the
 rest goes in the description bullets. An update that leaves subject out or sets the stored one is never refused for its length. description: the item's background as `- ` bullets of live state, one fact each: at most {{DESC_MAX_LINES}}
-lines, and every line, `- ` included, at most {{DESC_LINE_MAX}} characters (a link counts by its text); split a longer
-fact into two bullets or put it on the project page; prose, a longer line and more lines are refused. The first bullet
-opens `Goal:` (`goal:` or a bold label is put right) with the outcome wanted in a sentence (match the subject); a symptom,
+lines, and every line, `- ` included, at most {{DESC_LINE_MAX}} characters (a link counts by its text); a longer bullet is
+split for you at a sentence end or a space (the reply says so); prose, a bullet that cannot be split (one unbroken token) and more lines are refused. The first bullet
+opens `Goal:` (`goal:` or a bold label is put right) with that finished outcome in a sentence; a symptom,
 cause or trigger goes in a later bullet that opens `Problem:`. Then what the item is and where it lives (his words as
 a bullet such as `- {{OWNER}}: …`; parallel bullets go under one parent bullet, indented two spaces); never steps or
 commands for {{OWNER}} (those go in step, below), no working notes, status or history; prune what is no longer live;
@@ -437,7 +438,7 @@ first 8, then a count); the items that wait on it through after are woken; the c
 
 ## param OUTCOME_TEXT
 A close's summary: how the item ended, as `- ` bullets (at most {{DESC_MAX_LINES}} lines, every line `- ` included at
-most {{DESC_LINE_MAX}} characters): outcome_text="- PR 12 merged\n- live on the box". Stored in the item's Outcome
+most {{DESC_LINE_MAX}} characters; a longer bullet is split for you at a sentence end or a space, the reply says so): outcome_text="- PR 12 merged\n- live on the box". Stored in the item's Outcome
 field; the item's description is not changed. Goes with a close only.
 
 ## text GMAIL_TERMS

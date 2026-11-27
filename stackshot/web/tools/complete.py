@@ -37,7 +37,7 @@ def stackshot_complete(item_id: str, outcome: _OUTCOME_PARAM = "", reason: _REAS
 
 
 def stackshot_confirm(item_id: str, sender: str = "") -> str:
-    """Mark an item still true: sets its `confirmed` clock only. item_id: board#N (a bare number N is read as board#N)."""
+    """Mark an item still true: sets its `confirmed` clock only. item_id: board#N (a bare number N or #N is read as board#N)."""
     _oauth._who()
     _sender_required(sender)
     _sender_not_owner(sender)

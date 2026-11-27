@@ -9,7 +9,7 @@ with HOME and the XDG folders pointed into the scratch folder, a fake `gh` on PA
   3  the second run: suites added and deleted by name, test lines added and deleted per suite, the record replaced; --dry-run writes nothing
   4  thresholds: the placeholders never trigger; each of the four keys triggers on its own with a TRIGGER line, exit 0, the lines kept in the
      state file; a [repo] table overrides the top-level key; growth is scaled down to a week for a gap longer than a week
-  5  no suite times: a missing or damaged map gives n/a and a note and no minute trigger; --fetch downloads the artifact into a folder it
+  5  no suite times: a missing, empty or damaged map, or a fetch that fails (also no gh), gives n/a, a note, no minute trigger and exit 4 with one stderr line; --fetch downloads the artifact into a folder it
      removes again, and a failing gh gives n/a with the reason
   6  errors: an unwritable state folder is a clear message and a nonzero status with nothing printed on stdout; a bad config value, a missing
      explicit config and a checkout with no suites are status 2; a damaged previous record is started over with a note
@@ -203,16 +203,16 @@ check("a fall in test lines never triggers", "TRIGGER" not in r.stdout and r.ret
 base = ["--state-dir", str(T / "st5"), "--config", str(CONF)]
 CONF.write_text("max_serial_minutes = 0\nmax_suite_minutes = 0\n")
 r = run(*base, "--map", str(T / "no-such-map.json"))
-check("no map: n/a, a note, no minute trigger, exit 0", r.returncode == 0 and "serial minutes: n/a" in r.stdout and "no suite times:" in r.stdout and "TRIGGER" not in r.stdout, r.stdout + r.stderr)
+check("no map: n/a, a note, no minute trigger, exit 4 with one stderr line", r.returncode == 4 and r.stderr.count("\n") == 1 and r.stderr.startswith("test_trim_report: no suite times:") and "serial minutes: n/a" in r.stdout and "no suite times:" in r.stdout and "TRIGGER" not in r.stdout, r.stdout + r.stderr)
 check("no map: the record has null minutes", json.loads((T / "st5" / "fakerepo.json").read_text())["serial_minutes"] is None)
 (T / "bad-map.json").write_text("{not json")
 r = run(*base, "--map", str(T / "bad-map.json"))
-check("damaged map: n/a with the reason", r.returncode == 0 and "is not JSON" in r.stdout, r.stdout)
+check("damaged map: n/a with the reason, exit 4", r.returncode == 4 and "is not JSON" in r.stdout and "is not JSON" in r.stderr, r.stdout + r.stderr)
 (T / "old-map.json").write_text(json.dumps({"format": 2, "commit": "b", "suites": {}}))
 r = run(*base, "--map", str(T / "old-map.json"))
-check("a map of another format is not read", "is not a suite map of format 1" in r.stdout, r.stdout)
+check("a map of another format is not read: exit 4", r.returncode == 4 and "is not a suite map of format 1" in r.stdout and "is not a suite map of format 1" in r.stderr, (r.returncode, r.stdout + r.stderr))
 r = run(*base)
-check("default map path is <root>/.suitemap/map.json (absent here)", "suitemap/map.json" in r.stdout and "serial minutes: n/a" in r.stdout, r.stdout)
+check("default map path is <root>/.suitemap/map.json (absent here): exit 4", r.returncode == 4 and "suitemap/map.json" in r.stdout and "serial minutes: n/a" in r.stdout and "suitemap/map.json" in r.stderr, (r.returncode, r.stdout, r.stderr))
 
 GH_LOG = T / "gh.log"; GH_DIR = T / "gh.dir"
 fake_gh = f'''#!/bin/sh
@@ -232,14 +232,54 @@ CONF.write_text("")
 r = run(*base, "--fetch", "--github", "acme/widgets", env={"PATH": PATH2})
 check("--fetch: the artifact's map is used", r.returncode == 0 and "serial minutes: 22.5 (9 of 11 suites timed, 2 untimed)" in r.stdout, r.stdout + r.stderr)
 calls = GH_LOG.read_text().splitlines()
-check("--fetch: two gh calls, exactly: main's push run of tests.yml, then the suitemap artifact (the name is not a prefix of another)",
-      calls == ["run list --repo acme/widgets --workflow tests.yml --branch main --event push --status success --limit 1 --json databaseId",
+check("--fetch: two gh calls, exactly: main's newest successful run of the scheduled map refresh (suitemap-refresh.yml, any event), then the suitemap artifact (the name is not a prefix of another)",
+      calls == ["run list --repo acme/widgets --workflow suitemap-refresh.yml --branch main --status success --limit 1 --json databaseId",
                 f"run download 4242 --repo acme/widgets --name suitemap --dir {GH_DIR.read_text().strip()}"], calls)
 check("--fetch: the download folder is removed again", not pathlib.Path(GH_DIR.read_text().strip()).exists(), GH_DIR.read_text())
 r = run(*base, "--fetch", "--github", "acme/widgets", env={"PATH": PATH2, "GH_FAIL": "1"})
-check("--fetch: a failing gh gives n/a and the reason", r.returncode == 0 and "serial minutes: n/a" in r.stdout and "gh run list failed: boom" in r.stdout, r.stdout + r.stderr)
+check("--fetch: a failing gh gives n/a and the reason, exit 4 with the reason on stderr", r.returncode == 4 and "serial minutes: n/a" in r.stdout and "gh run list failed: boom" in r.stdout and "gh run list failed: boom" in r.stderr, (r.returncode, r.stdout + r.stderr))
 r = run(*base, "--fetch")
 check("--fetch: no repository to ask is said (the fake repo has no origin)", "needs --github OWNER/REPO" in r.stdout, r.stdout + r.stderr)
+NO_GH = T / "no-gh-bin"; NO_GH.mkdir()      # a PATH with no gh in it: a machine with no gh command, as with no login
+r = run(*base, "--fetch", "--github", "acme/widgets", env={"PATH": str(NO_GH)})
+check("--fetch: no gh on the machine (or no login) is exit 4 and one stderr line, never a quiet 0", r.returncode == 4 and "serial minutes: n/a" in r.stdout and r.stderr.startswith("test_trim_report: no suite times:") and r.stderr.count("\n") == 1, (r.returncode, r.stdout + r.stderr))
+(T / "empty-map.json").write_text(json.dumps({"format": 1, "commit": "c", "suites": {}}))
+r = run(*base, "--map", str(T / "empty-map.json"))
+check("a map that lists no suites is exit 4 and says so", r.returncode == 4 and "lists no suites" in r.stderr, (r.returncode, r.stderr))
+r = run(*base, "--map", str(MAP))
+check("control: a good map is still exit 0 with nothing on stderr", r.returncode == 0 and r.stderr == "", (r.returncode, r.stderr))
+CONF.write_text("max_suites = 0\n")
+r = run(*base, "--map", str(MAP))
+check("a threshold trip that files an item stays exit 0 (the item is only printed with --no-open)", r.returncode == 0 and "TRIGGER: max_suites" in r.stdout and r.stderr == "", (r.returncode, r.stdout[-200:], r.stderr))
+r = run(*base, "--map", str(T / "no-such-map.json"))
+check("no times and a threshold trip: the report is still printed, the state kept, exit 4", r.returncode == 4 and "TRIGGER: max_suites" in r.stdout and (T / "st5" / "fakerepo.json").exists(), (r.returncode, r.stdout[-200:], r.stderr))
+CONF.write_text("")
+# a map that is read but gives no suite of this checkout a usable time: exit 4 as well, never a quiet 0 with "0.0 minutes"
+(T / "zzz-map.json").write_text(json.dumps({"format": 1, "commit": "e", "suites": {"zzz": {"seconds": 5}}}))
+r = run(*base, "--map", str(T / "zzz-map.json"))
+check("a map whose suites are all unrelated to the checkout: exit 4, one stderr line naming the cause", r.returncode == 4 and r.stderr == "test_trim_report: no suite times: the suite map has no usable time for any of the 11 suites\n", (r.returncode, r.stderr))
+(T / "badtimes-map.json").write_text(json.dumps({"format": 1, "commit": "f", "suites": {n: {"seconds": v} for n, v in zip(SUITES, (-5, "7", None, True, [3]) * 3)}}))
+r = run(*base, "--map", str(T / "badtimes-map.json"))
+check("a map whose entries all have bad times (negative, string, missing, boolean, list): exit 4, one stderr line", r.returncode == 4 and r.stderr.count("\n") == 1 and r.stderr.startswith("test_trim_report: no suite times:") and "serial minutes" in r.stdout, (r.returncode, r.stdout[-300:], r.stderr))
+r = run(*base, "--map", str(T / "no-such-map.json"), "--dry-run")
+check("--dry-run with no times is exit 4 too", r.returncode == 4 and r.stderr.startswith("test_trim_report: no suite times:"), (r.returncode, r.stderr))
+r = run(*base, "--map", str(T / "no-such-map.json"), "--json")
+jj = json.loads(r.stdout) if r.stdout.strip().startswith("{") else {}
+check("--json with no times: the record is printed (null minutes) and the status is 4", r.returncode == 4 and jj.get("serial_minutes") is None and r.stderr.startswith("test_trim_report: no suite times:"), (r.returncode, r.stdout[:200], r.stderr))
+r = run(*base, "--map", str(MAP), "--json")
+check("--json with good data is still exit 0", r.returncode == 0 and json.loads(r.stdout)["serial_minutes"] == 22.5 and r.stderr == "", (r.returncode, r.stderr))
+
+# 3 wins over 4: the item cannot be opened (the client refuses) AND the times are missing: the report, then both lines on stderr, exit 3
+FAIL_CLIENT = T / "refusing-client.sh"; FAIL_CLIENT.write_text("#!/bin/sh\necho refused on purpose >&2\nexit 1\n"); FAIL_CLIENT.chmod(0o755)
+CONF.write_text('max_suites = 0\nitem_project = "acme"\nitem_mover = "acme-builder"\n')
+e5 = {"PATH": os.environ["PATH"], "HOME": str(HOME), "TMPDIR": tmp, "LANG": "C.UTF-8"}
+r = subprocess.run([sys.executable, TOOL, "--now", "2026-01-05T09:00:00+00:00", *base, "--client", str(FAIL_CLIENT), "--map", str(T / "no-such-map.json")], capture_output=True, text=True, env=e5, cwd=REPO, timeout=120)
+err_lines = r.stderr.splitlines()
+check("an item that cannot be opened AND no suite times: exit 3, the report printed, both reasons on stderr (the no-times line first)",
+      r.returncode == 3 and "TRIGGER: max_suites" in r.stdout and len(err_lines) == 2 and err_lines[0].startswith("test_trim_report: no suite times:") and "was not opened" in err_lines[1] and "refused on purpose" in err_lines[1], (r.returncode, r.stdout[-200:], r.stderr))
+r = subprocess.run([sys.executable, TOOL, "--now", "2026-01-05T09:00:00+00:00", *base, "--client", str(FAIL_CLIENT), "--map", str(MAP)], capture_output=True, text=True, env=e5, cwd=REPO, timeout=120)
+check("control: an item that cannot be opened with good times is exit 3 with the one item line", r.returncode == 3 and "no suite times" not in r.stderr and r.stderr.count("\n") == 1, (r.returncode, r.stderr))
+CONF.write_text("")
 check("--fetch: no folder of the tool is left in the scratch folder", not [p for p in T.iterdir() if p.name.startswith("test-trim-")], list(T.iterdir()))
 
 # ------------------------------------------------------------------ 6 errors
@@ -399,7 +439,7 @@ check("a negative, infinite or mistyped time is ignored with a note naming the s
 check("those suites count as untimed and add no minutes", "serial minutes: 1.0 (1 of 11 suites timed, 10 untimed)" in r.stdout and "slowest 1:" in r.stdout, r.stdout)
 (T / "none-map.json").write_text(json.dumps({"format": 1, "commit": "d", "suites": {"other": {"seconds": 5}}}))
 r = run("--map", str(T / "none-map.json"), "--state-dir", str(T / "st13"))
-check("a map that matches no suite prints no slowest line", r.returncode == 0 and "serial minutes: 0.0 (0 of 11 suites timed, 11 untimed)" in r.stdout and "slowest" not in r.stdout, r.stdout)
+check("a map that matches no suite prints no slowest line and is exit 4 with one stderr line (no time for any suite of the checkout)", r.returncode == 4 and "serial minutes: 0.0 (0 of 11 suites timed, 11 untimed)" in r.stdout and "slowest" not in r.stdout and r.stderr == "test_trim_report: no suite times: the suite map has no usable time for any of the 11 suites\n", (r.returncode, r.stdout, r.stderr))
 
 # ------------------------------------------------------------------ 12 --fetch beats --map, a folder that cannot be made, SIGTERM
 base = ["--state-dir", str(T / "st5"), "--config", str(CONF)]
@@ -434,8 +474,8 @@ try:
     rc, out, err = inproc("--fetch", "--github", "acme/widgets", "--state-dir", str(T / "st14"))
 finally:
     tempfile.mkdtemp = real_mkdtemp
-check("--fetch with no temporary folder: one line saying so, n/a minutes, exit 0, no traceback",
-      rc == 0 and "no suite times: cannot make a temporary folder for the download: Permission denied" in out and "serial minutes: n/a" in out and "Traceback" not in err, (rc, out[-300:], err))
+check("--fetch with no temporary folder: one line saying so, n/a minutes, exit 4, no traceback",
+      rc == 4 and "no suite times: cannot make a temporary folder for the download: Permission denied" in out and "serial minutes: n/a" in out and "Traceback" not in err, (rc, out[-300:], err))
 
 rc, out, err = inproc("--map", str(MAP), "--state-dir", str(T / "st14"))
 check("main restores the SIGTERM handler it found", rc == 0 and signal.getsignal(signal.SIGTERM) == term_before, (rc, signal.getsignal(signal.SIGTERM)))
@@ -509,8 +549,8 @@ def map_run(name, text, *extra):
 
 
 r = map_run("deep", "[" * 200000)
-check("a map nested deep enough to overflow the parser: one note, n/a minutes, exit 0, no traceback",
-      r.returncode == 0 and clean(r) and "no suite times:" in r.stdout and "nested too deeply" in r.stdout and "serial minutes: n/a" in r.stdout, (r.returncode, r.stdout[-300:], r.stderr[-300:]))
+check("a map nested deep enough to overflow the parser: one note, n/a minutes, exit 4, no traceback",
+      r.returncode == 4 and clean(r) and "no suite times:" in r.stdout and "nested too deeply" in r.stdout and "serial minutes: n/a" in r.stdout, (r.returncode, r.stdout[-300:], r.stderr[-300:]))
 r = map_run("bigint", '{"format": 1, "suites": {"s01": {"seconds": 1' + "0" * 400 + '}, "s02": {"seconds": 60}}}')
 check("a time that is an int beyond float range: ignored with a note naming the suite, no OverflowError",
       r.returncode == 0 and clean(r) and "ignored" in r.stdout and r.stdout.count("s01") == 1 and "serial minutes: 1.0 (1 of 11 suites timed" in r.stdout, (r.returncode, r.stdout[-400:], r.stderr[-300:]))
@@ -523,7 +563,7 @@ check("times of 1e308 are ignored: the minutes stay finite and the record is pla
 got = TR.read_map(str(T / "year.json"))
 check("the limit is a year: a year is a time, a year and a second is not, and 0 seconds is", got[0] == {"a": float(TR.SECONDS_MAX), "c": 0.0} and got[2] == ["b"], got)
 r = map_run("nan", '{"format": 1, "suites": {"s01": {"seconds": NaN}, "s02": {"seconds": Infinity}, "s03": {"seconds": -Infinity}}}')
-check("NaN, Infinity and -Infinity times are ignored with one note", r.returncode == 0 and clean(r) and r.stdout.count("note:") == 1 and "s01, s02, s03" in r.stdout, (r.stdout[-300:], r.stderr))
+check("NaN, Infinity and -Infinity times are ignored with one note (and no suite is timed: exit 4)", r.returncode == 4 and clean(r) and r.stdout.count("note: suite times ignored") == 1 and "s01, s02, s03" in r.stdout, (r.returncode, r.stdout[-300:], r.stderr))
 
 (T / "latin.toml").write_bytes(b"max_suites = 5\n# caf\xe9 \xff\xfe\n")
 r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st16"), "--config", str(T / "latin.toml"))
@@ -610,7 +650,7 @@ for n in many:
 r = run("--map", str(T / "listmax-map.json"), "--state-dir", str(T / "st16"), "--dry-run")
 for n in many:
     (REPO / "tests" / f"{n}_scenario.py").unlink()
-note = [l for l in r.stdout.splitlines() if l.startswith("note:")]
+note = [l for l in r.stdout.splitlines() if l.startswith("note: suite times ignored")]
 check("the note on ignored times is cut at LIST_MAX too and counts the rest", len(note) == 1 and note[0].endswith(": " + ", ".join(many[:TR.LIST_MAX]) + ", and 5 more"), note)
 
 # (c) minutes: seconds / 60 rounded to two places, added up, shown with one; zero and the half boundaries
@@ -721,7 +761,7 @@ def list_lines(n, kind):
         for x in names:
             suite(x, 1)
         r = run("--map", str(edge_map(f"neg{n}", {x: -1 for x in names})), "--state-dir", str(st), "--dry-run")
-        return names, [l for l in r.stdout.splitlines() if l.startswith("note:")]
+        return names, [l for l in r.stdout.splitlines() if l.startswith("note: suite times ignored")]
     finally:
         for x in names:
             (REPO / "tests" / f"{x}_scenario.py").unlink(missing_ok=True)

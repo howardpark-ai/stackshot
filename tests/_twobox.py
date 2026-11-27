@@ -90,7 +90,13 @@ class TwoBoxes:
         except FileNotFoundError: return False
 
 
+def code_span(line):
+    """The command a reply's line holds as code: the first run of backticks opens it and the next run of the same length closes it."""
+    fence = re.search("`+", line)
+    end = re.compile(f"(?<!`){fence.group()}(?!`)").search(line, fence.end())
+    return line[fence.end():end.start()]
+
+
 def given_command(out):
-    """The command a `clear` that could not reach the server printed (between the backticks of its line)."""
-    line = next(x for x in out.split("\n") if x.startswith("The server's entry for "))
-    return line[line.index("`") + 1:line.rindex("`")]
+    """The command a `clear` that could not reach the server printed."""
+    return code_span(next(x for x in out.split("\n") if x.startswith("The server's entry for ")))

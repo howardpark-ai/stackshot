@@ -228,7 +228,7 @@ the nightly run takes 9 minutes" (short `- ` bullets, never a paragraph; every l
 {{CLOSE_FORM}}A new or reworded open step that opens with a front agent is refused on an item another session moves:
 open it with the mover's name, or send `For <agent>,` to its project page (a step it already holds stays). With no
 builder there, its front agents may take the item by mover= or a step behind an open step
-(the item moves to it, told, when the step before is done). A date alone is a wait: the item waits until that date. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not: to leave an item again, pass needs without yourself. {{ITEM_FORM}} {{NEXT_FORM}}
+(the item moves to it, told, when the step before is done). A date alone is a wait: the item waits until that date. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not: to leave an item again, pass needs without yourself. {{ITEM_FORM}} A description that changes the Goal sentence's words, with no new subject, gets one reply line quoting the stored subject (a note, never a refusal): send subject= if the outcome moved. Words are compared: case, the spacing and punctuation between the same words and bold, code or link marks are no change; a word split or joined ("Re-run" to "Rerun") and a changed symbol (% and ~ count) are. {{NEXT_FORM}}
 ask="none" clears it (so does clear_ask=true). A write that leaves an ask standing on an item you move or wrote ends
 with a one-line reminder to withdraw the ask if it is wrong or moot; a write that sets an ask shows {{OWNER}}'s
 comments and notes since the item's last ask, so one that already answers it is seen before you ask again. His note on
@@ -241,7 +241,7 @@ open question; a non-empty list still takes 2 to 6 entries, exactly one recommen
 picking an option, the server clears the ask and the options itself and keeps his answer with the option's label and
 line. A client whose tool has no ask parameter refreshes the ask by writing the new line, in the ask's form, as the
 first line of next. When this work settles or changes a premise of another open item, update that one too, in the same
-turn. item_id: board#N; a bare number N is read as board#N, except in an update that closes the item. until takes YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, {{TZ_ABBR}}; a full ISO time with
+turn. item_id: board#N; a bare number N or #N is read as board#N (the reply says so), in a close too; the same for after and superseded_by. until takes YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, {{TZ_ABBR}}; a full ISO time with
 seconds or a UTC offset is converted to that minute in {{TZ_ABBR}}, and the reply says so. At that moment the server
 tells the item's mover and the sessions in its needs once and drops the date. A doing item whose date is over an hour away and whose every open step waits for a later date ("after Mar 2", "until
 Mar 2"; a deadline such as "by Mar 2" or "due Mar 2" is no wait) is listed as waiting, and the audit asks why the step

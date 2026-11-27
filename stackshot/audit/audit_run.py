@@ -15,7 +15,7 @@ The checks (category names as the audit agent's brief has them; one finding = {"
                           activity is not a finding of any pass: the hourly audit line (audit/hourly.py) writes it a History line and the idle hand-over (audit/hand_idle.py) hands it on. The passes
                           send their findings to the same recipient through the same `deliver_findings`, with the same text and send stamps (`merged_sent` joins the records), so a finding reaches its
                           mover once whichever pass finds it; they stand still while a run is in progress. Not counted in this run's `by_category`, the unmoved digest, the threshold or the 20% tightening share.
-  one model call each     next-done · wrong-needs · ask-missing (an ask that no longer fits) · unneeded-escalation · older-than-page · obsolete-wait (a waiting item, held or after another item or parked or outside, whose wait a later change may have overtaken) · why-not-now (a stored doing item whose wake is more than an hour out and whose every open step is dated for that day or later: is there a concrete reason the step cannot run before then?) · goal-unclear (an open item whose subject and `Goal:` bullet are new or reworded since the last judgment: does each name an outcome wanted rather than a symptom, cause, task or trigger, and do the two name the same one? Items with no Goal bullet are the one-time pass's, tools/goal_pass.py; at most `GOAL_MAX` a run; the stamps judged are the record's `goal_judged`). A suspect is an item a heuristic picks for one or more of
+  one model call each     next-done · wrong-needs · ask-missing (an ask that no longer fits) · unneeded-escalation · older-than-page · obsolete-wait (a waiting item, held or after another item or parked or outside, whose wait a later change may have overtaken) · why-not-now (a stored doing item whose wake is more than an hour out and whose every open step is dated for that day or later: is there a concrete reason the step cannot run before then?) · goal-unclear (an open item whose subject and `Goal:` bullet are new or reworded since the last judgment: does each name a finished outcome rather than a symptom, cause, task or trigger, and do the two name the same one? Items with no Goal bullet are the one-time pass's, tools/goal_pass.py; at most `GOAL_MAX` a run; the stamps judged are the record's `goal_judged`). A suspect is an item a heuristic picks for one or more of
                           these (`suspects`); the call returns {"finding": "yes"|"no", "check", "reason", "fix"}. At most `[audit] max_calls` calls, one at a time; an item judged "no" or "yes" is not
                           judged again until it is written; a call that fails is not counted as a "no" (the item is tried again next run), and three failures in a row end the calls.
   the orphan hand-over    the first stage of a run, before the board is read (`orphan_stage`; the server does the work, `POST /client/orphan-handover`, because the item lock and the fleet's heartbeat are its): an open item whose
@@ -45,7 +45,8 @@ Output, as the agent reported: one message per recipient per run, `<id> · <cate
 project's -main agent with `[for <owner>]` first (a second marked path: a finding that went to a builder and stayed unanswered through its reminders and the builder-level send goes once to -main, marked for its owner; see split_sent). A finding already sent (same item, same check) whose item has not been written since is not sent again: it stays on the record with its `sent` time and counts in
 `repeats`. The unmoved digest below names an item once per unmoved stretch (`stuck[].chased`); a finding on the previous run's record whose item has had no write since goes, as a job, to the project's builder and onto the record's `stuck`
 list (`first_flagged` kept); a summary to `[audit] summary_to` (default `projects/example`); and ONE message to `[audit] builder` when a check has at least `[audit] threshold` findings or the run trips a tightening
-condition (more than 20% of the open items flagged, the same session or the same category on top three days running). The record is `<paths.state>/audit/run-<date>-<HHMMSS>.json` (the start time, so a
+condition (more than 20% of the open items flagged; one session with the most findings on 3 of the last 7 days that have a run; one category with the most findings 3 such days running. A day counts the distinct findings
+of all its runs; "the most" is at least 2 and more than any other, so a tie names no one; the owner and "no owner" (an empty or "none" name) are never the session). The record is `<paths.state>/audit/run-<date>-<HHMMSS>.json` (the start time, so a
 second run the same day keeps the first one's record), as audit.py reads it, with `idle_pass`, `judged`, `calls` and `messages` beside the agent's keys. A run that dies finishes its record with `error`
 and puts a line in cues.jsonl, so it never holds the next cue back. A run begins no new model call once `[audit] max_minutes` (default 100) have passed since it started (`calls.timed_out`). A finding
 whose message to its mover fails goes to the project's -main agent, noted in `messages` (`kind: fallback`); when the refusal says the recipient is a front agent (the mover was a session id the role map
@@ -110,6 +111,9 @@ UNMOVED_MIN_HOURS = 6.0       # the previous run counts as "before this one" whe
 ONCE = ("event-missing",)    # a finding of these categories is sent once and never repeated or escalated (the builder's message about an event no type reports)
 REMIND_TRIES = 3             # a ten-minute pass sends an unanswered finding this many times (first send and reminders), then once to the builder as unmoved, then (a finding that went to a builder) once to the project's -main agent (split_sent)
 TIGHTEN_SHARE = 0.20          # a run that flags more than this share of the open items trips a tightening review
+TIGHTEN_MIN = 2               # the fewest findings of a day that make a session or a category the one with the most
+TIGHTEN_DAYS = 7              # the days a tightening condition reads at most: today and the newest 6 before it that have a run
+NO_SESSION = ("", "-", "none", "no owner")    # what a day's findings by session may hold that names no session (any case)
 FAIL_STOP = 3                 # model calls in a row that fail (no answer) end the calls of the run
 # what the message tool says when a message goes to a front agent without the mark (service/messaging.py `_gate_front`)
 FRONT_REFUSAL = "is a front agent of"
@@ -135,18 +139,30 @@ def run_label(t0: float, hist: list[dict[str, Any]]) -> str:
     return f"{date} {dt.datetime.fromtimestamp(t0, _cfg.tz()).strftime('%H:%M')}" if earlier else date
 
 
-def by_day(hist: list[dict[str, Any]], skip_date: str) -> list[dict[str, Any]]:
-    """`hist` (newest first) cut to one record a day, the newest of each, with `skip_date` left out: the tightening conditions count days (3 days running, 3 of the last 7), and two runs a
-    day would otherwise count one day twice."""
-    out: list[dict[str, Any]] = []
-    seen = {skip_date}
-    for h in hist:
-        d = h.get("date")
-        if d in seen:
-            continue
-        seen.add(d)
-        out.append(h)
-    return out
+def _day_finding(f: Any) -> dict[str, Any] | None:
+    """A recorded finding as the day counts read it; None for one that is no mapping or names its check in no text. A record is a file this script may not have written: `to` and `mover` count only as text, and a
+    finding with no `mover` at all (the audit agent's records) counts for the session its `owner` names."""
+    category = f.get("category") if isinstance(f, dict) else None
+    if not isinstance(category, str) or not category:
+        return None
+    to, mover = f.get("to"), f.get("mover", f.get("owner"))
+    return {**f, "to": to if isinstance(to, str) else "", "mover": mover if isinstance(mover, str) else ""}
+
+
+def by_day(findings: list[dict[str, Any]], hist: list[dict[str, Any]], today: str) -> list[tuple[dict[str, int], dict[str, int]]]:
+    """The days the tightening conditions count, `today` first and then the newest earlier dates `hist` (finished records, newest first) has a run on, TIGHTEN_DAYS days in all and nothing older read: (findings by
+    category, findings by session) of the distinct findings (`finding_key`: the item and the check) of all the day's runs, each counted once, for the session of the newest run that holds it. `findings`: this run's,
+    which count in `today` with the earlier runs of that date."""
+    days: dict[Any, dict[tuple[str, str, str], dict[str, Any]]] = {}
+    for rec in [{"date": today, "findings": findings}, *hist]:
+        date = rec.get("date")
+        if date not in days and len(days) == TIGHTEN_DAYS:
+            break       # newest first: every record left is of an older day
+        day, found = days.setdefault(date, {}), rec.get("findings")
+        for f in map(_day_finding, found if isinstance(found, list) else []):
+            if f:
+                day.setdefault(finding_key(f), f)
+    return [counts(list(day.values()), []) for day in days.values()]
 
 
 # ---------- the environment (everything that reads the world) ----------
@@ -896,24 +912,27 @@ def counts(findings: list[dict[str, Any]], passes: list[dict[str, Any]]) -> tupl
     return by_cat, by_ses
 
 
-def _top(d: dict[str, int], skip: tuple[str, ...] = ()) -> str:
-    d = {k: v for k, v in d.items() if k not in skip and v > 0}
-    return max(sorted(d), key=lambda k: d[k]) if d else ""
+def _top(d: dict[str, int]) -> str:
+    """The name with the most findings in `d`; "" when no name is it: a tie, or a most under TIGHTEN_MIN."""
+    most = max(d.values(), default=0)
+    top = [k for k, v in d.items() if v == most]
+    return top[0] if most >= TIGHTEN_MIN and len(top) == 1 else ""
 
 
-def tightening(open_n: int, findings: list[dict[str, Any]], by_cat: dict[str, int], by_ses: dict[str, int], history: list[dict[str, Any]]) -> list[str]:
-    """The tightening conditions this run trips (the agent's brief): more than 20% of the open items flagged; the session with most findings also on top in 2 of the 6 runs before (3 of the last 7);
-    the category with most findings also on top in each of the 2 runs before (3 days running)."""
+def tightening(open_n: int, findings: list[dict[str, Any]], history: list[dict[str, Any]], date: str) -> list[str]:
+    """The tightening conditions this run trips: more than 20% of the open items flagged; the session with the most findings today also that on 2 of the 6 days before (3 of the last 7);
+    the category with the most findings today also that on each of the 2 days before (3 days running). A day is `by_day`'s, the most is `_top`'s; the owner and "no owner" are never the session."""
     out: list[str] = []
     flagged = {f["id"] for f in findings}
     if open_n and len(flagged) / open_n > TIGHTEN_SHARE:
         out.append(f"{len(flagged)} of {open_n} open items flagged ({len(flagged) / open_n:.0%}, more than {TIGHTEN_SHARE:.0%})")
-    ts = _top({k: v for k, v in by_ses.items() if k != "-"})
-    if ts and sum(1 for h in history[:6] if _top({k: v for k, v in (h.get("by_session") or {}).items() if k != "-"}) == ts) >= 2:
-        out.append(f"{ts} has the most findings on 3 of the last 7 days")
-    tc = _top(by_cat, ("idle-pass",))
-    if tc and len(history) >= 2 and all(_top(h.get("by_category") or {}, ("idle-pass",)) == tc for h in history[:2]):
-        out.append(f"{tc} is the top category 3 days running")
+    days = by_day(findings, history, date)
+    sessions = [_top({w: n for w, n in ses.items() if w.strip().casefold() not in NO_SESSION and not _model.is_owner(w)}) for _cat, ses in days]
+    if sessions[0] and sessions[1:].count(sessions[0]) >= 2:
+        out.append(f"{sessions[0]} has the most findings on 3 of the last 7 days (at least {TIGHTEN_MIN} on each of those days, no tie)")
+    cats = [_top(cat) for cat, _ses in days[:3]]      # `by_day` counts findings, so idle passes are not among them
+    if cats[0] and cats[1:] == [cats[0], cats[0]]:
+        out.append(f"{cats[0]} is the top category 3 days running (at least {TIGHTEN_MIN} findings each day, no tie)")
     return out
 
 
@@ -1734,7 +1753,7 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
             sent.append({"to": to, "lines": len(g["lines"]), "delivered": ok, "said": _clip(said, 120), "kind": "registry"})
 
     by_cat, by_ses = counts(findings, passes)
-    trips = tightening(n_open, findings, by_cat, by_ses, by_day(hist, date))
+    trips = tightening(n_open, findings, hist, date)
     thr = _cfg.audit_threshold()
     tripped = [c for c, n in by_cat.items() if c != "idle-pass" and n >= thr]
     if tripped or trips:
@@ -1780,8 +1799,8 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
 # ---------- the front-step rule (part of the filing pass) ----------
 def _moved_text(f: dict[str, Any], opener: str, kind: str, hrs: float, line: str, now: float) -> str:
     """The one message to the mover of a step the rule moved to it."""
-    return (f"[stackshot] Filing check {_stamp(now)}: {f['id']}: the first open step is now yours ({_clip(line, 110)}). It opened with {opener}, {kind}, and stayed open {hrs:g} hours with the stuck-elsewhere finding "
-            f"unanswered, so stackshot reworded it to open with you; the item's History has the original opener. Do it, hand it on or mark it done.")
+    return (f"[stackshot] Filing check {_stamp(now)}: {f['id']}: the first open step is now yours ({_clip(line, 110)}). It opened with {opener}, {kind}, and stayed open {hrs:g} hours with its stuck-elsewhere finding "
+            f"unanswered, so stackshot reworded it to open with you (History has the original). Do it, hand it on or mark it done.")
 
 
 def _shown(gid: str) -> str:

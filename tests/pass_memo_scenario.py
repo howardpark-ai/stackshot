@@ -88,7 +88,13 @@ except ImportError:                                  # before the change: every 
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._owing_note = lambda debtor: ""
 handoff_svc.CLI_SESSIONS = T / "cli"
-hcold_svc.COLD_RUNNER = lambda msg: {"status": "ok", "text": "no json at all here", "duration_s": 0.1, "usage": {}, "note": "stub"}
+PASS_OVER = threading.Event(); PASS_OVER.set()
+def _cold_stub(msg):
+    """A cold call answers only after the pass that made it is over, as a real one does. One call runs at a time and a further one waits for the next pass, so a stub that answers at once would let the speed of its
+    thread decide how many items a pass moves."""
+    PASS_OVER.wait(60)
+    return {"status": "ok", "text": "no json at all here", "duration_s": 0.1, "usage": {}, "note": "stub"}
+hcold_svc.COLD_RUNNER = _cold_stub
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
@@ -140,7 +146,10 @@ def world():
     stall_svc.stall_since(B)
 def stall_pass(at):
     stall_svc.STALL_LAST[0] = 0.0
-    out = stalltick_svc.stall_tick(at); drain()
+    PASS_OVER.clear()
+    try: out = stalltick_svc.stall_tick(at)
+    finally: PASS_OVER.set()
+    drain()
     return out
 T1 = IDLE0 + 10 * 60.0 + 1.0
 

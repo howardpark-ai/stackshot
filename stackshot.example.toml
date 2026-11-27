@@ -110,7 +110,7 @@ suitemap_warm_cmd = ""                              # the command, as words, tha
                                                     # Stopped after 30 minutes; one at a time; a failure or a missing command is a line in <state>/releases/suitemap-warm-<sha>.log and nothing else.
                                                     # "" = none: the release log says so and goes on. Contract: none (a command that is run).
 deploy_ssh = ""                                     # the ssh host release.sh runs deploy.sh on (and the rollback), when the server runs on another box than release.sh: `ssh -o BatchMode=yes -o ConnectTimeout=15 <host> 'cd ~/stackshot && ...'`;
-                                                    # this box's checkout then follows to the same commit and only its puller restarts; a checkout that cannot follow (local changes) pauses the release queue and reports red, `release.sh queue --resume` goes on once it is clean. While it runs, a release also tells that box so (the busy hold and the Queued for release label read it). "" = deploy here (a one-box install). Set to another box, it also makes `./install.sh units` refuse there (`--force-host` overrides). Contract: none (a command that is run).
+                                                    # this box's checkout then follows to the same commit and only its puller restarts; a checkout that cannot follow (local changes) pauses the release queue and reports red, `release.sh queue --resume` goes on once it is clean. While it runs, a release also tells that box so (the busy hold and the Queued for release label read it). "" = deploy here (a one-box install). Set to another box, it also makes `./install.sh units` refuse there (`--force-host` overrides) and `stackshot publish publish`, `bump` and `flush` refuse there (no override; a running server publishes all the same, whatever this value calls its box). Contract: none (a command that is run).
 
 [subject]
 prefixes = ["[work] ", "[home] "]                   # every subject starts with one of these
@@ -245,7 +245,7 @@ max_calls = 30                                      # model calls in any rolling
 timeout_seconds = 30                                # one call, seconds; the write goes through unjudged when it runs longer
 model = ""                                          # the call's model; "" = the [router] model
 
-[rulebook_scan]                                     # the nightly scan of the instruction files sessions read (stackshot/tools/rulebook_scan.py): it runs from the audit's timer
+[rulebook_scan]                                     # the scan of the instruction files sessions read (stackshot/tools/rulebook_scan.py), run after each of the audit's two daily runs (the audit's timer; the sala checks are skipped, with one line, on a machine with no `sala` command)
 enabled = false                                     # (stackshot/audit/audit.py scan, after the run) and sends each file's keeper one note about a stackshot tool or parameter, a sala verb or flag, or a
                                                     # retired term the file names and no longer exists; a finding already sent and unchanged is not sent again. false (the default): nothing
                                                     # is sent (`stackshot/audit/audit.py scan --dry-run` still prints what it finds). The keys below are read at each run, so a change needs no restart.
@@ -262,10 +262,10 @@ enabled = false                                     # (stackshot/audit/audit.py 
 # glob = "~/rules/**/*.md"
 # keeper = "my-keeper"
 
-[refusal_report]                                    # the weekly count of refused board writes (stackshot/tools/refusal_report.py): the server keeps a line per create, update, complete, confirm and message call in
+[refusal_report]                                    # the weekly count and the daily analysis of refused board calls (stackshot/tools/refusal_report.py): the server keeps a line per call of every tool in
 enabled = false                                     # <paths.state>/calls/, and the audit's unit (stackshot/audit/audit.py refusals, after the run) sends one message that asks nothing for each finished Monday-to-Sunday week:
                                                     # create and update calls refused of all, the share, the week before, the streaks (a writer refused 3 times or more on one call within 15 minutes), the kinds, the sessions refused most, what the server corrected instead and how many of those fixes the writer sent back, and for message calls the refusals by kind, the streaks (one sender refused twice or more on one target within an hour) and the refusals sent again; it also goes to the project's background agent. false (the default):
-                                                    # nothing is sent (`stackshot/audit/audit.py refusals --dry-run` still prints the last week). Read at each run, so a change needs no restart. Every other key is optional.
+                                                    # nothing is sent (`stackshot/audit/audit.py refusals --dry-run` still prints the last week). With enabled = true the same run also sends, once a day, the daily analysis to the same place: the last 24 hours and 7 days of every tool's refusals per tool, rule kind and session, the retries, an estimate of the tokens they cost, and the kinds refused 3 times or more with a hint each, on a day with a refusal. Read at each run, so a change needs no restart. Every other key is optional.
 # to = ""                                           # the page key or session name the report goes to; "" = [audit] summary_to
 # top = 6                                           # how many kinds of refusal the report lists (1 to 20)
 # sender = "stackshot refusal report"
@@ -316,6 +316,10 @@ cross_process = true                                # true: each is also a flock
                                                     # false: a thread lock only, as before (the read-only standby never takes the flock either). Restart-only
                                                     # a lock file that cannot be had falls back to the thread lock and says so on stderr; with the environment variable STACKSHOT_XLOCK_STRICT=1 (what tests/run-suite sets) it raises instead,
                                                     # and so does a lock taken out of its order
+
+[standby_copy]                                      # `stackshot standby-copy`: one consistent copy of the server's data for a standby; see docs/standby-copy.md
+extra_dirs = []                                     # further directories every copy takes, beside those of --extra: ones written outside the store locks, such as the sign-in library's own client store.
+                                                    # Each is copied until a scan before and a scan after its copy find the same sizes and times; one that never settles, or is not there, fails the command
 
 [github]                                            # the board's GitHub mirror: the local store stays the working copy, an issue per item is the
 sync = false                                        # durable thread. true: an item's subject, open or closed, and description go, paced, through a queue on disk
@@ -999,7 +1003,7 @@ port = 8020
 path = "/mcp"
 # box = true                                        # whether this machine is the server box: it then reads the page registry, page times and the board's brief from its own checkouts
                                                     # ([paths] brain, store). false = never (a pane hook always asks the server's client API, whatever clones the machine holds): set it on
-                                                    # a machine that only runs sessions (`./install.sh units` refuses there too; `--force-host` overrides). Unset (the default): a machine that holds the pages checkout is taken for the server box
+                                                    # a machine that only runs sessions (`./install.sh units` refuses there too, `--force-host` overrides; so do `stackshot publish publish`, `bump` and `flush`; a running server publishes all the same). Unset (the default): a machine that holds the pages checkout is taken for the server box
 
 [items_api]                                         # what the items API (`items?key=<session>`, which the fleet tool's web board reads) emits
 owner_mover_kind = "legacy"                         # the `mover.kind` of an item that is the owner's move. "legacy" (the default) = a legacy owner label that stays supported: the owner's

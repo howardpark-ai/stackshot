@@ -258,7 +258,50 @@ check("stop: nothing about pages is logged at Stop", not any(json.loads(l)["kind
 check("debt: a keeper's touched page is owed while its Current state is unedited", [k for k, _ in p.stale_touches(S, strict=True)] == ["projects/alpha"], p.load_state(S))
 out = nnag(S)
 check("debt: the next prompt says it", "[project-page] board item s9 changed at" in out and "`projects/alpha` has no Current-state edit since" in out, out[:300])
-check("debt: …and again at the following prompt while it is owed", "[project-page] board item s9 changed at" in nnag(S))
+hm9 = p._debt_when(p.load_state(S)["touches"]["projects/alpha"])[1]
+check("debt: the first fire carries the item, the time, the missing Current-state edit, how to edit the page and the clear command, in about 450 characters",
+      "board item s9 changed at" in out and "has no Current-state edit since (a timeline line does not count)" in out and "commit and push. If no page change is due:" in out
+      and "pages.py clear projects/alpha" in out and len(out.strip()) <= 470, (len(out.strip()), out[:600]))
+out2 = nnag(S)
+check("debt: the second fire of the same debt is the one line `still owed: <page> (<item>, <HH:MM>)`",
+      out2.strip() == f"[project-page] still owed: projects/alpha (s9, {hm9})", out2)
+check("debt: …and the third is the same line, the debt still owed", nnag(S).strip() == out2.strip() and "projects/alpha" in (p.load_state(S).get("touches") or {}))
+# a different debt (the same page, a later change) prints in full again; so does another page
+st_ = p.load_state(S); st_["touches"]["projects/alpha"] = {"ts": int(time.time()) + 5, "task": "s9"}; p.save_state(S, st_)
+out3 = nnag(S)
+check("debt: a later change to the same page is a different debt and is said in full", "board item s9 changed at" in out3 and "still owed" not in out3, out3[:300])
+st_ = p.load_state(S); st_["touches"]["projects/gamma"] = {"ts": int(time.time()), "task": "s8"}; p.save_state(S, st_)
+out4 = nnag(S)
+check("debt: another page's debt is said in full beside the one already shown, which stays a line",
+      "board item s8 changed at" in out4 and "`projects/gamma`" in out4 and "still owed: projects/alpha (s9," in out4 and out4.count("board item s9 changed at") == 0, out4[:500])
+st_ = p.load_state(S); t_ = st_["touches"]["projects/alpha"]["ts"]; st_["touches"]["projects/alpha"] = {"ts": t_ + 9, "shown": t_, "shown_at": int(time.time()), "task": "s9"}; p.save_state(S, st_)
+out5 = nnag(S)
+check("debt: a mark left from an earlier change does not make a different change a repeat", "board item s9 changed at" in out5 and "still owed: projects/alpha" not in out5, out5[:300])
+st_ = p.load_state(S); st_["touches"].pop("projects/gamma", None); t_ = st_["touches"]["projects/alpha"]["ts"]; st_["touches"]["projects/alpha"] = {"ts": t_, "shown": t_, "shown_at": int(time.time()) - p.REPEAT_SECONDS - 5, "task": "s9"}; p.save_state(S, st_)
+out6 = nnag(S)
+check("debt: a debt last said in full over 2 hours ago is said in full once more, then a line again", "board item s9 changed at" in out6 and "still owed" not in out6 and nnag(S).strip().startswith("[project-page] still owed: projects/alpha"), out6[:200])
+check("debt: the window is 2 hours", p.REPEAT_SECONDS == 7200)
+_n0 = 1_800_000_000
+check("debt: the window's edge: a line at 7199 s, the full text at exactly 7200 s", p._repeat_ok({"shown_at": _n0}, _n0 + 7199) is True and p._repeat_ok({"shown_at": _n0}, _n0 + 7200) is False and p._repeat_ok({"shown_at": _n0}, _n0) is True)
+check("debt: a shown_at in the future (the clock went back) is not a repeat", p._repeat_ok({"shown_at": _n0 + 5}, _n0) is False)
+check("debt: a garbled shown_at (text, list, dict, none, inf, nan) never raises and is said in full",
+      all(p._repeat_ok({"shown_at": bad}, _n0) is False for bad in ("abc", "", [1], {"a": 1}, None, float("inf"), float("-inf"), float("nan"), "inf", "nan")) and p._repeat_ok({}, _n0) is False)
+st_ = p.load_state(S); st_["touches"].pop("projects/gamma", None); t_ = st_["touches"]["projects/alpha"]["ts"]
+st_["touches"]["projects/alpha"] = {"ts": t_, "shown": t_, "shown_at": [1, 2], "task": "s9"}; p.save_state(S, st_)
+out7 = nnag(S)
+check("debt: a garbled shown_at in the state does not crash the nag: the debt is said in full", "board item s9 changed at" in out7 and "Traceback" not in out7, out7[:200])
+# the mark is written only to the entry the debt was said for: a debt whose stamp differs from the stored entry's gets no mark
+import io as _io, contextlib as _cl
+st_ = p.load_state(S); t_ = int(time.time()); st_["touches"]["projects/alpha"] = {"ts": t_, "task": "s9"}; p.save_state(S, st_)
+_saved_stale = p.stale_touches; _saved_in = sys.stdin
+p.stale_touches = lambda sid, strict=False, skipped=None: [("projects/alpha", {"ts": t_ - 5, "task": "s9"})]
+sys.stdin = _io.StringIO(json.dumps({"session_id": S}))
+try:
+    with _cl.redirect_stdout(_io.StringIO()): p.cmd_nag()
+finally: p.stale_touches = _saved_stale; sys.stdin = _saved_in
+check("debt: the mark is not written to a stored entry of another change", "shown" not in p.load_state(S)["touches"]["projects/alpha"], p.load_state(S))
+st_ = p.load_state(S); st_["touches"]["projects/alpha"] = {"ts": t_, "task": "s9"}; p.save_state(S, st_)
+st_ = p.load_state(S); st_["touches"].pop("projects/gamma", None); st_["touches"]["projects/alpha"] = {"ts": int(time.time()), "task": "s9"}; p.save_state(S, st_)
 rc, err = stop(S, transcript(NOTICE, TL))
 check("debt: the Stop hook neither says it nor holds the turn, and the debt stays", rc == 0 and err == "" and "projects/alpha" in (p.load_state(S).get("touches") or {}), (rc, err[:300], p.load_state(S)))
 f = T / "brain/projects/alpha.md"; f.write_text(f.read_text(encoding="utf-8").replace("- **Point 1:**", "- **Point 1 (changed):**"), encoding="utf-8")
@@ -351,6 +394,11 @@ owe([S], {"projects/delta": 1700000000})
 rc, out = clear("projects/delta")
 check("clear: …and goes when nobody else owes", rc == 0 and "projects/delta" not in led() and not touched(S), (rc, out, led()))
 rc, _ = clear(); check("clear: no key → usage, exit 1", rc == 1)
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "clear"], capture_output=True, text=True)
+USAGE = "clear <key> [--force] [--name=<session name>] [--id=<permanent id>]..."
+check("clear: the usage line lists --name= and --id=", USAGE in r.stderr, r.stderr)
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "help"], capture_output=True, text=True)      # a word it does not know prints the text at the top
+check("clear: …and so does the text at the top of pages.py", USAGE in r.stdout, r.stdout[:200])
 
 # ---- 5c. two boxes: the sessions' box (its own state and reminders, [release] deploy_ssh naming the server host) and the server host (this fixture's
 # state, where the owed list is), with a fake `ssh` between them (tests/_twobox.py: nothing connects anywhere)
@@ -551,6 +599,88 @@ try:
 finally:
     p.CLEAR_LOCK_WAIT = was; os.close(held)
     if child and child.poll() is None: child.kill(); child.wait()
+# ---- 5d. the printed command is the one that clears: only control characters are taken out of it, a name cannot end its backticks, and it keeps --force
+stays_line = lambda out: next((x for x in out.split("\n") if x.startswith("The server's entry for ")), "")
+left_out_line = lambda out: next((x for x in out.split("\n") if "is not a plain name, so it was not sent" in x), "")
+def split(command):                                                    # a printed command's words; [] for one that was cut short or is not quoted for a shell
+    try: return shlex.split(command)
+    except ValueError: return []
+inner = lambda command: split(split(command)[-1]) if split(command) else []      # the words of the ssh form's far side
+for what, odd in (("a no-break space", "work" + chr(0xA0) + "osprey"), ("an ideographic space", "work" + chr(0x3000) + "osprey"), ("a zero-width joiner", "work" + chr(0x200D) + "osprey"),
+                  ("backticks", f"work `touch {T}/pwned-tick` osprey ``two``")):
+    names.write_text(json.dumps({S: {"name": odd, "machine": "a"}}), encoding="utf-8")
+    for line_of, mode, status in ((stays_line, "down", 4), (left_out_line, "run", 3)):
+        two([], {K: {odd: E(), B: E()}})
+        rc, out, _ = tb.clear(K, sid=S, mode=mode)
+        command = _twobox.code_span(line_of(out)) if line_of(out) else "false"
+        words = inner(command)
+        which = "the entry-stays line" if status == 4 else "the name-left-out line"
+        check(f"printed command: a name with {what} is in {which}'s command as it is", rc == status and f"--name={odd}" in words, (rc, out, words))
+        rc2, said, _ = tb.run(split(command) if words else ["false"])
+        check(f"printed command: …and run as printed it clears the debt under that name ({what}, {which}), keeps the other's and runs nothing in it",
+              rc2 == 3 and list(led().get(K, {})) == [B] and not (T / "pwned-tick").exists(), (rc2, said, led()))
+odd = "osprey" + chr(27) + "[31m" + chr(7) + " pane" + chr(0x9B)
+names.write_text(json.dumps({S: {"name": odd, "machine": "a"}}), encoding="utf-8")
+controls = lambda line: [c for c in line if ord(c) < 32 or 127 <= ord(c) < 160]
+for line_of, mode, status, which in ((stays_line, "down", 4, "entry-stays"), (left_out_line, "run", 3, "name-left-out")):
+    two([], {K: {odd: E(), B: E()}})
+    rc, out, _ = tb.clear(K, sid=S, mode=mode)
+    line = line_of(out)
+    check(f"printed command: the {which} line carries no control character of the name, in its words or its command", rc == status and "osprey[31m pane" in line and not controls(line), (rc, repr(out)))
+names.write_text(kept_names, encoding="utf-8")
+two([S], {K: {S: E()}})
+rc, out, _ = tb.clear(f"projects/x{chr(27)}[2J", sid=S)
+check("printed command: the entry-stays line carries no control character of the key", rc == 4 and "projects/x[2j stays" in stays_line(out).lower() and not controls(stays_line(out)), (rc, repr(out)))
+two([S], {K: {S: E(), B: E()}})
+rc, out, _ = tb.clear(K, "--force", sid=S, mode="down")
+command = _twobox.given_command(out)
+check("printed command: a --force clear that cannot reach the server prints a command that keeps --force", rc == 4 and inner(command)[-1] == "--force", (rc, out))
+rc2, said, _ = tb.run(split(command) or ["false"])
+check("printed command: …and run as printed it clears every writer's", rc2 == 0 and K not in led() and "for every writer (--force)" in said, (rc2, said, led()))
+odd = f"osprey two; $(touch {T}/pwned-local) `touch {T}/pwned-local` it's"
+names.write_text(json.dumps({S: {"name": odd, "machine": "a"}}), encoding="utf-8")
+two([], {K: {odd: E(), B: E()}})
+rc, out, calls = tb.clear(K, sid=S, config=tb.client_config("nohost-odd.toml", deploy_ssh="", box_false=True))
+command = _twobox.given_command(out)
+check("printed command: the server-box form is quoted for a shell: the name is one word of it", rc == 4 and calls == [] and "on the server box: `" in out and f"--name={odd}" in split(command), (rc, out))
+r = subprocess.run(["sh", "-c", command], capture_output=True, text=True, timeout=90,
+                   env={**tb.env(config=tb.server_config, fleet=tb.root / "no-fleet"), "HOME": str(tb.home)})       # as on the server box: its checkout, its config
+check("printed command: …and run there in a shell it clears the caller's debt, keeps the other's and runs nothing in the name",
+      r.returncode == 3 and list(led().get(K, {})) == [B] and not (T / "pwned-local").exists(), (r.returncode, r.stdout, r.stderr, led()))
+names.write_text(kept_names, encoding="utf-8")
+# --name= and --id= on the server host: a name is looked up for its permanent id only when no id is said, for it may belong to a later session by now
+host_roles = pathlib.Path(p._cfg.state("roles.json")); kept_roles = host_roles.read_text(encoding="utf-8") if host_roles.exists() else None
+OLD, NEW = "44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"
+try:
+    host_roles.write_text(json.dumps({"ids": {"far-name": OLD}}), encoding="utf-8")
+    owe([], {K: {OLD: E(), B: E()}})
+    rc, out = clear(K, "--name=far-name")
+    check("--name= on the server host: with no --id= the name is looked up, and the debt under its permanent id is the caller's", rc == 3 and list(led().get(K, {})) == [B], (rc, out, led()))
+    host_roles.write_text(json.dumps({"ids": {"far-name": NEW}}), encoding="utf-8")
+    owe([], {K: {OLD: E(), NEW: E()}})
+    rc, out = clear(K, "--name=far-name", f"--id={OLD}")
+    check("--name= with --id=: the name is not looked up, so a later session that took it keeps its debt", rc == 3 and list(led().get(K, {})) == [NEW], (rc, out, led()))
+    host_roles.write_text(json.dumps({"ids": {"work-osprey": NEW}}), encoding="utf-8")      # the name this host's own store gives the caller's conversation
+    owe([], {K: {OLD: E(), NEW: E()}})
+    rc, out = clear(K, f"--id={OLD}")
+    check("--id=: nor is the name this host knows the conversation by", rc == 3 and list(led().get(K, {})) == [NEW], (rc, out, led()))
+    for what, more in (("the name sent with it", ["--name", "work-osprey"]), ("the name this host knows the conversation by", [])):
+        owe([], {K: {OLD: E(), NEW: E()}}); said = io.StringIO()
+        with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said): rc = p.main(["pages.py", "clear-forwarded", K, "--session", S, *more, "--id", OLD])
+        check(f"clear-forwarded with --id: {what} is not looked up", rc == 3 and list(led().get(K, {})) == [NEW], (rc, said.getvalue(), led()))
+finally:
+    if kept_roles is None: host_roles.unlink(missing_ok=True)
+    else: host_roles.write_text(kept_roles, encoding="utf-8")
+# a list whose write fails only when the file is closed (here: past a file size limit, as on a full disk) is not put in place
+owe([], {K: {S: E(), **{f"writer-{i:02d}": E() for i in range(40)}}})
+whole = LEDGER.read_text(encoding="utf-8")
+assert 1500 < len(whole) < 8000, len(whole)       # larger than the limit below, smaller than the file's write buffer: only the close writes it
+limited = ("import resource, signal, sys; sys.path.insert(0, sys.argv[1]); from stackshot.projects import pages as p; signal.signal(signal.SIGXFSZ, signal.SIG_IGN); "
+           "resource.setrlimit(resource.RLIMIT_FSIZE, (1000, 1000)); sys.exit(p.main(['pages.py', 'clear', sys.argv[2]]))")
+r = subprocess.run([sys.executable, "-c", limited, STACK, K], capture_output=True, text=True, timeout=90, env={**os.environ, "CLAUDE_CODE_SESSION_ID": S})
+check("one box: a list whose write fails at the close is exit 4, and the list is left whole", r.returncode == 4 and "could not be rewritten (OSError)" in r.stdout
+      and LEDGER.read_text(encoding="utf-8") == whole, (r.returncode, r.stdout, r.stderr[-300:], len(LEDGER.read_text(encoding="utf-8"))))
+pathlib.Path(str(LEDGER) + ".tmp").unlink(missing_ok=True)
 for x in (S, A, B): p.save_state(x, {})
 if kept_ledger is None: LEDGER.unlink(missing_ok=True)
 else: LEDGER.write_text(kept_ledger, encoding="utf-8")
@@ -562,20 +692,18 @@ RETIRED_SCRIPT = "example-page.sh"     # a retired script (invented name): no hi
 v = {"ts": int(time.time()), "task": "s7"}; tm = time.strftime("%H:%M", time.localtime(v["ts"]))
 plain = p.describe("projects/beta", v)
 check("flavor plain: the nag says edit the file, commit and push",
-      f"— update the page (edit {tmp}/brain/projects/beta.md (its Current state, and a dated line under its Timeline), commit and push). Only if" in plain
+      f"Edit {tmp}/brain/projects/beta.md (Current state), commit and push. If no page change is due:" in plain
       and "add_timeline_entry" not in plain and RETIRED_SCRIPT not in plain, plain)
 p._cfg.CFG["pages"]["flavor"] = "gbrain"
 gb = p.describe("projects/beta", v)
 old_tm = p.datetime.datetime.fromtimestamp(v["ts"], p.zone_now().tzinfo).strftime("%H:%M")
-check("flavor gbrain: the nag is today's text, byte for byte", gb == (
-      f"board item s7 changed at {old_tm} {ZONE_ABBR} but the project page `projects/beta` has not been committed since — update the page "
-      f"(a dated line: the gbrain connector's add_timeline_entry; any other edit: get_page with section or grep (the smallest read that shows the text to change; a whole read only for a rewrite or a change spanning the page), then edit_page "
-      f"with expected_revision (the read's revision) and edits [{{old_text, new_text}}]; put_page only for a whole rewrite; "
-      f"never edit or git inside the brain mirror). "
-      f"Only if the board edit needed no page change: `python3 {p.HERE}/stackshot/projects/pages.py clear projects/beta`."), gb)
-check("flavor gbrain: the nag names add_timeline_entry, then edit_page, and put_page only for a whole rewrite; no retired script, no push override",
-      gb.index("add_timeline_entry") < gb.index("edit_page")
-      and "put_page only for a whole rewrite" in gb and "with expected_revision" in gb
+check("flavor gbrain: the first fire is about 450 characters at most", len(gb) <= 450, len(gb))
+check("flavor gbrain: the nag's first-fire text, exactly", gb == (
+      f"board item s7 changed at {old_tm} {ZONE_ABBR}: page `projects/beta` has not been committed since. "
+      f"Edit it with edit_page and expected_revision (get_page first; add_timeline_entry for a dated line; put_page only for a whole rewrite; never edit or git inside the brain mirror). "
+      f"If no page change is due: `python3 {p.HERE}/stackshot/projects/pages.py clear projects/beta`."), gb)
+check("flavor gbrain: the nag names edit_page with expected_revision, and add_timeline_entry for a dated line; no retired script, no push override",
+      "add_timeline_entry" in gb and "edit_page and expected_revision" in gb and "put_page only for a whole rewrite" in gb
       and RETIRED_SCRIPT not in gb and "EXAMPLE_PAGE_PUSH" not in gb and "on the server box only" not in gb, gb)
 p._cfg.CFG["pages"]["flavor"] = "plain"
 check("flavor gbrain: the server's wording is today's text, byte for byte", _pdebts._page_how("gbrain") ==
@@ -602,12 +730,20 @@ try:
     check("owing: a write past the grace goes through (no exception) and its reply gets one line: which page, that the write went through, that the page is still owed and what settles it",
           note_pl == "\nThis write went through. Still owed by you: projects/gamma (since s9, 4 h ago); it stays owed until the page's Current state is edited."
           and note_pl.count("\n") == 1, note_pl)
-    check("owing: …and under the gbrain flavor the same line adds that the server's copy of the page has to have caught up",
-          note_gb == note_pl[:-1] + " and the server's copy of the page has caught up." and note_gb.count("\n") == 1, note_gb)
+    check("owing: …and under the gbrain flavor the same line adds that the server has to have seen the edit (not that its copy has caught up: it reads the remote's too)",
+          note_gb == note_pl[:-1] + " and the server has seen that edit." and note_gb.count("\n") == 1, note_gb)
     check("owing: …the debt is kept as it was (still in the ledger, still in the nag, still in pages owed)",
           B in _pdebts._owed_load().get("projects/gamma", {}) and "PROJECT PAGE owed by you: projects/gamma" in _pdebts._nag(B) and "projects/gamma" in _pdebts._nag(A), (_pdebts._owed_load(), _pdebts._nag(B)))
     check("owing: …the nag tells the writer that writes go through, and no longer that the server refuses the next one",
           "Your board writes go through while it is owed." in _pdebts._nag(B) and "refuses your next board write" not in _pdebts._nag(B), _pdebts._nag(B))
+    said_cmd = f"python3 {_pdebts._HERE}/stackshot/projects/pages.py clear <key>"
+    note = _pdebts._nag(B)
+    check("the reminder names the command that drops a debt of a board-only edit, from this checkout", f"Board-only edit that changed no state: `{said_cmd}` (on another box, the same from the checkout there)." in note, note)
+    check("…and what another box's config needs for it, and what happens with neither", "Such a box needs `[release] deploy_ssh` in its config, naming the server host, so that the clear runs there, or `[server] box = false`, so that it prints the command to run there; "
+          "with neither it counts as the server host and the server's entry stays." in note, note)
+    r = subprocess.run(shlex.split(said_cmd.replace("<key>", "projects/gamma")), capture_output=True, text=True, env={**os.environ, "CLAUDE_CODE_SESSION_ID": B})
+    check("…and that command, run as the writer, drops its debt", r.returncode == 0 and "projects/gamma" not in _pdebts._owed_load(), (r.returncode, r.stdout, r.stderr, _pdebts._owed_load()))
+    _late_debt()
     check("owing: …the line is for the writer: another session and no session get none",
           _pdebts._owing_note(A) == "" and _pdebts._owing_note("") == "", (_pdebts._owing_note(A), _pdebts._owing_note("")))
     _late_debt(ts_ago=60); check("owing: …a debt inside the grace gets none", _pdebts._owing_note(B) == "", _pdebts._owing_note(B))
@@ -650,9 +786,9 @@ check("flavor gbrain: the keeper injection is today's text, byte for byte", p.in
 check("the Stop hook's page question is gone from the module", not hasattr(p, "steward_ask") and not hasattr(p, "verdicts") and not hasattr(p, "mode"))
 p._cfg.CFG["pages"]["flavor"] = "plain"; p.excerpts = saved_ex
 # F5: the time label is the configured zone's abbreviation, and a machine with no pages copy is told where the page is
-check("tz: Asia/Dubai prints its own abbreviation (the offset label, the zone having no letters)", p._cfg.tz_abbr() == ZONE_ABBR and f" {ZONE_ABBR} but " in p.describe("projects/beta", v), p.describe("projects/beta", v)[:60])
+check("tz: Asia/Dubai prints its own abbreviation (the offset label, the zone having no letters)", p._cfg.tz_abbr() == ZONE_ABBR and f" {ZONE_ABBR}: page " in p.describe("projects/beta", v), p.describe("projects/beta", v)[:60])
 p._cfg.CFG["instance"]["timezone"] = "UTC"
-check("tz: UTC prints UTC, never the instance zone's label", p._cfg.tz_abbr() == "UTC" and " UTC but " in p.describe("projects/beta", v) and ZONE_ABBR not in p.describe("projects/beta", v), p.describe("projects/beta", v)[:60])
+check("tz: UTC prints UTC, never the instance zone's label", p._cfg.tz_abbr() == "UTC" and " UTC: page " in p.describe("projects/beta", v) and ZONE_ABBR not in p.describe("projects/beta", v), p.describe("projects/beta", v)[:60])
 p._cfg.CFG["instance"]["timezone"] = "America/New_York"
 check("tz: a zone with daylight time takes the abbreviation of the moment", p._cfg.tz_abbr(p.datetime.datetime(2026, 1, 15, 12)) == "EST"
       and p._cfg.tz_abbr(p.datetime.datetime(2026, 7, 15, 12)) == "EDT", (p._cfg.tz_abbr(p.datetime.datetime(2026, 1, 15, 12)),))
@@ -660,8 +796,7 @@ p._cfg.CFG["instance"]["timezone"] = "Asia/Dubai"
 saved_brain = p.BRAIN; p.BRAIN = f"{tmp}/no-such-pages"
 nc = p.describe("projects/beta", v)
 check("flavor plain, no pages copy here: the nag names the page in a checkout of the pages repository, one parenthesis",
-      "— update the page (edit the page `projects/beta.md` in a checkout of the pages repository, which this machine does not read pages from: its Current state, "
-      "and a dated line under its Timeline; commit and push). Only if" in nc and "no copy" not in nc, nc)
+      "Edit `projects/beta.md` in a checkout of the pages repository (this machine does not read pages from it), commit and push. If no page change is due:" in nc and "no copy" not in nc, nc)
 p.BRAIN = saved_brain
 p._cfg.CFG.setdefault("pages", {})["flavor"] = "gbrain"; check("flavor: config gbrain is read", p._cfg.page_flavor() == "gbrain")
 p._cfg.CFG["pages"]["flavor"] = "nonsense"; check("flavor: an unknown value falls back to plain", p._cfg.page_flavor() == "plain")
@@ -841,12 +976,29 @@ rc, err = bstop(A, transcript("ship it", COMMIT)); check("board: an item given o
 fresh(s5={"confirmed": time.time()}, s6={"state_updated": time.time()})
 rc, err = bstop(A, transcript("ship it", COMMIT)); check("board: every item touched: no question", rc == 0 and err == "", err[:300])
 fresh()
-rc, err = bstop(A, transcript("ship it", COMMIT), mode="note"); check("note: the board question does not hold the turn", rc == 0 and err == "", (rc, err[:200]))
+def early_marked(tp):      # the turn's early question went out: the session's state carries the turn's start as its `early` mark
+    st = p.load_state(A); st["early"] = st["early_asked"] = p.turn_activity(tp)["start"]; p.save_state(A, st); return tp
+tpn = transcript("ship it", COMMIT)
+rc, err = bstop(A, tpn, mode="note"); check("note: the board question does not hold the turn", rc == 0 and err == "", (rc, err[:200]))
 check("note: …and is logged as a note", blog("note") and blog("note")[-1]["items"] == ["s5", "s6"], blog("note")[-1:])
-out = nnag(A); check("note: the next prompt says the board question, about the last turn", out.count("[board] About your last turn: BOARD: this turn did real work (a commit)") == 1 and 's5 "[home] item 5"' in out, out[:300])
+out = nnag(A)
+check("note: no early question was asked that turn: the next prompt says the full question, as before", out.count("[board] About your last turn: BOARD: this turn did real work (a commit)") == 1
+      and "Does anything from it change them" in out and 's5 "[home] item 5"' in out and "unanswered last turn" not in out, out[:300])
 check("note: …once", "[board]" not in nnag(A), "said twice")
+fresh(); rc, err = bstop(A, early_marked(transcript("ship it", COMMIT)), mode="note")
+out = nnag(A); check("note: the early question was asked that turn: the next prompt says it in one line", out.strip() == '[board] Board question unanswered last turn: s5 "[home] item 5", s6 "[home] item 6". Answer it in the reply.', out[:300])
+check("note: …and does not repeat the full question", "BOARD: this turn did real work" not in out and "Does anything from it change them" not in out and len(out) < 200, len(out))
+fresh(); rc, err = bstop(A, early_marked(transcript("ship it", COMMIT, "Pushed.\n\nBoard: no change, ok")), mode="note")
+out = nnag(A); check("note: the one line keeps the rejected-lines text", out.strip().endswith("Answer it in the reply. Not accepted from your reply: «Board: no change, ok» (the reason is under three words)."), out[-300:])
+_many = [{"gid": f"s{n}", "subject": f"item {n}"} for n in range(40, 50)]
+_nine = [{"gid": f"s{n}", "subject": f"item {n}"} for n in range(40, 49)]
+_eight = _nine[:8]
+check("note: nine items are eight and `and 1 more`; eight are all named", p.board_unanswered(_nine).endswith(", and 1 more. Answer it in the reply.") and "more" not in p.board_unanswered(_eight), (p.board_unanswered(_nine), p.board_unanswered(_eight)))
+check("note: the one line names at most 8 items and counts the rest", p.board_unanswered(_many).endswith(", and 2 more. Answer it in the reply.") and "s47" in p.board_unanswered(_many) and "s48" not in p.board_unanswered(_many), p.board_unanswered(_many))
 rc, err = bstop(A, transcript("ship it", COMMIT), mode="note"); rc, err = bstop(A, transcript("ship it again", COMMIT), mode="note")
-out = nnag(A); check("note: two turns before a prompt: both questions, oldest first", out.count("[board] About your last turn") == 2, out[:300])
+out = nnag(A); check("note: two turns before a prompt: both notes, oldest first", out.count("[board] About your last turn: BOARD:") == 2, out[:300])
+rc, err = bstop(A, transcript("ship it", COMMIT), mode="block")
+check("note: block mode still holds the turn with the full question", rc == 2 and err.startswith("BOARD: this turn did real work (a commit)") and "Does anything from it change them" in err, err[:200])
 fresh()
 rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\n\nBoard: no change, the commit is unrelated to them"))
 check("board: `Board: no change, <three words>` covers every item and is logged", rc == 0 and blog("verdict")[-1]["items"] == ["s5", "s6"]
@@ -1028,14 +1180,19 @@ fresh(); p.save_state(A, {}); p.save_state(S, {})
 tpa = transcript("ship it", [(ST + "update", {"item_id": "s5", "next": "x"})])
 rc, q = touch(A, tpa, {"item_id": "s5", "next": "go on"})
 check("early: the first board write of a turn gets the board question as context, in the reply's own words",
-      rc == 0 and q.startswith("[stackshot] The end-of-turn board question, asked now so it costs no second reply (once per turn): Your other open items") and 's6 "[home] item 6"' in q
+      rc == 0 and q.startswith("[stackshot] Board question (once per turn). Items untouched this turn: ") and 's6 "[home] item 6"' in q
       and "Page" not in q and "page" not in q
       and "`Board: no change, <reason>`" in q and "s7 " not in q and "s8 " not in q, q)
 check("early (quiet retired, Thu Oct 15th 2026): the question no longer advertises a [quiet] reply", "quiet" not in q.lower(), q)
-check("early: the examples name items as shown, `Board board#5: …`", "`Board board#N: no change, <reason>`" in q and "Board s5" not in q, q)
+check("early: the examples name items as shown, `board#N`, never a store id", "`- board#N: no change, <reason>`" in q and "Board s5" not in q, q)
 check("early (bullets): the question asks for a `Board:` line and one bullet per item for several items",
-      "a `Board:` line followed by one bullet per item, each on its own line: `- board#N: no change, <reason>` (or `- board#M: updated, <what>`)" in q
-      and "In another language the instance has configured the same lines read with its own words" in q, q)
+      "`Board: no change, <reason>` (3+ words) for all, or a `Board:` line plus one bullet per item on its own line (`- board#N: no change, <reason>` / `- board#M: updated, <what>`)" in q
+      and "If this turn changes one, update it (confirm only if still true)" in q and "Only items you move or are named in the needs of." in q, q)
+check("early: bullets go under a `Board:` line, each on its own line; confirm only when still true; the still-mover note is kept",
+      "a `Board:` line plus one bullet per item on its own line" in q and "confirm only if still true" in q
+      and "The role beside an item is the server's reading now" in q, q)
+check("early: the fixed text is under 400 characters and keeps the three-word reason and the update-or-confirm instruction",
+      300 <= len(q.split(": s5")[0]) + len(q[q.index(". If this turn changes"):q.index("needs of.") + 9]) <= 400 and "(3+ words)" in q and "update it (confirm only if still true)" in q, q)
 rc, q2 = touch(A, tpa, {"item_id": "s6", "next": "and on"}); check("early: once per turn: the next write in the same turn gets nothing", rc == 0 and q2 == "", q2)
 time.sleep(1.1); rc, q3 = touch(A, transcript("next prompt", []), {"item_id": "s5", "next": "again"})
 check("early: a later turn is asked again", q3.startswith("[stackshot]"), q3)
@@ -1074,11 +1231,75 @@ rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "priority": "p1"}); c
 rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "next": "x"}, resp="Refused: something"); check("early: a refused write asks nothing", q == "", q)
 rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "next": "x"}, bm="off"); check("early: the board check off: nothing asked", q == "", q)
 rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "next": "x"}, bm="note"); check("early: note mode asks the same, early", 's6 "[home] item 6"' in q, q)
+# a call made inside a subagent carries agent_id in its hook input: it asks nothing and keeps no early mark
+def atouch(sid, tp, tool, inp, resp):
+    pl = {"session_id": sid, "transcript_path": tp, "tool_name": tool, "tool_input": inp, "tool_response": resp, "agent_id": "ag1", "agent_type": "general-purpose"}
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "touch"], input=json.dumps(pl), capture_output=True, text=True,
+                       env={**os.environ, "BOARD_CHECK_MODE": "block"})
+    return r.returncode, r.stdout
+p.save_state(A, {}); time.sleep(1.05); tps = transcript("sub work", [])
+rc, out = atouch(A, tps, ST + "update", {"item_id": "s5", "next": "z"}, "updated [s5](https://x/items/s5).\nproject: projects/alpha")
+check("early: a board write inside a subagent asks nothing", rc == 0 and out.strip() == "", out)
+check("early: …and does not count as the turn's question (no early mark kept)", not p.load_state(A).get("early"), p.load_state(A))
+p.save_state(S, {}); items((10, S, {})); time.sleep(1.05)
+rc, out = atouch(S, transcript("keeper sub", []), ST + "update", {"item_id": "s10", "next": "z"}, "updated [s10](https://x/items/s10).\nproject: projects/alpha")
+check("early: a subagent's board write still records the page debt, and asks nothing", out.strip() == "" and (p.load_state(S).get("touches") or {}).get("projects/alpha", {}).get("task") == "s10", (out, p.load_state(S)))
+p.save_state(A, {}); fresh()
+rc, out = atouch(A, tps, "SendMessage", {}, "ok")
+check("early: any other write inside a subagent asks nothing and keeps no early mark", rc == 0 and out.strip() == "" and not p.load_state(A).get("early"), (out, p.load_state(A)))
+p.save_state(A, {}); time.sleep(1.05); tpt = transcript("agent session", [])
+pl_ = {"session_id": A, "transcript_path": tpt, "tool_name": "SendMessage", "tool_input": {}, "tool_response": "ok", "agent_type": "general-purpose"}
+r_ = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "touch"], input=json.dumps(pl_), capture_output=True, text=True, env={**os.environ, "BOARD_CHECK_MODE": "block"})
+check("early: a payload with agent_type and no agent_id (a main session started with --agent) is still asked", r_.returncode == 0 and "[stackshot] Board question" in r_.stdout, r_.stdout[:200])
+p.save_state(A, {}); time.sleep(1.05); tps = transcript("sub work 2", [])
+rc, q = touch(A, tps, {"item_id": "s5", "next": "z"})
+check("early: the same turn's main-session write after the subagent's is still asked", q.startswith("[stackshot] Board question"), q)
+# the Stop note is one line only when the early question really went out that turn: the `early` mark alone (set when nothing was asked) is not that
+_url0 = os.environ["STACKSHOT_URL"]
+def note_after(setup, early_url=None):
+    fresh(**setup); p.save_state(A, {}); time.sleep(1.05); tpe = transcript("ship it", COMMIT)
+    if early_url: os.environ["STACKSHOT_URL"] = early_url
+    try: q_ = otouch(A, tpe, "Bash", {"command": "git -C /x commit -qm y"})
+    finally: os.environ["STACKSHOT_URL"] = _url0
+    return q_, tpe
+def stop_note(tpe):
+    rc_, err_ = bstop(A, tpe, mode="note"); return nnag(A)
+FULL_NOTE = "[board] About your last turn: BOARD: this turn did real work"
+ONE_LINE = "[board] Board question unanswered last turn: "
+q_, tpe = note_after({}, early_url="http://127.0.0.1:9")
+check("early-asked: the server did not answer at the early call: nothing asked, an `early` mark but no `early_asked`", q_ == "" and p.load_state(A).get("early") and not p.load_state(A).get("early_asked"), (q_, p.load_state(A)))
+o_ = stop_note(tpe); check("early-asked: …so the next prompt says the full question, not the one line", FULL_NOTE in o_ and ONE_LINE not in o_, o_[:200])
+items(); p.save_state(A, {}); time.sleep(1.05); tpe = transcript("ship it", COMMIT)
+q_ = otouch(A, tpe, "Bash", {"command": "git -C /x commit -qm y"}); fresh()
+check("early-asked: the server gave an empty item list at the early call: nothing asked, no `early_asked`", q_ == "" and p.load_state(A).get("early") and not p.load_state(A).get("early_asked"), (q_, p.load_state(A)))
+o_ = stop_note(tpe); check("early-asked: …so the next prompt says the full question", FULL_NOTE in o_ and ONE_LINE not in o_, o_[:200])
+fresh(s5={"confirmed": time.time() + 600}, s6={"state_updated": time.time() + 600}); p.save_state(A, {}); time.sleep(1.05); tpe = transcript("ship it", COMMIT)
+q_ = otouch(A, tpe, "Bash", {"command": "git -C /x commit -qm y"}); fresh()
+check("early-asked: nothing due at the early call: nothing asked, no `early_asked`", q_ == "" and p.load_state(A).get("early") and not p.load_state(A).get("early_asked"), (q_, p.load_state(A)))
+o_ = stop_note(tpe); check("early-asked: …so the next prompt says the full question", FULL_NOTE in o_ and ONE_LINE not in o_, o_[:200])
+fresh(); p.save_state(A, {}); time.sleep(1.05); tpe = transcript("ship it", COMMIT)
+q_ = otouch(A, tpe, "Bash", {"command": "git -C /x commit -qm y"})
+check("early-asked: asked: the question went out and `early_asked` is kept with the turn's start", q_.startswith("[stackshot] Board question") and p.load_state(A).get("early_asked") == p.load_state(A).get("early"), (q_[:60], p.load_state(A)))
+o_ = stop_note(tpe); check("early-asked: …and then the next prompt says it in one line", o_.strip().startswith(ONE_LINE) and "BOARD: this turn" not in o_, o_[:200])
+# a parallel hook saves state (a board write's page debt) while the early question waits on the server: the debt must survive, and `early_asked` is still set
+fresh(); p.save_state(A, {}); time.sleep(1.05); tpr = transcript("ship it", COMMIT)
+_real_owned = lambda sid: [{"gid": "s5", "subject": "[home] item 5", "state_updated": 1, "updated": 1}]; _orig_owned = p.owned_items
+def _racing_owned(sid):
+    r_ = _real_owned(sid); st_r = p.load_state(sid); st_r.setdefault("touches", {})["projects/racer"] = {"ts": int(time.time()), "task": "s5", "tool": "update"}; p.save_state(sid, st_r); return r_
+p.owned_items = _racing_owned; _bm0 = os.environ.get("BOARD_CHECK_MODE"); os.environ["BOARD_CHECK_MODE"] = "block"
+try: q_ = p.early_question({"session_id": A, "transcript_path": tpr, "tool_name": "Bash", "tool_input": {"command": "git -C /x commit -qm y"}, "tool_response": "ok"})
+finally:
+    p.owned_items = _orig_owned
+    if _bm0 is None: os.environ.pop("BOARD_CHECK_MODE", None)
+    else: os.environ["BOARD_CHECK_MODE"] = _bm0
+st_ = p.load_state(A)
+check("early-asked: a page debt saved by a parallel hook during the server call survives, and `early_asked` is set", q_.startswith("[stackshot] Board question") and "projects/racer" in (st_.get("touches") or {}) and st_.get("early_asked") == st_.get("early") and st_.get("early_asked"), (q_[:50], st_))
+p.save_state(A, {}); fresh()
 # a page keeper (S keeps alpha and gamma): the early text carries the board question and nothing about its pages, and the board
 # write's page debt is still recorded
 p.save_state(S, {}); items((10, S, {}))
 rc, q = touch(S, transcript("keeper ships", []), {"item_id": "s10", "next": "x"}, resp="updated [s10](https://x/items/s10).\nproject: projects/alpha")
-check("early: a keeper gets the board question only: no Page line, no pages it keeps, no page owed", q.startswith("[stackshot] The end-of-turn board question")
+check("early: a keeper gets the board question only: no Page line, no pages it keeps, no page owed", q.startswith("[stackshot] Board question")
       and 's10 "[home] item 10"' in q and "Page" not in q and "Pages you keep" not in q and "owe `projects/alpha`" not in q, q)
 check("early: the touch still records the page debt and the item id from a linked reply", (p.load_state(S).get("touches") or {}).get("projects/alpha", {}).get("task") == "s10", p.load_state(S))
 rc, q = touch(S, transcript("keeper ships again", []), {"item_id": "s10", "next": "y"}, resp="updated [s10](https://x/items/s10).\nproject: projects/alpha", bm="off")

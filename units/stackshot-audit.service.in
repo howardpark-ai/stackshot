@@ -27,7 +27,7 @@ ExecStart=@UV@ run --project @CHECKOUT@ --locked stackshot audit cue scheduled
 # a failed scan from failing the unit, `timeout 300` keeps a slow one from holding the unit past five minutes, and [rulebook_scan] enabled = false (the default) makes it a no-op. A note already sent
 # and still true is not sent again, so the unit running twice a day does not repeat one
 ExecStartPost=-/usr/bin/timeout 300 @UV@ run --project @CHECKOUT@ --locked python -m stackshot.tools.rulebook_scan run
-# the weekly count of refused board writes (no model; a message that asks nothing, once per finished Monday-to-Sunday week, so the unit's two runs a day send it once); [refusal_report] enabled = false (the default) makes it a no-op.
+# the weekly count of refused board writes, then the daily analysis of refusals and retries of every tool's calls (no model; each a message that asks nothing, the count once per finished Monday-to-Sunday week and the analysis once per day, on a day with a refusal, so the unit's two runs a day send each once); [refusal_report] enabled = false (the default) makes it a no-op.
 # Run through `stackshot audit` (the locked project environment), like the cue above
 ExecStartPost=-/usr/bin/timeout 120 @UV@ run --project @CHECKOUT@ --locked stackshot audit refusals
 # the daily count of a hook's catches (no model; a message that asks nothing, once per finished day, so the unit's two runs a day send it once); [catch_report] enabled = false (the default) makes it a no-op. Run through `stackshot audit`, like the line above

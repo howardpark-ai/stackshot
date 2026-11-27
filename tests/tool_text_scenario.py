@@ -256,15 +256,15 @@ def _other(a):
     check("the workflow runs it on pull_request events only, on GitHub's hosted runners (ubuntu-latest), with the body in an environment variable and never in the shell text",
           "tools/tool_text.py touched" in wf and "github.event_name == 'pull_request'" in wf and len(runs_on) >= 2 and all(r.split("#")[0].strip() == "runs-on: ubuntu-latest" for r in runs_on)
           and len(body_refs) >= 1 and all(r.strip().startswith("PR_BODY:") for r in body_refs), (runs_on, body_refs))
-    # Every job of the two workflows runs on ubuntu-latest.
+    # Every job of the three workflows runs on ubuntu-latest.
     import yaml
     sw = {}
-    for f in ("tests.yml", "clean-text.yml"):
+    for f in ("tests.yml", "clean-text.yml", "suitemap-refresh.yml"):
         text = (pathlib.Path(STACK) / ".github/workflows" / f).read_text(encoding="utf-8"); y = yaml.safe_load(text)
         sw[f] = [(n, j["runs-on"]) for n, j in y["jobs"].items()]
-    check("every job of tests.yml and clean-text.yml runs on ubuntu-latest",
+    check("every job of tests.yml, clean-text.yml and suitemap-refresh.yml runs on ubuntu-latest",
           all(r == "ubuntu-latest" for rs in sw.values() for n, r in rs)
-          and sum(len(rs) for rs in sw.values()) == 6, sw)   # tests.yml: proof (main's stamp), shards (the full run's shard plan), measure (the full run, a matrix), suites, tool-text; one in clean-text.yml
+          and sum(len(rs) for rs in sw.values()) == 10, sw)   # tests.yml: proof (main's read of the queue's run), shards (the full run's shard plan), measure (the full run, a matrix), suites, tool-text; one in clean-text.yml; suitemap-refresh.yml: shards, measure, refresh, report
 
     # ================================================================= 5. the generated what-changed line
     S = lambda tools, **kw: {"format": 1, "instructions": kw.get("ins", "i"), "resources": kw.get("res", {}), "tools": tools}

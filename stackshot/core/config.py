@@ -40,6 +40,7 @@ import sys
 import threading
 import time
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -653,6 +654,31 @@ def audit_summary_to() -> str:
     """[audit] summary_to: the page key (or session name) the summary of each audit run is sent to (audit_run). Default "projects/example", the stand-in; a value that is not
     a page key or session name reads as the default (notes() says so)."""
     return _report_slug("audit", "summary_to")
+
+
+def publish_host_refusal(argv: list[str], address: Callable[[], str] | None = None, cfg: dict[str, Any] | None = None) -> str:
+    """The refusal line of the publisher on a box that is not the server host, or "" when it may publish here: on the server host, on an install whose config names no server host (a one-box or a fresh
+    install), and when the check itself cannot run. The publisher renders the board from this box's own copy of the store and its own state, commits it and pushes it, so a copy on another box would go
+    out over the live board. The decision is `server_host_refusal`'s (an unresolved host word refuses: it is never read as this box). `argv`: the publisher's words, said back as the command to run on
+    the server (`record_host_where`); `address`: asked only on a refusal that has no host name to give, for the address the server answers at ("" = none known)."""
+    try:
+        why, h = _server_host_decision(cfg)
+    except Exception:  # noqa: BLE001
+        return ""
+    if not why:
+        return ""
+    command = "~/stackshot/bin/stackshot publish"
+    where = record_host_where(command, argv, cfg)
+    how = f"run it there: `{where}`" if where.startswith("ssh ") else f"run it on the server host: `{command} {shlex.join(argv)}`"
+    if why == "other":
+        says = f"[release] deploy_ssh says the server runs on {h} (if that is another name for this box, set deploy_ssh to this box's hostname)"
+    elif why == "unresolved":
+        says = f"[release] deploy_ssh is the host word {h} and its [hosts] lookup did not resolve, so it names no box this one can be (fix the lookup, or name the host)"
+    else:
+        says = "[server] box = false says the server runs on another box"
+    at = address() if address and why != "other" else ""
+    return (f"publish: refused on {socket.gethostname()}, which is not the server host: {says}{f'; the server answers at {at}' if at else ''}. "
+            f"Nothing was fetched, written, committed or pushed; {how}")
 
 
 def release_report_to() -> str:

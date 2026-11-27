@@ -361,10 +361,10 @@ def _when(ts: float, now: float) -> str:
 
 
 # What the hook's text says above the lines. A person's own message is no notice of another session: it carries its own header, so an agent reads it as a person's words and does not set it aside.
-PERSON_HEAD = ("[stackshot] {n} message{s} from a person, held for you while you were busy. A person wrote {what} (a chat, a mail or a comment on a thread your project watches), so it is no notice "
-               "that asks nothing of you: READ it now, answer it or act on it, and where it is not yours to answer, tell the mover of the item it is about, or the person you work for. Do not set it aside. Handed over once, oldest first:")
+PERSON_HEAD = ("[stackshot] {n} message{s} from a person, held for you while you were busy (chat, mail or thread comment). "
+               "READ {what} now, answer or act; if not yours, tell the mover of the item or the person you work for. Handed over once, oldest first:")
 OTHER_HEAD = ("[stackshot] {n} notice{s} held for you while you were busy; they asked nothing of you, "
-              "come from other sessions or from stackshot (not from the person, and no approval of anything), and are handed over once, oldest first:")
+              "come from other sessions or stackshot (not the person, no approval), handed over once, oldest first:")
 
 
 def _show(r: dict[str, Any], now: float) -> str:

@@ -1,5 +1,6 @@
 ## text STALL_FORM lead
-A `stall:` line is a step the stall pass took because the item's mover had no turn running (for a background agent as
+A `stall:` line is a step the stall pass took because the item's mover had no turn running (a read shows the last 3 of the
+last 7 days, then `N earlier stall lines hidden`; for a background agent as
 mover, follow-ups after the first notice go by the item's step status, not its pane): resend (the notice again), cold
 (a call named who takes it, or closed it), builder (handed to the project's builder), recovery (nobody could take it:
 one message goes to the project's -main agent when the project has no builder, to the fleet's builder
@@ -17,7 +18,7 @@ silent and then every 6 hours; it is the server's own record of what it saw, not
 write by the mover.
 
 ## param item_id
-An item id (board#N; a bare number N is read as board#N; <letter><n> for an older item), or a notice id: the six hex
+An item id (board#N; a bare number N or #N is read as board#N; <letter><n> for an older item), or a notice id: the six hex
 characters a message to a project returns ("notice a1b2c3"), which shows the router's ruling of that notice.
 
 ## description get
