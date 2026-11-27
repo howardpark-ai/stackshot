@@ -9,7 +9,7 @@ the tool description); or a machine of the fleet as machine:<name>, add=["machin
 to online) tell the mover of each item in scope. Omit to list the anchors.
 
 ## param items
-Open items of this project the added URLs are about, items=["board#N"]; omit for a project-wide anchor. Every URL in
+Open items of this project the added URLs are about, items=["board#N"] (a bare number N is read as board#N); omit for a project-wide anchor. Every URL in
 add is scoped to every id in items (several URLs with several ids give each URL all the items).
 
 ## param remove

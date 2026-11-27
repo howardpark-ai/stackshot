@@ -283,6 +283,7 @@ def _start_background() -> list[str]:
 
 
 if __name__ == "__main__":
+    _pubmod.serving()                   # this process is the server: its publishes ask nothing about the host (web/publish.py)
     _start_background()
     import anyio
     anyio.run(_serve)                   # = mcp.run(transport="http", …), plus the SIGHUP handler on its loop

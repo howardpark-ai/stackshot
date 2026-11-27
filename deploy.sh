@@ -241,8 +241,10 @@ while [ $SECONDS -lt $deadline ]; do
     if curl -sf -m 3 "http://127.0.0.1:${port}/healthz" >/dev/null; then
         echo "healthz ok at $(git rev-parse --short HEAD)"
         if [ $server = 1 ]; then      # the live board was rendered by the old code until now: one publish, so a release never lags its own deploy
+            # This is a command, so on a server that [release] deploy_ssh names by an address or an ssh alias it is refused (it reads as another box) and the warning says so; the running server asks nothing
+            # about the host, so its timer still publishes.
             if out="$("$UV" run --project "$HERE" --locked --extra server stackshot publish publish 2>&1)"; then echo "  republished: $(echo "$out" | tail -1)"
-            else echo "  WARNING: the republish failed ($(echo "$out" | tail -1)); the deploy itself is done and the timer publishes within 10 min"; fi
+            else echo "  WARNING: the republish failed ($(echo "$out" | tail -1)); the deploy itself is done and the server publishes on its own at its next timer mark ([publish] every_minutes, 10 min by default)"; fi
         fi
         if [ -n "$beat_since" ]; then minute_check "$beat_since"; fi      # only when this deploy restarted the minute unit (so never at "inline": it is not installed there)
         exit 0

@@ -100,6 +100,20 @@ def _next_names_lines(item: dict[str, Any]) -> list[str]:
     return ["named in next:", *lines] if lines else []
 
 
+STALL_DAYS, STALL_MAX = 7, 3
+
+
+def stall_lines(m: dict[str, Any], now: float) -> list[str]:
+    """The `stall:` lines of an item read: the entries of the last STALL_DAYS days, at most the last STALL_MAX, oldest first, and one line counting the older ones left out. Only the text a session reads is cut; the stored log and the item page are not."""
+    log = _stall.log_of(m)
+    recent = [x for x in log if float(x.get("at") or 0) >= now - STALL_DAYS * 86400][-STALL_MAX:]
+    out = [f"stall: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), _wttext.ZONE))} {x.get('text') or ''}" for x in recent]
+    if len(log) > len(recent):
+        hidden = len(log) - len(recent)
+        out.insert(0, f"{hidden} earlier stall line{'' if hidden == 1 else 's'} hidden")
+    return out
+
+
 def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     m = item.get("metadata") or {}
     out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · parked' if _item_read._is_parked(item) else ''}] {item.get('subject')}"]
@@ -188,8 +202,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     from stackshot.audit import hourly_log as _hlog
     for x in _hlog.log_of(m)[-1:]:           # the newest hourly audit line (audit/hourly.py), with its own prefix: it is no step of the stall pass
         out.append(f"audit: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), _wttext.ZONE))} {x.get('text') or ''}")
-    for x in _stall.log_of(m)[-3:]:          # what the stall pass did (its mover's pane had no turn running), the last three, oldest first
-        out.append(f"stall: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), _wttext.ZONE))} {x.get('text') or ''}")
+    out.extend(stall_lines(m, time.time()))  # what the stall pass did (its mover's pane had no turn running): the last 7 days, at most three, oldest first
     if _rmod.waits_recycle(item):            # waits for a pane recycle, since when
         at = m.get("recycle_at")
         out.append("recycle: waits for a pane recycle" + (f" (since {_rmod.when_words(dt.datetime.fromtimestamp(float(at), _wttext.ZONE))})" if isinstance(at, (int, float)) else ""))

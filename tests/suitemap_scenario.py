@@ -1407,9 +1407,9 @@ STEP = "exec uv run --locked --only-group tests python tests/suitemap.py"
 wf = open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8").read().split("\n")
 at = [i for i, l in enumerate(wf) if re.search(r"\bsuitemap\.py (run|measure) ", l)]
 last = [next((len(l) - len(l.lstrip()) < len(wf[i]) - len(wf[i].lstrip()) for l in wf[i + 1:] if l.strip()), True) for i in at]
-# four steps run a suite: a small PR's selection (run), a manual run of named suites (run), main's measured run (measure) and a large PR selection's shard (run, in the measure job)
+# three steps run a suite: a small PR's selection (run), a manual run of named suites (run) and a shard's list (run --report, in the measure job: every event that shards runs plainly); the map's own measuring is suitemap-refresh.yml's
 check("tests.yml: every suite step ends with `exec uv run … suitemap.py run|measure`: without exec, a cancel's signal stops at the step's shell",
-      len(at) == 4 and all(re.match(r"\s*(run:\s*)?" + re.escape(STEP) + r" (run|measure) ", wf[i]) for i in at) and all(last), [wf[i] for i in at])
+      len(at) == 3 and all(re.match(r"\s*(run:\s*)?" + re.escape(STEP) + r" (run|measure) ", wf[i]) for i in at) and all(last), [wf[i] for i in at])
 
 # ---- main's measured run in shards (Mon Nov 2nd 2026): every suite of this checkout in exactly one shard, with and without a map; the workflow's matrix agrees
 import yaml
@@ -1454,7 +1454,7 @@ for label, table in (("as recorded, release and release_queue measured at three 
 y = yaml.safe_load(open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8"))
 pj, mj, uj = y["jobs"]["shards"], y["jobs"]["measure"], y["jobs"]["suites"]
 plan_step = next(st for st in pj["steps"] if st.get("id") == "plan")
-measure_step = next(st for st in mj["steps"] if st.get("name") == "run this shard's suites, measured")
+measure_step = next(st for st in mj["steps"] if st.get("name") == "run this shard's suites")
 suites_steps = [st.get("name") for st in uj["steps"]]
 prj = y["jobs"]["proof"]
 check(f"tests.yml: the shards need the proof job and the measure job the proof and the plan, as a matrix of 0..{sm.SHARDS - 1} with fail-fast off; both carry `!cancelled()` (the proof job is skipped on every event but main's push, and a skipped need skips what needs it)",
@@ -1466,48 +1466,53 @@ check(f"tests.yml: the plan is made once, by the shards job: `suitemap.py plan -
       and {k: v for k, v in pj["outputs"].items() if k.startswith("shard")} == {f"shard{i}": "${{ steps.plan.outputs.shard%d }}" % i for i in range(sm.SHARDS)}, (plan_step["run"], pj.get("outputs")))
 # a pull request's selection (a large one runs in these same shards): made once, in the shards job, and handed on as two more outputs; the shards' lists are of that selection alone
 select_step = next(st for st in pj["steps"] if st.get("id") == "select")
-pr_shard_step = next(st for st in mj["steps"] if st.get("name") == "run this shard's suites")
 check("tests.yml: the shards job makes a pull request's selection once (the `select` step, for a pull request only, `suitemap.py select --map .suitemap/map.json --to HEAD`, a failure of it is every suite) and hands it on as `selected`, with `large` from the plan",
       [k for k in pj["outputs"] if not k.startswith("shard")] == ["large", "selected"] and "steps.plan.outputs.large" in pj["outputs"]["large"] and "steps.select.outputs.selected" in pj["outputs"]["selected"]
       and select_step["if"].strip() == "github.event_name == 'pull_request'" and "suitemap.py select --map .suitemap/map.json --to HEAD" in select_step["run"] and "sel=all" in select_step["run"]
       and plan_step["env"]["SELECTED"] == "${{ steps.select.outputs.selected }}" and "--only $SELECTED" in plan_step["run"] and "pull_request" in plan_step["run"], (select_step, plan_step))
-check("tests.yml: a pull request's shards run the plan's list plainly (`suitemap.py run`: no measure, no --prev, no map, no strace, no cache read), on a pull request only; main's and the entry's measured run is for every other event",
-      pr_shard_step["if"].strip() == "github.event_name == 'pull_request'" and measure_step["if"].strip() == "github.event_name != 'pull_request'"
-      and pr_shard_step["env"]["SELECTED"] == measure_step["env"]["SELECTED"] and re.search(r"exec uv run --locked --only-group tests python tests/suitemap\.py run -T \"\$SUITE_T\" \$SELECTED", pr_shard_step["run"])
-      and "measure" not in pr_shard_step["run"].replace("measured", "") and mj["env"]["SUITE_T"] == 900
-      and all(st.get("if", "").strip().startswith("github.event_name != 'pull_request'") for st in mj["steps"] if st.get("name") in ("strace, for the measured run", "the suite map")), (pr_shard_step, mj["env"]))
-check("tests.yml: every shard runs the list the plan job gave it (its own output, by the matrix index) and plans nothing: no `suitemap.py shard` or `plan` in the measure job, no map read to choose suites",
-      measure_step["env"]["SELECTED"] == "${{ needs.shards.outputs[format('shard{0}', matrix.shard)] }}" and "measure" in measure_step["run"] and "$SELECTED" in measure_step["run"]
-      and not any(re.search(r"suitemap\.py (shard|plan)\b", st.get("run", "")) for st in mj["steps"])
+check("tests.yml: every shard runs the list the plan job gave it (its own output, by the matrix index) and plans nothing, PLAINLY on every event: `suitemap.py run -T \"$SUITE_T\" --report .suitemap/run-<shard>.json`: no measure, no --prev, no strace, no map or cache read in the shard",
+      measure_step["env"]["SELECTED"] == "${{ needs.shards.outputs[format('shard{0}', matrix.shard)] }}" and "if" not in measure_step and "$SELECTED" in measure_step["run"]
+      and re.search(r"exec uv run --locked --only-group tests python tests/suitemap\.py run -T \"\$SUITE_T\" --report \"\.suitemap/run-\$SHARD\.json\" \$SELECTED", measure_step["run"])
+      and "measure" not in measure_step["run"] and mj["env"]["SUITE_T"] == 900 and "MEASURE_T" not in mj["env"]
+      and not any(re.search(r"suitemap\.py (shard|plan|measure)\b|--prev|strace|actions/cache", st.get("run", "") + " " + st.get("uses", "")) or st.get("name") == "the suite map" for st in mj["steps"])
       and not any(re.search(r"suitemap\.py (shard|plan)\b", st.get("run", "")) for st in uj["steps"]), (measure_step, [st.get("name") for st in mj["steps"]]))
-check("tests.yml: the suites job waits for the proof, the plan and the shards and keeps the steps release.sh reads, after the merge of the shards' maps and the stamped map; it is never skipped (`!cancelled()`, and no job name)",
+report_step = next(st for st in mj["steps"] if st.get("name") == "hand the shard's report on")
+check("tests.yml: a shard hands its report on as the artifact suiterun-shard-<n> (hidden folder, kept a day, replaced on a re-run), whatever the suites did, on every event but a pull request (whose judge reads job results alone)",
+      report_step["uses"].startswith("actions/upload-artifact@") and report_step["with"]["name"] == "suiterun-shard-${{ matrix.shard }}" and report_step["with"]["path"] == ".suitemap/run-${{ matrix.shard }}.json"
+      and report_step["with"]["include-hidden-files"] is True and report_step["with"]["overwrite"] is True and report_step["with"]["retention-days"] == 1
+      and report_step["if"].startswith("always()") and "github.event_name != 'pull_request'" in report_step["if"], report_step)
+check("tests.yml: the suites job waits for the proof, the plan and the shards and keeps the step release.sh reads, after the shards' reports and the check that every suite ran; it is never skipped (`!cancelled()`, and no job name)",
       sorted(uj["needs"]) == ["measure", "proof", "shards"] and uj["if"].replace("${{", "").replace("}}", "").strip() == "!cancelled()" and "name" not in uj
-      and suites_steps.index("merge the shards' maps") < suites_steps.index("take the stamped map") < suites_steps.index("run every suite, measured") < suites_steps.index("audit the selection"), (uj.get("needs"), suites_steps))
+      and suites_steps.index("the shards' reports") < suites_steps.index("check that every suite ran") < suites_steps.index("run every suite, measured"), (uj.get("needs"), suites_steps))
+reports_step = next(st for st in uj["steps"] if st.get("name") == "the shards' reports")
+check_step = next(st for st in uj["steps"] if st.get("name") == "check that every suite ran")
+check("tests.yml: the shards' reports are downloaded (every artifact suiterun-shard-*, merged into one folder) and checked by `suitemap.py complete` over every file in it; a missing folder or no report fails the check, which the verdict step reads (continue-on-error, so the verdict names what is wrong)",
+      reports_step["uses"].startswith("actions/download-artifact@") and reports_step["with"]["pattern"] == "suiterun-shard-*" and reports_step["with"]["merge-multiple"] is True and reports_step["with"]["path"] == ".suitemap/ran"
+      and check_step["id"] == "check" and check_step["continue-on-error"] is True and check_step["if"] == reports_step["if"]
+      and "suitemap.py complete \"$@\"" in check_step["run"] and ".suitemap/ran/run-*.json" in check_step["run"] and "no shard handed on a report" in check_step["run"], (reports_step, check_step))
 verdict = next(st for st in uj["steps"] if st.get("name") == "run every suite, measured")
-check("tests.yml: the verdict step reads the proof, the take of the stamped map, the plan, the shards and the merge",
-      all(k in verdict["env"].get(v, "") for k, v in (("needs.proof.outputs.proven", "PROVEN"), ("needs.proof.outputs.run_id", "RUN_ID"), ("steps.take.outcome", "TAKEN"),
-                                                       ("needs.shards.result", "PLAN"), ("needs.measure.result", "SHARDS"), ("steps.merge.outcome", "MERGED"))) and len(verdict["env"]) == 6, verdict.get("env"))
+check("tests.yml: the verdict step reads the proof, the plan, the shards and the check that every suite ran, and nothing else",
+      all(verdict["env"].get(v, "") == "${{ " + k + " }}" for k, v in (("needs.proof.outputs.proven", "PROVEN"), ("needs.proof.outputs.run_id", "RUN_ID"),
+                                                                    ("needs.shards.result", "PLAN"), ("needs.measure.result", "SHARDS"), ("steps.check.outcome", "CHECKED"))) and len(verdict["env"]) == 5, verdict.get("env"))
 # The verdict step is what keeps a skipped or failed shard from passing the required check: a skipped job counts as passing, so the step's shell is run here with each
-# combination of what it reads. Proven: only a taken stamped map passes. Otherwise: the plan, every shard and the merge must each be `success`, and an all-skipped run (what an event that skipped its jobs would show) fails.
+# combination of what it reads. Proven: passes at once, saying which run proved it. Otherwise: the plan, every shard and the check must each be `success`, and an all-skipped run (what an event that skipped its jobs would show) fails.
 def verdict_rc(**env):
-    e = {"PATH": os.environ["PATH"], "PROVEN": "", "RUN_ID": "", "TAKEN": "skipped", "PLAN": "skipped", "SHARDS": "skipped", "MERGED": "skipped", **env}
+    e = {"PATH": os.environ["PATH"], "PROVEN": "", "RUN_ID": "", "PLAN": "skipped", "SHARDS": "skipped", "CHECKED": "skipped", **env}
     r = subprocess.run(["bash", "-e", "-c", verdict["run"]], capture_output=True, text=True, env=e)
     return r.returncode, r.stdout + r.stderr
-ok3 = dict(PLAN="success", SHARDS="success", MERGED="success")
-vr = {"proven and taken": verdict_rc(PROVEN="true", RUN_ID="9", TAKEN="success"), "proven, take failed": verdict_rc(PROVEN="true", TAKEN="failure"), "proven, take skipped": verdict_rc(PROVEN="true", TAKEN="skipped"),
-      "unproven, all passed": verdict_rc(PROVEN="false", **ok3), "no proof job (an entry), all passed": verdict_rc(PROVEN="", **ok3), "all skipped": verdict_rc(),
-      **{f"{k} {v}": verdict_rc(**{**ok3, k: v}) for k in ("PLAN", "SHARDS", "MERGED") for v in ("failure", "skipped", "cancelled")}}
-check("verdict step: a proven commit passes only when its stamped map was taken (and says nothing was run here); a failed or skipped take fails it",
-      vr["proven and taken"][0] == 0 and "stamped by the proof job" in vr["proven and taken"][1] and vr["proven, take failed"][0] == 1 and vr["proven, take skipped"][0] == 1, vr)
-check("verdict step: without a proof, the plan, the shards and the merge must each be `success`; any one failed, skipped or canceled fails it, and so does an all-skipped run (a skipped job counts as passing, this step does not)",
+ok3 = dict(PLAN="success", SHARDS="success", CHECKED="success")
+vr = {"proven": verdict_rc(PROVEN="true", RUN_ID="9"), "unproven, all passed": verdict_rc(PROVEN="false", **ok3), "no proof job (an entry), all passed": verdict_rc(PROVEN="", **ok3), "all skipped": verdict_rc(),
+      **{f"{k} {v}": verdict_rc(**{**ok3, k: v}) for k in ("PLAN", "SHARDS", "CHECKED") for v in ("failure", "skipped", "cancelled")}}
+check("verdict step: a proven commit passes at once, says which merge-queue run proved it and that nothing was run here",
+      vr["proven"][0] == 0 and "merge-queue run 9" in vr["proven"][1] and "nothing was run here" in vr["proven"][1], vr["proven"])
+check("verdict step: without a proof, the plan, the shards and the check that every suite ran must each be `success`; any one failed, skipped or canceled fails it, and so does an all-skipped run (a skipped job counts as passing, this step does not)",
       vr["unproven, all passed"][0] == 0 and vr["no proof job (an entry), all passed"][0] == 0 and vr["all skipped"][0] == 1
-      and all(v[0] == 1 for k, v in vr.items() if k.split()[0] in ("PLAN", "SHARDS", "MERGED")), {k: v[0] for k, v in vr.items()})
+      and all(v[0] == 1 for k, v in vr.items() if k.split()[0] in ("PLAN", "SHARDS", "CHECKED")), {k: v[0] for k, v in vr.items()})
 # release.sh can use either of two merge queues: GitHub's (the default; its entries are the `merge_group` event) or salamander's own (`salamander mq`, used when the host file says mode on; its entry branches are queue/**). Neither is retired, and both get the same run.
 # The salamander queue's branches (Mon Nov 2nd 2026, changed Tue Nov 3rd 2026): a push to queue/** gets a pull request's run (the selection, no shards), as .github/mergequeue.toml's `suites = "select"` says;
-# main's push keeps the full measured run. The workflow's `if:` expressions are evaluated for each kind of event, so a workflow and a rules file that disagree fail here.
+# main's push keeps the full run (plain, as the queue's). The workflow's `if:` expressions are evaluated for each kind of event, so a workflow and a rules file that disagree fail here.
 import tomllib
 push_on = y[True]["push"]["branches"]   # YAML 1.1 reads the key `on` as True
-save_step = next(st for st in uj["steps"] if st.get("name") == "save the map")
 mq = tomllib.load(open(os.path.join(SCR, "..", ".github", "mergequeue.toml"), "rb"))
 def holds(expr, event, ref, proven=False, large=False, shards_ok=True):
     """the value of an `if:` expression of tests.yml for an event, a ref and the proof job's verdict: the subset of the expression language the file uses (== and != on github.event_name and github.ref, startsWith(github.ref, …), &&, ||, parentheses, always(), !cancelled(), `hashFiles(…) != ''`, taken as true: the map exists, `needs.proof.outputs.proven == 'true'` read as `proven`, `needs.shards.result == 'success'` as `shards_ok`, `needs.shards.outputs.large (==|!=) 'true'` as `large` (the plan job's verdict on a pull request's selection), `runner.environment == 'github-hosted'` as true, and a step's outcome or output named in a comparison taken as the success path)"""
@@ -1533,9 +1538,8 @@ EVENTS = {"a pull request": ("pull_request", "refs/pull/7/merge", False), "a lar
           "a push to a queue branch": ("push", "refs/heads/queue/main/g1", False), "a manual run": ("workflow_dispatch", "refs/heads/some-branch", False),   # a push to a queue branch: the salamander merge queue's entry branch
           "a manual run on a queue branch": ("workflow_dispatch", "refs/heads/queue/main/g1", False),
           "a merge-queue entry": ("merge_group", "refs/heads/gh-readonly-queue/main/pr-7-0123456789abcdef0123456789abcdef01234567", False)}   # GitHub's merge queue (the default one release.sh uses): its own branch, not a push
-MEASURED_ONLY = ["the shards' maps", "merge the shards' maps", "the stamped map", "take the stamped map", "run every suite, measured", "keep the map", "save the map", "publish the map", "audit the selection"]
-STAMPED_ONLY = ["the stamped map", "take the stamped map"]   # a proven push to main takes the proof job's map instead of the shards'
-SHARDS_MAPS = ["the shards' maps", "merge the shards' maps"]
+MEASURED_ONLY = ["the shards' reports", "check that every suite ran", "run every suite, measured"]   # the steps of the full run's verdict (the name "run every suite, measured" is kept for release.sh; nothing is measured in tests.yml)
+SHARDS_REPORTS = ["the shards' reports", "check that every suite ran"]   # a proven push to main has no shards, so no reports to download and check
 SELECTION, MANUAL = "run the suites the change reaches", "run the suites named, or every suite"
 SHARDED = "run the selection, sharded"   # a large pull request selection's verdict, in the suites job
 def what_runs(event, ref, proven=False, large=False):
@@ -1545,17 +1549,17 @@ def what_runs(event, ref, proven=False, large=False):
 def expected(kind, queue_suites):
     return {**expected_before(kind, queue_suites), "sharded": kind == "a large pull request"}
 def expected_before(kind, queue_suites):
-    """what each kind of event must run: a merge-queue entry the full measured run (not the map's save: main saves it), main's push the full run too unless the queue proved the commit (then the stamp: no shards, the proof job's map),
+    """what each kind of event must run: a merge-queue entry the full plain run with its check that every suite ran, main's push the full run too unless the queue proved the commit (then the proof job and the verdict step alone: no shards),
     a pull request and a manual run as ever; a queue branch by the rules file's `suites`"""
     full = {"shards": True, "measure": True, "suites job": True, "selection": False, "manual": False}
-    if kind == "a push to a queue branch" and queue_suites == "all":   # main's run whole, but the map is saved from main only
-        return {"proof": False, **full, "measured steps": [n for n in MEASURED_ONLY if n not in ("save the map", *STAMPED_ONLY)]}
-    if kind == "a push to main":   # not proven: the proof job runs and finds nothing to stamp, and the whole run follows
-        return {"proof": True, **full, "measured steps": [n for n in MEASURED_ONLY if n not in STAMPED_ONLY]}
-    if kind == "a proven push to main":   # the proof job, then the suites job alone: it runs no suite, takes the stamped map and keeps, saves, publishes and audits it
-        return {"proof": True, "shards": False, "measure": False, "suites job": True, "selection": False, "manual": False, "measured steps": [n for n in MEASURED_ONLY if n not in SHARDS_MAPS]}
-    if kind == "a merge-queue entry":   # the gate: every suite, measured, in shards; the map is published as an artifact, saved by nothing (a merge-queue ref's cache is read by nothing else)
-        return {"proof": False, **full, "measured steps": [n for n in MEASURED_ONLY if n not in ("save the map", *STAMPED_ONLY)]}
+    if kind == "a push to a queue branch" and queue_suites == "all":   # main's run whole
+        return {"proof": False, **full, "measured steps": list(MEASURED_ONLY)}
+    if kind == "a push to main":   # not proven: the proof job runs and finds no green merge-queue run of the commit, and the whole run follows
+        return {"proof": True, **full, "measured steps": list(MEASURED_ONLY)}
+    if kind == "a proven push to main":   # the proof job, then the suites job alone: it runs no suite and says which merge-queue run proved the commit
+        return {"proof": True, "shards": False, "measure": False, "suites job": True, "selection": False, "manual": False, "measured steps": [n for n in MEASURED_ONLY if n not in SHARDS_REPORTS]}
+    if kind == "a merge-queue entry":   # the gate: every suite, plainly, in shards, and the check that every suite ran once and none failed
+        return {"proof": False, **full, "measured steps": list(MEASURED_ONLY)}
     if kind == "a pull request":   # a small selection: the plan job makes it and the suites job runs it, no shard
         return {"proof": False, "shards": True, "measure": False, "suites job": True, "measured steps": [], "selection": True, "manual": False}
     if kind == "a large pull request":   # a large selection: the plan job, the six shards (plain), and the suites job only judging them
@@ -1575,9 +1579,9 @@ check("mergequeue.toml: the snapshot-only conflict hook is still there for the c
 got = {k: what_runs(*ev) for k, ev in EVENTS.items()}
 for kind in EVENTS:
     want = expected(kind, mq["suites"] if kind == "a push to a queue branch" else None)
-    check(f"tests.yml runs for {kind} what mergequeue.toml (suites = {mq['suites']!r}) says: proof job {'yes' if want['proof'] else 'no'}, shard plan and shards {'yes' if want['shards'] else 'no'}, selection step {'yes' if want['selection'] else 'no'}, measured-run steps {len(want['measured steps'])} of {len(MEASURED_ONLY)}",
+    check(f"tests.yml runs for {kind} what mergequeue.toml (suites = {mq['suites']!r}) says: proof job {'yes' if want['proof'] else 'no'}, shard plan and shards {'yes' if want['shards'] else 'no'}, selection step {'yes' if want['selection'] else 'no'}, steps of the full run's verdict {len(want['measured steps'])} of {len(MEASURED_ONLY)}",
           got[kind] == want, (got[kind], want))
-check("…the two settings of `suites` expect different runs for a queue branch (so the check above fails when the file and the workflow disagree), and a queue branch with select runs no shard and no measured-run step, only the selection in the `suites` job",
+check("…the two settings of `suites` expect different runs for a queue branch (so the check above fails when the file and the workflow disagree), and a queue branch with select runs no shard and no step of the full run's verdict, only the selection in the `suites` job",
       expected("a push to a queue branch", "select") != expected("a push to a queue branch", "all")
       and (mq["suites"] != "select" or (not got["a push to a queue branch"]["shards"] and got["a push to a queue branch"]["measured steps"] == [] and got["a push to a queue branch"]["selection"])), got["a push to a queue branch"])
 def pool(expr, event, ref, hosted_var, hosted_input):
@@ -1606,28 +1610,25 @@ for kind, (ev, ref, *_) in EVENTS.items():
             if have_pool != want: bad.append((jname, kind, hv, hi, have_pool, want))
 check("tests.yml: the proof job, the shard plan, the shards and the `suites` job run on ubuntu-latest for every kind of event (the whole `runs-on` expression evaluated)",
       not bad and len(EVENTS) == 8, bad[:3])
-# GitHub's native merge queue (merge_group): THE GATE. Its run is the full measured run, in shards, and its `suites` job (the check main requires) is never skipped; the map is published, not saved
+# GitHub's native merge queue (merge_group): THE GATE. Its run is the full run, PLAIN, in shards, and its `suites` job (the check main requires) is never skipped; no map is made, saved or published in it
 MG, MAINPUSH, PROVEN = "a merge-queue entry", "a push to main", "a proven push to main"
 mg_on = y[True].get("merge_group")
 check("merge_group: tests.yml triggers on it with types checks_requested, and the entry's branch (gh-readonly-queue/…) is not in the push list (a push trigger too would run every entry twice)",
       isinstance(mg_on, dict) and mg_on.get("types") == ["checks_requested"] and not any("gh-readonly-queue" in b for b in push_on) and push_on == ["main", "queue/**"], (mg_on, push_on))
-check("merge_group: it runs every suite, measured (the plan, the six shards, the merged map, the verdict step, the map kept and published as an artifact, the audit) and no selection, no proof job, no cache save",
+check("merge_group: it runs every suite PLAINLY (the plan, the six shards, the shards' reports, the check that every suite ran, the verdict step) and no selection, no proof job, and none of the map's work (no keep, save, publish or audit: they are suitemap-refresh.yml's)",
       got[MG] == {"proof": False, "shards": True, "measure": True, "suites job": True,
-                  "measured steps": ["the shards' maps", "merge the shards' maps", "run every suite, measured", "keep the map", "publish the map", "audit the selection"], "selection": False, "manual": False, "sharded": False}, got[MG])
+                  "measured steps": ["the shards' reports", "check that every suite ran", "run every suite, measured"], "selection": False, "manual": False, "sharded": False}, got[MG])
 check("merge_group: the `suites` job (the check main requires) runs for it and keeps its name, whatever the jobs before it did: its `if` is `!cancelled()`, a skipped job would count as passing",
       got[MG]["suites job"] and uj["if"].replace("${{", "").replace("}}", "").strip() == "!cancelled()" and "name" not in uj, (uj.get("if"), uj.get("name")))
-check("merge_group: the plan and the shards do not run when the plan failed (`needs.shards.result`), and run when it passed; the suites job runs either way and its verdict step fails the failed plan",
+check("merge_group: the shards do not run when the plan failed (`needs.shards.result`), and run when it passed; the suites job runs either way and its verdict step fails the failed plan",
       all(holds(mj["if"], *EVENTS[k][:2], EVENTS[k][2], shards_ok=False) is False for k in (MG, MAINPUSH)) and all(holds(mj["if"], *EVENTS[k][:2], EVENTS[k][2], shards_ok=True) is True for k in (MG, MAINPUSH))
       and all(holds(uj["if"], *EVENTS[k][:2], EVENTS[k][2], shards_ok=False) is True for k in (MG, MAINPUSH)), mj["if"])
 cache_step = next(st for st in uj["steps"] if st.get("name") == "the suite map")
-check("merge_group: the map's cache key falls through the PR's base commit to the entry's base_sha, then to the earlier head, and the restore falls back to the newest map (the entry's base_sha may have no map of its own)",
-      cache_step["with"]["key"] == "suitemap-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}" and cache_step["with"]["restore-keys"].strip() == "suitemap-", cache_step["with"])
-plan_cache = [next(st for st in j["steps"] if st.get("name") == "the suite map") for j in (pj, mj)]
-check("merge_group: the shard plan and the shards read the earlier map the same way (the entry's base_sha, or main's earlier head, then the newest map): the same key and fallback in both, so a plan and its shards cannot differ; "
-      "a pull request's plan job reads it too, by the PR's base sha first (the suites job's own key), and its shards read none (they run the plan's lists plainly)",
-      plan_cache[1]["with"]["key"] == "suitemap-${{ github.event.merge_group.base_sha || github.event.before }}" and plan_cache[1]["if"].strip() == "github.event_name != 'pull_request'"
-      and plan_cache[0]["with"]["key"] == "suitemap-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}" and plan_cache[0]["with"] == cache_step["with"]
-      and all(c["with"]["restore-keys"].strip() == "suitemap-" for c in plan_cache), [c["with"] for c in plan_cache])
+check("the map's cache is read the same way everywhere: key suitemap-newest (never saved, so a miss) and restore-keys suitemap- (the refresh saves suitemap-<commit>-<run id>, and the newest of them is restored; a cache saved on main is readable from a pull request and a queue ref)",
+      cache_step["with"]["key"] == "suitemap-newest" and cache_step["with"]["restore-keys"].strip() == "suitemap-" and cache_step["uses"].startswith("actions/cache/restore@"), cache_step)
+plan_cache = next(st for st in pj["steps"] if st.get("name") == "the suite map")
+check("the shard plan reads the map exactly as the suites job does (the same key and fallback), so the plan and a pull request's own selection come from one map; the shards read none (they run the plan's lists)",
+      plan_cache["with"] == cache_step["with"] and plan_cache["uses"] == cache_step["uses"] and not any(st.get("name") == "the suite map" for st in mj["steps"]), [plan_cache["with"], cache_step["with"]])
 conc = y["concurrency"]
 check("merge_group: the concurrency group holds the ref (each entry has its own branch, so entries never share a group) and cancel-in-progress is true for a pull_request only: an entry's run is never cancelled by another",
       "github.ref" in conc["group"] and "github.workflow" in conc["group"]
@@ -1645,17 +1646,20 @@ def differ(a, b):
     return sorted({k for k in a[0] if a[0][k] != b[0][k]} | {k.split(": ", 1)[1] for k in a[1] if a[1][k] != b[1][k]})
 wr_mg, wr_main, wr_proven, wr_q = whole_run(*EVENTS[MG]), whole_run(*EVENTS[MAINPUSH]), whole_run(*EVENTS[PROVEN]), whole_run(*EVENTS["a push to a queue branch"])
 check("merge_group: every job and every step of the `suites` job (the `if:` of each evaluated, the whole set: the lock check, the map restore, the checkout …) runs for a merge-queue entry exactly as for a push to main the queue did not prove, "
-      "but for the proof job (main's alone: nothing precedes an entry) and the cache save (main's alone)",
-      len(wr_mg[1]) >= 12 and any(k.endswith("the suite map") for k in wr_mg[1]) and any("lock is present" in k for k in wr_mg[1]) and differ(wr_mg, wr_main) == ["proof", "save the map"], differ(wr_mg, wr_main))
-check("a proven push to main differs from an unproven one in exactly this: no shards and no measure jobs, no shards' maps to download and merge, and the proof job's stamped map downloaded and taken instead",
-      differ(wr_proven, wr_main) == sorted(["shards", "measure", "the shards' maps", "merge the shards' maps", "the stamped map", "take the stamped map"]), differ(wr_proven, wr_main))
-check("a queue/** push runs nothing of the gate: no proof, no shards, no measured step (the selection only), though a merge-queue entry runs all of it",
+      "but for the proof job (main's alone: nothing precedes an entry)",
+      len(wr_mg[1]) >= 12 and any(k.endswith("the suite map") for k in wr_mg[1]) and any("lock is present" in k for k in wr_mg[1]) and differ(wr_mg, wr_main) == ["proof"], differ(wr_mg, wr_main))
+check("a proven push to main differs from an unproven one in exactly this: no shards and no measure jobs, and no shards' reports to download and check (the proof job read the queue's run instead)",
+      differ(wr_proven, wr_main) == sorted(["shards", "measure", *SHARDS_REPORTS]), differ(wr_proven, wr_main))
+check("a queue/** push runs nothing of the gate: no proof, no shards, no step of the full run's verdict (the selection only), though a merge-queue entry runs all of it",
       differ(wr_q, wr_mg) and not wr_q[0]["proof"] and not wr_q[0]["shards"] and not wr_q[0]["measure"] and not any(v for k, v in wr_q[1].items() if k.split(": ", 1)[1] in MEASURED_ONLY), differ(wr_q, wr_mg))
 named_events = set(re.findall(r"github\.event_name\s*(?:==|!=)\s*'([^']*)'", open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8").read()))
 check("merge_group: every event name the file's expressions test for is one it triggers on, and merge_group is among them (a queue run is told apart from main's in the file, not left to fall through)",
       named_events <= {"push", "pull_request", "merge_group", "workflow_dispatch"} and "merge_group" in named_events, named_events)
-check("tests.yml: the map is saved to the cache from main only: a queue branch's commit may be rebased or deleted, and the audit of a later run would not resolve it",
-      "github.ref == 'refs/heads/main'" in save_step["if"] and "github.event_name == 'push'" in save_step["if"], save_step.get("if"))
+WF_ALL = open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8").read()
+WF_CODE = re.sub(r"(?m)^\s*#.*$", "", WF_ALL)
+check("tests.yml makes no map: no cache save, no artifact of the map, no keep, publish or audit step, no measuring, no strace (the gate is plain; the measuring is suitemap-refresh.yml's)",
+      "actions/cache/save" not in WF_CODE and "name: suitemap\n" not in WF_CODE and not any(n in suites_steps for n in ("keep the map", "save the map", "publish the map", "audit the selection", "merge the shards' maps"))
+      and not re.search(r"suitemap\.py (measure|merge|audit|stamp)\b", WF_CODE) and "strace" not in WF_CODE, None)
 # the plan command: its lines are the lists `shard --index` gives (one plan, however it is asked), with a map, without one, and with a map that is not there (the cache missed)
 def plan_lines(*extra):
     r = real("plan", "--of", str(sm.SHARDS), *extra)
@@ -1755,11 +1759,11 @@ check("isolation: the same steps started where a restored `.suitemap/map.json` s
 check("isolation: with such a map in the checkout (a copy of it), the select step, the suites job's own selection after a failed plan job and a queue push still give every suite, because the steps start in a folder with no `.suitemap`",
       iso[0][0] == 0 and sorted(iso[0][2][0].split("=", 1)[1].split()) == sorted(every) and iso[1][0] == 0 and would(iso[1][1]) == sorted(every) and iso[2][0] == 0 and would(iso[2][1]) == sorted(every),
       ([x[0] for x in iso], iso[0][2][:1], iso[1][1][-150:], iso[2][1][-150:]))
-b1 = step_sh(pr_shard_step, SUITE_T="900", SHARD="2", SELECTED="aa bb")
-b2 = step_sh(pr_shard_step, SUITE_T="900", SHARD="2", SELECTED="")
-b3 = step_sh(pr_shard_step, SUITE_T="900", SHARD="2", SELECTED="aa;bb")
-check("a pull request's shard runs its list plainly with the suite limit (`run -T 900 aa bb`); an empty list passes without running; a list with anything but names and spaces fails",
-      b1[0] == 0 and b1[1].strip().endswith("WOULD run -T 900 aa bb") and b2[0] == 0 and "WOULD" not in b2[1] and b3[0] == 2 and "WOULD" not in b3[1], (b1[:2], b2[:2], b3[:2]))
+b1 = step_sh(measure_step, SUITE_T="900", SHARD="2", SELECTED="aa bb")
+b2 = step_sh(measure_step, SUITE_T="900", SHARD="2", SELECTED="")
+b3 = step_sh(measure_step, SUITE_T="900", SHARD="2", SELECTED="aa;bb")
+check("a shard runs its list plainly with the suite limit and its report (`run -T 900 --report .suitemap/run-2.json aa bb`); an empty list passes without running; a list with anything but names and spaces fails",
+      b1[0] == 0 and b1[1].strip().endswith("WOULD run -T 900 --report .suitemap/run-2.json aa bb") and b2[0] == 0 and "WOULD" not in b2[1] and b3[0] == 2 and "WOULD" not in b3[1], (b1[:2], b2[:2], b3[:2]))
 sharded = next(st for st in uj["steps"] if st.get("name") == SHARDED)
 sv = {(p, s): step_sh(sharded, PLAN=p, SHARDS=s)[0] for p in ("success", "failure", "skipped", "cancelled") for s in ("success", "failure", "skipped", "cancelled")}
 check("suites job, a large selection's verdict step: it passes only when the plan and every shard are `success`; a failed, skipped or canceled plan or shard fails it (a skipped job counts as passing for GitHub, not for this step)",
@@ -1813,68 +1817,188 @@ check("merge: a suite in no shard fails it, by name, and the map is still writte
       and sorted(json.loads(MERGED.read_text())["suites"]) == sorted(here[:2]), r.stdout)
 r = tool("merge", "--map", str(T / "never.json"), A, part(here[2:], commit="0" * 40))
 check("merge: maps of two commits are refused and nothing is written", r.returncode == 2 and "not of one commit" in r.stdout and not (T / "never.json").exists(), r.stdout)
-# stamp (main's push, the proof job of tests.yml): a merge-queue run's map is accepted as the proof of a commit only when it is of that commit or of a commit with the same tree, holds exactly the
-# suites of that commit and marks none failed; anything else is a refusal (exit 1, the reason on stderr), which the workflow reads as "not proven". A throwaway repo of its own, a commit per case.
-R6 = T / "repo6"; R6.mkdir()
-def g6(*a): return subprocess.run(["git", "-C", str(R6), "-c", "user.name=t", "-c", "user.email=t@t", *a], check=True, capture_output=True, text=True).stdout.strip()
-g6("init", "-q", "-b", "main")
-(R6 / "tests").mkdir()
-for n in ("a", "b"): (R6 / "tests" / f"{n}_scenario.py").write_text("pass\n")
-g6("add", "-A"); g6("commit", "-qm", "two suites"); C1 = g6("rev-parse", "HEAD")
-g6("commit", "-q", "--allow-empty", "-m", "the same tree again (what a squash of the queue's merge looks like)"); C2 = g6("rev-parse", "HEAD")
-(R6 / "tests" / "c_scenario.py").write_text("pass\n"); g6("add", "-A"); g6("commit", "-qm", "a third suite"); C3 = g6("rev-parse", "HEAD")
-TREE1, TREE3 = g6("rev-parse", f"{C1}^{{tree}}"), g6("rev-parse", f"{C3}^{{tree}}")
-def stamp_of(commit, names=("a", "b"), sha=None, tree=None, out="stamped.json", entry=None, raw=None, fmt=sm.FORMAT):
-    mp = T / f"stamp-in-{len(list(T.glob('stamp-in-*')))}.json"
-    ent = {"ok": True, "seconds": 3, "py": {}}
-    mp.write_text(raw if raw is not None else json.dumps({"format": fmt, "commit": commit, "suites": {n: {**ent, **(entry or {})} for n in names}}))
-    o = T / out
-    if o.exists(): o.unlink()
-    r = tool("stamp", "--map", str(mp), "--sha", sha or C2, *(["--tree", tree] if tree else []), "--out", str(o), env={"SUITEMAP_ROOT": str(R6)})
-    return r, (json.loads(o.read_text()) if o.exists() else None)
-r, o = stamp_of(C2)
-check("stamp: a map of the commit itself, every suite of it, none failed, is accepted: exit 0, the map written", r.returncode == 0 and o and o["commit"] == C2 and sorted(o["suites"]) == ["a", "b"] and "accepted" in r.stderr, (r.returncode, r.stderr, o))
-r, o = stamp_of(C1)
-check("stamp: a map of another commit with the same tree (the queue's merge commit and main's) is accepted, and the written map is of the commit stamped, which the checkout has (`select` diffs against it later)",
-      r.returncode == 0 and o and o["commit"] == C2 and "same tree" in r.stderr, (r.returncode, r.stderr, o))
-r, o = stamp_of("1" * 40, tree=TREE1)
-check("stamp: a map of a commit the checkout does not have is accepted on the tree the workflow passes (--tree) when it is the commit's tree", r.returncode == 0 and o and o["commit"] == C2, (r.returncode, r.stderr))
-r, o = stamp_of("1" * 40, tree=TREE3)
-check("stamp: …and refused when the tree passed is another tree", r.returncode == 1 and "differs" in r.stderr and o is None, (r.returncode, r.stderr))
-r, o = stamp_of("1" * 40)
-check("stamp: a map of a commit the checkout does not have and no tree passed is refused (the tree is not known), nothing written", r.returncode == 1 and "not known" in r.stderr and o is None, (r.returncode, r.stderr))
-r, o = stamp_of(C3, names=("a", "b", "c"))
-check("stamp: a map of a commit with another tree is refused, though its suites are the ones named", r.returncode == 1 and "differs" in r.stderr and o is None, (r.returncode, r.stderr))
-r, o = stamp_of(C3, names=("a", "b", "c"), sha=C3)
-check("stamp: a map of the commit itself is accepted whatever the commit has (three suites here)", r.returncode == 0 and o and sorted(o["suites"]) == ["a", "b", "c"], (r.returncode, r.stderr))
-r, o = stamp_of(C2, names=("a",))
-check("stamp: a suite of the commit that the map lacks is a refusal that names it", r.returncode == 1 and "missing: b" in r.stderr and o is None, (r.returncode, r.stderr))
-r, o = stamp_of(C2, names=("a", "b", "gone"))
-check("stamp: a suite in the map that the commit does not have is a refusal that names it", r.returncode == 1 and "unknown: gone" in r.stderr and o is None, (r.returncode, r.stderr))
-r, o = stamp_of(C2, entry={"failed": True})
-check("stamp: a suite marked failed refuses it, though the map holds every suite", r.returncode == 1 and "failed" in r.stderr and o is None, (r.returncode, r.stderr))
-r, o = stamp_of(C2, raw="not json")
-check("stamp: a map that is not JSON is a refusal, not a crash", r.returncode == 1 and "refused" in r.stderr and o is None, (r.returncode, r.stderr))
-r, o = stamp_of(C2, raw="[1, 2]")
-check("stamp: a map that is a list is a refusal, not a crash", r.returncode == 1 and o is None, (r.returncode, r.stderr))
-r, o = stamp_of(C2, fmt=sm.FORMAT + 1)
-check("stamp: a map of another format is a refusal", r.returncode == 1 and o is None, (r.returncode, r.stderr))
-r, o = stamp_of("main")
-check("stamp: a map whose commit is not a full commit id is a refusal", r.returncode == 1 and "no full commit id" in r.stderr and o is None, (r.returncode, r.stderr))
-r, o = stamp_of(C2, sha="main")
-check("stamp: a sha that is not a full commit id is a refusal (a branch name is no proof of a tree)", r.returncode == 1 and "not a full commit id" in r.stderr and o is None, (r.returncode, r.stderr))
-r, o = stamp_of(C2, sha="2" * 40)
-check("stamp: a sha the checkout does not have is a refusal (it holds no suite)", r.returncode == 1 and o is None, (r.returncode, r.stderr))
-rs = tool("stamp", "--map", str(T / "no-such-map.json"), "--sha", C2, env={"SUITEMAP_ROOT": str(R6)})
-check("stamp: a map that is not there is a refusal", rs.returncode == 1 and "refused" in rs.stderr, (rs.returncode, rs.stderr))
-r, o = stamp_of(C2, entry={"seconds": 9})
-check("stamp: what the map holds of each suite is kept as it is (the times the next plan is balanced by), only the commit is set", r.returncode == 0 and o and all(e["seconds"] == 9 for e in o["suites"].values()), o)
-check("stamp: tests.yml's proof job gives it the map it downloaded, the commit and the tree of the map's commit, and uploads what it wrote only when it was accepted",
-      any("suitemap.py stamp --map" in st.get("run", "") and "--sha \"$GITHUB_SHA\"" in st["run"] and "--tree" in st["run"] and "--out .suitemap/stamped.json" in st["run"] for st in prj["steps"])
-      and next(st for st in prj["steps"] if st.get("id") == "up")["if"] == "steps.stamp.outcome == 'success'", [st.get("name") for st in prj["steps"]])
-check("tests.yml: the proof job can never fail the run (continue-on-error on the job and on the steps that can fail) and has no more permission than reading the run and the checkout",
-      prj.get("continue-on-error") is True and all(st.get("continue-on-error") is True for st in prj["steps"] if st.get("id") in ("find", "stamp", "up"))
-      and prj["permissions"] == {"contents": "read", "actions": "read"} and prj["outputs"] == {"proven": "${{ steps.final.outputs.proven }}", "run_id": "${{ steps.final.outputs.run_id }}"}, (prj.get("permissions"), prj.get("outputs")))
+# run --report and complete: the check that stands in for the measured map in the merge queue's and main's plain run ("every suite ran once and none failed"). `run --report` writes one report a shard;
+# `complete` reads them all and fails on a suite in no report (a shard skipped or cut short), in two reports (overlapping lists), unknown, failed, or a report of another commit or of no plain run.
+RHEAD = subprocess.run(["git", "-C", str(R), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+REPS = T / "reports"; REPS.mkdir()
+def report(names, commit=None, failed=(), kind=sm.RUN_REPORT, raw=None):
+    p = REPS / f"run-{len(list(REPS.glob('run-*.json')))}.json"
+    p.write_text(raw if raw is not None else json.dumps({"kind": kind, "commit": commit or RHEAD, "suites": {n: {"ok": n not in failed, "seconds": 1.5} for n in names}}))
+    return str(p)
+rr = REPS / "deeper" / "made-by-run.json"
+r = tool("run", "-T", "120", "--report", str(rr), "a", "z")
+rep_made = json.loads(rr.read_text()) if rr.exists() else None
+check("run --report: the suites ran as ever, and the report holds the head commit, the kind `run-report` (not a map: no `format`), and for each suite that ran whether it passed and how long it took; the folder is made",
+      r.returncode == 0 and rep_made and rep_made["kind"] == sm.RUN_REPORT and rep_made["commit"] == RHEAD and "format" not in rep_made and sorted(rep_made["suites"]) == ["a", "z"]
+      and all(e["ok"] is True and isinstance(e["seconds"], (int, float)) for e in rep_made["suites"].values()), (r.returncode, r.stderr[-300:], rep_made))
+rn = REPS / "never.json"
+r = tool("run", "-T", "120", "--report", str(rn))
+check("run --report: no suite named is still exit 2 and writes no report (an empty list is never a green run, and never a report that `complete` could count)", r.returncode == 2 and not rn.exists(), (r.returncode, r.stderr))
+check("run --help says what --report writes", "--report" in tool("run", "--help").stdout)
+here = tool("list").stdout.split()
+def complete_of(*paths):
+    r = tool("complete", *paths)
+    return r.returncode, r.stdout + r.stderr
+ca = complete_of(report(here[:2]), report(here[2:]))
+cb = complete_of(report(here))
+check("complete: the reports of every shard together hold every suite of the checkout once, none failed, all of the head commit: exit 0, the count said (one report or many)",
+      ca[0] == 0 and cb[0] == 0 and f"all {len(here)} suites" in ca[1] and "in 2 report(s)" in ca[1] and "in 1 report(s)" in cb[1], (ca, cb))
+cm = complete_of(report(here[:3]))
+check("complete: a suite in no report (a shard that was skipped, cut short or ran nothing) fails it and is named", cm[0] == 1 and f"in no report (not run): {here[3]}" in cm[1], cm)
+cm2 = complete_of(report(here[:1]), report(here[1:2]))
+check("complete: two shards' reports with the rest of the suites missing name every one of them", cm2[0] == 1 and f"in no report (not run): {', '.join(here[2:])}" in cm2[1], cm2)
+cf = complete_of(report(here[:2]), report(here[2:], failed=(here[2],)))
+check("complete: a suite that failed fails it and is named, though every suite is in a report", cf[0] == 1 and f"failed: {here[2]}" in cf[1] and "in no report" not in cf[1], cf)
+cd = complete_of(report(here[:2]), report(here[1:]))
+check("complete: a suite in two reports (overlapping lists) fails it and is named", cd[0] == 1 and f"in more than one report: {here[1]}" in cd[1], cd)
+cu = complete_of(report([*here, "ghost"]))
+check("complete: a suite that is not one of this checkout's fails it and is named (a stale list)", cu[0] == 1 and "not a suite of this checkout: ghost" in cu[1], cu)
+cc = complete_of(report(here[:2]), report(here[2:], commit="0" * 40))
+check("complete: a report of another commit than the checkout's fails it", cc[0] == 1 and "of another commit than this checkout's" in cc[1], cc)
+cn = complete_of()
+check("complete: no report at all fails it, saying so and that no suite ran", cn[0] == 1 and "no report was handed on" in cn[1] and "in no report (not run)" in cn[1], cn)
+cg = complete_of(report(here, raw="not json"))
+check("complete: a file that is not JSON fails it (named), not a crash", cg[0] == 1 and "cannot be read as a report" in cg[1] and "Traceback" not in cg[1], cg)
+cl = complete_of(report(here, raw="[1, 2]"))
+check("complete: a file that is JSON but not a report fails it", cl[0] == 1 and "is not a report of a plain run" in cl[1] and "Traceback" not in cl[1], cl)
+cmp_ = complete_of(MAP)
+check("complete: a measured map handed in place of a report is refused (a map has no kind `run-report`)", cmp_[0] == 1 and "is not a report of a plain run" in cmp_[1], cmp_)
+cx = complete_of(str(REPS / "no-such-report.json"))
+check("complete: a report that is not there fails it", cx[0] == 1 and "cannot be read as a report" in cx[1], cx)
+ck = complete_of(report(here, kind="map"))
+check("complete: a file of another kind fails it", ck[0] == 1 and "is not a report of a plain run" in ck[1], ck)
+check("complete: a good report beside a bad one still fails (one unreadable file never makes the rest pass)", complete_of(report(here), report(here, raw="not json"))[0] == 1)
+check("suitemap.py has no `stamp` command any more (the proof of a commit is the queue run's own check, read by the proof job), and `complete` is listed in the usage",
+      tool("stamp", "--sha", "x").returncode == 2 and "complete" in tool("--help").stdout, tool("stamp").stderr[-200:])
+
+# the proof job of tests.yml (main's push): it reads the merge-queue run of the commit and accepts it only when that run was green and its `suites` job has exactly one green step "run every suite, measured"
+(STUB / "gh").write_text("""#!/bin/sh
+# stands for `gh`: logs the call, answers `api .../jobs` with $STUB_GH_JOBS, any other `api` call with $STUB_GH_RUNS, `issue list` with $STUB_GH_ISSUE
+echo "gh $*" >> "$STUB_GH_LOG"
+case "$1" in
+  api) case "$2" in */jobs*) printf '%s\\n' "$STUB_GH_JOBS" ;; *) printf '%s\\n' "$STUB_GH_RUNS" ;; esac ;;
+  issue) [ "$2" != list ] || printf '%s\\n' "$STUB_GH_ISSUE" ;;
+esac
+exit 0
+""")
+os.chmod(STUB / "gh", 0o755)
+GHLOG = T / "gh.log"
+SHA40 = "ab" * 20
+def gh_sh(step, calls=False, **env):
+    GHLOG.write_text("")
+    out = step_sh(step, REPO="o/r", GITHUB_SHA=SHA40, GITHUB_STEP_SUMMARY=str(T / "summary.md"), STUB_GH_LOG=str(GHLOG), **env)
+    return (*out, GHLOG.read_text()) if calls else out
+find_st = next(st for st in prj["steps"] if st.get("id") == "find")
+ran_st = next(st for st in prj["steps"] if st.get("id") == "ran")
+final_st = next(st for st in prj["steps"] if st.get("id") == "final")
+f1 = gh_sh(find_st, calls=True, STUB_GH_RUNS="123456")
+f2 = gh_sh(find_st, STUB_GH_RUNS="")
+f3 = gh_sh(find_st, STUB_GH_RUNS="12;rm")
+check("proof job, finding the queue's run: it asks for the merge_group runs of this very commit (head_sha) and takes the id that comes back; none, or anything but digits, is no run (and not a failed step)",
+      f1[0] == 0 and f1[2] == ["run_id=123456"] and "event=merge_group" in f1[3] and f"head_sha={SHA40}" in f1[3] and f2[0] == 0 and f2[2] == ["run_id="] and f3[0] == 0 and f3[2] == ["run_id="], (f1, f2[:3], f3[:3]))
+jq = find_st["run"]
+check("proof job, finding the queue's run: only a completed, successful run of tests.yml itself counts, the newest of them (another workflow's merge-group run never proves a commit)",
+      all(s in jq for s in ('startswith(".github/workflows/tests.yml")', '.status == "completed"', '.conclusion == "success"', "sort_by(.created_at) | last")), jq[-400:])
+g1, g0, g2, ge = (gh_sh(ran_st, calls=True, RUN_ID="55", STUB_GH_JOBS=n) for n in ("1", "0", "2", ""))
+check("proof job, reading the queue run's jobs: exactly one green step `run every suite, measured` in the job `suites` proves it (and says which run); none, two or an unreadable answer does not",
+      g1[0] == 0 and "run 55" in g1[1] and "actions/runs/55/jobs" in g1[3] and g0[0] == 1 and g2[0] == 1 and ge[0] == 1, (g1[:2], g0[:2], g2[:2], ge[:2]))
+check("proof job, reading the queue run's jobs: the job is the one named `suites` and the step the one release.sh reads, concluded success (a skipped step has another conclusion)",
+      'select(.name == "suites")' in ran_st["run"] and 'select(.name == "run every suite, measured" and .conclusion == "success")' in ran_st["run"], ran_st["run"][-400:])
+fa = gh_sh(final_st, RAN="success", FOUND="9")
+fb = [gh_sh(final_st, RAN=x, FOUND="9") for x in ("failure", "skipped", "cancelled")]
+check("proof job, the verdict: `proven=true` and the run id only when the check of the queue's run succeeded; a failed, skipped or canceled check is `proven=false` and the whole run follows",
+      fa[2] == ["proven=true", "run_id=9"] and all(x[0] == 0 and x[2] == ["proven=false"] for x in fb), (fa[2], [x[2] for x in fb]))
+check("tests.yml: the proof job can never fail the run (continue-on-error on the job and on the steps that can fail), asks for no more than reading runs (`actions: read`), has no checkout, and hands on `proven` and `run_id`",
+      prj.get("continue-on-error") is True and all(st.get("continue-on-error") is True for st in prj["steps"] if st.get("id") in ("find", "ran"))
+      and prj["permissions"] == {"actions": "read"} and prj["outputs"] == {"proven": "${{ steps.final.outputs.proven }}", "run_id": "${{ steps.final.outputs.run_id }}"}
+      and not any("checkout" in st.get("uses", "") for st in prj["steps"]), (prj.get("permissions"), prj.get("outputs")))
+check("tests.yml: the proof job reads the queue's run of the pushed commit only: its `if` is main's push, and its ran-step waits for a found run",
+      holds(prj["if"], "push", "refs/heads/main") is True and all(holds(prj["if"], *EVENTS[k][:2]) is False for k in EVENTS if k not in ("a push to main", "a proven push to main")) and ran_st["if"] == "steps.find.outputs.run_id != ''", prj["if"])
+
+# the verdict step's wiring: it must read the check of the reports as `steps.check.outcome`; swapped or dropped, a short run would pass
+VERD_OLD = "          CHECKED: ${{ steps.check.outcome }}\n"
+def verdict_wired(yy):
+    st = next((s for s in yy["jobs"]["suites"]["steps"] if s.get("name") == "run every suite, measured"), {})
+    return st.get("env", {}).get("CHECKED") == "${{ steps.check.outcome }}" and st.get("env", {}).get("PLAN") == "${{ needs.shards.result }}" and st.get("env", {}).get("SHARDS") == "${{ needs.measure.result }}"
+check("tests.yml: the verdict step reads CHECKED from the check of the reports, PLAN from the plan job and SHARDS from the shard jobs", verdict_wired(y))
+VERD_MUT = {
+    "CHECKED read from the plan job (a short run would pass)": VERD_OLD.replace("steps.check.outcome", "needs.shards.result"),
+    "CHECKED read from the reports' download (a short run would pass)": VERD_OLD.replace("steps.check.outcome", "steps.reports.outcome"),
+    "CHECKED taken out": "",
+}
+for what, new in VERD_MUT.items():
+    mutated = WF_TEXT.replace(VERD_OLD, new, 1)
+    check(f"mutation: with {what} in tests.yml, the verdict wiring check fails (and the text did contain it)", WF_TEXT.count(VERD_OLD) == 1 and mutated != WF_TEXT and not verdict_wired(yaml.safe_load(mutated)), what)
+MUT_STRUCT = {
+    "the check step's `complete` call": (WF_TEXT.replace("suitemap.py complete \"$@\"", "suitemap.py list"), "check step"),
+    "the check step's own condition": (WF_TEXT.replace("        id: check\n        if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.proof.outputs.proven != 'true') || github.event_name == 'merge_group'\n", "        id: check\n        if: github.event_name == 'pull_request'\n"), "check step"),
+}
+for what, (mutated, _) in MUT_STRUCT.items():
+    yy = yaml.safe_load(mutated)
+    cs = next(s for s in yy["jobs"]["suites"]["steps"] if s.get("name") == "check that every suite ran")
+    check(f"mutation: with {what} spoiled in tests.yml, a queue entry would no longer run the check (the structure check sees it)",
+          mutated != WF_TEXT and not ("suitemap.py complete \"$@\"" in cs["run"] and holds(cs["if"], *EVENTS[MG][:2]) is True), what)
+
+# ---- the scheduled refresh (suitemap-refresh.yml): the map is made here, no longer by the gate
+RF_PATH = os.path.join(SCR, "..", ".github", "workflows", "suitemap-refresh.yml")
+rf = yaml.safe_load(open(RF_PATH, encoding="utf-8")); rf_on = rf[True]
+rj = rf["jobs"]
+check("suitemap-refresh.yml: it exists and suitemap.py's CI_WORKFLOW names it (fetch and the test-trim report read the map from its runs)",
+      os.path.isfile(RF_PATH) and sm.CI_WORKFLOW == ".github/workflows/suitemap-refresh.yml" and rf["name"] == "suitemap-refresh", sm.CI_WORKFLOW)
+check("suitemap-refresh.yml: it runs on a schedule every 3 hours and by hand, on no other event (never on a pull request, a push or the queue), and TRACE_MAX_AGE (hours) is longer than the schedule's interval so a run re-traces only the suites that are old",
+      sorted(rf_on) == ["schedule", "workflow_dispatch"] and len(rf_on["schedule"]) == 1 and re.fullmatch(r"\d+ \*/3 \* \* \*", rf_on["schedule"][0]["cron"]) and isinstance(sm.TRACE_MAX_AGE, int) and sm.TRACE_MAX_AGE > 3, (rf_on, sm.TRACE_MAX_AGE))
+check("suitemap-refresh.yml: its own concurrency group (not tests.yml's, so it never queues a gate run and a gate run never cancels it), and a run in progress is never cancelled by the next (the map is saved by the one that finishes)",
+      rf["concurrency"] == {"group": "suitemap-refresh", "cancel-in-progress": False} and "suitemap-refresh" not in y["concurrency"]["group"], rf.get("concurrency"))
+check("suitemap-refresh.yml: the jobs are the plan, the shards, the merge and the report; the token reads the checkout alone, and only the report job may write (issues), nothing else does",
+      sorted(rj) == ["measure", "refresh", "report", "shards"] and rf["permissions"] == {"contents": "read"} and rj["report"]["permissions"] == {"issues": "write"}
+      and not any("permissions" in rj[n] for n in ("shards", "measure", "refresh")), (rf.get("permissions"), sorted(rj)))
+check(f"suitemap-refresh.yml: the plan makes {sm.SHARDS} lists from the newest map and the shards are a matrix of 0..{sm.SHARDS - 1} (fail-fast off) that run their own list MEASURED, with the earlier map as --prev, and write a map of their own",
+      f"suitemap.py plan --of {sm.SHARDS} --map .suitemap/map.json" in next(st for st in rj["shards"]["steps"] if st.get("id") == "plan")["run"]
+      and [k for k in rj["shards"]["outputs"]] == [f"shard{i}" for i in range(sm.SHARDS)]
+      and rj["measure"]["strategy"]["matrix"]["shard"] == list(range(sm.SHARDS)) and rj["measure"]["strategy"]["fail-fast"] is False and rj["measure"]["needs"] == "shards"
+      and re.search(r"exec uv run --locked --only-group tests python tests/suitemap\.py measure -T \"\$MEASURE_T\" --prev \.suitemap/map\.json --map \"\.suitemap/shard-\$SHARD\.json\" \$SELECTED",
+                    next(st for st in rj["measure"]["steps"] if st.get("name") == "run this shard's suites, measured")["run"]), rj["measure"].get("strategy"))
+check("suitemap-refresh.yml: a shard hands its map on as the artifact suitemap-shard-<n> (hidden folder, kept a day, replaced on a re-run), whatever the suites did",
+      (lambda s: s["uses"].startswith("actions/upload-artifact@") and s["with"]["name"] == "suitemap-shard-${{ matrix.shard }}" and s["with"]["include-hidden-files"] is True and s["with"]["overwrite"] is True
+       and s["with"]["retention-days"] == 1 and s["if"].startswith("always()"))(next(st for st in rj["measure"]["steps"] if st.get("name") == "hand the shard's map on")), None)
+rsteps = [st.get("name") or st.get("uses") for st in rj["refresh"]["steps"]]
+check("suitemap-refresh.yml: the merge job runs whatever the shards did (`!cancelled()`), and its steps go: the shards' maps, the merge, the check that the map is whole, keep, save, publish, audit",
+      rj["refresh"]["if"].replace("${{", "").replace("}}", "").strip() == "!cancelled()" and sorted(rj["refresh"]["needs"]) == ["measure", "shards"]
+      and [rsteps.index(n) for n in ("the shards' maps", "merge the shards' maps", "the map is whole", "keep the map", "save the map", "publish the map", "audit the selection")] == sorted(rsteps.index(n) for n in ("the shards' maps", "merge the shards' maps", "the map is whole", "keep the map", "save the map", "publish the map", "audit the selection")), rsteps)
+save_rf = next(st for st in rj["refresh"]["steps"] if st.get("name") == "save the map")
+pub_rf = next(st for st in rj["refresh"]["steps"] if st.get("name") == "publish the map")
+aud_rf = next(st for st in rj["refresh"]["steps"] if st.get("name") == "audit the selection")
+check("suitemap-refresh.yml: the map is saved to the cache under its own key per run (suitemap-<commit>-<run id>: a cache entry cannot be overwritten, and the newest `suitemap-` entry is the one every reader restores)",
+      save_rf["uses"].startswith("actions/cache/save@") and save_rf["with"]["key"] == "suitemap-${{ github.sha }}-${{ github.run_id }}" and save_rf["with"]["path"] == ".suitemap/map.json" and "if" not in save_rf, save_rf)
+check("suitemap-refresh.yml: the map is published as the artifact `suitemap` (never turns the run red, replaces the earlier, hidden folder, kept 14 days: longer than a few failed 3-hour runs), the file `suitemap.py fetch` and the test-trim report take",
+      pub_rf["continue-on-error"] is True and pub_rf["with"]["name"] == "suitemap" and pub_rf["with"]["overwrite"] is True and pub_rf["with"]["include-hidden-files"] is True and pub_rf["with"]["path"] == ".suitemap/map.json"
+      and pub_rf["with"]["retention-days"] >= 7 and "if" not in pub_rf, pub_rf)
+check("suitemap-refresh.yml: the audit of the selection compares the earlier map with the new one at this commit (`audit --old … --new … --to ${{ github.sha }}`), and only when both exist",
+      "suitemap.py audit --old .suitemap/old.json --new .suitemap/new.json --to ${{ github.sha }}" in aud_rf["run"] and "new.json" in aud_rf["if"] and "old.json" in aud_rf["if"], aud_rf)
+whole_rf = next(st for st in rj["refresh"]["steps"] if st.get("name") == "the map is whole")
+wv = {(p, s, m): step_sh(whole_rf, PLAN=p, SHARDS=s, MERGED=m)[0] for p in ("success", "failure", "skipped") for s in ("success", "failure", "skipped", "cancelled") for m in ("success", "failure", "skipped")}
+check("suitemap-refresh.yml: the map is kept and saved only when the plan, every shard and the merge each succeeded (the step after the merge fails on any other result, a skipped one included)",
+      wv[("success", "success", "success")] == 0 and all(v == 1 for k, v in wv.items() if k != ("success", "success", "success")) and whole_rf["env"] == {"PLAN": "${{ needs.shards.result }}", "SHARDS": "${{ needs.measure.result }}", "MERGED": "${{ steps.merge.outcome }}"}, {k: v for k, v in wv.items() if v == 0})
+merge_rf = next(st for st in rj["refresh"]["steps"] if st.get("id") == "merge")
+check("suitemap-refresh.yml: the merge step is continue-on-error (its verdict is read by the step after it) and merges every shard's map the artifacts brought", merge_rf["continue-on-error"] is True and "suitemap.py merge --map .suitemap/new.json" in merge_rf["run"] and ".suitemap/shards/shard-*.json" in merge_rf["run"], merge_rf["run"])
+# the alert: an open issue titled "the suite map refresh failed" is made or commented on when the run did not finish green, and closed by the next green run
+rep_job = rj["report"]; rep_st = rep_job["steps"][0]
+check("suitemap-refresh.yml: the report job waits for the plan, the shards and the merge, runs whatever they did, and reads their three results",
+      sorted(rep_job["needs"]) == ["measure", "refresh", "shards"] and rep_job["if"].replace("${{", "").replace("}}", "").strip() == "!cancelled()"
+      and rep_job["env"]["RESULTS"] == "${{ needs.shards.result }} ${{ needs.measure.result }} ${{ needs.refresh.result }}" and rep_job["env"]["TITLE"] == "the suite map refresh failed", rep_job.get("env"))
+def alert(results, issue=""):
+    rc, out, _, log = gh_sh(rep_st, calls=True, RESULTS=results, TITLE=rep_job["env"]["TITLE"], RUN_URL="https://example.test/run/1", STUB_GH_ISSUE=issue)
+    return rc, [l for l in log.splitlines() if l.startswith("gh issue") and l.split()[2] != "list"]
+al = {"green, no issue": alert("success success success"), "green, issue open": alert("success success success", "7"),
+      "failed, no issue": alert("success failure skipped"), "failed, issue open": alert("success failure skipped", "7"), "a shard cancelled": alert("success cancelled success"), "merge skipped": alert("success success skipped")}
+check("suitemap-refresh.yml, the alert: a green run with no issue does nothing, and closes the one that is open; a run that failed, was cancelled or skipped its merge opens an issue (or comments on the open one) and fails the job, so the run is red in the Actions list",
+      al["green, no issue"] == (0, []) and al["green, issue open"][0] == 0 and [l.split()[2] for l in al["green, issue open"][1]] == ["close"]
+      and al["failed, no issue"][0] == 1 and [l.split()[2] for l in al["failed, no issue"][1]] == ["create"]
+      and al["failed, issue open"][0] == 1 and [l.split()[2] for l in al["failed, issue open"][1]] == ["comment"]
+      and al["a shard cancelled"][0] == 1 and al["merge skipped"][0] == 1, al)
+check("suitemap-refresh.yml, the alert: the issue it opens says the earlier map stays in use (what a person needs to know, in plain words) and links the run", "The last good map stays in use" in rep_st["run"] and "$RUN_URL" in rep_st["run"])
+check("fetch reads the refresh workflow's runs: the file `suitemap.py fetch` names is the file that exists and the name test-trim's report passes to gh is its basename",
+      os.path.basename(sm.CI_WORKFLOW) == "suitemap-refresh.yml" and "suitemap-refresh.yml" in open(os.path.join(SCR, "..", "tools", "test_trim_report.py"), encoding="utf-8").read(), None)
 K = T / "cancel"; (K / "tests").mkdir(parents=True); MARK = T / "marks"; MARK.mkdir()
 for f in ("run-suite", "suitemap.py", "_launcher.py"): shutil.copy(os.path.join(SCR, f), K / "tests" / f)
 for f in ("pyproject.toml", "uv.lock"): shutil.copy(os.path.join(SCR, "..", f), K / f)
@@ -2008,6 +2132,7 @@ DOCUSE_ALLOW = {
     ("tests/retired_inputs_scenario.py", "__doc__"): (1, "_client.__doc__, a module docstring: read by name, unchanged rule"),
     ("tests/script_post_kinds_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and terminal_prompt_svc._terminal_prompt.__doc__ (a function it names: the name rule selects the suite)"),
     ("tests/step_proof_scenario.py", "__doc__"): (2, "client.__doc__ twice, a module docstring: read by name, unchanged rule"),
+    ("tests/standby_copy_scenario.py", "getmembers"): (1, "TarFile.getmembers on the stream under test, a tar archive's member list: no function's docstring is read"),
 }
 def doc_uses(files):
     """(file, form, uses found, uses pinned) for every form of {path: source} whose number of uses is not the number the allow list pins"""

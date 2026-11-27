@@ -50,6 +50,10 @@ NOT get enabled there, because each writes or acts outward:
 
 Converting a box that already ran the minute unit (`[runner] process = "unit"`, the default): the first `./install.sh units` after the standby switch is in place stops, disables and removes it, and says so; it needs the switch to be visible to the script, that is `STACKSHOT_READ_ONLY=1` in its environment, or in the `stackshot.service` environment (a drop-in's `Environment=` line, or an `EnvironmentFile=` file). By hand, the same: `systemctl --user disable --now stackshot-minute.service`, then remove `~/.config/systemd/user/stackshot-minute.service` and `systemctl --user daemon-reload` (or `./install.sh minute-off`, which does all three and exits 1, leaving the file, when the unit cannot be stopped). If the box has no minute unit, nothing is needed; `stackshot doctor` does not list the unit on a standby (it reads the same switch), so a config copied from the live box at `"unit"` is no reason for a missing line.
 
+## Taking the copy
+
+`stackshot standby-copy`, run on the live server box, writes one consistent copy of the state dir, the board store and the settings folder, and `stackshot standby-copy --verify DIR` checks what arrived ([standby-copy.md](standby-copy.md)).
+
 ## What the copy job must touch
 
 The data age on `/healthz` and in the banner is the time since the newest modification time among the store

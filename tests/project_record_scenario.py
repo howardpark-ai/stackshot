@@ -341,6 +341,19 @@ check("anchors: the id lists the same as the key", r4 == r5 and r4, (r4, r5))
 URL = "https://x.slack.com/archives/C0000000009"
 _wt_anchors.stackshot_anchors(project=A_ID, add=[URL])
 check("anchors: add by id lands on the page's key", [e["url"] for e in _A.load().get("projects/alpha", [])] == [URL] and A_ID not in _A.load(), _A.load())
+from stackshot.core import call_log as _CLG
+from stackshot.github import ghsync as _ghs
+(T / "store/g").mkdir(exist_ok=True)
+(T / "store/g/40.json").write_text(json.dumps({"id": "40", "subject": "[home] an item the anchor is scoped to", "status": "open", "metadata": {"project": "projects/alpha"}}))
+URL2 = "https://x.slack.com/archives/C0000000010"
+_tok = _CLG.begin()
+try: _wt_anchors.stackshot_anchors(project=A_ID, add=[URL2], items=["40"])
+finally: _fx = _CLG.end(_tok)
+check("anchors: items reads a bare number as board#N, scopes the anchor to that item, and says what it read", [k for k, _ in _fx] == ["item-id"] and _fx[0][1] == f"read 40 as {_ghs.shown('g40')}" and any(e["url"] == URL2 and "g40" in (e.get("items") or []) for e in _A.load().get("projects/alpha", [])), (_fx, _A.load()))
+try: _wt_anchors.stackshot_anchors(project=A_ID, add=[URL2], items=["40x"]); _r7 = ""
+except ToolError as e: _r7 = str(e)
+check("anchors: items still refuses what is no number", _r7.startswith("bad item id"), _r7)
+_wt_anchors.stackshot_anchors(project=A_ID, remove=[URL2])
 _wt_anchors.stackshot_anchors(project=A_ID, remove=[URL])
 check("anchors: remove by id", not _A.load().get("projects/alpha"), _A.load())
 try: _wt_anchors.stackshot_anchors(project="prj_00000000"); r6 = ""

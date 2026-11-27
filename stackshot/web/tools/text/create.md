@@ -69,9 +69,9 @@ needs="decision", then="my-x" (who takes it after his answer), ask="Decide: whet
 Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099", options=[{"label": "Approve",
 "line": "Approve the schema", "recommended": true}, {"label": "Decline", "line": "Wait a week", "recommended":
 false}]; a step that waits on another item: next="my-x: ship the export once board#N closes", after=["board#N"],
-until="<day, within {{CAP_DAYS}} days>"; work for the project's builder: leave mover out. subject: {{PFX}}, then the outcome wanted as a
-task, never a topic or a symptom (a subject with no scope prefix is given the one its project's scope names, and the
-reply says so). project must exist (create the page first; a page in a second brain is looked up in that brain's own
+until="<day, within {{CAP_DAYS}} days>"; work for the project's builder: leave mover out. subject: {{PFX}}, then the finished outcome,
+the one the `Goal:` bullet says, never an activity, a question, a topic or a symptom (a subject with no scope prefix is
+given the one its project's scope names, and the reply says so). project must exist (create the page first; a page in a second brain is looked up in that brain's own
 copy, and taken unchecked while that copy cannot be read); a sub-page counts and shows on its hub's row. sender: your
 own session (a cloud/Cowork session's cse_… id, or a pane's name or transcript UUID); the server records it as the
 item's creator (a background agent may create items too). mover: who moves the item now (and then= after his answer or

@@ -6,7 +6,7 @@ The enqueue and the wait (sections 1 to 9): a clean enqueue (the GraphQL mutatio
 state (GraphQL: state, mergeCommit, mergeQueueEntry) every 60 s until it is MERGED, and the release deploys the commit GitHub made. The first reads come every 10 s until the entry shows (3 min of grace), a read
 that fails is waited out, a PR that never shows or stays past the limit fails "merge queue", a PR closed meanwhile fails "pr state", with no queue on main (the ruleset is
 off, the rollback case) the plain `gh pr merge --merge --admin --match-head-commit <head>` is the call, and the deploy waits for main's tests, since no merge_group run tested that merge. A PR that leaves the queue without merging is believed on the second read, the reason GitHub gave (the timeline's RemovedFromMergeQueueEvent)
-goes into the failure, and nothing is deployed. A merge call that errors (a 504) after the PR was queued or merged carries on; one that leaves the PR plainly open fails "merge" with the call's error.
+goes into the failure, and nothing is deployed. An enqueue call that GitHub's server fails (a 5xx, INTERNAL, a timeout, a reset) is made again, up to 4 attempts with waits of 5, 15 and 45 s and a read of the PR's state before each retry; a refusal is never retried (section 2a). A merge call that errors (a 504) after the PR was queued or merged carries on; one that leaves the PR plainly open fails "merge" with the call's error.
 A conflict that is only the generated tool-text snapshot is mended once, before the enqueue or after a removal from the queue (the stub of tools/snapshot_regen.py answers; its own decisions are
 tested in snapshot_regen_scenario.py), the PR's tests are waited for on the new head, and the PR is enqueued again. The head branch (a stacked PR closed when its base merged): the open PRs
 based on it are retargeted to main first and only then is the branch deleted. --recycle, mergeable UNKNOWN (read again every 10 s for 3 min), CONFLICTING, the front door and --help.
@@ -123,14 +123,54 @@ check("504: the log says the call errored and the PR is in the queue; the head b
 s = scenario("recovered-merged", merge="fail", gq="merged")
 check("504, the PR reads MERGED already: carries on, deploys, the report names the error", s["rc"] == 0 and s["deployed"] and "the enqueue call errored" in s["msg"] and "but the PR was MERGED" in s["msg"], (s["out"], s["msg"]))
 s = scenario("recovered-late", merge="fail", gq="open,open,queued,merged")
-check("504, the PR shows in the queue on the third read (GitHub's answer is eventually consistent): two sleeps of 10 s, then it carries on",
-      s["rc"] == 0 and s["deployed"] and s["sleeps"][:2] == ["10", "10"], (s["sleeps"], s["out"]))
+check("504 every time, the PR shows in the queue on the third read (GitHub's answer is eventually consistent): the read before each retry, waits of 5 s and 15 s, then it carries on without a third call",
+      s["rc"] == 0 and s["deployed"] and s["sleeps"][:2] == ["5", "15"] and len(enqueues(s)) == 3, (s["sleeps"], s["out"], enqueues(s)))
 s = scenario("open", merge="fail", gq="open", branch="present")
 check("504 and the PR stays plainly open: exits 1, never deploys", s["rc"] == 1 and not s["deployed"], s["out"])
 check("504 and open: FAILED at merge with the original error's last line, no deploy report",
       "PR #23 FAILED at merge: HTTP 504: We couldn't respond to your request in time." in s["msg"] and "merged and deployed" not in s["msg"], s["msg"])
-check("504 and open: six reads over five 10 s sleeps (about 50 s), one enqueue call", s["gq_reads"] == 6 and s["sleeps"] == ["10"] * 5 and len(enqueues(s)) == 1, (s["gq_reads"], s["sleeps"]))
+check("504 and open: four enqueue calls with waits of 5, 15 and 45 s and a read of the PR before each retry, then six reads over five 10 s sleeps (as before)",
+      s["gq_reads"] == 9 and s["sleeps"] == ["5", "15", "45"] + ["10"] * 5 and len(enqueues(s)) == 4, (s["gq_reads"], s["sleeps"], len(enqueues(s))))
 check("504 and open: the branch is left alone, the red report goes without --release", not refchecks(s) and not deletes(s) and s["msg"].rstrip("\n").endswith("| --sender | release") and "--release" not in s["msg"], (s["gh"], s["msg"]))
+
+# ---- 2a. the enqueue call is retried when GitHub's server fails (a 5xx, INTERNAL, "something went wrong", a timeout, a reset), never when GitHub refuses it
+RETRY = lambda k, n: f"merge queue call answered {k}; retrying in {n} s"
+s = scenario("enq-retry-ok", enq_fails="2", enq_kind="504", gq="open,open,merged")
+check("a 504 twice, then accepted: three enqueue calls, merged and deployed, no failure",
+      s["rc"] == 0 and s["deployed"] and len(enqueues(s)) == 3 and "FAILED" not in s["log"] and "enqueued: the merge queue accepted the head abc1234" in s["log"], (s["rc"], enqueues(s), s["log"]))
+check("...two retry lines, in the log's style, each with its wait and attempt, and the waits are the list's first two (5 s, 15 s)",
+      s["log"].count("merge queue call answered") == 2 and RETRY("HTTP 504", 5) + " (attempt 2 of 4)" in s["log"] and RETRY("HTTP 504", 15) + " (attempt 3 of 4)" in s["log"] and s["sleeps"][:2] == ["5", "15"], (s["log"], s["sleeps"]))
+s = scenario("enq-retry-env", enq_fails="3", enq_kind="502", gq="open,open,open,merged", extra={"RELEASE_ENQUEUE_WAITS": "1 2 3"})
+check("RELEASE_ENQUEUE_WAITS replaces the list: waits of 1, 2 and 3 s, four calls (the fourth accepted), a 502 named as such",
+      s["rc"] == 0 and s["deployed"] and s["sleeps"][:3] == ["1", "2", "3"] and len(enqueues(s)) == 4 and RETRY("HTTP 502", 3) + " (attempt 4 of 4)" in s["log"], (s["sleeps"], s["log"]))
+for kind, word in (("internal", "a GraphQL INTERNAL error"), ("wrong", "an error (something went wrong)"), ("timeout", "a timeout"), ("reset", "a cut connection")):
+    s = scenario(f"enq-retry-{kind}", enq_fails="1", enq_kind=kind, gq="open,merged")
+    check(f"a transient error of kind {kind} is retried once and then accepted, named {word}", s["rc"] == 0 and s["deployed"] and len(enqueues(s)) == 2 and RETRY(word, 5) in s["log"], (s["rc"], enqueues(s), s["log"]))
+s = scenario("enq-retry-four", enq_fails="all", enq_kind="last504", gq="open")
+check("a 5xx on every call: four attempts, waits 5, 15, 45 s (and no fifth call), then FAILED at merge with the last call's error, nothing deployed",
+      s["rc"] == 1 and not s["deployed"] and len(enqueues(s)) == 4 and s["sleeps"][:3] == ["5", "15", "45"] and "PR #23 FAILED at merge: HTTP 504: attempt 4" in s["msg"], (s["rc"], enqueues(s), s["sleeps"], s["msg"]))
+check("...three retry lines, the last for attempt 4 of 4, and no line for a fifth", s["log"].count("merge queue call answered") == 3 and "(attempt 4 of 4)" in s["log"] and "attempt 5" not in s["log"], s["log"])
+for kind, err in (("422", "HTTP 422: Pull request is not mergeable"), ("already", "Pull request is already in the merge queue"), ("conflict", "Pull request has merge conflicts"), ("403", "HTTP 403")):
+    s = scenario(f"enq-refused-{kind}", enq_fails="all", enq_kind=kind, gq="open")
+    check(f"a refusal ({kind}) is not retried: one call, no retry line, no wait for it, FAILED at merge with GitHub's words",
+          s["rc"] == 1 and not s["deployed"] and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"] and s["sleeps"][:1] != ["5"] and f"FAILED at merge: {err}" in s["msg"], (s["rc"], enqueues(s), s["sleeps"], s["msg"]))
+# the refusal list is checked first: a refusal whose text also holds a word of a transient failure (a 5xx, a timeout) is a refusal, one call and no retry, whichever list word it carries and also when it comes as a GraphQL INTERNAL error
+for word, text in (("http 4xx", "HTTP 404: bad gateway"), ("not mergeable", "Pull request is not mergeable: the merge check timed out"), ("already", "Pull request is already queued: HTTP 503"), ("conflict", "Pull request has a merge conflict: HTTP 502"),
+                   ("failing", "Pull request has failing checks: timeout"), ("required status", "Required status check missing: timeout"), ("protected ref", "Cannot update this protected ref: HTTP 500"), ("not enabled", "Merge queue is not enabled: HTTP 500")):
+    s = scenario("enq-mixed-" + word.replace(" ", "-"), enq_fails="all", enq_kind="text:" + text, gq="open")
+    check(f"a refusal ({word}) that also holds a transient word is not retried: one call, no retry line", s["rc"] == 1 and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"], (s["rc"], enqueues(s), s["log"]))
+s = scenario("enq-mixed-internal", enq_fails="all", enq_kind="internal:Pull request is not mergeable", gq="open")
+check("an INTERNAL error whose message is a refusal is not retried: the refusal list is read before INTERNAL", s["rc"] == 1 and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"], (s["rc"], enqueues(s), s["log"]))
+s = scenario("enq-waits-spaces", enq_fails="2", enq_kind="504", gq="open,open,merged", extra={"RELEASE_ENQUEUE_WAITS": "  7   8 "})
+check("RELEASE_ENQUEUE_WAITS is split on its spaces into a list of waits (read -a): waits 7 and 8 (the list is of two, so three calls)", s["rc"] == 0 and s["sleeps"][:2] == ["7", "8"] and len(enqueues(s)) == 3, (s["sleeps"], enqueues(s)))
+s = scenario("enq-refused-red", enqueue="red", gq="open")
+check("a failed required check is not retried either: one call, no retry line", s["rc"] == 1 and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"] and "failing required statuses" in s["msg"], (enqueues(s), s["log"]))
+s = scenario("enq-timeout-queued", enq_fails="all", enq_kind="timeout", gq="queued,merged")
+check("a timeout after which the PR is already in the queue: the PR is read before another call, none is made, the release carries on and deploys",
+      s["rc"] == 0 and s["deployed"] and len(enqueues(s)) == 1 and "merge queue call answered" not in s["log"] and "but the PR is OPEN, in the merge queue (QUEUED position 1); carrying on" in s["log"] and s["sleeps"][:1] != ["5"], (s["rc"], enqueues(s), s["log"], s["sleeps"]))
+check("...and the report names the error that was tolerated", "the enqueue call errored" in s["msg"] and "but the PR was OPEN, in the merge queue" in s["msg"] and "FAILED" not in s["msg"], s["msg"])
+s = scenario("enq-reset-merged", enq_fails="all", enq_kind="reset", gq="merged")
+check("a reset after which the PR is MERGED: carried on with one call", s["rc"] == 0 and s["deployed"] and len(enqueues(s)) == 1 and "but the PR was MERGED" in s["msg"], (enqueues(s), s["msg"]))
 
 # ---- 3. MERGED, but the branch deletion fails: still green; the branch already gone; a cross-repository PR
 s = scenario("delfail", merge="ok", branch="present", delete="fail")
@@ -1292,7 +1332,7 @@ check("--status of a release with no log: the unit's state and nothing else", st
 
 
 wf = pathlib.Path(STACK, ".github/workflows/tests.yml").read_text()
-check("the step names main_green reads are tests.yml's own", all(f"- name: {n}\n" in wf for n in ("run every suite, measured", "audit the selection")))
+check("the step name main_green reads is tests.yml's own (kept though nothing is measured there any more), and the audit step it also knows is not: the audit runs in suitemap-refresh.yml", "- name: run every suite, measured\n" in wf and "- name: audit the selection\n" not in wf)
 
 # ---- 12b. deploy.sh's restart plan for the package layout: the real deploy.sh, --dry-run, in a throwaway checkout of a throwaway origin;
 # the plan is what a change between two commits restarts (the units start the server and the hub through the project's pinned dependencies and stackshot/cli.py)
@@ -1386,7 +1426,7 @@ rc, units_, got, out = plan_units("units/stackshot-minute.service.in", home=HOME
 check("deploy.sh --dry-run of a rollback of the minute unit's own file: it alone", rc == 0 and units_ == [M_], (rc, got, out[-300:]))
 
 OLD_DEPLOY = '#!/bin/sh\n# a deploy.sh from before the minute unit: it knows the rollback hand-off (DEPLOY_ROLLED_BACK_FROM) and nothing of the unit\necho "old deploy.sh ran from=${DEPLOY_ROLLED_BACK_FROM:-none}" >> "$RT_LOG"\n[ -z "${RT_OLD_FAILS:-}" ] || exit 1\nexit 0\n'
-def real_deploy(files, home, rollback=False, tripped=False, runner="", standby=False, predates=False, active="active", beat="fresh", off_fails=False, wait=None, mainpid=4242, beatpid=None, old_fails=False, timeout=120):
+def real_deploy(files, home, rollback=False, tripped=False, runner="", standby=False, predates=False, active="active", beat="fresh", off_fails=False, wait=None, mainpid=4242, beatpid=None, old_fails=False, timeout=120, refused=""):
     """The real deploy.sh, run for real (not --dry-run) in a throwaway checkout, with systemctl, the server's control, install.sh, uv and curl stubs that log to one file → (rc, stdout, the log's lines).
     The home is a copy (the stub install.sh removes the minute unit's file there, as the real one does). `predates`: the rollback's target has no template of the minute unit and an older deploy.sh (a stub that only logs).
     The systemctl stub answers is-active for the minute unit with `active` ("active", "inactive", "failed"), its MainPID with `mainpid`, and writes its heartbeat (status.json under RT_STATE/minute) at its restart as `beat` says: "fresh", "none" or
@@ -1417,11 +1457,12 @@ def real_deploy(files, home, rollback=False, tripped=False, runner="", standby=F
                  '  *is-active*stackshot-minute*) echo "$RT_ACTIVE"; [ "$RT_ACTIVE" = active ] || exit 3 ;;\n'
                  'esac\nexit 0')
     if tripped: (d / "tripped").write_text("")
-    for n, body in (("systemctl", systemctl), ("uv", 'echo "uv $*" >> "$RT_LOG"; echo published'), ("curl", "exit 0")):
+    uv = 'echo "uv $*" >> "$RT_LOG"\nif [ -n "$RT_REFUSED" ]; then echo "$RT_REFUSED" >&2; exit 1; fi\necho published'      # `refused`: the republish's one line on stderr, and its exit 1
+    for n, body in (("systemctl", systemctl), ("uv", uv), ("curl", "exit 0")):
         (d / "bin" / n).write_text("#!/bin/sh\n" + body + "\n"); (d / "bin" / n).chmod(0o755)
     env = {**genv, "PATH": f"{d}/bin:" + os.environ.get("PATH", ""), "HOME": str(h), "RT_LOG": str(d / "log"), "RT_TRIP": str(d / "tripped"), "RT_RUNNER": runner, "RT_STANDBY": "1" if standby else "",
            "RT_STATE": str(d / "state"), "RT_ACTIVE": active, "RT_BEAT": beat, "RT_OFF_FAILS": "1" if off_fails else "", "DEPLOY_MINUTE_WAIT": str(wait if wait is not None else 20),
-           "RT_MAINPID": str(mainpid), "RT_BEATPID": str(mainpid if beatpid is None else beatpid), "RT_OLD_FAILS": "1" if old_fails else ""}
+           "RT_MAINPID": str(mainpid), "RT_BEATPID": str(mainpid if beatpid is None else beatpid), "RT_OLD_FAILS": "1" if old_fails else "", "RT_REFUSED": refused}
     cmd = ["bash", str(b / "deploy.sh")]
     if rollback: env.update(DEPLOY_ROLLBACK="1", DEPLOY_TO=base, DEPLOY_LOCK_FILE=str(d / "deploy.lock")); cmd = ["flock", str(d / "deploy.lock")] + cmd
     rc_, text_ = run_alarm(cmd, timeout, cwd=b, env=env)
@@ -1438,6 +1479,11 @@ check("deploy.sh reinstalls the units with --force-host and never a bare `instal
 rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_NONE)
 check("deploy.sh, no minute unit installed, the same change: the server restarted, nothing asked about the minute unit, nothing said about it", rc == 0 and "server_ctl restart stackshot.service" in log
       and not any("minute" in l for l in log) and "stackshot-minute" not in out, (rc, log, out[-300:]))
+REFUSED = "publish: refused on box-a, which is not the server host: [release] deploy_ssh says the server runs on 192.0.2.7. Nothing was fetched, written, committed or pushed"
+rc, out, log, gone = real_deploy(("stackshot/web/minute.py",), HOME_NONE, refused=REFUSED)
+warns = [l for l in out.splitlines() if "republish" in l]
+check("deploy.sh, the republish refused (a server its own config names by an address): the deploy exits 0 with one warning line that carries the refusal and says the server publishes on its own at its next timer mark",
+      rc == 0 and warns == [f"  WARNING: the republish failed ({REFUSED}); the deploy itself is done and the server publishes on its own at its next timer mark ([publish] every_minutes, 10 min by default)"], (rc, warns, out[-400:]))
 rc, out, log, gone = real_deploy(("units/stackshot-minute.service.in",), HOME_MIN)
 check("deploy.sh, minute unit installed, only its unit file changed: the minute unit restarted, the server not (no republish either)", rc == 0 and f"systemctl --user restart {M_}" in log
       and not any(l.startswith("server_ctl restart") or l.startswith("uv run") for l in log), (rc, log, out[-300:]))

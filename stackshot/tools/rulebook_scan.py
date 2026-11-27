@@ -1,4 +1,4 @@
-"""tools/rulebook_scan.py — the nightly scan of the instruction files sessions read for stale mentions of stackshot's tools and
+"""tools/rulebook_scan.py — the scan, run after each of the audit's two daily runs, of the instruction files sessions read for stale mentions of stackshot's tools and
 sala's commands. Why: a rulebook line can keep saying `owner` after the
 tools moved to `mover`, and nothing would catch it. Tokenless: no model call, no network but the one message per file it sends.
 
@@ -48,6 +48,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -216,10 +217,25 @@ def parse_help(main: str, op_help: str = "") -> SalaHelp:
     return h
 
 
+def find_sala(sala: str) -> str:
+    """The sala command to run, found the way every other external command of the checkout is (`shutil.which`, then ~/.local/bin): a name with a slash is taken as written. "" when no such executable exists
+    (a machine with no sala: the scan then skips the sala checks, see scan_all)."""
+    if os.sep in sala:
+        c = os.path.expanduser(sala)
+        return c if os.path.isfile(c) and os.access(c, os.X_OK) else ""
+    for c in (shutil.which(sala), os.path.expanduser(f"~/.local/bin/{sala}")):
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return ""
+
+
 def run_help(sala: str, verb: str = "") -> str:
     """`sala --help` or `sala <verb> --help` (for a verb in [rulebook_scan] help_verbs only): the help text, "" when it cannot be read."""
+    exe = find_sala(sala)
+    if not exe:      # no sala here: nothing to run and nothing to say (scan_all names it once)
+        return ""
     try:
-        r = subprocess.run([sala, *([verb] if verb else []), "--help"], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+        r = subprocess.run([exe, *([verb] if verb else []), "--help"], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
         return (r.stdout or "") + (r.stderr or "")
     except Exception as e:  # noqa: BLE001
         print(f"rulebook_scan: {sala} {verb} --help not read: {e}", file=sys.stderr)
@@ -464,11 +480,14 @@ def scan_all(cfg: dict[str, Any], *, schema: Path | None = None, help_main: Path
         tools = {k: list(v) for k, v in json.loads(Path(schema).read_text(encoding="utf-8")).items()}
     else:
         tools = server_tools(cfg["server"])
-    main_help = Path(help_main).read_text(encoding="utf-8") if help_main else run_help(cfg["sala"])
-    op_help = Path(help_op).read_text(encoding="utf-8") if help_op else (run_help(cfg["sala"], "op") if "op" in cfg["help_verbs"] else "")
-    op_asked = not help_op and "op" in cfg["help_verbs"]
+    no_sala = not help_main and not find_sala(cfg["sala"])      # no sala command on this machine (not on PATH, not in ~/.local/bin): its checks are skipped, said once
+    main_help = Path(help_main).read_text(encoding="utf-8") if help_main else ("" if no_sala else run_help(cfg["sala"]))
+    op_help = Path(help_op).read_text(encoding="utf-8") if help_op else (run_help(cfg["sala"], "op") if "op" in cfg["help_verbs"] and not no_sala else "")
+    op_asked = not help_op and "op" in cfg["help_verbs"] and not no_sala
     help_ok = bool(main_help.strip()) and (not op_asked or bool(op_help.strip()))
-    if not main_help.strip():
+    if no_sala:
+        notes.append(f"no `{cfg['sala']}` command on this machine (PATH, ~/.local/bin): the sala verb and flag checks were skipped")
+    elif not main_help.strip():
         notes.append("sala --help gave nothing: the sala verbs and flags were not checked")
     elif not help_ok:
         notes.append("sala op --help gave nothing: the sala verbs and flags were not checked")

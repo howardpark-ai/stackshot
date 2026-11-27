@@ -35,7 +35,7 @@ Part 2, the order of the sections (panel_order):
   * the script: each inline script parses (node, when present), and every address it writes is at the root.
 
     tests/run-suite panel_prefs        → exit 0 / 1"""
-import json, logging, os, pathlib, re, shutil, subprocess, sys, time
+import datetime, json, logging, os, pathlib, re, shutil, subprocess, sys, time
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch
@@ -85,6 +85,9 @@ from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 from stackshot.core import config as _cfg; from stackshot.web import app as _wapp       # the order part's (_wapp drops the kept home draw when it changes the Anchor hub)
+# The pages the suite compares with each other carry the time they were drawn (the header's line, the time tips, to the minute): every page is drawn as of one moment, so a minute passing between two draws changes nothing.
+DRAWN_AT, _board_init = datetime.datetime.now(_cfg.tz()), r2.Board.__init__
+r2.Board.__init__ = lambda self, data_dir, now=None, **kw: _board_init(self, data_dir, now or DRAWN_AT, **kw)
 DEFAULT = ["machines", "runners", "anchorhub", "audit-panel", "projects-panel"]
 UI = up.path()
 COOKIE = {e: _signin._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, NOOR)}

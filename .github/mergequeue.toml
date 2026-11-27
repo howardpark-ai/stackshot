@@ -10,8 +10,8 @@ queue_mode = "chain"
 
 # What a queue run is tested by: a push to a branch under queue_prefix runs tests.yml (its `push` trigger lists 'queue/**') and gets the run a pull request gets: the suites its change reaches by the newest map
 # (`suitemap.py select`), in the `suites` job, with no plan and no six measuring shards, however large the selection (a pull request's large selection runs in the shards, a queue branch's never does; a selected run is much shorter than a full sharded run). That is GitHub's merge-queue convention: an entry runs the checks a PR runs, and
-# main's own full measured run, with the selection audit, follows the merge. The job named `suites` is the check mq reads on an entry's head, and the same job name the PR check and release.sh's main_green read.
-# What a queue run does not give is the measured map and the selection audit (main's run only); the risk is a selection that misses a suite, which a PR's run accepts as well, and main's full run after the merge catches it.
+# main's own push then only checks that the merge queue's full run of the commit passed (the suite map and its selection audit are made apart from the gate, by suitemap-refresh.yml, every 3 hours). The job named `suites` is the check mq reads on an entry's head, and the same job name the PR check and release.sh's main_green read.
+# What a queue run does not give is the check that every suite ran (a merge-queue entry's run and an unproven push to main give it); the risk is a selection that misses a suite, which a PR's run accepts as well, and the refresh's audit and the full run of a commit the queue did not test catch it.
 required = ["suites"]
 queue_prefix = "queue/main/"   # must start with queue/ (tests.yml triggers on queue/**) and end with /
 suites = "select"              # mq only passes this on ("all" | "select"); tests.yml honors it: a queue branch runs the selection, never main's full sharded run. tests/suitemap_scenario.py fails when this and tests.yml disagree

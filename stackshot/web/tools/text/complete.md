@@ -3,7 +3,7 @@ Deprecated, pass outcome_text. Still accepted for callers that predate it: what 
 as the outcome text and never replaces the item's description (a text equal to the stored description is ignored).
 
 ## description complete
-Close an item; it works on a parked item too. Right call (item_id is board#N, never the bare number):
+Close an item; it works on a parked item too. Right call (item_id is board#N; a bare number N or #N is read as board#N; the reply says so and names the item by its subject):
 complete(item_id="board#N", sender="my-x", outcome="done", reason="Export shipped in PR 12", outcome_text="- PR 12
 merged\n- live on the box") (outcome_text: short `- ` bullets, every line `- ` included at most {{DESC_LINE_MAX}} characters); not
 planned: complete(item_id="board#N", sender="my-x", outcome="dropped", reason="No longer needed", outcome_text="- The
@@ -22,4 +22,4 @@ item reads stale after {{CALL_DAYS}} d without a state change or a confirm when 
 {{AGENT_DAYS}} d on agent, {{EXTERNAL_DAYS}} d when it waits on others; a parked item never does. Changes nothing
 else: no field, no state clock, no page owed, nobody told. Stale means unverified, not wrong: re-read the item against
 its project page, then confirm, update or complete it. sender = your own session (name or cse_… id). item_id = board#N
-(a bare number N is read as board#N). {{SENDER_MIRROR_STRIPPED}}
+(a bare number N or #N is read as board#N). {{SENDER_MIRROR_STRIPPED}}

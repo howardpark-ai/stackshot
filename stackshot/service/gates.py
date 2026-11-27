@@ -42,7 +42,7 @@ from stackshot.model import contact as _contact
 from stackshot.model import draft as _draft
 from stackshot.model import faults as _faults
 from stackshot.model import field_gates as _fg
-from stackshot.model.ids import _bare_id_ok, _norm_id
+from stackshot.model.ids import _norm_id
 from stackshot.model import holders as _holders
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
@@ -87,7 +87,7 @@ class Hooks:
     ask_none: Any            # the closed list of words that clear an ask (server._ASK_NONE)
     ask_stands: Callable[..., Any]
     basis_words: Any
-    close_refusal: Any            # the full close rule a refused close appends (server._CLOSE_REFUSAL)
+    close_refusal: Any            # the full close rule (server._CLOSE_REFUSAL); a refused close no longer appends it: it shows the accepted call, the tool text carries the rule
     contact_alive: Callable[..., Any]
     contact_fronts: Callable[..., Any]
     contact_same: Callable[..., Any]
@@ -1126,7 +1126,7 @@ def gate_after(after: Any, gid: str = "", line: int = 0) -> list[str]:
         raise ToolError("Refused: after is a list of item ids (or one comma-separated string)")
     out = []
     for x in after:
-        g = _norm_id(str(x))
+        g = _norm_id(str(x), bare=True)
         if not _path(g).exists():
             raise ToolError(f"Refused: after names {g}, which does not exist")
         g = h.follow_superseded(g)
@@ -1421,7 +1421,7 @@ def ask_pre(item_id: str) -> "dict[str, Any]":
     """What an update needs to know of the ask before the write: the item, the ask that stood and its record, where the owner's notes are looked for from, and the text the item held (every text it
     keeps, one line each), so that only a line new in the write is read as its author's word. {} when the item cannot be read."""
     try:
-        gid = _norm_id(item_id)
+        gid = _norm_id(item_id, bare=True)
         item = _load(gid)
     except ToolError:
         return {}
@@ -1535,7 +1535,7 @@ def until_in(item_id: str, status: str, until: str, wake: str, ask_by: str, hold
     kind = _model.clean(wait_kind).lower()
     if not kind or kind in h.ask_none:
         try:
-            kind = _watch.stored_kind((_load(_norm_id(item_id, bare=_bare_id_ok(status))).get("metadata") or {})) if not kind else ""
+            kind = _watch.stored_kind((_load(_norm_id(item_id, bare=True)).get("metadata") or {})) if not kind else ""
         except Exception:  # noqa: BLE001  — an unknown item is _update's to refuse
             kind = ""
     slot = _uw.slot_of(kind)                                                  # the one working field the date of this kind stands in ("ask_by" for a relay or event wait, else "wake")
@@ -1572,7 +1572,9 @@ def gate_close(gid: str, item: dict[str, Any], outcome: str, reason: str, supers
     if outcome == "superseded" and not superseded_by.strip():
         missing.append("superseded_by")
     if missing:
-        faults.append(f"Refused: closing {gid} needs {', '.join(missing)}. " + h.close_refusal + h.relaunch)
+        form = (f"accepted form: complete(item_id=\"{gid}\", sender=\"my-x\", outcome=\"done\", reason=\"<one line: the end state and why it closes>\", outcome_text=\"- <how it ended>\"); "
+                "outcome is done | dropped | superseded, and superseded takes superseded_by=\"board#M\" too")
+        faults.append(f"Refused: closing {gid} needs {', '.join(missing)}; {form}." + (h.relaunch if {"outcome", "reason", "outcome_text"} <= set(missing) else ""))
     if outcome == "unrecorded":
         faults.append("Refused: outcome unrecorded means the item closed before the model with no outcome in its record; only the migration writes it. A close says how it ended: "
                       f"{' | '.join(h.outcomes)}")
@@ -1593,7 +1595,7 @@ def gate_close(gid: str, item: dict[str, Any], outcome: str, reason: str, supers
             faults.append(f"Refused: superseded_by goes with outcome=superseded, not {outcome}")
         else:
             try:
-                rep = _norm_id(superseded_by)
+                rep = _norm_id(superseded_by, bare=True)
             except ToolError as e:
                 faults.append(str(e))
             if not rep:

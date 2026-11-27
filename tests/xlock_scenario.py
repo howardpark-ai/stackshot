@@ -72,6 +72,17 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""), flush=True)
 
+def segments(src):
+    """`ast.get_source_segment` for many nodes of one source. The standard function splits the whole source into lines at every call, which over every call of
+    the package is most of this suite's time; here a source is split once. Lines end where the parser ends them (CR LF, LF or CR; a form feed ends none), and a
+    node's column offsets count UTF-8 bytes, not characters."""
+    lines = [line.encode() for line in re.findall(r".*?(?:\r\n|\n|\r|$)", src)]
+    def segment(node):
+        a, b = node.lineno - 1, node.end_lineno - 1
+        if a == b: return lines[a][node.col_offset:node.end_col_offset].decode()
+        return b"".join((lines[a][node.col_offset:], *lines[a + 1:b], lines[b][:node.end_col_offset])).decode()
+    return segment
+
 from stackshot.core import config as _cfg, xlock                  # noqa: E402
 STRICT0 = xlock.strict                                            # as the environment set it (on under tests/run-suite): the checks that turn it off or on put it back to this
 GO, ROUNDS = T / "xl-go", 50
@@ -528,19 +539,25 @@ try:
     LOCKED_BY_CALLER[("github/ghsync.py", "take")] = "the re-key's file move (_move): it holds the item lock, `XLock(\"item\")`, from its read to the last removal of the old file"
     UNLOCKED_FOLLOW_UP = {}   # the writers of an item file that are neither writes.save nor under the lock: none (the GitHub re-key took the item lock)
     def is_item_lock(t): return "ITEM_LOCK" in t or t.replace(" ", "").endswith('XLock("item")')
+    wide = chr(0xE9) + chr(0x20AC) + chr(0x1D11E)      # characters of two, three and four UTF-8 bytes
+    sample = f'f("{wide}", g(1,\n    "{wide}"))\r\nwith lock("{wide}\x0c", a): h_{chr(0xE9)}.save(x,\r    "{wide}", y)\n'
+    seg = segments(sample); nodes = [n for n in ast.walk(ast.parse(sample)) if getattr(n, "end_col_offset", None) is not None]
+    differ = [(seg(n), ast.get_source_segment(sample, n)) for n in nodes if seg(n) != ast.get_source_segment(sample, n)]
+    check("15 source segments: the scans' segment reader gives ast.get_source_segment's text for every node of a source with non-ASCII text, nodes over several lines, a form feed and each kind of line end",
+          any(n.end_lineno > n.lineno for n in nodes) and not differ, differ)
     found = []
     for path in sorted((pathlib.Path(STACK) / "stackshot").rglob("*.py")):
         src = path.read_text(encoding="utf-8")
         try: tree = ast.parse(src)
         except SyntaxError: continue
-        rel = str(path.relative_to(pathlib.Path(STACK) / "stackshot"))
+        rel = str(path.relative_to(pathlib.Path(STACK) / "stackshot")); seg = segments(src)
         def walk(node, withs, func):
             for ch in ast.iter_child_nodes(node):
                 w, f = withs, func
                 if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)): f, w = ch.name, ()
-                if isinstance(ch, ast.With): w = withs + tuple(ast.get_source_segment(src, i.context_expr) or "" for i in ch.items)
+                if isinstance(ch, ast.With): w = withs + tuple(seg(i.context_expr) for i in ch.items)
                 if isinstance(ch, ast.Call):
-                    name = ast.get_source_segment(src, ch.func) or ""
+                    name = seg(ch.func)
                     if (name.endswith("_writes.save") or name.endswith("writes.save") or name.endswith("_write_item")) and rel not in ("web/search.py",) and not any(is_item_lock(t) for t in w):
                         found.append((rel, f))
                 walk(ch, w, f)
@@ -1150,14 +1167,14 @@ try:
         src = path.read_text(encoding="utf-8")
         try: tree = ast.parse(src)
         except SyntaxError: continue
-        rel = str(path.relative_to(pathlib.Path(STACK) / "stackshot"))
+        rel = str(path.relative_to(pathlib.Path(STACK) / "stackshot")); seg = segments(src)
         def walk2(node, withs, func):
             for ch in ast.iter_child_nodes(node):
                 w, f = withs, func
                 if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)): f, w = ch.name, ()
-                if isinstance(ch, ast.With): w = withs + tuple(ast.get_source_segment(src, i.context_expr) or "" for i in ch.items)
+                if isinstance(ch, ast.With): w = withs + tuple(seg(i.context_expr) for i in ch.items)
                 if isinstance(ch, ast.Call):
-                    n = (ast.get_source_segment(src, ch.func) or "").split(".")[-1]
+                    n = seg(ch.func).split(".")[-1]
                     if (n in owed or (rel, f, n) in OWED_IN) and f != n and not any(is_item_lock(t) for t in w): calls_unlocked.append((rel, f, n))
                 walk2(ch, w, f)
         walk2(tree, (), None)

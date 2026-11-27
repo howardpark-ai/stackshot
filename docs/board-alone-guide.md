@@ -206,7 +206,7 @@ Good result: `all good`, exit 0.
 
 In a new Claude Code session, or in a claude.ai chat with the connector, ask for something like this:
 
-> Create a board item with the Stackshot connector. Subject: `[todo] Try the board` (use your own prefix). Project: `projects/getting-started`. Description: one `- ` bullet that opens `Goal:` and states the outcome you want (for example `- Goal: the board shows this first item`); the server refuses a description whose first bullet does not start `Goal:`. Sender and mover: the same short name for this session. Add one `next` line that starts with that session name and a colon.
+> Create a board item with the Stackshot connector. Subject: `[todo] The board shows its first item` (use your own prefix). Project: `projects/getting-started`. Description: one `- ` bullet that opens `Goal:` and states the outcome you want (for example `- Goal: the board shows this first item`); the server refuses a description whose first bullet does not start `Goal:`. Sender and mover: the same short name for this session. Add one `next` line that starts with that session name and a colon.
 
 Good result, all of these:
 

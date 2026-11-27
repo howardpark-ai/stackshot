@@ -67,7 +67,7 @@ def subject_faults(subject: str, current: str | None = None) -> list[str]:
         out.append(f"Refused: subject must start with one of {s['prefixes']} — got {subject[:40]!r}")
     lim = _subject_max()
     if lim and len(subject) > lim and subject != current:
-        out.append(f"Refused: the subject is {len(subject)} characters and the limit is {lim}, the scope prefix counted. Shorten it to the action and its object; "
+        out.append(f"Refused: the subject is {len(subject)} characters and the limit is {lim}, the scope prefix counted. Shorten it to the finished outcome; "
                    "the detail goes in the description bullets (and the project page's timeline).")
     return out
 
@@ -169,32 +169,42 @@ def _next_line_max() -> int:
     return int(_cfg.CFG.get("metadata", {}).get("next", {}).get("line_max", 200)) if _bullets_on() else 0
 
 
-def fix_long_bullets(desc: str, stored: str | None = None) -> tuple[str, str]:
-    """A description whose bullets read over the limit, put right instead of refused: each long bullet is split at the gaps after its sentences into shorter bullets, and a clause still over the limit on its own at
-    its last comma, colon, spaced dash or opening parenthesis that leaves each piece within it (bullet_text.split_long_ex: no word is dropped, nothing is cut inside a link, a naked URL or a code span), and the reply says so
-    (call_log.fixed). → (the text, the History line the caller writes onto the item: the server changed it, "" when it did not). The text as given when it is within the form, when the fault is anything but a long bullet,
-    or when the split cannot be made (a clause with no cut that fits, more than the line cap): the gate then refuses it as before. A description with no bullet form required ([description] require_bullets = false) is
-    left alone. When the split text breaks the form some other way (a later line that is no bullet), the split text comes back with no note and no fix counted, so the gate refuses the fault that is left, not a long
-    bullet the server would have put right. `stored` is the description the item holds already (an update passes it): when the split gives exactly that text, the same long description has been sent before and is
-    stored as split, so the server changed nothing this time: no fix is counted, no reply line, no History line."""
+def fix_long_bullets(desc: str, stored: str | None = None, field: str = "description") -> tuple[str, str]:
+    """A description (or a close's outcome text, `field="outcome_text"`) whose bullets read over the limit, put right instead of refused: each long bullet is split at the gaps after its sentences into shorter bullets, a clause
+    still over the limit on its own at its last comma, colon, spaced dash or opening parenthesis that leaves each piece within it, and a bullet no such cut splits at its last space that fits, the rest on an indented `- ` line under
+    it (bullet_text.split_long_wrap: no word is dropped or cut, nothing is cut inside a link, a naked URL or a code span), and the reply says so (call_log.fixed: kind description-bullet or outcome-bullet for the first
+    two cuts, bullet-wrap or outcome-wrap for the last). -> (the text, the History line the caller writes onto the item: the server changed it, "" when it did not). The text as given when it is within the form, when the fault is anything
+    but a long bullet, or when the split cannot be made (a piece that is one unbroken token, a bullet with lines indented under it, more lines than the cap): the gate then refuses it as before. A text with no bullet form
+    required ([description] require_bullets = false) is left alone. When the split text breaks the form some other way (a later line that is no bullet), the split text comes back with no note and no fix counted, so
+    the gate refuses the fault that is left, not a long bullet the server would have put right. `stored` is the text the item holds already (an update passes it): when the split gives exactly that text, the same long
+    text has been sent before and is stored as split, so the server changed nothing this time: no fix is counted, no reply line, no History line."""
     if not desc or not _bullets_on():
         return desc, ""
     max_lines, line_max = _description_limits()
     bad = _bt.judge(desc, max_lines, line_max)
     if not bad or bad[0] != "long":
         return desc, ""
-    res = _bt.split_long_ex(desc, max_lines, line_max)
+    res = _bt.split_long_wrap(desc, max_lines, line_max)
     if not res:
         return desc, ""
-    new, n, soft = res
+    new, n, soft, wrapped = res
     if _bt.judge(new, max_lines, line_max):          # a split that still breaks the form (a later line not a bullet) is no fix: the gate refuses the fault that is left, and nothing is counted or told
         return new, ""
     if stored is not None and new.strip() == str(stored).strip():          # the same long text again, already stored as split: nothing is changed, so nothing is counted, told or noted
         return new, ""
-    where, hist = ("at the end of a sentence or at a comma, colon, dash or parenthesis", "at the end of a sentence or a comma, colon, dash or parenthesis") if soft else ("at the end of a sentence",) * 2
-    kept = "no word changed; a spaced dash at a cut is dropped" if soft else "no word changed"
-    _calls.fixed("description-bullet", f"{n} description bullet{'' if n == 1 else 's'} over {line_max} characters {'was' if n == 1 else 'were'} split {where} into shorter bullets, {kept}", fields=["description"], stored=new, sent=desc)
-    return new, f"description: {n} long bullet{'' if n == 1 else 's'} split by the server {hist}"
+    by_sentence = n - wrapped
+    hist: list[str] = []
+    if by_sentence:
+        where, h_ = ("at the end of a sentence or at a comma, colon, dash or parenthesis", "at the end of a sentence or a comma, colon, dash or parenthesis") if soft else ("at the end of a sentence",) * 2
+        kept = "no word changed; a spaced dash at a cut is dropped" if soft else "no word changed"
+        _calls.fixed("description-bullet" if field == "description" else "outcome-bullet",
+                     f"{by_sentence} {field} bullet{'' if by_sentence == 1 else 's'} over {line_max} characters {'was' if by_sentence == 1 else 'were'} split {where} into shorter bullets, {kept}", fields=[field], stored=new, sent=desc)
+        hist.append(f"{field}: {by_sentence} long bullet{'' if by_sentence == 1 else 's'} split by the server {h_}")
+    if wrapped:
+        _calls.fixed("bullet-wrap" if field == "description" else "outcome-wrap", f"{wrapped} {field} bullet{'' if wrapped == 1 else 's'} over {line_max} characters {'was' if wrapped == 1 else 'were'} cut at a space, the rest on an indented `- ` line under it, no word changed",
+                     fields=[field], stored=new, sent=desc)
+        hist.append(f"{field}: {wrapped} long bullet{'' if wrapped == 1 else 's'} continued on an indented line by the server, cut at a space")
+    return new, "; ".join(hist)
 
 
 def _step_line_room() -> int:
@@ -282,18 +292,21 @@ def description_faults(desc: str, field: str = "description") -> list[str]:
     bad = _description_fault(desc)
     if bad:
         kind, ln, n = bad
-        if kind == "lines":
-            out.append(f"Refused: {field} has {n} lines, the limit is {max_lines}; {fix}")
+        if kind == "lines":      # nested bullets count toward the cap too, so the way down is fewer facts or more per bullet, never a parent bullet
+            out.append(f"Refused: {field} has {n} lines, the limit is {max_lines}: cut {n - max_lines} (merge related facts into one bullet, or move detail to the project page); "
+                       f"accepted form: `- Goal: <the result you want>` then short `- ` bullets, one fact each, at most {line_max} characters, {max_lines} lines in all, nested ones counted")
         elif kind == "marker":
             out.append(f"Refused: {field} line is not a `- ` bullet: \"{_clip_line(ln, 60)}\"; {fix}")
         else:
-            out.append(f"Refused: {field} bullet is {n} characters, the limit is {line_max} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; {fix}")
+            out.append(f"Refused: {field} bullet is {n} characters, the limit is {line_max} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; the server splits a long bullet at a sentence end or a space by itself, "
+                       f"and could not split this one (no ordinary space to cut at within a line: a word or link longer than a line, or text spaced only with non-breaking or wide spaces; a bullet with lines indented under it, or more than {max_lines} lines once split); {fix}")
     if field != "description":
         return out
     low = desc.lower()
     for tok in d.get("forbid_tokens", []):
         if tok.lower() in low:
-            out.append(f"Refused: description contains {tok!r} — a description is the live state, never a changelog; fold the resolution into the state")
+            at = next((ln for ln in desc.splitlines() if tok.lower() in ln.lower()), "")
+            out.append(f"Refused: description contains {tok!r} — a description is the live state, never a changelog, so {tok!r} may not appear anywhere in it, in any case, even inside a longer word: \"{_clip_line(at, 60)}\". Write the state instead, e.g. `- PR 12 is merged and live`, not `- Done: PR 12 merged`")
             break
     return out
 
@@ -331,12 +344,12 @@ def _sendable(desc: str) -> bool:
     max_lines, line_max = _description_limits()
     if not _bt.judge(desc, max_lines, line_max):
         return True
-    res = _bt.split_long_ex(desc, max_lines, line_max)
+    res = _bt.split_long_wrap(desc, max_lines, line_max)
     return bool(res) and not _bt.judge(res[0], max_lines, line_max)
 
 
 def goal_fault(desc: str) -> str:
-    """The refusal text `_gate_goal` raises for `desc`, "" when the description opens with its goal (or the form checks are off). A session's new description, or one it rewrites, opens with the goal: the first `- ` bullet starts `Goal:` (case-sensitive, right after the dash) and says the outcome wanted;
+    """The refusal text `_gate_goal` raises for `desc`, "" when the description opens with its goal (or the form checks are off). A session's new description, or one it rewrites, opens with the goal: the first `- ` bullet starts `Goal:` (case-sensitive, right after the dash) and says the finished outcome;
     a symptom, cause or trigger goes in a later bullet that opens `Problem:`. Why: an item once carried a title and bullets that described the trouble and never said what result was wanted.
     Judged on the text written in the call only (the callers run it for a session's create and for an update that replaces the description with other text), after the form gate.
     The first bullet is the first `- ` line (bullet_text.first_bullet); a description with no bullet is refused the same way. [description] require_bullets = false switches it off with the other form checks."""
@@ -347,8 +360,8 @@ def goal_fault(desc: str) -> str:
     ex = _bt.goal_example(desc)
     if ex is not None and not _sendable(ex):      # a corrected description the form gate would refuse again is no example to copy
         ex = None
-    shown = (f" Send the description again with that bullet as the goal:\n{ex}\n" + "If that bullet names a symptom, a cause or a trigger, write the outcome you want as the goal and move the bullet to a later bullet that opens `Problem:`.") if ex else ""
-    return (f"Refused: the description must open with its goal, and {saw}.{shown} The subject and the first bullet state the outcome wanted: `- Goal: <the result you want, in a sentence>`; "
+    shown = (f" Send the description again with that bullet as the goal:\n{ex}\n" + "If that bullet names a symptom, a cause or a trigger, write the finished outcome as the goal and move the bullet to a later bullet that opens `Problem:`.") if ex else ""
+    return (f"Refused: the description must open with its goal, and {saw}.{shown} The subject and the first bullet name the same finished outcome: `- Goal: <the result you want, in a sentence>`; "
                     "a symptom, a cause or a trigger goes in a later bullet that opens `Problem:`. "
                     "Example: the symptom title “Fix X fails when Y” becomes the outcome title “Make X work when Y”, with `- Goal: X works when Y` as the first bullet "
                     "and `- Problem: X fails when Y` as the second. `Goal:` is case-sensitive and sits right after the dash." + _GOAL_RETRY)
@@ -441,7 +454,7 @@ def next_faults(next_: str, has_ask: bool = False, session: bool = False) -> lis
         fault = ""
         if (n := _next_len(ln)) > limit:
             fault = (f"Refused: a line of next is {n} characters after its `<actor>: ` prefix, the limit is {limit} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; "
-                     "next is one short line per next action, each naming who takes it; results and detail go on the project page (Current state or a timeline line)")
+                     f"cut it by {n - limit} character{'' if n - limit == 1 else 's'}: next is one short line per next action, each naming who takes it, e.g. `my-x: merge PR 12 once CI is green`; results and detail go on the project page (Current state or a timeline line)")
         elif (whole := _visible_len(ln)) > limit + NEXT_PREFIX_ROOM:         # the prefix is a name of up to three words of any length: the line as a whole is capped too
             fault = (f"Refused: a line of next is {whole} characters in all, the limit for the whole line is {limit + NEXT_PREFIX_ROOM} (the {limit} counts after its `<actor>: ` prefix, which has {NEXT_PREFIX_ROOM} characters of room; "
                      f"a link's URL does not count): \"{_clip_line(ln, 60)}\"; next is one short line per next action, each naming who takes it, with a short name; results and detail go on the project page (Current state or a timeline line)")

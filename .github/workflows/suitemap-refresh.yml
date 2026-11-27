@@ -1,0 +1,202 @@
+# The suite map, made off the gate. tests.yml picks the suites a pull request runs by a map (tests/suitemap.py select: which suites reach which files, measured by tracing every suite under strace and coverage).
+# Tracing costs about twice a plain run, so it no longer happens in the merge queue's run (tests.yml, THE GATE, deviation D3); it happens here, every 3 hours, on main, and nothing waits for it.
+# A run measures every suite on main's head, in the same six shards as the gate (plan, six `measure` jobs, then `refresh`), merges the shards' maps into one (tests/suitemap.py merge: every suite exactly once, or it fails),
+# audits the selection (tests/suitemap.py audit: would the earlier map have picked every suite whose measurement changed since), saves the map to the Actions cache under its own key and publishes it as the artifact `suitemap`.
+#   * the cache key is suitemap-<commit>-<run id>: unique per run, because a cache entry cannot be overwritten. Readers restore the newest entry by the prefix `suitemap-` (tests.yml: key suitemap-newest, restore-keys suitemap-).
+#     A cache saved on main is readable from every pull request, queue entry and queue branch; nothing else is needed to share it;
+#   * the artifact `suitemap` is what `tests/suitemap.py fetch` and tools/test_trim_report.py read from outside a run (the cache cannot be read from outside); they take the newest successful run of THIS workflow on main;
+#   * a map is hours old when a pull request picks by it: `select` always adds the change since the map's commit, so a map that lags only costs a wider pick, never a missed suite (TRACE_MAX_AGE in tests/suitemap.py: a suite
+#     is traced again when its earlier trace is older than that, 24 hours, and else keeps the earlier file measurement, which the audit checks).
+# A failed run is not silent: the job `report` opens an issue (or comments on the open one) naming the run, and closes it when a later run is green. A refresh that fails leaves the last good map in use, and a pull request picks by it, wider as it ages.
+# Concurrency: one run at a time (group below); a newer one waits and never cancels a run in progress (a half-traced run is no map). The free plan's 20 concurrent jobs are not raised: the six shards are the same six the gate uses, and a refresh that overlaps a queue run
+# only delays whichever starts second. The schedule runs on the default branch; a manual run (gh workflow run suitemap-refresh.yml) takes the branch it is given, saves and publishes all the same, so run it on main.
+name: suitemap-refresh
+on:
+  schedule:
+    - cron: '23 */3 * * *'   # every 3 hours, at minute 23 (GitHub's schedule runs late at the top of an hour)
+  workflow_dispatch:
+concurrency:
+  group: suitemap-refresh
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  shards:
+    name: refresh shard plan
+    runs-on: ubuntu-latest   # it only reads a map and lists suites
+    timeout-minutes: 15
+    outputs:
+      shard0: ${{ steps.plan.outputs.shard0 }}
+      shard1: ${{ steps.plan.outputs.shard1 }}
+      shard2: ${{ steps.plan.outputs.shard2 }}
+      shard3: ${{ steps.plan.outputs.shard3 }}
+      shard4: ${{ steps.plan.outputs.shard4 }}
+      shard5: ${{ steps.plan.outputs.shard5 }}
+    steps:
+      - name: scratch goes to the runner's temp folder
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - name: the one test environment
+        run: echo "UV_PROJECT_ENVIRONMENT=${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv" >> "$GITHUB_ENV"
+      # the newest map, for the measured times the plan is balanced by; none (a cache miss) gives the hash plan
+      - name: the suite map
+        uses: actions/cache/restore@v4
+        with:
+          path: .suitemap/map.json
+          key: suitemap-newest
+          restore-keys: suitemap-
+      - name: plan the shards
+        id: plan
+        run: |
+          set -o pipefail   # a failing plan must fail the step, not hide behind tee's exit status
+          uv run --locked --only-group tests python tests/suitemap.py plan --of 6 --map .suitemap/map.json | tee -a "$GITHUB_OUTPUT"
+  measure:
+    needs: shards
+    name: refresh shard ${{ matrix.shard }}
+    strategy:
+      fail-fast: false   # one failing shard must not cancel the others: the merge then names what is missing
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180   # a suite gets MEASURE_T (60 min) and its plain rerun (release: 5 min): 100 min could not hold both
+    env:
+      MEASURE_T: 3600    # seconds a suite gets traced and under coverage: a traced suite runs four to eight times its plain time; the release suite once ran over its limit measured
+      CAIO_IMPL: linux
+    steps:
+      - name: scratch goes to the runner's temp folder
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - name: strace, for the measured run
+        if: runner.environment == 'github-hosted'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends strace
+      - name: the one test environment
+        run: echo "UV_PROJECT_ENVIRONMENT=${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv" >> "$GITHUB_ENV"
+      # the earlier map, for measure --prev only (which suites to trace again). The list of suites is not decided from it here: it comes from the plan job, the same for every shard
+      - name: the suite map
+        uses: actions/cache/restore@v4
+        with:
+          path: .suitemap/map.json
+          key: suitemap-newest
+          restore-keys: suitemap-
+      - name: run this shard's suites, measured
+        env:
+          SHARD: ${{ matrix.shard }}
+          SELECTED: ${{ needs.shards.outputs[format('shard{0}', matrix.shard)] }}
+        run: |
+          case $SELECTED in *[!a-z0-9_\ ]*) echo "the plan holds only names of suites, separated by spaces"; exit 2 ;; esac
+          [ -n "$SELECTED" ] || { echo "shard $SHARD has no suite"; exit 0; }
+          echo "shard $SHARD: $SELECTED"
+          exec uv run --locked --only-group tests python tests/suitemap.py measure -T "$MEASURE_T" --prev .suitemap/map.json --map ".suitemap/shard-$SHARD.json" $SELECTED   # exec: a cancel's signal reaches suitemap.py
+      - name: hand the shard's map on
+        if: always() && hashFiles('.suitemap/shard-*.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: suitemap-shard-${{ matrix.shard }}
+          path: .suitemap/shard-${{ matrix.shard }}.json
+          include-hidden-files: true   # under the hidden folder .suitemap
+          retention-days: 1
+          overwrite: true   # a re-run of the job (same run id) uploads the same artifact name again; without this the second upload fails
+  refresh:
+    needs: [shards, measure]
+    if: ${{ !cancelled() }}
+    name: merge, save and publish the map
+    runs-on: ubuntu-latest   # it only merges the shards' maps and audits
+    timeout-minutes: 30
+    steps:
+      - name: scratch goes to the runner's temp folder
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - name: the one test environment
+        run: echo "UV_PROJECT_ENVIRONMENT=${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv" >> "$GITHUB_ENV"
+      - name: the earlier map
+        uses: actions/cache/restore@v4
+        with:
+          path: .suitemap/map.json
+          key: suitemap-newest
+          restore-keys: suitemap-
+      - name: the shards' maps
+        uses: actions/download-artifact@v4
+        with:
+          pattern: suitemap-shard-*
+          path: .suitemap/shards
+          merge-multiple: true
+      - name: merge the shards' maps
+        id: merge
+        continue-on-error: true   # judged by the next step, which names what is wrong
+        run: |
+          set -- .suitemap/shards/shard-*.json
+          [ -e "$1" ] || { echo "::error::no shard handed on a map"; exit 1; }
+          uv run --locked --only-group tests python tests/suitemap.py merge --map .suitemap/new.json "$@"
+      # The map is kept, saved and published only when every shard passed and the merge found every suite exactly once: a partial map would send every pull request to every suite, and one with a failed suite is no measurement of it.
+      - name: the map is whole
+        env:
+          PLAN: ${{ needs.shards.result }}
+          SHARDS: ${{ needs.measure.result }}
+          MERGED: ${{ steps.merge.outcome }}
+        run: |
+          [ "$PLAN" = success ] || { echo "::error::the plan was not made (plan: $PLAN): see the shard plan job"; exit 1; }
+          [ "$SHARDS" = success ] || { echo "::error::a shard did not pass (shards: $SHARDS): see the shards' jobs"; exit 1; }
+          [ "$MERGED" = success ] || { echo "::error::the shards' maps do not hold every suite exactly once (merge: $MERGED): see the step above"; exit 1; }
+          echo "every shard passed, and the merged map holds every suite once"
+      - name: keep the map
+        run: |
+          [ ! -f .suitemap/map.json ] || mv .suitemap/map.json .suitemap/old.json
+          cp .suitemap/new.json .suitemap/map.json
+      - name: save the map
+        uses: actions/cache/save@v4
+        with:
+          path: .suitemap/map.json
+          key: suitemap-${{ github.sha }}-${{ github.run_id }}
+      # The artifact is how a map is read from outside a run (tests/suitemap.py fetch, tools/test_trim_report.py). A failed upload never turns the run red.
+      - name: publish the map
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: suitemap
+          path: .suitemap/map.json
+          include-hidden-files: true   # the map is under a hidden folder (.suitemap): upload-artifact v4.4 and later skips hidden files without this, and the step would then upload nothing
+          retention-days: 14   # slack over the 3-hour schedule: a few failed runs in a row still leave a map to fetch
+          overwrite: true
+      # The audit: would the earlier map have picked, for the change since, every suite whose measurement changed. A miss fails this run (and so raises the issue below) after the map was already kept and published.
+      - name: audit the selection
+        if: always() && hashFiles('.suitemap/new.json') != '' && hashFiles('.suitemap/old.json') != ''
+        run: uv run --locked --only-group tests python tests/suitemap.py audit --old .suitemap/old.json --new .suitemap/new.json --to ${{ github.sha }}
+  # A failed refresh is raised as an issue, and closed again by the next green run. It needs `issues: write` and nothing else; every value goes in through env.
+  report:
+    needs: [shards, measure, refresh]
+    if: ${{ !cancelled() }}
+    name: report a failed refresh
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      RESULTS: ${{ needs.shards.result }} ${{ needs.measure.result }} ${{ needs.refresh.result }}
+      TITLE: the suite map refresh failed
+    steps:
+      - name: open, update or close the issue
+        run: |
+          n=$(gh issue list --repo "$REPO" --state open --search "\"$TITLE\" in:title" --json number,title --jq "[.[] | select(.title == \"$TITLE\")] | first | .number // empty") || n=
+          case $n in *[!0-9]*) n= ;; esac
+          case " $RESULTS " in
+            *" failure "*|*" cancelled "*|*" skipped "*)
+              body="The scheduled refresh of the suite map did not finish (shard plan, shards, merge: $RESULTS). Run: $RUN_URL. The last good map stays in use; pull requests pick by it, and pick more suites as it ages."
+              if [ -n "$n" ]; then gh issue comment "$n" --repo "$REPO" --body "$body"; else gh issue create --repo "$REPO" --title "$TITLE" --body "$body"; fi
+              exit 1   # the run itself ends red too, so it shows in the Actions list
+              ;;
+            *)
+              if [ -n "$n" ]; then gh issue close "$n" --repo "$REPO" --comment "A refresh finished green: $RUN_URL"; fi
+              ;;
+          esac

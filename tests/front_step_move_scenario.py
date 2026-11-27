@@ -154,7 +154,7 @@ check("2b …the clock is gone and the step's hash is kept as moved", FS.CLOCK n
 check("2b …the item's own write stamps are the server's bookkeeping: the last writer stays", get("a1")["written_by"] == "alpha-main" and get("a5")["written_by"] == "home-agent", (get("a1")["written_by"], get("a5")["written_by"]))
 movers = [(to, t, f) for to, t, f in sent if "is now yours" in t]
 check("2b the mover is told once per step, plainly and as an fyi", sorted(to for to, _t, _f in movers) == ["home-agent"] * 4 and all(f is True for _to, _t, f in movers), sent)
-check("2b …the message names the step, the original opener and what happened", all("[stackshot] Filing check " in t and "stayed open 3 hours" in t and "reworded it to open with you" in t for _to, t, _f in movers)
+check("2b …the message names the step, the original opener and what happened", all("[stackshot] Filing check " in t and "stayed open 3 hours" in t and "reworded it to open with you" in t and "stuck-elsewhere finding unanswered" in t and "History has the original" in t and "Do it, hand it on or mark it done." in t and len(t) < 420 for _to, t, _f in movers)
       and any("board#1: the first open step is now yours (home-agent: decide the wording). It opened with alpha-main, a front agent," in t for _to, t, _f in movers)
       and any("board#5: the first open step is now yours" in t and "It opened with old-front, a retired session," in t for _to, t, _f in movers), [t for _to, t, _f in movers])
 check("2b …nobody else hears of it: not the front agent, not the keeper, not the retired session, not the project", to_set() <= {"home-agent", "projects/alpha"} and not any("is now yours" in t for to, t, _f in sent if to != "home-agent"), sent)

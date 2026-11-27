@@ -1,4 +1,4 @@
-"""Scenario test for the nightly rulebook scan (tools/rulebook_scan.py step 4c part 5) on fixture files, a fixture tool schema,
+"""Scenario test for the rulebook scan (run after each of the audit's two daily runs) (tools/rulebook_scan.py step 4c part 5) on fixture files, a fixture tool schema,
 fixture `sala --help` and `sala op --help` texts and a fixture retired-terms list: no live files, no sala, no server, no network; the
 delivery is replaced by a recorder.
 
@@ -249,12 +249,39 @@ check("…and the next good night does not send them again: one send in total", 
 XO = dict(CX, help_verbs=["op"])
 sent.clear()
 # only the op help empty (sala op --help asked for and not read): the same
+_real_find_sala = rs.find_sala
+rs.find_sala = lambda name: "/fixture/sala"      # a sala exists for the checks that stand in for its help text
+_REAL_RUN_HELP = rs.run_help
 rs.run_help = lambda sala, verb="": HELP if not verb else ""
 r = rs.run(XO, deliver=deliver, state=XS, today="Thu Nov 12th", schema=T / "schema.json")
 check("…and an empty `sala op --help` (asked for) is the same: nothing sent, the keys kept", sent == [] and any("op --help gave nothing" in x for x in r["notes"]) and len(json.loads(XS.read_text())[str(X)]["keys"]) == 2, (sent, r["notes"]))
 rs.run_help = lambda sala, verb="": HELP if not verb else OPHELP
 r = rs.run(XO, deliver=deliver, state=XS, today="Fri Nov 13th", schema=T / "schema.json")
 check("…then a good night with both helps read: still nothing new", sent == [] and r["quiet"] == [str(X)], (sent, r["quiet"]))
+rs.find_sala = _real_find_sala
+rs.run_help = _REAL_RUN_HELP
+
+# ---- 4b2. no sala command on the machine: its checks are skipped with one line and no error; a present one is run
+import io, contextlib, stat
+BIN = T / "bin"; BIN.mkdir()
+FAKE = BIN / "fakesala"
+FAKE.write_text(f'#!/bin/sh\ncase "$1" in op) cat {T / "ophelp.txt"};; *) cat {T / "help.txt"};; esac\n', encoding="utf-8"); FAKE.chmod(FAKE.stat().st_mode | stat.S_IXUSR)
+sent.clear(); XM = T / "x-missing.json"
+CM = dict(CX, sala=str(T / "bin" / "no-such-sala"), help_verbs=["op"])
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    rm = rs.run(CM, deliver=deliver, state=XM, today="Sat Nov 14th", schema=T / "schema.json")
+skipped = [n for n in rm["notes"] if "sala" in n]
+check("4b2 no sala on the machine: one line says the sala checks were skipped, no error is printed, and the sala finding is not sent (the other finding is)",
+      len(skipped) == 1 and "skipped" in skipped[0] and "No such file" not in err.getvalue() and err.getvalue() == "" and len(sent) == 1 and "--nonsense" not in sent[0][1] and "owner" in sent[0][1], (rm["notes"], err.getvalue(), sent))
+check("4b2 …and a dry-run report prints that one line", sum(1 for l in rs.report(rs.run(CM, dry=True, schema=T / "schema.json"), True).splitlines() if "skipped" in l) == 1, None)
+check("4b2 find_sala: a name with a slash is taken as written, a missing or non-executable one is empty",
+      rs.find_sala(str(FAKE)) == str(FAKE) and rs.find_sala(str(T / "bin" / "no-such-sala")) == "" and rs.find_sala(str(T / "help.txt")) == "" and rs.find_sala("sala-never-run-xyz") == "", None)
+sent.clear(); XP = T / "x-present.json"
+CP = dict(CX, sala=str(FAKE), help_verbs=["op"])
+rp = rs.run(CP, deliver=deliver, state=XP, today="Sun Nov 15th", schema=T / "schema.json")
+check("4b2 a sala that exists is run: its help is read, the stale flag is found and sent, and no sala line is skipped", not any("skipped" in n for n in rp["notes"]) and len(sent) == 1 and "--nonsense" in sent[0][1], (rp["notes"], sent))
+sent.clear()
 
 # ---- 4c. the first failed delivery ends the sending; the rest hold for the next night
 Y1 = T / "y" / "Y1.md"; Y2 = T / "y" / "Y2.md"; Y1.parent.mkdir()

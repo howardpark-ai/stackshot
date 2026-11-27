@@ -65,8 +65,9 @@
 #                                 or no helper: the release fails, the reason in one more log line. At most RELEASE_REGEN_MAX (1) time in a release, so it cannot loop;
 #                                 3. ENQUEUE: one GraphQL read decides the way, `repository.mergeQueue(branch:"main")`. Present (the ruleset's queue is on): the PR goes in with the mutation `enqueuePullRequest(pullRequestId, expectedHeadOid)`,
 #                                 pinned to the head the checks ran on, so a push after the checks cannot ride in; its required checks have passed (step 2). `gh pr merge` is not used with the queue on: it asks for auto-merge, which this repository does not
-#                                 allow (cli/cli#13398), and auto-merge stays off. Absent (the ruleset is off, the way back): `gh pr merge --merge --admin --match-head-commit <head>` (no --delete-branch) merges at once, and the log says so. When the call errors (a
-#                                 GitHub 504 after the PR was queued or merged), the PR's state is read again for up to about 50 s: queued or merged carries on, anything else fails "merge" with the original error. An answer that cannot be read fails "merge";
+#                                 allow (cli/cli#13398), and auto-merge stays off. Absent (the ruleset is off, the way back): `gh pr merge --merge --admin --match-head-commit <head>` (no --delete-branch) merges at once, and the log says so. When GitHub's server fails the call
+#                                 (a 5xx, a GraphQL error of type INTERNAL, "something went wrong", a timeout or a reset), the PR's state is read first (queued or merged carries on: the call may have gone through), else the call is made again, up to 4 attempts with waits of 5, 15 and 45 s
+#                                 (RELEASE_ENQUEUE_WAITS, a space-separated list, overrides the waits), one log line per retry. A refusal (a 4xx, "not mergeable", "already in the queue", a conflict, a failed required check) is never retried. After the last attempt, and for a refusal, the PR's state is read again for up to about 50 s: queued or merged carries on, anything else fails "merge" with the error of the last call. An answer that cannot be read fails "merge";
 #                                 3a. WAIT FOR THE MERGE: GraphQL `pullRequest { state mergeCommit { oid } mergeQueueEntry { state position } }`, read every POLL_QUEUE s (60) for up to QUEUE_WAIT (RELEASE_QUEUE_WAIT, 3 h), the log saying where the PR is in the queue every 5 min (one read is
 #                                 one GitHub call from the hour's shared budget, so it is not polled faster; the first looks after the call come every 10 s until the entry shows, QUEUE_GRACE, 3 min). MERGED: the merge commit GitHub made is the one to deploy. A PR that was in the queue and is not any more, and is not merged
 #                                 (GitHub confirms it on a second read 10 s later, and three more reads 10 s apart find it still not MERGED): the reason GitHub gave is read from the timeline (`RemovedFromMergeQueueEvent` dated at or after the enqueue call: an older event is an earlier enqueue's),
@@ -81,7 +82,7 @@
 #                                 deploy.sh returns; fd 9 is closed for every child (a service a deploy leaves behind never inherits it). Only release.sh takes it: a deploy.sh run by hand does not;
 #                                 4a. ALREADY LIVE: when the live checkout contains the merge (a release that merged after this one's merge deployed past it, or deploy.sh was run by hand) there is nothing to deploy: the log says so, the session pick,
 #                                 the report and main's run for the merge follow as after a deploy, and the report says "already live";
-#                                 4b. DEPLOY GATE (deploy_gate): GitHub's merge queue ran the suites its selection picked for the merge group on the tree it made (a merge_group run, not every suite), so the merge deploys at once only when the queue made it
+#                                 4b. DEPLOY GATE (deploy_gate): GitHub's merge queue ran every suite, plainly, for the merge group on the tree it made (a merge_group run: tests.yml's shards, then the check that every suite ran once and none failed), so the merge deploys at once only when the queue made it
 #                                 (the enqueue went through the mutation: with the ruleset off the plain merge call merged it, and a rerun on a merged PR does not know, so both wait for main's tests, 4d) and what lies between the live checkout and the merge is not known to be bad:
 #                                 (a) the live checkout is an ancestor of the merge (deploy.sh fast-forwards; commits between them are merges of the queue or docs-only merges), (b) there is a last-good commit to roll back to ($LOGDIR/last-good, below) that is in the live history, and (c) no commit after it
 #                                 up to main's tip (a later member of the same merge group included) has a FAILED run on main (read from GitHub's list of runs, page after page, up to 10 of 100, until a run at or before the last-good commit; empty, crashed or never reaching it: unreadable; so is a run in the range cancelled after its job started,
@@ -96,8 +97,8 @@
 #                                 the rollback reached a verdict: a lock timeout keeps it); still pending, only cancelled runs, or no run found / GitHub unreadable (never a verdict) -> kept, and the gate stays closed until it is read (after two hours: unknown, a red report).
 #                                 Records are taken oldest deploy first. Main's run for the merge commit itself:
 #                                   pass: "main's tests passed on <sha>" in the log, the commit goes to last-good, the check that it is still
-#                                   in the live checkout and the record done under the deploy lock (a rollback cannot land between them); a note on the run (a selection
-#                                   miss, a suite that failed only when measured) goes to the keeper as a second message;
+#                                   in the live checkout and the record done under the deploy lock (a rollback cannot land between them); a note on the run (a step that failed
+#                                   besides the suites step; the selection audit and the measured-only failures are notes of suitemap-refresh.yml's runs now, not of main's) goes to the keeper as a second message;
 #                                   fail: ROLLED BACK. Under the lock again, ./deploy.sh goes back to the last-good commit (DEPLOY_ROLLBACK=1
 #                                   DEPLOY_TO=<it>, run by this script with the lock held; deploy.sh checks it, and runs the good tree's own
 #                                   deploy logic) and the red report is "FAILED at main's tests: rolled back to <sha>", which reaches the builder.
@@ -231,7 +232,7 @@ QUEUE_WAIT="${RELEASE_QUEUE_WAIT:-10800}"   # seconds a PR may stay in GitHub's 
 POLL_QUEUE="${RELEASE_POLL_QUEUE:-60}"      # seconds between two reads of the PR's merge-queue state while wait_merged waits (every read is a GitHub call from one shared hourly budget)
 QUEUE_GRACE="${RELEASE_QUEUE_GRACE:-180}"   # seconds after the enqueue call that GitHub may take to show the entry (eventually consistent); read every 10 s meanwhile, past it a PR that never showed is a failure
 START_MAX=4                                 # queued releases running at once (release.sh queue): release.sh's own number, not a setting
-WAIT_MAIN="${RELEASE_WAIT_MAIN:-5400}"   # seconds a covering run of main may be going (main_green: counted from when it starts, status in_progress). 90 min: main's full run, every suite measured, can be slow on a loaded host, so 60 min (3600) let a slow run end a release
+WAIT_MAIN="${RELEASE_WAIT_MAIN:-5400}"   # seconds a covering run of main may be going (main_green: counted from when it starts, status in_progress). 90 min: main's full run, every suite plainly in six shards, can be slow on a loaded host, so 60 min (3600) let a slow run end a release
 CAP_MAIN="${RELEASE_CAP_MAIN:-10800}"    # seconds from the merge, at most, that main_green waits for a run that covers it (3 h): a run queued behind others uses none of WAIT_MAIN, this keeps it from waiting forever
 WARM_TIMEOUT="${RELEASE_WARM_TIMEOUT:-1800}"   # seconds [release] suitemap_warm_cmd may run (warm_run), and a second warm waits for the first: a build of the index is a minute on the box that does it
 NOTICE_TIMEOUT="${RELEASE_NOTICE_TIMEOUT:-60}"   # seconds [fleet] notice_cmd may take (notice_send): past it the command is stopped and the notice counts as not sent, so the report loses its green flag and the next release starts
@@ -502,17 +503,16 @@ take_lock() {  # the deploy lock on fd 9 (exec: this shell's own), waited for up
 #   itself did not succeed (conclusion failure), with the suites step missing, still fails at once.
 # Two callers:
 #   main_green pre <M>     before a deploy whose gate is closed (4d at the top): its suites failing stops the release (merged, not deployed: fix forward); every suite
-#                          passing deploys, and what else the run found (a suite that failed only when measured and passed plainly, the audit's
-#                          selection miss, a later step that failed) goes in the report, which then goes to the keeper instead of green.
+#                          passing deploys, and what else the run found (a later step that failed; the audit's selection miss and a suite that failed only when measured are found by suitemap-refresh.yml now, and the code below still reads them should a run of tests.yml carry them) goes in the report, which then goes to the keeper instead of green.
 #                          The commit it passed on is left in $verified and the deploy is pinned to it (DEPLOY_TO), never to a newer tip with no passing run:
 #                          a merge another release lands meanwhile is deployed by that release, after its own run.
 #   main_green post <M>    after the deploy at the merge: M is the one deployed, whatever main's tip is by now. It never
 #                          fails the release; it returns 0 (the run passed; $audit_note holds what else it found) or 1, with $mg_kind
 #                          "fail" (its suites failed: the caller rolls back) or "unknown" (no run passed or failed in time; a cancelled run is the same as none): that one does not roll back,
 #                          and $mg_why, $mg_rid and $mg_rsha (the run, and the commit it ran on, which can be a newer one covering several merges).
-# A pass writes the commit to $LAST_GOOD (record_good). tests.yml's step names "run every suite, measured" and "audit the selection" are read here.
-# Both are steps of the `suites` job; on main that job runs after the `shards` plan and the `measure` matrix (main's measured run, split across runners) and its "run every suite, measured" passes only when
-# every shard passed and their merged map holds every suite once, so a failed shard reads here as a failed suites step. The shards' steps have other names.
+# A pass writes the commit to $LAST_GOOD (record_good). tests.yml's step name "run every suite, measured" is read here (and "audit the selection", which tests.yml no longer has: the audit moved to suitemap-refresh.yml, and a run without that step reads as one with no audit finding).
+# The name is kept though nothing is measured in tests.yml any more: it is a step of the `suites` job; on main that job runs after the `proof`, the `shards` plan and the `measure` matrix (main's plain run, split across runners) and its "run every suite, measured" passes only when
+# every shard passed and `tests/suitemap.py complete` found every suite once, none failed (or, when the proof job found the merge queue's green run of the same commit, at once, saying so), so a failed shard reads here as a failed suites step. The shards' steps have other names.
 run_state() {   # $1 = M. Prints "<run> pending <sha> running|queued", "<run> pass <sha> [what else it found]", "<run> fail <sha> <why>", "<run> cancelled <sha>" (only cancelled runs cover M) or
                 # "none" (no run covers it yet; "pending ... steps" is a run that is completed and green whose suites step has no conclusion yet); <sha> is the commit of the run that decided it. The rule is in the comment above. A line on stderr (the log) says which run decided when it is not the run on M itself
     TIP="$1" REPO="$REPO" GH_CACHE="$GH_CACHE" GH_TTL="$GH_TTL" python3 -c '
@@ -577,7 +577,7 @@ elif passed:
     r, jobs, bad = passed
     if stop and stop[1] == "fail":
         print("the run %s on %s failed after the pass on %s: judged by the oldest commit that failed, which is not this release, so the pass on %s decides" % (stop[0]["databaseId"], stop[0]["headSha"][:7], r["headSha"][:7], r["headSha"][:7]), file=sys.stderr)
-    flaky = []                        # tests/suitemap.py measure warns when a suite fails only when measured
+    flaky = []                        # tests/suitemap.py measure warns when a suite fails only when measured (a run of suitemap-refresh.yml; not one of tests.yml any more)
     for j in jobs:
         jid = j.get("databaseId")
         for a in js(gh("api", f"repos/{R}/check-runs/{jid}/annotations"), []) if jid else []:
@@ -2015,17 +2015,22 @@ run() {
     enqueue_pr() {   # 3. What GitHub says about the branch decides how the PR goes in: `repository.mergeQueue(branch:"main")` present (the ruleset's queue is on) -> the GraphQL mutation enqueuePullRequest, pinned to the head the checks
                      # ran on (expectedHeadOid), so a push after the checks cannot ride in; absent (the ruleset is off, the way back) -> `gh pr merge --merge --admin --match-head-commit <head>`, which merges at once. `gh pr merge` is never used with
                      # the queue on: it would ask for auto-merge, which this repository does not allow (cli/cli#13398). $via_queue says which way it went; $enq_epoch is the second of the call, for the removal event
-        local out tries
+        local out tries waits att=1 attmax why seen   # the waits (seconds) between the attempts at the enqueue call: one more attempt than waits; RELEASE_ENQUEUE_WAITS overrides the list (the tests give it "0 0 0")
+        read -r -a waits <<< "${RELEASE_ENQUEUE_WAITS:-5 15 45}"
+        attmax=$((${#waits[@]} + 1))
         gq_mq=""; gq_prid=""
         for tries in 1 2 3; do ghq_target "$pr" && break; [ $tries = 3 ] || sleep 10; done
         [ -n "$gq_mq" ] || fail "merge" "GitHub's answer about the repository's merge queue and the PR cannot be read, so it is not known whether the PR goes into the queue or is merged at once"
         enq_epoch="$(date +%s)"
         if [ "$gq_mq" = 1 ]; then
             via_queue=1
-            if out="$(gh api graphql -f query='mutation($id:ID!,$h:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$h}){mergeQueueEntry{state position}}}' -f id="$gq_prid" -f h="$headsha" 2>&1 9>&-)" \
-               && echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if not d.get("errors") and (d.get("data") or {}).get("enqueuePullRequest") else 1)' 2>/dev/null; then
-                say "enqueued: the merge queue accepted the head ${headsha:0:7}"
-            else   # gh prints the error body on stdout and its message on stderr: the report gets GitHub's messages (a red check, a ref rule), or the last line when there is no body
+            while :; do
+                if out="$(gh api graphql -f query='mutation($id:ID!,$h:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$h}){mergeQueueEntry{state position}}}' -f id="$gq_prid" -f h="$headsha" 2>&1 9>&-)" \
+                   && echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if not d.get("errors") and (d.get("data") or {}).get("enqueuePullRequest") else 1)' 2>/dev/null; then
+                    say "enqueued: the merge queue accepted the head ${headsha:0:7}"; break
+                fi
+                why="$(enq_transient "$out")"   # GitHub's server failed (5xx, INTERNAL, "something went wrong", a timeout or a reset), as against a refusal; empty for a refusal
+                # gh prints the error body on stdout and its message on stderr: the report gets GitHub's messages (a red check, a ref rule), or the last line when there is no body
                 out="$(echo "$out" | python3 -c '
 import json, sys
 lines = [l for l in sys.stdin.read().splitlines() if l.strip()]
@@ -2034,8 +2039,18 @@ for l in lines:
     try: msgs += [e.get("message", "") for e in (json.loads(l).get("errors") or [])]
     except Exception: pass
 print("; ".join(m for m in msgs if m) or (lines[-1] if lines else "no answer"))' 2>/dev/null)"
-                enq_failed "$out"
-            fi
+                # a refusal, or the last attempt: as before (enq_failed reads the PR's state again and fails with the error)
+                if [ -z "$why" ] || [ $att -ge $attmax ]; then enq_failed "$out"; break; fi
+                # the call may have gone through before it failed (a timeout, a reset, a 504): the PR's state is read before another call
+                if ghq_read "$pr" && { [ "$gq_state" = MERGED ] || [ -n "$gq_entry" ]; }; then
+                    seen="${gq_state}${gq_entry:+, in the merge queue ($gq_entry)}"
+                    say "the enqueue call errored: $out; reading the PR's state again"
+                    say "the enqueue call errored ($out) but the PR is $seen; carrying on"
+                    merge_note="$merge_note; the enqueue call errored ($out) but the PR was $seen"; break
+                fi
+                say "merge queue call answered $why; retrying in ${waits[$((att - 1))]} s (attempt $((att + 1)) of $attmax)"
+                sleep "${waits[$((att - 1))]}"; att=$((att + 1))
+            done
         else
             # --admin: with the bot-only ruleset active and main not excluded from it, a green PR reads BLOCKED and a plain `gh pr merge` fails with "the base branch policy prohibits the merge";
             # --admin lets the bot merge a green PR, and GitHub still refuses a failing or pending one, so the required check holds. --match-head-commit keeps the head pin
@@ -2043,6 +2058,19 @@ print("; ".join(m for m in msgs if m) or (lines[-1] if lines else "no answer"))'
             if out="$(gh pr merge "$pr" --repo "$REPO" --merge --admin --match-head-commit "$headsha" 2>&1 9>&-)"; then say "no merge queue on main (the ruleset is off): merged at once, the plain merge call accepted the head ${headsha:0:7} ($(echo "$out" | tail -1 | cut -c1-160))"
             else enq_failed "$(echo "$out" | tail -1)"; fi
         fi
+    }
+    enq_transient() {   # $1 = what the enqueue call printed (stdout and stderr). A short reason when GitHub's server failed and the same call may work a moment later: a 5xx, a GraphQL error of type INTERNAL, "something went wrong", a timeout, a reset or a cut connection.
+                        # Empty (nothing is retried) for anything else: a 4xx, "not mergeable", "already in the queue", a conflict, a failed required check, a ref rule, an answer that says nothing
+        echo "$1" | python3 -c '
+import re, sys
+t = sys.stdin.read(); low = t.lower()
+if re.search(r"http 4\d\d|not mergeable|already|conflict|failing|required status|protected ref|not enabled", low): sys.exit(0)   # a refusal first: its text may hold a transient word too
+if re.search(r"\"type\"\s*:\s*\"internal\"", low): print("a GraphQL INTERNAL error"); sys.exit(0)
+m = re.search(r"http (5\d\d)", low)
+if m: print("HTTP " + m.group(1)); sys.exit(0)
+for pat, name in (("something went wrong", "an error (something went wrong)"), ("timed out|timeout|deadline exceeded", "a timeout"), ("connection reset|connection refused|broken pipe|unexpected eof|\\beof\\b|tls handshake", "a cut connection"),
+                  ("bad gateway|service unavailable|gateway time-?out", "a gateway error")):
+    if re.search(pat, low): print(name); sys.exit(0)' 2>/dev/null
     }
     enq_failed() {   # $1 = the call's last line. The call can error after the PR was queued or merged (a 504, or a PR queued already): GitHub's answer is eventually consistent, so ask again
         local err="$1" i seen="" what; what="$([ "$gq_mq" = 1 ] && echo enqueue || echo merge)"

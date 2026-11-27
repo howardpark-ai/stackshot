@@ -49,8 +49,8 @@ from stackshot.model import step_commands as _sc
 from stackshot.model import steps as _steps
 from stackshot.model import wait_tells as _wtell
 from stackshot.model import work as _work
-from stackshot.model.bullet_text import RX_MD_LINK, RX_NAKED_URL, _clip_line
-from stackshot.model.ids import _bare_id_ok, _norm_id
+from stackshot.model.bullet_text import RX_MD_LINK, RX_NAKED_URL, _clip_line, goal_of, goal_words, stated_goal
+from stackshot.model.ids import _norm_id, name_read as _name_read
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
 from stackshot.service import anchor_offers as _anchor_offers
@@ -409,6 +409,19 @@ def _dropped_lines_note(old: Any, new: Any) -> str:
             f"put back any fact you meant to keep: {'; '.join(shown)})")
 
 
+def _goal_moved_note(item_was: dict[str, Any], item: dict[str, Any], sent: str) -> str:
+    """The reply line of a write that changed the words of the item's Goal sentence and left its subject as stored: the title and the `Goal:` bullet name one outcome, so the subject is quoted, with what to send when
+    the outcome moved. Counted in the call log (call_log.noted). Information only: nothing is refused or stored differently. `sent` is the description as the call passed it: the words must differ both there and as
+    stored, so neither the server's split of a long bullet nor a long Goal sent again and split the same way is a change. "" when the stored description opens with no `Goal:` bullet, the one it replaces gave no
+    sentence, the words are the same (a re-formatting, a label put right) or the write stored another subject."""
+    new, old, said = goal_of(item.get("description")), stated_goal(item_was.get("description")), stated_goal(sent)
+    subject = str(item.get("subject") or "")
+    if new is None or old is None or said is None or subject != str(item_was.get("subject") or "") or goal_words(old) in (goal_words(new), goal_words(said)):
+        return ""
+    _calls.noted("goal-moved")
+    return f'\n(note: the Goal changed and the subject did not; the stored subject is "{_clip_line(subject)}": send subject= if the outcome moved)'
+
+
 def _mark_next_stale(item_was: dict[str, Any], item: dict[str, Any], meta: dict[str, Any], writer: str, naming_added: list[str], next_passed: bool) -> None:
     """A write by a session that is neither the item's mover nor named by its next, which changes needs, state, hold, wake or after and not next, marks next
     as needing a rewrite (metadata.next_stale {by, fields, at}), until a write passes next."""
@@ -697,8 +710,10 @@ def update_unlocked(
         if opts:
             fc.add("Refused: clear_options drops the options; it does not go with a new list")
         opts = []
-    gid = _norm_id(item_id, bare=_bare_id_ok(status))
+    gid = _norm_id(item_id, bare=True)
     item = _load(gid)
+    if status == "completed":
+        _name_read(gid, str(item.get("subject") or ""))          # a close read from a bare number or #N says which item it is: its subject's first words
     answered_note = _answered_since_note(gid, item, sender)      # read now: the write below is the sender's too
     had_hold = bool((item.get("metadata") or {}).get("hold"))      # read before the unfold, which stands a basis or the kind time in as a hold
     was_until = _uw.unfold_item(item)                    # a stored until stands as the old working fields for this write's gates (until_write.py); it is folded back just before the save
@@ -901,7 +916,15 @@ def update_unlocked(
         else:
             outcome_text, description = description.strip(), ""
     if closing:                   # a close says how the item ended
+        outcome_text, ot_note = _fg.fix_long_bullets(outcome_text, None, "outcome_text")       # a bullet over the limit is split like a description's (a pure form fix; the reply says so, and History)
+        if ot_note:
+            _stall.note(meta, time.time(), ot_note)
+        read_superseded = not outcome and bool(superseded_by)      # a replacing item names the outcome: superseded_by goes with no other (an outcome of done or dropped beside it is still refused)
+        if read_superseded:
+            outcome = "superseded"
         superseded_by = fc.call(_gates.gate_close, gid, item, outcome, reason, superseded_by, outcome_text, default="")
+        if read_superseded and superseded_by:      # told only when the close passed its gate, with the item it read (a typo that is a real item would otherwise go unseen) and how to undo it
+            _calls.fixed("outcome-superseded", f"no outcome was given, so {_gh.shown(gid)} closed as superseded by {_gh.shown(superseded_by)}; to undo: reopen with status=open and a next line, then close again with the outcome you mean")
     elif outcome or reason or superseded_by or outcome_text:
         fc.add(f"Refused: outcome, outcome_text, reason and superseded_by go with a close (status=completed on an open item, or the complete tool)"
                + (f"; {gid} is already completed: to correct its close, reopen it (status=open with a next) and close it again"
@@ -911,6 +934,7 @@ def update_unlocked(
     if draft_set and (status or item.get("status")) == "completed":
         fc.add("Refused: a completed item keeps no draft (a close drops it); draft goes with an open item")
     owing = h.owing_note(debtor) if state_change else ""      # a write is never refused or held for a page debt: the reply says the write went through and the page is still owed (read here, before this write records its own debt)
+    desc_sent = description      # as the call passed it, before the server's own form fixes (the Goal note compares it)
     description = _fg.fix_bare_urls(description, str(item_was.get("description") or ""), session=_writes.session_next())       # a bare address in a description becomes a link to itself (the reply says so); next and ask keep the refusal
     for f_ in _fg.bare_url_faults({"description": description, "next": next, "ask": ask}, {"description": item_was.get("description"), "next": meta.get("next"), "ask": ask_was}, session=_writes.session_next()):   # only the fields this call sets; a stored bare URL is no reason to refuse
         fc.add(f_, text=True)
@@ -1663,6 +1687,12 @@ def update_unlocked(
             dropped_note = _dropped_lines_note(item_was.get("description"), item.get("description"))      # lines of the old description the new one lacks: named with their old text, so the writer can put a fact back
         except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
             print(f"update: {gid} dropped-lines note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    goal_note = ""
+    if description.strip() and _writes.session_next() and not reformat and not sender.strip().startswith("a script on "):      # the writes the goal gate judges: a session's own words
+        try:
+            goal_note = _goal_moved_note(item_was, item, desc_sent)
+        except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
+            print(f"update: {gid} goal note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     machine_note = h.machine_note(gid, item, keeper_was)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     offer_note = _anchor_offers.item_line(gid, item, item_was)      # a relay wait this write set, or a source link it put in the description, that no anchor watches: one line with the ready anchors call, never a refusal
     if dropped_hold:
@@ -1670,7 +1700,7 @@ def update_unlocked(
                  + (f"; its date {_wt.wake_value(meta)} stays" if _wt.wake_value(meta) else "") + ")")
     return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
-                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + wait_note + machine_note + offer_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(not backstop and (hold or wake or until_wait or after_set or wait_kind.strip() or str(wait_basis or "").strip() or waits))) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
+                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + goal_note + wait_note + machine_note + offer_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(not backstop and (hold or wake or until_wait or after_set or wait_kind.strip() or str(wait_basis or "").strip() or waits))) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + answered_note + named + told + owing + h.nag(debtor))
 
 
@@ -1704,7 +1734,7 @@ def said_preread(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
             return
         sess = str(got.get("sender") or "").strip()
         if not sess:
-            sess = str(got.get("owner") or "").strip() or _telling.holder(_load(_norm_id(str(got.get("item_id") or ""), bare=_bare_id_ok(str(got.get("status") or "")))))
+            sess = str(got.get("owner") or "").strip() or _telling.holder(_load(_norm_id(str(got.get("item_id") or ""), bare=True)))
         _gates.gate_said(said, sess, "", dry=True)
     except Exception:  # noqa: BLE001  — a lookup that failed is the write's own refusal, raised under the lock from the same (missing) answers
         pass
@@ -1743,13 +1773,13 @@ def complete_item(item_id: str, outcome: str = "", reason: str = "", description
     that replaces it there still reaches the close). The close ends the anchors it left with no open item in their scope and says so in the reply (update_unlocked, through anchor_sweep.on_close). The fields default to empty so that a pane with an older cached schema gets the refusal
     that says what is missing and how to close through the portal, not a schema error."""
     h = _hooks()
-    _load(_norm_id(item_id))          # an item that does not exist is refused here, before anything is written
+    _load(_norm_id(item_id, bare=True))          # an item that does not exist is refused here, before anything is written
     with _writes.close_write():      # the complete tool's own call: the close ticks the sender's own steps only (update_unlocked reads it, as it reads session_next for the update tool's)
         return h.update(item_id, description=description, status="completed", sender=sender, outcome=outcome, reason=reason, superseded_by=superseded_by, said=said, outcome_text=outcome_text)
 
 
 def confirm_item(item_id: str, sender: str = "") -> str:
-    """Mark an item still true: sets its `confirmed` clock only (the confirm tool without its identity and sender checks). item_id: board#N (a bare number N is read as board#N)."""
+    """Mark an item still true: sets its `confirmed` clock only (the confirm tool without its identity and sender checks). item_id: board#N (a bare number N or #N is read as board#N)."""
     h = _hooks()
     gid = _norm_id(item_id, bare=True)
     with _writes.ITEM_LOCK:         # read, changed and saved under the item lock: a write that lands between (an update, a pass in another process) is kept

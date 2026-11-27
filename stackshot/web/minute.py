@@ -13,7 +13,8 @@ What it does, in order:
      `install_late`; tests/phase_sweep_scenario.py pins it). That starts no thread and runs none of the server's start-time passes (the migrations, the refile and wake passes stay in the server)
   5. waits until the server answers `GET /healthz` with `ok`, as the receiver's unit does before it starts: the server answers only after its start-time passes, so the store is migrated before the first tick. It waits for as long
      as it takes and says so on stderr every 30 seconds; a stop signal ends the wait
-  6. builds the runner (`service/runner.make`, the same one the server builds) and starts its thread, and reloads the config on SIGHUP as the server's reload does for what the runner reads (the config, the stall pause)
+  6. builds the runner (`service/runner.make`, the same one the server builds) and starts its thread, saying first that this process serves the instance (`publish.serving`: its ticks publish as the server's do), and
+     reloads the config on SIGHUP as the server's reload does for what the runner reads (the config, the stall pause)
   7. on SIGTERM or SIGINT asks the runner to stop and waits up to `--stop-wait` seconds for the round that is running (a tick is never cut off before that); a tick that is still running after it is abandoned, which is safe
      (every tick is meant to be run again), the lock is released and the process exits 0
 
@@ -123,6 +124,7 @@ def reload_config() -> None:
 def run(stop: threading.Event, hup: threading.Event, ready_poll: float = READY_POLL, stop_wait: float = STOP_WAIT) -> int:
     """Everything after the lock is taken: import the server's wiring, wait for the server, run the runner until `stop`, stop it. → the exit code."""
     from stackshot.web import server as _server      # noqa: F401  — the wiring: the hook tables are installed at its import, in the server's order; nothing starts (no thread, no start-time pass)
+    from stackshot.web import publish as _publish
     from stackshot.core import runner as _minute
     from stackshot.service import runner as _runner
     from stackshot.service import stall as _stallsvc
@@ -138,6 +140,7 @@ def run(stop: threading.Event, hup: threading.Event, ready_poll: float = READY_P
     if not _runner.RUNNER:
         _runner.RUNNER[:] = [_runner.make()]
     rn = _runner.RUNNER[0]
+    _publish.serving()                  # the runner is part of the server: its ticks' publishes ask nothing about the host (web/publish.py)
     rn.start()
     while not stop.wait(LOOP_POLL):
         if hup.is_set():

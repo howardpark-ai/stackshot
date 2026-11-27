@@ -30,6 +30,7 @@ whose `started` is two hours old or more is a crashed run, not a running one: it
                               No model, no tokens.
     audit.py refusals [--dry-run] [--force] [--week DATE]  the weekly count of refused board writes (tools/refusal_report.py): the last full week, Monday to Sunday, sent once to [refusal_report] to
                               (default [audit] summary_to) as a message that asks nothing; [refusal_report] enabled gates it, --dry-run only prints. The timer's unit runs it after the run. No model, no tokens.
+                              It then runs the daily analysis (refusals and retries of every tool's calls, 24 hours and 7 days, tokens, the kinds that repeat with a hint each), once per day, to the same place; `refusals daily` runs that alone.
     audit.py catches [--dry-run] [--force] [--day DATE]  the daily count of a hook's catches (tools/catch_report.py): yesterday, per source, beside the day before, with the panes and senders caught most, sent once to
                               [catch_report] to (default [audit] summary_to) as a message that asks nothing; [catch_report] enabled gates it, --dry-run only prints. The timer's unit runs it after the run. No model, no tokens.
     audit.py next-check [--line|--json]   the open items that break the Next rules N1 to N7 (tools/next_report.py): read only, the
