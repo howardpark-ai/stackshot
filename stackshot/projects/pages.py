@@ -972,6 +972,32 @@ def still_mover_note(rows):
 # so the session can carry the lines in the reply it is writing anyway; at Stop the lines are found and nothing is asked. The
 # Stop check stays the fallback, in block and in note mode alike. This text once also asked the page
 # question (`Page: no change, <reason>`); the owner retired that one, and a write-up mod covers the turn's end.
+HOOK_SECONDS = 10      # the PostToolUse hook's own timeout (cli.hook_entries): past it the hook is killed and what it had to say is lost
+HOOK_BUDGET = 8.5      # s from the touch run's start by which the early question's server reads are over
+_HOOK_END = None       # time.monotonic() of that point while a touch run is going
+_EARLY_OPEN = []       # the sessions whose early mark this run set; cmd_touch confirms them once its answer is out (early_done)
+
+def hook_left():
+    """s left for the early question's server reads in this touch run (outside one: no limit of its own)."""
+    return 60.0 if _HOOK_END is None else _HOOK_END - time.monotonic()
+
+def early_done(sid):
+    """The early mark of `sid` stands: it is no longer open."""
+    st = load_state(sid)
+    if st.pop("early_open", None) is not None: save_state(sid, st)
+
+def early_undone(sid):
+    """The early mark of `sid` is left open and past its time, as after a killed run: the turn's next write asks."""
+    if sid in _EARLY_OPEN: _EARLY_OPEN.remove(sid)
+    st = load_state(sid); st["early_open"] = 1; save_state(sid, st)
+
+def early_listed(sid, turn):
+    """{store id: shown} the early question listed for an open ask in the turn whose prompt came at `turn` (turn_activity's `prompt`; 0, no prompt record
+    to tell the turn by: the last list). Stop takes `ask stands` for these whatever its own asks-named read answers."""
+    rec = load_state(sid).get("early_ids")
+    if not isinstance(rec, dict) or (turn and rec.get("turn") != turn): return {}
+    return rec.get("items") if isinstance(rec.get("items"), dict) else {}
+
 def early_question(payload):
     """→ the board question for this turn's first write, or "" (asked already this turn, nothing to ask, or the check off)."""
     if payload.get("agent_id"): return ""      # a call made inside a subagent (its hook input carries agent_id): the open items are the calling session's, so nothing is asked and nothing is kept
@@ -981,16 +1007,25 @@ def early_question(payload):
     sid = sid_of(payload)
     act = turn_activity(str(payload.get("transcript_path") or ""))
     start = int(act.get("start") or 0)
+    prompt = int(act.get("prompt") or 0)
     st = load_state(sid)
-    if start and int(st.get("early") or 0) == start: return ""        # once per turn
-    st["early"] = start or int(time.time()); save_state(sid, st)
-    items = owned_items(sid)
-    if items is None: return ""
-    asked = named_asks(sid, start); named = {a["gid"] for a in asked}      # listed on their own, touched or not
+    if start and int(st.get("early") or 0) == start and not 0 < _num(st.get("early_open")) <= time.time(): return ""   # once per turn; a mark still open past its time is a run that was killed
+    left = hook_left()
+    if left < 1.0: return ""                              # no time left in this run: nothing marked, the next write asks
+    # held while this run asks (a parallel hook stays quiet), confirmed when its answer is out
+    st["early"] = start or int(time.time()); st["early_open"] = time.time() + HOOK_SECONDS; save_state(sid, st); _EARLY_OPEN.append(sid)
+    items = owned_items(sid) if left >= 6.0 else owned_items(sid, left)
+    if items is None:
+        if left < 6.0: early_undone(sid)                  # cut short by this run's own time: the next write asks
+        return ""
+    asked = named_asks(sid, prompt or start, min(3.0, hook_left())); named = {a["gid"] for a in asked}      # listed on their own, touched or not
     due = [it for it in items if it["gid"] not in named and not it.get("held") and max(_num(it.get("state_updated")), _num(it.get("confirmed")), _num(it.get("updated"))) < start]
     if not due and not asked: return ""
     listed = ", ".join(f'{item_shown(it)} "{it.get("subject") or ""}"' + (f" ({r})" if (r := role_note(it)) else "") for it in due[:BOARD_LIST]) + (f", and {len(due) - BOARD_LIST} more" if len(due) > BOARD_LIST else "")
-    st = load_state(sid); st["early_asked"] = start or int(time.time()); save_state(sid, st)  # read again: the server call above may have taken seconds, and a parallel hook (a board write's page debt) saved state meanwhile     # the question really went out this turn (`early` only guards once per turn, and is set when nothing was asked too): the Stop note may then be one line
+    before = early_listed(sid, prompt) if prompt else {}      # asked again in the same turn (after a skill load): the first list still counts
+    st = load_state(sid); st["early_asked"] = start or int(time.time())  # read again: the server calls above may have taken seconds, and a parallel hook (a board write's page debt) saved state meanwhile     # the question went out this turn (`early` only guards once per turn, and is set when nothing was asked too): the Stop note may then be one line
+    if asked: st["early_ids"] = {"turn": prompt, "items": {**before, **{a["gid"]: item_shown(a) for a in asked}}}
+    save_state(sid, st)
     untouched = ("" if not due else " Items untouched this turn: " + listed + ". If this turn changes one, "
                  "update it (confirm only if still true); else end your reply with `Board: no change, <reason>` (3+ words) "
                  "for all, or a `Board:` line plus one bullet per item on its own line (`- board#N: no change, <reason>` / `- board#M: updated, <what>`). "
@@ -1051,10 +1086,16 @@ def handover(payload):
     return f"[stackshot] {line}" if line else ""
 
 def cmd_touch():
-    global _KNOWN
-    _KNOWN = {}
-    try: return _cmd_touch()
-    finally: _KNOWN = None
+    global _KNOWN, _HOOK_END
+    _KNOWN = {}; _HOOK_END = time.monotonic() + HOOK_BUDGET; del _EARLY_OPEN[:]
+    try:
+        rc = _cmd_touch()
+        sys.stdout.flush()                              # the answer is out: now the early mark stands
+        for sid in _EARLY_OPEN:
+            try: early_done(sid)
+            except Exception: pass
+        return rc
+    finally: _KNOWN = None; _HOOK_END = None
 
 def _cmd_touch():
     try: payload = json.load(sys.stdin)
@@ -1071,16 +1112,13 @@ def _cmd_touch():
             for name, a in writes: rc = touch_mcp(payload, name, a) or rc
             return rc
     if other_write(payload):
-        ctx = []
-        try:
-            q = early_question(payload)
-            if q: ctx.append(q)
-        except Exception: pass
+        q = h = ""
         if tool == "SendMessage":
-            try:
-                h = handover(payload)               # a handover to a background agent names it on the item
-                if h: ctx.append(h)
+            try: h = handover(payload)              # a handover to a background agent names it on the item; first, with its own full time: the early question fits what is left
             except Exception: pass
+        try: q = early_question(payload)
+        except Exception: pass
+        ctx = [x for x in (q, h) if x]
         if ctx: print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\n".join(ctx)}}, ensure_ascii=False))
     return 0                                            # the native TaskCreate/TaskUpdate never reach the board (refused by hooks)
 
@@ -1301,15 +1339,30 @@ def bash_work(command):
     c = str(command or "")
     return [why for rx, why in _BASH_WORK if rx.search(c)]
 
+def _record_epoch(e):
+    """A transcript record's time in epoch seconds, 0 when it has none that reads."""
+    try: return int(datetime.datetime.fromisoformat(str(e.get("timestamp", "")).replace("Z", "+00:00")).timestamp())
+    except Exception: return 0
+
+def _is_prompt(e):
+    """Is this transcript record a turn's prompt: a user record that is not a tool result, not a compaction summary, and not one Claude Code adds inside a turn
+    (isMeta: a skill load, an image note, a Stop hook's feedback). A message from another session and a scheduled prompt are isMeta too, and carry
+    promptSource "system"."""
+    if e.get("type") != "user" or e.get("isCompactSummary") or (e.get("isMeta") and e.get("promptSource") != "system"): return False
+    c = (e.get("message") or {}).get("content")
+    return not (isinstance(c, list) and c and all(isinstance(x, dict) and x.get("type") == "tool_result" for x in c))
+
 def turn_activity(transcript_path):
-    """What the turn now ending did: {start: epoch of its prompt, writes: bool, inbound: bool, why: [..], final: its last
-    message, items: {store id: wrote with sender=}}.
+    """What the turn now ending did: {start: epoch of its prompt, prompt: epoch of its last prompt record (_is_prompt; 0 when none is in the tail read), writes:
+    bool, inbound: bool, why: [..], final: its last message, items: {store id: wrote with sender=}}.
+    `start` is the last user record that is not a tool result, which a record added inside a turn (a skill load, a compaction summary) moves forward; the open
+    asks (named_asks) go by `prompt`, which such a record leaves where it is.
     A turn = everything after the last real user prompt. Writes: a stackshot write, SendMessage, any other connector write, and
     since an earlier change a Bash command that commits, pushes, opens or merges a PR, or deploys (bash_work).
     A gbrain write is the page itself and does not count, except in a turn opened by an [anchor] notice or a message from
     another session (`inbound`). Being opened by a notice is no longer a write by itself (a chatty anchored channel
     cost one "no change" reply per message). A connector read is no write."""
-    out = {"start": 0, "writes": False, "inbound": False, "why": [], "final": "", "items": {}}
+    out = {"start": 0, "prompt": 0, "writes": False, "inbound": False, "why": [], "final": "", "items": {}}
     try:
         with open(transcript_path, "rb") as f:
             f.seek(0, 2); size = f.tell(); f.seek(max(0, size - 3_000_000)); raw = f.read().decode("utf-8", "ignore")
@@ -1329,8 +1382,8 @@ def turn_activity(transcript_path):
     if start_i is None: return out
     first = evs[start_i]; c = (first.get("message") or {}).get("content")
     text = c if isinstance(c, str) else " ".join(x.get("text", "") for x in (c or []) if isinstance(x, dict))
-    try: out["start"] = int(datetime.datetime.fromisoformat(str(first.get("timestamp", "")).replace("Z", "+00:00")).timestamp())
-    except Exception: out["start"] = int(time.time()) - 600
+    out["start"] = _record_epoch(first) or int(time.time()) - 600
+    out["prompt"] = next((_record_epoch(e) for e in reversed(evs) if _is_prompt(e)), 0)
     out["inbound"] = "[anchor]" in text or "cross-session-message" in text or "[stackshot message]" in text or "[board]" in text
     tail = []                                           # the text after the turn's last tool result: its final message
     for e in evs[start_i + 1:]:
@@ -1575,7 +1628,8 @@ def cmd_check():
         if bm == "block" and due:           # an open ask alone never holds the turn: it is a note in both modes
             line.append(q); board_log(sid, name, "block", listed)
         else:
-            asked_early = bool(int(activity().get("start") or 0)) and int(load_state(sid).get("early_asked") or 0) == int(activity().get("start") or 0)   # the full question went out this turn as hook context: the note says it in a line; else it is the first time and in full
+            est = load_state(sid); began = int(activity().get("start") or 0)
+            asked_early = bool(began) and int(est.get("early_asked") or 0) == began and not est.get("early_open")   # the full question went out this turn as hook context (its run ended): the note says it in a line; else it is the first time and in full
             notes.append("[board] " + (board_unanswered(due, asked) + rejected_text(bact.get("rejects") or []) if asked_early else "About your last turn: " + q)); board_log(sid, name, "note", listed)
     if foreign:                                         # a note in both modes, never a block
         notes.append("[board] About your last turn's Board lines: " + "; ".join(x for _, x in foreign) + ".")
@@ -1603,7 +1657,8 @@ def cmd_check():
 # question goes to the next prompt instead of holding the turn).
 # An item with a standing ask that a message of this turn named, whose ask this session wrote or whose mover it is (named_asks), is listed on its own whether the
 # turn touched it or not, unless the turn wrote or cleared the ask: the session withdraws it, or answers `- board#N: ask stands, <reason>`. An open ask alone never
-# holds a turn; it goes to the next prompt in both modes.
+# holds a turn; it goes to the next prompt in both modes. Stop takes that answer for every item the early question listed this turn, whatever its own read says
+# (early_listed). "This turn" for these items starts at the turn's prompt (turn_activity's `prompt`), not at a record added inside it.
 BOARD_LOG = os.path.join(STATE, "board-log.jsonl")
 REPEAT_SECONDS = 7200   # a page debt already said in full is a one-line repeat for this long; then it is said in full once more (a compacted or resumed session)
 BOARD_LIST = 8   # items named in the question; the rest are counted
@@ -1718,10 +1773,10 @@ def board_verdicts(text, gids, rejects=None, aliases=None, stands=()):
         for g in hit: got.setdefault(g, line)
     return got, lines
 
-def owned_items(sid):
+def owned_items(sid, timeout=6.0):
     """The open items this session owns, or is named in the needs of (marked role "agent", the key since an earlier change), from the
     server (client API `items`); None when the server cannot say."""
-    body = _api("items", sid)
+    body = _api("items", sid, timeout=timeout)
     if not body: return None
     try:
         items = json.loads(body).get("items")
@@ -1732,12 +1787,13 @@ def _num(v):
     try: return float(v or 0)
     except (TypeError, ValueError): return 0.0
 
-def named_asks(sid, start):
+def named_asks(sid, start, timeout=3.0):
     """The items with a standing ask that a message which reached the session since its turn began (`start`) names, when the session wrote the ask or moves the item
-    (client API `asks-named`: rows {gid, shown, subject, ask}); [] when the turn's start is not known or the server cannot say (an older server has no such read)."""
-    if not start: return []
+    (client API `asks-named`: rows {gid, shown, subject, ask}); [] when the turn's start is not known, under half a second is left for the read, or the server
+    cannot say (an older server has no such read)."""
+    if not start or timeout < 0.5: return []
     try:
-        rows = json.loads(_api("asks-named", sid, timeout=3.0, since=str(start)) or "{}").get("items")
+        rows = json.loads(_api("asks-named", sid, timeout=timeout, since=str(start)) or "{}").get("items")
         return [r for r in rows or [] if isinstance(r, dict) and r.get("gid") and r.get("ask")]
     except Exception: return []
 
@@ -1749,7 +1805,7 @@ def asked_lines(asked, alone=False):
         if len(ask) > 200: ask = ask[:199].rstrip() + "…"
         out += (f'\n{sh} "{a.get("subject") or ""}" (ask: {ask}): still on {_cfg.owner()}\'s move: withdraw it now (update with clear_ask) if it can no longer be '
                 f"answered as written, else answer `- {sh}: ask stands, <reason>` in the Board block.")
-    if len(asked) > BOARD_LIST: out += f"\n… and {len(asked) - BOARD_LIST} more with an open ask."
+    if len(asked) > BOARD_LIST: out += f"\n… and {len(asked) - BOARD_LIST} more with an open ask, to answer the same way: " + ", ".join(item_shown(a) for a in asked[BOARD_LIST:]) + "."
     if out and alone: out += "\nThe Board block is a `Board:` line, then one bullet per item on its own line; the reason is at least three words."
     return out
 
@@ -1766,16 +1822,18 @@ def board_due(sid, name, payload, activity):
     # neither clock (a rule keeps it off the confirm clock) but is the session working on the item (the hook asked about another item after
     # an ask-only update)
     due = [it for it in items if not it.get("held") and max(_num(it.get("state_updated")), _num(it.get("confirmed")), _num(it.get("updated"))) < start]
-    asked = named_asks(sid, start); named = {a["gid"] for a in asked}; act["named"] = named
+    prompt = int(act.get("prompt") or 0)
+    asked = named_asks(sid, prompt or start); named = {a["gid"] for a in asked}; act["named"] = named
     if not due and not asked: return [], act
-    gids = list(dict.fromkeys(it["gid"] for it in due + asked)); al = item_aliases(items + asked)
+    early = early_listed(sid, prompt); stands = named | set(early)
+    gids = list(dict.fromkeys(it["gid"] for it in due + asked)); al = item_aliases(items + asked + [{"gid": g, "shown": sh} for g, sh in early.items()])
     final = str(payload.get("last_assistant_message") or "") or act.get("final") or ""
     # a bare [quiet] is an ordinary reply since an earlier change
-    rej = []; got, lines = board_verdicts(final, gids, rej, al, named)
+    rej = []; got, lines = board_verdicts(final, gids, rej, al, stands)
     for _ in range(2):                                  # the transcript's last lines can lag the hook by a moment
         if len(got) == len(gids) or payload.get("last_assistant_message"): break
         time.sleep(0.4); final = turn_activity(str(payload.get("transcript_path") or "")).get("final") or ""
-        rej = []; got, lines = board_verdicts(final, gids, rej, al, named)
+        rej = []; got, lines = board_verdicts(final, gids, rej, al, stands)
     act["rejects"] = rej; act["asked"] = [a for a in asked if a["gid"] not in got]
     if got:
         board_log(sid, name, "verdict", sorted(got), " | ".join(dict.fromkeys(lines))[:600])
@@ -1791,7 +1849,8 @@ def board_foreign(sid, final, act):
             k = item_key(t)
             if k: ids.append(k)
     wrote = act.get("items") or {}
-    ids = [g for g in dict.fromkeys(ids) if not wrote.get(g) and g not in (act.get("named") or ())]      # an item listed for its ask is this session's to answer
+    mine = set(act.get("named") or ()) | set(early_listed(sid, int(act.get("prompt") or 0)))
+    ids = [g for g in dict.fromkeys(ids) if not wrote.get(g) and g not in mine]      # an item listed for its ask, early or at Stop, is this session's to answer
     if not ids: return []
     body = _api("item-facts", sid, ids=",".join(ids[:20]))
     try: facts = json.loads(body).get("items") if body else None

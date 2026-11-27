@@ -1357,7 +1357,7 @@ p.save_state(S, {})
 fresh()
 
 # ---- 9b. an open ask on the owner's move that a message of this turn named: the question lists it on its own with its ask, for the session that wrote the ask or moves the item
-import datetime
+import datetime, fcntl, io
 from stackshot.service import agent_names as _names_svc
 from stackshot.service import ask_named as _ask_named_svc
 from stackshot.service import messaging as _msg_svc
@@ -1497,9 +1497,195 @@ check("asks: cleared or rewritten this turn: not listed", "ask stands" not in q_
 long_ = "Decide: " + "very " * 80 + "long"; asks_fixture(s51=asked_item(B, A, ask=long_)); tell("s51"); q_ = early()
 check("asks: a long ask is cut", f"(ask: {long_[:199].rstrip()}…)" in q_, q_)
 many_ = [asked_item(A, B) for _ in range(10)]; items(*[(60 + i, B, v) for i, v in enumerate(many_)]); tell(" ".join(f"s{60 + i}" for i in range(10))); q_ = early()
-check("asks: a session that owns no open item is asked about its own asks; at most eight are named, the rest counted", q_.startswith("[stackshot] Board question (once per turn).\ns60 ") and "\ns67 " in q_ and "\ns68 " not in q_ and "… and 2 more with an open ask." in q_, q_)
+MORE = "\n… and 2 more with an open ask, to answer the same way: s68, s69."
+check("asks: a session that owns no open item is asked about its own asks; eight get a line each, the rest are named after the count", q_.startswith("[stackshot] Board question (once per turn).\ns60 ") and "\ns67 " in q_ and "\ns68 " not in q_ and MORE in q_, q_)
 p.save_state(A, {}); rc, err = bstop(A, turn(), mode="note"); out = nnag(A)
-check("asks: …and at the end of its turn too", rc == 0 and "\ns60 " in out and "… and 2 more with an open ask." in out, out)
+check("asks: …and at the end of its turn too", rc == 0 and "\ns60 " in out and MORE in out, out)
+items(*[(60 + i, B, asked_item(B, A)) for i in range(10)]); tell(" ".join(f"s{60 + i}" for i in range(10))); q_ = early(); p.save_state(A, {}); rc, err = bstop(A, turn())
+check("asks: ten untouched items with an open ask: the turn is held and every one is named, early and at Stop", rc == 2 and all(re.search(rf"\bs{60 + i}\b", q_) and re.search(rf"\bs{60 + i}\b", err) for i in range(10)), (q_, err))
+rc, err = bstop(A, turn("Done.\nBoard: ask stands, every choice is still open"))
+check("asks: …and one `ask stands` line for all of them lets it end", rc == 0 and err == "", err)
+asks_fixture(s51=asked_item(B, A, ask="Decide: a" + chr(7) + chr(27) + "[31m b" + chr(0x202E) + "c")); tell("s51"); q_ = early()
+check("asks: control and reordering characters in an ask are not served", "(ask: Decide: a[31m bc)" in q_ and not [c for c in (7, 27, 0x202E) if chr(c) in q_], repr(q_))
+
+# which record opens the turn: one added inside it (a skill load, a compaction summary) does not move the time the named asks go by
+def stamp(ago): return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - ago))
+def urec(content, ago, **flags): return {"type": "user", "timestamp": stamp(ago), "message": {"content": content}, **flags}
+def said(text): return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+WORK = [{"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": "git -C /x commit -qm y"}}]}}, {"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}}]
+def SKILL(ago=6): return urec([{"type": "text", "text": "Base directory for this skill: /x"}], ago, isMeta=True)
+def SUMMARY(ago=5): return urec("This session is being continued from a previous one.", ago, isCompactSummary=True, isVisibleInTranscriptOnly=True)
+def written(name, *rows):
+    f = T / f"asks-{name}.jsonl"; f.write_text("\n".join(json.dumps(r) for r in rows) + "\n"); return str(f)
+check("turn: which records are a turn's prompt", [p._is_prompt(r) for r in (urec("x", 1), urec("x", 1, isMeta=True, promptSource="system"), urec([{"type": "text", "text": "x"}], 1), urec("x", 1, isMeta=True),
+      urec("x", 1, isMeta=True, promptSource="typed"), SUMMARY(), urec("x", 1, isCompactSummary=True, promptSource="system"), WORK[1], said("x"))] == [True, True, True, False, False, False, False, False, False])
+opened = urec("ship it", 300); mid = [SKILL(), SUMMARY(), urec("[Image: source: /x]", 4, isMeta=True), urec("Stop hook feedback: x", 3, isMeta=True)]
+tpm = written("mid", opened, *WORK, *mid, *WORK, said("done")); a_ = p.turn_activity(tpm)
+check("turn: records added inside it move `start` and leave `prompt` at the prompt", abs(a_["prompt"] - (time.time() - 300)) < 20 and a_["start"] > time.time() - 20 and a_["writes"], a_)
+tpm2 = written("peer", urec("an earlier turn", 900), said("ok"), urec("Another Claude session sent a message: see", 300, isMeta=True, origin={"kind": "peer"}, promptSource="system"), SKILL(), said("done")); a_ = p.turn_activity(tpm2)
+check("turn: a message from another session is the turn's prompt though Claude Code marks it isMeta", abs(a_["prompt"] - (time.time() - 300)) < 20, a_)
+a_ = p.turn_activity(written("cut", SKILL(), *WORK, said("done")))
+check("turn: no prompt record in what is read: `prompt` is not told", a_["prompt"] == 0 and a_["start"] > 0, a_)
+check("turn: a record time that does not read is 0", p._record_epoch({"timestamp": "soon"}) == 0 and p._record_epoch({}) == 0)
+all_touched(); logged((A, "see s51", 280, "delivered")); q_ = early(tpm)
+check("asks: a skill load and a compaction inside the turn: a message from its first minutes is still listed early", ASKED("s51") in q_, q_)
+p.save_state(A, {}); rc, err = bstop(A, tpm, mode="note"); out = nnag(A)
+check("asks: …and at Stop", ASKED("s51") in out, (rc, err, out))
+asks_fixture(s51=asked_item(B, A, at=time.time() - 100, **NOWISH)); logged((A, "see s51", 280, "delivered")); q_ = early(tpm)
+check("asks: …an ask rewritten after the prompt and before the skill load is not listed", "ask stands" not in q_, q_)
+
+# `ask stands` for what the early question listed holds at Stop whatever the second read answers
+_get2 = client_reads_svc._client_get
+def second_read(reply):
+    """Run the block with the asks-named read answering `reply`: None raises, "slow" answers after the hook has given up, a tuple is served as it is."""
+    def fake(what, q):
+        if what != "asks-named" or reply == "real": return _get2(what, q)
+        if reply == "slow": time.sleep(3.6); return _get2(what, q)
+        if reply is None: raise RuntimeError("the read failed")
+        return reply
+    client_reads_svc._client_get = fake
+STANDS = "Done.\nBoard:\n- s50: ask stands, the choice is still open\n- s51: ask stands, nothing in it moved"
+REST = "".join(f"\n- s{n}: no change, the commit is elsewhere" for n in (5, 53, 54))
+def asked_turn(name="h1", ago=60):
+    """A turn whose early question listed s50 and s51 (s51 untouched, s50 not this session's to move) → its transcript path and prompt record."""
+    asks_fixture(); tell("s50 and s51 changed"); first = urec("ship it", ago); tp = written(name, first, *WORK, said("working"))
+    q_ = early(tp); assert ASKED("s50") in q_ and ASKED("s51") in q_, q_
+    return tp, first
+for label_, reply_ in (("fails", None), ("answers 500", (500, "text/plain", "boom")), ("answers too late", "slow"), ("answers 404", (404, "text/plain", "no such read"))):
+    tp_, first_ = asked_turn(); written("h1", first_, *WORK, said(STANDS + REST)); second_read(reply_); IS.handle_error = lambda *a: None
+    try: rc, err = bstop(A, tp_); out = nnag(A)
+    finally: client_reads_svc._client_get = _get2
+    check(f"asks: the Stop read {label_}: the answer the early question asked for ends the turn, and nothing says to leave it out", rc == 0 and err == "" and "leave it out" not in out and "Not accepted" not in out
+          and {"s50", "s51"} <= set(p.early_listed(A, p.turn_activity(tp_)["prompt"])) and "s51" in blog("verdict")[-1]["items"], (rc, err, out, blog("verdict")[-1:]))
+tp_, first_ = asked_turn(); second_read(None)
+try: rc, err = bstop(A, tp_, last_assistant_message=STANDS + REST); out = nnag(A)
+finally: client_reads_svc._client_get = _get2
+check("asks: the Stop read fails and the reply comes with the hook's input: the same", rc == 0 and err == "" and "leave it out" not in out and "Not accepted" not in out, (rc, err, out))
+tp_, first_ = asked_turn(); written("h1", first_, *WORK, said(STANDS + REST.replace("\n- s54: no change, the commit is elsewhere", ""))); second_read(None)
+try: rc, err = bstop(A, tp_); out = nnag(A)
+finally: client_reads_svc._client_get = _get2
+check("asks: the Stop read fails and another item has no verdict: the turn is held for that item alone, the answers to the asks stand",
+      rc == 2 and 's54 "' in err and 's51 "' not in err and "Not accepted" not in err + out and "leave it out" not in err + out, (rc, err, out))
+tp_, first_ = asked_turn(); written("h1", first_, *WORK, said(STANDS + REST)); logged(); rc, err = bstop(A, tp_); out = nnag(A)
+check("asks: the naming message has left the log by Stop: the same", rc == 0 and err == "" and "leave it out" not in out, (rc, err, out))
+tp_, first_ = asked_turn(); written("h1", first_, *WORK, SKILL(), SUMMARY(), *WORK, said(STANDS + REST)); second_read(None)
+try: rc, err = bstop(A, tp_); out = nnag(A)
+finally: client_reads_svc._client_get = _get2
+check("asks: a skill load and a compaction after the early question, and the read fails: the same", rc == 0 and err == "" and "leave it out" not in out, (rc, err, out))
+tp_, first_ = asked_turn(); written("h1", first_, *WORK, SKILL(), said(STANDS + "\n- s52: no change, nothing of mine moved")); rc, err = bstop(A, tp_); out = nnag(A)
+check("asks: no write after the skill load: the listed items are not called another session's, an unlisted one still is", rc == 0 and "s52 is moved by" in out and "s50" not in out, (rc, err, out))
+tp_, first_ = asked_turn(); tpl_ = written("h1-next", urec("next", 20), *WORK, said(STANDS + REST)); second_read(None)
+try: rc, err = bstop(A, tpl_)
+finally: client_reads_svc._client_get = _get2
+check("asks: the list is the turn's own: a later turn does not take `ask stands` from it", rc == 2 and "s51 " in err and "Not accepted" in err, (rc, err))
+tp_, first_ = asked_turn(); second_read((200, "application/json", json.dumps({"items": [{"gid": "s51", "shown": "z7", "subject": "far", "ask": "Decide: x"}]})));
+try: q_ = early(written("h1", first_, *WORK, said("working")))
+finally: client_reads_svc._client_get = _get2
+written("h1", first_, *WORK, said("Done.\nBoard:\n- z7: ask stands, nothing in it moved\n- s50: ask stands, still the same" + REST)); second_read(None)
+try: rc, err = bstop(A, tp_)
+finally: client_reads_svc._client_get = _get2
+check("asks: an id the early question showed is read at Stop as shown", "z7 " in q_ and rc == 0 and "s51" in blog("verdict")[-1]["items"], (q_, rc, err))
+asks_fixture(); first_ = urec("ship it", 60); p.save_state(A, {}); tell("s50"); tp_ = written("h1", first_, *WORK, said("working")); otouch(A, tp_, "Bash", {"command": "git -C /x commit -qm y"})
+tell("s51"); written("h1", first_, *WORK, SKILL(), said("working")); q_ = otouch(A, tp_, "Bash", {"command": "git -C /x commit -qm y"})
+check("asks: asked again after a skill load: the first list still counts beside the second", ASKED("s51") in q_ and set(p.early_listed(A, p.turn_activity(tp_)["prompt"])) == {"s50", "s51"}, (q_, p.load_state(A)))
+p.save_state(A, {"early": time.time(), "early_ids": {"turn": 5, "items": {"s50": "s50"}}})
+check("asks: the early list answers for its own turn, and for a turn whose prompt cannot be told", p.early_listed(A, 5) == p.early_listed(A, 0) == {"s50": "s50"} and p.early_listed(A, 6) == {}, p.load_state(A))
+for bad_ in ("x", {"turn": 5, "items": ["s50"]}):
+    p.save_state(A, {"early": time.time(), "early_ids": bad_}); check(f"asks: a stored list of another shape is no list ({type(bad_).__name__})", p.early_listed(A, 5) == {})
+
+# the early question inside the touch hook's own time: bounded reads, and nothing lost when the run is killed
+check("hook time: the budget sits inside the PostToolUse timeout the install writes", p.HOOK_SECONDS == __import__("stackshot.cli").cli.hook_entries()["PostToolUse"][0]["hooks"][0]["timeout"] and 0 < p.HOOK_BUDGET <= p.HOOK_SECONDS - 1)
+_api0, _bm1, _lo0 = p._api, os.environ.get("BOARD_CHECK_MODE"), p.LOCAL_ONLY; os.environ["BOARD_CHECK_MODE"] = "block"; p.LOCAL_ONLY = False    # this process asks the fixture server as a hook does
+READS_ = []
+def spy(down=(), take={}):
+    def f(what, key="", timeout=6.0, **extra):
+        READS_.append((what, timeout, extra.get("since")))
+        if p._HOOK_END is not None: p._HOOK_END -= take.get(what, 0)      # the read "takes" this long
+        return None if what in down else _api0(what, key, timeout=timeout, **extra)
+    return f
+def ask_once(left=None, tp=None, state=None, **kw):
+    READS_.clear(); p.save_state(A, state or {}); del p._EARLY_OPEN[:]; p._api = spy(**kw)
+    p._HOOK_END = None if left is None else time.monotonic() + left
+    try: return p.early_question({"session_id": A, "transcript_path": tp or turn(), "tool_name": "Bash", "tool_input": {"command": "git -C /x commit -qm y"}, "tool_response": "ok"})
+    finally: p._api = _api0; p._HOOK_END = None
+def times(): return {w: t for w, t, _ in READS_}
+asks_fixture(); tell(); q_ = ask_once()
+check("hook time: with time to spare the items read has its 6 s and asks-named 3 s", times() == {"items": 6.0, "asks-named": 3.0} and "ask stands" in q_, READS_)
+READS_.clear(); p._api = spy(); p.named_asks(A, time.time() - 60); p._api = _api0
+check("hook time: …and the Stop read of asks-named has 3 s", times() == {"asks-named": 3.0}, READS_)
+q_ = ask_once(left=8.5, take={"items": 6.5}); t_ = times()
+check("hook time: after a slow items read asks-named gets only what is left", t_["items"] == 6.0 and 1.0 < t_["asks-named"] <= 2.0 and "ask stands" in q_, READS_)
+q_ = ask_once(left=8.5, take={"items": 8.2})
+check("hook time: with under half a second left asks-named is not read and the question goes out as before", [w for w, _, _ in READS_] == ["items"] and q_.startswith("[stackshot] Board question") and "ask stands" not in q_, (READS_, q_))
+q_ = ask_once(left=4.0)
+check("hook time: an items read gets no more than the run has left", 3.0 < times()["items"] <= 4.0 and times()["asks-named"] == 3.0, READS_)
+q_ = ask_once(left=0.9)
+check("hook time: under a second left: nothing read, nothing marked, so the next write asks", q_ == "" and READS_ == [] and not p.load_state(A).get("early") and not p.load_state(A).get("early_open"), (READS_, p.load_state(A)))
+asks_fixture(); tell(); tpc_ = turn(); q_ = ask_once(left=4.0, down=("items",), tp=tpc_, state={"early_ids": {"turn": 7, "items": {"s50": "s50"}}, "early": time.time()}); st_ = p.load_state(A); open_ = list(p._EARLY_OPEN)
+p.early_done("nobody"); again_ = p.early_question({"session_id": A, "transcript_path": tpc_, "tool_response": "ok"})
+check("hook time: an items read cut short by the run's own time leaves the mark open and past its time: the run confirms nothing, the next write asks, an earlier list stays",
+      q_ == "" and st_.get("early_open") == 1 and open_ == [] and st_.get("early_ids", {}).get("turn") == 7 and "ask stands" in again_, (q_, st_, open_, again_))
+q_ = ask_once(down=("items",)); st_ = p.load_state(A); open_ = list(p._EARLY_OPEN)
+check("hook time: a server that fails with the full time keeps the mark, as before: the run confirms it, no next write asks",
+      q_ == "" and st_.get("early") and st_.get("early_open", 0) > time.time() and open_ == [A], (st_, open_))
+asks_fixture(); tell(); tpr_ = turn(); parallel_ = []
+def racing(what, key="", timeout=6.0, **extra):
+    """While this run reads, a second hook saves its own change to the session's state and asks the early question itself."""
+    st = p.load_state(A); st.setdefault("touches", {})["other-" + what] = 1; p.save_state(A, st)
+    p._api = _api0
+    try: parallel_.append(p.early_question({"session_id": A, "transcript_path": tpr_, "tool_response": "ok"}))
+    finally: p._api = racing
+    return _api0(what, key, timeout=timeout, **extra)
+p.save_state(A, {}); del p._EARLY_OPEN[:]; p._api = racing
+try: q_ = p.early_question({"session_id": A, "transcript_path": tpr_, "tool_response": "ok"})
+finally: p._api = _api0
+p.early_done(A); st_ = p.load_state(A)
+check("hook time: a second hook writes the state while this one reads: it stays quiet, and both its writes and this run's stand",
+      "ask stands" in q_ and parallel_ == ["", ""] and {"other-items", "other-asks-named"} <= set(st_["touches"]) and st_.get("early_ids") and st_.get("early_asked") and not st_.get("early_open"), (q_, parallel_, st_))
+tp_ = turn(); q_ = ask_once(tp=tp_); st_ = p.load_state(A); again_ = p.early_question({"session_id": A, "transcript_path": tp_, "tool_response": "ok"})
+check("hook time: while a run holds the mark a parallel one stays quiet", q_ and st_.get("early_open", 0) > time.time() + 5 and again_ == "", (st_, again_))
+st_["early_open"] = time.time() - 1; p.save_state(A, st_); rc, err = bstop(A, tp_, mode="note"); out = nnag(A)
+check("hook time: a run that was killed: Stop's note is the full question, not the one line", "About your last turn: BOARD: this turn did real work" in out and "unanswered last turn" not in out, out)
+st_ = p.load_state(A); st_.update(early=p.turn_activity(tp_)["start"], early_open=time.time() - 1); p.save_state(A, st_)
+again_ = p.early_question({"session_id": A, "transcript_path": tp_, "tool_response": "ok"})
+check("hook time: …and the turn's next write asks again", again_.startswith("[stackshot] Board question"), (again_, p.load_state(A)))
+p.early_done(A); check("hook time: a mark that stands asks no second time", p.early_question({"session_id": A, "transcript_path": tp_, "tool_response": "ok"}) == "" and p.load_state(A).get("early") and "early_open" not in p.load_state(A), p.load_state(A))
+kept_ = p.load_state(A); p.early_done(A); check("hook time: confirming twice changes nothing", p.load_state(A) == kept_, p.load_state(A))
+# the touch run itself: its clock, the confirmation, and a handover that keeps its own time
+p.save_state(A, {}); q_ = otouch(A, turn(), "Bash", {"command": "git -C /x commit -qm y"}); st_ = p.load_state(A)
+check("hook time: a touch run that ends leaves the mark standing", q_.startswith("[stackshot] Board question") and st_.get("early") and "early_open" not in st_, st_)
+_hand0, _early0 = p.handover, p.early_question; ORDER = []
+def _hand(payload): ORDER.append(("handover", p.hook_left())); return "[stackshot] (named x)"
+def _early(payload): ORDER.append(("early", p.hook_left())); return "Q"
+p.handover, p.early_question = _hand, _early; _stdin = sys.stdin; _stdout = sys.stdout
+sys.stdin = io.StringIO(json.dumps({"session_id": A, "tool_name": "SendMessage", "tool_input": {"to": "x", "message": "s5"}, "tool_response": "ok"})); sys.stdout = io.StringIO()
+try: p.cmd_touch(); printed_ = sys.stdout.getvalue()
+finally: sys.stdin, sys.stdout = _stdin, _stdout; p.handover, p.early_question = _hand0, _early0
+check("hook time: a message hands over first, the early question fits what is left, and the lines read question first", [n for n, _ in ORDER] == ["handover", "early"] and json.loads(printed_)["hookSpecificOutput"]["additionalContext"] == "Q\n[stackshot] (named x)", (ORDER, printed_))
+check("hook time: the run's clock is set for the run and cleared after it", all(p.HOOK_BUDGET - 1 < t <= p.HOOK_BUDGET for _, t in ORDER) and p._HOOK_END is None and p.hook_left() > p.HOOK_BUDGET, (ORDER, p._HOOK_END))
+p.LOCAL_ONLY = _lo0
+if _bm1 is None: os.environ.pop("BOARD_CHECK_MODE", None)
+else: os.environ["BOARD_CHECK_MODE"] = _bm1
+
+# the record of delivered lines is written under the store's lock, and a failure to write it fails no delivery
+logged(); _w0 = _held_t._write; LOCKED = []
+def _w_probe(path, rows):
+    with open(_held_t.dir_() / "lock") as f:
+        try: fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB); fcntl.flock(f, fcntl.LOCK_UN); LOCKED.append(False)
+        except BlockingIOError: LOCKED.append(True)
+    _w0(path, rows)
+_held_t._write = _w_probe
+try: _held_t.note_reached(A, ["about s50"])
+finally: _held_t._write = _w0
+check("asks: the record of delivered lines is written under the store's lock", LOCKED == [True], LOCKED)
+def _w_fail(path, rows): raise OSError("disk full")
+_held_t._write = _w_fail
+try: _held_t.note_reached(A, ["about s51"]); said_ = "returned"
+except Exception as e: said_ = repr(e)
+finally: _held_t._write = _w0
+check("asks: a record that cannot be written raises nothing into the delivery", said_ == "returned", said_)
+logged(); asks_fixture(); tell()
+
 check("asks: no listed item, no text", p.asked_lines([], alone=True) == "" and p.asked_lines([]) == "")
 # an older server, a failing one and an answer that cannot be read: as before
 _get0 = client_reads_svc._client_get
