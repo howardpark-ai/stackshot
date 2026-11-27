@@ -430,6 +430,8 @@ check("apply_lang: <html lang>, the script table ahead of the page's own scripts
 check("apply_lang: English comes back as it was, and a page already done is not done twice", r2.apply_lang(page, "en") == page and r2.apply_lang(out, "ko") == out)
 check("apply_lang: the script table holds the keys the scripts ask for, in the language", json.loads(re.search(r"window.SSI=(\{.*?\});</script>", out, re.S).group(1))["js.copied"] == MARK("Copied"))
 check("the English table in every page head is the catalog's own (a script never carries a copy of a word)", r2._SST_HEAD.count("window.SSD=") == 1 and json.dumps(i18n.js_table("en")).replace("</", "<\\/") in r2._SST_HEAD)
+_asked = {k for p in pathlib.Path(i18n.__file__).parent.rglob("*.py") for k in re.findall(r"""SST\(\s*['"]([A-Za-z0-9_.]+)['"]\s*[,)]""", p.read_text(encoding="utf-8"))}
+check("every key a page script asks for by name is in the table a page carries (else the script draws the key itself)", {"explain.about", "panel.audit.dash_help"} <= _asked <= set(i18n.js_table("en")), sorted(_asked - set(i18n.js_table("en"))))
 
 # ---- 7. ui.render imported for the first time while a request's language is not English: its module-level words are the English ones
 IMPORT_PROBE = r"""
