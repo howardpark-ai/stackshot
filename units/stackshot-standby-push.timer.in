@@ -1,0 +1,15 @@
+# stackshot-standby-push.timer — the push of the server's data to a standby: two minutes after the machine boots (at once when the timer is started later than that), then five minutes after each run starts
+# of stackshot-standby-push.service. A push that is missed is not made up (the next one carries everything).
+# Install: ./install.sh units — only with [standby_copy] push_to set; with it empty an installed one is disabled and removed
+[Unit]
+Description=stackshot — push the server's data to a standby
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=15s
+RandomizedDelaySec=0
+Unit=stackshot-standby-push.service
+
+[Install]
+WantedBy=timers.target

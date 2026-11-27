@@ -258,7 +258,7 @@ enabled = false                                     # (stackshot/audit/audit.py 
                                                     # Every key is optional; what is shown is the default.
 # terms = "tests/retired_terms.toml"                # the retired-terms list (a path relative to the checkout, or absolute); absent = that check is skipped
 # server = "stackshot/web/server.py"                              # the tools and their parameters are read from the tool definitions in this file and in the tools/ folder beside it, never by importing it
-# sala = "sala"                                     # `sala --help` is read, and `--help` of the verbs in help_verbs only (most verbs take --help as an argument)
+# sala = "sala"                                     # `sala --help` is read, and `sala op --help --full` for op (its verb table); `--help` of the other verbs in help_verbs only (most verbs take --help as an argument). With no verb table `sala op`'s verbs and flags are not checked, with a note; the other sala checks still run
 # help_verbs = ["op"]
 # sala_lib = "~/salamander/lib"                     # sala's code: a flag a file names that lib/<verb>.sh takes, though `sala --help` does not list it, is a help-text gap and goes to sala_keeper
 # keeper = "my-keeper"                              # the session a set of files with no keeper of its own goes to
@@ -326,6 +326,11 @@ cross_process = true                                # true: each is also a flock
 [standby_copy]                                      # `stackshot standby-copy`: one consistent copy of the server's data for a standby; see docs/standby-copy.md
 extra_dirs = []                                     # further directories every copy takes, beside those of --extra: ones written outside the store locks, such as the sign-in library's own client store.
                                                     # Each is copied until a scan before and a scan after its copy find the same sizes and times; one that never settles, or is not there, fails the command
+push_to = ""                                        # `stackshot standby-push`: the user@host the stream goes to over ssh (the receiver there is the key's forced command). Empty (the default): nothing is pushed,
+                                                    # the command refuses with exit 3, and `./install.sh units` installs no timer for it; set, it installs stackshot-standby-push.timer (every 5 minutes)
+push_key = ""                                       # the private key file ssh uses for the push (and no other key); a file that is not there refuses the command
+push_known_hosts = ""                               # the known_hosts file the host key is checked against (and no other); a file that is not there refuses the command
+push_timeout = 300                                  # seconds one push may take, the copy and ssh together, at most 540 (the unit's start timeout is 10 minutes; above it the command refuses); then both are stopped and the run fails
 
 [github]                                            # the board's GitHub mirror: the local store stays the working copy, an issue per item is the
 sync = false                                        # durable thread. true: an item's subject, open or closed, and description go, paced, through a queue on disk

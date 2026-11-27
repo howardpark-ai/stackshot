@@ -26,6 +26,8 @@
 #                                   [portal] account_id is set, anchor-hub.service only when [anchor_hub] enabled = true, and
 #                                   stackshot-audit.{service,timer} only when [audit] enabled = true (the timer enabled and
 #                                   started: it only arms the schedule, the audit, or its cue in mode "agent", runs at [audit] at),
+#                                   stackshot-standby-push.{service,timer} only when [standby_copy] push_to is set (the timer enabled and
+#                                   started, the service never started here: a start is a push), removed when it is empty,
 #                                   and stackshot-minute.service only when [runner] process = "unit" (the default, so unless "inline" is set) on a box that is not a read-only
 #                                   standby (the minute set's runner as a process of its own; "unit" is the default, so it is installed unless [runner] process = "inline" is set)
 #                                   The front door's own (docs/front-door.md), after those and only for the tables the config has: stackshot-frontdoor.service ([frontdoor]), stackshot-signin.service
@@ -55,6 +57,8 @@
 # is off is skipped, never removed or disabled: an existing one stays as it is. Two exceptions. The audit's pair:
 # with [audit] enabled = false a timer installed by an earlier run is disabled and stopped and both files are removed, since
 # a timer left behind would fire every day into a cue the server refuses. Its service is never restarted here: that would cue an audit.
+# The standby push's pair is handled the same way, on [standby_copy] push_to: installed only when it is set, an installed pair disabled, stopped and removed when it is empty,
+# and its service never restarted here (that would push).
 # And stackshot-minute.service: with [runner] process back at "inline" (a value that is neither "inline" nor "unit" counts as inline), or on a box that is a read-only standby, the unit an earlier run
 # installed is stopped, disabled and removed. At inline so a runner left running does not keep the lock the server's own runner needs; on a standby because its read-only state is read from the
 # environment at a start only, so a runner that is already running cannot notice the change and would go on writing the board (the standby's drop-in reaches stackshot.service alone, and `stackshot minute`
@@ -90,6 +94,7 @@ read -r AUDIT AUDIT_AT RUNNER_PROCESS AUDIT_PROJECT < <(STACKSHOT_CONFIG="$CONFI
 # the front door's units: which of its tables the config has, and why there is no splitter to render ("" when there is one, "absent" with no [frontdoor_splitter] table)
 read -r DOOR SIGNIN SPLITTER_WHY < <(STACKSHOT_CONFIG="$CONFIG" python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from stackshot.core import config as c, frontdoor_splitter_config as sp; s = sp.parse()[0]; print(int(c.get("frontdoor") is not None), int(c.get("frontdoor_signin") is not None), "; ".join(sp.blocking(s)) if s.present else "absent")' "$CHECKOUT")
 CADDYFILE="$HOME/.config/stackshot/splitter.Caddyfile"
+PUSH=0; [ -n "$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" get standby_copy.push_to | tr -d '[:space:]')" ] && PUSH=1      # the standby push's timer pair
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 . "$HERE/units/scope.sh"      # UNIT_DIR, xdg_repair, user_manager_ok (config.py refused a removed mode above, with its line)
 MINUTE=0; MINUTE_OFF=inline; MINUTE_STUCK=0     # stackshot-minute.service: only at [runner] process = "unit", and never on a standby (`stackshot minute` exits 4 there); MINUTE_OFF says why it is not wanted
@@ -148,6 +153,7 @@ PY
 SERVER=(stackshot.service stackshot-reload.service stackshot-reload.path); [ $PORTAL = 1 ] && SERVER+=(stackshot-portal-sync.service)
 USERU=(); [ $HUB = 1 ] && USERU+=(anchor-hub.service); USERU+=(stackshot-puller.service)
 AUDITU=(stackshot-audit.service stackshot-audit.timer); [ $AUDIT = 1 ] && USERU+=("${AUDITU[@]}")
+PUSHU=(stackshot-standby-push.service stackshot-standby-push.timer); [ $PUSH = 1 ] && USERU+=("${PUSHU[@]}")
 [ $MINUTE = 1 ] && USERU+=(stackshot-minute.service)
 FRONTU=()      # installed by `units`, never enabled or started by this script
 [ "$DOOR" = 1 ] && FRONTU+=(stackshot-frontdoor.service)
@@ -253,6 +259,16 @@ case "$VERB" in
                     echo "  stackshot-audit.timer, stackshot-audit.service: skipped ([audit] enabled is not true)"
                 fi
             fi
+            if [ $PUSH = 0 ]; then          # no push target: a timer pair an earlier run installed goes, so it never fires into a refused push
+                if [ -f "$UNIT_DIR/stackshot-standby-push.timer" ] || [ -f "$UNIT_DIR/stackshot-standby-push.service" ]; then
+                    systemctl --user disable --now --quiet stackshot-standby-push.timer 2>/dev/null || true
+                    rm -f "$UNIT_DIR/stackshot-standby-push.timer" "$UNIT_DIR/stackshot-standby-push.service"
+                    systemctl --user reset-failed stackshot-standby-push.service 2>/dev/null || true
+                    echo "  stackshot-standby-push.timer, stackshot-standby-push.service: disabled and removed ([standby_copy] push_to is empty)"
+                else
+                    echo "  stackshot-standby-push.timer, stackshot-standby-push.service: skipped ([standby_copy] push_to is empty)"
+                fi
+            fi
             if [ $MINUTE = 0 ]; then       # not wanted: back at "inline" the server runs the runner again; on a standby `stackshot minute` exits 4 at its start, and a runner already running there is a writer the standby drop-in does not reach
                 if [ -f "$UNIT_DIR/stackshot-minute.service" ]; then   # an installed unit goes, stopped first: a process cannot notice that its box became a standby, and a runner left running keeps the lock the server's own runner needs
                     if minute_remove; then
@@ -278,6 +294,10 @@ case "$VERB" in
             systemctl --user enable --now --quiet stackshot-audit.timer 2>/dev/null || true
             case " ${changed[*]:-} " in *" stackshot-audit.timer "*) systemctl --user restart stackshot-audit.timer 2>/dev/null || true ;; esac   # a new [audit] at
         fi
+        if [ "$VERB" = units ] && [ $PUSH = 1 ]; then     # arming the timer: the first push is two minutes after the machine boots (at once when the timer starts later than that), then five minutes after each run starts
+            systemctl --user enable --now --quiet stackshot-standby-push.timer 2>/dev/null || true
+            case " ${changed[*]:-} " in *" stackshot-standby-push.timer "*) systemctl --user restart stackshot-standby-push.timer 2>/dev/null || true ;; esac
+        fi
         systemctl --user enable --quiet stackshot-puller.service 2>/dev/null || true
         if [ "$START" = 1 ]; then          # start what this verb runs, or restart it if it is running (covers --restart too)
             failed=()
@@ -297,7 +317,7 @@ case "$VERB" in
             if [ "$RESTART" = 1 ]; then
                 for n in "${changed[@]}"; do
                     case "$n" in
-                        stackshot-reload.service|stackshot-portal-sync.service|stackshot-audit.service|stackshot-audit.timer) ;;   # the audit's: a restart of its service would cue an audit; its timer is re-armed above
+                        stackshot-reload.service|stackshot-portal-sync.service|stackshot-audit.service|stackshot-audit.timer|stackshot-standby-push.service|stackshot-standby-push.timer) ;;   # the audit's: a restart of its service would cue an audit, the push's would push; the timers are re-armed above
                         stackshot-frontdoor.service|stackshot-signin.service|stackshot-splitter.service|stackshot-splitter.Caddyfile) ;;   # front_restart below: only one that runs already
                         stackshot-minute.service) systemctl --user reset-failed "$n" 2>/dev/null || true; systemctl --user restart "$n" && echo "  restarted $n" ;;   # reset-failed first: past its start limit a plain restart is refused
                         *) systemctl --user restart "$n" && echo "  restarted $n" ;;

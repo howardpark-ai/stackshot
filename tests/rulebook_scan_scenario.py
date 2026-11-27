@@ -1,5 +1,5 @@
 """Scenario test for the rulebook scan (run once a week, by the audit unit's first run of each week) (tools/rulebook_scan.py step 4c part 5) on fixture files, a fixture tool schema,
-fixture `sala --help` and `sala op --help` texts and a fixture retired-terms list: no live files, no sala, no server, no network; the
+fixture `sala --help` and `sala op --help --full` texts and a fixture retired-terms list: no live files, no sala, no server, no network; the
 delivery is replaced by a recorder.
 
 Covers: a parameter a tool does not take (the call form, the `tool, name=` form, the codemode object form, a multi-line call in a fenced
@@ -141,6 +141,21 @@ check("…a flag before any `--` is still read: `sala lane --bogus` is a finding
 fs = sl("`sala lane exec x -- claude --cloud`\n")
 check("…`sala lane exec x -- claude --cloud` gives none", fs == [], [(f.kind, f.text) for f in fs])
 
+# asking op for its help is no stale mention: no verb table lists --help or --full, and both are right straight after `op`
+for label, hh in (("with the op table", h), ("with the main help alone", rs.parse_help(HELP))):
+    scan_op = lambda text: rs.scan_text("f.md", text, SCHEMA, hh, [])
+    fs = scan_op("`sala op --help` `sala op -h` `sala op --help --full` `sala op -h --full` `sala op --help [--full]` `salamander op --help [--full]`\n")
+    check(f"{label}: --help or -h, then optionally --full (bracketed or not), straight after `op` are not reported", fs == [], [(f.kind, f.text, f.problem) for f in fs])
+    fs = scan_op("`sala op --full`\n`sala op --full --help`\n`sala op --help --help`\n`sala op --help --force`\n`sala op --full-x`\n`sala op --helpx`\n")
+    check(f"{label}: --full alone, or any other flag after --help, and the --full-x and --helpx lookalikes are reported",
+          [(f.line, f.flag) for f in fs] == [(1, "--full"), (2, "--full"), (2, "--help"), (3, "--help"), (4, "--force"), (5, "--full-x"), (6, "--helpx")], [(f.line, f.kind, f.text, f.problem) for f in fs])
+    fs = scan_op("`sala op --full`\n`sala op --help --force`\n")
+    check(f"{label}: the finding names the wrong command, not a doubled flag: `sala op --full`, `sala op --help --force`",
+          [f.text for f in fs] == ["sala op --full", "sala op --help --force"], [f.text for f in fs])
+    fs = scan_op("`sala op --help --full --bogus`\n`sala op retire NAME --full`\n`sala op rename OLD NEW --help`\n`sala spawn --full`\n")
+    check(f"{label}: a wrong flag is still reported: beside them, --full or --help anywhere else, --full on another verb",
+          [(f.line, f.kind, f.flag) for f in fs] == [(1, "flag", "--bogus"), (2, "flag", "--full"), (3, "flag", "--help"), (4, "flag", "--full")], [(f.line, f.kind, f.problem) for f in fs])
+
 # ---- 3. the retired terms
 terms = rs.load_terms(T / "terms.toml")
 check("terms: [[term]] tables, literal and pattern, with what to say", [t[1] for t in terms] == ["steward role", "\\bpane owner\\b"] and terms[0][2] == "the back agents", terms)
@@ -248,14 +263,14 @@ r = rs.run(CX, deliver=deliver, state=XS, today="Wed Nov 11th", **SRC)
 check("…and the next good scan does not send them again: one send in total", sent == [] and len(st[str(X)]["keys"]) == 2 and r["quiet"] == [str(X)], (sent, r["quiet"]))
 XO = dict(CX, help_verbs=["op"])
 sent.clear()
-# only the op help empty (sala op --help asked for and not read): the same
+# only the op help empty (sala op --help --full asked for and not read): nothing is resent either
 _real_find_sala = rs.find_sala
 rs.find_sala = lambda name: "/fixture/sala"      # a sala exists for the checks that stand in for its help text
 _REAL_RUN_HELP = rs.run_help
-rs.run_help = lambda sala, verb="": HELP if not verb else ""
+rs.run_help = lambda sala, verb="", full=False: HELP if not verb else ""
 r = rs.run(XO, deliver=deliver, state=XS, today="Thu Nov 12th", schema=T / "schema.json")
-check("…and an empty `sala op --help` (asked for) is the same: nothing sent, the keys kept", sent == [] and any("op --help gave nothing" in x for x in r["notes"]) and len(json.loads(XS.read_text())[str(X)]["keys"]) == 2, (sent, r["notes"]))
-rs.run_help = lambda sala, verb="": HELP if not verb else OPHELP
+check("…and an empty `sala op --help --full` (asked for) sends nothing new and keeps the keys", sent == [] and any("op --help --full gave nothing" in x for x in r["notes"]) and len(json.loads(XS.read_text())[str(X)]["keys"]) == 2, (sent, r["notes"]))
+rs.run_help = lambda sala, verb="", full=False: HELP if not verb else OPHELP
 r = rs.run(XO, deliver=deliver, state=XS, today="Fri Nov 13th", schema=T / "schema.json")
 check("…then a good scan with both helps read: still nothing new", sent == [] and r["quiet"] == [str(X)], (sent, r["quiet"]))
 rs.find_sala = _real_find_sala
@@ -265,7 +280,12 @@ rs.run_help = _REAL_RUN_HELP
 import io, contextlib, stat
 BIN = T / "bin"; BIN.mkdir()
 FAKE = BIN / "fakesala"
-FAKE.write_text(f'#!/bin/sh\ncase "$1" in op) cat {T / "ophelp.txt"};; *) cat {T / "help.txt"};; esac\n', encoding="utf-8"); FAKE.chmod(FAKE.stat().st_mode | stat.S_IXUSR)
+(T / "shortop.txt").write_text('  salamander op <verb> [args…] --from NAME --words "<the owner\'s words>"   queue one operation\nverbs: recycle retire rename lane\n', encoding="utf-8")
+FAKE.write_text('#!/bin/sh\ncase "$*" in\n'
+                f'  "--help") cat "{T / "help.txt"}";;\n'
+                f'  "op --help --full") cat "{T / "ophelp.txt"}";;\n'
+                f'  "op --help") cat "{T / "shortop.txt"}";;\n'
+                '  *) exit 2;;\nesac\n', encoding="utf-8"); FAKE.chmod(FAKE.stat().st_mode | stat.S_IXUSR)
 sent.clear(); XM = T / "x-missing.json"
 CM = dict(CX, sala=str(T / "bin" / "no-such-sala"), help_verbs=["op"])
 err = io.StringIO()
@@ -282,6 +302,10 @@ CP = dict(CX, sala=str(FAKE), help_verbs=["op"])
 rp = rs.run(CP, deliver=deliver, state=XP, today="Sun Nov 15th", schema=T / "schema.json")
 check("4b2 a sala that exists is run: its help is read, the stale flag is found and sent, and no sala line is skipped", not any("skipped" in n for n in rp["notes"]) and len(sent) == 1 and "--nonsense" in sent[0][1], (rp["notes"], sent))
 sent.clear()
+OPF = T / "op" / "OP.md"; OPF.parent.mkdir(); OPF.write_text('`sala op frobnicate X --from me`\n', encoding="utf-8")
+rp = rs.run(dict(CP, files=[{"glob": str(OPF), "keeper": "heron-engineer"}]), dry=True, deliver=deliver, state=T / "op.json", schema=T / "schema.json")
+check("4b2 …the real run_help asks for `op --help --full`: a verb `sala op` does not have is found",
+      [(f.kind, f.text) for v in rp["found"].values() for f in v] == [("verb", "sala op frobnicate")] and not any("not checked" in n for n in rp["notes"]), (rp["found"], rp["notes"]))
 
 # ---- 4c. the first failed delivery ends the sending; the rest hold for the next scan
 Y1 = T / "y" / "Y1.md"; Y2 = T / "y" / "Y2.md"; Y1.parent.mkdir()
@@ -297,6 +321,89 @@ check("…the next scan sends both", len(sent) == 2 and r["held"] == [], sent)
 
 # ---- 4d. a dry run makes no directory
 check("no state directory is made by asking for the state file's path or by a dry run", not (T / "state" / "rulebook-scan").exists() and rs.state_file().parent == T / "state" / "rulebook-scan")
+
+# ---- 4e. the op help is read with `--full`: a short help (its verbs on one `verbs:` line, no table) is loud, and only op's own checks are off
+SHORTOP = """  salamander op <verb> [args…] --from NAME --words "<the owner's words>" queue one operation (the verbs below)
+  salamander op --list                                                  the queue
+verbs: amber birch cedar delta
+(sala op --help --full: each verb's shape, the forms that take no words)
+"""
+VERB_NAMES = ["amber", "birch", "cedar", "delta", "ember", "fjord", "garnet", "harbor", "iris", "juniper", "kestrel", "lumen", "maple", "nectar", "onyx", "pine"]
+ROWS = [f"  {v} [--keep] [--force]                    the {v} verb\n" for v in VERB_NAMES]
+HEADING = ("  reason path                               a heading for a reason on the record, not a verb\n"      # in the middle of the table, as in the real help
+           "                                            `VERB --only NAME --item REF --from YOU`: the heading's continuation line\n")
+FULLTAB = ("  salamander op <verb> [args…] --from NAME --words \"<the owner's words>\"   queue one operation (the verbs below)\n"
+           "verbs:\n" + "".join(ROWS[:2]) + HEADING + "".join(ROWS[2:]))
+check("4e the short op help parses to no op verb, the full table to all sixteen (the reason path heading is not a verb)",
+      rs.op_verb_count(SHORTOP) == 0 and rs.op_verb_count(FULLTAB) == 16 and rs.op_verb_count("") == 0
+      and "reason" not in rs.parse_help("", FULLTAB).op_verbs, (rs.op_verb_count(SHORTOP), rs.op_verb_count(FULLTAB)))
+hf = rs.parse_help(HELP, FULLTAB)
+fs = rs.scan_text("f.md", "`sala op birch --only x`\n", SCHEMA, hf, [])
+check("4e the flags on the heading's continuation lines belong to no verb: not to the verb above the heading",
+      hf.op_verbs["birch"] == {"--keep", "--force"} and [(f.kind, f.flag) for f in fs] == [("flag", "--only")], (hf.op_verbs["birch"], [(f.kind, f.problem) for f in fs]))
+Z4 = T / "z4" / "Z4.md"; Z4.parent.mkdir()
+Z4.write_text("`sala op nonsense-verb --from YOU`\n`sala op amber --bogus`\n`sala spawn --nonsense`\n`sala frobnicate --x`\n", encoding="utf-8")
+CZ4 = dict(CFG, files=[{"glob": str(Z4), "keeper": "heron-engineer"}], help_verbs=["op"], sala="fixture-sala")
+_real_find_sala = rs.find_sala; _REAL_RUN_HELP2 = rs.run_help
+rs.find_sala = lambda name: "/fixture/sala"
+calls4e = []
+ops4e = lambda calls: [c for c in calls if c[0] == "op"]      # the main help's call is not the op help's
+said4e = lambda r: [(f.kind, f.text) for v in r["found"].values() for f in v]
+MAIN_ONLY = [("flag", "sala spawn --nonsense"), ("verb", "sala frobnicate --x")]      # what `sala --help` alone can judge
+def _scan4e(full_text, plain_text):
+    """One dry scan with a sala that answers `op --help --full` and `op --help` with these texts → (the result, the stderr)."""
+    def run_help(sala, verb="", full=False):
+        calls4e.append((verb, full))
+        return HELP if not verb else (full_text if full else plain_text)
+    calls4e.clear(); rs.run_help = run_help
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        r = rs.run(CZ4, dry=True, deliver=deliver, state=T / "z4.json", schema=T / "schema.json")
+    return r, err.getvalue()
+r4, err4e = _scan4e(SHORTOP, SHORTOP)
+check("4e a short op help (both forms tried, neither has a table): loud note, and the line also goes to stderr",
+      any("sala op --help --full lists no verb table" in x and "not checked" in x for x in r4["notes"]) and ops4e(calls4e) == [("op", True), ("op", False)]
+      and "lists no verb table" in err4e, (r4["notes"], calls4e, err4e))
+check("4e …no op verb or op flag is judged, and the checks that need only `sala --help` still run", said4e(r4) == MAIN_ONLY, said4e(r4))
+r4, _ = _scan4e("", "")
+check("4e …the same when the op help gives nothing", said4e(r4) == MAIN_ONLY and any("sala op --help --full gave nothing" in x for x in r4["notes"]), (said4e(r4), r4["notes"]))
+r4, _ = _scan4e(SHORTOP, "")
+check("4e a plain help with no table is not taken over the --full answer: the note still says what --full gave",
+      any("lists no verb table" in x for x in r4["notes"]) and not any("gave nothing" in x for x in r4["notes"]), r4["notes"])
+r4, _ = _scan4e(FULLTAB, SHORTOP)
+check("4e the full table is read first and checked: the made-up verb and the wrong flag are found, no loud note",
+      ops4e(calls4e) == [("op", True)] and not any("verb table" in x or "gave nothing" in x for x in r4["notes"])
+      and said4e(r4) == [("verb", "sala op nonsense-verb"), ("flag", "sala op amber --bogus")] + MAIN_ONLY, (calls4e, said4e(r4), r4["notes"]))
+r4, _ = _scan4e(SHORTOP, FULLTAB)      # an older sala: no --full, its plain help is the table
+check("4e an older sala with no --full: its plain help is read as the table, and the verb is still checked",
+      ops4e(calls4e) == [("op", True), ("op", False)] and ("verb", "sala op nonsense-verb") in said4e(r4) and not any("verb table" in x for x in r4["notes"]), (calls4e, r4["notes"]))
+rs.find_sala = _real_find_sala; rs.run_help = _REAL_RUN_HELP2
+# a bad --op-help file is named as that file, not as the command
+(T / "emptyop.txt").write_text("", encoding="utf-8")
+for bad, what in ((T / "emptyop.txt", "gave nothing"), (T / "shortop.txt", "lists no verb table")):
+    with contextlib.redirect_stderr(io.StringIO()):
+        r4 = rs.run(CZ4, dry=True, deliver=deliver, state=T / "z4.json", **{**SRC, "help_op": bad})
+    said = [x for x in r4["notes"] if "not checked" in x]
+    check(f"4e a --op-help file that {what}: the note names the file, not `sala op --help --full`",
+          len(said) == 1 and f"the --op-help file {bad} {what}" in said[0] and "sala op --help" not in said[0], r4["notes"])
+# an unread op table between two good scans: op findings are kept (not resent), the others are judged as usual
+W = T / "w" / "W.md"; W.parent.mkdir(); WS = T / "w-sent.json"
+CWO = dict(CFG, files=[{"glob": str(W), "keeper": "heron-engineer"}]); NOTABLE = {**SRC, "help_op": T / "shortop.txt"}
+OPLINES = "`sala op frobnicate X`\n`sala op rename OLD NEW --force`\n"
+keys4e = lambda: sorted(k.split("|")[1] for k in json.loads(WS.read_text())[str(W)]["keys"])
+sent.clear(); W.write_text(OPLINES + "`sala spawn --nonsense`\n", encoding="utf-8")
+rs.run(CWO, deliver=deliver, state=WS, today="Mon Nov 16th", **SRC)
+check("4e kept keys: the good scan sends one note with the two op findings and the spawn flag", len(sent) == 1 and sent[0][1].count("\nL") == 3, sent)
+sent.clear(); W.write_text(OPLINES + "`sala spawn --other`\n", encoding="utf-8")
+with contextlib.redirect_stderr(io.StringIO()):
+    r4 = rs.run(CWO, deliver=deliver, state=WS, today="Tue Nov 17th", **NOTABLE)
+check("4e …with no op table, a new non-op finding is sent alone, the fixed one is forgotten and the op keys are kept",
+      len(sent) == 1 and sent[0][1].count("\nL") == 1 and "--other" in sent[0][1]
+      and keys4e() == ["sala op frobnicate", "sala op rename --force", "sala spawn --other"], (sent, keys4e()))
+sent.clear()
+r4 = rs.run(CWO, deliver=deliver, state=WS, today="Wed Nov 18th", **SRC)
+check("4e …and the next good scan does not send the op findings again", sent == [] and r4["quiet"] == [str(W)], (sent, r4["quiet"]))
+sent.clear()
 
 # ---- 5. the terms file absent, an unreadable sala, a file that cannot be read
 CFG2 = dict(CFG, terms=T / "no-terms.toml")
@@ -372,6 +479,10 @@ rb = rs.run_weekly(CW, week="2026-W61", wfile=WF3, deliver=deliver, state=WD / "
 check("weekly: a scan blind to sala (help unreadable) does not record the week", rb is not None and rb["blind"] is True and not WF3.exists(), rb)
 rb2 = rs.run_weekly(CW, week="2026-W61", wfile=WF3, deliver=deliver, state=WD / "s4.json", **SRC)
 check("weekly: …the next run scans again, and a good read records the week", rb2 is not None and rb2["blind"] is False and json.loads(WF3.read_text()) == {"week": "2026-W61"}, rb2)
+WF3o = WD / "blind-op" / "last-week.json"
+with contextlib.redirect_stderr(io.StringIO()):
+    rbo = rs.run_weekly(CW, week="2026-W61", wfile=WF3o, deliver=deliver, state=WD / "s4o.json", **{**SRC, "help_op": T / "shortop.txt"})
+check("weekly: a scan with only op's verb table unread does not record the week either", rbo is not None and rbo["blind"] is True and not WF3o.exists(), rbo)
 # a missing or damaged week file reads as no scan this week; the scan then writes a whole one
 for label, body in (("damaged", "{not json"), ("empty", ""), ("a list", "[]"), ("a number for the week", '{"week": 5}')):
     WF4 = WD / "dmg" / "last-week.json"; WF4.parent.mkdir(exist_ok=True); WF4.write_text(body, encoding="utf-8")

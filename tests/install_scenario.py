@@ -21,6 +21,8 @@ garbage value reads as 05:00) in the instance timezone; `units` enables and star
 the timer when its file changed; --restart never restarts the service (that would cue an audit); with enabled = false a pair
 installed earlier is disabled and removed, and with none installed it is only skipped. [audit] at as a list of times gives
 the timer one OnCalendar line each (sorted, once each); the rulebook scan is the service's ExecStartPost, after the run.
+The standby push's timer pair (stackshot-standby-push.{service,timer}): rendered and installed only with [standby_copy] push_to set; `units` enables and starts the timer, never the service, re-arms
+the timer when its file changed and never restarts the service (that would push); with push_to empty again a pair installed earlier is disabled and removed, and with none installed it is only skipped.
 The minute runner's unit (stackshot-minute.service): only with [runner] process = "unit" on a box that is not a read-only standby (a bad
 value counts as inline). At inline nothing is rendered, installed, enabled, started or restarted for it, no systemctl call asks about a
 standby, and every other unit renders to the same bytes as at "unit"; at "unit" it is rendered with each setting the issue names
@@ -48,7 +50,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-def conf(name, account_id="", enabled="false", scope=None, client=None, audit=None, at=None, tz=None, project=None, runner=None):
+def conf(name, account_id="", enabled="false", scope=None, client=None, audit=None, at=None, tz=None, project=None, runner=None, push=None):
     t, n1 = re.subn(r'(?m)^account_id = "[^"]*"', f'account_id = "{account_id}"', toml)
     t, n2 = re.subn(r'(?m)^(\[anchor_hub\][^\n]*\n)enabled = (true|false)', rf'\g<1>enabled = {enabled}', t)
     assert n1 == 1 and n2 == 1, (n1, n2)
@@ -61,6 +63,8 @@ def conf(name, account_id="", enabled="false", scope=None, client=None, audit=No
         t, n = re.subn(r'(?m)^process = "[^"]*"[^\n]*\n', "", t); assert n == 1
     elif runner is not None:                 # [runner] process
         t, n = re.subn(r'(?m)^process = "[^"]*"', lambda m: f'process = "{runner}"', t); assert n == 1   # the example has one key of that name
+    if push is not None:                     # [standby_copy] push_to
+        t, n = re.subn(r'(?m)^push_to = "[^"]*"', f'push_to = "{push}"', t); assert n == 1
     if project is not None:
         t, n = re.subn(r'(?m)^project = "[^"]*"', f'project = "{project}"', t); assert n == 1
     if tz is not None:
@@ -358,6 +362,53 @@ rc, out, calls = units(conf("aud-u-off.toml", audit="false"), env=AH)
 check("units, audit off with none installed: skipped, no disable call", rc == 0 and "stackshot-audit.service: skipped ([audit] enabled is not true)" in out
       and not any("stackshot-audit" in c for c in calls), (calls, out[-500:]))
 check("the audit pair: sudo never called", not (T / "sudo-called").exists())
+
+# ---- the standby push's timer pair: only with [standby_copy] push_to set; empty again → a pair installed earlier is disabled and removed, its service never started or restarted
+PUSHU = ["stackshot-standby-push.service", "stackshot-standby-push.timer"]
+rc, units_, out = render(conf("push-off.toml"))
+check("push_to empty (the example's default): no push units rendered", rc == 0 and not set(PUSHU) & set(units_), units_)
+rc, units_, out = render(conf("push-on.toml", push="user@standby-host"))
+check("push_to set: the service and the timer join, after the puller", rc == 0 and units_ == BASE + ["stackshot-puller.service"] + PUSHU, units_)
+pcfg = conf("push-ref.toml", push="user@standby-host")
+for n in PUSHU:
+    rc, one, _ = render_out(pcfg, n)
+    check(f"{n} is the plain substitution of its template", rc == 0 and one == reference(n, os.path.realpath(pcfg)), one[:300])
+rc, tout, _ = render_out(pcfg, "stackshot-standby-push.timer")
+check("the timer: two minutes after boot, five after each run, 15 s accuracy, no random delay, no Persistent, the service it starts, wanted by timers.target",
+      rc == 0 and all(f"\n{l}\n" in tout for l in ("OnBootSec=2min", "OnUnitActiveSec=5min", "AccuracySec=15s", "RandomizedDelaySec=0", "Unit=stackshot-standby-push.service", "WantedBy=timers.target"))
+      and "Persistent" not in re.sub(r"(?m)^#.*$", "", tout) and "OnCalendar" not in tout, tout)
+rc, sout, _ = render_out(pcfg, "stackshot-standby-push.service")
+check("the service: a oneshot running `stackshot standby-push` in the locked project environment, 10 minutes at most, the config and PATH lines of the other units (~/.local/bin first)",
+      rc == 0 and "\nType=oneshot\n" in sout and "\nTimeoutStartSec=10min\n" in sout and "[Install]" not in sout
+      and re.search(r"(?m)^ExecStart=\S+ run --project " + re.escape(STACK) + r" --locked stackshot standby-push$", sout)
+      and "\nEnvironment=STACKSHOT_CONFIG=" + os.path.realpath(pcfg) + "\n" in sout and "\nWorkingDirectory=" + STACK + "\n" in sout
+      and re.findall(r"(?m)^Environment=PATH=(\S+)$", sout) == [os.environ["HOME"] + "/.local/bin:/usr/local/bin:/usr/bin:/bin"], sout)
+check("the service carries the labels of the audit's: X-Model-Lane=none (no model is called), X-Project and X-Runs-With=servers once each, in [Unit]",
+      all(len(re.findall(rf"(?m)^{k}=", sout)) == 1 and sout.index(f"\n{k}=") < sout.index("[Service]") for k in ("X-Model-Lane", "X-Project", "X-Runs-With")) and "\nX-Model-Lane=none\n" in sout and "\nX-Runs-With=servers\n" in sout, sout)
+PH = {**UENV, "HOME": str(T / "uhome10")}; pdir = T / "uhome10/.config/systemd/user"
+rc, out, calls = units(conf("push-u-on.toml", push="user@standby-host"), env=PH)
+check("units, push_to set: both files installed, the timer enabled and started, the service never started or enabled",
+      rc == 0 and all((pdir / n).is_file() for n in PUSHU) and "--user enable --now --quiet stackshot-standby-push.timer" in calls
+      and not any("stackshot-standby-push.service" in c for c in calls), (calls, out[-500:]))
+rc, out, calls = units(conf("push-u-on.toml", push="user@standby-host"), env=PH)
+check("units, push_to set, twice: unchanged, the timer not restarted", rc == 0 and "stackshot-standby-push.timer: unchanged" in out and "--user restart stackshot-standby-push.timer" not in calls, (calls, out[-500:]))
+(pdir / "stackshot-standby-push.timer").write_text("stale\n"); (pdir / "stackshot-standby-push.service").write_text("stale\n")
+rc, out, calls = units(conf("push-u-on.toml", push="user@standby-host"), "--restart", env=PH)
+check("units, a changed pair with --restart: the timer re-armed, the service never restarted",
+      rc == 0 and "--user restart stackshot-standby-push.timer" in calls and not any("stackshot-standby-push.service" in c for c in calls)
+      and (pdir / "stackshot-standby-push.timer").read_text().startswith("# Rendered by install.sh"), (calls, out[-500:]))
+rc, out, calls = units(conf("push-u-on.toml", push="user@standby-host"), "--start", env=PH)
+check("units --start: the service is never started", rc == 0 and not any("stackshot-standby-push.service" in c for c in calls), (calls, out[-500:]))
+rc, out, calls = units(conf("push-u-off.toml"), env=PH)
+check("units, push_to empty after set: the timer disabled and stopped, both files removed, said once",
+      rc == 0 and "--user disable --now --quiet stackshot-standby-push.timer" in calls and not any((pdir / n).exists() for n in PUSHU)
+      and "disabled and removed ([standby_copy] push_to is empty)" in out and all(c.startswith("--user ") for c in calls), (calls, out[-500:]))
+rc, out, calls = units(conf("push-u-off.toml"), env=PH)
+check("units, push_to empty with none installed: skipped, no disable call", rc == 0 and "stackshot-standby-push.service: skipped ([standby_copy] push_to is empty)" in out
+      and not any("stackshot-standby-push" in c for c in calls), (calls, out[-500:]))
+rc, out, calls = units(conf("push-u-blank.toml", push="   "), env=PH)
+check("units, push_to only blanks counts as empty", rc == 0 and not any((pdir / n).exists() for n in PUSHU), (calls, out[-300:]))
+check("the push pair: sudo never called", not (T / "sudo-called").exists())
 
 # ---- the minute runner's unit: only with [runner] process = "unit", never on a standby; nothing else about the unit set moves
 MIN = "stackshot-minute.service"
