@@ -392,14 +392,23 @@ Parameter contact (a filing field: it moves no state clock, changes no mover and
 falls to the project's -main agent.
 
 ## text ASK_RULE trail
-The server takes an ask off {{OWNER}}'s move in one case only: its author's own plain sentence. A write by the ask's
+The server takes an ask off {{OWNER}}'s move only on its author's own plain sentence: that the ask is wrong, or that its proposal is being redrawn or the decision waits on a number. A write by the ask's
 author whose whole new text, in every text parameter of the call (description, next, subject, goal and the others; a
 line sent again whole from before is not new), is exactly one sentence, "The ask is wrong.", "My question is moot." or
 "This ask is no longer needed." (also stale, void, obsolete, no longer valid; at most one "- " bullet before it, and
 only "now", "anymore" or a full stop after it) removes the ask, its options and his stored your-call, hands the item
 back to its author, says so in History and in the reply, and keeps his late answer as a comment. Any other new line or
 sentence in that write (a hedge, a label such as Note:, a quote, a question, another language) means no word, and a
-write with no sender counts for nothing. A dropped dependency removes nothing: a gate is a precondition, so a dropped
+write with no sender counts for nothing. A decision whose proposal is being redrawn, or that waits on a number, is not on
+his move meanwhile, but this rule is narrow: only a `step` or a `next` that is ONE line holding exactly ONE sentence counts, and anything else keeps the ask (a second line or
+sentence, a header or list, any description write, a finished step, the options, said and draft text, a write that sets an ask). The sentence, after one "- " bullet or number, your own "name:" lead
+and before the full stop, must be, whole, one of these shapes: "I am|we are|I will|now|still" or a bare imperative with redraw|rebuild|redo|rework|redesign (also -ing) and
+"the|this|his|her|our" and mockup, proposal, options, design, ask, or "pick|ask|decision|question" before page or card, with "now", "again" or "from his pick" at most after it ("I am rebuilding the
+proposal now."); "the mockup is being rebuilt" or "will be" redrawn|rebuilt|redone|reworked|redesigned, with the same ending; a bare "is redrawn" only with ", then the pick goes back to him" or "so the ask
+waits for his answer" after it (a sentence that only reports the work finished never counts); or "not decided until the number is in", which must end its sentence. Any other word in the sentence keeps the ask: "for
+the CLI", "to use argparse", "next month", "in a branch", ", but the ask stands", "the ask button", "the options parser", or a bare "The page is being redrawn" (a page or card needs the decision named in front of it).
+The server
+takes the ask off the same way (clear_ask yourself when you know), and you ask again with the new proposal. A dropped dependency removes nothing: a gate is a precondition, so a dropped
 gate often makes the ask more live. When an ask whose text names an item after/once/when/until/waiting for/depends on
 has that item closed as dropped after the ask was written, the ask's author is reminded on each of his writes to the
 item while that item stays dropped and the ask stands (withdraw the ask with clear_ask=true if it is moot, otherwise

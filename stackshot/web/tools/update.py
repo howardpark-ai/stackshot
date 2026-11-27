@@ -65,6 +65,12 @@ _ASK_NONTEXT_PARAMS = (
     "clear_then", "clear_wait", "clear_draft", "clear_next", "clear_check")                                   # switches
 
 
+def _ask_own_texts(params: "dict[str, Any]") -> "list[str]":
+    """The strings of a write that the redraw reader (ask_leaves.author_says_redrawn) may read: the `step` (not a finished one, written with `done`) and the `next`, each a text of its own. The description and every other text never
+    take an ask off his move."""
+    return [x for n in ("step", "next") if not (n == "step" and params.get("done")) for x in _askl.text_leaves(params.get(n))]
+
+
 def _ask_write_texts(params: "dict[str, Any]") -> "list[str]":
     """Every string a write carries in a text parameter (_ASK_TEXT_PARAMS; a mapping or list parameter gives each string inside it), for ask_leaves.new_lines and author_says_wrong."""
     return [x for n in _ASK_TEXT_PARAMS for x in _askl.text_leaves(params.get(n))]
@@ -233,7 +239,7 @@ def stackshot_update(
                            **({"busy_note": busy_note} if busy_note is not None else {})) + fix_note
             if alias_used:
                 out += _uw.alias_note(alias_used, _model.clean(alias_date), alias_ends, _backstop_field(item_id, status))
-            return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()))
+            return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()), own=_ask_own_texts(locals()))
     finally:
         _telling.HO_STATE.handback = set()      # the flag is this write's: a later write on this thread starts without it
 

@@ -218,7 +218,7 @@ def _ask_authors(item: dict[str, Any]) -> "list[str]":
     return [x for x in (_telling.holder(item), str(meta.get("owner") or "")) if x and not _model.is_owner(x)]
 
 
-def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
+def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "", redrawn: bool = False) -> str:
     """Take the standing ask off the owner's move: the ask, its options and his stored your-call go, `decision` leaves needs, the item goes back to its author (a live session; else as any answered
     decision's hand-over leaves it), one History line says what and why, and metadata.ask_left keeps the ask and its options so that his late answer is kept as a comment (_answer). Only its
     author's own plain sentence (`why`) calls for it; `expect` = the ask the caller saw, so a write that changed it meanwhile leaves it alone. The server's own save: it
@@ -243,7 +243,7 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
         if back and _handover._then_live(back, meta):
             meta["then"] = back      # the author takes the item back; read below, so the hand-over sees the `then` set here and not the one stored before
         mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # after the line above: _decision_hand_over reads the then that stands now
-        meta[_askl.LEFT] = {"at": now, "ask": ask, "how": "word", "why": why[:200], "by": str(rec.get("by") or ""), **({"options": shown_opts} if shown_opts else {})}
+        meta[_askl.LEFT] = {"at": now, "ask": ask, "how": "redrawn" if redrawn else "word", "why": why[:200], "by": str(rec.get("by") or ""), **({"options": shown_opts} if shown_opts else {})}
         _handover._decision_hand_over(meta, mover_in, then_in, parked=False, waiting=_item_read._model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
         _stall.note(meta, now, f"ask taken off {OWNER}'s move by the server (its author said so: {_clip_line(why, 110)}): \"{_clip_line(ask, 90)}\"")
         item["metadata"] = meta
@@ -252,7 +252,8 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
     _hooks().publish()
     item["gid"] = gid
     to = _telling.holder(item)
-    line = (f"[stackshot] the ask on {_gh.shown(gid)} was taken off {OWNER}'s move (its author said it is wrong: {_clip_line(why, 140)}). "
+    said = "its proposal is being redrawn or waits on a number" if redrawn else "it is wrong"
+    line = (f"[stackshot] the ask on {_gh.shown(gid)} was taken off {OWNER}'s move (its author said {said}: {_clip_line(why, 140)}). "
             f"The item is back with {_sr._session_label(to) if to else 'its default mover'}. If he answers it late, his answer is kept as a comment → {_item_url(gid) or _telling.notice_link(gid)}")
     if to and not (sender.strip() and _handoff.ho_same(to, sender)):
         try:
@@ -260,11 +261,11 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
         except Exception as e:  # noqa: BLE001  — the ask is off his move; a notice that fails is a stderr line
             print(f"ask: {gid} mover not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     print(f"ask: {gid} taken off the owner's move (its author's word): {why}", file=sys.stderr, flush=True)
-    return (f"\n(the server took the ask off {OWNER}'s move: you said it is wrong, \"{_clip_line(why, 110)}\". "
+    return (f"\n(the server took the ask off {OWNER}'s move: you said {said}, \"{_clip_line(why, 110)}\". "
             f"The item is back with {_sr._session_label(to) if to else 'its default mover'}; History says so. His late answer, if one comes, is kept as a comment.)")
 
 
-def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bool, texts: "list[str]") -> str:
+def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bool, texts: "list[str]", own: "list[str] | None" = None) -> str:
     """An update's tail for the ask on its item (the reply's extra lines). Three things, in this order:
       a write that sets an ask → the ask-time check: his comments and notes since the item's last ask are shown, so one that already answers the ask is seen at the write;
       a write by the ask's author whose ENTIRE new text (every text parameter of the call, _ASK_TEXT_PARAMS in web/tools/update.py; a line the item already held whole is not new) is one plain sentence, "the ask is wrong|moot|stale|...", the closed shape of
@@ -289,9 +290,11 @@ def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bo
         authors = _ask_authors(item)
         mine = bool(who) and any(_handoff.ho_same(who, a) for a in authors)
         if _cfg.ask_leaves_on():
-            word = _askl.author_says_wrong(_askl.new_lines(texts, str(pre.get("old") or ""))) if mine and pre.get("ask") == now_ask else ""
-            if word:
-                out = _ask_leave(gid, word, sender=who, expect=now_ask)
+            fresh = _askl.new_lines(texts, str(pre.get("old") or "")) if mine and pre.get("ask") == now_ask else []
+            word = _askl.author_says_wrong(fresh)
+            redrawn = "" if word or not fresh else _askl.author_says_redrawn(own or [], who, str(pre.get("old") or ""))      # the author's step or next, one line, one sentence: the proposal is being redrawn, or the pick waits on a number: it is not on his move meanwhile
+            if word or redrawn:
+                out = _ask_leave(gid, word or redrawn, sender=who, expect=now_ask, redrawn=bool(redrawn))
                 if out:
                     return out
         if mine or (who and _handoff.ho_same(who, _telling.holder(item))) or (who and _handoff.ho_same(who, str(meta.get("owner") or ""))):

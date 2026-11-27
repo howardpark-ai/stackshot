@@ -55,6 +55,58 @@ def author_says_wrong(texts: list[str]) -> str:
     return body if _CORE_RX.match(body) else ""
 
 
+_DET = r"(?:the|this|my|its|his|her|our)\s+(?:new\s+)?"
+_PRE = r"(?:(?:pick|ask|decision|question)\s+)"
+_OBJ = rf"(?:{_PRE}(?:page|card)s?|mock-?ups?|proposals?|options?|designs?|ask)"      # a page or card is the ask's own only with the decision named in front of it ("the pick page"); a bare "the page" or "the card" is not
+_LEAD = r"(?:(?:i|we)(?:\s+will|\s+am|\s+are|'ll|'m|'re)?\s+(?:now\s+)?|now\s+|still\s+)?"
+_VERB = r"(?:re-?draw(?:ing|s)?|rebuild(?:ing|s)?|redo(?:ing)?|rework(?:ing|s)?|redesign(?:ing|s)?)"
+_PP = r"(?:re-?drawn|redone|rebuilt|reworked|redesigned)"
+_TAIL = r"(?:\s+(?:now|again|from\s+(?:his|her|the|(?-i:[A-Z][a-z]+'s))\s+pick))?"      # the only words that may follow the noun
+_HAND = (r"(?:\s*[,;]\s*(?:and\s+)?(?:then|so)\s+the\s+(?:pick|ask|decision|question)\s+"      # an explicit later hand-back: "..., then the pick goes back to him", "..., so the ask waits for his answer"
+         r"(?:(?:goes|comes|is\s+sent|will\s+go|will\s+come)\s+back\s+to\s+(?:him|her|(?-i:[A-Z][a-z]+))|waits\s+for\s+(?:him|her|his\s+answer)))")
+_END = r"\s*[.!]*\s*$"
+_REDRAW = (rf"{_LEAD}{_VERB}\s+(?:{_DET})?{_OBJ}{_TAIL}(?:{_HAND})?"      # "redraw|rebuild|redo|rework|redesign the proposal"
+           rf"|{_DET}{_OBJ}\s+(?:(?:is|are|gets?)\s+being|will\s+be)\s+{_PP}{_TAIL}(?:{_HAND})?"      # "the proposal is being redrawn", "will be redrawn"
+           rf"|{_DET}{_OBJ}\s+(?:is|are|gets?)\s+{_PP}{_TAIL}{_HAND}")      # a bare "is redrawn" only with the hand-back (else it reports finished work)
+_REDRAW_RX = re.compile(rf"^(?:{_REDRAW}){_END}", re.I)
+_STOP = r"(?:if|unless|maybe|might|could|should|would|after|once|when|whenever|before|while|next|later|eventually|someday|in|until)"
+_NUM = (r"until\s+(?:(?:the|a|an)\s+)?(?:(?!" + _STOP + r"\b)[\w']+\s+){0,3}?(?:numbers?|figures?|measurements?|results?)"
+        r"\s+(?:is|are|come|comes|arrive|arrives|land|lands)\s+(?:in|back)\s*[.,;!]?\s*$")
+_WAITS_RX = re.compile(      # the decision itself waits on the number, to the end of the sentence: "not decided until", "nothing is decided until", "I will not decide until", "the decision waits until", or the bare "until the (replay) number is in"
+    rf"^(?:(?:this|that|it|the\s+(?:decision|pick|choice))\s+(?:is|stays|remains)\s+)?not\s+(?:yet\s+)?decided\s+{_NUM}"
+    rf"|^nothing\s+(?:is|gets|will\s+be)\s+decided\s+{_NUM}"
+    rf"|^(?:i|we)\s+(?:will\s+not|won't|do\s+not|don't|am\s+not\s+going\s+to|are\s+not\s+going\s+to)\s+(?:decide|pick|choose)(?:\s+anything)?\s+{_NUM}"
+    rf"|^(?:the\s+)?(?:decision|pick|choice)\s+(?:waits|is\s+waiting|stays\s+open|stays\s+undecided)\s+(?:on\s+it\s+)?{_NUM}"
+    r"|^until\s+(?:(?:the|a|an)\s+)?(?:(?!" + _STOP + r"\b)[\w']+\s+){0,3}?numbers?\s+(?:is|are|come|comes|arrive|arrives|land|lands)\s+(?:in|back)\s*[.,;!]?\s*$", re.I)      # bare: only a "number", never "results" or "measurement" ("until the CI results are in" is a gate on something else)
+_ITEM_RX = re.compile(r"^(?:[-*•]|\d+[.)])\s+")
+MAX_SENT = 400      # a sentence over this is never a removal: the reader is linear in what it is given, and what is longer than a note is not one
+
+
+def author_says_redrawn(texts: list[str], who: str = "", old: str = "") -> str:
+    """The sentence in which the author of a write says the proposal behind the ask is being redrawn, or that the decision waits on a number, "" when none does. `texts` are the author's step and next of the
+    write (nothing else: never the description). A text counts only when it is ONE line holding exactly ONE sentence, after one list bullet or number, the author's own `who:` lead and the full stop, and that
+    sentence is, whole, one of a few shapes: "I am|we are|I will|now|still redrawing|rebuilding|redoing|reworking|redesigning (or the imperative) the|this|his|her|our mockup|proposal|options|design|ask|pick page|ask card"
+    with "now", "again" or "from his pick" at most after it; "the proposal is being redrawn" or "will be redrawn" (same ending); a bare "is redrawn" only with ", then the pick goes back to him" or "waits for his
+    answer" after it; or the number wait ("not decided until the numbers are in"). Anything else keeps the ask: any other word, a second line or sentence before or after, a header, a quote, a label, a question, a
+    past tense. A line the item already held (`old`) is not the author's new word. The ask is then not his to answer: the server takes it off his move, and its author asks again with the new proposal. The reader
+    is linear and a sentence over 400 characters is never read."""
+    lead = re.compile(rf"^{re.escape(who.strip())}:\s*", re.I) if who.strip() else None
+    held = {_norm_line(ln) for ln in str(old or "").replace("’", "'").splitlines()} - {""}
+    for t in texts:
+        lines = [ln for ln in str(t or "").replace("’", "'").splitlines() if ln.strip()]
+        if len(lines) != 1:
+            continue      # a second line (a header, a list, another sentence) keeps the ask
+        flat = " ".join(lines[0].split())
+        if len(flat) > MAX_SENT or _norm_line(flat) in held:
+            continue
+        body = _ITEM_RX.sub("", flat, count=1)
+        if lead:
+            body = lead.sub("", body, count=1)
+        if _WAITS_RX.match(body) or _REDRAW_RX.match(body):
+            return body
+    return ""
+
+
 def _norm_line(x: Any) -> str:
     return " ".join(re.sub(r"^[\s\-*•]+", "", str(x or "")).lower().split())
 

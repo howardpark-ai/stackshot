@@ -622,6 +622,188 @@ print(f"real update, text parameters accepted as sent: {acc}; refused as sent: {
 check("through the real update, the sentence in the description plus a new value of any one of the %d text parameters leaves the ask standing" % len(TP), not bad_t, bad_t)
 check("... wait_anchor, post_wake_mover and then, which store a free string as written, are among the text parameters", {"wait_anchor", "post_wake_mover", "then"} <= set(TP), None)
 
+# (board 1721) a proposal being redrawn, or a pick that waits on a number, takes the ask off his move on its author's sentence; the sessions that broke the rule wrote it as a step or a note, ask standing
+# The reader takes the WHOLE sentence or nothing: one of a few anchored shapes; any other word in it keeps the ask.
+R_ = AL.author_says_redrawn
+YES_ = ("I am rebuilding the proposal now.", "We are redrawing the mockup.", "I'm redoing his options again", "I will rework this design", "Redrawing the proposal.", "redraw his proposal", "rework the proposal.", "redo the mockup", "redesign the proposal",
+        "Rebuild our options now", "rebuild the ask", "still redrawing the proposal", "now redoing the mockup", "redraw the pick page", "Rebuild the question card now.", "redo the proposal from his pick", "redo the proposal from Aaron's pick",
+        "The mockup is being rebuilt.", "the options are being redone", "The mockup will be redone", "The pick page is being redrawn", "The ask card will be reworked now", "This design is being redesigned again", "The mockup is being rebuilt",
+        "The mockup is redrawn, then the pick goes back to him", "The mockup is redrawn, so the question goes back to him.", "The mockup is redrawn, then the ask comes back to Aaron", "The mockup is redrawn, so the pick waits for him",
+        "The proposal is redesigned; so the pick waits for his answer", "The options are redone, and then the pick will go back to Aaron", "Redraw the proposal, then the pick goes back to him.",
+        "Nothing is decided until the number is in.", "Not decided until the number is in.", "nothing is decided until the number is in", "I will not decide until the number is in", "This is not decided until Aaron's number is in.",
+        "until the replay number is in", "The decision waits until the figures are in.", "until the replay number is in.", "Not decided until the numbers are back", "Not decided until the one two three numbers are in",
+        "- rebuilding the proposal now", "1. Rework the proposal",
+        "I’m rebuilding the proposal", "redo the proposal from the pick", "redraw her proposal", "The mockup is redrawn, so the pick is sent back to him", "The mockup is redrawn, so the pick will come back to him",
+        "The decision stays open until the numbers are in.", "This is not decided until Aaron’s number is in.")
+check("author_says_redrawn: the anchored shapes are read", all(R_([t]) for t in YES_), [t for t in YES_ if not R_([t])])
+NO_ = ("Should I redraw the page?", "Redraw the page?", "if the page is redrawn we ship it", "I will not redraw the page", "I will not redraw the proposal", "the build is being rebuilt", "redraw the chart", "no redraw needed",
+       "after he picks, rebuild the page", "until the release is out", "",
+       # a conditional lead-in of any subject, a thing that is not the ask's own, a number that is not the decision's
+       "next: after the owner picks, rework the card to match", "once the pick is in, redo the page", "when the owner answers, rebuild the proposal", "keep the PR open until the CI results are in",
+       "until the test results are in", "do not close until the measurement is in", "rework the options parser in config.py", "rework the card layout in the login form",
+       "the docs page is being rebuilt by the deploy job", "Feature: redo the page after login redirect", "redo the page", "The page is being redrawn", "the page is being rebuilt", "rework the card", "I will decide after the number is in, then rebuild the proposal",
+       # finished-state passives report the work done; a bare "is redrawn" needs a clause saying the pick goes back; the bare number wait ends its sentence
+       "The mockup is redrawn; the pick is ready", "The proposal is reworked, the ask above stands", "The options are redone and posted", "The page is rebuilt with the pick card", "The proposal is redesigned in the PR",
+       "The mockup is redrawn. The ask stands.", "The mockup is redrawn, then CI runs the checks", "The mockup is redrawn, then we go back to the other work", "Until the PR number is in the title, CI fails", "until the ticket number is in, hold the deploy",
+       # an earlier condition (sentence, line or header) holds the rewrite back; a sentence is not cut at ";"
+       "when the owner answers; rebuild the proposal", "after he picks; rework the proposal", "If he agrees, e.g. rework the proposal", "The owner picks A or B. Rework the proposal with his pick.", "1. The owner picks. 2. Rework the proposal to match.",
+       "Next steps after the owner picks:\n- rework the proposal", "Next steps after the owner picks:\n- a thing\n- rework the proposal", "Checked it, once the owner picks.\nrework the proposal", "Checked the logs; the mockup is being rebuilt", "See e.g. Rework the proposal", "Next steps:\n- rework the proposal", "He agrees. Rework the proposal.", "The owner answers. Rework the proposal.", "The owner picks A or B. Rework the proposal.", "1. The owner picks. 2. Rework the proposal.",
+       "When the owner answers.\nRebuild the proposal.", "1. Wait until the owner picks.\n2. Rework the proposal.", "Next steps after the owner picks:\n1. Rework the proposal\n2. Ship", "- When the owner answers.\n- Rebuild the proposal.", "- If he picks B, nothing else changes.\n- Redo the options.",
+       # a different object, or any other word after the noun
+       "rework the options to use argparse", "rework the options for the CLI flags", "rebuild the mockup for the demo", "rework the options.py parser", "redo the options.json", "rebuild the proposal.md", "rework options.toml",
+       "redo the card to pick up the new theme", "Rebuild the page, ask Aaron for review", "rework the card, the question mark icon is wrong", "redraw the proposal with the card", "redraw the proposal and then put the pick back",
+       "The mockup is being redrawn by CI for the nightly deploy", "The mockup is being redrawn in a branch", "The mockup is being redrawn, but the ask stands", "I am redrawing the proposal, Aaron can still pick", "redraw the proposal, cancelled", "redraw the proposal, tbd",
+       "rebuilding the proposal, the ask button is misaligned", "redraw the proposal and the deploy script", "The proposal will be redrawn next month", "redraw the proposal in v2", "redraw the proposal at some point", "redraw the proposal, probably",
+       "rebuild the ask button", "rework the pick list", "redo the decision tree", "redraw the question card layout", "redraw the pick page for mobile", "rebuild the question mark",
+       "The mockup is redrawn.", "The mockup is being redrawn. On hold.", "See next steps.\nRework the proposal.", "Redraw the proposal, then the pick goes back to A" + "a" * 450, "The mockup is redrawn, then the pick goes to him", "The mockup is redrawn, then the pick goes him", "The mockup is redrawn, then the pick back to him", "redo the proposal from xy's pick", "Not decided until after the numbers are in", "Not decided until if the numbers are in", "Not decided until later numbers are in", "Not decided until once the numbers are in",
+       "Whenever it rains. Redraw the proposal.", "Once done. Redraw the proposal.", "After lunch. Redraw the proposal.", "Before lunch. Redraw the proposal.", "Until Friday. Redraw the proposal.", "If so. Redraw the proposal.", "When ready. Redraw the proposal.",
+       "The mockup is being redrawn. This is paused.", "The mockup is being redrawn. The rest is tbc.", "The mockup is being redrawn. The ask is standing.",
+       # one line and one sentence only: a second line or sentence before or after, a header, a list, a quote, a label keeps the ask
+       "Checked the logs. The mockup is being rebuilt.", "The mockup is redrawn. The proposal is being reworked now.", "Checked the logs.\nredraw the proposal", "Redrawing the proposal now:\n- redo the options", "Later:\nChecked the logs.\n- rebuilding the proposal now",
+       "Later:\nRebuild the proposal.", "Backlog:\nI am rebuilding the proposal.", "TODO:\nI am rebuilding the proposal.", "Done:\nI am rebuilding the proposal.", "Not now:\nredo the options", "Pat said:\nI am rebuilding the proposal.",
+       "Later:\n- Rebuild the proposal.", "Backlog:\n1. Redo the options", "Done so far:\n- Redraw the proposal", "Aaron asked for:\n- rework the proposal", "**Later:**\n- rebuild the proposal", "## Backlog\n- rebuild the proposal", "Do not merge\nuntil the number is in.",
+       "I am rebuilding the proposal. The ask is postponed", "I am rebuilding the proposal. The ask is still valid", "I am rebuilding the proposal. The ask is not withdrawn", "I am rebuilding the proposal. Keep the ask on his move", "I am rebuilding the proposal. He still needs to answer.",
+       "I am rebuilding the proposal. Parked.", "Parked. I am rebuilding the proposal.", "Unless he objects.\nRebuild the proposal.", "Should he pick B?", "I am rebuilding the proposal.\nOnly if he picks B.", "- When he picks B.\n- I am rebuilding the proposal.",
+       # another sentence of the text that keeps the ask leaves the whole text
+       "The mockup is being redrawn. The ask stands.", "The mockup is being redrawn. Ignore the ask.", "The mockup is being redrawn. The ask is cancelled.", "The mockup is being redrawn. Abandon this.", "The mockup is being redrawn. The pick is dropped.",
+       "The mockup is being redrawn. The pick is pending.", "The mockup is being redrawn. The rest is tbd.", "Redrawing the proposal now.\nThe ask stays.", "The mockup is being redrawn. It remains open.", "Hold off. The mockup is being redrawn, on hold.",
+       # a bare passive needs an explicit hand-back to him, and a later time or a hedge word of any kind leaves the ask
+       "The mockup is redrawn, then the pick is ready to go", "The mockup is redrawn, so the ask is back with the owner", "The mockup is redrawn, then the pick goes to the owner", "The proposal is redone, so the question is live and waiting for his answer",
+       "The mockup is redrawn, then the pick goes back to CI", "The mockup is redrawn, then the pick waits on CI", "The mockup is redrawn, so the ask waits for CI", "The proposal will be reworked in the next release", "The proposal will be reworked next release", "redraw the proposal, later",
+       "redraw the proposal, maybe", "redraw the proposal, should it", "redraw the proposal, dont wait", "redraw the proposal, donot wait", "redraw the proposal, don’t wait", "redraw the proposal, whenever he asks", "redraw the proposal, while he waits",
+       "redraw the proposal, would help", "redraw the proposal, might help", "redraw the proposal, could work", "redraw the proposal, if possible", "Not decided until the number is in, then we redraw it",
+       "redraw the proposal, after the owner picks", "redraw the proposal now, once the pick is in", "redraw the proposal, when the owner answers", "redraw the proposal, until the pick is in", "redraw the proposal, before he looks",
+       "redraw the proposal, if the owner asks", "redraw the proposal, unless he objects", "redraw the proposal, ok?", "redraw the proposal, not the page", "redraw the proposal, never mind", "redraw the proposal, no need to answer",
+       "the docs mockup is being rebuilt by the deploy job", "Not decided until the number is in, if Aaron agrees.", "Not decided until the number is in?", "nothing is decided until the number is in once he looks",
+       # the number wait: a hedge or a long run of words inside it, a number that is not the decision's
+       "Not decided until the next release numbers are in", "Not decided until the maybe numbers are in", "Not decided until the one two three four numbers are in", "Not decided until when the numbers are in", "Not decided until the numbers are in next week",
+       "The owner said it: redraw the proposal", "> redraw the proposal", "Redrawn the proposal.", "Redrawn the proposal with the card", "Aaron said: Not decided until the number is in.", "Note: redraw the proposal", "[done] redraw the proposal", "done: redrawing the proposal",
+       # a quote, a label, a done line, a past tense
+       "The owner said it: 'redraw the page'", "> redraw the page", "[done] redraw the page", "done: redrew the page", "Redrew the page with the question card", "I have redrawn the page for the pick",
+       "the mockup was rebuilt yesterday", "waiting on it: until the numbers come in", "\"redraw the proposal\"", "\uc81c\uc548\uc744 \ub2e4\uc2dc \uadf8\ub9bd\ub2c8\ub2e4")
+check("author_says_redrawn: a question, a condition of any subject, any other word in the sentence, a thing that is not the ask's own, another sentence that keeps the ask, a quote, a label, a done line, a past tense or another language is not read", not any(R_([t]) for t in NO_), [t for t in NO_ if R_([t])])
+check("author_says_redrawn: the author's own `who:` lead is allowed, another label is not", R_(["home-agent: redraw the proposal"], "home-agent") and not R_(["home-other: redraw the proposal"], "home-agent")
+      and not R_(["home-agent: redraw the proposal"]), None)
+check("author_says_redrawn: only a text of one line and one sentence counts, a second line or sentence anywhere keeps the ask, and a line the item already held is not read again",
+      R_(["redraw the proposal"]) and not R_(["redraw the proposal\nChecked it"]) and not R_(["Checked it\nredraw the proposal"]) and not R_(["Checked it. redraw the proposal"]) and not R_(["redraw the proposal. Checked it."])
+      and not R_(["rework the proposal"], "", "rework the proposal") and not R_(["- rework the proposal"], "", "- rework the proposal") and R_(["rework the proposal"], "", "Plain text") and not R_(["a", "redraw the proposal\nb"]) and R_(["a", "redraw the proposal"]) == "redraw the proposal", None)
+check("the redraw reader reads the step (not a finished one) and the next, and nothing else: not the description, options, said, draft or any other text",
+      _wt_update._ask_own_texts({"options": OPTS, "next": "x", "step": "z", "description": "d", "subject": "s", "goal": "g"}) == ["z", "x"] and _wt_update._ask_own_texts({"said": "redraw the proposal", "draft": "redraw the proposal", "next": "y"}) == ["y"]
+      and _wt_update._ask_own_texts({"step": "redraw the proposal", "done": 1}) == [] and _wt_update._ask_own_texts({"step": "redraw the proposal"}) == ["redraw the proposal"] and _wt_update._ask_own_texts({"description": "redraw the proposal"}) == []
+      and any(OPTS[0]["label"] in x for x in _wt_update._ask_write_texts({"options": OPTS})), None)
+import time as _tm
+_slow = []
+for sh in ("The mockup is redrawn" + ", then the pick " * 400, "a; " * 2000, "The mockup is redrawn, then the pick goes back " + "to " * 1500, "1. " * 1500, "redraw the proposal" + ", and then " * 400, "x" * 20000,
+           "Not decided until " + "the a " * 1500, "Until " + "the number " * 1500, ("The mockup is redrawn" + ", then the pick " * 20 + ". ") * 12, ("redraw the proposal" + ", then " * 40) * 5,
+           "I am rebuilding " + "the " * 2000, "The mockup is being redrawn" + " and the deploy script" * 300, "- " * 2000, "Backlog:\n" + "- a\n" * 1500, ("When he answers. " * 30 + "\n") * 20):
+    for n in (5000, 20000, 3900, 399):
+        t0 = _tm.time(); R_([sh[:n]]); el = _tm.time() - t0
+        if el > 0.5: _slow.append((sh[:20], n, round(el, 2)))
+check("author_says_redrawn is linear: texts of 399, 3,900, 5,000 and 20,000 characters of the shapes that backtracked end in well under a second", not _slow, _slow)
+check("author_says_redrawn: a held line with a curly apostrophe is still held", not R_(["Not decided until Aaron\u2019s number is in."], "", "Not decided until Aaron\u2019s number is in.") and R_(["Not decided until Aaron\u2019s number is in."]), None)
+item(2495, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK}, step="Rebuild the proposal.")
+r = upd("a2495", step="Rebuild the proposal.", description=DW("A new line of the description"))
+check("a step sent again whole from before is not the author's new word, even when the write carries another new line: the ask stands", stood(2495) and "took the ask off" not in r, r)
+check("a sentence over 400 characters, and a text of many lines, are never a removal", not R_(["redraw the proposal, then " + "x " * 250]) and not R_(["Checked it.\n" * 400 + "redraw the proposal"]) and R_(["redraw the proposal, then the pick goes back to him"]), None)
+item(1772, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+r = upd("a1772", draft="redraw the proposal")
+check("a draft is for someone else, not the author's own sentence about the ask: the ask stands", stood(1772) and "took the ask off" not in r, r)
+for k, kw, nm in ((1721, {"next": "home-agent: Redraw the proposal."}, "next"),
+                  (1722, {"step": "The mockup is being rebuilt."}, "step"),
+                  (1723, {"next": "home-agent: Nothing is decided until the number is in."}, "next")):
+    item(k, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+    r = upd(f"a{k}", **kw)
+    m = rd(k)["metadata"]
+    check(f"a write by the ask's author saying the proposal is redrawn ({nm}) takes the ask off his move", not stood(k) and "took the ask off" in r and "redrawn or waits on a number" in r, r)
+    check(f"... the ask is kept in ask_left as redrawn, History says so, nothing is closed or answered ({nm})",
+          m.get("ask_left", {}).get("how") == "redrawn" and m["ask_left"]["ask"] == ASK and rd(k)["status"] == "open" and not m.get("ask")
+          and any("ask taken off" in h and "its author said so" in h for h in history(k)), [m.get("ask_left"), history(k)])
+item(1724, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+r = upd("a1724", next="home-agent: Redraw the proposal.", sender="home-other")
+check("another session's redraw sentence leaves the ask standing", stood(1724) and "took the ask off" not in r, r)
+item(1725, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+r = upd("a1725", next="home-agent: redraw the page if he asks for it")
+check("a hedged redraw sentence by the author leaves the ask standing", stood(1725) and "took the ask off" not in r, r)
+item(1726, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+r = upd("a1726", next="home-agent: Redraw the proposal.", ask=ASK2)
+check("a write that sets a new ask with the redraw line keeps the new ask", stood(1726) and rd(1726)["metadata"]["ask"] == ASK2, r)
+# the write that makes the ask stand (a decision need added to an item that holds an ask) is not the author's word about the ask that stood before it
+item(1727, mover="home-agent", ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+try:
+    r = upd("a1727", needs=["decision"], step="I am rebuilding the proposal.")
+except Exception as e:  # noqa: BLE001
+    r = f"refused: {e}"
+check("a write that adds the decision need to an item that holds an ask, with a redraw line, leaves the ask standing (the ask was not on his move before the write)", stood(1727) and "took the ask off" not in r, r)
+
+# the sentences a reading of the ask must not take off his move, through the real update, in the description, as a step and as a next (a wrongly removed ask is the worse error)
+FP_ = ("The proposal is redrawn, the ask above stands", "Until the PR number is in the title, CI fails", "next: after the owner picks, rework the card to match", "once the pick is in, redo the page", "when the owner answers, rebuild the proposal",
+       "keep the PR open until the CI results are in", "until the test results are in", "do not close until the measurement is in",
+       "rework the options parser in config.py", "rework the card layout in the login form", "the docs page is being rebuilt by the deploy job",
+       "Feature: redo the page after login redirect", "The owner said it: 'redraw the page'", "> redraw the page", "[done] redraw the page",
+       "Redrew the page with the question card", "The proposal was rebuilt yesterday.", "Redraw the page?",
+       "rework the options to use argparse", "rework the options for the CLI flags", "rebuild the mockup for the demo", "rework the options.py parser", "redo the options.json", "rebuild the proposal.md", "rework options.toml",
+       "redo the card to pick up the new theme", "Rebuild the page, ask Aaron for review", "rework the card, the question mark icon is wrong", "The mockup is redrawn, then the pick is ready to go", "The mockup is redrawn, so the ask is back with the owner",
+       "The mockup is being redrawn by CI for the nightly deploy", "The mockup is being redrawn in a branch", "The mockup is being redrawn, but the ask stands", "I am redrawing the proposal, Aaron can still pick", "redraw the proposal, cancelled", "redraw the proposal, tbd",
+       "rebuilding the proposal, the ask button is misaligned", "redraw the proposal and the deploy script", "The proposal will be redrawn next month", "redraw the proposal in v2", "redraw the proposal at some point", "redraw the proposal, probably",
+       "rebuild the ask button", "rework the pick list", "redo the decision tree", "The mockup is being redrawn. The ask stands.", "The mockup is being redrawn. Ignore the ask.", "The mockup is being redrawn. The rest is tbd.",
+       "I am not redrawing the proposal", "The page is being redrawn", "I’m not redrawing the proposal",
+       "When the owner answers.\nRebuild the proposal.", "1. Wait until the owner picks.\n2. Rework the proposal.", "Next steps after the owner picks:\n1. Rework the proposal\n2. Ship", "Next steps after the owner picks:\n- rework the proposal",
+       "- When the owner answers.\n- Rebuild the proposal.", "- If he picks B, nothing else changes.\n- Redo the options.", "- Next steps after the owner picks:\n  - rework the proposal",
+       "Later:\n- Rebuild the proposal.", "Backlog:\n1. Redo the options", "Done so far:\n- Redraw the proposal", "TODO:\n- Redraw the proposal", "Aaron asked for:\n- rework the proposal",
+       "Later:\nRebuild the proposal.", "Backlog:\nI am rebuilding the proposal.", "TODO:\nI am rebuilding the proposal.", "Done:\nI am rebuilding the proposal.", "Not now:\nredo the options", "Pat said:\nI am rebuilding the proposal.",
+       "I am rebuilding the proposal. The ask is postponed", "I am rebuilding the proposal. The ask is still valid", "I am rebuilding the proposal. The ask is not withdrawn", "I am rebuilding the proposal. Keep the ask on his move", "I am rebuilding the proposal. He still needs to answer.",
+       "I am rebuilding the proposal. Parked.", "Unless he objects.\nRebuild the proposal.", "Should he pick B?", "I am rebuilding the proposal.\nOnly if he picks B.", "**Later:**\n- rebuild the proposal", "## Backlog\n- rebuild the proposal", "Do not merge\nuntil the number is in.")
+DBUL = lambda tx: "\n".join(ln if ln.lstrip().startswith("- ") else "- " + ln for ln in tx.split("\n"))      # the description is bullets only
+fp_bad, kfp = [], 2000
+for tx in FP_:
+    for pn in ("description", "step", "next"):
+        if pn == "next" and "\n" in tx:
+            continue
+        kfp += 1
+        item(kfp, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+        val = {"description": DESC + "\n" + DBUL(tx), "step": tx, "next": "home-agent: " + tx}[pn]
+        try:
+            r = upd(f"a{kfp}", **{pn: val})
+        except Exception as e:  # noqa: BLE001  — a write the update refuses stores nothing
+            r = "refused: " + str(e)[:80]
+        if not stood(kfp) or "took the ask off" in r: fp_bad.append((pn, tx[:50], r[:80]))
+check("through the real update, each of the %d sentences that must not take the ask off his move (as the description, a step or a next) leaves it standing" % len(FP_), not fp_bad, fp_bad[:6])
+item(2430, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+r = upd("a2430", step="- Rebuilding the proposal now.")
+check("a redraw step that is a bullet takes the ask off (the stored text does not matter)", not stood(2430) and "took the ask off" in r, r)
+# the same shapes, each as the description, a step and a next, take the ask off
+yes_bad, kyes = [], 2500
+for tx in ("Redraw the proposal.", "I am rebuilding the proposal now.", "I am rebuilding the proposal.", "The proposal is being redrawn.", "The mockup is being rebuilt.", "Not decided until the number is in.", "The mockup is redrawn, then the pick goes back to him."):
+    for pn in ("step", "next"):
+        kyes += 1
+        item(kyes, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+        val = {"description": DESC + "\n" + DBUL(tx), "step": tx, "next": "home-agent: " + tx}[pn]
+        r = upd(f"a{kyes}", **{pn: val})
+        if stood(kyes) or "took the ask off" not in r: yes_bad.append((pn, tx[:40]))
+check("through the real update, each shape (as a step or a next) takes the ask off his move", not yes_bad, yes_bad)
+desc_bad = []
+for j, tx in enumerate(("Redraw the proposal.", "I am rebuilding the proposal.", "Not decided until the number is in.")):
+    item(2480 + j, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+    r = upd(f"a{2480 + j}", description=DW(tx))
+    if not stood(2480 + j) or "took the ask off" in r: desc_bad.append(tx)
+item(2490, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK}, description=DESC + "\n- When he picks B.")
+r = upd("a2490", description=DESC + "\n- When he picks B.\n- I am rebuilding the proposal.")
+if not stood(2490) or "took the ask off" in r: desc_bad.append("stored bullet")
+item(2491, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+r = upd("a2491", step="Rebuild the proposal.", done=1)
+if not stood(2491) or "took the ask off" in r: desc_bad.append("done step")
+check("the description never takes the ask off his move (also with a stored bullet before it), and neither does a finished step", not desc_bad, desc_bad)
+item(1770, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+r = upd("a1770", options=[OPTS[0], {"label": "Rebuild", "line": "Rebuild the page with cards", "recommended": False}])
+check("an options text with a redraw verb in one option is the choices shown, not the author's sentence: the ask stands", stood(1770) and "took the ask off" not in r, r)
+item(1771, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+r = upd("a1771", options=[OPTS[0], {"label": "Redo", "line": "Redraw the proposal", "recommended": False}])
+check("a sentence the reader takes, \"Redraw the proposal\", in an option of the options text alone does not take the ask off his move", stood(1771) and "took the ask off" not in r and R_(["Redraw the proposal"]), r)
+for j, (pn, tx) in enumerate((("d", "Redraw the proposal."), ("d", "I will not decide until the number is in."), ("d", "This is not decided until Aaron's number is in."), ("d", "The proposal is redrawn, then the pick goes back to him."))):
+    item(1780 + j, mover="home-agent", needs=["decision"], ask=ASK, options=OPTS, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+    r = upd(f"a{1780 + j}", step=tx)
+    check(f"the sentence {tx!r} ({pn}) still takes the ask off", not stood(1780 + j) and "took the ask off" in r, r)
+
 # (round 12, L1) from the records of lines only the `text` is held: status words ("open", "done", "dropped") are not the item's text
 item(980, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK}, wait_basis={"text": "waiting for the vendor", "wake": "2026-11-20", "by": "home-agent", "at": now},
      steps=[{"text": "home-agent: the next step", "status": "open"}, {"text": "home-agent: an old step", "status": "done", "by": "home-agent", "at": now - 100}, {"text": "home-agent: a dropped step", "status": "dropped", "by": "home-agent", "at": now - 90}])
@@ -691,6 +873,9 @@ try:
     item(46, rec_at=now - 7200, mover="home-agent", needs=["decision"], ask=X("Decide: ship once {B}20 lands · Recommend: ship · Stakes: none · By: no date"))
     r = upd("a46", priority="p2")
     check("[ask] leaves = false: a dropped dependency still only reminds its author (the record removed nothing before either)", stood(46) and "reminder" in r and "took the ask off" not in r, r)
+    item(1728, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
+    r = upd("a1728", next="home-agent: redraw the page, then put the pick back")
+    check("[ask] leaves = false turns the redrawn removal off too", stood(1728) and "took the ask off" not in r, r)
 finally:
     cfgfile.write_text(on_text, encoding="utf-8"); _cfg.reload()
 check("the switch is back on", _cfg.ask_leaves_on() is True)
@@ -720,7 +905,7 @@ check("Done with an empty box still finishes the step as before", res == "done" 
 # ---- 8. the texts agents learn it from
 d = _wt_update._UPDATE_DESC
 check("the update text says it: the reminder, the one plain sentence, what stands, the dropped dependency as a reminder only, the late answer, what it never does, and the notes it applies",
-      all(x in d for x in ("reminder", "in one case only: its author's own plain sentence", "whose whole new text", "exactly one sentence", "The ask is wrong.", "My question is moot.", "This ask is no longer needed.",
+      all(x in d for x in ("reminder", "only on its author's own plain sentence", "whose whole new text", "exactly one sentence", "The ask is wrong.", "My question is moot.", "This ask is no longer needed.",
                            "Any other new line or sentence in that write", "A dropped dependency removes nothing", "a dropped gate often makes the ask more live", "names an item after/once/when/until/waiting for/depends on",
                            "reminded on each of his writes to the item while that item stays dropped and the ask stands", "in every text parameter of the call", "and only \"now\", \"anymore\" or a full stop after it", "clear_ask=true", "late answer as a comment", "never writes an ask, closes an item or answers for", "ran it", "tomorrow evening"))
       and not any(x in d for x in ("two plain shapes", "shape (2)", "approve-type request", "replacement chain", "taken off by the record")), [x for x in ("reminder", "in one case only") if x not in d])
@@ -729,15 +914,15 @@ check("the close text carries the same words as the update text (one rule, one p
 import _docs
 readme = _docs.page("asks-and-answers")
 check("the docs state the limit with its After wording", "Never by the server: closing an item, writing an ask, answering for the owner, altering his words" in readme, None)
-check("the docs say the server removes an ask only on the author's own plain sentence, a dropped dependency only reminds the author, and names the reader's words",
-      "only on its author's own plain sentence" in readme and "a dropped dependency only reminds" in readme and "after/once/when/until/waiting for/depends on" in readme and "two plain shapes" not in _docs.pages(), None)
+check("the docs say the server removes an ask only on the author's own sentence, a dropped dependency only reminds the author, and names the reader's words",
+      "only on its author's own sentence" in readme and "a dropped dependency only reminds" in readme and "after/once/when/until/waiting for/depends on" in readme and "two plain shapes" not in _docs.pages(), None)
 check("the docs say which parameters are read (every one of the text list, by name), which are not and why, that a part of a longer held line is new, and that the clause repeats on each write",
       all(f"`{p}`" in readme for p in _wt_update._ASK_TEXT_PARAMS + _wt_update._ASK_NONTEXT_PARAMS if not p.startswith("clear_") and p not in ("item_id", "hold", "recycle"))
       and "a line that only appears inside a longer held line is new" in readme and "with each of his writes to the item for as long as the dependency stays dropped and the ask stands" in readme
       and "an ask stored before the record has none, and then the item's mover and creator count as its author" in readme and "naming each such item once in the clause" in readme, [p for p in _wt_update._ASK_TEXT_PARAMS + _wt_update._ASK_NONTEXT_PARAMS if f"`{p}`" not in readme][:6])
 check("the ask rule never says 'nothing after it' and the config's own help says the same as the docs", "nothing after it" not in _wt_text._ASK_RULE
       and "its author's write is, whole, one plain sentence" in pathlib.Path(STACK, "stackshot/core/config.py").read_text(encoding="utf-8") and "the record shows it moot" not in pathlib.Path(STACK, "stackshot/core/config.py").read_text(encoding="utf-8"), None)
-check("the example config says the same", "only on its author's own plain sentence" in pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"), None)
+check("the example config says the same", "only on its author's own sentence" in pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"), None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
