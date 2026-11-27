@@ -12,7 +12,8 @@ Every rule is a probe that returns whether the rule held on a fixture, run twice
   5  which builder is free: not one whose pane is in a turn, not one that moves an open item on an agent (an untaken hand-off to it counts), one that moves a held item is free; the project's own
      background agents only, never a builder of another project, however idle; a project with no background agent of its own, or none free, keeps the item and -main is told; the item's own mover is never picked;
      a name with no pane or an unreadable pane is not free
-  6  no free builder: nothing moves, -main is told it once per item per 24 hours, one History line says so; a project with no -main agent gets the History line alone
+  6  no free builder: nothing moves, -main is told it once per item per 24 hours and the item's mover is told it holds an idle item, again every hour until it works on it or hands it back (the owner never), one History line says so;
+     a project with no -main agent gets the History line and the mover's message
   7  the limits: an item is handed on once in 24 hours and may be handed again after that; at most 3 items per pass; two builders never get one item each of the same pass twice over
   8  a torn audit entry or a torn record of this pass does not raise and is no signal
   9  the tick: `_silence_tick` runs it after the hourly line; a failure in it stops nothing
@@ -158,6 +159,7 @@ def tick(at=None, **kw):
     finally: CLK.t = None
 def to_main(): return [x for x in sent if x[1] == U["home-main"]]
 def to_builder(name): return [x for x in sent if x[1] == U[name]]
+def to_mover(name="home-peer"): return [x for x in sent if x[1] == U[name]]
 def history(i): return [e["text"] for e in ST.log_of(mt(i))]
 def hm(at): return time.strftime("%H:%M", time.gmtime(at + 4 * 3600))
 class _Err:
@@ -412,8 +414,8 @@ def probe_no_background_agent():
     for n in ("team-back", "team-aux", "other-back", "delta-one", "delta-two", "lone-back"): panes[n] = "idle"
     with _Err() as e: got = tick()
     tm = [x for x in sent if x[1] == U["gamma-main"]]
-    return (got == [] and mover_of(1) == "home-peer" and len(sent) == 1 and len(tm) == 1 and tm[0][3] == "stall_summary" and "no builder was free" in tm[0][2] and "stays with home-peer" in tm[0][2]
-            and len(history(1)) == 1 and "no builder was free to take it: a summary goes to gamma-main" in history(1)[0] and mt(1)["hand_idle"] == {"none_at": now0}
+    return (got == [] and mover_of(1) == "home-peer" and len(sent) == 2 and len(tm) == 1 and tm[0][3] == "stall_summary" and "no builder was free" in tm[0][2] and "stays with home-peer" in tm[0][2]
+            and len(to_mover()) == 1 and len(history(1)) == 1 and "no builder was free to take it: a summary goes to gamma-main" in history(1)[0] and mt(1)["hand_idle"] == {"none_at": now0, "mover_told_at": now0}
             and "idle, no builder free" in e.text)
 rule("5 a project with no background agent of its own keeps the item, however many builders other projects have idle: the History line and -main say so", probe_no_background_agent, [(audit_ticks_svc, "_hand_idle_builders", old_builders)])
 def probe_no_background_agent_once():
@@ -486,11 +488,13 @@ def all_busy():
 def probe_none_free():
     wipe(); on(); put(1, act=90); all_busy()
     got = tick()
-    return got == [] and mover_of(1) == "home-peer" and len(to_main()) == 1 and len(sent) == 1 and "no builder was free" in to_main()[0][2] and "stays with home-peer" in to_main()[0][2] and "Oliver" not in to_main()[0][2].split("\n", 1)[1].replace("nothing here is for Oliver", "")
-rule("6 with no builder free nothing moves and -main is told that none was, and only -main", probe_none_free, [(HI, "pick_free", lambda c, busy, status, dead, same, frm="": next((x for x in c if x), ""))])
+    return (got == [] and mover_of(1) == "home-peer" and len(to_main()) == 1 and len(sent) == 2 and "no builder was free" in to_main()[0][2] and "stays with home-peer" in to_main()[0][2] and "Oliver" not in to_main()[0][2].split("\n", 1)[1].replace("nothing here is for Oliver", "")
+            and len(to_mover()) == 1 and to_mover()[0][3] == "stall" and "no builder was free to take it" in to_mover()[0][2] and "again every hour" in to_mover()[0][2] and "no activity on it for about 1 hour " in to_mover()[0][2]
+            and "Oliver" not in to_mover()[0][2].split("\n", 1)[1].replace("nothing here is for Oliver", ""))
+rule("6 with no builder free nothing moves, -main is told that none was and the mover is told it holds the idle item, and nobody else", probe_none_free, [(HI, "pick_free", lambda c, busy, status, dead, same, frm="": next((x for x in c if x), ""))])
 wipe(); on(); put(1, act=90); all_busy(); tick()
 h6 = history(1)
-check("6 one History line says so, and the item keeps its mover and its record", len(h6) == 1 and h6[0].startswith("no activity for an hour and nothing verified, but no builder was free to take it: a summary goes to home-main") and mt(1)["hand_idle"] == {"none_at": now0}, (h6, mt(1).get("hand_idle")))
+check("6 one History line says so, and the item keeps its mover and its record", len(h6) == 1 and h6[0] == "no activity for an hour and nothing verified, but no builder was free to take it: a summary goes to home-main, and the audit tells home-peer every hour while it stays idle" and mt(1)["hand_idle"] == {"none_at": now0, "mover_told_at": now0}, (h6, mt(1).get("hand_idle")))
 check("6 the pass leaves the item's hand-off alone: no record, the next lines as they were", HO.record_of(rd(1)) is None or not HO.record_of(rd(1)), HO.record_of(rd(1)))
 def probe_once_per_day():
     wipe(); on(); put(1, act=90); all_busy()
@@ -514,8 +518,44 @@ def probe_no_main():
     real = _agents._main_agent; _agents._main_agent = lambda p: ""
     try: tick()
     finally: _agents._main_agent = real
-    return sent == [] and len(history(1)) == 1 and "the project has no -main agent to tell" in history(1)[0]
-check("6 a project with no -main agent gets the History line alone, and no message", probe_no_main() is True)
+    return len(sent) == 1 and len(to_mover()) == 1 and len(history(1)) == 1 and "the project has no -main agent to tell, and the audit tells home-peer every hour" in history(1)[0]
+check("6 a project with no -main agent gets the History line and the mover's message, and nobody else is told", probe_no_main() is True)
+
+# the mover is told again every hour while the item stays idle, and a second pass inside the hour tells nobody
+def probe_mover_hourly():
+    wipe(); on(); put(1, act=90); all_busy(); tick(); n0 = len(to_mover())
+    tick(now0 + 10 * MIN); n1 = len(to_mover())            # inside the hour: not again
+    tick(now0 + 56 * MIN); n2 = len(to_mover())            # an hour (less the tick's slack) after the first: again
+    tick(now0 + 70 * MIN); n3 = len(to_mover())            # inside the hour of the second
+    tick(now0 + 112 * MIN); n4 = len(to_mover())           # and again
+    return [n0, n1, n2, n3, n4] == [1, 1, 2, 2, 3] and len(history(1)) == 1 and len(to_main()) == 1 and "about 2 hours " in to_mover()[1][2] and "about 3 hours " in to_mover()[2][2]
+rule("6 the mover of an item no builder was free to take is told again every hour while it stays idle: not inside the hour, one History line for the stretch and -main still told once", probe_mover_hourly,
+     [(HI, "MOVER_EVERY", 10 ** 9)])
+def probe_record_keeps():
+    m = {}; HI.mark_mover_told(m, now0); HI.mark_none(m, now0 + 5)
+    kept = m["hand_idle"].get("mover_told_at") == now0 and m["hand_idle"].get("none_at") == now0 + 5
+    HI.mark_handed(m, now0 + 9, "a", "b")
+    return kept and "mover_told_at" not in m["hand_idle"] and HI.mover_first({}, now0) and not HI.mover_first(m_told := {"hand_idle": {"mover_told_at": now0}}, now0 + HI.MOVER_STRETCH - 1) and HI.mover_first(m_told, now0 + HI.MOVER_STRETCH + 1)
+rule("6 the record of the mover's last tell survives the day's note to -main, is dropped by a hand-over, and the first tell of a stretch is told apart from its repeats", probe_record_keeps,
+     [(HI, "mark_handed", lambda meta, now, frm, to: meta.__setitem__("hand_idle", {**meta.get("hand_idle", {}), "handed_at": now}))])
+def probe_mover_stops_when_it_works():
+    wipe(); on(); put(1, act=90); all_busy(); tick()
+    d = rd(1); d["activity"] = now0 + 30 * MIN; d["written_at"] = now0 + 30 * MIN; d["written_by"] = "home-peer"; (T / "store/a/1.json").write_text(json.dumps(d))      # the mover wrote to it after the idle line
+    tick(now0 + 56 * MIN); tick(now0 + 112 * MIN)
+    return len(to_mover()) == 1 and mover_of(1) == "home-peer"
+rule("6 …and the tells end when the mover works on the item", probe_mover_stops_when_it_works, [(SL, "clock", lambda item, mover="": 0.0)])
+def probe_mover_then_builder():
+    wipe(); on(); put(1, act=90); all_busy(); tick()
+    panes["team-back"] = "idle"; got = tick(now0 + 10 * MIN)
+    n = len(to_mover())
+    got2 = tick(now0 + 56 * MIN)
+    return got == ["a1"] and mover_of(1) == "team-back" and n == 1 and len(to_mover()) == 1 and got2 == [] and len(to_builder("team-back")) == 1
+check("6 …and a builder that frees up takes the item at the next pass, and the old mover is not told again", probe_mover_then_builder() is True)
+def probe_mover_is_main():
+    wipe(); on(); put(1, mover="home-main", act=90, next="", needs=[]); all_busy()      # the owner answered it: a front agent's idle item is an ordinary one, and its mover is the project's -main
+    got = tick()
+    return got == [] and mover_of(1) == "home-main" and len(to_main()) == 1 and "again every hour" in to_main()[0][2] and to_main()[0][3] == "stall" and "stays with" not in to_main()[0][2] and len(sent) == 1
+check("6 a -main agent that is itself the mover is told once, as the mover, never twice", probe_mover_is_main() is True)
 
 # ================================================================ 7. the limits
 def probe_day_limit():
