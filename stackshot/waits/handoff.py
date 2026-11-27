@@ -695,8 +695,10 @@ def words(item: dict[str, Any], now: float, tz: dt.tzinfo | None = None, label: 
       handed to Z (X did not take it in 10 min), not yet taken (since 14:12)
       nobody could take it, the fleet's builder was asked to recover it (X is gone; the project lists no builder)   (or the project's -main agent, for a front-only project: `recovery_by`)
     then the server's own lines about it (a failed push, a move), newest last."""
+    if item.get("status") != "open":
+        return closed_words(item, now, tz, label)
     r = record_of(item)
-    if not r or item.get("status") != "open":
+    if not r:
         return []
     to = label(r.get("to") or "") if not _model.is_owner(r.get("to")) else _model.owner_display()
     since = _hhmm(float(r.get("at") or now), now, tz)
@@ -715,6 +717,29 @@ def words(item: dict[str, Any], now: float, tz: dt.tzinfo | None = None, label: 
         if isinstance(e, dict) and e.get("text"):
             out.append(f"  {_hhmm(float(e.get('at') or now), now, tz)} {e['text']}")
     return out
+
+
+def last_record(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The newest hand-off an item has: its record (open, or taken and still the mover's), else the newest of the history (the one a close ended). None when it has none."""
+    r = record_of(item)
+    if r:
+        return r
+    hist = [h for h in ((item or {}).get("metadata") or {}).get(HISTORY) or [] if isinstance(h, dict) and h.get("to")]
+    return hist[-1] if hist else None
+
+
+def closed_words(item: dict[str, Any], now: float, tz: dt.tzinfo | None = None, label: Callable[[str], str] = str) -> list[str]:
+    """The one hand-off line of a closed item, with the three times it has: handed (the record's `at`), taken (its `taken_at`, or "not taken"), live (the item's close clock,
+    `state_updated`: the moment the item closed, which for a release is the moment its merge was seen live; a later close moves it). [] when the item has no hand-off on record.
+      handoff: handed to X at 14:02, taken 14:05, live 14:40"""
+    r = last_record(item)
+    if not r or not r.get("at"):
+        return []
+    to = label(r.get("to") or "") if not _model.is_owner(r.get("to")) else _model.owner_display()
+    taken = f"taken {_hhmm(float(r['taken_at']), now, tz)}" if r.get("taken_at") else "not taken"
+    live = float(item.get("state_updated") or 0)
+    parts = [f"handed to {to} at {_hhmm(float(r['at']), now, tz)}", taken] + ([f"live {_hhmm(live, now, tz)}"] if live else [])
+    return ["handoff: " + ", ".join(parts)]
 
 
 def brief_lines(items: dict[str, dict[str, Any]], now: float, tz: dt.tzinfo | None = None, shown: Callable[[str], str] = str, label: Callable[[str], str] = str,
