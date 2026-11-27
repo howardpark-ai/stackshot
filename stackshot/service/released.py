@@ -72,25 +72,28 @@ def released(pr: str, sha: str = "", dry: bool = False) -> dict[str, Any]:
     n = int(key.rsplit("#", 1)[1])
     shown = _live.pr_shown(key)
     co = _live.released_foreign(repo) if foreign else None
-    if not str(sha or "").strip() and not foreign:
+    asked = str(sha or "").strip()
+    limit = 50 if asked else 3000      # the merges read: those a given merge commit holds are at the top of its log
+    if not asked and not foreign:
         raise ToolError(f"Refused: PR #{n} has no merge commit given (--sha <merge commit>), so it cannot be read as merged and passed; nothing written")
     cannot = f"Refused: the checkout of {repo} cannot be read; nothing written"
     if foreign:      # the merge is an ancestor of the checkout's HEAD; a sha the caller did not give is found in the checkout's own log
         try:
+            _live.foreign_ahead(co, asked, limit)      # one on another machine answers all of the report in one ssh session
             head = _live.git_commit("HEAD", co)
             if not head:
                 raise ToolError(cannot)
-            full = _live.git_commit(str(sha).strip(), co) if str(sha or "").strip() else head
+            full = _live.git_commit(asked, co) if asked else head
         except _live.Unread:
             raise ToolError(cannot) from None
         if not full:
             raise ToolError(f"Refused: the merge commit {str(sha)[:40]!r} of {shown} is not a commit the checkout of {repo} knows; nothing written")
     else:
-        full = _live.git_commit(str(sha).strip())
+        full = _live.git_commit(asked)
         if not full:
             raise ToolError(f"Refused: the merge commit {str(sha)[:40]!r} of PR #{n} is not a commit this checkout knows; nothing written")
     try:
-        merged = _live.merged_prs(full, limit=50 if str(sha or "").strip() else 3000, **({"cwd": co} if co else {}))
+        merged = _live.merged_prs(full, limit=limit, **({"cwd": co} if co else {}))
     except _live.Unread:
         raise ToolError(cannot) from None
     if n not in merged:
