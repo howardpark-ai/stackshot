@@ -252,10 +252,10 @@ sent.clear()
 _real_find_sala = rs.find_sala
 rs.find_sala = lambda name: "/fixture/sala"      # a sala exists for the checks that stand in for its help text
 _REAL_RUN_HELP = rs.run_help
-rs.run_help = lambda sala, verb="": HELP if not verb else ""
+rs.run_help = lambda sala, verb="", full=False: HELP if not verb else ""
 r = rs.run(XO, deliver=deliver, state=XS, today="Thu Nov 12th", schema=T / "schema.json")
-check("…and an empty `sala op --help` (asked for) is the same: nothing sent, the keys kept", sent == [] and any("op --help gave nothing" in x for x in r["notes"]) and len(json.loads(XS.read_text())[str(X)]["keys"]) == 2, (sent, r["notes"]))
-rs.run_help = lambda sala, verb="": HELP if not verb else OPHELP
+check("…and an empty `sala op --help` (asked for) is the same: nothing sent, the keys kept", sent == [] and any("op --help --full gave nothing" in x for x in r["notes"]) and len(json.loads(XS.read_text())[str(X)]["keys"]) == 2, (sent, r["notes"]))
+rs.run_help = lambda sala, verb="", full=False: HELP if not verb else OPHELP
 r = rs.run(XO, deliver=deliver, state=XS, today="Fri Nov 13th", schema=T / "schema.json")
 check("…then a good night with both helps read: still nothing new", sent == [] and r["quiet"] == [str(X)], (sent, r["quiet"]))
 rs.find_sala = _real_find_sala
@@ -297,6 +297,56 @@ check("…the next night sends both", len(sent) == 2 and r["held"] == [], sent)
 
 # ---- 4d. a dry run makes no directory
 check("no state directory is made by asking for the state file's path or by a dry run", not (T / "state" / "rulebook-scan").exists() and rs.state_file().parent == T / "state" / "rulebook-scan")
+
+# ---- 4d. the op help is read with `--full`: a short help (its verbs on one `verbs:` line, no table) is loud and checks nothing; the table passes
+SHORTOP = """  salamander op <verb> [args…] --from NAME --words "<the owner's words>" queue one operation (the verbs below)
+  salamander op --list                                                  the queue
+verbs: amber birch cedar delta
+(sala op --help --full: each verb's shape, the forms that take no words)
+"""
+VERB_NAMES = ["amber", "birch", "cedar", "delta", "ember", "fjord", "garnet", "harbor", "iris", "juniper", "kestrel", "lumen", "maple", "nectar", "onyx", "pine"]
+FULLTAB = ("  salamander op <verb> [args…] --from NAME --words \"<the owner's words>\"   queue one operation (the verbs below)\n"
+           "verbs:\n"
+           "  reason path                               a heading for a reason on the record, not a verb\n"
+           "                                            `VERB --only NAME --from YOU` (or a reason path line in continuation)\n"
+           + "".join(f"  {v} [--keep] [--force]                    the {v} verb\n" for v in VERB_NAMES))
+check("4d the short op help parses to no op verb, the full table to all sixteen (the reason path heading is not a verb)",
+      rs.op_verb_count(SHORTOP) == 0 and rs.op_verb_count(FULLTAB) == 16 and rs.op_verb_count("") == 0
+      and "reason" not in rs.parse_help("", FULLTAB).op_verbs, (rs.op_verb_count(SHORTOP), rs.op_verb_count(FULLTAB)))
+Z4 = T / "z4" / "Z4.md"; Z4.parent.mkdir()
+Z4.write_text("`sala op nonsense-verb --from YOU`\n", encoding="utf-8")
+CZ4 = dict(CFG, files=[{"glob": str(Z4), "keeper": "heron-engineer"}], help_verbs=["op"], sala="fixture-sala")
+_real_find_sala = rs.find_sala; _REAL_RUN_HELP2 = rs.run_help
+rs.find_sala = lambda name: "/fixture/sala"
+calls4d = []
+ops4d = lambda calls: [c for c in calls if c[0] == "op"]      # the main help's call is not the op help's
+def _short_only(sala, verb="", full=False):
+    calls4d.append((verb, full))
+    return HELP if not verb else SHORTOP
+rs.run_help = _short_only
+err4d = io.StringIO()
+with contextlib.redirect_stderr(err4d):
+    r4 = rs.run(CZ4, dry=True, deliver=deliver, state=T / "z4.json", schema=T / "schema.json")
+check("4d a short op help (both forms tried, neither has a table): loud note, the sala verb check is not made, and the line also goes to stderr",
+      any("lists no verb table" in x and "not checked" in x for x in r4["notes"]) and ops4d(calls4d) == [("op", True), ("op", False)]
+      and not any(f.kind == "verb" for v in r4["found"].values() for f in v) and "lists no verb table" in err4d.getvalue(), (r4["notes"], calls4d, err4d.getvalue()))
+def _full_table(sala, verb="", full=False):
+    calls4d.append((verb, full))
+    return HELP if not verb else (SHORTOP if not full else FULLTAB)
+calls4d.clear(); rs.run_help = _full_table
+r4 = rs.run(CZ4, dry=True, deliver=deliver, state=T / "z4.json", schema=T / "schema.json")
+check("4d the full table is read first and checked: the made-up verb is found, no loud note",
+      ops4d(calls4d) == [("op", True)] and not any("verb table" in x or "gave nothing" in x for x in r4["notes"])
+      and any(f.kind == "verb" and "nonsense-verb" in f.text for v in r4["found"].values() for f in v), (calls4d, r4["notes"]))
+def _older_sala(sala, verb="", full=False):
+    calls4d.append((verb, full))
+    return HELP if not verb else (SHORTOP if full else FULLTAB)      # an older sala: no --full, its plain help is the table
+calls4d.clear(); rs.run_help = _older_sala
+r4 = rs.run(CZ4, dry=True, deliver=deliver, state=T / "z4.json", schema=T / "schema.json")
+check("4d an older sala with no --full: its plain help is read as the table, and the verb is still checked",
+      ops4d(calls4d) == [("op", True), ("op", False)] and any(f.kind == "verb" for v in r4["found"].values() for f in v) and not any("verb table" in x for x in r4["notes"]), (calls4d, r4["notes"]))
+rs.find_sala = _real_find_sala; rs.run_help = _REAL_RUN_HELP2
+sent.clear()
 
 # ---- 5. the terms file absent, an unreadable sala, a file that cannot be read
 CFG2 = dict(CFG, terms=T / "no-terms.toml")

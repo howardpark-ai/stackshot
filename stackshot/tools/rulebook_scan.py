@@ -15,8 +15,9 @@ What it reads ([rulebook_scan] in stackshot.toml; every path and every keeper is
                     from its `@mcp.tool` definitions and from the modules of the tools/ folder beside it, where each tool is registered with
                     `mcp.tool(...)(function)`, never by importing it: an import wants fastmcp and a store, and the server
                     refuses to start outside the production checkout without a config. `--schema JSON` ({"tool": ["param", …]}) replaces it.
-    sala            the command (default `sala`): `sala --help` is read once. `sala op --help` is read too (it prints its verbs and
-                    flags). Any other verb's `--help` is NOT run: the dispatcher hands a verb its arguments, and most verbs take
+    sala            the command (default `sala`): `sala --help` is read once. `sala op --help --full` is read too (its verb table: each
+                    verb's flags; the short `sala op --help` lists the verbs on one line and is not used). When that table has no verb,
+                    the scan says so and the sala verb and flag checks are not made. Any other verb's `--help` is NOT run: the dispatcher hands a verb its arguments, and most verbs take
                     `--help` as a name (`sala retire --help` would try to retire a session). `[rulebook_scan] help_verbs` lists the
                     verbs known to print help (default ["op"]). Never a verb that acts.
     terms           the retired-terms list of part 1 (default tests/retired_terms.toml in the checkout); absent
@@ -173,13 +174,14 @@ SALA_LINE = re.compile(r"^\s{0,4}(?:salamander|sala)\s+([a-z][a-z-]*)\b")
 class SalaHelp:
     verbs: dict[str, set[str]] = field(default_factory=dict)       # verb → every flag the help lists under it
     op_general: set[str] = field(default_factory=set)              # flags of `op` itself (--from, --words, --plan, --list …)
-    op_verbs: dict[str, set[str]] = field(default_factory=dict)    # `op`'s verbs → their flags, from `sala op --help` (empty when not read)
+    op_verbs: dict[str, set[str]] = field(default_factory=dict)    # `op`'s verbs → their flags, from `sala op --help --full` (empty when not read)
     op_flags_any: set[str] = field(default_factory=set)            # every flag the main help's op section lists (the fallback)
 
 
 def parse_help(main: str, op_help: str = "") -> SalaHelp:
     """`sala --help` is a list of lines that open with `salamander <verb>` and continue on deeper-indented lines; the flags of a
-    line and its continuations belong to that verb. `sala op --help` has the op's own flags, then a `verbs:` block."""
+    line and its continuations belong to that verb. `sala op --help --full` has the op's own flags, then a `verbs:` block with
+    one verb per line and its flags indented under it (the short `sala op --help` puts the verbs on one `verbs:` line: no block, no verbs)."""
     h = SalaHelp()
     cur = ""
     for line in main.splitlines():
@@ -206,6 +208,12 @@ def parse_help(main: str, op_help: str = "") -> SalaHelp:
                 h.op_general |= set(FLAG.findall(line))
                 continue
             m = re.match(r"^  ([a-z][a-z-]*)\b", line)
+            # a verb's name column is the verb alone or with its arguments (flags, brackets, UPPER placeholders); a heading
+            # such as `reason path` has two lowercase words there and is a heading of the table, not a verb
+            head = line[2:].split("  ")[0].strip()
+            if m and re.fullmatch(r"[a-z][a-z-]* [a-z][a-z-]*", head):
+                sub = ""                       # its continuation lines belong to no verb
+                continue
             if m:
                 sub = m.group(1)
                 h.op_verbs.setdefault(sub, set())
@@ -215,6 +223,11 @@ def parse_help(main: str, op_help: str = "") -> SalaHelp:
         for f in h.op_verbs.values():
             h.verbs["op"] |= f
     return h
+
+
+def op_verb_count(op_help: str) -> int:
+    """How many verbs the op help's verb table lists (0 for "" or for a help with no table)."""
+    return len(parse_help("", op_help).op_verbs) if op_help.strip() else 0
 
 
 def find_sala(sala: str) -> str:
@@ -229,13 +242,14 @@ def find_sala(sala: str) -> str:
     return ""
 
 
-def run_help(sala: str, verb: str = "") -> str:
-    """`sala --help` or `sala <verb> --help` (for a verb in [rulebook_scan] help_verbs only): the help text, "" when it cannot be read."""
+def run_help(sala: str, verb: str = "", full: bool = False) -> str:
+    """`sala --help`, `sala <verb> --help` (for a verb in [rulebook_scan] help_verbs only), or with `full` `sala <verb> --help --full`:
+    the help text, "" when it cannot be read."""
     exe = find_sala(sala)
     if not exe:      # no sala here: nothing to run and nothing to say (scan_all names it once)
         return ""
     try:
-        r = subprocess.run([exe, *([verb] if verb else []), "--help"], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+        r = subprocess.run([exe, *([verb] if verb else []), "--help", *(["--full"] if full else [])], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
         return (r.stdout or "") + (r.stderr or "")
     except Exception as e:  # noqa: BLE001
         print(f"rulebook_scan: {sala} {verb} --help not read: {e}", file=sys.stderr)
@@ -472,7 +486,8 @@ def collect(files: list[dict[str, str]]) -> list[tuple[Path, str]]:
 def scan_all(cfg: dict[str, Any], *, schema: Path | None = None, help_main: Path | None = None, help_op: Path | None = None,
              terms: Path | None = None) -> tuple[dict[str, list[Finding]], dict[str, str], list[str], bool]:
     """→ ({file: findings}, {file: keeper}, the lines of what could not be read, which the caller prints and never turns into a finding,
-    whether sala's help was read: False when `sala --help`, or `sala op --help` where it is asked for, came back empty)."""
+    whether sala's help was read: False when `sala --help` came back empty, or the op help (`sala op --help --full` where it is asked for,
+    or a file given) came back empty or with no verb table)."""
     notes: list[str] = []
     if not cfg["files"]:
         return {}, {}, [NO_FILES_NOTE], True
@@ -482,15 +497,28 @@ def scan_all(cfg: dict[str, Any], *, schema: Path | None = None, help_main: Path
         tools = server_tools(cfg["server"])
     no_sala = not help_main and not find_sala(cfg["sala"])      # no sala command on this machine (not on PATH, not in ~/.local/bin): its checks are skipped, said once
     main_help = Path(help_main).read_text(encoding="utf-8") if help_main else ("" if no_sala else run_help(cfg["sala"]))
-    op_help = Path(help_op).read_text(encoding="utf-8") if help_op else (run_help(cfg["sala"], "op") if "op" in cfg["help_verbs"] and not no_sala else "")
-    op_asked = not help_op and "op" in cfg["help_verbs"] and not no_sala
-    help_ok = bool(main_help.strip()) and (not op_asked or bool(op_help.strip()))
+    op_read = bool(help_op) or ("op" in cfg["help_verbs"] and not no_sala)      # the op help is asked for (a file given counts)
+    if help_op:
+        op_help = Path(help_op).read_text(encoding="utf-8")
+    elif op_read:
+        op_help = run_help(cfg["sala"], "op", full=True)
+        if not op_verb_count(op_help):      # a sala with no --full (an older one): its plain help is the verb table it always printed
+            plain = run_help(cfg["sala"], "op")
+            if op_verb_count(plain):
+                op_help = plain
+    else:
+        op_help = ""
+    op_bad = op_read and op_verb_count(op_help) == 0      # nothing read, or a help with no verb table: no op verb is checked, so say so
+    help_ok = bool(main_help.strip()) and not op_bad
     if no_sala:
         notes.append(f"no `{cfg['sala']}` command on this machine (PATH, ~/.local/bin): the sala verb and flag checks were skipped")
     elif not main_help.strip():
         notes.append("sala --help gave nothing: the sala verbs and flags were not checked")
-    elif not help_ok:
-        notes.append("sala op --help gave nothing: the sala verbs and flags were not checked")
+    elif op_bad:
+        said = ("sala op --help --full gave nothing" if not op_help.strip()
+                else "sala op --help --full lists no verb table (no `verbs:` block with verbs in it)")
+        notes.append(f"{said}: the sala verbs and flags were not checked")
+        print(f"rulebook_scan: {notes[-1]}", file=sys.stderr)
         main_help = ""
     sala = parse_help(main_help, op_help)
     tp = Path(terms) if terms else cfg["terms"]
