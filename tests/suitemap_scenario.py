@@ -1954,7 +1954,7 @@ check("suitemap-refresh.yml: the jobs are the plan, the shards, the merge and th
       and not any("permissions" in rj[n] for n in ("shards", "measure", "refresh")), (rf.get("permissions"), sorted(rj)))
 check(f"suitemap-refresh.yml: the plan makes {sm.SHARDS} lists from the newest map and the shards are a matrix of 0..{sm.SHARDS - 1} (fail-fast off) that run their own list MEASURED, with the earlier map as --prev, and write a map of their own",
       f"suitemap.py plan --of {sm.SHARDS} --map .suitemap/map.json" in next(st for st in rj["shards"]["steps"] if st.get("id") == "plan")["run"]
-      and [k for k in rj["shards"]["outputs"]] == [f"shard{i}" for i in range(sm.SHARDS)]
+      and [k for k in rj["shards"]["outputs"] if k != "fresh"] == [f"shard{i}" for i in range(sm.SHARDS)]
       and rj["measure"]["strategy"]["matrix"]["shard"] == list(range(sm.SHARDS)) and rj["measure"]["strategy"]["fail-fast"] is False and rj["measure"]["needs"] == "shards"
       and re.search(r"exec uv run --locked --only-group tests python tests/suitemap\.py measure -T \"\$MEASURE_T\" --prev \.suitemap/map\.json --map \"\.suitemap/shard-\$SHARD\.json\" \$SELECTED",
                     next(st for st in rj["measure"]["steps"] if st.get("name") == "run this shard's suites, measured")["run"]), rj["measure"].get("strategy"))
@@ -1963,7 +1963,7 @@ check("suitemap-refresh.yml: a shard hands its map on as the artifact suitemap-s
        and s["with"]["retention-days"] == 1 and s["if"].startswith("always()"))(next(st for st in rj["measure"]["steps"] if st.get("name") == "hand the shard's map on")), None)
 rsteps = [st.get("name") or st.get("uses") for st in rj["refresh"]["steps"]]
 check("suitemap-refresh.yml: the merge job runs whatever the shards did (`!cancelled()`), and its steps go: the shards' maps, the merge, the check that the map is whole, keep, save, publish, audit",
-      rj["refresh"]["if"].replace("${{", "").replace("}}", "").strip() == "!cancelled()" and sorted(rj["refresh"]["needs"]) == ["measure", "shards"]
+      rj["refresh"]["if"].replace("${{", "").replace("}}", "").strip() == "!cancelled() && needs.shards.outputs.fresh != 'true'" and sorted(rj["refresh"]["needs"]) == ["measure", "shards"]
       and [rsteps.index(n) for n in ("the shards' maps", "merge the shards' maps", "the map is whole", "keep the map", "save the map", "publish the map", "audit the selection")] == sorted(rsteps.index(n) for n in ("the shards' maps", "merge the shards' maps", "the map is whole", "keep the map", "save the map", "publish the map", "audit the selection")), rsteps)
 save_rf = next(st for st in rj["refresh"]["steps"] if st.get("name") == "save the map")
 pub_rf = next(st for st in rj["refresh"]["steps"] if st.get("name") == "publish the map")
@@ -1984,7 +1984,7 @@ check("suitemap-refresh.yml: the merge step is continue-on-error (its verdict is
 # the alert: an open issue titled "the suite map refresh failed" is made or commented on when the run did not finish green, and closed by the next green run
 rep_job = rj["report"]; rep_st = rep_job["steps"][0]
 check("suitemap-refresh.yml: the report job waits for the plan, the shards and the merge, runs whatever they did, and reads their three results",
-      sorted(rep_job["needs"]) == ["measure", "refresh", "shards"] and rep_job["if"].replace("${{", "").replace("}}", "").strip() == "!cancelled()"
+      sorted(rep_job["needs"]) == ["measure", "refresh", "shards"] and rep_job["if"].replace("${{", "").replace("}}", "").split("#")[0].strip() == "!cancelled() && needs.shards.outputs.fresh != 'true'"
       and rep_job["env"]["RESULTS"] == "${{ needs.shards.result }} ${{ needs.measure.result }} ${{ needs.refresh.result }}" and rep_job["env"]["TITLE"] == "the suite map refresh failed", rep_job.get("env"))
 def alert(results, issue=""):
     rc, out, _, log = gh_sh(rep_st, calls=True, RESULTS=results, TITLE=rep_job["env"]["TITLE"], RUN_URL="https://example.test/run/1", STUB_GH_ISSUE=issue)
@@ -1997,6 +1997,33 @@ check("suitemap-refresh.yml, the alert: a green run with no issue does nothing, 
       and al["failed, issue open"][0] == 1 and [l.split()[2] for l in al["failed, issue open"][1]] == ["comment"]
       and al["a shard cancelled"][0] == 1 and al["merge skipped"][0] == 1, al)
 check("suitemap-refresh.yml, the alert: the issue it opens says the earlier map stays in use (what a person needs to know, in plain words) and links the run", "The last good map stays in use" in rep_st["run"] and "$RUN_URL" in rep_st["run"])
+# ---- a scheduled run whose commit already has the newest saved map ends after the plan job
+fresh_st = next(st for st in rj["shards"]["steps"] if st.get("id") == "fresh")
+map_st = next(st for st in rj["shards"]["steps"] if st.get("name") == "the suite map")
+plan_rf = next(st for st in rj["shards"]["steps"] if st.get("id") == "plan")
+check("suitemap-refresh.yml, fresh: the shards job exposes `fresh`, from the step `fresh`, which reads the key the map step matched; the plan runs only when not fresh, and the map step comes before both",
+      rj["shards"]["outputs"].get("fresh") == "${{ steps.fresh.outputs.fresh }}" and map_st.get("id") == "map" and plan_rf["if"] == "steps.fresh.outputs.fresh != 'true'"
+      and [st.get("id") for st in rj["shards"]["steps"] if st.get("id") in ("map", "fresh", "plan")] == ["map", "fresh", "plan"], rj["shards"]["outputs"])
+check("suitemap-refresh.yml, fresh: measure, refresh and report are each gated on `fresh`, so a fresh run raises or closes nothing",
+      rj["measure"]["if"] == "needs.shards.outputs.fresh != 'true'" and all("needs.shards.outputs.fresh != 'true'" in rj[n]["if"] for n in ("refresh", "report")), [rj[n]["if"] for n in ("measure", "refresh", "report")])
+check("suitemap-refresh.yml, fresh: the step reads the event, the matched key and the commit through env (nothing interpolated into the script), and compares the whole commit",
+      fresh_st["env"] == {"EVENT": "${{ github.event_name }}", "MATCHED": "${{ steps.map.outputs.cache-matched-key }}", "SHA": "${{ github.sha }}"} and "${{" not in fresh_st["run"]
+      and '"$EVENT" != schedule' in fresh_st["run"] and '"$mapsha" != "$SHA"' in fresh_st["run"], fresh_st)
+GOOD = "a" * 40
+def fresh_of(event, key, sha=GOOD):
+    rc, out, lines = step_sh(fresh_st, EVENT=event, MATCHED=key, SHA=sha)
+    return rc, lines
+fcases = {"same commit, schedule": (fresh_of("schedule", f"suitemap-{GOOD}-123456"), "fresh=true"),
+          "other commit, schedule": (fresh_of("schedule", "suitemap-" + "b" * 40 + "-123456"), "fresh=false"),
+          "prefix of the commit, schedule": (fresh_of("schedule", f"suitemap-{GOOD[:39]}-123456"), "fresh=false"),
+          "longer than the commit, schedule": (fresh_of("schedule", f"suitemap-{GOOD}0-123456"), "fresh=false"),
+          "no key (a miss), schedule": (fresh_of("schedule", ""), "fresh=false"),
+          "same commit, manual run": (fresh_of("workflow_dispatch", f"suitemap-{GOOD}-123456"), "fresh=false"),
+          "garbage key, schedule": (fresh_of("schedule", "whatever"), "fresh=false"),
+          "no commit in the key, schedule": (fresh_of("schedule", "suitemap-"), "fresh=false"),
+          "empty commit and empty key part, schedule": (fresh_of("schedule", "suitemap--1", ""), "fresh=false")}
+check("suitemap-refresh.yml, fresh: true only for a scheduled run whose matched key holds exactly this commit; a manual run, another commit, a partial commit, no key or an unreadable key measure",
+      all(r == (0, [want]) for r, want in fcases.values()), {k: v[0] for k, v in fcases.items()})
 check("fetch reads the refresh workflow's runs: the file `suitemap.py fetch` names is the file that exists and the name test-trim's report passes to gh is its basename",
       os.path.basename(sm.CI_WORKFLOW) == "suitemap-refresh.yml" and "suitemap-refresh.yml" in open(os.path.join(SCR, "..", "tools", "test_trim_report.py"), encoding="utf-8").read(), None)
 K = T / "cancel"; (K / "tests").mkdir(parents=True); MARK = T / "marks"; MARK.mkdir()
