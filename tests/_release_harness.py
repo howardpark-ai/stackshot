@@ -32,7 +32,7 @@ def check(name, cond, got=None):
 # The world of workflow runs the gh stub and the salamander stub share (text put into both): RT_ORPHAN_RUNS = a JSON list of runs {"id", "age" (seconds queued when the scenario starts; it grows with the fake clock),
 # "status" (default queued), "jobs" (default none), "wf" (the workflow's name, default tests), "event" (pull_request | merge_group, default pull_request), "branch" (a merge_group run's head branch), "sha" (the head it
 # belongs to, default the PR's head), "view_status" and "view_age" (what `gh run view` says when it differs from the list: the run moved on meanwhile), "view_jobs": "absent" | "null" | "object" (what `gh run view`
-# gives for the job list when it is not a list), "new": true (created when the PR was reopened or dequeued, "after" seconds later; "age" is not read)}. Once the PR was reopened or dequeued (orphan_replaced holds the
+# gives for the job list when it is not a list), "new": true (created when the PR was reopened, "after" seconds later; "age" is not read)}. Once the PR was reopened (orphan_replaced holds the
 # second it was), RT_ORPHAN_AFTER is the list when it is set; when it is not, GitHub does what it does: the same runs (a replaced run stays listed, queued, as GitHub keeps it) and one new run of each workflow
 # (and branch) among them, created at that second, in progress with a job. orphan_list(done=True): those new runs completed (the poller's view once they finished). Every run's creation second is in "_t".
 ORPHAN_PY = r'''
@@ -104,20 +104,22 @@ if a[:1] == ["--orphan-blocks"]:   # the shell part's question, not a gh call: i
     top = max(mine, key=lambda r: (r["_t"], r["id"]), default=None)
     sys.exit(0 if top and top.get("status", "queued") == "queued" and not top.get("jobs") else 1)
 open(f"{d}/gh.log", "a").write(" ".join(a) + "\n")
-if a[:2] == ["pr", "view"] and a[a.index("--json") + 1] == "state,headRefOid,closedAt":   # orphan_look: the PR now, one answer per read of this kind, the last repeated: RT_PRNOW, comma-separated, of OPEN (default) | CLOSED (closed
-    # by someone else a day before) | MERGED | moved (OPEN on another head) | fail (the read errors) | lag (OPEN on the head, whatever happened: GitHub has not shown a close yet). The PR is CLOSED from a close call
-    # to a reopen call whatever RT_PRNOW says (but fail and lag): pr_closed holds the second GitHub dates that close to (the close call's, on the fake clock; a scenario can start with it, empty for a close a day before).
+if a[:2] == ["pr", "view"] and a[a.index("--json") + 1] == "state,headRefOid":   # orphan_look: the PR now, one answer per read of this kind, the last repeated: RT_PRNOW, comma-separated, of OPEN (default) | CLOSED (closed
+    # by someone else) | MERGED | moved (OPEN on another head) | fail (the read errors) | lag (OPEN on the head, whatever happened: GitHub has not shown a close yet) | handed (OPEN on the head, and the PR is found handed
+    # to the salamander merge queue meanwhile: its marker is written). The PR is CLOSED from a close call to a reopen call whatever RT_PRNOW says (but fail and lag): the file pr_closed (a scenario can start with it).
     # Every such read is in orphan_calls
     open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
     pn = int(open(f"{d}/prnow_reads").read()) + 1 if os.path.exists(f"{d}/prnow_reads") else 1
     open(f"{d}/prnow_reads", "w").write(str(pn)); pseq = env("RT_PRNOW", "OPEN").split(","); pv = pseq[min(pn, len(pseq)) - 1]
     if pv == "fail": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
-    head, closed = env("RT_HEAD", HEAD0), None
+    head = env("RT_HEAD", HEAD0)
     if pv == "lag": pv = "OPEN"
-    elif os.path.exists(f"{d}/pr_closed"): pv = "CLOSED"; closed = int(open(f"{d}/pr_closed").read().strip() or tclock() - 86400)
-    elif pv == "CLOSED": closed = tclock() - 86400
+    elif os.path.exists(f"{d}/pr_closed"): pv = "CLOSED"
     elif pv == "moved": pv, head = "OPEN", "f00d" * 10
-    print(json.dumps({"state": pv, "headRefOid": head, "closedAt": None if closed is None else iso(closed)})); sys.exit(0)
+    elif pv == "handed":
+        pv = "OPEN"; os.makedirs(f"{d}/releases/mq-on", exist_ok=True)
+        open(f"{d}/releases/mq-on/pr-23", "w").write("2026-11-04T00:00:00Z handed to the salamander merge queue by the group release led by PR #26\n")
+    print(json.dumps({"state": pv, "headRefOid": head})); sys.exit(0)
 if a[:2] == ["pr", "view"]:
     fields = a[a.index("--json") + 1]
     if (env("RT_PRSTATE") or env("RT_PRSTATE_AFTER")) and fields in ("state,mergeCommit", "state,mergeCommit,headRefOid"):   # the salamander merge queue, mode on: a group release reads each PR's state first: RT_PRSTATE = "<pr>=<OPEN|MERGED|CLOSED>[@<oid>][#<head oid>],..." (a PR not listed is OPEN; MERGED with only #<head> is a fast-forward merge GitHub names no merge commit for);
@@ -153,13 +155,12 @@ if a[:2] == ["pr", "checks"]:
     cseq = env("RT_CHECKS", "pass").split(","); cv = cseq[min(cn, len(cseq)) - 1]
     print(json.dumps([{"name": "lint", "bucket": "pass"}] if cv == "lint" else [{"name": "suites", "bucket": "pending"}, {"name": "tool-text", "bucket": "fail"}] if cv == "toolfail"
                      else [{"name": "suites", "bucket": cv}, {"name": "lint", "bucket": "pass"}])); sys.exit(0)
-# Orphaned runs (release.sh orphan_scan): the runs are ORPHAN_PY's (above); RT_ORPHAN_ERR=list|view: that call errors; RT_PRCLOSE=fail | RT_REOPEN=fail | RT_DEQUEUE=fail: that call errors; RT_PRCLOSE=failclosed: the close errors
+# Orphaned runs (release.sh orphan_scan): the runs are ORPHAN_PY's (above); RT_ORPHAN_ERR=list|view: that call errors; RT_PRCLOSE=fail | RT_REOPEN=fail: that call errors; RT_PRCLOSE=failclosed: the close errors
 # but the PR is closed all the same; killapplied: the close goes through, then the release ends (SIGTERM to its shell) before gh returns, and gh errors; other: someone else closed the PR right before the call (gh then
 # says it is already closed). As the real gh does, a close of a PR that is closed already changes nothing, says so on stderr and exits 0. RT_REOPEN=killfirst: the first reopen call ends the release (SIGTERM to its
-# shell) and errors, later ones work; killfirst2: the same, and the second reopen errors too; killfail: the same, and every later reopen errors. RT_DEQUEUE=null: GitHub answers with no error and no entry (dequeuePullRequest null), errors: a GraphQL errors body
-# (exit 0 all the same), pause: the dequeue works and the release queue is found paused (queue.paused written), handed: the dequeue works and the PR is found handed to the salamander merge queue meanwhile (its
-# marker written), failapplied: the dequeue goes through but gh errors (the PR reads open with no entry until it is enqueued again: the file dequeued). The PR is closed from a close call to a reopen call (the file
-# pr_closed, holding the second of the close: `gh pr view` says CLOSED; a scenario can start with it). `gh run list --commit` lists only the runs of that head. Every close, reopen, dequeue and orphan_look read is in orphan_calls.
+# shell) and errors, later ones work; killfirst2: the same, and the second reopen errors too; killfail: the same, and every later reopen errors. The PR is closed from a close call to a reopen call (the file
+# pr_closed: `gh pr view` says CLOSED; a scenario can start with it). `gh run list --commit` lists only the runs of that head. Every close, reopen and orphan_look read is in orphan_calls, and so is a dequeue call
+# (release.sh makes none: it never takes a PR out of the merge queue).
 def kill_release():   # SIGTERM to the release's own shell: the parent, or the shell past a command substitution's subshell (a fork of it: the same program and command line); only a process of this scenario (RT_DIR in its environment)
     import signal
     def same(p): return os.readlink(f"/proc/{p}/exe"), open(f"/proc/{p}/cmdline", "rb").read()
@@ -201,14 +202,7 @@ if a[:2] == ["run", "view"] and "jobs,status,createdAt,startedAt" in a:
     if r.get("view_jobs") == "object": v["jobs"] = {}   # empty, but not a list
     print(json.dumps(v)); sys.exit(0)
 if a[:1] == ["api"] and a[1:2] == ["graphql"] and "dequeuePullRequest" in " ".join(a):
-    open(f"{d}/orphan_calls", "a").write("dequeue " + " ".join(x for x in a if x.startswith("id=")) + "\n")
-    if env("RT_DEQUEUE") == "fail": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
-    if env("RT_DEQUEUE") == "null": print(json.dumps({"data": {"dequeuePullRequest": None}})); sys.exit(0)
-    if env("RT_DEQUEUE") == "errors": print(json.dumps({"data": {"dequeuePullRequest": None}, "errors": [{"type": "FORBIDDEN", "message": "Resource not accessible by integration"}]})); sys.exit(0)
-    if env("RT_DEQUEUE") == "pause": os.makedirs(f"{d}/releases", exist_ok=True); open(f"{d}/releases/queue.paused", "w").write("PR #22 failed at the main tests after its merge, 2026-11-04T00:00:00Z\n")   # the queue was paused meanwhile; the dequeue works
-    if env("RT_DEQUEUE") == "handed": os.makedirs(f"{d}/releases/mq-on", exist_ok=True); open(f"{d}/releases/mq-on/pr-23", "w").write("2026-11-04T00:00:00Z handed to the salamander merge queue by the group release led by PR #26\n")
-    open(f"{d}/orphan_replaced", "w").write(str(tclock()))
-    if env("RT_DEQUEUE") == "failapplied": open(f"{d}/dequeued", "w").close(); print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    open(f"{d}/orphan_calls", "a").write("dequeue " + " ".join(x for x in a if x.startswith("id=")) + "\n")   # a call release.sh must never make: recorded for the tests, and answered as GitHub would
     print(json.dumps({"data": {"dequeuePullRequest": {"mergeQueueEntry": {"state": "QUEUED"}}}})); sys.exit(0)
 if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which query it is, by its text:
     q = " ".join(a)   # - the timeline (ghq_reason, RemovedFromMergeQueueEvent): RT_GQ_REASON = the reason (GitHub's values: merged, failed_checks, manual, merge_conflict, branch_protection_failure; any other text is passed through), "none" = no event of this enqueue, "fail" = the read errors; RT_GQ_REASON_AGE = how many seconds before "now" the event is dated
@@ -252,7 +246,6 @@ if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which q
         if env("RT_ENQUEUE") in ENQ_ERR:   # gh api graphql prints the error body on stdout and "gh: <message>" on stderr, and exits 1
             m = ENQ_ERR[env("RT_ENQUEUE")]; print(json.dumps({"data": {"enqueuePullRequest": None}, "errors": [{"message": m}]})); print("gh: " + m, file=sys.stderr); sys.exit(1)
         open(f"{d}/enqueued_at", "w").write(str(tclock()))   # the entry's enqueuedAt, for the state query
-        if os.path.exists(f"{d}/dequeued"): os.remove(f"{d}/dequeued")
         print(json.dumps({"data": {"enqueuePullRequest": {"mergeQueueEntry": {"state": "QUEUED", "position": 1}}}})); sys.exit(0)
     if "mergeQueue(" in q:
         open(f"{d}/mq_reads", "a").write("x")
@@ -269,7 +262,6 @@ if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which q
         for _ in range(600):
             if os.path.exists(f"{d}/unpark"): break
             time.sleep(0.1)
-    if os.path.exists(f"{d}/dequeued"): gv = "open"   # a dequeue went through (RT_DEQUEUE=failapplied) and no enqueue since
     if gv == "fail": print("HTTP 502: bad gateway", file=sys.stderr); sys.exit(1)
     if gv == "garbage": print("not json"); sys.exit(0)
     oid = env("RT_MERGE_OID") or "0106c0de0106c0de0106c0de0106c0de0106c0de"
