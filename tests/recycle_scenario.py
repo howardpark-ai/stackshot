@@ -220,7 +220,7 @@ check("an exception still exits 0", rc == 0)
 # ---- 5. recycle-due: a script marks a recycle as due on an existing item,
 # by id or through the pull request it is anchored to, and never files one (and it is not an item)
 def _no_identity(): raise ToolError("Refused: unknown identity is not allowed on this board")
-_oauth._who = _no_identity                         # as with auth on and no signed-in caller: the client path must not need one
+_real_who, _oauth._who = _oauth._who, _no_identity # as with auth on and no signed-in caller: the client path must not need one
 nfiles = lambda: len(list((T / "store").glob("?/*.json")))
 item(8, "home-here"); item(9, "home-skipped")
 PR = "https://github.com/example-owner/stackshot/pull/11"
@@ -277,7 +277,9 @@ check("update's description says the flag goes on only once the change is instal
       and "a flag set before the provision recycled the box too early" in _wt_update._UPDATE_DESC)
 check("update's description names the board's status line and that sala runs the recycle, not the old notice",
       "Pane recycle pending for … (sala runs it)" in _wt_update._UPDATE_DESC and "sala runs a flagged recycle itself" in _wt_update._UPDATE_DESC and "Pane recycle needed" not in _wt_update._UPDATE_DESC)
+_oauth._who = _real_who                          # a listing answers members only, and this board has auth off: the stand-in is put back after it
 _ut = next(t for t in __import__("asyncio").run(server.mcp.list_tools()) if t.name == "update")
+_oauth._who = _no_identity
 check("the update tool as served carries the same guidance", "never before" in (_ut.description or "") and "(sala runs it)" in (_ut.description or ""), (_ut.description or "")[:200])
 _cfg.CFG["fleet"].update(tool_name="", recycle_when_idle="")      # no fleet tool: nothing named, no command suggested
 try: _wt_create._create(subject="[home] Recycle the sessions on box-a", description="- A thing", project="projects/alpha", owner="home-here"); check("with no fleet tool, create still refuses a recycle item", False)

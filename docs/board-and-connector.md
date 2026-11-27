@@ -9,7 +9,11 @@ write (debounced), on a timer and when the machine or session state changes. A p
 nothing.
 
 **The connector.** The same server serves MCP at `/mcp`, behind Google OAuth (plus one optional machine token for a
-Cloudflare MCP portal). Its tools:
+Cloudflare MCP portal). Lists and reads answer members only: a signed-in identity that is none of the board's members
+is refused every list (tools, resources, resource templates, prompts), every read and every call with
+`Refused: <identity> is not allowed on this board`, and gets no instructions text at the start of a session. A call
+ends in a tool error; any other request ends in a JSON-RPC error (code -32003). With no token, or one the board does
+not know, the answer is HTTP 401; with `[auth] mode = "off"` everyone is answered. Its tools:
 
 | Tool | What it does |
 |---|---|
