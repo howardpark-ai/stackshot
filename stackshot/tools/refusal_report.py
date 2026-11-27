@@ -412,10 +412,10 @@ HINTS: dict[str, str] = {
     "an ask with a second question in its Decide part": "put one question in an ask; a second question goes on an item of its own.",
     "an ask that approves a design or plan with no link in the ask": "link the design, plan or mockup inside the ask itself, as [words](url).",
     "an option without its label and line": "send 2 to 6 options as {label, line, recommended}: a label of at most 40 characters, a one-sentence line of at most 160, exactly one recommended.",
-    "a said entry in the wrong form": "send said as a list of {tag, quote, msg} objects, msg being the uuid of the owner's message in your transcript.",
-    "a time wait with no recorded words or basis": "to check back on your own work send until and wait_reason with no wait_kind; a park (wait_kind=\"time\") needs the owner's words (said) or a wait_basis.",
+    "a said entry in the wrong form": "send said as a list of {tag, quote, msg} objects, msg being the uuid of the user's message in your transcript.",
+    "a time wait with no recorded words or basis": "to check back on your own work send until and wait_reason with no wait_kind; a park (wait_kind=\"time\") needs the user's words (said) or a wait_basis.",
     "a date moved later with nothing else changed": "do not only move a date: in the same call mark a step done or dropped, write the next step or state the new reason.",
-    "a date past the wait cap": "set a date within the wait cap; a later one needs the owner's words (said) or a wait_basis that names a real date.",
+    "a date past the wait cap": "set a date within the wait cap; a later one needs the user's words (said) or a wait_basis that names a real date.",
     "a line of next that reads as a wait on a live item": "set the wait with until, after or wait_kind, and keep next to the action someone takes now.",
     "a wait with an input missing": "give the wait what its kind needs, as the refusal names it: until, wait_anchor, wait_event or after.",
     "a wait_basis the rule does not take": "write wait_basis as one line saying what happens, with its date as YYYY-MM-DD, on the day the wait ends or within 30 days after it.",
@@ -434,16 +434,15 @@ HINTS: dict[str, str] = {
     "a close with a step still open": "mark each open step done or dropped in the closing update call (the complete tool takes no marks).",
     "a status line over its limit": "keep the work text to a few words within its limit; put the detail on the project page.",
     "a status line from a session the item does not name": "set work only on an item you move or whose needs names you; otherwise ask its mover to name you.",
-    "a step over its limit": "keep step to a one-line summary within its limit; the actions go in lines of next that open with the owner's name.",
-    "a step to post a text with no draft": "when a step asks the owner to post or send a text, put the exact text in draft= or link the document that holds it.",
+    "a step over its limit": "keep step to a one-line summary within its limit; the actions go in lines of next that open with the user's name.",
+    "a step to post a text with no draft": "when a step asks the user to post or send a text, put the exact text in draft= or link the document that holds it.",
     "a bare URL in next or ask": "write a link in next or ask as [words](url), never a bare address.",
-    "the owner left as mover with nothing to do": "an item the owner moves needs something of theirs (step=, or needs=decision with an ask); otherwise name a session as mover.",
+    "the user left as mover with nothing to do": "an item the user moves needs something of theirs (step=, or needs=decision with an ask); otherwise name a session as mover.",
     "a park with nothing it waits for": "give a park what it waits for: until=YYYY-MM-DD, after=[<item>], a scoped anchor with a backstop date, or recycle=true; else set no park.",
 }
 
 # kind of refusal with no hint, and why none fits: a repeating one is listed with this line, and asks for nothing.
 NO_HINT: dict[str, str] = {
-    "a page update owed (no longer refused)": "no hint fits: no write is refused for an owed page update any more; only older log lines count here.",
     "message: not recorded": "no hint fits: lines logged before the log kept a message refusal's kind, so there is no one fault to name.",
 }
 

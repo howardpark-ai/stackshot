@@ -161,9 +161,8 @@ def part_refusal_report():
         "Refused: step at most 300 characters on one line (400 now); it is a summary": "a step over its limit",
         f"Refused: {BID(7)}: the step asks the owner to post, send or paste a text (\"Send\"), so put the text in draft=<the text>": "a step to post a text with no draft",
         "Refused: ask has a bare URL (https://example.com/mockup/3) and the page may not draw it as a link.": "a bare URL in next or ask",
-        "Refused: this item would be left with the owner as its mover but nothing for him to do: no ask": "the owner left as mover with nothing to do",
+        "Refused: this item would be left with the owner as its mover but nothing for him to do: no ask": "the user left as mover with nothing to do",
         "Refused: this needs=decision item links a mockup (https://example.com/mockup/3) in its description but not in its ask.": "an ask that approves a design or plan with no link in the ask",
-        f"Refused: you owe a project-page update — projects/demo (since {BID(3)}, 4 min ago) — update the page first": "a page update owed (no longer refused)",
         # a refusal that names several faults is counted under its first, as raised (line breaks) and as the log keeps it (folded to one line)
         "Refused: 2 problems in this call; fix all of them and send the call once more.\n(1) the reason is 130 characters and the limit is 120.\n(2) status must be open | completed": "a close reason over its limit",
         "Refused: 2 problems in this call; fix all of them and send the call once more. (1) status must be open | completed Not checked yet, because they read what the faults above leave: the close": "a status that is not open or completed",
@@ -1111,8 +1110,8 @@ def part_refusal_report():
           (sorted(names - set(RR.HINTS) - set(RR.NO_HINT)), sorted(set(RR.HINTS) & set(RR.NO_HINT))))
     check("10 daily: every such line is one plain line that opens saying no hint fits, for a kind the log can name", all(v.startswith("no hint fits: ") and "\n" not in v and v == v.strip() for v in RR.NO_HINT.values())
           and all(k in names or k.startswith("message: ") for k in RR.NO_HINT), RR.NO_HINT)
-    owed = RR.daily_tally([{"t": 1, "tool": "update", "ok": False, "why": "Refused: you owe a project-page update — projects/demo"}] * 3 + [{"t": 1, "tool": "message", "ok": False}] * 3, [])
-    check("10 daily: a repeating kind that has no hint for a reason shows the reason and asks for no fix", sorted(h for _, _, h in RR.repeating(owed)) == sorted(RR.NO_HINT[k] for k in ("a page update owed (no longer refused)", "message: " + RR.NO_KIND)), RR.repeating(owed))
+    unnamed = RR.daily_tally([{"t": 1, "tool": "message", "ok": False}] * 3, [])
+    check("10 daily: a repeating kind that has no hint for a reason shows the reason and asks for no fix", [h for _, _, h in RR.repeating(unnamed)] == [RR.NO_HINT["message: " + RR.NO_KIND]], RR.repeating(unnamed))
     txt = RR.build_daily(NOW, d24, d7)
     sample = txt
     check("10 daily: the text names both spans, the estimate and the repeating kinds with their hints",
