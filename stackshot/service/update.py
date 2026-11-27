@@ -179,6 +179,45 @@ def _hooks() -> Hooks:
     return _hooks_
 
 
+CLOSE_REASON_DEFAULT = "closed with every step done (set by the server)"
+CLOSE_TEXT_DEFAULT = "- every step is done (set by the server)"
+CLOSE_REASON_DROPPED = "closed with every step done or dropped (set by the server)"      # the same words when a step was dropped
+CLOSE_TEXT_DROPPED = "- every step is done or dropped (set by the server)"
+
+
+def _close_default(gid: str, item_was: dict[str, Any], keeper: str, done: Any, dropped: Any, work_tick: int, outcome: str, reason: str, outcome_text: str, superseded_by: str) -> tuple[str, str, str, str, str]:
+    """A close that leaves out its outcome, reason or outcome_text, on an item whose every step is done or dropped (counting the steps this call marks), is accepted: the server
+    writes outcome done, the reason CLOSE_REASON_DEFAULT and the bullet CLOSE_TEXT_DEFAULT for the parts the caller left out (the parts it gave stay as given). → (outcome, reason, outcome_text,
+    the line that tells what the server wrote ("" when nothing was defaulted), why nothing could be ("" when the close is complete, or is not one this default reads: another outcome than done, or a replacing item)).
+    An open step, or no step at all, leaves the close as the caller sent it: the gate refuses it and says why."""
+    if (outcome and reason and outcome_text) or superseded_by or outcome not in ("", "done"):
+        return outcome, reason, outcome_text, "", ""
+    try:
+        steps = _steps.view(item_was.get("metadata"), keeper=keeper)
+        dropped_now = set(_steps.resolve(steps, dropped, "dropped"))
+        marked = {*_steps.resolve(steps, done, "done"), *dropped_now}
+        if work_tick >= 0:
+            marked.add(work_tick)
+    except _steps.StepError:
+        return outcome, reason, outcome_text, "", ""      # the marks cannot be read: they are refused on their own, and no default is guessed past them
+    wrote = [n for n, v in (("outcome", outcome), ("reason", reason), ("outcome_text", outcome_text)) if not v]
+    open_ix = [i + 1 for i, st in enumerate(steps) if st["status"] == _steps.OPEN and i not in marked]
+    if open_ix:
+        many = len(open_ix) > 1
+        return outcome, reason, outcome_text, "", (f"Nothing is written and the item stays open: step{'s' if many else ''} "
+                                                   f"{', '.join(str(i) for i in open_ix[:8])}{' and more' if len(open_ix) > 8 else ''} {'are' if many else 'is'} still open, so the server cannot fill in {', '.join(wrote)} "
+                                                   f"(it does that only when every step is done or dropped). Mark {'them' if many else 'it'} in the same call (done=[...] or dropped=[...]) and leave out what you want filled, or pass {', '.join(wrote)} yourself")
+    if not steps:
+        return outcome, reason, outcome_text, "", ("Nothing is written and the item stays open: " + ("it has no steps and no outcome, so the server cannot fill in " if len(wrote) == 3 else "it has no steps, so the server cannot fill in ")
+                                                   + f"{', '.join(wrote)}. Pass {'them' if len(wrote) > 1 else 'it'} yourself, or add the steps and mark them")
+    any_dropped = any(st["status"] == _steps.DROPPED for st in steps) or bool(dropped_now)
+    reason_d, text_d = (CLOSE_REASON_DROPPED, CLOSE_TEXT_DROPPED) if any_dropped else (CLOSE_REASON_DEFAULT, CLOSE_TEXT_DEFAULT)      # a step dropped is no step done: the words say "done or dropped"
+    told = (f"{_gh.shown(gid)} closed as done with every step done or dropped; the call left out {', '.join(wrote)}, so the server wrote "
+            + "; ".join({"outcome": "outcome done", "reason": f"the reason \"{reason_d}\"", "outcome_text": f"the outcome bullet \"{text_d}\""}[n] for n in wrote)
+            + "; to give the real end state, reopen with status=open and a next line, then close again with outcome, reason and outcome_text")
+    return outcome or "done", reason or reason_d, outcome_text or text_d, told, ""
+
+
 def _wait_is_bare(m: dict[str, Any]) -> bool:
     """A date with nothing else stated beside it: no hold, no kind, no basis, no after link (the date is then a wait on that date alone, outside a hand-off)."""
     return _uw.is_bare(m)
@@ -923,10 +962,13 @@ def update_unlocked(
         outcome_text, ot_note = _fg.fix_long_bullets(outcome_text, None, "outcome_text")       # a bullet over the limit is split like a description's (a pure form fix; the reply says so, and History)
         if ot_note:
             _stall.note(meta, time.time(), ot_note)
+        outcome, reason, outcome_text, close_told, no_default = _close_default(gid, item_was, keeper_was, done, dropped, work_tick, outcome, reason, outcome_text, superseded_by)
+        if close_told:
+            _calls.fixed("outcome-defaulted", close_told)
         read_superseded = not outcome and bool(superseded_by)      # a replacing item names the outcome: superseded_by goes with no other (an outcome of done or dropped beside it is still refused)
         if read_superseded:
             outcome = "superseded"
-        superseded_by = fc.call(_gates.gate_close, gid, item, outcome, reason, superseded_by, outcome_text, default="")
+        superseded_by = fc.call(_gates.gate_close, gid, item, outcome, reason, superseded_by, outcome_text, no_default, default="")
         if read_superseded and superseded_by:      # told only when the close passed its gate, with the item it read (a typo that is a real item would otherwise go unseen) and how to undo it
             _calls.fixed("outcome-superseded", f"no outcome was given, so {_gh.shown(gid)} closed as superseded by {_gh.shown(superseded_by)}; to undo: reopen with status=open and a next line, then close again with the outcome you mean")
     elif outcome or reason or superseded_by or outcome_text:
@@ -1246,16 +1288,17 @@ def update_unlocked(
     if meta.get("hold") and not meta.get("wake") and (hold or clear_wake or after_set or clear_after or clear_recycle) and not h.after_open(meta) and not meta.get("recycle") and (wake_bad or after_bad or wait_args_bad or basis_bad):
         fc.skip("the check that a park names what it waits for", "it reads the wake, the after list, the wait's arguments or the wait_basis, which are refused above")
     elif meta.get("hold") and not meta.get("wake") and (hold or clear_wake or after_set or clear_after or clear_recycle) and not h.after_open(meta) and not meta.get("recycle"):
-        if h.scoped_anchors(str(meta.get("project") or ""), gid):
-            fc.add(f"Refused: a park that waits on a notice from the anchor scoped to {gid} still carries a backstop date, at most {_wt.cap_days():g} "
-                   f"days out unless {OWNER}'s words are on the item (until=YYYY-MM-DD): the notice may never come")
-        else:
-            fc.add("Refused: a park names what it waits for; an unconditional or indefinite park is refused. Give it a date (until=YYYY-MM-DD or "
-                        f"YYYY-MM-DDTHH:MM with wait_kind=\"time\": the date {OWNER} gave, the date the outside party or event it waits on is due, or the end of a window the work itself needs, with wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"; a park of {_wt.cap_days():g} days or less needs {OWNER}'s recorded words), the items that must close first (`after=[\"board#N\"]`), "
-                        f"a notice from an anchor scoped to it (`anchors(project, add=[url], items=[\"{_gh.shown(gid)}\"])`, with a backstop date at most {_wt.cap_days():g} "
-                        f"days out), or a pane recycle (recycle=true). An item waiting on {OWNER}'s call is parked with needs=[<session>] and mover={OWNER} (his ask returns at the date); "
-                        "to put it on his move instead, needs=decision with its ask, or after=[<the item that carries the ask>], which releases it when that item closes. To check back on work you keep moving while the "
-                        "item stays active, set no date: a date with no park is a wait until it (outside a hand-off)")
+        if not fc.call(_gates._default_wait_end, {**item, "metadata": meta}, gid, False, True, default=""):      # a park with nothing that can wake it is not refused: the server stores its default backstop day and says so
+            if h.scoped_anchors(str(meta.get("project") or ""), gid):
+                fc.add(f"Refused: a park that waits on a notice from the anchor scoped to {gid} still carries a backstop date, at most {_wt.cap_days():g} "
+                       f"days out unless {OWNER}'s words are on the item (until=YYYY-MM-DD): the notice may never come")
+            else:
+                fc.add("Refused: a park names what it waits for; an unconditional or indefinite park is refused. Give it a date (until=YYYY-MM-DD or "
+                            f"YYYY-MM-DDTHH:MM with wait_kind=\"time\": the date {OWNER} gave, the date the outside party or event it waits on is due, or the end of a window the work itself needs, with wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"; a park of {_wt.cap_days():g} days or less needs {OWNER}'s recorded words), the items that must close first (`after=[\"board#N\"]`), "
+                            f"a notice from an anchor scoped to it (`anchors(project, add=[url], items=[\"{_gh.shown(gid)}\"])`, with a backstop date at most {_wt.cap_days():g} "
+                            f"days out), or a pane recycle (recycle=true). An item waiting on {OWNER}'s call is parked with needs=[<session>] and mover={OWNER} (his ask returns at the date); "
+                            "to put it on his move instead, needs=decision with its ask, or after=[<the item that carries the ask>], which releases it when that item closes. To check back on work you keep moving while the "
+                            "item stays active, set no date: a date with no park is a wait until it (outside a hand-off)")
     # The done check: set or cleared by this write (a filing edit: no page owed), then the hand-off gate: a write
     # that hands the item to another session (a `<session>: <action>` line of next) leaves it with a check or a wake
     chk = " ".join(str(check or "").split())
@@ -1529,6 +1572,8 @@ def update_unlocked(
         if wake:
             touched_m.add("cap_ok")                             # a wake records his words for it
         full_judgement = reopening or (h.switchover_on() and not filing_only)     # step 4's switchover: every write is judged whole, old items included; a bookkeeping write (a page rename) still only by what it touches
+        if wake or ask_by.strip():
+            meta.pop(_model.SERVER_END_KEY, None)      # an end day this call gives is the caller's, whatever the server stored before
         desc_note = fc.call(_gates.gate_model, item_now, None if full_judgement else touched_m, gid, needs=[x for x in _needs_of(meta) if x not in naming_added], hold=hold_pre, desc_set=bool(description.strip()),
                             next_text=next_judged if next_touch else None, windows_text=next_judged if next_touch else "", defers_text=next_judged if next_touch else "",
                             until_wait=until_wait or (was_until and not (wake or hold or clear_wait_basis or str(wait_basis or "").strip())), date_given=bool(wake), hold_given=bool(hold), basis_kept=bool(wake) and not str(wait_basis or "").strip() and _gates.basis_held({**item, "status": status or item.get("status")}, hold=hold, verifying=state_st == "verifying"),
@@ -1590,6 +1635,10 @@ def update_unlocked(
             meta["hold"] = True
             if kept_hold_set:
                 meta["hold_set"] = kept_hold_set
+    if item.get("status") == "open" and _model.server_end(meta) and not _wt.stored_until(meta) and _uw.date_of(meta):
+        _uw.fold(meta)                     # the end the server stored beside the call's own fields (gates._default_wait_end) is stored as every end is: the one date, until
+    if meta.get(_model.SERVER_END_KEY) and not _model.server_end(meta):
+        meta.pop(_model.SERVER_END_KEY, None)      # the mark of a day the server stored goes when the end is another day or the wait is gone
     fc.raise_now()                         # every gate has run: what was found is refused together, nothing is stored
     item["metadata"] = meta
     item["updated"] = time.time()          # the item's own clock (the renderer used to trust the file's mtime, which a migration rewrites)

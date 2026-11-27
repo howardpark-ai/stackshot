@@ -1010,7 +1010,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
         miss: list[str] = []
         if w.kind == "time":
             if not w.until and not recycle:
-                miss.append("a time wait needs its date: until=YYYY-MM-DD with wait_kind=\"time\" (a verifying state's end date is its until)")
+                miss.append("a time wait needs its date: until=YYYY-MM-DD with wait_kind=\"time\" (a verifying state's end date is its until). A write the server judges leaves it out, the server stores the default backstop day and says so; this refusal is the migration's, which writes nothing it has not judged")
         elif w.kind == "anchor":
             if not (w.anchor or (anchored(item) if anchored else False)):
                 miss.append("an anchor wait names its anchor: wait_anchor=<url>, or an anchor scoped to the item (anchors tool)")

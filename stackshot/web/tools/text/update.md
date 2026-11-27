@@ -11,7 +11,13 @@ A wrong `stall:` step is undone with update (mover, next, clear_needs); the whol
 A wait is one stored date, until, with wait_kind beside it when it stands on more than the date. An item with an until
 is waiting; the server clears both when the wait ends. wake and ask_by, and hold beside a date, are retired parameters: a call that passes
 one is refused, and the date goes in until. A wait_kind with no date is never refused: the server takes a date from the
-item's words, else a suggested one, else tomorrow, and says which. Every open item has a mover (the one party whose
+item's words, else a suggested one, else tomorrow, and says which. A wait that this write leaves with no end day, and that
+passes no wait_kind (an after link, a wait stored earlier, needs=external, a park or a wait on a time with no date), is
+not refused either: the server stores its default backstop day (for a wait after other items the latest expected-by of
+the open items it waits after plus two days, else 14 days from today; any other wait 14 days from today), marks it as
+set by the server on the item, and says so in the reply; its mover replaces it with the real day (until). A wait_kind
+passed with no date keeps the fallback above (the next day, or the day the item's words give), never the 14-day backstop;
+the dates you give yourself keep the cap rules. Every open item has a mover (the one party whose
 move it is now: a session, {{OWNER}}, an outside party, or the item it waits `after`). An open item waits on its real
 dates only (until, due): no expected time is derived for any item, and a parked item waits until its date or its
 blocker closes, with no stale mark. A date a session sets runs at most {{CAP_DAYS}} days from the item's last move: a
@@ -129,7 +135,7 @@ if it has not ended is until, YYYY-MM-DD, tomorrow at the earliest: until="<day,
 
 ## param UNTIL
 The one date a wait ends on, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM, in the board timezone (a relay or event
-wait takes the day alone, YYYY-MM-DD: the day it comes back to someone). Alone it is a wait; a wait on your own item
+wait takes the day alone, YYYY-MM-DD: the day it comes back to someone; for a wait left out with no wait_kind in the call (on an item, anchor, relay or event, or a time wait with no date), the server stores a default backstop day (14 days from today, or the expected-by of the items it waits after plus two days) and says so; with a wait_kind it takes the next day or the day the item's words give, not the backstop). Alone it is a wait; a wait on your own item
 also needs wait_reason (at least {{WAIT_GUARD_REASON_MIN}} characters), a date more than {{CAP_DAYS}} days out needs a
 wait_basis, and a park (wait_kind="time") within the cap needs his recorded words. An item with an until is waiting
 (outside a hand-off: in an update that hands the item to another session the date parks nothing, it is the hand-off's

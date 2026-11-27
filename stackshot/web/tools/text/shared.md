@@ -194,7 +194,7 @@ fleet event an event wait watches: {{EVENT_FORMS}}>; until=YYYY-MM-DD (a relay w
 anchor wait's backstop day); post_wake_mover, the old name of mover, is still read as mover for a while
 (the reply says so; on an item that waits on nothing it is dropped, and a different mover beside it is refused). An event wait is how an item whose mover waits in the background for something the fleet does
 says so: update(wait_kind="event", wait_event="pr_released <n>" (this repository's pull request number), until=<the
-day it comes back anyway, required>, mover=<who takes it then>). Live for now: pr_released, pr_merged,
+day it comes back anyway; left out, the server takes tomorrow or the day the item's words give, and says so; it is not the 14-day backstop>, mover=<who takes it then>). Live for now: pr_released, pr_merged,
 box_online, recycle, and every fleet_op form (any verb, any, many); a job_run wait turns only on its backstop day.
 box_online <machine> waits for a machine to be online (its puller checking in, within the minutes the server counts as
 online): the server reads it itself and the item turns within a minute or two of the machine's return, so an item
@@ -249,13 +249,18 @@ update(item_id="board#N", sender="my-x", until="<tomorrow or later, within {{CAP
 wait_reason="the nightly run finishes at 03:00").
 
 ## param AFTER
-Items this one waits on: after=["board#N"], with until=<YYYY-MM-DD> as the day it comes back if they are still open.
-The wait ends when they close.
+Items this one waits on: after=["board#N"], with until=<YYYY-MM-DD> as the day it comes back if they are still open
+(left out, with no wait_kind in the call, the server stores a default backstop day, marks it as its own and says so; with a wait_kind it takes the next day or the day the item's words give, not the backstop). The wait ends when they close.
 
 ## param OUTCOME
 How a close ended: done | dropped (won't do, no longer needed, or can't) | superseded (replaced by another item:
-reworded, merged or split; send superseded_by=<its id>). With reason and outcome_text, all three required:
-outcome="done", reason="Export shipped in PR 12", outcome_text="- PR 12 merged".
+reworded, merged or split; send superseded_by=<its id>). With reason and outcome_text, all three are given:
+outcome="done", reason="Export shipped in PR 12", outcome_text="- PR 12 merged". Leave all three out only when the item
+has steps and every step is done or dropped: the server then closes it as done and writes the parts you left out
+("closed with every step done (set by the server)" as the reason, "- every step is done (set by the server)" as the
+outcome bullet; "done or dropped" in both when a step was dropped), and the reply says so. The same fill-in applies when
+you send outcome="done" alone, with the reason or the bullet left out. With an open step, or no step at all, a close with no outcome is refused and
+nothing is written.
 
 ## param REASON
 One line, at most {{CLOSE_REASON_MAX}} characters (longer is refused): the end state reached and why. Goes with
@@ -324,7 +329,7 @@ pr_merged|pr_released <owner>/<repo>#<n> (or none to clear that step's)}], or th
 step must be open and not {{OWNER}}'s own.
 
 ## param WAIT_KIND
-What a waiting item waits on: time | anchor | item | relay | event. A time wait is its until date; an item wait its after;
+What a waiting item waits on: time | anchor | item | relay | event. A time wait is its until date (with none, and no wait_kind in the call, the server stores the default backstop day and says so); an item wait its after;
 an anchor wait its wait_anchor (on the project's anchors list first: add it with the anchors tool) and wait_event (an
 until date is the backstop); a relay wait its wait_event and until day; an event wait its wait_event (a fleet event) and a
 backstop day (until). An anchor wait wakes the item on any new notice at its anchor that reaches the server
@@ -408,7 +413,10 @@ it stands). The server never writes an ask, closes an item or answers for {{OWNE
 ## text CLOSE_REFUSAL
 A close (complete, or update with status=completed) carries outcome: done | dropped (won't do, no longer needed, or
 can't) | superseded (replaced by another item: reworded, merged or split), with superseded_by = the replacing item's
-id (open or completed); reason: one line, the end state reached and why, at most {{CLOSE_REASON_MAX}} characters
+id (open or completed). A close that leaves out outcome, reason and outcome_text is accepted when the item has at least
+one step and every step is done or dropped: the server closes it as done, writes "closed with every step done (set by the
+server)" and "- every step is done (set by the server)" for the parts left out (also when you send outcome="done" with the reason or the bullet left out; "done or dropped" when a step was dropped), and the reply says so; with an open step
+(named by number) or no step, it is refused and nothing is written. reason: one line, the end state reached and why, at most {{CLOSE_REASON_MAX}} characters
 (longer is refused); and outcome_text: how it ended, as short `- ` bullets (at most {{DESC_MAX_LINES}} lines of
 {{DESC_LINE_MAX}} characters), shown in the Outcome block. A close leaves the description as it was (a description
 passed with a close is stored as outcome_text) and clears next, ask and needs (and any park, until date or recycle wait);
@@ -433,7 +441,13 @@ name), by the closer (done when the outcome is done, dropped otherwise; this set
 opens with another session's name stays open, so the close is refused, naming that step: ask that session to finish
 it, or mark it in the closing call with update (status=completed and done=[n] or dropped=[n]; complete takes no
 marks). It tells the mover of every other open item that names the closed item (board#N), one message per mover (the
-first 8, then a count); the items that wait on it through after are woken; the closer is not told.
+first 8, then a count); the items that wait on it through after are woken; the closer is not told. A close that leaves out
+outcome, reason and outcome_text is accepted when the item has at least one step and every step is done or dropped (steps
+marked in the same call count): the server closes it as done, writes "closed with every step done (set by the server)" as
+the reason and "- every step is done (set by the server)" as the outcome bullet for the parts left out ("done or dropped"
+when a step was dropped; also for outcome="done" sent with the reason or the bullet left out), keeps the parts
+given, and says so in the reply; with an open step (named by number) or no step at all, nothing is written and the item
+stays open.
 {{ASK_RULE}}
 
 ## param OUTCOME_TEXT

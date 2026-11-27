@@ -421,7 +421,7 @@ refused_nw("hint: wait_event=none on an anchor wait is refused 'input is missing
 refused_nw("hint: wait_anchor=none on an anchor wait: the same refusal and the same hint", 40, lambda: upd(40, wait_anchor="none"), "input is missing", "clear_wait=true")
 item(42, needs=[BACK], subject="[home] wait derived from the state", state="outside", party="Acme", chase=day(4))
 item(43, needs=[BACK], subject="[home] no ask_by", wait_kind="relay", wait_event="Acme's reply", post_wake_mover="team-back")
-refused_nw("hint: a stored wait with no end names clear_wait=true too", 43, lambda: upd(43, wait_event="Acme replies"), "has no end", "clear_wait=true")
+check("default: a stored wait with no end is no longer refused: the write goes through and the server stores the default end day, marked as its own (tests/close_wait_defaults_scenario.py)", (upd(43, wait_event="Acme replies"), mt(43).get("until_server") == day(14))[1], mt(43))
 check("hint: …a stored wait is dropped by clear_wait=true in one write", (upd(43, clear_wait=True), "wait_kind" not in mt(43))[1], mt(43))
 # asking the owner on an item that still waits: refused with the hint, nothing written; clear_wait=true in the same update goes through
 ASK2 = "Decide: merge now · Recommend: yes · Stakes: a day · By: no date"

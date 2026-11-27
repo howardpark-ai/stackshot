@@ -45,6 +45,7 @@ from stackshot.model import field_gates as _fg
 from stackshot.model.ids import _norm_id
 from stackshot.model import holders as _holders
 from stackshot.model import model as _model
+from stackshot.model import migration as _mig
 from stackshot.model import model_guards as _mg
 from stackshot.model.needs import _after_of, _canon_needs, _needs_kinds, _NEEDS_KINDS, _needs_list, _needs_sessions, _waits_decision
 from stackshot.model import nextlines as _nl
@@ -585,7 +586,7 @@ def gate_state_args(carry: dict[str, str], split_note: str = "") -> tuple[str, d
     return ("your-step" if "step" in given else "blocked" if "supplies" in given else ""), given, withdraw
 
 
-_NOT_PASSED = ("until", "waits", "wait_mode")      # in the wait group, but not arguments of this call
+_NOT_PASSED = ("until", "waits", "wait_mode", "until_server")      # in the wait group, but not arguments of this call
 
 
 def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict[str, str], set[str]]:
@@ -797,6 +798,63 @@ def _description_guard_mode() -> str:
     return "refuse" if str(_cfg.get("model", "description_guard", default="note") or "note").strip().lower() == "refuse" else "note"
 
 
+class _EndEnv:
+    """What model.migration.default_end reads of its Env: the day today (the board's zone), the items a wait is after, and their metadata."""
+
+    def __init__(self, today: dt.date, items: dict[str, dict[str, Any]], opened: list[str]) -> None:
+        self.today, self.items, self._open = today, items, opened
+
+    def after_open(self, _it: dict[str, Any]) -> list[str]:
+        return list(self._open)
+
+
+def _default_wait_end(item: dict[str, Any], gid: str, creating: bool, no_end: bool = True) -> str:
+    """A wait that has nothing to wake it: a wait on another item's close, an anchor, a relay or an event with no end (`no_end`: the guard saw it), or a time wait with no date: store the
+    default backstop day (model/migration.default_end, the rule the start repair uses) as its end, remember in metadata that the server set it, and tell the caller in the reply (fix kind
+    wait-end-defaulted). The day is stored as `until` (the one date a wait stores) for a time wait and for a create; an update's other kinds carry it in the working ask_by until update.py folds it.
+    → the line told ("" when no default was stored)."""
+    h = _hooks()
+    meta = item.get("metadata")
+    if not isinstance(meta, dict):
+        return ""
+    project = str(meta.get("project") or "")
+    opened = [str(g) for g in h.after_open(meta)]
+    try:
+        w = _model.derive(item, time.time(), lambda i_: h.after_open(i_.get("metadata") or {}), lambda i_: bool(gid and h.scoped_anchors(project, gid))).wait
+    except Exception:  # noqa: BLE001
+        return ""
+    synthetic = False
+    if w is None and meta.get("hold") and not (_wt.wake_value(meta) or _wt.stored_until(meta)):
+        w = _model.Wait(kind="time", kind_explicit=False); synthetic = True                     # a hold with no date stands as a park whatever state the item still stores: a wait on a time with none
+    if w is None or w.kind not in ("time", "anchor", "item", "relay", "event"):
+        return ""
+    if w.kind == "time":
+        if w.until or meta.get("recycle"):
+            return ""
+    elif not no_end:
+        return ""
+    items: dict[str, dict[str, Any]] = {}
+    for g in opened:
+        try:
+            items[g] = json.loads(_path(g).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+    day, why = _mig.default_end(_EndEnv(_pages.zone_now().date(), items, [g for g in opened if g in items]), item, w.kind)      # type: ignore[arg-type]
+    meta["until" if (creating or w.kind == "time") else "ask_by"] = day      # an update judges the old working fields (update.py folds this one into `until` before it saves); a time wait's until stands on its own
+    if not _uw.kind_of(meta) and not synthetic:
+        meta["wait_kind"] = w.kind                       # a date with no kind would read as a wait on a time: the wait keeps the kind the item's fields gave it
+    meta[_model.SERVER_END_KEY] = day
+    if w.kind == "time":
+        for k_ in ("hold", "hold_set", "wake"):
+            meta.pop(k_, None)                           # the day is the wait's one date, stored as until: no hold flag or working wake beside it
+    why = why.replace("from the pass", "from today")
+    line = (f"the wait had no {'date' if w.kind == 'time' else 'end'}, so the server stored {day} as its end ({why}); it is a backstop day set by the server, not a promise: the day it comes back to someone when nothing has arrived. "
+            f"Its mover replaces it with the real day (until=YYYY-MM-DD); a day you give yourself for an item or anchor wait is capped at {_wt.cap_days():g} days from the item's last move "
+            "(a later one needs the owner's word), so sending this day back as your own can be refused")
+    _calls.fixed("wait-end-defaulted", line)
+    return line
+
+
 def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None", gid: str = "", needs: list[str] | None = None, hold: bool | None = None, desc_set: bool = True, strict: bool = False, next_text: str | None = None, windows_text: str | None = None, creating: bool = False, defers_text: str | None = None, until_wait: bool = False, date_given: bool = False, hold_given: bool = False, basis_kept: bool = False, old_end_ok: bool = False, date_ends: bool = False) -> str:
     """The item model's write guards (model_guards.py) on the item as a create or update leaves it: refuse, with what is wrong and the fix, a write that
     leaves an alive item with no valid mover, a wait without its input, post-wake mover, reason or end, a second mover in needs, a decision with a hold, a placeholder, a next line with
@@ -816,12 +874,19 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
         return ""
     meta = item.get("metadata") or {}
     project = str(meta.get("project") or "")
+    def _run() -> "list[Any]":
+        return _mg.check(item, _mg.Ctx(label=_session_label, shown=_gh.shown), touched=touched, gid=gid,
+                         after_open=lambda i_: h.after_open(i_.get("metadata") or {}),
+                         anchored=lambda i_: bool(gid and h.scoped_anchors(project, gid)),
+                         needs=needs, hold=hold, one_mover=bool(_cfg.get("model", "one_mover", default=True)), next_text=next_text, windows_text=windows_text, creating=creating,
+                         defers_text=defers_text, named_open=h.open_item_named, canon=_gh.resolve, until_wait=until_wait, date_given=date_given, hold_given=hold_given, basis_kept=basis_kept, old_end_ok=old_end_ok, date_ends=date_ends)[0]
+    end_note = ""
     try:
-        probs, _flags = _mg.check(item, _mg.Ctx(label=_session_label, shown=_gh.shown), touched=touched, gid=gid,
-                                 after_open=lambda i_: h.after_open(i_.get("metadata") or {}),
-                                 anchored=lambda i_: bool(gid and h.scoped_anchors(project, gid)),
-                                 needs=needs, hold=hold, one_mover=bool(_cfg.get("model", "one_mover", default=True)), next_text=next_text, windows_text=windows_text, creating=creating,
-                                 defers_text=defers_text, named_open=h.open_item_named, canon=_gh.resolve, until_wait=until_wait, date_given=date_given, hold_given=hold_given, basis_kept=basis_kept, old_end_ok=old_end_ok, date_ends=date_ends)
+        probs = _run()
+        if not strict and any(p.key in ("no_end", "wait_input") for p in probs):      # a wait with no end (a time wait: no date) gets the default backstop day, before the check refuses it (the server curates, then tells)
+            end_note = _default_wait_end(item, gid, creating, any(p.key == "no_end" for p in probs))
+            if end_note:
+                probs = _run()
     except Exception as e:  # noqa: BLE001  — the guard is an extra: a failure in it writes as before
         print(f"model guards: {gid or 'a new item'} not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         if strict:
@@ -1323,7 +1388,7 @@ BUSY_HOLD_REFUSAL = ("Refused: this item is being moved now: {live} is running o
 
 BUSY_RELEASE_PREFIX = "a release of PR #"      # what the words of a running release begin with (audit/busy_hold.py `live_release`): the refusal that names one is BUSY_RELEASE_REFUSAL
 BUSY_RELEASE_REFUSAL = ("Refused: this item is being moved now: {live}, so it is not paused. Keep it in hand and write where its step stands (work=<one line>, state in progress), "
-                        "or wait on it by name: update(wait_kind=\"event\", wait_event=\"pr_released <n>\" or \"pr_merged <n>\", until=<the day it comes back anyway, required>, mover=<who takes it then>). "
+                        "or wait on it by name: update(wait_kind=\"event\", wait_event=\"pr_released <n>\" or \"pr_merged <n>\", until=<the day it comes back anyway; left out, the server takes tomorrow or the day the item's words give, and says so; it is not the 14-day backstop>, mover=<who takes it then>). "
                         "Park it only once nothing is running on it.")
 
 
@@ -1565,7 +1630,7 @@ def until_in(item_id: str, status: str, until: str, wake: str, ask_by: str, hold
     return u, "", True, used, given
 
 
-def gate_close(gid: str, item: dict[str, Any], outcome: str, reason: str, superseded_by: str, outcome_text: str) -> str:
+def gate_close(gid: str, item: dict[str, Any], outcome: str, reason: str, superseded_by: str, outcome_text: str, no_default: str = "") -> str:
     """Refuse a close that does not say how the item ended → the replacing item's id, normalised, or "". Every fault of the close is kept and refused together (model/faults.py)."""
     h = _hooks()
     faults: list[str] = []
@@ -1575,7 +1640,7 @@ def gate_close(gid: str, item: dict[str, Any], outcome: str, reason: str, supers
     if missing:
         form = (f"accepted form: complete(item_id=\"{gid}\", sender=\"my-x\", outcome=\"done\", reason=\"<one line: the end state and why it closes>\", outcome_text=\"- <how it ended>\"); "
                 "outcome is done | dropped | superseded, and superseded takes superseded_by=\"board#M\" too")
-        faults.append(f"Refused: closing {gid} needs {', '.join(missing)}; {form}." + (h.relaunch if {"outcome", "reason", "outcome_text"} <= set(missing) else ""))
+        faults.append(f"Refused: closing {gid} needs {', '.join(missing)}; {form}." + (f" {no_default}." if no_default else "") + (h.relaunch if {"outcome", "reason", "outcome_text"} <= set(missing) else ""))
     if outcome == "unrecorded":
         faults.append("Refused: outcome unrecorded means the item closed before the model with no outcome in its record; only the migration writes it. A close says how it ended: "
                       f"{' | '.join(h.outcomes)}")
