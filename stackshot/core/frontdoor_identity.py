@@ -27,6 +27,7 @@ VERSION = "v1"
 HEADER = "x-stackshot-identity"      # the header a backend reads the signed identity from
 MAX_AGE = 300.0                      # seconds a signed identity is accepted after it was signed
 MAX_FUTURE = 30.0                    # seconds a signed time may be ahead of the verifier's clock (clocks of two processes on one box differ by far less)
+NOT_MEMBER_CODE = -32003             # the JSON-RPC error code a board refuses a list or a read with when the caller is no member; the front door tells it from a board that is down
 
 # A Google sign-in a registration refuses (core/invites.py) travels from the board to the sign-in service as one of these words, and from there to the front door
 # inside the identity the proxy sets, so the person is told in words which address signed in and why. Such an identity is a member of nothing.

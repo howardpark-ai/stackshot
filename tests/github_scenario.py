@@ -1552,7 +1552,7 @@ check("the owner's comment is recorded on the item: answers = [{ts, kind comment
       and isinstance(ans[0].get("told"), list) and ans[0]["told"] and all(isinstance(x, str) and x for x in ans[0]["told"])
       and {k: v for k, v in ans[0].items() if k != "told"} == {"ts": ans[0]["ts"], "kind": "comment", "text": "Ship it, option 1.\nAnd thanks.", "via": "github", "url": c1["html_url"], "comment_id": c1["id"]}
       and abs(ans[0]["ts"] - G._epoch(c1["created_at"])) < 1, (r, ans))
-NOTE = f"[stackshot] the owner commented on board#{gn} on GitHub: Ship it, option 1. And thanks. → https://board.example.org/items/{gn}"
+NOTE = f"[stackshot] the owner commented on board#{gn} on GitHub: Ship it, option 1. And thanks. An answer or result asked for belongs on the item, not only in your own pane. → https://board.example.org/items/{gn}"
 check("the mover (the session in its needs) alone is told, once: the text on one line, the card link, the id as shown (the creator is not told)",
       sorted(told) == [(g_c, "home-other", NOTE, "comment")], told)
 check("reading only: needs, status and the clocks as they were", it_c["metadata"]["needs"] == ["decision", "home-other"] and it_c["status"] == "open"
@@ -1605,7 +1605,7 @@ c_f = F.comment(n_c, "yes, go ahead"); told.clear(); _fs = telling.front_keeper
 telling.front_keeper = lambda who, project="": (True, "home-keeper")
 try: r = G.poll_comments(GH, STORE, say=lambda s: None)
 finally: telling.front_keeper = _fs
-NOTE_F = f"[stackshot] the owner commented on board#{gn} on GitHub: yes, go ahead → https://board.example.org/items/{gn}"
+NOTE_F = f"[stackshot] the owner commented on board#{gn} on GitHub: yes, go ahead. An answer or result asked for belongs on the item, not only in your own pane. → https://board.example.org/items/{gn}"
 check("a front agent mover hears it marked [for the owner]",
       r["new"] == 1 and sorted(told) == [(g_c, "home-other", f"[for the owner] {NOTE_F}", "comment")], told)
 long = ("a long word of the owner's " * 60).strip()
@@ -1615,7 +1615,7 @@ check("a long comment is clipped in the notice (one line, an ellipsis, under 800
       and rd(g_c[0], gn)["metadata"]["answers"][-1]["text"] == long + "\n\nsecond paragraph", [len(t[2]) for t in told])
 # the owner's own comment on an item with no session in needs: the owner alone
 g_c2 = mk("[home] commented, nobody in needs"); c_2 = F.comment(G.issue_of(g_c2, STORE), "noted"); told.clear(); r = G.poll_comments(GH, STORE, say=lambda s: None)
-check("with no session in needs the owner alone is told", r["new"] == 1 and told == [(g_c2, OWNER, f"[stackshot] the owner commented on board#{num(g_c2)} on GitHub: noted → https://board.example.org/items/{num(g_c2)}", "comment")], told)
+check("with no session in needs the owner alone is told", r["new"] == 1 and told == [(g_c2, OWNER, f"[stackshot] the owner commented on board#{num(g_c2)} on GitHub: noted. An answer or result asked for belongs on the item, not only in your own pane. → https://board.example.org/items/{num(g_c2)}", "comment")], told)
 # GitHub down: the read raises GitHubDown for the loop to back off; nothing changes
 F.down = True; c_d = F.comment(n_c, "while GitHub is down"); told.clear(); st_d = G.comments_state()
 try: G.poll_comments(GH, STORE, say=lambda s: None); down = None
@@ -1637,7 +1637,7 @@ c_o = F.comment(n_c, "as the configured login", login="someone-else"); c_h = F.c
 # the earlier comment is put at the cursor: where it was posted, the cursor has moved past it once the checks above took over a second
 next(c for c in F.issues[n_c]["_comments"] if c["body"] == "a word from someone else")["updated_at"] = G.comments_state()["since"]
 r = G.poll_comments(GH, STORE, say=lambda s: None); _ghc.pop("owner_login")
-said = lambda: sorted({t[2].split("on GitHub: ")[1].split(" →")[0] for t in told})
+said = lambda: sorted({t[2].split("on GitHub: ")[1].split(" →")[0].removesuffix(". An answer or result asked for belongs on the item, not only in your own pane.") for t in told})      # his words alone
 check("[github] owner_login names whose comments count (case apart), the earlier one by that login still at the cursor included; the token's login then does not",
       r["new"] == 2 and len(told) == 2 and said() == ["a word from someone else", "as the configured login"] and rd(g_c[0], gn)["metadata"]["answers"][-1]["comment_id"] == c_o["id"], (r, told))
 told.clear(); r = G.poll_comments(GH, STORE, say=lambda s: None)

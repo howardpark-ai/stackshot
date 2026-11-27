@@ -364,7 +364,7 @@ This guide installs the board only. Later options, none needed now:
 | `doctor` says `OAuth metadata reachable ... missing` | The HTTPS front does not reach port 8020 | Step 9 |
 | The board shows nothing new on GitHub | The data repo never got `main` on the remote | Step 5 |
 | Google says `redirect_uri_mismatch` | The URI in the Google client differs from `<base>/auth/callback` | Fix it in the Google console, character for character |
-| claude.ai refuses to sign in, or says "not allowed on this board" | Your Google email is not in `[auth] allowed_emails` | Add it in the config; it reloads by itself |
+| claude.ai refuses to sign in, lists no tools, or says "not allowed on this board" | Your Google email is not in `[auth] allowed_emails` | Add it in the config; it reloads by itself |
 | Services stop when you log out | Lingering is off | `sudo loginctl enable-linger <your user>` |
 | `systemctl --user` says it cannot reach your user manager | You are in a shell that was not a login | `export XDG_RUNTIME_DIR=/run/user/$(id -u)` or log in again |
 | A write's reply says a project-page update is still owed | The page rule: the session changed the board and has not edited the page for longer than `grace_minutes` | Edit the page, commit, push; no write is refused for it, and the debt settles by itself once the server's copy has the edit. With the default (`false`) the page's keeper is charged |

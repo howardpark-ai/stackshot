@@ -1,5 +1,5 @@
 """middleware.py: the tool middleware of the server, in the order app.build adds them: the tool-set fingerprint (`_Fingerprint`), the board links (`_LinkIds`, with `_link_ids` and `_unlink_ids`: every item id in a tool's text reply is a link to its page, a write's text arguments are unlinked first), the refusal log (`_RefusalLog`: one stderr line for every ToolError a tool call ends in, the call count
-and the one reply line for a correction the server made itself), the read-only refusal of a warm standby copy (`_ReadOnly`, with `_RO_WRITE_TOOLS` and `_ro_tool_changes`), and the refusal of the
+and the one reply line for a correction the server made itself), the gate that answers lists, reads, calls and the instructions text to members only (`_MembersOnly`), the read-only refusal of a warm standby copy (`_ReadOnly`, with `_RO_WRITE_TOOLS` and `_ro_tool_changes`), and the refusal of the
 retired item-state inputs (`_RetiredInputs`).
 
 web/app.py makes the FastMCP instance and adds these to it; the order of the `mcp.add_middleware(...)` calls is there."""
@@ -12,9 +12,12 @@ import time
 from typing import Any, Iterator
 
 from fastmcp.exceptions import ToolError
+from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.middleware import Middleware as _MW
+from mcp.shared.exceptions import MCPError
 
 from stackshot.core import call_log as _calls
+from stackshot.core import frontdoor_identity as _ident
 from stackshot.core import instance as _inst
 from stackshot.core import readonly as _ro
 from stackshot.core import retired_inputs as _retired
@@ -22,6 +25,7 @@ from stackshot.core.instance import OWNER
 from stackshot.github import ghsync as _gh
 from stackshot.model.ids import _item_url, _norm_id
 from stackshot.service.store import _path
+from stackshot.web.auth import oauth as _oauth
 
 REFUSAL_LOG_MAX = 300      # characters of a refusal's reason kept in the log line
 
@@ -195,6 +199,53 @@ def _ro_tool_changes(name: str, args: Any) -> bool:
     return False
 
 
+# the requests that are not refused up front to someone who is no member: the first two are answered without the instructions text, ping carries nothing,
+# and a tool call is refused in `_MembersOnly.on_call_tool`
+_ASKED_BY_ANYONE = ("initialize", "server/discover", "ping", "tools/call")
+
+
+def _refusal() -> str:
+    """"" for a caller who may read the board (`oauth._who` answers: a member, or anyone with auth off), else the sentence it refuses with."""
+    try:
+        _oauth._who()
+    except ToolError as e:
+        return str(e)
+    return ""
+
+
+def _within_a_call() -> bool:
+    """True when the request in hand names itself a tool call (the `Mcp-Method` header). The MCP library lists the tools inside such a request, to read the called tool's schema, before the call."""
+    try:
+        return get_http_request().headers.get("mcp-method") == "tools/call"
+    except RuntimeError:      # no HTTP request in hand
+        return False
+
+
+class _MembersOnly(_MW):
+    """Lists and reads answer members only. Whoever `oauth._who` refuses is refused every list, every read and every other request (`_ASKED_BY_ANYONE` aside), and gets no instructions text from
+    `initialize` and `server/discover`. A tool call of theirs ends in the ToolError `_who` raises, before the standby copy's and the retired inputs' refusals, and inside _RefusalLog, which logs it.
+    The one listing the library makes inside a tool call (`_within_a_call`) gets an empty list instead of a refusal: the call is refused next, and a refused listing there would put a traceback in
+    the log for every such call."""
+    async def on_request(self, context, call_next):  # type: ignore[override]
+        if context.method not in _ASKED_BY_ANYONE and (why := _refusal()):
+            if context.method == "tools/list" and _within_a_call():
+                return []
+            raise MCPError(code=_ident.NOT_MEMBER_CODE, message=why)
+        return await call_next(context)
+
+    async def on_call_tool(self, context, call_next):  # type: ignore[override]
+        _oauth._who()
+        return await call_next(context)
+
+    async def on_initialize(self, context, call_next):  # type: ignore[override]
+        result = await call_next(context)
+        if result is None or not _refusal():
+            return result
+        return result.model_copy(update={"instructions": None})
+
+    on_discover = on_initialize
+
+
 class _ReadOnly(_MW):
     async def on_call_tool(self, context, call_next):  # type: ignore[override]
         if _ro.is_read_only():
@@ -228,6 +279,8 @@ class _Fingerprint(_MW):
 
     async def on_discover(self, context, call_next):  # type: ignore[override]
         result = await call_next(context)
+        if not (result.get("instructions") if isinstance(result, dict) else getattr(result, "instructions", None)):
+            return result      # a caller who is no member gets no instructions (_MembersOnly): nothing is added to none
         try:
             import hashlib
             names = sorted(t.name for t in await self._mcp.list_tools(run_middleware=False))

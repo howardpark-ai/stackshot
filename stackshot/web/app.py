@@ -31,7 +31,7 @@ from stackshot.web.tools import anchors as _tool_anchors
 from stackshot.web.tools import rules as _tool_rules
 from stackshot.web.tools import invite as _tool_invite
 from stackshot.web import door_guard as _door_guard, frame_guard as _frame_guard, requestlog as _requestlog
-from stackshot.web.middleware import _Fingerprint, _LinkIds, _ReadOnly, _RefusalLog, _RetiredInputs
+from stackshot.web.middleware import _Fingerprint, _LinkIds, _MembersOnly, _ReadOnly, _RefusalLog, _RetiredInputs
 from stackshot.web.routes import client_api as _routes_client_api
 from stackshot.web.routes import answers as _routes_answers
 from stackshot.web.routes import door_verify as _routes_door_verify
@@ -213,8 +213,9 @@ def build(
     mcp.add_middleware(_requestlog.RequestRoute())      # first, so outermost: it names the request's route for the request log (web/requestlog.py), and changes nothing
     mcp.add_middleware(_Fingerprint(mcp))
     mcp.add_middleware(_LinkIds())
-    # The refusal log, the standby copy's read-only refusal and the retired-input refusal come after _LinkIds, in this order.
+    # The refusal log, the members-only gate, the standby copy's read-only refusal and the retired-input refusal come after _LinkIds, in this order.
     mcp.add_middleware(_RefusalLog())
+    mcp.add_middleware(_MembersOnly())
     mcp.add_middleware(_ReadOnly())
     mcp.add_middleware(_RetiredInputs())
     _door_guard.install(mcp)      # a board behind a front door checks the signed identity of a call to /mcp (web/door_guard.py); with no [behind_frontdoor] identity_secret_file it touches nothing. Before the request log's wrapper, so the log is the outermost and sees a refusal too
