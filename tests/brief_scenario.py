@@ -1,9 +1,9 @@
 """Scenario test for the item brief, GET /items/<key>/brief, and the panel the home page opens it in (docs/board-ui.md). Fixture data, the HTTP routes through Starlette's test client,
-no live store, no network. What the page's script does in a browser (opening, closing, Back, drafts, sending, the live refresh) is tests/brief_check.py.
+no live store, no network. What the page's script does in a browser (opening, closing, Back, drafts, sending, failures, the installed app, the live refresh) is tests/brief_check.py.
 
 Covers: the brief is behind the same sign-in as the item's page and answers an unknown or malformed address with a 404; an old form of an id goes to the one address, the query kept; a GET
 writes nothing; its answer boxes are the item page's own (same forms, fields and buttons, for each viewer and item) and post to the one answer route with every gate as it was; the notice
-after a send and the codes that keep the box; what the brief shows and leaves out (ask, step, draft, outcome, wait, the first lines of the background, the last answers); the sentences
+after a send, the codes that keep the box and the codes that mean something was written; what the brief shows and leaves out (ask, why the recommended card is recommended, step, draft, outcome, wait, the first lines of the background, the last answers); the sentences
 that explain a control sit behind a "?" with a role="tooltip" the button names; nothing drawn from an item reaches the page unescaped; the home page carries one empty panel and its
 script, its rows' links stay the item pages' own, and the item's page is as it was; the words follow the viewer's language; the scripts parse.
 
@@ -76,6 +76,7 @@ item("a", 11, subject=f"[home] {EVIL}", description=f"- {EVIL}\n- [go](javascrip
      options=[{"label": 'A"><i>x</i>', "line": f"line {EVIL}", "recommended": True}, {"label": "B", "line": "x", "recommended": False}], draft=f"draft {EVIL}",
      answers=[{"ts": now - 60, "kind": "decision", "choice": f"{EVIL}", "text": EVIL, "via": "board", "by": EVIL}])
 for n in (12, 13, 14, 15): ask_(n)
+item("a", 16, needs=["decision"], ask='"><img src=x onerror=alert(4)> [go](javascript:alert(5))', description="- five\n- of\n- these\n- and\n- no more")      # a short ask in no set form, which the brief draws as the page does
 item("g", 5, needs=["decision"], ask=ASK, options=OPTS)                      # an item addressed by its number
 (T / "store/next-id").write_text("20"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
@@ -176,6 +177,13 @@ check("a paragraph is one piece, a blank line ends it", P("x\ny\n\nz\n") == ["x\
 check("numbered lines and headings start pieces of their own", P("## h\ntext\n1. one\n2. two") == ["## h\ntext", "1. one", "2. two"], P("## h\ntext\n1. one\n2. two"))
 FENCED = "intro\n```\n- not a cut\n\n- nor this\n```\n- after"
 check("a fenced block is never cut", P(FENCED) == ["intro", "```\n- not a cut\n\n- nor this\n```", "- after"], P(FENCED))
+check("a line that only quotes words in three backticks opens no fence", P("```one word``` first\n- a\n- b") == ["```one word``` first", "- a", "- b"], P("```one word``` first\n- a\n- b"))
+LONG = "````\n```\n- inside\n````\n- after"
+check("a fence ends only at as many marks as opened it", P(LONG) == ["````\n```\n- inside\n````", "- after"], P(LONG))
+INFO = "```\n```py\n- inside\n```\n- after"
+check("a line with words after its marks ends no fence", P(INFO) == ["```\n```py\n- inside\n```", "- after"], P(INFO))
+TILDE = "~~~ a`b\n```\n- inside\n~~~~\n- after"
+check("a tilde fence ends at tildes, as many or more", P(TILDE) == ["~~~ a`b\n```\n- inside\n~~~~", "- after"], P(TILDE))
 check("an indented block under a bullet stays with it across a blank line", P("- a\n\n  still a\n- b") == ["- a\n\n  still a", "- b"], P("- a\n\n  still a\n- b"))
 check("list lines join as one list, paragraphs stay apart", ui_brief._join(["- a", "- b", "tail", "other", "## h", "- c"]) == "- a\n- b\n\ntail\n\nother\n\n## h\n\n- c", ui_brief._join(["- a", "- b", "tail", "other", "## h", "- c"]))
 
@@ -216,7 +224,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
 
     # ---- 3. the answer boxes are the item page's own
     for who, ck in (("the first member", ME), ("the second member", SECOND)):
-        for key in ("a1", "a2", "a3", "a4", "a5", "a6", "a9", "a11", "5"):
+        for key in ("a1", "a2", "a3", "a4", "a5", "a6", "a9", "a11", "a16", "5"):
             page_forms = Doc(get(f"/items/{key}", cookie=ck).text).posts()
             _, b = brief(key, cookie=ck)
             check(f"{who}, {key}: the brief posts the forms the item's page posts, field for field", b.posts() == page_forms, (b.posts(), page_forms))
@@ -228,19 +236,31 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     r, d = brief("a1"); art = article(r.text); text = d.shown()
     root = d.tags[0][1]
     check("the article names the item, its fingerprint and the notices that keep the box", root.get("data-key") == "a1" and re.fullmatch(r"[0-9a-f]{6,}", root.get("data-fp") or "") and root.get("data-keep") == " ".join(ui_frame._QUIET), root)
+    codes = (root.get("data-recorded") or "").split()
+    check("it names the notices that mean something was written, askedback among them, and no other",
+          sorted(codes) == sorted(["askedback", "closednote", "comment", "decision", "done", "donenote", "partdone", "stalenote", "stepreply"]) and not set(codes) & set(ui_frame._QUIET), codes)
     heads = [t for t, a in d.tags if a.get("id") == "brief-title"]
     check("the page's title of the item is its one heading", heads == ["h1"] and "a1" in text and "titleword of item a1" in text and "[home]" not in text, (heads, text[:200]))
     check("the project sits over the title", 'class="bwho"' in art and "Alpha" in text, text[:300])
     check("the ask: what to decide and the stakes", "zebraword" in text and "stakesword" in text, text[:600])
-    check("with a recommended card the recommendation line is left to the card", "recoword" not in text and 'class="badge rec"' in art, text[:600])
+    asked = art.split('<div class="iask">', 1)[1].split("</div>", 1)[0]
+    why = re.search(r'<p class="breco"><b>Why recommended</b> (.*?)</p>', art)
+    check("with a recommended card, the recommendation and its reason are a line of their own over the cards, once",
+          why and "recoword" in why.group(1) and "recoword" not in asked and art.count("recoword") == 1 and 'class="badge rec"' in art
+          and art.find('class="bsec bbg"') < why.start() < art.find('name="choice"'), (why and why.group(0), asked))
     check("a date line that says there is none is left out", "no date" not in text, text[:600])
     _, d6 = brief("a6")
-    check("with no recommended card the recommendation is a line of the ask, and a date is shown", "recoword" in d6.shown() and "2099-03-04" in d6.shown(), d6.shown()[:600])
+    a6 = article(brief("a6")[0].text)
+    check("with no recommended card the recommendation is a line of the ask, and a date is shown", "recoword" in a6.split('<div class="iask">', 1)[1].split("</div>", 1)[0] and 'class="breco"' not in a6 and "2099-03-04" in d6.shown(), d6.shown()[:600])
     check("the draft to paste is there", "draftword to send as it is" in text)
-    check("the first five lines of the background, the others folded with their count", all(f"point{w}" in art for w in ("one", "two", "three", "four", "five", "six", "seven"))
-          and art.split('<details class="bmore"><summary>', 1)[0].count("of the background") == 5 and "2 more lines" in art, art[:3000])
+    bg = art.split('<section class="bsec bbg">', 1)[1].split("</section>", 1)[0]
+    check("the first five lines of the background, and a link to the detail view that counts the others; nothing folded",
+          all(f"point{w}" in bg for w in ("one", "two", "three", "four", "five")) and "pointsix" not in art and "pointseven" not in art and "<details" not in bg
+          and '<p class="bmoreline"><a href="/items/a1">2 more lines in Detail view</a></p>' in bg, bg)
     _, d7 = brief("a7")
-    check("one folded line is counted in the singular", "1 more line" in " ".join(d7.shown().split()) and "1 more lines" not in d7.shown(), d7.shown()[:900])
+    check("one line more is counted in the singular", "1 more line in Detail view" in " ".join(d7.shown().split()) and "1 more lines" not in d7.shown(), d7.shown()[:900])
+    d16bg = brief("a16")
+    check("five lines are all there is, so no line counts more", 'class="bmoreline"' not in article(d16bg[0].text) and "no more" in d16bg[1].shown(), d16bg[1].shown())
     r3, d3 = brief("a3")
     check("a description that only repeats the subject draws no background", "Background" not in d3.shown() and 'class="bsec bbg"' not in r3.text, d3.shown())
     check("the last three answers, oldest first, a comment not among them", "Past answers (3)" in text and "pick1word" not in art and [art.find(f"pick{n}word") for n in (2, 3, 4)] == sorted(art.find(f"pick{n}word") for n in (2, 3, 4))
@@ -266,9 +286,9 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         return (len(buttons) == 1 and buttons[0].get("aria-describedby") == tid and buttons[0].get("type") == "button" and buttons[0].get("aria-label") == about and "name" not in buttons[0]
                 and len(popup) == 1 and popup[0].get("role") == "tooltip" and "hidden" in popup[0]
                 and doc.tips == {tid: words} and words not in doc.shown() and not [a for _, a in doc.tags if words in (a.get("title") or "")])
-    check("how to send a pick is behind a ? button, not inline", tooltip_ok(d, "xp-brief-pick-a1", "Pick an option or write a note", "About Send"), (d.tips, d.shown()[-600:]))
+    check("how to send a pick is behind a ? button, not inline", tooltip_ok(d, "xp-brief-pick-a1", "Pick an option or write a note", "Help: Send"), (d.tips, d.shown()[-600:]))
     r9, d9 = brief("a9")
-    check("what Send note needs is behind a ? button, with no hover title left", tooltip_ok(d9, "xp-brief-note-a9", "Write a note to send it", "About Send note") and "data-hint" not in article(r9.text) and "data-needs-text" in article(r9.text), (d9.tips, article(r9.text)[-1500:]))
+    check("what Send note needs is behind a ? button, with no hover title left", tooltip_ok(d9, "xp-brief-note-a9", "Write a note to send it", "Help: Send note") and "data-hint" not in article(r9.text) and "data-needs-text" in article(r9.text), (d9.tips, article(r9.text)[-1500:]))
     css = r.text.split("<style>", 1)[1].split("</style>", 1)[0]
     check("the inline hint is not drawn in a brief", ".bitem .ahint{display:none}" in css)
     check("the ? is the board's shared control: its style and its script are on the brief's page, once", css.count(_explain.CSS) == 1 and Doc(r.text).scripts.count(_explain.JS) == 1)
@@ -277,6 +297,9 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     r11, d11 = brief("a11"); art11 = article(r11.text)
     bad = [(t, a) for t, a in d11.tags if t in ("img", "script", "i") or any(k.startswith("on") for k in a) or str(a.get("href") or "").lower().startswith("javascript:")]
     check("an item's words are text everywhere in the brief", not bad and "alert(2)" in art11 and "<script>alert" not in r11.text, bad)
+    r16, d16 = brief("a16"); art16 = article(r16.text)
+    bad = [(t, a) for t, a in d16.tags if t in ("img", "script") or any(k.startswith("on") for k in a) or str(a.get("href") or "").lower().startswith("javascript:")]
+    check("so is a short ask in no set form", not bad and 'class="iask"' in art16 and "alert(4)" in d16.shown() and "<img" not in art16, (bad, art16[:1500]))
 
     check("a GET writes nothing", digest() == snap)
 
@@ -326,11 +349,14 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     scripts = [s for s in hd.scripts if "window.ssBrief={" in s]
     check("its script is there once", len(scripts) == 1, len(scripts))
     check("the live refresh leaves a page with a draft in the panel alone and tells the panel of a newer board", any("ssBrief.draft()){newer=true;return}" in s and "stackshot:newer" in s and "dispatchEvent(new CustomEvent('stackshot:newer'" in s for s in hd.scripts))
+    at = {mark: next((n for n, s in enumerate(hd.scripts) if mark in s), -1) for mark in ("window.ssBrief={", "SK='ss-home-scroll'", "ssBrief.takes(a)")}
+    check("the installed app's link rule leaves a title the panel takes, and the panel's script reads the address before the home script clears it",
+          0 <= at["ssBrief.takes(a)"] < at["window.ssBrief={"] < at["SK='ss-home-scroll'"] and "takes:function(a)" in scripts[0], at)
     check("the box and send-key scripts take a form put in by the script", sum(s.count("addEventListener('stackshot:inserted'") for s in hd.scripts) == 2, [s.count("stackshot:inserted") for s in hd.scripts])
     links = [a.get("href") for t, a in hd.tags if t == "a" and "ir-link" in (a.get("class") or "").split()]
     check("every row's link is still the item's own page", links and all(re.fullmatch(r"/items/" + _ids._ITEM_KEY, h) for h in links), links)
     ipage = get("/items/a1", headers=NAV).text
-    check("the item's page is as it was: no brief, no panel, no ? button, its own script", 'class="bitem"' not in ipage and 'id="brief"' not in ipage and "brief-pick-" not in ipage and "window.ssBrief" not in ipage
+    check("the item's page is as it was: no brief, no panel, no ? button, its own script", 'class="bitem"' not in ipage and 'id="brief"' not in ipage and "brief-pick-" not in ipage and "window.ssBrief={" not in ipage
           and "<form class=\"ianswer\" data-cards" in ipage and '<div class="bfoot">' not in ipage, [w for w in ('class="bitem"', 'id="brief"', "brief-pick-") if w in ipage])
     chunk = next((x for x in home.split("<li ") if 'class="ir-link" href="/items/a13"' in x), "")
     row = re.search(r'<div class="ir-proj">(.*?)</div>', chunk, re.S)
@@ -354,11 +380,11 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
                 check(f"{name} script {n} is valid JavaScript", p.returncode == 0, p.stderr[:600])
 
     # ---- 10. the viewer's language
-    (T / "locale/ko.json").write_text(json.dumps({"brief.background": "XX-background", "brief.close": "XX-close", "explain.about": "XX-about {what}", "js.brief.open": "XX-open", "js.brief.picked": "XX-picked {what}", "js.brief.none": "XX-none"}), encoding="utf-8")
+    (T / "locale/ko.json").write_text(json.dumps({"brief.background": "XX-background", "brief.close": "XX-close", "explain.about": "XX-about {what}", "brief.why_rec": "XX-why", "js.brief.open": "XX-open", "js.brief.picked": "XX-picked {what}", "js.brief.none": "XX-none"}), encoding="utf-8")
     _cfg.CFG.setdefault("ui", {})["locale_dir"] = str(T / "locale")
     uiprefs.set_lang(EMAIL2, "ko")
     r, d = brief("a1", cookie=SECOND)
-    check("the brief is drawn in the viewer's language", "XX-background" in d.shown() and "XX-picked XX-none" in d.shown() and 'aria-label="XX-about Send"' in r.text and "XX-open" in r.text, d.shown()[:600])
+    check("the brief is drawn in the viewer's language", "XX-background" in d.shown() and "XX-picked XX-none" in d.shown() and 'aria-label="XX-about Send"' in r.text and "XX-why" in d.shown() and "XX-open" in r.text, d.shown()[:600])
     check("another viewer's stays English", "XX-" not in article(brief("a1")[0].text))
     home2 = get("/", cookie=SECOND, headers=NAV).text
     check("the home panel's bar and the row button's words follow it too", 'aria-label="XX-close"' in home2 and "XX-open" in home2, [x for x in re.findall(r'aria-label="[^"]*"', home2.split('<aside id="brief"', 1)[-1][:900])])

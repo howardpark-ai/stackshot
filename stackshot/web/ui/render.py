@@ -921,6 +921,7 @@ _APP_HEAD = _SST_HEAD + ('<link rel="manifest" href="/manifest.webmanifest" cros
              "document.addEventListener('click',function(ev){if(ev.defaultPrevented||ev.button!==0||ev.metaKey||ev.ctrlKey||ev.shiftKey||ev.altKey||!app())return;"
              "var a=ev.target&&ev.target.closest?ev.target.closest('a[href]'):null;if(!a||String(a.target).toLowerCase()!=='_blank'||a.hasAttribute('download'))return;"
              "var u;try{u=new URL(a.href,location.href)}catch(e){return}if(u.origin!==location.origin)return;"
+             "if(window.ssBrief&&ssBrief.takes(a))return;"      # a title the home page opens in its panel (ui/brief_assets.py): left to its script, which comes after this one
              "ev.preventDefault();location.assign(u.href)});"
              # the search box's form opens its results in a new tab; an app window has none, so a same-origin GET form with target=_blank goes to the window itself, as its link does
              "document.addEventListener('submit',function(ev){var f=ev.target;if(ev.defaultPrevented||!app()||!f||!f.getAttribute||String(f.getAttribute('target')).toLowerCase()!=='_blank'||String(f.getAttribute('method')).toLowerCase()!=='get')return;"
@@ -4707,8 +4708,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
 <script>{_FOLD_JS}</script>
 {self.sent_notes_html()}
 {_CARDS_JS}
-<script>{_HOME_JS}</script>
 <script>{_brief.JS}</script>
+<script>{_HOME_JS}</script>
 <script>{_ABOX_JS}</script>
 {_SENDKEY_JS}
 {_COPY_JS}

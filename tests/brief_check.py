@@ -4,9 +4,13 @@ board's cookie then checks that:
 
   - on a wide screen a row opens in a panel on the right (address ?item=<key>), the lists stay beside it, Escape and Back close it, the list keeps its scroll, j and k step;
   - a pick and a note are one draft with the row's, survive closing, the live refresh and a changed item; a send records one answer and moves on; a send that fails records nothing;
-  - at 390 px it is a bottom sheet that fits, closes by a drag, the dimmed page and Back, and keeps the answer box in view;
+  - at 390 and 360 px it is a bottom sheet that fits, closes by a drag, the dimmed page and Back, and keeps the answer box in view;
   - the "?" shows its words on hover, focus and tap; the full screen page fits and carries the draft there;
-  - without the script, and when a brief cannot be read, a row leads to the item's page.
+  - one answer is sent once, from the panel, the item opened again or the row; a send under way on one item leaves the others alone; a failure or a reply that never comes is said;
+  - a brief that cannot be read, and an item that cannot be read again after a send, never leave the page; drafts come back after a reload, the detail view and the full screen view,
+    and where the browser keeps nothing leaving is asked about; a pick or a note that no longer fits its item is named or held; in the installed app a title opens the panel;
+  - each of those fails when its line is taken out of the script as the page serves it (MUTANTS);
+  - without the script a row leads to the item's page.
 
     tests/run-suite brief_check     → exit 0 / 1
     (the browser, once per machine: uvx playwright@1.63.0 install chromium)
@@ -66,7 +70,7 @@ LONG_ITEM = dict(ask=f"Decide: whether {LONG} · Recommend: yes · Stakes: {LONG
                  opts=[{"label": "A" * 60, "line": LONG, "recommended": True}, {"label": "B", "line": LONG, "recommended": False}])
 item(8, **LONG_ITEM)
 for i in range(10, 40): item(i, ask=None, opts=None, subject=f"work under way a{i}")
-(T / "store/next-id").write_text("60"); (T / "store/anchors.json").write_text("{}")
+(T / "store/next-id").write_text("1000"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 
 
@@ -124,7 +128,7 @@ def shot(pg, name):
 
 
 def loaded(pg, i):
-    pg.wait_for_selector(f"#brief article.bitem[data-key='a{i}']", timeout=10000)
+    pg.wait_for_selector(f"#brief article.bitem[data-key='a{i}']")
 
 
 def open_(pg, i, how="a.ir-link"):
@@ -132,11 +136,13 @@ def open_(pg, i, how="a.ir-link"):
 
 
 def closed(pg):
-    pg.wait_for_selector("#brief", state="hidden", timeout=5000)
+    pg.wait_for_selector("#brief", state="hidden")
 
 
-def home(pg, query=""):
-    pg.goto(BOARD + "/" + query); pg.wait_for_selector(f"{row(12)} .bopen", state="attached", timeout=10000)
+def home(pg, clean=False):
+    """the home page; `clean`: with no draft left over from the checks before"""
+    if clean: pg.evaluate("() => sessionStorage.clear()")
+    pg.goto(BOARD + "/"); pg.wait_for_selector(f"{row(12)} .bopen", state="attached")
     pg.evaluate("() => { document.querySelector('#agents-at-work > details').open = true }")      # the list of items under way starts closed
 
 
@@ -170,7 +176,7 @@ def visible(pg, sel):
 
 
 def desktop(br, errors):
-    ctx = br.new_context(ignore_https_errors=True, viewport={"width": 1280, "height": 800}); ctx.add_cookies([cookie()])
+    ctx = br.new_context(ignore_https_errors=True, viewport={"width": 1280, "height": 800}); ctx.add_cookies([cookie()]); ctx.set_default_timeout(10000)
     pg = ctx.new_page(); pg.on("pageerror", lambda e: errors.append(str(e)))
     home(pg)
     check("every row has its button", pg.eval_on_selector_all("li.irow.hrow", "l => l.length > 5 && l.every(x => x.querySelectorAll('.bopen').length === 1)"))
@@ -246,13 +252,15 @@ def desktop(br, errors):
     check("a change under a half-written answer is told, the answer stays", s["note"] == "half written" and "Wait" in s["pick"] and "rewritten" not in pg.inner_text("#brief"), s)
     shot(pg, "desktop-changed")
     pg.click("#brief .bchanged button"); pg.wait_for_selector("#brief .bchanged", state="detached"); pg.wait_for_function("() => document.querySelector('#brief').innerText.includes('rewritten')"); s = state(pg)
-    check("the latest keeps the note and drops the pick made on the old question", s["note"] == "half written" and s["pick"] == "" and answers(5) == [], s)
+    foot = pg.inner_text("#brief .bfoot")
+    check("the latest keeps the note, drops the pick made on the old question and names it", s["note"] == "half written" and s["pick"] == "" and answers(5) == []
+          and "The question changed since you picked" in foot and "Wait" in foot, (s, foot))
     open_(pg, 6); rewrite(6, ask=ASK.replace("next version", "second version")); poll(pg, "() => document.querySelector('#brief').innerText.includes('second version')")
     pg.wait_for_function("() => document.querySelector('#brief').innerText.includes('second version')", timeout=10000)
     check("with nothing written the open item is simply drawn anew", pg.query_selector("#brief .bchanged") is None and pg.evaluate("() => window.sameDocument === true"))
 
     # a draft on an item whose row has no box, while the whole page wants a reload
-    home(pg); open_(pg, 10); pg.fill("#brief textarea", "a comment under way"); pg.click("#brief .bhead")
+    home(pg, clean=True); open_(pg, 10); pg.fill("#brief textarea", "a comment under way"); pg.click("#brief .bhead")
     pg.evaluate("() => { window.sameDocument = true; document.querySelector('meta[name=\"stackshot-shell\"]').content = 'another-frame' }")
     rewrite(11, next="something else now"); poll(pg); pg.wait_for_timeout(2500)
     check("the live refresh does not reload the page over a draft in the panel", pg.evaluate("() => window.sameDocument === true") and state(pg)["note"] == "a comment under way", state(pg))
@@ -264,7 +272,7 @@ def desktop(br, errors):
     # sends that write nothing
     home(pg); open_(pg, 4); pg.fill("#brief textarea", "kept when the send fails")
     pg.route("**/items/a4/answer", lambda r: r.abort()); pg.click("#brief button[name=act]"); pg.wait_for_selector("#brief .aerr:not([hidden])"); s = state(pg)
-    check("a send that cannot reach the board says so and keeps the note", "Nothing sent" in pg.inner_text("#brief .aerr") and s["note"] == "kept when the send fails" and s["send"] and answers(4) == [], (s, pg.inner_text("#brief .aerr")))
+    check("a send that gets no reply says it is not known whether it was recorded, and keeps the note", "may or may not have been recorded" in pg.inner_text("#brief .aerr") and s["note"] == "kept when the send fails" and s["send"] and answers(4) == [], (s, pg.inner_text("#brief .aerr")))
     pg.unroute("**/items/a4/answer")
     pg.route("**/items/a4/answer", lambda r: r.fulfill(status=200, content_type="application/json", body='{"sent":"empty"}')); pg.click("#brief button[name=act]")
     pg.wait_for_function("() => document.querySelector('#brief .aerr').textContent.includes('pick an option')"); s = state(pg)
@@ -299,27 +307,24 @@ def desktop(br, errors):
     check("…each answered once", all(len(answers(i)) == 1 for i in (1, 2, 3, 4, 5, 6, 8)), {i: len(answers(i)) for i in range(1, 9)})
 
     # opening by address; addresses that are not the panel's
+    pg.evaluate("() => sessionStorage.clear()")
     pg.goto(BOARD + "/?item=a12"); loaded(pg, 12); pg.keyboard.press("Escape"); closed(pg)
     check("an address that names an item opens it, and closing stays on the list", state(pg)["url"] == "/", state(pg))
     pg.goto(BOARD + "/?sent=decision&item=a12"); pg.wait_for_timeout(1500)
     check("the address of a row's own send is not the panel's", not state(pg)["open"], state(pg))
     pg.goto(BOARD + "/?item=../x"); pg.wait_for_timeout(800); check("an address that names no item form opens nothing", not state(pg)["open"], state(pg))
 
-    # a new tab, and a brief that cannot be read
+    # a new tab
     home(pg)
     with ctx.expect_page() as new:
         pg.click(f"{row(12)} a.ir-link", modifiers=["Control"])
     other = new.value; other.wait_for_url(BOARD + "/items/a12", timeout=10000)      # a new tab is about:blank before its first navigation
     check("Ctrl+click opens the item's page in a new tab and no panel", other.url == BOARD + "/items/a12" and not state(pg)["open"], other.url); other.close()
-    pg.route("**/items/a13/brief*", lambda r: r.fulfill(status=500, body="broken")); pg.click(f"{row(13)} a.ir-link"); pg.wait_for_url(BOARD + "/items/a13", timeout=10000)
-    check("a brief that cannot be read leads to the item's page", True)
-    pg.go_back(); pg.wait_for_selector(f"{row(1)} .bopen"); pg.wait_for_timeout(500)
-    check("…and Back from there is the list, with no panel", pg.url == BOARD + "/" and not state(pg)["open"], pg.url)
-    pg.unroute("**/items/a13/brief*"); ctx.close()
+    ctx.close()
 
 
 def fullpage(br, errors):
-    ctx = br.new_context(ignore_https_errors=True, viewport={"width": 1280, "height": 800}); ctx.add_cookies([cookie()])
+    ctx = br.new_context(ignore_https_errors=True, viewport={"width": 1280, "height": 800}); ctx.add_cookies([cookie()]); ctx.set_default_timeout(10000)
     pg = ctx.new_page(); pg.on("pageerror", lambda e: errors.append(str(e)))
     item(40); git("add", "-A"); git("commit", "-q", "-m", "a40"); board_home._board_home_drop()
     home(pg); open_(pg, 40); pg.fill("#brief textarea", "carried to the full page"); pg.click("#brief .acard:has-text('Ship')")
@@ -329,8 +334,10 @@ def fullpage(br, errors):
     check("full screen keeps the draft", got["t"] == "carried to the full page" and "Ship" in (got["c"] or "") and "Ship" in got["p"], got)
     check("the full page fits", pg.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"))
     shot(pg, "desktop-full")
-    pg.click("#brief-page button[name=act]"); pg.wait_for_url(re.compile(r"/items/a40/brief\?sent=decision$"), timeout=10000); pg.wait_for_selector("#brief-page .bsent .isent.ok")
-    check("a send on the full page records one answer and says so there", len(answers(40)) == 1 and answers(40)[0].get("text") == "carried to the full page", answers(40))
+    pg.evaluate("() => { window.sameDocument = true }")
+    pg.click("#brief-page button[name=act]"); pg.wait_for_selector("#brief-page .bsent .isent.ok")
+    check("a send on the full page records one answer and says so there, in the same page", len(answers(40)) == 1 and answers(40)[0].get("text") == "carried to the full page"
+          and pg.url == BOARD + "/items/a40/brief" and pg.evaluate("() => window.sameDocument === true"), (answers(40), pg.url))
     item(42, **LONG_ITEM); git("add", "-A"); git("commit", "-q", "-m", "a42"); board_home._board_home_drop()
     pg.goto(BOARD + "/items/a42/brief"); pg.wait_for_selector("#brief-page article")
     check("long unbroken text does not widen the full page", pg.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth")); ctx.close()
@@ -340,59 +347,74 @@ def fullpage(br, errors):
     home(pg); open_(pg, 41); shot(pg, "desktop-panel-dark"); dark.close()
 
 
-def phone(br, errors, scheme):
+def phone(br, errors, scheme, w=390, h=844):
     n = 50 if scheme == "light" else 51
+    if w != 390: n += 2
+    tag = scheme if w == 390 else f"{scheme}-{w}"
     item(n); item(n + 5, ask=None, opts=None, state="your-step", step="run the one line `true`", needs=["home-here"])
     git("add", "-A"); git("commit", "-q", "-m", f"a{n}"); board_home._board_home_drop()
-    ctx = br.new_context(ignore_https_errors=True, viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, device_scale_factor=2, color_scheme=scheme); ctx.add_cookies([cookie()])
+    ctx = br.new_context(ignore_https_errors=True, viewport={"width": w, "height": h}, is_mobile=True, has_touch=True, device_scale_factor=2, color_scheme=scheme); ctx.add_cookies([cookie()]); ctx.set_default_timeout(10000)
     pg = ctx.new_page(); pg.on("pageerror", lambda e: errors.append(str(e)))
-    home(pg); shot(pg, f"phone-home-{scheme}")
+    home(pg); shot(pg, f"phone-home-{tag}")
+    # a row's button lies over none of the row's own words
+    over = pg.evaluate("""() => [...document.querySelectorAll('li.irow.hrow')].filter(li => li.getClientRects().length).flatMap(li => {
+        const b = li.querySelector('.bopen'); if (!b) return ['a row with no button'];
+        const r = b.getBoundingClientRect(), box = li.getBoundingClientRect(), out = r.left < box.left - 1 || r.right > box.right + 1 ? ['outside its row'] : [];
+        const walk = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+        for (let t = walk.nextNode(); t; t = walk.nextNode()) { if (b.contains(t) || !t.textContent.trim() || !t.parentElement.checkVisibility()) continue;
+            const g = document.createRange(); g.selectNodeContents(t);
+            for (const q of g.getClientRects()) if (q.left < r.right - 1 && r.left < q.right - 1 && q.top < r.bottom - 1 && r.top < q.bottom - 1) { out.push('over: ' + t.textContent.trim().slice(0, 60)); break } }
+        return out })""")
+    check(f"{tag}: the rows' buttons lie over no words, and nothing scrolls sideways", over == [] and pg.evaluate("() => document.documentElement.scrollWidth") <= w, (over[:6], pg.evaluate("() => document.documentElement.scrollWidth")))
     reach = pg.eval_on_selector(f"{row(20)} .bopen", "b => { b.scrollIntoView({block: 'center'}); const r = b.getBoundingClientRect(), x = r.x + r.width / 2; return [r.height, [-20, 0, 20].every(d => document.elementFromPoint(x, r.y + r.height / 2 + d) === b)] }")
-    check(f"{scheme}: the row's button is small to look at and a full target for a finger", reach[0] < 32 and reach[1], reach)
+    check(f"{tag}: the row's button is small to look at and a full target for a finger", reach[0] < 32 and reach[1], reach)
     pg.evaluate("(s) => document.querySelector(s).scrollIntoView({block: 'center'})", row(20)); y = pg.evaluate("() => window.scrollY")
     pg.tap(f"{row(20)} .bopen"); loaded(pg, 20); pg.keyboard.press("Escape"); closed(pg)
-    check(f"{scheme}: the list is where it was after the sheet", y > 0 and abs(pg.evaluate("() => window.scrollY") - y) < 2, (y, pg.evaluate("() => window.scrollY")))
+    check(f"{tag}: the list is where it was after the sheet", y > 0 and abs(pg.evaluate("() => window.scrollY") - y) < 2, (y, pg.evaluate("() => window.scrollY")))
     pg.tap(f"{row(n)} a.ir-link"); loaded(pg, n)
     box = pg.eval_on_selector("#brief", "e => { const r = e.getBoundingClientRect(); return {x: r.x, w: r.width, h: r.height, b: r.bottom} }")
-    check(f"{scheme}: a bottom sheet, the full width and most of the height", box["x"] == 0 and box["w"] == 390 and abs(box["h"] - 0.92 * 844) < 2 and abs(box["b"] - 844) < 1, box)
+    check(f"{tag}: a bottom sheet, the full width and most of the height", box["x"] == 0 and box["w"] == w and abs(box["h"] - 0.92 * h) < 2 and abs(box["b"] - h) < 1, box)
     fit = pg.evaluate("() => { const b = document.querySelector('#brief .bbody'); return [document.documentElement.scrollWidth, b.scrollWidth, b.clientWidth] }")
-    check(f"{scheme}: nothing scrolls sideways", fit[0] <= 390 and fit[1] <= fit[2], fit)
-    check(f"{scheme}: the page behind is dimmed, still and out of reach", pg.evaluate("() => !document.getElementById('brief-scrim').hidden && document.documentElement.classList.contains('sheet') && document.getElementById('layout').inert && document.getElementById('brief').getAttribute('aria-modal') === 'true'"))
+    check(f"{tag}: nothing scrolls sideways", fit[0] <= w and fit[1] <= fit[2], fit)
+    check(f"{tag}: the page behind is dimmed, still and out of reach", pg.evaluate("() => !document.getElementById('brief-scrim').hidden && document.documentElement.classList.contains('sheet') && document.getElementById('layout').inert && document.getElementById('brief').getAttribute('aria-modal') === 'true'"))
     send = pg.eval_on_selector("#brief button[name=act]", "e => e.getBoundingClientRect().bottom")
     small = pg.eval_on_selector_all("#brief .brief-bar .b, #brief .xp-b", "l => l.filter(e => e.getClientRects().length).map(e => [e.textContent, e.getBoundingClientRect().height]).filter(x => x[1] < 43.9)")
-    check(f"{scheme}: Send is in view, the bar's buttons are large enough to tap", send <= 844 and small == [], (send, small))
-    shot(pg, f"phone-sheet-{scheme}")
+    check(f"{tag}: Send is in view, the bar's buttons are large enough to tap", send <= h and small == [], (send, small))
+    off = pg.evaluate("""() => [...document.querySelectorAll('#brief .brief-bar .b, #brief button[name=act]')].filter(e => e.getClientRects().length)
+        .map(e => { const r = e.getBoundingClientRect(); return [e.textContent, r.left, r.right, r.top, r.bottom] }).filter(x => x[1] < -0.5 || x[2] > innerWidth + 0.5 || x[3] < -0.5 || x[4] > innerHeight + 0.5)""")
+    check(f"{tag}: the bar's buttons and Send are wholly on the screen", off == [], off)
+    shot(pg, f"phone-sheet-{tag}")
     side = pg.evaluate("() => ['#brief textarea', '#brief button[name=act]'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom] })")
     (_, tr, tt, tb), (bl, br_, bt, bb) = side
-    check(f"{scheme}: Send stands beside the note box, on its line", tr <= bl and br_ <= 390 and abs((tt + tb) / 2 - (bt + bb) / 2) < 6, side)
-    low =pg.eval_on_selector("#brief textarea", "e => e.getBoundingClientRect().height")
+    check(f"{tag}: Send stands beside the note box, on its line", tr <= bl and br_ <= w and abs((tt + tb) / 2 - (bt + bb) / 2) < 6, side)
+    low = pg.eval_on_selector("#brief textarea", "e => e.getBoundingClientRect().height")
     pg.tap("#brief textarea"); pg.wait_for_timeout(300)
     tall = pg.eval_on_selector("#brief textarea", "e => [e.getBoundingClientRect().height, parseFloat(getComputedStyle(e).fontSize)]")
-    check(f"{scheme}: the note box is one line until used, with text large enough not to zoom", low < 50 and tall[0] >= 80 and tall[1] >= 16, (low, tall))
+    check(f"{tag}: the note box is one line until used, with text large enough not to zoom", low < 50 and tall[0] >= 80 and tall[1] >= 16, (low, tall))
     pg.fill("#brief textarea", "\n".join(["a line of the note"] * 8)); grown = pg.eval_on_selector("#brief textarea", "e => e.getBoundingClientRect().height")
-    check(f"{scheme}: …and grows with its text", grown > tall[0] + 20, (tall, grown)); pg.fill("#brief textarea", "")
+    check(f"{tag}: …and grows with its text", grown > tall[0] + 20, (tall, grown)); pg.fill("#brief textarea", "")
     why = f"#xp-brief-pick-a{n}"
     pg.tap("#brief .xp-b"); pg.wait_for_selector(why, timeout=5000); tip = pg.eval_on_selector(why, "e => { const r = e.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom] }")
-    check(f"{scheme}: a tap on ? shows the words, on the screen", tip[0] >= 0 and tip[1] <= 390 and tip[2] >= 0 and tip[3] <= 844, tip)
-    shot(pg, f"phone-tooltip-{scheme}")
-    pg.tap("#brief .xp-b"); check(f"{scheme}: a second tap puts them away", visible(pg, why) == "hidden")
+    check(f"{tag}: a tap on ? shows the words, on the screen", tip[0] >= 0 and tip[1] <= w and tip[2] >= 0 and tip[3] <= h, tip)
+    shot(pg, f"phone-tooltip-{tag}")
+    pg.tap("#brief .xp-b"); check(f"{tag}: a second tap puts them away", visible(pg, why) == "hidden")
     head = pg.eval_on_selector("#brief .bhead", "e => { const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] }")
     pg.mouse.move(*head); pg.mouse.down(); pg.mouse.move(head[0], head[1] + 40, steps=4); pg.mouse.up()
-    check(f"{scheme}: a short drag leaves it open", state(pg)["open"])
+    check(f"{tag}: a short drag leaves it open", state(pg)["open"])
     pg.mouse.move(*head); pg.mouse.down(); pg.mouse.move(head[0], head[1] + 180, steps=8); pg.mouse.up(); closed(pg)
-    check(f"{scheme}: a drag down closes it", pg.evaluate("() => !document.documentElement.classList.contains('sheet') && !document.getElementById('layout').inert"))
-    pg.tap(f"{row(n)} .bopen"); loaded(pg, n); pg.touchscreen.tap(195, 20); closed(pg)
-    check(f"{scheme}: a tap on the dimmed page closes it", state(pg)["url"] == "/", state(pg))
+    check(f"{tag}: a drag down closes it", pg.evaluate("() => !document.documentElement.classList.contains('sheet') && !document.getElementById('layout').inert"))
+    pg.tap(f"{row(n)} .bopen"); loaded(pg, n); pg.touchscreen.tap(w / 2, 20); closed(pg)
+    check(f"{tag}: a tap on the dimmed page closes it", state(pg)["url"] == "/", state(pg))
     pg.tap(f"{row(n)} .bopen"); loaded(pg, n); pg.go_back(); closed(pg)
-    check(f"{scheme}: Back closes it", state(pg)["url"] == "/", state(pg))
-    pg.goto(BOARD + f"/?item=a{n + 5}"); loaded(pg, n + 5); shot(pg, f"phone-step-{scheme}")
+    check(f"{tag}: Back closes it", state(pg)["url"] == "/", state(pg))
+    pg.goto(BOARD + f"/?item=a{n + 5}"); loaded(pg, n + 5); shot(pg, f"phone-step-{tag}")
     pg.goto(BOARD + "/?item=a42"); loaded(pg, 42)
     fit = pg.evaluate("() => { const b = document.querySelector('#brief .bbody'); return [document.documentElement.scrollWidth, b.scrollWidth, b.clientWidth] }")
-    check(f"{scheme}: long unbroken text stays inside the sheet", fit[0] <= 390 and fit[1] <= fit[2], fit)
-    shot(pg, f"phone-long-{scheme}")
+    check(f"{tag}: long unbroken text stays inside the sheet", fit[0] <= w and fit[1] <= fit[2], fit)
+    shot(pg, f"phone-long-{tag}")
     pg.goto(BOARD + "/items/a42/brief"); pg.wait_for_selector("#brief-page article")
-    check(f"{scheme}: long unbroken text does not widen the full page", pg.evaluate("() => document.documentElement.scrollWidth") <= 390, pg.evaluate("() => document.documentElement.scrollWidth"))
-    pg.goto(BOARD + f"/items/a{n}/brief"); pg.wait_for_selector("#brief-page article"); shot(pg, f"phone-full-{scheme}"); ctx.close()
+    check(f"{tag}: long unbroken text does not widen the full page", pg.evaluate("() => document.documentElement.scrollWidth") <= w, pg.evaluate("() => document.documentElement.scrollWidth"))
+    pg.goto(BOARD + f"/items/a{n}/brief"); pg.wait_for_selector("#brief-page article"); shot(pg, f"phone-full-{tag}"); ctx.close()
 
 
 def noscript(br):
@@ -406,9 +428,329 @@ def noscript(br):
     check("…a row's title opens the item's page", other.url == BOARD + "/items/a12", other.url); ctx.close()
 
 
+# ---- what a person must not lose: each of these runs in a browser of its own, on items of its own, and again with one line of the script taken out (MUTANTS), where it must fail
+NEXT = [100]
+
+
+def fresh(**kw):
+    """an item nobody has touched, for one scenario"""
+    NEXT[0] += 1; n = NEXT[0]
+    item(n, **kw); git("add", "-A"); git("commit", "-q", "-m", f"a{n}"); board_home._board_home_drop()
+    return n
+
+
+def soon(pg, js, arg=None):
+    """True once the JavaScript test holds, False when it never does"""
+    try:
+        pg.wait_for_function(js, arg=arg); return True
+    except Exception:  # noqa: BLE001  — the check that follows says what is missing
+        return False
+
+
+def tokened(pg, n):
+    """the row's own box is drawn once its token has come"""
+    pg.wait_for_function("(s) => { const i = document.querySelector(s + ' form.hanswer input[name=token]'); return !!i && !!i.value }", arg=row(n))
+
+
+def rowtype(pg, n, text):
+    pg.evaluate("([s, v]) => { const t = document.querySelector(s + ' form.hanswer textarea'); t.value = v; t.dispatchEvent(new Event('input', {bubbles: true})) }", [row(n), text])
+
+
+def rowshut(pg, n):
+    return pg.evaluate("(s) => { const f = document.querySelector(s + ' form.hanswer'); return [f.querySelector('button[name=act]').disabled, f.getAttribute('aria-busy')] }", row(n))
+
+
+def panelsend(pg):
+    return pg.evaluate("() => { const b = document.querySelector('#brief button[name=act]'); return b ? [b.disabled, b.textContent] : null }")
+
+
+def shut_panel(pg):
+    """close it, and wait for the history to have gone back before anything else is opened"""
+    pg.click("#brief [data-bact=close]"); closed(pg); pg.wait_for_function("() => location.search === ''")
+
+
+def posts_of(pg):
+    sent = []
+    pg.on("request", lambda q: sent.append(q.url) if q.method == "POST" and q.url.endswith("/answer") else None)
+    return lambda n: len([u for u in sent if u.endswith(f"/items/a{n}/answer")])
+
+
+ARMED = "() => { const e = new Event('beforeunload', {cancelable: true}); window.dispatchEvent(e); return e.defaultPrevented }"      # would leaving be asked about
+ROW_SEND = "(s) => { const f = document.querySelector(s + ' form.hanswer'); f.querySelector('input[name=choice]').click(); f.requestSubmit(f.querySelector('button[name=act]')) }"
+STORED = "() => sessionStorage.getItem('ss-brief-drafts') || ''"
+
+
+def sc_double(pg, say):
+    a, b, c = fresh(), fresh(), fresh()
+    count = posts_of(pg); home(pg); tokened(pg, a); held = []
+    pg.route(f"**/items/a{a}/answer", lambda r: held.append(r))
+    open_(pg, a); pg.click("#brief .acard:has-text('Drop')"); pg.click("#brief button[name=act]")
+    soon(pg, "() => document.querySelector('#brief button[name=act]').disabled")
+    shut = rowshut(pg, a)
+    say("a send under way from the panel shuts the row's Send", shut == [True, "true"], shut)
+    say("…and leaving the page is asked about while it is", pg.evaluate(ARMED))
+    shut_panel(pg); open_(pg, a); got = panelsend(pg)
+    say("…the item opened again has its Send shut and says it is sending", bool(got) and got[0] and "Sending" in got[1], got)
+    pg.evaluate("""(s) => { const r = document.querySelector(s + ' form.hanswer'), p = document.querySelector('#brief form.ianswer'); r.requestSubmit(); if (p) p.requestSubmit();
+        for (const f of [r, p]) { const t = f && f.querySelector('textarea'); if (t) t.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', ctrlKey: true, bubbles: true})) } }""", row(a))
+    pg.wait_for_timeout(500)
+    say("…and no way of sending it again makes a second request", count(a) == 1 and len(held) == 1, (count(a), len(held)))
+    held[0].continue_(); soon(pg, "() => !!document.querySelector('#brief .bsent .bnext')")
+    say("one answer is recorded", len(answers(a)) == 1, answers(a))
+    say("…and then leaving is not asked about", not pg.evaluate(ARMED))
+    # the other way round: the row's own Send first (its page load held back here), then the panel
+    shut_panel(pg); tokened(pg, b)
+    pg.evaluate("() => document.addEventListener('submit', e => { if (e.target.matches('form.hanswer')) e.preventDefault() })")
+    pg.evaluate(ROW_SEND, row(b)); pg.wait_for_timeout(300); open_(pg, b); got = panelsend(pg)
+    say("a send under way from a row shuts the panel's Send", bool(got) and got[0] and "Sending" in got[1], got)
+    pg.evaluate("() => document.querySelector('#brief form.ianswer').requestSubmit()"); pg.wait_for_timeout(500)
+    say("…and the panel sends nothing", count(b) == 0, count(b))
+    # a row's own send, to its end: the page it comes back as ends that draft
+    home(pg); tokened(pg, c)
+    with pg.expect_navigation():
+        pg.evaluate(ROW_SEND, row(c))
+    pg.wait_for_selector("p.isent"); kept = pg.evaluate(STORED)
+    say("a row's own send records once and leaves no draft of it", len(answers(c)) == 1 and f'"a{c}"' not in kept, (answers(c), kept))
+
+
+def sc_apart(pg, say):
+    a, b = fresh(), fresh()
+    home(pg); held = []
+    pg.route(f"**/items/a{a}/answer", lambda r: held.append(r))
+    open_(pg, a); pg.click("#brief .acard:has-text('Drop')"); pg.click("#brief button[name=act]"); soon(pg, "() => document.querySelector('#brief button[name=act]').disabled")
+    open_(pg, b); pg.click("#brief .acard:has-text('Ship')"); got = panelsend(pg)
+    say("a send under way on one item leaves another's Send on", bool(got) and not got[0], got)
+    pg.click("#brief button[name=act]"); soon(pg, "() => !!document.querySelector('#brief .bsent .bnext')")
+    say("…which records its own answer", len(answers(b)) == 1 and answers(a) == [], (answers(a), answers(b)))
+    held[0].fulfill(status=403, content_type="text/plain", body="refused for this check")
+    soon(pg, "() => !document.getElementById('brief-toast').hidden")
+    told = pg.inner_text("#brief-toast")
+    say("the send that failed is told, with its item, though another is open", "refused for this check" in told and f"a{a}" in told and state(pg)["url"] == f"/?item=a{b}", (told, state(pg)))
+    pg.wait_for_timeout(4600)
+    say("…and the line stays until it is acted on", pg.is_visible("#brief-toast"))
+    pg.click("#brief-toast button.main"); loaded(pg, a); s = state(pg)
+    why = pg.inner_text("#brief .aerr")
+    say("…its button opens the item, which says why and keeps the pick", "refused for this check" in why and "Drop" in s["pick"] and s["send"], (why, s))
+
+
+def sc_timeout(pg, say):
+    n = fresh(); pg.clock.install(); home(pg); held = []
+    pg.route(f"**/items/a{n}/answer", lambda r: held.append(r))
+    open_(pg, n); pg.fill("#brief textarea", "kept when no reply comes"); pg.click("#brief button[name=act]"); pg.wait_for_selector("#brief button[name=act]:disabled")
+    pg.clock.fast_forward(31000); pg.wait_for_selector("#brief .aerr:not([hidden])"); s = state(pg); why = pg.inner_text("#brief .aerr")
+    say("a send with no reply ends after its time, says it is not known whether it was recorded, and keeps the note",
+        "may or may not have been recorded" in why and s["note"] == "kept when no reply comes" and s["send"] and answers(n) == [], (why, s))
+
+
+def sc_failed_load(pg, say):
+    n = fresh(); home(pg); tokened(pg, n); rowtype(pg, n, "typed before the read failed")
+    pg.evaluate("() => { window.sameDocument = true }")
+    broken = re.compile(rf"/items/a{n}/brief$")
+    pg.route(broken, lambda r: r.fulfill(status=500, body="broken")); pg.click(f"{row(n)} a.ir-link")
+    soon(pg, "() => !!document.querySelector('#brief .bfail')"); pg.wait_for_timeout(500)
+    got = pg.evaluate("""() => ({same: window.sameDocument === true, url: location.pathname + location.search, text: (document.querySelector('#brief .bfail') || {}).innerText || '',
+        link: (document.querySelector('#brief .bfail a') || {getAttribute: () => ''}).getAttribute('href')})""")
+    say("a brief that cannot be read stays on the list and says so", got["same"] and got["url"] == f"/?item=a{n}" and "This item could not be read." in got["text"], got)
+    say("…with a way to try again and a link to the item's page", "Try again" in got["text"] and got["link"] == f"/items/a{n}", got)
+    say("…and the row keeps what was typed", rowstate(pg, n)["note"] == "typed before the read failed", rowstate(pg, n))
+    shot(pg, "desktop-failed")
+    pg.unroute(broken); pg.click("#brief .bretry"); loaded(pg, n)
+    say("…Try again reads it, the draft in its box", state(pg)["note"] == "typed before the read failed", state(pg))
+    # recorded, and then the item cannot be read again
+    m = fresh(); home(pg); open_(pg, m); pg.evaluate("() => { window.sameDocument = true }")
+    again = re.compile(rf"/items/a{m}/brief(\?.*)?$")      # every read of it from here on: the read after the send, and any the live refresh asks for
+    pg.route(again, lambda r: r.fulfill(status=500, body="broken"))
+    pg.route("**/render-stamp", lambda r: r.fulfill(status=500, body="held back"))      # the lists stay as they are, so the row below is the one that was marked
+    pg.click("#brief .acard:has-text('Ship')"); pg.click("#brief button[name=act]")
+    soon(pg, "() => !!document.querySelector('#brief .bretry')")
+    text = pg.inner_text("#brief"); r = rowstate(pg, m)
+    say("a send recorded on an item that then cannot be read says it was sent, in the same page",
+        "Sent. The item could not be read again." in text and pg.evaluate("() => window.sameDocument === true") and state(pg)["url"] == f"/?item=a{m}" and len(answers(m)) == 1, (text, answers(m)))
+    say("…leaves no box to send it twice, and marks the row", pg.query_selector("#brief textarea") is None and r["sent"], r)
+    pg.unroute(again); pg.click("#brief .bretry"); soon(pg, "() => !document.querySelector('#brief .bretry')")
+    soon(pg, "() => document.querySelector('#brief').innerText.includes('Sent')")
+    say("…and reads it on asking, still saying it was sent", pg.query_selector("#brief .bretry") is None and pg.query_selector("#brief article.bitem .bsent .isent.ok") is not None, pg.inner_text("#brief"))
+
+
+def sc_drafts(pg, say):
+    n = fresh(); home(pg); open_(pg, n); pg.click("#brief .acard:has-text('Drop')"); pg.fill("#brief textarea", "kept across the pages"); pg.click("#brief .bhead")
+    kept = lambda s: s["note"] == "kept across the pages" and "Drop" in s["pick"]
+    onpage = "() => { const t = document.querySelector('#brief-page textarea'), c = document.querySelector('#brief-page input[name=choice]:checked'); return [t ? t.value : '', c ? c.value : ''] }"
+    pg.reload(); loaded(pg, n); s = state(pg)
+    say("a reload brings the draft back to the panel", kept(s), s)
+    tokened(pg, n); r = rowstate(pg, n)
+    say("…and to the row", r["note"] == "kept across the pages" and "Drop" in r["pick"], r)
+    say("…and with the draft kept, leaving is not asked about", not pg.evaluate(ARMED))
+    pg.click("#brief [data-bact=detail]"); pg.wait_for_url(BOARD + f"/items/a{n}"); pg.go_back(); loaded(pg, n); s = state(pg)
+    say("Detail view and Back keep it", kept(s), s)
+    pg.click("#brief [data-bact=full]"); pg.wait_for_url(BOARD + f"/items/a{n}/brief"); pg.wait_for_selector("#brief-page article"); got = pg.evaluate(onpage)
+    say("Full screen shows it", got[0] == "kept across the pages" and "Drop" in got[1], got)
+    pg.fill("#brief-page textarea", "kept across the pages, and changed there"); pg.reload(); pg.wait_for_selector("#brief-page article"); got = pg.evaluate(onpage)
+    say("…keeps it over a reload", got[0] == "kept across the pages, and changed there" and "Drop" in got[1], got)
+    pg.go_back(); loaded(pg, n); soon(pg, "() => document.querySelector('#brief textarea').value.endsWith('changed there')"); s = state(pg)
+    say("…and Back to the panel shows what was written there", s["note"] == "kept across the pages, and changed there" and "Drop" in s["pick"], s)
+
+
+def sc_no_storage(pg, say):
+    pg.add_init_script("""(() => { const real = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) {
+        if (String(k).startsWith('ss-brief-')) throw new DOMException('full', 'QuotaExceededError'); return real.call(this, k, v) } })()""")
+    n = fresh(); home(pg); open_(pg, n)
+    say("where the browser keeps nothing: with nothing written, leaving is not asked about", not pg.evaluate(ARMED))
+    pg.fill("#brief textarea", "only in this page")
+    say("…and with a draft it is", pg.evaluate(ARMED))
+    pg.fill("#brief textarea", "")
+    say("…until the draft is gone", not pg.evaluate(ARMED))
+
+
+def sc_lost_pick(pg, say):
+    n = fresh(); home(pg); open_(pg, n); pg.click("#brief .acard:has-text('Drop')"); pg.fill("#brief textarea", "a note on the first question")
+    shut_panel(pg)
+    rewrite(n, ask=ASK.replace("next version", "other version")); open_(pg, n)
+    soon(pg, "() => { const e = document.querySelector('#brief .aerr'); return !!e && !e.hidden && e.textContent.includes('The question changed since you picked') }")
+    s = state(pg); foot = pg.inner_text("#brief .bfoot")
+    say("a pick dropped because the question changed is named under Send",
+        "The question changed since you picked" in foot and "Drop" in foot and s["pick"] == "" and s["note"] == "a note on the first question", (foot, s))
+    told = pg.evaluate("(s) => (document.querySelector(s + ' .bnote') || {}).textContent || ''", row(n))
+    say("…and on the row", "Drop" in told, told)
+    shot(pg, "desktop-lost-pick")
+    pg.click("#brief .acard:has-text('Wait')"); soon(pg, "() => document.querySelector('#brief .aerr').hidden")
+    say("…and a new pick puts the line away", pg.eval_on_selector("#brief .aerr", "e => e.hidden") and pg.query_selector(f"{row(n)} .bnote") is None)
+
+
+def sc_held(pg, say):
+    n = fresh(ask=None, opts=None, state="your-step", step="run the one line `true`", needs=["home-here"])
+    home(pg); open_(pg, n); pg.fill("#brief textarea", "a note on the old step")
+    rewrite(n, state="", step="", needs=["decision"], ask=ASK, options=OPTS)
+    pg.click("#brief button[value=done]")
+    soon(pg, "() => !!document.querySelector('#brief .bheld')")
+    held = pg.evaluate("() => { const h = document.querySelector('#brief .bheld'); return h ? [h.querySelector('code').textContent, [...h.querySelectorAll('button')].map(b => b.textContent)] : null }")
+    say("Done with a note on a step that is gone records nothing; the note that fits no box is held, offered with Copy and Put it in the box",
+        bool(held) and held[0] == "a note on the old step" and "Put it in the box" in held[1] and "Discard" in held[1] and len(held[1]) >= 3 and answers(n) == [], (held, answers(n)))
+    say("…and is not put in the decision's box by itself", state(pg)["note"] == "", state(pg))
+    shot(pg, "desktop-held")
+    pg.reload(); loaded(pg, n)
+    say("…a reload keeps it held", pg.query_selector("#brief .bheld code") is not None and pg.inner_text("#brief .bheld code") == "a note on the old step")
+    pg.click("#brief .bheld .buse"); soon(pg, "() => !document.querySelector('#brief .bheld')"); s = state(pg)
+    say("…Put it in the box does so", s["note"] == "a note on the old step" and pg.query_selector("#brief .bheld") is None, s)
+    # a comment that was being written when the item became a question
+    m = fresh(ask=None, opts=None); home(pg); open_(pg, m); pg.fill("#brief textarea", "only a comment"); pg.click("#brief .bhead")
+    rewrite(m, needs=["decision"], ask=ASK, options=OPTS); pg.evaluate("() => document.dispatchEvent(new CustomEvent('stackshot:newer', {detail: 424242}))")
+    soon(pg, "() => !!document.querySelector('#brief .bchanged')"); pg.click("#brief .bchanged button"); soon(pg, "() => !!document.querySelector('#brief .bheld')")
+    s = state(pg)
+    say("a comment under way does not move into a decision's box", s["note"] == "" and pg.query_selector("#brief .bheld code") is not None and pg.inner_text("#brief .bheld code") == "only a comment", s)
+    pg.click("#brief .bheld .bdrop")
+    say("…and Discard drops it", soon(pg, "() => !document.querySelector('#brief .bheld')") and "only a comment" not in pg.evaluate(STORED), pg.evaluate(STORED))
+
+
+def sc_older_read(pg, say):
+    n = fresh(); home(pg); open_(pg, n); late = []
+    plain = re.compile(rf"/items/a{n}/brief$")
+    pg.route(plain, lambda r: late.append((r, r.fetch())))
+    pg.evaluate("() => document.dispatchEvent(new CustomEvent('stackshot:newer', {detail: 987654}))")
+    for _ in range(40):
+        if late: break
+        pg.wait_for_timeout(100)
+    pg.click("#brief .acard:has-text('Drop')"); pg.click("#brief button[name=act]"); pg.wait_for_selector("#brief .bsent .bnext")
+    late[0][0].fulfill(response=late[0][1]); pg.wait_for_timeout(700)
+    say("an older read that lands late does not put the item back", pg.query_selector("#brief .bsent .isent.ok") is not None and pg.query_selector("#brief form.ianswer[data-cards]") is None, pg.inner_text("#brief"))
+    pg.unroute(plain)
+    rewrite(n, needs=["decision"], ask=ASK.replace("next version", "later version"), options=OPTS)
+    pg.evaluate("() => document.dispatchEvent(new CustomEvent('stackshot:newer', {detail: 987655}))")
+    soon(pg, "() => !!document.querySelector('#brief form.ianswer[data-cards]')")
+    say("an item that asks again drops the last answer's notice", pg.query_selector("#brief form.ianswer[data-cards]") is not None and pg.query_selector("#brief .bsent") is None, pg.inner_text("#brief"))
+
+
+def sc_standalone(pg, say):
+    pg.add_init_script("Object.defineProperty(Navigator.prototype, 'standalone', {configurable: true, get: () => true})")
+    n = fresh(); home(pg); tokened(pg, n); rowtype(pg, n, "typed before the tap")
+    link = f"{row(n)} a.ir-link"
+    say("this check runs as the installed app, on a link that asks for a new tab", pg.evaluate("() => navigator.standalone === true") and pg.get_attribute(link, "target") == "_blank", pg.get_attribute(link, "target"))
+    pg.evaluate("() => { window.sameDocument = true }"); pg.click(link); pg.wait_for_timeout(1500)
+    got = pg.evaluate("() => ({same: window.sameDocument === true, url: location.pathname + location.search, open: !!document.querySelector('#brief:not([hidden])')})")
+    say("in the installed app a title opens the panel, in the same page", got == {"same": True, "url": f"/?item=a{n}", "open": True}, got)
+    loaded(pg, n)
+    say("…with what was typed in the row", state(pg)["note"] == "typed before the tap", state(pg))
+    pg.click("#brief [data-bact=detail]"); pg.wait_for_url(BOARD + f"/items/a{n}"); pg.go_back(); loaded(pg, n)
+    say("…and Detail view and Back keep it", state(pg)["note"] == "typed before the tap", state(pg))
+    pg.evaluate("() => { const a = document.body.appendChild(document.createElement('a')); a.id = 'other-link'; a.href = '/items/a12'; a.target = '_blank'; a.textContent = 'another'; a.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99' }")
+    pages = len(pg.context.pages); pg.click("#other-link"); pg.wait_for_url(BOARD + "/items/a12")
+    say("…and any other such link still opens in the app's own window", len(pg.context.pages) == pages, len(pg.context.pages))
+
+
+def sc_leftover(pg, say):
+    home(pg); open_(pg, 15); pg.fill("#brief textarea", "left on an item with no box on its row")
+    say("a draft in the open panel holds the live refresh", pg.evaluate("() => ssBrief.draft()"))
+    shut_panel(pg)
+    say("…and holds nothing once its box is no longer on the page", not pg.evaluate("() => ssBrief.draft()"))
+    open_(pg, 15)
+    say("…while the draft itself is kept", state(pg)["note"] == "left on an item with no box on its row", state(pg))
+
+
+def sc_next_folded(pg, say):
+    n, _ = fresh(), fresh(); home(pg); open_(pg, n); pg.click("#brief .acard:has-text('Ship')"); pg.click("#brief button[name=act]"); pg.wait_for_selector("#brief .bsent .bnext")
+    pg.evaluate("(s) => document.querySelectorAll('#your-move li.irow.hrow').forEach(li => { if (!li.matches(s)) li.style.display = 'none' })", row(n))
+    pg.click("#brief .bnext")
+    went = soon(pg, "(k) => { const a = document.querySelector('#brief article'); return !!a && a.getAttribute('data-key') !== k }", f"a{n}")
+    say("next goes on to a question in a folded part of the list instead of saying all are answered", went and state(pg)["open"], state(pg))
+
+
+SCENARIOS = (sc_double, sc_apart, sc_timeout, sc_failed_load, sc_drafts, sc_no_storage, sc_lost_pick, sc_held, sc_older_read, sc_standalone, sc_leftover, sc_next_folded)
+# (what is taken out, the text as the page serves it, what it becomes, the scenario, the check of it that must then fail)
+MUTANTS = (
+    ("no form is locked during a send", "function lock(f,v){", "function lock(f,v){return;", sc_double, "…the item opened again has its Send shut and says it is sending"),
+    ("the rows are not locked during a send", "all('li.irow.hrow').forEach(function(li){var r=rowForm(li),k=keyOf(li);if(r&&k)l.push([k,r])});", "", sc_double, "a send under way from the panel shuts the row's Send"),
+    ("the installed app takes a title link itself", "if(window.ssBrief&&ssBrief.takes(a))return;", "", sc_standalone, "in the installed app a title opens the panel, in the same page"),
+    ("a failed read leaves for the item's page", "function failed(me){", "function failed(me){location.assign(page(me.k));return;", sc_failed_load, "a brief that cannot be read stays on the list and says so"),
+    ("drafts are not stored", "if(stored)try{if(Object.keys(D).length)", "if(0)try{if(Object.keys(D).length)", sc_drafts, "a reload brings the draft back to the panel"),
+    ("a dropped pick is not named", "){d.x=d.l||d.c;d.c=''}save()}", "){d.c=''}save()}", sc_lost_pick, "a pick dropped because the question changed is named under Send"),
+    ("a note that fits no box is not set aside", "function stash(d){", "function stash(d){return;", sc_held,
+     "Done with a note on a step that is gone records nothing; the note that fits no box is held, offered with Copy and Put it in the box"),
+    ("an older read is drawn when it lands", "if(cur!==me||me.n!==n||SENDING[me.k])return;var old", "if(cur!==me)return;var old", sc_older_read, "an older read that lands late does not put the item back"),
+)
+
+
+def play(br, scenario, patch=None):
+    """one scenario in a browser context of its own: (its checks, the script errors, whether the patch found its text)"""
+    ctx = br.new_context(ignore_https_errors=True, viewport={"width": 1280, "height": 800}); ctx.add_cookies([cookie()]); ctx.set_default_timeout(4000 if patch else 10000)
+    said, errs, found = [], [], []
+    if patch:
+        def serve(route):
+            if route.request.resource_type != "document" or route.request.method != "GET": return route.fallback()
+            res = route.fetch(); body = res.text()
+            if patch[0] in body: found.append(True)
+            route.fulfill(response=res, body=body.replace(patch[0], patch[1]))
+        ctx.route("**/*", serve)
+    pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append(str(e)))
+    try:
+        scenario(pg, lambda what, holds, got=None: said.append((what, bool(holds), got)))
+    except Exception as e:  # noqa: BLE001  — a scenario that stops is a failed check, and the others still run
+        said.append((f"{scenario.__name__} ran to its end", False, f"{type(e).__name__}: {str(e)[:600]}"))
+    finally:
+        try:
+            pg.unroute_all(behavior="ignoreErrors"); ctx.unroute_all(behavior="ignoreErrors")
+        finally:
+            ctx.close()
+    return said, errs, bool(found)
+
+
+def scenarios(br, errors):
+    for scenario in SCENARIOS:
+        said, errs, _ = play(br, scenario); errors.extend(errs)
+        for what, holds, got in said: check(what, holds, got)
+
+
+def mutants(br):
+    for what, old, new, scenario, target in MUTANTS:
+        said, errs, found = play(br, scenario, (old, new))
+        failed = [name for name, holds, _ in said if not holds]
+        broken = [e for e in errs if "SyntaxError" in e]      # a script that does not parse would fail everything and prove nothing
+        check(f"mutant caught: {what}", found and not broken and target in failed, {"found": found, "script": broken, "failed": failed, "checks": len(said)})
+
+
 def run(br):
     errors = []
-    desktop(br, errors); fullpage(br, errors); phone(br, errors, "light"); phone(br, errors, "dark"); noscript(br)
+    desktop(br, errors); fullpage(br, errors); phone(br, errors, "light"); phone(br, errors, "dark"); phone(br, errors, "light", 360, 740)
+    scenarios(br, errors); mutants(br); noscript(br)
     check("no script error on any page", errors == [], errors)
 
 

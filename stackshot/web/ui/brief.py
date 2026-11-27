@@ -1,7 +1,7 @@
 """brief.py — the item brief: a short view of one item for deciding, beside the item's own page (the detail view).
 
 article() is the one drawing, from the item's own fields: the head, what the item asks or the step, a draft to paste, the outcome or the wait, the first lines of its description,
-the answer box and the last answers. page() is that article as a page of its own (GET /items/<key>/brief); the home page's panel reads the same page and takes the article out
+why the recommended option is recommended, the answer box and the last answers. page() is that article as a page of its own (GET /items/<key>/brief); the home page's panel reads the same page and takes the article out
 (ui/brief_assets.py). Nothing here writes, and nothing here decides who may answer: the answer box is the item page's own (Board.item_html hands it over), posting to the one answer route.
 """
 from __future__ import annotations
@@ -16,10 +16,10 @@ from stackshot.web.i18n import t as _t
 from stackshot.web.ui import answer_frame as _frame, brief_assets as _assets, explain as _xp, render as _r, under
 
 esc = _r.esc
-_LEAD = 5                  # the pieces of the description shown before the rest folds
+_LEAD = 5                  # the pieces of the description shown; a line under them says how many more the detail view has
 _PAST = 3                  # the last answers listed
 _TOP = re.compile(r"(?:[-*+]|\d{1,9}[.)])\s|#{1,6}\s")      # a line at the margin that starts a piece of its own: a bullet, a numbered line, a heading
-_FENCE = re.compile(r"\s*(```|~~~)")
+_FENCE = re.compile(r"\s*(`{3,}|~{3,})(.*)$")      # a fence line: its marks and what follows them (CommonMark: nothing follows a closing fence, and no backtick follows a backtick fence)
 
 
 def pieces(text: str) -> list[str]:
@@ -31,12 +31,14 @@ def pieces(text: str) -> list[str]:
         m = _FENCE.match(line)
         if fence:
             out[-1].append(line)
-            if m and m.group(1) == fence:
+            if m and m.group(1).startswith(fence) and not m.group(2).strip():
                 fence = ""
             continue
         if not line.strip():
             blank = True
             continue
+        if m and m.group(1)[0] == "`" and "`" in m.group(2):      # ```a word``` on a line of its own is text, and opens nothing
+            m = None
         indented = line[0] in " \t"
         if not out or (not indented and (blank or _TOP.match(line) or (m and out[-1]))):
             out.append([line])
@@ -72,20 +74,22 @@ def _background(board: Any, r: dict[str, Any]) -> str:
     md = lambda part: f'<div class="desc md">{board.md_html(_join(part), r["gid"])}</div>'
     cut = pieces(desc)
     body = md(cut[:_LEAD])
-    rest = cut[_LEAD:]
-    if rest:
-        label = _t("brief.more_one" if len(rest) == 1 else "brief.more", n=len(rest))
-        body += f'<details class="bmore"><summary>{esc(label)}</summary>{md(rest)}</details>'
+    rest = len(cut) - _LEAD
+    if rest > 0:
+        label = _t("brief.more_one" if rest == 1 else "brief.more", n=rest)
+        body += f'<p class="bmoreline"><a href="{esc(_r.item_href(r))}">{esc(label)}</a></p>'
     return _section("bbg", _t("brief.background"), body)
 
 
-def _ask(board: Any, r: dict[str, Any], p: dict[str, Any], cards: bool) -> str:
-    """What the item asks, shorter than on its page: the recommendation is left to the card that carries its badge, and a date line that says there is none is left out.
-    Whether there is anything to show is the page's own rule (p["ask"] is empty when the item asks this viewer nothing)."""
+def _ask(board: Any, r: dict[str, Any], p: dict[str, Any], cards: bool) -> tuple[str, str]:
+    """(what the item asks, the line saying why). The ask is shorter than on its page: where a card carries the recommended badge, the recommendation and its reason leave the list
+    for a line of their own above the cards; a date line that says there is none is left out. Whether there is anything to show is the page's own rule (p["ask"] is empty when
+    the item asks this viewer nothing)."""
     if not p["ask"] or not p["pa"]:
-        return p["ask"]
+        return p["ask"], ""
     pa, gid = p["pa"], r["gid"]
     badged = cards and 'class="badge rec"' in p["box"]
+    why = f'<p class="breco"><b>{esc(_t("brief.why_rec"))}</b> {board.linkify(pa["recommend"], gid)}</p>' if badged and pa["recommend"].strip() else ""
     rows = []
     for key, label in (("decide", "item.ask.decide"), ("recommend", "item.ask.recommend"), ("stakes", "item.ask.stakes"), ("by", "item.ask.by")):
         value = pa[key]
@@ -94,7 +98,7 @@ def _ask(board: Any, r: dict[str, Any], p: dict[str, Any], cards: bool) -> str:
         link = _r.mockup_link(r, _r.open_ask(r)) if key == "decide" else ""
         rows.append(f'<dt>{_t(label)}</dt><dd>{board.linkify(value, gid)}{link}</dd>')
     listed = f'<b class="osub">{_t("home.options")}</b>{p["ol"]}' if p["ol"] and not cards else ""      # no cards drawn: the options are listed here, as on the item's page
-    return f'<div class="iask"><b>{_t("item.ask")}</b><dl>{"".join(rows)}</dl>{listed}</div>'
+    return f'<div class="iask"><b>{_t("item.ask")}</b><dl>{"".join(rows)}</dl>{listed}</div>', why
 
 
 def _step(step: str, key: str) -> str:
@@ -161,14 +165,18 @@ def article(board: Any, gid: str, answer: dict[str, Any] | None, heading: str = 
     head = (f'<header class="bhead">' + (f'<p class="bwho">{who}</p>' if who else "")
             + f'<{heading} class="btitle" id="brief-title"><span class="ir-id">{esc(_r.rid(r))}</span> {board.mentions(esc(title), r["gid"])}</{heading}>'
             + f'<p class="bstate">{p["state"]}</p></header>')
-    top = _ask(board, r, p, cards) + _step(p["step"], key) + p["draft"]
+    ask, why = _ask(board, r, p, cards)
+    top = ask + _step(p["step"], key) + p["draft"]
     middle = ((_section("boutcome", _t("item.outcome"), f'<div class="desc md">{board.md_html(outcome, r["gid"])}</div>') if outcome else "")
-              + p["wait"] + _background(board, r) + _box(p["box"], key) + _past(board, r))
+              + p["wait"] + _background(board, r) + why + _box(p["box"], key) + _past(board, r))
     code = str((answer or {}).get("sent") or "")
-    known = board.sent_keys().get(code)
+    codes = board.sent_keys()
+    known = codes.get(code)
+    recorded = " ".join(c for c, v in codes.items() if v[0] == "ok" or c == "askedback")      # askedback warns, and the answer and the note are kept on the item
     sent = f'<div class="bsent" data-ok="{1 if known[0] == "ok" else 0}">{p["sent"]}</div>' if known else ""
     attrs = (f' data-key="{esc(key)}" data-fp="{_r._blk_fp(head + top + middle)}"'
-             f' data-keep="{" ".join(_frame._QUIET)}"')      # the notices that mean nothing was written, so the box stays as it is
+             f' data-keep="{" ".join(_frame._QUIET)}"'      # the notices that mean nothing was written, so the box stays as it is
+             f' data-recorded="{recorded}"')      # the notices that mean something was written, so the draft ends
     return f'<article class="bitem"{attrs}>{head}<div class="bbody">{sent}{top}{middle}</div></article>', title
 
 
