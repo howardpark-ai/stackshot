@@ -8,7 +8,8 @@ The first form runs on the server box only. It writes a tar stream to standard o
 
 How the picture is made, in order:
   1. a first copy of the three folders into a private staging directory under the runtime directory, with no lock held, so that the next step has little left to do;
-  2. the locks: the publish lock, the project record's lock, the store locks (LOCKS, in the order of core/xlock.py), the push queue's and the item id counter's;
+  2. the locks: the publish lock, the project record's lock, the store locks (LOCKS, in the order of core/xlock.py), the push queue's and the item id counter's. No others: a writer with a lock of its own that is not taken here (the inbox, the client rows, the caller keys, the held list, the GitHub budget file and the like)
+     writes each record whole, a temporary file renamed over the old one, so a copy of it is consistent without its lock;
   3. under them, every file that is new, changed or recently written is copied again, pass after pass, until a whole pass finds nothing to do. A `*.log` or `*.jsonl` file is appended to all the time, so it
      is read again under the locks; one written within 2 s before that read, or changing during it, is cut after its last newline, any other is kept whole;
   4. the locks are let go; the extra directories are copied (each until a scan before and a scan after its copy match), the files are hashed and the output is written.
@@ -73,7 +74,7 @@ RUN_LOCK = "stackshot-standby-copy.lock"            # in the runtime directory, 
 STALE_AFTER = 600                 # seconds: an empty leftover directory this old that no process holds is removed (a younger one may be about to be locked)
 LOCK_TIMEOUT = 60.0               # seconds to get all the locks
 LOCK_SLICE = 2.0                  # seconds, in all, to get every lock after the publish lock while others are held; then all are let go and taken again
-MAX_HOLD = 30.0                   # seconds the locks may be held, from the publish lock on
+MAX_HOLD = 5.0                    # seconds the locks may be held, from the publish lock on
 OUTPUT_TIMEOUT = 600.0            # seconds to write the output
 JOURNAL_SOCKETS = "/run/systemd/journal/"          # a standard output connected to a socket there is the journal
 PASSES = 20                       # passes under the locks before a folder counts as never settling
@@ -161,14 +162,17 @@ def nothing_left_out(rel: str, name: str, is_dir: bool) -> bool:
 
 
 # ---------------------------------------------------------------------------- scanning and copying
-def scan(tree: Tree) -> tuple[dict[str, tuple[Sig, int]], set[str]]:
-    """The folder as it is now: ({path: (signature, mode)} of its files, {its directories}); `tree.skipped` is set to what cannot be copied."""
+def scan(tree: Tree, check: Callable[[], None] | None = None) -> tuple[dict[str, tuple[Sig, int]], set[str]]:
+    """The folder as it is now: ({path: (signature, mode)} of its files, {its directories}); `tree.skipped` is set to what cannot be copied. `check` is called before each directory is read and for each entry,
+    so that a slow tree under the locks stops at the longest hold and not at the end of the scan."""
     files: dict[str, tuple[Sig, int]] = {}
     dirs: set[str] = set()
     skipped: dict[str, str] = {}
     todo = [("", tree.src)]
     while todo:
         base, path = todo.pop()
+        if check is not None:
+            check()
         try:
             with os.scandir(path) as it:
                 entries = list(it)
@@ -177,6 +181,8 @@ def scan(tree: Tree) -> tuple[dict[str, tuple[Sig, int]], set[str]]:
                 raise CopyError(f"the folder {tree.src} is not there") from None
             continue                      # gone since its parent was read: the next pass sees it
         for e in entries:
+            if check is not None:
+                check()
             rel = f"{base}/{e.name}" if base else e.name
             link = e.is_symlink()
             try:
@@ -280,7 +286,7 @@ def _stands(have: Entry | None, sig: Sig, log: bool) -> bool:
 
 def sync(tree: Tree, *, locked: bool, check: Callable[[], None]) -> list[str]:
     """One pass: make the staged copy of `tree` what a scan finds now -> the paths it had to touch."""
-    files, dirs = scan(tree)
+    files, dirs = scan(tree, check)
     os.makedirs(tree.dst, mode=0o700, exist_ok=True)
     touched: list[str] = []
     for rel in [r for r in tree.staged if r not in files]:
