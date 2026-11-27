@@ -138,6 +138,9 @@ check("the server and anchor-hub take the reload as SIGHUP", all("\nExecReload=/
       {n: U.get(n, "") for n in ("stackshot.service", "anchor-hub.service")})
 check("every systemctl call in the units carries --user", all(re.match(r"ExecStart=-?/usr/bin/systemctl --user ", l) for l in uout.splitlines() if "systemctl " in l and not l.startswith("#")),
       [l for l in uout.splitlines() if "systemctl " in l])
+check("every unit that runs a program sets its own PATH, ~/.local/bin first (a user manager after a reboot has none, and `gh` would be the plain one)",
+      all(re.findall(r"(?m)^Environment=PATH=(\S+)$", U.get(n, "")) == [os.environ["HOME"] + "/.local/bin:/usr/local/bin:/usr/bin:/bin"]
+          for n in ("stackshot.service", "anchor-hub.service")), {n: re.findall(r"(?m)^Environment=PATH=.*", U.get(n, "")) for n in ("stackshot.service", "anchor-hub.service")})
 S_ = re.escape(STACK)
 for unit, rx in (("stackshot.service", r"ExecStart=\S+ run --project " + S_ + r" --locked --extra server stackshot server"),
                  ("anchor-hub.service", r"ExecStart=\S+ run --project " + S_ + r" --locked --extra anchor-hub stackshot anchor-hub"),
