@@ -411,6 +411,9 @@ def phone(br, errors, scheme, w=390, h=844):
         .map(e => { const r = e.getBoundingClientRect(); return [e.textContent, r.left, r.right, r.top, r.bottom] }).filter(x => x[1] < -0.5 || x[2] > innerWidth + 0.5 || x[3] < -0.5 || x[4] > innerHeight + 0.5)""")
     check(f"{tag}: the bar's buttons and Send are wholly on the screen", off == [], off)
     shot(pg, f"phone-sheet-{tag}")
+    q = pg.evaluate("""() => { const p = document.querySelector('#brief .bq'), t = p.querySelector(':scope > span').getBoundingClientRect(), b = p.querySelector('.xp-b').getBoundingClientRect(),
+        line = parseFloat(getComputedStyle(p).lineHeight); return {gap: b.left - t.right, off: Math.abs(b.top + b.height / 2 - t.top - line / 2), lines: t.height / line} }""")
+    check(f"{tag}: the question's lines stay close, and its ? stands beside the first of them", q["gap"] >= -0.5 and q["off"] < 4 and abs(q["lines"] - round(q["lines"])) < 0.05, q)
     side = pg.evaluate("() => ['#brief textarea', '#brief button[name=act]'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom] })")
     (_, tr, tt, tb), (bl, br_, bt, bb) = side
     check(f"{tag}: Send stands beside the note box, on its line", tr <= bl and br_ <= w and abs((tt + tb) / 2 - (bt + bb) / 2) < 6, side)
@@ -791,11 +794,16 @@ def scenarios(br, errors):
 
 
 def mutants(br):
-    for what, old, new, scenario, target in MUTANTS:
-        said, errs, found = play(br, scenario, (old, new))
-        failed = [name for name, holds, _ in said if not holds]
-        broken = [e for e in errs if "SyntaxError" in e]      # a script that does not parse would fail everything and prove nothing
-        check(f"mutant caught: {what}", found and not broken and target in failed, {"found": found, "script": broken, "failed": failed, "checks": len(said)})
+    global SHOTS
+    kept, SHOTS = SHOTS, None      # a patched page's screen would be saved over the real one of the same name
+    try:
+        for what, old, new, scenario, target in MUTANTS:
+            said, errs, found = play(br, scenario, (old, new))
+            failed = [name for name, holds, _ in said if not holds]
+            broken = [e for e in errs if "SyntaxError" in e]      # a script that does not parse would fail everything and prove nothing
+            check(f"mutant caught: {what}", found and not broken and target in failed, {"found": found, "script": broken, "failed": failed, "checks": len(said)})
+    finally:
+        SHOTS = kept
 
 
 def run(br):

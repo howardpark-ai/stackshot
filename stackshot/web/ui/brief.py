@@ -96,7 +96,7 @@ def _ask(board: Any, r: dict[str, Any], p: dict[str, Any], cards: bool, more: st
     gid = r["gid"]
     pa, raw = p["pa"], _r.open_ask(r)
     question = board.linkify(pa["decide"] if pa else raw, gid) + _r.mockup_link(r, raw) if raw else ""      # an ask in no set form is the line as it is
-    line = f'<p class="bq">{question}{more}</p>' if question or more else ""
+    line = f'<p class="bq"><span>{question}</span>{more}</p>' if question or more else ""      # the words in a box of their own, so the "?" stands beside them and opens no gap between their lines
     why = pa["recommend"].strip() if pa else ""
     reco = f'<p class="breco"><b>{esc(_t("item.ask.recommend"))}</b> {board.linkify(why, gid)}</p>' if why else ""
     listed = "" if cards else p["ol"]

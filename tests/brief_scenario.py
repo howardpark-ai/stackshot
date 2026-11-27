@@ -246,7 +246,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     links = lambda doc, href: [a for t, a in doc.tags if t == "a" and a.get("href") == href]
     check("the heading is the item's id and title, as the one link to the item's page", heads == ["h1"] and re.search(r'<h1 class="btitle" id="brief-title"><a href="/items/a1"><span class="ir-id">a1</span> titleword of item a1</a></h1>', art)
           and len(links(d, "/items/a1")) == 1 and "[home]" not in text, (heads, art[:600]))
-    q = re.search(r'<div class="iask"><p class="bq">whether to ship zebraword<span class="xp" data-xp="brief-more-a1">', art)
+    q = re.search(r'<div class="iask"><p class="bq"><span>whether to ship zebraword</span><span class="xp" data-xp="brief-more-a1">', art)
     reco = art.find('<p class="breco"><b>Recommend</b> yes recoword</p></div>')
     check("the question is one line with its ? beside it, the recommendation and its reason under it, over the choices",
           q and 0 <= q.start() < reco < art.find('name="choice"') and 'class="badge rec"' in art, art[:2500])
@@ -271,7 +271,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("five lines are all there is, so nothing says more", d16.tips["xp-brief-more-a16"] == "• five\n• of\n• these\n• and\n• no more", d16.tips)
     r17, d17 = brief("a17"); a17 = article(r17.text)
     check("a question's mockup link sits beside it, ahead of the ?",
-          re.search(r'<p class="bq">whether to ship zebraword <a class="mockup" href="' + re.escape(ART) + '"', a17) and "recoword" in d17.shown() and d17.shown().count("Mockup") == 1, (d17.shown(), a17[:300]))
+          re.search(r'<p class="bq"><span>whether to ship zebraword <a class="mockup" href="' + re.escape(ART) + '"', a17) and "recoword" in d17.shown() and d17.shown().count("Mockup") == 1, (d17.shown(), a17[:300]))
     r3, d3 = brief("a3"); a3 = article(r3.text)
     check("an item that asks nothing shows its state line; one with only its subject to add has no ?", re.search(r'<div class="bbody"><p class="bstate">.+?</p><form', a3) and not d3.tips and 'class="iask"' not in a3, a3)
     r4, d4 = brief("a4"); a4 = article(r4.text)

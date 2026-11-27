@@ -57,11 +57,14 @@ li.irow.hrow>.bnote{clear:both}
 .btitle a:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
 .bwhole .btitle{white-space:normal}
 @media(pointer:coarse){.bitem .btitle{margin:-4px 0 -10px;padding:15px 0}.btitle a{padding:15px 0}}
-.bq{margin:0;font-size:16px;font-weight:600;line-height:1.45}
-.bq>.xp{margin-left:4px}
+.bq{display:flex;align-items:flex-start;gap:4px;margin:0;font-size:16px;font-weight:600;line-height:1.45}
+.bq>span{min-width:0}
+.bq>.xp{flex:none;margin-top:-2px}
 .bstate{margin:0 0 14px;font-size:14px;color:var(--mut)}
 .bitem .istep{display:flex;align-items:flex-start;gap:4px}
 .bitem .istep>.istepbody{flex:1 1 auto;min-width:0;margin-top:0}
+.bitem .istep>.xp{flex:none;margin-top:4px}
+@media(pointer:coarse){.bq>.xp{margin-top:-10px}.bitem .istep>.xp{margin-top:-4px}}
 .bitem .xp-pop{max-height:50vh;overflow-y:auto;overscroll-behavior:contain;white-space:pre-line}
 .bbody{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow-y:auto;overscroll-behavior:contain;padding:12px 16px 0;overflow-wrap:anywhere}
 .bbody>*{flex:none;min-width:0}
