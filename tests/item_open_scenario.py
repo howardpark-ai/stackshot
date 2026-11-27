@@ -997,6 +997,7 @@ finally: _update_svc._update = _real_update
 half = sync_open("plugin_sync:repair")
 hm = item(_gh.shown(half[0]))["metadata"] if half else {}
 check("a state write and the rollback both failing leaves one open item for the marker, with no your-step state", raised13 and len(half) == 1 and hm.get("state") != "your-step", (raised13, half, hm.get("state"), hm.get("step")))
+check("…and the create's own write records his line as the route's, not yet as sent", hm.get("item_sync_step") == S1 and "item_sync_sent" not in hm, (hm.get("item_sync_step"), hm.get("item_sync_sent")))
 st, r13 = isy("open", marker="plugin_sync:repair")
 hm2 = item(_gh.shown(half[0]))["metadata"] if half else {}
 check("the next open of the marker makes the item whole (the state your-step with his step) and files nothing", st == 200 and r13["action"] == "refreshed" and r13["repeat"] is True and r13["item"] == _gh.shown(half[0]) and hm2.get("state") == "your-step"
