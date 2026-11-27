@@ -951,4 +951,69 @@ s = grp("on-group-warm-fail", warm=WARM_G, warmmode="fail")
 check("group, a command that fails: the group is green and deployed as without it; the failure is a line in the unit's log", s["rc"] == 0 and s["deploys"] == [M2] and "the command failed (status 7)" in s["warm_log"] and len(s["msgs"]) == 2, (s["rc"], s["deploys"], s["warm_log"], len(s["msgs"])))
 
 
+# ---- 19. a workflow run GitHub leaves `queued` with no jobs never starts and cannot be cancelled or rerun: the wait replaces it, once (RELEASE_ORPHAN_QUEUED, 30 min by default)
+def orph(*runs): return json.dumps(list(runs))
+def oc(s): return (s["dir"] / "orphan_calls").read_text().splitlines() if (s["dir"] / "orphan_calls").exists() else []
+def closes(s): return [l for l in oc(s) if l.startswith("pr close") or l.startswith("pr reopen") or l.startswith("dequeue")]
+PRRUN = {"id": 4001, "age": 100}
+CAP60 = {"RELEASE_ORPHAN_QUEUED": "60"}
+s = scenario("orphan-pr-replaced", merge="ok", checks="pending,pending,pass", orphan_runs=orph(PRRUN), extra=CAP60)
+check("an orphaned PR check run (queued 100 s with no jobs, cap 60 s): the PR is closed and reopened exactly once, the log names the run, and the release goes on to merge and deploy",
+      s["rc"] == 0 and s["deployed"] and closes(s) == ["pr close 23 --repo example-owner/stackshot", "pr reopen 23 --repo example-owner/stackshot"] and "run 4001 has been queued for more than 1 min with no jobs" in s["log"]
+      and "closing and reopening PR #23 on the same head" in s["log"] and s["log"].count("replacing it with a new run") == 1 and len(enqueues(s)) == 1, (s["rc"], oc(s), s["log"]))
+s = scenario("orphan-pr-ghost", merge="ok", checks=",".join(["pending"] * 20 + ["pass"]), orphan_runs=orph(PRRUN), orphan_after=orph(PRRUN), extra=CAP60)
+check("the replaced run stays listed as queued (GitHub keeps it): it is not replaced again, the PR is closed and reopened once over the whole wait",
+      s["rc"] == 0 and s["deployed"] and len([l for l in closes(s) if l.startswith("pr close")]) == 1, (s["rc"], oc(s)))
+s = scenario("orphan-pr-job", merge="ok", checks="pending,pending,pass", orphan_runs=orph({**PRRUN, "jobs": [{"name": "suites", "status": "queued"}]}), extra=CAP60)
+check("a queued run with one job (even a queued one) is not an orphan: nothing is closed or reopened", s["rc"] == 0 and s["deployed"] and closes(s) == [] and any(l.startswith("run view") for l in oc(s)) and "replacing" not in s["log"], (oc(s), s["log"]))
+s = scenario("orphan-pr-young", merge="ok", checks="pending,pending,pass", orphan_runs=orph({"id": 4001, "age": 30}), extra=CAP60)
+check("a run queued 30 s with the cap at 60 s is not replaced, and its job list is not even read", s["rc"] == 0 and s["deployed"] and closes(s) == [] and "replacing" not in s["log"] and not any(l.startswith("run view") for l in oc(s)), (oc(s), s["log"]))
+s = scenario("orphan-pr-running", merge="ok", checks="pending,pending,pass", orphan_runs=orph({**PRRUN, "status": "in_progress"}), extra=CAP60)
+check("a run that is not queued (in progress, no jobs listed) is not replaced", s["rc"] == 0 and closes(s) == [] and not any(l.startswith("run view") for l in oc(s)), oc(s))
+s = scenario("orphan-pr-list-error", merge="ok", checks="pending,pending,pass", orphan_runs=orph(PRRUN), orphan_err="list", extra=CAP60)
+check("gh errors on the run list: nothing is replaced, the wait goes on to the pass", s["rc"] == 0 and s["deployed"] and closes(s) == [] and "replacing" not in s["log"], (oc(s), s["log"]))
+s = scenario("orphan-pr-view-error", merge="ok", checks="pending,pending,pass", orphan_runs=orph(PRRUN), orphan_err="view", extra=CAP60)
+check("gh errors on the run view: nothing is replaced, the wait goes on to the pass", s["rc"] == 0 and s["deployed"] and closes(s) == [] and "replacing" not in s["log"], (oc(s), s["log"]))
+s = scenario("orphan-pr-twice", merge="ok", checks="pending", orphan_runs=orph(PRRUN), orphan_after=orph(PRRUN, {"id": 4002, "age": 100}), extra=CAP60)
+check("a second orphan (run 4002, after the PR was closed and reopened once) fails the release at checks naming the run id; one close and one reopen only, nothing merged",
+      s["rc"] == 1 and not s["deployed"] and "FAILED at checks: run 4002 is queued with no jobs again" in s["msg"] and len(closes(s)) == 2 and not merges(s), (s["rc"], s["msg"], oc(s)))
+s = scenario("orphan-pr-clock", merge="ok", checks="pending", orphan_runs=orph({"id": 4001, "age": 0}), orphan_after=orph({"id": 4001, "age": 0}), extra={"RELEASE_ORPHAN_QUEUED": "100", "RELEASE_WAIT_CHECKS": "600"})
+check("the wait clock restarts once with the replacement (found at 300 s, a 600 s cap): the give-up keeps its message and its cap, counted again from the reopen: 15 sleeps before, one after the reopen, 30 more (46), not 31",
+      s["rc"] == 1 and "FAILED at checks: still pending after 10 min" in s["msg"] and len(s["sleeps"]) == 46 and len(closes(s)) == 2, (s["rc"], s["msg"], len(s["sleeps"])))
+s = scenario("orphan-pr-view-moved", merge="ok", checks="pending,pending,pass", orphan_runs=orph({**PRRUN, "view_status": "in_progress"}), extra=CAP60)
+check("the list says queued but the run view says the run has started meanwhile: not replaced", s["rc"] == 0 and closes(s) == [], (oc(s), s["log"]))
+s = scenario("orphan-pr-view-young", merge="ok", checks="pending,pending,pass", orphan_runs=orph({**PRRUN, "view_age": 10}), extra=CAP60)
+check("the run view dates the run younger than the cap (a re-created run): not replaced", s["rc"] == 0 and closes(s) == [], (oc(s), s["log"]))
+s = scenario("orphan-pr-close-error", merge="ok", checks="pending,pending,pass", orphan_runs=orph(PRRUN), prclose="fail", extra=CAP60)
+check("the close call errors: no reopen, the PR is not touched, the wait goes on", s["rc"] == 0 and any(l.startswith("pr close") for l in oc(s)) and not any(l.startswith("pr reopen") for l in oc(s)) and "closing the PR to replace it failed" in s["log"], (oc(s), s["log"]))
+s = scenario("orphan-pr-reopen-error", merge="ok", checks="pending,pending,pass", orphan_runs=orph(PRRUN), reopen="fail", extra=CAP60)
+check("the reopen call errors four times: the release fails at checks saying the PR is CLOSED and how to reopen it", s["rc"] == 1 and "FAILED at checks: run 4001" in s["msg"] and "is CLOSED (reopen it by hand: gh pr reopen 23)" in s["msg"] and len([l for l in oc(s) if l.startswith("pr reopen")]) == 4, (s["msg"], oc(s)))
+# the default: 30 min exactly, pinned on both sides (the look is every 5 min: a run 1500 s old at the start is 1800 s old at the look 300 s later; 1499 s is 1799 s)
+s = scenario("orphan-default-1800", merge="ok", checks=",".join(["pending"] * 17 + ["pass"]), orphan_runs=orph({"id": 4001, "age": 1500}))
+check("the default RELEASE_ORPHAN_QUEUED is 1800 s: a run 1800 s old at the look is replaced, and the log says 30 min", s["rc"] == 0 and len(closes(s)) == 2 and "queued for more than 30 min with no jobs" in s["log"], (oc(s), s["log"]))
+s = scenario("orphan-default-1799", merge="ok", checks=",".join(["pending"] * 17 + ["pass"]), orphan_runs=orph({"id": 4001, "age": 1499}))
+check("...and a run 1799 s old at the look (the look at 300 s) is not", s["rc"] == 0 and closes(s) == [] and "replacing" not in s["log"], (oc(s), s["log"]))
+# the merge queue: merge_group runs of this PR
+MQRUN = {"id": 5001, "age": 0, "event": "merge_group", "branch": "gh-readonly-queue/main/pr-23-0123abc"}
+CAP120 = {"RELEASE_ORPHAN_QUEUED": "120"}
+QUEUED5 = "queued,queued,queued,queued,merged"
+s = scenario("orphan-mq-replaced", merge="ok", gq=QUEUED5, orphan_runs=orph(MQRUN), extra=CAP120)
+check("an orphaned merge_group run of the PR (queued 120 s, no jobs): the PR is dequeued and enqueued again exactly once (two enqueue calls), the log names the run, and the release goes on to merge and deploy",
+      s["rc"] == 0 and s["deployed"] and [l.split()[0] for l in closes(s)] == ["dequeue"] and len(enqueues(s)) == 2 and "run 5001 has been queued for more than 2 min with no jobs" in s["log"]
+      and "dequeuing PR #23 and enqueueing it again" in s["log"] and s["log"].count("enqueued: the merge queue accepted") == 2, (s["rc"], oc(s), enqueues(s), s["log"]))
+check("...the dequeue comes between the two enqueues", at(s["log"], "enqueued: the merge queue accepted", "replacing it with a new run", "enqueued: the merge queue accepted"), s["log"])
+s = scenario("orphan-mq-other-pr", merge="ok", gq="queued,queued,queued,merged", orphan_runs=orph({**MQRUN, "branch": "gh-readonly-queue/main/pr-230-0123abc"}), extra=CAP120)
+check("a merge_group run of another PR (pr-230) is not this PR's: nothing is dequeued", s["rc"] == 0 and closes(s) == [] and len(enqueues(s)) == 1, (oc(s), s["log"]))
+s = scenario("orphan-mq-job", merge="ok", gq="queued,queued,queued,merged", orphan_runs=orph({**MQRUN, "jobs": [{"name": "suites", "status": "queued"}]}), extra=CAP120)
+check("a merge_group run with a job is not replaced", s["rc"] == 0 and closes(s) == [] and len(enqueues(s)) == 1, (oc(s), s["log"]))
+s = scenario("orphan-mq-young", merge="ok", gq="queued,queued,merged", orphan_runs=orph(MQRUN), extra={"RELEASE_ORPHAN_QUEUED": "600"})
+check("a merge_group run younger than the cap is not replaced", s["rc"] == 0 and closes(s) == [] and len(enqueues(s)) == 1, (oc(s), s["log"]))
+s = scenario("orphan-mq-error", merge="ok", gq="queued,queued,queued,merged", orphan_runs=orph(MQRUN), orphan_err="list", extra=CAP120)
+check("gh errors on the run list in the merge queue wait: nothing is dequeued", s["rc"] == 0 and closes(s) == [] and len(enqueues(s)) == 1, (oc(s), s["log"]))
+s = scenario("orphan-mq-twice", merge="ok", gq="queued", orphan_runs=orph(MQRUN), orphan_after=orph(MQRUN, {**MQRUN, "id": 5002}), extra=CAP120)
+check("a second merge_group orphan (5002) fails the release at merge queue naming the run id; one dequeue only", s["rc"] == 1 and "FAILED at merge queue: run 5002 is queued with no jobs again" in s["msg"] and len(closes(s)) == 1 and not s["deployed"], (s["msg"], oc(s)))
+s = scenario("orphan-mq-dequeue-error", merge="ok", gq="queued,queued,queued,merged", orphan_runs=orph(MQRUN), dequeue="fail", extra=CAP120)
+check("the dequeue call errors: the PR is not enqueued again (still one enqueue call) and the wait goes on", s["rc"] == 0 and len(enqueues(s)) == 1 and "dequeuing the PR to replace it failed" in s["log"], (oc(s), s["log"]))
+
+
 finish()

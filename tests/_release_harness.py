@@ -107,6 +107,33 @@ def tclock():   # the clock the release reads (the date stub's): the start plus 
     return int(base + add)
 def iso(t):
     import datetime; return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+# Orphaned runs (release.sh orphan_scan): RT_ORPHAN_RUNS = a JSON list of runs {"id", "age" (seconds queued when the scenario starts; it grows with the fake clock), "status" (default queued), "jobs" (default none), "event" (pull_request | merge_group,
+# default pull_request), "branch" (a merge_group run's head branch), "view_status" and "view_age" (what `gh run view` says when it differs from the list: the run moved on meanwhile)}; RT_ORPHAN_AFTER = the list that replaces it once the PR was reopened or dequeued (the replaced run stays listed, as GitHub keeps it); RT_ORPHAN_ERR=list|view: that call errors;
+# RT_PRCLOSE=fail | RT_REOPEN=fail | RT_DEQUEUE=fail: that call errors. Every close, reopen and dequeue call is in orphan_calls.
+def orphan_list():
+    after = os.path.exists(f"{d}/orphan_replaced") and env("RT_ORPHAN_AFTER")
+    return json.loads(after or env("RT_ORPHAN_RUNS", "[]"))
+def orphan_created(r):
+    return iso((int(open(f"{d}/clock-base").read()) if os.path.exists(f"{d}/clock-base") else int(__import__("time").time())) - int(r["age"]))
+if a[:2] in (["pr", "close"], ["pr", "reopen"]):
+    open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
+    if (a[1] == "close" and env("RT_PRCLOSE") == "fail") or (a[1] == "reopen" and env("RT_REOPEN") == "fail"): print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    if a[1] == "reopen": open(f"{d}/orphan_replaced", "w").close()
+    sys.exit(0)
+if a[:2] == ["run", "list"] and "--event" in a and a[a.index("--event") + 1] in ("pull_request", "merge_group"):
+    open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
+    if env("RT_ORPHAN_ERR") == "list": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    ev = a[a.index("--event") + 1]
+    print(json.dumps([{"databaseId": r["id"], "status": r.get("status", "queued"), "createdAt": orphan_created(r), "headBranch": r.get("branch", "")} for r in orphan_list() if r.get("event", "pull_request") == ev])); sys.exit(0)
+if a[:2] == ["run", "view"] and "jobs,status,createdAt" in a:
+    open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
+    if env("RT_ORPHAN_ERR") == "view": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    r = next((r for r in orphan_list() if str(r["id"]) == a[2]), {"id": a[2], "age": 99999})   # a run the list never named reads as an old orphan (a call that should not have been made shows)
+    print(json.dumps({"status": r.get("view_status", r.get("status", "queued")), "createdAt": orphan_created({"age": r.get("view_age", r["age"])}), "jobs": r.get("jobs", [])})); sys.exit(0)
+if a[:1] == ["api"] and a[1:2] == ["graphql"] and "dequeuePullRequest" in " ".join(a):
+    open(f"{d}/orphan_calls", "a").write("dequeue " + " ".join(x for x in a if x.startswith("id=")) + "\n")
+    if env("RT_DEQUEUE") == "fail": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    open(f"{d}/orphan_replaced", "w").close(); print(json.dumps({"data": {"dequeuePullRequest": {"mergeQueueEntry": {"state": "QUEUED"}}}})); sys.exit(0)
 if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which query it is, by its text:
     q = " ".join(a)   # - the timeline (ghq_reason, RemovedFromMergeQueueEvent): RT_GQ_REASON = the reason (GitHub's values: merged, failed_checks, manual, merge_conflict, branch_protection_failure; any other text is passed through), "none" = no event of this enqueue, "fail" = the read errors; RT_GQ_REASON_AGE = how many seconds before "now" the event is dated
                       #   (default 0: after the enqueue); RT_GQ_STALE = the text of an event dated a day before, listed AFTER the other (an earlier enqueue's removal)
