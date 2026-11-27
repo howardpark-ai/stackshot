@@ -526,6 +526,44 @@ check("read-only: the logs folder is byte for byte as it was", tree_hash(w2.logs
 check("the file is executable", os.access(TOOL, os.X_OK))
 check("the module's quantile is linear between ranks, a single value is itself", RS.quantile([10, 20], 0.5) == 15 and RS.quantile([7], 0.9) == 7 and RS.quantile([1, 2, 3, 4, 5], 0.9) == 4.6)
 
+# ------------------------------------------------------------------ 13 a group's start, the pushed head, a paid debt in an empty window, the median kept
+w13 = World("group")
+for pr in (701, 702):                                             # a group: release.sh writes its start line into every member's log
+    w13.log(pr, [(BASE, f"release of PRs #701 #702 starts in /srv/widgets ({SLUG}): the merge queue (mode on) tests them as one group"),
+                 (BASE + mins(2), "the PR's tests pass on the pushed head 7070707"), (BASE + mins(6), "enqueued: the merge queue accepted the head 7070707"),
+                 (BASE + mins(20), "merged by the merge queue as abc1234, 14 min after the enqueue"), (BASE + mins(22), "done: abc1234, restarted app.service ")])
+w13.log(703, [(BASE + mins(60), f"release of PR #703 starts in /srv/widgets ({SLUG})"), (BASE + mins(62), "the PR's tests pass on the pushed head 7030303"),
+              (BASE + mins(66), "enqueued: the merge queue accepted the head 7030303"), (BASE + mins(80), "merged by the merge queue as abc1234, 14 min after the enqueue"),
+              (BASE + mins(82), "done: abc1234, restarted app.service ")])
+w13.save()
+r, j = jrun(w13)
+S = j.get("stages", {})
+check("a group's start line (`release of PRs #N #M starts`) starts a release in each member's log: 3 live (two of the group, one single)", r.returncode == 0 and j["prs"]["live"] == 3, (r.returncode, j.get("prs"), r.stderr))
+check("the pushed-head line is the checks-pass line: checks pass -> queued is 4 min (log only, no GitHub runs), queued -> merged 14, merged -> live 2",
+      S.get("green_to_queued", {}).get("median") == 4.0 and S.get("queued_to_merged", {}).get("median") == 14.0 and S.get("merged_to_live", {}).get("median") == 2.0 and S["green_to_queued"]["n"] == 3, S)
+
+w13b = World("paid")                                              # an owed item that is paid, in a window with no release
+w13b.log(711, [(LO - mins(60), f"release of PR #711 starts in /srv/widgets ({SLUG})"), (LO - mins(50), "done: abc1234, restarted app.service ")])
+w13b.save()
+kept_before = {"format": 1, "repo": "widgets", "generated": "2026-11-19T00:00:00+00:00", "stages": {}, "flakes": {}, "marker": "kept",
+               "open_pending": [{"key": "max_open_to_live_median_minutes", "limit": 10, "value": 30.0, "line": "FLAG: open_to_live_median: 30 min > 10"}]}
+w13b.state.mkdir(); (w13b.state / "widgets.json").write_text(json.dumps(kept_before))
+CONF.write_text("max_open_to_live_median_minutes = 10\nitem_project = \"widgets-page\"\nitem_mover = \"widgets-builder\"\n")
+client_reset()
+r = run(w13b, "--client", str(CLIENT), no_open=False)
+after = rec(w13b)
+check("an owed item paid in an empty window: the item is sent once, the debt is cleared in the state, the rest of the previous record stays, exit 4",
+      r.returncode == 4 and len(client_calls()) == 1 and "open_pending" not in after and after == {k: v for k, v in kept_before.items() if k != "open_pending"}, (r.returncode, client_calls(), after))
+CONF.write_text("")
+client_reset()
+
+w13c = stats_world("kept")                                        # GitHub unreadable after a good run: the previous open -> live median stays
+r = run(w13c)
+r2, j2 = jrun(w13c, env={"PATH": str(NO_GH)})
+check("GitHub unreadable after a good run: the open -> live median is the previous run's (30), a note says so, the log's stages are still counted (merged -> live n 5), exit 4",
+      r.returncode == 0 and r2.returncode == 4 and j2["stages"]["open_to_live"]["median"] == 30.0 and any("previous run's" in n for n in j2["notes"])
+      and j2["stages"]["merged_to_live"]["n"] == 5, (r2.returncode, j2.get("stages", {}).get("open_to_live"), j2.get("notes")))
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()
 os._exit(1 if fails else 0)

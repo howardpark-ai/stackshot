@@ -81,8 +81,8 @@ OPEN_SENDER = "release-speed-report"
 STAGES = [("open_to_green", "PR open -> checks green"), ("green_to_queued", "checks green -> queued"), ("queued_to_merged", "queued -> merged"),
           ("merged_to_live", "merged -> live"), ("live_to_main", "live -> main's check"), ("open_to_live", "PR open -> live")]
 STAMP = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) (.*)$")
-START = re.compile(r"release of PR #(\d+) starts in \S+(?: \(([^)]*)\))?")
-CHECKS_PASS = re.compile(r"(checks pass|the PR's tests pass on the updated head)\b")
+START = re.compile(r"release of PRs? (#\d+(?: #\d+)*) starts in \S+(?: \(([^)]*)\))?")     # release.sh: one PR's start, or a group's "PRs #N #M" (every member's log has it)
+CHECKS_PASS = re.compile(r"(checks pass|the PR's tests pass on the (?:updated|pushed) head)\b")
 ENQUEUED = re.compile(r"enqueued: ")
 MERGED = re.compile(r"merged( |$)")
 DONE = re.compile(r"done: ")
@@ -117,7 +117,7 @@ def read_segments(path: str, slug: str | None, notes: list[str]) -> list[dict]:
                     continue
                 s = START.match(m.group(2))
                 if s:
-                    cur = {"pr": int(s.group(1)), "start": ts, "events": [], "slug": s.group(2)}
+                    cur = {"pr": int(s.group(1).split()[0][1:]), "start": ts, "events": [], "slug": s.group(2)}
                     segs.append(cur)
                 if cur is not None:
                     cur["events"].append((ts, m.group(2)))
@@ -521,6 +521,9 @@ def build(args, now: dt.datetime) -> tuple[str, dict, str]:
             args.no_data = f"no GitHub data: {e}"
             notes.append(f"{args.no_data}: the stages that start at the PR's creation or need a check run are from the logs alone, and the PR-run flakes are not counted")
     stages = summarize(logs["live"], prs, greens, notes)
+    if args.no_data and args.no_data.startswith("no GitHub data") and prev and isinstance(prev["stages"].get("open_to_live"), dict):
+        stages["open_to_live"] = dict(prev["stages"]["open_to_live"])       # it needs GitHub: the previous run's median is kept, said
+        notes.append("the open -> live stage is the previous run's (it needs GitHub, which could not be read)")
     flakes = {"merge_queue": logs["queue_flakes"], "pr_runs": pr_run_flakes, "main_run": logs["main_flakes"],
               "total": logs["queue_flakes"] + (pr_run_flakes or 0) + logs["main_flakes"]}
     rec = {"format": FORMAT, "repo": repo, "github": slug, "generated": now.isoformat(timespec="seconds"), "window_days": args.days,
@@ -621,11 +624,15 @@ def main(argv: list[str] | None = None) -> int:
         if failure or (args.item_triggers and not (res and res["sent"])):
             rec["open_pending"] = args.item_triggers
         empty = rec["prs"]["live"] == 0 and rec["prs"]["not_live"] == 0
-        if not args.dry_run and not empty:             # a window with no release leaves the previous record, and any debt in it, as it was
-            try:
+        prev, _ = read_previous(state_file, rec["repo"])
+        try:
+            if not args.dry_run and not empty:
                 TR.write_state(state_file, rec)
-            except OSError as e:
-                raise Fail(f"cannot write {state_file}: {e.strerror or e}", 1)
+            elif not args.dry_run and prev is not None and "open_pending" in prev and res and res["sent"]:
+                # a window with no release leaves the previous record as it was, but a debt that was paid is cleared in it too
+                TR.write_state(state_file, {k: v for k, v in prev.items() if k != "open_pending"})
+        except OSError as e:
+            raise Fail(f"cannot write {state_file}: {e.strerror or e}", 1)
         if args.json:
             print(json.dumps(dict(rec, item_open=res) if res else rec, sort_keys=True))
         else:
