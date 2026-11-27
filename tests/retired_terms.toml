@@ -84,6 +84,9 @@ allow = [
     "line that starts `the owner:`",
     "only the owner does",
     "steps or commands for the owner",      # the description is the background, never steps or commands for Oliver (the tool text, where "the owner" is Oliver)
+    # tools/refusal_report.py: two keys of its hint table are the message tool's refusal kinds as the call log stores them (service/messaging.py), each the whole string.
+    "=message: unmarked-not-for-owner",
+    "=message: question-from-owner",
     # tests/tool_text.snapshot.json is the tool text rendered on the example config, where the instance's person is the placeholder "the owner". Each phrase is a sentence of the tools' text as it renders, where "the owner" stands for the person the board is for.
     "`the owner:`",
     "`- the owner: …`",

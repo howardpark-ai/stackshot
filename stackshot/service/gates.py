@@ -588,12 +588,13 @@ def gate_state_args(carry: dict[str, str], split_note: str = "") -> tuple[str, d
 _NOT_PASSED = ("until", "waits", "wait_mode")      # in the wait group, but not arguments of this call
 
 
-def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict[str, str], set[str]]:
+def gate_model_args(vals: dict[str, str], clears: dict[str, bool], stored: dict[str, Any] | None = None) -> tuple[dict[str, str], set[str]]:
     """The model fields a write passes (model.py): goal, mover, then, wait_kind, wait_anchor, wait_event, ask_by, post_wake_mover → (the fields to set, whitespace
     collapsed and the owner's name and wait_kind normalised, the fields to drop). A value of none, clear or - drops that field; clear_goal, clear_mover, clear_then drop theirs
     and clear_wait the wait's four (wait_kind, wait_anchor, wait_event, ask_by, and the old picker key stored beside them; the wake and after keep their own flags). A clear does not go with a new value
     for what it drops. post_wake_mover is the old name of mover (an alias in its window, the service folds it, model.fold_picker_alias): passed beside a different mover it is refused here, naming mover.
-    Only the form is judged here (model.check_fields): whether an alive item names a mover or a wait its mover is for the write guards."""
+    Only the form is judged here (model.check_fields): whether an alive item names a mover or a wait its mover is for the write guards.
+    `stored`: the item's metadata as it stands (an update's): the refusal of clear_wait beside a new wait_kind names the stored wait_anchor and wait_event the call to send would keep."""
     h = _hooks()
     faults: list[str] = []
     setv: dict[str, str] = {}
@@ -616,7 +617,13 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict
         if clears.get(flag):
             clash = [k for k in fields if k in setv]
             if clash:
-                instead = ". The new wait_kind takes the place of the stored one: send this call again without clear_wait" if "wait_kind" in clash else ""
+                instead = ""
+                if "wait_kind" in clash:      # only the kind takes a new value's place: a stored anchor and event stay beside it, so the call to send names them
+                    stays = [k for k in ("wait_anchor", "wait_event") if _model.clean((stored or {}).get(k)) and k not in setv and k not in drop]
+                    instead = ". The new wait_kind takes the place of the stored kind: send this call again without clear_wait"
+                    if stays:
+                        instead += (f", and for {' and '.join(stays)}, which the item stores and would keep beside the new kind, send the new wait's own value or "
+                                    + " and ".join(f'{k}="none"' for k in stays) + " to drop " + ("them" if len(stays) > 1 else "it"))
                 faults.append(f"Refused: clear_{flag} drops {', '.join(k for k in fields if k not in _NOT_PASSED)}; it does not go with a new {', '.join(clash)}{instead}")      # `until`, `waits` and `wait_mode` are no write field of this call: the refusal names the five a caller can pass
             else:
                 drop.update(fields)

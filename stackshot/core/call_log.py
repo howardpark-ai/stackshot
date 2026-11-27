@@ -433,12 +433,12 @@ _KINDS: tuple[tuple[str, str], ...] = (
     (r"a line of next is \d+ characters", "a line of next over its limit"),
     (r"the subject is \d+ characters", "a subject over its limit"),
     (r"subject must start with", "a subject without a scope prefix"),
-    (r"ask must read|this ask has a Decide part|needs an ask line", "an ask in the wrong form"),
-    (r"puts two questions in its Decide part", "an ask with a second question in its Decide part"),
+    (r"ask must read|needs an ask line", "an ask in the wrong form"),
+    (r"puts two questions in its Decide part|has a (?:Decide|Recommend) part split by|has more than one Decide or Recommend part|asks several decisions in one", "an ask with a second question in its Decide part"),
     (r"carries no link to it|links a mockup .* but not in its ask", "an ask that approves a design or plan with no link in the ask"),
     (r"Refused: option \d+ ", "an option without its label and line"),
     (r"Refused: said[\[:]", "a said entry in the wrong form"),
-    (r"wait on another item's close has no end|wait on news only .* relays has no end", "a wait on another item with no end date"),
+    (r"wait on another item's close has no end|wait on news only .* relays has no end|'s wait on .{0,200}? has no end", "a wait with no end date"),
     (r"a wait on your own item needs its reason", "a wait set without its reason"),          # this refusal and the four below it name wait_basis as another way to park: they are not a fault of a basis
     (r"waits on a time .*with no reason", "a time wait with no recorded words or basis"),
     (r"clock pushed out", "a date moved later with nothing else changed"),
@@ -452,6 +452,7 @@ _KINDS: tuple[tuple[str, str], ...] = (
     (r"reword: step", "a reword of another session's step"),
     (r"leaves .* open with no open step|new item has no open step", "an open item left with no open step"),
     (r"this update hands ", "a hand-off with no check or date"),          # before the front agent kind: that refusal names the sessions handed to, none is a front agent
+    (r"contact=\S+ is not a front agent", "a contact that is not a front agent"),      # before the next: that refusal says "user-facing agent" too, and asks for the opposite
     (r"user-facing agent|not a background agent", "a front agent named as mover"),
     (r"state is a retired input|ranks are retired|(?:is|are) not a parameter any more|is not a parameter of \w+ any more", "a retired input"),
     (r"pass sender=", "no sender"),
@@ -469,14 +470,20 @@ _KINDS: tuple[tuple[str, str], ...] = (
     (r"the status of a step on \S+ is written by its mover", "a status line from a session the item does not name"),
     (r"step at most \d+ characters on one line", "a step over its limit"),
     (r"put the text in draft=", "a step to post a text with no draft"),
-    (r"has a bare URL", "a bare URL in next or ask"),
+    (r"has a bare URL", "a bare URL in a description, next or ask"),
     (r"left with .{0,60} as its mover but nothing for", "the user left as mover with nothing to do"),
     (r"Refused: a (?:park|hold) names what it waits for", "a park with nothing it waits for"),
+    (r"ask_by is YYYY-MM-DD", "an ask_by that is no date"),
+    (r"anchors belong to the project, not the item", "anchors passed on an item write"),
+    (r"a front agent does not watch handed-off work", "a front agent's date on handed-off work"),
+    (r"options must be a list", "options that are no list"),
+    (r"(?:subject|ask|next) uses \"[^\"]{1,40}\": .{0,60}reads this", "an alarming word in text the user reads"),
+    (r"has mover=\S+ on an item whose state is .{0,80}An item that is", "another mover on an item that is the user's"),
 )
 _KIND_RX = tuple((re.compile(p, re.I), name) for p, name in _KINDS)
 
 
-_COMBINED_RX = re.compile(r"Refused: \d+ problems in this call.*?\s\(1\) (.*?)(?:\s\(2\) |\sNot checked yet|\Z)", re.S)      # faults.combine's shape, with its line breaks or folded to spaces as a logged line is (record)
+_COMBINED_RX = re.compile(r"Refused: \d+ problems(?: in this call|\.).*?\s\(1\) (.*?)(?:\s\(2\) |\sNot checked yet|\Z)", re.S)      # the shape of faults.combine and of model_guards.refusal ("N problems."), with its line breaks or folded to spaces as a logged line is (record)
 
 
 def kind_of(why: str) -> str:

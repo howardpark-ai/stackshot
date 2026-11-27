@@ -788,7 +788,7 @@ def update_unlocked(
                 meta["wake"] = str(meta["wake"])[:10]
     model_set, model_drop = fc.call(_gates.gate_model_args, {"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
                                                   "ask_by": ask_by, "post_wake_mover": post_wake_mover},
-                                    {"goal": clear_goal, "mover": clear_mover, "then": clear_then, "wait": clear_wait}, default=({}, set()))   # a bad value is refused before anything is written
+                                    {"goal": clear_goal, "mover": clear_mover, "then": clear_then, "wait": clear_wait}, item_was.get("metadata") or {}, default=({}, set()))   # a bad value is refused before anything is written
     wait_args_bad = fc.count > n_wait_args      # the wait's own arguments (the waits list, wait_kind, ask_by, the mover) are refused: the park's reason, which reads what they would have stored, is not judged
     model_drop |= list_drop
     list_set = list_plan is not None and list_plan.kind == "list"
@@ -861,8 +861,6 @@ def update_unlocked(
             if work_spec.get("cut"):
                 _calls.fixed("work-cut", f"the status line was {work_spec['cut']} characters and the limit is {_work.TEXT_MAX}: it was cut at the last word that fits and ends with an ellipsis, as \"{work_spec['text']}\"; to change it, send a shorter one",
                              fields=["work"], stored=work_spec["text"], sent=str(work))
-            if work_spec.get("waiting") and not work_spec["remove"]:
-                _calls.fixed("work-waiting", "a status line has no waiting state, so it was stored as assigned (not in progress); if the item itself waits, say on what with until=<date>, after=[<item>] or wait_kind")
             work_spec["text"] = _shown_ids(work_spec.get("text") or "")   # g7 → board#N, after the length check
             work_writer = _session_label(h.session_id(sender.strip() or own_for))   # the writer by name; the session whose step it is, unless the spec names another
             fc.call(_gates.gate_work_writer, gid, work_writer, _telling.holder({"status": "open", "metadata": meta}), meta, finishing)                      # the needs list as this call leaves it
@@ -1452,6 +1450,8 @@ def update_unlocked(
                 cl_w = list(cl_w)
                 spec_w = {**work_spec, "state": "done"} if work_tick >= 0 else work_spec
                 cl_w[ti_w] = _work.apply(cl_w[ti_w], spec_w, time.time())
+                if work_spec.get("waiting") and not work_spec["remove"] and spec_w["state"] == "assigned":      # told only where the line is recorded so
+                    _calls.fixed("work-waiting", "a status line has no waiting state, so it was stored as assigned (not in progress); if the item itself waits, say on what with until=<date>, after=[<item>] or wait_kind")
                 meta["steps"] = _steps.stored(cl_w)
                 work_note += "".join("\n" + w for w in _work.changes({"steps": (item_was.get("metadata") or {}).get("steps")}, meta)) or f"\n(work: \"{work_spec.get('text') or 'the status'}\" unchanged, already so)"
                 if work_made:

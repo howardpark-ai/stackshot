@@ -1052,7 +1052,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                 if near_:
                     add("snooze", head_ + f"A park of {_wt.cap_days():g} days or less needs {H}'s recorded words: a wait_basis sent with a date this near is dropped, so adding one does not help. Ask him to answer on the item, "
                                   "or pass said=[...] with his words. To only check back on work you keep moving, set a bare until with wait_reason "
-                                  "(this call without wait_kind and wait_basis, with wait_reason=\"<what you check then>\"), or set no date: " + tail_)
+                                  "(this call without wait_kind and wait_basis, with wait_reason=\"<what you check then>\"; where that moves a stored date later, also mark a step done or dropped or write the next step in it), or set no date: " + tail_)
                 else:
                     add("snooze", head_ + "With neither, a park has no reason: when the work itself needs this window (a soak, a log or data collection, a trial week, a timer you started), "
                                   "add wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\" (a verifying item's date takes it too, with no park); to only check back on work you keep moving, set no date: " + tail_ + " "

@@ -28,7 +28,8 @@ a basis sent with such a date is dropped, the reply saying so). A bare date with
 needs no basis; a date does not leave the item active as a reminder (outside a hand-off's backstop): set no date to
 keep an item moving. A wait that can no longer end (a check whose pull request was closed unmerged) fails at once and
 tells the item's mover. clear_wait=true is how an update drops a stored wait (wait_kind and its fields); wait_anchor or
-wait_event of none and clear_wait_basis do not. An update that newly adds needs=decision to an item that stores a wait is refused unless it
+wait_event of none and clear_wait_basis do not. To change a wait send the new wait_kind without clear_wait (the two
+do not go in one call); a stored wait_anchor or wait_event stays beside it unless the call sends another or "none". An update that newly adds needs=decision to an item that stores a wait is refused unless it
 also passes clear_wait=true: the wait would otherwise win and get would list a model conflict. clear_after=true clears
 the after list, as after=[] or after="none" do; some clients drop an empty list, so the flag always arrives. A write
 that clears a wait while an open next line still defers on what it cleared in words goes through, and its reply
@@ -327,8 +328,9 @@ resource that is down), at least {{WAIT_GUARD_REASON_MIN}} characters: wait_reas
 03:00". Required when this write sets an until, or a line of your own next dated later than today, on an item you move,
 or it is refused (a model may refuse it too when the step could be done now). Not stored on the item. A park
 (wait_kind="time" with wait_basis), a wait on another item (after) and needs decision or external need none.
-wait_kind="time" within {{CAP_DAYS}} days is a park, which needs {{OWNER}}'s words (said): to check back on your own
-work send until and wait_reason with no wait_kind. A date after by, due or before is a deadline, not a wait.
+A new wait_kind="time" within {{CAP_DAYS}} days is a park, which needs {{OWNER}}'s words (said) unless the item is
+already parked, on a time wait or verifying (a wait_basis does there): to check back on your own work send until and
+wait_reason with no wait_kind. A date after by, due or before is a deadline, not a wait.
 
 ## description update
 {{UPDATE_DESC}}{{CONTACT_FORM}}{{MODEL_FORM}}{{CHECKLIST_FORM}}{{STEP_PROOF_FORM}}{{DRAFT_FORM}}{{STEP_FORM}}{{STALL_SHORT}}{{SELF_WAIT_FORM}}{{MACHINE_FORM}}{{ANCHOR_OFFER_FORM}}{{WAIT_FORM}}

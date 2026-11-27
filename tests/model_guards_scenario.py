@@ -833,6 +833,12 @@ item(960, needs=[BACK])
 refused_nw("7 time wait: a near date with wait_kind=time and no words is refused with the call to send instead", 960, lambda: upu(960, wait_kind="time", until=day(3)), "with no reason", 'this call without wait_kind and wait_basis, with wait_reason="<what you check then>"')
 upu(960, until=day(3), wait_reason="the build still runs until that day")
 check("7 time wait: …the same call without wait_kind, with wait_reason, goes through", W.stored_until(mt(960)) == day(3) and not mt(960).get("wait_kind"), mt(960))
+item(961, needs=[BACK], until=day(2), next="team-back: one\nteam-back: two")
+refused_nw("7 time wait: on an item that stores a date the refusal says what a later one takes beside it", 961, lambda: upu(961, wait_kind="time", until=day(3)), "with no reason",
+           "where that moves a stored date later, also mark a step done or dropped or write the next step in it")
+refused_nw("7 time wait: …since the date alone, moved later, is refused", 961, lambda: upu(961, until=day(3), wait_reason="the build still runs until that day"), "clock pushed out")
+upu(961, until=day(3), wait_reason="the build still runs until that day", done=[1])
+check("7 time wait: …and with a step marked done it goes through", W.stored_until(mt(961)) == day(3) and not mt(961).get("wait_kind"), mt(961))
 
 # ================================================================ 8. every next line names who takes it
 item(85, needs=[BACK])

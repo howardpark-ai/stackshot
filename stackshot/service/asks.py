@@ -50,7 +50,7 @@ from stackshot.waits import watchers as _watch
 _ASK_LABELS = ("Decide", "Recommend", "Stakes", "By")
 _ASK_EXAMPLE = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 _ASK_BREAKS = "\r\n\v\f\x85\u2028\u2029"
-_ASK_LINK_TARGET = re.compile(r"\]\(([^()\s\]]*)\)")      # a markdown link's address; linear, as a scan from one `](` stops before the next
+_ASK_LINK_TARGET = re.compile(r"\]\(((?:[^()\s\]]|\([^()\s\]]*\))*+)\)")      # a markdown link's address, one level of parentheses in it; linear, as a scan from one `](` stops before the next
 _ASK_SEP_TAIL = " |;/,-\u2013\u2014\u00b7\u2022"           # what a writer puts between two parts in place of " · " (the text is flattened first, so a space is the only white space): stripped off the end of a part with str.rstrip, never a regex, whose cost grows with the square of a long run of it
 
 
@@ -61,6 +61,8 @@ def _ask_weight(flat: str, hits: dict[str, int]) -> str:
     if hits:
         bounds = [*hits.values(), len(flat)]
         out += "; its parts run " + ", ".join(f"{lb} {e - b}" for lb, b, e in zip(hits, bounds, bounds[1:])) + " characters, labels and separators included"
+        if bounds[0]:
+            out += f', and {bounds[0]} come before "{next(iter(hits))}:"'
     return out
 
 

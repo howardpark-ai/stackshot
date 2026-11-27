@@ -481,6 +481,10 @@ res, made = upd(421, work={"text": "reply due", "state": "assigned"})
 check("d work: a state the line has tells no fix", not isinstance(res, ToolError) and "work-waiting" not in kinds(made), made)
 res, made = upd(421, work={"text": "reply due", "state": "blocked"})
 check("d work: another state is refused as before, under its own kind", isinstance(res, ToolError) and "work: state 'blocked' is not one of" in str(res) and CL.kind_of(str(res)) == "a status state the work line does not have" and "work-waiting" not in kinds(made), str(res)[:300])
+item(422); res, made = upd(422, status="completed", done=[1, 2], work={"text": "reply due", "state": "waiting"}, **CLOSE)
+check("d work: on the closing call no status is recorded, so no fix says one was", not isinstance(res, ToolError) and "work: not recorded" in res and "work-waiting" not in kinds(made), (str(res)[:400], made))
+res, made = upd(422, work={"text": "reply due", "state": "waiting"})
+check("d work: …nor on a closed item", "work-waiting" not in kinds(made), (str(res)[:400], made))
 check("d work: parse marks waiting alone", WK.parse({"text": "a", "state": "waiting"})["waiting"] is True and WK.parse({"text": "a", "state": "waiting"})["state"] == "assigned" and WK.parse({"text": "a", "state": "wip"})["waiting"] is False and WK.parse("a")["waiting"] is False, None)
 
 # d.4 a long bullet the line cap keeps from being split: the refusal gives that reason and the number of lines to cut
@@ -525,6 +529,13 @@ check("d ask: parts out of order get no part lengths", "characters, and the limi
 t0 = time.monotonic(); m4 = ask_msg("Decide: " + "](" * 100000 + " · Recommend: yes · Stakes: a week · By: Fri"); took4 = time.monotonic() - t0
 t0 = time.monotonic(); m5 = ask_msg("Decide: " + "](a" * 70000 + ") · Recommend: yes · Stakes: a week · By: Fri"); took5 = time.monotonic() - t0
 check("d ask: long runs of link openers are counted in well under a second", "characters, and the limit is" in m4 and "characters, and the limit is" in m5 and took4 < 1.0 and took5 < 1.0, (took4, took5))
+check("d ask: with the first label at the start nothing is said to come before it", "come before" not in m_, m_[:600])
+paren = "https://example.com/wiki/Page_(draft)_" + "b" * 60
+m6 = ask_msg("Please read first. Decide: take the [page](" + paren + ") · Recommend: " + "y" * 90 + " · Stakes: " + "s" * 60 + " · By: Fri")
+check("d ask: an address with parentheses in it is counted whole", f"{len(paren)} of them are link addresses" in m6, m6[:500])
+check("d ask: what comes before the first label is counted beside the parts", f'labels and separators included, and {len("Please read first. ")} come before "Decide:"' in m6, m6[:600])
+t0 = time.monotonic(); m7 = ask_msg("Decide: " + "](a(" * 50000 + " · Recommend: yes · Stakes: a week · By: Fri"); took7 = time.monotonic() - t0
+check("d ask: long runs of openers with parentheses are counted in well under a second", "characters, and the limit is" in m7 and took7 < 1.0, took7)
 short = "Decide: take the design · Recommend: yes · Stakes: a week · By: Fri"
 check("d ask: …and an ask cut to the limit passes", ASKS._gate_ask(short) == short, None)
 
@@ -538,6 +549,39 @@ wait_ = MD.derive(rd(440)).wait
 check("d clear_wait: …and without it the new wait takes the stored one's place: a time wait to the new day, the old event not read", not isinstance(res, ToolError) and wait_.kind == "time" and wait_.until == local_day(40) and wait_.event == "", (str(res)[:400], wait_))
 res, made = upd(440, clear_wait=True, wait_event="the vendor replies")
 check("d clear_wait: beside a field with no new wait_kind it does not say so", isinstance(res, ToolError) and "clear_wait drops" in str(res) and "without clear_wait" not in str(res), str(res)[:400])
+
+# d.6b only the kind takes a new value's place: the call the refusal names says what to send for a stored anchor and event, and it is followed for each stored wait
+PR = "https://github.com/example/repo/pull/3"
+res, made = fx(lambda: _wt_anchors.stackshot_anchors(project=STK, add=[PR]))
+assert not isinstance(res, ToolError), res
+REL = {"wait_kind": "relay", "wait_event": "the vendor replies"}
+ANC = {"wait_kind": "anchor", "wait_anchor": PR, "wait_event": "a merge"}
+EVT = {"wait_kind": "event", "wait_event": "recycle box-a"}
+NEW_PARTY = "the courier confirms"; NEW_EVENT = "pr_merged example/repo#3"
+CASES = (  # (item, what it stores, the new wait as first sent beside clear_wait, the stored fields the refusal must name, the new wait as the advised call sends it)
+    (441, REL, {"wait_kind": "event"}, ["wait_event"], {"wait_kind": "event", "wait_event": NEW_EVENT, "mover": MAIN}),
+    (442, REL, {"wait_kind": "relay"}, ["wait_event"], {"wait_kind": "relay", "wait_event": NEW_PARTY}),
+    (443, ANC, {"wait_kind": "relay", "wait_event": NEW_PARTY}, ["wait_anchor"], {"wait_kind": "relay", "wait_event": NEW_PARTY, "wait_anchor": "none"}),
+    (444, EVT, {"wait_kind": "relay"}, ["wait_event"], {"wait_kind": "relay", "wait_event": NEW_PARTY}),
+    (445, REL, {"wait_kind": "anchor", "wait_anchor": PR}, ["wait_event"], {"wait_kind": "anchor", "wait_anchor": PR, "wait_event": "none"}),
+    (446, ANC, {"wait_kind": "time"}, ["wait_anchor", "wait_event"], {"wait_kind": "time", "wait_anchor": "none", "wait_event": "none", "wait_basis": BASIS(40)}),
+)
+for i, stored, first, stays, then in CASES:
+    label = f"{stored['wait_kind']} to {first['wait_kind']}"
+    item(i, until=local_day(3), mover=MAIN, **stored)
+    day_ = local_day(40) if then["wait_kind"] == "time" else local_day(5)      # a park past the cap stands on its basis; another wait runs within the cap
+    res, made = upd(i, clear_wait=True, until=day_, **first)
+    why = str(res)
+    check(f"d clear_wait: {label}: the refusal names the stored fields that would stay, and no other", isinstance(res, ToolError) and "without clear_wait" in why and all(f'{k}="none"' in why for k in stays)
+          and not any(f'{k}="none"' in why for k in ("wait_anchor", "wait_event") if k not in stays), why[:600])
+    res, made = upd(i, until=day_, **then)
+    m_i = mt(i); w_i = MD.derive(rd(i)).wait
+    want = {k: ("" if then.get(k, "none") == "none" else then[k]) for k in ("wait_anchor", "wait_event")}
+    check(f"d clear_wait: {label}: the advised call goes through and leaves the new wait's fields alone", not isinstance(res, ToolError) and w_i.kind == then["wait_kind"] and W.stored_until(m_i) == day_
+          and all(str(m_i.get(k) or "") == v for k, v in want.items()), (str(res)[:500], m_i))
+item(447, until=local_day(3), mover=MAIN)
+res, made = upd(447, clear_wait=True, wait_kind="time", until=local_day(40), wait_basis=BASIS(40))
+check("d clear_wait: with no stored anchor or event none is named", isinstance(res, ToolError) and "without clear_wait" in str(res) and '="none"' not in str(res), str(res)[:500])
 
 # d.7 a wait_kind that is someone outside
 ext = " ".join(MD.check_fields({"wait_kind": "External"}))
