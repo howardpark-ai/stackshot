@@ -32,9 +32,9 @@ The page is the answer block alone, as the home page's Your move draws it: the q
 |---|---|---|
 | `open` | The item is on the signed-in person's move and has options to pick (stored ones, or Yes and No). Also after a send that did not go through. | The question and the form. After a failed send, a line that says nothing was sent and why. |
 | `sending` | A send is under way. | The form, locked. |
-| `answered` | The question was answered, here or on the board. | The recorded answer: the question, who answered and when, the card and the note. Nothing can be pressed. |
+| `answered` | There is no question with options for the person, and an answer to show. In a frame that drew a question: an answer recorded since it was first drawn, here or on the board, also while the item stays on the person's move (a step beside the question, say). On a first load or a reload: the item's latest answer, only while the item is not on the person's move and stores no question asked or taken back since. | The recorded answer: the question, who answered and when, the card and the note. Nothing can be pressed. |
 | `changed` | The question is not the one this frame drew. | One line and a link to the item. Loading the frame again shows the new question. |
-| `closed` | The item is not on the person's move, has nothing to pick, or does not exist. While it is on the person's move for something else (a step, say), an older answer is not shown: the frame is `closed`, not `answered`. | One line and a link to the item. |
+| `closed` | There is nothing to pick and no answer to show by the rule for `answered`, or the item does not exist. While the item is on the person's move for something else (a step, say), an answer from before the frame was first drawn is never shown, and a first load or a reload shows no answer. | One line and a link to the item. |
 | `signed_out` | The request carries no board session. | A link that opens the item on the board in a new tab, and nothing of the item. An item that does not exist gives the same page. |
 
 `changed` is a reading against the question first drawn, so only a frame that is already showing reaches it. A first load shows the question as it stands.
@@ -70,7 +70,7 @@ Frames of the same item on one page share the pick, the note, a send under way a
 
 ## Sending an answer
 
-Send posts the form to the board's one answer route, `POST /items/<key>/answer`, with every check that route makes: a board session, the board's own origin, the token of this person and this item, and the reference of the question the form showed (a pick on a question rewritten since is not recorded). The answer is recorded under the signed-in member, as from the item's page. A request whose `Accept` header is exactly `application/json` gets `{"sent": "<code>"}` in place of the redirect, with the same codes the item page's notices read; nothing else about the route differs. A session's or a machine's token is not a board session and cannot answer here.
+Send posts the form to the board's one answer route, `POST /items/<key>/answer`, with every check that route makes: a board session, the board's own origin, the token of this person and this item, and the reference of the question the form showed (a pick on a question rewritten since is not recorded). The answer is recorded under the signed-in member, as from the item's page. A request whose `Accept` header is exactly `application/json` gets `{"sent": "<code>"}` in place of the redirect, with the same codes the item page's notices read; nothing else about the route differs. The frame words those codes as the home page does, except a recorded answer, where it says only that the answer was recorded: the item may stay on the person's move for a step. A session's or a machine's token is not a board session and cannot answer here.
 
 ## What protects it
 

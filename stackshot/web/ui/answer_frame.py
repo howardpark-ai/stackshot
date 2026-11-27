@@ -6,7 +6,7 @@ the stylesheet are the board's own (ui/render.py); this module adds the page aro
     sending      (the script's own, never drawn by the server) a send is under way
     answered     the recorded answer, nothing to press
     changed      the question is no longer the one this frame drew: a board link
-    closed       not on his move, or nothing to pick: a line and a board link (on his move for a step, never an older answer)
+    closed       nothing to pick and no answer to show: a line and a board link (on his move, never an answer from before the frame was drawn, and none on a first load)
     signed_out   no board session: a board link and no text of the item
 
 The route (web/routes/answer_frame.py) decides who is asking and sends the headers; nothing here writes."""
@@ -41,16 +41,16 @@ def state_of(board: Any, r: dict[str, Any], token: str, was: str, since: float) 
     """The frame's state of the item for a signed-in member, with what it draws: ("open", (question html, form html)), ("answered", the answer record), ("changed", None) or ("closed", None).
     `was` is the reference (model/ask_ref.py) of the question this frame first drew ("" when it has drawn none) and `since` when it was first drawn (epoch seconds): a refresh reads the state
     against them, a first load or a reload has neither question nor claim on an old one."""
-    if _home.list_of(board.mod_of(r)) == _home.YOUR_MOVE:      # on his move, by the same rule as the home page's list (a closed item is in none)
+    mine = _home.list_of(board.mod_of(r)) == _home.YOUR_MOVE      # on his move, by the same rule as the home page's list (a closed item is in none)
+    if mine:
         ask = board.home_ask(r, token)
         if ask and (_r.open_options(r) or _r.yesno_options(r)):      # with cards to pick from
             return ("changed", None) if was and _r.question_ref(r) != was else ("open", ask)
-        return "closed", None      # on his move for something else (a step, or a question with no cards): no older answer is his to see
     a = last_answer(r)
-    if was:
+    if was:      # an answer recorded since the frame was drawn is its result, also while the item stays on his move (a step beside the question)
         return ("answered", a) if a and _when_ts(a) > since else ("closed", None)
     meta = r.get("metadata") or {}
-    if a and not meta.get("ask") and not meta.get(_askl.LEFT):      # an ask still stored, or one the server took off his move, is newer than the last answer: that answer is not what the item asks now
+    if a and not mine and not meta.get("ask") and not meta.get(_askl.LEFT):      # on his move, or with an ask stored or taken off it since, the item asks something newer: the last answer is not shown
         return "answered", a
     return "closed", None
 
@@ -96,8 +96,9 @@ def closed_body(href: str) -> str:
 
 
 def _notices() -> dict[str, list[str]]:
-    """The notice of each code the answer path can say (the home page's wording where a code has one: the frame has no "below" either): {code: [class, text]}."""
-    return {code: [v[0], _t(v[-1])] for code, v in _r.Board._SENT_KEYS.items()}
+    """The notice of each code the answer path can say (the home page's wording where a code has one: the frame has no "below" either): {code: [class, text]}.
+    A recorded answer says only that: the board's own line also says the item left his queue, which is not so while a step of his stays on it."""
+    return {code: [v[0], _t("frame.sent" if code == "decision" else v[-1])] for code, v in _r.Board._SENT_KEYS.items()}
 
 
 def page(body: str, *, key: str, state: str, href: str, origins: list[str], lang: str, theme: str, drawn: float, ref: str = "", channel: str = "") -> str:
@@ -201,7 +202,7 @@ var m=msgs[res.code]||['warn',''];
 if(quiet.indexOf(res.code)>=0){lock(false);to('open');say(m[0],m[1]);return}
 delete drafts[ref];var s=++seq;
 load().then(function(n){if(s!==seq)return;var f=form();if(f){box(f).value='';put(f,{pick:'',note:''})}lock(false);show(n);delete drafts[ref];say(m[0],m[1])},
-function(){if(s!==seq)return;busy=false;say(m[0],m[1]);fall(res.code)})}
+function(){if(s!==seq)return;busy=false;say(m[0],res.code==='decision'?'':m[1]);fall(res.code)})}
 function send(f,submitter){var ref=A('ref'),data=new URLSearchParams(new FormData(f)),ctl=window.AbortController?new AbortController():null,timer=ctl&&setTimeout(function(){ctl.abort()},60000);
 if(!picked(f)&&!box(f).value.trim())return;
 data.set('act','answer');seq++;say('','');tell({k:'sending',ref:ref,pick:picked(f),note:box(f).value});mine=true;lock(true);to('sending');

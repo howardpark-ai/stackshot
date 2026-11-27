@@ -258,7 +258,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
 
     # ---- 5. the language
     LOC = T / "locale"
-    (LOC / "ko.json").write_text(json.dumps({"frame.title": "XX-title", "home.send": "XX-send", "frame.signed_out": "XX-signed-out", "js.answer.sending": "XX-sending", "sent.decision": "XX-sent"}), encoding="utf-8")
+    (LOC / "ko.json").write_text(json.dumps({"frame.title": "XX-title", "home.send": "XX-send", "frame.signed_out": "XX-signed-out", "js.answer.sending": "XX-sending", "frame.sent": "XX-sent"}), encoding="utf-8")
     _cfg.CFG["ui"]["locale_dir"] = str(LOC); i18n._WARNED.clear(); i18n._LOADED.clear()
     check("the test locale loaded", i18n.available() == ["en", "ko"], i18n.available())
     rk, pk = frame("a1", "?lang=ko&theme=dark")
@@ -270,7 +270,8 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     uiprefs.set_lang(EMAIL, "en")
     _cfg.CFG["ui"].pop("locale_dir"); i18n._WARNED.clear(); i18n._LOADED.clear()
     msgs = json.loads(p.at["data-msgs"])
-    check("the notices are the board's own, the home page's wording where it has one", set(msgs) == set(ui_render.Board._SENT_KEYS) and msgs["stale"] == ["warn", i18n.EN["sent.stale_home"]] and msgs["decision"] == ["ok", i18n.EN["sent.decision"]], msgs)
+    check("the notices are the board's own, the home page's wording where it has one", set(msgs) == set(ui_render.Board._SENT_KEYS) and msgs["stale"] == ["warn", i18n.EN["sent.stale_home"]] and msgs["comment"] == ["ok", i18n.EN["sent.comment"]], msgs)
+    check("…but a recorded answer says only that, and no notice says the item left his queue", msgs["decision"] == ["ok", i18n.EN["frame.sent"]] and not any("queue" in t for _, t in msgs.values()), msgs)
 
     # ---- 6. no board session
     _bad_reads = []
@@ -372,11 +373,48 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("an open question on his move still draws its cards on the first load", ref41 != "" and frame("a41")[1].at["data-state"] == "open")
     item("a", 41, state="your-step", step=STEP, answers=[{"ts": time.time() + 60, "kind": "decision", "choice": "Ship", "via": "board", "ask": ASK}])   # answered, then the item moved to a step of his
     rr, pp, bb = again("a41", ref41, t41)
-    check("an answered question followed by a newer step, on a later poll: closed, not answered", pp.at["data-state"] == "closed" and "Ship it now" not in rr.text and "zebraword" not in rr.text and tok("a41") not in rr.text, (pp.at, bb[:300]))
-    check("…and on a first load", frame("a41")[1].at["data-state"] == "closed" and "Ship it now" not in frame("a41")[0].text)
+    check("an answer recorded since the frame was drawn, the item then on a step of his, on a later poll: answered", pp.at["data-state"] == "answered" and '<span class="alab">Ship</span>' in bb and tok("a41") not in rr.text, (pp.at, bb[:300]))
+    check("…and on a first load closed, the answer not shown", frame("a41")[1].at["data-state"] == "closed" and "Ship it now" not in frame("a41")[0].text)
     item("a", 42, status="doing", answers=[{"ts": now - 60, "kind": "decision", "choice": "Ship", "via": "board", "ask": ASK}])   # just answered, the item off his move
     rr, pp = frame("a42"); bb = body_of(rr.text)
     check("a just-given answer, the item off his move: answered, with the recorded answer", pp.at["data-state"] == "answered" and '<span class="alab">Ship</span>' in bb and "zebraword" in bb, (pp.at, bb[:300]))
+
+    # ---- 10c. a question beside a step, answered through the frame: the item stays on his move and the answer is the frame's result
+    def on_move(g):
+        board = ui_render.Board(str(STORE))
+        return ui_frame._home.list_of(board.mod_of(board.item(g))) == ui_frame._home.YOUR_MOVE
+    older = {"ts": now - 3 * 86400, "kind": "decision", "choice": "Drop", "text": "olderword", "via": "board", "ask": ASK}
+    item("a", 43, needs=["decision"], ask=ASK, options=OPTS, state="your-step", step=STEP, answers=[older])
+    r43, p43 = frame("a43"); ref43, t43 = p43.at["data-ref"], p43.at["data-drawn"]
+    check("an open question beside a step: open, with its cards and not the older answer", p43.at["data-state"] == "open" and r43.text.count('type="radio" name="choice"') == 3 and "olderword" not in r43.text, p43.at)
+    res = post("/items/a43/answer", {"token": tok("a43"), "choice": "B · Ship", "text": "besideword", "ref": ref43, "act": "answer"}, headers=JSON)
+    m43 = rd("a", 43)["metadata"]
+    check("…its answer is recorded, and the item stays on his move for the step", res.json() == {"sent": "decision"} and m43.get("state") == "your-step" and m43.get("step") == STEP and "decision" not in (m43.get("needs") or []) and on_move("a43"), (res.text, m43))
+    rr, pp, bb = again("a43", ref43, t43)
+    check("…the frame's refresh after the send: answered, with the recorded answer", pp.at["data-state"] == "answered" and "Answered by Oliver, " in bb and '<span class="alab">B \u00b7 Ship</span>' in bb and "besideword" in bb and "olderword" not in rr.text
+          and all(x not in bb for x in ("<input", "<button", "<textarea", "<form", "<a ", i18n.EN["frame.closed"])) and tok("a43") not in rr.text and pp.at["data-ref"] == "", (pp.at, bb[:500]))
+    notices = json.loads(pp.at["data-msgs"])
+    check("…and nothing on that page says the item left his queue", notices["decision"] == ["ok", i18n.EN["frame.sent"]] and "left your queue" not in rr.text, notices["decision"])
+    rr2, pp2, bb2 = again("a43", ref43, t43)
+    check("…a later poll: still answered", pp2.at["data-state"] == "answered" and bb2 == bb, (pp2.at, bb2[:300]))
+    for what, query in (("a reload", ""), ("a reload with a time and no reference", f"?was=&since={t43}")):
+        rr, pp = frame("a43", query)
+        check(f"…{what}: closed, no answer shown", pp.at["data-state"] == "closed" and "besideword" not in rr.text and "olderword" not in rr.text and "zebraword" not in rr.text, pp.at)
+    item("a", 44, needs=["decision"], ask=ASK, options=OPTS, state="your-step", step=STEP, answers=[older])
+    ref44, t44 = first("a44")
+    item("a", 44, state="your-step", step=STEP, answers=[older])      # the question taken off, unanswered
+    rr, pp, bb = again("a44", ref44, t44)
+    check("a question beside a step taken off unanswered, on a later poll: closed, not the older answer", on_move("a44") and pp.at["data-state"] == "closed" and "olderword" not in rr.text, (pp.at, bb[:300]))
+
+    # ---- 10d. on his move with no step: never an older answer
+    for i, what, meta in ((45, "needs a decision and stores no ask", {"needs": ["decision"]}), (46, "a your-call with no ask", {"state": "your-call", "needs": ["decision"]}),
+                          (47, "a stored your-call with no needs and no ask", {"state": "your-call"})):
+        item("a", i, answers=[older], **meta)
+        check(f"{what}: the item is on his move", on_move(f"a{i}"))
+        rr, pp = frame(f"a{i}")
+        check(f"{what}, an older answer, first load: closed", pp.at["data-state"] == "closed" and "olderword" not in rr.text and "zebraword" not in rr.text and tok(f"a{i}") not in rr.text, pp.at)
+        rr, pp, bb = again(f"a{i}", "0" * 16, now - 60)
+        check(f"{what}, an older answer, a poll: closed", pp.at["data-state"] == "closed" and "olderword" not in rr.text, pp.at)
 
     # ---- 11. answering: the board's one answer path, its gates unchanged
     ref5, t5 = first("a5")

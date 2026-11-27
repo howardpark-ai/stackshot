@@ -101,6 +101,7 @@ for i in range(2, 8): item(i)
 item(8, ask=f"Decide: whether {LONG} · Recommend: yes · Stakes: none · By: no date",
      opts=[{"label": "A" * 60, "line": LONG, "recommended": True}, {"label": "B", "line": LONG, "recommended": False}], draft=LONG)
 item(9, opts=None)                                     # Yes and No
+item(10)
 (T / "store/next-id").write_text("30"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 
@@ -305,6 +306,13 @@ def run(br):
     check("…and the box that had focus is gone: typing false", msgs(pg)[-1]["typing"] is False, msgs(pg)[-1])
     done(pg)
 
+    pg = parent(ctx, ("f", "/items/a10/answer-frame")); wait_state(pg, "open")      # sent, and the frame cannot read the item again
+    ctx.route("**/items/a10/answer-frame?**", lambda route: route.abort())
+    card(pg, "Wait"); press(pg); wait_state(pg, "answered"); pg.wait_for_timeout(500)
+    t = body_text(pg)
+    check("sent, the reading after it failed: answered, said once, nothing about his queue", len(answers(10)) == 1 and t.count(i18n.EN["frame.sent"]) == 1 and "queue" not in t, (answers(10), t))
+    ctx.unroute("**/items/a10/answer-frame?**"); done(pg)
+
     # ---- 5. the question rewritten under a pick; answered on the board; taken off his move
     pg = parent(ctx, ("f", "/items/a4/answer-frame")); wait_state(pg, "open")
     card(pg, "Ship"); item(4, ask=ASK2); press(pg); wait_state(pg, "changed")
@@ -376,7 +384,7 @@ def run(br):
     check("every message held exactly the contract's fields and a contract state", seen and all(set(m) == FIELDS and m["state"] in STATES and m["source"] == "stackshot" and m["v"] == 1 and isinstance(m["typing"], bool) and isinstance(m["height"], int) for m in seen),
           [m for m in seen if set(m) != FIELDS or m["state"] not in STATES][:3])
     all_text = json.dumps(seen)
-    tokens = [_web_answers._answer_token(EMAIL, f"a{i}") for i in range(1, 10)]
+    tokens = [_web_answers._answer_token(EMAIL, f"a{i}") for i in range(1, 11)]
     check("no message held a word of an item, an answer or a token", not any(w in all_text for w in ("zebraword", "titleword", "rewritten", "typed", "changed in the second", "held through", "Drop", "Ship", *tokens)), all_text[:400])
     check("no script error on any page", errors == [], errors)
 
