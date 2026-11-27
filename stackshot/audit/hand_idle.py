@@ -10,8 +10,9 @@ this module reads that mark and decides which items are handed on. It decides an
   due_all(items, now, front)                    [(gid, row)] of every such item, in id order; reads only
   busy_movers(items, now)                       the movers of the open items that are on an agent (a builder among them is not free)
   pick_free(candidates, busy, status, dead, same, frm)   the first candidate that is free, "" when none is
-  mark_handed / mark_none                       the record `metadata.hand_idle` ({"handed_at", "from", "to", "none_at"}) that keeps the two limits
+  mark_handed / mark_none                       the record `metadata.hand_idle` ({"handed_at", "from", "to", "none_at", "mover_told_at"}) that keeps the limits
   handed_recently / none_told_recently          the 24-hour limits
+  mover_due / mover_first / mark_mover_told / idle_hours   the hourly tell of the mover of an item no builder was free to take (`MOVER_EVERY`), and which of its tells is the first of a stretch (`MOVER_STRETCH`)
 
 An item is handed on when all of these hold:
 
@@ -26,7 +27,8 @@ A builder is free when it is not the mover of any open item that is on an agent 
 it is idle (`status(who) == "idle"`: audit/agent_state.py, fresh, naming the builder, its state read; a builder that is busy, missing from the push, not read, or whose push is stale or absent is UNKNOWN or busy, and is not free: the server cannot see a pane
 on another box, so no word is not "idle"). A name that is known to have no pane (`dead`) or whose status cannot be read is not free. The candidates are the item's project's
 background agents, best first, and no other project's (a project's work is built, reviewed and released by its own builder, so a builder of an unrelated project is never a candidate, however idle). With none free, a project with no background agent of its own included, nothing is handed on and -main is told that none was, once per
-item per 24 hours. At most `MAX_PER_TICK` items are handed on in one pass.
+item per 24 hours, and the item's MOVER is told as well (the owner's pick): the item stays on agent and the mover gets one message that it holds an item with no activity, again every hour (`MOVER_EVERY`) for as long as the item stays idle, so it
+ends when the mover works on the item (its clock moves) or hands it back; the owner is never told. At most `MAX_PER_TICK` items are handed on in one pass.
 
 THE BALANCER (`[audit] balance`, on by default; `audit_ticks._balance_tick`, its own minute tick ahead of the hand-off tick). The same module decides, the server writes. An item that is NOT STARTED (an untaken hand-off to a
 builder) or QUEUED BEHIND its mover's other item and has waited `[audit] balance_minutes` (default 10) goes to the builder of its OWN PROJECT with the FEWEST open items; the former mover is told to disregard it.
@@ -80,6 +82,8 @@ BALANCE_KEY = "balance"
 BALANCE_MAX_PER_TICK = 3          # items the balancer moves in one pass
 BALANCE_LIFETIME = 2              # moves of one item by the balancer, ever: after that the existing ladders have it
 PR_KINDS = (_la.CI_RESULT, _la.REVIEW, _la.COMMENT, _la.PR_MERGED, _la.COMMIT)      # the kinds of `last_activity` that are an event on a tied pull request: a build is in flight
+MOVER_EVERY = _hourly.HOUR - 300.0      # an idle item that no builder was free to take tells its mover again after this long (an hour less the ten-minute tick's slack, so the tell lands once an hour, not every second hour)
+MOVER_STRETCH = 2 * _hourly.HOUR       # a gap of more than this between two tells of the mover is a new idle stretch: its first tell gets a History line, the repeats none
 WHY = "no activity for an hour, nothing verified"      # the reason the History line and the new mover's notice carry
 
 
@@ -112,8 +116,30 @@ def mark_handed(meta: dict[str, Any], now: float, frm: str, to: str) -> None:
 
 
 def mark_none(meta: dict[str, Any], now: float) -> None:
-    """No builder was free for the item now and -main was told; the last hand-over is kept."""
-    meta[KEY] = {**{k: v for k, v in _record(meta).items() if k in ("handed_at", "from", "to")}, "none_at": now}
+    """No builder was free for the item now and -main was told; the last hand-over and the last tell of the mover are kept."""
+    meta[KEY] = {**{k: v for k, v in _record(meta).items() if k in ("handed_at", "from", "to", "mover_told_at")}, "none_at": now}
+
+
+def mover_due(meta: dict[str, Any] | None, now: float) -> bool:
+    """Is the mover of an idle item with no builder free to be told now? Yes when it was never told, or `MOVER_EVERY` ago or longer. A torn stamp (not a number, a bool, one dated ahead of now) counts as never."""
+    at = _record(meta).get("mover_told_at")
+    return not (isinstance(at, (int, float)) and not isinstance(at, bool) and 0 <= now - at < MOVER_EVERY)
+
+
+def mover_first(meta: dict[str, Any] | None, now: float) -> bool:
+    """Is the tell due now the first of an idle stretch (no tell yet, or the last one more than `MOVER_STRETCH` ago)? Only that one gets a History line."""
+    at = _record(meta).get("mover_told_at")
+    return not (isinstance(at, (int, float)) and not isinstance(at, bool) and 0 <= now - at <= MOVER_STRETCH)
+
+
+def idle_hours(since: float, now: float) -> int:
+    """Whole hours an item has been without activity, never under 1: what the mover's message says (it never says more than there was)."""
+    return max(1, int((now - since) // _hourly.HOUR))
+
+
+def mark_mover_told(meta: dict[str, Any], now: float) -> None:
+    """The mover was told now that it holds an idle item no builder was free to take; the rest of the record is kept."""
+    meta[KEY] = {**_record(meta), "mover_told_at": now}
 
 
 def _front_step_open(meta: dict[str, Any], mover: str) -> bool:
@@ -146,7 +172,8 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, front: Callable[
         return None      # the first audit line is owed after 45 minutes, inside the hour: an item is handed on only after a full hour without activity, as it was when the first line itself waited for the hour
     if handed_recently(meta, now):
         return None
-    return {"mover": mover, "project": project, "line_at": line["at"], "told_none": none_told_recently(meta, now)}
+    return {"mover": mover, "project": project, "line_at": line["at"], "told_none": none_told_recently(meta, now), "since": _silence.clock(it, mover),
+            "mover_due": mover_due(meta, now), "mover_first": mover_first(meta, now)}
 
 
 def due_all(items: dict[str, dict[str, Any]], now: float, front: Callable[[Any, str], bool] | None = None) -> list[tuple[str, dict[str, Any]]]:

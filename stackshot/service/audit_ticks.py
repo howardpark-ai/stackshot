@@ -596,6 +596,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
     busy = _hi.busy_movers(items, now)
     handed: list[str] = []
     told: dict[str, list[tuple[str, str]]] = {}      # -main agent -> (item, line) of its message
+    told_mover: dict[str, list[tuple[str, str]]] = {}      # mover -> (item, line) of its message: an idle item with no builder free tells the session that holds it
     builders: dict[str, list[str]] = {}      # per project, read once a pass (the role map is not read again for every item)
     mains: dict[str, str] = {}
     for gid, row in rows:
@@ -625,19 +626,33 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                 if main:
                     told.setdefault(main, []).append((gid, f"{lead}: no activity for an hour and nothing the audit could verify, so it went from {_sr._session_label(row['mover'])} to {_sr._session_label(to)}"))
                 print(f"audit: {gid} idle, handed from {row['mover']} to {to}", file=sys.stderr, flush=True)
-            elif not row["told_none"]:
+            elif not row["told_none"] or row["mover_due"]:
                 with _writes.ITEM_LOCK:
                     item = _svcstore._load(gid)
                     cur = _hi.due({**items, gid: item}, gid, now, front)
-                    if cur is None or cur["told_none"] or not _handoff.ho_same(cur["mover"], row["mover"]):
+                    if cur is None or not _handoff.ho_same(cur["mover"], row["mover"]):
+                        continue
+                    first_none, tell_mover = not cur["told_none"], cur["mover_due"] and not _model.is_owner(cur["mover"])      # under the lock, on the fresh read: what is still owed
+                    if not first_none and not tell_mover:
                         continue
                     meta = item.setdefault("metadata", {})
-                    _hi.mark_none(meta, now)
-                    _stall.note(meta, now, "no activity for an hour and nothing verified, but no builder was free to take it: " + (f"a summary goes to {_sr._session_label(main)}" if main else "the project has no -main agent to tell"))
+                    tell_main = bool(main) and not _handoff.ho_same(main, row["mover"])      # a -main agent that is the mover itself is told once, as the mover
+                    if first_none:
+                        _hi.mark_none(meta, now)
+                    if tell_mover:
+                        _hi.mark_mover_told(meta, now)
+                    if first_none or cur["mover_first"]:      # one History line for the first tell of a stretch; the hourly repeats write none
+                        parts = ([f"a summary goes to {_sr._session_label(main)}" if tell_main else "the project has no -main agent to tell" if not main else ""] if first_none else [])
+                        parts += [f"the audit tells {_sr._session_label(row['mover'])} every hour while it stays idle"] if tell_mover else []
+                        if any(parts):
+                            _stall.note(meta, now, "no activity for an hour and nothing verified, but no builder was free to take it: " + ", and ".join(x for x in parts if x))
                     _writes.save(gid, item, note="audit: idle, no builder free")
-                if main:
+                if first_none and tell_main:
                     told.setdefault(main, []).append((gid, f"{lead}: no activity for an hour and nothing the audit could verify, and no builder was free to take it, so it stays with {_sr._session_label(row['mover'])}"))
-                print(f"audit: {gid} idle, no builder free", file=sys.stderr, flush=True)
+                if tell_mover:
+                    hours = _hi.idle_hours(cur["since"], now)
+                    told_mover.setdefault(row["mover"], []).append((gid, f"{lead}: no activity on it for about {hours} hour{'s' if hours != 1 else ''} and nothing the audit could verify, and no builder was free to take it. If you are at work on it, write a line on it; if you are not, say what blocks it or hand it on. The audit tells you again every hour while it stays idle"))
+                print(f"audit: {gid} idle, no builder free" + (", mover told" if tell_mover else ""), file=sys.stderr, flush=True)
         except Exception as e:  # noqa: BLE001  — one item never stops the others
             print(f"audit: {gid} idle item not handed on: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     for main, pairs in told.items():
@@ -648,6 +663,14 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                         + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall_summary")
         except Exception as e:  # noqa: BLE001
             print(f"audit: {main} not told of the idle items: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    for mover, pairs in told_mover.items():
+        try:
+            gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
+            body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items of yours have had no activity and no builder was free to take them:\n" + "\n".join("- " + x for x in lines)
+            _telling.tell_woken(",".join(gids), _hooks().session_id(mover) or mover, f"[stackshot] {body}\nNo reply is owed to the audit; nothing here is for {OWNER}. → "
+                                + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
+        except Exception as e:  # noqa: BLE001
+            print(f"audit: {mover} not told of its idle items: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return handed
 
 
