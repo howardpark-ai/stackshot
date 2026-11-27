@@ -25,8 +25,10 @@ from fastmcp.exceptions import NotFoundError, ToolError
 from fastmcp.server.dependencies import get_context, get_http_headers
 from fastmcp.server.providers import Provider
 from fastmcp.server.providers.proxy import ProxyTool
+from mcp.shared.exceptions import MCPError
 
 from stackshot.core.frontdoor_config import Settings
+from stackshot.core.frontdoor_identity import NOT_MEMBER_CODE
 from stackshot.frontdoor import config as _config
 from stackshot.frontdoor.backend import Backends, log
 
@@ -51,6 +53,11 @@ NOT_A_MEMBER = "you are not a member of any board."
 
 def none_answered(names: list[str]) -> str:
     return f"none of your boards answered ({', '.join(names)}). Check /healthz."
+
+
+def refused_caller(e: object) -> bool:
+    """True for a board's answer that the caller is none of its members (the board is up)."""
+    return isinstance(e, MCPError) and e.code == NOT_MEMBER_CODE
 
 
 def did_not_answer(kind: str, name: str, unreachable: bool, detail: str) -> str:
@@ -196,16 +203,18 @@ class DoorProvider(Provider):
                 raise TimeoutError(f"no answer in {limit:g} s") from None
         res, health = await asyncio.gather(asyncio.gather(*(one(n) for n in mine), return_exceptions=True), asyncio.gather(*(d.backends.health(n) for n in mine)))
         ok = {n: r for n, r in zip(mine, res) if not isinstance(r, BaseException)}
+        refused = {n for n, r in zip(mine, res) if d.backends.by_name[n].kind == "board" and refused_caller(r)}
         for n, r, h in zip(mine, res, health):
             if isinstance(r, BaseException):
-                msg = (f"{d.backends.by_name[n].kind} '{n}' did not list its tools ({type(r).__name__}: {str(r)[:200]}); health={h}. "
+                msg = (f"board '{n}' refused this caller: {str(r)[:200]}" if n in refused else
+                       f"{d.backends.by_name[n].kind} '{n}' did not list its tools ({type(r).__name__}: {str(r)[:200]}); health={h}. "
                        f"Its tools are not missing, the {d.backends.by_name[n].kind} is down.")
                 if warn:
                     await d.warn(msg)
                 else:
                     log.warning("%s", msg)
         if not ok:
-            raise ToolError(none_answered(mine))
+            raise ToolError(str(res[0]) if len(refused) == len(mine) else none_answered(mine))      # every board refused the caller: the first one's own sentence, as for a refused call
         out: dict[str, DoorTool] = {}
         boards = [n for n in ok if d.backends.by_name[n].kind == "board"]
         if boards:
