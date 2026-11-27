@@ -172,7 +172,7 @@ def server_tools(server_py: Path) -> dict[str, list[str]]:
 FLAG = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")
 END_OF_FLAGS = re.compile(r"(?<!\S)--(?!\S)")
 SALA_LINE = re.compile(r"^\s{0,4}(?:salamander|sala)\s+([a-z][a-z-]*)\b")
-OP_HELP_ASK = re.compile(r"(?:\s*\[?--(?:help|full)(?![\w-])\]?)*")      # straight after `op`: asking for its help (`--help`, `--help --full`), which no verb table lists
+OP_HELP_ASK = re.compile(r"(?:\s*(?:--help|-h)(?![\w-])(?:\s*\[?--full(?![\w-])\]?)?)?")      # straight after `op`: asking for its help (`--help` or `-h`, then optionally `--full`, bracketed or not), which no verb table lists; nothing else may follow it
 
 
 @dataclass
@@ -435,16 +435,21 @@ def check_sala(path: str, ln: int, s: str, h: SalaHelp) -> list[Finding]:
             if h.op_unread:
                 continue
             sub = (rest.split() or [""])[0]
+            sub = "" if sub.startswith("-") else sub       # a flag is not a verb name (`sala op --full` names none)
             if h.op_verbs and re.fullmatch(r"[a-z][a-z-]*", sub) and sub not in h.op_verbs:
                 out.append(Finding(path, ln, "verb", f"sala op {sub}", f"sala op has no verb {sub!r}", "op verbs: " + ", ".join(sorted(h.op_verbs))))
                 continue
             named = sub in h.op_verbs
-            for f in dict.fromkeys(FLAG.findall(rest[OP_HELP_ASK.match(rest).end():])):
-                ok = (f in h.op_general or f in h.op_verbs.get(sub, set()) or (not named and f in h.op_flags_any)
-                      or (not named and any(f in v for v in h.op_verbs.values())))
+            asked = OP_HELP_ASK.match(rest)
+            help_asked = bool(asked.group())                  # `--help` / `-h` [--full]: excused, and no flag may follow it
+            shown = rest[:asked.end()].strip() if help_asked else sub
+            for f in dict.fromkeys(FLAG.findall(rest[asked.end():])):
+                ok = not help_asked and (f in h.op_general or f in h.op_verbs.get(sub, set()) or (not named and f in h.op_flags_any)
+                                         or (not named and any(f in v for v in h.op_verbs.values())))
                 if not ok:
-                    out.append(Finding(path, ln, "flag", f"sala op {sub} {f}".replace("  ", " "), f"sala op {sub} lists no flag {f}".replace("  ", " "),
-                                       f"flags: {', '.join(sorted(h.op_general | h.op_verbs.get(sub, set()))) or '(none)'}", verb="op", flag=f))
+                    listed = "(none after " + shown + ")" if help_asked else ', '.join(sorted(h.op_general | h.op_verbs.get(sub, set()))) or '(none)'
+                    out.append(Finding(path, ln, "flag", f"sala op {shown} {f}".replace("  ", " "), f"sala op {shown} lists no flag {f}".replace("  ", " "),
+                                       f"flags: {listed}", verb="op", flag=f))
             continue
         for f in flags:
             if f not in h.verbs[verb]:

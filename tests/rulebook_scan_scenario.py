@@ -144,8 +144,14 @@ check("…`sala lane exec x -- claude --cloud` gives none", fs == [], [(f.kind, 
 # asking op for its help is no stale mention: no verb table lists --help or --full, and both are right straight after `op`
 for label, hh in (("with the op table", h), ("with the main help alone", rs.parse_help(HELP))):
     scan_op = lambda text: rs.scan_text("f.md", text, SCHEMA, hh, [])
-    fs = scan_op("`sala op --help` `sala op --help --full` `sala op --full` `salamander op --help [--full]`\n")
-    check(f"{label}: --help and --full straight after `op` are not reported", fs == [], [(f.kind, f.text, f.problem) for f in fs])
+    fs = scan_op("`sala op --help` `sala op -h` `sala op --help --full` `sala op -h --full` `sala op --help [--full]` `salamander op --help [--full]`\n")
+    check(f"{label}: --help or -h, then optionally --full (bracketed or not), straight after `op` are not reported", fs == [], [(f.kind, f.text, f.problem) for f in fs])
+    fs = scan_op("`sala op --full`\n`sala op --full --help`\n`sala op --help --help`\n`sala op --help --force`\n`sala op --full-x`\n`sala op --helpx`\n")
+    check(f"{label}: --full alone, or any other flag after --help, and the --full-x and --helpx lookalikes are reported",
+          [(f.line, f.flag) for f in fs] == [(1, "--full"), (2, "--full"), (2, "--help"), (3, "--help"), (4, "--force"), (5, "--full-x"), (6, "--helpx")], [(f.line, f.kind, f.text, f.problem) for f in fs])
+    fs = scan_op("`sala op --full`\n`sala op --help --force`\n")
+    check(f"{label}: the finding names the wrong command, not a doubled flag: `sala op --full`, `sala op --help --force`",
+          [f.text for f in fs] == ["sala op --full", "sala op --help --force"], [f.text for f in fs])
     fs = scan_op("`sala op --help --full --bogus`\n`sala op retire NAME --full`\n`sala op rename OLD NEW --help`\n`sala spawn --full`\n")
     check(f"{label}: a wrong flag is still reported: beside them, --full or --help anywhere else, --full on another verb",
           [(f.line, f.kind, f.flag) for f in fs] == [(1, "flag", "--bogus"), (2, "flag", "--full"), (3, "flag", "--help"), (4, "flag", "--full")], [(f.line, f.kind, f.problem) for f in fs])
