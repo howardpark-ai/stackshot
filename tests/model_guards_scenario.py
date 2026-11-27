@@ -828,11 +828,11 @@ upd(200, wake=day(2))
 check("7 second mover: two background agents of the project are no second mover either", wk_(mt(200)) == day(2), mt(200))
 refused_nw("7 second mover: …but decision plus another project's background agent beside them is", 200, lambda: upd(200, needs=["decision", BACK, "home-beta-bg"], ask=ASK), "needs names more than one mover")
 
-# a time wait with no words: the refusal of a near date gives the bare dated wait to send instead, and that call goes through
+# a time wait with no words: the refusal of a near date gives the bare dated wait to send instead, and that call goes through the tool
 item(960, needs=[BACK])
-refused_nw("7 time wait: a near date with wait_kind=time and no words is refused with the call to send instead", 960, lambda: upd(960, wait_kind="time", until=day(3)), "with no reason", 'this call without wait_kind and wait_basis, with wait_reason="<what you check then>"')
-upd(960, until=day(3), wait_reason="the build still runs until that day")
-check("7 time wait: …the same call without wait_kind, with wait_reason, goes through", ab_(mt(960)) == day(3) and not mt(960).get("wait_kind"), mt(960))
+refused_nw("7 time wait: a near date with wait_kind=time and no words is refused with the call to send instead", 960, lambda: upu(960, wait_kind="time", until=day(3)), "with no reason", 'this call without wait_kind and wait_basis, with wait_reason="<what you check then>"')
+upu(960, until=day(3), wait_reason="the build still runs until that day")
+check("7 time wait: …the same call without wait_kind, with wait_reason, goes through", W.stored_until(mt(960)) == day(3) and not mt(960).get("wait_kind"), mt(960))
 
 # ================================================================ 8. every next line names who takes it
 item(85, needs=[BACK])

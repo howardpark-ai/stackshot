@@ -56,6 +56,7 @@ from stackshot.model import ids as _model_ids
 from stackshot.model import bullet_text as BT
 from stackshot.model import field_gates as _fg
 from stackshot.model import steps as S
+from stackshot.model import nextlines as NL
 from stackshot.model import work as WK
 from stackshot.waits import waiting as W
 from stackshot.web.tools import create as _wt_create
@@ -448,9 +449,11 @@ check("d status: …with one part only it is judged as a close: the missing part
 item(406)
 res, made = upd(406, status="finished", **CLOSE)
 check("d status: another word is not read as a close", isinstance(res, ToolError) and "status must be open | completed" in str(res) and rd(406)["status"] == "open" and "status-closed" not in kinds(made), str(res)[:300])
-item(407)
+item(407, next_=f"{OTHER}: build it\nfalcon-main: test it", next_by=[[OTHER, NL.key_of(f"{OTHER}: build it")]])      # a step another session wrote and still owes
 res, made = upd(407, status="done", **CLOSE)
-check("d status: …and every check of a close still judges it: a close over open steps with none marked is refused", isinstance(res, ToolError) and "nothing is ticked" in str(res) and rd(407)["status"] == "open", str(res)[:300])
+check("d status: …and every check of a close still judges it: a close over another session's open step is refused", isinstance(res, ToolError) and "nothing is ticked" in str(res) and CL.kind_of(str(res)) == "a close with a step still open" and rd(407)["status"] == "open", str(res)[:300])
+out, _ = run_mw("update", {"item_id": "a407", "sender": MAIN}, lambda: reply(_wt_update.stackshot_update("a407", sender=MAIN, status="done", **CLOSE)))
+check("d status: …the refused reply tells of no fix: nothing was read as anything", isinstance(out, ToolError) and "nothing is ticked" in str(out) and "was read as" not in str(out), str(out)[-400:])
 item(408)
 out, _ = run_mw("update", {"item_id": "a408", "sender": MAIN}, lambda: reply(_wt_update.stackshot_update("a408", sender=MAIN, status="closed", done=[1, 2], **CLOSE)))
 check("d status: the reply the caller reads carries the line", 'was read as status="completed"' in txt(out), txt(out)[-300:])
@@ -526,16 +529,17 @@ short = "Decide: take the design · Recommend: yes · Stakes: a week · By: Fri"
 check("d ask: …and an ask cut to the limit passes", ASKS._gate_ask(short) == short, None)
 
 # d.6 clear_wait beside a new wait_kind: send it without clear_wait
+from stackshot.model import model as MD
 item(440, until=local_day(3), wait_kind="relay", wait_event="the vendor replies")
 res, made = upd(440, clear_wait=True, wait_kind="time", until=local_day(40), wait_basis=BASIS(40))
 check("d clear_wait: beside a new wait_kind it is refused, naming the call to send", isinstance(res, ToolError) and "send this call again without clear_wait" in str(res) and CL.kind_of(str(res)) == "clear_wait sent beside a new wait", str(res)[:500])
 res, made = upd(440, wait_kind="time", until=local_day(40), wait_basis=BASIS(40))
-check("d clear_wait: …and without it the new wait takes the stored one's place", not isinstance(res, ToolError) and mt(440).get("wait_kind") == "time" and W.stored_until(mt(440)) == local_day(40) and not mt(440).get("wait_event"), (str(res)[:400], mt(440)))
+wait_ = MD.derive(rd(440)).wait
+check("d clear_wait: …and without it the new wait takes the stored one's place: a time wait to the new day, the old event not read", not isinstance(res, ToolError) and wait_.kind == "time" and wait_.until == local_day(40) and wait_.event == "", (str(res)[:400], wait_))
 res, made = upd(440, clear_wait=True, wait_event="the vendor replies")
 check("d clear_wait: beside a field with no new wait_kind it does not say so", isinstance(res, ToolError) and "clear_wait drops" in str(res) and "without clear_wait" not in str(res), str(res)[:400])
 
 # d.7 a wait_kind that is someone outside
-from stackshot.model import model as MD
 ext = " ".join(MD.check_fields({"wait_kind": "External"}))
 check("d wait_kind: external is answered with the relay form", "(got 'external'); a wait on someone outside is wait_kind=\"relay\" with wait_event=<who>, until=<the day to chase> and needs=[\"external\"]" in ext, ext)
 check("d wait_kind: another unknown kind is not", "someone outside" not in " ".join(MD.check_fields({"wait_kind": "soon"})), None)
