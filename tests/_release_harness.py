@@ -80,10 +80,10 @@ if a[:2] == ["pr", "view"]:
         mn = int(open(f"{d}/mviews").read()) + 1 if os.path.exists(f"{d}/mviews") else 1   # one value per read, the last repeated: RT_MERGEABLE (comma-separated)
         open(f"{d}/mviews", "w").write(str(mn)); mseq = env("RT_MERGEABLE", "MERGEABLE").split(",")
         vst = env("RT_VIEWSTATE", "OPEN").split(",")   # RT_VIEWSTATE: the PR's state per read, the last repeated (OPEN | CLOSED | MERGED)
-        print(json.dumps({"state": vst[min(mn, len(vst)) - 1], "mergeable": mseq[min(mn, len(mseq)) - 1], "title": env("RT_TITLE", "a change"), "headRefName": "agent/topic",
+        print(json.dumps({"state": "CLOSED" if os.path.exists(f"{d}/pr_closed") else vst[min(mn, len(vst)) - 1], "mergeable": mseq[min(mn, len(mseq)) - 1], "title": env("RT_TITLE", "a change"), "headRefName": "agent/topic",
                           "isCrossRepository": env("RT_CROSS") == "1", "headRefOid": (env("RT_PRHEADS") or env("RT_HEAD", "abc1234def5678abc1234def5678abc1234def56")).split(",")[min(mn, len((env("RT_PRHEADS") or "x").split(","))) - 1]})); sys.exit(0)
-    if fields in ("state,mergeCommit", "state,mergeCommit,headRefOid"):   # a group release's state read with no RT_PRSTATE: every PR is open
-        print(json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "abc1234def5678abc1234def5678abc1234def56"})); sys.exit(0)
+    if fields in ("state,mergeCommit", "state,mergeCommit,headRefOid"):   # a group release's state read with no RT_PRSTATE: every PR is open (closed between a close and a reopen call: pr_closed)
+        print(json.dumps({"state": "CLOSED" if os.path.exists(f"{d}/pr_closed") else "OPEN", "mergeCommit": None, "headRefOid": "abc1234def5678abc1234def5678abc1234def56"})); sys.exit(0)
     sys.exit(3)
 if a[:2] == ["pr", "list"]:   # the open PRs based on the merged head branch (retarget_and_delete_branch): RT_STACKED, comma-separated numbers, none by default; RT_LIST=fail: the call errors
     if env("RT_LIST") == "fail": print("HTTP 502: bad gateway", file=sys.stderr); sys.exit(1)
@@ -109,7 +109,9 @@ def iso(t):
     import datetime; return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 # Orphaned runs (release.sh orphan_scan): RT_ORPHAN_RUNS = a JSON list of runs {"id", "age" (seconds queued when the scenario starts; it grows with the fake clock), "status" (default queued), "jobs" (default none), "event" (pull_request | merge_group,
 # default pull_request), "branch" (a merge_group run's head branch), "view_status" and "view_age" (what `gh run view` says when it differs from the list: the run moved on meanwhile)}; RT_ORPHAN_AFTER = the list that replaces it once the PR was reopened or dequeued (the replaced run stays listed, as GitHub keeps it); RT_ORPHAN_ERR=list|view: that call errors;
-# RT_PRCLOSE=fail | RT_REOPEN=fail | RT_DEQUEUE=fail: that call errors. Every close, reopen and dequeue call is in orphan_calls.
+# RT_PRCLOSE=fail | RT_REOPEN=fail | RT_DEQUEUE=fail: that call errors; RT_PRCLOSE=failclosed: the close errors but the PR is closed all the same; RT_REOPEN=killfirst: the first reopen call ends the release (SIGTERM to its shell) and errors, later ones work.
+# The PR is closed from a close call to a reopen call (the file pr_closed: `gh pr view` says CLOSED; a scenario can start with it, files={"pr_closed": ""}). A run may carry "sha" (the head it belongs to, default the PR's head: `gh run list --commit` lists only
+# the runs of that head) and "view_jobs": "absent" | "null" | "object" (what `gh run view` gives for the job list when it is not a list). Every close, reopen and dequeue call is in orphan_calls.
 def orphan_list():
     after = os.path.exists(f"{d}/orphan_replaced") and env("RT_ORPHAN_AFTER")
     return json.loads(after or env("RT_ORPHAN_RUNS", "[]"))
@@ -117,19 +119,31 @@ def orphan_created(r):
     return iso((int(open(f"{d}/clock-base").read()) if os.path.exists(f"{d}/clock-base") else int(__import__("time").time())) - int(r["age"]))
 if a[:2] in (["pr", "close"], ["pr", "reopen"]):
     open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
-    if (a[1] == "close" and env("RT_PRCLOSE") == "fail") or (a[1] == "reopen" and env("RT_REOPEN") == "fail"): print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
-    if a[1] == "reopen": open(f"{d}/orphan_replaced", "w").close()
+    if a[1] == "close" and env("RT_PRCLOSE") == "failclosed": open(f"{d}/pr_closed", "w").close()
+    if a[1] == "reopen" and env("RT_REOPEN") == "killfirst" and open(f"{d}/orphan_calls").read().count("pr reopen") == 1:
+        import signal, time; os.kill(os.getppid(), signal.SIGTERM); time.sleep(0.3); print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    if (a[1] == "close" and env("RT_PRCLOSE") in ("fail", "failclosed")) or (a[1] == "reopen" and env("RT_REOPEN") == "fail"): print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    if a[1] == "close": open(f"{d}/pr_closed", "w").close()
+    if a[1] == "reopen":
+        open(f"{d}/orphan_replaced", "w").close()
+        if os.path.exists(f"{d}/pr_closed"): os.remove(f"{d}/pr_closed")
     sys.exit(0)
 if a[:2] == ["run", "list"] and "--event" in a and a[a.index("--event") + 1] in ("pull_request", "merge_group"):
     open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
     if env("RT_ORPHAN_ERR") == "list": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
     ev = a[a.index("--event") + 1]
-    print(json.dumps([{"databaseId": r["id"], "status": r.get("status", "queued"), "createdAt": orphan_created(r), "headBranch": r.get("branch", "")} for r in orphan_list() if r.get("event", "pull_request") == ev])); sys.exit(0)
+    cm = a[a.index("--commit") + 1] if "--commit" in a else None   # --commit <sha>: only the runs of that head
+    print(json.dumps([{"databaseId": r["id"], "status": r.get("status", "queued"), "createdAt": orphan_created(r), "headBranch": r.get("branch", "")} for r in orphan_list()
+                      if r.get("event", "pull_request") == ev and (cm is None or r.get("sha", env("RT_HEAD", "abc1234def5678abc1234def5678abc1234def56")) == cm)])); sys.exit(0)
 if a[:2] == ["run", "view"] and "jobs,status,createdAt" in a:
     open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
     if env("RT_ORPHAN_ERR") == "view": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
     r = next((r for r in orphan_list() if str(r["id"]) == a[2]), {"id": a[2], "age": 99999})   # a run the list never named reads as an old orphan (a call that should not have been made shows)
-    print(json.dumps({"status": r.get("view_status", r.get("status", "queued")), "createdAt": orphan_created({"age": r.get("view_age", r["age"])}), "jobs": r.get("jobs", [])})); sys.exit(0)
+    v = {"status": r.get("view_status", r.get("status", "queued")), "createdAt": orphan_created({"age": r.get("view_age", r["age"])}), "jobs": r.get("jobs", [])}
+    if r.get("view_jobs") == "absent": del v["jobs"]
+    if r.get("view_jobs") == "null": v["jobs"] = None
+    if r.get("view_jobs") == "object": v["jobs"] = {}   # empty, but not a list
+    print(json.dumps(v)); sys.exit(0)
 if a[:1] == ["api"] and a[1:2] == ["graphql"] and "dequeuePullRequest" in " ".join(a):
     open(f"{d}/orphan_calls", "a").write("dequeue " + " ".join(x for x in a if x.startswith("id=")) + "\n")
     if env("RT_DEQUEUE") == "fail": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)

@@ -56,7 +56,7 @@
 #                                 codex_review = false, salamander not on PATH). The unit gets PATH, XDG_STATE_HOME, SALA_CONFIG, SALA_CODEX_REVIEW and the other SALA_CODEX_* variables that are set in this release's environment. A group release
 #                                 (THE TWO MERGE QUEUES, run_group) does not start it;
 #                                 2. its checks pass (waits up to 50 min for a pending or queued one: the CI runners take one job at a time);
-#                                    A workflow run of the PR that stays `queued` for more than 30 min (RELEASE_ORPHAN_QUEUED, seconds) with NO jobs (`gh run view <id> --json jobs`) never starts and cannot be cancelled or rerun (GitHub bug): the wait replaces it, once per step: a PR check run by `gh pr close` then `gh pr reopen` (the head stays, no commit), a merge_group run by taking the PR out of the merge queue (GraphQL dequeuePullRequest) and enqueueing it again; the wait clock restarts once, the log line names the run; a second orphan in the same step fails the release naming its run id. A run with any job, a younger one, or a gh error replaces nothing.
+#                                    A workflow run of the PR that stays `queued` for more than 30 min (RELEASE_ORPHAN_QUEUED, seconds) with NO jobs (`gh run view <id> --json jobs`) never starts and cannot be cancelled or rerun (GitHub bug): the wait replaces it, once per step: a PR check run by `gh pr close` then `gh pr reopen` (the head stays, no commit), a merge_group run by taking the PR out of the merge queue (GraphQL dequeuePullRequest) and enqueueing it again; the wait clock restarts once, the log line names the run(s): every orphan found at one look is replaced together; a run that is an orphan only after the replacement fails the release naming its run id. In the merge queue only a run created at or after this enqueue counts. A PR closed for the replacement is reopened however the release ends (a failed close is checked, the exit trap, a marker file orphan-reopen-<pr> for a rerun). A run with any job, a younger one, or a gh error replaces nothing.
 #                                 2a. A CONFLICT THAT IS ONLY THE GENERATED TOOL-TEXT SNAPSHOT is mended instead of failing (regen_snapshot, tools/snapshot_regen.py): two PRs that both change tool text
 #                                 conflict on tests/tool_text.snapshot.json and on nothing else, and the by-hand fix is always the same. When the first look at the PR says CONFLICTING, or GitHub removed the PR
 #                                 from the merge queue and the PR conflicts with main now, this fetches main and the PR head (git only: no GitHub call), merges main into the head in a temporary worktree of its own
@@ -1000,20 +1000,25 @@ if f and r.stdout.strip():
     except OSError: pass
 sys.stdout.write(r.stdout)' "${@:2}"
 }
-orphan_scan() {   # $1 = pr (this head's pull_request runs) | queue (the merge_group runs of this PR). Prints the id of one run that is `queued` for at least ORPHAN_QUEUED s with an EMPTY job list, none when there is none.
-                  # A run with any job (even a queued one), a younger run, a run already replaced, and any answer GitHub does not give (a gh error, a reply that is not as expected) are never one: an error replaces nothing
-    local list ids id view
+orphan_scan() {   # $1 = pr (this head's pull_request runs) | queue (the merge_group runs of this PR). Prints the id of EVERY run that is `queued` for at least ORPHAN_QUEUED s with an EMPTY job list (one per line), none when there is none.
+                  # A run with any job (even a queued one), a younger run, a run already replaced, and any answer GitHub does not give (a gh error, a reply that is not as expected) are never one: an error replaces nothing.
+                  # queue: only a run created at or after THIS enqueue counts ($enq_epoch, less ORPHAN_SLACK s for the clock of GitHub against this host's): a ghost of an earlier enqueue of the same PR number (it stays queued
+                  # for ever and cannot be cancelled) is not this group's run, and replacing "it" would dequeue the healthy new group. pr: the runs of this very head (--commit) are all looked at, whenever they were created: this
+                  # wait only gets here while a check of the head is still pending, and a ghost of the head (left by an earlier release of it, or by an earlier close and reopen) shows as that pending check and blocks the wait
+                  # for ever, so a rerun that finds it is right to replace it once; a run of another head is never listed
+    local list ids id view ORPHAN_SLACK=120
     if [ "$1" = pr ]; then list="$(gh run list --event pull_request --commit "$headsha" --repo "$REPO" --json databaseId,status,createdAt --limit 30 2>/dev/null)" || return 0
     else list="$(gh run list --event merge_group --repo "$REPO" --json databaseId,status,createdAt,headBranch --limit 50 2>/dev/null)" || return 0; fi
-    ids="$(echo "$list" | KIND="$1" PR="$pr" CAP="$ORPHAN_QUEUED" NOW="$(date +%s)" DONE="$orphan_done" python3 -c '
+    ids="$(echo "$list" | KIND="$1" PR="$pr" CAP="$ORPHAN_QUEUED" NOW="$(date +%s)" DONE="$orphan_done" ENQ="${enq_epoch:-0}" SLACK="$ORPHAN_SLACK" python3 -c '
 import datetime, json, os, sys
 try:
     runs = json.load(sys.stdin)
     now = int(os.environ["NOW"]); cap = int(os.environ["CAP"]); done = os.environ["DONE"].split()
     for r in runs:
         if r.get("status") != "queued" or str(r.get("databaseId")) in done: continue
-        if os.environ["KIND"] == "queue" and "/pr-" + os.environ["PR"] + "-" not in (r.get("headBranch") or ""): continue
-        if now - int(datetime.datetime.strptime(r["createdAt"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp()) >= cap: print(r["databaseId"])
+        t = int(datetime.datetime.strptime(r["createdAt"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp())
+        if os.environ["KIND"] == "queue" and ("/pr-" + os.environ["PR"] + "-" not in (r.get("headBranch") or "") or t < int(os.environ["ENQ"]) - int(os.environ["SLACK"])): continue
+        if now - t >= cap: print(r["databaseId"])
 except Exception: pass' 2>/dev/null)"
     for id in $ids; do
         [[ "$id" =~ ^[0-9]+$ ]] || continue
@@ -1025,25 +1030,58 @@ try:
     t = int(datetime.datetime.strptime(r["createdAt"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp())
     ok = r.get("status") == "queued" and isinstance(r.get("jobs"), list) and len(r["jobs"]) == 0 and int(os.environ["NOW"]) - t >= int(os.environ["CAP"])
 except Exception: ok = False
-sys.exit(0 if ok else 1)' 2>/dev/null; then echo "$id"; return 0; fi
+sys.exit(0 if ok else 1)' 2>/dev/null; then echo "$id"; fi
     done
     return 0
 }
-orphan_said() {   # $1 = run id, $2 = what replaces it
-    say "run $1 has been queued for more than $((ORPHAN_QUEUED/60)) min with no jobs: GitHub never starts such a run and it cannot be cancelled or rerun; replacing it with a new run ($2), once"
-    orphan_done="$orphan_done$1 "
+orphan_names() {   # $1 = the run ids, space separated -> $on_txt ("run 4001" | "runs 4001, 4002"), $on_has (has | have), $on_be (is | are)
+    local n=($1)
+    if [ ${#n[@]} -eq 1 ]; then on_txt="run $1"; on_has=has; on_be=is; else on_txt="runs ${1// /, }"; on_has=have; on_be=are; fi
 }
-orphan_pr() {   # in wait_pr_checks: a PR check run that is an orphan is replaced by closing and reopening the PR (the head stays; no commit). $1 = the step, $2 = 1 when this step replaced a run already. 0: replaced (the wait clock restarts), 1: no orphan
-    local id try
-    id="$(orphan_scan pr)"; [ -n "$id" ] || return 1
-    [ "$2" != 1 ] || fail "$1" "run $id is queued with no jobs again, after the PR was closed and reopened once for the same reason; GitHub is not starting this PR's runs (it cannot be cancelled or rerun)"
-    if ! gh pr close "$pr" --repo "$REPO" >/dev/null 2>&1; then say "run $id is queued with no jobs, but closing the PR to replace it failed; the wait goes on"; return 1; fi
-    orphan_said "$id" "closing and reopening PR #$pr on the same head ${headsha:0:7}"
+orphan_said() {   # $1 = the run ids (space separated: one replacement covers all of them), $2 = what replaces them. Every id is recorded: a replaced run stays listed as queued and is never replaced twice
+    local i on_txt on_has on_be; orphan_names "$1"
+    say "$on_txt $on_has been queued for more than $((ORPHAN_QUEUED/60)) min with no jobs: GitHub never starts such a run and it cannot be cancelled or rerun; replacing it with a new run ($2), once"
+    for i in $1; do orphan_done="$orphan_done$i "; done
+}
+orphan_open=""   # the number of a PR this release closed to replace a run and has not reopened yet (the exit trap reopens it); its marker file under the state dir ($LOGDIR/orphan-reopen-<pr>) outlives a release that is killed
+orphan_reopen() {   # $1 = the PR. Reopens it (4 tries, 5 s apart). 0 when GitHub took it: the marker and $orphan_open are cleared
+    local try
     for try in 1 2 3 4; do
-        gh pr reopen "$pr" --repo "$REPO" >/dev/null 2>&1 && return 0
+        if gh pr reopen "$1" --repo "$REPO" >/dev/null 2>&1; then rm -f "$LOGDIR/orphan-reopen-$1"; orphan_open=""; return 0; fi
         [ $try = 4 ] || sleep 5
     done
-    fail "$1" "run $id was queued with no jobs, the PR was closed to replace it, but it cannot be reopened: PR #$pr is CLOSED (reopen it by hand: gh pr reopen $pr)"
+    return 1
+}
+orphan_exit() {   # first in the EXIT trap: a release that ends (a failure, a signal) between the close and the reopen of a PR would leave it closed: reopened here, 3 tries. An error is not a new failure (the marker stays: a rerun reopens it)
+    local try pn="$orphan_open"
+    [ -n "$pn" ] || return 0
+    orphan_open=""
+    for try in 1 2 3; do
+        if gh pr reopen "$pn" --repo "$REPO" >/dev/null 2>&1; then rm -f "$LOGDIR/orphan-reopen-$pn"; return 0; fi
+        [ $try = 3 ] || sleep 3
+    done
+    return 0
+}
+orphan_pr() {   # in wait_pr_checks: PR check runs that are orphans are replaced by closing and reopening the PR (the head stays; no commit), once for all of them. $1 = the step, $2 = 1 when this step replaced runs already. 0: replaced (the wait clock restarts), 1: no orphan
+    local ids st on_txt on_has on_be mk="$LOGDIR/orphan-reopen-$pr"
+    ids="$(orphan_scan pr | tr '\n' ' ')"; ids="${ids% }"; [ -n "$ids" ] || return 1
+    orphan_names "$ids"
+    # only a run that is not recorded gets here (orphan_scan skips the replaced ones): one that appeared after the replacement is a second failure of GitHub, not the first one again
+    [ "$2" != 1 ] || fail "$1" "$on_txt $on_be queued with no jobs again, after the PR was closed and reopened once for the same reason; GitHub is not starting this PR's runs (it cannot be cancelled or rerun)"
+    : > "$mk"; orphan_open="$pr"   # before the close: from here a kill, a failure or a rerun finds the PR to reopen
+    if ! gh pr close "$pr" --repo "$REPO" >/dev/null 2>&1; then
+        # the call can have closed the PR and still errored (a timeout after the fact): GitHub is asked
+        st="$(gh pr view "$pr" --repo "$REPO" --json state,mergeCommit 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])' 2>/dev/null)"
+        case "$st" in
+            OPEN) rm -f "$mk"; orphan_open=""; say "$on_txt $on_be queued with no jobs, but closing the PR to replace it failed; the wait goes on"; return 1 ;;
+            CLOSED) say "closing the PR to replace $on_txt reported an error, but GitHub shows PR #$pr CLOSED: it is reopened" ;;
+            *) say "$on_txt $on_be queued with no jobs; closing the PR to replace it failed and GitHub's answer about its state cannot be read; the wait goes on (the PR is reopened when this release ends, if it is closed)"; return 1 ;;
+        esac
+    fi
+    orphan_said "$ids" "closing and reopening PR #$pr on the same head ${headsha:0:7}"
+    orphan_reopen "$pr" && return 0
+    orphan_open=""   # the four tries are done and the message says how to reopen it; the marker stays for a rerun
+    fail "$1" "$on_txt $on_has been queued with no jobs, the PR was closed to replace $([ "$on_has" = has ] && echo it || echo them), but it cannot be reopened: PR #$pr is CLOSED (reopen it by hand: gh pr reopen $pr)"
 }
 wait_pr_checks() {   # $1 = the step a failure is named for (checks: the first wait; pr tests: the wait on an updated head), $2 = quiet|progress, $3 = what the log says on a pass. Waits up to WAIT_CHECKS, polled every POLL_PR s (60)
     local step="$1" mode="$2" okmsg="$3" waited=0 checks verdict ci_line orph_at=-1 orph_n=0
@@ -1243,7 +1281,7 @@ wait_merged() {   # after the enqueue call, in run(): reads the PR until it is M
                   # waiting after QUEUE_WAIT, fails the release. The reads are every POLL_QUEUE s once the entry shows (every 10 s before, for QUEUE_GRACE: GitHub shows a new entry a moment late); one that cannot be read is waited out like
                   # a pending one. Leaving the queue is believed on the second read, 10 s after the first (the entry can vanish a moment before the PR shows merged), and only after the PR was read for MERGED up to three more times,
                   # 10 s apart, and the timeline for the removal (a merged PR is never reported as removed). $via_queue is the enqueue call's (1: the queue took the PR). Runs inside run()
-    local t0 now waited said=0 seen=0 absent=0 unread=0 poll=10 tries orph_at=-1 orph_n=0 oid
+    local t0 now waited said=0 seen=0 absent=0 unread=0 poll=10 tries orph_at=-1 orph_n=0 oid on_txt on_has on_be
     t0="$(date +%s)"; mergeoid=""; removed_why=""; gq_state=""; gq_oid=""; gq_entry=""
     while :; do
         now="$(date +%s)"; waited=$((now - t0))
@@ -1290,15 +1328,17 @@ wait_merged() {   # after the enqueue call, in run(): reads the PR until it is M
         # a merge_group run of this PR queued with no jobs for ORPHAN_QUEUED s never starts: the PR is dequeued and enqueued again, once, and the wait clock restarts once with it. Looked for every 5 min once the PR has waited that long
         if [ "$waited" -ge "$ORPHAN_QUEUED" ] && { [ $orph_at -lt 0 ] || [ $((waited - orph_at)) -ge 300 ]; }; then
             orph_at=$waited
-            oid="$(orphan_scan queue)"
+            oid="$(orphan_scan queue | tr '\n' ' ')"; oid="${oid% }"
             if [ -n "$oid" ]; then
-                [ $orph_n = 0 ] || fail "merge queue" "run $oid is queued with no jobs again, after the PR was dequeued and enqueued once for the same reason; GitHub is not starting this PR's merge group runs (it cannot be cancelled or rerun)"
+                orphan_names "$oid"
+                # the scan skips every run already replaced, so a run found after the replacement is a new one: a second failure of GitHub, not the first one again
+                [ $orph_n = 0 ] || fail "merge queue" "$on_txt $on_be queued with no jobs again, after the PR was dequeued and enqueued once for the same reason; GitHub is not starting this PR's merge group runs (it cannot be cancelled or rerun)"
                 if ghq_dequeue "$pr"; then
                     orphan_said "$oid" "dequeuing PR #$pr and enqueueing it again"
                     orph_n=1; enqueue_pr; t0="$(date +%s)"; waited=0; orph_at=-1; seen=0; absent=0; unread=0; poll=10; said=0
                     continue
                 fi
-                say "run $oid is queued with no jobs, but dequeuing the PR to replace it failed; the wait goes on"
+                say "$on_txt $on_be queued with no jobs, but dequeuing the PR to replace it failed; the wait goes on"
             fi
         fi
         [ $waited -lt "$QUEUE_WAIT" ] || fail "merge queue" "still $([ -n "$gq_entry" ] && echo "in the merge queue ($gq_entry)" || echo "not merged") $((waited/60)) min after the enqueue, which is as long as this release waits; the PR may still merge later: rerun release.sh $pr to carry on from the merge (the next release's deploy carries it too)"
@@ -2020,7 +2060,7 @@ run() {
     say "release of PR #$pr starts in $HERE ($REPO)"
     ! q_is_started "$pr" || qstart=1   # the queue started this release (it wrote the mark before the start): its pause and its pre-enqueue stop apply to it
     fail() { say "FAILED at $1: $2"; queue_after_fail "$1"; tell "[release] PR #$pr FAILED at $1: $2$q_note · log $log"; exit 1; }
-    SYNC_WHO="PR #$pr"; trap 'record_sync; running_end' EXIT   # deploy_ssh: however this release ends, the server box gets the record (4c-record) and is told the release ended (4c-running); a subshell does not run it
+    SYNC_WHO="PR #$pr"; trap 'orphan_exit; record_sync; running_end' EXIT   # a PR closed to replace an orphaned run and not yet reopened is reopened first (orphan_exit); deploy_ssh: however this release ends, the server box gets the record (4c-record) and is told the release ended (4c-running); a subshell does not run it
     running_start "$pr" "$log"
     recover_pending   # a deploy of an earlier release whose process ended before main's run was read (killed, the box restarted): looked at first
     local mqmode; mqmode="$(mq_host_mode)"   # THE TWO MERGE QUEUES: only `on` changes this release (off, shadow, no file and a file that does not read are GitHub's queue, below)
@@ -2056,6 +2096,13 @@ run() {
         [ "$1" != removed ] || { step="merge queue"; why="$removed_why; "; }
         regen_pushed=0
         read_view
+        if [ "$1" = start ] && [ -e "$LOGDIR/orphan-reopen-$pr" ]; then   # an earlier release of this PR closed it to replace a run queued with no jobs (the marker) and ended before it reopened it: a PR that is CLOSED now is reopened; a closed PR without the marker is not (someone else closed it)
+            if [ "$state" = CLOSED ]; then
+                say "PR #$pr is CLOSED: an earlier release closed it to replace a run queued with no jobs and ended before it reopened it; reopening it"
+                orphan_reopen "$pr" || fail "pr state" "the PR is CLOSED: an earlier release closed it to replace a run queued with no jobs and it cannot be reopened (reopen it by hand: gh pr reopen $pr)"
+                read_view
+            else rm -f "$LOGDIR/orphan-reopen-$pr"; fi
+        fi
         if [ "$1" = start ] && [ "$state" = MERGED ]; then resumed=1; return 0; fi   # a rerun on a merged PR (4 below)
         if [ "$mergeable" = UNKNOWN ] && [ "$state" = OPEN ]; then
             say "GitHub says mergeable UNKNOWN (it is still computing, as it does after main moves); reading again every 10 s for up to $((MERGEABLE_WAIT/60)) min"
