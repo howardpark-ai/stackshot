@@ -242,7 +242,7 @@ r = run(*base, "--fetch")
 check("--fetch: no repository to ask is said (the fake repo has no origin)", "needs --github OWNER/REPO" in r.stdout, r.stdout + r.stderr)
 NO_GH = T / "no-gh-bin"; NO_GH.mkdir()      # a PATH with no gh in it: a machine with no gh command, as with no login
 r = run(*base, "--fetch", "--github", "acme/widgets", env={"PATH": str(NO_GH)})
-check("--fetch: no gh on the machine (or no login) is exit 4 and one stderr line, never a quiet 0", r.returncode == 4 and "serial minutes: n/a" in r.stdout and r.stderr.startswith("test_trim_report: no suite times:") and r.stderr.count("\n") == 1, (r.returncode, r.stdout + r.stderr))
+check("--fetch: no gh on the machine (or no login) is exit 4 and one stderr line, never a quiet 0, and the reason says the gh command is not installed", r.returncode == 4 and "serial minutes: n/a" in r.stdout and "the gh command is not installed" in r.stdout and r.stderr.startswith("test_trim_report: no suite times:") and r.stderr.count("\n") == 1, (r.returncode, r.stdout + r.stderr))
 (T / "empty-map.json").write_text(json.dumps({"format": 1, "commit": "c", "suites": {}}))
 r = run(*base, "--map", str(T / "empty-map.json"))
 check("a map that lists no suites is exit 4 and says so", r.returncode == 4 and "lists no suites" in r.stderr, (r.returncode, r.stderr))

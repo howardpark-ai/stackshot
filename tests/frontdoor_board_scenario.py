@@ -107,10 +107,12 @@ def auth_start(oauth):
             else: os.environ[k] = v
 
 
-def serve(app):
-    """The ASGI app on 127.0.0.1:<ephemeral port>, in its own thread; → (server, thread, port). stop(...) ends it."""
+def serve(app, sock=None):
+    """The ASGI app on 127.0.0.1:<ephemeral port>, or on `sock` (a socket bound already: the caller needed the port first), in its own thread; → (server, thread, sock, port). stop(...) ends it."""
     import socket, threading, time, uvicorn
-    sock = socket.socket(); sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
+    if sock is None:
+        sock = socket.socket(); sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
     srv = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="on", timeout_graceful_shutdown=3))
     th = threading.Thread(target=lambda: srv.run(sockets=[sock]), daemon=True); th.start()
     for _ in range(200):
@@ -158,6 +160,7 @@ def part_on():
     from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
     from fastmcp.exceptions import ToolError
+    from mcp.shared.exceptions import MCPError
     SECRET, OTHER = "door-secret-0123456789abcdef", "another-secret-0123456789abc"
     sig = lambda who, secret_=SECRET, now=None: ident.sign(secret_.encode(), who, now=now)
     ALICE, BOB, CAROL, DAVE = "alice@example.test", "bob@example.test", "carol@example.test", "dave@example.test"
@@ -406,10 +409,18 @@ def part_on():
         check("board: a client signed with another secret cannot connect", e is not None, e)
         names, text = tools_and_item({ident.HEADER: sig(ALICE)})
         check("board: a signed call by a member lists the tools and reads an item", {"get", "brief", "create", "update"} <= set(names) and "door fixture item" in text, (names, text[:200]))
+        def one_call(headers):
+            async def run():
+                async with Client(StreamableHttpTransport(URL, headers=headers)) as c:
+                    return await c.call_tool("get", {"item_id": "a1"})
+            return asyncio.run(run())
+        def refused(e, who, kind=ToolError): return isinstance(e, kind) and f"Refused: {who} is not allowed on this board" in str(e) and (kind is not MCPError or e.code == ident.NOT_MEMBER_CODE)
+        e = raises(one_call, {ident.HEADER: sig(BOB)})
+        check("board: a signed call by someone this board does not list is refused by the tool with the board's own sentence", refused(e, BOB), repr(e))
+        e = raises(one_call, {ident.HEADER: sig(DAVE)})
+        check("board: ... and so is one the front door's file does not list at all", refused(e, DAVE), repr(e))
         e = raises(tools_and_item, {ident.HEADER: sig(BOB)})
-        check("board: a signed call by someone this board does not list is refused by the tool with the board's own sentence", isinstance(e, ToolError) and f"Refused: {BOB} is not allowed on this board" in str(e), repr(e))
-        e = raises(tools_and_item, {ident.HEADER: sig(DAVE)})
-        check("board: ... and so is one the front door's file does not list at all", isinstance(e, ToolError) and f"Refused: {DAVE} is not allowed on this board" in str(e), repr(e))
+        check("board: ... and the list of tools is refused to them too", refused(e, BOB, MCPError), repr(e))
 
         async def session_calls(who_headers, edits):
             """One open session; between its calls `edits` change the members file; → the outcome of each call."""
@@ -469,8 +480,13 @@ def part_on():
         check("front door: what the front door's transport sends (its signed identity, its bearer) is accepted by the board and the call is the member's", "get" in tools_d and "door fixture item" in text_d, (tools_d, text_d[:120]))
         e = raises(lambda: asyncio.run(through_door(door_settings(secret("wrong.key", OTHER)), ALICE)))
         check("front door: a front door that signs with another secret is refused by the board", e is not None, e)
+        async def call_through_door(settings_, caller):
+            async with fdback.Backends(settings_).client("main", caller) as c:
+                return await c.call_tool("get", {"item_id": "a1"})
+        e = raises(lambda: asyncio.run(call_through_door(door_settings(paths["secret"]), BOB)))
+        check("front door: a caller the front door signs for but the board does not list is refused by the board's tool", refused(e, BOB), repr(e))
         e = raises(lambda: asyncio.run(through_door(door_settings(paths["secret"]), BOB)))
-        check("front door: a caller the front door signs for but the board does not list is refused by the board's tool", isinstance(e, ToolError) and "is not allowed on this board" in str(e), repr(e))
+        check("front door: ... and the board refuses the list to them", refused(e, BOB, MCPError), repr(e))
     finally:
         stop(srv, th, sock)
 
