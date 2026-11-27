@@ -861,6 +861,8 @@ def update_unlocked(
             if work_spec.get("cut"):
                 _calls.fixed("work-cut", f"the status line was {work_spec['cut']} characters and the limit is {_work.TEXT_MAX}: it was cut at the last word that fits and ends with an ellipsis, as \"{work_spec['text']}\"; to change it, send a shorter one",
                              fields=["work"], stored=work_spec["text"], sent=str(work))
+            if work_spec.get("waiting") and not work_spec["remove"]:
+                _calls.fixed("work-waiting", "a status line has no waiting state, so it was stored as assigned (not in progress); if the item itself waits, say on what with until=<date>, after=[<item>] or wait_kind")
             work_spec["text"] = _shown_ids(work_spec.get("text") or "")   # g7 → board#N, after the length check
             work_writer = _session_label(h.session_id(sender.strip() or own_for))   # the writer by name; the session whose step it is, unless the spec names another
             fc.call(_gates.gate_work_writer, gid, work_writer, _telling.holder({"status": "open", "metadata": meta}), meta, finishing)                      # the needs list as this call leaves it
@@ -932,7 +934,7 @@ def update_unlocked(
     elif outcome or reason or superseded_by or outcome_text:
         fc.add(f"Refused: outcome, outcome_text, reason and superseded_by go with a close (status=completed on an open item, or the complete tool)"
                + (f"; {gid} is already completed: to correct its close, reopen it (status=open with a next) and close it again"
-                  if was == "completed" else ""))
+                  if was == "completed" else '; to close it now, send the same call with status="completed"'))
     if reopening and not next.strip():
         fc.add(f"Refused: reopening {gid} needs a new next: the step that comes now")
     if draft_set and (status or item.get("status")) == "completed":

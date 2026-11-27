@@ -105,7 +105,7 @@ The status of your open step, one line per call: {"text": "PR 83 up", "state": "
 of your first open step in place (the step is the stage, such as "stage 11: auth and who", and the status says where
 you are in it; the page keeps one line per step, so a night of updates is one line). text is at most {{WORK_TEXT_MAX}}
 characters (details go on the project page). state: in progress (the default) | done; done also ticks the step, as
-done=[n] does. With no open step of yours, one is made from the text. {"remove": true} clears the status. Written by
+done=[n] does. A status has no waiting state: a wait is until, after or wait_kind. With no open step of yours, one is made from the text. {"remove": true} clears the status. Written by
 the mover or a session named in needs; it changes no needs and owes no page. A project builder's step with a status in
 progress (changed within 90 minutes) tells the stall pass and the balancer that a build subagent is running on the
 item, so the item is not handed on meanwhile; a status left in progress stops hiding the item after that, and a status
@@ -146,8 +146,8 @@ test it\nmy-x: open the PR". An item that stays open keeps one open step, a park
 reword an open step to add progress. next="none" removes your open lines; an empty next is next not passed.
 
 ## param ASK
-The one line a needs=decision item carries, all four parts in this order, joined by " · ", no line break, at most 240
-characters in all: ask="Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week
+The one line a needs=decision item carries, all four parts in this order, each opening with its label and a colon,
+joined by " · ", no line break, at most 240 characters in all, every one counted, a link's address too: ask="Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week
 delays the demo · By: Mon Jun 8th 2099" (By is a date in words, or no date). A real choice, not "have you done X?";
 one question per ask, whose answers are the options (no ";" between decisions, no second question joined by "and say if",
 "and tell me whether", "and decide whether" or "and, if so, …" when the clause ends there; a bundled action such as
@@ -326,8 +326,9 @@ What the step waits on that is not available now (a reply, a build or test still
 resource that is down), at least {{WAIT_GUARD_REASON_MIN}} characters: wait_reason="the nightly run finishes at
 03:00". Required when this write sets an until, or a line of your own next dated later than today, on an item you move,
 or it is refused (a model may refuse it too when the step could be done now). Not stored on the item. A park
-(wait_kind="time" with wait_basis), a wait on another item (after) and needs decision or external need none. A date after by,
-due or before is a deadline, not a wait.
+(wait_kind="time" with wait_basis), a wait on another item (after) and needs decision or external need none.
+wait_kind="time" within {{CAP_DAYS}} days is a park, which needs {{OWNER}}'s words (said): to check back on your own
+work send until and wait_reason with no wait_kind. A date after by, due or before is a deadline, not a wait.
 
 ## description update
 {{UPDATE_DESC}}{{CONTACT_FORM}}{{MODEL_FORM}}{{CHECKLIST_FORM}}{{STEP_PROOF_FORM}}{{DRAFT_FORM}}{{STEP_FORM}}{{STALL_SHORT}}{{SELF_WAIT_FORM}}{{MACHINE_FORM}}{{ANCHOR_OFFER_FORM}}{{WAIT_FORM}}

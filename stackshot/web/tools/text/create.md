@@ -37,8 +37,8 @@ Results and PRs go on the project page, never in next. A line opening with `{{OW
 with several actions is split into one line per action (a lead-in that ends with a colon before `1) … 2) …` stays one line, its items indented `- ` lines under it; not one over {{STEP_SPLIT_MAX}} characters or {{STEP_SPLIT_ACTIONS}} actions).
 
 ## param ASK_PARAM_NEW
-The one line a needs=decision item carries, all four parts in this order, joined by " · ", no line break, at most 240
-characters in all: ask="Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week
+The one line a needs=decision item carries, all four parts in this order, each opening with its label and a colon,
+joined by " · ", no line break, at most 240 characters in all, every one counted, a link's address too: ask="Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week
 delays the demo · By: Mon Jun 8th 2099" (By is a date in words, or no date). A real choice, not "have you done X?";
 one question per ask, whose answers are the options (no ";" between decisions, no second question joined by "and say if",
 "and tell me whether", "and decide whether" or "and, if so, …" when the clause ends there; a bundled action such as

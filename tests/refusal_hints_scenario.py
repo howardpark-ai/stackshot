@@ -8,6 +8,8 @@ A refusal names the fix and shows the corrected call, so a writer does not need 
                          the corrected description shown
   c  hints               the refusal for an ask in the wrong form, a said entry that is not JSON, a wait set without its reason, a wait_basis the rule does not take and an option without its label
                          and line names the fault and shows the corrected call; each corrected call is sent back to the same gate and goes through
+  d  repeating refusals  two words read as the one the tool takes (a close's status, a status line's `waiting`), and the refusals that now give the reason or the call to send: a long bullet the line cap
+                         keeps from being split, a too long ask, clear_wait beside a new wait, close fields with no close, a wait_kind of someone outside; a refusal of several faults keeps its first one's kind
 
     tests/run-suite refusal_hints        -> exit 0 / 1"""
 import asyncio, contextlib, datetime as dt, io, json, logging, os, pathlib, re, sys, time, types
@@ -427,5 +429,130 @@ try:
 except ValueError as e:
     said_msg2 = str(e)
 check("c said: what it started with is shown with its quote marks and line break escaped (repr), on one line", "it starts " + repr('said=["go\non", \'x\']') + ")" in said_msg2 and "\n" not in said_msg2.split("); pass a list")[0], said_msg2[:200])
+
+# ================================================================ d. repeating refusals: read what is harmless, say the reason or the call to send
+# d.1 status="closed" or "done" sent with a close's parts is the close
+CLOSE = dict(outcome="done", reason="it shipped", outcome_text="- It shipped")
+for i, word in ((401, "closed"), (402, "Done "), (403, "done")):
+    item(i)
+    res, made = upd(i, status=word, done=[1, 2], **CLOSE)
+    check(f"d status: {word!r} with the close's parts closes the item", not isinstance(res, ToolError) and rd(i)["status"] == "completed" and mt(i).get("outcome") == "done", (str(res)[:300], rd(i)["status"]))
+    check(f"d status: …{word!r}: one fix says it was read as completed", kinds(made).count("status-closed") == 1 and f'status="{word.strip()}" was read as status="completed"' in dict(made)["status-closed"], made)
+check("d status: the fix invites no resend, and its line names no machine", "status-closed" in CL.NO_RESEND and "To keep" not in CL.reply_note([("status-closed", "x")]) and no_machine(dict(made)["status-closed"]), CL.reply_note([("status-closed", "x")]))
+item(404)
+res, made = upd(404, status="closed", next="falcon-main: carry on")
+check("d status: closed with no part of a close is refused as before, nothing is closed and no fix is told", isinstance(res, ToolError) and "status must be open | completed" in str(res) and rd(404)["status"] == "open" and "status-closed" not in kinds(made), (str(res)[:300], made))
+item(405)
+res, made = upd(405, status="done", done=[1, 2], outcome="done")
+check("d status: …with one part only it is judged as a close: the missing parts are named and the item stays open", isinstance(res, ToolError) and "closing" in str(res) and "reason" in str(res) and rd(405)["status"] == "open", str(res)[:400])
+item(406)
+res, made = upd(406, status="finished", **CLOSE)
+check("d status: another word is not read as a close", isinstance(res, ToolError) and "status must be open | completed" in str(res) and rd(406)["status"] == "open" and "status-closed" not in kinds(made), str(res)[:300])
+item(407)
+res, made = upd(407, status="done", **CLOSE)
+check("d status: …and every check of a close still judges it: a close over open steps with none marked is refused", isinstance(res, ToolError) and "nothing is ticked" in str(res) and rd(407)["status"] == "open", str(res)[:300])
+item(408)
+out, _ = run_mw("update", {"item_id": "a408", "sender": MAIN}, lambda: reply(_wt_update.stackshot_update("a408", sender=MAIN, status="closed", done=[1, 2], **CLOSE)))
+check("d status: the reply the caller reads carries the line", 'was read as status="completed"' in txt(out), txt(out)[-300:])
+
+# d.2 close fields on a write that is no close: the refusal gives the way to close
+item(410)
+res, made = upd(410, **CLOSE)
+check("d close fields: with no status the refusal says to send the same call with status=completed", isinstance(res, ToolError) and 'to close it now, send the same call with status="completed"' in str(res), str(res)[:400])
+check("d close fields: …the kind has its own name", CL.kind_of(str(res)) == "close fields on a write that is no close" and CL.kind_of(" ".join(str(res).split())[:CL.WHY_MAX]) == CL.kind_of(str(res)), CL.kind_of(str(res)))
+res, made = upd(410, status="completed", done=[1, 2], **CLOSE)
+check("d close fields: …and that call goes through", not isinstance(res, ToolError) and rd(410)["status"] == "completed", str(res)[:300])
+res, made = upd(410, reason="another reason")
+check("d close fields: on a closed item it says to reopen, not to send status=completed", isinstance(res, ToolError) and "already completed" in str(res) and "send the same call with status" not in str(res), str(res)[:400])
+
+# d.3 a status line's state "waiting" is stored as assigned
+item(420)
+res, made = upd(420, work={"text": "reply due", "state": "Waiting "})
+steps_ = json.dumps(mt(420).get("steps"))
+check("d work: state waiting goes through, stored as assigned and not as work running", not isinstance(res, ToolError) and "reply due" in steps_ and '"in progress"' not in steps_ and '"assigned"' in steps_, (str(res)[:300], steps_))
+check("d work: …one fix says what was stored and how a wait is set", kinds(made).count("work-waiting") == 1 and "stored as assigned" in dict(made)["work-waiting"] and "after=" in dict(made)["work-waiting"] and "work-waiting" in CL.NO_RESEND and no_machine(dict(made)["work-waiting"]), made)
+res, made = upd(420, work={"state": "waiting", "remove": True})
+check("d work: removing the status line with that state tells no fix", not isinstance(res, ToolError) and "work-waiting" not in kinds(made), (str(res)[:300], made))
+item(421)
+res, made = upd(421, work={"text": "reply due", "state": "assigned"})
+check("d work: a state the line has tells no fix", not isinstance(res, ToolError) and "work-waiting" not in kinds(made), made)
+res, made = upd(421, work={"text": "reply due", "state": "blocked"})
+check("d work: another state is refused as before, under its own kind", isinstance(res, ToolError) and "work: state 'blocked' is not one of" in str(res) and CL.kind_of(str(res)) == "a status state the work line does not have" and "work-waiting" not in kinds(made), str(res)[:300])
+check("d work: parse marks waiting alone", WK.parse({"text": "a", "state": "waiting"})["waiting"] is True and WK.parse({"text": "a", "state": "waiting"})["state"] == "assigned" and WK.parse({"text": "a", "state": "wip"})["waiting"] is False and WK.parse("a")["waiting"] is False, None)
+
+# d.4 a long bullet the line cap keeps from being split: the refusal gives that reason and the number of lines to cut
+MAXL, MAXC = _fg._description_limits(); assert (MAXL, MAXC) == (8, 120), (MAXL, MAXC)
+LONG = "- " + "the export reads every row of the sample table and writes it out again " * 2 + "each night"
+assert MAXC < len(LONG) <= 2 * MAXC, len(LONG)
+FULL = "\n".join(["- Goal: a thing", *[f"- fact {i}" for i in range(MAXL - 2)], LONG])
+def faults_(d, field="description"): return _fg.description_faults(d, field)
+m_ = faults_(FULL)[0]
+check("d bullet: at the line cap, one long bullet: the refusal says the split would pass the cap, by how much", f"here it would make {MAXL + 1}: cut 1 line (" in m_ and "could not split" not in m_ and f"stays within {MAXL} lines" in m_, m_)
+check("d bullet: …under the same kind", CL.kind_of(m_) == "a description bullet over its limit", CL.kind_of(m_))
+item(430)
+res, made = upd(430, description=FULL)
+check("d bullet: …the write is refused with that reason", isinstance(res, ToolError) and f"cut 1 line (" in str(res) and rd(430)["description"] == DESC, str(res)[:400])
+cut = "\n".join(FULL.splitlines()[:1] + FULL.splitlines()[2:])
+res, made = upd(430, description=cut)
+check("d bullet: …with that one line cut the call goes through, the bullet split", not isinstance(res, ToolError) and len(rd(430)["description"].splitlines()) == MAXL and max(map(len, rd(430)["description"].splitlines())) <= MAXC, (str(res)[:300], rd(430)["description"]))
+two = faults_("\n".join(["- Goal: a thing", *[f"- fact {i}" for i in range(MAXL - 3)], LONG, LONG]))[0]
+check("d bullet: two over reads in the plural", f"here it would make {MAXL + 2}: cut 2 lines (" in two, two)
+out_ = faults_(FULL, "outcome_text")[0]
+check("d bullet: an outcome_text at the cap says the same of its field", out_.startswith("Refused: outcome_text bullet is ") and "cut 1 line (" in out_, out_)
+token = faults_("\n".join(["- Goal: a thing", *[f"- fact {i}" for i in range(MAXL - 2)], "- " + "z" * 130]))[0]
+check("d bullet: a bullet with no place to cut keeps the old reason, at the cap too", "and could not split this one" in token and "here it would make" not in token, token)
+wall = faults_("\n".join(["- Goal: a thing", "- " + "word " * 2000]))[0]
+check("d bullet: a wall of text far past the cap keeps the old words (the count is looked for up to three times the cap)", "and could not split this one" in wall and "here it would make" not in wall, wall[:300])
+check("d bullet: a bullet the split would fit is not told it passes the cap", _fg._lines_once_split("- Goal: a thing\n" + LONG, MAXL, MAXC) == 0 and _fg._lines_once_split(FULL, MAXL, MAXC) == MAXL + 1, None)
+
+# d.5 a too long ask says how much to cut and where the characters are
+URL = "https://example.com/mockup/" + "a" * 60
+BASE = "Decide: take the design [mockup](" + URL + ") · Recommend: " + "y" * 90 + " · Stakes: " + "s" * 60 + " · By: Fri"
+assert len(BASE) > 240 and len(BASE) - len(URL) <= 240 + len(URL), len(BASE)
+m_ = ask_msg(BASE)
+check("d ask: too long: how many to cut", f"it is {len(BASE)} characters, and the limit is 240: cut {len(BASE) - 240} or more" in m_, m_[:400])
+check("d ask: …that a link's address counts, and how many characters are addresses", f"(every character of an ask counts, a link's address too: {len(URL)} of them are link addresses)" in m_, m_[:500])
+spans = [BASE.index(x) for x in ("Decide:", "Recommend:", "Stakes:", "By:")] + [len(BASE)]
+check("d ask: …and what each part runs to", "its parts run " + ", ".join(f"{lb} {b - a}" for lb, a, b in zip(("Decide", "Recommend", "Stakes", "By"), spans, spans[1:])) + " characters" in m_, m_[:600])
+check("d ask: …the caller's words are not put into an ask to send: the example is shown", m_.split(":\n")[-1] == "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date" and URL not in m_, m_[-300:])
+m2 = ask_msg("Decide: " + "x" * 230 + " · Recommend: yes · Stakes: a week · By: Fri")
+check("d ask: with no link nothing is said of links", "link address" not in m2 and "its parts run Decide " in m2, m2[:400])
+m3 = ask_msg("Recommend: yes · Decide: " + "x" * 230 + " · Stakes: a week · By: Fri")
+check("d ask: parts out of order get no part lengths", "characters, and the limit is 240: cut " in m3 and "its parts run" not in m3, m3[:400])
+t0 = time.monotonic(); m4 = ask_msg("Decide: " + "](" * 100000 + " · Recommend: yes · Stakes: a week · By: Fri"); took4 = time.monotonic() - t0
+t0 = time.monotonic(); m5 = ask_msg("Decide: " + "](a" * 70000 + ") · Recommend: yes · Stakes: a week · By: Fri"); took5 = time.monotonic() - t0
+check("d ask: long runs of link openers are counted in well under a second", "characters, and the limit is" in m4 and "characters, and the limit is" in m5 and took4 < 1.0 and took5 < 1.0, (took4, took5))
+short = "Decide: take the design · Recommend: yes · Stakes: a week · By: Fri"
+check("d ask: …and an ask cut to the limit passes", ASKS._gate_ask(short) == short, None)
+
+# d.6 clear_wait beside a new wait_kind: send it without clear_wait
+item(440, until=local_day(3), wait_kind="relay", wait_event="the vendor replies")
+res, made = upd(440, clear_wait=True, wait_kind="time", until=local_day(40), wait_basis=BASIS(40))
+check("d clear_wait: beside a new wait_kind it is refused, naming the call to send", isinstance(res, ToolError) and "send this call again without clear_wait" in str(res) and CL.kind_of(str(res)) == "clear_wait sent beside a new wait", str(res)[:500])
+res, made = upd(440, wait_kind="time", until=local_day(40), wait_basis=BASIS(40))
+check("d clear_wait: …and without it the new wait takes the stored one's place", not isinstance(res, ToolError) and mt(440).get("wait_kind") == "time" and W.stored_until(mt(440)) == local_day(40) and not mt(440).get("wait_event"), (str(res)[:400], mt(440)))
+res, made = upd(440, clear_wait=True, wait_event="the vendor replies")
+check("d clear_wait: beside a field with no new wait_kind it does not say so", isinstance(res, ToolError) and "clear_wait drops" in str(res) and "without clear_wait" not in str(res), str(res)[:400])
+
+# d.7 a wait_kind that is someone outside
+from stackshot.model import model as MD
+ext = " ".join(MD.check_fields({"wait_kind": "External"}))
+check("d wait_kind: external is answered with the relay form", "(got 'external'); a wait on someone outside is wait_kind=\"relay\" with wait_event=<who>, until=<the day to chase> and needs=[\"external\"]" in ext, ext)
+check("d wait_kind: another unknown kind is not", "someone outside" not in " ".join(MD.check_fields({"wait_kind": "soon"})), None)
+item(450)
+res, made = upd(450, wait_kind="relay", wait_event="the vendor replies", until=local_day(3), needs=["external"], mover=MAIN)
+check("d wait_kind: …and that form goes through", not isinstance(res, ToolError), str(res)[:400])
+
+# d.8 the kinds of the refusals the server raises here, as raised and as the log keeps them
+item(460)
+res, made = upd(460, status="parked", reason="why")
+whys = str(res)
+check("d kinds: a refusal of several faults is counted under its first, whole and folded as logged", whys.startswith("Refused: 2 problems") and CL.kind_of(whys) == CL.kind_of(" ".join(whys.split())[:CL.WHY_MAX]) and CL.kind_of(whys) in ("close fields on a write that is no close", "a status that is not open or completed"), (whys[:600], CL.kind_of(whys)))
+item(461, until=local_day(3), wait_kind="relay", wait_event="the vendor replies")
+for name, kw, want in (("a wait_kind of no kind", dict(wait_kind="soon"), "a wait_kind that is none of the kinds"),
+                       ("a close with no parts", dict(status="completed", done=[1, 2]), "a close with a part missing"),
+                       ("a close reason over its limit", dict(status="completed", done=[1, 2], outcome="done", reason="r " * 200, outcome_text="- It shipped"), "a close reason over its limit")):
+    res, made = upd(461, **kw)
+    check(f"d kinds: {name}", isinstance(res, ToolError) and CL.kind_of(str(res)) == want, (str(res)[:400], CL.kind_of(str(res))))
 
 print(("ok" if not fails else "FAILED") + f": refusal hints scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

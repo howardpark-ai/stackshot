@@ -135,6 +135,38 @@ def part_refusal_report():
         f"Refused: demo-main is a user-facing agent of projects/demo, and mover=demo-main from another session hands it an item it gets no notice of": "a front agent named as mover",
         "Refused: a name is not a background agent of any project, nor this project's keeper; needs names one of those": "a front agent named as mover",
         'Refused: the step "demo-main: ask" opens with demo-main, a user-facing agent of projects/demo: it gets no work notice': "a front agent named as mover",
+        # refusals that name wait_basis as another way to park are not a fault of a basis
+        f"Refused: {BID(7)} waits on a time (until 2099-03-02) with no reason: a time wait carries the owner's words or a real outside date (wait_basis=\"<what happens> YYYY-MM-DD\").": "a time wait with no recorded words or basis",
+        f"Refused: {BID(7)} would have its clock pushed out (until 2099-03-02 to 2099-03-09) with its reason and its open steps exactly as they were. Park it (wait_basis=<what the date is>).": "a date moved later with nothing else changed",
+        f"Refused: {BID(7)} has had its clock pushed out 2 times in a row on a change of what its wait stands on alone (wait_basis), and this would be the 3rd": "a date moved later with nothing else changed",
+        "Refused: a wait runs at most 7 days from the item's last move ([waiting] cap_days), and this wake is 20 days out. A longer one needs words or wait_basis.": "a date past the wait cap",
+        "Refused: next line 'x: wait for the build' reads as a wait (wait word) on an alive item. Set the wait (wait_basis=...) or write the action.": "a line of next that reads as a wait on a live item",
+        "Refused: wait_basis is one line of 12 to 300 characters": "a wait_basis the rule does not take",
+        "Refused: clear_wait_basis drops the basis; it does not go with a new wait_basis": "a wait_basis the rule does not take",
+        f"Refused: {BID(7)} waits on a fleet event but its input is missing: wait_event=<the event>. If the item should not wait, drop the wait with update clear_wait=true (wait_kind, wait_anchor, wait_event and until go together).": "a wait with an input missing",
+        "Refused: hold is not a parameter any more: a park is until": "a retired input",
+        f"Refused: closing {BID(7)} needs outcome, reason; accepted form: complete(item_id=\"{BID(7)}\")": "a close with a part missing",
+        "Refused: the reason is 130 characters and the limit is 120.": "a close reason over its limit",
+        "Refused: work: state 'blocked' is not one of defined, assigned, in progress, done": "a status state the work line does not have",
+        "Refused: clear_wait drops wait_kind, wait_anchor, wait_event, ask_by, post_wake_mover; it does not go with a new wait_kind": "clear_wait sent beside a new wait",
+        "Refused: a park that waits on a notice from the anchor scoped to it still carries a backstop date, at most 7 days out": "an anchor park with no backstop date",
+        "Refused: wait_anchor https://example.com/pull/3 is not on projects/demo's anchors list, so nothing watches it": "a wait_anchor that is not on the anchors list",
+        "Refused: wait_kind is one of time | anchor | item | relay | event (got 'external')": "a wait_kind that is none of the kinds",
+        'Refused: outcome, outcome_text, reason and superseded_by go with a close (status=completed on an open item, or the complete tool); to close it now, send the same call with status="completed"': "close fields on a write that is no close",
+        "Refused: status must be open | completed": "a status that is not open or completed",
+        f"Refused: {BID(7)} is not closed and nothing is ticked. To close it now, mark that step in the closing call itself": "a close with a step still open",
+        'Refused: work: a status line is a few words, at most 40 characters (52 given: "PR…")': "a status line over its limit",
+        f"Refused: the status of a step on {BID(7)} is written by its mover (worker-a) or a session named in its needs (none named); worker-b is neither.": "a status line from a session the item does not name",
+        "Refused: step at most 300 characters on one line (400 now); it is a summary": "a step over its limit",
+        f"Refused: {BID(7)}: the step asks the owner to post, send or paste a text (\"Send\"), so put the text in draft=<the text>": "a step to post a text with no draft",
+        "Refused: ask has a bare URL (https://example.com/mockup/3) and the page may not draw it as a link.": "a bare URL in next or ask",
+        "Refused: this item would be left with the owner as its mover but nothing for him to do: no ask": "the owner left as mover with nothing to do",
+        "Refused: this needs=decision item links a mockup (https://example.com/mockup/3) in its description but not in its ask.": "an ask that approves a design or plan with no link in the ask",
+        f"Refused: you owe a project-page update — projects/demo (since {BID(3)}, 4 min ago) — update the page first": "a page update owed (no longer refused)",
+        # a refusal that names several faults is counted under its first, as raised (line breaks) and as the log keeps it (folded to one line)
+        "Refused: 2 problems in this call; fix all of them and send the call once more.\n(1) the reason is 130 characters and the limit is 120.\n(2) status must be open | completed": "a close reason over its limit",
+        "Refused: 2 problems in this call; fix all of them and send the call once more. (1) status must be open | completed Not checked yet, because they read what the faults above leave: the close": "a status that is not open or completed",
+        " ".join(("Refused: 3 problems in this call; fix all of them and send the call once more.\n(1) wait_kind is one of time | anchor | item | relay | event (got 'soon')\n(2) the reason is 130 characters. " + "z " * 400).split())[:CL.WHY_MAX]: "a wait_kind that is none of the kinds",
     }
     for why, want in kinds.items():
         check(f"1 kind_of: {want}", CL.kind_of(why) == want, CL.kind_of(why))
@@ -1073,6 +1105,13 @@ def part_refusal_report():
     check("10 daily: a kind refused three times or more in the day repeats (a kind refused twice does not), each with its hint or 'needs a fix'",
           [(k, n) for k, n, _ in rep] == [(CL.kind_of(NS), 4), (RR.READ_PREFIX + CL.kind_of(GONE), 3), (CL.kind_of("Refused: some rare thing 5"), 3)] and rep[0][2] == RR.HINTS[CL.kind_of(NS)] and rep[1][2] == RR.READ_HINT and rep[2][2] == RR.NEEDS_FIX, rep)
     check("10 daily: every hint is one plain line, and no hint is for a kind the log can no longer name", all(h and "\n" not in h and h == h.strip() for h in RR.HINTS.values()) and all(k in {n for _, n in CL._KINDS} or k.startswith("message: ") for k in RR.HINTS), [k for k in RR.HINTS if k not in {n for _, n in CL._KINDS}])
+    names = {n for _, n in CL._KINDS}
+    check("10 daily: every kind the log names has a hint, or a line saying why none fits, and never both", names <= set(RR.HINTS) | set(RR.NO_HINT) and not set(RR.HINTS) & set(RR.NO_HINT),
+          (sorted(names - set(RR.HINTS) - set(RR.NO_HINT)), sorted(set(RR.HINTS) & set(RR.NO_HINT))))
+    check("10 daily: every such line is one plain line that opens saying no hint fits, for a kind the log can name", all(v.startswith("no hint fits: ") and "\n" not in v and v == v.strip() for v in RR.NO_HINT.values())
+          and all(k in names or k.startswith("message: ") for k in RR.NO_HINT), RR.NO_HINT)
+    owed = RR.daily_tally([{"t": 1, "tool": "update", "ok": False, "why": "Refused: you owe a project-page update — projects/demo"}] * 3 + [{"t": 1, "tool": "message", "ok": False}] * 3, [])
+    check("10 daily: a repeating kind that has no hint for a reason shows the reason and asks for no fix", sorted(h for _, _, h in RR.repeating(owed)) == sorted(RR.NO_HINT[k] for k in ("a page update owed (no longer refused)", "message: " + RR.NO_KIND)), RR.repeating(owed))
     txt = RR.build_daily(NOW, d24, d7)
     sample = txt
     check("10 daily: the text names both spans, the estimate and the repeating kinds with their hints",

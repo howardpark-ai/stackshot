@@ -616,7 +616,8 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict
         if clears.get(flag):
             clash = [k for k in fields if k in setv]
             if clash:
-                faults.append(f"Refused: clear_{flag} drops {', '.join(k for k in fields if k not in _NOT_PASSED)}; it does not go with a new {', '.join(clash)}")      # `until`, `waits` and `wait_mode` are no write field of this call: the refusal names the five a caller can pass
+                instead = ". The new wait_kind takes the place of the stored one: send this call again without clear_wait" if "wait_kind" in clash else ""
+                faults.append(f"Refused: clear_{flag} drops {', '.join(k for k in fields if k not in _NOT_PASSED)}; it does not go with a new {', '.join(clash)}{instead}")      # `until`, `waits` and `wait_mode` are no write field of this call: the refusal names the five a caller can pass
             else:
                 drop.update(fields)
     if "wait_kind" in setv:

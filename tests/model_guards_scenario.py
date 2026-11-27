@@ -794,7 +794,9 @@ for p in (T / "store").glob("*/*.json"):
 # ================================================================ 7. one mover in needs
 item(82, needs=[FRONT])
 refused_nw("7 second mover: two sessions in needs", 82, lambda: upd(82, needs=[FRONT, "home-beta-bg"]), "needs names more than one mover", "then=<session>", "who takes it after")
-refused_nw("7 second mover: decision plus a session", 82, lambda: upd(82, needs=["decision", FRONT], ask=ASK), "decision plus", "then=<session>")
+refused_nw("7 second mover: decision plus a session", 82, lambda: upd(82, needs=["decision", FRONT], ask=ASK), "decision plus", "then=<session>", f'Here that is the same call with needs=["decision"] and then="{FRONT}".')
+refused_nw("7 second mover: …with two sessions beside decision no call is given (which one takes it after is the writer's choice)", 82, lambda: upd(82, needs=["decision", FRONT, "home-beta-bg"], ask=ASK), "needs names more than one mover", none=("Here that is",))
+refused_nw("7 second mover: …and none for two sessions with no decision", 82, lambda: upd(82, needs=[FRONT, "home-beta-bg"]), "needs names more than one mover", none=("Here that is",))
 upd(82, needs=["decision"], ask=ASK, then=BACK)
 check("7 second mover: …one mover (decision) and the session in then passes", mt(82)["needs"] == ["decision"] and mt(82)["then"] == BACK, mt(82))
 set_cfg(one_mover=False)
@@ -825,6 +827,12 @@ item(200, needs=[BACK, OTHER])
 upd(200, wake=day(2))
 check("7 second mover: two background agents of the project are no second mover either", wk_(mt(200)) == day(2), mt(200))
 refused_nw("7 second mover: …but decision plus another project's background agent beside them is", 200, lambda: upd(200, needs=["decision", BACK, "home-beta-bg"], ask=ASK), "needs names more than one mover")
+
+# a time wait with no words: the refusal of a near date gives the bare dated wait to send instead, and that call goes through
+item(960, needs=[BACK])
+refused_nw("7 time wait: a near date with wait_kind=time and no words is refused with the call to send instead", 960, lambda: upd(960, wait_kind="time", until=day(3)), "with no reason", 'this call without wait_kind and wait_basis, with wait_reason="<what you check then>"')
+upd(960, until=day(3), wait_reason="the build still runs until that day")
+check("7 time wait: …the same call without wait_kind, with wait_reason, goes through", ab_(mt(960)) == day(3) and not mt(960).get("wait_kind"), mt(960))
 
 # ================================================================ 8. every next line names who takes it
 item(85, needs=[BACK])

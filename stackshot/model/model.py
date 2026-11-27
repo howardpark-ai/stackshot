@@ -683,7 +683,8 @@ def check_fields(values: dict[str, Any]) -> list[str]:
             out.append(f"{k} is one line of at most {LINE_MAX} characters (got {len(v)})")
     k = clean(values.get("wait_kind")).lower()
     if k and k not in SINGLE_KINDS:      # a wait on a list is stored by the server's own write path, never named as a wait_kind by a caller
-        out.append(f"wait_kind is one of {' | '.join(SINGLE_KINDS)} (got {k!r})")
+        outside = "; a wait on someone outside is wait_kind=\"relay\" with wait_event=<who>, until=<the day to chase> and needs=[\"external\"]" if k == "external" else ""
+        out.append(f"wait_kind is one of {' | '.join(SINGLE_KINDS)} (got {k!r}){outside}")
     u = clean(values.get("until"))
     if u and _wt.wake_epoch(u) is None:
         out.append(f"until is YYYY-MM-DD or YYYY-MM-DDTHH:MM, a real date (got {u!r})")

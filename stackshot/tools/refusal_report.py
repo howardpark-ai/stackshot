@@ -12,7 +12,7 @@ a step left out of next kept open, a subject or a status line cut at its last wo
 
   daily         every tool's calls (reads too: a read that errors counts as refused) for the last 24 hours and the last 7 days: refusals per tool, per rule kind and per caller session; the retries (the same caller repeating the same tool on the same item within
                 RETRY_WINDOW, 10 minutes, after a refusal); the tokens of refusal text plus retried requests (characters / 4, an estimate: the log keeps sizes, `req` and `rlen`, never content); and the kinds refused REPEAT_MIN (3) times or more in the
-                day, each with its line from HINTS or "needs a fix". Sent once per calendar day (the audit's 05:00 run; its 20:00 run finds it sent) to the same place as the weekly report, when there was a refusal in the last 24 hours; the background agent
+                day, each with its line from HINTS (or the line of NO_HINT saying why none fits) or "needs a fix". Sent once per calendar day (the audit's 05:00 run; its 20:00 run finds it sent) to the same place as the weekly report, when there was a refusal in the last 24 hours; the background agent
                 gets it too when a repeating kind needs a fix. A line of the log from before sizes were kept counts as a call of no size. No new timer and no new config key: the days sent are kept in the weekly report's sent.json.
 
   run           the report of the last full week (Monday to Sunday) that has not been sent, sent once to `[refusal_report] to` (default: `[audit] summary_to`),
@@ -390,8 +390,8 @@ READ_HINT = "an error of a read, not a rule of the board: check the item id, pro
 # kind of refusal → the one line a caller is told to avoid it. The keys are the kind names of call_log.kind_of (a message refusal: "message: " and its kind slug). A repeating kind with no entry is listed as needing a fix.
 HINTS: dict[str, str] = {
     "a step left out of next with no done or dropped": "keep every step the item had in next, or mark it done or dropped; read the item first and send the whole list.",
-    "a description bullet over its limit": "keep each description bullet within its limit; split a long one into two bullets.",
-    "an outcome_text bullet over its limit": "keep each outcome_text bullet within its limit; split a long one into two bullets.",
+    "a description bullet over its limit": "keep each description bullet within its limit: the server splits a longer one only while the description stays within its line limit, so shorten bullets or cut facts.",
+    "an outcome_text bullet over its limit": "keep each outcome_text bullet within its limit: the server splits a longer one only while the text stays within its line limit, so shorten bullets or cut facts.",
     "a description over its line limit": "cut the description to its line limit; move detail to the item's pages or its history.",
     "a description that does not open with its goal": "open the description with its goal as the first bullet.",
     "a changelog word in a description": "describe what the item is and where it lives, not what changed; changes belong in the status line.",
@@ -408,6 +408,42 @@ HINTS: dict[str, str] = {
     "no sender": "pass sender= with your own session name on every write.",
     "message: unknown-page-key": "address a session by name, or a project page as projects/<slug> spelled as the sessions or anchors listing shows it.",
     "message: message-too-long": "keep a message within its limit; put the long form on a page or in a file both sessions can read and send the pointer.",
+    "an ask in the wrong form": "write the ask on one line as \"Decide: … · Recommend: … · Stakes: … · By: …\", every part with its label, at most 240 characters in all, a link's address counted.",
+    "an ask with a second question in its Decide part": "put one question in an ask; a second question goes on an item of its own.",
+    "an ask that approves a design or plan with no link in the ask": "link the design, plan or mockup inside the ask itself, as [words](url).",
+    "an option without its label and line": "send 2 to 6 options as {label, line, recommended}: a label of at most 40 characters, a one-sentence line of at most 160, exactly one recommended.",
+    "a said entry in the wrong form": "send said as a list of {tag, quote, msg} objects, msg being the uuid of the owner's message in your transcript.",
+    "a time wait with no recorded words or basis": "to check back on your own work send until and wait_reason with no wait_kind; a park (wait_kind=\"time\") needs the owner's words (said) or a wait_basis.",
+    "a date moved later with nothing else changed": "do not only move a date: in the same call mark a step done or dropped, write the next step or state the new reason.",
+    "a date past the wait cap": "set a date within the wait cap; a later one needs the owner's words (said) or a wait_basis that names a real date.",
+    "a line of next that reads as a wait on a live item": "set the wait with until, after or wait_kind, and keep next to the action someone takes now.",
+    "a wait with an input missing": "give the wait what its kind needs, as the refusal names it: until, wait_anchor, wait_event or after.",
+    "a wait_basis the rule does not take": "write wait_basis as one line saying what happens, with its date as YYYY-MM-DD, on the day the wait ends or within 30 days after it.",
+    "needs naming more than one mover": "name one mover in needs; who takes the item after an answer or a step goes in then=<session>.",
+    "a reword of another session's step": "reword only a step your own session wrote; mark another's done or dropped, or ask its writer.",
+    "an open item left with no open step": "keep one open step in next, opening with who takes it, or close the item.",
+    "a close with a part missing": "send outcome, reason and outcome_text together in the closing call.",
+    "a close reason over its limit": "keep the close reason within its limit; put the detail in outcome_text.",
+    "a status state the work line does not have": "a work state is in progress or done; a wait is set with until, after or wait_kind.",
+    "clear_wait sent beside a new wait": "to change a wait send the new wait_kind without clear_wait; clear_wait alone ends the wait.",
+    "an anchor park with no backstop date": "give a park that waits on an anchor a backstop, until=YYYY-MM-DD within the wait cap: the notice may never come.",
+    "a wait_anchor that is not on the anchors list": "add the URL to the project's anchors list (the anchors tool, add=[url]) before naming it in wait_anchor.",
+    "a wait_kind that is none of the kinds": "wait_kind is time, anchor, item, relay or event; a wait on someone outside is relay with wait_event, until and needs=[\"external\"].",
+    "close fields on a write that is no close": "outcome, outcome_text, reason and superseded_by go only with a close: add status=\"completed\" or use the complete tool.",
+    "a status that is not open or completed": "status is open or completed; a park is a date (until) with its wait fields, not a status.",
+    "a close with a step still open": "mark each open step done or dropped in the closing update call (the complete tool takes no marks).",
+    "a status line over its limit": "keep the work text to a few words within its limit; put the detail on the project page.",
+    "a status line from a session the item does not name": "set work only on an item you move or whose needs names you; otherwise ask its mover to name you.",
+    "a step over its limit": "keep step to a one-line summary within its limit; the actions go in lines of next that open with the owner's name.",
+    "a step to post a text with no draft": "when a step asks the owner to post or send a text, put the exact text in draft= or link the document that holds it.",
+    "a bare URL in next or ask": "write a link in next or ask as [words](url), never a bare address.",
+    "the owner left as mover with nothing to do": "an item the owner moves needs something of theirs (step=, or needs=decision with an ask); otherwise name a session as mover.",
+}
+
+# kind of refusal with no hint, and why none fits: a repeating one is listed with this line, and asks for nothing.
+NO_HINT: dict[str, str] = {
+    "a page update owed (no longer refused)": "no hint fits: no write is refused for an owed page update any more; only older log lines count here.",
+    "message: not recorded": "no hint fits: lines logged before the log kept a message refusal's kind, so there is no one fault to name.",
 }
 
 
@@ -525,7 +561,7 @@ def _tokens(t: dict[str, Any]) -> int:
 
 def repeating(day: dict[str, Any]) -> list[tuple[str, int, str]]:
     """The kinds refused REPEAT_MIN times or more in the day → [(kind, n, hint or NEEDS_FIX)], the most refused first."""
-    return [(k, v, READ_HINT if k.startswith(READ_PREFIX) else HINTS.get(k, NEEDS_FIX)) for k, v in day["kinds"].most_common() if v >= REPEAT_MIN]
+    return [(k, v, READ_HINT if k.startswith(READ_PREFIX) else HINTS.get(k) or NO_HINT.get(k, NEEDS_FIX)) for k, v in day["kinds"].most_common() if v >= REPEAT_MIN]
 
 
 def build_daily(now: float, day: dict[str, Any], week: dict[str, Any], *, top: int = TOP_DEFAULT) -> str:
@@ -624,7 +660,7 @@ def run(*, dry: bool = False, force: bool = False, week: dt.date | None = None, 
 
 
 ASK_DAILY = ("\n\nWhat I ask of you: the kinds marked 'needs a fix' repeat today and have no hint for the writers yet: file a write-time hint or a server fix for each, add its line to the hint table "
-             "(tools/refusal_report.py HINTS), or say in a line why none fits.")
+             "(tools/refusal_report.py HINTS), or say in a line why none fits (NO_HINT there).")
 
 
 def run_daily(*, dry: bool = False, force: bool = False, now: float | None = None, cfg: dict[str, Any] | None = None, deliver: Deliver = deliver_client,

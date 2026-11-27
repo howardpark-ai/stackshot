@@ -50,7 +50,18 @@ from stackshot.waits import watchers as _watch
 _ASK_LABELS = ("Decide", "Recommend", "Stakes", "By")
 _ASK_EXAMPLE = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 _ASK_BREAKS = "\r\n\v\f\x85\u2028\u2029"
+_ASK_LINK_TARGET = re.compile(r"\]\(([^()\s\]]*)\)")      # a markdown link's address; linear, as a scan from one `](` stops before the next
 _ASK_SEP_TAIL = " |;/,-\u2013\u2014\u00b7\u2022"           # what a writer puts between two parts in place of " · " (the text is flattened first, so a space is the only white space): stripped off the end of a part with str.rstrip, never a regex, whose cost grows with the square of a long run of it
+
+
+def _ask_weight(flat: str, hits: dict[str, int]) -> str:
+    """Where the characters of a too long ask are, to say what to cut: those its links' addresses take (an ask counts them, a description does not), and each part's share when all four are there in order (`hits`: where each label starts). Counts only, never the text."""
+    linked = sum(len(m.group(1)) for m in _ASK_LINK_TARGET.finditer(flat))
+    out = f" (every character of an ask counts, a link's address too: {linked} of them are link addresses)" if linked else ""
+    if hits:
+        bounds = [*hits.values(), len(flat)]
+        out += "; its parts run " + ", ".join(f"{lb} {e - b}" for lb, b, e in zip(hits, bounds, bounds[1:])) + " characters, labels and separators included"
+    return out
 
 
 def _ask_fault(ask: str) -> tuple[str, str]:
@@ -69,7 +80,7 @@ def _ask_fault(ask: str) -> tuple[str, str]:
     if any(c in t for c in _ASK_BREAKS):
         why = "it holds a line break, and an ask is one line"
     elif len(t.strip()) > mx:
-        why = f"it is {len(t.strip())} characters, and the limit is {mx}"
+        why = f"it is {len(t.strip())} characters, and the limit is {mx}: cut {len(t.strip()) - mx} or more" + _ask_weight(flat, hits if in_order else {})
     elif missing := [lb for lb in _ASK_LABELS if lb not in hits]:
         why = f"the part {missing[0]} is missing" + (f" (and {', '.join(missing[1:])})" if len(missing) > 1 else "")
     elif not in_order:

@@ -23,7 +23,7 @@ from stackshot.model import steps as _steps
 STATES = ("defined", "assigned", "in progress", "done")
 TEXT_MAX = 40            # a status line is a few words
 KEYS = ("text", "state", "agent", "remove")      # `id` named a line of the old list: a non-empty one is refused with the way in (a client with a cached schema must not tick a whole step by it); an empty one is ignored
-_STATE_ALIAS = {"wip": "in progress", "doing": "in progress", "started": "in progress", "completed": "done", "finished": "done", "todo": "defined", "open": "defined"}
+_STATE_ALIAS = {"wip": "in progress", "doing": "in progress", "started": "in progress", "completed": "done", "finished": "done", "todo": "defined", "open": "defined", "waiting": "assigned"}
 FORM = "{text: a few words (at most 40 characters), state: in progress | done}"
 
 
@@ -132,7 +132,8 @@ def norm_state(s: Any) -> str:
 
 
 def parse(spec: Any) -> dict[str, Any]:
-    """The update tool's `work` argument as given → {text, state, agent, remove, cut}, each normalized ("" / False / 0 when not given; `cut` is the length the text was before a text over TEXT_MAX was cut at its last whole word). Accepts an object, a JSON string of one (a client whose
+    """The update tool's `work` argument as given → {text, state, agent, remove, cut, waiting}, each normalized ("" / False / 0 when not given; `cut` is the length the text was before a text over TEXT_MAX was cut at its last whole word;
+    `waiting` says the state given was "waiting", which no status line has: it is read as assigned, so no reader takes the line as work running, and the caller tells the writer). Accepts an object, a JSON string of one (a client whose
     cached schema sends the parameter as text), or a plain string, which is the text of the status line. ValueError with the hint on anything else."""
     if isinstance(spec, str):
         s = spec.strip()
@@ -160,7 +161,8 @@ def parse(spec: Any) -> dict[str, Any]:
             raise ValueError(f"work: a status line is a few words, at most {TEXT_MAX} characters ({was} given); the details of a stage stay on the project page")
         cut = was
     out = {"text": text, "state": norm_state(spec["state"]) if spec.get("state") not in (None, "") else "",
-           "agent": str(spec.get("agent") or "").strip(), "remove": bool(spec.get("remove")), "cut": cut}
+           "agent": str(spec.get("agent") or "").strip(), "remove": bool(spec.get("remove")), "cut": cut,
+           "waiting": str(spec.get("state") or "").strip().lower() == "waiting"}
     if not out["text"] and not out["state"] and not out["remove"]:
         raise ValueError(f"work: text is the status line's few words (or state alone, to move the line you have); {FORM}")
     return out

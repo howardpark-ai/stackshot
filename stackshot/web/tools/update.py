@@ -6,7 +6,7 @@ from typing import Annotated, Any
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from stackshot.core import config as _cfg
+from stackshot.core import call_log as _calls, config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.model import ask_leaves as _askl, model as _model, states as _states, step_split as _step_split, work as _work
 from stackshot.model.ids import _norm_id
@@ -190,6 +190,7 @@ def stackshot_update(
     _sender_not_owner(sender)
     note = _owner_param("update", owner)           # step 4b: owner is accepted with a note until [model] owner_param_until, then refused
     fixes: list[tuple[str, str, str]] = []; fix_note = ""
+    status = _close_status(status, outcome, reason, outcome_text, superseded_by)      # before every gate that reads status
     _telling.HO_STATE.handback = set()      # the front agents this write's gate keeps as a hand-back (gates.fix_front_mover); the hand-off notice reads them
     try:
         if _model.clean(mover) or _model.clean(then) or _model.clean(post_wake_mover):
@@ -236,6 +237,14 @@ def stackshot_update(
             return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()))
     finally:
         _telling.HO_STATE.handback = set()      # the flag is this write's: a later write on this thread starts without it
+
+
+def _close_status(status: str, *close_parts: str) -> str:
+    """`status` as the write reads it: "closed" or "done" sent with a part of a close means a close, the tool's "completed", and the reply says so. Every check of a close still judges it. With no part of a close it stays as sent, and is refused."""
+    if str(status or "").strip().lower() not in ("closed", "done") or not any(str(v or "").strip() for v in close_parts):
+        return status
+    _calls.fixed("status-closed", f'status="{status.strip()}" was read as status="completed", the status that closes an item', fields=["status"], stored="completed", sent=status)
+    return "completed"
 
 
 def register(mcp, *, ask_after_write, sender_not_owner, update, busy_live=None) -> None:
