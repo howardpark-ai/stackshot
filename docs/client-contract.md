@@ -225,6 +225,20 @@ should bring back. `items?key=<session>` is the items a session *moves*, takes a
      "contact": "work-a", "observers": [], "list": "waiting", "held": true, "until": "2026-10-05", "state_updated": 1789800000.0, "updated": 1789800000.0, "scope": "hp"}]}
   ```
 
+## The open asks a message named to a session this turn
+
+`GET /client/asks-named?key=<session>&since=<epoch seconds>` is what the board question of the session hooks (`pages.py`) asks beside `items?key=`: of the items that a message which reached the session since its turn began names,
+those with an open ask to the owner that the session wrote or whose notices go to it. The session then withdraws the ask or says why it stands.
+
+- **Auth** as for every read of `/client`. It writes nothing, and it is answered off the event loop.
+- **Query.** `key` as `items?key=` reads it; `since` is when the session's turn began, in epoch seconds, above zero. A missing or ill-formed one is 400 with a plain line. The hooks send the time of the turn's prompt, which a record added inside
+  the turn (a skill load, a compaction summary) does not move.
+- **Which messages.** A row of the message log to the session whose outcome is delivered, queued or inbox, dated no more than 30 seconds before `since`; the words of a held line the session's hook printed, or of a router pass delivered to it, in the
+  same window. A message that was refused, archived or is still held does not count, and neither does an item notice the server pushes straight to a pane, which leaves no record.
+- **Which items.** An open item the message names, as the message tool reads a name (not one in a code span or a quote), with a standing ask on the owner's move; the session wrote that ask, or is the session the item's notices go to (its mover, else its
+  `then`). An ask written or rewritten since `since` is left out.
+- **Shape.** 200 `{"items": [{"gid", "shown", "subject", "ask"}]}`, at most 20. A server without this read answers 404, and the question is then asked without these lines.
+
 ## A pane waiting in its terminal
 
 When a session's permission prompt cannot be answered by a hook (a question to the owner, a guarded file, plan mode), the pane waits in its terminal. The fleet tool (sala) tells stackshot,
