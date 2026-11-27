@@ -2343,7 +2343,7 @@ check("errors: a newer render updates the page in place unless a field has focus
       "if(busy()||tried===ts){newer=true;return}return update(ts)" in L and "if(busy())return 'busy'" in L and "else if(k==='busy')newer=true" in L
       and "#panel[data-pbusy],#panel-menu:not([hidden])" in L and "INPUT|TEXTAREA|SELECT" in L)
 check("errors: no reload loop — a stamp already reloaded for only gets the banner; no stamp on the page never reloads",
-      "function fallback(ts){if(ss(KF)!==String(ts)){ss(KF,String(ts));reload()}else newer=true}" in L and "if(!R||ts<=R)" in L)
+      "function fallback(ts){if(window.ssBrief&&ssBrief.draft()){newer=true;return}if(ss(KF)!==String(ts)){ss(KF,String(ts));reload()}else newer=true}" in L and "if(!R||ts<=R)" in L)
 # the in-place update (a board write used to republish the page and reload it)
 check("in place: location.reload is reached only through reload(), and reload() only from the fallback (and the banner's own button)",
       L.count("location.reload") == 1 and "function reload(){ss(KY,String(window.scrollY||0));location.reload()}" in L

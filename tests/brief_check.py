@@ -182,7 +182,8 @@ def desktop(br, errors):
     check("a title opens the panel, the address names the item, the row is marked", s["open"] and s["url"] == "/?item=a3" and s["current"] == ["/items/a3"] and s["inside"], s)
     box = pg.eval_on_selector("#brief", "e => { const r = e.getBoundingClientRect(); return {x: r.x, w: r.width, h: r.height} }")
     pad = pg.eval_on_selector("#layout", "e => parseFloat(getComputedStyle(e).paddingRight)")
-    check("the panel stands on the right and the lists make room for it", abs(box["x"] + box["w"] - 1280) < 1 and box["w"] == 560 and box["h"] == 800 and pad >= 559, (box, pad))
+    edge = pg.evaluate("() => document.documentElement.clientWidth")      # the window less its scrollbar, where a fixed element's right edge sits
+    check("the panel stands on the right and the lists make room for it", abs(box["x"] + box["w"] - edge) < 1 and box["w"] == 560 and box["h"] == 800 and pad >= 559, (box, pad, edge))
     check("nothing scrolls sideways", pg.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"))
     send = pg.eval_on_selector("#brief button[name=act]", "e => e.getBoundingClientRect().bottom")
     check("Send is in view with nothing picked, and is off", send <= 800 and s["send"] is False and s["picked"] == "Picked: none yet", (send, s))
@@ -307,7 +308,7 @@ def desktop(br, errors):
     home(pg)
     with ctx.expect_page() as new:
         pg.click(f"{row(12)} a.ir-link", modifiers=["Control"])
-    other = new.value; other.wait_for_load_state()
+    other = new.value; other.wait_for_url(BOARD + "/items/a12", timeout=10000)      # a new tab is about:blank before its first navigation
     check("Ctrl+click opens the item's page in a new tab and no panel", other.url == BOARD + "/items/a12" and not state(pg)["open"], other.url); other.close()
     pg.route("**/items/a13/brief*", lambda r: r.fulfill(status=500, body="broken")); pg.click(f"{row(13)} a.ir-link"); pg.wait_for_url(BOARD + "/items/a13", timeout=10000)
     check("a brief that cannot be read leads to the item's page", True)
@@ -360,7 +361,10 @@ def phone(br, errors, scheme):
     small = pg.eval_on_selector_all("#brief .brief-bar .b, #brief .xp-b", "l => l.filter(e => e.getClientRects().length).map(e => [e.textContent, e.getBoundingClientRect().height]).filter(x => x[1] < 43.9)")
     check(f"{scheme}: Send is in view, the bar's buttons are large enough to tap", send <= 844 and small == [], (send, small))
     shot(pg, f"phone-sheet-{scheme}")
-    low = pg.eval_on_selector("#brief textarea", "e => e.getBoundingClientRect().height")
+    side = pg.evaluate("() => ['#brief textarea', '#brief button[name=act]'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom] })")
+    (_, tr, tt, tb), (bl, br_, bt, bb) = side
+    check(f"{scheme}: Send stands beside the note box, on its line", tr <= bl and br_ <= 390 and abs((tt + tb) / 2 - (bt + bb) / 2) < 6, side)
+    low =pg.eval_on_selector("#brief textarea", "e => e.getBoundingClientRect().height")
     pg.tap("#brief textarea"); pg.wait_for_timeout(300)
     tall = pg.eval_on_selector("#brief textarea", "e => [e.getBoundingClientRect().height, parseFloat(getComputedStyle(e).fontSize)]")
     check(f"{scheme}: the note box is one line until used, with text large enough not to zoom", low < 50 and tall[0] >= 80 and tall[1] >= 16, (low, tall))
@@ -397,7 +401,7 @@ def noscript(br):
     pg.click("#agents-at-work > details > summary")
     with ctx.expect_page() as new:
         pg.click(f"{row(12)} a.ir-link")
-    other = new.value; other.wait_for_load_state()
+    other = new.value; other.wait_for_url(BOARD + "/items/a12", timeout=10000)
     check("…a row's title opens the item's page", other.url == BOARD + "/items/a12", other.url); ctx.close()
 
 

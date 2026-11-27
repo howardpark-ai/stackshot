@@ -88,6 +88,10 @@ body.brief-open #panel,body.brief-open #panel-edge,body.brief-open #panel-scrim,
 .brief-bar .b{min-width:44px;min-height:44px}
 .bitem .btitle{font-size:15px}
 .bitem form.ianswer textarea{font-size:16px}
+.bitem .bfoot{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px;align-items:center}
+.bitem .bfoot>*{grid-column:1/-1}
+.bitem .bfoot>.abox{grid-column:1}
+.bitem .bfoot>.abtns-send{grid-column:2;flex-wrap:nowrap;margin:0}
 html.sheet,html.sheet body{overflow:hidden}}
 main.briefpage{overflow-wrap:anywhere}
 .bpbar{display:flex;gap:8px;margin:12px 0}
