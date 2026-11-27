@@ -45,7 +45,10 @@ runs on every box.
                                 only when he has decided nothing, his newest comment (kind comment). A caller resumes only on a line
                                 whose kind is decision, and keeps waiting on a comment. The label is empty when he picked none, the
                                 text's line breaks are " / ", and <when> is when he gave it, an ISO time in the instance's timezone
-                                (cut -f1, -f2, -f3, -f4 take it apart). The line does not say which question it answers: an item that was
+                                (cut -f1, -f2, -f3, -f4 take it apart). On a board of several members, the text of an answer to a step
+                                another member had a part in, which left the item on a step, opens with who answered, which step, and
+                                who the step was with after that answer: one member's Done need not end the step.
+                                The line does not say which question it answers: an item that was
                                 answered before a question was filed on it returns that old answer, so
                                 a caller files a fresh item for each question (client.py post question). Prints nothing and exits 0 while he has not answered. Exit 1,
                                 the reason on stderr and nothing on stdout: no id given (usage; the server's 400 for an empty key),
@@ -66,11 +69,12 @@ runs on every box.
   client.py get involved <session>
                                 the open items a session is the contact of or an observer on, whoever moves them, newest write first, as JSON: {"items": [{shown ("board#N"), subject, url (the item's page), mover (the name of whoever moves it now, as the item model reads it and `get item-facts` gives it),
                                 contact (the item's contact now, by name), observers ([names]), list ("your-move" | "agents" | "waiting", as `get items` gives it), held (as `get items` gives it: true for a parked item, one that waits on an open item or a doing item waiting for a stated wake), until (the day a held item comes back,
-                                "YYYY-MM-DD" as the home page's Waiting row dates it; null for an item that is not held or has no such day), state_updated and updated (epoch seconds, null for none)}]}. <session> is read as `get items` reads it (a pane name, a transcript uuid, a cse_ id or a permanent id). A closed item is not in it; a session that is neither contact nor
+                                "YYYY-MM-DD" as the home page's Waiting row dates it; null for an item that is not held or has no such day), state_updated and updated (epoch seconds, null for none), scope (the item's group: the scope of the board row its project's page rolls up to, one of the names in [project_scopes] order, the default one for an item with no project; `get items`, `get your-move` and `get item-facts` rows carry the same `scope`)}]}. <session> is read as `get items` reads it (a pane name, a transcript uuid, a cse_ id or a permanent id). A closed item is not in it; a session that is neither contact nor
                                 observer anywhere, or that no one knows, gets {"items": []}; no session is 400. No cap. Reads only. Exit 0 · 1 no token, a refusal or not reached.
   client.py get your-move       every open item in {OWNER}'s Your move group, as JSON: {"items": [{shown ("board#N"), subject, url (the item's page), ask (the open ask line, "" for none), updated (epoch seconds
-                                of the item's last write)}], "group": {"en": <the group's name>, "ko": <its name in the second language>}}. It is the home page's own list with no cap, in the home page's order (the item that has been his longest first; `get brief` shows the first
+                                of the item's last write), scope}], "group": {"en": <the group's name>, "ko": <its name in the second language>}}. It is the home page's own list with no cap, in the home page's order (the item that has been his longest first; `get brief` shows the first
                                 five lines of the same list), and holds every item whose mover is him, whichever session it names or whether it names one. An empty group is {"items": [], "group": {...}}.
+                                `scope` is the name of the subsection the home page lists that item under (one of the names in [project_scopes] order; the default one for an item with no project).
                                 `group` is the heading the home page draws over the list in each language, as the string table gives it; a language with no catalog on the install has the English text. Reads only.
                                 Exit 0 · 1 no token or not reached.
   client.py post project-agent <project> <name> --role <role> (--front | --back) [--surface sala|slack] --mandate "<one line>" [--sender <session id | label>]

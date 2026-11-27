@@ -304,7 +304,7 @@ check("2 close: …the full text is stashed for the router to deliver", len(stas
 item(30, subject="[home] get names these", needs=[PEER], mover="home-peer", next=f"home-peer: check board#17 and board#62, then board#30 itself, board#68, and board#17 again; board#14 too")
 g = _wt_get.stackshot_get("board#30")
 check("3 get: a `named in next:` block follows next", "next:\nhome-peer: check board#17" in g and "\nnamed in next:\n" in g, g)
-check("3 get: a closed item shows its close time in the instance timezone and its outcome", re.search(r"- board#17: closed \w{3} \w{3} \d+(?:st|nd|rd|th) \d\d:\d\d \(done\)", g), g)
+check("3 get: a closed item shows its close time in the instance timezone and its outcome", re.search(r"- board#17: closed \w{3} \w{3} \d+(?:st|nd|rd|th)(?: \d{4})? \d\d:\d\d \(done\)", g), g)
 check("3 get: an open item shows its mover", "- board#62: open, mover " in g, g)
 check("3 get: …a waiting item shows what it waits after", "- board#14: open, waiting after board#61" in g, g)
 check("3 get: …an unknown item says not found", "- board#68: not found" in g, g)

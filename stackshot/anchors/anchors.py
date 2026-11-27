@@ -433,6 +433,41 @@ def hub_of(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
     return "/".join(parts[:2])
 
 
+def board_row_of(key: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
+    """The board row a page key rolls up to: itself or the nearest ancestor with `board_row: true`, else its hub page (hub_of: a `hub:` line in its chain, else the top-level page). "" for no key.
+    The home page's project rows and an item's group both read it, so a page cannot sit on one row in one and another in the other."""
+    if not key:
+        return ""
+    reg = registry() if reg is None else reg
+    parts = key.split("/")
+    for n in range(len(parts), 2, -1):
+        cand = "/".join(parts[:n])
+        if (reg.get(cand) or {}).get("board_row"):
+            return cand
+    return hub_of(key, reg)
+
+
+def page_key(v: Any) -> str:
+    """A page key as the board reads it from an item's stored project: slashes and `.md` dropped, a bare value (legacy) read as `<first [pages] dir>/<slug>`."""
+    v = str(v or "").strip().strip("/")
+    if not v:
+        return ""
+    if v.endswith(".md"):
+        v = v[:-3]
+    return v if "/" in v else _cfg.page_dirs()[0] + "/" + v
+
+
+def item_scope(meta: Any, reg: dict[str, dict[str, Any]] | None = None, ids: dict | None = None, marks_: dict | None = None) -> str:
+    """The group an item is listed in, from its project: the scope (projects.scope_of, one of the names in [project_scopes] order) of the board row the item's page rolls up to, the default scope
+    for an item with no project. This is the one reading of an item's group for the text renderer (Board.item_scope, the your-move read) and the client reads (items, involved, item-facts). The home page (web/ui/render.py) keeps its own copy of the rule; tests/client_your_move_scenario.py compares the two against the real home page HTML. `ids`/`marks_` are
+    the id file's, read once by a caller that asks for many items."""
+    from stackshot.projects import projects as _prj  # noqa: PLC0415
+    reg = registry() if reg is None else reg
+    k = board_row_of(page_key(_iproj.key_of(meta)), reg)
+    entry = reg.get(k)
+    return _prj.scope_of(k, entry if isinstance(entry, dict) else {}, reg, ids, marks_)
+
+
 def session_hubs(name: str, reg: dict[str, dict[str, Any]] | None = None, nm: dict[str, str] | None = None) -> list[str]:
     """The hubs a session belongs to: hub_of() of every page that names it as its keeper (`display-name:`, `agent:`) or lists it
     under `agents:`. A session is matched by name or by id (canonical)."""

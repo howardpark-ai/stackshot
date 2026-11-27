@@ -13,7 +13,7 @@
 
 What the pass does per open item: it gives a wait stored in the old fields (wake, ask_by, hold) the form the writers store the same wait in today, through their own fold: `until` (and `wait_kind` where the old
 fields imply one: an after link beside a date is an item wait), no old field, and one History line saying the wait was rewritten as until. A bare wake (no hold, no kind, no wait_basis, no after link) is a backstop,
-not a wait, and stays as it is; so does an item with no old date. The server refuses (and leaves as it is) an item whose phase, kind of wait, mover, watched status, hold, stored phase or end date would read
+not a wait, and stays as it is; so does an item with no old date. A bare ask_by on a waiting item, with no wake beside it, stays as it is too and is LISTED: nothing reads that date, so someone re-saves the item with one. The server refuses (and leaves as it is) an item whose phase, kind of wait, mover, watched status, hold, stored phase or end date would read
 differently. No item is closed or woken, nobody is told, no clock moves, nothing but the wait keys and the History line changes (the file is replaced whole under the item lock, with a sha256 check, as the stamp and
 retire passes do). Running it twice changes nothing the second time. The pass itself wakes nothing; the watchers act on the newly watched future dates it lists, when they come.
 

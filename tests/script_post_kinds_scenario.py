@@ -797,7 +797,7 @@ def part_job_alert():
         return ja._jobalert_open_items(f"{unit} on {host}")
     NOW = "2027-01-01T00:00:00Z"
     def pin(iso):
-        """The server's clock for the future-time guard: the fixture's times are all before NOW. The module is reloaded in section 3, so this is called again there."""
+        """The server's clock for the future-time guard: the fixture's times are all before NOW (so a written run time is of a past year and says it). The module is reloaded in section 3, so this is called again there."""
         import stackshot.service.job_alert as ja
         t = datetime.datetime.fromisoformat(iso.replace("Z", "+00:00")); ja._jobalert_now = lambda: t
     pin(NOW)
@@ -818,7 +818,7 @@ def part_job_alert():
     d = it["description"].splitlines()
     check("…the description is bullets: the job and machine, the count, the run's time in the instance's zone, what to do, who opened it",
           len(d) == 5 and all(x.startswith("- ") for x in d) and d[0] == "- nightly.service on host-a ended a scheduled run in failure" and d[1] == "- Failed runs since this item opened: 1"
-          and d[2].startswith("- Failed run at Mon Nov 23rd 06:15 ") and "journal of nightly.service on host-a" in d[3] and "next successful run closes this item" in d[3] and d[4] == f"- Opened by job alert (a script on {me})", it["description"])
+          and d[2].startswith("- Failed run at Mon Nov 23rd 2026 06:15 ") and "journal of nightly.service on host-a" in d[3] and "next successful run closes this item" in d[3] and d[4] == f"- Opened by job alert (a script on {me})", it["description"])
     check("…the state a later call needs is on the item: the times, the count, the unit and the host", m["job_alert_runs"] == ["2026-11-23T02:15:00Z"] and m["job_alert_count"] == 1 and m["job_alert_unit"] == "nightly.service" and m["job_alert_host"] == "host-a", m)
     settle()
     check("…the builder is told once and no one else is", len(pushed) == 1 and pushed[0][0] in ("home-sparrow-builder", S["build"]) and gid1 in pushed[0][1] and "now needs you" in pushed[0][1], pushed)
@@ -830,7 +830,7 @@ def part_job_alert():
     st, o2 = failed(time_="2026-11-23T14:15:00Z")
     check("a second failure: 200, the same item, added, two failures, nothing filed", st == 200 and o2["item"] == gid1 and o2["action"] == "added" and o2["failures"] == 2 and len(items()) == n1, (st, o2))
     d = item(gid1)["description"].splitlines()
-    check("…the description has the count 2 and both runs' times, the earlier first", d[1] == "- Failed runs since this item opened: 2" and d[2].startswith("- Failed run at Mon Nov 23rd 06:15 ") and d[3].startswith("- Failed run at Mon Nov 23rd 18:15 "), d)
+    check("…the description has the count 2 and both runs' times, the earlier first", d[1] == "- Failed runs since this item opened: 2" and d[2].startswith("- Failed run at Mon Nov 23rd 2026 06:15 ") and d[3].startswith("- Failed run at Mon Nov 23rd 2026 18:15 "), d)
     check("…the item is still open under the same mover, with the metadata kept", item(gid1)["status"] == "open" and item(gid1)["metadata"]["job_alert_count"] == 2 and item(gid1)["metadata"]["job_alert_runs"] == ["2026-11-23T02:15:00Z", "2026-11-23T14:15:00Z"]
           and sr._session_label(item(gid1)["metadata"]["mover"]) == "home-sparrow-builder", item(gid1)["metadata"])
     settle()
@@ -861,7 +861,7 @@ def part_job_alert():
     it = item(gid1)
     check("job-ok: 200 and the item's id closed", st == 200 and c1["closed"] == [gid1] and c1["unit"] == "nightly.service" and c1["host"] == "host-a", (st, c1))
     check("…completed, outcome done, the run's time in the reason (in the instance's zone), the end state in the description", it["status"] == "completed" and it["metadata"]["outcome"] == "done"
-          and it["metadata"]["reason"] == "the next run of nightly.service on host-a succeeded at Tue Nov 24th 07:00 +04" and "ran successfully at Tue Nov 24th 07:00 +04" in it["metadata"]["outcome_text"]
+          and it["metadata"]["reason"] == "the next run of nightly.service on host-a succeeded at Tue Nov 24th 2026 07:00 +04" and "ran successfully at Tue Nov 24th 2026 07:00 +04" in it["metadata"]["outcome_text"]
           and it["description"].splitlines()[0] == "- nightly.service on host-a ended a scheduled run in failure", it["metadata"])
     st, c2 = ok(time_="2026-11-24T03:00:00Z")
     check("a second job-ok for the same run: 200, nothing closed, nothing changed", st == 200 and c2["closed"] == [] and "no open item" in c2["note"] and item(gid1)["status"] == "completed" and len(items()) == n2, (st, c2))
@@ -1030,7 +1030,7 @@ def part_job_alert():
     st, o1 = failed(unit="sort.service", time_="2026-12-11T10:00:00Z"); st, o2_ = failed(unit="sort.service", time_="2026-12-11T08:00:00Z")
     check("an older failure sent after a newer one is added and the kept times stay in time order", o2_["action"] == "added" and item(o1["item"])["metadata"]["job_alert_runs"] == ["2026-12-11T08:00:00Z", "2026-12-11T10:00:00Z"], (o2_, item(o1["item"])["metadata"]))
     d = item(o1["item"])["description"].splitlines()
-    check("…and the description lists them in that order", d[2].startswith("- Failed run at Fri Dec 11th 12:00 ") and d[3].startswith("- Failed run at Fri Dec 11th 14:00 "), d)
+    check("…and the description lists them in that order", d[2].startswith("- Failed run at Fri Dec 11th 2026 12:00 ") and d[3].startswith("- Failed run at Fri Dec 11th 2026 14:00 "), d)
     ok(unit="sort.service", time_="2026-12-11T11:00:00Z")
 
     # ---- 9d2. an item written with the old spelling of a time: the instants are compared, never the strings

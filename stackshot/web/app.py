@@ -10,13 +10,13 @@ from fastmcp import FastMCP
 from mcp_types import Icon as _Icon
 from starlette.responses import FileResponse, HTMLResponse, PlainTextResponse
 
-from stackshot.core import config as _cfg, instance as _inst, readonly as _ro, store as _store
+from stackshot.core import config as _cfg, instance as _inst, members as _members, readonly as _ro, store as _store
 from stackshot.core.instance import NAME, OWNER
 from stackshot.github import ghsync as _gh
 from stackshot.web import i18n as _i18n, uiprefs as _uiprefs
 from stackshot.web.auth import oauth as _oauth, signin as _signin
 from stackshot.web.auth.signin import _ui_renewed
-from stackshot.web.board_home import _board_home_drop
+from stackshot.web.board_home import _board_home_drop, use_viewer as _use_viewer
 from stackshot.web.tools.text import ZONE, _DESC_LINE_MAX, _DESC_MAX_LINES, _NEXT_WORDS
 from stackshot.web.tools import notes as _tool_notes
 from stackshot.web.tools import brief as _tool_brief
@@ -61,6 +61,19 @@ def _request_lang(request) -> str:
     except Exception as e:  # noqa: BLE001  — a language that cannot be worked out is English, never a refused page
         print(f"page language not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return _i18n.DEFAULT
+
+
+def _request_viewer(request) -> str:
+    """The member a request's home is drawn for: the signed-in one on a board of several members; "" with one member, for nobody signed in and for a sign-in address no member has, who all get
+    the page every member shares."""
+    try:
+        if request.method not in ("GET", "HEAD") or len(_members.members()) < 2:
+            return ""
+        p = _members.person_of_email(_signin._ui_email(request))
+        return p.name if p is not None else ""
+    except Exception as e:  # noqa: BLE001  — a viewer that cannot be worked out reads the shared page, never a refused one
+        print(f"home viewer not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return ""
 
 
 def _panel_ordered(request, resp):
@@ -129,7 +142,8 @@ def _custom_route_ro(path, methods, **kw):
             if not _ro.is_read_only():
                 tok = _i18n.set_current(_request_lang(request))      # the page handler draws in the person's language (i18n.current)
                 try:
-                    resp = await fn(request)
+                    with _use_viewer(_request_viewer(request)):      # …and the home as the signed-in member's (board_home.viewer)
+                        resp = await fn(request)
                 finally:
                     _i18n.reset_current(tok)
                 resp = _ui_renewed(request, _panel_ordered(request, resp))
@@ -142,7 +156,8 @@ def _custom_route_ro(path, methods, **kw):
                 return PlainTextResponse("this page reads GitHub and the other machines; on a read-only standby copy (STACKSHOT_READ_ONLY) it is on the live board.", status_code=503, headers={"Cache-Control": "no-store"})
             tok = _i18n.set_current(_request_lang(request))
             try:
-                resp = await fn(request)
+                with _use_viewer(_request_viewer(request)):
+                    resp = await fn(request)
             finally:
                 _i18n.reset_current(tok)
             return _ui_renewed(request, _ro_with_banner(_panel_ordered(request, resp)))

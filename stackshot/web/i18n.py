@@ -12,10 +12,10 @@ with no file that loaded, `available()` is just English and the pages draw no to
 when read: a key `EN` does not have is ignored (and counted), a value that is not text or that names a field `EN` does not offer for that key falls back to the English text for that key. One warning line
 per file goes to stderr when it is read (missing file or folder, unreadable JSON, how many keys are missing or were refused), never a line per page.
 
-Dates and ages are templates in the catalog too (`date.full`, `date.nohm`, `date.day`, `date.ord.*`, `date.wd.*`, `date.mon.*`, `age.*`), so a language's own forms come out of its file alone.
+Dates and ages are templates in the catalog too (`date.full`, `date.nohm`, their `_year` forms, `date.day`, `date.ord.*`, `date.wd.*`, `date.mon.*`, `age.*`), so a language's own forms come out of its file alone.
 
-The language of a request is `current()`: the server sets it for the request from the person's stored choice (uiprefs.lang) with `use`, and a Board draws in it unless it was given one. Stdlib and
-stackshot.core.config only; this module imports nothing of the web layer."""
+The language of a request is `current()`: the server sets it for the request from the person's stored choice (uiprefs.lang) with `use`, and a Board draws in it unless it was given one. Stdlib,
+stackshot.core.config and stackshot.core.datewords only; this module imports nothing of the web layer."""
 from __future__ import annotations
 
 import contextlib
@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from stackshot.core import config as _cfg
+from stackshot.core import datewords as _datewords
 
 DEFAULT = "en"
 LANGS: tuple[str, ...] = ("en", "ko")        # the codes a person can pick; the toggle offers the ones whose catalog loaded
@@ -40,6 +41,8 @@ EN: dict[str, str] = {}
 EN.update({
     "date.full": "{wd} {month} {day} {hm}",                  # Tue Nov 10th 16:20
     "date.nohm": "{wd} {month} {day}",                       # Tue Nov 10th
+    "date.full_year": "{wd} {month} {day} {year} {hm}",      # Fri Mar 5th 2027 18:30: a date of a year other than the current one
+    "date.nohm_year": "{wd} {month} {day} {year}",           # Fri Mar 5th 2027
     "date.day": "{n}{ord}",                                  # 10th
     "date.ord.1": "st", "date.ord.2": "nd", "date.ord.3": "rd", "date.ord.n": "th",
     "age.now": "just now",
@@ -259,9 +262,10 @@ def _ord(d: int, lang: str) -> str:
     return t({1: "date.ord.1", 2: "date.ord.2", 3: "date.ord.3"}.get(d % 10, "date.ord.n"), lang)
 
 
-def fmt_date(ts: Any, lang: str | None = None, clock: bool = True, tz: datetime.tzinfo | None = None) -> str:
+def fmt_date(ts: Any, lang: str | None = None, clock: bool = True, tz: datetime.tzinfo | None = None, today: datetime.date | None = None) -> str:
     """A date a person reads, from the catalog's templates: "Tue Nov 10th 16:20" in English (clock=False: "Tue Nov 10th"). `ts` is a datetime (drawn in its own zone), a date (never has a clock), or epoch seconds (in
-    `tz`, else UTC)."""
+    `tz`, else UTC). A date of a year other than the current one says its year (the date.*_year templates, field {year}); the current year is the one it is now in the instance's timezone, or `today`'s when a
+    caller passes its own now (core/datewords.other_year, the rule the text of the tools follows too)."""
     if isinstance(ts, datetime.datetime):
         d = ts
     elif isinstance(ts, datetime.date):
@@ -270,9 +274,12 @@ def fmt_date(ts: Any, lang: str | None = None, clock: bool = True, tz: datetime.
         d = datetime.datetime.fromtimestamp(float(ts), tz or datetime.timezone.utc)
     lang = current() if lang is None else lang
     f = dict(wd=t(f"date.wd.{d.weekday()}", lang), month=t(f"date.mon.{d.month}", lang), day=t("date.day", lang, n=d.day, ord=_ord(d.day, lang)))
+    suffix = ""
+    if _datewords.other_year(d, today):
+        suffix, f["year"] = "_year", d.year
     if isinstance(d, datetime.datetime) and clock:
-        return t("date.full", lang, hm=f"{d:%H:%M}", **f)
-    return t("date.nohm", lang, **f)
+        return t("date.full" + suffix, lang, hm=f"{d:%H:%M}", **f)
+    return t("date.nohm" + suffix, lang, **f)
 
 
 def fmt_span(seconds: float, lang: str | None = None) -> str:

@@ -508,7 +508,8 @@ check("11 summary: …and the two tags that ask for action stay exempt (the busy
 # the senders: the two -main summaries use the progress tag, the busy-stretch and quiet-mover notices the exempt one
 src_ = lambda fn: inspect.getsource(fn)
 check("11 wiring: the idle hand-over's and the balancer's -main summaries are sent as stall_summary", 'tag="stall_summary"' in src_(_audit_ticks._hand_idle_tick) and 'tag="stall_summary"' in src_(_audit_ticks._balance_tick)
-      and 'tag="stall")' not in src_(_audit_ticks._hand_idle_tick) and 'tag="stall")' not in src_(_audit_ticks._balance_tick))
+      and 'tag="stall")' not in src_(_audit_ticks._balance_tick) and src_(_audit_ticks._hand_idle_tick).count('tag="stall")') == 1)
+check("11 wiring: the idle hand-over's one other notice, the hourly one to the mover of an item no builder was free to take, is tag stall (it asks the holder to act)", 'tag="stall")' in src_(_audit_ticks._hand_idle_tick) and "told_mover" in src_(_audit_ticks._hand_idle_tick))
 check("11 wiring: the busy-stretch notice stays tag stall (it asks the holder to look)", 'tag="stall")' in src_(_audit_ticks._busy_tell_tick) and "stall_summary" not in src_(_audit_ticks._busy_tell_tick))
 check("11 wiring: the notice to a quiet mover stays tag stall", 'tag="stall")' in src_(_ladder.ladder_main_tell) or 'tag="stall")' in src_(_ladder.ladder_enter_quiet) or 'tag="stall")' in src_(_ladder.ladder_quiet_look), None)
 # the gate: -main (a front agent) is the receiver, the owner is away: no push, no turn, a board line and a held-log line

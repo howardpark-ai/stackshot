@@ -159,6 +159,7 @@ def old_items(key):
                     "contact": _contacts._contact_label(dict(it, gid=gid)),
                     "next": str(m.get("next") or ""), "state_updated": su, "confirmed": _hooks().rmod_confirmed_at(it, p),
                     "updated": up, "held": _item_read._is_parked(it) or bool(_item_read._after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid)), **_wait_fields(gid, it, ctx),
+                    "scope": _anc.item_scope(m),
                     "roles": roles, **({"role": "agent"} if linked else {})})
     return 200, "application/json", json.dumps({"items": out}, ensure_ascii=False)
 '''

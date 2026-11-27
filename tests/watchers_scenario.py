@@ -140,7 +140,7 @@ check("ask: the relay question is the fixed text, the party's own event named", 
       and wk.relay_ask({"wait_event": "signature", "party": "Acme legal"}) == "Decide: has Acme legal's signature arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop"
       and wk.is_watcher_ask(wk.relay_ask({"wait_event": "x"})) and wk.is_watcher_ask(wk.drop_ask({"wait_event": "x"})) and not wk.is_watcher_ask("Decide: a · Recommend: b · Stakes: c · By: d"), wk.relay_ask({"wait_event": "x"}))
 D0 = datetime.date(2026, 11, 16)
-WHEN = [wk.ASK_AGAIN + wk.day_words(D0 + datetime.timedelta(days=7)), wk.ASK_AGAIN + wk.day_words(D0 + datetime.timedelta(days=14)), wk.ASK_AGAIN + wk.day_words(wk._add_months(D0, 1))]      # the three date buttons: a week, two weeks, a month
+WHEN = [wk.ASK_AGAIN + wk.day_words(D0 + datetime.timedelta(days=7), D0), wk.ASK_AGAIN + wk.day_words(D0 + datetime.timedelta(days=14), D0), wk.ASK_AGAIN + wk.day_words(wk._add_months(D0, 1), D0)]      # the three date buttons: a week, two weeks, a month
 RELAY_LABELS = ["arrived", *WHEN, "not yet, ask again on <date>", "drop"]; DROP_LABELS = ["drop", *WHEN, "keep waiting until <date>"]
 wrelay, wdrop = {"metadata": {"ask": wk.relay_ask({"wait_event": "x"}), "watch": {"asked": "relay"}, "options": wk.relay_options(D0)}}, {"metadata": {"ask": wk.drop_ask({"wait_event": "x"}), "watch": {"asked": "dropit"}, "options": wk.drop_options(D0)}}
 check("options: relay arrived / the three dates / not yet / drop; drop-it: drop / the three dates / keep waiting; the date buttons carry their day, no option is recommended",
@@ -603,6 +603,37 @@ reset(); woke = wakes_svc.wake_pass()
 check("review 6: an anchor wait with no stored anchor is released by today's wake pass (the hold goes, no watcher mover)", "a68" in woke and "hold" not in mt(68) and "mover" not in mt(68) and not any("a68" in x[0] for x in sent("watch")), mt(68))
 br = _wt_brief.stackshot_brief()
 check("review 6: the brief lists the waits no watcher can end", "Waits no watcher can end" in br and "a68" in br and "a69" in br, br[:1800])
+# a waiting item with no wait_kind that nothing wakes is listed with them: needs external with a bare ask_by (relay-like and anchor-like), as the connector once wrote it
+item(201, needs=["external"], ask_by=day(-26), subject="[home] relay-like, a bare ask_by")
+item(202, needs=["external"], ask_by=day(-22), wait_anchor="https://github.com/o/r/issues/61", subject="[home] anchor-like, a bare ask_by")
+item(203, needs=["external"], ask_by=day(9), subject="[home] a bare ask_by still ahead")
+item(204, hold=True, wake=day(3), needs=[BACK], subject="[home] a hold the wake pass takes")
+item(205, hold=True, after=["a204"], needs=[BACK], subject="[home] held behind an open item")
+item(206, needs=[BACK], ask_by=day(-5), state="doing", subject="[home] alive, a leftover ask_by")
+item(207, hold=True, needs=[BACK], subject="[home] held, an anchor scoped to it")
+item(208, wait_kind="relay", wait_event="the badge", ask_by=day(3), post_wake_mover=BACK, needs=[], subject="[home] a watched relay wait")
+item(209, status="completed", needs=["external"], ask_by=day(-5), subject="[home] closed")
+_anchors_before = _anc.load()
+_anc.save({**_anchors_before, "projects/alpha": [*_anchors_before.get("projects/alpha", []), {"url": "https://github.com/o/r/issues/62", "items": ["a207"], "added": now0, "by": "x"}]})
+def waits_line():
+    br = _wt_brief.stackshot_brief()
+    line = next((l for l in br.splitlines() if l.startswith("Waits no watcher can end")), "")
+    ids = lambda s: set(re.findall(r"a\d+\b", s))
+    return line, ids(line.split("):")[0]), ids(line.split("Nothing at all wakes:")[1].split(". The others")[0]) if "Nothing at all wakes:" in line else set()
+line, listed, dead = waits_line()
+check("brief: needs external with a bare ask_by and no wait_kind is listed, relay-like, anchor-like and with the date still ahead, as one nothing wakes", {"a201", "a202", "a203"} <= listed and {"a201", "a202", "a203"} <= dead, line)
+check("brief: …the neighbors something wakes, an alive item and a closed one are not listed", not listed & {"a204", "a205", "a206", "a207", "a208", "a209"}, line)
+check("brief: …a stored kind with nothing to watch is still listed", {"a68", "a69"} <= listed, line)
+check("brief: …the line says what gives each a wait, and speaks of others only when there are others", "give it one (until, after or wait_anchor)" in line and ("The others keep today's mechanisms." in line) == bool(listed - dead), (line, listed - dead))
+_real_off = _item_read._old_wait_off
+_item_read._old_wait_off = lambda: True
+try:
+    line, listed, dead = waits_line()
+finally:
+    _item_read._old_wait_off = _real_off
+check("brief: with the old wake pass stood down, a held wake and an `after` behind a hold wake nothing", {"a204", "a205"} <= dead and "a208" not in listed, line)
+_anc.save(_anchors_before)
+for i in range(201, 210): (T / f"store/a/{i}.json").unlink()
 
 # --- 8. the item turned to the owner passes the second-mover guard
 cfg(guards=True)
@@ -735,7 +766,7 @@ check("refresh: a closed item and an agent's own ask are left alone", raw(312) =
 r_before = (raw(310), raw(311)); again = watching_svc.watch_refresh_asks(now0 + 3 * DAY)
 check("refresh: a second run writes nothing (idempotent: the date buttons are the mark)", again == [] and (raw(310), raw(311)) == r_before, again)
 SENT.clear(); r_ = rd(310); r_["metadata"]["answers"] = []; (T / "store/a/310.json").write_text(json.dumps(r_))
-out_ = answer_svc._answer("a310", wk.ASK_AGAIN + wk.day_words(D_ + datetime.timedelta(days=7)), "", "answer")
+out_ = answer_svc._answer("a310", wk.ASK_AGAIN + wk.day_words(D_ + datetime.timedelta(days=7), D_), "", "answer")
 check("refresh: a day button of the rebuilt question puts the wait back on that day, as on the follow-up", out_ != "askedback" and mt(310).get("wait_kind") == "relay" and ab_(mt(310)) == (D_ + datetime.timedelta(days=7)).isoformat() and "ask" not in mt(310), mt(310))
 
 # stale day buttons (a question that sat past its first button's day) are counted again from today; a fresh one is left alone
@@ -764,7 +795,7 @@ later = watching_svc.watch_refresh_asks(now0 + 8 * DAY)
 check("stale: a week later the rebuilt buttons are stale again and are counted again", {"a320", "a321", "a322", "a323"} <= set(later), later)
 SENT.clear(); r_ = rd(320); r_["metadata"]["answers"] = []; (T / "store/a/320.json").write_text(json.dumps(r_))
 D2_ = D_ + datetime.timedelta(days=8)
-out2_ = answer_svc._answer("a320", wk.ASK_AGAIN + wk.day_words(D2_ + datetime.timedelta(days=7)), "", "answer")
+out2_ = answer_svc._answer("a320", wk.ASK_AGAIN + wk.day_words(D2_ + datetime.timedelta(days=7), D2_), "", "answer")
 check("stale: a day button of a re-based question puts the wait back on that day (no refusal as for a past day)", out2_ != "askedback" and mt(320).get("wait_kind") == "relay" and ab_(mt(320)) == (D2_ + datetime.timedelta(days=7)).isoformat(), (out2_, mt(320)))
 
 # ================================================================ the example config documents the switches

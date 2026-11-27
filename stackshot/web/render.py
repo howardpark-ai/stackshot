@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg  # stackshot.toml: paths, fleet, scopes, the Machines panel, branding
+from stackshot.core import datewords as _datewords   # a date in words, and when it says its year
 from stackshot.core import members as _members
 from stackshot.core import legacy_owner as _lo   # an old version of an item (from the store's history) read as the current code reads it: History only, never written back
 from stackshot.web import item_history as _ihist   # the commits of an item's file in the store's git, kept per item (item_history.py)
@@ -384,12 +385,10 @@ def yesno_options(r):
 def option_lines(r):
     """The options as plain lines, "label (recommended): line", for a tool reply or a tooltip."""
     return [f'{_ol.listed(o["label"], i)}{" (recommended)" if o["recommended"] else ""}: {o["line"]}' for i, o in enumerate(options_of(r))]
-def when_words(t, clock=True):
-    """"Thu Mar 5th 18:30" (clock=False: "Thu Mar 5th"): the rulebook's form for a date a person reads. t = an aware datetime
-    (drawn in its own zone) or a date (no clock). Board.when and the server's replies use it."""
-    if not isinstance(t, datetime.datetime): clock = False
-    d = t.day
-    return f"{t:%a %b} {d}{'th' if 11 <= d % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(d % 10, 'th')}" + (f" {t:%H:%M}" if clock else "")
+def when_words(t, clock=True, today=None):
+    """"Thu Mar 5th 18:30" (clock=False: "Thu Mar 5th"), with the year when it is not the current one ("Fri Mar 5th 2027 18:30"): the rulebook's form for a date a person reads. t = an aware datetime
+    (drawn in its own zone) or a date (no clock); today = the caller's own now (core/datewords). Board.when and the server's replies use it."""
+    return _datewords.when_words(t, today, clock)
 def age_words(seconds):
     """An age in words: "12 min", "5 h", "2 d" (minutes below 90 min, hours below 36 h, days from then on)."""
     m = int(max(0.0, float(seconds)) // 60)
@@ -471,11 +470,7 @@ def shown_full(g): return _gh.shown(g)                             # an id as a 
 def shown(g):                                                      # an id on the board itself: #7 ("board" crowds the UI), the rest as shown_full
     t = shown_full(g); return t[len("board"):] if t.startswith("board#") else t
 def rid_full(r): return shown_full(r["gid"])                       # board.md and the brief, which sessions read and quote: board#N
-def _page_key(v):
-    v = str(v or "").strip().strip("/")
-    if not v: return ""
-    if v.endswith(".md"): v = v[:-3]
-    return v if "/" in v else _cfg.page_dirs()[0] + "/" + v   # items store the full page key; a bare value is legacy and means <first [pages] dir>/<slug>
+def _page_key(v): return _anc.page_key(v)                           # an item's stored project as the page key the board reads (anchors.page_key)
 def proj_key(r):
     """The PAGE the item is filed on (its plain detail link): the key every reader that needs the page reads (the board row, the keeper, the anchors, the project page's items and sub-page badge)."""
     return _page_key(_iproj.key_of(r["metadata"]))
@@ -748,7 +743,6 @@ def outcome_of(r):
     return str(m.get("outcome") or ""), str(m.get("reason") or ""), str(m.get("superseded_by") or "")
 from stackshot.anchors.anchors import KINDS as _KIND     # an anchor id's prefix → its type; the one table, shared with anchor-hub
 from stackshot.anchors import anchors as _anc   # roles.json's live flag per session (roles_live)
-from stackshot.anchors.anchors import hub_of as _hub_of   # the page a key belongs to on the board (a `hub:` line, else its top-level page)
 _KIND_ORDER = ["Slack", "Notion", "Gmail", "Drive", "GitHub", "Link"]
 # The board as an installed app (Chrome "Install page as app", display standalone). The manifest (/manifest.webmanifest,
 # served by server.py) is fetched with credentials: Chrome fetches a manifest without cookies unless the link says
@@ -1077,15 +1071,8 @@ class Board:
         k = proj_key(r)
         return k, (self.proj.get(k) if k else None)
     def row_of(self, k):
-        """The board row a page key rolls up to: itself or the nearest ancestor with `board_row: true`, else its hub page: the
-        page a `hub:` line in its chain names (ops/hub sits on the hub project's row, with its keeper and
-        agents), else the top-level page."""
-        if not k: return ""
-        parts = k.split("/")
-        for n in range(len(parts), 2, -1):
-            cand = "/".join(parts[:n])
-            if (self.proj.get(cand) or {}).get("board_row"): return cand
-        return _hub_of(k, self.proj)
+        """The board row a page key rolls up to: itself or the nearest ancestor with `board_row: true`, else its hub page (anchors.board_row_of)."""
+        return _anc.board_row_of(k, self.proj)
     def proj_label(self, k):
         """An item's project as the card says it: the scope and the row's name, then the sub-page's when the item sits below the row, with plain
         slashes ("ops/hub/sharing/sub-page", "home/general")."""
@@ -1111,13 +1098,20 @@ class Board:
         if not k or k not in self.proj: return ""
         c = self.__dict__.setdefault("_lscope", {})
         if k not in c:
-            if "_lscope_id" not in self.__dict__:
-                try: ids = _prj.ids_by_key()
-                except ValueError: ids = {}                    # a damaged id file: the registry's own copy of the id answers
-                self.__dict__["_lscope_id"] = (ids, _prj.marks())
-            ids, mk = self.__dict__["_lscope_id"]
+            ids, mk = self.scope_ids()
             c[k] = _prj.label_scope(k, self.proj.get(k) or {}, self.proj, ids, mk)
         return c[k]
+    def scope_ids(self):
+        """(key → id, the marks by id) of the id file, read once for the draw."""
+        if "_scope_ids" not in self.__dict__:
+            try: ids = _prj.ids_by_key()
+            except ValueError: ids = {}                    # a damaged id file: the registry's own copy of the id answers
+            self.__dict__["_scope_ids"] = (ids, _prj.marks())
+        return self.__dict__["_scope_ids"]
+    def item_scope(self, r):
+        """The group the home page lists an item under, the name on its subsection there (ui/render.py scope_groups): anchors.item_scope, the reading the client reads share with this renderer (the home page in ui/render.py keeps its own copy of the rule, which the your-move scenario compares with this one). One of the names in
+        [project_scopes] order, single-scope instances included; board.md's own grouping (proj_scope, [scopes]) is another setting."""
+        return _anc.item_scope(r["metadata"], self.proj, *self.scope_ids())
     def proj_mirror(self, k):
         return (self.proj.get(k) or {}).get("mirror") or ""
     def proj_scope(self, k):
@@ -1215,7 +1209,7 @@ class Board:
         if isinstance(ts, datetime.datetime): t = ts.astimezone(self.now.tzinfo)
         elif isinstance(ts, datetime.date): t, clock = ts, False
         else: t = datetime.datetime.fromtimestamp(float(ts), self.now.tzinfo)
-        return when_words(t, clock)
+        return when_words(t, clock, self.now)
     def new_hold_words(self, r):
         """A new hold's words for the briefings: "set by my-x Sat Mar 21st 09:00 · wake Mon Mar 23rd · parked for after board#N",
         or "… · nothing holds it now" when no open after, recycle, needs external or item-scoped anchor holds it."""
@@ -1527,13 +1521,13 @@ class Board:
     def your_move(self) -> list:
         """The whole Your move group as the client read `your-move` serves it: one dict per item, in the group's own order (`home_pairs`, the call the home page's group, board.md and the brief draw from; the brief
         shows its first five, this shows all), {shown: the id as a person reads it, subject, url: the item's page (the path alone when the instance has no board address), ask: the open ask line or "", updated: epoch seconds of the
-        item's last write (the file's time for an item that stores none)}. No cap: the group is as long as the owner's queue."""
+        item's last write (the file's time for an item that stores none), scope: the group the home page lists it under (item_scope)}. No cap: the group is as long as the owner's queue."""
         out = []
         base = _inst.BOARD_URL.rstrip("/")
         for r, _m in self.home_pairs()[_home.YOUR_MOVE]:
             try: upd = float(r.get("updated") or 0) or r["_updated"].timestamp()
             except (TypeError, ValueError): upd = r["_updated"].timestamp()
-            out.append({"shown": rid_full(r), "subject": str(r.get("subject") or ""), "url": base + id_href(r["gid"]), "ask": open_ask(r), "updated": upd})
+            out.append({"shown": rid_full(r), "subject": str(r.get("subject") or ""), "url": base + id_href(r["gid"]), "ask": open_ask(r), "updated": upd, "scope": self.item_scope(r)})
         return out
 
     def brief(self) -> str:
@@ -1579,7 +1573,7 @@ class Board:
         def m_item(r):
             m = r["metadata"]; out = [f"<a id=\"{anchor(r)}\"></a>**{rid_full(r)} · {r['subject']}**" + (f" ({self.md_hold(r)})" if is_parked(r) else "")]
             k = "" if is_parked(r) else needs_kind(r)   # parked: its needs field waits with it
-            meta = ([f"**Due in {(due_of(r) - now.date()).days} d ({due_of(r):%m-%d %a})**"] if due_of(r) else []) + [m.get("priority") or "p2"]
+            meta = ([f"**Due in {(due_of(r) - now.date()).days} d ({_datewords.numeric_day(due_of(r), now)} {due_of(r):%a})**"] if due_of(r) else []) + [m.get("priority") or "p2"]
             if _home.wait_phrase(self.mod_of(r), "waiting on", shown_full): meta.append(_home.wait_phrase(self.mod_of(r), "waiting on", shown_full))      # the kind of its wait, in the model's words
             if r.get("_fresh") == "stale": meta.append("stale")                       # before the ask, whose own " · " would swallow it
             if k == "call" and open_ask(r): meta.append("ask: " + open_ask(r))
@@ -1695,7 +1689,7 @@ class Board:
                 for r in done:
                     oc, why, by = outcome_of(r)   # how it ended
                     print(f"- <a id=\"{anchor(r)}\"></a>**{rid_full(r)}** {r['subject']}" + (f" · **{outcome_word(oc)}**" + (f" by {shown_full(by)}" if by else "") + (f": {why}" if why else "") if oc else "")
-                          + (f" · {m_sref(r)}" if lab(r) else "") + f" · {r['_updated']:%m-%d %H:%M} {_cfg.tz_abbr(r['_updated'])}")
+                          + (f" · {m_sref(r)}" if lab(r) else "") + f" · {_datewords.numeric_day(r['_updated'], self.now)} {r['_updated']:%H:%M} {_cfg.tz_abbr(r['_updated'])}")
             else: print("_none_")
         return _b.getvalue()
 

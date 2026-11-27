@@ -97,8 +97,32 @@ def owner_display(meta: dict[str, Any] | None = None) -> str:
 
 
 def is_owner(who: Any) -> bool:
-    """Does `who` name the owner: a person's name or alias, in any case (members.person_of)."""
+    """Does `who` name a member, any of them: a person's name or alias, in any case (members.person_of). The question for one member's Home, is it THIS member's move, is names_member's."""
     return _members.person_of(clean(who)) is not None
+
+
+def names_member(who: Any, member: str) -> bool:
+    """Does `who` name the member called `member`, by the name or an alias, in any case?"""
+    p = _members.person_of(clean(who))
+    return p is not None and p.name == member
+
+
+def board_viewer(name: Any) -> str:
+    """The member a Home is drawn for: `name` as the config writes that member, on a board of several members; "" for anyone else, and always while the board has one member (every item that waits
+    on a member waits on that one, so there is one Home)."""
+    if len(_members.members()) < 2:
+        return ""
+    p = _members.person_of(clean(name))
+    return p.name if p is not None else ""
+
+
+def wake_member(meta: dict[str, Any], picker: str = "") -> str:
+    """The member to store as `mover` when a wait ends on a member's move: the one who picks the wait up (`picker`, when it names a member), else the member the item names (item_person: the stored
+    mover, a line of next). "" with one member: there is nothing to store, every item that waits on a member waits on that one."""
+    if len(_members.members()) < 2:
+        return ""
+    p = _members.person_of(clean(picker))
+    return p.name if p is not None else item_person(meta).name
 
 
 def norm_who(who: Any) -> str:

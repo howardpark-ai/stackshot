@@ -137,6 +137,18 @@ def child_hooked(hook, argv):
                 hold_then("locked"); time.sleep(30 if hook == "signal-locked" else 0.3)
             return real_copy(src, dst, **k)
         s.copy_file = copy
+    elif hook == "slowscan":                  # every stat of a scan under the locks takes long: the hold must end the scan, not wait for its end
+        real_settle, real_stat, on = s.settle, os.stat, {"on": False, "n": 0}
+
+        def stat(path, *args, **k):
+            if on["on"]:
+                on["n"] += 1; (T / "slowscan-stats").write_text(str(on["n"])); time.sleep(0.2)
+            return real_stat(path, *args, **k)
+
+        def settle(trees, check):
+            on["on"] = True
+            return real_settle(trees, check)
+        s.settle = settle; os.stat = stat
     elif hook in ("extra-once", "extra-always", "extra-locks"):
         def copy(src, dst, **k):
             got = real_copy(src, dst, **k)
@@ -369,6 +381,24 @@ def wait_for(cond, what, secs=60.0):
         if time.time() > end:
             raise TimeoutError(what)
         time.sleep(0.01)
+
+
+def reap(p, what, secs=60.0):
+    """(stdout, stderr) of `p` once it ends. One that is still running after `secs` is a failed check that says where it stood (its state, what it waits in, the locks held, what it wrote), then killed: a run that hangs fails one check instead of ending the scenario with a bare timeout."""
+    try:
+        return p.communicate(timeout=secs)
+    except subprocess.TimeoutExpired:
+        stood = {}
+        for name in ("status", "wchan"):
+            try:
+                text = (pathlib.Path("/proc") / str(p.pid) / name).read_text()
+                stood[name] = next((ln for ln in text.splitlines() if ln.startswith("State:")), text.strip()) if name == "status" else text.strip()
+            except OSError as e:
+                stood[name] = repr(e)
+        p.kill()
+        out, err = p.communicate()
+        check(f"{what}: the command ends within {secs:g} s", False, (stood, locks_held(), staged(), (err or b"")[-2000:]))
+        return out, err
 
 
 def staged():
@@ -811,6 +841,11 @@ def main():
     rc, out, err = standby("--max-hold", "0.1", hook="slowlocked")
     check("failure: the copy under the locks takes longer than it may", rc == 1 and "did not finish within" in err and not out, (rc, err))
     clean("failure: longest hold")
+    rc, out, err = standby("--max-hold", "0.5", hook="slowscan")
+    stats = int((T / "slowscan-stats").read_text()) if (T / "slowscan-stats").exists() else 0
+    check("failure: a scan under the locks that outlasts the longest hold stops at it, with the locks let go", rc == 1 and "did not finish within 0.5 s of the first lock" in err and not out and stats <= 8, (rc, err, stats))
+    check("the longest hold defaults to 5 s", s.MAX_HOLD == 5.0, s.MAX_HOLD)
+    clean("failure: slow scan")
     rc, out, err = standby(hook="boom")
     check("failure: an unforeseen error names its kind and place, never its text", rc == 1 and "ValueError at" in err and "MARKER" not in err and not out, (rc, err))
     clean("failure: unforeseen")
@@ -823,7 +858,7 @@ def main():
             p = start([sys.executable, "-m", "stackshot", "standby-copy"])
             wait_for(lambda: staged() and not free(publish.LOCK), "the command to wait for the item lock")
             p.send_signal(num)
-            out, err = p.communicate(timeout=60)
+            out, err = reap(p, f"signal {signame} while a lock is waited for")
         finally:
             os.close(fd)
         check(f"signal {signame} while a lock is waited for: 128 + n, nothing written", p.returncode == 128 + num and not out and b"stopped by signal" in err, (p.returncode, err))
@@ -833,7 +868,7 @@ def main():
         wait_for((T / "held-locked").exists, "the copy under the locks")
         check(f"signal {signame}: (the locks are held at that point)", "item" in locks_held(), locks_held())
         p.send_signal(num)
-        out, err = p.communicate(timeout=60)
+        out, err = reap(p, f"signal {signame} while the locks are held")
         check(f"signal {signame} while the locks are held: 128 + n, nothing written", p.returncode == 128 + num and not out, (p.returncode, err))
         clean(f"signal {signame} with the locks held")
         p = start([sys.executable, "-m", "stackshot", "standby-copy"])      # while the output is blocked: 3 MB into a pipe nobody reads

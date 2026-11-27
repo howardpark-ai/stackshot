@@ -1,0 +1,29 @@
+# stackshot-splitter.service — the splitter: Caddy on the port the board listened on before it moved behind the front door. The MCP path is
+# checked by the sign-in service and goes to the front door, everything else goes to the board (docs/front-door.md). Rendered by ./install.sh units
+# from [frontdoor_splitter] and the tables it points at, only when they allow a splitter, and never enabled or started by it. Enabling it is the step
+# that gives it the public port: systemctl --user enable --now stackshot-splitter.service
+[Unit]
+Description=stackshot splitter (Caddy on 127.0.0.1:@LISTEN_PORT@)
+After=network.target stackshot.service stackshot-frontdoor.service stackshot-signin.service
+Wants=stackshot-frontdoor.service stackshot-signin.service
+# a start that the check below refuses is tried a few times and then left failed, where `systemctl --user --failed` shows it
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=notify
+WorkingDirectory=@CHECKOUT@
+Environment=STACKSHOT_CONFIG=@CONFIG@
+# before every start, a reboot included: the values below are still what the config says, [server] port does not give the board this port, and the
+# Caddy is new enough. Anything else: it does not start. Standard library only, so the system's python3 runs it.
+ExecStartPre=/usr/bin/python3 -m stackshot.frontdoor.splitter check --listen @LISTEN_PORT@ --board @BOARD_ADDR@ --door @DOOR_ADDR@ --signin @SIGNIN_ADDR@ --header @IDENTITY_HEADER@ --caddy @CADDY@
+ExecStart=@CADDY@ run --config "@CADDYFILE@" --adapter caddyfile
+# the admin API is off, so there is no reload: a change of the Caddyfile needs a restart
+TimeoutStopSec=5s
+LimitNOFILE=65536
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

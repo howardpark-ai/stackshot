@@ -12,7 +12,8 @@ The guards, each a key of GUARDS:
   post_wake      …and a post-wake mover who passes the same test as a mover (defaults count)
   snooze         a time wait (a hold with a wake) carries the owner's words (cap_ok with a quote that parks, waits, says until or names a date) or a real date (wait_basis)
   filler         TBD, TBC, TBA, "?", dashes and "to be determined" are refused in goal, next, ask and wait_event
-  no_end         a wait has an end: a relay's ask_by, an anchor's, an item's or an event's ask_by (or its backstop wake); a time wait's end is its wake
+  no_end         a wait has an end: a relay's ask_by, an anchor's, an item's or an event's ask_by (or its backstop wake); a time wait's end is its wake. An ask_by stored with no wait_kind is no end (no watcher and
+                 no wake pass reads it), except on an update that sets nothing of the wait (WAIT_SETTING): an old item's wait never blocks an unrelated write
   decision_hold  needs decision together with a hold (a call for later is parked as a hold with a session in needs and him as the mover: the ask and options stay and come back at the date)
   mover_state    an agent stored as mover on an item in the owner's state (your-step, your-call, needs decision): he is its mover; the agent goes in `then`
   owner_mover   an alive item whose mover is the owner but which is not in his state: not your-step with a step, not your-call or needs decision (the ask is the ask rule's: [ask] refuse_after); the mirror of mover_state
@@ -58,6 +59,7 @@ LABELS = {"mover": "mover", "wait_input": "wait input", "post_wake": "post-wake 
           "decision_hold": "decision that is parked", "mover_state": "agent mover on his state", "owner_mover": f"{_cfg.owner()} as mover with no step or ask", "second_mover": "second mover", "next_unnamed": "next line with no name", "next_wait": "wait in next", "next_windows": "his next line with a command that is not in backticks, does not say where it runs, runs on the wrong machine or is a `! ` line", "alarm": "alarming word", "description": "description not in bullets"}
 CLOSED_NO_OUTCOME = "closed_no_outcome"
 STATE_FIELDS = frozenset({"needs", "hold", "wake", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "cap_ok", "wait_basis", "waits", "wait_mode"})
+WAIT_SETTING = STATE_FIELDS - {"mover", "then", "cap_ok"}      # the fields that make or restate a wait: an update that sets none of them leaves an old ask_by with no kind standing as the wait's end (no_end)
 FIELD_GUARDS = frozenset({"subject", "goal", "next", "ask", "wait_event", "description"})       # the fields a text guard reads
 _STATE_GUARDS = frozenset({"mover", "wait_input", "post_wake", "snooze", "no_end", "decision_hold", "mover_state", "owner_mover", "second_mover"})
 
@@ -868,13 +870,13 @@ def _wait_text(w: "_model.Wait") -> str:
 def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str] | None" = None, gid: str = "", after_open: Callable[[dict[str, Any]], Any] | None = None,
           anchored: Callable[[dict[str, Any]], Any] | None = None, needs: list[str] | None = None, hold: bool | None = None, one_mover: bool = True, until_wait: bool = False, date_given: bool = False, hold_given: bool = False, basis_kept: bool = False,
           next_text: str | None = None, windows_text: str | None = None, creating: bool = False, defers_text: str | None = None,
-          named_open: Callable[[str], str] | None = None, canon: Callable[[str], str] | None = None) -> tuple[list[Problem], list[str]]:
+          named_open: Callable[[str], str] | None = None, canon: Callable[[str], str] | None = None, old_end_ok: bool = False, date_ends: bool = False) -> tuple[list[Problem], list[str]]:
     """(what the item, as the write leaves it, has wrong, the broad wait words its next uses). `item` is the open item after the write (a dict with status, subject, metadata);
     `touched` the fields the write sets (None: all of them: a create, a report); `needs` and `hold` override what the metadata says (the server's own naming of the writer in
     needs is not a mover the writer made; a hold the old rule drops silently is still a hold the write set). `next_text`: the lines of next the write itself set, when next is kept by writer and the write left
     other sessions' lines in place: the text guards on next judge these, not lines another session wrote and this write did not touch (None: all of next). `windows_text`: the same for the Windows-command guard on his next lines, which
     never rejudges a stored line: an update passes the lines it sets ("" when it leaves next alone, whatever else it judges whole), a create or the report None (all of next). `until_wait`: the wait stands on a stored `until` (a wait on the date alone carries no snooze reason: that guard judges a time wait stated as one). `date_given`, `hold_given`: this write gives the date, and hold=true beside it (the snooze guard judges only a date a write gives to a time wait stated as one). `basis_kept`: the item as stored already holds a time wait (gates.basis_held), whose update keeps a wait_basis sent with a date within the cap instead of dropping it: the snooze refusal then advises the basis. `creating`: the write is a create, whose refusals offer only the fixes a create can make (it takes no state and no clear_mover). `defers_text`, `named_open`, `canon`: the next_defers guard. `defers_text` = the lines of next the write sets ("" when it leaves next alone: a stored line is never rejudged; None, a create or the report, judges all of next);
-    `named_open("board#N")` → the store id of that item when it exists and is open, else "" (the guard is off without it); `canon(id)` → an id as `after` stores it. A closed item is never judged."""
+    `named_open("board#N")` → the store id of that item when it exists and is open, else "" (the guard is off without it); `canon(id)` → an id as `after` stores it. A closed item is never judged. `old_end_ok`: an ask_by with no wait_kind counts as the wait's end: the update sets nothing of the wait (the audit's wait-end rule asks the mover for the repair), or it gives the ask_by itself (stored as a date that is read). `date_ends`: this write gives a date that replaces such an old ask_by, and that date is the end."""
     if item.get("status") == "completed":
         return [], []
     m = item.get("metadata") or {}
@@ -1055,7 +1057,9 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                                   + (f"To keep the park, send the same call again with wait_basis=\"<what the window collects> ends {wake[:10]}\"." if far_ok
                                      else f"A basis stands for a date at most {_wt.BASIS_MAX_WAKE_DAYS} days out, and this date ({wake[:10]}) is further: set a nearer one."))
         if w.kind in ("anchor", "item", "relay", "event"):
-            end = clean(m.get("ask_by")) or (w.backstop if w.kind != "relay" else "") or (w.until if w.kind == "relay" else "")
+            unread = bool(clean(m.get("ask_by"))) and not clean(m.get("wait_kind")) and not old_end_ok      # an ask_by with no wait_kind is read by no watcher and by no wake pass
+            relay_end = (_wt.stored_until(m) if unread else w.until) or (clean(m.get("wake")) if date_ends else "")
+            end = ("" if unread else clean(m.get("ask_by"))) or (w.backstop if w.kind != "relay" else "") or (relay_end if w.kind == "relay" else "")
             if not end:
                 add("no_end", f"{what}'s wait on {_wait_text(w)} has no end: set until=YYYY-MM-DD, the day it comes back to someone when nothing has arrived"
                               + (" (a backstop date does the same)" if w.kind != "relay" else "") + "." + drop_hint)

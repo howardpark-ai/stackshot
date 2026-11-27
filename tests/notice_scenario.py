@@ -62,7 +62,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live
+from stackshot.core import config as _cfg, datewords as _datewords; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live
 from stackshot.web import server
 from stackshot.service import client_reads as client_reads_svc
 from stackshot.service import messaging as _messaging
@@ -107,7 +107,7 @@ check("2: a notice the router has not ruled yet says it is still held, who sent 
       and (field(t_wait, "expected") or "").startswith("by ") and f"every {int(live.tick_s())} s" in field(t_wait, "expected") and "late" not in field(t_wait, "expected")
       and field(t_wait, "ruled") is None and field(t_wait, "reason") is None, t_wait)
 check("2: …the sent time is the notice's own, in the instance timezone, in the server's time style (Wed Jun 17th 14:23)",
-      re.fullmatch(r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(st|nd|rd|th) \d\d:\d\d", field(t_wait, "sent") or "")
+      re.fullmatch(r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(st|nd|rd|th)(?: \d{4})? \d\d:\d\d", field(t_wait, "sent") or "")
       and field(t_wait, "sent") == _rmod.when_words(dt.datetime.fromtimestamp(n_pass["ts"], ZONE)), t_wait)
 check("2: …and its text is one line of at most 120 characters, cut with an ellipsis", len(field(t_wait, "text")) <= 120 and field(t_wait, "text").endswith("…") and field(t_wait, "text").startswith("please look at the quote"), field(t_wait, "text"))
 
@@ -118,7 +118,7 @@ res = live.tick(); settle()
 t_pass, t_held, t_drop, t_mer = get(id_pass), get(id_held), get(id_drop), get(id_base)
 check("3: passed: the ruling names who it went to, the reason, the call that ruled it, who ruled it and when; no item",
       field(t_pass, "ruling") == "passed to work-osprey-x" and field(t_pass, "reason") == "the builder reads vendor quotes" and field(t_pass, "rule") == "the router's call"
-      and field(t_pass, "ruled by") == "stackshot (router)" and re.fullmatch(r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(st|nd|rd|th) \d\d:\d\d", field(t_pass, "ruled") or "")
+      and field(t_pass, "ruled by") == "stackshot (router)" and re.fullmatch(r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(st|nd|rd|th)(?: \d{4})? \d\d:\d\d", field(t_pass, "ruled") or "")
       and field(t_pass, "item") == "none" and field(t_pass, "expected") is None and t_pass.startswith(f"notice {id_pass}: message to projects/alpha"), (t_pass, res))
 check("3: archived: the ruling says it is kept for the digest and tells nobody at once, with the router's reason",
       (field(t_held, "ruling") or "").startswith("archived (kept in the daily digest") and field(t_held, "reason") == "wait for the page pass" and field(t_held, "ruled by") == "stackshot (router)", t_held)
@@ -174,7 +174,8 @@ t_auto = get(n_auto)
 check("8: a notice logged and ruled at once (log-only) says so, in another project's file", field(t_auto, "project") == "projects/gamma" and field(t_auto, "ruled by") == "stackshot (auto)" and "ruled at once" in field(t_auto, "rule"), t_auto)
 EPOCH = dt.datetime(2026, 9, 17, 2, 40, tzinfo=ZONE).timestamp()          # Thu Sep 17th 02:40 +04 = Wed Sep 16th 22:40 UTC (the local day differs from the UTC day)
 n_zone = routing.record("projects/gamma", kind="message", to="", label="m", who="home-beta", text="zone check", pilot=True, live=True, ts=EPOCH)
-check("8: the time is in the instance timezone, whatever the box's clock: 22:40 UTC the day before reads Thu Sep 17th 02:40", field(get(n_zone), "sent") == "Thu Sep 17th 02:40", get(n_zone))
+SENT = "Thu Sep 17th " + ("2026 " if _datewords.other_year(dt.date(2026, 9, 17)) else "") + "02:40"      # the year is said once it is not the current one
+check("8: the time is in the instance timezone, whatever the box's clock: 22:40 UTC the day before reads Thu Sep 17th 02:40", field(get(n_zone), "sent") == SENT, get(n_zone))
 OLD = time.time() - 40 * 86400
 n_old = routing.record("projects/gamma", kind="message", to="", label="m", who="home-beta", text="forty days ago", pilot=True, live=True, ts=OLD)
 with open(routing._file("projects/gamma"), "a", encoding="utf-8") as f:

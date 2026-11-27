@@ -30,6 +30,7 @@ from stackshot.model import model as _model
 from stackshot.model import note_read as _noteread
 from stackshot.model import owner_steps as _hs
 from stackshot.model import states as _states
+from stackshot.model import steps as _steps
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _item_url
 from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store
@@ -132,39 +133,56 @@ def _also_reached(meta: dict[str, Any]) -> list[tuple[str, bool]]:
     return out
 
 
-def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str = "", handed: str = "") -> list[str]:
+def _shared_line(gid: str, rec: dict[str, Any], stays: str, done: bool, moved: bool) -> str:
+    """The line the sessions get for an answer on a step that more than one member has a part in (a board of several members): who answered, the step, and who it is with now, whether it passed on
+    (`moved`) or stayed. A note that does not finish the step (`done` false) is quoted."""
+    step = _states.clean(rec.get("step"))
+    step = step if len(step) <= 240 else step[:240].rstrip() + " …"
+    head = f"[stackshot] {_members.recorded_by(rec)}"
+    note = _answers()._answer_words({"text": rec.get("text")}, 300) if rec.get("text") else ""
+    if not done:
+        return f"{head} sent a note on their step on {_gh.shown(gid)}: {step}. The item stays with {stays}: “{note}”"
+    where = f"It goes to {stays} for their step now" if moved else f"The item stays with {stays}"
+    return f"{head} did their step on {_gh.shown(gid)}: {step}. {where}" + (f", with their note: “{note}”" if note else "")
+
+
+def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str = "", handed: str = "", also: str = "", said: str = "") -> list[str]:
     """Push the answer to the item's mover (holder, never the creator) and to every session named in its needs, one line each, through the owner-notice
     path (tell_woken). A front-agent mover's line carries the mark a front agent takes. A front agent that is named in needs but neither moves the item nor takes it after the answer (the project's builder does) gets the line held for its
     next turn (_tell_aside), never the plain send that starts one. After a Done or a note on his step (`then` is who the item moved to) the then-mover is told too,
     in its own line: the step he did and "it's yours now". After a decision that handed the item to its stored then-mover (`handed`) the same: its line ends "It's yours now". A line that carries his words (a pick, a note, a Done with
     its note) is pushed to a front agent as ever; the bare hand-over of a Done with no note is a progress notice (telling.tell_own_move) when the item holds nothing for him and the front agent's own named step is not the next one: filed for its next turn, or archived with him away; a front agent whose own step is the item's first open named step is given a turn (`named=True`).
+    `said` (with it no `then`): the line in place of the ones above, for an answer on a step more than one member has a part in (_shared_line); `also` is the session that takes the item once the members are through, told that line as the then-mover is.
     → the session ids told: one the front gate archived is left out, so its next write is still told his answer."""
     meta = item.get("metadata") or {}
     owner, project = _telling.holder(item), str(meta.get("project") or "")
     verb = "answered" if rec.get("kind") == "decision" else "commented on"
     url = _item_url(gid) or _telling.notice_link(gid)
     done = f"; parked with a wake on {rec['parked']}, set by the server" if rec.get("parked") else ""   # a stored raise's park, applied
-    line = f"[stackshot] {_model.owner_display(meta)} {verb} {_gh.shown(gid)} on the board: {_answers()._answer_words(rec)}{done} → {url}"
-    thenid = _session_id(then or handed) if (then or handed) else ""
+    by = _members.recorded_by(rec)      # who answered (the item's member may be another once the answer has moved it)
+    line = f"[stackshot] {by} {verb} {_gh.shown(gid)} on the board: {_answers()._answer_words(rec)}{done} → {url}"
+    thenid = _session_id(then or handed or also) if (then or handed or also) else ""
     if then:      # a Done: the step he did, then who has the item now and his note
         step = _states.clean(rec.get("step"))
         step = step if len(step) <= 240 else step[:240].rstrip() + " …"
         note = f", with his note: “{_answers()._answer_words({'text': rec.get('text')}, 300)}”" if rec.get("text") else ""
-        line = f"[stackshot] {_model.owner_display(meta)} did his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now{note} → {url}"
+        line = f"[stackshot] {by} did his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now{note} → {url}"
     judge = ""
     if then and rec.get("kind") == "step-reply":      # his note on the step, sent with no Done: the session that takes the item judges it (only its own line says so)
-        line = (f"[stackshot] {_model.owner_display(meta)} sent a note on his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now with his note: "
+        line = (f"[stackshot] {by} sent a note on his step on {_gh.shown(gid)}: {step}. It goes to {_sr._session_label(then)} now with his note: "
                 f"“{_answers()._answer_words({'text': rec.get('text')}, 300)}” → {url}")
-        judge = (f". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to {_model.owner_display(meta)} "
+        judge = (f". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to {by} "
                  f"with a new step (step=…); if it says he will do the step at a later time, park the item until then "
                  f"(update until=<that time, YYYY-MM-DDTHH:MM {_cfg.tz_abbr()}>, wait_reason=<what it waits on, at least {_cfg.WAIT_GUARD_REASON_MIN} characters>), "
                  f"leave his step open and hand no new step back.")
+    if said:
+        line = f"{said} → {url}"
     yours = ("" if _answers()._answer_words(rec).rstrip()[-1:] in (".", "!", "?", ")") else ".") + " It's yours now" if handed and not then else ""      # a decision handed over: the mover's line plus the tail
     to_then = lambda t: t.replace(f"It goes to {_sr._session_label(then)} now", "It's yours now", 1).replace(f" → {url}", f"{yours}{judge} → {url}", 1)      # the then-mover's own line: "It's yours now", and for a note the instruction to judge it
     told: list[str] = []
     if judge and rec.get("applied"):      # the server read his note and applied it (note_read.py): the then-mover is told what was done instead of being asked to judge the note
         judge = ". " + str(rec["applied"])
-    bare = bool(then) and not str(rec.get("text") or "").strip()      # a Done with no note: the hand-over line carries none of his words, only that the item is the then-mover's now
+    bare = bool(then or said) and not str(rec.get("text") or "").strip()      # a Done with no note: the hand-over line carries none of his words, only that the item is the then-mover's now
     tried: list[str] = []      # every session a line was sent to, held or not: one line each, and the ones he is in conversation with (below) are not sent it twice
     def tell(sid: str, text: str, yours: bool = False) -> None:
         if yours and bare:      # the bare hand-over ("It's yours now" and nothing of his): to a front agent it is a progress notice when the item holds nothing for him (telling.own_move_kind), filed for its next turn, unless the item's first open named step is that agent's own (`named=True`): its step is the work, and the line starts its turn. A line that carries his words (a pick, a note, a Done with its note) keeps its kind and starts a turn as ever
@@ -205,23 +223,25 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     return told
 
 
-def _mail_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str) -> list[str]:
+def _mail_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: str, stays: str = "") -> list[str]:
     """The notice after the server ticked his send step on a mail he sent (`_answer` with via "mail"): a plain line to each session that now has the item, in its own words (the server did it, from a mail: it is not his
-    answer and not his note), and only to a background agent. A front agent is told nothing: the board shows the step ticked, and a front turn is for what he must do. A session whose role cannot be read counts as front. → the session ids told."""
+    answer and not his note), and only to a background agent. A front agent is told nothing: the board shows the step ticked, and a front turn is for what he must do. A session whose role cannot be read counts as front. `stays`: the member the
+    item passed to for their own step (a board of several members), which every line then names. → the session ids told."""
     meta = item.get("metadata") or {}
     project = str(meta.get("project") or "")
     url = _item_url(gid) or _telling.notice_link(gid)
     step = _states.clean(rec.get("step"))
     step = step if len(step) <= 240 else step[:240].rstrip() + " …"
     thenid = _session_id(then) if then else ""
-    head = f"[stackshot] The server saw a mail {_model.owner_display(meta)} sent that fits his step on {_gh.shown(gid)}: {step}. It ticked the step"
+    head = f"[stackshot] The server saw a mail {_members.recorded_by(rec)} sent that fits his step on {_gh.shown(gid)}: {step}. It ticked the step"
     told: list[str] = []
     names = [n for n in (_telling.holder(item), *_needs_sessions(meta), then) if n]
     for n in names:
         sid = _session_id(n)
         if not sid or sid in told or _telling.front_keeper(n, project, strict=True)[0]:
             continue
-        _telling.tell_woken(gid, sid, f"{head}. It's yours now → {url}" if sid == thenid else f"{head}. It goes to {_sr._session_label(then)} now → {url}", tag="answer")
+        goes = f"It goes to {stays} for their step now" if stays else "It's yours now" if sid == thenid else f"It goes to {_sr._session_label(then)} now"
+        _telling.tell_woken(gid, sid, f"{head}. {goes} → {url}", tag="answer")
         told.append(sid)
     return told
 
@@ -253,6 +273,11 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
     answer in the box sent with a reference other than the standing question's is no answer to it (`stale`, nothing written; with a note `stalenote`, the note kept as a comment, as for any answer to a question that changed,
     the pick named without its card letter); with no reference nothing is compared. `by` is the name of the person who answered (the route's signed-in person): it is stored on the answer as `by` (when it is not the first person, whose answers carry none), ticks his
     step and is the save's author; none stands for the first person, and a mail tick records no `by`. A page loaded before this form posts act=send (an empty box is a Done, a note is a step-reply, as ever) or act=comment (a comment only, the step stands).
+    On a board of several members a step two members have had a part in (steps.several_hold) is answered member by member. Done ticks the steps that are the answering member's or no one's, never another member's; a member with no part
+    left in it (steps.takes_part) gets `nostep`. So does anyone while a question stands on such an item (a page drawn before the question was added: a Done passed on would take the question to the next
+    member), on any other item anyone but the member asked while one stands, and a mail tick on a step asked of anyone but the first person. What such a person wrote is kept as a comment.
+    An item only one member has had a part in is answered by another member as by that one, recorded under the sender's name. While another member has a part in the step too (_handover._share_step): a Done on the member's own step passes the item to the member of the next open step
+    (`done`, `donenote`, `stepreply`), a Done on another's step ticks only theirs and the item stays (`partdone`), a note that does not say done ticks and moves nothing (`comment`), and no session has to be set to take the item.
     """
     choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
     who = " ".join(str(by or "").split()) or OWNER      # the person the answer is recorded under: the route passes the signed-in person's name (`by`); a server tick on a mail, and a caller that names none, stand for the first person
@@ -312,6 +337,20 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             kind = "decision" if act == "answer" and "decision" in _needs_kinds(meta) else "comment"      # a stale tab's Send as an answer, after the decision is gone, is a comment: nothing he wrote is lost
         else:
             return "empty"
+        member = _model.norm_who(OWNER if via == "mail" else who) if stepped and len(_members.members()) > 1 else ""      # several members: the step is answered member by member (a mail is the first person's)
+        asked_of = _steps.member_for(_hs.decide_of(meta.get("ask")), meta) if member and meta.get("ask") and "decision" in _needs_kinds(meta) else ""      # whose question stands on the item
+        outsider = bool(member) and not _steps.takes_part(meta, member)
+        several = bool(member) and _steps.several_hold(meta)
+        if member and (asked_of not in ("", member) or (asked_of and several) or (via == "mail" and member != _steps.member_for(meta.get("step"), meta)) or (outsider and several)):
+            if not text:
+                return "nostep"
+            kind, choice, stepped, member = "comment", "", False, ""      # not theirs to finish (a page drawn before the item changed): what they wrote is kept as a comment
+        elif outsider:
+            member = ""      # only one member has had a part in the item: another's answer stands for theirs, under the sender's name
+        if member:
+            _steps.settle_members(meta, meta)      # whose each bare step is, read before this answer takes any line out
+        shared = bool(member) and (member != _steps.member_for(meta.get("step"), meta) or any(m != member for m in _steps.open_members(meta)))      # another member has a part in it too
+        stays, done, moved = "", False, False      # of a shared step: who it is with after this answer, whether the answer finished the member's part, and whether the step passed on
         eff = _watch.answer_effect(meta, choice, text, _pages.zone_now().date()) if kind == "decision" and not stepped else {"do": ""}     # a pick on a watcher ask, or his words in the box, acts on the item
         askback = eff["do"] == _watch.NEEDS_DATE      # a date button, and no date he gave can be read: the answer and the note are kept below, and the item asks him back with dates
         if askback:
@@ -353,10 +392,18 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
                 then = _handover._builder_for_front(then, meta) or then
             if not then or _model.is_owner(then):      # no default mover and no session in needs: the front agent that holds the item's next open named step when the project has a builder; a project with no builder hands it to the session its next open step names, else its contact; else the item goes to its project's keeper at once, as mover
                 then = _handover._front_step_holder(meta) or _holders._builderless_answer_to(meta, str(meta.get("project") or "")) or _telling.auto_mover(_telling.project_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
-            if not then or _model.is_owner(then):      # nobody to take it (no default mover, no session in needs, no keeper): not recorded, nothing written
+            if not shared and (not then or _model.is_owner(then)):      # nobody to take it (no default mover, no session in needs, no keeper): not recorded, nothing written
                 return "nomover"
+        if shared:                      # another member has a part in the step: it stays a step, with one of them
+            done = kind == "decision" or bool(_noteread.read(text, _pages.zone_now(), _watch.parse_date)["done"])
+            was = _steps.member_for(meta.get("step"), meta)
+            stays = rec["left_with"] = _handover._share_step(meta, rec, member, done, now)      # the item is still on a step, and whose: the answer line says so whenever it is read
+            moved = stays != was
+            if moved:
+                item["state_updated"] = item["confirmed"] = now
+        elif stepped:
             if kind == "decision":          # his word that the step is done checks it on the item's checklist (a note leaves it open: the session that takes the item judges it)
-                _handover._check_his_step(meta, rec["step"], now, by=who)
+                _handover._check_his_step(meta, rec["step"], now, by=who, member=member)
             else:                           # N4: his note on the step is his answer too: the server's step is ticked with his words (`→ "…"`); the lines a session wrote stay open for the session that judges them
                 said = _noteread.read(text, _pages.zone_now(), _watch.parse_date)      # what the note says, applied by the server (note_read.py): a note that says he did it, or names a later time
                 if said["until"]:           # "tomorrow evening": his step stays open and the item waits until then, on his words (the park path below); the then-mover is told it is held
@@ -365,7 +412,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
                 else:
                     _hs.tick(meta, str(meta.get("owner") or ""), who, now, _hs.answer_words("", text), make=_holders._owner_want(meta), writer=NAME, add=False)
                     if said["done"]:        # "ran it": his step is ticked as a Done ticks it (every open line of his), the then-mover is told
-                        _handover._check_his_step(meta, rec["step"], now, by=who)
+                        _handover._check_his_step(meta, rec["step"], now, by=who, member=member)
                         rec["applied"] = "The server read the note as done and ticked his step: carry on as after a Done."
             _holders._state_end(meta, "your-step")
             meta.pop("draft", None)         # the step is done: the text he was to post is posted
@@ -412,13 +459,21 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
         if kind == "decision" and eff["do"] == "drop":      # the items that waited on this one are released after both locks are let go (_release_dropped): a release tells the waiters
             drop.append(True)
         item["gid"] = gid
-        told = [t for t in (_mail_deliver(gid, item, rec, then) if via == "mail" else _answer_deliver(gid, item, rec, then if stepped else "", handed)) if t]
-        if via != "mail" and kind in ("decision", "step-reply") and not parked and eff["do"] != "wait" and item.get("status") == "open":   # a park is acted on here, and so is a wait put back; any other decision waits for a session's write
+        took = then if then and not _model.is_owner(then) else ""      # the session that takes the item after the step
+        if shared:
+            told = _mail_deliver(gid, item, rec, took, stays) if via == "mail" else _answer_deliver(gid, item, rec, also=took, said=_shared_line(gid, rec, stays, done, moved))
+        else:
+            told = _mail_deliver(gid, item, rec, then) if via == "mail" else _answer_deliver(gid, item, rec, then if stepped else "", handed)
+        told = [t for t in told if t]
+        ticked = shared and done and not rec.get("text")      # a bare Done on a shared step asks no session for anything
+        if via != "mail" and kind in ("decision", "step-reply") and not ticked and not parked and eff["do"] != "wait" and item.get("status") == "open":   # a park is acted on here, and so is a wait put back; any other decision waits for a session's write
             st = _answers()._answers_load()
             st[gid] = {"ts": now, "owner": _session_id(_telling.holder(item)), "project": str(meta.get("project") or ""),
                        "told": told, "words": _answers()._answer_words(rec, 300)}
             _answers()._answers_save(st)
     kind =("stepreply" if kind == "step-reply" else "donenote" if text else "done") if stepped else kind      # Done with a note in the box says the note went along
+    if shared and not moved:      # the item is where it was: the notices that say it moved on do not fit
+        kind = "partdone" if done else "comment"
     print(f"answer: {gid} {kind} from {'a sent mail' if via == 'mail' else 'the board'}" + (f", parked until {parked}" if parked else "") + f", told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
     _hooks().publish()
     return "askedback" if askback else kind

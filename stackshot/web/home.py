@@ -7,6 +7,9 @@ Every open item is exactly one of alive or waiting (model.py), so it sits in exa
   agents      alive, and a session or the project's background agent is the mover: oldest first by the age the row shows (the longest-running item leads); the mover's name is on the row and plays no part in the order
   waiting     waiting on a time, an anchor's event, another item's close or news only the owner relays: by end date
 
+On a board of several members the home page is drawn for the member who is signed in (`viewer`, model.board_viewer): Your move holds only what names that member (the mover, or an open step on
+the checklist), and any other member's move is listed first under Waiting, oldest first, with no answer form (the row says who picks it up). With no viewer (one member, nobody signed in, board.md and the brief) any member's move is Your move.
+
 This module is the pure half: which list an item is in, the row's immediate next step (the first `next` line, its `<mover>: ` prefix stripped), when its state began, the
 age's colour, who watches a wait, the sorts. The HTML is render.py's (Board.home_html). Pure functions of items, the model's reading and a clock: no server import, so the
 board, the project pages and the tests share one copy."""
@@ -20,6 +23,7 @@ from stackshot.waits import handoff as _ho
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model import queued as _queued
+from stackshot.model import steps as _steps
 from stackshot.waits import waiting as _wt
 
 YOUR_MOVE, AGENTS, WAITING = "your-move", "agents", "waiting"
@@ -30,13 +34,17 @@ WATCHED_BY = {"time": "the scheduler", "relay": "the scheduler", "anchor": "the 
 _FAR = float("inf")
 
 
-def list_of(mod: "_model.Model") -> str:
-    """Which list an open item is in, from the model's reading: waiting → Waiting; alive with the owner as the mover → Your move; any other alive item → Agents at work.
-    A dead item is in none ("")."""
+def list_of(mod: "_model.Model", viewer: str = "", meta: dict[str, Any] | None = None) -> str:
+    """Which list an open item is in, from the model's reading: waiting → Waiting; alive with a member as the mover → Your move, or, drawn for the member `viewer`, Waiting when the mover is
+    another member and the checklist holds no open step of the viewer's (`meta`: the item's metadata; steps.open_members); any other alive item → Agents at work. A dead item is in none ("")."""
     if mod.state == _model.WAITING:
         return WAITING
     if mod.state == _model.ALIVE:
-        return YOUR_MOVE if _model.is_owner(mod.mover) else AGENTS
+        if not _model.is_owner(mod.mover):
+            return AGENTS
+        if not viewer or _model.names_member(mod.mover, viewer):
+            return YOUR_MOVE
+        return YOUR_MOVE if meta is not None and viewer in _steps.open_members(meta) else WAITING
     return ""
 
 
@@ -150,16 +158,17 @@ def front_test() -> Callable[[str, str], bool]:
     return _ar.Env().is_front_safe
 
 
-def classify(rows: list[dict[str, Any]], derive: Callable[[dict[str, Any]], "_model.Model"]) -> dict[str, list[tuple[dict[str, Any], "_model.Model"]]]:
+def classify(rows: list[dict[str, Any]], derive: Callable[[dict[str, Any]], "_model.Model"], viewer: str = "") -> dict[str, list[tuple[dict[str, Any], "_model.Model"]]]:
     """The open rows split into the three lists, each row with its model reading: {your-move: [(row, model)], agents: […], waiting: […]}, in the rows' own order (the sorts are
-    below). Every open row lands in exactly one list; a row whose reading fails is read as an alive item of the agents (never dropped: an item that cannot be read is still one)."""
+    below). `viewer` is the member the lists are drawn for (list_of). Every open row lands in exactly one list; a row whose reading fails is read as an alive item of the agents (never dropped:
+    an item that cannot be read is still one)."""
     out: dict[str, list[tuple[dict[str, Any], _model.Model]]] = {k: [] for k in LISTS}
     for r in rows:
         if r.get("status") == "completed":
             continue
         try:
             mod = derive(r)
-            which = list_of(mod)
+            which = list_of(mod, viewer, r.get("metadata") or {})
         except Exception:  # noqa: BLE001
             mod, which = _model.Model(_model.ALIVE), ""
         if not which:
@@ -182,9 +191,12 @@ def sort_agents(pairs: list[tuple[dict[str, Any], "_model.Model"]], tie: Callabl
     return sorted(pairs, key=lambda p: (since(p[0], p[1], **kw), tie(p[0])))
 
 
-def sort_waiting(pairs: list[tuple[dict[str, Any], "_model.Model"]], tie: Callable[[dict[str, Any]], Any]) -> list[tuple[dict[str, Any], "_model.Model"]]:
-    """By end date, the soonest first; a wait with no date last."""
-    return sorted(pairs, key=lambda p: (end_epoch(p[1]), tie(p[0])))
+def sort_waiting(pairs: list[tuple[dict[str, Any], "_model.Model"]], tie: Callable[[dict[str, Any]], Any],
+                 same: Callable[[Any, Any], bool] | None = None) -> list[tuple[dict[str, Any], "_model.Model"]]:
+    """By end date, the soonest first; a wait with no date last. Ahead of them, on a member's Home, the other members' moves (the alive rows classify put here), oldest first as their own Your
+    move lists them."""
+    theirs = sort_your_move([p for p in pairs if p[1].state == _model.ALIVE], tie, same)
+    return theirs + sorted((p for p in pairs if p[1].state != _model.ALIVE), key=lambda p: (end_epoch(p[1]), tie(p[0])))
 
 
 def copyables(step: str) -> tuple[str, list[str]]:

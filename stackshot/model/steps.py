@@ -5,7 +5,11 @@ THE STORAGE (the one decision of this module). `metadata.next` stays what it alw
 rows, the GitHub mirror, `get`, the write guards, the router, search) reads that text and is untouched. Beside it `metadata.steps` is the checklist: a list, in the order the steps were written, of
 
     {"text": <the step as written, its sub-lines included>, "status": "open" | "done" | "dropped", "by": <who marked it>, "at": <epoch seconds it was marked>,
-     "tag": {"text": <a few words>, "state": <in progress | done | …>, "ts": <epoch seconds>}}
+     "tag": {"text": <a few words>, "state": <in progress | done | …>, "ts": <epoch seconds>},
+     "of": <a member's name, or "">}
+
+`of` is written only on a board of several members, on a bare step (a line that names no one): the line its writer wrote it under, as that line's member's name, "-" when the line opens with anyone else,
+or "" under no line that names anyone. It is stored at the step's first save there and never changed after it, whoever joins the item (settle_members). A reader that does not know it ignores it.
 
 `tag` is the step's status line (optional): where the step's session is with it ("PR 83 up", "review, scan running"). A `work` write of the update tool changes the tag of the sender's first open step in
 place, so a step that takes a night keeps one line, not one line per status; it follows the step's text (the key) through a reorder and stays on the step when it is marked.
@@ -24,6 +28,7 @@ import re
 from typing import Any, Callable
 
 from stackshot.core import config as _cfg
+from stackshot.core import members as _members
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model import nextlines as _nl
@@ -85,11 +90,22 @@ def _with_tag(step: dict[str, Any], tag: dict[str, Any] | None) -> dict[str, Any
     return step
 
 
+OF = "of"      # on a bare step, on a board of several members: the member whose line it was written under, OTHERS under anyone else's, "" under none (settle_members)
+OTHERS = "-"
+
+
+def _with_of(step: dict[str, Any], old: dict[str, Any]) -> dict[str, Any]:
+    """`step` with the settled member of `old` (OF), when that holds one and `step` is still a bare line: a step reworded to name someone is theirs by its words."""
+    if isinstance(old.get(OF), str) and is_bare(step["text"]):
+        step[OF] = old[OF]
+    return step
+
+
 def _valid(v: Any) -> list[dict[str, Any]]:
     out = []
     for s in v if isinstance(v, list) else []:
         if isinstance(s, dict) and str(s.get("text") or "").strip() and s.get("status") in STATUSES:
-            out.append(_with_tag({"text": str(s["text"]), "status": s["status"], "by": clean(s.get("by")), "at": s.get("at") or 0}, tag_of(s)))
+            out.append(_with_of(_with_tag({"text": str(s["text"]), "status": s["status"], "by": clean(s.get("by")), "at": s.get("at") or 0}, tag_of(s)), s))
     return out
 
 
@@ -114,27 +130,44 @@ def view_rows(meta: dict[str, Any] | None, closed: bool = False, keeper: str = "
     rows = _nl.resolve(m, keeper or str(m.get("owner") or ""))
     chunks = [e for e, _ in rows]
     writers = [w for _, w in rows]
-    keys = [key(c) for c in chunks]
-    used: set[int] = set()
+    lined = _line_up([s for s in stored if s["status"] == OPEN], chunks)
     out: list[dict[str, Any]] = []
     at: list[int | None] = []
+    n = 0      # the open steps seen, as _line_up counts them
     for s in stored:
         if s["status"] != OPEN:
             out.append(s)
             at.append(None)
             continue
-        k = key(s["text"])
-        j = next((j for j, kk in enumerate(keys) if j not in used and kk == k), -1)
-        if j >= 0:
-            used.add(j)
-            out.append(_with_tag({**_step(chunks[j]), "writer": writers[j]}, tag_of(s)))
+        j = lined.get(n)
+        n += 1
+        if j is not None:
+            out.append(_with_of(_with_tag({**_step(chunks[j]), "writer": writers[j]}, tag_of(s)), s))
             at.append(j)
         else:
-            out.append(_with_tag(_step(s["text"], DROPPED), tag_of(s)))
+            out.append(_with_of(_with_tag(_step(s["text"], DROPPED), tag_of(s)), s))
             at.append(None)
+    used = set(lined.values())
     rest = [j for j in range(len(chunks)) if j not in used]
     out += [{**_step(chunks[j]), "writer": writers[j]} for j in rest]
     return out, at + rest
+
+
+def _line_up(steps: list[dict[str, Any]], chunks: list[str]) -> dict[int, int]:
+    """Which line of `chunks` each of `steps` is, as {position in steps: position in chunks}: a line that reads like it (key), each line taken once, in order. Of lines that read the same, a step with a
+    stored member (OF) first takes the one that stands under that member, so the same words under two names never trade places. A step no line reads like has no entry."""
+    keys = [key(c) for c in chunks]
+    under = _members_down(chunks)
+    lined: dict[int, int] = {}
+    for by_member in (True, False):
+        for i, s in enumerate(steps):
+            if i in lined or (by_member and OF not in s):
+                continue
+            k = key(s["text"])
+            j = next((j for j, kk in enumerate(keys) if kk == k and j not in lined.values() and (not by_member or under[j] == s[OF])), None)
+            if j is not None:
+                lined[i] = j
+    return lined
 
 
 def drawn_order(steps: list[dict[str, Any]], extra: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
@@ -159,7 +192,7 @@ def close_status(outcome: Any) -> str:
 def mark_open(steps: list[dict[str, Any]], outcome: Any, by: str, at: float) -> list[dict[str, Any]]:
     """The checklist with every step still open marked by the closer: done when the outcome is done, dropped otherwise, `by` and `at` like any other mark. Marked steps stay as they are."""
     st = close_status(outcome)
-    return [_with_tag(_step(s["text"], st, by, at), _done_tag(tag_of(s), st)) if s["status"] == OPEN else dict(s) for s in steps]
+    return [_with_of(_with_tag(_step(s["text"], st, by, at), _done_tag(tag_of(s), st)), s) if s["status"] == OPEN else dict(s) for s in steps]
 
 
 def others_open(steps: list[dict[str, Any]], own: Callable[[str], bool], marked: set[int] | list[int] = (), names: Callable[[str], bool] | None = None) -> list[int]:
@@ -202,7 +235,7 @@ def stored(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if s["status"] != OPEN:
             e["by"] = s.get("by") or ""
             e["at"] = s.get("at") or 0
-        out.append(_with_tag(e, tag_of(s)))
+        out.append(_with_of(_with_tag(e, tag_of(s)), s))
     return out
 
 
@@ -337,7 +370,7 @@ def apply(old: list[dict[str, Any]], new_next: str | None, done: list[int], drop
     steps = [dict(s) for s in old]
     for idx, st in ((done, DONE), (dropped, DROPPED)):
         for i in idx:
-            steps[i] = _with_tag(_step(steps[i]["text"], st, by, at), _done_tag(tag_of(steps[i]), st))
+            steps[i] = _with_of(_with_tag(_step(steps[i]["text"], st, by, at), _done_tag(tag_of(steps[i]), st)), steps[i])
     marked = {key(old[i]["text"]) for i in (*done, *dropped)}
     left = {k: sum(1 for s in steps if s["status"] == OPEN and key(s["text"]) == k) for k in marked}      # the open steps still reading k once this call's marks are in
     listed: dict[str, int] = {}
@@ -355,16 +388,11 @@ def apply(old: list[dict[str, Any]], new_next: str | None, done: list[int], drop
     chunks = split(new_next)
     keys = [key(c) for c in chunks]
     open_idx = [i for i, s in enumerate(steps) if s["status"] == OPEN]
-    used: dict[int, int] = {}
-    for i in open_idx:
-        k = key(steps[i]["text"])
-        j = next((j for j, kk in enumerate(keys) if j not in used.values() and kk == k), -1)
-        if j >= 0:
-            used[i] = j
+    used = {open_idx[n]: j for n, j in _line_up([steps[i] for i in open_idx], chunks).items()}
     gone = [i for i in open_idx if i not in used]
     if gone and wipe:
         for i in gone:
-            steps[i] = _with_tag(_step(steps[i]["text"], DROPPED, by, at), tag_of(steps[i]))
+            steps[i] = _with_of(_with_tag(_step(steps[i]["text"], DROPPED, by, at), tag_of(steps[i])), steps[i])
     else:
         said_rw = [i for i in gone if reworded and i in reworded]
         if said_rw:
@@ -379,12 +407,13 @@ def apply(old: list[dict[str, Any]], new_next: str | None, done: list[int], drop
                             f"Send the call again with {retry_call([i + 1 for i in mine])} (done if the work was done, dropped if no longer wanted, reword to change the words; a reworded line in next counts as a new step), or keep the line in next; "
                             "clear_next=true wipes every line and marks them dropped. If this tool shows no done/dropped/reword parameter, call stackshot_update through the MCP Portal's Code Mode (portal_codemode_execute with codemode.stackshot_update({…, done:[…]}))")
         for i in gone:
-            steps[i] = _with_tag(_step(steps[i]["text"], DROPPED), tag_of(steps[i]))
+            steps[i] = _with_of(_with_tag(_step(steps[i]["text"], DROPPED), tag_of(steps[i])), steps[i])
     open_idx = [i for i in open_idx if i in used]
     order = sorted(used.values())
     tags = {key(s["text"]): tag_of(s) for s in old if s["status"] == OPEN and tag_of(s)}      # a status line follows its step's words through a reorder
+    was = {j: steps[i] for i, j in used.items()}      # a settled member goes with the step to the line it was lined up with
     for slot, j in zip(open_idx, order):
-        steps[slot] = _with_tag(_step(chunks[j]), tags.get(keys[j]))
+        steps[slot] = _with_of(_with_tag(_step(chunks[j]), tags.get(keys[j])), was[j])
     taken = set(used.values())
     steps += [_step(c) for j, c in enumerate(chunks) if j not in taken]
     return steps
@@ -493,3 +522,136 @@ def is_bare(text: Any) -> bool:
     so the page draws it without the item's mover put in front of it."""
     first = next((ln for ln in str(text or "").splitlines() if ln.strip()), "")
     return bool(_MARKER.match(first)) and not opener(first)
+
+
+# ---------------------------------------------------------------------------------------------------------------- which member's step it is (a board of several members)
+def _members_down(texts: list[str]) -> list[str | None]:
+    """The lines read one under another. A line that opens with a name: that member's name, None for anyone else's. A bare line: what OF stores for it there, the member whose line stands above it,
+    OTHERS under anyone else's, "" under none that names anyone. Any other line: "" (it names no one)."""
+    out: list[str | None] = []
+    above = ""
+    for text in texts:
+        name = opener(text)
+        if name:
+            p = _members.person_of(name)
+            out.append(p.name if p else None)
+            above = p.name if p else OTHERS
+        else:
+            if not is_bare(text):
+                above = ""
+            out.append(above)
+    return out
+
+
+def _by_place(cl: list[dict[str, Any]], at: list[int | None]) -> list[str | None]:
+    """_members_down of each step by where it stands now: a step with a line in next reads from the line above it there (never the one above it in the checklist, which puts a line a later write added
+    after all the stored ones); a step with no line in next (done, dropped) reads in the checklist's order."""
+    said = _members_down([s["text"] for s in cl])
+    lines = sorted((i for i, j in enumerate(at) if j is not None), key=lambda i: at[i])
+    for i, who in zip(lines, _members_down([cl[i]["text"] for i in lines])):
+        said[i] = who
+    return said
+
+
+def _said(cl: list[dict[str, Any]], at: list[int | None]) -> list[str | None]:
+    """_by_place, with what each bare step holds (OF) in its place. A bare step that holds nothing (stored before OF was) and stands above every other line of next was left there when the lines over it
+    were marked: it reads under the nearest of those above it in the checklist."""
+    said = _by_place(cl, at)
+    for i in sorted((i for i, j in enumerate(at) if j is not None), key=lambda i: at[i]):
+        if not is_bare(cl[i]["text"]):
+            break      # every bare line further down stands under a line of next
+        over = next((cl[n]["text"] for n in range(i - 1, -1, -1) if at[n] is None and not is_bare(cl[n]["text"])), "")
+        said[i] = _members_down([over, cl[i]["text"]])[1]
+    return [s.get(OF, who) for s, who in zip(cl, said)]
+
+
+def _member_of(value: str) -> str | None:
+    """Whose a bare step is by what it holds (OF): the member's name; "" no one's; None anyone else's, a name that is no member's any more among them."""
+    p = _members.person_of(value) if value else None
+    return p.name if p else None if value else ""
+
+
+def member_rows(meta: dict[str, Any] | None) -> tuple[list[dict[str, Any]], list[int | None], list[str | None]]:
+    """(the checklist, each step's line position in next (view_rows), whose each step is among the members): the name of the member its opener names; None when the opener names anyone else (a session,
+    an outside party); "" when it names no one. A bullet or numbered line that names no one (is_bare) is whose line it was written under (OF, settle_members; read from where it stands when nothing is
+    stored, _said): a member's, no one's ("") when under no line that names anyone, and None under anyone else's, which no member is shown or ticks. While one member alone has had a part in the item
+    (a line of theirs, or the step asked of them) such a line under anyone else's reads as no one's, so it goes with that member's step as it does on a board of one."""
+    m = meta or {}
+    cl, at = view_rows(meta)
+    said = _said(cl, at)
+    whose = [_member_of(str(v)) if is_bare(s["text"]) else v for s, v in zip(cl, said)]
+    parts = {who for who in whose if who} | ({member_for(m.get("step"), m)} if clean(m.get("step")) else set())
+    if len(parts) < 2:
+        whose = ["" if v == OTHERS else who for v, who in zip(said, whose)]
+    return cl, at, whose
+
+
+def settle_members(meta: dict[str, Any], before: dict[str, Any] | None, written: str = "") -> None:
+    """Settle whose each bare step is, so that nothing later moves it: on a board of several members every bare step of `meta` holds OF from the first save it is part of, however many members have had
+    a part in the item. `before` is the item's metadata as it stood before the write, `written` the next text the writer's call set. A step keeps what it holds. One that stood before holding nothing
+    takes what `before` reads for it (_said). A new step takes the line it stands under in `written` (so a line merged into another writer's takes no sub-line with it), else, when `written` does not
+    have it under any line, the line it stands under in next. Nothing is written for a board of one member, or when every bare step holds OF already."""
+    if len(_members.members()) < 2:
+        return
+    cl, at = view_rows(meta)
+    bare = [i for i, s in enumerate(cl) if is_bare(s["text"])]
+    if all(OF in cl[i] for i in bare):
+        return
+    old, old_at = view_rows(before)
+    stood = [(key(s["text"]), s["status"], str(value)) for s, value in zip(old, _said(old, old_at)) if is_bare(s["text"])]
+
+    def take(i: int, fits: Callable[[str, str], bool]) -> str | None:
+        """What the first step that stood before with the words of step `i` and fits holds, which no other step takes after this."""
+        n = next((n for n, (k, status, value) in enumerate(stood) if k == key(cl[i]["text"]) and fits(status, value)), None)
+        return None if n is None else stood.pop(n)[2]
+
+    got = {i: cl[i][OF] for i in bare if OF in cl[i]}
+    for i, mine in got.items():      # a step that kept its own accounts for the one it was
+        take(i, lambda _status, value: value == mine)
+    for i in bare:      # in checklist order, where the steps that stood come before the ones this write adds
+        if i not in got:
+            value = take(i, lambda status, _value: status == cl[i]["status"])
+            value = take(i, lambda status, _value: status == OPEN) if value is None else value      # marked by this write
+            if value is not None:
+                got[i] = value
+    lines = split(written)
+    top = next((n for n, c in enumerate(lines) if not is_bare(c)), len(lines))      # a bare line above every other line of the text stands under nothing there
+    under: dict[str, list[str]] = {}
+    for c, who in list(zip(lines, _members_down(lines)))[top:]:
+        if is_bare(c):
+            under.setdefault(key(c), []).append(str(who))
+    for i, value in got.items():
+        if value in under.get(key(cl[i]["text"]), []):
+            under[key(cl[i]["text"])].remove(value)
+    here = _by_place(cl, at)
+    for i in bare:
+        if i not in got:
+            said = under.get(key(cl[i]["text"]))
+            got[i] = said.pop(0) if said else str(here[i])
+    for i, value in got.items():
+        cl[i][OF] = value
+    meta["steps"] = stored(cl)
+
+
+def open_members(meta: dict[str, Any] | None) -> list[str]:
+    """The members who have an open step on the checklist (member_rows), each once, in the checklist's order."""
+    cl, _at, whose = member_rows(meta)
+    return list(dict.fromkeys(who for s, who in zip(cl, whose) if who and s["status"] == OPEN))
+
+
+def member_for(text: Any, meta: dict[str, Any] | None = None) -> str:
+    """The member a step or a question of the item is asked of: the one `text` opens with, else the item's member (model.item_person)."""
+    p = _members.person_of(opener(text))
+    return p.name if p else _model.item_person(meta).name
+
+
+def takes_part(meta: dict[str, Any] | None, member: str) -> bool:
+    """Has `member` a part in the item's your-step: the step is theirs (member_for the stored `step`), or the checklist holds an open step of theirs."""
+    m = meta or {}
+    return member == member_for(m.get("step"), m) or member in open_members(m)
+
+
+def several_hold(meta: dict[str, Any] | None) -> bool:
+    """Have two members or more had a part in the item: a line of theirs on the checklist, open or not (member_rows), or the stored `step` asked of them (member_for)?"""
+    m = meta or {}
+    return len({who for who in member_rows(m)[2] if who} | {member_for(m.get("step"), m)}) > 1

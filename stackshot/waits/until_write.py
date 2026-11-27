@@ -53,12 +53,14 @@ def is_bare(meta: dict[str, Any]) -> bool:
 def unfold(meta: dict[str, Any]) -> bool:
     """Turn a stored `until` into the old working fields, in place, for one update's gates: the date is the relay's ask_by, the backstop wake of an anchor, item or event wait, or the
     wake of a wait on the date alone (kind time or none), which also stands as a hold when the item states a reason for it (a wait_basis) or stores the kind time, as a park with a reason does; a bare date is a wait on that date alone. `until` itself goes from the working copy; `fold` puts it back.
+    A wake or ask_by stored beside the until goes too: until is the wait's date, and `date_of` would else take an older one in its place.
     → True when the item stored an `until` (the caller folds it again after the write)."""
     u = _wt.stored_until(meta)
     if not u:
         meta.pop("until", None)
         return False
-    meta.pop("until", None)
+    for k_ in ("until", "wake", "ask_by"):
+        meta.pop(k_, None)
     k = kind_of(meta)
     if slot_of(k) == "ask_by":
         meta["ask_by"] = u

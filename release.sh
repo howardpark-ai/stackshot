@@ -46,6 +46,11 @@
 #   ./release.sh queue --list     the queued PRs in order, each running, waiting or started but not running, whether the queue is paused and why
 #   ./release.sh queue --drop N   take PR N out of the queue (a release already started is not stopped, and a PR already in GitHub's merge queue stays there: the CLI cannot remove it)
 #   ./release.sh queue --resume   after a pause, once main is fixed: the queue goes on (waiting PRs start up to the cap, and a queued release that was started but is no longer running starts again)
+#   ./release.sh hold --minutes N --by NAME --why TEXT
+#                                 hold every release's deploy for N minutes (1 to 120), for work on the server that a deploy's restarts must not fall into (THE HOLD below). Waits for the deploy under way
+#                                 first, so when it returns none is running. The same NAME again replaces its own hold (a new end, a new reason); another NAME is refused while one stands
+#   ./release.sh hold --status    who holds releases, until when and why, or that nothing does
+#   ./release.sh hold --end       end the hold now: the releases waiting for it go on
 #   ./release.sh --run <pr> [--recycle | --no-recycle]
 #                                 the steps themselves (what the unit runs):
 #                                 1. the PR is open and mergeable;
@@ -252,6 +257,9 @@ SYNC_WHO=""; SYNC_TOLD=""                # record_sync's message: which release 
 RUN_BEAT="${RELEASE_RUNNING_BEAT:-60}"      # [release] deploy_ssh: seconds between two entries a release sends the server box to say it runs (4c-running); an entry counts 300 s there (core/release_running.py EXPIRE_S)
 RUN_LIMIT="${RELEASE_RUNNING_LIMIT:-20}"    # seconds one such send may take in all (a 10 s connect and at most 8 s of the command there fit inside); past it the ssh is stopped
 RUN_PID=""; RUN_PR=""; RUN_LOG=""           # the process that sends them (running_start), and what it sends
+HOLD_FILE="$LOGDIR/hold"                 # release.sh hold: the end (epoch seconds), who and why, one a line; while it stands no release deploys (THE HOLD)
+HOLD_MAX_MIN=120                         # the longest one hold lasts: release.sh's own number, not a setting, so a forgotten hold cannot stall releases for long
+POLL_HOLD="${RELEASE_POLL_HOLD:-10}"     # seconds between two looks at a hold a release waits for
 QUEUE="$LOGDIR/queue"                    # the release queue (release.sh queue): PR numbers, one a line, in order; $QUEUE.lock its flock, $QUEUE.started the PRs whose release the queue started, $QUEUE.paused why it is paused, $QUEUE.log what it did
 MQ_ON_ADD_TIMEOUT="${RELEASE_MQ_ON_ADD_TIMEOUT:-60}"   # seconds `salamander mq add` may take in mode on (it starts the queue's driver unit, and a refusal is an answer, so a slow one is an error: THE TWO MERGE QUEUES at the top)
 MQ_WAIT_CAP="${RELEASE_MQ_WAIT_CAP:-18000}"       # seconds a group release waits for the salamander merge queue's verdicts (5 h: a queue run takes up to 100 min, and a PR behind a failure in the chain is tested again after the restack)
@@ -473,10 +481,107 @@ pr_files() {  # the files PR $1 changed, one a line, every page (GitHub lists up
     gh api "repos/$REPO/pulls/$1/files?per_page=100" --paginate --jq '.[].filename'
 }
 
-take_lock() {  # the deploy lock on fd 9 (exec: this shell's own), waited for up to LOCK_WAIT; $1 says what was done when it fails
-    mkdir -p "$(dirname "$LOCK_FILE")"; exec 9>>"$LOCK_FILE" || { exec 9>&-; fail "deploy lock" "cannot open the lock file $LOCK_FILE"; }
-    if ! flock -n 9; then say "another release holds the deploy lock; waiting up to $((LOCK_WAIT/60)) min ($LOCK_WAIT s)"
-        flock -w "$LOCK_WAIT" 9 || { exec 9>&-; fail "deploy lock" "another deploy held the lock $LOCK_FILE for more than $LOCK_WAIT s; $1"; }; fi
+# THE HOLD. `release.sh hold --minutes N --by NAME --why TEXT` keeps every release from deploying for a short, named time: work on the server that restarts the board (a change of how it is
+# reached, say) must not have a deploy's restarts in the middle of it. It is checked where every deploy of a release passes, under the deploy lock (take_lock: a release by hand or from the
+# queue, a group, a rollback): a release that finds a hold lets the lock go, says who holds it and why (its log, and one message), waits, and takes the lock again once the hold is over.
+# So a release still merges its PR while held, and stops before its deploy; a rollback waits too. `hold` writes the file under the same lock, so no release's deploy is running once it
+# returns. A hold ends by `hold --end` or by its own end, 120 minutes at most; a file there that does not read as a hold holds for 120 minutes from its last change, and says so.
+# deploy.sh run by hand does not look at it. With [release] deploy_ssh the hold is taken where release.sh runs.
+hold_read() {   # 1 when there is no hold file. Else 0, with $hd_state (active | expired), $hd_by, $hd_why and $hd_until (epoch seconds)
+    local line="" mtime cap   # line starts set: a read that fails at once (a folder at that path) leaves it, and set -u would end the script
+    hd_state=""; hd_by=""; hd_why=""; hd_until=""
+    [ -e "$HOLD_FILE" ] || return 1
+    mtime="$(stat -c %Y "$HOLD_FILE" 2>/dev/null)" || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            until=*) hd_until="${line#*=}" ;;
+            by=*) hd_by="${line#*=}" ;;
+            why=*) hd_why="${line#*=}" ;;
+        esac
+    done 2>/dev/null < "$HOLD_FILE"
+    cap=$((mtime + HOLD_MAX_MIN * 60))
+    if [[ "$hd_until" =~ ^[0-9]{1,12}$ ]] && [ -n "$hd_by" ] && [ -n "$hd_why" ]; then
+        [ "$hd_until" -le "$cap" ] || hd_until=$cap
+    else
+        hd_until=$cap; hd_by="unknown"; hd_why="the file $HOLD_FILE does not read as a hold"
+    fi
+    if [ "$hd_until" -gt "$(date +%s)" ]; then hd_state=active; else hd_state=expired; fi
+    return 0
+}
+hold_end_at() { date -u -d "@$hd_until" +%FT%TZ; }
+hold_line() {   # the hold hold_read found, in words
+    echo "held by $hd_by until $(hold_end_at) ($(( (hd_until - $(date +%s) + 59) / 60 )) min left): $hd_why" | mq_plain
+}
+hold_note() {   # one line where a release is started or listed, when a hold stands; never fails
+    ! hold_read || [ "$hd_state" != active ] || say "note: releases are $(hold_line). A release merges its PR and then waits before its deploy (release.sh hold --end ends the hold)"
+    return 0
+}
+hold_cmd() {   # release.sh hold --minutes N --by NAME --why TEXT | --status | --end
+    local use="usage: release.sh hold --minutes N --by NAME --why TEXT | hold --status | hold --end" mins="" by="" why="" until_s replaced=""
+    case "${1:-}" in
+        --status)
+            [ $# -eq 1 ] || { echo "$use" >&2; return 2; }
+            if ! hold_read; then echo "no hold on releases"
+            elif [ "$hd_state" = active ]; then echo "releases are $(hold_line)"
+            else echo "no hold on releases: the one by $hd_by ended at $(hold_end_at) ($hd_why)"; fi
+            return 0 ;;
+        --end)
+            [ $# -eq 1 ] || { echo "$use" >&2; return 2; }
+            if ! hold_read; then echo "no hold on releases"; return 0; fi
+            rm -f "$HOLD_FILE" || { echo "the hold could not be ended: $HOLD_FILE cannot be removed; it stands until $(hold_end_at)" >&2; return 1; }
+            if [ "$hd_state" = active ]; then echo "hold ended: it was held by $hd_by until $(hold_end_at): $hd_why"
+            else echo "no hold on releases: the one by $hd_by had ended at $(hold_end_at); its file is removed"; fi
+            return 0 ;;
+    esac
+    while [ $# -gt 0 ]; do
+        [ $# -ge 2 ] || { echo "$use" >&2; return 2; }
+        case "$1" in
+            --minutes) mins="$2" ;;
+            --by) by="$2" ;;
+            --why) why="$2" ;;
+            *) echo "$use" >&2; return 2 ;;
+        esac
+        shift 2
+    done
+    { [ -n "$mins" ] && [ -n "${by//[[:space:]]/}" ] && [ -n "${why//[[:space:]]/}" ]; } || { echo "$use (all three are needed)" >&2; return 2; }
+    { [[ "$mins" =~ ^[1-9][0-9]{0,2}$ ]] && [ "$mins" -le "$HOLD_MAX_MIN" ]; } || { echo "release.sh hold: --minutes is a whole number from 1 to $HOLD_MAX_MIN" >&2; return 2; }
+    { [[ "$by" != *[[:cntrl:]]* ]] && [[ "$why" != *[[:cntrl:]]* ]] && [ "${#by}" -le 80 ] && [ "${#why}" -le 200 ]; } ||
+        { echo "release.sh hold: --by is one line of 80 characters at most, --why one of 200 at most" >&2; return 2; }
+    mkdir -p "$(dirname "$LOCK_FILE")" "$LOGDIR"
+    exec 9>>"$LOCK_FILE" || { exec 9>&-; echo "not held: cannot open the lock file $LOCK_FILE" >&2; return 1; }
+    if ! flock -n 9; then echo "a deploy is under way: waiting for it, up to $LOCK_WAIT s"
+        flock -w "$LOCK_WAIT" 9 || { exec 9>&-; echo "not held: another deploy held the lock $LOCK_FILE for more than $LOCK_WAIT s" >&2; return 1; }; fi
+    if hold_read && [ "$hd_state" = active ]; then
+        [ "$hd_by" = "$by" ] || { echo "not held: releases are already $(hold_line) (release.sh hold --end ends it)" >&2; exec 9>&-; return 1; }
+        replaced=" (your earlier hold is replaced)"
+    fi
+    until_s=$(( $(date +%s) + mins * 60 ))
+    { printf 'until=%s\nby=%s\nwhy=%s\n' "$until_s" "$by" "$why" > "$HOLD_FILE.$$" && mv -f "$HOLD_FILE.$$" "$HOLD_FILE"; } ||
+        { rm -f "$HOLD_FILE.$$"; exec 9>&-; echo "not held: could not write $HOLD_FILE" >&2; return 1; }
+    exec 9>&-
+    hold_read || { echo "not held: $HOLD_FILE cannot be read back" >&2; return 1; }
+    echo "releases are $(hold_line)$replaced. No release deploys until then; release.sh hold --end lets them go on sooner"
+}
+take_lock() {  # the deploy lock on fd 9 (exec: this shell's own), waited for up to LOCK_WAIT; $1 says what was done when it fails. A hold (THE HOLD) is waited out first, without the lock
+    local told=""
+    mkdir -p "$(dirname "$LOCK_FILE")"
+    while :; do
+        exec 9>>"$LOCK_FILE" || { exec 9>&-; fail "deploy lock" "cannot open the lock file $LOCK_FILE"; }
+        if ! flock -n 9; then [ -n "$told" ] || say "another release holds the deploy lock; waiting up to $((LOCK_WAIT/60)) min ($LOCK_WAIT s)"   # a waiter on a hold takes the lock for a moment: not said again
+            flock -w "$LOCK_WAIT" 9 || { exec 9>&-; fail "deploy lock" "another deploy held the lock $LOCK_FILE for more than $LOCK_WAIT s; $1"; }; fi
+        hold_read || break
+        if [ "$hd_state" = expired ]; then
+            say "$(echo "the hold on releases by $hd_by ended at $(hold_end_at) ($hd_why): going on" | mq_plain)"; rm -f "$HOLD_FILE" || say "its file $HOLD_FILE could not be removed"
+            break
+        fi
+        exec 9>&-
+        if [ "$told" != "$hd_until $hd_by $hd_why" ]; then
+            told="$hd_until $hd_by $hd_why"
+            say "releases are $(hold_line). Waiting before the deploy; release.sh hold --end lets it go on"
+            tell "[release] ${SYNC_WHO:-a release} waits before its deploy: releases are $(hold_line). release.sh hold --end lets it go on"
+        fi
+        sleep "$POLL_HOLD"
+    done
     say "deploy lock taken"
 }
 
@@ -1574,6 +1679,10 @@ queue_cmd() {   # release.sh queue N [N...] | --list | --drop N | --resume
             q_read
             if [ "${#q[@]}" -eq 0 ]; then echo "release queue: empty"; else echo "release queue, in order: ${q[*]}"; fi
             [ ! -f "$QUEUE.paused" ] || echo "paused: $(head -1 "$QUEUE.paused") (release.sh queue --resume)"
+            if hold_read; then
+                if [ "$hd_state" = active ]; then echo "on hold: releases are $(hold_line) (release.sh hold --end)"
+                else echo "no hold now: the one by $hd_by ended at $(hold_end_at) ($hd_why)"; fi
+            fi
             for n in "${q[@]}"; do
                 if ! q_is_started "$n"; then st="waiting"
                 elif q_alive "$n"; then st="running (its release starts the next waiting one when it is deployed)"
@@ -1591,6 +1700,7 @@ queue_cmd() {   # release.sh queue N [N...] | --list | --drop N | --resume
     esac
     for n in "$@"; do [[ "$n" =~ ^[0-9]+$ ]] || { echo "release.sh queue: '$n' is not a PR number; usage: release.sh queue N [N...]" >&2; return 2; }; done
     queue_checks_gate "$@" || return 1   # no PR is added when one of them is refused
+    hold_note
     q_locked queue_add_locked "$@"
 }
 queue_checks_gate() {   # $@ = the PR numbers `release.sh queue` was given. 0 when none of them (not queued yet) has a check row that failed, was cancelled or timed out; else 1 with "refused: PR N has failing check rows:" and one line a row
@@ -1747,6 +1857,7 @@ run_group() {   # $@ = the PRs of one group, in queue order (two or more, at mos
     }
     SYNC_WHO="the group release of PRs $names"; trap 'record_sync; running_end' EXIT   # deploy_ssh: however this release ends, the server box gets the record (4c-record) and is told the release ended (4c-running); a subshell does not run it
     running_start "$lead" "$LOGDIR/pr-$lead.log"   # one unit, the lead's, so one entry (4c-running)
+    hold_note
     mq_settle() {   # $1 = a PR: let go of it in the queue (best effort). Its marker goes once the queue no longer holds it: dropped, or "is not in the line" (never added: the add was refused, or it settled already), or no active entry in `mq status`
         local k="$1" o rc st act
         o="$(timeout 20 salamander mq drop "$k" --repo "$REPO" 2>&1 4>&- 6>&- 7>&- 8>&- 9>&-)"; rc=$?
@@ -2062,6 +2173,7 @@ run() {
     fail() { say "FAILED at $1: $2"; queue_after_fail "$1"; tell "[release] PR #$pr FAILED at $1: $2$q_note · log $log"; exit 1; }
     SYNC_WHO="PR #$pr"; trap 'orphan_exit; record_sync; running_end' EXIT   # a PR closed to replace an orphaned run and not yet reopened is reopened first (orphan_exit); deploy_ssh: however this release ends, the server box gets the record (4c-record) and is told the release ended (4c-running); a subshell does not run it
     running_start "$pr" "$log"
+    hold_note
     recover_pending   # a deploy of an earlier release whose process ended before main's run was read (killed, the box restarted): looked at first
     local mqmode; mqmode="$(mq_host_mode)"   # THE TWO MERGE QUEUES: only `on` changes this release (off, shadow, no file and a file that does not read are GitHub's queue, below)
     mq_line_check() {   # every mode: a PR the salamander merge queue holds (the marker of a group release) is never merged here, whatever the host file says now (a mode changed mid-group does not take the PR out of that queue)
@@ -2378,8 +2490,10 @@ case "${1:-}" in
         systemd-run --user --quiet --collect --unit "stackshot-release-$1" -p WorkingDirectory="$HERE" \
             --setenv=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" "$HERE/release.sh" --run-group "$@" \
             || { echo "could not start stackshot-release-$1 (systemd-run failed): nothing was started" >&2; exit 1; }
+        hold_note
         echo "started stackshot-release-$1: hands the PRs $* to the merge queue as one group, deploys what it merges once, and reports to $REPORT_TO · log $LOGDIR/group-$1.log (and each PR's pr-N.log)"; exit 0 ;;
     queue) shift; queue_cmd "$@"; exit $? ;;
+    hold) shift; hold_cmd "$@"; exit $? ;;   # THE HOLD (above take_lock)
     --copy-record)   # [release] deploy_ssh: copy the last-good record to the server box now (4c-record; a release does it on its own: this is for a copy that failed with no release coming)
         [ $# -eq 1 ] || { echo "usage: release.sh --copy-record" >&2; exit 2; }
         [ -n "$DEPLOY_SSH" ] || { echo "nothing to copy: [release] deploy_ssh is unset, so the server reads this box's record"; exit 0; }
@@ -2387,11 +2501,12 @@ case "${1:-}" in
         SYNC_TOLD=1; record_sync; exit $? ;;   # by hand: the output is the report, no message
     ''|-h|--help) sed -n '2,/^set -uo pipefail/{/^set -uo pipefail/!p}' "$0"; exit 2 ;;   # the header comment, up to the first line of code
     *)
-        pr="$1"; [[ "$pr" =~ ^[0-9]+$ ]] && [[ "${2:-}" =~ ^(|--recycle|--no-recycle)$ ]] && [ $# -le 2 ] || { echo "usage: release.sh <pr> [--recycle | --no-recycle] | --status [pr] | --run <pr> [--recycle | --no-recycle] | --pick <pr> | --pick-files <file>... | queue N [N...] | queue --list | queue --drop N | queue --resume | --group N N... | --copy-record" >&2; sed -n '/^# How to run it/,/^#   - Auto mode/p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+        pr="$1"; [[ "$pr" =~ ^[0-9]+$ ]] && [[ "${2:-}" =~ ^(|--recycle|--no-recycle)$ ]] && [ $# -le 2 ] || { echo "usage: release.sh <pr> [--recycle | --no-recycle] | --status [pr] | --run <pr> [--recycle | --no-recycle] | --pick <pr> | --pick-files <file>... | queue N [N...] | queue --list | queue --drop N | queue --resume | hold --minutes N --by NAME --why TEXT | hold --status | hold --end | --group N N... | --copy-record" >&2; sed -n '/^# How to run it/,/^#   - Auto mode/p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
         if systemctl --user is-active --quiet "stackshot-release-$pr.service" 2>/dev/null; then echo "release of PR #$pr is already running (release.sh --status $pr)"; exit 1; fi
         systemd-run --user --quiet --collect --unit "stackshot-release-$pr" -p WorkingDirectory="$HERE" \
             --setenv=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" "$HERE/release.sh" --run "$pr" ${2:+"$2"} \
             || { echo "could not start stackshot-release-$pr (systemd-run failed): nothing was started" >&2; exit 1; }     # uv, gh, python3 and the fleet tool as the shell sees them; a start that failed is said so (the queue skips it)
+        hold_note
         echo "started stackshot-release-$pr: enqueues PR #$pr in the merge queue when its checks pass, deploys what GitHub merges, picks what the sessions need (${2:-from the files it changed}), and reports to $REPORT_TO · log $LOGDIR/pr-$pr.log"; exit 0 ;;
 esac
 exit 0

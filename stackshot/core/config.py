@@ -1516,6 +1516,10 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
         old_mail = get("auth", "allowed_emails", default=[], cfg=cfg)
         if (old_owner and old_owner != pe.PLACEHOLDER) or get("instance", "owner_aliases", cfg=cfg) or (isinstance(old_mail, list) and any(e not in owned for e in old_mail)):
             out.append("[[members]] is set, so [instance] owner, owner_aliases and [auth] allowed_emails are not read for a person: move what they hold into it, and drop them")
+        listed = get("members", cfg=cfg)
+        if isinstance(listed, list) and len(listed) > 1 and not any(isinstance(t, dict) and "agents" in t for t in listed):
+            out.append('[[members]] names several members and none lists agents, so no row of Home says an agent acts for a person: add agents = ["<session name>"] to the member a session acts as '
+                       "(agents = [] on a member says there is none)")
     pg = get("page_gate", cfg=cfg)
     pg = pg if isinstance(pg, dict) else {}
     if "keeper_currency" in pg:
@@ -1635,6 +1639,7 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
         out.append(f"[anchors] offers = {repr(ao)[:60]} is not true or false, so the anchor offers stay on (true): write offers = false to stop the replies offering an anchors call")
     out.extend(frontdoor_notes(cfg))
     out.extend(frontdoor_signin_notes(cfg))
+    out.extend(frontdoor_splitter_notes(cfg))
     out.extend(behind_door_notes(cfg))
     return out
 
@@ -1662,6 +1667,12 @@ def frontdoor_signin_notes(cfg: dict[str, Any] | None = None) -> list[str]:
     """The lines for the `[frontdoor_signin]` table (core/frontdoor_signin_config.py judges it): [] when the config has no such table. Imported at call time: that module reads this one."""
     from stackshot.core import frontdoor_signin_config
     return frontdoor_signin_config.notes(cfg)
+
+
+def frontdoor_splitter_notes(cfg: dict[str, Any] | None = None) -> list[str]:
+    """The lines for the `[frontdoor_splitter]` table (core/frontdoor_splitter_config.py judges it): [] when the config has no such table. Imported at call time: that module reads this one."""
+    from stackshot.core import frontdoor_splitter_config
+    return frontdoor_splitter_config.notes(cfg)
 
 
 def stall_item_answers(item: str) -> list[dict[str, Any]] | None:

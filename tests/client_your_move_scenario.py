@@ -3,7 +3,9 @@
 Covers: the read lists every item of the group, more than five, whichever way the owner is its mover (a decision with its ask, a stored mover, an item no session moves or is named on, an item a session created) and nothing of
 the other two lists (an item an agent moves, one that waits on a date or on another item, a held one, a closed one, one in the retired on-hold status); the answer is the home page's own group: the same items in the same order as the
 ui renderer's Your move list, and its first five are the brief's five lines; the order is the page's (the longest-his first, items of one age by due date), not newest first; each row's fields (`shown`, `subject`, `url`, `ask`
-empty without an open ask, `updated` in epoch seconds with the file's time for an item that stores none), a url without the instance's board address; a decision that leaves the group and an item that joins it show at once;
+empty without an open ask, `updated` in epoch seconds with the file's time for an item that stores none, `scope`), a url without the instance's board address; a decision that leaves the group and an item that joins it show at once;
+each row's `scope` is the subsection the home page draws that item in, for every way a page gets its scope (its board row's, a sub-page and a hub page included; the key prefix, org, name prefix, tag, record entry and the mark set on
+purpose; no project, a bare slug and an unlisted page), on an instance with no [project_scopes] and with a damaged id file, `[scopes]` not read, the id file read once for a read;
 an empty group is {"items": [], "group": {...}}; with the queue rule on (which asks for the session roles about each item an agent moves) the roles are built once for a read, and the answer is byte for byte the one without that memo; the group's name (`group`: {"en", "ko"}) is the string table's own Your move heading, as the home page draws it, with no second-language catalog (the English text for both), with an ASCII test locale, with a catalog that lacks the key or refuses its value; over HTTP: no token, a wrong token, the token in the query string, a Basic credential and a live caller's pass are 401, the machine's token is the read's own answer, no-store, answered in a
 worker thread, a read-only standby serves it and a write to it is refused; the 404 list and `client.py` name the read.
 
@@ -124,7 +126,7 @@ check("group, a second language configured: the name in each language, the Engli
 with contextlib.redirect_stderr(io.StringIO()): hk, he = home_heading("ko"), home_heading("en")
 check("group, each name is what the home page draws over the list in that language", (jk["group"]["ko"], jk["group"]["en"]) == (hk, he), (jk["group"], hk, he))
 check("group, a second language configured changes nothing else: every other key, each row and the order are as without it", set(jk) == {"items", "group"} and jk["items"] == j["items"] and [list(x) for x in jk["items"]] == [list(x) for x in j["items"]], (jk.keys(),))
-check("group, the rows are exactly what the renderer's your_move gives and nothing was added to a row", j["items"] == json.loads(json.dumps(_rmod.your_move(str(_store.STORE)))) and all(list(x) == ["shown", "subject", "url", "ask", "updated"] for x in j["items"]), (j["items"][:1],))
+check("group, the rows are exactly what the renderer's your_move gives and nothing was added to a row", j["items"] == json.loads(json.dumps(_rmod.your_move(str(_store.STORE)))) and all(list(x) == ["shown", "subject", "url", "ask", "updated", "scope"] for x in j["items"]), (j["items"][:1],))
 write_ko({"state.agent": MARK(_i18n.EN["state.agent"])})                                                 # a catalog that lacks the key: the table's fallback for that key, English
 settle()
 with contextlib.redirect_stderr(io.StringIO()): jm = body()
@@ -147,7 +149,7 @@ check("…and the two of one age: the dated one before the undated one", got.ind
 check("…so the newest is last", got[-1] == shown(9) and got[0] == shown(1), got)
 
 r = rows()
-check("a row has exactly the five fields", all(set(x) == {"shown", "subject", "url", "ask", "updated"} for x in r.values()), [set(x) for x in r.values()][:2])
+check("a row has exactly the six fields", all(set(x) == {"shown", "subject", "url", "ask", "updated", "scope"} for x in r.values()), [set(x) for x in r.values()][:2])
 check("shown is the id as a person reads it, subject the item's", r[shown(1)]["subject"] == "[home] a decision with its ask" and all(x["shown"] == s for s, x in r.items()), r[shown(1)])
 check("ask is the open ask line of a decision, and empty for an item with none or with an ask that is no open question", r[shown(1)]["ask"] == ASK and r[shown(3)]["ask"] == "" and r[shown(2)]["ask"] == "" and r[shown(10)]["ask"] == "", [(k, x["ask"]) for k, x in r.items()])
 check("updated is the item's last write in epoch seconds", isinstance(r[shown(1)]["updated"], float) and abs(r[shown(1)]["updated"] - (now0 - 9 * DAY)) < 1, r[shown(1)]["updated"])
@@ -180,6 +182,117 @@ for n in gone: drop(n)
 st, ct, b = cr._client_get("your-move", {})
 check("an empty group is 200 {items: [], group: {...}}: the group's name is there with no item", st == 200 and json.loads(b) == {"items": [], "group": NAMES_EN} and ui_group() == [], (st, b))
 for n, t in saved.items(): (T / f"store/a/{n}.json").write_text(t)
+
+# each row's `scope`: the name on the subsection the home page draws that item in. The instance lists the scopes work, home (the default) and ops, and maps the key prefix "ops/" and the tags ops and work.
+def drawn():
+    """{item: scope} as the home page's HTML draws its Your move list: the subsection each item's link sits in."""
+    sec = _ui.Board(str(_store.STORE)).html().split('<section id="your-move">', 1)[1].split('<section id=', 1)[0]
+    parts = re.split(r'data-fold="home\.your-move\.([^"]+)"', sec)
+    return {s: sc for sc, chunk in zip(parts[1::2], parts[2::2]) for s in (shown(n) for n in (*mine, *CASES, 250)) if f'href="/items/{_gh.href_id(s)}"' in chunk}
+def answered(): return {x["shown"]: x["scope"] for x in body()["items"]}
+def page(**e): return {"title": "P", "name": "P", "org": "home", "tags": [], "type": "project", "status": "active", "board": [], **e}
+reg0 = (T / "store/projects.json").read_text()
+reg = json.loads(reg0)
+reg["pages"].update({"projects/w": page(org="work"), "projects/w/sub": page(), "projects/w/own": page(board_row=True, org="", tags=["ops"]), "ops/box": page(org="work"), "ops/hubbed": page(hub="projects/w"),
+                     "projects/named": page(session="ops-keeper", role="name"), "projects/tagged": page(org="", tags=["ops"]), "projects/recorded": page(org="work", scope="ops"), "projects/marked": page(org="work")})
+CASES = {200: ("projects/w", "work", "a page's org"), 201: ("projects/w/sub", "work", "a sub-page with no row of its own follows the row above it, not its own org"),
+         202: ("projects/w/own", "ops", "a sub-page that is a row keeps its own: its tag"), 203: ("ops/box", "ops", "the key prefix beats the page's org"),
+         204: ("ops/hubbed", "work", "a hub: page follows its hub's row, not its own key prefix"), 205: ("projects/named", "ops", "the prefix of the page's name line"),
+         206: ("projects/tagged", "ops", "a tag"), 207: ("projects/recorded", "ops", "the scope the record's entry names"), 208: ("projects/marked", "home", "the mark set on purpose beats the page's org"),
+         209: ("", "home", "no project: the default scope"), 210: ("projects/ghost", "home", "a page the registry does not list: the default scope"),
+         211: ("ops/ghost", "ops", "an unlisted page, by its key prefix"), 212: ("w", "work", "a bare slug is read as its page")}
+(T / "store/projects.json").write_text(json.dumps(reg))
+pid = _prj.ensure_ids(["projects/marked"])["projects/marked"]
+_prj.set_mark(pid, scope="home")
+for n, (key, _sc, _why) in CASES.items(): put(n, subject=f"[home] scope case {n}", age=3, mover=OWNER, project=key)
+try:
+    got_sc, page_sc = answered(), drawn()
+    for n, (key, sc, why) in CASES.items():
+        check(f"scope, {why} ({key or 'no project'}): {sc}", got_sc.get(shown(n)) == sc, got_sc.get(shown(n)))
+    check("scope, the items of a project with a plain org", {got_sc[shown(n)] for n in mine} == {"home"}, got_sc)
+    check("scope, every row's is the subsection the home page draws that item in", got_sc == page_sc and len(page_sc) == len(mine) + len(CASES) and set(page_sc.values()) == {"work", "home", "ops"}, (got_sc, page_sc))
+    check("scope, the list's own name stays in the top-level group, unchanged by it", body()["group"] == NAMES_EN, body()["group"])
+    # the same group on the other reads that list items: a copy of each case moved by a session and observed by another, read through items, involved and item-facts
+    for n, (key, _sc, _why) in CASES.items(): put(n + 100, subject=f"[home] scope copy {n}", age=3, mover="alpha-builder", observers=["alpha-main"], project=key)
+    try:
+        def by_shown(rows_): return {x["shown"]: x["scope"] for x in rows_}
+        it_sc = by_shown(json.loads(cr._client_get("items", {"key": "alpha-builder"})[2])["items"])
+        inv_sc = by_shown(json.loads(cr._client_get("involved", {"key": "alpha-main"})[2])["items"])
+        fa = json.loads(cr._client_get("item-facts", {"key": "alpha-builder", "ids": ",".join(f"a{n + 100}" for n in CASES)})[2])["items"]
+        fa_sc = {x["shown"]: x["scope"] for x in fa.values()}
+        for name, got_ in (("items", it_sc), ("involved", inv_sc), ("item-facts", fa_sc)):
+            for n, (key, sc, why) in CASES.items():
+                check(f"scope on {name}, {why} ({key or 'no project'}): {sc}", got_.get(shown(n + 100)) == sc, got_.get(shown(n + 100)))
+            check(f"scope on {name}, each case is the group its twin is listed in under Your move", all(got_.get(shown(n + 100)) == got_sc[shown(n)] for n in CASES), got_)
+    finally:
+        for n in CASES: drop(n + 100)
+    was = _cfg.CFG.get("scopes")
+    try:
+        _cfg.CFG["scopes"] = {"order": ["desk"], "default": "desk", "by_org": {"work": "desk"}, "by_prefix": {"ops/": "desk"}}
+        board_md = _rmod.Board(str(_store.STORE))
+        check("scope, [scopes] (board.md's own grouping) is not read", answered() == got_sc and {board_md.proj_scope(k) for k in reg["pages"]} == {"desk"}, answered())
+    finally: _cfg.CFG["scopes"] = was
+    # the id file is read once for a read, not once per item
+    reads = []; real_ids = _prj.ids_by_key; real_marks = _prj.marks
+    def spy_of(name, real):
+        def spy():
+            if sys._getframe(1).f_code.co_name in ("scope_ids", "scope_of"): reads.append(name)
+            return real()
+        return spy
+    _prj.ids_by_key, _prj.marks = spy_of("ids", real_ids), spy_of("marks", real_marks)
+    try: _rmod.your_move(str(_store.STORE))
+    finally: _prj.ids_by_key, _prj.marks = real_ids, real_marks
+    check("scope, the id file is read once for a read of the whole group", sorted(reads) == ["ids", "marks"], reads)
+    ids_file = pathlib.Path(_prj.record_path()); kept = ids_file.read_text()
+    # an agent only the project record holds (made through the form, its page line still owed) moves the page's scope by its name prefix, on the home page, your-move and the other reads alike
+    reg_p = json.loads((T / "store/projects.json").read_text()); reg_p["pages"]["projects/pend"] = page(org=""); (T / "store/projects.json").write_text(json.dumps(reg_p))
+    try:
+        pend_id = _prj.ensure_ids(["projects/pend"])["projects/pend"]
+        _prj.add_pending(pend_id, "work-x", {"front": True, "role": "x", "mandate_line": "a thing"})
+        put(250, subject="[home] pending case", age=3, mover=OWNER, project="projects/pend"); put(350, subject="[home] pending copy", age=3, mover="alpha-builder", observers=["alpha-main"], project="projects/pend")
+        cr._VIEW["v"] = None
+        yp = answered()[shown(250)]
+        ip = by_shown(json.loads(cr._client_get("items", {"key": "alpha-builder"})[2])["items"])[shown(350)]
+        vp = by_shown(json.loads(cr._client_get("involved", {"key": "alpha-main"})[2])["items"])[shown(350)]
+        fp = json.loads(cr._client_get("item-facts", {"key": "alpha-builder", "ids": "a350"})[2])["items"]["a350"]["scope"]
+        check("scope, a page that only a pending agent places (work-x): your-move says work", yp == "work", yp)
+        check("scope, …and items, involved and item-facts say the same as your-move", ip == vp == fp == yp, (yp, ip, vp, fp))
+        check("scope, …and the home page draws it in the same subsection", drawn().get(shown(250)) == yp, drawn().get(shown(250)))
+    finally:
+        for n in (250, 350): drop(n)
+        ids_file.write_text(kept); (T / "store/projects.json").write_text(json.dumps(reg))
+    # the registry, the id file and the marks are read once per read of items, involved and item-facts, not once per row
+    spy = {"ids": 0, "marks": 0, "pending": 0}; real_i, real_m, real_p = _prj.ids_by_key, _prj.marks, _prj.with_pending
+    def s_ids(*a, **k): spy["ids"] += 1; return real_i(*a, **k)
+    def s_marks(*a, **k): spy["marks"] += 1; return real_m(*a, **k)
+    def s_pend(*a, **k): spy["pending"] += 1; return real_p(*a, **k)
+    for n, (key, _sc, _why) in CASES.items(): put(n + 100, subject=f"[home] scope copy {n}", age=3, mover="alpha-builder", observers=["alpha-main"], project=key)
+    _prj.ids_by_key, _prj.marks, _prj.with_pending = s_ids, s_marks, s_pend
+    try:
+        def read_items():
+            cr._VIEW["v"] = None
+            return cr._client_get("items", {"key": "alpha-builder"})
+        for what, call in (("items", read_items), ("involved", lambda: cr._client_get("involved", {"key": "alpha-main"})),
+                           ("item-facts", lambda: cr._client_get("item-facts", {"key": "alpha-builder", "ids": ",".join(f"a{n + 100}" for n in CASES)}))):
+            for k_ in spy: spy[k_] = 0
+            st_, _ct, b_ = call()
+            check(f"scope, {what}: the id file, the marks and the pending agents are read once for the whole read", st_ == 200 and len(json.loads(b_)["items"]) >= len(CASES) and spy == {"ids": 1, "marks": 1, "pending": 1}, spy)
+    finally:
+        _prj.ids_by_key, _prj.marks, _prj.with_pending = real_i, real_m, real_p
+        for n in CASES: drop(n + 100)
+    try:
+        ids_file.write_text("{ torn")
+        bad_sc, bad_page = answered(), drawn()
+        check("scope, a damaged id file: the read still answers, the marked page by its own lines, as the home page draws it", bad_sc == {**got_sc, shown(208): "work"} and bad_sc == bad_page, (bad_sc, bad_page))
+    finally: ids_file.write_text(kept)
+    was = _cfg.CFG.pop("project_scopes")
+    try:
+        one_sc, one_page = answered(), drawn()
+        check("scope, an instance with no [project_scopes]: every row is in the one default scope, general, as the home page draws it", set(one_sc.values()) == {"general"} and one_sc == one_page, (one_sc, one_page))
+    finally: _cfg.CFG["project_scopes"] = was
+finally:
+    for n in CASES: drop(n)
+    (T / "store/projects.json").write_text(reg0)
 
 # the session roles are worked out once for a read: with the queue rule on, the group asks who is a front agent about each item an agent moves
 def roles_builds(call):
@@ -251,7 +364,7 @@ check("http: it is answered in a worker thread, not on the event loop (it render
 check("http: the 404 list of reads names it", nf.status_code == 404 and "your-move" in nf.text, nf.text[:200])
 check("a read-only standby copy serves it, as it serves the other reads, and a write is still refused", sb.status_code == 200 and sb.json() == body() and wr.status_code == 503 and "read-only standby" in wr.text, (sb.status_code, wr.status_code, wr.text[:120]))
 usage = open(client.__file__, encoding="utf-8").read().split('"""', 2)[1]
-check("client.py knows the read and its usage text names it and its fields", "your-move" in client.READS and "client.py get your-move" in usage and all(w in usage.split("client.py get your-move", 1)[1].split("client.py post project-agent", 1)[0] for w in ("shown", "subject", "url", "ask", "updated", "no cap", '"group": {"en"', "heading the home page draws over the list in each language", "no catalog on the install has the English text")), usage[:100])
+check("client.py knows the read and its usage text names it and its fields", "your-move" in client.READS and "client.py get your-move" in usage and all(w in usage.split("client.py get your-move", 1)[1].split("client.py post project-agent", 1)[0] for w in ("shown", "subject", "url", "ask", "updated", "scope", "[project_scopes] order", "no cap",'"group": {"en"', "heading the home page draws over the list in each language", "no catalog on the install has the English text")), usage[:100])
 _get = client.get
 client.get = lambda what, key="", timeout=10.0, **k: (200, json.dumps({"items": []}) if what == "your-move" else "x")
 try:

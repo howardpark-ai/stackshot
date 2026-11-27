@@ -306,7 +306,7 @@ class _ItemsView:
     """The board read once for every asking session: per open item its parsed file and the identities of who moves it, who takes it after the answer and who its needs name (the part that asks
     nothing of the asker), the fleet's names as they were then, the queue map the rows read, and, built when a session first needs them, each item's row. `body_for(key)` is one session's answer.
     `valid_until` is the first instant the clock alone changes an answer (`_next_edge`, `_clock_edge`); the view is not served from then on."""
-    __slots__ = ("stamp", "at", "nm", "ctx", "entries", "rows", "bodies", "lock", "queue", "queue_on", "cfg", "valid_until")
+    __slots__ = ("stamp", "at", "nm", "ctx", "entries", "rows", "bodies", "lock", "queue", "queue_on", "cfg", "valid_until", "sc")
 
     def __init__(self, stamp: frozenset, at: float, nm: Any, ctx: Any, entries: list, queue: dict[str, str], queue_on: bool, valid_until: float) -> None:
         self.stamp, self.at, self.nm, self.ctx, self.entries, self.queue, self.queue_on, self.valid_until = stamp, at, nm, ctx, entries, queue, queue_on, valid_until
@@ -314,6 +314,7 @@ class _ItemsView:
         self.rows: dict[str, dict[str, Any]] = {}
         self.bodies: dict[str, str] = {}
         self.lock = threading.Lock()
+        self.sc: tuple[dict, dict, dict] | None = None      # the registry, id file and marks the rows' group is read from, taken at the first row
 
     def holds(self, stamp: frozenset, now: float) -> bool:
         """Is this view what the per-read path would answer now: the files it stands on are as they were, the running config is the one it was built under, no date it read has come, it is younger than `_VIEW_TTL`,
@@ -325,7 +326,9 @@ class _ItemsView:
         """The session-free part of an item's row (everything but `roles` and `role`), built once per view."""
         r = self.rows.get(gid)
         if r is None:
-            r = self.rows[gid] = _item_row(gid, p, it, self.ctx, self.queue)
+            if self.sc is None:
+                self.sc = _scope_ctx()
+            r = self.rows[gid] = _item_row(gid, p, it, self.ctx, self.queue, self.sc)
         return r
 
     def selected(self, k: str) -> list[tuple[str, Any, dict[str, Any], list[str], bool]]:
@@ -419,8 +422,22 @@ def _items_view() -> _ItemsView:
         return v
 
 
-def _item_row(gid: str, p: Any, it: dict[str, Any], ctx: "_agents._WaitCtx", queue: dict[str, str] | None = None) -> dict[str, Any]:
-    """An open item's row of the items list, without the asking session's `roles` and `role`."""
+def _scope_ctx() -> tuple[dict, dict, dict]:
+    """(the page registry as the home page holds it (the record laid over the pages, then the agents only the record holds: with_pending), key -> id, the marks by id) that an item's group is read from, taken once for a read or a view."""
+    try:
+        ids = _prj.ids_by_key()
+    except ValueError:
+        ids = {}                                   # a damaged id file: the registry's own copy of the id answers
+    return _prj.with_pending(_anc.registry()), ids, _prj.marks()
+
+
+def _item_scope(it: dict[str, Any], sc: tuple[dict, dict, dict]) -> str:
+    """An item's group: the scope of the board row its page rolls up to (`anchors.item_scope`, shared with the text renderer's `Board.item_scope`; the home page keeps its own copy of the rule), so it is one of the names in [project_scopes] order."""
+    return _anc.item_scope(it.get("metadata") or {}, *sc)
+
+
+def _item_row(gid: str, p: Any, it: dict[str, Any], ctx: "_agents._WaitCtx", queue: dict[str, str] | None = None, sc: tuple[dict, dict, dict] | None = None) -> dict[str, Any]:
+    """An open item's row of the items list, without the asking session's `roles` and `role`. `sc` is `_scope_ctx()`, read once by the caller that builds many rows."""
     m = it.get("metadata") or {}
     try:
         su = float(it.get("state_updated") or 0) or None
@@ -435,7 +452,8 @@ def _item_row(gid: str, p: Any, it: dict[str, Any], ctx: "_agents._WaitCtx", que
             **({"state": st_, "state_fields": _states.carry_of(it)} if not st_derived else {}),      # only an item that stores a state carries it: the word an item reads as is not sent
             "contact": _contacts._contact_label(dict(it, gid=gid)),
             "next": str(m.get("next") or ""), "state_updated": su, "confirmed": _hooks().rmod_confirmed_at(it, p),
-            "updated": up, "held": _item_read._is_parked(it) or bool(_item_read._after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid), queue), **_wait_fields(gid, it, ctx)}
+            "updated": up, "held": _item_read._is_parked(it) or bool(_item_read._after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid), queue), **_wait_fields(gid, it, ctx),
+            "scope": _item_scope(it, sc or _scope_ctx())}
 
 
 def _client_items(key: str) -> tuple[int, str, str]:
@@ -491,6 +509,7 @@ def _client_involved(key: str) -> tuple[int, str, str]:
     queue = dict(_hooks().queue_map()) if queue_on else {}
     ctx = _agents._WaitCtx(now)
     base = _inst.BOARD_URL.rstrip("/")
+    sc = _scope_ctx()
     found: list[tuple[float, dict[str, Any]]] = []
     for gid, p in _item_files():
         try:
@@ -508,19 +527,20 @@ def _client_involved(key: str) -> tuple[int, str, str]:
         observers = _observers_of(m)
         if not ((contact and is_me(contact)) or any(is_me(o) for o in observers)):
             continue
-        r = _item_row(gid, p, it, ctx, queue)
+        r = _item_row(gid, p, it, ctx, queue, sc)
         names = list(dict.fromkeys(_sr._session_label(o) or o for o in observers))
         row = {"shown": r["shown"], "subject": r["subject"], "url": f"{base}/items/{_gh.href_id(gid)}", "mover": _item_mover_label(dict(it, gid=gid), nm), "contact": r["contact"], "observers": names,
-               "list": r["list"], "held": r["held"], "until": _back_on(dict(it, gid=gid)) if r["held"] else None, "state_updated": r["state_updated"], "updated": r["updated"]}
+               "list": r["list"], "held": r["held"], "until": _back_on(dict(it, gid=gid)) if r["held"] else None, "state_updated": r["state_updated"], "updated": r["updated"],
+               "scope": r["scope"]}
         found.append((float(r["updated"] or r["state_updated"] or 0.0), row))
     found.sort(key=lambda t: -t[0])
     return 200, "application/json", json.dumps({"items": [row for _t, row in found]}, ensure_ascii=False)
 
 
 def _client_your_move() -> tuple[int, str, str]:
-    """`your-move`: every open item in the owner's Your move group, whoever the item's session mover is or whether it has one -> {"items": [{shown, subject, url, ask, updated}], "group": {<language code>: <the group's name>}}, the items in the order the home page draws the
+    """`your-move`: every open item in the owner's Your move group, whoever the item's session mover is or whether it has one -> {"items": [{shown, subject, url, ask, updated, scope}], "group": {<language code>: <the group's name>}}, the items in the order the home page draws the
     group (the brief's first five lines are the head of the same list). The group is the renderer's own (`Board.your_move`, built on `home_pairs`, the call the home page, board.md and the brief all take their lists from), so
-    this read has no selection rule of its own and cannot drift from them. `ask` is the open ask line, "" for an item with none; `updated` is the item's last write in epoch seconds. No cap: the group is as long as the queue,
+    this read has no selection rule of its own and cannot drift from them. `ask` is the open ask line, "" for an item with none; `updated` is the item's last write in epoch seconds; `scope` is the name of the subsection the home page draws the item in (`Board.item_scope`). No cap: the group is as long as the queue,
     and a row is a few hundred bytes. An empty group is `{"items": [], "group": {...}}`. `group` is the heading the home page draws over the list, in each language of the string table (`your_move_group`, the page's own
     lookup asked once per language); a language with no catalog on the install gets the English text, as the page does."""
     return 200, "application/json", json.dumps({"items": _hooks().rmod_your_move(str(_store.STORE)), "group": _hooks().rmod_your_move_group()}, ensure_ascii=False)
@@ -600,6 +620,7 @@ def _client_item_facts(key: str, ids: str) -> tuple[int, str, str]:
     me |= {nm.get(x, "") for x in list(me)}
     me.discard("")
     out = {}
+    sc = _scope_ctx()
     for g in dict.fromkeys(want):
         p = _path(g)
         try:
@@ -616,7 +637,7 @@ def _client_item_facts(key: str, ids: str) -> tuple[int, str, str]:
         row = {"status": str(it.get("status") or ""), "shown": _gh.shown(g),
                "mover": _item_mover_label(it, nm, mover), "mover_me": bool(mover and ({mover, _anc.canonical(mover, nm)} & me)),
                "mine": bool(th_ and ({th_, _anc.canonical(th_, nm)} & me)), "agent": any({ag, _anc.canonical(ag, nm)} & me for ag in _needs_sessions(m)),
-               "project": str(m.get("project") or ""), "contact": _contacts._contact_label(it)}
+               "project": str(m.get("project") or ""), "contact": _contacts._contact_label(it), "scope": _item_scope(it, sc)}
         if row["status"] != "open":
             try:
                 ts = float(it.get("state_updated") or it.get("updated") or 0)
