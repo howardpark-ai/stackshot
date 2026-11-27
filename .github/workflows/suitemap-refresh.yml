@@ -10,6 +10,7 @@
 # A failed run is not silent: the job `report` opens an issue (or comments on the open one) naming the run, and closes it when a later run is green. A refresh that fails leaves the last good map in use, and a pull request picks by it, wider as it ages.
 # Concurrency: one run at a time (group below); a newer one waits and never cancels a run in progress (a half-traced run is no map). The free plan's 20 concurrent jobs are not raised: the six shards are the same six the gate uses, and a refresh that overlaps a queue run
 # only delays whichever starts second. The schedule runs on the default branch; a manual run (gh workflow run suitemap-refresh.yml) takes the branch it is given, saves and publishes all the same, so run it on main.
+# A scheduled run whose commit already has a saved map (the newest cache entry, suitemap-<this commit>-<run id>) ends after the plan job: measure, refresh and report are skipped, and nothing is raised or closed. A manual run always measures, and so does a run whose commit differs from the map's.
 name: suitemap-refresh
 on:
   schedule:
@@ -26,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest   # it only reads a map and lists suites
     timeout-minutes: 15
     outputs:
+      fresh: ${{ steps.fresh.outputs.fresh }}
       shard0: ${{ steps.plan.outputs.shard0 }}
       shard1: ${{ steps.plan.outputs.shard1 }}
       shard2: ${{ steps.plan.outputs.shard2 }}
@@ -43,18 +45,41 @@ jobs:
         run: echo "UV_PROJECT_ENVIRONMENT=${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv" >> "$GITHUB_ENV"
       # the newest map, for the measured times the plan is balanced by; none (a cache miss) gives the hash plan
       - name: the suite map
+        id: map
         uses: actions/cache/restore@v4
         with:
           path: .suitemap/map.json
           key: suitemap-newest
           restore-keys: suitemap-
+      # A scheduled run whose commit already has the newest saved map has nothing new to measure: fresh=true ends the run after this job (measure, refresh and report are skipped).
+      # Only the schedule skips; a manual run always measures. The commit is read off the matched key (suitemap-<commit>-<run id>) and compared whole (40 hex characters); anything unparsable is not fresh.
+      - name: is the newest map for this commit
+        id: fresh
+        env:
+          EVENT: ${{ github.event_name }}
+          MATCHED: ${{ steps.map.outputs.cache-matched-key }}
+          SHA: ${{ github.sha }}
+        run: |
+          mapsha=
+          case $MATCHED in suitemap-*) rest=${MATCHED#suitemap-}; mapsha=${rest%%-*} ;; esac
+          if [ "$EVENT" != schedule ]; then
+            echo "fresh=false"; echo "not a scheduled run ($EVENT): measuring" >&2
+          elif [ -z "$MATCHED" ]; then
+            echo "fresh=false"; echo "no saved map: measuring" >&2
+          elif [ -z "$mapsha" ] || [ "$mapsha" != "$SHA" ]; then
+            echo "fresh=false"; echo "the newest map is for another commit, or its key is not readable: measuring" >&2
+          else
+            echo "fresh=true"; echo "the newest map is for this commit: nothing to measure, the run ends here" >&2
+          fi >> "$GITHUB_OUTPUT"
       - name: plan the shards
         id: plan
+        if: steps.fresh.outputs.fresh != 'true'
         run: |
           set -o pipefail   # a failing plan must fail the step, not hide behind tee's exit status
           uv run --locked --only-group tests python tests/suitemap.py plan --of 6 --map .suitemap/map.json | tee -a "$GITHUB_OUTPUT"
   measure:
     needs: shards
+    if: needs.shards.outputs.fresh != 'true'
     name: refresh shard ${{ matrix.shard }}
     strategy:
       fail-fast: false   # one failing shard must not cancel the others: the merge then names what is missing
@@ -104,7 +129,7 @@ jobs:
           overwrite: true   # a re-run of the job (same run id) uploads the same artifact name again; without this the second upload fails
   refresh:
     needs: [shards, measure]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.shards.outputs.fresh != 'true' }}
     name: merge, save and publish the map
     runs-on: ubuntu-latest   # it only merges the shards' maps and audits
     timeout-minutes: 30
@@ -173,7 +198,7 @@ jobs:
   # A failed refresh is raised as an issue, and closed again by the next green run. It needs `issues: write` and nothing else; every value goes in through env.
   report:
     needs: [shards, measure, refresh]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.shards.outputs.fresh != 'true' }}   # a fresh run skips the jobs above on purpose; the `skipped` check below is for the real failure paths only
     name: report a failed refresh
     runs-on: ubuntu-latest
     timeout-minutes: 10
