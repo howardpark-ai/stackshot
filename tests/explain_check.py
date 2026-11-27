@@ -5,6 +5,7 @@ the files. It checks that:
   - on a phone (360 px, touch, light and dark) every "?" is a 44 px target that a tap opens, without moving the page, and a second tap closes; the popup is whole inside the screen, nothing lies over it,
     its text contrasts with its ground, and the page does not scroll sideways; a tap outside and Escape close it;
   - at 360 and 1280 px no "?" lies over words or a control beside it, so a tap on those opens nothing;
+  - on a phone, scrolled to its end, no page leaves a "?" under a floating button;
   - the color panel (dark theme, whether the page opened dark or turned dark) holds its note behind a "?"; its popup stays inside the panel, and Escape closes it before the panel;
   - the side panel's Audit card: its script redraws the card the server drew, the "?" included; the popup opens inside the panel and stays open, with the keyboard focus, through a redraw;
   - on a desktop (1280 px) hover opens it, the pointer can move onto the popup, leaving closes it; Tab reaches the button and opens it; Escape closes it;
@@ -91,6 +92,10 @@ STATE = r"""id => { const b = document.getElementById(id), p = document.getEleme
 # every "?" a reader can see, by id
 BUTTONS = "() => [...document.querySelectorAll('button.xp-b')].filter(b => b.getClientRects().length && getComputedStyle(b).visibility !== 'hidden').map(b => b.id)"
 CENTER = "id => document.getElementById(id).scrollIntoView({block: 'center', behavior: 'instant'})"
+# scrolled to its end, where a reader can scroll no further: the "?" a floating button lies over there
+AT_END = r"""() => { scrollTo({top: document.documentElement.scrollHeight, behavior: 'instant'});
+  return [...document.querySelectorAll('button.xp-b')].filter(b => { if (!b.getClientRects().length) return false; const r = b.getBoundingClientRect(),
+    t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return t && t.closest('#totop, .fab'); }).map(b => b.id); }"""
 # where the page was as the finger came down, after whatever scrolling the tap itself needed to reach the button
 FINGER = "() => addEventListener('pointerdown', () => { window.__y = scrollY; }, true)"
 inside = lambda s: s["left"] >= -0.5 and s["right"] <= s["vw"] + 0.5 and s["top"] >= -0.5 and s["bottom"] <= s["vh"] + 0.5
@@ -130,6 +135,7 @@ with sync_playwright() as p:
             ids = pg.evaluate(BUTTONS)
             check(f"{tag}: at least {WANT[name]} explainers show", len(ids) >= WANT[name], ids)
             c = pg.evaluate(COVERS); check(f"{tag}: no ? lies over words or a control", c["things"] > 5 and not c["bad"], c)
+            under = pg.evaluate(AT_END); check(f"{tag}: at the page's end no ? is under a floating button", not under, under)
             for n, i in enumerate(ids):
                 pg.evaluate(CENTER, i); pg.tap(f"#{i}"); pg.wait_for_timeout(30); s = pg.evaluate(STATE, i)
                 moved = pg.evaluate("() => scrollY - window.__y")
