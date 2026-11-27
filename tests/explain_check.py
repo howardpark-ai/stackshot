@@ -4,6 +4,8 @@ the files. It checks that:
 
   - on a phone (360 px, touch, light and dark) every "?" is a 44 px target that a tap opens and a second tap closes; the popup is whole inside the screen, nothing lies over it,
     its text contrasts with its ground, and the page does not scroll sideways; a tap outside and Escape close it;
+  - at 360 and 1280 px no "?" lies over words or a control beside it, so a tap on those opens nothing;
+  - the color panel (dark theme, whether the page opened dark or turned dark) holds its note behind a "?"; its popup stays inside the panel, and Escape closes it before the panel;
   - on a desktop (1280 px) hover opens it, the pointer can move onto the popup, leaving closes it; Tab reaches the button and opens it; Escape closes it;
   - the popup's ground differs between light and dark.
 
@@ -80,7 +82,18 @@ STATE = r"""id => { const b = document.getElementById(id), p = document.getEleme
 BUTTONS = "() => [...document.querySelectorAll('button.xp-b')].filter(b => b.getClientRects().length && getComputedStyle(b).visibility !== 'hidden').map(b => b.id)"
 CENTER = "id => document.getElementById(id).scrollIntoView({block: 'center', behavior: 'instant'})"
 inside = lambda s: s["left"] >= -0.5 and s["right"] <= s["vw"] + 0.5 and s["top"] >= -0.5 and s["bottom"] <= s["vh"] + 0.5
-WANT = {"projects": 1, "closed": 2, "audits": 10, "project": 1, "list-wait": 2, "relay-wait": 1, "runners": 1}      # the fewest "?" each page shows
+WANT = {"projects": 1, "closed": 2, "audits": 12, "project": 1, "list-wait": 2, "relay-wait": 1, "runners": 1}      # the fewest "?" each page shows
+# each shown "?" button against the words and controls outside every "?": which of them its box lies over. What is fixed to the screen floats over the page and is left out
+COVERS = r"""() => { const hit = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+  const fixed = e => { for (; e; e = e.parentElement) if (getComputedStyle(e).position === 'fixed') return true; return false; };
+  const shown = e => !fixed(e) && e.checkVisibility({checkVisibilityCSS: true});      // false inside a closed <details> too
+  const things = [], range = document.createRange(), walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let t; (t = walk.nextNode());) { const e = t.parentElement; if (!t.textContent.trim() || e.closest('.xp,script,style') || !shown(e)) continue; range.selectNodeContents(t);
+    for (const r of range.getClientRects()) if (r.width > 1 && r.height > 1) things.push([r, t.textContent.trim().slice(0, 40)]); }
+  for (const e of document.querySelectorAll('a[href],button,input,select,textarea,summary,label')) { if (e.closest('.xp') || !shown(e)) continue;
+    for (const r of e.getClientRects()) if (r.width > 1 && r.height > 1) things.push([r, e.tagName + ' ' + (e.textContent || e.name || '').trim().slice(0, 40)]); }
+  const bad = []; for (const b of document.querySelectorAll('button.xp-b')) { if (!shown(b)) continue; for (const r of b.getClientRects()) for (const [o, what] of things) if (hit(r, o)) bad.push(b.id + ' over ' + what); }
+  return {bad: bad.slice(0, 12), things: things.length}; }"""
 grounds = {}
 
 from playwright.sync_api import sync_playwright
@@ -95,6 +108,7 @@ with sync_playwright() as p:
             pg.on("pageerror", lambda e, errs=errs: errs.append(str(e))); pg.goto(path.as_uri()); pg.wait_for_timeout(100)
             ids = pg.evaluate(BUTTONS)
             check(f"{tag}: at least {WANT[name]} explainers show", len(ids) >= WANT[name], ids)
+            c = pg.evaluate(COVERS); check(f"{tag}: no ? lies over words or a control", c["things"] > 5 and not c["bad"], c)
             for n, i in enumerate(ids):
                 pg.evaluate(CENTER, i); pg.tap(f"#{i}"); pg.wait_for_timeout(30); s = pg.evaluate(STATE, i)
                 check(f"{tag}: {i}: a tap opens it, whole inside the screen, nothing over it, no sideways scroll",
@@ -108,20 +122,21 @@ with sync_playwright() as p:
             if ids:
                 i = ids[0]; pg.evaluate(CENTER, i); pg.tap(f"#{i}"); pg.wait_for_timeout(30); s = pg.evaluate(STATE, i)
                 y = s["bottom"] + 40 if s["bottom"] + 40 < s["vh"] else max(1, s["top"] - 40)
-                pg.touchscreen.tap(2, y); pg.wait_for_timeout(50)
-                check(f"{tag}: a tap outside closes it", not pg.evaluate(STATE, i)["open"], pg.evaluate(STATE, i))
-                pg.evaluate(CENTER, i); pg.tap(f"#{i}"); pg.keyboard.press("Escape"); pg.wait_for_timeout(30)
-                check(f"{tag}: Escape closes it", not pg.evaluate(STATE, i)["open"])
+                was = s["open"]; pg.touchscreen.tap(2, y); pg.wait_for_timeout(50)
+                check(f"{tag}: a tap outside closes it", was and not pg.evaluate(STATE, i)["open"], (was, pg.evaluate(STATE, i)))
+                pg.evaluate(CENTER, i); pg.tap(f"#{i}"); pg.wait_for_timeout(30); was = pg.evaluate(STATE, i)["open"]; pg.keyboard.press("Escape"); pg.wait_for_timeout(30)
+                check(f"{tag}: Escape closes it", was and not pg.evaluate(STATE, i)["open"], was)
             check(f"{tag}: no script error", not errs, errs)
             ctx.close()
         for name, path in FILES.items():
             tag = f"{name} 1280 {scheme}"
             ctx = br.new_context(viewport={"width": 1280, "height": 900}, color_scheme=scheme); pg = ctx.new_page(); pg.goto(path.as_uri()); pg.wait_for_timeout(100)
             ids = pg.evaluate(BUTTONS)
+            c = pg.evaluate(COVERS); check(f"{tag}: no ? lies over words or a control", c["things"] > 5 and not c["bad"], c)
             for i in ids:
                 pg.evaluate(CENTER, i); pg.hover(f"#{i}"); pg.wait_for_timeout(30); s = pg.evaluate(STATE, i)
                 check(f"{tag}: {i}: hover opens it, whole inside the window, nothing over it", s["open"] and inside(s) and not s["over"], s)
-                pg.mouse.move(*s["path"], steps=12)      # straight down (or up) from the button, which the popup spans; pg.wait_for_timeout(30)
+                pg.mouse.move(*s["path"], steps=12); pg.wait_for_timeout(30)      # straight down (or up) from the button, which the popup spans
                 check(f"{tag}: {i}: the pointer moves onto the popup and it stays", pg.evaluate(STATE, i)["open"], pg.evaluate(STATE, i))
                 pg.mouse.move(1, 1); pg.wait_for_timeout(30)
                 check(f"{tag}: {i}: leaving closes it", not pg.evaluate(STATE, i)["open"])
@@ -136,6 +151,32 @@ with sync_playwright() as p:
                 pg.keyboard.press("Escape"); pg.wait_for_timeout(30)
                 check(f"{tag}: Escape closes it and focus stays on the button", not pg.evaluate(STATE, i)["open"] and pg.evaluate("() => document.activeElement.id") == i)
             ctx.close()
+    # the color panel: the tool builds it only for a dark page, at once or when the page turns dark
+    for width, first in ((360, "dark"), (360, "light"), (1280, "dark")):
+        tag = f"colors {width}, opened {first}"; touch = width < 600
+        ctx = br.new_context(viewport={"width": width, "height": 760}, color_scheme=first, has_touch=touch, is_mobile=touch); pg = ctx.new_page(); errs = []
+        pg.on("pageerror", lambda e, errs=errs: errs.append(str(e))); pg.goto(FILES["projects"].as_uri()); pg.wait_for_timeout(100)
+        if first == "light":
+            check(f"{tag}: no panel yet", pg.evaluate("() => !document.getElementById('ct-pop')"))
+            pg.emulate_media(color_scheme="dark"); pg.wait_for_timeout(300)
+        check(f"{tag}: the panel's note is behind a ? and no longer under its buttons", pg.evaluate("() => !!document.querySelector('#ct-pop>.ct-foot>.xp #xpb-colors') && !document.querySelector('#ct-pop>p.ct-small')"),
+              pg.evaluate("() => { const p = document.getElementById('ct-pop'); return p ? p.lastElementChild.outerHTML.slice(0, 400) : 'no panel'; }"))
+        # the tool's button sits in the side panel, which a phone keeps shut: the check presses the button's own handler, then works inside the open panel
+        opened = pg.evaluate("() => { const b = document.getElementById('ct-btn'), p = document.getElementById('ct-pop'); if (!b || !p) return false; b.click(); return !p.hidden; }")
+        check(f"{tag}: the color panel opens", opened)
+        if opened:
+            press = pg.tap if touch else pg.click
+            pg.evaluate(CENTER, "xpb-colors"); press("#xpb-colors"); pg.wait_for_timeout(50); s = pg.evaluate(STATE, "xpb-colors")
+            box = pg.evaluate("() => { const r = document.getElementById('ct-pop').getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom]; }")
+            check(f"{tag}: its ? opens inside the panel, nothing over it", s["open"] and s["words"] > 0 and not s["over"] and s["left"] >= box[0] - 0.5 and s["right"] <= box[1] + 0.5
+                  and s["top"] >= box[2] - 0.5 and s["bottom"] <= box[3] + 0.5, (s, box))
+            if SHOTS:
+                os.makedirs(SHOTS, exist_ok=True); pg.screenshot(path=os.path.join(SHOTS, f"colors-{width}-{first}.png"))
+            shown = "() => !document.getElementById('ct-pop').hidden"
+            pg.keyboard.press("Escape"); pg.wait_for_timeout(50); check(f"{tag}: Escape closes the ? and leaves the panel", s["open"] and not pg.evaluate(STATE, "xpb-colors")["open"] and pg.evaluate(shown))
+            pg.keyboard.press("Escape"); pg.wait_for_timeout(50); check(f"{tag}: the next Escape closes the panel", not pg.evaluate(shown))
+        check(f"{tag}: no script error", not errs, errs)
+        ctx.close()
     br.close()
 check("the popup's ground differs between light and dark", grounds.get("light") and grounds.get("dark") and not grounds["light"] & grounds["dark"], grounds)
 print(("ok" if not fails else "FAILED") + f": explainer check, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

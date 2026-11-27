@@ -4,15 +4,19 @@ Fixture data, the pages through Starlette's test client and the board's renderer
 The script runs in node against a small fake document built from the component's own markup; no browser runs here, so the drawn layout is tests/explain_check.py's, which CI runs.
 
 Covers:
-  * the markup: the button's name and state, its description pointing at the popup, the text and the name escaped, in the request's language;
-  * every page with the board's chrome carries the script once and the style, and no two explainers on a page share a key;
+  * the markup: the button's name and state, its description pointing at the popup, the text and the name escaped, in the request's language; the script's own builder
+    (stackshotExplain) gives the same;
+  * every page with the board's chrome carries the script once, ahead of the color tool's, and the style; on every page drawn here no two explainers share a key and none sits
+    inside a heading or a <summary>;
   * the script: a tap opens and a second tap closes; hover opens and leaving closes, unless a click pinned it; keyboard focus opens and tabbing away closes; Escape closes it
     and nothing else, and leaves Escape alone when nothing is open; a tap outside closes; one is open at a time; the popup stays inside the window and inside a clipping
-    ancestor, and goes above the button when there is no room below; an open popup survives the home page's in-place update;
+    ancestor, and goes above the button when there is no room below and there is room above; an open popup survives the home page's in-place update;
+  * the color panel's note moves behind a "?", whether the panel is there at once or built later (tests/explain_check.py shows it in the real panel);
   * the explainers that left the pages (MOVED, one row per "?"): each is in its popup, and no page drawn here shows any of them outside a popup. A new explainer gets a row.
+    A state does not go with them: a page the router never rules, an empty section, a log that is off and a pace's last run say so on the page.
 
     tests/run-suite explain        → exit 0 / 1"""
-import datetime, html, json, logging, os, pathlib, re, shutil, subprocess, sys, time
+import contextlib, datetime, html, json, logging, os, pathlib, re, shutil, subprocess, sys, time
 from html.parser import HTMLParser
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
@@ -65,6 +69,7 @@ from stackshot.web import i18n
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
+from stackshot.web.ui import colortool as ct
 from stackshot.web.ui import explain as xp
 from stackshot.web.ui import render as r2
 from stackshot.web.ui import runners as ui_runners
@@ -95,18 +100,18 @@ w = t[0] if t else {"attrs": {}, "kids": []}
 btn, pop = (w["kids"] + [{"attrs": {}, "kids": [], "text": "", "tag": ""}] * 2)[:2]
 check("one wrapper keyed by the explainer, holding the button and the popup", len(t) == 1 and w["attrs"] == {"class": "xp", "data-xp": "a-b"} and [btn["tag"], pop["tag"]] == ["button", "span"] and len(w["kids"]) == 2, m)
 check("the button: type=button, named for what it explains, closed, controlling and described by the popup, its ? hidden from a screen reader",
-      btn["attrs"] == {"type": "button", "class": "xp-b", "id": "xpb-a-b", "aria-label": 'About The "<list>"', "aria-expanded": "false", "aria-controls": "xp-a-b", "aria-describedby": "xp-a-b"}
+      btn["attrs"] == {"type": "button", "class": "xp-b", "id": "xpb-a-b", "aria-label": 'Help: The "<list>"', "aria-expanded": "false", "aria-controls": "xp-a-b", "aria-describedby": "xp-a-b"}
       and [(k["tag"], k["attrs"], k["text"]) for k in btn["kids"]] == [("span", {"aria-hidden": "true"}, "?")], btn)
 check("the popup: a hidden, focusable tooltip holding the text as text", pop["attrs"] == {"class": "xp-pop", "id": "xp-a-b", "role": "tooltip", "tabindex": "-1", "hidden": ""}
       and pop["text"] == 'Says <b> "how" & why.' and not pop["kids"], pop)
 check("no bare title attribute: the text is in the page", "title=" not in m, m)
 (T / "loc").mkdir()
-(T / "loc/ko.json").write_text(json.dumps({"explain.about": "[x:About {what}]"}), encoding="utf-8")
+(T / "loc/ko.json").write_text(json.dumps({"explain.about": "[x:Help: {what}]"}), encoding="utf-8")
 from stackshot.core import config as _cfg
 _cfg.CFG.setdefault("ui", {})["locale_dir"] = str(T / "loc")
 with i18n.use("ko"): mk = xp.explain("k", "text", "Thing")
 _cfg.CFG["ui"].pop("locale_dir")
-check("the button's name is in the request's language", 'aria-label="[x:About Thing]"' in mk, mk)
+check("the button's name is in the request's language", 'aria-label="[x:Help: Thing]"' in mk, mk)
 check("a heading and its explainer sit side by side: the button is not inside the heading", xp.head("<h2>Runs</h2>", m).startswith('<div class="xp-head xp-h2"><h2>Runs</h2><span class="xp"') and xp.head("<h2>Runs</h2>", m).endswith("</span></div>"))
 check("the line takes the heading's level, a heading with a class too", xp.head('<h1>T</h1>', m).startswith('<div class="xp-head xp-h1">') and xp.head('<h2 class="lsec">T</h2>', m).startswith('<div class="xp-head xp-h2">'))
 
@@ -121,13 +126,13 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         check(f"{n}: drawn", r.status_code == 200, (r.status_code, r.text[:300]))
 for n, h in pages.items():
     check(f"{n}: the explainer script once, at the end of the body, and its style", h.count(xp.SCRIPT) == 1 and h.find(xp.SCRIPT) > h.rfind("</main>") and ".xp-pop[hidden]{display:none}" in h, h.count(xp.SCRIPT))
-    keys = re.findall(r'<span class="xp" data-xp="([^"]*)"', h)
-    check(f"{n}: no two explainers share a key", len(keys) == len(set(keys)), keys)
+    check(f"{n}: the script comes ahead of the color tool's, so an Escape reaches the popup first, and the tool's script moves its note", -1 < h.find(xp.SCRIPT) < h.find(ct.BODY) and ct.NOTE_TO_TIP in ct.BODY, (h.find(xp.SCRIPT), h.find(ct.BODY)))
 
 # ---- 3. what left the pages stays off them
 # the "?" (its key; "/…" tells two states of one key apart) -> the catalog keys of the text it holds, and the drawn page that shows it
 MOVED = {"projects": ("projects", ["projects.note"]), "closed-new": ("closed", ["closed.new_help"]), "closed-last14": ("closed", ["closed.last14_note"]),
-         "audit-groups": ("audits", ["audit.groups_help", "audit.note_logged"]), "audit-runs": ("audits", ["audit.runs_hint"]),
+         "audit-groups": ("audits", ["audit.groups_help", "audit.note_logged"]), "audit-runs": ("audits, audit on", ["audit.runs_help"]), "audit-runs/off": ("audits", ["audit.runs_help_off"]),
+         "audit-pace-min": ("audits", ["audit.pace_min_help"]), "audit-pace-ten": ("audits", ["audit.pace_ten_help"]),
          **{f"audit-group-{k[len('audit.desc.'):]}": ("audits", [k]) for k in i18n.EN if k.startswith("audit.desc.")},
          "runners": ("runners, in use", ["runners.sub", "runners.checks"]), "routing": ("project", ["routing.help_pilot"]), "routing/plain": ("project, not ruled", ["routing.help_plain"]),
          "wait-list": ("item, all of a list", ["wait.list.help_all"]), "wait-list/any": ("item, any of a list", ["wait.list.help_any"]),
@@ -144,12 +149,18 @@ try:
     drawn["runners, in use"] = ui_runners.page_html(board(), {"ts": now0, "errors": {}, "failed": [], "runners": [one], "switch": {}, "stale": False, "refreshing": False, "age_s": 0})
 finally:
     _anc.pilot_root, ui_runners.enabled = real_root, real_enabled
+@contextlib.contextmanager
+def audit_set(**kw):
+    had = dict(_cfg.CFG.get("audit", {})); _cfg.CFG.setdefault("audit", {}).update(kw)
+    try: yield
+    finally: _cfg.CFG["audit"].clear(); _cfg.CFG["audit"].update(had)
+with audit_set(enabled=True): drawn["audits, audit on"] = board().audits_html()
 POP = re.compile(r'<span class="xp-pop" id="xp-([^"]*)"[^>]*>([^<]*)</span>')
 def inline(h):
     """The words a page draws outside every popup (and outside its style and scripts)."""
     h = POP.sub(" ", re.sub(r"(?s)<(style|script)[^>]*>.*?</\1>", " ", h))
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", h)))
-KNOWN = {"audit.runs_hint": {"button": i18n.EN["panel.audit.now"]}}      # a string that is nearly all fields would match any sentence: the field the page always fills the same way is filled in
+KNOWN = {"audit.runs_help": {"button": i18n.EN["panel.audit.now"]}}      # a string that is nearly all fields would match any sentence: the field the page always fills the same way is filled in
 def said(key):
     """The English text, any value in each of its fields."""
     s = i18n.EN[key]
@@ -164,23 +175,50 @@ for row, (where, keys) in MOVED.items():
         check(f"{row}: {k} is drawn outside a popup on no page", not back, back)
 check('the runners page read above is the one in use, with its "as of" line', 'class="sub rasof"' in drawn["runners, in use"], inline(drawn["runners, in use"])[:600])
 check("an empty New section still says so on the page", i18n.EN["closed.new_none"] in inline(pages["closed"]), inline(pages["closed"])[:600])
-_had = dict(_cfg.CFG.get("audit", {})); _cfg.CFG.setdefault("audit", {})["pattern_review"] = "off"
-try:
+with audit_set(pattern_review="off"):
     with TestClient(server.mcp.http_app(), base_url=BOARD) as c: off = c.get("/audits", headers={"host": "board.example.org"}).text
-finally:
-    _cfg.CFG["audit"].clear(); _cfg.CFG["audit"].update(_had)
 check("a findings log that is off is a warning, so it stays on the page", i18n.EN["audit.note_log_off"] in inline(off) and 'id="xp-audit-groups"' in off, inline(off)[:600])
+unruled = i18n.EN["routing.no_rulings"]
+check("a page the router never rules says so on the page, and a ruled one does not", unruled in inline(drawn["project, not ruled"]) and unruled not in inline(drawn["project"]), (inline(drawn["project, not ruled"])[:600], inline(drawn["project"])[:600]))
+runs = {n: dict(POP.findall(drawn[n])).get("audit-runs", "") for n in ("audits", "audits, audit on")}
+check("the runs popup names the button only where the page draws it", i18n.EN["panel.audit.now"] in runs["audits, audit on"] and 'id="audit-now-page"' in drawn["audits, audit on"]
+      and i18n.EN["panel.audit.now"] not in runs["audits"] and 'id="audit-now-page"' not in drawn["audits"], runs)
+
+def walk(n, above=()):
+    """Every element of a Tree with the elements above it, outermost first."""
+    for k in n["kids"]:
+        yield k, above
+        yield from walk(k, above + (k,))
+def has(n, cls): return cls in n["attrs"].get("class", "").split()
+trees = {n: Tree(h).root for n, h in drawn.items()}
+found = 0
+for n, root in trees.items():
+    tips = [(e, above) for e, above in walk(root) if has(e, "xp")]
+    found += len(tips)
+    keys = [e["attrs"].get("data-xp") for e, _a in tips]
+    check(f"{n}: no two explainers share a key", len(keys) == len(set(keys)), keys)
+    enclosed = [e["attrs"].get("data-xp") for e, above in tips if any(a["tag"] in ("summary", "h1", "h2", "h3") for a in above)]
+    check(f"{n}: no explainer sits inside a heading or a <summary>", not enclosed, enclosed)
+check("the two checks above looked at explainers", found >= len(MOVED), found)
+cards = [e for e, _a in walk(trees["audits"]) if has(e, "apace")]
+said_on = [[k["text"] for k in c["kids"] if k["tag"] == "span"] for c in cards]
+check("a pace card shows its last run and nothing else: none before a run, and the runs' card says there was none", said_on == [[], [], [i18n.EN["audit.no_run_yet"]]], said_on)
+SEL = "#new h2.lsec .count"      # the Closed page's script writes the live number of New rows here
+counts = [e["text"] for e, above in walk(trees["closed"]) if has(e, "count") and any(a["tag"] == "h2" and has(a, "lsec") for a in above) and any(a["attrs"].get("id") == "new" for a in above)]
+check("the Closed page's script finds the New count in the heading beside its explainer", SEL in r2._LANDED_JS and len(counts) == 1 and counts[0].isdigit(), counts)
 
 # ---- 4. the script, in node
 HARNESS = r"""
 const vm = require('vm'), fs = require('fs'), assert = require('assert');
-const [js, tree] = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const [js, tree, mover] = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 let active = null, timers = [];
 const listeners = {};
 class El {
   constructor(tag, attrs) { this.tagName = tag.toUpperCase(); this.attrs = attrs || {}; this.kids = []; this.parentElement = null; this.style = {}; this.rect = {left: 0, top: 0, width: 0, height: 0};
-    this.hidden = 'hidden' in this.attrs; this.overflowX = 'visible'; this.keyboard = false; }
+    this.hidden = 'hidden' in this.attrs; this.overflowX = 'visible'; this.overflowY = 'visible'; this.keyboard = false; this.textContent = ''; }
   add(k) { k.parentElement = this; this.kids.push(k); return k; }
+  appendChild(k) { return this.add(k); }
+  remove() { const p = this.parentElement; p.kids.splice(p.kids.indexOf(this), 1); this.parentElement = null; }
   get classList() { const c = (this.attrs.class || '').split(' '); return {contains: x => c.includes(x)}; }
   get firstElementChild() { return this.kids[0]; }
   get lastElementChild() { return this.kids[this.kids.length - 1]; }
@@ -200,14 +238,14 @@ html.clientWidth = 360;
 const walk = (n, f) => { f(n); n.kids.forEach(k => walk(k, f)); };
 const document = {documentElement: html, body, get activeElement() { return active || body; },
   querySelector(s) { const m = /^\.xp\[data-xp="([^"]*)"\]$/.exec(s); assert(m, s); let got = null; walk(html, n => { if (!got && n.classList.contains('xp') && n.attrs['data-xp'] === m[1]) got = n; }); return got; },
-  addEventListener(t, f, cap) { (listeners[t] = listeners[t] || []).push([f, !!cap]); }};
+  createElement: t => new El(t, {}), addEventListener(t, f, cap) { (listeners[t] = listeners[t] || []).push([f, !!cap]); }};
 const winl = {};
-const window = {innerHeight: 700, getComputedStyle: n => ({overflowX: n.overflowX}), addEventListener(t, f) { winl[t] = f; }};
+const window = {innerHeight: 700, getComputedStyle: n => ({overflowX: n.overflowX, overflowY: n.overflowY}), addEventListener(t, f) { winl[t] = f; }};
 function fire(type, target, props) {
-  let stopped = false, prevented = false;
-  const e = Object.assign({type, target, preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }}, props || {});
+  let stopped = false, halted = false, prevented = false;
+  const e = Object.assign({type, target, preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }, stopImmediatePropagation() { stopped = halted = true; }}, props || {});
   const l = listeners[type] || [];
-  for (const cap of [true, false]) { for (const [f, c] of l) if (c === cap) f(e); if (stopped) break; }
+  for (const cap of [true, false]) { for (const [f, c] of l) if (c === cap && !halted) f(e); if (stopped) break; }
   return {prevented, stopped};
 }
 const flush = () => { const t = timers; timers = []; t.forEach(f => f()); };
@@ -216,10 +254,11 @@ function make(key, left, top, into) {
   const t = JSON.parse(JSON.stringify(tree).split('KEY').join(key)), w = build(t, into || body);
   w.rect = {left, top, width: 36, height: 36}; w.firstElementChild.rect = {left, top, width: 36, height: 36}; return w;
 }
-let panelEscapes = 0;
+let panelEscapes = 0, laterEscapes = 0;
 const sb = {document, window, setTimeout: f => timers.push(f), String, Math, isNaN, parseFloat};
 vm.createContext(sb); vm.runInContext(js, sb);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') panelEscapes++; });      // the side panel's own Escape, a bubbling listener as in the page
+document.addEventListener('keydown', e => { if (e.key === 'Escape') laterEscapes++; }, true);      // the color panel's, a capture listener added after the script
 const out = {};
 const check = (name, ok, got) => { out[name] = ok ? true : String(JSON.stringify(got)); };
 const A = make('a', 100, 100), B = make('b', 300, 100), outside = body.add(new El('div', {}));
@@ -256,10 +295,11 @@ fire('click', A.firstElementChild); check('...Enter (a click) keeps it open, pin
 fire('click', A.firstElementChild); check('...Enter again closes', shut(A), state(A));
 active = null; A.firstElementChild.focus(); active = outside; fire('focusout', A.firstElementChild, {relatedTarget: outside}); flush(); check('tabbing away closes', shut(A), state(A)); active = null;
 
-A.firstElementChild.focus(); const e1 = esc(); check('Escape closes it', shut(A), state(A)); check('...and nothing else hears that Escape', e1.stopped && e1.prevented && panelEscapes === 0, [e1, panelEscapes]);
-const e2 = esc(); check('with nothing open, Escape goes on to the page', !e2.stopped && !e2.prevented && panelEscapes === 1, [e2, panelEscapes]);
+A.firstElementChild.focus(); const e1 = esc(); check('Escape closes it', shut(A), state(A)); check('...and nothing else hears that Escape', e1.stopped && e1.prevented && panelEscapes === 0 && laterEscapes === 0, [e1, panelEscapes, laterEscapes]);
+const e2 = esc(); check('with nothing open, Escape goes on to the page', !e2.stopped && !e2.prevented && panelEscapes === 1 && laterEscapes === 1, [e2, panelEscapes, laterEscapes]);
 fire('click', A.firstElementChild); const e3 = esc({isComposing: true}); check('an Escape that cancels an input method composition is left alone', open(A) && !e3.stopped, state(A));
 A.lastElementChild.focus(); A.firstElementChild.keyboard = true; esc(); flush(); check('Escape from inside the popup closes it and puts the focus on its button, without reopening it', shut(A) && active === A.firstElementChild, [state(A), active && active.tagName]); away();
+fire('click', glyph(A)); A.lastElementChild.focus(); A.firstElementChild.keyboard = true; A.firstElementChild.focus(); flush(); fire('click', glyph(A)); check('keyboard focus coming back to a pinned one leaves the pin: one click closes it', shut(A), state(A)); away();
 
 tap(A); tap(B); check('one is open at a time', shut(A) && open(B), [state(A), state(B)]); away();
 tap(A); over(B); check('...also when the next one opens on hover', shut(A) && open(B), [state(A), state(B)]); leave(B); away();
@@ -275,6 +315,29 @@ M.rect.left = 1240; M.firstElementChild.rect.left = 1240; winl.resize(); check('
 const low = make('low', 100, 660); tap(low); check('near the bottom it goes above the button', at(low).top === 600, at(low)); away();
 const clip = body.add(new El('div', {})); clip.overflowX = 'auto'; clip.rect = {left: 1000, top: 0, width: 280, height: 700};
 const C = make('clipped', 1010, 100, clip); tap(C); check('inside an ancestor that clips, it stays inside that', at(C).left === 1008 && at(C).width === 264, at(C)); away();
+const pane = body.add(new El('div', {})); pane.overflowY = 'auto'; pane.rect = {left: 0, top: 300, width: 1280, height: 200};
+const D = make('pane-low', 100, 440, pane); tap(D); check('near the bottom of an ancestor that scrolls, it goes above the button', at(D).top === 380, at(D)); away();
+pane.rect.height = 100; const E = make('pane-short', 100, 330, pane); tap(E); check('...and stays below where above would leave that ancestor', at(E).top === 366, at(E)); away();
+window.innerHeight = 100; const F = make('short', 100, 20); tap(F); check('in a window too short on both sides it stays below the button', at(F).top === 56, at(F)); away(); window.innerHeight = 700;
+
+// the same markup from the script's own builder, for a "?" added to markup the server did not draw
+const shape = n => ({tag: n.tagName.toLowerCase(), attrs: n.attrs, text: n.textContent, kids: n.kids.map(shape)});
+let differs = null; try { assert.deepStrictEqual(shape(window.stackshotExplain('KEY', 'text', 'Help: Thing')), tree); } catch (x) { differs = x.message.slice(0, 600); }
+check('stackshotExplain builds the markup explain() draws', differs === null, differs);
+// the color tool's note: moved behind a "?" beside the panel's last buttons, at once or when the panel is built
+function panel(late) {
+  let there = !late, watch = null, off = false, watched = null;
+  const pop = new El('div', {id: 'ct-pop'}), foot = pop.add(new El('div', {class: 'ct-foot'})), note = pop.add(new El('p', {class: 'ct-small'})); note.textContent = 'the <note>';
+  const doc = {body, querySelector: s => { if (!there || !pop.kids.includes(note)) return null; if (s === '#ct-pop>p.ct-small') return note; assert(s === '#ct-pop>.ct-foot', s); return foot; }};
+  class Obs { constructor(f) { this.f = f; } observe(n, o) { watched = [n === body, o.childList]; watch = () => this.f([], this); } disconnect() { off = true; } }
+  vm.runInContext(mover, vm.createContext({document: doc, window: {stackshotExplain: window.stackshotExplain, SST: k => '<' + k + '>'}, MutationObserver: Obs}));
+  const before = [pop.kids.length, foot.kids.length];
+  let early = null; if (late && watch) { watch(); early = [off, foot.kids.length]; there = true; watch(); }
+  return {before, early, off, watched, pop, foot};
+}
+const moved = p => p.pop.kids.length === 1 && p.foot.kids.length === 1 && p.foot.kids[0].attrs['data-xp'] === 'colors' && p.foot.kids[0].lastElementChild.textContent === 'the <note>' && p.foot.kids[0].firstElementChild.attrs['aria-label'] === '<js.colors.help>';
+const now = panel(false); check('the color note moves behind a "?" in a panel that is there', moved(now) && now.watched === null, [now.before, now.watched]);
+const later = panel(true); check('...and in one built later: the page is watched until then, and no longer', moved(later) && String(later.before) === '2,0' && String(later.early) === 'false,0' && String(later.watched) === 'true,true' && later.off, [later.before, later.early, later.watched, later.off]);
 
 // the in-place update: the block holding the open explainer is replaced by a fresh copy
 const block = body.add(new El('section', {})); let S = make('s', 100, 100, block);
@@ -293,7 +356,7 @@ process.stdout.write(JSON.stringify(out));
 """
 if shutil.which("node"):
     tree = Tree(xp.explain("KEY", "text", "Thing")).root["kids"][0]
-    (T / "h.js").write_text(HARNESS, encoding="utf-8"); (T / "in.json").write_text(json.dumps([xp.JS, tree]), encoding="utf-8")
+    (T / "h.js").write_text(HARNESS, encoding="utf-8"); (T / "in.json").write_text(json.dumps([xp.JS, tree, ct.NOTE_TO_TIP]), encoding="utf-8")
     nr = subprocess.run(["node", str(T / "h.js"), str(T / "in.json")], capture_output=True, text=True, timeout=60)
     try: res = json.loads(nr.stdout)
     except ValueError: res = None

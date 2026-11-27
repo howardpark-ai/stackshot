@@ -727,8 +727,8 @@ check("…and in the test locale each kind reads from its own key with the same 
 # the English-only values of the item page's areas, in both languages: the English page says the table's words, the test locale's page marks them
 _en_all = html.unescape(_nojs("\n".join(ipx_en.values())))
 def _en_pat(v): return re.compile(".{0,600}?".join(re.escape(x) for x in re.split(r"\{[^}]*\}", v)), re.S)
-LOW_B = sorted(k for k in IPX_NEW if (k.startswith(("link.google_", "item.log.", "wait.what.")) or k in ("item.earlier_steps", "item.no_open_steps", "item.github_issue", "item.github_issue_tip", "wait.chase_note", "watch.not_watched")) and k not in IPX_DIRECT)
-check("the English-only values (the Google links, the earlier and open steps, the GitHub issue, the History's lines, the wait's words and chase note, the watch's) are listed", len(LOW_B) >= 40, len(LOW_B))
+LOW_B = sorted(k for k in IPX_NEW if (k.startswith(("link.google_", "item.log.", "wait.what.")) or k in ("item.earlier_steps", "item.no_open_steps", "item.github_issue", "item.github_issue_tip", "wait.chase_help", "watch.not_watched")) and k not in IPX_DIRECT)
+check("the English-only values (the Google links, the earlier and open steps, the GitHub issue, the History's lines, the wait's words and chase text, the watch's) are listed", len(LOW_B) >= 40, len(LOW_B))
 check("…each reads as the table's words on some English fixture page", all(_en_pat(EN[k]).search(_en_all) for k in LOW_B), [k for k in LOW_B if not _en_pat(EN[k]).search(_en_all)])
 check("…and each is marked on some page in the test locale", all(k in seen for k in LOW_B), [k for k in LOW_B if k not in seen])
 

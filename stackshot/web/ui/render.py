@@ -953,8 +953,8 @@ _RELOAD_JS = ("<script>document.addEventListener('click',function(e){var b=e.tar
 _TOTOP_LINK = ('<a href="#top" id="totop" aria-label="Back to top" title="Back to top"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" '
                'stroke-linecap="round" stroke-linejoin="round"><path d="M6 14l6-6 6 6"/></svg></a>')
 _FAB_PAIR = _RELOAD_FAB + "\n" + _TOTOP_LINK
+_FAB_PAIR += _xp.SCRIPT   # the one script of every page's "?" explainers (explain.py); ahead of the color tool's, so an Escape closes an open popup before the panel it sits in
 _FAB_PAIR += _ct.BODY   # the color tool's init, at the end of every page's body: it draws the Colors button into the side panel's mount (#panel-colors) and the panel in the body
-_FAB_PAIR += _xp.SCRIPT   # the one script of every page's "?" explainers (explain.py)
 _TOTOP_JS = ("<script>(function(){var b=document.getElementById('totop');if(!b)return;"
              "b.addEventListener('click',function(e){e.preventDefault();window.scrollTo(0,0);history.replaceState(null,'',' ')})})();</script>")
 # Every fold on every page of the board keeps its open state per browser (localStorage, key `stackshot.fold.<data-fold>`), whichever page it is on: the home page's
@@ -1734,7 +1734,7 @@ main.audits-page .apmsg{font-size:13px;color:var(--fg);overflow-wrap:anywhere}ma
 main.audits-page .asub{margin:4px 0 16px;color:var(--mut)}
 main.audits-page .apaces{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 22px}
 @media(max-width:520px){main.audits-page .apaces{grid-template-columns:minmax(0,1fr)}}
-main.audits-page .apace{min-width:0;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}main.audits-page .apace b{display:block;font-weight:600}main.audits-page .apace span{font-size:13px;color:var(--mut);overflow-wrap:anywhere}
+main.audits-page .apace{min-width:0;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}main.audits-page .aph{display:flex;align-items:center;column-gap:4px}main.audits-page .apace b{display:block;min-width:0;font-weight:600}main.audits-page .apace span{font-size:13px;color:var(--mut);overflow-wrap:anywhere}
 main.audits-page h2{margin:22px 0 8px;font-size:17px}main.audits-page h2 small{font-size:13px;font-weight:400;color:var(--mut)}
 main.audits-page .agroups,main.audits-page .afeed{display:flex;flex-direction:column;gap:8px}
 .agw{display:flex;align-items:flex-start;gap:2px}.agw>details.audg{flex:1;min-width:0}.agw>.xp{flex:none;margin:0}
@@ -3102,7 +3102,8 @@ class Board:
                 f'<title>{esc(name)}</title><link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{esc(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style><noscript><style>form.hanswer{{display:none}}</style></noscript></head>{_PANEL_BODY}<div id="layout"><main id="top">' + self.page_header() +
                 f'<p class="pjback"><a href="{under("/projects")}">{_t("routing.back")}</a></p><h1>{esc(name)}</h1>' + (f'<p class="sub"><a href="{esc(mirror)}" target="_blank" rel="noopener">{_t("routing.gbrain_page")}</a></p>' if mirror else "")
-                + f'<p class="sub">{_t("routing.sub", summary=esc(summary))} {_xp.explain("routing", _t("routing.help_pilot" if pilot else "routing.help_plain"), _t("routing.sec_notices"))}</p>'
+                + f'<p class="sub">{_t("routing.sub", summary=esc(summary))}' + ("" if pilot else f' · {_t("routing.no_rulings")}')      # a page the router never rules says so; why is behind the "?"
+                + f' {_xp.explain("routing", _t("routing.help_pilot" if pilot else "routing.help_plain"), _t("routing.sec_notices"))}</p>'
                 + self.sent_notes_html() + fold("items", _t("routing.sec_items"), n_items, items_body, more=(f' <span class="count dim">{_t("routing.verifying", n=n_ver)}</span>' if n_ver else "") + (f' <span class="count dim">{_t("routing.completed", n=n_done)}</span>' if n_done else ""))
                 + fold("sessions", _t("routing.sec_sessions"), n_sess, sess_body or f'<p class="empty">{_t("page.none")}</p>')
                 + fold("anchors", _t("routing.sec_anchors"), len(seen), f'<ul class="alist">{alist}</ul>' if alist else f'<p class="empty">{_t("page.none")}</p>')
@@ -4279,10 +4280,11 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         done = [r for r in ov["runs"] if r["finished"] is not None and not r["error"]]
         last = done[0] if done else None
         times = _t("audit.times_join").join(ov["times"]) or _t("audit.scheduled")
-        paces = [(_t("audit.pace_min"), _t("audit.pace_min_what")),
-                 (_t("audit.pace_ten"), _t("audit.pace_ten_what_last", at=stamp(ov["ten_last"])) if ov["ten_last"] else _t("audit.pace_ten_what")),
-                 (times, _t("audit.pace_runs_last", at=stamp(last["finished"]), items=last["items"] if last["items"] is not None else 0, found=last["found"]) if last else _t("audit.no_run_yet"))]
-        paces_html = "".join(f'<div class="apace"><b>{e(a)}</b><span>{e(b)}</span></div>' for a, b in paces)
+        def pace(title, said="", tip=""):      # one schedule card: its name, what its last run left (nothing before one), and what it looks at behind a "?"
+            return f'<div class="apace"><div class="aph"><b>{e(title)}</b>{tip}</div>' + (f'<span>{e(said)}</span>' if said else "") + '</div>'
+        paces_html = (pace(_t("audit.pace_min"), tip=_xp.explain("audit-pace-min", _t("audit.pace_min_help"), _t("audit.pace_min")))
+                      + pace(_t("audit.pace_ten"), _t("audit.pace_ten_last", at=stamp(ov["ten_last"])) if ov["ten_last"] else "", _xp.explain("audit-pace-ten", _t("audit.pace_ten_help"), _t("audit.pace_ten")))
+                      + pace(times, _t("audit.pace_runs_last", at=stamp(last["finished"]), items=last["items"] if last["items"] is not None else 0, found=last["found"]) if last else _t("audit.no_run_yet")))
         def group(g):
             if g["found"] is None:
                 num = f'<span class="anum">{_t("audit.not_logged" if not g["log"] else "audit.log_off")}</span>'
@@ -4324,7 +4326,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         about = _t("audit.groups_help") + (" " + _t("audit.note_logged") if ov["log"] else "")
         note = "" if ov["log"] else f'<p class="anote">{e(_t("audit.note_log_off"))}</p>'      # a setting that is off is said on the page
         groups_head = _xp.head(f'<h2>{_t("audit.groups")}</h2>', _xp.explain("audit-groups", about, _t("audit.groups")))
-        runs_head = _xp.head(f'<h2>{_t("audit.runs")}</h2>', _xp.explain("audit-runs", _t("audit.runs_hint", times=times, button=_t("panel.audit.now")), _t("audit.runs")))
+        starts = _t("audit.runs_help", times=times, button=_t("panel.audit.now")) if ov["enabled"] else _t("audit.runs_help_off", times=times)      # an audit that is off draws no button, so none is named
+        runs_head = _xp.head(f'<h2>{_t("audit.runs")}</h2>', _xp.explain("audit-runs", starts, _t("audit.runs")))
         font_css = str(_cfg.get("instance", "font_css") or "")
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("audit.title")} · {e(self.title)}</title>'
