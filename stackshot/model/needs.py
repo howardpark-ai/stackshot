@@ -1,6 +1,7 @@
 """needs.py: what an item's needs, after and observers lists hold, and the readers of them: the two kinds of need (`_NEEDS_KINDS`: decision, external) and the session names after them
 (`_needs_sessions`), the list as stored and as written back (`_needs_list`, `_needs_of`, `_needs_kinds`, `_needs_store`), the stored order (`_canon_needs`), whether the item waits on the owner's
-decision (`_waits_decision`), and the `after`, `observers` and `tell_him` lists (`_after_of`, `_observers_of`, `_tell_him_of`).
+decision (`_waits_decision`), whether it holds any question or call for him still unanswered (`owner_question_open`), and the `after`, `observers` and `tell_him` lists (`_after_of`,
+`_observers_of`, `_tell_him_of`).
 
 An item relates to sessions five ways: its mover, metadata.needs (whose move it is now: a LIST of "decision" (the owner's), "external" (someone outside, named in next) and session names, several at once;
 empty is the mover's move), metadata.observers (sessions that hear only a close or a reopen), metadata.tell_him (the front agents he asked to tell him about it: a turn each time, even while he is away) and metadata.after (items of any project that must close first). The stored needs list is canonical: decision,
@@ -64,6 +65,18 @@ def _waits_decision(meta: dict[str, Any]) -> bool:
     """Its needs hold decision: the item is in the owner's queue, never on hold (render.is_held
     reads the lane the same way, needs_kind "call")."""
     return any(x.lower() == "decision" for x in _needs_of(meta))
+
+
+def owner_question_open(meta: dict[str, Any]) -> bool:
+    """Does the item hold a question or call for the owner that he has not answered: decision in needs (with or without an ask), a stored ask, options that no answer of his has
+    settled (his pick drops them; an answer in his own words leaves them beside its record in `answers`), or a stored your-call; whoever the mover is, parked or not. The one test
+    every default of the server reads (a close's outcome, a wait's end day): while it holds, none applies and the call is judged as it was before those defaults existed."""
+    if _waits_decision(meta) or str(meta.get("state") or "").strip().lower() == "your-call":
+        return True
+    if " ".join(str(meta.get("ask") or "").split()):
+        return True
+    opts, answers = meta.get("options"), meta.get("answers")
+    return isinstance(opts, list) and bool(opts) and not (isinstance(answers, list) and any(isinstance(a, dict) for a in answers))
 
 
 def _after_of(meta: dict[str, Any]) -> list[str]:

@@ -1,8 +1,11 @@
 """Scenario test for two defaults a call may leave out (fixture data, no live store, no network, no server socket): a close with no outcome on an item whose every step is done or dropped
-is closed as done with the server's words, marked as the server's, unless the call sends new work, a need, an ask or a check with it, or the item still waits on an ask to the owner or a done
-check; a wait with nothing that can wake it (on an item, anchor, relay or event with no end, or a time wait, park or hold with no date) gets the default backstop day, marked as the server's
-and shown so in the agent reads; an open step, no steps at all, a date in the past and a day the caller gives past the cap or with no reason stay refused, whichever old name carries it;
-an anchor's notice still releases what it released before; two writers racing on the same item end in one consistent state.
+is closed as done with the server's words, marked as the server's; a wait with nothing that can wake it (on an item, anchor, relay or event with no end, or a time wait, park or hold with no
+date) gets the default backstop day, 14 days from today, marked as the server's and shown so in the agent reads. Two rules switch them off, and the call is then judged as it was before the
+defaults existed: (A) the default close applies only to a call that passes nothing outside its allow list (checked from the tools' signatures, every other parameter one by one); (B) no
+default applies while the item holds a question or call for the owner he has not answered (decision, an ask, options, a your-call), parked or not, nor to a close right after such a call.
+A blank or "none" date is no date of the caller's; an expected-by is never read, an unreadable one included; the wake pass drops the mark with the day. An open step, no steps at all, a
+date in the past and a day the caller gives past the cap or with no reason stay refused, whichever old name carries it; an anchor's notice still releases what it released before; two
+writers racing on the same item end in one consistent state.
 
     tests/run-suite close_wait_defaults  -> exit 0 / 1"""
 import asyncio, contextlib, datetime, importlib.util, io, json, os, re, sys, pathlib, tempfile, time, logging, hashlib
@@ -186,10 +189,10 @@ check("wait: the item page shows the mark beside the end date", "end date set by
 item(72, needs=[BACK], subject="[home] blocker with an expected day", state="doing", expected_by=day(3))
 item(73, needs=[BACK], subject="[home] waits after it")
 upd(73, after=["a72"])
-check("wait: for an item wait the default is the latest expected-by of the open items it waits after plus two days", (mt(73).get("ask_by") or mt(73).get("until")) == day(5) and mt(73).get("until_server") == day(5), mt(73))
+check("wait: an awaited item's expected-by is never read: the default is 14 days from today", (mt(73).get("ask_by") or mt(73).get("until")) == EXP14 and mt(73).get("until_server") == EXP14, mt(73))
 
 updt(73, until=day(5))
-check("wait: sending the very day the server stored makes it the caller's own: the mark goes", "until_server" not in mt(73) and (mt(73).get("ask_by") or mt(73).get("until")) == day(5), mt(73))
+check("wait: a day the caller sends is the caller's own: the mark goes", "until_server" not in mt(73) and (mt(73).get("ask_by") or mt(73).get("until")) == day(5), mt(73))
 
 item(74, needs=[BACK], subject="[home] relay no end", wait_kind="relay", wait_event="the vendor's reply", post_wake_mover="team-back")
 out, fx = with_fixes(lambda: upd(74, wait_event="the vendor replies"))
@@ -281,9 +284,10 @@ except Exception:
 check("wait: the same item through the plain gate gets the default", sa2["metadata"].get("until") == EXP14 and sa2["metadata"].get("until_server") == EXP14, sa2["metadata"])
 
 # close paths the default must read right
-done_item(90, "done", "open")
-out, fx = with_fixes(lambda: _update_svc._update("a90", sender="home-front", status="completed", work={"text": "finished", "state": "done"}))
-check("close: the step a status done ticks in the same call counts as marked", rd(90)["status"] == "completed" and rd(90)["metadata"].get("outcome") == "done" and [k for k, _ in fx] == ["outcome-defaulted"], (rd(90)["status"], fx, out))
+done_item(90, "done", "open"); was = raw(90)
+refused("close: work is not on the allow list: a close that sends a step status, done or not, gets no default and is refused as before", lambda: _update_svc._update("a90", sender="home-front", status="completed", work={"text": "finished", "state": "done"}),
+        "closing a90 needs outcome, reason, outcome_text")
+check("close: ...nothing is written", raw(90) == was, rd(90)["metadata"])
 done_item(91, "done", "open")
 refused("close: without that tick the open step refuses, naming it by number", lambda: _update_svc._update("a91", sender="home-front", status="completed"), "step 2 is still open")
 check("close: ...and nothing was written", rd(91)["status"] == "open" and "reason" not in rd(91)["metadata"], rd(91)["metadata"])
@@ -422,38 +426,38 @@ except Exception as e:
     e93 = str(e)
 check("close: ...and so for no steps at all: complete's refusal does not tell it to add and mark steps", "no steps and no outcome" in e93 and "Pass them yourself" in e93 and "add the steps" not in e93, e93)
 
-# ---- a close that would throw away what the same call sends, or an ask or a check still open, is not defaulted: the refusal names what is in the way, and nothing is written
+# ---- a close that sends anything beside its allow list (rule A), or on an item with a question open for the owner (rule B), is judged as before the default: refused with the plain
+# words of a close with no outcome (none of the default's), and nothing is written
+PLAIN = "needs outcome, reason, outcome_text; "
 def unchanged(label, i, was_):
     check(f"{label}: ...nothing is written: the item stays open with its steps as they were", raw(i) == was_ and rd(i)["status"] == "open", rd(i)["metadata"])
-done_item(150, "done", "done"); was = raw(150)
-refused("close+work: new work in next beside a close with no outcome is refused, naming it", lambda: upd(150, status="completed", next="home-front: a new step"),
-        "Nothing is written and the item stays open", "this call adds work in next (\"home-front: a new step\"), which would be left open", "or send the new work in an update of its own")
-unchanged("close+work", 150, was)
-done_item(151, "done", "done"); was = raw(151)
-refused("close+need: a new need and an ask beside the close are refused, each named", lambda: upd(151, status="completed", needs=["decision"], ask=ASK), "this call sets needs", "this call sets an ask")
-unchanged("close+need", 151, was)
-done_item(152, "done", "done"); was = raw(152)
-refused("close+status: a work status that is not done is refused, naming it", lambda: upd(152, status="completed", work={"text": "building it", "state": "in progress"}), "a step status that is not done (work: in progress)")
-unchanged("close+status", 152, was)
-done_item(153, "done", "open"); was = raw(153)
-refused("close+mark+work: marking the last step done does not let new work through", lambda: upd(153, status="completed", done=[2], next="home-front: another"), "this call adds work in next")
-unchanged("close+mark+work", 153, was)
-done_item(156, "done", "open"); was = raw(156)
-refused("close+work+open step: the refusal names the new work and the open step together", lambda: upd(156, status="completed", next="home-front: brand new"), "this call adds work in next", "step 2 is still open")
-unchanged("close+work+open step", 156, was)
-done_item(154, "done", "done", needs=["decision"], ask=ASK); was = raw(154)
-try:
-    comp(154); e154 = ""
-except Exception as e:
-    e154 = str(e)
-check(f"close+open ask: an item that still waits on {OWN}'s answer is not closed by default; complete's refusal names the ask and only what complete takes", f"the item still waits on {OWN}'s answer to its ask" in e154 and "Pass outcome, reason, outcome_text yourself" in e154 and "send the new work" not in e154, e154)
-unchanged("close+open ask", 154, was)
+def plain_refusal(label, i, f):
+    was_ = raw(i)
+    try:
+        f(); e_ = ""
+    except Exception as e:
+        e_ = str(e)
+    check(f"{label}: refused as before the default, in the plain words of a close with no outcome", f"closing a{i} {PLAIN}" in e_ and "Nothing is written and the item stays open" not in e_ and "set by the server" not in e_, e_[:400])
+    unchanged(label, i, was_)
+done_item(150, "done", "done")
+plain_refusal("close+next (rule A)", 150, lambda: upd(150, status="completed", next="home-front: a new step"))
+done_item(151, "done", "done")
+plain_refusal("close+need+ask (rule A)", 151, lambda: upd(151, status="completed", needs=["decision"], ask=ASK))
+done_item(152, "done", "done")
+plain_refusal("close+work status (rule A)", 152, lambda: upd(152, status="completed", work={"text": "building it", "state": "in progress"}))
+done_item(153, "done", "open")
+plain_refusal("close+mark+next (rule A): marking the last step done does not let new work through", 153, lambda: upd(153, status="completed", done=[2], next="home-front: another"))
+done_item(156, "done", "open")
+plain_refusal("close+next+open step (rule A)", 156, lambda: upd(156, status="completed", next="home-front: brand new"))
+done_item(154, "done", "done", needs=["decision"], ask=ASK)
+plain_refusal(f"close+open ask (rule B): an item that still waits on {OWN}'s answer", 154, lambda: comp(154))
+done_item(158, "done", "done", needs=["decision"], ask=ASK)
+plain_refusal("close+clear_ask (rule A): taking the ask back in the closing call is an argument outside the list", 158, lambda: upd(158, status="completed", clear_ask=True))
 done_item(155, "done", "done", check="item_closed a70"); was = raw(155)
 refused("close+check: a done check that has not passed is not closed over by default", lambda: comp(155), "the item's done check (item_closed a70) has not passed")
 unchanged("close+check", 155, was)
-done_item(157, "done", "done"); was = raw(157)
-refused("close+check given: a done check sent with the close is not closed over either", lambda: upd(157, status="completed", check="item_closed a70"), "this call sets a done check")
-unchanged("close+check given", 157, was)
+done_item(157, "done", "done")
+plain_refusal("close+check given (rule A)", 157, lambda: upd(157, status="completed", check="item_closed a70"))
 
 # ---- the server's close words are marked as the server's in metadata and in get; a reopen drops the mark
 check("mark: a close the server filled lists the fields it wrote (outcome_server)", mt(60).get("outcome_server") == ["outcome", "reason", "outcome_text"] and mt(61).get("outcome_server") == ["outcome", "outcome_text"], (mt(60).get("outcome_server"), mt(61).get("outcome_server")))
@@ -533,11 +537,46 @@ finally:
     _wakes_svc.wake_notify = _wake_notify_was
     _anc.save({})
 
-# ---- a day the server takes from an awaited item's expected-by far out says how far and why
+# ---- an awaited item's expected-by is never read, far out or unreadable: the day is 14 days from today, marked, and the guards still judge the write
 item(175, needs=[BACK], subject="[home] blocker expected far out", state="doing", expected_by=day(40))
 item(176, needs=[BACK], subject="[home] waits after the far one")
 out, fx = with_fixes(lambda: upd(176, after=["a175"]))
-check("far: the day is the awaited item's expected-by plus two days, and the reply says how far out and why", mt(176).get("until") == day(42) and any("that is 42 days out, later than the usual 14, because the item it waits after is expected then" in t for _, t in fx), (mt(176), fx))
+check("expected-by: a far expected-by moves nothing: the day is 14 days from today and the line says so", mt(176).get("until") == EXP14 and mt(176).get("until_server") == EXP14 and [k for k, _ in fx] == ["wait-end-defaulted"] and "14 days from today" in fx[0][1], (mt(176), fx))
+for n_, bad in ((177, "9999-12-31"), (178, "2027-02-31")):
+    item(n_, needs=[BACK], subject=f"[home] blocker expected {bad}", state="doing", expected_by=bad)
+    item(n_ + 10, needs=[BACK], subject="[home] waits after it")
+    err_ = io.StringIO()
+    with contextlib.redirect_stderr(err_):
+        out, fx = with_fixes(lambda: upd(n_ + 10, after=[f"a{n_}"]))
+    check(f"expected-by: an unreadable one ({bad}) stops nothing: the waiter gets the 14-day day, marked and told", mt(n_ + 10).get("until") == EXP14 and mt(n_ + 10).get("until_server") == EXP14 and [k for k, _ in fx] == ["wait-end-defaulted"], (mt(n_ + 10), fx))
+    check(f"expected-by ({bad}): ...the guards judged the write (no 'not judged' line)", "not judged" not in err_.getvalue() and "not defaulted" not in err_.getvalue(), err_.getvalue())
+def _fill_fails(item_, meta_, *a):
+    meta_["until"] = meta_["until_server"] = EXP14; meta_["wait_kind"] = "item"
+    raise ValueError("a day that is no date")
+_fill_was = _gates_svc._wait_end_fill
+_gates_svc._wait_end_fill = _fill_fails
+try:
+    m_ = {"owner": U["home-front"], "project": "projects/alpha", "next": "home-front: wait", "needs": [BACK], "after": ["a70"]}; err_ = io.StringIO()
+    with contextlib.redirect_stderr(err_):
+        told_ = _gates_svc._default_wait_end({"status": "open", "metadata": m_}, "a99", False, True)
+    check("default end: a failure inside it leaves the item as the write made it, says so on stderr and tells nothing", told_ == "" and not any(k in m_ for k in ("until", "until_server", "wait_kind")) and "a99 not defaulted" in err_.getvalue(), (told_, m_, err_.getvalue()))
+    item(179, needs=[BACK], subject="[home] waits, the default fails"); was = raw(179)
+    with contextlib.redirect_stderr(io.StringIO()):
+        refused("default end: ...and the guards then judge the write as before the default: a wait with no end is refused", lambda: upd(179, after=["a70"]), "has no end")
+    check("default end: ...nothing is stored", raw(179) == was, mt(179))
+finally:
+    _gates_svc._wait_end_fill = _fill_was
+from stackshot.model import migration as _mig_mod
+class _MigEnv:
+    today = datetime.date.fromisoformat(day(0))
+    def __init__(self, items): self.items = items
+    def after_open(self, it): return list(it["metadata"].get("after") or [])
+for bad in ("9999-12-31", "2027-02-31"):
+    env_ = _MigEnv({"a1": {"metadata": {"expected_by": bad}}, "a2": {"metadata": {"expected_by": day(3)}}})
+    got_ = _mig_mod.default_end(env_, {"metadata": {"after": ["a1", "a2"]}}, "item")
+    check(f"expected-by: the start repair's default_end skips an unreadable expected-by ({bad}) and reads the others", got_[0] == day(5) and day(3) in got_[1], got_)
+    env_ = _MigEnv({"a1": {"metadata": {"expected_by": bad}}})
+    check(f"expected-by: ...and with only that one, it takes 14 days from the pass ({bad})", _mig_mod.default_end(env_, {"metadata": {"after": ["a1"]}}, "item")[0] == (_MigEnv.today + datetime.timedelta(days=14)).isoformat(), None)
 
 # ---- the mark counts only while the stored end is the server's day
 SM, STALE = {"until": EXP14, "until_server": EXP14}, {"until": day(6), "until_server": EXP14}
@@ -554,6 +593,153 @@ check("mark: board.md's parked mark and the brief's parked line mark the server'
 check("mark: the board report's wake words mark the server's day, not another", _board_report._wake_words(SM) == f"until {EXP14} (set by the server)" and _board_report._wake_words(STALE) == f"until {day(6)}", (_board_report._wake_words(SM), _board_report._wake_words(STALE)))
 check("mark: the audit's stored-wait text marks the server's day, not another", f"ends on {EXP14} (set by the server)" in _audit_run.stored_wait_text({"metadata": SM}) and "set by the server" not in _audit_run.stored_wait_text({"metadata": STALE}),
       (_audit_run.stored_wait_text({"metadata": SM}), _audit_run.stored_wait_text({"metadata": STALE})))
+
+class _AuditEnv:
+    clock = staticmethod(time.time)
+    page = staticmethod(lambda p: ("", None))
+def audit_head(mk):
+    """The context lines the audit's obsolete-wait check gives for an item that waits after a closed one, its stored end as `mk`."""
+    its = {"a500": {"id": "500", "status": "open", "subject": "[home] waits", "updated": now0, "state_updated": now0, "metadata": {"project": "projects/alpha", "after": ["a501"], "wait_kind": "item", **mk}},
+           "a501": {"id": "501", "status": "completed", "subject": "[home] done", "updated": now0, "metadata": {"outcome": "done", "reason": "finished"}}}
+    return _audit_run.obsolete_wait_evidence("a500", its, {"500": ["a500"], "501": ["a501"]}, _AuditEnv(), {}, 0.0)[1]
+check("mark: the audit's obsolete-wait head marks the server's day", (audit_head(SM) or [""])[0].endswith(f"until {EXP14} (set by the server)"), audit_head(SM))
+check("mark: ...and not a day that is not the server's", bool(audit_head(STALE)) and "set by the server" not in audit_head(STALE)[0] and f"until {day(6)}" in audit_head(STALE)[0], audit_head(STALE))
+
+# ================================================================ rule A: the default close's allow list, checked from the tools' signatures
+import inspect
+UPD_P = set(inspect.signature(_wt_update.stackshot_update).parameters)
+UNL_P = set(inspect.signature(_update_svc.update_unlocked).parameters)
+CMP_P = set(inspect.signature(_wt_complete.stackshot_complete).parameters)
+ALLOW_ = _update_svc.CLOSE_DEFAULT_ARGS
+check("rule A: the allow list is the close's own fields, his recorded words and the step marks, nothing else", ALLOW_ == {"item_id", "sender", "status", "outcome", "reason", "outcome_text", "description", "superseded_by", "said", "done", "dropped"}, sorted(ALLOW_))
+check("rule A: every argument of the write is a parameter of the update tool or one the tool layer computes (SERVER_ARGS): an argument added later is outside the list until it is named there",
+      UNL_P - _update_svc.SERVER_ARGS <= UPD_P and _update_svc.SERVER_ARGS <= UNL_P, sorted(UNL_P - _update_svc.SERVER_ARGS - UPD_P))
+check("rule A: ...and every update tool parameter reaches the write, but the retired rank pair (refused at the tool) and until (passed on as wake or ask_by)", UPD_P - UNL_P == {"rank", "clear_rank", "until"}, sorted(UPD_P - UNL_P))
+check("rule A: complete passes only arguments on the list, and the list names only arguments the write has", CMP_P <= ALLOW_ and ALLOW_ <= UNL_P, (sorted(CMP_P - ALLOW_), sorted(ALLOW_ - UNL_P)))
+check("rule A: an argument the write gains later is outside the list", _update_svc.close_extra_args({"status": "completed", "outcome": "", "a_new_argument": "x"}) == ["a_new_argument"], None)
+check("rule A: blank, False, 0 and None are not passed; an empty list is (it clears)", _update_svc.close_extra_args({"next": "  ", "hold": False, "rank": 0, "after": None, "needs": [], "wake": "none"}) == ["needs", "wake"], None)
+OPTS = [{"label": "Ship", "line": "Ship it now.", "recommended": True}, {"label": "Wait", "line": "Wait a week.", "recommended": False}]
+SAMPLE = {"after": ["a70"], "agent": BACK, "next": "home-front: a new step", "needs": [BACK], "ask": ASK, "options": OPTS, "work": {"text": "finished", "state": "done"},
+          "check": "item_closed a70", "mover": BACK, "then": BACK, "post_wake_mover": BACK, "until": day(5), "wake": day(5), "ask_by": day(5), "due": day(5), "expected_by": day(5),
+          "observers": [BACK], "tell_him": "home-front", "reword": {"1": "step one renamed"}, "waits": [{"after": "a70"}], "wait_mode": "any", "subject": "[home] renamed",
+          "project": "projects/alpha", "priority": "high", "anchors": ["https://example.org/pull/7"], "wait_kind": "time", "wait_anchor": "https://example.org/pull/7", "wait_event": "merged",
+          "wait_basis": f"the soak ends {day(5)}", "goal": "A new goal", "step": "pick it", "supplies": "the file", "draft": "a draft", "contact": "someone", "watch_reason": "x",
+          "wait_reason": "the nightly run finishes at 03:00", "owner_name": "x", "expected_reason": "x", "owner": "home-front"}
+def sample_of(p, prm):
+    return SAMPLE.get(p, True if prm.default is False else 1 if (prm.default == 0 and prm.default is not False) else "x")
+done_item(399, "done", "done")
+out, fx = with_fixes(lambda: updt(399, status="completed"))
+check("rule A: (control) the same close with nothing beside the list is closed by the default", rd(399)["status"] == "completed" and [k for k, _ in fx] == ["outcome-defaulted"], fx)
+n_ = 400; leaked = []
+for p, prm in sorted(inspect.signature(_wt_update.stackshot_update).parameters.items()):
+    if p in ALLOW_:
+        continue
+    v = sample_of(p, prm); n_ += 1; done_item(n_, "done", "done"); was_ = raw(n_)
+    try:
+        updt(n_, status="completed", **{p: v}); e_ = ""
+    except Exception as e:
+        e_ = str(e)
+    if raw(n_) != was_ or not e_ or "set by the server" in e_ or "Nothing is written and the item stays open" in e_:
+        leaked.append((p, e_[:160]))
+    if p in UNL_P and _update_svc.close_extra_args({p: v}) != [p]:
+        leaked.append((p, "not read as outside the list"))
+check(f"rule A: each of the {n_ - 400} update parameters outside the list, sent with a close with no outcome on an item whose every step is done, gets no default: refused as before, nothing written", not leaked and n_ - 400 >= 50, leaked)
+for n_, (p, v) in enumerate((("after", ["a70"]), ("agent", BACK), ("mover", BACK), ("needs", [BACK]), ("clear_needs", True), ("observers", [BACK]), ("due", day(5)), ("wait_kind", "time"), ("subject", "[home] renamed")), 470):
+    done_item(n_, "done", "done")
+    plain_refusal(f"rule A: {p}= beside a close with no outcome" + (" (M1)" if p == "after" else " (M2: the old name of needs)" if p == "agent" else ""), n_, lambda: updt(n_, status="completed", **{p: v}))
+
+# ================================================================ rule B: a question or call open for the owner switches every default off
+from stackshot.model import needs as _needs_mod
+oq = _needs_mod.owner_question_open
+check("rule B: the predicate reads decision in needs, a stored ask, options he has not answered and a your-call, whoever the mover is",
+      oq({"needs": ["decision"]}) and oq({"needs": ["decision", BACK]}) and oq({"ask": ASK, "needs": [BACK]}) and oq({"options": OPTS}) and oq({"state": "your-call", "needs": [BACK]})
+      and oq({"options": OPTS, "answers": []}) and oq({"options": OPTS, "answers": ["not a record"]}), None)
+check("rule B: ...and nothing else: options his answer settled, a blank ask, a session's need, nothing at all", not oq({"options": OPTS, "answers": [{"text": "ship it"}]}) and not oq({"ask": "  "}) and not oq({"needs": [BACK]}) and not oq({}) and not oq({"state": "doing"}), None)
+done_item(300, "done", "done", needs=[BACK], mover=OWN, until=day(10), wait_kind="time", wait_basis=f"the vendor quote is due {day(10)}", ask=ASK, options=OPTS)
+plain_refusal(f"rule B (H1): the parked call of {OWN} (needs a session, he is mover, a time wait with its basis, ask and options unanswered, steps done): a bare complete", 300, lambda: comp(300))
+plain_refusal("rule B (H1): ...and a close through update", 300, lambda: updt(300, status="completed"))
+done_item(301, "done", "done", needs=["decision"], ask=ASK, options=OPTS)
+updt(301, needs=[BACK])
+check("rule B (H1): (setup) a hand-off by needs alone keeps the ask and the options", mt(301).get("needs") == [BACK] and mt(301).get("ask") and mt(301).get("options"), mt(301))
+plain_refusal("rule B (H1): a complete right after a hand-off by needs alone", 301, lambda: comp(301))
+done_item(302, "done", "done", needs=[BACK], state="your-call")
+plain_refusal("rule B (H1): a your-call item with needs a session", 302, lambda: comp(302))
+done_item(308, "done", "done", needs=[BACK], options=OPTS)
+plain_refusal("rule B: an item with options he has not answered and no ask", 308, lambda: comp(308))
+done_item(303, "done", "done", needs=["decision"], ask=ASK, options=OPTS); was = raw(303)
+refused("rule B (H2): a bare hold beside needs a session, on a decision item with its ask and options, is refused as before: no server day", lambda: updt(303, needs=[BACK], hold=True), "a park names what it waits for")
+check("rule B (H2): ...nothing is stored: no day, no mark, the question stays his", raw(303) == was, mt(303))
+plain_refusal("rule B (H2): ...and a complete right after it", 303, lambda: comp(303))
+refused("rule B (H2): the same park with until 14 days out stays refused by the cap", lambda: updt(303, needs=[BACK], hold=True, until=day(14)), "a wait runs at most")
+refused("rule B: ...and so with until=\"none\"", lambda: updt(303, needs=[BACK], hold=True, until="none"), "a park names what it waits for")
+for n_, kw in ((305, dict(state="doing", ask=ASK)), (307, dict(state="doing", options=OPTS))):
+    item(n_, needs=[BACK], **kw); was = raw(n_)
+    refused(f"rule B: a bare hold on an item with {'an ask' if 'ask' in kw else 'options he has not answered'} is refused as before", lambda: updt(n_, hold=True), "a park names what it waits for")
+    check(f"rule B ({n_}): ...nothing is stored", raw(n_) == was, mt(n_))
+item(310, needs=[BACK], ask=ASK); was = raw(310)
+refused("rule B: a wait after another item with no end, on an item with an ask, is refused for its end as before", lambda: updt(310, after=["a70"]), "has no end")
+check("rule B (310): ...nothing is stored", raw(310) == was, mt(310))
+item(312, needs=[BACK], ask=ASK, wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK); was = raw(312)
+refused("rule B: a stored relay wait with no end, on an item with an ask, is refused for its end when another field is edited", lambda: updt(312, wait_event="the vendor replies"), "has no end")
+check("rule B (312): ...nothing is stored", raw(312) == was, mt(312))
+item(313, needs=["decision"], ask=ASK, options=OPTS)
+refused("rule B: ask_by beside a hold on a decision item is not read as the park's date: refused as before", lambda: updt(313, hold=True, ask_by=day(3)), "needs holds decision together with a park")
+for n_, kw, want in ((314, dict(stored=dict(ask=ASK), call={}), "wait_basis explains the wake"), (317, dict(stored={}, call=dict(ask=ASK)), "wait_basis explains the wake")):
+    item(n_, needs=[BACK], state="doing", **kw["stored"]); was = raw(n_)
+    refused(f"rule B: ask_by beside a hold with {'a stored ask' if kw['stored'] else 'an ask the call itself sends'} stays the ask's day, not the park's: refused as before", lambda: updt(n_, hold=True, ask_by=day(3), wait_basis=f"the soak collects its logs ends {day(3)}", **kw["call"]), want)
+    check(f"rule B ({n_}): ...nothing is stored", raw(n_) == was, mt(n_))
+item(316, needs=[BACK], ask=ASK, hold=True, wake=day(4)); was = raw(316)
+refused("rule B: clear_wake on a hold stored the old way, on an item with an ask, does not end the park: judged as before", lambda: updt(316, clear_wake=True), "a park names what it waits for")
+check("rule B (316): ...nothing is stored", raw(316) == was, mt(316))
+for n_, kw, want in ((330, dict(after=["a70"]), "has no end"), (331, dict(hold=True), "a park names what it waits for")):
+    item(n_, needs=["decision"], ask=ASK, **({"state": "doing"} if "hold" in kw else {})); was = raw(n_)
+    refused(f"rule B: a hand-off that takes the ask back ({', '.join(kw)}) is judged by the item as it stood: no server day, refused as before", lambda: updt(n_, needs=[BACK], clear_ask=True, **kw), want)
+    check(f"rule B ({n_}): ...nothing is stored", raw(n_) == was, mt(n_))
+for n_, kw, want in ((334, dict(hold=True), "a park names what it waits for"), (335, dict(after=["a70"]), "has no end")):
+    item(n_, needs=["decision"], **({"state": "doing"} if "hold" in kw else {})); was = raw(n_)
+    refused(f"rule B: a hand-off by needs from a decision with no ask ({', '.join(kw)}) is judged by the item as it stood: no server day, refused as before", lambda: updt(n_, needs=[BACK], **kw), want)
+    check(f"rule B ({n_}): ...nothing is stored", raw(n_) == was, mt(n_))
+item(332, needs=[BACK], ask=ASK, state="doing"); was = raw(332)
+refused("rule B: ...and so is a bare hold that takes the ask back", lambda: updt(332, clear_ask=True, hold=True), "a park names what it waits for")
+check("rule B (332): ...nothing is stored", raw(332) == was, mt(332))
+item(321, needs=[BACK], state="doing", ask=ASK, hold=True, until=day(9), until_server=day(9)); was = raw(321)
+refused("rule B: hold=true sent again on a server-dated park that holds an ask is judged as a date given, as before", lambda: updt(321, hold=True), "with no reason")
+check("rule B (321): ...nothing is stored", raw(321) == was, mt(321))
+for label, m_ in (("decision and an ask", {"needs": ["decision"], "ask": ASK}), ("an ask", {"needs": [BACK], "ask": ASK}), ("a your-call", {"needs": [BACK], "state": "your-call"})):
+    ti = {"status": "open", "subject": "[home] q", "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "home-front: wait", "after": ["a70"], **m_}}
+    try:
+        _gates_svc.gate_model(ti, None, "", creating=True)
+    except Exception:
+        pass
+    check(f"rule B: a create with {label} and a wait with no end gets no server day", not any(k in ti["metadata"] for k in ("until", "ask_by", "until_server")), ti["metadata"])
+m_now = {"owner": U["home-front"], "project": "projects/alpha", "next": "home-front: wait", "needs": [BACK], "after": ["a70"]}
+check("rule B: the default end reads the item as it stood too: a question the write takes away still switches it off", _gates_svc._default_wait_end({"status": "open", "metadata": m_now}, "a99", False, True, {"needs": ["decision"], "ask": ASK}) == "" and "until_server" not in m_now
+      and _gates_svc._default_wait_end({"status": "open", "metadata": dict(m_now)}, "a99", False, True, {"needs": [BACK]}) != "", m_now)
+
+# ================================================================ M3: a blank or "none" date is no date of the caller's
+item(320, needs=[BACK], subject="[home] hold, ask_by none", state="doing")
+out, fx = with_fixes(lambda: updt(320, hold=True, ask_by="none"))
+server_end_checks("M3: hold=true with ask_by=\"none\"", 320, fx, out)
+out, fx = with_fixes(lambda: updt(320, hold=True, ask_by="none"))
+check("M3: ...sent again it is accepted: the server's day and its mark stand, nothing told twice", mt(320).get("until") == EXP14 and mt(320).get("until_server") == EXP14 and "wait-end-defaulted" not in [k for k, _ in fx], (mt(320), fx))
+for n_, kw in ((325, dict(ask_by=" ")), (326, dict(until="none")), (327, dict(wake="none")), (328, dict(until=" "))):
+    item(n_, needs=[BACK], subject=f"[home] hold, {kw}", state="doing")
+    out, fx = with_fixes(lambda: updt(n_, hold=True, **kw))
+    check(f"M3: hold=true with {kw} is a bare hold: the server's day, marked and told", mt(n_).get("until") == EXP14 and mt(n_).get("until_server") == EXP14 and [k for k, _ in fx] == ["wait-end-defaulted"], (mt(n_), fx))
+item(322, needs=[BACK], subject="[home] after-wait, ask_by none")
+upd(322, after=["a70"])
+updt(322, ask_by="none")
+check("M3: ask_by=\"none\" on a server-dated wait after another item leaves the server's day and its mark", mt(322).get("until") == EXP14 and mt(322).get("until_server") == EXP14, mt(322))
+item(329, needs=[BACK], subject="[home] after-wait, clear_after with ask_by none")
+upd(329, after=["a70"])
+out329 = updt(329, clear_after=True, ask_by="none")
+check("M3: clear_after with ask_by=\"none\" ends the server-dated wait as clear_after alone does: the day and its mark go, and the reply says so",
+      not any(k in mt(329) for k in ("until", "until_server", "wait_kind", "after")) and f"the backstop day {EXP14} the server had set for that wait went with it" in out329, (mt(329), out329[-400:]))
+item(323, needs=[BACK], subject="[home] relay, no ask_by"); item(324, needs=[BACK], subject="[home] relay, ask_by none")
+out_a, fx_a = with_fixes(lambda: updt(323, wait_kind="relay", wait_event="the vendor's reply", mover=BACK))
+out_b, fx_b = with_fixes(lambda: updt(324, wait_kind="relay", wait_event="the vendor's reply", mover=BACK, ask_by="none"))
+check("M3: a relay wait with ask_by=\"none\" is stored as the same call with none: the fallback day, marked as the server's, told the same", bool(_WT.stored_until(mt(323))) and _WT.stored_until(mt(324)) == _WT.stored_until(mt(323))
+      and mt(324).get("until_server") == _WT.stored_until(mt(324)) == mt(323).get("until_server") and [k for k, _ in fx_b] == [k for k, _ in fx_a], (mt(323), mt(324), fx_a, fx_b))
 
 # ================================================================ 3. two writers
 def race(fa, fb):
@@ -583,6 +769,31 @@ for n in range(120, 132):      # a default end racing the same item's own end da
     seen.add("given" if end == day(6) and "until_server" not in m else "default" if end == EXP14 and m.get("until_server") == EXP14 else "BAD")
     if "BAD" in seen: print("race wait:", r, m)
 check("race: a wait racing an update that gives its end ends on one consistent day: the given one with no mark, or the default with its mark", seen <= {"given", "default"} and seen, seen)
+
+# ================================================================ 4. the end of a server-dated wait takes the mark with the day (last: the pass below wakes every dated item in the store)
+from stackshot.service import watching as _watching_svc
+item(340, needs=[BACK], subject="[home] bare hold, to wake", state="doing")
+updt(340, hold=True)
+item(341, needs=[BACK], subject="[home] dated hold, to wake", state="doing")
+updt(341, hold=True, until=day(3), wait_basis=f"the soak collects its logs ends {day(3)}")
+item(344, needs=[BACK], subject="[home] the blocker it parks on")
+item(343, needs=[BACK], subject="[home] park on a closing, server-dated", after=["a344"], until=EXP14, until_server=EXP14)
+item(345, needs=[BACK], subject="[home] server-dated, no watcher can end it", wait_kind="anchor", until=EXP14, until_server=EXP14)
+check("end: (setup) a345 is the old wake pass's, not a watcher's", not _watchers_mod.watches(rd(345)), mt(345))
+check("end: (setup) the bare hold is on the server's day, the dated one on its own", mt(340).get("until_server") == EXP14 and mt(341).get("until") == day(3) and "until_server" not in mt(341), (mt(340), mt(341)))
+_notify_was, _wtell_was = _wakes_svc.wake_notify, _watching_svc.watch_tell
+_wakes_svc.wake_notify = lambda *a, **k: []
+_watching_svc.watch_tell = lambda *a, **k: None
+try:
+    comp(344, outcome="done", reason="finished", outcome_text="- it is done")
+    check("end: the release of a park on a closing item drops the server's day and its mark", not any(k in mt(343) for k in ("until", "until_server")), mt(343))
+    _wakes_svc.wake_pass(_wakes_svc._pages.zone_now() + datetime.timedelta(days=16))
+finally:
+    _wakes_svc.wake_notify, _watching_svc.watch_tell = _notify_was, _wtell_was
+KEYS_ = ("mover", "wait_kind", "hold", "hold_set", "until", "wake", "needs", "state", "after")
+check("end: the wake of a bare hold takes the server's mark with its day", "until_server" not in mt(340) and "until" not in mt(340), mt(340))
+check("end: ...and so does the old wake pass, for a dated wait no watcher can end", "until_server" not in mt(345) and "until" not in mt(345), mt(345))
+check("end: ...and leaves the item as the wake of a hold with its own day leaves it (status, mover, kind, needs)", rd(340)["status"] == rd(341)["status"] and {k: mt(340).get(k) for k in KEYS_} == {k: mt(341).get(k) for k in KEYS_}, (rd(340)["status"], mt(340), rd(341)["status"], mt(341)))
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": close and wait defaults,{len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

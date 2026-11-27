@@ -28,7 +28,7 @@ if it has not ended is until, YYYY-MM-DD, tomorrow at the earliest: until="<day,
 
 ## param UNTIL_PARAM_NEW
 The one date the new item's wait ends on, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM, in the board timezone (a
-relay or event wait takes the day alone, YYYY-MM-DD; for a wait left out with no wait_kind in the call (on an item, anchor, relay or event, or a time wait with no date), the server stores a default backstop day (14 days from today, or the expected-by of the items it waits after plus two days) and says so; with a wait_kind it takes the next day or the day the item's words give, not the backstop). wait_kind goes only beside it (none: the date alone). Beside
+relay or event wait takes the day alone, YYYY-MM-DD; for a wait left out with no wait_kind in the call (on an item, anchor, relay or event, or a time wait with no date), the server stores a default backstop day (14 days from today; none while {{OWNER}}'s call is open on the item) and says so; with a wait_kind it takes the next day or the day the item's words give, not the backstop). wait_kind goes only beside it (none: the date alone). Beside
 waits it is the list's backstop day, required.
 
 ## param NEXT_CREATE

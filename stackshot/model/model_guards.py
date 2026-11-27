@@ -1010,7 +1010,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
         miss: list[str] = []
         if w.kind == "time":
             if not w.until and not recycle:
-                miss.append("a time wait needs its date: until=YYYY-MM-DD with wait_kind=\"time\" (a verifying state's end date is its until). Only the strict data pass reports this: a create or update that leaves the date out gets the server's backstop day instead, and the reply says so")
+                miss.append("a time wait needs its date: until=YYYY-MM-DD with wait_kind=\"time\" (a verifying state's end date is its until)")
         elif w.kind == "anchor":
             if not (w.anchor or (anchored(item) if anchored else False)):
                 miss.append("an anchor wait names its anchor: wait_anchor=<url>, or an anchor scoped to the item (anchors tool)")

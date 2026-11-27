@@ -439,7 +439,7 @@ def turn_alive(meta: dict[str, Any], mover: str, what: str, now: float) -> None:
             meta.pop("watch")
 
 
-DATE_DROP = ("hold", "hold_set", "wake", "until", "wait_basis", "watch_reason", "waiting", "wait_failed", "idle", "waits", "wait_mode")      # what the end of a wait on the date alone clears (the two of a list that did not hold, with it)
+DATE_DROP = ("hold", "hold_set", "wake", "until", "wait_basis", "watch_reason", "waiting", "wait_failed", "idle", "waits", "wait_mode", _model.SERVER_END_KEY)      # what the end of a wait on the date alone clears (the two of a list that did not hold, with it)
 
 
 def end_date(meta: dict[str, Any], what: str, to: str, now: float) -> None:

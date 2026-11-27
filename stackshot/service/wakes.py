@@ -204,7 +204,7 @@ def wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
                 had_u = bool(_wt.stored_until(meta))      # a date stored as until is a wait on it, not a backstop: its end releases the item like a hold's
                 if had_u:
                     meta.pop("wait_kind", None)   # the date has come: the wait is over, its date and its kind go together (a wait stored by the old fields keeps what it had: the stored items are migrated apart)
-                meta.pop("wake", None); meta.pop("until", None)
+                meta.pop("wake", None); meta.pop("until", None); meta.pop(_model.SERVER_END_KEY, None)      # (the mark of a backstop day the server stored goes with that day)
                 meta.pop("watch_reason", None)    # a front agent's reason for watching belonged to this wake
                 meta.pop("wait_basis", None)      # a wait that stood on a real-world date: the wake is spent, so is its basis
                 _hooks().state_end(meta, "parked")        # a park that stood on that wake is over with it
@@ -439,7 +439,7 @@ def release_after(gid: str, outcome: str, superseded_by: str, writer: str, reaso
                     print(f"after: {g} now waits on {', '.join(left)} ({gid} closed as {outcome}" + (f", followed to {rep}" if rep_open else "") + ")", file=sys.stderr, flush=True)
                     continue
                 had_until = bool(_wt.stored_until(meta))
-                meta.pop("after", None); meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None)
+                meta.pop("after", None); meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None); meta.pop(_model.SERVER_END_KEY, None)
                 if had_until and _watch.stored_kind(meta) == "item":
                     meta.pop("wait_kind", None)           # the wait it stood on is over: its date and its kind go together
                 _hooks().state_end(meta, "blocked", "parked")     # the item it waited on is closed: the wait is over
