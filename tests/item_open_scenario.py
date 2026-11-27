@@ -661,7 +661,7 @@ finally:
     _ghsync.letter = letter_
 close(ref)
 
-# a note of his that parks the item: nothing is written while it waits; the step the park dropped was sent, so only a newer one is asked after the wait
+# a note of his that parks the item: nothing is written while it waits; the step the park dropped before he answered is asked again after the wake
 from stackshot.service import wakes as _wakes_svc
 def wake_all():
     _wakes_svc.wake_pass(now=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30)); settle()
@@ -671,11 +671,12 @@ for i_, words in enumerate(("I'll do it tomorrow evening", "I'll do it next week
     check(f"parked setup ({words}): the item waits, no step of his is open, his step is dropped", is_waiting(g_) and his_open(g_) == [] and ("Oliver: " + S1, "dropped") in steps_of(g_) and meta_of(g_).get("until") and own(g_) is None, (meta_of(g_), steps_of(g_)))
     untouched(f"parked ({words}): the same step again writes no step", g_, mk, S1)
     untouched(f"parked ({words}): a newer step writes no step onto the waiting item", g_, mk, S2)
-    check(f"parked ({words}): the step not set is not recorded as sent", sent(g_) == S1, sent(g_))
+    check(f"parked ({words}): the step not set is not recorded as sent", sent(g_) != S2, sent(g_))
+    check(f"parked ({words}): no step counts as sent", sent(g_) == "", meta_of(g_))
     wake_all()
     check(f"parked ({words}): the wake ends the wait", not is_waiting(g_) and meta_of(g_).get("state") != "your-step", meta_of(g_))
-    untouched(f"after the wait ({words}): the step the park dropped before he answered is not asked again", g_, mk, S1)
-    asks(f"after the wait ({words}): the newer step is set", g_, mk, S2, [S2])
+    asks(f"after the wait ({words}): the step the park dropped before he answered is asked again", g_, mk, S1, [S1])
+    untouched(f"after the wait ({words}): once asked again it is sent", g_, mk, S1)
     close(g_)
 
 # a session's wait on a date, and on another item
@@ -687,6 +688,112 @@ untouched("a newer step on a builder's hold writes no step", g_, "plugin_sync:ho
 wake_all()
 check("hold: the wake ends the wait", not is_waiting(g_), meta_of(g_))
 asks("after the hold the newer step is set", g_, "plugin_sync:hold", S2, [S2])
+close(g_)
+# whatever shape the wait has, a step it dropped before he answered is asked again after it
+def asked_again(tag, marker, g, end=wake_all):
+    check(f"{tag}: setup: the item waits and his step is dropped, unanswered", is_waiting(g) and his_open(g) == [] and ("Oliver: " + S1, "dropped") in steps_of(g), (meta_of(g), steps_of(g)))
+    check(f"{tag}: no step counts as sent", sent(g) == "" and own(g) is None, meta_of(g))
+    untouched(f"{tag}: nothing is asked while it waits", g, marker, S1)
+    end()
+    check(f"{tag}: the wait ends", not is_waiting(g), meta_of(g))
+    asks(f"{tag}: the step is asked again", g, marker, S1, [S1])
+    untouched(f"{tag}: once asked again it is sent", g, marker, S1)
+    close(g)
+def held(g, **kw): by_builder(g, wait_kind="time", wake=day(20), wait_basis=f"the vendor ships the fix on {day(20)}", **kw)
+g_ = opened("plugin_sync:again-hold"); held(g_)
+asked_again("a session's dated wait", "plugin_sync:again-hold", g_)
+g_ = opened("plugin_sync:again-same"); held(g_, step=S1)
+asked_again("a wait whose write names the same step", "plugin_sync:again-same", g_)
+g_, blocker = opened("plugin_sync:again-blocked"), opened("plugin_sync:again-blocker")
+by_builder(g_, wait_kind="item", after=[blocker])
+def unblock(): isy("close", marker="plugin_sync:again-blocker"); settle(); wake_all()
+asked_again("a wait on another item", "plugin_sync:again-blocked", g_, unblock)
+for tag, kw in (("an item with no record, parked", {}), ("an item with no record, held by a session", None)):
+    mk = f"plugin_sync:again-old{int(kw is None)}"; g_ = opened(mk); forget(g_, *RECORD)
+    if kw is None: held(g_)
+    else: note(g_, "I'll do it next week")
+    asked_again(tag, mk, g_)
+# a park whose first write after it is the one that ends the wait: the line stood through the wait and that write drops it
+g_ = opened("plugin_sync:again-late")
+def parked_by_hand(m_):
+    for k_ in ("state", "step", "phase", "waits_on"): m_.pop(k_, None)
+    m_.update(until=day(5), mover="home-sparrow-builder", needs=[])
+edit_meta(g_, parked_by_hand)
+check("late setup: the item waits and the route's line still stands", is_waiting(g_) and his_open(g_) == mine(S1) and own(g_) == S1, (meta_of(g_), steps_of(g_)))
+wake_all()
+check("late: the write that ends the wait drops the line, and no step counts as sent", not is_waiting(g_) and his_open(g_) == [] and sent(g_) == "", (meta_of(g_), steps_of(g_)))
+asks("late: the step is asked again", g_, "plugin_sync:again-late", S1, [S1])
+close(g_)
+# work the board shows as waiting though it is stored as doing: a write onto it drops the line, by that wait
+g_ = opened("plugin_sync:again-dated")
+def dated_open(m_):
+    for k_ in ("step", "phase", "waits_on"): m_.pop(k_, None)
+    m_.update(state="doing", mover="home-sparrow-builder", needs=["home-sparrow-builder"], wake=day(5), wait_basis={"text": f"the nightly run ends {day(5)}", "wake": day(5)})
+edit_meta(g_, dated_open)
+st, r_ = isy("open", marker="plugin_sync:again-dated", step=S1, description=["- the run saw it"]); settle()
+check("a write onto an item shown as waiting drops the route's line, and no step counts as sent", st == 200 and M.derive(item(g_)).state == M.ALIVE and is_waiting(g_) and his_open(g_) == [] and sent(g_) == "", (st, meta_of(g_), steps_of(g_)))
+close(g_)
+
+# a step a session replaced, reworded, dropped or withdrew, or one he answered, stays sent through a wait
+def never_again(tag, marker, g, legacy):
+    check(f"{tag}: setup: the item waits, no step of his is open", is_waiting(g) and his_open(g) == [], (meta_of(g), steps_of(g)))
+    check(f"{tag}: the step stays sent", sent(g) == S1 or (legacy and sent(g) is None), meta_of(g))
+    wake_all()
+    check(f"{tag}: the wait ends", not is_waiting(g), meta_of(g))
+    untouched(f"{tag}: after the wait the step is not asked again", g, marker, S1)
+    close(g)
+for legacy in (False, True):
+    old = ", an item with no record" if legacy else ""
+    for tag, first, then in (("withdrawn by the write that sets the wait", None, {"step": "none"}), ("replaced by the write that sets the wait", None, {"step": S3}),
+                             ("dropped by the write that sets the wait", None, {"dropped": [1]}), ("withdrawn, then held", {"step": "none"}, {}), ("replaced, then held", {"step": S3}, {})):
+        mk = f"plugin_sync:never{int(legacy)}-{len(items())}"; g_ = opened(mk)
+        if legacy: forget(g_, *RECORD)
+        if first: by_builder(g_, **first)
+        held(g_, **then)
+        never_again(tag + old, mk, g_, legacy)
+    for tag, words in (("withdrawn after the park", "none"), ("replaced after the park", S3)):
+        mk = f"plugin_sync:neverpark{int(legacy)}-{len(items())}"; g_ = opened(mk)
+        if legacy: forget(g_, *RECORD)
+        edit_meta(g_, parked_by_hand)
+        by_builder(g_, step=words)
+        check(f"{tag}{old}: setup: the line is gone and the step stays sent", ("Oliver: " + S1, "dropped") in steps_of(g_) and sent(g_) == S1, (meta_of(g_), steps_of(g_)))
+        wake_all()
+        untouched(f"{tag}{old}: the step is not asked again", g_, mk, S1)
+        close(g_)
+    mk = f"plugin_sync:neverdone{int(legacy)}"; g_ = opened(mk)
+    if legacy: forget(g_, *RECORD)
+    done(g_); held(g_)
+    never_again("answered with Done, then held" + old, mk, g_, legacy)
+# a wait that took the line keeps it on the item as the stored step: what then answers, replaces or withdraws it there makes it sent
+def held_then(tag, marker, act, sends):
+    g = opened(marker); held(g)
+    check(f"{tag}: setup: held, the step still stored, none sent", meta_of(g).get("step") == S1 and sent(g) == "", (meta_of(g), steps_of(g)))
+    act(g)
+    check(f"{tag}: the step {'counts as sent' if sends else 'still counts as not sent'}", sent(g) == (S1 if sends else ""), meta_of(g))
+    wake_all()
+    if sends: untouched(f"{tag}: after the wait it is not asked again", g, marker, S1)
+    else: asks(f"{tag}: after the wait it is asked again", g, marker, S1, [S1])
+    close(g)
+held_then("held, then Done", "plugin_sync:held-done", done, True)
+held_then("held, then a note", "plugin_sync:held-note", lambda g: note(g, "it still shows the old version"), True)
+held_then("held, then a note that names a later time", "plugin_sync:held-later", lambda g: note(g, "I'll do it next week"), False)
+held_then("held, then withdrawn", "plugin_sync:held-none", lambda g: by_builder(g, step="none"), True)
+held_then("held, then replaced", "plugin_sync:held-new", lambda g: by_builder(g, step=S3), True)
+held_then("held, then the same step set again", "plugin_sync:held-same", lambda g: by_builder(g, step=S1), False)
+# a line dropped with no wait behind it stays sent; so does an old item's first line another writer wrote; an item no route filed gets no record
+g_ = opened("plugin_sync:nowait"); edit_meta(g_, lambda m_: [m_.pop(k_, None) for k_ in ("state", "step", "phase", "waits_on")] + [m_.update(mover="home-sparrow-builder", needs=[])])
+by_builder(g_, description="- the builder looked at it")
+check("a drop with no wait: the line is gone, the item does not wait, the step stays sent", not is_waiting(g_) and ("Oliver: " + S1, "dropped") in steps_of(g_) and sent(g_) == S1, (meta_of(g_), steps_of(g_)))
+untouched("a drop with no wait: the step is not asked again", g_, "plugin_sync:nowait", S1)
+close(g_)
+g_ = opened("plugin_sync:otherwriter"); forget(g_, *RECORD)
+edit_meta(g_, lambda m_: m_["next_by"][0].__setitem__(0, "home-sparrow-builder"))
+note(g_, "I'll do it next week"); wake_all()
+check("an old item parked, first line another writer's: nothing is recorded", sent(g_) is None and his_open(g_) == [], (meta_of(g_), steps_of(g_)))
+untouched("an old item parked, first line another writer's: the step is not asked again", g_, "plugin_sync:otherwriter", S1)
+close(g_)
+g_ = opened("plugin_sync:unmarked"); forget(g_, "item_sync", *RECORD); held(g_)
+check("an item no route filed, held: its step is dropped and no route record is added", his_open(g_) == [] and "item_sync_sent" not in meta_of(g_), (meta_of(g_), steps_of(g_)))
 close(g_)
 g_, blocker = opened("plugin_sync:blocked"), opened("plugin_sync:blocker")
 by_builder(g_, wait_kind="item", after=[blocker])
@@ -719,8 +826,8 @@ for tag, answer_it in (("done", done), ("note", lambda g: note(g, "it still show
         untouched(f"{label}: the same words again ask nothing", g_, mk, A1)
         asks(f"{label}: a newer, shorter step is set", g_, mk, A0, [A0])
         close(g_)
-g_ = opened("plugin_sync:oldpark"); forget(g_, *RECORD); note(g_, "I'll do it next week"); wake_all()
-untouched("an item with no record: the step a park dropped, the one it was filed with, is not asked again after the wait", g_, "plugin_sync:oldpark", S1)
+g_ = opened("plugin_sync:oldpark"); note(g_, "I'll do it next week"); wake_all(); forget(g_, *RECORD)
+untouched("an item with no record whose filing line a wait had dropped already: it cannot be told from any other drop, so the step is not asked again", g_, "plugin_sync:oldpark", S1)
 asks("...a newer step is", g_, "plugin_sync:oldpark", S2, [S2])
 close(g_)
 

@@ -420,6 +420,8 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
                     if said["done"]:        # "ran it": his step is ticked as a Done ticks it (every open line of his), the then-mover is told
                         _handover._check_his_step(meta, rec["step"], now, by=who, member=member)
                         rec["applied"] = "The server read the note as done and ticked his step: carry on as after a Done."
+            if not until:
+                _hs.route_settled(meta, rec["step"])      # an answer to a step a wait had taken off his list: a script's route does not ask it again
             _holders._state_end(meta, "your-step")
             meta.pop("draft", None)         # the step is done: the text he was to post is posted
             meta.pop("mover", None); meta.pop("then", None)

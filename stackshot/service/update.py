@@ -1495,6 +1495,8 @@ def update_unlocked(
     work_note += hold_note + h.state_apply(meta, str(item.get("status") or ""), state_st, state_given, state_touched, step_withdrawn)   # the state last: it reads the item as every gate above left it
     if route_record is not None:
         _hs.route_writes(meta, route_record["own"], route_record["sent"], "step" in state_given)      # before the save settles his step: the line the server kept for the step before is not reworded away
+    elif step_withdrawn or state_given.get("step"):
+        _hs.route_replaced(meta, str(meta.get("owner") or ""), state_given.get("step") or "", str((item_was.get("metadata") or {}).get("step") or ""))      # before the save drops lines: a step a session replaced or withdrew is not one a wait dropped
     desc_note = ""
     mover_named = "mover" in model_set or "mover" in model_drop or filing_only or _writes.reformat()      # a write that names the mover, or only files (rename, priority, re-bullet): the server flips nothing for it
     if item.get("status") == "open":      # the state checks, on the item as this write leaves it (they refuse, or mark, before anything is saved)

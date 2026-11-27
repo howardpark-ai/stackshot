@@ -220,9 +220,10 @@ def _itemsync_record(meta: dict[str, Any], checklist: list[dict[str, Any]]) -> t
     """(the route's own step, the step it last sent) of an item, "" for what is not known: metadata.item_sync_step and item_sync_sent. An item filed before those records holds neither, and its first
     checklist step, the one line its create wrote, is read instead. Open, his, written under the item's creator and reading as metadata.step: the route asked it, so it is its own step and the last
     sent. Open, his, written under the creator, the only step there ever was, and the item has no step (a filing cut short before its state): its own step, not yet sent. No longer open: the step last sent. Any
-    other open first line cannot be told from a session's, so nothing is read from it."""
+    other open first line cannot be told from a session's, so nothing is read from it. A stored empty item_sync_sent is read as it stands: a wait dropped the route's line before he answered
+    (owner_steps.route_wait_dropped)."""
     own, sent = _states.clean(meta.get(_hs.ROUTE_KEY)), _states.clean(meta.get(_hs.SENT_KEY))
-    if own or sent or not checklist:
+    if _hs.ROUTE_KEY in meta or _hs.SENT_KEY in meta or not checklist:      # SENT_KEY stored empty: a wait dropped the route's line, and no step counts as sent
         return own, sent
     first = checklist[0]
     text = _steps.without_owner(_steps.first_line(first["text"]))
