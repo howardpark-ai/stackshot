@@ -1040,6 +1040,7 @@ PROGRAMS = {
     "frontdoor-token": ("stackshot.frontdoor.boardtoken", "copy the board's machine token into the front door's token file, after a new token (docs/front-door.md)"),
     "publish": ("stackshot.web.publish", "the stackshot publisher"),
     "standby-copy": ("stackshot.tools.standby_copy", "one consistent copy of the server's data for a standby, and `standby-copy --verify DIR` to check a received one (docs/standby-copy.md)"),
+    "standby-push": ("stackshot.tools.standby_push", "push one consistent copy of the server's data to a standby over ssh, on the settings of [standby_copy] (docs/standby-copy.md)"),
     "render": ("stackshot.web.render", "the board's text renderer"),
 }
 

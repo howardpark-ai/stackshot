@@ -42,6 +42,7 @@ NOT get enabled there, because each writes or acts outward:
 |---|---|
 | `stackshot-puller.service` | fetches this machine's notices and messages from the server and delivers them to sessions |
 | `stackshot-audit.service` and `stackshot-audit.timer` | the daily board audit: runs a model and writes items |
+| `stackshot-standby-push.service` and `stackshot-standby-push.timer` | pushes a copy of the server's data to another box over ssh (installed only with `[standby_copy] push_to` set, which belongs on the server box; `standby-copy` refuses on a standby) |
 | `stackshot-portal-sync.service` and the drop-in `stackshot.service.d/portal-sync.conf` | re-syncs the MCP portal's copy of the tool list (an outward write) |
 | `stackshot-minute.service` | runs the minute set's runner, which writes the board; `./install.sh units` installs it only with `[runner] process` at `"unit"` (the default) and not on a standby, and on a box that became a standby it stops, disables and removes the unit an earlier run installed (a running process reads the standby switch only at its start and would go on writing the board); `stackshot minute` exits 4 on a standby when it is started |
 | `stackshot-reload.path` and `stackshot-reload.service` | reload on a config change; the standby's config is a copy, and nothing there needs a reload |
@@ -52,7 +53,7 @@ Converting a box that already ran the minute unit (`[runner] process = "unit"`, 
 
 ## Taking the copy
 
-`stackshot standby-copy`, run on the live server box, writes one consistent copy of the state dir, the board store and the settings folder, and `stackshot standby-copy --verify DIR` checks what arrived ([standby-copy.md](standby-copy.md)).
+`stackshot standby-copy`, run on the live server box, writes one consistent copy of the state dir, the board store and the settings folder, and `stackshot standby-copy --verify DIR` checks what arrived; `stackshot standby-push` sends it to the standby over ssh on a timer ([standby-copy.md](standby-copy.md)).
 
 ## What the copy job must touch
 

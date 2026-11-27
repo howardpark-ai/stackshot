@@ -1,6 +1,6 @@
 # The standby-copy command
 
-What this page covers: `stackshot standby-copy`, one consistent copy of a running server's data for a [standby](read-only-standby.md): where it runs, what it locks, what it copies and leaves out, the manifest, and `--verify` on the receiving side. Back to the [README](../README.md).
+What this page covers: `stackshot standby-copy`, one consistent copy of a running server's data for a [standby](read-only-standby.md): where it runs, what it locks, what it copies and leaves out, the manifest, `--verify` on the receiving side, and [pushing the copy to a standby](#pushing-the-copy-to-a-standby) with `stackshot standby-push`. Back to the [README](../README.md).
 
 ```
 stackshot standby-copy [--out DIR] [--extra DIR]... [--lock-timeout SECONDS] [--max-hold SECONDS] [--output-timeout SECONDS]
@@ -90,3 +90,40 @@ Each of the three time limits is a finite number of seconds above 0; anything el
 The staging directory, and the half-made tree beside the target of `--out`, are removed on every one of these ways out. A run that is killed outright (`SIGKILL`, the out-of-memory killer) leaves its staging directory until the next run removes it, and the half-made tree of `--out` too, settings files included. The next run removes them: the staging directories in the runtime directory and, with `--out`, the `.<name>.standby-copy-partial-<8 characters>` directories beside its target. It removes only a directory with such a name that its own user owns, that is mode 0700, that no process holds, and that has nothing at its top but `state`, `store`, `settings`, `extra` and `manifest.json` (an empty one only once it is ten minutes old). Anything else stays. One left beside a target that no later run writes next to stays too, until it is removed by hand.
 
 The staging directory holds the whole copy, so the runtime directory needs room for it: it is usually held in memory and sized as a share of it.
+
+## Pushing the copy to a standby
+
+```
+stackshot standby-push [--lock-timeout SECONDS] [--max-hold SECONDS] [--output-timeout SECONDS] [--extra DIR]...
+```
+
+`stackshot standby-push` runs on the server box. It starts `stackshot standby-copy` (the same python and package, standard output piped) and, as a second process, `ssh` that reads the pipe, so the stream goes to the standby box as it is made and never lands on disk here. ssh runs no remote command: the receiver on the standby box is the forced command of the key, which takes the stream on its standard input. The four flags are handed to `standby-copy` as they are.
+
+The settings are in `[standby_copy]`:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `push_to` | `""` | `user@standby-host`, where the stream goes. Empty: the command refuses |
+| `push_key` | `""` | the private key file; ssh offers this key and no other |
+| `push_known_hosts` | `""` | a known_hosts file; the standby's host key has to be in it, and no other known_hosts file is read |
+| `push_timeout` | `300` | seconds the whole push may take, the copy and ssh together; at most `540` (the unit's start timeout is 10 minutes, and a larger value is refused) |
+
+`push_to` takes `user@host`. To use another port, write it in the URI form `ssh://user@host:port`.
+
+ssh is started with `-F /dev/null`, so no ssh config file is read (neither the user's `~/.ssh/config` nor a system one), then `-i <push_key> -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<push_known_hosts> -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ControlMaster=no -o ControlPath=none <push_to>`, so it never asks a question, never trusts an unknown host key and never shares a connection. The key's own `authorized_keys` line on the standby box should restrict it to the receiver (`command="..."` and the `restrict` option).
+
+**Exit codes.** 0 only when both the copy and ssh exit 0. 1 when either does not (one line on standard error says which, and its exit code; the copy's own line and ssh's own messages are passed through), when `push_timeout` runs out, or when an earlier push is still running. 2 for a usage error. 3, with one line and nothing run, when `push_to` is empty, `push_key` or `push_known_hosts` is not set or is not a file, `push_to` is not a plain `user@host`, or `push_timeout` is not a finite number above 0 or is above 540 (the message says so and names the unit's 10-minute start timeout). A ssh or copy program that cannot be started gives 1 with one line, `failed: ssh could not be started: <reason>` or `failed: the copy could not be started: <reason>`, and no traceback. 128 + n when the command is stopped by signal n (SIGTERM, SIGINT, SIGHUP or SIGQUIT). Standard output stays empty, and the stream is never printed.
+
+**Stopping.** The copy and ssh share a process group of their own. When `push_timeout` runs out, or the command gets SIGTERM, SIGINT, SIGHUP or SIGQUIT, both get SIGTERM and, 5 seconds later, SIGKILL. When ssh exits non-zero, the copy is stopped at once, since nothing reads its output. When ssh exits 0, the copy gets 5 seconds to end by itself (it may still be cleaning up its staging folder); if it is still running after that, it is stopped and the run fails with the line "ssh ended before the copy did". When the copy fails, ssh sends what it was given and ends, so the receiver sees a cut stream (which has no whole `manifest.json`, and fails `--verify`); the receiver is the one that refuses it.
+
+**One at a time.** A flock on `standby-push.lock` in the state dir (`[paths] state`) keeps two pushes apart: a push that finds an earlier one live exits 1 with one line, and writes no state file.
+
+**The state file.** Every push that ran writes `standby-push.json` in the state dir, a temporary file in the same directory renamed over the old one (mode 0600), so a reader sees a whole file:
+
+```
+{"at": 1700000000, "ok": true, "seconds": 41.2, "error": "", "last_ok_at": 1700000000}
+```
+
+`at` is when the run ended, in epoch seconds; `ok` is whether both sides exited 0; `seconds` is how long the run took; `error` is the one line printed, or empty; `last_ok_at` is the `at` of the last run that was ok, kept from the file before it (0 before the first). A refused push and one that found an earlier run live write nothing.
+
+**The timer.** `./install.sh units` installs `stackshot-standby-push.service` and `stackshot-standby-push.timer` only when `push_to` is not empty; the timer runs the command 2 minutes after the machine boots (at once when the timer is started later than that), then 5 minutes after each run starts, and the install enables and starts the timer, never the service (a start is a push). With `push_to` empty again, the next `./install.sh units` disables, stops and removes an installed pair, and clears any failed state of the service. To tune the copy, add the flags to the `ExecStart` line with a drop-in; the drop-in needs an empty `ExecStart=` line before the new one, since a oneshot unit would otherwise run both lines.
