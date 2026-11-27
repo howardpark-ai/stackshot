@@ -471,11 +471,7 @@ def shown_full(g): return _gh.shown(g)                             # an id as a 
 def shown(g):                                                      # an id on the board itself: #7 ("board" crowds the UI), the rest as shown_full
     t = shown_full(g); return t[len("board"):] if t.startswith("board#") else t
 def rid_full(r): return shown_full(r["gid"])                       # board.md and the brief, which sessions read and quote: board#N
-def _page_key(v):
-    v = str(v or "").strip().strip("/")
-    if not v: return ""
-    if v.endswith(".md"): v = v[:-3]
-    return v if "/" in v else _cfg.page_dirs()[0] + "/" + v   # items store the full page key; a bare value is legacy and means <first [pages] dir>/<slug>
+def _page_key(v): return _anc.page_key(v)                           # an item's stored project as the page key the board reads (anchors.page_key)
 def proj_key(r):
     """The PAGE the item is filed on (its plain detail link): the key every reader that needs the page reads (the board row, the keeper, the anchors, the project page's items and sub-page badge)."""
     return _page_key(_iproj.key_of(r["metadata"]))
@@ -748,7 +744,6 @@ def outcome_of(r):
     return str(m.get("outcome") or ""), str(m.get("reason") or ""), str(m.get("superseded_by") or "")
 from stackshot.anchors.anchors import KINDS as _KIND     # an anchor id's prefix → its type; the one table, shared with anchor-hub
 from stackshot.anchors import anchors as _anc   # roles.json's live flag per session (roles_live)
-from stackshot.anchors.anchors import hub_of as _hub_of   # the page a key belongs to on the board (a `hub:` line, else its top-level page)
 _KIND_ORDER = ["Slack", "Notion", "Gmail", "Drive", "GitHub", "Link"]
 # The board as an installed app (Chrome "Install page as app", display standalone). The manifest (/manifest.webmanifest,
 # served by server.py) is fetched with credentials: Chrome fetches a manifest without cookies unless the link says
