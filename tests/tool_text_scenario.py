@@ -81,7 +81,7 @@ def part_gates():
     check("get's labels are the fixed prefixes of the lines it returns (mover:, then:, state:, next:, needs: …), read from every branch of the helpers", want_get <= set(lab["get"]), sorted(want_get - set(lab["get"])))
     check("the notice-only labels are not required of create, update and complete, but project: and reason: (which an item also has) still are", {"ruling:", "sender:"} <= tt.get_only_labels() and not ({"project:", "reason:"} & tt.get_only_labels()) and {"project:", "reason:"} <= set(lab["create"]) & set(lab["update"]) & set(lab["complete"]), sorted(tt.get_only_labels()))
     check("owner: is not a label (the creator is no line at all), and create, update and complete return get's lines", "owner:" not in lab["get"] and set(lab["get"]) - tt.get_only_labels() <= set(lab["create"]) and set(lab["get"]) - tt.get_only_labels() <= set(lab["update"]) and set(lab["get"]) - tt.get_only_labels() <= set(lab["complete"]), (sorted(set(lab["get"]) - set(lab["create"])),))
-    check("brief adds its own labels (mover gone:, pages owed by others:); message returns no labelled line", {"mover gone:", "waits no watcher owns:", "pages owed by others:"} <= set(lab["brief"]) and lab["message"] == [], lab["brief"])
+    check("brief adds its own labels (mover gone:, pages owed:, pages owed by others:); message returns no labelled line", {"mover gone:", "waits no watcher owns:", "pages owed by others:", "pages owed:"} <= set(lab["brief"]) and lab["message"] == [], lab["brief"])
     names_ok = tt.labels_by_tool()
     check("every output helper in HELPERS is defined (a renamed or removed one fails loudly, naming the list)", set(names_ok) == set(tt.HELPERS) and names_ok["get"] == lab["get"], None)
     tools_ast = set()
