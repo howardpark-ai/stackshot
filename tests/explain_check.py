@@ -85,7 +85,8 @@ STATE = r"""id => { const b = document.getElementById(id), p = document.getEleme
   const a = lum(s.color), g = lum(s.backgroundColor), over = [];
   if (!p.hidden) for (const [x, y] of [[r.left + 3, r.top + 3], [r.right - 3, r.top + 3], [r.left + r.width / 2, r.top + r.height / 2], [r.left + 3, r.bottom - 3], [r.right - 3, r.bottom - 3]]) {
     const e = document.elementFromPoint(x, y); if (e !== p) over.push(Math.round(x) + ',' + Math.round(y) + ' ' + (e ? e.tagName + '.' + e.className : 'nothing')); }
-  return {open: !p.hidden && s.display !== 'none', expanded: b.getAttribute('aria-expanded'), left: r.left, right: r.right, top: r.top, bottom: r.bottom, vw: document.documentElement.clientWidth, vh: innerHeight,
+  return {at: [br.top, br.bottom, scrollY, document.documentElement.scrollHeight, visualViewport.offsetTop, visualViewport.height, visualViewport.scale, p.style.top, p.offsetParent && p.offsetParent.className],
+    open: !p.hidden && s.display !== 'none', expanded: b.getAttribute('aria-expanded'), left: r.left, right: r.right, top: r.top, bottom: r.bottom, vw: document.documentElement.clientWidth, vh: innerHeight,
     sw: document.documentElement.scrollWidth, over: over, contrast: (Math.max(a, g) + 0.05) / (Math.min(a, g) + 0.05), ground: s.backgroundColor, words: p.textContent.length, bw: br.width, bh: br.height,
     path: [br.left + br.width / 2, r.top + r.height / 2]}; }"""
 # every "?" a reader can see, by id
@@ -129,9 +130,11 @@ with sync_playwright() as p:
             check(f"{tag}: at least {WANT[name]} explainers show", len(ids) >= WANT[name], ids)
             c = pg.evaluate(COVERS); check(f"{tag}: no ? lies over words or a control", c["things"] > 5 and not c["bad"], c)
             for n, i in enumerate(ids):
-                pg.evaluate(CENTER, i); pg.tap(f"#{i}"); pg.wait_for_timeout(30); s = pg.evaluate(STATE, i)
-                check(f"{tag}: {i}: a tap opens it, whole inside the screen, nothing over it, no sideways scroll",
-                      s["open"] and s["expanded"] == "true" and s["words"] > 0 and inside(s) and not s["over"] and s["sw"] <= 360, s)
+                pg.evaluate(CENTER, i); before = pg.evaluate(STATE, i)["at"]; pg.tap(f"#{i}"); pg.wait_for_timeout(30); s = pg.evaluate(STATE, i)
+                ok = s["open"] and s["expanded"] == "true" and s["words"] > 0 and inside(s) and not s["over"] and s["sw"] <= 360
+                check(f"{tag}: {i}: a tap opens it, whole inside the screen, nothing over it, no sideways scroll", ok, {"before": before, **s})
+                if not ok and SHOTS:
+                    os.makedirs(SHOTS, exist_ok=True); pg.screenshot(path=os.path.join(SHOTS, f"fail-{name}-{i}-{scheme}.png"))
                 check(f"{tag}: {i}: a 44 px target, and words that contrast with their ground", s["bw"] >= 43.5 and s["bh"] >= 43.5 and s["contrast"] >= 4.5, s)
                 grounds.setdefault(scheme, set()).add(s["ground"])
                 if n == 0 and SHOTS:
