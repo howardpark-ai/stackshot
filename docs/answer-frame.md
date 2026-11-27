@@ -34,7 +34,7 @@ The page is the answer block alone, as the home page's Your move draws it: the q
 | `sending` | A send is under way. | The form, locked. |
 | `answered` | The question was answered, here or on the board. | The recorded answer: the question, who answered and when, the card and the note. Nothing can be pressed. |
 | `changed` | The question is not the one this frame drew. | One line and a link to the item. Loading the frame again shows the new question. |
-| `closed` | The item is not on the person's move, has nothing to pick, or does not exist. | One line and a link to the item. |
+| `closed` | The item is not on the person's move, has nothing to pick, or does not exist. While it is on the person's move for something else (a step, say), an older answer is not shown: the frame is `closed`, not `answered`. | One line and a link to the item. |
 | `signed_out` | The request carries no board session. | A link that opens the item on the board in a new tab, and nothing of the item. An item that does not exist gives the same page. |
 
 `changed` is a reading against the question first drawn, so only a frame that is already showing reaches it. A first load shows the question as it stands.

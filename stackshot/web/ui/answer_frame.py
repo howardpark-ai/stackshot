@@ -6,7 +6,7 @@ the stylesheet are the board's own (ui/render.py); this module adds the page aro
     sending      (the script's own, never drawn by the server) a send is under way
     answered     the recorded answer, nothing to press
     changed      the question is no longer the one this frame drew: a board link
-    closed       not on his move, or nothing to pick: a line and a board link
+    closed       not on his move, or nothing to pick: a line and a board link (on his move for a step, never an older answer)
     signed_out   no board session: a board link and no text of the item
 
 The route (web/routes/answer_frame.py) decides who is asking and sends the headers; nothing here writes."""
@@ -45,6 +45,7 @@ def state_of(board: Any, r: dict[str, Any], token: str, was: str, since: float) 
         ask = board.home_ask(r, token)
         if ask and (_r.open_options(r) or _r.yesno_options(r)):      # with cards to pick from
             return ("changed", None) if was and _r.question_ref(r) != was else ("open", ask)
+        return "closed", None      # on his move for something else (a step, or a question with no cards): no older answer is his to see
     a = last_answer(r)
     if was:
         return ("answered", a) if a and _when_ts(a) > since else ("closed", None)

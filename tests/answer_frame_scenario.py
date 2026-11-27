@@ -359,6 +359,25 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and all(x not in bb for x in ("<input", "<button", "<textarea", "<form", "<a ")) and tok("a6") not in rr.text and pp.at["data-ref"] == "", bb[:700])
     check("…the same on a first load", body_of(frame("a6")[0].text) == bb and frame("a6")[1].at["data-state"] == "answered")
 
+    # ---- 10b. on his move for a step: never an older answer
+    STEP = "run the second line `true`"
+    item("a", 40, state="your-step", step=STEP, answers=[{"ts": now - 3 * 86400, "kind": "decision", "choice": "Ship", "via": "board", "ask": ASK}])   # a days-old answer; the item now on his move for a step
+    rr, pp = frame("a40"); bb = body_of(rr.text)
+    check("a step on his move after an older answer, first load: closed, not answered", pp.at["data-state"] == "closed" and "Ship it now" not in rr.text and "zebraword" not in rr.text and tok("a40") not in rr.text
+          and bb == f'<p class="afline">{i18n.EN["frame.closed"]}</p><p class="aflink"><a href="/items/a40" target="_blank" rel="noopener">{i18n.EN["frame.open_board"]}</a></p>', (pp.at["data-state"], bb[:300]))
+    rr, pp = frame("a40", f"?was=&since={now - 60}")
+    check("…and a reload with no reference and a time: still closed", pp.at["data-state"] == "closed" and "Ship it now" not in rr.text, pp.at)
+    item("a", 41, needs=["decision"], ask=ASK, options=OPTS)
+    ref41, t41 = first("a41")
+    check("an open question on his move still draws its cards on the first load", ref41 != "" and frame("a41")[1].at["data-state"] == "open")
+    item("a", 41, state="your-step", step=STEP, answers=[{"ts": time.time() + 60, "kind": "decision", "choice": "Ship", "via": "board", "ask": ASK}])   # answered, then the item moved to a step of his
+    rr, pp, bb = again("a41", ref41, t41)
+    check("an answered question followed by a newer step, on a later poll: closed, not answered", pp.at["data-state"] == "closed" and "Ship it now" not in rr.text and "zebraword" not in rr.text and tok("a41") not in rr.text, (pp.at, bb[:300]))
+    check("…and on a first load", frame("a41")[1].at["data-state"] == "closed" and "Ship it now" not in frame("a41")[0].text)
+    item("a", 42, status="doing", answers=[{"ts": now - 60, "kind": "decision", "choice": "Ship", "via": "board", "ask": ASK}])   # just answered, the item off his move
+    rr, pp = frame("a42"); bb = body_of(rr.text)
+    check("a just-given answer, the item off his move: answered, with the recorded answer", pp.at["data-state"] == "answered" and '<span class="alab">Ship</span>' in bb and "zebraword" in bb, (pp.at, bb[:300]))
+
     # ---- 11. answering: the board's one answer path, its gates unchanged
     ref5, t5 = first("a5")
     base = {"token": tok("a5"), "choice": "B · Ship", "text": "a note from the frame", "ref": ref5, "act": "answer", "back": ""}
