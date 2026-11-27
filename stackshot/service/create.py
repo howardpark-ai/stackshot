@@ -221,6 +221,7 @@ def create_item(
         if pfx_:
             subject = pfx_ + subject.lstrip()
             _calls.fixed("subject-prefix", f"the scope prefix {pfx_.strip()} was put before the subject, as the project's scope names it", fields=["subject"], stored=subject)
+    subject_sent = subject       # all its words, for the title note
     subject = _fg.fix_long_subject(subject)       # a subject over the limit is cut at its last word that fits (a pure form fix; the reply says so)
     for f_ in _fg.subject_faults(subject):
         fc.add(f_, text=True)
@@ -426,7 +427,7 @@ def create_item(
     title_note = ""
     if goal_judged:      # a title that does not read as work: a note, never a refusal; the writes the goal gate judges
         try:
-            title_note = _fg.subject_form_note(subject)
+            title_note = _fg.subject_form_note(subject, subject_sent)
         except Exception as e:  # noqa: BLE001  — the item is filed; a note that fails is a stderr line, never a failed write
             print(f"create: {gid} title note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     if local:
