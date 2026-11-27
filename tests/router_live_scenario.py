@@ -115,6 +115,7 @@ from stackshot.web import page_debts as _web_page_debts
 from stackshot.service import fleet_events as fleetev
 from stackshot.service import page_debt as pdebt_svc
 from stackshot.service import handoff as handoff_svc
+from stackshot.service import audit_ticks as _hold_ticks; _hold_ticks._move_hold = lambda *a, **k: (lambda gid, mover: "")      # no mover in this suite runs a subagent: the hold every pass asks before it changes a mover (service/move_hold.py) is tests/move_hold_scenario.py's
 from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import anchors as _wt_anchors

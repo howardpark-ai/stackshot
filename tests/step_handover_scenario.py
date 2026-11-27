@@ -90,7 +90,11 @@ from stackshot.service import telling
 from stackshot.service import writes
 OWNER = _core_instance.OWNER
 IDS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+THREADS = []      # the notices a write started: each one's thread saves the push's result on its item
+def drain():
+    while THREADS: THREADS.pop(0).join(30)
 def fixtures():
+    drain()      # a thread of the last case that saved after the rewrite would put its old item back
     for f in (T / "store/a").glob("*.json"): f.unlink()
     item(1, "home-one: merge PR #11\nhome-two: verify the pages")                                       # the two-session item: one's step ticks, two is next
     item(2, "home-one: merge PR #11\nhome-gone: verify the pages")                                      # the next session has no pane at all
@@ -125,15 +129,12 @@ checks_svc.pr_merged = fake_pr_merged
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-THREADS = []
 _real_tell = telling.tell_woken
 def _tell(gid, owner, note, tag="wake", result=None):
     th = _real_tell(gid, owner, note, tag, result)
     if th: THREADS.append(th)
     return th
 telling.tell_woken = _tell
-def drain():
-    while THREADS: THREADS.pop(0).join(30)
 def pushes(): drain(); return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_for(gid, to=None): return [p for p in pushes() if p[1].startswith(f"[stackshot] {gid}") and (to is None or p[0] == U.get(to, to))]
 def mover_of(i): return _fleet_sessions_registry._session_label(telling.holder({**rd(i), "gid": f"a{i}"}))

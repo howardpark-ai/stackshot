@@ -96,7 +96,7 @@ from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.service import mover_steps as _mover_steps
 from stackshot.service import owner_words as _owner_words
 from stackshot.service import runner as runner_svc
-from stackshot.service import agent_state as _agent_state_store, watching as _watching
+from stackshot.service import agent_state as _agent_state_store, watching as _watching, move_hold as _move_hold_store
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -942,6 +942,12 @@ def probe_anchors_unread():
 rule("20 anchors that cannot be read stop nothing: a subagent is still tied by the item's own id", probe_anchors_unread, NO_HOLD)
 rule("20 a mover with a pane that the snapshot cannot give keeps the item: nothing says it is not at work on it", stays(UNREAD, state=""), [(audit_ticks_svc, "_mover_subagents", lambda *a, **k: [])])
 rule("20 a read of the mover's state that raises keeps the item too", stays(UNREAD, state="boom"), [(audit_ticks_svc, "_mover_subagents", lambda *a, **k: [])])
+def probe_hold_kept():
+    _move_hold_store.path().unlink(missing_ok=True)
+    held = stays(UNREAD, state="")()
+    rec = _move_hold_store.load()["items"].get("a2") or {}
+    return held and rec.get("mover") == "home-peer" and rec.get("kind") == "unread" and rec.get("since") == now0
+check("20 …and the balancer's hold is recorded for the report of one that lasts", probe_hold_kept() is True, (probe_hold_kept(), _move_hold_store.load()))
 REAL_HOLD = audit_ticks_svc._move_hold
 def probe_no_pane():
     at_work(state=""); dead["home-peer"] = "a retired session, its pane gone"

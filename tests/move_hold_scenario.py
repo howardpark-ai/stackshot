@@ -241,6 +241,11 @@ both("the step hand-over after a proof's tick", step_item, hand(True),
      and len(to_("home-peer")) == 1 and "stays with you" in to_("home-peer")[0][2] and not to_("team-back"), lambda got: got["action"] == "moved" and mover_of(1) == "team-back")
 wipe(); step_item(); push(on(1)); got = hand(False)()
 check("3 …a step a session marked itself is its own write: handed on whatever runs", got["action"] == "moved" and mover_of(1) == "team-back", got)
+answer_with(HAND)
+for label, setup, run in (("the cold call's answer", cold_item, cold), ("the end of a wait", lambda: put(1, mover="home-main", state="parked", needs=["home-main"], wait_kind="time", wake="2026-01-02"), fire),
+                          ("the step hand-over", step_item, hand(True))):
+    wipe(); setup(); run(); rec = mhold.load()["items"].get("a1") or {}; got = mhold.report(time.time() + H + MIN)
+    check(f"3 {label} held for unreadable subagents is tried once, so the report reads the item itself and tells it after the hour", rec.get("once") is True and got == ["a1"], (rec, got))
 
 # ================================================================ 4. a hold that goes on is told
 T0 = now0 - 40 * H
@@ -285,6 +290,15 @@ got = mhold.report(T0 + H)
 check("4 a hold no pass has asked about for half an hour is over: nothing is said and the record goes", got == [] and mhold.load()["items"] == {} and not history(1), (got, mhold.load()))
 wipe(); put(1); mhold.checker(T0)("a1", "home-peer"); mhold.checker(T0 + H)("a1", "home-peer")
 check("4 …and a pass that asks again after such a gap starts a new clock", mhold.load()["items"]["a1"]["since"] == T0 + H, mhold.load())
+wipe(); put(1); mhold.checker(T0)("a1", "home-peer"); mhold.checker(T0 + 10 * MIN)("a1", "team-aux")
+rec = mhold.load()["items"]["a1"]
+check("4 a hold by another mover starts its own clock", rec["mover"] == "team-aux" and rec["since"] == T0 + 10 * MIN, rec)
+wipe(); put(1); stretch(T0, T0 + H); at = T0 + H + MIN
+push(agent("fix the flaky test"), written=at - 30); mhold.checker(at)("a1", "home-peer")
+rec = mhold.load()["items"]["a1"]
+check("4 a hold whose reason changes starts the new reason's own clock, and keeps when it was last told", rec["kind"] == "untied" and rec["since"] == at and rec["told"] == T0 + H, rec)
+got = stretch(at + MIN, at + 2 * H + MIN, subagent=agent("fix the flaky test"))
+check("4 …so it is not told a second time within the day", got == [] and len(history(1)) == 1 and len(summaries()) == 1, (got, history(1), summaries()))
 for label, change in (("closed", lambda: (T / "store/a/1.json").write_text(json.dumps({**rd(1), "status": "completed"}))), ("handed on", lambda: put(1, mover="team-aux"))):
     wipe(); put(1); mhold.checker(T0, once=True)("a1", "home-peer"); change()
     got = mhold.report(T0 + H)
@@ -347,6 +361,8 @@ got = unwritten("team-back", "team-aux", "home-main")
 check("5 …and the pick stands when neither can", got[0] == "team-back", got)
 wipe(); listed("team-back"); idle(); put(1, state="parked", mover="team-back", needs=["team-back"], wait_kind="time", wake="2026-01-02"); watching_svc.watch_fire("a1", "time", time.time(), {})
 check("5 …and a listed agent somebody wrote as the one to pick it up keeps it", mover_of(1) == "team-back", mt(1))
+wipe(); listed("team-back"); idle(); put(1, state="parked", mover="team-back", needs=["external"], wait_kind="time", wake="2026-01-02"); watching_svc.watch_fire("a1", "time", time.time(), {})
+check("5 …also when it is written as the mover only, with no need that names it", mover_of(1) == "team-back", mt(1))
 wipe(); listed("team-back"); idle(); push(agent("fix the flaky test"), who="team-back")
 put(1, mover="", state="parked", wait_kind="time", wake="2026-01-02", next="do the thing"); watching_svc.watch_fire("a1", "time", time.time(), {})
 check("5 …nor is the item passed from a pick whose subagent may be on it", mover_of(1) == "team-back" and any("does not pass to team-aux" in h for h in history(1)), (mover_of(1), history(1)))

@@ -29,7 +29,7 @@ surface the callers and the suites use and adds a flock on `<state>/<name>.lock`
   19 order         a recorder over the passes that take more than one lock: wake before item, never item before wake, no two locks in both orders
   20 no send       the wake pass, a release after a close and an anchor release send nothing, push nothing, start no process and open no connection while the item lock is held
   21 strict        off by default in production, on by the environment variable (1, true, yes, on), exported on by tests/run-suite; LockUnavailable and LockOrderError are no OSError
-  22 order         with strict on a lock is refused when one that comes after it is held (wake, item, answers, then for-you, landed, handback-held, ledger, stall), and a refusal leaves nothing held; strict off refuses nothing
+  22 order         with strict on a lock is refused when one that comes after it is held (wake, item, answers, then for-you, landed, handback-held, ledger, stall, move-hold), and a refusal leaves nothing held; strict off refuses nothing
   23 the lock      the review points of the lock: no descriptor opened by a thread that only waits on the front lock, the constructor publishes last, an open's retries do not sleep for a try that may not wait or past a
                    deadline, the front lock is given back on a failed close, a non-OSError and an interrupt, the descriptor is never inheritable, no watchdog outlives its wait
   24 the sends     each send that moved out from under a lock (the wake pass, a release after a close, his answer that drops an item, the escalation pass, the hand-over, a proof, the proof pass, release.sh's call) is made with
@@ -797,13 +797,13 @@ try:
         except xlock.LockOrderError: return "order"
         except Exception as e: return repr(e)
     CASES = (("wake", "item", "ok"), ("item", "wake", "order"), ("item", "answers", "ok"), ("answers", "item", "order"), ("answers", "for-you", "ok"), ("for-you", "answers", "order"),
-             ("answers", "landed", "ok"), ("answers", "handback-held", "ok"), ("item", "ledger", "ok"), ("ledger", "item", "order"), ("item", "stall", "ok"), ("stall", "item", "order"),
+             ("answers", "landed", "ok"), ("answers", "handback-held", "ok"), ("item", "ledger", "ok"), ("ledger", "item", "order"), ("item", "stall", "ok"), ("stall", "item", "order"), ("item", "move-hold", "ok"), ("move-hold", "item", "order"),
              ("landed", "for-you", "ok"), ("wake", "answers", "ok"), ("answers", "wake", "order"), ("machine-anchors", "item", "ok"), ("item", "machine-anchors", "ok"), ("item", "item", "ok"))
     xlock.strict = True
     try:
         res = {(a, b): nest(a, b) for a, b, _ in CASES}
         bad = {k: v for (a, b, want) in CASES if (v := res[(a, b)]) != want for k in [(a, b)]}
-        check("22 order: with strict on a lock is refused (LockOrderError) when a lock that comes after it is held: wake, item, answers, then for-you, landed, handback-held, ledger, stall; machine-anchors is outside the order", not bad, bad)
+        check("22 order: with strict on a lock is refused (LockOrderError) when a lock that comes after it is held: wake, item, answers, then for-you, landed, handback-held, ledger, stall, move-hold; machine-anchors is outside the order", not bad, bad)
         check("22 order: ...and a refused lock leaves nothing held: no lock of the nine is owned by this thread, no file is locked", not lockstate() and xlock._held() == [] and all(raw_free(n) for n in LOCKS), (lockstate(), xlock._held()))
         def swapped():
             with xlock.XLock("answers"):
@@ -1028,7 +1028,7 @@ try:
         swap(proofs._steps, "view", lambda meta, keeper="": [{"text": "release PR #7 is live", "status": proofs._steps.OPEN}, {"text": "then check the page", "status": proofs._steps.OPEN}])
         swap(proofs, "proof_hits", lambda cl, opened, *a, **k: {0: True}); swap(proofs._live, "released_skip", lambda *a, **k: "")
         swap(proofs._telling, "holder", lambda it: "home-agent"); swap(proofs._telling, "tell_woken", lambda *a, **k: None)
-        swap(proofs, "handover", lambda gid, now, done, dry=False, defer=None: (seen.append(defer is sendl), None)[1])
+        swap(proofs, "handover", lambda gid, now, done, dry=False, defer=None, by_pass=False: (seen.append(defer is sendl), None)[1])
         try:
             with writes.ITEM_LOCK: row = proofs.proof_item("a1", 7, "o/r#7", "merged", set(), False, time.time(), proofs._sp.PR_MERGED, sends=sendl)
             err = None
@@ -1323,7 +1323,7 @@ try:
             swap(proofs._steps, "view", lambda meta, keeper="": [{"text": "release PR #7 is live", "status": proofs._steps.OPEN}, {"text": "then check the page", "status": proofs._steps.OPEN}])
             swap(proofs, "proof_hits", lambda cl, opened, *a, **k: {0: True}); swap(proofs._live, "released_skip", lambda *a, **k: "")
             swap(proofs._telling, "holder", lambda it: "home-agent"); swap(proofs._telling, "tell_woken", tell)
-            swap(proofs, "handover", lambda gid, now, done, dry=False, defer=None: None)
+            swap(proofs, "handover", lambda gid, now, done, dry=False, defer=None, by_pass=False: None)
             try:
                 with writes.ITEM_LOCK: row = proofs.proof_item("a1", 7, "o/r#7", "merged", set(), False, time.time(), proofs._sp.PR_MERGED, sends=sendl)
                 err = None

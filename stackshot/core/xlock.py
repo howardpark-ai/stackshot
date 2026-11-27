@@ -24,7 +24,7 @@ The lock file is opened after the front lock is taken (a thread that only waits 
 `[locks] cross_process = false` turns the flock off for the run (restart-only, config.RESTART_ONLY): every `XLock` is then its front thread lock and nothing else; so is every one on the read-only standby, which writes nothing.
 
 Order. The locks that nest are always taken in one order, so two processes never wait on each other: the wake pass (`wake`) first, then the item lock (`item`), then the pending answers (`answers`), then
-the For you list (`for-you`), the Landed list (`landed`) and the held hand-back lines (`handback-held`); the page-debt ledger (`ledger`) and the stall record (`stall`) are taken after the item lock, and the machine
+the For you list (`for-you`), the Landed list (`landed`) and the held hand-back lines (`handback-held`); the page-debt ledger (`ledger`), the stall record (`stall`) and the move-hold record (`move-hold`) are taken after the item lock, and the machine
 anchors (`machine-anchors`) alone. The anchors file (`anchors`: the anchors tool, an anchor wait, the anchor sweep and an item's re-key take it round their read, change and save) is outside the order too: it is taken after the item lock where both are held (the sweep at a close, a wait, a re-key), no path takes the item lock while holding it, and none holds it across a publish. No path takes the wake pass while it holds the item lock (the order is wake, then item; with `strict` on a lock out of order raises, and a recorder in tests/xlock_scenario.py fails on item before wake, on answers before item and on any pair taken in both orders). A new `XLock` that nests with these takes its place in that order and in docs/server-passes.md."""
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ from stackshot.core import config as _cfg
 from stackshot.core import readonly as _ro
 
 strict = os.environ.get("STACKSHOT_XLOCK_STRICT", "").strip().lower() in ("1", "true", "yes", "on")      # off unless the environment says so (tests/run-suite does): see the docstring, "Strict"
-ORDER = {"wake": 0, "item": 1, "answers": 2, "for-you": 3, "landed": 3, "handback-held": 3, "ledger": 3, "stall": 3}      # a lock may be taken while holding one that has the same number or a lower one, never a higher one; a name not listed (machine-anchors, a test's) is outside the order
+ORDER = {"wake": 0, "item": 1, "answers": 2, "for-you": 3, "landed": 3, "handback-held": 3, "ledger": 3, "stall": 3, "move-hold": 3}      # a lock may be taken while holding one that has the same number or a lower one, never a higher one; a name not listed (machine-anchors, a test's) is outside the order
 FALLBACK_LOG_EVERY = 60.0       # seconds: one stderr line per lock for the holds that fell back
 WAIT_LOG_FIRST = 30.0           # seconds a waiter waits before it says so, then every WAIT_LOG_EVERY
 WAIT_LOG_EVERY = 60.0

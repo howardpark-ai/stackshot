@@ -57,7 +57,7 @@ from stackshot import paths as _paths
 FORMAT = 1
 MANIFEST = "manifest.json"
 # every store lock of the package, in the order core/xlock.py gives them (the anchors file and the machine anchors stand outside it: nothing is taken while either is held, so they come last)
-LOCKS = ("wake", "item", "answers", "for-you", "landed", "handback-held", "ledger", "stall", "anchors", "machine-anchors")
+LOCKS = ("wake", "item", "answers", "for-you", "landed", "handback-held", "ledger", "stall", "move-hold", "anchors", "machine-anchors")
 # `anchor-daily` is not a store lock: it keeps two daily passes apart, is held for a whole pass (its reads of other boxes included) and is taken without waiting. The files the pass changes are covered by the locks above and by the passes of step 3.
 LOCKS_NOT_TAKEN = ("anchor-daily",)
 STATE_DIRS_LEFT_OUT = ("site", "tmp", "search")      # top level of the state dir: the served version files, the scratch of the atomic writes, the search index

@@ -145,6 +145,10 @@ check("8 no_handoff: …it is refused in the page's own order too, not by the bu
       S.plan({"x": waiting("bgp-old", project="projects/bgp")}, REG, derive, gone, str, general=GEN, takes=spared("bgp-main", "bgp-build"))[0]["to"] == "bgp-docs"
       and S.plan({"x": alive("bgp-old", project="projects/bgp")}, REG, derive, gone, str, general=GEN, back_of=lambda p: ["bgp-build", "bgp-docs"], takes=spared("bgp-build"))[0]["to"] == "bgp-docs")
 check("8 no_handoff: …and it still counts as a live agent of its project: an item with no session named is no orphan there", S.plan({"x": alive("", project="projects/bgp")}, REG, derive, gone, str, general=GEN, takes=spared("bgp-build", "bgp-docs")) == [])
+two = {**REG, "projects/two": {"agents": {"two-main": "the front", "two-a": "builds the code", "two-b": "builds the code"}, "back_agents": {"two-a": "builds the code", "two-b": "builds the code"}}}
+one, both = (S.pick("projects/two", two, lambda n: n == "two-main", GEN, alive=True, takes=spared(*names)) for names in (("two-a",), ("two-a", "two-b")))
+check("8 no_handoff: …the front agent is told only when every builder takes none: with one that does, though it has no pane, no notice is sent to it", one.name == both.name == "two-main" and one.told is False and one.front is True
+      and S.FRONT_NOTE in one.reason and both.told is True and S.FRONT_TOLD_LISTED in both.reason, (one, both))
 
 # ---------------------------------------------------------------- 4-7. the server half: a store, a heartbeat, a registry
 now0 = time.time()
