@@ -63,6 +63,7 @@ from stackshot.waits import watchers as _watch   # a relay's subject and the cha
 from stackshot.fleet import sessions_registry as _sr   # the permanent session id: a stored id is shown as the session's name now, and two forms of one session read as one
 from stackshot.core import ghbudget as _gb   # the hour's GitHub calls, drawn as a card in the side panel's Audit section
 from stackshot.web.ui import search as _search   # the search box every page's header draws, and its style (search.py)
+from stackshot.web.ui import brief_assets as _brief   # the item brief's style, and the panel and script the home page opens it in (brief_assets.py)
 from stackshot.web.ui import colortool as _ct   # the shared color tool's settings and script blocks (ui/colortool.py, shared/colortool.js)
 from stackshot.web import runners as _runners   # the side panel's Runners section: the last snapshot, never a build (runners.peek)
 _OWNER = _members.first().name   # whom a Next line addresses with "<owner>:"
@@ -1479,7 +1480,7 @@ e.preventDefault();set(h,v)});
 document.addEventListener('input',function(e){var t=e.target;if(coarse()&&t&&t.matches&&t.matches('.abox textarea'))grow(t)});
 window.addEventListener('resize',function(){if(coarse())[].slice.call(document.querySelectorAll('.abox textarea')).forEach(fit);else[].slice.call(document.querySelectorAll('.abox .rsz')).forEach(clamp)});
 if(MQ&&MQ.addEventListener)MQ.addEventListener('change',init);
-init();document.addEventListener('stackshot:swapped',init);window.addEventListener('pageshow',init)})();""".replace("__VH__", str(_ABOX_MAX_VH))
+init();document.addEventListener('stackshot:swapped',init);document.addEventListener('stackshot:inserted',init);window.addEventListener('pageshow',init)})();""".replace("__VH__", str(_ABOX_MAX_VH))
 # The For you list's "seen": the form is a plain POST to /for-you/seen that works without script; with script the page
 # sends it as a fetch and drops the row (or every row, for "mark all seen") without leaving the board, and the count with it. One listener on
 # the document, because the in-place update swaps the section's markup. A fetch that fails falls back to the plain form.
@@ -1499,7 +1500,7 @@ document.addEventListener('keydown',function(e){if(e.key!=='Enter'||!(e.ctrlKey|
 var t=e.target;if(!t||!t.matches||!t.matches('form.ianswer textarea,form.hanswer textarea'))return;var f=t.form;if(!f)return;
 e.preventDefault();var b=main(f);if(!b||b.disabled)return;if(f.requestSubmit)f.requestSubmit(b);else b.click()});
 function hint(){[].forEach.call(document.querySelectorAll('form.ianswer,form.hanswer'),function(f){var b=main(f);if(b&&!b.title)b.title=K})}
-hint();document.addEventListener('stackshot:swapped',hint)})();</script>"""
+hint();document.addEventListener('stackshot:swapped',hint);document.addEventListener('stackshot:inserted',hint)})();</script>"""
 _HOME_JS = r"""(function(){var T={},SK='ss-home-scroll';
 function run(){var F=[].slice.call(document.querySelectorAll('form.hanswer[data-gid]'));if(!F.length)return;if(!window.fetch){F.forEach(function(f){f.hidden=true});return}
 var need=F.map(function(f){return f.getAttribute('data-gid')}).filter(function(g,i,a){return !(g in T)&&a.indexOf(g)===i});
@@ -1600,7 +1601,7 @@ function typed(){var l=document.querySelectorAll('form.hanswer textarea,form.han
 function busy(){var a=document.activeElement,s=window.getSelection?String(window.getSelection()):'';return !!((a&&(/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)||(a.matches&&a.matches('.rsz'))))||document.querySelector('.rsz.drag')||document.querySelector('#panel[data-pbusy],#panel-menu:not([hidden])')||s||typed())}
 function draw(){var k=out?'out':down?'down':newer?'new':'';if(out&&!told){told=true;var a=B.querySelector('#conn-signin');if(a)a.setAttribute('href',location.pathname+location.search);document.dispatchEvent(new Event('stackshot:signedout'))}B.className='conn'+(k?' '+k:'');B.hidden=!k}
 function reload(){ss(KY,String(window.scrollY||0));location.reload()}
-function fallback(ts){if(ss(KF)!==String(ts)){ss(KF,String(ts));reload()}else newer=true}
+function fallback(ts){if(window.ssBrief&&ssBrief.draft()){newer=true;return}if(ss(KF)!==String(ts)){ss(KF,String(ts));reload()}else newer=true}
 function bl(d){var m=d.querySelector('meta[name="stackshot-blocks"]'),o={};if(m)String(m.content).split(' ').forEach(function(p){var i=p.indexOf('=');if(i>0)o[p.slice(0,i)]=p.slice(i+1)});return o}
 function key(a){return a.id?'#'+a.id:a.getAttribute('href')?a.tagName+'|'+a.className+'|'+a.getAttribute('href'):''}
 function swap(o,n){var x=document.importNode(n,true),f={},a=document.activeElement,k='';
@@ -1631,6 +1632,7 @@ inflight=fetch(location.pathname+location.search,{cache:'no-store',credentials:'
 if(k==='fail')fallback(ts);else if(k==='old'){tried=ts;newer=true}else if(k==='busy')newer=true;else{newer=false;ss(KF,null)}})
 .then(function(){inflight=null},function(e){inflight=null;throw e});return inflight}
 function seen(ts){if(!R||ts<=R){newer=false;ss(KF,null);return}
+document.dispatchEvent(new CustomEvent('stackshot:newer',{detail:ts}));
 if(busy()||tried===ts){newer=true;return}return update(ts)}
 function poll(){if(out)return;var t=Date.now();if(t-last<2000)return;last=t;clearTimeout(timer);document.dispatchEvent(new Event('stackshot:poll'));
 fetch('@ROOT@/render-stamp',{cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(r){if(r.status===401){out=true;throw 0}if(!r.ok||r.redirected)throw 0;return r.json()})
@@ -2783,7 +2785,7 @@ class Board:
         name = self.creator_name(r)
         val = self.sess_html(name, arrow=True) if name else f'<span class="dim">{_t("item.unknown")}</span>'
         return (f'<span title="{esc(_t("item.creator_tip"))}">{_t("item.creator")}</span>', val)
-    def item_html(self, gid, answer=None, watch=None, contact=None) -> str:
+    def item_html(self, gid, answer=None, watch=None, contact=None, parts=None) -> str:
         """An item's own page at /items/<gid>, on the item model (the layout is GitHub's: a main column beside a right-hand sidebar, one
         column under 768px). The goal as the title (the subject when it has none; the id first, muted, beside the item's GitHub issue link), then in the main column: one state line in
         words (alive · since; waiting on · watched by · until · then; done · date · outcome; the mover and the `then` are the sidebar's Mover and Then rows) on its own (the History keeps every change),
@@ -2793,7 +2795,8 @@ class Board:
         observers) sit in a closed "More details" fold below them. The History is one line per revision with its author. Rendered on request; KeyError for an unknown id.
         answer: the server's {"action", "token", "sent"} for a signed-in viewer: the answer box under the Ask (an item the owner does not move has the comment box in the same place, open).
         watch (the For you list): the server's {"action", "token", "flag", "watched", "why"} for a signed-in viewer: the Watch / Mute control in the sidebar.
-        contact: the item's contact as the server derives it (contacts._contact_label), the sidebar's second row, "Owner" (after Mover); None reads the stored one; no contact, no row."""
+        contact: the item's contact as the server derives it (contacts._contact_label), the sidebar's second row, "Owner" (after Mover); None reads the stored one; no contact, no row.
+        parts: a dict the item brief passes (ui/brief.py): it is filled with this page's own state line, ask, step, answer box, draft, wait and notice, and "" comes back, so what the brief shows to whom is what this page shows."""
         r = self.item(gid); m = r["metadata"]; e = esc
         done = r.get("status") == "completed"
         L = lambda x: self.linkify(x, r["gid"])       # session-written free text: links, and item and session mentions
@@ -2963,6 +2966,10 @@ class Board:
         dsc = f'<div class="desc md">{self.md_html(desc, r["gid"])}</div>' if desc and desc != r["subject"] else f'<p class="empty">{_t("item.none")}</p>'
         outcome_text = str(m.get("outcome_text") or "").strip() if done else ""      # how a closed item ended, in bullets, kept apart from the description (a close leaves that as it was); an open item, or a close with no outcome text, has no block
         outcome_html = fold("outcome", _t("item.outcome"), f'<div class="desc md">{self.md_html(outcome_text, r["gid"])}</div>', True, "ioutcome") if outcome_text else ""
+        if parts is not None:
+            parts.update(r=r, state=sline, ask=ask_html, pa=pa, ol=ol, step=sb_html, box="" if sb_html else (form or cform), draft=draft_html, wait=wait_html,
+                         sent=self.sent_html(answer, who_text(mod.mover) if alive else ""))
+            return ""
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow">'
                 f'<title>{e(rid(r))} · {e(title)}</title><link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main class="itempage" id="top">' + self.page_header() +
@@ -3403,7 +3410,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         css = css.replace("__D2FACE__", _D2_FACE).replace("__DOCK__", str(_PANEL_DOCK_PX)).replace("__ISPIN__", f"{_ITEM_PIN_STRIP_PX - 0.02:g}")
         css = css.replace("__FONT__", str(_cfg.get("instance", "font_stack") or "system-ui,sans-serif"))
         ts = _ui.type_scale      # the page's own rules on the five-size scale; the panel's cards, the machine cards and the Runners page keep theirs
-        return ts(css) + ts(_BTN_CSS) + ts(_ABOX_CSS) + ts(_CARDS_CSS) + _MACH_CSS + _RUN_CSS + ts(_PORDER_CSS) + ts(_search.CSS) + ts(_AUDITS_CSS) + _ui.CSS + _xp.CSS
+        return ts(css) + ts(_BTN_CSS) + ts(_ABOX_CSS) + ts(_CARDS_CSS) + _MACH_CSS + _RUN_CSS + ts(_PORDER_CSS) + ts(_search.CSS) + ts(_AUDITS_CSS) + _ui.CSS + _xp.CSS + ts(_brief.CSS)
 
     def audit_line(self):
         """HTML: the audit card, the body of the side panel's Audit section. The name row is `Audits ↗`, a link to the Audits page (/audits), with the Audit now text link at its right; under it the shortlist
@@ -4693,6 +4700,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
 </main>
 {_panel_frame(BL)}
 </div>
+{_brief.panel_html()}
 <script>{_PANEL_JS}</script>
 <script>{_PORDER_JS}</script>
 <script>{_LANG_JS}</script>
@@ -4700,6 +4708,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
 {self.sent_notes_html()}
 {_CARDS_JS}
 <script>{_HOME_JS}</script>
+<script>{_brief.JS}</script>
 <script>{_ABOX_JS}</script>
 {_SENDKEY_JS}
 {_COPY_JS}

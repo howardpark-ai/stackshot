@@ -9,6 +9,7 @@ One flat dict, `CATALOG`, of dotted key -> `str.format` template. The areas:
     item.*     the item page: its state line, checklist, ask, sidebar, folds and the History's lines (item.log.*)
     wait.*     the item page's wait block (what it waits on, who watches, the chases) and the words that describe a wait
     answer.*   the item page's answer and comment boxes
+    brief.*    the item brief: the home page's panel and the item's brief page; js.brief.* are the words its script says
     watch.*    the item page's For you control
     more.*     the item page's More details fold
     link.*     the short labels of a bare address
@@ -830,4 +831,24 @@ CATALOG: dict[str, str] = {
     "probe.f.what": "Two buttons: one runs window.open, the other sets location.href.",
     "probe.f.open": "window.open",
     "probe.f.href": "location.href",
+
+    # ------------------------------------------------------------------ the item brief (ui/brief.py, ui/brief_assets.py)
+    "brief.prev": "Previous item",
+    "brief.next": "Next item",
+    "brief.full": "Full screen",
+    "brief.detail": "Detail view",
+    "brief.close": "Close",
+    "brief.home": "‹ Home",
+    "brief.background": "Background",
+    "brief.more": "{n} more lines",
+    "brief.more_one": "1 more line",
+    "brief.past": "Past answers ({n})",
+    "js.brief.open": "item contents ›",
+    "js.brief.loading": "Loading…",
+    "js.brief.picked": "Picked: {what}",
+    "js.brief.none": "none yet",
+    "js.brief.next": "Next item ›",
+    "js.brief.all_done": "All answered.",
+    "js.brief.changed": "This item changed since you opened it.",
+    "js.brief.show_latest": "Show the latest",
 }

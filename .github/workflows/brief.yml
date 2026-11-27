@@ -1,0 +1,48 @@
+# The item brief in a browser (tests/brief_check.py; docs/board-ui.md): the panel on the home page, the bottom sheet at 390 px, Escape and Back, the drafts, a send, the live refresh and the
+# "?" tooltip. A browser shows what the scenario suites cannot, and tests.yml's suites install none.
+# DEVIATION from "every check runs in tests.yml", with its reason: this one needs a browser download, so it runs on its own and only when what it covers can have changed.
+name: brief
+on:
+  pull_request:
+    paths:
+      - "stackshot/**"
+      - "stackshot.example.toml"
+      - "tests/brief_check.py"
+      - "tests/_*.py"
+      - "tests/run-suite"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/brief.yml"
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read        # the checkout
+    steps:
+      - name: scratch goes to the runner's temp folder
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"   # as in tests.yml
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - name: the browser (Chromium, at the locked playwright version)
+        run: |
+          export UV_PROJECT_ENVIRONMENT="$HOME/.cache/stackshot/test-venv"   # the environment tests/run-suite uses
+          uv run --locked --only-group tests playwright install --with-deps chromium
+      - name: the check
+        env:
+          BRIEF_SHOTS: ${{ runner.temp }}/brief-shots
+        run: tests/run-suite brief_check
+      - name: the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brief-screenshots
+          path: ${{ runner.temp }}/brief-shots
+          if-no-files-found: ignore
+          retention-days: 7
