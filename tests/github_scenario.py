@@ -179,7 +179,7 @@ def part_repo_id():
     (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project",
                                                                                     "session": "home-here", "status": "active", "board": [], "board_open": 0}}}))
     (T / "store/next-id").write_text("1"); (T / "store/anchors.json").write_text("{}")
-    (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
+    (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n"); import subprocess as _sp; [_sp.run(["git", "-C", f"{tmp}/brain", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True) for a in (("init", "-q"), ("add", "-A"), ("commit", "-q", "-m", "pages"))]      # the pages are a git checkout, as an instance's are: a debt settles on a read of it that works
     git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
     git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
     sys.path.insert(0, STACK); logging.disable(logging.INFO)
@@ -827,7 +827,7 @@ item("a", 4, status="completed", outcome="dropped", reason="not needed")
 item("a", 5, hold=True, wake="2026-12-01", next="later")
 item("s", 12, next="after a1 closes", after=["a1"])
 (T / "store/next-id").write_text("20"); (T / "store/anchors.json").write_text("{}")
-(T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
+(T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n"); import subprocess as _sp; [_sp.run(["git", "-C", f"{tmp}/brain", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True) for a in (("init", "-q"), ("add", "-A"), ("commit", "-q", "-m", "pages"))]      # the pages are a git checkout, as an instance's are: a debt settles on a read of it that works
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
 def snap(msg): git("add", "-A"); git("commit", "-q", "--allow-empty", "-m", msg)

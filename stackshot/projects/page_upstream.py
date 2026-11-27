@@ -17,7 +17,7 @@ Bounds: one fetch a copy at a time, begun at most every EVERY s and ended after 
 in a row, up to BACKOFF s; one that works sets it back. So an edit that reaches the remote after a fetch began is seen by the first fetch after that time,
 and a read until then answers as the copy does. A caller waits at most `wait` s counted from the fetch's start, so many callers together wait no longer than
 one; a board write never waits (wait 0). A branch with no upstream, a remote that cannot be reached and a fetch that fails or is slow leave the answer the
-local copy gives, and so does a read of the repository that fails: a debt is settled only on what was read. A read-only standby never fetches.
+local copy gives, and so does a read of the repository that fails: a debt is settled only on what was read. A read of the fetched version that fails is not tried again for READ_BACKOFF s (ct_changed answers at once), so a repository that keeps failing costs one read, not one for every debtor of every settle. A read-only standby never fetches.
 A fetch ended outright can leave git's lock file on REF, which stops every later fetch; one older than STALE s is removed (nothing else writes REF).
 """
 from __future__ import annotations
@@ -40,10 +40,12 @@ LIMIT = 30.0        # a fetch still running after this is ended
 END_GRACE = 2.0     # seconds an ended fetch has to remove its lock files before it is ended outright
 STALE = 300.0       # a lock file on REF this old was left behind: no fetch lives past LIMIT and two END_GRACE
 READ_LIMIT = 5      # seconds one read of the local repository may take
+READ_BACKOFF = 30.0 # after a read of the fetched version fails, the seconds in which ct_changed answers "cannot tell" at once, without another read of that copy
 
 _LOCK = threading.Lock()
 _RUNS: dict[str, tuple[float, threading.Event]] = {}     # copy -> (when its last fetch began, set when that fetch is over)
 _FAILS: dict[str, int] = {}                              # copy -> fetches that failed in a row: said at the first, and the next comes later with each
+_READ_FAILED: dict[str, float] = {}                      # copy -> (time.monotonic) when a read of its fetched version last failed, for READ_BACKOFF
 
 
 def _read(base: str, *args: str) -> str | None:
@@ -138,8 +140,13 @@ def refresh(base: str, wait: float = 0.0) -> None:
     with _LOCK:
         run = _RUNS.get(base)
         if run is None or (run[1].is_set() and time.monotonic() - run[0] >= _gap(base)):
-            run = _RUNS[base] = (time.monotonic(), threading.Event())
-            threading.Thread(target=_fetch, args=(base, run[1]), name="page-upstream", daemon=True).start()
+            began, done = time.monotonic(), threading.Event()
+            try:
+                threading.Thread(target=_fetch, args=(base, done), name="page-upstream", daemon=True).start()
+            except Exception as e:  # noqa: BLE001  — a thread that cannot be started: the copy answers as before, and nothing is registered that no fetch will ever set
+                _failed(base, f"no fetch could be started ({type(e).__name__})")
+                return
+            run = _RUNS[base] = (began, done)
     left = run[0] + wait - time.monotonic()
     if wait > 0 and left > 0:
         run[1].wait(left)
@@ -157,19 +164,29 @@ def edit_ts(key: str, since: float, wait: float = 0.0) -> int:
 
 def ct_changed(key: str, since: float) -> bool:
     """True when the page's compiled truth at the fetched commit differs from its version at `since`; a page that had no version by then counts any put.
-    False when a read fails or takes too long: what cannot be told settles nothing."""
+    False when a read fails or takes too long: what cannot be told settles nothing. A failed read is not tried again by the next caller for READ_BACKOFF s
+    (every debtor of a page, and every settle, would otherwise pay up to four reads of READ_LIMIT s each): the answer is False at once, and the debt stays."""
     base, path = _pages._base(key), f"./{key}.md"      # ./ = relative to the pages directory, which may sit inside a larger repository
-    now = _read(base, "show", f"{REF}:{path}")
-    last = _read(base, "log", "-1", f"--before={int(since)}", "--format=%H", REF, "--", path)
-    if now is None or last is None:
+    if time.monotonic() - _READ_FAILED.get(base, -READ_BACKOFF) < READ_BACKOFF:
         return False
+    def cannot() -> bool:
+        _READ_FAILED[base] = time.monotonic()
+        return False
+    now = _read(base, "show", f"{REF}:{path}")
+    if now is None:
+        return cannot()
+    last = _read(base, "log", "-1", f"--before={int(since)}", "--format=%H", REF, "--", path)
+    if last is None:
+        return cannot()
     last = last.strip()
     if not last:
         return True
     held = _read(base, "ls-tree", "--name-only", last, "--", path)
     if held is None:
-        return False
+        return cannot()
     if not held.strip():
         return True        # the last commit by then removed the page
     before = _read(base, "show", f"{last}:{path}")
-    return before is not None and _pages.compiled_truth(before) != _pages.compiled_truth(now)
+    if before is None:
+        return cannot()
+    return _pages.compiled_truth(before) != _pages.compiled_truth(now)
