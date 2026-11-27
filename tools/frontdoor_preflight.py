@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""tools/frontdoor_preflight.py: what has to hold before the first step of a live switch to the front door. Read-only: it changes nothing, so it has no --apply.
+"""tools/frontdoor_preflight.py: what has to hold before the first step of a live switch to the front door. Read-only: it changes nothing of the board,
+its config or its units, so it has no --apply. One thing it may write: it reads the config notes through `uv run` in the checkout, which first brings that
+checkout's Python environment up to date when it is behind (FRONTDOOR_SWITCH_PYTHON names another command).
 
     python3 tools/frontdoor_preflight.py --backup-dir DIR [--baseline FILE] [--confirm NAME ...]
 
@@ -78,6 +80,10 @@ def checks(co: Path, cfg_path: Path, backups: Path, baseline: Path | None) -> li
     busy = sorted(listening_ports() & set(fs.PRE_FLIGHT_PORTS))
     rows.append((f"ports {', '.join(map(str, fs.PRE_FLIGHT_PORTS))} are free" + (f" (busy: {', '.join(map(str, busy))})" if busy else ""), not busy))
 
+    missing = [u for u in fs.RESTORE_UNITS if not (fs.unit_dir() / u).is_file()]
+    rows.append((f"the units the cut-over and its way back restart are installed ({', '.join(fs.RESTORE_UNITS)})"
+                 + (f" (not installed: {', '.join(missing)}; {fs.SYNC_UNIT} is installed only with [portal] account_id set)" if missing else ""), not missing))
+
     left = fs.overrides_present()
     rows.append(("no override of an earlier way back is in place" + (f" ({', '.join(str(p) for p in left)}: run the undo script after the config revert)" if left else ""), not left))
 
@@ -96,7 +102,8 @@ def checks(co: Path, cfg_path: Path, backups: Path, baseline: Path | None) -> li
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="tools/frontdoor_preflight.py", description="What has to hold before a live switch to the front door (read-only).")
+    ap = argparse.ArgumentParser(prog="tools/frontdoor_preflight.py", description="What has to hold before a live switch to the front door. It changes nothing of the board, its "
+                                 "config or its units; reading the config notes runs `uv run` in the checkout, which may first sync that checkout's Python environment.")
     ap.add_argument("--backup-dir", metavar="DIR", default="", help="the folder of the board's daily backups (default: FRONTDOOR_BACKUP_DIR)")
     ap.add_argument("--baseline", metavar="FILE", help="a saved list of the config notes to compare with")
     ap.add_argument("--confirm", action="append", default=[], choices=list(MANUAL), metavar="NAME", help="confirm a manual line: " + ", ".join(MANUAL))

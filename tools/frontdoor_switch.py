@@ -17,16 +17,21 @@ Environment:
   FRONTDOOR_SECRETS_DIR         the folder of the front door's secrets (default ~/.config/stackshot/frontdoor)
   FRONTDOOR_SWITCH_CHECKOUT     the checkout whose install.sh, release.sh, git history and Python are used (default: the one this file is in)
   FRONTDOOR_SWITCH_PYTHON       the command that runs the front door's Python (default: uv run in that checkout with the server extra)
-  FRONTDOOR_SWITCH_WINDOW       seconds the cut-over's checks have from the board's restart (default 300)
+  FRONTDOOR_SWITCH_WINDOW       seconds from the first restart within which the cut-over's checks and, when one fails, the way back end (default 300)
+  FRONTDOOR_SWITCH_RESERVE      the end of that window kept for the way back: the checks have the rest (default 90, never more than half of the window)
   FRONTDOOR_SWITCH_CHECK        seconds one check of the cut-over is asked again before it counts as failed (default 30)
-  FRONTDOOR_SWITCH_UNDO_WINDOW  seconds the undo waits for the board's answers (default 120)
+  FRONTDOOR_SWITCH_UNDO_WINDOW  seconds a person's run of the undo waits for the board's answers (default 120)
   FRONTDOOR_SWITCH_POLL         seconds between two asks (default 1)
+A number of seconds above 300 is read as 300; one that is not above 0, or no number, is refused.
 """
 from __future__ import annotations
 
+import fcntl
+import math
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -54,7 +59,10 @@ DOOR_PORT = 8030
 SIGNIN_PORT = 8031
 PRE_FLIGHT_PORTS = (NEW_BOARD_PORT, TEST_SPLITTER_PORT, DOOR_PORT, SIGNIN_PORT)
 
-WINDOW_SECONDS = 300            # from the board's restart, every check of the cut-over is green within this
+WINDOW_SECONDS = 300            # from the first restart: the cut-over's checks and, when one fails, the way back end within this
+RESERVE_SECONDS = 90            # the end of the window kept for the way back
+CALL_FLOOR_SECONDS = 5          # a call of the cut-over's way back gets at least this, with the window over too: a late board is better than none
+SAVED_COPY_SECONDS = 24 * 3600  # a saved copy older than this that no unit reads may be an earlier switch's: the undo wants --snapshot then
 CHECK_SECONDS = 30              # one check is asked again for at most this long
 UNDO_WINDOW_SECONDS = 120
 MIN_HOLD_MINUTES = 15           # the release hold has to outlast the cut-over's checks and a way back
@@ -70,12 +78,26 @@ OVERRIDE_NAME = "zz-frontdoor-rollback.conf"                  # a drop-in that p
 SNAPSHOT_ARCHIVE = "board.tar.gz"
 SNAPSHOT_HEAD = "stackshot-head"
 SNAPSHOT_NOTES = "config-notes.txt"
+SNAPSHOT_COMPLETE = "snapshot-complete"          # written last, only when every check of the snapshot passed: the archive's size
+
+# the signals that would end a run: before the first restart they stop it, after it they are answered by the way back, and they are ignored while a way back runs
+SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT, signal.SIGUSR1, signal.SIGUSR2)
 
 SWITCH_TABLES = ("behind_frontdoor", "frontdoor", "frontdoor_signin", "frontdoor_splitter")
 
 
 class Usage(Exception):
     """A call that cannot be run as asked: the message says what to change. The scripts exit CANNOT with it."""
+
+
+class Locked(Exception):
+    """Another run of these scripts is writing."""
+
+
+def shield() -> None:
+    """Ignore the signals that would end the run, here and in the programs it starts from now on (an ignored signal stays ignored in them)."""
+    for s in SIGNALS:
+        signal.signal(s, signal.SIG_IGN)
 
 
 # ---------------------------------------------------------------- output
@@ -105,7 +127,17 @@ def _env_path(name: str, default: Path) -> Path:
 
 
 def _env_seconds(name: str, default: float) -> float:
-    return float(os.environ.get(name) or default)
+    """Seconds in (0, WINDOW_SECONDS]: more is read as WINDOW_SECONDS, and what is not above 0 (nan too) or no number is refused."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if math.isnan(value) or value <= 0:
+        raise Usage(f"{name} takes a number of seconds above 0 (at most {WINDOW_SECONDS}), not {raw!r}")
+    return min(value, float(WINDOW_SECONDS))
 
 
 def checkout() -> Path:
@@ -120,6 +152,10 @@ def window_seconds() -> float:
     return _env_seconds("FRONTDOOR_SWITCH_WINDOW", WINDOW_SECONDS)
 
 
+def reserve_seconds() -> float:
+    return min(_env_seconds("FRONTDOOR_SWITCH_RESERVE", RESERVE_SECONDS), window_seconds() / 2)
+
+
 def check_seconds() -> float:
     return _env_seconds("FRONTDOOR_SWITCH_CHECK", CHECK_SECONDS)
 
@@ -130,6 +166,12 @@ def undo_window_seconds() -> float:
 
 def poll_seconds() -> float:
     return _env_seconds("FRONTDOOR_SWITCH_POLL", 1)
+
+
+def check_settings() -> None:
+    """Refuse a number of seconds that cannot be used before anything is changed, not in the middle of a run."""
+    for read in (window_seconds, reserve_seconds, check_seconds, undo_window_seconds, poll_seconds):
+        read()
 
 
 def public_url() -> str:
@@ -185,29 +227,29 @@ def systemctl(*args: str, timeout: float = 120) -> tuple[bool, str]:
     return outcome(*run(["systemctl", "--user", *args], timeout=timeout))
 
 
-def unit_enabled(unit: str) -> tuple[bool, str]:
-    rc, out = run(["systemctl", "--user", "is-enabled", unit])
+def unit_enabled(unit: str, timeout: float = 120) -> tuple[bool, str]:
+    rc, out = run(["systemctl", "--user", "is-enabled", unit], timeout=timeout)
     state = last_line(out) or f"exit {rc}"
     return state in ("enabled", "enabled-runtime"), state
 
 
-def unit_active(unit: str) -> tuple[bool, str]:
-    rc, out = run(["systemctl", "--user", "is-active", unit])
+def unit_active(unit: str, timeout: float = 120) -> tuple[bool, str]:
+    rc, out = run(["systemctl", "--user", "is-active", unit], timeout=timeout)
     state = last_line(out) or f"exit {rc}"
     return state in ("active", "activating", "reloading"), state
 
 
-def splitter_off(timeout: float = 120) -> tuple[bool, str]:
+def splitter_off(timeout: float = 120, read_timeout: float = 120) -> tuple[bool, str]:
     """Disable and stop the splitter. What counts is the state afterwards: not running and not enabled (a unit that was never installed is both)."""
     _, line = systemctl("disable", "--now", SPLITTER_UNIT, timeout=timeout)
-    running, state = unit_active(SPLITTER_UNIT)
-    enabled, was = unit_enabled(SPLITTER_UNIT)
+    running, state = unit_active(SPLITTER_UNIT, read_timeout)
+    enabled, was = unit_enabled(SPLITTER_UNIT, read_timeout)
     ok = not enabled and not running and state in ("inactive", "failed", "unknown")
     return ok, f"{state}, {was}" if ok else f"{state}, {was} ({line})"
 
 
-def install_units(co: Path) -> tuple[bool, str]:
-    return outcome(*run([str(co / "install.sh"), "units"], cwd=co, timeout=300))
+def install_units(co: Path, timeout: float = 300) -> tuple[bool, str]:
+    return outcome(*run([str(co / "install.sh"), "units"], cwd=co, timeout=timeout))
 
 
 def config_repo(path: Path) -> Path | None:
@@ -395,7 +437,8 @@ def snapshot_config(snapshot: Path, cfg_path: Path) -> Path:
 
 def http_code(url: str, method: str = "GET", timeout: float = 5) -> str:
     """The HTTP status of a request by curl, or "000" when none came (refused, timed out)."""
-    _, out = run(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", f"{max(1.0, timeout):.0f}", "-X", method, url], timeout=max(1.0, timeout) + 2)
+    direct = ["--noproxy", "*"] if url.startswith("http://127.0.0.1:") else []         # a proxy of the environment must not answer for this machine
+    _, out = run(["curl", "-s", *direct, "-o", "/dev/null", "-w", "%{http_code}", "--max-time", f"{max(1.0, timeout):.0f}", "-X", method, url], timeout=max(1.0, timeout) + 2)
     m = re.match(r"\d{3}", out.strip())
     return m.group(0) if m else "000"
 
@@ -428,10 +471,68 @@ class Window:
         return self.end - time.monotonic()
 
 
+class Limits:
+    """How long each call of a way back may take, up to the moment the board is back.
+    With the cut-over's window every call is held to what is left of it, in shares of the time kept for the way back (a sixth each: 15 s of 90), so no one call
+    takes what the board's restart and its answer need; a call still gets `floor` seconds when nothing is left. Without a window (a person runs the undo)
+    each call keeps its own limit, and the board's answers get FRONTDOOR_SWITCH_UNDO_WINDOW seconds."""
+
+    def __init__(self, window: Window | None):
+        self.window = window
+        reserve = reserve_seconds() if window else 0.0
+        self.share = reserve / 6
+        self.floor = min(CALL_FLOOR_SECONDS, max(1.0, reserve / 10))
+
+    def _held(self, free: float, held: Callable[[float], float]) -> float:
+        return free if self.window is None else max(self.floor, held(self.window.left()))
+
+    def act(self) -> float:
+        """Stopping the splitter, a daemon-reload."""
+        return self._held(120, lambda left: min(self.share, left))
+
+    def read(self) -> float:
+        """Asking a unit's state, clearing a failed one."""
+        return self._held(120, lambda left: min(self.share / 3, left))
+
+    def install(self) -> float:
+        return self._held(300, lambda left: left / 2)
+
+    def restart(self) -> float:
+        """The board's restart: all that is left but one share, for the board's answer."""
+        return self._held(120, lambda left: left - self.share)
+
+    def answers(self) -> Window:
+        """The time the board's answers have, from now."""
+        return Window(undo_window_seconds()) if self.window is None else Window(max(self.floor, self.window.left()))
+
+
+# ---------------------------------------------------------------- one run at a time
+
+def lock_path() -> Path:
+    return Path.home() / ".config/stackshot/frontdoor-switch.lock"
+
+
+def take_lock() -> int:
+    """Hold the lock of the scripts that write until this process ends (however it ends). Raises Locked when another run holds it."""
+    path = lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        holder = os.read(fd, 32).decode("ascii", "replace").strip()
+        os.close(fd)
+        raise Locked(f"another run of the switch's scripts holds {path}" + (f" (process {holder})" if holder.isdigit() else "")
+                     + ": wait for it to end (a cut-over that is sent SIGTERM after its first restart brings the board back before it ends)") from None
+    os.ftruncate(fd, 0)
+    os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+    return fd
+
+
 # ---------------------------------------------------------------- files
 
-def write_private(path: Path, data: bytes) -> None:
-    """Put `data` at `path` in one step at mode 600: a reader sees the old file or the new one, never a part. Its folder must exist."""
+def _put_private(path: Path, data: bytes, place: Callable[[str, Path], None]) -> None:
+    """Write `data` beside `path` at mode 600, then `place` the whole file at `path` in one step; no temporary file is left, pass or fail."""
     fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=str(path.parent))
     try:
         try:
@@ -442,20 +543,20 @@ def write_private(path: Path, data: bytes) -> None:
             os.fsync(fd)
         finally:
             os.close(fd)
-        os.replace(tmp, path)
+        place(tmp, path)
     finally:
         if os.path.lexists(tmp):
             os.unlink(tmp)
 
 
+def write_private(path: Path, data: bytes) -> None:
+    """Put `data` at `path` in one step at mode 600: a reader sees the old file or the new one, never a part. Its folder must exist."""
+    _put_private(path, data, os.replace)
+
+
 def new_private(path: Path, data: bytes) -> None:
-    """Create `path` at mode 600 only when nothing is there (O_EXCL): an existing file is never replaced."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as f:
-        os.fchmod(f.fileno(), 0o600)
-        f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
+    """Create `path` whole, in one step, at mode 600, only when nothing is there: a hard link never replaces a file (FileExistsError)."""
+    _put_private(path, data, os.link)
 
 
 def mode_of(path: Path) -> int:
