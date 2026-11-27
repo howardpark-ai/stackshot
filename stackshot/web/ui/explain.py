@@ -7,7 +7,8 @@ that draws the board's chrome only has to call explain().
 The popup opens on a tap or click, and on a desktop also on hover and on keyboard focus; Escape, a tap outside and tabbing away close it. The button's accessible
 description is the text itself, so a screen reader says it on focus, open or not. The popup stays inside the window and inside any ancestor that clips it. An Escape that
 closes it reaches no listener added after this script, so SCRIPT comes ahead of the scripts of a panel a "?" can sit in. The script is delegated on the document and
-remembers the open popup by its key, so a block the home page's live refresh swaps in keeps it open."""
+remembers the open popup by its key, so a block the home page's live refresh swaps in keeps it open. A script that redraws a "?" of its own (the side panel's Audit
+card) says so with a `stackshot:redrawn` event."""
 from __future__ import annotations
 
 import html as _html
@@ -58,7 +59,7 @@ function wrap(t){return t&&t.closest?t.closest('.xp'):null}
 function find(k){return document.querySelector('.xp[data-xp="'+k+'"]')}
 function set(w,on){w.firstElementChild.setAttribute('aria-expanded',String(on));w.lastElementChild.hidden=!on}
 function place(w){var b=w.firstElementChild,p=w.lastElementChild,L=0,R=document.documentElement.clientWidth,T=0,H=window.innerHeight;
-for(var n=w.parentElement;n&&n!==document.body&&n!==document.documentElement;n=n.parentElement){var s=window.getComputedStyle(n),c=n.getBoundingClientRect();
+for(var n=w.parentElement;n&&n!==document.body&&n!==document.documentElement;n=n.parentElement){var s=window.getComputedStyle(n),c=n.getBoundingClientRect();if(s.display==='contents')continue;
 if(s.overflowX!=='visible'){L=Math.max(L,c.left);R=Math.min(R,c.right)}if(s.overflowY!=='visible'){T=Math.max(T,c.top);H=Math.min(H,c.bottom)}}
 p.style.left='0px';p.style.top='0px';p.style.maxWidth=Math.max(0,Math.min(320,R-L-16))+'px';
 var r=b.getBoundingClientRect(),o=w.getBoundingClientRect(),W=p.offsetWidth,h=p.offsetHeight,x=Math.max(L+8,Math.min(r.left+r.width/2-W/2,R-8-W)),y=r.bottom;
@@ -67,6 +68,7 @@ p.style.left=(x-o.left)+'px';p.style.top=(y-o.top)+'px'}
 function hide(){if(!O)return;var w=find(O.k);O=null;if(w)set(w,false)}
 function show(w,how){var k=w.getAttribute('data-xp');if(O&&O.k!==k)hide();O={k:k,h:how};set(w,true);place(w)}
 function is(w){return !!O&&O.k===w.getAttribute('data-xp')}
+window.stackshotRefocus=function(key){var w=find(key);if(w){quiet=true;w.firstElementChild.focus({preventScroll:true});quiet=false}};
 document.addEventListener('click',function(e){var w=wrap(e.target);if(!w||!e.target.closest('.xp-b'))return;e.preventDefault();if(is(w)&&O.h==='pin')hide();else show(w,'pin')});
 document.addEventListener('pointerover',function(e){var w=wrap(e.target);if(w&&e.pointerType==='mouse'&&!w.contains(e.relatedTarget)&&!is(w))show(w,'hover')});
 document.addEventListener('pointerout',function(e){var w=wrap(e.target);if(w&&e.pointerType==='mouse'&&!w.contains(e.relatedTarget)&&is(w)&&O.h==='hover')hide()});
@@ -76,5 +78,6 @@ document.addEventListener('focusout',function(e){var t=e.target,w=wrap(t);if(!w)
 document.addEventListener('keydown',function(e){if(e.key!=='Escape'||e.isComposing||!O)return;var w=find(O.k);if(!w){O=null;return}e.preventDefault();e.stopImmediatePropagation();var inside=w.contains(document.activeElement);hide();
 if(inside){quiet=true;w.firstElementChild.focus();quiet=false}},true);
 window.addEventListener('resize',function(){var w=O&&find(O.k);if(w)place(w)});
-document.addEventListener('stackshot:swapped',function(){if(!O)return;var w=find(O.k);if(w){set(w,true);place(w)}else O=null})})();"""
+function again(){if(!O)return;var w=find(O.k);if(w){set(w,true);place(w)}else O=null}
+document.addEventListener('stackshot:swapped',again);document.addEventListener('stackshot:redrawn',again)})();"""
 SCRIPT = f"<script>{JS}</script>"

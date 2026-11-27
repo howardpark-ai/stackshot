@@ -124,8 +124,9 @@ with TestClient(server.mcp.http_app()) as c:
     rows = re.findall(r'<span class="lbl">([^<]+)</span><span class="val a-n">(\d+)</span><span class="val a-n( hit)?">([^<]+)</span>', cd)
     check("the card's shortlist: each group with its number of audits and its findings in 24 hours, the same numbers as the page",
           [(a, int(b), d) for a, b, _, d in rows] == [(g["name"], len(g["audits"]), n) for g, n in zip(ov.GROUPS, ["1", "3", "2", "1", "1", "1", "–", "–"])], rows)
-    check("the card: a dash, never a zero, for Fleet and services and Text and rules; a group with findings is marked (hit); the note says what the dash means",
-          [d for *_, d in rows][-2:] == ["–", "–"] and sum(1 for x in rows if x[2]) == 6 and '<span class="a-cn">– keeps no findings log</span>' in cd and ">0</span><span" not in cd.replace('class="val a-n">0', ""), cd)
+    check('the card: a dash, never a zero, for Fleet and services and Text and rules; a group with findings is marked (hit); a "?" under the list says what the dash means',
+          [d for *_, d in rows][-2:] == ["–", "–"] and sum(1 for x in rows if x[2]) == 6 and '<span class="a-cn a-cq">–<span class="xp" data-xp="audit-card">' in cd and "A dash means the group keeps no findings log.</span>" in cd
+          and "– keeps no findings log" not in cd and ">0</span><span" not in cd.replace('class="val a-n">0', ""), cd)
     check("the card's header cells name its columns", '<span class="a-h">audits</span><span class="a-h">found, 24 h</span>' in cd)
     check("the card and the status endpoint say the same: GET /audit/status has the card's rows",
           c.get("/audit/status").json()["card"] == {"groups": [{"name": g["name"], "audits": len(g["audits"]), "found": n} for g, n in zip(ov.GROUPS, [1, 3, 2, 1, 1, 1, None, None])], "note": "– keeps no findings log"})
@@ -241,7 +242,7 @@ with TestClient(server.mcp.http_app()) as c:
     r = c.get("/audits"); h = r.text; w = text_of(h)
     check("the findings log off: every group says so, the feed says findings are not listed, the card's note says the log is off, no count anywhere",
           r.status_code == 200 and re.findall(r'<span class="anum">((?:\d+ found)|not logged|log off)</span>', h) == ["log off"] * 6 + ["not logged"] * 2
-          and "The findings log is off, so findings are not listed here." in w and "– the findings log is off" in h and "found</span>" not in h.replace("found, 24 h", ""), w[:600])
+          and "The findings log is off." in w and '<span class="a-cn">– the findings log is off</span>' in h and 'data-xp="audit-card"' not in h and "found</span>" not in h.replace("found, 24 h", ""), w[:600])
     config.CFG["audit"]["pattern_review"] = "shadow"
 
     # ---- 7. the audit off

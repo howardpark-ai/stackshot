@@ -1669,9 +1669,12 @@ if(run)f.appendChild(sp('a-run',num(d.running_since)?SST('panel.audit.running_si
 else if(L&&L.finished==null)f.appendChild(sp('a-run a-bad',SST('panel.audit.unfinished')));
 if(C&&C.groups&&C.groups.length){f.appendChild(sp('a-h',''));f.appendChild(sp('a-h',SST('panel.audit.h_audits')));f.appendChild(sp('a-h',SST('panel.audit.h_found')));
 C.groups.forEach(function(g){f.appendChild(sp('lbl',GK[g.name]?SST('panel.audit.group.'+GK[g.name]):g.name));f.appendChild(sp('val a-n',String(g.audits)));f.appendChild(sp('val a-n'+(g.found?' hit':''),g.found===null?'–':String(g.found)))});
-if(C.note)f.appendChild(sp('a-cn',NK[C.note]?SST('panel.audit.note.'+NK[C.note]):C.note))}
+if(C.note&&NK[C.note]==='unlogged'){var q=sp('a-cn a-cq','–');
+if(window.stackshotExplain)q.appendChild(window.stackshotExplain('audit-card',SST('panel.audit.dash_help'),SST('explain.about',{what:SST('panel.audit.h_found')})));f.appendChild(q)}
+else if(C.note)f.appendChild(sp('a-cn',NK[C.note]?SST('panel.audit.note.'+NK[C.note]):C.note))}
 else{btn();E.hidden=false;if(P)P.hidden=false;return}
-if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}}
+if(sig(f)!==sig(T)){var a=document.activeElement,held=!!a&&a.id==='xpb-audit-card';if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}
+document.dispatchEvent(new Event('stackshot:redrawn'));if(held&&window.stackshotRefocus)window.stackshotRefocus('audit-card')}
 btn();E.hidden=false;if(P)P.hidden=false}
 function refresh(){fetch('@ROOT@/audit/status',{cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'}})
 .then(function(r){if(r.status===404&&!r.redirected){E.hidden=true;return null}if(!r.ok||r.redirected)throw 0;return r.json()})
@@ -1776,7 +1779,7 @@ tr.scope{scroll-margin-top:calc(var(--hdr,0px) + 12px)}
 #audit .mh a.nm{color:var(--fg)}#audit .mh a.nm:hover{color:var(--acc)}
 #panel .audit .a-h{font-size:11px;line-height:1.4;color:var(--mut);text-align:right}
 #audit .a-n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}#audit .a-n.hit{color:var(--orange);font-weight:600}
-#panel .audit .a-cn{grid-column:1/-1;margin-top:4px;font-size:11px;line-height:1.4;color:var(--mut);white-space:normal}
+#panel .audit .a-cn{grid-column:1/-1;margin-top:4px;font-size:11px;line-height:1.4;color:var(--mut);white-space:normal}#panel .audit .a-cq{display:flex;align-items:center;justify-content:flex-end;column-gap:2px}
 #panel .ghc{margin-top:8px;font-size:12px}#panel .ghc .val{color:var(--fg)}#panel .ghc .val .cap{color:var(--mut)}
 """   # the Runners panel's cards (one line each, the count busy/online and a ↗, since an earlier change): the Machines cards' look, one to a row in the side panel; the Audit section: the daily audit's card, its name row with the Audit now text link beside the name, and the GitHub calls card, the section hidden when the audit is off and there is no calls card; every panel section on the Anchor hub's card spacing (8px between cards, 6px 10px inside a card, 2px between lines) and the Machines and Runners cards on the same three columns (subgrid: the matrix owns them, so "latest" lines up from card to card)
 def _run_stale_s(): return 3 * max(float(_runners.conf("panel_refresh_s")), _every_m() * 60)   # a snapshot older than this carries a "last read at" note in the Runners panel: three times the larger of the panel refresh and the publish interval, so the note never flips between two publishes and the block holds still (younger ones say nothing)
@@ -2993,7 +2996,7 @@ class Board:
         elif w.kind == "item":
             opn = set(after_open(r))
             what = ", ".join(f'<a href="{e(id_href(g))}">{e(shown(g))}</a> <span class="dim">{_t("wait.state_open" if (g in opn or w.queued) else "wait.state_closed")}</span>' for g in w.after) or _t("wait.item_none")
-            if w.queued: what += f' <span class="dim">· {e(_t("wait.queued_note"))}</span>'
+            if w.queued: what += f' <span class="dim">· {e(_t("wait.queued"))}</span> ' + _xp.explain("wait-queued", _t("wait.queued_help"), _t("wait.queued"))
         elif w.kind == "relay": what = self.mentions(e(_wat.subject_of(m)), r["gid"]) + f' <span class="dim">{_t("wait.relay_note", who=e(_model.owner_display()))}</span>'
         else:
             what = e(wtext) if wtext and wtext != _t("wait.a_date") else _t("wait.a_date")
@@ -3404,8 +3407,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
 
     def audit_line(self):
         """HTML: the audit card, the body of the side panel's Audit section. The name row is `Audits ↗`, a link to the Audits page (/audits), with the Audit now text link at its right; under it the shortlist
-        (audit_overview.card): one row per audit group with its number of audits and its findings in the last 24 hours, `–` for a group that keeps no findings log (never a zero) and a line under the list that
-        says what the dash means. Drawn at render time with the rows, classes and button _AUDIT_JS draws from GET /audit/status, character for character, so the page script's first refresh changes
+        (audit_overview.card): one row per audit group with its number of audits and its findings in the last 24 hours, `–` for a group that keeps no findings log (never a zero), and under the list a dash with
+        a "?" that says what it means; with the findings log off, a line there says so. Drawn at render time with the rows, classes and button _AUDIT_JS draws from GET /audit/status, character for character, so the page script's first refresh changes
         nothing. A run in progress is a line above the list (`Audit running since 03:00…`), a last run that did not finish a warn line. The status is the endpoint's own (audit.status, imported here:
         audit.py needs only config). Hidden only when the audit is not enabled; a status that cannot be read leaves the card hidden and empty for the script to fill."""
         z = _cfg.tz()
@@ -3436,7 +3439,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         txt += cell("a-h", "") + cell("a-h", _t("panel.audit.h_audits")) + cell("a-h", _t("panel.audit.h_found"))
         for g in c["groups"]:
             txt += cell("lbl", _audit_word(_AUDIT_GROUPS, g["name"], "panel.audit.group.")) + cell("val a-n", str(g["audits"])) + cell("val a-n" + (" hit" if g["found"] else ""), "–" if g["found"] is None else str(g["found"]))
-        if c["note"]:
+        if c["note"] == _ov.NOTE_UNLOGGED:      # what a dash means is an explainer; any other note is a state and stays on the card
+            txt += f'<span class="a-cn a-cq">–{_xp.explain("audit-card", _t("panel.audit.dash_help"), _t("panel.audit.h_found"))}</span>'
+        elif c["note"]:
             txt += cell("a-cn", _audit_word(_AUDIT_NOTES, c["note"], "panel.audit.note."))
         return f'{head}>' + name.format(dis=" disabled" if run else "") + f'<span class="a-txt">{txt}</span>' + tail
 
@@ -4276,7 +4281,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             btn = (f'<div class="atbtn"><button type="button" class="b" id="audit-now-page"{" disabled" if running else ""}>{_t("panel.audit.now")}</button>'
                    '<span class="apmsg" id="audit-page-msg" role="status" aria-live="polite"></span></div>')
         else:
-            sub, btn = _t("audit.off"), ""
+            sub, btn = _t("audit.off_note"), ""
+        off_tip = "" if ov["enabled"] else " " + _xp.explain("audit-off", _t("audit.off_help"), _t("audit.title"))
         done = [r for r in ov["runs"] if r["finished"] is not None and not r["error"]]
         last = done[0] if done else None
         times = _t("audit.times_join").join(ov["times"]) or _t("audit.scheduled")
@@ -4303,7 +4309,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             ref = f'<a href="{under("/items/" + n)}">{e(r["id"])}</a>' if n else e(r["id"])
             return (f'<div class="af">{ref} {e(r["detail"])}<div class="am">{e(stamp(r["at"]))} · {e(_t("audit.source." + r["source"]) if r["source"] in _ov.SOURCES else (r["source"] or _t("audit.source_default")))} · {e(r["agent"])}</div></div>')
         if not ov["log"]:
-            feed, fsub = f'<p class="aempty">{_t("audit.feed_log_off")}</p>', _t("audit.log_off")
+            feed, fsub = f'<p class="aempty">{_t("audit.feed_off")}</p>', _t("audit.log_off")
         elif ov["recent"]:
             feed, fsub = '<div class="afeed">' + "".join(finding(r) for r in ov["recent"]) + "</div>", _t("audit.found_24h", n=ov["found"])
         else:
@@ -4324,7 +4330,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         else:
             runs = f'<p class="aempty">{_t("audit.no_runs")}</p>'
         about = _t("audit.groups_help") + (" " + _t("audit.note_logged") if ov["log"] else "")
-        note = "" if ov["log"] else f'<p class="anote">{e(_t("audit.note_log_off"))}</p>'      # a setting that is off is said on the page
+        note = "" if ov["log"] else f'<p class="anote">{e(_t("audit.note_off"))} {_xp.explain("audit-log-off", _t("audit.note_off_help"), _t("audit.findings"))}</p>'      # a setting that is off is said on the page
         groups_head = _xp.head(f'<h2>{_t("audit.groups")}</h2>', _xp.explain("audit-groups", about, _t("audit.groups")))
         starts = _t("audit.runs_help", times=times, button=_t("panel.audit.now")) if ov["enabled"] else _t("audit.runs_help_off", times=times)      # an audit that is off draws no button, so none is named
         runs_head = _xp.head(f'<h2>{_t("audit.runs")}</h2>', _xp.explain("audit-runs", starts, _t("audit.runs")))
@@ -4333,7 +4339,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("audit.title")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top" class="audits-page">{self.page_header()}'
-                f'<div class="atop"><h1>{_t("audit.title")}</h1>{btn}</div><p class="asub">{e(sub)}</p><div class="apaces">{paces_html}</div>'
+                f'<div class="atop"><h1>{_t("audit.title")}</h1>{btn}</div><p class="asub">{e(sub)}{off_tip}</p><div class="apaces">{paces_html}</div>'
                 f'{groups_head}<div class="agroups">{groups_html}</div>'
                 f'<h2>{_t("audit.findings")} <small>{e(fsub)}</small></h2>{feed}'
                 f'{runs_head}{runs}{note}</main>'

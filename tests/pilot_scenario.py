@@ -2422,7 +2422,8 @@ check("audit: the server's answer shows 10 s — 409 / 503 warn, 404 hides the l
       "else if(s===409||s===503)say(t||SST('panel.audit.http',{n:s}),true)" in AJ and "if(s===404){E.hidden=true;if(P)P.hidden=true;return}" in AJ and "},10000)" in AJ and ".audit .a-bad,.audit .a-msg.warn{color:var(--warn)" in he)
 check("audit: the variants — running since, did not finish (warn), the shortlist (a group's name, its audits, its findings in 24 h, a dash where no log is kept) and the note under it",
       "num(d.running_since)?SST('panel.audit.running_since',{at:clock(d.running_since)}):SST('panel.audit.running')" in AJ and "sp('a-run a-bad',SST('panel.audit.unfinished'))" in AJ
-      and "sp('val a-n'+(g.found?' hit':''),g.found===null?'–':String(g.found))" in AJ and "sp('a-h',SST('panel.audit.h_found'))" in AJ and "if(C.note)f.appendChild(sp('a-cn',NK[C.note]?SST('panel.audit.note.'+NK[C.note]):C.note))" in AJ
+      and "sp('val a-n'+(g.found?' hit':''),g.found===null?'–':String(g.found))" in AJ and "sp('a-h',SST('panel.audit.h_found'))" in AJ and "else if(C.note)f.appendChild(sp('a-cn',NK[C.note]?SST('panel.audit.note.'+NK[C.note]):C.note))" in AJ
+      and "if(C.note&&NK[C.note]==='unlogged'){var q=sp('a-cn a-cq','–');" in AJ and "window.stackshotExplain('audit-card',SST('panel.audit.dash_help'),SST('explain.about',{what:SST('panel.audit.h_found')}))" in AJ
       and "row('findings'" not in AJ and "row('last audit'" not in AJ)
 check("audit: the Audits page's button shares the script: it finds #audit-now-page and the message line #audit-page-msg, and both buttons cue through the one cue()",
       "document.getElementById('audit-page-msg')" in AJ and "B=[N,P].filter(Boolean)" in AJ and "B.forEach(function(b){b.addEventListener('click',function(){if(!b.disabled)cue()})})" in AJ and AJ.count("function cue()") == 1)
@@ -2430,7 +2431,8 @@ check("audit: times in the rulebook's form, in the board's zone", "Intl.DateTime
       and "function when(ts){var p=pt(ts),k=p.year===pt(Date.now()/1000).year?'date.full':'date.full_year';return SST(k,{wd:SST('date.wd.'+WD.indexOf(p.weekday))" in AJ and "hourCycle:'h23'" in AJ)
 check("audit: the server's text is drawn as text, never as markup", "innerHTML" not in AJ and "g.textContent=t" in AJ)
 check("audit: a redraw builds the new text first and swaps it in, and leaves an unchanged line alone",
-      "f=document.createDocumentFragment()" in AJ and "if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}}" in AJ
+      "f=document.createDocumentFragment()" in AJ and "if(sig(f)!==sig(T)){var a=document.activeElement,held=!!a&&a.id==='xpb-audit-card';if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}" in AJ
+      and "document.dispatchEvent(new Event('stackshot:redrawn'));if(held&&window.stackshotRefocus)window.stackshotRefocus('audit-card')}" in AJ
       and "T.textContent=''" not in AJ.replace("else{T.textContent='';T.appendChild(f)}", ""))
 # with the audit on, the static page carries the card already drawn — the script's rows, classes and button
 from stackshot.audit import audit_overview as _ov
@@ -2443,13 +2445,14 @@ _BTN = ' <span class="a-msg" role="status" aria-live="polite"></span></div>'    
 _NM = lambda dis="": '<b class="lbl mh"><a class="nm" href="/audits">Audits ↗</a><button type="button" id="audit-now"' + dis + '>Audit now</button></b>'
 _HD = '<div id="audit" class="pc audit" data-tz="Asia/Dubai">' + _NM() + '<span class="a-txt">'
 _CH = '<span class="a-h"></span><span class="a-h">audits</span><span class="a-h">found, 24 h</span>'
-def _CARD(found=None, note="\u2013 keeps no findings log"):
-    """The shortlist the card draws: per group its name, audits and findings in 24 h (0 for a logged group without findings, a dash for the two that keep no log) and the note."""
+from stackshot.web.ui import explain as _xp
+def _CARD(found=None):
+    """The shortlist the card draws: per group its name, audits and findings in 24 h (0 for a logged group without findings, a dash for the two that keep no log) and, under them, a dash with its "?"."""
     found = found or {}; o = _CH
     for g in _ov.GROUPS:
         n = found.get(g["key"], 0) if g["log"] else None
         o += f'<span class="lbl">{g["name"]}</span><span class="val a-n">{len(g["audits"])}</span><span class="val a-n{" hit" if n else ""}">{"\u2013" if n is None else n}</span>'
-    return o + (f'<span class="a-cn">{note}</span>' if note else "")
+    return o + '<span class="a-cn a-cq">–' + _xp.explain("audit-card", "A dash means the group keeps no findings log.", "found, 24 h") + '</span>'
 _LOG = _AD / "findings-log.jsonl"
 check("audit on, no run yet: visible, the shortlist of the eight groups (a zero for a group that keeps a log and found nothing, a dash for the two that keep none) and the note, no run line",
       _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + _CARD() + '</span>' + _BTN, _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))

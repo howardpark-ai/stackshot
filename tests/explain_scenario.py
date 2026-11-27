@@ -69,6 +69,7 @@ from stackshot.web import i18n
 from stackshot.web import publish as _web_publish
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
+from stackshot.model import model as MODEL
 from stackshot.web.ui import colortool as ct
 from stackshot.web.ui import explain as xp
 from stackshot.web.ui import render as r2
@@ -136,7 +137,9 @@ MOVED = {"projects": ("projects", ["projects.note"]), "closed-new": ("closed", [
          **{f"audit-group-{k[len('audit.desc.'):]}": ("audits", [k]) for k in i18n.EN if k.startswith("audit.desc.")},
          "runners": ("runners, in use", ["runners.sub", "runners.checks"]), "routing": ("project", ["routing.help_pilot"]), "routing/plain": ("project, not ruled", ["routing.help_plain"]),
          "wait-list": ("item, all of a list", ["wait.list.help_all"]), "wait-list/any": ("item, any of a list", ["wait.list.help_any"]),
-         "wait-backstop": ("item, all of a list", ["wait.list.help_backstop"]), "wait-chases": ("item, a relay wait", ["wait.chase_help"])}
+         "wait-backstop": ("item, all of a list", ["wait.list.help_backstop"]), "wait-chases": ("item, a relay wait", ["wait.chase_help"]),
+         "wait-queued": ("item, queued", ["wait.queued_help"]), "audit-card": ("audits, audit on", ["panel.audit.dash_help"]),
+         "audit-off": ("audits", ["audit.off_help"]), "audit-log-off": ("audits, log off", ["audit.note_off_help"])}
 def board(): return r2.Board(str(T / "store"))
 drawn = dict(pages)
 drawn["item, all of a list"] = board().item_html("a2"); drawn["item, any of a list"] = board().item_html("a3"); drawn["item, a relay wait"] = board().item_html("a4")
@@ -154,7 +157,10 @@ def audit_set(**kw):
     had = dict(_cfg.CFG.get("audit", {})); _cfg.CFG.setdefault("audit", {}).update(kw)
     try: yield
     finally: _cfg.CFG["audit"].clear(); _cfg.CFG["audit"].update(had)
-with audit_set(enabled=True): drawn["audits, audit on"] = board().audits_html()
+with audit_set(enabled=True): drawn["audits, audit on"] = board().audits_html(); drawn["home, audit on"] = board().html()      # the home page drawn now: "/" serves the copy drawn before
+with audit_set(enabled=True, pattern_review="off"): drawn["audits, log off"] = board().audits_html()
+queued = MODEL.Model(MODEL.WAITING, "", False, "", False, "", False, "", MODEL.Wait(kind="item", kind_explicit=False, after=("a1",), mover="alpha-main", mover_explicit=False, due=False, queued=True))      # derived, never stored (model/queued.py)
+drawn["item, queued"] = board().wait_html({"gid": "a5", "metadata": {}}, queued, "", None, "alpha-main", str)
 POP = re.compile(r'<span class="xp-pop" id="xp-([^"]*)"[^>]*>([^<]*)</span>')
 def inline(h):
     """The words a page draws outside every popup (and outside its style and scripts)."""
@@ -175,9 +181,15 @@ for row, (where, keys) in MOVED.items():
         check(f"{row}: {k} is drawn outside a popup on no page", not back, back)
 check('the runners page read above is the one in use, with its "as of" line', 'class="sub rasof"' in drawn["runners, in use"], inline(drawn["runners, in use"])[:600])
 check("an empty New section still says so on the page", i18n.EN["closed.new_none"] in inline(pages["closed"]), inline(pages["closed"])[:600])
-with audit_set(pattern_review="off"):
-    with TestClient(server.mcp.http_app(), base_url=BOARD) as c: off = c.get("/audits", headers={"host": "board.example.org"}).text
-check("a findings log that is off is a warning, so it stays on the page", i18n.EN["audit.note_log_off"] in inline(off) and 'id="xp-audit-groups"' in off, inline(off)[:600])
+off = drawn["audits, log off"]
+check("a findings log that is off is a warning, so it stays on the page: the page's line, the feed's and the card's",
+      all(i18n.EN[k] in inline(off) for k in ("audit.note_off", "audit.feed_off", "panel.audit.note.off")) and 'id="xp-audit-groups"' in off and 'data-xp="audit-card"' not in off, inline(off)[:900])
+check("an audit that is off says so on the page", i18n.EN["audit.off_note"] in inline(drawn["audits"]) and i18n.EN["audit.off_note"] not in inline(drawn["audits, audit on"]), inline(drawn["audits"])[:600])
+legend = i18n.EN["panel.audit.note.unlogged"]      # what the status answer says about a dash: the card holds it behind its "?"
+card = '<span class="a-cn a-cq">–<span class="xp" data-xp="audit-card">'
+check('the side panel\'s Audit card draws a dash and its "?" for the groups with no findings log, on every page drawn with the audit on, and the words on none',
+      all(card in drawn[n] for n in ("home, audit on", "audits, audit on")) and not [n for n, h in drawn.items() if legend in inline(h)], ([n for n, h in drawn.items() if legend in inline(h)], card in drawn["home, audit on"]))
+check("a queued item's page says it is queued", "· " + i18n.EN["wait.queued"] in inline(drawn["item, queued"]), inline(drawn["item, queued"])[:600])
 unruled = i18n.EN["routing.no_rulings"]
 check("a page the router never rules says so on the page, and a ruled one does not", unruled in inline(drawn["project, not ruled"]) and unruled not in inline(drawn["project"]), (inline(drawn["project, not ruled"])[:600], inline(drawn["project"])[:600]))
 runs = {n: dict(POP.findall(drawn[n])).get("audit-runs", "") for n in ("audits", "audits, audit on")}
@@ -215,7 +227,7 @@ let active = null, timers = [];
 const listeners = {};
 class El {
   constructor(tag, attrs) { this.tagName = tag.toUpperCase(); this.attrs = attrs || {}; this.kids = []; this.parentElement = null; this.style = {}; this.rect = {left: 0, top: 0, width: 0, height: 0};
-    this.hidden = 'hidden' in this.attrs; this.overflowX = 'visible'; this.overflowY = 'visible'; this.keyboard = false; this.textContent = ''; }
+    this.hidden = 'hidden' in this.attrs; this.overflowX = 'visible'; this.overflowY = 'visible'; this.display = 'block'; this.keyboard = false; this.textContent = ''; }
   add(k) { k.parentElement = this; this.kids.push(k); return k; }
   appendChild(k) { return this.add(k); }
   remove() { const p = this.parentElement; p.kids.splice(p.kids.indexOf(this), 1); this.parentElement = null; }
@@ -240,7 +252,7 @@ const document = {documentElement: html, body, get activeElement() { return acti
   querySelector(s) { const m = /^\.xp\[data-xp="([^"]*)"\]$/.exec(s); assert(m, s); let got = null; walk(html, n => { if (!got && n.classList.contains('xp') && n.attrs['data-xp'] === m[1]) got = n; }); return got; },
   createElement: t => new El(t, {}), addEventListener(t, f, cap) { (listeners[t] = listeners[t] || []).push([f, !!cap]); }};
 const winl = {};
-const window = {innerHeight: 700, getComputedStyle: n => ({overflowX: n.overflowX, overflowY: n.overflowY}), addEventListener(t, f) { winl[t] = f; }};
+const window = {innerHeight: 700, getComputedStyle: n => ({overflowX: n.overflowX, overflowY: n.overflowY, display: n.display}), addEventListener(t, f) { winl[t] = f; }};
 function fire(type, target, props) {
   let stopped = false, halted = false, prevented = false;
   const e = Object.assign({type, target, preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }, stopImmediatePropagation() { stopped = halted = true; }}, props || {});
@@ -290,6 +302,9 @@ over(A); leave(A); check('...and passing over again does not unpin it', open(A),
 over(A); fire('click', glyph(A)); check('...a second click closes it', shut(A), state(A));
 over(A, glyph(A)); check('...and moving within the button does not reopen it', shut(A), state(A)); leave(A);
 
+A.firstElementChild.keyboard = false; A.firstElementChild.focus(); check('a focus the browser does not call keyboard focus opens nothing', shut(A), state(A)); away();
+const old = make('no-selector', 100, 100); old.firstElementChild.matches = () => { throw new Error('unknown selector'); };
+old.firstElementChild.focus(); check('in a browser that cannot say, any focus opens it', open(old), state(old)); away();
 A.firstElementChild.keyboard = true; A.firstElementChild.focus(); check('keyboard focus opens', open(A), state(A));
 fire('click', A.firstElementChild); check('...Enter (a click) keeps it open, pinned', open(A), state(A));
 fire('click', A.firstElementChild); check('...Enter again closes', shut(A), state(A));
@@ -319,6 +334,8 @@ const pane = body.add(new El('div', {})); pane.overflowY = 'auto'; pane.rect = {
 const D = make('pane-low', 100, 440, pane); tap(D); check('near the bottom of an ancestor that scrolls, it goes above the button', at(D).top === 380, at(D)); away();
 pane.rect.height = 100; const E = make('pane-short', 100, 330, pane); tap(E); check('...and stays below where above would leave that ancestor', at(E).top === 366, at(E)); away();
 window.innerHeight = 100; const F = make('short', 100, 20); tap(F); check('in a window too short on both sides it stays below the button', at(F).top === 56, at(F)); away(); window.innerHeight = 700;
+const boxless = body.add(new El('span', {})); boxless.display = 'contents'; boxless.overflowX = 'hidden'; boxless.overflowY = 'hidden';
+const G = make('boxless', 600, 100, boxless); tap(G); check('an ancestor with no box of its own (display: contents) clips nothing', at(G).left === 458 && at(G).width === 320 && at(G).top === 136, at(G)); away();
 
 // the same markup from the script's own builder, for a "?" added to markup the server did not draw
 const shape = n => ({tag: n.tagName.toLowerCase(), attrs: n.attrs, text: n.textContent, kids: n.kids.map(shape)});
@@ -352,6 +369,16 @@ tap(S); check('...and a tap still closes it', shut(S), state(S)); away();
 S = swap(true); check('a closed one stays closed through an update', shut(S), state(S));
 S.firstElementChild.keyboard = true; S.firstElementChild.focus(); S = swap(true); check('one opened by the keyboard survives it too, with the focus', open(S) && active === S.firstElementChild, state(S)); away();
 tap(S); swap(false); const n0 = panelEscapes; esc(); check('an explainer the update removed is forgotten: Escape goes on to the page', panelEscapes === n0 + 1, panelEscapes - n0);
+
+// a script that redraws its own "?" (the side panel's Audit card): it removes the old one, says so, and hands the focus back
+const own = body.add(new El('div', {})); let R = make('r', 100, 100, own);
+function redraw() {
+  const had = active === R.firstElementChild; own.kids.pop().parentElement = null; if (had) active = null;
+  R = make('r', 100, 100, own); R.firstElementChild.keyboard = true; fire('stackshot:redrawn', body); if (had) window.stackshotRefocus('r'); flush(); }
+tap(R); redraw(); check('an open popup survives a redraw its script announces, placed again', open(R) && R.lastElementChild.style.top === '36px', state(R));
+check('...with the focus back on its button', active === R.firstElementChild, active && active.tagName);
+esc(); redraw(); check('one closed with Escape gets the focus back and stays closed', shut(R) && active === R.firstElementChild, [state(R), active && active.tagName]); away();
+window.stackshotRefocus('no-such-key'); check('a key no "?" has takes no focus', active === null, active && active.tagName);
 process.stdout.write(JSON.stringify(out));
 """
 if shutil.which("node"):

@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - "stackshot/web/**"
+      - "shared/**"
       - "stackshot.example.toml"
       - "tests/explain_check.py"
       - "tests/_*.py"

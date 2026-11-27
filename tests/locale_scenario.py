@@ -659,7 +659,7 @@ check("the item page has strings in the table (the areas item, wait, answer, wat
 check("every fixture page rendered in both languages", len(ipx_en) == len(ipx_ko) == len(IPX_IDS) * 6 + 5 and all("<html" in h for h in ipx_en.values()), (len(ipx_en), len(ipx_ko)))
 check("the item pages in English carry no marker and keep <html lang=\"en\"> (apply_lang rewrites it per person)", all("[x:" not in h and '<html lang="en">' in h for h in ipx_en.values()),
       [k for k, h in ipx_en.items() if "[x:" in h][:5])
-check("a queued item's page says why it waits, in English and marked in the test locale", "its mover is working on that item first" in ipx_en[(201, "queued")] and MARK(EN["wait.queued_note"]) in ipx_ko[(201, "queued")] and 'href="/items/a202"' in ipx_en[(201, "queued")], re.findall(r"Waits on.{0,300}", ipx_en[(201, "queued")])[:1])
+check("a queued item's page says why it waits, in English and marked in the test locale", "· queued</span>" in ipx_en[(201, "queued")] and EN["wait.queued_help"] in ipx_en[(201, "queued")] and all(MARK(EN[k]) in ipx_ko[(201, "queued")] for k in ("wait.queued", "wait.queued_help")) and 'href="/items/a202"' in ipx_en[(201, "queued")], re.findall(r"Waits on.{0,300}", ipx_en[(201, "queued")])[:1])
 check("the item pages in the test locale carry markers", all("[x:" in h for h in ipx_ko.values()), [k for k, h in ipx_ko.items() if "[x:" not in h][:5])
 
 def _ipx_pat(v):

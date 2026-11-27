@@ -6,6 +6,7 @@ the files. It checks that:
     its text contrasts with its ground, and the page does not scroll sideways; a tap outside and Escape close it;
   - at 360 and 1280 px no "?" lies over words or a control beside it, so a tap on those opens nothing;
   - the color panel (dark theme, whether the page opened dark or turned dark) holds its note behind a "?"; its popup stays inside the panel, and Escape closes it before the panel;
+  - the side panel's Audit card: its script redraws the card the server drew, the "?" included; the popup opens inside the panel and stays open, with the keyboard focus, through a redraw;
   - on a desktop (1280 px) hover opens it, the pointer can move onto the popup, leaving closes it; Tab reaches the button and opens it; Escape closes it;
   - the popup's ground differs between light and dark.
 
@@ -65,6 +66,15 @@ drawn = {"projects": board().projects_html(), "closed": board().landed_html(), "
          "list-wait": board().item_html("a2"), "relay-wait": board().item_html("a4")}
 ui_runners.enabled = lambda: True      # a board with runners, before the first read: nothing is read from GitHub
 drawn["runners"] = ui_runners.page_html(board(), {"ts": 0, "errors": {}, "failed": [], "runners": [], "switch": {}, "stale": False, "pending": True, "refreshing": False, "age_s": 0})
+from stackshot.core import config as _cfg
+from stackshot.audit import audit, audit_overview
+audit_was = dict(_cfg.CFG["audit"])
+_cfg.CFG["audit"]["pattern_review"] = "off"
+drawn["audits-log-off"] = board().audits_html()
+_cfg.CFG["audit"].update(enabled=True, pattern_review="shadow")
+card_page = T / "pages" / "audit-card.html"; card_page.write_text(board().html(), encoding="utf-8")      # the home page with the side panel's Audit card drawn
+card_status = {**audit.status(), "card": audit_overview.card(time.time())}                             # what GET /audit/status answers for that card
+_cfg.CFG["audit"].clear(); _cfg.CFG["audit"].update(audit_was)
 FILES = {}
 for name, h in drawn.items():
     FILES[name] = T / "pages" / f"{name}.html"; FILES[name].write_text(h, encoding="utf-8")
@@ -82,7 +92,16 @@ STATE = r"""id => { const b = document.getElementById(id), p = document.getEleme
 BUTTONS = "() => [...document.querySelectorAll('button.xp-b')].filter(b => b.getClientRects().length && getComputedStyle(b).visibility !== 'hidden').map(b => b.id)"
 CENTER = "id => document.getElementById(id).scrollIntoView({block: 'center', behavior: 'instant'})"
 inside = lambda s: s["left"] >= -0.5 and s["right"] <= s["vw"] + 0.5 and s["top"] >= -0.5 and s["bottom"] <= s["vh"] + 0.5
-WANT = {"projects": 1, "closed": 2, "audits": 12, "project": 1, "list-wait": 2, "relay-wait": 1, "runners": 1}      # the fewest "?" each page shows
+WANT = {"projects": 1, "closed": 2, "audits": 13, "audits-log-off": 14, "project": 1, "list-wait": 2, "relay-wait": 1, "runners": 1}      # the fewest "?" each page shows
+# the Audit card's status read, answered by the check once it sets window.__AUDIT; every other request fails, as it does for a file
+STATUS = r"""window.fetch = u => window.__AUDIT && String(u).startsWith('/audit/status') ? Promise.resolve(new Response(JSON.stringify(window.__AUDIT), {status: 200, headers: {'Content-Type': 'application/json'}}))
+  : Promise.reject(new TypeError('offline'));"""
+CARD = "() => document.querySelector('#audit .a-txt').innerHTML"
+# the card's "?" against the panel and the card's own words
+IN_CARD = r"""() => { const r = e => e.getBoundingClientRect(), b = r(document.getElementById('xpb-audit-card')), p = r(document.getElementById('panel')), range = document.createRange(), over = [];
+  for (const e of document.querySelectorAll('#audit .lbl, #audit .val, #audit .a-h')) { if (!e.textContent.trim()) continue; range.selectNodeContents(e);
+    for (const o of range.getClientRects()) if (o.left < b.right - 0.5 && b.left < o.right - 0.5 && o.top < b.bottom - 0.5 && b.top < o.bottom - 0.5) over.push(e.textContent); }
+  return {over: over, button: [b.left, b.right], panel: [p.left, p.right]}; }"""
 # each shown "?" button against the words and controls outside every "?": which of them its box lies over. What is fixed to the screen floats over the page and is left out
 COVERS = r"""() => { const hit = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
   const fixed = e => { for (; e; e = e.parentElement) if (getComputedStyle(e).position === 'fixed') return true; return false; };
@@ -177,6 +196,37 @@ with sync_playwright() as p:
             pg.keyboard.press("Escape"); pg.wait_for_timeout(50); check(f"{tag}: the next Escape closes the panel", not pg.evaluate(shown))
         check(f"{tag}: no script error", not errs, errs)
         ctx.close()
+    # the side panel's Audit card: its "?" as the server draws it and as the card's script redraws it from the status
+    for scheme in ("light", "dark"):
+        for width in (360, 1280):
+            tag = f"audit card {width} {scheme}"; touch = width < 600; i = "xpb-audit-card"
+            ctx = br.new_context(viewport={"width": width, "height": 900}, color_scheme=scheme, has_touch=touch, is_mobile=touch); ctx.add_init_script(STATUS); pg = ctx.new_page(); errs = []
+            pg.on("pageerror", lambda e, errs=errs: errs.append(str(e))); pg.goto(card_page.as_uri()); pg.wait_for_timeout(200)
+            if touch: pg.click("#panel-open"); pg.wait_for_timeout(300)
+            def redraw(status):
+                pg.evaluate("s => { window.__AUDIT = s; document.dispatchEvent(new Event('stackshot:poll')); }", status); pg.wait_for_timeout(250)
+            served = pg.evaluate(CARD)
+            pg.evaluate("() => document.querySelector('#audit .a-txt').replaceChildren()"); redraw(card_status)
+            check(f"{tag}: the script draws the card the server drew, its ? included", i in served and pg.evaluate(CARD) == served, (served[-700:], pg.evaluate(CARD)[-700:]))
+            pg.evaluate(CENTER, i)
+            if touch: pg.tap(f"#{i}")
+            else:
+                for _ in range(200):
+                    pg.keyboard.press("Tab")
+                    if pg.evaluate("() => document.activeElement && document.activeElement.id") == i: break
+            pg.wait_for_timeout(50); s = pg.evaluate(STATE, i); c = pg.evaluate(IN_CARD)
+            check(f"{tag}: it opens whole inside the panel, nothing over it", s["open"] and s["words"] > 0 and inside(s) and not s["over"] and s["right"] - s["left"] > 100 and s["left"] >= c["panel"][0] - 0.5 and s["right"] <= c["panel"][1] + 0.5, (s, c))
+            check(f"{tag}: the ? lies over none of the card's words and stays inside the panel", not c["over"] and c["button"][0] >= c["panel"][0] and c["button"][1] <= c["panel"][1] and (s["bw"] >= 43.5 or not touch), (c, s))
+            if SHOTS:
+                os.makedirs(SHOTS, exist_ok=True); pg.screenshot(path=os.path.join(SHOTS, f"audit-card-{width}-{scheme}.png"))
+            changed = json.loads(json.dumps(card_status)); changed["card"]["groups"][0]["found"] = 7; redraw(changed); s = pg.evaluate(STATE, i)
+            check(f"{tag}: a redraw with a new count keeps the popup open and in its place", pg.evaluate("() => [...document.querySelectorAll('#audit .a-n')].some(e => e.textContent === '7')") and s["open"] and inside(s), s)
+            if not touch:
+                check(f"{tag}: ...and the keyboard focus on its button", pg.evaluate("() => document.activeElement.id") == i, pg.evaluate("() => document.activeElement.tagName"))
+                pg.keyboard.press("Escape"); pg.wait_for_timeout(30); redraw(card_status); s = pg.evaluate(STATE, i)
+                check(f"{tag}: one closed with Escape stays closed through a redraw, still focused", not s["open"] and pg.evaluate("() => document.activeElement.id") == i, s)
+            check(f"{tag}: no script error", not errs, errs)
+            ctx.close()
     br.close()
 check("the popup's ground differs between light and dark", grounds.get("light") and grounds.get("dark") and not grounds["light"] & grounds["dark"], grounds)
 print(("ok" if not fails else "FAILED") + f": explainer check, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
