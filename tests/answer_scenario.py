@@ -417,7 +417,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and a5["state_updated"] == before5["state_updated"], (r.status_code, r.headers.get("location"), a5["metadata"]))
     check("the comment is stored with kind comment and its text", [(a["kind"], a["text"], a["via"]) for a in a5["metadata"]["answers"]] == [("comment", "What about the\nother box?", "board")],
           a5["metadata"].get("answers"))
-    check("the owner hears it, one line, the text's break flattened", [(t[1], t[2]) for t in told] == [(OWNER, f"[stackshot] Oliver commented on a5 on the board: What about the / other box? → {BOARD}/items/a5")], told)
+    check("the owner hears it, one line, the text's break flattened", [(t[1], t[2]) for t in told] == [(OWNER, f"[stackshot] Oliver commented on a5 on the board: What about the / other box? An answer or result asked for belongs on the item, not only in your own pane. → {BOARD}/items/a5")], told)
     check("his comment queues no GitHub job either", jobs() == [], jobs())
     for p in G.pending(): p.unlink()
     told.clear()
@@ -643,7 +643,8 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     _judge_old = ". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to Oliver with a new step (step=…)"
     _judge_later = (f"; if it says he will do the step at a later time, park the item until then (update until=<that time, YYYY-MM-DDTHH:MM {_tz}>, "
                     f"wait_reason=<what it waits on, at least {_minreason} characters>), leave his step open and hand no new step back.")
-    _judge = _judge_old + _judge_later
+    _on_item = " An answer or result asked for belongs on the item, not only in your own pane."
+    _judge = _judge_old + _judge_later + _on_item
     check("an old page's Send with a note: the then-mover alone is told, with his note and the instruction to judge it (the creator is not told)",
           sorted((t[1], t[3]) for t in told) == [(AGENT, "answer")]
           and {t[1]: t[2] for t in told}[AGENT] == f"[stackshot] Oliver sent a note on his step on a41: {_STEPN}. It's yours now with his note: “which box do I run it on?”{_judge} → {BOARD}/items/a41", told)
@@ -656,7 +657,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     told.clear(); r_s45 = post("/items/a45/answer", {"token": tok("a45"), "act": "send", "text": "I will do this after the trip, so wait until then", "back": "/#task-a-45"}); m45 = rd("a", 45)["metadata"]
     n45 = {t[1]: t[2] for t in told}[AGENT]
     check("a later-time note: the then-mover alone is told, and its notice keeps both earlier branches word for word and adds the wait branch after them",
-          sorted(t[1] for t in told) == [AGENT] and _judge_old + "; if it says he will do the step at a later time" in n45 and n45.endswith(_judge_later + f" → {BOARD}/items/a45")
+          sorted(t[1] for t in told) == [AGENT] and _judge_old + "; if it says he will do the step at a later time" in n45 and n45.endswith(_judge_later + _on_item + f" → {BOARD}/items/a45")
           and "if it finishes the step, carry on as after a Done" in n45 and "then hand the item back to Oliver with a new step (step=…)" in n45, n45)
     check("the wait branch names the exact tool form: until, a date as YYYY-MM-DDTHH:MM in the instance zone, a wait_reason with its minimum length, his step left open, no new step handed back",
           f"update until=<that time, YYYY-MM-DDTHH:MM {_tz}>" in n45 and f"wait_reason=<what it waits on, at least {_minreason} characters>" in n45
