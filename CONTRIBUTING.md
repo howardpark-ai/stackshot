@@ -66,9 +66,30 @@ project's notes.
   The deny list for a local run is the environment variable `CLEAN_TEXT_DENY` if it holds anything, else the file `${XDG_CONFIG_HOME:-$HOME/.config}/stackshot/clean-text-deny` (one regex per line, blank lines ignored; the maintainer
   holds the list and hands it to a contributor who is to have it). It is never read from the tree. With neither, only the generic patterns run and one line on standard error says so; that is not a failure.
 - **Run it by hand** when you want to; the script needs only Python 3.12 or later. For a commit message: `python3 tools/clean_text.py --message-file <file>`; for a branch name:
-  `python3 tools/clean_text.py --branch <name>`; for a PR title and body: `python3 tools/clean_text.py --title "<title>" --body-file <file>` (the hooks do not see them, so run it before opening the PR); for every commit of a branch: `python3 tools/clean_text.py --commits origin/main..HEAD`; for the commits a push to the remote `NAME` would add: `python3 tools/clean_text.py --new-commits HEAD --remote NAME`.
+  `python3 tools/clean_text.py --branch <name>`; for a PR title and body: `python3 tools/clean_text.py --title "<title>" --body-file <file>` (the hooks do not see them, so run it, or `tools/prepush` below, before opening the PR); for every commit of a branch: `python3 tools/clean_text.py --commits origin/main..HEAD`; for the commits a push to the remote `NAME` would add: `python3 tools/clean_text.py --new-commits HEAD --remote NAME`.
 - **License:** the repository is MIT-licensed (`LICENSE`); a contribution comes in under the same license.
 - **Comments explain why, without names or dates.** A comment says why the code works the way it does; who decided it, when and in what words belong in the issue tracker or the history, not the source.
+
+## Before a push
+
+Fetch `origin`, then run `tools/prepush` on the branch you are about to push. It compares `HEAD` with `origin/main` and runs the checks that cost seconds, through the repository's own tools:
+
+```
+tools/prepush --title "<PR title>" --body-file <file holding the PR body>
+```
+
+| check | what fails it |
+|---|---|
+| commit and PR text | `tools/clean_text.py` refuses the branch name, a commit message of the branch, or the title or body given |
+| retired terms | `tools/retired_terms.py` finds a word listed in `tests/retired_terms.toml` in a place that list covers |
+| tool text | `tools/tool_text.py touched`: a tool function or output helper changed, the tool-text snapshot did not, and the body given has no `tool-text: unchanged:` line (*The tool-text gates*) |
+| suite pick | `tests/suitemap.py select` cannot answer. Without CI's map the answer is every suite, which is not a failure (*Suite selection*) |
+
+It runs no test suite unless told to, and it ends by listing what ran and what is left to you. `--suites` also runs the suites that scan whole trees (`until_write`, `retired_terms`, `neutral_install`, `tool_text`, `suitemap`), which a file your change reaches by no name can still fail; use it only where tests may run. The other suites of the pick are named, with the command that runs them. Exit status 0 means that every check that ran passed, 1 that one failed or could not run, 2 wrong usage.
+
+A check of your own goes in the environment variable `STACKSHOT_PREPUSH_EXTRA`, empty by default: a shell command run from the checkout's root with `PREPUSH_BASE` (the fork point), `PREPUSH_BODY_FILE` and `PREPUSH_TITLE` set; a non-zero exit fails `tools/prepush`.
+
+The `pre-push` hook of `.githooks/` (turned on as above) runs `tools/prepush --hook`, the retired-terms lint alone, when a pushed commit is the checked-out one. The lint reads the files of the checkout, untracked files that git does not ignore included, so for any other pushed commit the hook says that it did not run it.
 
 ## Where work is recorded
 

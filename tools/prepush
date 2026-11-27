@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""tools/prepush — the checks to run on a branch before pushing it (CONTRIBUTING.md, "Before a push"). Stdlib only (Python 3.12+).
+
+    tools/prepush [--body-file F] [--title T]   the quick checks of HEAD against origin/main: seconds, and no test suite
+    tools/prepush --suites [...]                the same, then the suites that scan whole trees: only where tests may run
+    tools/prepush --hook                        the part .githooks/pre-push runs: the retired-terms lint of the checked-out tree
+
+Every check is an existing tool or suite run as a command; none of their logic is here. Quick checks: the branch name, commit
+messages and PR text (tools/clean_text.py); retired wording (tools/retired_terms.py); tool code changed without the tool-text
+snapshot or the PR body's line (tools/tool_text.py touched); the suite pick (tests/suitemap.py select). The output ends with what
+ran and what is left to you. Exit 0: every check that ran passed. Exit 1: one failed or could not run. Exit 2: wrong usage.
+
+An extra check of your own: set STACKSHOT_PREPUSH_EXTRA to a shell command (empty by default). It runs from the checkout's root
+after the quick checks (not with --hook), with PREPUSH_BASE (the fork point), PREPUSH_BODY_FILE and PREPUSH_TITLE (empty when not
+given) in its environment, and a non-zero exit fails this command."""
+import argparse, os, subprocess, sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+# The suites that read whole trees (every doc, source or test file, a fresh install's served text), so a file no change reaches
+# by name can fail them: they run before every push, whatever the pick says.
+WHOLE_TREE = ("until_write", "retired_terms", "neutral_install", "tool_text", "suitemap")
+SUITE_TIMEOUT = 900
+RUN = "uv run --locked --only-group tests python tests/suitemap.py run -T 600"
+
+
+def call(cmd, timeout=600, env=None):
+    """(exit code, stdout, stderr); a command that cannot start or does not end in time has code None and the reason as stderr"""
+    try:
+        r = subprocess.run([str(c) for c in cmd], cwd=ROOT, env=env, capture_output=True, text=True, errors="replace",
+                           stdin=subprocess.DEVNULL, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, "", str(e)
+    return r.returncode, r.stdout, r.stderr
+
+
+def git(*args):
+    rc, out, _ = call(["git", *args])
+    return out.strip() if rc == 0 else None
+
+
+class Report:
+    def __init__(self):
+        self.ran, self.bad = [], []
+
+    def result(self, name, ok, output):
+        """a pass prints its last line only; a failure prints what the check said"""
+        lines = [line for line in output.rstrip().splitlines() if line.strip()]
+        shown = lines[-1:] if ok else lines[-60:]
+        print(f"{'ok  ' if ok else 'FAIL'} {name}" + "".join(f"\n       {line}" for line in shown), flush=True)
+        self.ran.append(name)
+        if not ok:
+            self.bad.append(name)
+
+    def script(self, name, path, *args):
+        """run one of the repository's tools; a missing script or a command that cannot run is a failure, never a skip"""
+        if not (ROOT / path).is_file():
+            self.result(name, False, f"could not run: {path} is not in this checkout")
+            return
+        rc, out, err = call([sys.executable, ROOT / path, *args])
+        self.result(name, rc == 0, out + err if rc is not None else f"could not run: {err}")
+
+
+def pick_suites(report, base):
+    """the names tests/suitemap.py picks for base..HEAD, "all", or None when the pick could not be made"""
+    if not (ROOT / "tests/suitemap.py").is_file():
+        report.result("suite pick", False, "could not run: tests/suitemap.py is not in this checkout")
+        return None
+    rc, out, err = call([sys.executable, ROOT / "tests/suitemap.py", "select", "--base", base, "--to", "HEAD"])
+    if rc != 0:
+        report.result("suite pick", False, f"could not run: {err or out}")
+        return None
+    words = out.split()
+    notes = [line for line in err.splitlines() if "CI map" in line or "wider than CI" in line]
+    said = "every suite" if words == ["all"] else f"{len(words)} suite(s)"
+    report.result("suite pick", True, " ".join([said + ";", *notes[:1]]))
+    return "all" if words == ["all"] else words
+
+
+def run_suites(report):
+    """the whole-tree suites, one at a time through tests/run-suite (which sets up the environment and any configured launcher)"""
+    for name in WHOLE_TREE:
+        if not (ROOT / f"tests/{name}_scenario.py").is_file():
+            report.result(f"suite {name}", False, "could not run: no such suite in this checkout")
+            continue
+        rc, out, err = call([ROOT / "tests/run-suite", name], timeout=SUITE_TIMEOUT)
+        if rc != 0:
+            # the failing checks alone when the suite names them (its last lines may be noise), else the end of what it printed
+            failed = [line[:400] for line in out.splitlines() if line.startswith("FAIL")]
+            said = failed[-20:] or (out + err).splitlines()[-15:]
+            out = "\n".join([*said, f"exit {rc}" if rc is not None else f"could not run: {err}"])
+        report.result(f"suite {name}", rc == 0, out or err)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="tools/prepush", description=__doc__.split("\n")[0])
+    ap.add_argument("--base", default="origin/main", help="what the branch is compared with (default origin/main, as last fetched)")
+    ap.add_argument("--body-file", metavar="F", help="the PR body: its text is checked, and its `tool-text: unchanged:` line counts")
+    ap.add_argument("--title", help="the PR title: its text is checked")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--suites", action="store_true", help="also run the whole-tree suites (only on a machine that may run tests)")
+    mode.add_argument("--hook", action="store_true", help="the pre-push hook's part: the retired-terms lint only")
+    a = ap.parse_args(argv)
+    body = str(Path(a.body_file).resolve()) if a.body_file else ""
+    report = Report()
+    lint = ("retired terms", "tools/retired_terms.py", "--root", ROOT, "--config", ROOT / "tests/retired_terms.toml")
+    if a.hook:
+        report.script(*lint)
+        print("prepush: the hook ran the retired-terms lint only; `tools/prepush --body-file <f>` runs the other checks", flush=True)
+        return 1 if report.bad else 0
+
+    base = git("merge-base", a.base, "HEAD")
+    if not base:
+        print(f"FAIL base: could not run: no merge base of {a.base} and HEAD (fetch it, or pass --base)\nprepush: nothing was checked")
+        return 1
+    branch = git("symbolic-ref", "--quiet", "--short", "HEAD")
+    behind = git("rev-list", "--count", f"HEAD..{a.base}")
+    print(f"prepush: {branch or 'detached HEAD'} {git('rev-parse', '--short', 'HEAD')} against {a.base} (fork point {base[:10]})")
+    if behind not in (None, "0"):
+        print(f"note: {a.base} holds {behind} commit(s) this branch does not")
+    if git("status", "--porcelain", "--untracked-files=no"):
+        print("note: uncommitted changes: the commit-text and tool-text checks and the pick read commits, the rest reads the files here")
+    if body and not Path(body).is_file():
+        report.result("PR body file", False, f"could not run: {a.body_file} is not a file")
+        body = ""
+
+    text = ["--commits", f"{base}..HEAD"]
+    if branch:
+        text += ["--branch", branch]
+    if a.title is not None:
+        text += [f"--title={a.title}"]
+    if body:
+        text += ["--body-file", body]
+    report.script("commit and PR text", "tools/clean_text.py", *text)
+    report.script(*lint)
+    report.script("tool text", "tools/tool_text.py", "touched", "--base", base, "--head", "HEAD", "--repo", ROOT,
+                *(["--body-file", body] if body else []))
+    picked = pick_suites(report, base)
+    extra = os.environ.get("STACKSHOT_PREPUSH_EXTRA", "").strip()
+    if extra:
+        env = {**os.environ, "PREPUSH_BASE": base, "PREPUSH_BODY_FILE": body, "PREPUSH_TITLE": a.title or ""}
+        rc, out, err = call(["sh", "-c", extra], timeout=3600, env=env)
+        report.result("extra check", rc == 0, out + err if rc is not None else f"could not run: {err}")
+    if a.suites:
+        run_suites(report)
+
+    print(f"\nprepush: ran {len(report.ran)} check(s): {', '.join(report.ran)}")
+    left = []
+    if not a.suites:
+        left.append(f"the whole-tree suites, on a machine that may run tests (or rerun there with --suites):\n      {RUN} {' '.join(WHOLE_TREE)}")
+    if picked == "all":
+        left.append("the pick is every suite: CI runs it on the PR; run here what covers your change (`tests/run-suite <name>`)")
+    elif picked is None:
+        left.append("the suites your change reaches: the pick could not be made")
+    elif rest := [s for s in picked if s not in WHOLE_TREE]:
+        left.append(f"the picked suites, on a machine that may run tests:\n      {RUN} {' '.join(rest)}")
+    if a.title is None or not body:
+        left.append("the PR title and body text: pass --title and --body-file")
+    print("prepush: left to you:" + ("".join(f"\n  - {x}" for x in left) if left else " nothing"))
+    if report.bad:
+        print(f"prepush: FAILED: {', '.join(report.bad)}")
+        return 1
+    print("prepush: every check that ran passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
