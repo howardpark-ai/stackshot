@@ -78,6 +78,37 @@ def _gate_subject(subject: str, current: str | None = None) -> None:
         raise _faults.refusals(got)
 
 
+# The openings and endings that show a title asks or names work where the finished outcome belongs. Only forms that cannot be read as a result: a verb such as "Fix", "Add" or "Check" can open a good title,
+# or be a noun in one ("check valves stay closed"), so it is left to the audit's judge. Korean words are written as escapes (no Hangul in the repository): they end a title or its part before a colon.
+_RX_ASKS = re.compile(r"(?:how|whether|why|should)\s", re.I)
+_RX_WORK = re.compile(r"(?:investigat(?:e|ing)|look(?:ing)? into|figure out|find out|analy[sz]e|(?:pick|choose|decide) (?:how|whether|which|what|if|between|on))\b", re.I)
+_RX_ASKS_END = re.compile("(?:\ubc29\ubc95|\ud560\uc9c0|\uc5ec\ubd80)$")      # way to, whether to, whether or not
+_RX_WORK_END = re.compile("(?<![^ ])(?:\ud655\uc778|\uac80\ud1a0|\uc870\uc0ac|\ubcf4\ub0b4\uae30|\ub2e4\ub4ec\uae30|\uc54c\uc544\ubcf4\uae30)$")      # check, review, look into, sending, polishing, finding out; a word of its own
+
+
+def subject_reads_as(subject: str) -> str:
+    """"a question" or "an activity" when the subject plainly is one and so names no finished outcome, else "". Read past the scope prefix, and in each part a colon sets off (`Door sensor: how to wire it`):
+    how a part opens, how it ends (Korean puts the verb last; a closing bracket and the ellipsis of a cut subject are passed over), and a question mark at the end. A narrow reading on purpose: a title it
+    passes may still be unclear, which the daily audit's judge reads; a title it names costs one line of a reply."""
+    s = next((subject[len(p):] for p in _cfg.CFG["subject"]["prefixes"] if subject.startswith(p)), subject).strip()
+    parts = [re.sub(r"(?:\s*(?:…|\([^()]*\)))+$", "", p).strip() for p in re.split(r"[:\uff1a]\s+", s)]
+    if s.endswith(("?", "\uff1f")) or any(_RX_ASKS.match(p) or _RX_ASKS_END.search(p) for p in parts):
+        return "a question"
+    return "an activity" if any(_RX_WORK.match(p) or _RX_WORK_END.search(p) for p in parts) else ""
+
+
+def subject_form_note(subject: str) -> str:
+    """The reply line of a session's write that leaves an item titled as a question or an activity: the subject is quoted, with what to send instead. Counted in the call log (call_log.noted). Information only:
+    nothing is refused or stored differently. "" for any other subject. Why: only the description's first bullet is held to the outcome at write time, so a title such as "pick whether ..." was filed in silence
+    and stayed after the choice was made."""
+    kind = subject_reads_as(subject)
+    if not kind:
+        return ""
+    _calls.noted("subject-form")
+    return (f'\n(note: the subject "{_clip_line(subject)}" reads as {kind}, not a finished outcome: send subject= naming the result wanted, the one the Goal sentence says, as "Make X work when Y" '
+            'or "X is live")')
+
+
 def fix_long_subject(subject: str, current: str | None = None) -> str:
     """A subject over [subject] max_length, put right instead of refused: cut at the last word that fits with " …" after it, the whole counted in the limit (bullet_text.cut_words: no word is cut in two, the kept
     words and the scope prefix are as written), and the reply says so (call_log.fixed). The subject as given when it fits, when it is the stored text sent back (a long one stored before the limit), when it

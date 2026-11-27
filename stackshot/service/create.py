@@ -422,10 +422,11 @@ def create_item(
     item["gid"] = gid
     machine_note = h.machine_note(gid, item, owner)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     offer_note = _anchor_offers.item_line(gid, item)      # a relay wait or a source link in the description that no anchor watches: one line with the ready anchors call, never a refusal
+    title_note = _fg.subject_form_note(subject) if goal_judged else ""      # a title that reads as a question or an activity: a note, never a refusal; the writes the goal gate judges
     if local:
         why_ = f"GitHub is taking no new write right now ({local[:120]})" if local_held else f"GitHub did not answer ({local[:120]})"
         told += (f"\n({why_}, so {_gh.shown(gid)} is a temporary id: the item takes its issue number when {'GitHub has room' if local_held else 'GitHub is back'}, "
                  f"{_gh.shown(gid)} stays as an alias for it, and {_session_label(owner) or 'its mover'} is told the new id)")
-    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_inst.BOARD_URL}) now.\n" + h.fmt(item) + h.said_note(said_l) + proof_note + asked + h.form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + wait_note + machine_note + offer_note
+    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_inst.BOARD_URL}) now.\n" + h.fmt(item) + h.said_note(said_l) + proof_note + asked + h.form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + wait_note + machine_note + offer_note + title_note
                  + then_note + similar_note(gid, subject, str(meta.get("project") or "")) + told + owing + h.nag("" if by else owner))
 

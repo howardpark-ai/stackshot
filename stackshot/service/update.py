@@ -1695,9 +1695,13 @@ def update_unlocked(
         except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
             print(f"update: {gid} dropped-lines note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     goal_note = ""
-    if description.strip() and _writes.session_next() and not reformat and not sender.strip().startswith("a script on "):      # the writes the goal gate judges: a session's own words
+    if _writes.session_next() and not reformat and not sender.strip().startswith("a script on "):      # the writes the goal gate judges: a session's own words
         try:
-            goal_note = _goal_moved_note(item_was, item, desc_sent)
+            if description.strip():
+                goal_note = _goal_moved_note(item_was, item, desc_sent)
+            # a write that names the item anew, or says anew what it is (a title that asked the owner's choice outlives it so), is told when the open item's title is a question or an activity
+            if item.get("status") == "open" and any(item.get(k) != item_was.get(k) for k in ("subject", "description")):
+                goal_note += _fg.subject_form_note(str(item.get("subject") or ""))
         except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
             print(f"update: {gid} goal note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     machine_note = h.machine_note(gid, item, keeper_was)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal

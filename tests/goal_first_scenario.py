@@ -9,7 +9,8 @@ new subject alone is not; the items a script files (the question route, the serv
 bullet says; `[description] require_bullets = false` switches it off with the other form checks; the form gate still speaks first for prose; the pure readers
 (bullet_text.first_bullet, goal_of); and the tools' text states the rule in create, update and the connector's tool list; a session's update that changes the words of the Goal sentence
 and leaves the subject gets one reply line quoting the stored subject, clipped to one line (never a refusal, none for a re-formatted or unchanged Goal, a new subject or a script's write), kept in the call log
-as a note and not a fix, and stored nowhere else.
+as a note and not a fix, and stored nowhere else; and a session's create, or its update that changes an open item's subject or description, whose stored subject reads as a question or an activity gets one reply line that quotes it
+(never a refusal, none for a script's write, a close or a title that names a result, kept as the note `subject-form`).
 
     tests/run-suite goal_first        → exit 0 / 1"""
 import asyncio, contextlib, io, json, os, re, sys, pathlib, logging, time, types
@@ -308,5 +309,106 @@ check("the update tool's text names the line, that it is no refusal, what to sen
       "A description that changes the Goal sentence's words, with no new subject, gets one reply line quoting the stored subject (a note, never a refusal): send subject= if the outcome moved. Words are compared: "
       'case, the spacing and punctuation between the same words and bold, code or link marks are no change; a word split or joined ("Re-run" to "Rerun") and a changed symbol (% and ~ count) are.'
       in " ".join(TOOLS["update"].split()), None)
+
+# ---- the title that reads as a question or an activity: a note in the reply, never a refusal. The Korean titles are written as escapes (no Hangul in the repository).
+from stackshot.model import field_gates as FG
+def ko(*codes): return "".join(chr(c) for c in codes)
+KO_WAY, KO_WHETHER, KO_WHETHER2 = ko(0xBC29, 0xBC95), ko(0xD560, 0xC9C0), ko(0xC5EC, 0xBD80)
+KO_WORK = (ko(0xD655, 0xC778), ko(0xAC80, 0xD1A0), ko(0xC870, 0xC0AC), ko(0xBCF4, 0xB0B4, 0xAE30), ko(0xB2E4, 0xB4EC, 0xAE30), ko(0xC54C, 0xC544, 0xBCF4, 0xAE30))
+KO_THING = ko(0xC804, 0xB4F1)                       # a noun the titles are about
+KO_SET, KO_DONE, KO_AGAIN, KO_SUBJ = ko(0xD655, 0xC815, 0xB41C, 0xB2E4), ko(0xC644, 0xB8CC), ko(0xC7AC), ko(0xC774)
+ASKING = ("[home] How a guest opens the gate", "[home] Door sensor: how to wire it", "[home] whether the pump stays on at night", "[home] Why the boiler cycles", "[home] Should the bins go out on Fridays",
+          "[work] The pump stays on at night?", "[home] The pump stays on at night" + chr(0xFF1F), "[home] Plan" + chr(0xFF1A) + " how to wire it", "[home] HOW to wire the sensor",
+          f"[home] {KO_THING} {KO_WAY}", f"[home] {KO_THING}{KO_WHETHER}", f"[home] {KO_THING} {KO_WHETHER2}", f"[home] {KO_THING} {KO_WAY} (2)", f"[home] {KO_THING} {KO_WAY} …",
+          f"[home] {KO_THING} {KO_WAY}: the second part")
+WORKING = ("[home] Investigate the noisy boiler", "[home] investigating the noisy boiler", "[home] Look into the noisy boiler", "[home] looking into the noisy boiler", "[home] Figure out the sensor wiring",
+           "[home] Find out who pays the fee", "[home] Analyze the noisy boiler", "[home] analyse the noisy boiler", "[home] pick whether to add a second lamp", "[home] hall: pick how the shelf looks",
+           "[home] Choose which sensor to buy", "[home] Decide what to cook", "[home] Decide if the pump stays", "[home] Choose between two sensors", "[home] Decide on the sensor",
+           *(f"[home] {KO_THING} {w}" for w in KO_WORK), f"[home] {KO_THING} {KO_WORK[4]}: part two", KO_WORK[0])
+NAMING = ("[home] Make the nightly run finish by 06:00", "[home] The export is live", "[home] The export no longer times out", "[home] Fix the retry so uploads finish", "[home] Check valves stay closed",
+          "[home] Review dates reach the tenant", "[home] Show where each parcel waits", "[home] A guest knows how to open the gate", "[home] However it is opened, the page loads",
+          "[home] How-to guide is published", "[home] The porch: why-sign hangs by the door", "[home] The tenant decides whether the lamp stays", "[home] The plumber investigates every leak",
+          "[home] Analyzers run on every sample", "[home] Pick up times are on the fridge", "[home] Investigation notes are in the drawer", "[home] The export runs at 12:30 how it is set",
+          "[home] The plumber can investigate every leak", "[home] A guest can decide whether to stay", "[home] The tag door:why stays readable",
+          f"[home] {KO_THING}{KO_SUBJ} {KO_SET}", f"[home] {KO_THING} {KO_AGAIN}{KO_WORK[0]}", f"[home] {KO_WAY}{KO_SUBJ} {KO_SET}", f"[home] {KO_THING} {KO_WORK[0]} {KO_DONE}", "[home] ", "")
+for kind, titles in (("a question", ASKING), ("an activity", WORKING), ("", NAMING)):
+    wrong = [(s, FG.subject_reads_as(s)) for s in titles if FG.subject_reads_as(s) != kind]
+    check(f"subject_reads_as: {kind or 'a title that names a result is neither'}", not wrong, ascii(wrong))
+check("subject_reads_as: a title with no scope prefix is read the same", FG.subject_reads_as("how to wire it") == "a question", None)
+
+def title_line(subject, kind): return f'(note: the subject "{subject}" reads as {kind}, not a finished outcome: send subject= naming the result wanted, the one the Goal sentence says, as "Make X work when Y" or "X is live")'
+TITLE = "reads as"
+def call_create(**kw):
+    """the create tool as a session calls it, through the middleware that writes the call log: (the reply or the ToolError, the log rows this call added)"""
+    args = {"subject": "[home] Make the export finish", "description": GOOD, "project": STK, "sender": MAIN, "next": f"{MAIN}: carry on", **kw}
+    n = len(list(CL.read(0, time.time() + 86400)))
+    async def nxt(ctx):
+        text = _wt_create.stackshot_create(owner=MAIN, **{k: v for k, v in args.items() if k != "sender"})
+        return types.SimpleNamespace(content=[types.SimpleNamespace(type="text", text=text)], structured_content={"result": text})
+    ctx = types.SimpleNamespace(message=types.SimpleNamespace(name="create", arguments=args))
+    with contextlib.redirect_stderr(io.StringIO()):
+        try: out = asyncio.run(_wmw._RefusalLog().on_call_tool(ctx, nxt)).content[0].text
+        except ToolError as e: out = e
+    return out, list(CL.read(0, time.time() + 86400))[n:]
+
+asked = "[home] pick whether to add a second lamp"
+n0 = n_items()
+out, rows = call_create(subject=asked)
+check("create with such a title: filed as sent, with the line, kept in the log as a note and no fix", isinstance(out, str) and out.startswith("created") and n_items() == n0 + 1 and title_line(asked, "an activity") in out
+      and noted(rows) == [["subject-form"]] and "fix" not in rows[0] and rows[0]["ok"] and stored(_model_ids._norm_id(out.split()[1]))["subject"] == asked, (str(out)[-500:], rows))
+out, rows = call_create(subject="[home] Door sensor: how to wire it")
+check("create: the line says a question", isinstance(out, str) and title_line("[home] Door sensor: how to wire it", "a question") in out and noted(rows) == [["subject-form"]], (str(out)[-500:], rows))
+out, rows = call_create()
+check("create with an outcome title: no line, no note", isinstance(out, str) and out.startswith("created") and TITLE not in out and noted(rows) == [], (str(out)[-400:], rows))
+out, rows = call_create(subject=asked, due="not a day")
+check("a refused create: no line, no note", isinstance(out, ToolError) and TITLE not in str(out) and noted(rows) == [] and rows[0]["ok"] is False, (str(out)[:300], rows))
+made = _wt_create._create(subject=asked, description="- A thing", project=STK, owner=MAIN, next=f"{MAIN}: carry on")
+check("no title line: the server's own create (no session's write)", made.startswith("created") and TITLE not in made, made[-300:])
+with writes.session_write():
+    made = create_svc.create_item(subject=asked, description="- A thing", project=STK, owner=MAIN, next=f"{MAIN}: carry on", by="a watcher (a script on testbox)")[1]
+check("no title line: a script's create", made.startswith("created") and TITLE not in made, made[-300:])
+
+def titled(i, subject, desc=BASE):
+    legacy(i, desc)
+    q = T / f"store/a/{i}.json"
+    q.write_text(json.dumps({**json.loads(q.read_text(encoding="utf-8")), "subject": subject}))
+    return f"a{i}"
+titled(80, "[home] Make it run")
+out, rows = call_tool("a80", subject=asked)
+check("an update that sets such a title: stored, with the line and the note", stored("a80")["subject"] == asked and title_line(asked, "an activity") in str(out) and noted(rows) == [["subject-form"]] and "fix" not in rows[0], (str(out)[-500:], rows))
+titled(81, asked)
+out, rows = call_tool("a81", description=BASE + "\n- The choice is made: fit it")
+check("an update that rewrites the description under a stored title of that form (the choice is made): the line", title_line(asked, "an activity") in str(out) and noted(rows) == [["subject-form"]], (str(out)[-500:], rows))
+titled(82, asked)
+out, rows = call_tool("a82", description=MOVED)
+check("a changed Goal under such a title: both lines, both notes", "the Goal changed" in str(out) and title_line(asked, "an activity") in str(out) and [sorted(n) for n in noted(rows)] == [["goal-moved", "subject-form"]], (str(out)[-700:], rows))
+for name, i, kw in (("a write that changes neither the title nor the description", 83, {"priority": "p2"}), ("the stored title and description sent back", 84, {"subject": asked, "description": BASE})):
+    titled(i, asked)
+    out, rows = call_tool(f"a{i}", **kw)
+    check(f"no title line: {name}", isinstance(out, str) and TITLE not in out and noted(rows) == [], (str(out)[-400:], rows))
+titled(85, asked)
+out, rows = call_tool("a85", subject="[home] The second lamp is in place")
+check("an update that rewords the title to the outcome: no line", isinstance(out, str) and TITLE not in out and noted(rows) == [] and stored("a85")["subject"] == "[home] The second lamp is in place", (str(out)[-400:], rows))
+titled(86, asked)
+r = _wt_complete.stackshot_complete("a86", sender=MAIN, outcome="done", outcome_text="- The lamp is on", reason="it ran")
+check("no title line: a close", stored("a86")["status"] == "completed" and TITLE not in r, r[-300:])
+titled(87, asked)
+r = _wt_update.stackshot_update("a87", sender=MAIN, status="completed", outcome="done", outcome_text="- The lamp is on", reason="it ran", subject="[home] pick whether to keep it")
+check("no title line: a close that sets the title", stored("a87")["status"] == "completed" and TITLE not in r, r[-300:])
+titled(88, "[home] Make it run")
+out = _update_svc._update("a88", subject=asked, sender=MAIN)
+check("no title line: a server-side _update (no session's write)", stored("a88")["subject"] == asked and TITLE not in out, out[-300:])
+titled(89, "[home] Make it run")
+with writes.session_write():
+    out = _update_svc._update("a89", subject=asked, sender="a script on testbox")
+check("no title line: a script's update", stored("a89")["subject"] == asked and TITLE not in out, out[-300:])
+titled(90, asked)
+try:
+    writes.REFORMAT.on = True
+    with writes.session_write():
+        out = _update_svc._update("a90", description=MOVED, sender="rebullet")
+finally:
+    writes.REFORMAT.on = False
+check("no title line: the re-bullet route's filing edit", stored("a90")["description"] == MOVED and TITLE not in out, out[-300:])
 
 print(("ok" if not fails else "FAILED") + f": goal_first scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
