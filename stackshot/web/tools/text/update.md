@@ -329,9 +329,9 @@ soon, for nothing (a flag set before the provision recycled the box too early). 
 a recycle is never an item of its own (create refuses one), and for a change no item covers, {{WHEN_IDLE}};
 {{FLEET_TOOL}} runs a flagged recycle itself, the board shows one "Pane recycle pending for … ({{FLEET_TOOL}} runs
 it)" status line while an open item not parked carries it, and when {{FLEET_TOOL}} reports the recycle done the
-server clears it and tells you to re-read the item and resume. clear_recycle=true takes it off by hand. A question {{OWNER}} asks on an item (in his answer or a comment on it) is
-answered by the mover on the item itself: rewrite the description, and the options where it is a pick, the description
-saying it answers his question. His question is never posted with said and never taken as his call; only his
+server clears it and tells you to re-read the item and resume. clear_recycle=true takes it off by hand. A question {{OWNER}} asks on an item (in his answer, a note on his step or a comment on it) is
+answered by the mover on the item itself, not only in its own pane: rewrite the description, and the options where it is
+a pick, the description saying it answers his question. A result he asks for there belongs on the item too. His question is never posted with said and never taken as his call; only his
 conclusions are. {{NEEDS_FORM}} {{CHECK_FORM}}check="" changes nothing, and a new check passed replaces the old one.
 
 ## param project

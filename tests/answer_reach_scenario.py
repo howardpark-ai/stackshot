@@ -199,6 +199,7 @@ check("4 a long answer: the held line is cut to the store's line limit, his word
 item(10, needs=["demo-builder"], contact="demo-lead")
 out, got, kept = answer("a10", "", "a question about it", "comment")
 check("5 a comment reaches the contact too, as a held line with the comment's own words", out == "comment" and "commented on a10 on the board: a question about it" in kept.get("demo-lead", "") and "demo-lead" not in got and len(got.get("demo-builder", [])) == 1, (got, kept))
+check("5 …the line of the session that acts says an answer belongs on the item, and the held line beside it does not", telling.ON_ITEM in "".join(got.get("demo-builder", [])) and telling.ON_ITEM not in kept.get("demo-lead", ""), (got, kept))
 item(11, state="your-step", step=STEP, needs=["demo-builder"], contact="demo-lead")
 out, got, kept = answer("a11", "", "", "done")
 check("5 a Done on his step reaches the contact as a held line saying he did his step", out == "done" and "did his step on a11" in kept.get("demo-lead", "") and "demo-lead" not in got and len(got.get("demo-builder", [])) == 1, (out, got, kept))
