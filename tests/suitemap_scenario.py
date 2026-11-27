@@ -1984,7 +1984,7 @@ check("suitemap-refresh.yml: the merge step is continue-on-error (its verdict is
 # the alert: an open issue titled "the suite map refresh failed" is made or commented on when the run did not finish green, and closed by the next green run
 rep_job = rj["report"]; rep_st = rep_job["steps"][0]
 check("suitemap-refresh.yml: the report job waits for the plan, the shards and the merge, runs whatever they did, and reads their three results",
-      sorted(rep_job["needs"]) == ["measure", "refresh", "shards"] and rep_job["if"].replace("${{", "").replace("}}", "").split("#")[0].strip() == "!cancelled() && needs.shards.outputs.fresh != 'true'"
+      sorted(rep_job["needs"]) == ["measure", "refresh", "shards"] and rep_job["if"] == "${{ !cancelled() && needs.shards.outputs.fresh != 'true' }}"
       and rep_job["env"]["RESULTS"] == "${{ needs.shards.result }} ${{ needs.measure.result }} ${{ needs.refresh.result }}" and rep_job["env"]["TITLE"] == "the suite map refresh failed", rep_job.get("env"))
 def alert(results, issue=""):
     rc, out, _, log = gh_sh(rep_st, calls=True, RESULTS=results, TITLE=rep_job["env"]["TITLE"], RUN_URL="https://example.test/run/1", STUB_GH_ISSUE=issue)
@@ -2026,6 +2026,15 @@ check("suitemap-refresh.yml, fresh: true only for a scheduled run whose matched 
       all(r == (0, [want]) for r, want in fcases.values()), {k: v[0] for k, v in fcases.items()})
 check("fetch reads the refresh workflow's runs: the file `suitemap.py fetch` names is the file that exists and the name test-trim's report passes to gh is its basename",
       os.path.basename(sm.CI_WORKFLOW) == "suitemap-refresh.yml" and "suitemap-refresh.yml" in open(os.path.join(SCR, "..", "tools", "test_trim_report.py"), encoding="utf-8").read(), None)
+# every cache restore of the suite map (an actions/cache/restore step, and an actions/cache step, which restores too) reads the newest entry: key suitemap-newest, restore-keys suitemap-. The skip logic reads the commit off the matched key (suitemap-<commit>-<run id>),
+# so the prefix is pinned here; a restore with another key or prefix would read an unrelated entry and be taken for this commit's map.
+def map_restores(wf):
+    jobs = yaml.safe_load(open(os.path.join(SCR, "..", ".github", "workflows", wf), encoding="utf-8"))["jobs"].values()
+    return [s.get("with", {}) for j in jobs for s in j.get("steps", []) if re.match(r"actions/cache(/restore)?@", str(s.get("uses", ""))) and "suitemap" in str(s.get("with", {}).get("path", ""))]
+MAP_RESTORES = {wf: map_restores(wf) for wf in ("suitemap-refresh.yml", "tests.yml")}
+check("the suite map's cache restores in suitemap-refresh.yml and tests.yml: each file has one, and every one is key suitemap-newest with restore-keys suitemap-",
+      all(ws and all(w.get("key") == "suitemap-newest" and w.get("restore-keys") == "suitemap-" for w in ws) for ws in MAP_RESTORES.values()),
+      {wf: [(w.get("key"), w.get("restore-keys")) for w in ws] for wf, ws in MAP_RESTORES.items()})
 K = T / "cancel"; (K / "tests").mkdir(parents=True); MARK = T / "marks"; MARK.mkdir()
 for f in ("run-suite", "suitemap.py", "_launcher.py"): shutil.copy(os.path.join(SCR, f), K / "tests" / f)
 for f in ("pyproject.toml", "uv.lock"): shutil.copy(os.path.join(SCR, "..", f), K / f)
