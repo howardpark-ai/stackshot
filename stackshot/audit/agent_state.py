@@ -1,6 +1,6 @@
 """agent_state.py: is a registered agent busy or idle, as the fleet's session manager last told the server (service/agent_state.py, `POST /client/agent-state`).
 
-The hourly audit (audit/hourly.py), the idle hand-over and the busy-hold guard (audit/busy_hold.py) need the mover's state and the subagents it has running. The server reads neither a pane registry nor a
+The hourly audit (audit/hourly.py), the idle hand-over and the balancer (audit/hand_idle.py) and the busy-hold guard (audit/busy_hold.py) need the mover's state and the subagents it has running. The server reads neither a pane registry nor a
 transcript of its own: the machine that runs the panes pushes one snapshot of the whole fleet about every five minutes, and this module reads the last one.
 
   state_of(name, now, snap, aliases)   -> AgentState(state, why, pane, since, subagents): `busy` or `idle` only when a FRESH snapshot names the agent, says it was read and says so itself; else `unknown` and why

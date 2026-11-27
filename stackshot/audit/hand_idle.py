@@ -8,6 +8,7 @@ this module reads that mark and decides which items are handed on. It decides an
   enabled()                                     `[audit] hand_idle`, on unless a TOML false
   due(items, gid, now, front)                   {"mover", "project", "line_at", "told_none"} when the item is to be handed on now, else None
   due_all(items, now, front)                    [(gid, row)] of every such item, in id order; reads only
+  subagent_hold(items, gid, mover, same, subagents, prs)   why a running subagent keeps the item with its mover, "" when none does
   busy_movers(items, now)                       the movers of the open items that are on an agent (a builder among them is not free)
   pick_free(candidates, busy, status, dead, same, frm)   the first candidate that is free, "" when none is
   mark_handed / mark_none                       the record `metadata.hand_idle` ({"handed_at", "from", "to", "none_at", "mover_told_at"}) that keeps the limits
@@ -26,9 +27,13 @@ An item is handed on when all of these hold:
 A builder is free when it is not the mover of any open item that is on an agent (an item it is to take counts: an untaken hand-off names it as mover) and the fleet's last agent-state push says
 it is idle (`status(who) == "idle"`: audit/agent_state.py, fresh, naming the builder, its state read; a builder that is busy, missing from the push, not read, or whose push is stale or absent is UNKNOWN or busy, and is not free: the server cannot see a pane
 on another box, so no word is not "idle"). A name that is known to have no pane (`dead`) or whose status cannot be read is not free. The candidates are the item's project's
-background agents, best first, and no other project's (a project's work is built, reviewed and released by its own builder, so a builder of an unrelated project is never a candidate, however idle). With none free, a project with no background agent of its own included, nothing is handed on and -main is told that none was, once per
+background agents, best first, less those `[audit] no_handoff` names, and no other project's (a project's work is built, reviewed and released by its own builder, so a builder of an unrelated project is never a candidate, however idle). With none free, a project with no background agent of its own included, nothing is handed on and -main is told that none was, once per
 item per 24 hours, and the item's MOVER is told as well (the owner's pick): the item stays on agent and the mover gets one message that it holds an item with no activity, again every hour (`MOVER_EVERY`) for as long as the item stays idle, so it
 ends when the mover works on the item (its clock moves) or hands it back; the owner is never told. At most `MAX_PER_TICK` items are handed on in one pass.
+
+NO ITEM A SUBAGENT MAY BE WORKING ON IS MOVED (`subagent_hold`, which this pass and the balancer ask before a move). An idle line can be hours old and a step status is only what the mover wrote, so both passes read the
+subagents the mover runs now, as the fleet's last agent-state push lists them. The item stays when one of them is tied to it (audit/subagent_tie.py), when one is tied to none of the mover's open items (it may be working on
+this one), and when the subagents of a mover that has a pane cannot be read. A mover with no pane runs none. A subagent started after the last push (one every five minutes or so) is not seen.
 
 THE BALANCER (`[audit] balance`, on by default; `audit_ticks._balance_tick`, its own minute tick ahead of the hand-off tick). The same module decides, the server writes. An item that is NOT STARTED (an untaken hand-off to a
 builder) or QUEUED BEHIND its mover's other item and has waited `[audit] balance_minutes` (default 10) goes to the builder of its OWN PROJECT with the FEWEST open items; the former mover is told to disregard it.
@@ -47,15 +52,16 @@ An item is moved when all of these hold:
     session's item is never balanced) and no front agent;
   - it waited the whole time: its hand-off (when its latest one names the mover) was delivered, else made, at least `balance_minutes` ago, and `silence.clock` is that old too;
   - it is NOT STARTED (an untaken hand-off to a session, `handoff.awaiting_session`) or QUEUED (`balance_queue`: the mover has another item in hand with activity inside the window and this one has none);
-  - the mover has NOT STARTED it: no `taken_at` (in the latest hand-off to it, nor in `handoff_history`), no step status in progress or done and no step marked done on a step that opens with the mover's name, no subagent running (`silence.subagent_running`), no anchor scoped to it, and
-    no pull request event (a CI result, review, comment, merge or commit) as its last activity;
+  - the mover has NOT STARTED it: no `taken_at` (in the latest hand-off to it, nor in `handoff_history`), no step status in progress or done and no step marked done on a step that opens with the mover's name, no step status that
+    says a subagent is running (`silence.subagent_running`), no anchor scoped to it, and no pull request event (a CI result, review, comment, merge or commit) as its last activity;
+  - no running subagent of the mover holds it (`subagent_hold`, above);
   - it was not moved by the idle hand-over (`metadata.hand_idle`) nor by the balancer in the last 24 hours and has been moved fewer than `BALANCE_LIFETIME` (2) times; one at the lifetime cap is left to the ladders, and -main is told once (`capped_at`).
 
-Which builder: the candidates are the builders only (`audit_ticks._balance_builders`: the item's own project's background agents whose mandate says build, maintain, merge or engineer, and no other project's) less any whose pane
+Which builder: the candidates are the builders only (`audit_ticks._balance_builders`: the item's own project's background agents whose mandate says build, maintain, merge or engineer, less those `[audit] no_handoff` names, and no other project's) less any whose pane
 is known dead, the item's own mover, every name in the hand-off record's `tried` and any front agent; the pick is the one with the fewest open items (a busy pane only breaks a tie: an idle one first; then the candidates' order).
 The move must improve the spread, the mover's count including the item: an untaken hand-off moves when `to == 0 or to + 1 < from` (a lone item goes to an empty builder; a swap does not happen), a queued item only when
 `to + 1 < from`. At most `BALANCE_MAX_PER_TICK` (3) items are moved in a pass. With NO eligible candidate (no live builder) the item stays, one History line says so and -main is told once per item per 24 hours (`none_at`; the pass looks again every minute, so a builder that comes back is used at once and its move ends the note) and ONLY when the role map holds another builder than the mover, which is dead or gone (`balance_others`): with no
-other builder, or a pick that is no improvement, it is silent (a log line only). A project whose only builder is the mover therefore keeps its item, however idle another project's builders are.
+other builder (one `[audit] no_handoff` names is none), or a pick that is no improvement, it is silent (a log line only). A project whose only builder is the mover therefore keeps its item, however idle another project's builders are.
 
 Pure: no server import, no file, no clock read. Stdlib plus the repo's modules."""
 from __future__ import annotations
@@ -65,6 +71,7 @@ from typing import Any, Callable, Iterable
 from stackshot.audit import audit_checks as _ac
 from stackshot.audit import hourly as _hourly
 from stackshot.audit import silence as _silence
+from stackshot.audit import subagent_tie as _tie
 from stackshot.core import config as _cfg
 from stackshot.model import last_activity as _la
 from stackshot.model import model as _model
@@ -191,6 +198,36 @@ def due_all(items: dict[str, dict[str, Any]], now: float, front: Callable[[Any, 
     return out
 
 
+def subagent_hold(items: dict[str, dict[str, Any]], gid: str, mover: str, same: Callable[[Any, Any], bool], subagents: Callable[[str], list[dict[str, Any]]], prs: dict[str, Any] | None = None) -> str:
+    """Why a running subagent keeps the open item `gid` with `mover`, "" when none does: one is tied to the item (`subagent_tie.tied_to`: its description, else its brief, names the item or a pull request anchored to it), one
+    is tied to none of the mover's open items (it may be working on this one, as the hourly line reads it), or the subagents cannot be read. Subagents that are all tied to other open items of the mover's hold nothing.
+    `subagents(mover)` → its running subagents (`audit_ticks._mover_subagents`; a call that raises is "cannot be read"), `prs` {item id: the pull requests anchored to it}."""
+    try:
+        subs = list(subagents(mover) or [])
+    except Exception as e:  # noqa: BLE001  — a read that fails is no proof that nothing runs
+        return f"its subagents could not be read ({e})"
+    if not subs:
+        return ""
+    from stackshot.tools import next_report as _nr  # noqa: PLC0415
+    mine = [gid]
+    for g in items:
+        if g == gid or items[g].get("status") != "open":
+            continue
+        try:
+            other = _ac._item_view(items, g)[3]
+        except Exception:  # noqa: BLE001  (an item that cannot be read is no other item of the mover's)
+            continue
+        if other and same(other, mover):
+            mine.append(g)
+    cands = {g: (_nr.shown(g), (prs or {}).get(g, ())) for g in mine}
+    ties = [_tie.tied_to(s, cands) for s in subs]
+    if any(gid in t for t in ties):
+        return "a subagent of the mover is running on it"
+    if not all(ties):
+        return "a subagent of the mover is running that is tied to none of its open items"
+    return ""
+
+
 def busy_movers(items: dict[str, dict[str, Any]], now: float) -> list[str]:
     """The movers of the open items that are on an agent as the board shows them (a hold and a stored wait are not), whatever else is true of them. An item that cannot be read is left out."""
     out: list[str] = []
@@ -280,8 +317,9 @@ def mark_balance_capped(meta: dict[str, Any], now: float) -> None:
 
 
 def started_reason(item: dict[str, Any], mover: str, now: float, same: Callable[[Any, Any], bool], anchored: Callable[[dict[str, Any]], bool] | None = None) -> str:
-    """Why the mover is taken to have STARTED the item ("" when it has not): the hand-off was taken, a step opening with the mover's name has a status in progress or done or is marked done, a subagent is running on it,
-    an anchor is scoped to it, or a pull request event is its last activity. Such an item is never taken from its mover."""
+    """Why the item's record says the mover STARTED it ("" when it does not): the hand-off was taken, a step opening with the mover's name has a status in progress or done or is marked done, a step status says a
+    subagent is running on it, an anchor is scoped to it, or a pull request event is its last activity. Such an item is never taken from its mover; neither is one a running subagent holds (`subagent_hold`, which reads
+    the agent-state push, not the record)."""
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     r = _ho.record_of(item)
     if r and r.get("taken_at") and same(r.get("to"), mover):

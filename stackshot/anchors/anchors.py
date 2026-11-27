@@ -813,6 +813,21 @@ def background_ranked(project: str, reg: dict[str, dict[str, Any]] | None = None
         return []
 
 
+def takes_handoff(who: str) -> bool:
+    """May a pass hand an item to the session `who`? False for one [audit] no_handoff names, by its name in any case or its id (same_session)."""
+    return not any(same_session(who, n) for n in _cfg.audit_no_handoff())
+
+
+def takers_ranked(project: str, reg: dict[str, dict[str, Any]] | None = None) -> list[tuple[int, int, str]]:
+    """background_ranked less the agents [audit] no_handoff names: whom a pass may hand an item of `project` to, best first."""
+    return [r for r in background_ranked(project, reg) if takes_handoff(r[2])]
+
+
+def taker_of(project: str, reg: dict[str, dict[str, Any]] | None = None) -> list[str]:
+    """The builder a pass hands an item to: the first of takers_ranked of class 0 or 1. A list of one, or none. builder_of and front_only ("has this project a builder") do not read the list."""
+    return [n for c, _o, n in takers_ranked(project, reg) if c < 2][:1]
+
+
 def background_agent(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
     """The one background agent a message or pass that is no need of the person goes to, for the router and the message tool alike: the first of background_ranked (the project's builder, else
     the first agent that maintains or merges, else the first by name), read through the project's hub, so a component page with no background agent of its own has its hub's. "" when the project has none."""

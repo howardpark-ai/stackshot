@@ -157,9 +157,10 @@ def orphans(items: dict[str, dict[str, Any]], derive: Callable[[dict[str, Any]],
 
 def plan(items: dict[str, dict[str, Any]], reg: dict[str, dict[str, Any]], derive: Callable[[dict[str, Any]], Any], gone: Callable[[str], str],
          label: Callable[[str], str] = str, general: Callable[[str, dict[str, dict[str, Any]]], tuple[str, str]] | None = None,
-         back_of: Callable[[str], list[str]] | None = None) -> list[dict[str, Any]]:
+         back_of: Callable[[str], list[str]] | None = None, takes: Callable[[str], bool] | None = None) -> list[dict[str, Any]]:
     """Each orphan with its successor: the orphan's row plus `to` (the session, "" when nothing is live), `tier`, `reason` and `why`, the sentence the item's History carries
-    (`<session> is gone (<why>); closest live agent: …`). The candidates are asked for liveness once each."""
+    (`<session> is gone (<why>); closest live agent: …`). The candidates are asked for liveness once each. A name `takes(name)` refuses ([audit] no_handoff) is no successor in any tier; it still counts as a live agent
+    of its project."""
     memo: dict[str, bool] = {}
 
     def live(name: str) -> bool:
@@ -175,7 +176,7 @@ def plan(items: dict[str, dict[str, Any]], reg: dict[str, dict[str, Any]], deriv
     for r in rows:
         key = (r["project"], r["state"] == "alive")
         if key not in picks:
-            picks[key] = pick(r["project"], reg, live, general, alive=key[1], back_of=back_of)
+            picks[key] = pick(r["project"], reg, lambda n: (takes is None or takes(n)) and live(n), general, alive=key[1], back_of=back_of)
         p = picks[key]
         who = label(r["from"]) if r["from"] else ""
         r.update(to=p.name if p else "", tier=p.tier if p else "", front=bool(p and p.front), told=bool(p and p.told), reason=p.reason if p else "no live agent of the project, its parents, its hub or its scope",

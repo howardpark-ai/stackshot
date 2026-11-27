@@ -610,6 +610,14 @@ def audit_balance_minutes() -> float:
     return max(1.0, float(v))
 
 
+def audit_no_handoff() -> list[str]:
+    """[audit] no_handoff: background agents (session names or ids) that no pass hands an item to, for an agent whose mandate covers one kind of work only: the balancer, the idle hand-over, the front hand-on, the builder step of the
+    hand-off and stall ladders, the orphan hand-over and a wake that passes a front agent's item to the builder (anchors.takes_handoff). Its own items are judged as any other's. Default none; a value that is not a list reads as
+    none, and an entry that is not text or is blank is left out. Read at use."""
+    v = get("audit", "no_handoff")
+    return [s.strip() for s in v if isinstance(s, str) and s.strip()] if isinstance(v, list) else []
+
+
 def audit_orphan_handover() -> str:
     """[audit] orphan_handover: what the audit does with an open item whose mover is gone (successor.py): "report" (the default for the first week of use) only lists it, "apply" hands it to the closest live agent, "off" makes no check.
     A value that is none of these reads as the default."""

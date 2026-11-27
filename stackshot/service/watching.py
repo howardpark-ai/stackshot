@@ -78,11 +78,11 @@ def passed_note(front: str) -> str:
 def _front_to_background(post: str, meta: dict[str, Any]) -> str:
     """When a wait ends on a front agent (a session he talks to), the item goes to the project's builder instead: the front agent is not told by the wake and hears of the item only on a turn he gives it
     (the History line names it). → the builder's name, or "" when the item stays with `post`: `post` is not a front agent, the project has no builder (the ended wait's fallback stays, as for the answers
-    and fallbacks in handoffs.md), or an open step or the ask names `post` itself to act."""
+    and fallbacks in handoffs.md), or an open step or the ask names `post` itself to act. A builder `[audit] no_handoff` names is passed over (`anchors.taker_of`)."""
     project = str(meta.get("project") or "")
     if not post or not _telling.front_keeper(post, project)[0] or _telling.own_step(meta, post):
         return ""
-    return (_anc.builder_of(project) or [""])[0]
+    return (_anc.taker_of(project) or [""])[0]
 
 
 def watch_ask(gid: str, meta: dict[str, Any], what: str) -> tuple[str, list[dict[str, Any]]]:

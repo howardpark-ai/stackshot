@@ -224,6 +224,28 @@ def _mover_subagents(who: str, now: float | None = None, snap: Any = None) -> "l
     return subs
 
 
+def _move_hold(items: "dict[str, dict[str, Any]]", now: float, snap: Any, dead: "Callable[[str], str]") -> "Callable[[str, str], str]":
+    """For the two passes that take an item from a mover that did not hand it back, the idle hand-over and the balancer: `hold(gid, mover)` → why a running subagent keeps the item there, "" when none does
+    (audit/hand_idle.py `subagent_hold`). The subagents are those of `snap`, the pass's one read of the last agent-state push (`_mover_subagents`). A mover with no pane (`dead`) whose subagents cannot be read runs none.
+    With the anchors unread, a subagent is tied by an item's own id alone, so one that names only a pull request is tied to nothing and holds the item."""
+    _hi = _hooks().audit_mod("hand_idle")
+    _tie = _hooks().audit_mod("subagent_tie")
+    try:
+        prs = _rlive.released_anchors()
+    except Exception as e:  # noqa: BLE001
+        prs = {}
+        print(f"audit: anchors not read for the subagents of a mover: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+
+    def subagents(who: str) -> "list[dict[str, Any]]":
+        try:
+            return _mover_subagents(who, now, snap)
+        except _tie.Unreadable:
+            if dead(who):
+                return []
+            raise
+    return lambda gid, mover: _hi.subagent_hold(items, gid, mover, _handoff.ho_same, subagents, prs)
+
+
 def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None,
                  subagents: "Callable[[str], list[dict[str, Any]]] | None" = None, anchored: "dict[str, Any] | None" = None) -> list[str]:
     """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, on by default), run from the ten-minute audit tick: an open item on an agent with no activity for 45 minutes (`hourly.EVERY`, so the line lands inside the hour), and no audit line in the last
@@ -492,7 +514,7 @@ def _front_handon_tick(now: "float | None" = None, items: "dict[str, dict[str, A
     """An idle front agent's item with an open step of its own goes to a free background agent of its project (audit/front_handon.py; `[audit] hand_idle` must be on, and it rides `[audit] hourly_line` like the pick-up), run from the ten-minute
     audit tick right after the idle hand-over and before the pick-up (`_front_pickup_tick`, its fallback). The item must pass the pick-up's own test (`front_pickup.eligible`: the board shows it on an agent, a front agent of its project moves it, its leading
     open step is that agent's own, the snapshot says the agent is idle, nobody is in that conversation, 45 minutes of quiet) and not have been handed on by the idle pass in the last 24 hours (`metadata.hand_idle`, the hand-over's own guard, written
-    by this move too). The new mover is the first free background agent of the item's own project (`hand_idle.pick_free` over `_handoff.handoff_background`, the builder first): not the mover of any open item on an agent, and the snapshot says it is
+    by this move too). The new mover is the first free background agent of the item's own project (`hand_idle.pick_free` over `_handoff.handoff_background`, the builder first, `[audit] no_handoff` left out): not the mover of any open item on an agent, and the snapshot says it is
     idle (fresh, read, state `idle`, as the idle hand-over reads it; busy, unknown, stale, missing are not free), and its pane may exist (`handoff_pane`). The move is the idle hand-over's own write (`_handoff.handoff_exec` -> `handoff_write_move`, `via` orphan): the background
     agent heads `needs`, the hand-off record is made from the server and it is told by the hand-off notice; the front agent stays named in `needs` (`Step.keep_frm`) and the item's contact is not touched. One History line says why and names the mover it left.
     Nobody else is told, and never the owner. With none free (or no background agent in the project) nothing is written and the pick-up has the item. `acted` (an out-set the tick gives) receives every item this pass looked at as handed on or tried to
@@ -565,8 +587,9 @@ def _front_handon_tick(now: "float | None" = None, items: "dict[str, dict[str, A
 
 
 def _hand_idle_builders(project: str) -> list[str]:
-    """The sessions an idle item of `project` may be handed to, best first: the project's own background agents (`_handoff.handoff_background`) and no other project's. A project's work is built, reviewed and released by its
-    own builder, so a builder of an unrelated project is never a candidate, however idle. A project with no free background agent of its own keeps the item, and `_hand_idle_tick` says so to its -main agent."""
+    """The sessions an idle item of `project` may be handed to, best first: the project's own background agents less those `[audit] no_handoff` names (`_handoff.handoff_background`) and no other project's. A project's work is
+    built, reviewed and released by its own builder, so a builder of an unrelated project is never a candidate, however idle. A project with no free background agent of its own keeps the item, and `_hand_idle_tick` says so
+    to its -main agent."""
     return list(_handoff.handoff_background(project))
 
 
@@ -577,6 +600,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
     that moves no open item on an agent: a builder that is busy, missing from the push or not read is not free), by the minute hand-off pass's own write (`_handoff.handoff_exec` → `_handoff.handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
     from the server and the builder is told. One History line says why and names the mover it left. The project's -main agent gets one message that asks nothing. With no builder free nothing moves: a History
     line says so and -main is told once per item per 24 hours. No message goes to the owner and no step is made for him. At most `hand_idle.MAX_PER_TICK` items are handed on per pass and one per item per 24 hours.
+    An item a running subagent of its mover may be working on is not moved, a log line only (`_move_hold`).
     `now`, `items`, `env`, `status`, `dead` are for tests and the tick. → the ids handed on."""
     _hi = _hooks().audit_mod("hand_idle")
     if not _hi.enabled() or _ro.is_read_only() or _handoff.handoff_paused():
@@ -588,11 +612,12 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
     rows = _hi.due_all(items, now, front)
     if not rows:
         return []
+    snap = _hooks().audit_mod("agent_state").snapshot() or {}      # the fleet's last agent-state push, read once for the pass: none is {}, which reads every agent unknown
     if status is None or dead is None:
         idx = _sr._sessions_index()
-        snap = _hooks().audit_mod("agent_state").snapshot() or {}      # the fleet's last agent-state push, read once for the pass: none is {}, which reads every agent unknown
         status = status or (lambda who: _state_word(who, now, snap))
         dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
+    hold = _move_hold(items, now, snap, dead)
     busy = _hi.busy_movers(items, now)
     handed: list[str] = []
     told: dict[str, list[tuple[str, str]]] = {}      # -main agent -> (item, line) of its message
@@ -612,6 +637,11 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                 main = ""      # the owner is told nothing by this pass, whatever the page names as -main
             lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({row['project']})"
             if to:
+                why = hold(gid, row["mover"])
+                if why:
+                    _balance_log_once(gid, "idle-subagent", now, f"audit: {gid} idle, left with {row['mover']}: {why}")
+                    continue
+
                 def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due, and still with the mover it was found with; the stamp goes on the metadata the move saves
                     cur = _hi.due({**items, st.gid: item}, st.gid, now, front)
                     if cur is None or not _handoff.ho_same(cur["mover"], st.frm):
@@ -674,12 +704,12 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
     return handed
 
 
-_BALANCE_LOGGED: dict[tuple[str, str], float] = {}   # (item, reason) -> when the balancer last logged it: a stay that lasts is one stderr line an hour, not one a minute
+_BALANCE_LOGGED: dict[tuple[str, str], float] = {}   # (item, reason) -> when a stay was last logged (the balancer's, and the idle hand-over's for a subagent): a stay that lasts is one stderr line an hour, not one a pass
 BALANCE_LOG_EVERY = 3600.0
 
 
 def _balance_log_once(gid: str, key: str, now: float, line: str) -> None:
-    """One stderr line for an item the balancer leaves where it is, at most once per `BALANCE_LOG_EVERY` per item and reason (the pass looks at the item every minute for as long as it waits)."""
+    """One stderr line for an item the balancer or the idle hand-over leaves where it is, at most once per `BALANCE_LOG_EVERY` per item and reason (the balancer looks at the item every minute for as long as it waits)."""
     last = _BALANCE_LOGGED.get((gid, key))
     if last is not None and 0 <= now - last < BALANCE_LOG_EVERY:
         return
@@ -690,7 +720,7 @@ def _balance_log_once(gid: str, key: str, now: float, line: str) -> None:
 
 
 def _balance_builders(project: str) -> list[str]:
-    """The sessions the balancer may move an item of `project` to, best first: the project's own BUILDERS only (the mandate says build, maintain, merge or engineer: `_handoff.handoff_ranked` classes them 0 and 1). Never another
+    """The sessions the balancer may move an item of `project` to, best first: the project's own BUILDERS only (the mandate says build, maintain, merge or engineer: `_handoff.handoff_ranked` classes them 0 and 1, and leaves out those `[audit] no_handoff` names). Never another
     project's builder: a project's code is built, reviewed and released by its own builder, and a builder of an unrelated project has a different mandate. With no other builder here the item stays where it is. A reviewer or any
     other background agent is no candidate."""
     return [n for c, _o, n in _handoff.handoff_ranked(project) if c < 2]
@@ -709,8 +739,9 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
     """The balancer (audit/hand_idle.py, `[audit] balance`, on by default), its own minute tick ahead of the hand-off tick, so a move at `balance_minutes` (10) comes before that tick's reminder: an item NOT STARTED (an
     untaken hand-off to a builder) or QUEUED BEHIND its mover's other item (the queue rule over the balancer's own window, whatever `[model] queued_behind` says) that has waited that long goes to the builder of its own project with the fewest open
     items, by the same write as the idle hand-over (`_handoff.handoff_exec` → `_handoff.handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
-    why. The mover it left is told ONCE, by `tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
-    subagent, an anchor, a pull request event) is never moved. `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
+    why. The mover it left is told ONCE, by `tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done or one
+    that says a subagent is running, an anchor, a pull request event) is never moved, and neither is one a running subagent of the mover may be working on, whatever its record says: a subagent of the last agent-state push tied
+    to it or to none of the mover's open items, or subagents that cannot be read for a mover with a pane (`_move_hold`; a log line only). `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
     in all (then the existing ladders have it and -main is told once), three per pass. With NO live builder to take it (another builder than its mover is in the role map and none is usable) the item stays, one History line says so and -main is told once per item per 24 hours, and the pass looks again every minute; with no other builder, or a builder that is no improvement, it is a log line only.
     Only an item whose mover is itself a builder is balanced, and only to builders. The notice to the mover it left is at-most-once (a crash between the save and the send loses it) and is not sent to a pane that is gone. An item the idle
     hand-over moved in the last 24 hours is left alone. Stands still while the audit is off (`[audit] enabled`) or runs in agent mode, while the board is paused, with `[model] handoff` off, and in a read-only copy. `now`, `items`, `env`, `status`, `dead`, `anchored` are for tests and the tick. → the ids moved."""
@@ -742,11 +773,12 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
     rows = _hi.balance_all(items, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
     if not rows:
         return []
+    snap = _hooks().audit_mod("agent_state").snapshot() or {}      # the fleet's last agent-state push, read once for the pass: none is {}, which reads every agent unknown
     if status is None or dead is None:
         idx = _sr._sessions_index()
-        snap = _hooks().audit_mod("agent_state").snapshot() or {}      # the fleet's last agent-state push, read once for the pass: none is {}, which reads every agent unknown
         status = status or (lambda who: _state_word(who, now, snap))
         dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
+    hold = _move_hold(items, now, snap, dead)
     load = _hi.load_counts(_hi.busy_movers(items, now), _handoff.ho_same)
     moved: list[str] = []
     gone: list[tuple[str, str, str]] = []      # (the mover it left, the item, who has it now): the former mover's notice
@@ -757,6 +789,10 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         if len(moved) >= _hi.BALANCE_MAX_PER_TICK:
             break
         try:
+            why = hold(gid, row["mover"])
+            if why:      # the mover may be at work on it: no move, no History line, nobody told
+                _balance_log_once(gid, "subagent", now, f"balance: {gid} stays with {row['mover']}: {why}")
+                continue
             project = row["project"]
             if project not in builders:
                 builders[project] = _balance_builders(project)

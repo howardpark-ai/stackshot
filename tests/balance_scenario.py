@@ -15,8 +15,10 @@ Every rule is a probe that returns whether the rule held on a fixture, run twice
   9  the notice to the mover it left: one message for several items, only for ids this pass moved, never to a front agent
   10 the tick: its place before the hand-off tick, a failure that stops nothing, a move at ten minutes ahead of the hand-off tick's reminder
   11 a torn record is not a signal
+  20 a mover at work on an item keeps it, whatever its record says: a subagent of the last agent-state push tied to it or to none of the mover's open items, or subagents that cannot be read for a mover with a pane
+  21 `[audit] no_handoff`: an agent it names is handed nothing by the passes that pick a receiver here, and with none left the item stays
 
-    tests/run-suite balance       -> exit 0 / 1"""
+    tests/run-suite balance      -> exit 0 / 1"""
 import io, json, os, re, sys, pathlib, time, logging
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
@@ -94,6 +96,7 @@ from stackshot.service import pane_recovery as _pane_recovery
 from stackshot.service import mover_steps as _mover_steps
 from stackshot.service import owner_words as _owner_words
 from stackshot.service import runner as runner_svc
+from stackshot.service import agent_state as _agent_state_store, watching as _watching
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -120,6 +123,7 @@ telling.tell_woken = fake_tell
 _messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append(("message", to, text, "message")), "delivered to " + to)[1]
 fleetev.inbox_flag_send = lambda *a, **k: sent.append(("flag", "", "", "flag"))
 panes = {}; dead = {}                                              # a name -> its pane's registry status; a name -> why it has no pane
+running = {}                                                       # a name -> the subagents the snapshot lists for it while it is busy
 def fake_status(who, idx=None):
     st = panes.get(who, "")
     if st == "boom": raise OSError("registry unreadable")
@@ -129,9 +133,12 @@ def fake_agent_state(who, now=None, snap=None):
     """What the agent-state snapshot says of a name (audit/agent_state.py): the dict's `busy` or `idle` is a fresh snapshot naming it; no entry is a snapshot that does not name it (unknown); "boom" is a read that raises."""
     st = panes.get(who, "")
     if st == "boom": raise OSError("snapshot unreadable")
-    if st in ("busy", "idle"): return _AS.AgentState(st, "", "turn" if st == "busy" else "idle", now0 - 3600, ())
+    if st in ("busy", "idle"): return _AS.AgentState(st, "", "turn" if st == "busy" else "idle", now0 - 3600, tuple(running.get(who, ())) if st == "busy" else ())
     return _AS.AgentState("unknown", "the agent is not in the agent-state snapshot", "", 0.0, ())
+REAL_AGENT_STATE, REAL_SUBAGENTS = audit_ticks_svc._agent_state, audit_ticks_svc._mover_subagents
 audit_ticks_svc._agent_state = fake_agent_state       # the builders' freedom is the snapshot's word, never this box's pane registry
+def listed_subagents(who, now=None, snap=None): return list(running.get(who, ()))
+audit_ticks_svc._mover_subagents = listed_subagents   # up to section 20 a mover the snapshot does not name runs no subagent; from section 20 the server's own read is used
 handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
 _fleet_sessions_registry._sessions_index = fleetev._sessions_index = pdebt_svc._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
 
@@ -154,7 +161,7 @@ def mt(i): return rd(i)["metadata"]
 def mover_of(i): return mt(i).get("mover")      # the stored mover (a waiting item has no derived one)
 def wipe():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
-    sent.clear(); panes.clear(); dead.clear(); (T / "store/anchors.json").write_text("{}")
+    sent.clear(); panes.clear(); dead.clear(); running.clear(); _cfg.CFG["audit"].pop("no_handoff", None); (T / "store/anchors.json").write_text("{}")
     audit_ticks_svc._BALANCE_LOGGED.clear(); _cfg.CFG["audit"].pop("balance_minutes", None); off()      # the baseline of every section is the switch off until it says `on()`
 def on(): _cfg.CFG["audit"]["balance"] = True
 def off(): _cfg.CFG["audit"]["balance"] = False
@@ -873,6 +880,171 @@ def probe_log_throttle_load():
     with _Err() as e: tick(); tick(now0 + 60); tick(now0 + 5 * MIN)
     return e.text.count("no builder has few enough open items") == 1
 rule("19 'no builder has few enough open items' is logged once per item per hour too", probe_log_throttle_load, [(audit_ticks_svc, "BALANCE_LOG_EVERY", 0.0)])
+
+# ================================================================ 20. a mover at work on an item keeps it, whatever its record says
+audit_ticks_svc._mover_subagents = REAL_SUBAGENTS      # from here the subagents are read as the server reads them, from the (fake) snapshot
+def agent(description, brief=""): return {"id": f"agent-{len(description)}-{len(brief)}", "description": description, "brief": brief, "at": now0 - 6 * MIN}
+def named(i): return NR.shown(f"a{i}")      # the id a subagent writes, the one the hourly line ties by (`board#<n>`)
+ON_IT, UNTIED, UNREAD = "a subagent of the mover is running on it", "a subagent of the mover is running that is tied to none of its open items", "its subagents could not be read"
+def at_work(*subagents, state="busy", queued_meta=None):
+    """The queued item a2 (a1 in hand), its mover home-peer as the snapshot shows it: `state`, with `subagents` running."""
+    queue_setup(queued_meta=queued_meta)
+    if state: panes["home-peer"] = state
+    running["home-peer"] = list(subagents)
+def stays(why, *subagents, **kw):
+    """The item stays as it was: nothing written on it, nobody told, one log line that says why."""
+    def probe():
+        at_work(*subagents, **kw); before = rd(2)
+        with _Err() as e: got = tick()
+        return got == [] and rd(2) == before and sent == [] and f"balance: a2 stays with home-peer: {why}" in e.text
+    return probe
+def moves(*subagents, **kw):
+    def probe():
+        at_work(*subagents, **kw)
+        return tick() == ["a2"] and mover_of(2) == "team-back"
+    return probe
+NO_HOLD = [(HI, "subagent_hold", lambda *a, **k: "")]      # the balancer without the rule: it reads the item's record alone
+ASSIGNED = dict(steps=STEP("assigned", now0 - 12 * MIN))   # the mover's own status word on the step it dispatched a subagent for, which is not "in progress"
+rule("20 a queued item a subagent of the mover is building stays: its step status says only `assigned` and the record shows no start", stays(ON_IT, agent(f"{named(2)} build the send button"), queued_meta=ASSIGNED), NO_HOLD)
+def probe_record_alone():
+    queue_setup(queued_meta=ASSIGNED); panes["home-peer"] = "idle"
+    return tick() == ["a2"] and mover_of(2) == "team-back"
+check("20 …and by its record alone that item moves: it is the subagent that holds it", probe_record_alone() is True)
+def probe_untaken_held():
+    wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes.update({"team-aux": "idle", "home-peer": "busy"}); running["home-peer"] = [agent(f"build {named(1)}")]
+    return tick() == [] and mover_of(1) == "home-peer" and sent == [] and history(1) == []
+rule("20 an untaken hand-off whose mover has a subagent running on it stays", probe_untaken_held, NO_HOLD)
+rule("20 a subagent whose brief names the item, its description naming none, holds it", stays(ON_IT, agent("build the fix", f"Work on {named(2)} in your own worktree.")), NO_HOLD)
+rule("20 a subagent tied to none of the mover's open items holds it: it may be building this one", stays(UNTIED, agent("fix the flaky test")), NO_HOLD)
+rule("20 …also beside a subagent that is tied to another item of the mover's", stays(UNTIED, agent(f"build {named(1)}"), agent("fix the flaky test")), NO_HOLD)
+HOLD_ANY = [(HI, "subagent_hold", lambda items, gid, mover, same, subagents, prs=None: "held" if subagents(mover) else "")]      # the rule widened to any running subagent
+rule("20 an item queued behind the one its mover's subagent builds still moves", moves(agent(f"build {named(1)}", f"It follows {named(2)}.")), HOLD_ANY)
+def probe_anothers():
+    at_work(agent(f"build {named(999)}"))
+    put(999, mover="team-rev", act=3, last=3)
+    return tick() == [] and mover_of(2) == "home-peer"
+rule("20 a subagent that names only another session's item is tied to none of the mover's: the item stays", probe_anothers, NO_HOLD)
+def probe_closed():
+    at_work(agent(f"tidy up after {named(3)}"))
+    put(3, status="completed", act=3)
+    return tick() == [] and mover_of(2) == "home-peer"
+rule("20 a subagent that names only a closed item of the mover's is tied to none of its open items: the item stays", probe_closed, NO_HOLD)
+def probe_pr_on_1():
+    at_work(agent("review the fix for org/repo#7"))
+    (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": "https://github.com/org/repo/pull/7", "items": ["a1"], "added": now0 - 60 * MIN}]}))
+    return tick() == ["a2"]
+rule("20 a subagent that names a pull request anchored to the mover's other item is tied to that item: the queued one moves", probe_pr_on_1, [(audit_ticks_svc._rlive, "released_anchors", lambda: {})])
+def no_anchors(): raise OSError("anchors unreadable")
+def probe_anchors_unread():
+    at_work(agent(f"build {named(2)}"))
+    with _Err() as e: got = mutated([(audit_ticks_svc._rlive, "released_anchors", no_anchors)], tick)
+    return got == [] and mover_of(2) == "home-peer" and "anchors not read for the subagents of a mover" in e.text and ON_IT in e.text
+rule("20 anchors that cannot be read stop nothing: a subagent is still tied by the item's own id", probe_anchors_unread, NO_HOLD)
+rule("20 a mover with a pane that the snapshot cannot give keeps the item: nothing says it is not at work on it", stays(UNREAD, state=""), [(audit_ticks_svc, "_mover_subagents", lambda *a, **k: [])])
+rule("20 a read of the mover's state that raises keeps the item too", stays(UNREAD, state="boom"), [(audit_ticks_svc, "_mover_subagents", lambda *a, **k: [])])
+REAL_HOLD = audit_ticks_svc._move_hold
+def probe_no_pane():
+    at_work(state=""); dead["home-peer"] = "a retired session, its pane gone"
+    return tick() == ["a2"] and mover_of(2) == "team-back"
+rule("20 a mover with no pane runs no subagent: its item moves though the snapshot does not name it", probe_no_pane, [(audit_ticks_svc, "_move_hold", lambda items, now, snap, dead: REAL_HOLD(items, now, snap, lambda who: ""))])
+rule("20 a mover the snapshot says is idle runs none: the queued item moves", moves(state="idle"), [(HI, "subagent_hold", lambda *a, **k: "held")])
+def probe_held_log_once():
+    at_work(agent(f"build {named(2)}"))
+    with _Err() as e: tick(); tick(now0 + 60); tick(now0 + 5 * MIN)
+    return e.text.count(ON_IT) == 1
+rule("20 the stay is logged once per item per hour", probe_held_log_once, [(audit_ticks_svc, "BALANCE_LOG_EVERY", 0.0)])
+def probe_capped_held():
+    at_work(agent(f"build {named(2)}"), queued_meta=dict(balance={"at": now0 - 30 * H, "from": "team-back", "to": "home-peer", "count": 2}))
+    return tick() == [] and sent == [] and history(2) == []
+rule("20 an item at the lifetime cap that its mover is building gets no cap line and -main no message", probe_capped_held, NO_HOLD)
+
+# …the same through the server's own store and read of a pushed snapshot
+def push(written, state, *subagents):
+    quiet = {"state": "idle", "since": written - 600, "why": "a pane", "pane": "idle", "read": True, "subagents": []}
+    mine = {"state": state, "since": written - 600, "why": "a pane", "pane": "turn" if state == "busy" else "idle", "read": True, "subagents": list(subagents)}
+    code, ans = _agent_state_store.post("a", {"schema": 1, "written": written, "agents": {"home-peer": mine, "team-back": quiet, "team-aux": quiet}})
+    assert code == 200 and "ignored" not in ans, (code, ans)
+def pushed(probe):
+    """`probe` with the server's own read of the agent state, from the stored snapshot alone."""
+    def run():
+        audit_ticks_svc._agent_state = REAL_AGENT_STATE
+        try:
+            _agent_state_store.path().unlink(missing_ok=True)
+            queue_setup(builders_idle=())
+            return probe()
+        finally:
+            audit_ticks_svc._agent_state = fake_agent_state
+            _agent_state_store.path().unlink(missing_ok=True)
+    return run
+def probe_pushed():
+    push(now0 - 80, "busy", agent(f"{named(2)} build the send button"))
+    held = tick() == [] and mover_of(2) == "home-peer"
+    push(now0 - 20, "idle")      # a later push: the subagent has ended
+    return held and tick() == ["a2"] and mover_of(2) == "team-back"
+rule("20 pushed snapshot: held while it lists the subagent, moved once a later push says the mover is idle", pushed(probe_pushed), NO_HOLD)
+def probe_stale_push():
+    push(now0 - 20 * MIN, "idle")      # older than agent_state.MAX_AGE_S: it says nothing of the mover
+    with _Err() as e: got = tick()
+    return got == [] and mover_of(2) == "home-peer" and UNREAD in e.text and "minutes old" in e.text
+rule("20 pushed snapshot: a stale one that says idle holds the item, and the line says why", pushed(probe_stale_push), [(_AS, "MAX_AGE_S", 3600.0)])
+
+# ================================================================ 21. [audit] no_handoff: an agent the passes hand nothing to
+audit_ticks_svc._mover_subagents = listed_subagents
+def listed(*names): _cfg.CFG["audit"]["no_handoff"] = list(names)
+NO_LIST = [(_cfg, "audit_no_handoff", lambda: [])]
+EXAMPLE = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
+check("21 the example config documents `no_handoff = []` under [audit]", re.search(r"(?m)^no_handoff = \[\] ", EXAMPLE.split("\n[audit]", 1)[1].split("\n[", 1)[0]) is not None)
+def probe_getter():
+    wipe(); out = [_cfg.audit_no_handoff()]
+    for v in ("team-aux", [" team-aux ", "", "  ", 5, None, True, "team-back"], {"a": 1}, []):
+        _cfg.CFG["audit"]["no_handoff"] = v; out.append(_cfg.audit_no_handoff())
+    wipe()
+    return out == [[], [], ["team-aux", "team-back"], [], []] or out
+check("21 the setting is none by default, a value that is not a list reads as none, blank and non-text entries are left out, and it is read at use", probe_getter() is True, probe_getter())
+def probe_names():
+    wipe()
+    plain = (_anc.takes_handoff("team-aux"), [n for _c, _o, n in _anc.takers_ranked("projects/alpha")], _anc.taker_of("projects/alpha"))
+    ok = plain == (True, ["team-back", "team-aux", "team-rev"], ["team-back"])
+    for entry in ("team-aux", "TEAM-AUX", U["team-aux"]):
+        listed(entry); ok = ok and not _anc.takes_handoff("team-aux") and _anc.takes_handoff("team-back") and [n for _c, _o, n in _anc.takers_ranked("projects/alpha")] == ["team-back", "team-rev"]
+    wipe()
+    return ok or plain
+rule("21 a listed agent is named by its name, in any case, or by its session id", probe_names, NO_LIST)
+def probe_balance_never():
+    wipe(); on(); listed("team-aux"); put(1, mover="team-back", act=15, **ho("team-back", 12)); busy_on("team-back", 1, first=60); panes["team-aux"] = "idle"      # the project's only other builder is the listed one
+    with _Err() as e: got = tick()
+    return got == [] and mover_of(1) == "team-back" and sent == [] and history(1) == [] and "no other builder to move it to" in e.text
+rule("21 the balancer moves nothing to a listed agent: with no other builder the item stays with its mover", probe_balance_never, NO_LIST)
+def probe_balance_next():
+    queue_setup(); listed("team-back")
+    return tick() == ["a2"] and mover_of(2) == "team-aux"
+rule("21 …and goes past a listed one to the next builder", probe_balance_next, NO_LIST)
+def probe_balance_from():
+    wipe(); on(); listed("team-aux"); put(1, mover="team-aux", act=15, **ho("team-aux", 12)); panes["team-back"] = "idle"
+    return tick() == ["a1"] and mover_of(1) == "team-back"
+check("21 a listed agent's own item is judged as any builder's: it can be moved from it", probe_balance_from() is True)
+def probe_receivers(call, none, one, both):
+    def probe():
+        wipe(); a = call()
+        listed("team-back"); b = call()
+        listed("team-back", "team-aux"); c = call()
+        wipe()
+        return (a, b, c) == (none, one, both) or f"{(a, b, c)}"
+    return probe
+rule("21 the idle hand-over and the front hand-on pick from a list without the listed agents", probe_receivers(lambda: audit_ticks_svc._hand_idle_builders("projects/alpha"),
+     ["team-back", "team-aux", "team-rev"], ["team-aux", "team-rev"], ["team-rev"]), NO_LIST)
+rule("21 the balancer's candidates leave them out", probe_receivers(lambda: audit_ticks_svc._balance_builders("projects/alpha"), ["team-back", "team-aux"], ["team-aux"], []), NO_LIST)
+rule("21 the builder step of the hand-off ladder and of the stall pass goes past them, and has none when every builder is listed",
+     probe_receivers(lambda: handoff_svc.handoff_env(now0).background("projects/alpha"), ["team-back"], ["team-aux"], []), NO_LIST)
+rule("21 a wait that ends on a front agent passes its item past them, and leaves it with the front agent when there is no other builder",
+     probe_receivers(lambda: _watching._front_to_background("home-main", {"project": "projects/alpha"}), "team-back", "team-aux", ""), NO_LIST)
+def probe_builder_still():
+    wipe(); listed("team-back", "team-aux")
+    got = (_anc.builder_of("projects/alpha"), _anc.front_only("projects/alpha"), handoff_svc.handoff_builder("projects/alpha"))
+    wipe()
+    return got == (["team-back"], False, ["team-back"]) or got
+check("21 whether a project has a builder, and who it is, does not read the list", probe_builder_still() is True, probe_builder_still())
+audit_ticks_svc._mover_subagents = listed_subagents
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

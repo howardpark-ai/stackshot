@@ -2,7 +2,7 @@
 
   1.  the probe: an idle front agent, an open step of its own, the owner not in that conversation, a free builder: the item is handed to it (mover, stored mover, needs with the front agent behind it, contact, the hand-off
       record, one History line, the guard stamp, one hand-off notice to the builder and nobody else)
-  2.  which agent: the builder-mandate one first, then the others; one in a turn or moving another open item is not free; two items go to two agents; the third is the pick-up's
+  2.  which agent: the builder-mandate one first, then the others; one in a turn or moving another open item is not free; two items go to two agents; the third is the pick-up's; one `[audit] no_handoff` names is never one
   3.  no one free (in a turn, unknown, unread, absent, no pane, a stale or missing snapshot) or no background agent at all: nothing is handed, the pick-up starts the front agent's turn
   4.  what is never handed on: the owner's step, another session's step, no step, every wait, a closed item, a front agent that is not idle, a mover that is no front agent of the item's project, under 45 minutes of quiet
   5.  the owner in that conversation (a fresh stamp, a future stamp, a partial or unreadable index, an unreadable stamp folder, a presence test that raises): nothing
@@ -112,7 +112,7 @@ def wipe():
     for p_ in stamps_dir().glob("*"): p_.unlink()
     for p_ in (T / "state").glob("*front-pickup*"): p_.unlink()
     sent.clear(); (T / "store/anchors.json").write_text("{}"); outcome.update(ok=True, none=False, raise_=False, raise_x=False); outcome["raise"] = False
-    for k in ("hourly_line", "hand_idle", "busy_tell"): _cfg.CFG["audit"].pop(k, None)
+    for k in ("hourly_line", "hand_idle", "busy_tell", "no_handoff"): _cfg.CFG["audit"].pop(k, None)
     _cfg.CFG["audit"]["mode"] = "script"
 def at(m): return now0 + m * MIN
 PANES = {"idle": ("idle", "idle"), "busy": ("busy", "turn"), "unknown": ("unknown", ""), "unread": ("unknown", ""), "shell": ("idle", "shell"), "sleeping": ("idle", "sleeping"), "busy_pane_idle": ("busy", "idle")}
@@ -200,6 +200,16 @@ got = tick2(0)
 check("2 a third item with none left free is the pick-up's, and the two handed are not picked up", got == (["a1", "a2"], ["a3"]) and [x[3] for x in to("a-main")] == ["stall"] and mover_of(3) == "a-main", (got, sent))
 wipe(); put(1, act=60)
 check("2 another project's idle builder is never a candidate: with the project's own both in a turn nothing is handed and the pick-up has it", tick2(0, both_busy()) == ([], ["a1"]) and mover_of(1) == "a-main")
+NO_LIST = [(_cfg, "audit_no_handoff", lambda: [])]
+def listed_passed_probe():
+    wipe(); put(1, act=60); _cfg.CFG["audit"]["no_handoff"] = ["a-back"]
+    return th(0) == ["a1"] and mover_of(1) == "a-aide" and to("a-back") == []
+rule("2 an agent `[audit] no_handoff` names is passed over, however free: the next background agent takes the item", listed_passed_probe, NO_LIST)
+def listed_all_probe():
+    wipe(); put(1, act=60); _cfg.CFG["audit"]["no_handoff"] = ["a-back", "a-aide"]
+    return tick2(0) == ([], ["a1"]) and mover_of(1) == "a-main" and to("a-back") == [] and to("a-aide") == []
+rule("2 with every background agent of the project listed nothing is handed on and the pick-up has the item", listed_all_probe, NO_LIST)
+wipe()
 
 # ================================================================ 3. no one free: the pick-up
 none_free = [("both in a turn", both_busy()), ("both state unknown and unread", {"a-back": "unknown", "a-aide": "unread"}), ("both absent from the snapshot", {"a-back": None, "a-aide": None})]

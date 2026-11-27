@@ -16,6 +16,7 @@ A project's last agent is retired, or a mover's pane is gone for good: its open 
   6  server: an item the owner moves, an owner's wait, and an item of a live mover are left as they were; a second call finds nothing to do and writes nothing (idempotent); a move is checked again under the
      item lock (an item written since it was found is left and counted `skipped`)
   7  server: an item with no live successor is not touched and is listed under `left` with the reason; it stays listed at the next call (and is moved once an agent is live)
+  8  `[audit] no_handoff`: an agent it names is no successor in any tier (the next background agent, else the front agent, else nobody) and still counts as a live agent of its project; the server's hand-over reads it
 
     tests/run-suite successor        → exit 0 / 1"""
 import contextlib, datetime, io, json, os, re, sys, pathlib, time, logging
@@ -135,6 +136,15 @@ after = {g: (alive(rows[g]["to"], project=it["metadata"]["project"]) if g in row
             waiting(rows[g]["to"], project=it["metadata"]["project"]) if g in rows else it) for g, it in ITEMS.items()}
 check("3 pure: once each item's mover is its successor a second plan has nothing to do", S.plan(after, REG, derive, gone, str, general=GEN) == [], S.plan(after, REG, derive, gone, str, general=GEN))
 
+spared = lambda *names: lambda n: n not in names          # [audit] no_handoff as plan() reads it: `takes(name)` is False for a listed agent
+r3 = {r["gid"]: r for r in S.plan(ITEMS, REG, derive, gone, str, general=GEN, takes=spared("bgp-build", "both-build", "gen-main"))}
+check("8 no_handoff: an agent `takes` refuses is no successor in any tier: the next background agent (a12), else the front agent (a13), and the scope's general agent neither (a2)",
+      r3["a12"]["to"] == "bgp-docs" and r3["a12"]["tier"] == "back" and r3["a13"]["to"] == "both-main" and r3["a13"]["tier"] == "own" and r3["a2"]["to"] == "" and "no live successor was found" in r3["a2"]["why"], (r3.get("a12"), r3.get("a13"), r3.get("a2")))
+check("8 no_handoff: …it is refused in the page's own order too, not by the builder-first hint alone (a back_of that still names it, and the `own` tier)",
+      S.plan({"x": waiting("bgp-old", project="projects/bgp")}, REG, derive, gone, str, general=GEN, takes=spared("bgp-main", "bgp-build"))[0]["to"] == "bgp-docs"
+      and S.plan({"x": alive("bgp-old", project="projects/bgp")}, REG, derive, gone, str, general=GEN, back_of=lambda p: ["bgp-build", "bgp-docs"], takes=spared("bgp-build"))[0]["to"] == "bgp-docs")
+check("8 no_handoff: …and it still counts as a live agent of its project: an item with no session named is no orphan there", S.plan({"x": alive("", project="projects/bgp")}, REG, derive, gone, str, general=GEN, takes=spared("bgp-build", "bgp-docs")) == [])
+
 # ---------------------------------------------------------------- 4-7. the server half: a store, a heartbeat, a registry
 now0 = time.time()
 DEAD_ISO = datetime.datetime.fromtimestamp(now0 - 3 * 3600, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -198,6 +208,14 @@ check("4 server: …and lists what would move: the six orphans, each with its ta
       and {m["id"]: (m["to"], m["tier"]) for m in dry["moved"]} == {B(101): ("par-main", "parent"), B(102): ("gen-main", "scope"), B(103): ("live-main", "own"), B(112): ("both-build", "back"),
                                                                        B(106): ("gen-main", "scope"), B(108): ("bgp-back", "back")} and dry["left"] == [], dry)
 check("4 server: every listed move carries its reason, naming the gone session and the successor", all(m["from"] in m["why"] and "is gone" in m["why"] and m["to"] in m["why"] for m in dry["moved"]), dry["moved"][:2])
+_cfg.CFG["audit"]["no_handoff"] = ["both-build"]
+spare = {m["id"]: (m["to"], m["tier"]) for m in handoff_svc.orphan_handover(apply=False, now=now0)["moved"]}
+_cfg.CFG["audit"].pop("no_handoff")
+check("8 no_handoff: the server's hand-over passes over a listed agent: item 112 goes to the project's front agent, every other move as before", spare == {**{m["id"]: (m["to"], m["tier"]) for m in dry["moved"]}, B(112): ("both-main", "own")}, spare)
+_cfg.CFG["audit"]["no_handoff"] = ["both-build", "both-main"]      # a name the builder-first hint never offers: the front agent is refused in its own tier too
+spare = {m["id"]: (m["to"], m["tier"]) for m in handoff_svc.orphan_handover(apply=False, now=now0)["moved"]}
+_cfg.CFG["audit"].pop("no_handoff")
+check("8 no_handoff: …and a listed agent of any other tier takes none either: with both agents of the page listed, item 112 goes past both", spare.get(B(112), ("", ""))[0] not in ("both-build", "both-main"), spare)
 _cfg.CFG["audit"]["orphan_handover"] = "report"
 rep = handoff_svc.orphan_handover(apply=True, now=now0)
 check("4 server: [audit] orphan_handover = report lists the same moves and moves nothing even when asked to apply", not rep["applied"] and "nothing was moved" in rep["note"] and "apply" in rep["note"] and ids(rep["moved"]) == ids(dry["moved"]) and all(raw(i) == before[i] for i in before), rep)

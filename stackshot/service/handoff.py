@@ -178,19 +178,24 @@ def handoff_started(who: str, idx: dict[str, Any] | None = None) -> float:
 
 
 def handoff_background(project: str) -> list[str]:
-    """The project's background agents, the one to hand to first first (the send-time guard names one): the builder before the rest, the names' alphabetical order within each (anchors.background_ranked)."""
+    """The project's background agents a pass may hand to, the one to hand to first first (the send-time guard names one): the builder before the rest, the names' alphabetical order within each (anchors.takers_ranked)."""
     return [n for _a, _b, n in handoff_ranked(project)]
 
 
 def handoff_ranked(project: str) -> list[tuple[int, int, str]]:
-    """(class, order, name) of the project's background agents, best first (anchors.background_ranked): class 0 a mandate that says build, 1 one that says maintain, merge or engineer, 2 the rest.
-    The builder is the first of class 0 or 1."""
-    return _anc.background_ranked(project)
+    """(class, order, name) of the project's background agents a pass may hand to, best first (anchors.takers_ranked: background_ranked less [audit] no_handoff): class 0 a mandate that says build, 1 one that says maintain,
+    merge or engineer, 2 the rest."""
+    return _anc.takers_ranked(project)
+
+
+def handoff_taker(project: str) -> list[str]:
+    """Where a hand-off nobody took falls first: the first of handoff_ranked of class 0 or 1 (anchors.taker_of). A list of one, or none: the ladder then goes on as for a project with no builder."""
+    return _anc.taker_of(project)
 
 
 def handoff_builder(project: str) -> list[str]:
-    """Where a hand-off nobody took falls first: the project's BUILDER alone (anchors.builder_of, which front_only reads too: the background agent whose mandate says build, else maintain, merge or
-    engineer, the names' alphabetical order within each; not every background agent on the page). A list of one, or none."""
+    """The project's BUILDER alone (anchors.builder_of, which front_only reads too: the background agent whose mandate says build, else maintain, merge or engineer, the names' alphabetical order within each; not every
+    background agent on the page). A list of one, or none. Whom a pass hands to is handoff_taker."""
     return _anc.builder_of(project)
 
 
@@ -286,7 +291,7 @@ def handoff_env(now: float) -> "_ho.Env":
         return reminded[key]
     return _ho.Env(now=now, derive=ho_derive, same=ho_same, minutes=handoff_minutes(), idle_grace=handoff_num("handoff_idle_seconds", _ho.IDLE_GRACE),
                    gone_days=handoff_num("handoff_gone_days", _ho.GONE_DAYS), cold_call=cold_call_on(), pane=lambda w: handoff_pane(w, idx),
-                   inbox_grace=handoff_num("handoff_inbox_grace_minutes", 10.0), status=lambda w: handoff_status(w, idx), started=lambda w: handoff_started(w, idx), background=handoff_builder,
+                   inbox_grace=handoff_num("handoff_inbox_grace_minutes", 10.0), status=lambda w: handoff_status(w, idx), started=lambda w: handoff_started(w, idx), background=handoff_taker,
                    exempt=handoff_exempt, peer=handoff_peer, label=_session_label, cover_all=_hooks().switchover_on(), is_front=lambda w, _p: _telling.front_sender(w), anchored=anchored, remind=remind,
                    ladder=_hooks().ladder_on(), laddered=lambda g, w, at: _hooks().laddered(g, w, now, at))
 
@@ -601,7 +606,7 @@ def orphan_handover(apply: bool = False, now: float | None = None) -> dict[str, 
     Idempotent: the mover a hand-over names is live, so the next call finds the item whole. Each move is checked again under the item lock (the item must still be open with the mover it was found with).
     Stands still, `checked` false, while [audit] orphan_handover is "off" or the fleet's heartbeat is empty (every name would look gone), and moves nothing in "report" (the shipped default). A partial view of the fleet is not taken for gone sessions:
     a mover on a machine whose machine.json cannot be read, or with no row while a machine's session list is empty or unreadable, is not read as gone, and more orphans than ORPHAN_CEILING or than a quarter of the open items is answered with
-    `ceiling` true and the list, and nothing moved. An alive item goes to a background agent first (successor.pick: the minute pass sends a front agent no notice, except that a front-only project's new front holder is sent the one hand-off notice, `told_front` in handoff_exec); a held item is not listed. → {checked, mode, applied, read, found, moved: [{id,
+    `ceiling` true and the list, and nothing moved. An alive item goes to a background agent first (successor.pick: the minute pass sends a front agent no notice, except that a front-only project's new front holder is sent the one hand-off notice, `told_front` in handoff_exec); a held item is not listed. An agent `[audit] no_handoff` names takes none. → {checked, mode, applied, read, found, moved: [{id,
     project, from, to, tier, why}], left: [{id, project, from, why}], skipped, over_cap, note}."""
     now = time.time() if now is None else now
     mode = _cfg.audit_orphan_handover()
@@ -639,7 +644,7 @@ def orphan_handover(apply: bool = False, now: float | None = None) -> dict[str, 
         if not mine and partial and why == "no pane of it is in the heartbeat":
             return ""                                                          # no row, while a machine's view is partial: it may be on that machine
         return why
-    rows = _succ.plan(items, reg, ho_derive, gone, _session_label, back_of=handoff_background)
+    rows = _succ.plan(items, reg, ho_derive, gone, _session_label, back_of=handoff_background, takes=_anc.takes_handoff)
     out.update(checked=True, read=len(items), found=len(rows))
     if len(rows) > ORPHAN_CEILING or len(rows) > len(items) // 4:
         out.update(ceiling=True, moved=[{"id": _gh.shown(r["gid"]), "project": r["project"], "from": _session_label(r["from"]) if r["from"] else "", "to": r["to"], "tier": r["tier"], "why": r["why"]} for r in rows if r["to"]][:ORPHAN_MAX],
