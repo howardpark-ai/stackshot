@@ -13,6 +13,7 @@ History line and changes nothing else; the server refuses an item that would rea
   7  script           tools/until_migrate.py: --apply asks for the plan first, backs up every touched file byte for byte and writes the undo file before the first write; --undo puts the keys back; twice is a no-op;
                       a key a later save changed is `kept`; the dry run over a copy writes nothing live
   8  gate             refused while [model] migration is off, for a sender or machine outside the lists, for a body naming another key, for an undo entry naming a key the pass does not write
+  17 bare ask_by      a bare ask_by on a waiting item (no wake beside it) is listed and left as it is; on an item that does not wait it stays unlisted
 
     tests/run-suite until_migrate        -> exit 0 / 1"""
 import argparse, contextlib, copy, io, json, logging, os, pathlib, re, subprocess, sys, time
@@ -817,7 +818,27 @@ st_, d_ = call(op="until", items=["g222"])
 check("16.10 hold + wake + wait_kind time on an item that reads as doing without the hold is refused for the conflict it would show, and left untouched", d_["results"][0]["action"] == "refused" and "conflicts:" in d_["results"][0]["why"] and "which is alive" in d_["results"][0]["why"] and bytes_of(222) == b222, d_["results"][0])
 r0_, r1_ = {"pair": 1, "mover": "", "held": False, "stamp": [], "date": "", "watched": False, "conflicts": ["a"]}, {"pair": 1, "mover": "", "held": False, "stamp": [], "date": "", "watched": False, "conflicts": ["a", "b"]}
 check("16.10 same(): a new conflict is a difference; the same ones, or fewer, are not", "conflicts" in UP.same(r0_, r1_) and UP.same(r1_, r0_) == "" and UP.same(r0_, r0_) == "", UP.same(r0_, r1_))
-CFGM["migration"] = False
+# ---- 17. a bare ask_by on a waiting item is listed: nothing reads that date, so nothing wakes the item
+CFGM["migration"] = True
+RELAY17 = dict(needs=["external"], wait_event="the vendor's reply")
+ANCH17 = dict(needs=["external"], wait_anchor="https://example.com/x", wait_event="the page changes")
+put(250, ask_by=day(-30), **RELAY17); put(251, ask_by=day(-26), **ANCH17); put(252, ask_by=day(6), **RELAY17)
+put(253, needs=[BACK], ask_by=day(-30))                                    # alive: a backstop beside nothing, quiet
+put(254, wake=day(3), ask_by=day(5), **RELAY17)                            # waiting, with a wake the wake pass reads: quiet
+put(255, ask_by=day(-3), wait_kind="relay", **RELAY17)                     # a stored kind: the watchers read the date (already read, rewritten as before)
+ids17 = (250, 251, 252, 253, 254, 255)
+b17 = {i: bytes_of(i) for i in ids17}
+for dry17 in (True, False):
+    st_, d_ = call(op="until", items=[f"g{i}" for i in ids17], dry=dry17)
+    r17 = {int(r["item"].split("#")[1]): r for r in d_["results"]} if st_ == 200 else {}
+    word17 = "dry run" if dry17 else "write"
+    check(f"17 the {word17} lists the relay-like and the anchor-like bare ask_by on a waiting item, past or ahead, and says why", all(r17.get(i, {}).get("action") == "kept" and "nothing wakes the item" in r17[i]["why"] and "update(until=" in r17[i]["why"] for i in (250, 251, 252)), r17)
+    check(f"17 …the {word17} writes none of them", all(bytes_of(i) == b17[i] for i in (250, 251, 252)), None)
+    check(f"17 …a bare ask_by on an alive item and a waiting item the wake pass has a date for are not listed ({word17})", [r17.get(i, {}).get("action") for i in (253, 254)] == ["same", "same"] and bytes_of(253) == b17[253] and bytes_of(254) == b17[254], r17)
+    check(f"17 …a relay that stores its kind is rewritten as before ({word17})", r17.get(255, {}).get("action") == ("would_set" if dry17 else "set"), r17.get(255))
+PW = UP.plan_for(mt(250), waiting=True)
+check("17 plan_for: listed only when the item waits", PW["listed"] and not PW["edits"] and not UP.plan_for(mt(250))["listed"] and not UP.plan_for(mt(254), waiting=True)["listed"], (PW, UP.plan_for(mt(250))))
+for i_ in ids17: (T / f"store/g/{i_}.json").unlink()
 CFGM["migration"] = False
 shutil.rmtree(tmp, ignore_errors=True); shutil.rmtree(RUN, ignore_errors=True); shutil.rmtree(RUN2, ignore_errors=True)
 for d in (run16, run_s, run_l, run_p, fake_store, inside, sub_home, sub_run, run_u, base_u, run_t): shutil.rmtree(d, ignore_errors=True)

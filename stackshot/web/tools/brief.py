@@ -9,7 +9,7 @@ from stackshot.core.instance import OWNER
 from stackshot.core.store import _item_files
 from stackshot.github import ghsync as _gh
 from stackshot.model import item_project as _ip, model as _model
-from stackshot.service import telling as _telling
+from stackshot.service import item_read as _item_read, telling as _telling
 from stackshot.service.store import _legacy_hold, _load
 from stackshot.waits import watchers as _watch
 from stackshot.web import whatschanged as _wc
@@ -26,26 +26,36 @@ _is_parked = None      # set by register: the server's own, looked up at each ca
 
 def _world_waits_text() -> str:
     """The brief's "Waiting on the world" (design section 4): the open items whose stored wait is news only the owner relays, one line each (what, ask-by date, chases), the earliest
-    ask-by first. "" when none: a brief never fails over it."""
+    ask-by first; then the waits no watcher can end (a stored kind with nothing to watch, and any waiting item nothing wakes: watchers.nothing_wakes). "" when none: a brief never fails over it."""
     rows: list[tuple[str, str]] = []
     stuck: list[str] = []
+    unwoken: list[str] = []
     for gid, _p in _item_files():
         try:
             it = _load(gid)
             m = it.get("metadata") or {}
-            if it.get("status") != "open" or not _watch.stored_kind(m):
+            if it.get("status") != "open":
                 continue
-            if _watch.stored_kind(m) == "relay":
+            kind = _watch.stored_kind(m)
+            if kind == "relay":
                 rows.append((_model.clean(_watch.relay_day(m)) or "9999", _watch.world_line(_gh.shown(gid), str(it.get("subject") or ""), m)))
-            if not _watch.can_end(m):
+            if _watch.can_end(m):
+                continue
+            it["gid"] = gid
+            nothing = _item_read._model_of(it).state == _model.WAITING and _watch.nothing_wakes(
+                m, bool(_item_read._after_open(m)), lambda: _item_read._scoped_anchors(str(m.get("project") or ""), gid), _item_read._old_wait_off())
+            if kind or nothing:
                 stuck.append(_gh.shown(gid))
+            if nothing:
+                unwoken.append(_gh.shown(gid))
         except Exception:  # noqa: BLE001
             continue
     out = []
     if rows:
         out.append(f"Waiting on the world ({len(rows)}; news only {OWNER} relays, each comes to him as a question on its ask-by day):\n" + "\n".join(r for _d, r in sorted(rows)))
     if stuck:
-        out.append(f"Waits no watcher can end ({len(stuck)}: {', '.join(stuck)}): the wait has no date or anchor to watch, so it keeps today's wake pass; give it one (until, after or wait_anchor).")
+        out.append(f"Waits no watcher can end ({len(stuck)}: {', '.join(stuck)}): the wait has no date or anchor a watcher reads; give it one (until, after or wait_anchor)."
+                   + (f" Nothing at all wakes: {', '.join(unwoken)}." if unwoken else "") + (" The others keep today's mechanisms." if len(stuck) > len(unwoken) else ""))
     return "\n\n".join(out)
 
 

@@ -5,7 +5,8 @@ half lives here: the readings (which items the watchers own, which are due, on w
 reading of the owner's answer to those asks, the date he gives. The server (server.py, the `_watch_*` functions) reads and writes the items, sends the messages and calls these.
 
   The watchers act ONLY on an item with a stored wait_kind. Every other item keeps today's wake pass and `after` release
-  until the step 4 migration, so no item is moved by two mechanisms (`watches` is the gate those read).
+  until the step 4 migration, so no item is moved by two mechanisms (`watches` is the gate those read). That pass reads an ask_by only beside a relay or event kind, so a waiting item whose one date is an
+  ask_by with no wait_kind is woken by nothing (`nothing_wakes`): the audit reports it (wait_end.py) and the brief lists it.
 
   time    the wake passes → alive, the post-wake mover
   item    the last `after` item closes → alive, the post-wake mover; the backstop (ask_by, else the wake) passes first → alive, the post-wake mover, with the note that the item
@@ -28,13 +29,15 @@ from __future__ import annotations
 import datetime as dt
 import re
 import time
-from typing import Any
+from typing import Any, Callable
 
 from stackshot.core import config as _cfg
 from stackshot.core import datewords as _datewords
 from stackshot.core import runner_files as _files
 from stackshot.waits import event_waits as _ew
 from stackshot.model import model as _model
+from stackshot.model import step_proof as _sp
+from stackshot.model import steps as _steps
 from stackshot.waits import wait_list as _wl
 from stackshot.waits import waiting as _wt
 
@@ -176,6 +179,29 @@ def backstop_epoch(meta: dict[str, Any]) -> float | None:
         return day_epoch(su)
     eps = [e for e in (day_epoch(meta.get("ask_by")), day_epoch(meta.get("wake"))) if e is not None]
     return min(eps) if eps else None
+
+
+def dead_ask_by(meta: dict[str, Any], now: float) -> bool:
+    """Is the item's ask_by a day that has passed and that nothing acts on: it stores no wait_kind and no until, so no watcher and no wake pass reads it. A write that gives the item a wait drops
+    it: kept, it would stand as that wait's date and end the wait as it is stored."""
+    ep = day_epoch((meta or {}).get("ask_by"))
+    return ep is not None and ep <= now and not stored_kind(meta)
+
+
+def nothing_wakes(meta: dict[str, Any], open_after: bool, scoped_anchor: Callable[[], Any], old_off: bool = False) -> bool:
+    """Is a waiting item (the caller has read it so) one that nothing will wake? No watcher can end its wait (can_end) and the old wake pass has no date for it (waiting.wake_value: its until, else its wake, else the
+    ask_by of a stored relay or event kind), and nothing else ends it either: an open `after` (`open_after`: that close releases it), a pane recycle, a done check, an open step the proof pass ticks, or, for a held
+    item, an anchor scoped to it (`scoped_anchor`: its notice releases the hold). `old_off`: the old wake pass and its `after` release stand down for every item no watcher watches (item_read._old_wait_off), so
+    neither its date nor its `after` counts."""
+    m = meta or {}
+    if can_end(m) or m.get("recycle") or _model.clean(m.get("check")):
+        return False
+    if not old_off and (open_after or day_epoch(_wt.wake_value(m)) is not None):
+        return False
+    proofs = m.get("step_proof") if isinstance(m.get("step_proof"), dict) else {}
+    if any(s["status"] == _steps.OPEN and _sp.has_proof(s["text"], proofs, _steps.key) for s in _steps.view(m)):
+        return False
+    return not (m.get("hold") and scoped_anchor())
 
 
 def next_moment(meta: dict[str, Any]) -> float | None:

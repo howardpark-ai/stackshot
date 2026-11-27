@@ -721,6 +721,10 @@ def update_unlocked(
         clear_hold = True                                # the date of a wait on the date alone is the whole wait: dropping it ends the wait, the hold it stands as goes with it
     item_was = json.loads(json.dumps(item))             # the item as it stood, for the state checks (a re-park, a decision asked again, a stale next)
     meta = dict(item.get("metadata") or {})
+    old_ask = bool(str(meta.get("ask_by") or "").strip()) and not _watch.stored_kind(meta)      # an ask_by with no wait_kind, as stored before this write
+    gives_wait = bool(wake or hold or after or waits or any(str(v or "").strip() for v in (ask_by, wait_kind, wait_anchor, wait_event)))
+    if gives_wait and item.get("status") == "open" and _watch.dead_ask_by(meta, time.time()):
+        meta.pop("ask_by", None)                       # a passed ask_by with no kind was nobody's date: the wait this write gives never takes it as its own
     before = json.loads(json.dumps({k: meta.get(k) for k in ("next", "needs", "check", "after")}))   # what the mover is told of, as it stood
     ask_was = meta.get("ask")
     meta.pop("refiled", None)                          # the last refile's record is its History line; only a write that refiles carries it
@@ -1389,7 +1393,7 @@ def update_unlocked(
     if relay_hold:
         wait_note += "\n(a relay or event wait stores no park flag: the wait is itself the park, until its day " + (_uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))) + "; it ends when the notice arrives or on that day)"
     gave_ask = bool(ask_by.strip()) and ask_by.strip().lower() not in h.ask_none
-    if was_until and bool(wake) != gave_ask and item.get("status") == "open":      # one date given: the date the item held before (unfolded into the other working field) does not outlive it
+    if bool(wake) != gave_ask and item.get("status") == "open":      # one date given: a date the item held before in the other working field (an unfolded until, or an older write's wake or ask_by) does not outlive it
         meta.pop("ask_by" if wake else "wake", None)
     if item.get("status") == "open" and "wait_kind" in model_set:
         _uw.to_slot(meta)                                       # a date held for another kind moves to the field the new kind reads
@@ -1527,7 +1531,8 @@ def update_unlocked(
         full_judgement = reopening or (h.switchover_on() and not filing_only)     # step 4's switchover: every write is judged whole, old items included; a bookkeeping write (a page rename) still only by what it touches
         desc_note = fc.call(_gates.gate_model, item_now, None if full_judgement else touched_m, gid, needs=[x for x in _needs_of(meta) if x not in naming_added], hold=hold_pre, desc_set=bool(description.strip()),
                             next_text=next_judged if next_touch else None, windows_text=next_judged if next_touch else "", defers_text=next_judged if next_touch else "",
-                            until_wait=until_wait or (was_until and not (wake or hold or clear_wait_basis or str(wait_basis or "").strip())), date_given=bool(wake), hold_given=bool(hold), basis_kept=bool(wake) and not str(wait_basis or "").strip() and _gates.basis_held({**item, "status": status or item.get("status")}, hold=hold, verifying=state_st == "verifying"), default="")   # the write guards of the item model; his lines' Windows check judges only the lines this write sets; a wait on an until carries no snooze reason
+                            until_wait=until_wait or (was_until and not (wake or hold or clear_wait_basis or str(wait_basis or "").strip())), date_given=bool(wake), hold_given=bool(hold), basis_kept=bool(wake) and not str(wait_basis or "").strip() and _gates.basis_held({**item, "status": status or item.get("status")}, hold=hold, verifying=state_st == "verifying"),
+                            old_end_ok=gave_ask or not (reopening or touched_m & _mg.WAIT_SETTING), date_ends=old_ask and bool(wake), default="")   # the write guards of the item model; his lines' Windows check judges only the lines this write sets; a wait on an until carries no snooze reason
         desc_note += mover_note
         fc.call(h.anchor_wait_gate, item_was.get("metadata") or {}, meta, gid)      # an anchor wait newly set or moved: its anchor must be on the project's list already (after the model guards)
         if next_touch or state_st or state_given.get("step") or needs_set or clear_needs or agent.strip():      # only a write that touches next, the state, needs or the step; any other keeps the note. After the model guards, so their more specific refusals (a command in his line) come first
@@ -1570,6 +1575,8 @@ def update_unlocked(
         if backstop:
             meta.pop("until", None)        # a write that hands the item on never parks it: a bare date beside the hand-off (a wake, an until or an ask_by) stays the date it was, the backstop of the hand-off, and the item stays alive in the new mover's lane (the hand-off record needs a mover)
             kept_legacy_wake = False
+            if gave_ask and meta.get("ask_by") and not meta.get("wake") and not _uw.kind_of(meta) and h.model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING:
+                meta["wake"] = meta.pop("ask_by")      # the write leaves the item waiting (needs external), and the wake pass reads an ask_by only beside a relay or event kind: the backstop is stored where it is read
             if was_until and _wait_is_bare(item_was.get("metadata") or {}):
                 wait_note += (f"\n(the item was waiting until {_uw.date_of(item_was.get('metadata') or {})}: this hand-off ends that wait. The date stays as the hand-off's backstop, and the item is active in the new mover's lane)")
         else:

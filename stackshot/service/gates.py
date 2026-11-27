@@ -797,7 +797,7 @@ def _description_guard_mode() -> str:
     return "refuse" if str(_cfg.get("model", "description_guard", default="note") or "note").strip().lower() == "refuse" else "note"
 
 
-def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None", gid: str = "", needs: list[str] | None = None, hold: bool | None = None, desc_set: bool = True, strict: bool = False, next_text: str | None = None, windows_text: str | None = None, creating: bool = False, defers_text: str | None = None, until_wait: bool = False, date_given: bool = False, hold_given: bool = False, basis_kept: bool = False) -> str:
+def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None", gid: str = "", needs: list[str] | None = None, hold: bool | None = None, desc_set: bool = True, strict: bool = False, next_text: str | None = None, windows_text: str | None = None, creating: bool = False, defers_text: str | None = None, until_wait: bool = False, date_given: bool = False, hold_given: bool = False, basis_kept: bool = False, old_end_ok: bool = False, date_ends: bool = False) -> str:
     """The item model's write guards (model_guards.py) on the item as a create or update leaves it: refuse, with what is wrong and the fix, a write that
     leaves an alive item with no valid mover, a wait without its input, post-wake mover, reason or end, a second mover in needs, a decision with a hold, a placeholder, a next line with
     no name or one that reads as a wait, or an alarming word. `touched` = the fields the write sets (None: a create or a reopen, every field is judged): a guard on a field runs
@@ -809,7 +809,8 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
     With `strict` (the migration pass) a failure of the check itself refuses instead: a write nothing could judge is not made.
     `next_text`: the lines of next this write set (the sender's own), when other sessions' lines stand beside them: the text guards on next judge these only.
     `windows_text`: the lines of next the shell-place guard on his lines judges: an update passes the lines it sets, or "" when it leaves next alone (a whole-item judgement, the switchover's or a reopen's, never rejudges a stored line); None (a create) judges all of next.
-    `defers_text`: the same for the next_defers guard (a line that defers on another open item in words while `after` does not name it): the lines the write sets, "" when it leaves next alone, None on a create."""
+    `defers_text`: the same for the next_defers guard (a line that defers on another open item in words while `after` does not name it): the lines the write sets, "" when it leaves next alone, None on a create.
+    `old_end_ok`, `date_ends`: what an ask_by stored with no wait_kind counts for (model_guards.check)."""
     h = _hooks()
     if not h.model_guards_on() or item.get("status") != "open":
         return ""
@@ -820,7 +821,7 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
                                  after_open=lambda i_: h.after_open(i_.get("metadata") or {}),
                                  anchored=lambda i_: bool(gid and h.scoped_anchors(project, gid)),
                                  needs=needs, hold=hold, one_mover=bool(_cfg.get("model", "one_mover", default=True)), next_text=next_text, windows_text=windows_text, creating=creating,
-                                 defers_text=defers_text, named_open=h.open_item_named, canon=_gh.resolve, until_wait=until_wait, date_given=date_given, hold_given=hold_given, basis_kept=basis_kept)
+                                 defers_text=defers_text, named_open=h.open_item_named, canon=_gh.resolve, until_wait=until_wait, date_given=date_given, hold_given=hold_given, basis_kept=basis_kept, old_end_ok=old_end_ok, date_ends=date_ends)
     except Exception as e:  # noqa: BLE001  — the guard is an extra: a failure in it writes as before
         print(f"model guards: {gid or 'a new item'} not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         if strict:
@@ -1765,7 +1766,8 @@ def gate_said(said: Any, default_session: str, by: str, dry: bool = False) -> li
 def gate_cap(item: dict[str, Any], said_l: list[dict[str, Any]], what: str, shown: str, when: float, basis: str = "") -> str:
     """The owner's rule for a wake a session sets: more than [waiting] cap_days after the item's last move (this write is one), it is refused
     unless his words are behind it (_owner_words_on). A due date is not gated: it is a deadline, not a wait.
-    [waiting] cap_needs_owner = false lifts the gate. No wait is exempt, an anchored thread's included. Only a write is gated: a date
+    [waiting] cap_needs_owner = false lifts the gate. It judges the date a write stores as a wake. The date of a relay or an event wait is stored as its ask_by and is not judged, on a create or an update, unless
+    the same update puts a hold on that wait; an anchored thread's wait has no exemption of its own. Only a write is gated: a date
     stored earlier is read as it is. → the words that allowed a wake past the cap ("a checked said entry" | "a board answer"), else ""."""
     h = _hooks()
     if not _wt.cap_needs_owner():
