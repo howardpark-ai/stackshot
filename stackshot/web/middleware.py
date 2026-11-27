@@ -244,10 +244,11 @@ class _Fingerprint(_MW):
 
 # For all sessions, ever:
 # every board id in a tool's text reply is written as a markdown link to its item page, so a cloud or Cowork
-# session, which runs no pane mod, shows it linked too. Skipped: an id already inside a markdown link, a URL or inline code;
-# an id-shaped token glued to a word, a hyphen, a slash or a dot-number (p1-x, /items/s1); and a token that is no item
-# in the store (p1 is a priority, not an item). A reply that is JSON is left as it is.
-_LINK_SKIP = r"\[[^\]\n]*\]\([^)\s]*\)|https?://[^\s)>\]]+|`[^`\n]*`"
+# session, which runs no pane mod, shows it linked too. Skipped: an id already inside a markdown link, a URL, an email
+# address or inline code; an id-shaped token glued to a word, a hyphen, a slash or a dot-number (p1-x, /items/s1); and a
+# token that is no item in the store (p1 is a priority, not an item). A reply that is JSON is left as it is.
+_LINK_SKIP = (r"\[[^\]\n]*\]\([^)\s]*\)|https?://[^\s)>\]]+|`[^`\n]*`"
+              r"|(?<![A-Za-z0-9._%+'\-])[A-Za-z0-9._%+'\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+")      # tried at the start of a name only: one pass over a long word
 
 
 _LINK_RX = re.compile(_LINK_SKIP + r"|(?<![\w\-/#.:@])(?P<tid>board-tmp-[a-z0-9-]*[a-z0-9]#[1-9]\d*)(?![\w\-/]|\.\d)"

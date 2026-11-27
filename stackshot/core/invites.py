@@ -16,7 +16,8 @@ The check holds for any invited entry of the members file, whether or not this b
     mcp_url   the address an app adds as its MCP server (default: [auth] base_url followed by /mcp)
 
 and only on a board that can enforce the above: `[auth] mode = "google"` with an https base_url, and `[behind_frontdoor]` members_file, board_name and
-verify_secret_file (the board the sign-in service asks). `notes` says what is missing. See docs/front-door.md, *Inviting a person*.
+verify_secret_file (the board the sign-in service asks). `notes` says what is missing. Calling `invite` through the front door also needs [behind_frontdoor]
+identity_secret_file, which is not checked here: without it the board takes the call as the account of the door's own credential. See docs/front-door.md, *Inviting a person*.
 
 Every change of the members file is made under a lock, as one rename, and never one that loses part of the file (a name written twice) or makes it too large to read."""
 from __future__ import annotations

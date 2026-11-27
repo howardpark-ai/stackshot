@@ -108,10 +108,11 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 import fastmcp.server.dependencies as deps
 from fastmcp.server.auth import AccessToken
+from starlette.requests import Request
 from starlette.testclient import TestClient
 
 from stackshot.web import server
-from stackshot.core import config as _cfg, frontdoor_config as fc, frontdoor_identity as ident, frontdoor_signin_config as sc, invites, readonly as _ro
+from stackshot.core import config as _cfg, frontdoor_config as fc, frontdoor_identity as ident, frontdoor_signin_config as sc, invites, members as _members, readonly as _ro
 from stackshot.frontdoor import app as door_app, provider as fdprov, signin
 from stackshot.service.caller_pass import RateLimit
 from stackshot.web import publish as _web_publish, middleware as _middleware
@@ -278,6 +279,27 @@ def part_admit():
     check("session: an invited address keeps its account, others none", invites.session_account("new@example.com", "111") == "111" and invites.session_account("bob@example.com", "9") == "")
     check("session: it holds for that account only, and a hand entry's holds with none", invites.session_holds("new@example.com", "111") and not invites.session_holds("new@example.com", "")
           and not invites.session_holds("new@example.com", "222") and invites.session_holds("bob@example.com", ""))
+    reset_members()
+    invites.register("new@example.com", "alice", S)
+    check("session: with no account id it does not hold on an invitation nobody has joined", not invites.session_holds("new@example.com", ""))
+
+    # something else writes the record between the first read and the lock: what is read under the lock decides
+    for label, written, why in (("another account", "222", "other_account"), ("an unreadable record", 5, "unreadable")):
+        reset_members()
+        invites.register("new@example.com", "alice", S)
+        locked = invites._locked
+
+        @contextlib.contextmanager
+        def raced(real, written=written, locked=locked):
+            got = members(); got["new@example.com"]["invited"]["google_sub"] = written; REAL_MEMBERS.write_text(json.dumps(got))
+            with locked(real):
+                yield
+        invites._locked = raced
+        try:
+            said = invites.admit("new@example.com", "111", True)
+        finally:
+            invites._locked = locked
+        check(f"admit: {label} recorded between the read and the lock is refused, and stands", said == why and pin() == written, (said, pin()))
 
 
 # ================================================================ 4. the chain: board, sign-in service, front door
@@ -374,6 +396,16 @@ def part_chain():
             direct = httpx.get(board + "/frontdoor/verify", headers={"authorization": "Bearer " + unv, "x-stackshot-verify": ident.sign(pathlib.Path(VERIFY).read_text().strip().encode(), "token-check")}, timeout=30)
             check("verify: an unverified invited address is 403 not_admitted with the reason and the address", direct.status_code == 403
                   and direct.json() == {"error": "not_admitted", "why": "unverified", "email": "new@example.com"} and direct.headers.get("cache-control") == "no-store", (direct.status_code, direct.text))
+            real_barred = _oauth._barred
+
+            def broken(claims):
+                raise RuntimeError("the check failed")
+            _oauth._barred = broken
+            try:
+                down = httpx.get(board + "/frontdoor/verify", headers={"authorization": "Bearer " + alice, "x-stackshot-verify": ident.sign(pathlib.Path(VERIFY).read_text().strip().encode(), "token-check")}, timeout=30)
+            finally:
+                _oauth._barred = real_barred
+            check("verify: a registration check that fails is 503, never a 200", down.status_code == 503 and down.json() == {"error": "unavailable"}, (down.status_code, down.text))
             r = verify(unv)
             barred = r.headers.get("x-verified-user", "")
             check("sign-in service: passes it on as an identity that carries the refusal", r.status_code == 200 and ident.barred_of(barred) == ("unverified", "new@example.com"), (r.status_code, barred))
@@ -444,6 +476,9 @@ def part_direct():
         check("direct: the verified one is let in and recorded", _oauth._who() == "new@example.com" and members()["new@example.com"]["invited"]["google_sub"] == "111")
         claims.update(sub="222")
         check("direct: another account is refused", "another Google account" in str(raised(_oauth._who)))
+        claims.clear(); claims.update(email="new@example.com", via="portal")
+        e = raised(_oauth._who)
+        check("direct: the machine token is no Google sign-in, so no registration refuses it", e is None, e)
         claims.clear(); claims.update(email="alice@example.com", via="portal")
         e = raised(_tool.stackshot_invite, "m@example.com")
         check("direct: a machine token invites nobody", e is not None and str(e) == _tool.MACHINE and "m@example.com" not in members(), e)
@@ -472,11 +507,12 @@ def part_direct():
                 flow = _signin._ui_sign(json.dumps({"state": "s1", "verifier": "v" * 50, "next": "/", "exp": _signin._ui_now() + 600}))
                 c.cookies.clear()
                 r = c.get("/ui/callback?code=abc&state=s1", cookies={"stackshot_ui_flow": flow}, follow_redirects=False)
-                sess = next((v.split(";")[0].split("=", 1)[1].strip('"') for k, v in r.headers.multi_items() if k == "set-cookie" and v.startswith("stackshot_ui=")), "")
+                sess = cookie_of(r)
                 c.cookies.clear()
                 return r, sess
             nav = {"Sec-Fetch-Mode": "navigate"}
             see = lambda sess: c.get("/", cookies={"stackshot_ui": sess}, headers=nav, follow_redirects=False)
+            cookie_of = lambda r: next((v.split(";")[0].split("=", 1)[1].strip('"') for k, v in r.headers.multi_items() if k == "set-cookie" and v.startswith("stackshot_ui=")), "")
             r, sess = callback(google("ui-unv", "new@example.com", "111", "false"))
             check("web: an unverified invited address gets no session and is told why", r.status_code == 403 and not sess and r.text.startswith("new@example.com is not let in. Google does not report"), (r.status_code, r.text))
             r, sess = callback(google("ui-ok", "new@example.com", "111"))
@@ -487,6 +523,16 @@ def part_direct():
             check("web: another account gets none", r2.status_code == 403 and not sess2 and "another Google account" in r2.text, (r2.status_code, r2.text))
             r3, hand = callback(google("ui-bob", "bob@example.com", "901", "false"))
             check("web: a member written by hand signs in as before, with no account id kept", r3.status_code == 302 and "sub" not in json.loads(_signin._ui_unsign(hand)) and see(hand).status_code == 200, (r3.status_code, r3.text))
+            old = _signin._ui_sign(json.dumps({"email": "new@example.com", "sub": "111", "exp": _signin._ui_now() + 86400 * _signin._ui_days() - _signin._UI_RENEW_AFTER - 60}))
+            c.cookies.clear()
+            r5 = see(old)
+            renewed = cookie_of(r5)
+            c.cookies.clear()
+            kept = json.loads(_signin._ui_unsign(renewed) or "{}")
+            check("web: a renewed session keeps the account's id, and holds", r5.status_code == 200 and kept.get("sub") == "111" and see(renewed).status_code == 200, (r5.status_code, sorted(kept)))
+            got = members(); got["bob"]["invited"] = {"by": "alice", "at": "", "google_sub": ""}; REAL_MEMBERS.write_text(json.dumps(got))
+            c.cookies.clear()
+            check("web: a session with no account id ends where its address is now an invitation nobody has joined", see(hand).status_code == 302, see(hand).status_code)
             invites.remove("new@example.com", S)
             check("web: removal ends the session at its next request", see(sess).status_code == 302 and see(sess).headers["location"].startswith("/ui/login"), see(sess).status_code)
             invites.register("new@example.com", "alice", S)
@@ -528,6 +574,16 @@ def part_open():
             _join.PER_SOURCE, _join.CEILING = RateLimit(100, 60), RateLimit(1, 60)
             got = [c.get("/join") for _ in range(3)]
             check("page: so are all sources together", [x.status_code for x in got] == [200, 429, 429], [x.status_code for x in got])
+
+            def read(address):
+                return asyncio.run(_join.join(Request({"type": "http", "method": "GET", "path": "/join", "query_string": b"", "headers": [], "client": (address, 1)}))).status_code
+            _join.PER_SOURCE, _join.CEILING = RateLimit(1, 60), RateLimit(600, 60)
+            got = [read(a) for a in ("2001:db8:1:2::1", "2001:db8:1:2:ffff::9", "2001:db8:1:3::1", "203.0.113.7", "::ffff:203.0.113.7", "203.0.113.8")]
+            check("page: a source is an IPv6 /64, and an IPv4-mapped address the IPv4 one", got == [200, 429, 200, 200, 429, 200], got)
+            _join.PER_SOURCE = RateLimit(1, 60)
+            with serving(server.mcp.http_app()) as board:
+                got = [httpx.get(board + "/join", headers={"x-forwarded-for": a}, timeout=30).status_code for a in ("203.0.113.20", "203.0.113.20", "203.0.113.21", "2001:db8:9::1", "2001:db8:9::2")]
+            check("page: behind a proxy on the loopback address the source is the client it names", got == [200, 429, 200, 200, 429], got)
         finally:
             _join.PER_SOURCE, _join.CEILING = per, ceiling
 
@@ -543,7 +599,10 @@ def part_open():
                  "http://localhost:53117/callback", "http://127.0.0.1:40000/callback", "http://localhost:8787/callback", "https://www.cursor.com/agents/mcp/oauth/callback"]
         for uri in taken:
             check(f"redirect: taken: {uri}", asks(uri))
-        for uri in ("https://evil.example/callback", "https://chatgpt.com/connector_platform_oauth_redirect/x", "https://chatgpt.com/connector/oauth/abc", "https://chatgpt.com.evil.example/connector_platform_oauth_redirect",
+        for uri in ("https://chatgpt.com/connector_platform_oauth_redirect?x=1", "https://chatgpt.com/connector_platform_oauth_redirect;x=1", "https://chatgpt.com/connector_platform_oauth_redirect#x",
+                    "https://chatgpt.com:443/connector_platform_oauth_redirect", "https://CHATGPT.com/connector_platform_oauth_redirect", "https://claude.ai/api/mcp/auth_callback?x=1"):
+            check(f"redirect: the library takes this too, as the docs say: {uri}", asks(uri))
+        for uri in ("https://chatgpt.com:8443/connector_platform_oauth_redirect", "https://evil.example/callback", "https://chatgpt.com/connector_platform_oauth_redirect/x", "https://chatgpt.com/connector/oauth/abc", "https://chatgpt.com.evil.example/connector_platform_oauth_redirect",
                     "http://chatgpt.com/connector_platform_oauth_redirect", "http://localhost:53117/other", "http://localhost:53117/callback/x", "http://localhost.evil.example/callback",
                     "https://cursor.com/agents/mcp/oauth/callback", "https://www.cursor.com/agents/mcp/oauth/callbackx", "cursor://anysphere.cursor-mcp/oauth/callback", "http://203.0.113.5:8787/callback"):
             check(f"redirect: refused: {uri}", not asks(uri))
@@ -560,8 +619,9 @@ from stackshot.core import config as c
 from stackshot.web.auth import oauth
 with TestClient(server.mcp.http_app()) as t:
     r = t.get("/join", follow_redirects=False)
+    routes = [getattr(x, "path", "") for x in t.app.routes]
 print(json.dumps({"tools": [x.name for x in asyncio.run(server.mcp.list_tools())], "instructions": server.mcp.instructions, "status": r.status_code, "body": r.text[:300], "uris": oauth._redirect_uris(),
-                  "configured": c.CFG["auth"]["allowed_client_redirect_uris"]}))
+                  "configured": c.CFG["auth"]["allowed_client_redirect_uris"], "routes": routes}))
 '''
 
 
@@ -572,13 +632,21 @@ def part_off():
     d = json.loads(r.stdout.strip().splitlines()[-1])
     check("off: no invite tool", "invite" not in d["tools"] and "brief" in d["tools"], d["tools"])
     check("off: nothing about newcomers in the instructions", "just joined" not in d["instructions"] and "invite tool" not in d["instructions"], d["instructions"][-400:])
-    check("off: no setup page", d["status"] != 200 or "mcpServers" not in d["body"], (d["status"], d["body"]))
+    check("off: no setup page, and no route for one", d["status"] != 200 and "/{name:path}" in d["routes"] and "/join" not in d["routes"], (d["status"], d["body"], d["routes"]))
     check("off: the redirect URIs are the configured ones and the board's own callback", d["uris"] == d["configured"] + [BASE_URL + "/ui/callback"], d["uris"])
 
 
 # the front door's words, with no invitation at all
 def part_words():
     check("words: a name that is no address is told what it was always told", fdprov.not_a_member("carol") == fdprov.NOT_A_MEMBER and fdprov.not_a_member(None) == fdprov.NOT_A_MEMBER)
+    REAL_MEMBERS.write_text(json.dumps({"carol@example.com": ["side"]}))
+    real_who = _oauth._who
+    _oauth._who = lambda: _members.PLACEHOLDER
+    try:
+        e = raised(_tool._admin, replace(S, admins=(_members.PLACEHOLDER,)))
+    finally:
+        _oauth._who = real_who
+    check("tool: the placeholder of a board that lists nobody is no admin, whatever admins names", e is not None and str(e) == _tool.NOT_ADMIN, e)
     check("words: a reason this version does not know is still a refusal", ident.barred_of("!refused:newer:a@example.com") == ("unreadable", "a@example.com") and ident.barred_of("alice") is None and ident.barred_of(None) is None)
     reset_members({"!refused:unverified:z@example.com": ["main"]})
     s, _p = fc.parse({"frontdoor": {"identity_header": "x-verified-user", "identity_secret_file": IDENTITY, "members_file": str(MEMBERS),

@@ -68,6 +68,9 @@ check("an id inside inline code is left alone", lk("run `client.py recycle-due -
 check("an id-like string glued to a word, a hyphen, a path or a version is left alone",
       lk("ba1 a1b a1-x x-a1 /a1 w1.2 a1.5 a1_x") == "ba1 a1b a1-x x-a1 /a1 w1.2 a1.5 a1_x", lk("ba1 a1b a1-x x-a1 /a1 w1.2 a1.5 a1_x"))
 check("a token that names no item stays plain (priority p1, an unknown s99)", lk("p1 s99 a1") == f"p1 s99 {L('a1')}", lk("p1 s99 a1"))
+mails = "a1@example.com kim+a1@example.org <a2@mail.example.com> mailto:a1@example.com invite(address=\"o'a1+a2@example.com\", remove=true) draft to a1@example.com."
+check("an id inside an email address is left alone", lk(mails) == mails, lk(mails))
+check("…and an id beside an address is still linked", lk("a1: kim@example.com, a2.") == f"{L('a1')}: kim@example.com, {L('a2')}.", lk("a1: kim@example.com, a2."))
 check("a JSON reply is left as it is", lk('{"id": "a1"}') == '{"id": "a1"}' and lk('[{"gid": "a1"}]') == '[{"gid": "a1"}]')
 check("a reply that only starts with a bracket is still linked", lk("[nag] a1 owes") == f"[nag] {L('a1')} owes", lk("[nag] a1 owes"))
 _bu = _core_instance.BOARD_URL; _core_instance.BOARD_URL = ""

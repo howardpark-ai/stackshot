@@ -773,7 +773,8 @@ result_turn_cap_per_hour = 6                        # the most turns one session
 
 # [invites]                                         # on the board the sign-in service asks ([behind_frontdoor] members_file, board_name and verify_secret_file; [auth] mode = "google"): its
 #                                                   # admins invite a person by Google address with the `invite` tool, and GET /join says how to connect (docs/front-door.md, "Inviting a
-#                                                   # person"). Absent: no tool, no page, no extra redirect URI. Restart-only
+#                                                   # person"). Absent: no tool, no page, no extra redirect URI. Restart-only. To invite through the front door the board
+#                                                   # also needs [behind_frontdoor] identity_secret_file
 # admins = ["alice"]                                # REQUIRED: the members (their names in the members file) who may invite and remove
 # mcp_url = "https://board.example.com/mcp"         # the address an app adds (default: [auth] base_url followed by /mcp)
 

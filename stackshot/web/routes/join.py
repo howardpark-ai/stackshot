@@ -2,8 +2,8 @@
 
 Anyone may read it, signed in or not, so it holds nothing but the connector's address from the config and the same words for everyone: no secret, no member, no
 item, no board name. The one thing that depends on the request is the language (a signed-in reader's own; a query string changes nothing), so it says nothing
-about whether an address is registered. It reads no store and writes nothing. Requests are limited per source address and over all of them. The route is there only on a board that can invite
-([invites], core/invites.py). Every text is escaped as it is put in; the page carries no script and loads nothing."""
+about whether an address is registered. It reads no store and writes nothing. Requests are limited per source (`caller_pass._source`) and over all of them. The route
+is there only on a board that can invite ([invites], core/invites.py). Every text is escaped as it is put in; the page carries no script and loads nothing."""
 from __future__ import annotations
 
 import html
@@ -12,10 +12,12 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse, Response
 
 from stackshot.core import invites as _invites
-from stackshot.service.caller_pass import RateLimit
+from stackshot.service.caller_pass import RateLimit, _source
 from stackshot.web import i18n as _i18n
 
-PER_SOURCE = RateLimit(60, 60)       # pages one source address reads a minute (behind a proxy on this machine every reader is one source)
+# The address is the connection's as uvicorn gives it (`request.client`): the peer, or the client the loopback proxy in front of the server names in X-Forwarded-For.
+# `_source` counts it as the client API's limits do (an IPv6 address by its /64).
+PER_SOURCE = RateLimit(60, 60)       # pages one source reads a minute
 CEILING = RateLimit(600, 60)         # ...and all of them together
 
 _HEADERS = {
@@ -66,7 +68,7 @@ def page(url: str) -> str:
 
 
 async def join(request: Request) -> Response:
-    source = request.client.host if request.client else ""
+    source = _source(request.client.host if request.client else "")
     wait = PER_SOURCE.allow(source) or CEILING.allow()
     if wait:
         return PlainTextResponse(_i18n.t("join.busy"), status_code=429, headers={**_HEADERS, "Retry-After": str(int(wait) + 1)})
