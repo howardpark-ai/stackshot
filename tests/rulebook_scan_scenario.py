@@ -1,4 +1,4 @@
-"""Scenario test for the rulebook scan (run after each of the audit's two daily runs) (tools/rulebook_scan.py step 4c part 5) on fixture files, a fixture tool schema,
+"""Scenario test for the rulebook scan (run once a week, by the audit unit's first run of each week) (tools/rulebook_scan.py step 4c part 5) on fixture files, a fixture tool schema,
 fixture `sala --help` and `sala op --help` texts and a fixture retired-terms list: no live files, no sala, no server, no network; the
 delivery is replaced by a recorder.
 
@@ -10,7 +10,7 @@ in another verb's section, a placeholder verb after `sala op`); the retired-term
 the tool names and parameters read from the real server.py by `ast` and the real `sala --help` shape; grouping (one note per file, to
 its keeper, the findings of a file together); no repeat (the same unchanged finding is not sent twice, a note carries only what is new
 and counts the older ones, a fixed finding that comes back is sent again, a delivery that failed is tried again); the audit's `scan`
-verb and the timer unit; the CLI.
+verb and the timer unit; the weekly gate (--weekly: one scan a week, a held note does not count, concurrent runs scan once); the CLI.
 
     tests/run-suite rulebook_scan        → exit 0 / 1"""
 import atexit, json, os, re, shutil, subprocess, sys, pathlib, tempfile
@@ -290,7 +290,7 @@ CY = dict(CFG, files=[{"glob": str(T / "y" / "*.md"), "keeper": "heron-engineer"
 sent.clear(); ok[0] = False
 r = rs.run(CY, deliver=deliver, state=YS, today="Mon Nov 23rd", **SRC)
 check("a failed delivery ends the night's sending: one attempt, the other file held and not tried", len(sent) == 1 and sorted(map(os.path.basename, r["held"])) == ["Y1.md", "Y2.md"], (sent, r["held"]))
-check("…and said so", any("held for the next night" in x for x in r["notes"]), r["notes"])
+check("…and said so", any("held for the next scan" in x for x in r["notes"]), r["notes"])
 sent.clear(); ok[0] = True
 r = rs.run(CY, deliver=deliver, state=YS, today="Tue Nov 24th", **SRC)
 check("…the next night sends both", len(sent) == 2 and r["held"] == [], sent)
@@ -335,9 +335,49 @@ rc, out, err = cli("run", "--bogus")
 check("CLI: an option it does not know: usage, exit 2", rc == 2 and "usage" in err, (rc, err))
 rc, out, err = cli("bogus", script="stackshot/audit/audit.py")
 check("audit.py's usage names scan", rc == 2 and "scan [--dry-run]" in err, err)
+# ---- 7. once a week: the unit's runs of one Monday-to-Sunday week scan once
+import datetime as _dt, threading
+from zoneinfo import ZoneInfo
+check("this_week: the Monday-to-Sunday week, ISO form, in the instance timezone",
+      rs.this_week(_dt.datetime(2026, 11, 22, 23, 0, tzinfo=ZoneInfo("Asia/Dubai"))) == "2026-W47" and rs.this_week(_dt.datetime(2026, 11, 23, 0, 5, tzinfo=ZoneInfo("Asia/Dubai"))) == "2026-W48"
+      and rs.this_week(_dt.datetime(2026, 11, 29, 23, 0, tzinfo=ZoneInfo("Asia/Dubai"))) == "2026-W48")
+WD = T / "weekly"; WD.mkdir(); WF = WD / "last-week.json"
+CW = dict(CFG, files=[{"glob": f"{T}/hub/roles/clean.md", "keeper": "heron-engineer"}])
+r1 = rs.run_weekly(CW, week="2026-W48", wfile=WF, deliver=deliver, state=WD / "s.json", **SRC)
+r2 = rs.run_weekly(CW, week="2026-W48", wfile=WF, deliver=deliver, state=WD / "s.json", **SRC)
+r3 = rs.run_weekly(CW, week="2026-W49", wfile=WF, deliver=deliver, state=WD / "s.json", **SRC)
+check("weekly: the first run of a week scans, the second run of that week skips, the next week scans again",
+      r1 is not None and r2 is None and r3 is not None and json.loads(WF.read_text())["week"] == "2026-W49", (r1, r2, r3))
+CB = dict(CFG, files=[{"glob": f"{T}/hub/RULES.md", "keeper": "heron-engineer"}]); ok[0] = False
+RULES.write_text('one `update(item_id="board#9", owner="x")`\n', encoding="utf-8")
+rf = rs.run_weekly(CB, week="2026-W50", wfile=WF, deliver=deliver, state=WD / "s2.json", **SRC)
+check("weekly: a scan whose note was not delivered does not record the week, so the next run tries again", rf["held"] and json.loads(WF.read_text())["week"] == "2026-W49", rf["held"])
+ok[0] = True
+rg = rs.run_weekly(CB, week="2026-W50", wfile=WF, deliver=deliver, state=WD / "s2.json", **SRC)
+check("weekly: ...and once delivered the week is recorded", rg is not None and not rg["held"] and json.loads(WF.read_text())["week"] == "2026-W50", rg)
+rd = rs.run_weekly(CB, week="2026-W51", wfile=WF, dry=True, deliver=deliver, state=WD / "s3.json", **SRC)
+check("weekly: a dry run records nothing", rd is not None and json.loads(WF.read_text())["week"] == "2026-W50")
+# concurrent writers: eight runs of one week started together scan once, and the week file stays whole
+cnt = []
+def _count(to, text, sender): cnt.append(to); return True, "[200] ok"
+WF2 = WD / "conc" / "last-week.json"; outs = []
+def _go(): outs.append(rs.run_weekly(CB, week="2026-W60", wfile=WF2, deliver=_count, state=WD / "conc-sent.json", **SRC))
+ths = [threading.Thread(target=_go) for _ in range(8)]
+[t.start() for t in ths]; [t.join() for t in ths]
+check("weekly, concurrent runs of one week: exactly one scans and sends, the others skip, the week file is whole JSON",
+      sum(x is not None for x in outs) == 1 and len(cnt) == 1 and json.loads(WF2.read_text()) == {"week": "2026-W60"} and not list(WF2.parent.glob("*.tmp")), (len(outs), cnt))
+# the CLI: --weekly
+RULES.write_text('nothing stale here\n', encoding="utf-8")
+rc, out, err = cli("run", "--weekly", *srcs)
+check("CLI: --weekly scans in the first run of the week and records it", rc == 0 and "rulebook scan: " in out and "already scanned" not in out and (T / "state/rulebook-scan/last-week.json").is_file(), (rc, out[:300], err[:300]))
+rc, out, err = cli("run", "--weekly", *srcs)
+check("CLI: --weekly again in the same week skips with one line, exit 0", rc == 0 and "already scanned in week" in out and "files," not in out, (rc, out[:300], err[:300]))
+rc, out, err = cli("run", *srcs)
+check("CLI: a run without --weekly always scans", rc == 0 and "files," in out, (rc, out[:300], err[:300]))
+
 unit = pathlib.Path(STACK, "units/stackshot-audit.service.in").read_text(encoding="utf-8")
-check("the timer's unit runs the scan after the run (ExecStartPost), and a failed scan never fails the unit",
-      re.search(r"(?m)^ExecStartPost=-/usr/bin/timeout 300 @UV@ run --project @CHECKOUT@ --locked python -m stackshot\.tools\.rulebook_scan run$", unit) and "ExecStart=@UV@ run --project @CHECKOUT@ --locked stackshot audit cue scheduled" in unit
+check("the timer's unit runs the scan after the run (ExecStartPost), once a week (--weekly), and a failed scan never fails the unit",
+      re.search(r"(?m)^ExecStartPost=-/usr/bin/timeout 300 @UV@ run --project @CHECKOUT@ --locked python -m stackshot\.tools\.rulebook_scan run --weekly$", unit) and "ExecStart=@UV@ run --project @CHECKOUT@ --locked stackshot audit cue scheduled" in unit
       and "ExecStartPre" not in re.sub(r"(?m)^#.*$", "", unit) and unit.index("ExecStart=@UV@") < unit.index("ExecStartPost="), unit)
 ex = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
 check("the example config documents [rulebook_scan], off by default", re.search(r"(?m)^\[rulebook_scan\][^\n]*\nenabled = false", ex) is not None)

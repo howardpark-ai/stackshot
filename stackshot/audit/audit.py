@@ -26,7 +26,7 @@ whose `started` is two hours old or more is a crashed run, not a running one: it
     audit.py scan [--dry-run] the rulebook scan (tools/rulebook_scan.py): the instruction files sessions read are checked for
                               stackshot tools, parameters, sala verbs and flags and retired terms that no longer exist, and each file's keeper gets
                               one note (a message through client.py, as a script's message); [rulebook_scan] enabled gates it, --dry-run only prints.
-                              The timer's unit runs tools/rulebook_scan.py just after the cue (ExecStartPost: after the run and its page checks; its failure never fails the unit).
+                              The timer's unit runs tools/rulebook_scan.py run --weekly just after the cue (ExecStartPost: after the run and its page checks; its failure never fails the unit); --weekly scans only in the first run of each Monday-to-Sunday week.
                               No model, no tokens.
     audit.py refusals [--dry-run] [--force] [--week DATE]  the weekly count of refused board writes (tools/refusal_report.py): the last full week, Monday to Sunday, sent once to [refusal_report] to
                               (default [audit] summary_to) as a message that asks nothing; [refusal_report] enabled gates it, --dry-run only prints. The timer's unit runs it after the run. No model, no tokens.
