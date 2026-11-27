@@ -517,13 +517,15 @@ _answer_svc._answer(_model_ids._norm_id(g9b), "", "", "done")
 st, c9c = isy("close", marker="plugin_sync:handed2")
 check("a close after his Done with no other step open completes the item as before", st == 200 and c9c["action"] == "closed" and item(g9b)["status"] == "completed", (st, c9c))
 
-# a repeat open sets the step it sends when it differs from every open step of his and from the step he finished last
+# a repeat open sets the step it sends only when it differs from the step the route last sent, and never beside a line of his that is not the route's own
 def his_open(g): return [t for t, s_ in steps_of(g) if s_ == "open" and t.startswith("Oliver: ")]
 def edit_meta(g, fn):
     p_ = _service_store._path(g); d_ = json.loads(p_.read_text(encoding="utf-8")); fn(d_["metadata"]); p_.write_text(json.dumps(d_), encoding="utf-8")
 S1, S2, S3, S4 = "open the plugin page and press Sync", "press Sync on the plugin page again", "press Sync and check the version", "check the version number on the page"
 def meta_of(g): return item(g)["metadata"]
 def own(g): return meta_of(g).get("item_sync_step")
+def sent(g): return meta_of(g).get("item_sync_sent")
+RECORD = ("item_sync_step", "item_sync_sent")      # forgetting both makes an item as one filed before the records
 def forget(g, *keys): edit_meta(g, lambda m_: [m_.pop(k_, None) for k_ in keys])
 def opened(marker, **kw):
     st_, r_ = isy("open", marker=marker, **kw); settle()
@@ -541,15 +543,15 @@ def untouched(name, g, marker, step):
     st_, r_ = isy("open", marker=marker, step=step, description=[fact]); settle()
     check(name, st_ == 200 and r_["action"] == "refreshed" and shape(g) == before and meta_of(g).get("until") == until_ and own(g) == own_ and item(g)["description"].splitlines()[0] == fact, (st_, r_, before, shape(g), own_, own(g), item(g)["description"]))
 def asks(name, g, marker, step, opens, record=True):
-    """a repeat open that sets the step: his move again, `opens` the open steps of his after it, `record` whether the line it asks is the route's own"""
+    """a repeat open that sets the step: his move again, `opens` the open steps of his after it, `record` whether the line it asks is the route's own; the step is recorded as sent"""
     st_, r_ = isy("open", marker=marker, step=step); settle()
     m_ = meta_of(g)
     check(name, st_ == 200 and r_["action"] == "refreshed" and sorted(his_open(g)) == mine(*opens) and m_.get("state") == "your-step" and m_.get("step") == step and m_.get("owner_step") == "Oliver: " + step and M.derive(item(g)).mover == "Oliver"
-          and own(g) == (step if record else None), (st_, r_, steps_of(g), m_.get("state"), m_.get("step"), m_.get("owner_step"), own(g)))
+          and own(g) == (step if record else None) and sent(g) == step, (st_, r_, steps_of(g), m_.get("state"), m_.get("step"), m_.get("owner_step"), own(g), sent(g)))
 
 settle(); pushed.clear()
 gr = opened("plugin_sync:rules")
-check("rules setup: the open files his step as the one open step, recorded as the route's own", steps_of(gr) == [("Oliver: " + S1, "open")] and own(gr) == S1, (steps_of(gr), own(gr)))
+check("rules setup: the open files his step as the one open step, recorded as the route's own and as sent", steps_of(gr) == [("Oliver: " + S1, "open")] and own(gr) == S1 and sent(gr) == S1, (steps_of(gr), own(gr), sent(gr)))
 pushed.clear()
 asks("a new step on a repeat open is set: one open step of his, the new one, recorded; the item waits on him", gr, "plugin_sync:rules", S2, [S2])
 check("...the route's old step is dropped, and nobody is told", ("Oliver: " + S1, "dropped") in steps_of(gr) and pushed == [], (steps_of(gr), pushed))
@@ -572,23 +574,51 @@ close(g_)
 # a step a session wrote and he finished is his finished step as much as the route's
 g_ = opened("plugin_sync:theirs")
 by_builder(g_, step=S3)
-check("setup: a session's step= takes the route's line over: one open step of his, and the route owns none", his_open(g_) == mine(S3) and own(g_) is None, (steps_of(g_), own(g_)))
+check("setup: a session's step= takes the route's line over: one open step of his, and the route owns none", his_open(g_) == mine(S3) and own(g_) is None and sent(g_) == S1, (steps_of(g_), own(g_), sent(g_)))
 done(g_)
 untouched("a step a session wrote and he finished, sent by the route: not asked again", g_, "plugin_sync:theirs", S3)
-edit_meta(g_, lambda m_: m_.__setitem__("steps", [*m_["steps"], {"text": "home-sparrow-builder: tidy up", "status": "done", "by": "home-sparrow-builder", "at": time.time() + 60}]))
-untouched("...nor after an agent's own step was finished later: the comparison is with his step", g_, "plugin_sync:theirs", S3)
+edit_meta(g_, lambda m_: m_.__setitem__("steps", [*m_["steps"], {"text": "Oliver: " + S4, "status": "done", "by": "home-sparrow-builder", "at": time.time() + 60}]))
+untouched("...nor after a line for him was ticked later by a session: only his own mark makes a step the one he finished last", g_, "plugin_sync:theirs", S3)
+close(g_)
+g_ = opened("plugin_sync:ticked")
+by_builder(g_, next="Oliver: " + S3); by_builder(g_, done=["Oliver: " + S3])
+check("setup: a session wrote a line for him and ticked it itself; the route's step is open", his_open(g_) == mine(S1) and any(s_["status"] == "done" and s_["by"] != "Oliver" for s_ in _steps_mod.view(meta_of(g_))), _steps_mod.view(meta_of(g_)))
+asks("a step a session ticked is not one he finished: it is set", g_, "plugin_sync:ticked", S3, [S3])
 close(g_)
 
-# crash repair: the create wrote his line and the record, the state write never happened
-g4 = opened("plugin_sync:rule4")
-forget(g4, "state", "step", "owner_step")
-check("crash setup: his step open and recorded, no state", his_open(g4) == mine(S1) and not meta_of(g4).get("state") and own(g4) == S1, (steps_of(g4), meta_of(g4)))
+# the step the route last sent is never asked again, whatever became of its line
+def not_asked(tag, mk, change, still):
+    """the route sends S1 again after a session's `change` of its line: nothing is written, the open steps of his stay `still`; then a newer step waits for any line of the session's to go"""
+    g_ = opened(mk); change(g_); settle()
+    check(f"setup ({tag}): the route's line is gone", "Oliver: " + S1 not in his_open(g_) and own(g_) is None and sent(g_) == S1 and sorted(his_open(g_)) == mine(*still), (meta_of(g_), steps_of(g_)))
+    for n_ in (1, 2):
+        untouched(f"after a session {tag} the route's step, the same text again asks nothing (run {n_})", g_, mk, S1)
+    if still:
+        untouched(f"after a session {tag} the route's step, a newer step is not put beside the session's", g_, mk, S2)
+        check(f"...and is not recorded as sent ({tag})", sent(g_) == S1, sent(g_))
+        done(g_)
+        untouched(f"after his Done on the session's step ({tag}), the route's old text still asks nothing", g_, mk, S1)
+    asks(f"after a session {tag} the route's step, a newer step is set once no line of the session's stands", g_, mk, S2, [S2])
+    close(g_)
+
+not_asked("replaced", "plugin_sync:replaced", lambda g: by_builder(g, step=S3), [S3])
+not_asked("reworded", "plugin_sync:reworded", lambda g: _update_svc._update(_model_ids._norm_id(g), step=S4, sender="home-sparrow-main"), [S4])
+not_asked("withdrew", "plugin_sync:withdrew", lambda g: by_builder(g, next="home-sparrow-builder: watch the sync", step="none"), [])
+
+# crash repair: the create wrote his line and the route's own record, the state write never happened
+def cut_short(g, *keys): forget(g, "state", "step", "owner_step", "item_sync_sent", *keys)
+g4 = opened("plugin_sync:rule4"); cut_short(g4)
+check("crash setup: his step open and recorded as the route's, never sent, no state", his_open(g4) == mine(S1) and not meta_of(g4).get("state") and own(g4) == S1 and sent(g4) is None, (steps_of(g4), meta_of(g4)))
 asks("his open step on an item that does not ask him is made whole by a repeat open, and stays the route's", g4, "plugin_sync:rule4", S1, [S1])
 asks("...so a newer step replaces it", g4, "plugin_sync:rule4", S2, [S2])
 close(g4)
-g_ = opened("plugin_sync:unrecorded"); forget(g_, "state", "step", "owner_step", "item_sync_step")
-asks("an open step with no record on an item that does not ask him is set, and is not taken as the route's", g_, "plugin_sync:unrecorded", S1, [S1], record=False)
-asks("...so a newer step goes beside it", g_, "plugin_sync:unrecorded", S2, [S1, S2])
+g_ = opened("plugin_sync:rule4new"); cut_short(g_)
+asks("a filing cut short, sent a newer step first: the route's line is replaced", g_, "plugin_sync:rule4new", S2, [S2])
+close(g_)
+g_ = opened("plugin_sync:rule4beside"); by_builder(g_, next="Oliver: " + S3); cut_short(g_)      # the line first: an item with no state takes no line for him from a session
+check("setup: a cut-short filing with a session's line beside the route's", sorted(his_open(g_)) == mine(S1, S3) and not meta_of(g_).get("state"), (steps_of(g_), meta_of(g_)))
+untouched("...a newer step is not put beside the session's line, and the route's is not dropped", g_, "plugin_sync:rule4beside", S2)
+asks("...the route's own line sent again makes the item ask it", g_, "plugin_sync:rule4beside", S1, [S1, S3])
 close(g_)
 
 # the record is the step as sent, compared as the board stores it, however it is spelled
@@ -610,9 +640,8 @@ g_ = opened("plugin_sync:twice")
 by_builder(g_, next=f"Oliver: {S1}\nOliver: {bold}\nOliver: {S3}")
 check("setup: the route's line, a session's line that reads the same, and a session's other step", len(his_open(g_)) == 3 and own(g_) == S1, (steps_of(g_), own(g_)))
 st_, r_ = isy("open", marker="plugin_sync:twice", step=S3); settle()
-check("a step standing as a session's line replaces the route's own: the record is gone, the session's lines are open", st_ == 200 and own(g_) is None and sorted(his_open(g_)) == sorted([f"Oliver: {bold}", "Oliver: " + S3]), (st_, r_, steps_of(g_), own(g_)))
-st_, r_ = isy("open", marker="plugin_sync:twice", step=S2); settle()
-check("...so a later step goes beside both and drops neither", st_ == 200 and sorted(his_open(g_)) == sorted([f"Oliver: {bold}", "Oliver: " + S2, "Oliver: " + S3]), (st_, r_, steps_of(g_), own(g_)))
+check("a step standing as a session's line replaces the route's own: the record is gone, the session's lines are open", st_ == 200 and own(g_) is None and sent(g_) == S3 and sorted(his_open(g_)) == sorted([f"Oliver: {bold}", "Oliver: " + S3]), (st_, r_, steps_of(g_), own(g_), sent(g_)))
+untouched("...so a later step is not put beside them", g_, "plugin_sync:twice", S2)
 close(g_)
 
 # a step that names an item by its id is the same line at the create, in the record and in every comparison; the board writes the id of an issue-numbered item otherwise than it is sent
@@ -632,7 +661,7 @@ finally:
     _ghsync.letter = letter_
 close(ref)
 
-# a note of his that parks the item: nothing is written while it waits; the step the park dropped is asked again after the wait
+# a note of his that parks the item: nothing is written while it waits; the step the park dropped was sent, so only a newer one is asked after the wait
 from stackshot.service import wakes as _wakes_svc
 def wake_all():
     _wakes_svc.wake_pass(now=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30)); settle()
@@ -642,9 +671,11 @@ for i_, words in enumerate(("I'll do it tomorrow evening", "I'll do it next week
     check(f"parked setup ({words}): the item waits, no step of his is open, his step is dropped", is_waiting(g_) and his_open(g_) == [] and ("Oliver: " + S1, "dropped") in steps_of(g_) and meta_of(g_).get("until") and own(g_) is None, (meta_of(g_), steps_of(g_)))
     untouched(f"parked ({words}): the same step again writes no step", g_, mk, S1)
     untouched(f"parked ({words}): a newer step writes no step onto the waiting item", g_, mk, S2)
+    check(f"parked ({words}): the step not set is not recorded as sent", sent(g_) == S1, sent(g_))
     wake_all()
     check(f"parked ({words}): the wake ends the wait", not is_waiting(g_) and meta_of(g_).get("state") != "your-step", meta_of(g_))
-    asks(f"after the wait ({words}): the step the park dropped before he answered is asked again", g_, mk, S1, [S1])
+    untouched(f"after the wait ({words}): the step the park dropped before he answered is not asked again", g_, mk, S1)
+    asks(f"after the wait ({words}): the newer step is set", g_, mk, S2, [S2])
     close(g_)
 
 # a session's wait on a date, and on another item
@@ -682,14 +713,36 @@ A1, A0 = "open Settings → Plugins and press Sync", "open Settings"
 for tag, answer_it in (("done", done), ("note", lambda g: note(g, "it still shows the old version"))):
     for legacy in (False, True):
         mk = f"plugin_sync:arrow-{tag}-{int(legacy)}"; g_ = opened(mk, step=A1); label = f"arrow step, {tag}{', an item with no record of the step' if legacy else ''}"
-        if legacy: forget(g_, "item_sync_step")
+        if legacy: forget(g_, *RECORD)
         answer_it(g_)
         check(f"{label}: setup: his step is finished", his_open(g_) == [] and any(s_ == "done" and t.startswith("Oliver: " + A1) for t, s_ in steps_of(g_)) and (tag == "done" or any('→ "it still' in t for t, _s in steps_of(g_))), steps_of(g_))
         untouched(f"{label}: the same words again ask nothing", g_, mk, A1)
         asks(f"{label}: a newer, shorter step is set", g_, mk, A0, [A0])
         close(g_)
-g_ = opened("plugin_sync:oldpark"); forget(g_, "item_sync_step"); note(g_, "I'll do it next week"); wake_all()
-asks("an item with no record: the step a park dropped is asked again after the wait", g_, "plugin_sync:oldpark", S1, [S1])
+g_ = opened("plugin_sync:oldpark"); forget(g_, *RECORD); note(g_, "I'll do it next week"); wake_all()
+untouched("an item with no record: the step a park dropped, the one it was filed with, is not asked again after the wait", g_, "plugin_sync:oldpark", S1)
+asks("...a newer step is", g_, "plugin_sync:oldpark", S2, [S2])
+close(g_)
+
+# an arrow after the sent words is his answer only when the item records that answer at the moment the step was marked
+BARE = "set the sync mode"
+for i_, words_ in enumerate(("fast", '"fast"')):
+    mk = f"plugin_sync:arrowwords{i_}"; g_ = opened(mk)
+    by_builder(g_, step=f"{BARE} → {words_}"); done(g_)
+    check(f"setup: he finished a step whose own words end in → {words_}", his_open(g_) == [] and ("Oliver: " + f"{BARE} → {words_}", "done") in steps_of(g_), steps_of(g_))
+    asks(f"\"{BARE}\" is not matched by a finished \"{BARE} → {words_}\" that is the step's own words", g_, mk, BARE, [BARE])
+    close(g_)
+g_ = opened("plugin_sync:arrowlater")
+by_builder(g_, step=f"{BARE} → fast"); done(g_)
+edit_meta(g_, lambda m_: m_.__setitem__("answers", [{"ts": 1.0, "kind": "decision", "choice": "fast"}, *m_["answers"]]))
+check("setup: an answer with the same words is recorded at another moment than the step was marked", his_open(g_) == [] and ("Oliver: " + f"{BARE} → fast", "done") in steps_of(g_), (meta_of(g_).get("answers"), steps_of(g_)))
+asks("an answer recorded at another moment makes no arrow his answer: the step is set", g_, "plugin_sync:arrowlater", BARE, [BARE])
+close(g_)
+g_ = opened("plugin_sync:choice")
+by_builder(g_, needs=["decision"], ask=f"Decide: {BARE} · Recommend: yes · Stakes: none · By: no date")
+_answer_svc._answer(_model_ids._norm_id(g_), "Yes", "", "answer"); settle()
+check("setup: his choice is shown after the finished step, the route's own step open beside it", his_open(g_) == mine(S1) and ("Oliver: " + BARE + " → Yes", "done") in steps_of(g_), steps_of(g_))
+untouched("the step he finished with a choice after it, sent by the route: not asked again", g_, "plugin_sync:choice", BARE)
 close(g_)
 
 # one Done can tick two steps of his at once: each is the step he finished last
@@ -714,42 +767,76 @@ for finished_first in (True, False):
     untouched(f"a pending ask {kind_}: the route's step again writes no step", g_, mk, S1)
     untouched(f"a pending ask {kind_}: a newer step writes no step and drops no line", g_, mk, S2)
     close(g_)
-g_ = opened("plugin_sync:answered"); done(g_); by_builder(g_, needs=["decision"], ask=ASK)
+g_ = opened("plugin_sync:answered"); done(g_); asks("setup: a second step", g_, "plugin_sync:answered", S2, [S2]); done(g_); by_builder(g_, needs=["decision"], ask=ASK)
 _answer_svc._answer(_model_ids._norm_id(g_), "Yes", "", "answer"); settle()
 check("setup: he answered the later decision", not meta_of(g_).get("ask") and his_open(g_) == [], (meta_of(g_), steps_of(g_)))
-asks("after a later decision the step finished before it is an older one: asked again", g_, "plugin_sync:answered", S1, [S1])
+asks("after a later decision a step finished before it is an older one: asked again", g_, "plugin_sync:answered", S1, [S1])
 close(g_)
 g_ = opened("plugin_sync:yourcall"); edit_meta(g_, lambda m_: m_.__setitem__("state", "your-call"))
 untouched("an item stored as his call writes no step", g_, "plugin_sync:yourcall", S2)
 close(g_)
 
-# the route replaces only its own open step: a session's line stays open beside the new one
+# while a line of his that is not the route's own stands, the route sets nothing but to ask a line that reads as the sent step
 g_ = opened("plugin_sync:beside")
 by_builder(g_, next="Oliver: " + NOTES)
 untouched("a session's line for him beside the route's open step: the route's step again changes nothing", g_, "plugin_sync:beside", S1)
-asks("a newer step replaces the route's own and leaves the session's open", g_, "plugin_sync:beside", S2, [S2, NOTES])
+untouched("...a newer step adds nothing and drops nothing", g_, "plugin_sync:beside", S2)
+check("...and is not recorded as sent", sent(g_) == S1 and own(g_) == S1, (sent(g_), own(g_)))
+by_builder(g_, dropped=["Oliver: " + NOTES])
+asks("...once the session's line is gone the newer step replaces the route's", g_, "plugin_sync:beside", S2, [S2])
 close(g_)
 g_ = opened("plugin_sync:stands")
 by_builder(g_, next="Oliver: " + S2)
 check("setup: the route's step and a session's, the same words as the next send, are open", sorted(his_open(g_)) == mine(S1, S2), steps_of(g_))
 asks("the step sent stands as a session's and the route's own other step is open: the route's is dropped, one step open, asked, not the route's", g_, "plugin_sync:stands", S2, [S2], record=False)
 untouched("...sent again it is left alone", g_, "plugin_sync:stands", S2)
-asks("...a newer step goes beside the session's line", g_, "plugin_sync:stands", S3, [S2, S3])
-untouched("...which stays the route's: sent again it is left alone", g_, "plugin_sync:stands", S3)
-asks("...and the next replaces the route's alone", g_, "plugin_sync:stands", S4, [S2, S4])
-close(g_)
-g_ = opened("plugin_sync:standing"); forget(g_, "item_sync_step"); by_builder(g_, next="Oliver: " + NOTES)
-untouched("a step open already on an item that asks him, with no step of the route's own to replace: nothing is written", g_, "plugin_sync:standing", NOTES)
+untouched("...and a newer step is not put beside the session's line", g_, "plugin_sync:stands", S3)
+done(g_)
+asks("...after his Done on it the newer step is set", g_, "plugin_sync:stands", S3, [S3])
 close(g_)
 
-# a step a session set with step= is the session's: the route's new step goes beside it, before or after his Done
+# a session's current step is never written over; its split record and its draft stay
+def keeps(name, g, marker, step, opens, was_sent):
+    """a repeat open that leaves the session's current step, its split record and its draft; `opens` the open steps of his after it, `was_sent` the record of the step sent"""
+    before = {k_: meta_of(g).get(k_) for k_ in ("state", "step", "step_lines", "draft", "owner_step")}
+    st_, r_ = isy("open", marker=marker, step=step); settle()
+    after = {k_: meta_of(g).get(k_) for k_ in before}
+    check(name, st_ == 200 and r_["action"] == "refreshed" and after == before and sorted(his_open(g)) == sorted(opens) and sent(g) == was_sent, (st_, r_, before, after, steps_of(g), sent(g)))
+LONG = ". ".join(f"Open the settings page number {n} of the plugin and check that every field reads as the note says" for n in range(1, 4)) + "."
+g_ = opened("plugin_sync:split")
+with _writes_s.session_write(): by_builder(g_, step=LONG)
+by_builder(g_, draft="the settings read as the note says")
+split_ = [t for t in his_open(g_) if t != meta_of(g_).get("owner_step")]
+check("setup: a session's long step is split into lines of his, with a draft", meta_of(g_).get("step_lines") and len(split_) >= 2 and meta_of(g_).get("draft"), (meta_of(g_), steps_of(g_)))
+open_ = his_open(g_)
+keeps("a newer step of the route leaves the session's step, its split record, its draft and every line", g_, "plugin_sync:split", S2, open_, S1)
+action_ = split_[0].removeprefix("Oliver: ")
+keeps("a line of the split sent by the route: asked already, the session's step stays the current one", g_, "plugin_sync:split", action_, open_, action_)
+close(g_)
+g_ = opened("plugin_sync:current")
+by_builder(g_, step=S3); by_builder(g_, next="Oliver: " + NOTES)
+keeps("a session's line sent while the item asks the session's step: the current step stays", g_, "plugin_sync:current", NOTES, mine(S3, NOTES), NOTES)
+close(g_)
+g_ = opened("plugin_sync:leftover"); by_builder(g_, next="Oliver: " + NOTES); cut_short(g_); by_builder(g_, step=NOTES)
+check("setup: the item asks a session's step, the route's own line still open beside it", meta_of(g_).get("step") == NOTES and sorted(his_open(g_)) == mine(S1, NOTES) and own(g_) == S1, (meta_of(g_), steps_of(g_)))
+by_builder(g_, next="Oliver: " + S3)
+keeps("a session's line sent while another session step is current and the route's older line is open: only the route's line goes", g_, "plugin_sync:leftover", S3, mine(NOTES, S3), S3)
+check("...it is dropped", ("Oliver: " + S1, "dropped") in steps_of(g_) and own(g_) is None, (steps_of(g_), own(g_)))
+close(g_)
+g_ = opened("plugin_sync:summary")
+by_builder(g_, next="Oliver: " + NOTES)
+edit_meta(g_, lambda m_: m_.__setitem__("step_lines", ["Oliver: " + NOTES]))
+keeps("while the current step is split into lines, no line is the route's own: nothing is dropped, whatever the summary reads", g_, "plugin_sync:summary", NOTES, mine(S1, NOTES), NOTES)
+close(g_)
+
+# a step a session set with step= is the session's: the route sets nothing beside it
 for after_done in (False, True):
     kind_ = "after his Done" if after_done else "over the route's open step"
     mk = f"plugin_sync:sessionstep{int(after_done)}"; g_ = opened(mk)
     if after_done: done(g_)
     by_builder(g_, step=S3)
-    untouched(f"a session's step= {kind_}, sent by the route: it is asked already", g_, mk, S3)
-    asks(f"a session's step= {kind_}: the route's newer step leaves it open beside it", g_, mk, S2, [S2, S3])
+    keeps(f"a session's step= {kind_}, sent by the route: it is asked already", g_, mk, S3, mine(S3), S3)
+    untouched(f"a session's step= {kind_}: the route's newer step is not put beside it", g_, mk, S2)
     close(g_)
 
 # the record goes with the route's open line, so a line a session writes later with the same words is the session's
@@ -757,21 +844,22 @@ for i_, (tag, close_it) in enumerate((("his Done", done), ("a session withdrew i
     mk = f"plugin_sync:rewritten{i_}"; g_ = opened(mk)
     if tag != "his Done": by_builder(g_, next="home-sparrow-builder: watch the sync")
     close_it(g_)
-    check(f"setup ({tag}): the route's line is closed and its record gone", "Oliver: " + S1 not in his_open(g_) and own(g_) is None, (meta_of(g_), steps_of(g_)))
+    check(f"setup ({tag}): the route's line is closed and its record gone, the step sent stays", "Oliver: " + S1 not in his_open(g_) and own(g_) is None and sent(g_) == S1, (meta_of(g_), steps_of(g_)))
     by_builder(g_, next="home-sparrow-builder: watch the sync\nOliver: " + S1)
     check(f"setup ({tag}): a session writes the same words again", "Oliver: " + S1 in his_open(g_), (meta_of(g_), steps_of(g_)))
-    asks(f"after {tag}, the session's line with the route's old words stays open beside the new step", g_, mk, S2, [S1, S2])
+    untouched(f"after {tag}, the session's line with the route's old words is not taken for the route's: a newer step drops nothing", g_, mk, S2)
     close(g_)
 
-# after his Done, an agent holds the item and a session's line for him is open: it is asked again unless it is what he finished
+# after his Done, an agent holds the item and a session's line for him is open: it is asked, unless it is what he finished
 for legacy in (False, True):
     kind_ = " (an item with no record of the step)" if legacy else ""
     mk = f"plugin_sync:held{int(legacy)}"; g_ = opened(mk)
-    if legacy: forget(g_, "item_sync_step")
+    if legacy: forget(g_, *RECORD)
     done(g_)
     by_builder(g_, next="home-sparrow-builder: watch the sync\nOliver: " + NOTES)
     check(f"setup: after Done an agent holds the item, a session's step for him open{kind_}", his_open(g_) == mine(NOTES) and meta_of(g_).get("state") != "your-step" and M.derive(item(g_)).mover != "Oliver", (meta_of(g_), steps_of(g_)))
     untouched(f"the step he finished, sent now: the agent keeps the item{kind_}", g_, mk, S1)
+    untouched(f"a step no line reads as, sent now: nothing beside the session's line{kind_}", g_, mk, S2)
     asks(f"the open step he has not finished, sent now: he is the mover again{kind_}", g_, mk, NOTES, [NOTES], record=False)
     close(g_)
 g_ = opened("plugin_sync:heldsame"); done(g_)
@@ -779,21 +867,63 @@ by_builder(g_, next="home-sparrow-builder: watch the sync\nOliver: " + S1)
 untouched("a line open again with the words he finished: not asked, the agent keeps the item", g_, "plugin_sync:heldsame", S1)
 close(g_)
 
-# a long step a session set is split into lines for him: the route's step leaves every one of them open
-LONG = ". ".join(f"Open the settings page number {n} of the plugin and check that every field reads as the note says" for n in range(1, 4)) + "."
-g_ = opened("plugin_sync:split")
-with _writes_s.session_write(): by_builder(g_, step=LONG)
-split_ = [t for t in his_open(g_) if t != meta_of(g_).get("owner_step")]
-check("setup: a session's long step is split into lines of his", meta_of(g_).get("step_lines") and len(split_) >= 2, (meta_of(g_), steps_of(g_)))
-before_ = his_open(g_)
-st, r_ = isy("open", marker="plugin_sync:split", step=S2); settle()
-check("a newer step of the route leaves the session's step and every line of its split open beside it", st == 200 and sorted(his_open(g_)) == sorted([*before_, "Oliver: " + S2]) and own(g_) == S2, (st, before_, steps_of(g_)))
+# a close takes the record of the route's own line and keeps the step sent
+for i_, (tag, close_it) in enumerate((("the route's close", lambda g, mk: isy("close", marker=mk)), ("a session's close", lambda g, mk: close(g)))):
+    mk = f"plugin_sync:closed{i_}"; g_ = opened(mk)
+    check(f"setup ({tag}): the open item records the route's own line", own(g_) == S1, meta_of(g_))
+    close_it(g_, mk); settle()
+    check(f"{tag} clears the record of the route's own line; the step sent stays", item(g_)["status"] == "completed" and own(g_) is None and sent(g_) == S1, meta_of(g_))
+
+# an item filed before the records: the line its create wrote is read as the route's where the record shows that
+def old(marker):
+    g_ = opened(marker); forget(g_, *RECORD); return g_
+g_ = old("plugin_sync:old")
+untouched("an old item: the step it was filed with, sent again, changes nothing", g_, "plugin_sync:old", S1)
+asks("an old item: a newer step replaces the line the route wrote at filing", g_, "plugin_sync:old", S2, [S2])
+done(g_)
+check("...so his Done marks the one step he was asked, not the old one beside it", [s_ for t, s_ in steps_of(g_) if t == "Oliver: " + S1] == ["dropped"], steps_of(g_))
+close(g_)
+g_ = old("plugin_sync:oldwithdrawn"); by_builder(g_, next="home-sparrow-builder: watch the sync", step="none")
+untouched("an old item whose step a session withdrew: the step it was filed with is not asked again", g_, "plugin_sync:oldwithdrawn", S1)
+asks("...a newer one is", g_, "plugin_sync:oldwithdrawn", S2, [S2])
+close(g_)
+g_ = old("plugin_sync:oldreplaced"); by_builder(g_, step=S3)
+untouched("an old item whose step a session replaced: the step it was filed with is not asked again", g_, "plugin_sync:oldreplaced", S1)
+untouched("...and a newer one is not put beside the session's", g_, "plugin_sync:oldreplaced", S2)
+done(g_)
+asks("...it is set after his Done", g_, "plugin_sync:oldreplaced", S2, [S2])
+close(g_)
+g_ = opened("plugin_sync:oldcut"); cut_short(g_, "item_sync_step")
+asks("an old filing cut short before its state: the same step makes the item ask it, as the route's own", g_, "plugin_sync:oldcut", S1, [S1])
+asks("...so a newer step replaces it", g_, "plugin_sync:oldcut", S2, [S2])
+close(g_)
+g_ = opened("plugin_sync:oldcutnew"); cut_short(g_, "item_sync_step")
+asks("an old filing cut short, sent a newer step: the filing's line is replaced", g_, "plugin_sync:oldcutnew", S2, [S2])
+close(g_)
+# where it cannot be told: an older repeat completed a cut-short filing with a different step, two lines open and the first not the current one
+g_ = opened("plugin_sync:oldunknown"); cut_short(g_, "item_sync_step")
+_update_svc._update(_model_ids._norm_id(g_), step=S2, sender="x (a script on a client machine)"); settle()
+check("setup: an old item with the filing's line and a different current step", meta_of(g_).get("step") == S2 and sorted(his_open(g_)) == mine(S1, S2) and own(g_) is None and sent(g_) is None, (meta_of(g_), steps_of(g_)))
+untouched("an old item whose route line cannot be told: no newer step is set, no line is dropped", g_, "plugin_sync:oldunknown", S3)
+done(g_)
+asks("...his Done frees it and the newer step is set", g_, "plugin_sync:oldunknown", S3, [S3])
+close(g_)
+g_ = opened("plugin_sync:oldcutbeside"); by_builder(g_, next="Oliver: " + NOTES); cut_short(g_, "item_sync_step")
+asks("an old filing cut short with a second step on the list: the filing's step sent again is asked, as a line that is not known to be the route's", g_, "plugin_sync:oldcutbeside", S1, [S1, NOTES], record=False)
+by_builder(g_, dropped=["Oliver: " + NOTES])
+untouched("...so a newer step drops nothing", g_, "plugin_sync:oldcutbeside", S2)
+close(g_)
+g_ = old("plugin_sync:oldwriter")
+edit_meta(g_, lambda m_: m_["next_by"][0].__setitem__(0, "home-sparrow-builder"))
+untouched("an old item whose first line another writer wrote is not taken for the route's: nothing beside it, nothing dropped", g_, "plugin_sync:oldwriter", S2)
 close(g_)
 
 # none, clear and - are no step: a repeat open withdraws nothing
 g_ = opened("plugin_sync:nostep")
 for word in ("none", "None", "clear", "-", "Oliver: none", "Oliver: -"):
     untouched(f"a repeat open with the step {word!r} changes no step", g_, "plugin_sync:nostep", word)
+    n_ = len(items()); st_, e_ = isy("open", marker="plugin_sync:nostep-first", step=word)
+    check(f"a first open with the step {word!r} is refused, nothing filed", st_ == 400 and "no step" in e_["error"] and len(items()) == n_ and sync_open("plugin_sync:nostep-first") == [], (st_, e_))
 
 # a step the board's step gates refuse: neither the description, the list nor the record is written
 before_, before_d = shape(g_), item(g_)["description"]

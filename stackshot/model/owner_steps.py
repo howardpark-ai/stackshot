@@ -28,7 +28,8 @@ from stackshot.model import nextlines as _nl
 from stackshot.model import steps as _steps
 
 KEY = "owner_step"                 # metadata: the first line of the step the server made (see THE STORAGE)
-ROUTE_KEY = "item_sync_step"       # metadata: the open step a script's route set itself (service/item_sync.py), as the route sent it; it says which open line is the route's own and goes when that line is no longer open
+ROUTE_KEY = "item_sync_step"       # metadata: the open step a script's route added itself (service/item_sync.py), as the route sent it; it says which open line is the route's own, and goes when that line is no longer open or the item closes (states.CLOSE_EXTRA)
+SENT_KEY = "item_sync_sent"        # metadata: the step that route last sent and had on the item, which it never asks again; it stays when the line goes
 
 
 def recorded(meta: dict[str, Any]) -> str:
@@ -163,13 +164,15 @@ def forget_closed(meta: dict[str, Any], keeper: str) -> None:
         meta.pop(KEY, None)
 
 
-def route_writes(meta: dict[str, Any], own: str) -> None:
-    """The write of a script's route that sets a step (service/item_sync.py): the server's line for the step before it is let go, not reworded, so a line that is not the route's stays open beside the new
-    one (the route drops its own line itself, with a dropped mark), and the route's record is stored: `own`, the step it set, or "" when the line it asks stood already and is not its own."""
-    meta.pop(KEY, None)
+def route_writes(meta: dict[str, Any], own: str, sent: str, sets_step: bool) -> None:
+    """The record a script's route stores with its write (service/item_sync.py): `own`, the step of the open line that is the route's own ("" when none is), and `sent`, the step it sent. A write that
+    sets the step (`sets_step`) also lets the server's line for the step before it go, not reworded, so a line that is not the route's stays open (the route drops its own line itself, with a dropped mark)."""
+    if sets_step:
+        meta.pop(KEY, None)
     meta.pop(ROUTE_KEY, None)
     if own:
         meta[ROUTE_KEY] = own
+    meta[SENT_KEY] = sent
 
 
 def forget_route_closed(meta: dict[str, Any], keeper: str) -> None:
