@@ -55,6 +55,7 @@ from stackshot.service import front_turn as _front_turn
 from stackshot.service import fleet_events as _fleetev
 from stackshot.service import sibling_words as _sibling_words
 from stackshot.service import handoff as _handoff
+from stackshot.service import item_read as _item_read
 from stackshot.service import store as _svcstore
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
@@ -437,18 +438,23 @@ _LOG_TAIL_BYTES = 800_000      # and no further than this much of its end
 
 class _Hold:
     """What _gate_front returns for a message a front agent is not woken for and nobody is refused: the front gate files it for the agent's next turn (`why`: the reason, for the sender's reply)."""
-    def __init__(self, why: str, project: str = "", tail: str = "", kind: str = "") -> None:
+    def __init__(self, why: str, project: str = "", tail: str = "", kind: str = "", say_why: bool = False, to: str = "") -> None:
         self.why = why
         self.project = project
         self.tail = tail        # what the sender's reply says to do next, when the generic line (send it again, marked) does not fit
         self.kind = kind        # the kind of the refusal this hold replaces ("" for a hold that never was a refusal): `_message` counts the message as handled under it once it is filed
+        self.say_why = say_why  # a message that could not be rerouted (`[front] to_background_senders`): the reply gives `why`, an fyi's too, and what to do, whether or not the line could be filed
+        self.to = to            # the front agent that holds it, when the message was addressed to a project page and not to that agent
 
 
 class _Pass:
     """What _gate_front returns for a message that is not for the owner and goes to the project's background agent `to` instead of the front agent `front` (a refusal before): `_message` sends it there and tells the sender so.
-    `refusal` is the refusal that stands when the agent cannot take it and no hold can (a `Refused`, not raised here)."""
-    def __init__(self, to: str, front: str, project: str, refusal: "Refused") -> None:
+    `refusal` is the refusal that stands when the agent cannot take it and no hold can (a `Refused`, not raised here).
+    `lead` makes it a reroute (`[front] to_background_senders`, `[front] idle_peers_to_background`): the sender's reply starts with it, a retired agent is one that cannot take the message (it does not go to the project instead),
+    and then `hold` is what becomes of the message; with none, `refusal` stands, except for a message addressed to a project page (`page`), which goes to the page as it would without the switch."""
+    def __init__(self, to: str, front: str, project: str, refusal: "Refused", lead: str = "", hold: "_Hold | None" = None, page: bool = False) -> None:
         self.to, self.front, self.project, self.refusal = to, front, project, refusal
+        self.lead, self.hold, self.page = lead, hold, page
 
 
 class _Turn:
@@ -641,6 +647,111 @@ def background_of(project: str) -> str:
     return _anc.background_agent(project)
 
 
+_REROUTE_TAIL = "Put the work on a board item (create or update one) and name it, so it reaches whoever does it and a stall shows."
+_NO_ITEM_LINE = "No open board item is named: put the work on one (create or update an item) and name it, so a stall shows."
+
+
+def _to_background_sender(sender: str, idx: dict[str, dict[str, Any]] | None = None, roles: dict[str, Any] | None = None) -> str:
+    """The role name of `sender` (a name or a session id, resolved as the gate resolves a sender) when it is a front agent that `[front] to_background_senders` lists, else "". An empty list reads nothing."""
+    listed = _front_turn.to_background_senders()
+    sender = str(sender or "").strip()
+    if not listed or not sender:
+        return ""
+    roles = _anc.session_roles() if roles is None else roles
+    idx = _sr._sessions_index() if idx is None else idx
+    name = _sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or "")) or ""
+    return name if name and roles.get(name, {}).get("role") == "front" and name.casefold() in listed else ""
+
+
+def _reroute_pass(sname: str, front: str, project: str, back: str, hold: "_Hold | None", page: bool = False) -> "_Pass":
+    """The pass of a listed sender's message for the front agent `front` to `back`, the background agent of `project`."""
+    refusal = Refused("reroute-not-taken", f"Refused: {sname} sends nothing to front agents, {back}, the background agent of {project}, could not take this, and holding it for {front}'s next turn is switched off, so nothing can carry it. {_REROUTE_TAIL}")
+    return _Pass(back, front, project, refusal, f"Rerouted: {sname} sends nothing to front agents, so it went to {back}, the background agent of {project}, instead of {front}", hold, page)
+
+
+def _reroute_hold(why: str, project: str, to: str = "") -> "_Hold":
+    """The hold of a message that could not be rerouted: `why` it could not, and what to do instead."""
+    return _Hold(f"it could not be rerouted: {why}", project, _REROUTE_TAIL, say_why=True, to=to)
+
+
+def _reroute_front(sname: str, front: str, project: str, back: str) -> "_Pass | _Hold":
+    """A listed sender's message for a front agent (`[front] to_background_senders`): to the project's background agent, else held for the front agent's next turn; refused only when the hold is switched off and there is no background agent to take it."""
+    if back and back.casefold() != sname.casefold():
+        return _reroute_pass(sname, front, project, back, _reroute_hold(f"{back}, the background agent of {project}, could not take it", project) if _held.enabled() else None)
+    if not _held.enabled():
+        raise Refused("reroute-no-background", f"Refused: {sname} sends nothing to front agents, {project} has no background agent, and holding it for {front}'s next turn is switched off, so nothing can carry it. {_REROUTE_TAIL}")
+    return _reroute_hold(f"{project} has no background agent", project)
+
+
+def _reroute_page(sname: str, front: str, page: str, idx: dict[str, dict[str, Any]]) -> "_Pass | _Hold | None":
+    """A listed sender's message to the project page `page` that opens "For <front agent>, ...": to that page's background agent, else held for the front agent's next turn. None when neither can carry it
+    (no background agent, and the hold is off or the front agent has no pane row to hold it for): the message goes to the page as it would without the switch."""
+    back = background_of(page)
+    holdable = _held.enabled() and (front in idx or any(r.get("name") == front for r in idx.values()))
+    if back and back.casefold() != sname.casefold():
+        return _reroute_pass(sname, front, page, back, _reroute_hold(f"{back}, the background agent of {page}, could not take it", page, front) if holdable else None, True)
+    return _reroute_hold(f"{page} has no background agent", page, front) if holdable else None
+
+
+def _idle_peer_background(front: str, sname: str, back: str, idx: dict[str, dict[str, Any]], fyi: bool = False) -> str:
+    """`back` when `[front] idle_peers_to_background` is on and the front agent `sname`'s unmarked message to the peer front agent `front` goes to it: the person is not with `front` (a presence that cannot be read counts as there),
+    the message is no fyi, and `back` is a background agent that is not the sender. "" otherwise, and on any failure: the message is held, as without the switch."""
+    try:
+        if fyi or not _front_turn.idle_peers_to_background() or not back or back.casefold() == sname.casefold():
+            return ""
+        return "" if _telling.presence_here(front, idx=idx, unread=True) else back
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def router_to_background(who: str) -> str:
+    """The router's use of `[front] to_background_senders` (router_live's `front_reroute` hook): the role name of the sender of a message notice (`who`, its label) when it is a front agent the key lists, else "" (a script, an unlisted sender, anything unreadable)."""
+    try:
+        if "(a script on" in str(who):
+            return ""
+        return _to_background_sender(re.split(r" \(", str(who).strip(), maxsplit=1)[0].strip())
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def router_idle_peer(front: str, body: str) -> bool:
+    """The router's use of `[front] idle_peers_to_background` (router_live's `front_idle` hook): does the message `body` (the relayed envelope), from a front agent to the peer front agent `front`, go to the project's background agent instead of being held?
+    True when the switch is on, the sender's own words can be read from the envelope, they carry neither the mark nor needs: decision, they are no done, taken or no-action note, and the person is not with `front`. False on any doubt."""
+    try:
+        lines = str(body or "").splitlines()
+        if not _front_turn.idle_peers_to_background() or not lines or not lines[0].startswith("[stackshot message] from "):
+            return False
+        end = next((i for i in range(len(lines) - 1, 0, -1) if lines[i].startswith(f"— Relayed by {NAME}.")), len(lines))
+        text = "\n".join(lines[1:end]).strip()
+        first = next((ln for ln in text.splitlines() if ln.strip()), "")
+        if not text or _FOR_OWNER in first or _held._owner_mark().search(text):
+            return False
+        fronts = tuple(n for n, r in _anc.session_roles().items() if r.get("role") == "front")
+        if _own_no_action(text) is not None or _reports.is_report(text, fronts):
+            return False
+        return not _telling.presence_here(front, unread=True)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _no_item_line(text: str, sender: str, origin: str, fyi: bool) -> str:
+    """The one line a listed sender's reply ends with (`[front] to_background_senders`) when its message hands work off (no fyi, no done, taken or no-action note) and names no open board item; "" otherwise. Never raises."""
+    try:
+        if origin or fyi or not _front_turn.to_background_senders():
+            return ""
+        roles = _anc.session_roles()
+        if not _to_background_sender(sender, roles=roles):
+            return ""
+        raw = str(text or "").strip()
+        fronts = tuple(n for n, r in roles.items() if r.get("role") == "front")
+        if _own_no_action(raw) is not None or _reports.is_report(raw, fronts):
+            return ""
+        return "" if any(_item_read._open_item_named(g) for g in _agent_names._item_refs(raw)) else _NO_ITEM_LINE
+    except Exception as e:  # noqa: BLE001  — the line is an extra: a failure in it leaves the reply as it was
+        print(f"message: open-item line not added: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return ""
+
+
 def answer_route(front: str, project: str, sender: str, raw: str, idx: dict[str, dict[str, Any]], roles: dict[str, Any], via: str = "", nid: str = "") -> tuple[str, str]:
     """What becomes of a message with no need of the person that comes from `sender` to the front agent `front`, when it is an answer to a question the front agent itself put to the sender (asked_by):
     ("deliver", "") the person is in that conversation (his last message to the front agent within [presence] minutes, 30 by default: telling.presence_here), so it goes back to the agent, unmarked;
@@ -727,7 +838,9 @@ def router_result(front: str, who: str, raw: str, nid: str = "") -> bool:
 def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str = "", script: str = "", fyi: bool = False) -> "str | _Hold | _Pass | _Turn | None":
     """(the owner's decision): a front agent, a session he talks to, hears a peer's message with a turn only when it needs him. A message addressed to a project page goes to the
     project (the router rules it) and never reaches this gate. What the gate cannot give a turn it handles another way and tells the sender (`_handled`), and it refuses only what nothing can carry. In order:
-      first, for a front agent that `[front] result_turn_agents` lists (none by default): a message from a session it handed work to (`handed_to`: it wrote to that session within `[front] result_turn_hours`, or the message names an open item the session moves that the agent itself handed it, by the item's hand-off record)
+      before everything else, from a front agent that `[front] to_background_senders` lists (none by default), to any front agent, marked or not, fyi or not: passed to the target project's background agent (_Pass, a reroute), else held for the
+        target's next turn (_Hold; refused only when the hold is off too);
+      next, for a front agent that `[front] result_turn_agents` lists (none by default): a message from a session it handed work to (`handed_to`: it wrote to that session within `[front] result_turn_hours`, or the message names an open item the session moves that the agent itself handed it, by the item's hand-off record)
         is a turn, whether or not it carries the mark and whether or not the person is there (`result_turn`: not an fyi, not a script's, not the person's, not a peer front agent's; at most `[front] result_turn_cap_per_hour` turns per sender, the rest handled by the rules below): `_Turn`, delivered
         past the builder-report, status-shape and item-of-his tests below, as a line of kind `exempt` the pane's digest never files. The loop it could make (the agent's reply starts the sender, whose reply starts the agent) is stopped by that cap and by the sender's `fyi=true`;
       marked ([for <owner>] on its first non-empty line): it needs him; unless it says in a fixed phrase, as its own statement, that nothing is needed from him (`_own_no_actions`: a done, taken or no-ask note): a background agent's is written onto the item it names (_builder_report), any other is held for the agent's next turn (_Hold; refused when the hold is off, and for the person's own);
@@ -741,6 +854,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
       unmarked, an answer to a question the front agent itself put to the sender (answer_route; a hand-back is not one): delivered while he is in that conversation, else written onto the item it names, else held;
       unmarked, from any other sender, a done, taken or no-ask note (a fixed phrase as its own statement, or a plain status report): held for the agent's next turn (_Hold; refused when the hold is off);
       a front agent's message to a peer front agent, or the project's background agent's own: held for the agent's next turn (_Hold), the channel between front agents and the way a builder reaches the front agent;
+        with `[front] idle_peers_to_background` on (off by default) a peer's, while the person is not with the target, goes to the target project's background agent instead (_Pass, a reroute; held as above when that agent cannot take it);
       any other unmarked message: passed to the project's background agent (_Pass: `_message` sends it there and tells the sender); a project with none holds it for the agent's next turn (_Hold: telling.front_fyi).
     → the sender's reply (item-written), a _Hold, a _Pass, a _Turn (deliver it as a turn of kind exempt: a result of work the agent handed over) or None (deliver it). Raises Refused for a refusal. `sender` is blank for a script (no session); `script` is its label, `name (a script on <machine>)`, for the History line a marked message of its writes."""
     roles = _anc.session_roles()
@@ -753,6 +867,8 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     first = lines[at] if at < len(lines) else ""
     back = background_of(project)
     sname = (_sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or "")) or "") if sender.strip() else ""
+    if _to_background_sender(sender, idx, roles):          # a sender that sends nothing to front agents: before the mark checks and the answer rule, whatever the message says
+        return _reroute_front(sname, name, project, back)
     mine = bool(sname and roles.get(sname, {}).get("role") == "back" and roles[sname].get("project") == project)          # a background agent of this project, whichever of them
     same = bool(sname and back and (sname.casefold() == back.casefold() or mine))          # the sender is the background agent itself, or one beside it: it is not sent back to itself or across to its sibling
     goes = (f"the project's background agent, {back} (message(to={back!r}, …))" if back and not same else f"the project, where the router rules it (to={project!r})")
@@ -789,7 +905,12 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
         peer_ = bool(sname) and roles.get(sname, {}).get("role") == "front" and sname.casefold() != name.casefold()      # a front agent's message to a peer front agent: the channel between them
         if _held.enabled():
             if peer_:
-                return _Hold(f"{sname} is a front agent, so its message to {name} rides {name}'s next turn", project)
+                peer_hold = _Hold(f"{sname} is a front agent, so its message to {name} rides {name}'s next turn", project)
+                idle = _idle_peer_background(name, sname, back, idx, fyi)          # "" unless [front] idle_peers_to_background is on
+                if not idle:
+                    return peer_hold
+                return _Pass(idle, name, project, Refused("idle-peer-not-taken", f"Refused: {idle}, the background agent of {project}, could not take this, and it could not be held for {name}'s next turn."),
+                             f"Rerouted: {name} is idle ({OWNER} is not talking with it), so this went to {idle}, the background agent of {project}", peer_hold)
             if same:
                 return _Hold(f"{sname} is the project's background agent, so it cannot go back to it" if sname.casefold() == back.casefold()
                              else f"{sname} is a background agent of {project}, so its message is not passed across to {back}", project)
@@ -1053,12 +1174,20 @@ def _front_fyi_name(to: str, raw: str, idx: dict[str, dict[str, Any]]) -> str:
 
 # The retired names `_sent_instead` has met inside the pass-on that is running (`_message_body`): a message passed to the project's background agent that turns out retired went to its project instead, and the pass-on's reply and call-log mark say so.
 _REDIRECTED: "contextvars.ContextVar[list[str] | None]" = contextvars.ContextVar("message_redirected", default=None)
+_NO_REDIRECT: "contextvars.ContextVar[bool]" = contextvars.ContextVar("message_no_redirect", default=False)      # inside a reroute's send: a retired agent cannot take the message, which does not go to its project instead
+_FORWARDING: "contextvars.ContextVar[bool]" = contextvars.ContextVar("message_forwarding", default=False)      # inside `_sent_instead`'s send to the project: its "For <front agent>" line reroutes nothing, so no send comes back on itself
 
 
 def _sent_instead(name: str, why: str, project: str, raw: str, sender: str, auth: str, origin: str, fyi: bool) -> str:
     """A message to a retired session (or a name no pane has) goes to the project it belongs to, as a message to the page key (the router rules it); the sender's reply says so in front of the usual
     answer ("held for the router — the router rules notice <id> …"), so it knows the receiver is retired and where the message went."""
-    got = _message(project, raw, sender, auth, origin, fyi)
+    if _NO_REDIRECT.get():
+        raise Refused("reroute-to-retired", f"Refused: {name!r} is retired ({why})")
+    token = _FORWARDING.set(True)
+    try:
+        got = _message(project, raw, sender, auth, origin, fyi)
+    finally:
+        _FORWARDING.reset(token)
     seen = _REDIRECTED.get()
     if seen is not None:
         seen.append(name)          # a pass-on in progress (`_message_body`) learns that its agent was retired
@@ -1109,17 +1238,20 @@ def _tell(note: str) -> None:
 
 def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False, question: bool = False, name_items: bool = True) -> str:
     """Relay one message (`_message_body` has the rules) → the sender's reply: what became of it, and, where the relay handled it another way than asked where it once refused it (`_handled`), one plain line at the end saying so
-    (each note ends in a full stop, and the reply before it does too). `name_items` false: the handover naming (a background agent named in the needs of the open items the text names) is left out; a message passed on in place of its front agent is no handover."""
+    (each note ends in a full stop, and the reply before it does too). `name_items` false: the handover naming (a background agent named in the needs of the open items the text names) is left out; a message passed on in place of its front agent is no handover.
+    The reply to a sender `[front] to_background_senders` lists ends with one line more when the message hands work off and names no open item (`_no_item_line`), once per call however it was sent on."""
+    outer = _NOTES.get() is None          # a send inside another (a pass, a retired recipient's project) leaves the item line to the call the sender made
     notes: list[str] = []
     token = _NOTES.set(notes)
     try:
         out = _message_body(to, text, sender, auth, origin, fyi, question, name_items)
     finally:
         _NOTES.reset(token)
-    if not notes:
-        return out
-    tail = " ".join(n if n.rstrip().endswith((".", "!", "?")) else n.rstrip() + "." for n in notes)
-    return out + (" " if out.rstrip().endswith((".", "!", "?", ")")) else ". ") + tail
+    if notes:
+        tail = " ".join(n if n.rstrip().endswith((".", "!", "?")) else n.rstrip() + "." for n in notes)
+        out += (" " if out.rstrip().endswith((".", "!", "?", ")")) else ". ") + tail
+    line = _no_item_line(text, sender, origin, fyi) if outer else ""
+    return f"{out}\n{line}" if line else out
 
 
 def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str = "", fyi: bool = False, question: bool = False, name_items: bool = True) -> str:
@@ -1160,47 +1292,66 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
         to = ref = fixed_to
     fyi = bool(fyi) and not _model.is_owner(sender)
     result_turn_ = False            # the front gate found the message the result of work the front agent handed over: pushed as a line of kind exempt, logged with the mark
+    hold_say = False          # a message that could not be rerouted: the reply says why (_Hold.say_why)
+    reported: "str | _Hold | _Pass | _Turn | None" = None
     hold_why = hold_project = hold_tail = hold_kind = ""            # why a message to a front agent that is no fyi is held for its next turn all the same (_gate_front's _Hold), and the kind of refusal that hold replaces
     front_fyi = bool(fyi) and not re.match(_cfg.page_dirs_re() + "/", to) and bool(_front_fyi_name(to, raw, idx))      # an fyi for a front agent is not refused for its missing mark: the front gate below takes it
     if not re.match(_cfg.page_dirs_re() + "/", to):
         _want_for_front(to, idx, sender, auth, bool(origin))      # a want for a background agent when its front agent's project has none, whatever the gate or the fyi path then does with the message
-        reported = None if front_fyi else _gate_front(to, raw, idx, "" if origin else sender, f"{sender} (a script on {origin})" if origin else "", fyi)     # a front agent is given a turn only by what needs the person: the rest is passed to its builder, written onto an item, held, or refused (_gate_front)
+        skip_ = front_fyi and not (not origin and _to_background_sender(sender, idx))          # an fyi of a sender that sends nothing to front agents is rerouted by the gate like any other message
+        reported = None if skip_ else _gate_front(to, raw, idx, "" if origin else sender, f"{sender} (a script on {origin})" if origin else "", fyi)     # a front agent is given a turn only by what needs the person: the rest is passed to its builder, written onto an item, held, or refused (_gate_front)
         if isinstance(reported, _Turn):          # the result of work the front agent handed over: delivered below as a turn, past every hold
             result_turn_, reported = True, None
-        if isinstance(reported, _Pass):          # not for the person: the project's background agent takes it, and the reply says so
-            moved: list[str] = []          # filled by `_sent_instead` when the agent is retired: the message then went to its project, never to the agent
-            moved_token = _REDIRECTED.set(moved)
-            try:
-                got = _message(reported.to, raw, sender, auth, origin, fyi, question, False)      # no handover naming: the text was not a hand-over of an item, so the agent is named in no item's needs and no mover is told
-            except ToolError as e:
-                if str(e).startswith("Delivery failed: timed out"):          # the push may have gone out all the same: holding it too could deliver it twice, so the failure goes back to the sender as it is
-                    raise
-                if not _held.enabled():          # the agent cannot take it and nothing can hold it: the refusal stands
-                    raise reported.refusal from e
-                reported = _Hold(f"{reported.to}, the project's background agent, could not take it ({_clip_line(str(e), 120)})", reported.project, "", "unmarked-not-for-owner")
-            else:
-                if moved:          # the agent is retired: the push reached no live agent, the router has the message (held for it), and the reply says no more than that
-                    _handled("unmarked-not-for-owner", "held")
-                    return (f"Not for {OWNER}, so {reported.front}, which takes only what {OWNER} has to do, did not get it, and the project's background agent {reported.to} could not take it: {got.rstrip().rstrip('.')}. "
-                            f"To reach {reported.front}, put {_FOR_OWNER} on the first line and name an open item of his.")
-                _handled("unmarked-not-for-owner", "passed-on")
-                return (f"Not for {OWNER}, so it went to {reported.to}, the project's background agent, instead of {reported.front}, which takes only what {OWNER} has to do and did not get it: {got.rstrip().rstrip('.')}. "
-                        f"To reach {reported.front}, put {_FOR_OWNER} on the first line and name an open item of his.")
-            finally:
-                _REDIRECTED.reset(moved_token)
-        if isinstance(reported, _Hold):
-            hold_why, hold_project, hold_tail, hold_kind, reported = reported.why, reported.project, reported.tail, reported.kind, None
-        if reported:
-            return reported
     elif not origin:
         m_for = _router._FOR_AGENT.match(next((ln.strip() for ln in raw.splitlines() if ln.strip()), ""))      # "For <front agent>, …" to a project is the same message (the router's for-agent rule would pass it to that pane)
         if m_for:
             roles_ = _anc.session_roles()
             tname = _sr._role_name(roles_, m_for.group(1))
             if tname and roles_[tname]["role"] == "front":
-                reported = _builder_report(tname, raw, sender, idx, roles_, via=to.rstrip("/"))
-                if reported:
-                    return reported
+                page = to.rstrip("/").removesuffix(".md")
+                lsender = "" if _FORWARDING.get() or page not in _anc.registry() else _to_background_sender(sender, idx, roles_)
+                if lsender:
+                    reported = _reroute_page(lsender, tname, page, idx)
+                if reported is None:
+                    reported = _builder_report(tname, raw, sender, idx, roles_, via=to.rstrip("/"))
+    if isinstance(reported, _Pass):          # not for the person, or rerouted: the project's background agent takes it, and the reply says so
+        moved: list[str] = []          # filled by `_sent_instead` when the agent is retired: the message then went to its project, never to the agent
+        moved_token = _REDIRECTED.set(moved)
+        stay_token = _NO_REDIRECT.set(bool(reported.lead))
+        try:
+            got = _message(reported.to, raw, sender, auth, origin, fyi, question, False)      # no handover naming: the text was not a hand-over of an item, so the agent is named in no item's needs and no mover is told
+        except ToolError as e:
+            if str(e).startswith("Delivery failed: timed out"):          # the push may have gone out all the same: holding it too could deliver it twice, so the failure goes back to the sender as it is
+                raise
+            if reported.lead:
+                if reported.hold is None and not reported.page:
+                    raise reported.refusal from e
+                if reported.hold is not None and reported.hold.say_why:
+                    reported.hold.why = f"{reported.hold.why} ({_clip_line(str(e), 120)})"
+                reported = reported.hold          # None: a message to a project page that nothing else can carry goes to the page, below
+            elif not _held.enabled():          # the agent cannot take it and nothing can hold it: the refusal stands
+                raise reported.refusal from e
+            else:
+                reported = _Hold(f"{reported.to}, the project's background agent, could not take it ({_clip_line(str(e), 120)})", reported.project, "", "unmarked-not-for-owner")
+        else:
+            if reported.lead:
+                return f"{reported.lead}: {got}"
+            if moved:          # the agent is retired: the push reached no live agent, the router has the message (held for it), and the reply says no more than that
+                _handled("unmarked-not-for-owner", "held")
+                return (f"Not for {OWNER}, so {reported.front}, which takes only what {OWNER} has to do, did not get it, and the project's background agent {reported.to} could not take it: {got.rstrip().rstrip('.')}. "
+                        f"To reach {reported.front}, put {_FOR_OWNER} on the first line and name an open item of his.")
+            _handled("unmarked-not-for-owner", "passed-on")
+            return (f"Not for {OWNER}, so it went to {reported.to}, the project's background agent, instead of {reported.front}, which takes only what {OWNER} has to do and did not get it: {got.rstrip().rstrip('.')}. "
+                    f"To reach {reported.front}, put {_FOR_OWNER} on the first line and name an open item of his.")
+        finally:
+            _NO_REDIRECT.reset(stay_token)
+            _REDIRECTED.reset(moved_token)
+    if isinstance(reported, _Hold):
+        if reported.to:          # a message to a project page, held for the front agent its first line names
+            to = ref = reported.to
+        hold_why, hold_project, hold_tail, hold_kind, hold_say, reported = reported.why, reported.project, reported.tail, reported.kind, reported.say_why, None
+    if reported:
+        return reported
     who = f"{sender} (a script on {origin})" if origin else _msg_label(sender, idx)
     held_who = f"{sender[:60]}… (a script on {origin})" if origin and len(sender) > 60 else who      # a held message is whole up to held.WHOLE_MAX, the message limit and held.FRAME_ROOM for its label: a long script sender is cut so a message at the limit still fits whole (a session's label is never cut)
     tag = ""
@@ -1282,13 +1433,16 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
             except Exception:  # noqa: BLE001
                 pass
             if filed:
-                lead_ = "(fyi: it asks nothing, so it starts no turn)" if fyi else f"({hold_why}, so it starts no turn)"
+                lead_ = "(fyi: it asks nothing, so it starts no turn)" if fyi and not hold_say else f"({hold_why}, so it starts no turn)"
                 return (f"held for {to}'s next turn {lead_} — it is handed over with the first turn {to} takes, whatever causes it, once, "
                         f"oldest first; an open item it names gets a History line. " + (hold_tail or f"If it does ask something of {OWNER}, send it again without fyi, its first line carrying {_FOR_OWNER}."))
             if origin:          # a script reads the status, not the sentence: an fyi that could not be held is a failure to it, as it was before the gate took a script's fyi
                 raise Refused("script-fyi-not-held", f"Refused: {to} is a front agent whose hook cannot fetch held lines, so an fyi cannot be held for its next turn and nothing was sent to its pane. "
                                 f"An open item the text names has it on its History, and the message log has it. Send it to the project's page key (to=projects/<slug>), which the router rules, "
                                 f"or, when it asks something of {OWNER}, send it without fyi with {_FOR_OWNER} on its first line.")
+            if hold_say:
+                return (f"not passed on — {hold_why}, and it could not be held for {to}'s next turn either ({why_}). {to}'s pane was not given it; an open item it names has it on its History, "
+                        f"and the message log has it. {hold_tail}")
             return (f"not passed on — {to} is a front agent, {'an fyi' if fyi else 'a message that is not for ' + OWNER} starts no turn there, and the message could not be held for its next turn ({why_}). {to}'s pane was not given it; "
                     f"an open item it names has it on its History, and the message log has it. If {to} must have it, put it on an item (update, complete), or send it again without fyi, "
                     f"its first line carrying {_FOR_OWNER}, when it asks something of {OWNER}.")

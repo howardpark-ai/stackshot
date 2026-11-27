@@ -566,10 +566,10 @@ def presence_minutes() -> float:
         return PRESENCE_MINUTES
 
 
-def presence_here(who: str, now: float | None = None, idx: dict[str, Any] | None = None) -> bool:
+def presence_here(who: str, now: float | None = None, idx: dict[str, Any] | None = None, unread: bool = False) -> bool:
     """is the owner there for this pane: the stamp file <state>/prompts/<session id> (written by the prompt hook of the config repo; stackshot only reads it; with [agents_box] ssh set, a copy of the one on that box) holds epoch seconds
     within [presence] minutes. The pane's session id comes from the CLI registry (service/handoff.py `handoff_pane_row`: ~/.claude/sessions/<pid>.json). A pane this box does not run, a missing, empty or
-    unreadable file, a stamp from the future or an old one: not there."""
+    unreadable file, a stamp from the future or an old one: not there. `unread` is the answer instead when the read itself fails (anything but a stamp file that is not there): a caller for which "cannot tell" counts as there passes True."""
     h = _hooks()
     try:
         row = h.handoff_pane_row(who, idx)
@@ -579,8 +579,10 @@ def presence_here(who: str, now: float | None = None, idx: dict[str, Any] | None
         ts = float((_ab.prompts_dir() / sid).read_text(encoding="utf-8").strip().split()[0])
         now = time.time() if now is None else now
         return 0 <= now - ts <= presence_minutes() * 60.0
-    except Exception:  # noqa: BLE001  — no stamp, no presence
+    except FileNotFoundError:
         return False
+    except Exception:  # noqa: BLE001  — no stamp that reads, no presence, unless the caller says otherwise
+        return unread
 
 
 def present_fronts(now: float | None = None, idx: dict[str, Any] | None = None) -> list[str]:
