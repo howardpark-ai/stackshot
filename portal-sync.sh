@@ -13,8 +13,9 @@ TOK=$(cat "${CF_API_TOKEN_FILE:-$(python3 "$HERE/stackshot/core/config.py" path 
 DEFAULT_SID=$(python3 "$HERE/stackshot/core/config.py" get portal.server_id)
 tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
 for sid in "${@:-$DEFAULT_SID}"; do
-  code=$(curl -sS -m 60 -o "$tmp" -w '%{http_code}' -X POST -H "Authorization: Bearer $TOK" \
-    "https://api.cloudflare.com/client/v4/accounts/$ACCT/access/ai-controls/mcp/servers/$sid/sync" || echo 000)
+  # the token goes to curl on stdin (-H @-): an argument of a program is readable by every user of the machine in the process list
+  code=$(curl -sS -m 60 -o "$tmp" -w '%{http_code}' -X POST -H @- \
+    "https://api.cloudflare.com/client/v4/accounts/$ACCT/access/ai-controls/mcp/servers/$sid/sync" <<<"Authorization: Bearer $TOK" || echo 000)
   n=$(python3 -c 'import json,sys
 d=json.load(open(sys.argv[1])); r=d.get("result") or {}
 print(len(r.get("tools_raw") or r.get("tools") or []))' "$tmp" 2>/dev/null || echo "?")

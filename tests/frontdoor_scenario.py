@@ -678,8 +678,8 @@ async def main():
     check("instructions: kept five minutes", fdinstr.CACHE_SECONDS == 300.0)
     old = BOARD_TEXT["b"]
     async with fclient("bob") as c: ins2 = c.initialize_result.instructions or ""
-    check("instructions: a second session inside the five minutes gets the stored text ", old in ins2 and door.instructions._cache["b"][1] == old, (ins2, door.instructions._cache.get("b")))
-    door.instructions._cache["b"] = (time.monotonic() - 301, "STALE TEXT")
+    check("instructions: a second session of the caller inside the five minutes gets the stored text", old in ins2 and door.instructions._cache[("b", "bob")][1] == old, (ins2, door.instructions._cache.get(("b", "bob"))))
+    door.instructions._cache[("b", "bob")] = (time.monotonic() - 301, "STALE TEXT")
     async with fclient("bob") as c: ins3 = c.initialize_result.instructions or ""
     check("instructions: after five minutes the text is read live again (the stale copy is replaced)", "STALE TEXT" not in ins3 and old in ins3, ins3)
 
@@ -722,7 +722,7 @@ async def main():
         names, e, dt = await timed(list_all())
         check(f"hung backend: initialize and tools/list together return within the bound ({dt:.1f} s) with the healthy board's tools", e is None and dt < 4.0 and sorted(names) == sorted(single), (e, dt, names))
         check("hung backend: the list names h in a warning to the client", any("board 'h'" in w and "did not list" in w and "no answer in 1 s" in w for w in hwarn), hwarn)
-        check("hung backend: its instructions were not stored (it is asked again at the next request) and a's were", "h" not in hdoor.instructions._cache and "a" in hdoor.instructions._cache, list(hdoor.instructions._cache))
+        check("hung backend: its instructions were not stored (it is asked again at the next request) and a's were", ("h", "jo") not in hdoor.instructions._cache and ("a", "jo") in hdoor.instructions._cache, list(hdoor.instructions._cache))
         async def call_h():
             async with client_to(hfront, "jo") as c:
                 ok = json.loads(await call(c, "whoami", {"board": "a"}))["board"]
