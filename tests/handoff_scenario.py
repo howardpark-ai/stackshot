@@ -108,6 +108,7 @@ from stackshot.service import handoff as handoff_svc, handoff_cold as hcold_svc
 from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
+from stackshot.model import model_cuts as _MC; _MC.STALL_COLD_SKIP = False      # this suite pins the ladder with its cold step; the cut's own suite is stall
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._owing_note = lambda debtor: ""
 # section 15's invariant, checked after every save of the run: an OPEN record never names someone but the item's mover (handoff.stale)

@@ -117,6 +117,7 @@ NO_SESSION = ("", "-", "none", "no owner")    # what a day's findings by session
 FAIL_STOP = 3                 # model calls in a row that fail (no answer) end the calls of the run
 # what the message tool says when a message goes to a front agent without the mark (service/messaging.py `_gate_front`)
 FRONT_REFUSAL = "is a front agent of"
+from stackshot.model import model_cuts as _cuts       # the kinds that make no model call (AUDIT_MODEL_OFF): one line to put one back
 CHECKS_MODEL = ("next-done", "wrong-needs", "ask-missing", "unneeded-escalation", "older-than-page", "obsolete-wait", "why-not-now", "goal-unclear")
 _BOARD_RX = re.compile(r"\bboard#(\d+)\b")
 
@@ -537,7 +538,9 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
                     lines = [_clip(ln, 220) for ln in text.splitlines() if sid in ln][:3]
                     ev["older-than-page"] = f"the project page ({_stamp(float(pts))}) is newer than the item's last write ({_stamp(last)}) and mentions {sid}: " + " | ".join(lines)
         sig, ctx, has_closed = "", [], False
-        if is_waiting(it, after_open):
+        if is_waiting(it, after_open) and "obsolete-wait" in _cuts.AUDIT_MODEL_OFF:
+            pass                                     # no model call for this kind: its evidence is not read
+        elif is_waiting(it, after_open):
             line, ctx, sig, has_closed = obsolete_wait_evidence(gid, items, by_num, env, pages, last)
             if line:
                 ev["obsolete-wait"] = line
@@ -552,6 +555,8 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
         gline, gsig = goal_evidence(it, goal_seen, sid)
         if gline:
             ev["goal-unclear"] = gline
+        for off in _cuts.AUDIT_MODEL_OFF:
+            ev.pop(off, None)                        # a kind with no model call is no suspect (model_cuts.py); the item's other checks stay
         if not ev:
             continue
         checks = [c for c in CHECKS_MODEL if c in ev]
@@ -708,6 +713,8 @@ def carried(prev_judged: dict[str, Any], items: dict[str, dict[str, Any]], picke
         it = items[gid]
         if _br._last_write(it) > _f(e.get("write")):
             continue                                    # written since: the old verdict says nothing; it is judged again when a heuristic picks it
+        if e.get("check") in _cuts.AUDIT_MODEL_OFF:
+            continue                                    # a kind with no model call: its old verdict is dropped, so its finding is not sent again
         if live is not None and e.get("check") in ("obsolete-wait", "why-not-now") and sid not in live:
             continue                                    # the wait's evidence is gone: the old "yes" is stale
         keep[sid] = e

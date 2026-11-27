@@ -26,6 +26,7 @@ from stackshot.core import xlock as _xlock
 from stackshot.core.instance import NAME
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
+from stackshot.model import model_cuts as _cuts
 from stackshot.model.bullet_text import _clip_line
 from stackshot.router import routing as _routing
 from stackshot.service import handoff as _handoff
@@ -274,7 +275,9 @@ def stall_resend(gid: str, who: str, now: float, minutes: float, lines: list[tup
 
 def stall_cold(gid: str, who: str, now: float, minutes: float) -> str:
     """Step 2: the hand-off's cold call, through the machinery that already handles its answer (_hcold.handoff_cold). The record carries `stall`, so the call never asks <owner>: with no taker
-    named the item goes on to the builder (step 3) at once."""
+    named the item goes on to the builder (step 3) at once. With `model_cuts.STALL_COLD_SKIP` the call is not made and the item goes to the builder at once, as it does when no taker is named."""
+    if _cuts.STALL_COLD_SKIP:
+        return stall_builder(gid, who, now, minutes)
     with _writes.ITEM_LOCK:
         item = _load(gid)
         if item.get("status") != "open" or not _handoff.ho_same(stall_mover(gid, item), who):

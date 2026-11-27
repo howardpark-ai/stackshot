@@ -90,6 +90,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 
 from stackshot.core import config as _cfg; from stackshot.audit import audit; from stackshot.audit import audit_run as AR; from stackshot.waits import mover_state as MS; from stackshot.waits import stall; from stackshot.tools import board_report as BR; from stackshot.tools import next_report as NR
 _cfg.CFG["audit"]["pattern_review"] = "off"      # this suite holds the run to its other stages: the pattern review has its own suite (pattern_review_scenario)
+from stackshot.model import model_cuts as _MC; _MC.AUDIT_MODEL_OFF = ()      # this suite pins the judgment kinds as they were: the cut's own suite is model_cuts
 H = 3600; now = time.time()
 ZONE_OFFSET = 4 * H                         # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
 if not 600 <= (now + ZONE_OFFSET) % 86400 <= 86400 - 1200: now -= 1800     # a run from 20 minutes before to 10 minutes after local midnight starts 30 minutes earlier: the sections that read record times after `now` (the registry's second run is at now + 600) must stay on one calendar day
@@ -2010,6 +2011,34 @@ pk_item = build(item(P_DATE, wrote=now - 30 * H, state="doing", **PARK_P))
 pit, pmeta, pafter, pmover = _ACP._item_view(pk_item, f"a{P_DATE}")
 check("parked ask: a date-parked doing item is not stale while its date is ahead", _ACP.check_stale(pit, pmeta, "home-agent", pafter, now, now - 30 * H) == "", None)
 check("parked ask: …and its first open step is no stuck-elsewhere finding while its date is ahead", _ACP.check_stuck_elsewhere(pit, pmeta, "home-agent", {"home-agent", "Oliver"}, now - 30 * H, pafter, now) is None, None)
+
+# ---- the cut: model_cuts.AUDIT_MODEL_OFF (unneeded-escalation, obsolete-wait) makes no model call for those two kinds and leaves every deterministic check
+CUT = ("unneeded-escalation", "obsolete-wait")
+cut_items = build(*replay.items(), item(P_DEC, wrote=now - 30 * H, **{**PARK_P, "needs": ["decision"]}))
+def cut_findings(): return sorted((f["id"], f["category"]) for f in AR.field_findings(cut_items, {}, now, env())[0])
+_MC.AUDIT_MODEL_OFF = ()
+old_sus = {s["id"]: s["checks"] for s in AR.suspects(cut_items, now, env())[0]}
+old_det = cut_findings()
+_MC.AUDIT_MODEL_OFF = CUT
+try:
+    new_sus = {s["id"]: s["checks"] for s in AR.suspects(cut_items, now, env())[0]}
+    check("cut: before the cut both kinds are asked about (the fixture is a real suspect for each)", any(OBS in c for c in old_sus.values()) and any("unneeded-escalation" in c for c in old_sus.values()), old_sus)
+    check("cut: with the cut no suspect carries either kind, and the item's other checks stay", not any(k in c for c in new_sus.values() for k in CUT) and f"board#{BID_80}" in new_sus and "next-done" in new_sus[f"board#{BID_80}"]
+          and any("ask-missing" in c for c in new_sus.values()), new_sus)
+    rec_clear(); fake(default=YES("next-done"))
+    rec = go(build(*replay.items()))
+    check("cut: a run makes one call (next-done) and its message offers no obsolete-wait check", len(calls()) == 1 and "obsolete-wait" not in calls()[0]["stdin"].split("Candidate checks")[-1], calls())
+    only_wait = build(hold_at(99, 20, f"home-agent: then fold board#{BID_65}'s nightly sync into this item's record", "the done line waits on that sync"), closed(75, "dropped", "closed as overtaken", 21, "[home] Add a nightly sync"))
+    only_wait[f"a{BID_80}"]["metadata"]["next"] = "home-agent: then wait for the wake"
+    reset_calls(); rec = go(only_wait)
+    check("cut: an item suspected for obsolete-wait alone makes no call at all", not [s for s in AR.suspects(only_wait, now, env())[0] if OBS in s["checks"]] and rec["calls"]["made"] == len(calls()) and not [c for c in calls() if OBS in c["stdin"].split("Candidate checks")[-1]], (calls(), rec["calls"]))
+    check("cut: the deterministic checks are unchanged by it", cut_findings() == old_det, (old_det, cut_findings()))
+    prev = {f"board#{BID_80}": {"verdict": "yes", "check": OBS, "write": now, "checks": [OBS], "reason": "r", "fix": "f"}}
+    keep, again = AR.carried(prev, replay, set(), {f"board#{BID_80}": f"a{BID_80}"}, None)
+    check("cut: an old yes under a cut kind is dropped when the record is carried, so its finding is not sent again", keep == {} and again == [], (keep, again))
+finally:
+    _MC.AUDIT_MODEL_OFF = ()
+check("cut: with the tuple empty the two kinds are asked about again (one line to put them back)", any(OBS in c for c in {s["id"]: s["checks"] for s in AR.suspects(cut_items, now, env())[0]}.values()), None)
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)
