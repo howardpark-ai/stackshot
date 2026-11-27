@@ -24,9 +24,10 @@ For each request the proxy asks `GET /verify`, carrying the original request's h
     body that is no address or names no kind of token, no answer in `timeout_seconds` (a total deadline), a board that cannot be reached, a secret or members file that cannot be
     read, or any fault of this service. Never 200, and never 401: a 401 makes a connector throw its token away, which is wrong for an outage.
 
-A 200 of the board that the service accepts is kept for `cache_seconds` (a short time, 5 by default), under a hash of the token, at most MAX_ENTRIES of them. Nothing else is
-kept: a refusal or a failure is never remembered, so a token the board refused is asked again at the next request, and an entry can only repeat what the board said of that very token a moment ago (a token revoked
-at Google keeps working here for at most `cache_seconds`). The members file and the secret are read at each request, cached or not. The board is reached directly (a proxy of the environment is ignored), no redirect of it is followed, and
+A 200 of the board that the service accepts, for an address a member holds, is kept for `cache_seconds` (a short time, 5 by default), under a hash of the token, at most MAX_ENTRIES of them. Nothing else is
+kept: a refusal or a failure is never remembered, so a token the board refused is asked again at the next request, and neither is an answer for an address no member holds, so that the next request
+of an address registered a moment later is asked about. An entry can only repeat what the board said of that very token a moment ago (a token revoked at Google keeps working here for at most
+`cache_seconds`). The members file and the secret are read at each request, cached or not. The board is reached directly (a proxy of the environment is ignored), no redirect of it is followed, and
 no cookie it sets is kept: one caller's check carries nothing of another's.
 
 Nothing the caller sent is echoed: the answer's only header of its own is `X-Verified-User`, whatever the request carried under that name. A token, a secret or an address is never
@@ -240,18 +241,18 @@ class Service:
 
     # ------------------------------------------------------------------ the route
 
-    def identity_of(self, email: str) -> str:
-        """The identity the proxy is told, by the front door's members file read now: the key of the member whose sign-in addresses hold the address, else the address itself (lower case).
+    def identity_of(self, email: str) -> tuple[str, bool]:
+        """(the identity the proxy is told, whether a member holds the address), by the front door's members file read now: the identity is the key of the member whose sign-in addresses hold the address, else the address itself (lower case).
         "" when no member holds the address and it is written as a key of the file: the front door matches keys exactly, so passing it on would make this caller that member.
         FileError when the file cannot be used, or when the front door would give that member other boards than the records do."""
         records = _files.read_member_records(self.s.members_file)
         listed = _files.read_members(self.s.members_file)      # the front door's own reader: every key as it looks it up, a case duplicate too
         member = _files.member_of_address(records, email)
         if not member:
-            return "" if email in listed else email
+            return ("" if email in listed else email), False
         if set(listed.get(member, ())) != set(records[member].boards):      # two keys a surrounding space apart: the records take the first entry, the front door the last
             raise _files.FileError(f"members_file {os.path.expanduser(self.s.members_file)} lists the member {tag(member)} more than once with different boards: list one key with all its boards")
-        return member
+        return member, True
 
     async def verify(self, request: Any) -> Any:
         try:
@@ -288,13 +289,13 @@ class Service:
                 log.warning("503 token %s: %s", tag(token) if token else "-", "the board refused a check that carries no token as a sign-in" if verdict == "barred" else what)
                 return outage()
             email = what
-            if token:
-                self._keep(key, email)
         try:
-            identity = self.identity_of(email)
+            identity, held = self.identity_of(email)
         except _files.FileError as e:
             log.error("503: %s", e)
             return outage()
+        if token and via == "board" and held:      # an address no member holds may be registered at any moment, and its next request has to be asked about (core/invites.py)
+            self._keep(key, email)
         if not identity:
             log.warning("403 token %s: address %s is no member's sign-in address and is written as a member's key", tag(token), tag(email))
             return _plain(403, NOT_THEIRS)

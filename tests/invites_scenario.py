@@ -17,6 +17,8 @@ Covers:
   * the redirect URIs: the apps' own are taken, look-alikes are not;
   * a board with no [invites]: no tool, no page, no extra redirect URI, nothing added to the instructions.
 
+What each of these callers then reads and writes, tool by tool, is tests/invites_access_scenario.py.
+
     tests/run-suite invites         -> exit 0 / 1"""
 import asyncio, base64, contextlib, hashlib, json, logging, os, pathlib, re, socket, stat, subprocess, sys, threading, time, tomllib
 from dataclasses import replace
@@ -448,7 +450,7 @@ def part_chain():
             # removal blocks the next request of a token already in use (the sign-in service still caches its address)
             out, e = invite("alice", "new@example.com", remove=True)
             check("remove: the reply says what stops and that machine tokens are revoked separately", not e and out.startswith("Removed the registration of new@example.com from board main.")
-                  and "next request to this board is refused" in out and "Machine tokens and enrolled keys are not part of a registration: revoke separately" in out and "new@example.com" not in members(), (out, e))
+                  and "From its next request on, this board's connector refuses that address every list, read and call" in out and "Machine tokens and enrolled keys are not part of a registration: revoke separately" in out and "new@example.com" not in members(), (out, e))
             r = verify(first)
             who = r.headers.get("x-verified-user", "")
             _n, e = through(who or "x", listing)
@@ -620,7 +622,7 @@ from stackshot.web.auth import oauth
 with TestClient(server.mcp.http_app()) as t:
     r = t.get("/join", follow_redirects=False)
     routes = [getattr(x, "path", "") for x in t.app.routes]
-print(json.dumps({"tools": [x.name for x in asyncio.run(server.mcp.list_tools())], "instructions": server.mcp.instructions, "status": r.status_code, "body": r.text[:300], "uris": oauth._redirect_uris(),
+print(json.dumps({"tools": [x.name for x in asyncio.run(server.mcp.list_tools(run_middleware=False))], "instructions": server.mcp.instructions, "status": r.status_code, "body": r.text[:300], "uris": oauth._redirect_uris(),
                   "configured": c.CFG["auth"]["allowed_client_redirect_uris"], "routes": routes}))
 '''
 

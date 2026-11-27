@@ -67,7 +67,7 @@ def _removed(address: str, s: _invites.Settings) -> str:
     if listed:
         out.append("The address is still let in by another entry of the members file, which was not registered this way: change that entry in the file.")
     else:
-        out.append("Its next request to this board is refused, with sign-in tokens already issued too.")
+        out.append("From its next request on, this board's connector refuses that address every list, read and call, with sign-in tokens already issued too.")
     out.append("Machine tokens and enrolled keys are not part of a registration: revoke separately any this person holds.")
     if left:
         out.append(f"Still registered on: {', '.join(left)} (an admin of that board removes it there).")
