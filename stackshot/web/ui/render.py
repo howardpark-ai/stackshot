@@ -3660,7 +3660,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         (step_field_entries), at the place the field gives it, each once. [] when he has no open step on the checklist (the step field is then the step: step_block_html). Drawn for `member` on a board of several
         members, the step field joins only the list of the member the step is asked of (steps.member_for)."""
         mine = self.his_open_steps(r, member)
-        if not mine: return []
+        if not mine: return self.settled_split_steps(r) if not member or member == _steps.member_for((r["metadata"] or {}).get("step"), r["metadata"]) else []
         if member and member != _steps.member_for((r["metadata"] or {}).get("step"), r["metadata"]): return mine
         cm = lambda e: set(_sc.commands_of("\n".join([e[0], *e[1]]))) if e[1] or "`" in e[0] else set()
         used, out = set(), []
@@ -3670,6 +3670,26 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             if at is None: out.append(f); continue
             out += [mine[i] for i in range(at + 1) if i not in used]; used |= set(range(at + 1))
         return out + [h for i, h in enumerate(mine) if i not in used]
+    def settled_split_steps(self, r):
+        """The whole click path of a split step whose lines are all settled, as (first line, lines under it) entries in the split's order: the summary ends `(+N more)`, the keys of the lines the server made from it
+        (metadata.step_lines) are all done or dropped steps of the checklist, and none is open, so the summary would be the only thing of his left to draw and its marker points at nothing. Those lines read as one numbered
+        step, as the open ones do (the first line is the summary's own action in full). [] for any other item: a line still open (the usual drawing), no record of the lines, or one of them with no text on the checklist."""
+        meta = r["metadata"] or {}
+        if not re.search(r"\(\+\d+ more\)\s*$", str(meta.get("step") or "")): return []
+        keys = [k for k in meta.get("step_lines") or [] if isinstance(k, str)]
+        if not keys: return []
+        by = {}
+        for x in _steps.view(meta):
+            by.setdefault(_steps.key(x["text"]), []).append(x)
+        out = []
+        for k in keys:
+            got = by.get(k) or []
+            if not got or any(x["status"] == _steps.OPEN for x in got): return []
+            ls = [ln for ln in str(got[0]["text"]).split("\n") if ln.strip()]
+            first = _steps.strip_owner(ls[0]) if ls else ""
+            if not first or _sc.FENCE_RX.match(ls[0]): return []
+            out.append((first, ls[1:]))
+        return out
     def step_nexts_html(self, r, draft=None, member=""):
         """The Your step block's list: his open steps (your_steps), drawn as the whole of the block (the one-line summary stays where space is short, the tab title and a Slack notice): one ordered list numbered
         from 1, each step in full without its `<name>: ` opener, each command in backticks (a span with a space in it) or fenced block in a code block with a Copy button under its line. `draft` (a function from the
