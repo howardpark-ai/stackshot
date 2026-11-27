@@ -31,7 +31,7 @@ from stackshot.projects import projects as _prj
 from stackshot.router import page_debt as _page_debt
 from stackshot.web import render as _rmod
 from stackshot.service import gates as _gates
-from stackshot.fleet.sessions_registry import _same_sess, _session_label, _sessions_index
+from stackshot.fleet.sessions_registry import _same_sess, _sessions_index
 
 _HERE = _paths.ROOT
 
@@ -371,7 +371,7 @@ def _debt_mover(project: str = "", keeper: str = "") -> str:
 
 
 def _nag(owner: str = "") -> str:
-    """Appended to replies: the caller's own debts in full (when the call names its owner), everyone else's in one line."""
+    """Appended to replies: the caller's own debts in full (when the call names its owner), everyone else's as one line of page keys."""
     d = _owed_readable(_owed_settle())
     if not d:
         return ""
@@ -393,7 +393,7 @@ def _nag(owner: str = "") -> str:
                      "Such a box needs `[release] deploy_ssh` in its config, naming the server host, so that the clear runs there, or `[server] box = false`, so that it prints the command to run there; "
                      "with neither it counts as the server host and the server's entry stays.")
     if others:
-        out.append("pages owed: " + ", ".join(f"{k} ({_session_label(o)}, {_age(e['ts'])}{', a keeper: settles on a Current-state edit' if _debt_strict(o, e) else ''})" for k, o, e in others))
+        out.append(("pages owed by others: " if owner else "pages owed: ") + ", ".join(dict.fromkeys(k for k, _o, _e in others)))      # the page keys only, once each, in ledger order: no session, age or keeper text; the label says "by others" only when the call names its owner (with none, every debt is listed under `pages owed:`)
     return ("\n\n" + "\n".join(out)) if out else ""
 
 
