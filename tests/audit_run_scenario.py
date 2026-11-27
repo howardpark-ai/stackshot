@@ -90,7 +90,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 
 from stackshot.core import config as _cfg; from stackshot.audit import audit; from stackshot.audit import audit_run as AR; from stackshot.waits import mover_state as MS; from stackshot.waits import stall; from stackshot.tools import board_report as BR; from stackshot.tools import next_report as NR
 _cfg.CFG["audit"]["pattern_review"] = "off"      # this suite holds the run to its other stages: the pattern review has its own suite (pattern_review_scenario)
-from stackshot.model import model_cuts as _MC; _MC_DEFAULT = _MC.AUDIT_MODEL_OFF; _MC.AUDIT_MODEL_OFF = ()      # this suite pins the judgment kinds as they were: the cut's own suite is model_cuts
+from stackshot.model import model_cuts as _MC; _MC_DEFAULT = _MC.AUDIT_MODEL_OFF; _MC.AUDIT_MODEL_OFF = ()      # this suite pins the judgment kinds as they were: the cut's own checks are the last section of this file
 H = 3600; now = time.time()
 ZONE_OFFSET = 4 * H                         # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
 if not 600 <= (now + ZONE_OFFSET) % 86400 <= 86400 - 1200: now -= 1800     # a run from 20 minutes before to 10 minutes after local midnight starts 30 minutes earlier: the sections that read record times after `now` (the registry's second run is at now + 600) must stay on one calendar day
@@ -2034,6 +2034,39 @@ try:
     reset_calls(); rec = go(only_wait)
     check("cut: an item suspected for obsolete-wait alone makes no call at all", not [s for s in AR.suspects(only_wait, now, env())[0] if OBS in s["checks"]] and rec["calls"]["made"] == len(calls()) and not [c for c in calls() if OBS in c["stdin"].split("Candidate checks")[-1]], (calls(), rec["calls"]))
     check("cut: the deterministic checks are unchanged by it", cut_findings() == old_det, (old_det, cut_findings()))
+    # verdicts stored before the cut list the cut kinds in `checks` (and the obsolete-wait signature): neither is asked again after the deploy
+    _MC.AUDIT_MODEL_OFF = ()
+    old_full = AR.suspects(cut_items, now, env())[0]
+    _MC.AUDIT_MODEL_OFF = CUT
+    stored = {s["id"]: {"verdict": "no", "write": s["write"], "checks": s["checks"], "at": now, **({"sig": s["sig"]} if s.get("sig") else {})} for s in old_full}
+    check("cut: the stored verdicts are the two shapes the deploy meets (an ask item with unneeded-escalation, a held item with next-done and obsolete-wait)",
+          sorted(stored[f"board#{P_DEC}"]["checks"]) == ["ask-missing", "unneeded-escalation", "wrong-needs"] and stored[f"board#{BID_80}"]["checks"] == ["next-done", OBS], stored)
+    again, skipped = AR.suspects(cut_items, now, env(), stored)
+    check("cut: …neither is picked again (a stored 'no' that listed a cut kind still stands), they count as skipped", [s["id"] for s in again] == [] and skipped == len(new_sus), (again, skipped, new_sus))
+    stored[f"board#{P_DEC}"]["checks"] = ["wrong-needs"]
+    check("cut: …a stored verdict whose other checks differ is still asked again", [s["id"] for s in AR.suspects(cut_items, now, env(), stored)[0]] == [f"board#{P_DEC}"], None)
+    # the rank is the one the item had with its cut kind: a decision with an ask and an open owner step stays at priority 1
+    prio_item = build(item(6, wrote=now - 30 * H, state="your-call", needs=["decision"], mover="Oliver", ask=ASK_P, next="Oliver: pick one of the options"))
+    _MC.AUDIT_MODEL_OFF = ()
+    p_old = AR.suspects(prio_item, now, env())[0]
+    _MC.AUDIT_MODEL_OFF = CUT
+    p_new = AR.suspects(prio_item, now, env())[0]
+    check("cut: an item that was a suspect for unneeded-escalation keeps its priority (1) though the call now rests on ask-missing alone", len(p_old) == len(p_new) == 1 and "unneeded-escalation" in p_old[0]["checks"] and p_new[0]["checks"] == ["ask-missing"]
+          and p_old[0]["priority"] == p_new[0]["priority"] == 1, (p_old, p_new))
+    # the evidence of a cut kind is not even read
+    reads = []
+    _real_owe = AR.obsolete_wait_evidence
+    AR.obsolete_wait_evidence = lambda *a, **k: reads.append(1) or _real_owe(*a, **k)
+    try:
+        AR.suspects(build(*replay.items()), now, env())
+        n_cut = len(reads)
+        _MC.AUDIT_MODEL_OFF = ()
+        AR.suspects(build(*replay.items()), now, env())
+        n_old = len(reads) - n_cut
+    finally:
+        AR.obsolete_wait_evidence = _real_owe
+        _MC.AUDIT_MODEL_OFF = CUT
+    check("cut: the obsolete-wait evidence is not read for a waiting item while its model call is cut, and is read with the call back", n_cut == 0 and n_old > 0, (n_cut, n_old))
     prev = {f"board#{BID_80}": {"verdict": "yes", "check": OBS, "write": now, "checks": [OBS], "reason": "r", "fix": "f"}}
     keep, again = AR.carried(prev, replay, set(), {f"board#{BID_80}": f"a{BID_80}"}, None)
     check("cut: an old yes under a cut kind is dropped when the record is carried, so its finding is not sent again", keep == {} and again == [], (keep, again))

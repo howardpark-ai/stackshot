@@ -44,10 +44,10 @@ GROUPS: tuple[dict[str, Any], ...] = (
     {"key": "filing", "name": "Filing", "desc": "an item's state is wrong", "log": True, "audits": (
         ("filing pass", EVERY_TEN, None), ("wait-loop walk", EVERY_MIN, None), ("stuck-elsewhere", EVERY_TEN, None), ("mover-no-session", EVERY_TEN, None), ("arbitrary-hold", EVERY_TEN, None), ("mislabeled-state", EVERY_TEN, None),
         ("reads-as-wait", EVERY_TEN, None), ("wait-end", EVERY_TEN, "wait_end"), ("step-handover", EVERY_TEN, None), ("ask-options", EVERY_TEN, None), ("why-not-now (code)", EVERY_TEN, None),
-        ("wrong-needs (model)", EACH_RUN, None), ("obsolete-wait (model)", EACH_RUN, None), ("why-not-now (model)", EACH_RUN, None))},
+        ("wrong-needs (model)", EACH_RUN, None), ("obsolete-wait (no model call)", EACH_RUN, None), ("why-not-now (model)", EACH_RUN, None))},
     {"key": "wording", "name": "Wording", "desc": "next steps and asks", "log": True, "audits": (
         ("ask-missing", EACH_RUN, None), *((f"next rules N{n}", EACH_RUN, None) for n in range(1, 8)),
-        ("next-done (model)", EACH_RUN, None), ("ask no longer fits (model)", EACH_RUN, None), ("unneeded-escalation (model)", EACH_RUN, None), ("goal-unclear (model)", EACH_RUN, None))},
+        ("next-done (model)", EACH_RUN, None), ("ask no longer fits (model)", EACH_RUN, None), ("unneeded-escalation (no model call)", EACH_RUN, None), ("goal-unclear (model)", EACH_RUN, None))},
     {"key": "dates", "name": "Dates", "desc": "due dates and wake dates", "log": True, "audits": (
         ("dates pass", EVERY_TEN, None), ("For-you due-date look", EVERY_TEN, None), ("wake catch-up", EVERY_TEN, None))},
     {"key": "proof", "name": "Proof and patterns", "desc": "waits for proof, and repeat patterns", "log": True, "audits": (

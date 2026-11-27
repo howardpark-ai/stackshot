@@ -273,10 +273,10 @@ def stall_resend(gid: str, who: str, now: float, minutes: float, lines: list[tup
     return "resend"
 
 
-def stall_cold(gid: str, who: str, now: float, minutes: float) -> str:
-    """Step 2: the hand-off's cold call, through the machinery that already handles its answer (_hcold.handoff_cold). The record carries `stall`, so the call never asks <owner>: with no taker
-    named the item goes on to the builder (step 3) at once. With `model_cuts.STALL_COLD_SKIP` the call is not made and the item goes to the builder at once, as it does when no taker is named."""
-    if _cuts.STALL_COLD_SKIP:
+def stall_cold(gid: str, who: str, now: float, minutes: float, cut: bool = True) -> str:
+    """Step 2 of the stall pass, or the cold rung of the hand-off audit's ladder: the cold call, through the machinery that already handles its answer (_hcold.handoff_cold). The record carries `stall`, so the call never asks <owner>: with no taker
+    named the item goes on to the builder (step 3) at once. With `model_cuts.STALL_COLD_SKIP` (and `cut` true, which is the stall pass's own call; the hand-off audit's rung passes false) the call is not made and the item goes to the builder at once, as it does when no taker is named."""
+    if cut and _cuts.STALL_COLD_SKIP:
         return stall_builder(gid, who, now, minutes)
     with _writes.ITEM_LOCK:
         item = _load(gid)

@@ -103,7 +103,7 @@ from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import telling
-from stackshot.model import model_cuts as _MC; _MC_DEFAULT = _MC.STALL_COLD_SKIP; _MC.STALL_COLD_SKIP = False      # this suite pins the ladder with its cold step; the cut's own suite is model_cuts
+from stackshot.model import model_cuts as _MC; _MC_DEFAULT = _MC.STALL_COLD_SKIP; _MC.STALL_COLD_SKIP = False      # this suite pins the ladder with its cold step; the cut's own checks are section 23
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 # the record follows the mover (handoff.stale): checked after every save of the run, the stall pass's moves and raises included
 _real_save = writes.save
