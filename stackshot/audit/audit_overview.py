@@ -59,7 +59,7 @@ GROUPS: tuple[dict[str, Any], ...] = (
         ("clients tick", EVERY_MIN, None), ("inbox flag", EVERY_MIN, None), ("hand-back tick", EVERY_MIN, None), ("roles sync", EVERY_MIN, None),
         ("orphan hand-over", EACH_RUN, "orphans"))},
     {"key": "text", "name": "Text and rules", "desc": "rulebook and tool text", "log": False, "audits": (
-        ("rulebook scan", "after each run", None), ("retired-terms lint", "every PR", None), ("tool-text snapshot test", "every PR", None),
+        ("rulebook scan", "weekly", None), ("retired-terms lint", "every PR", None), ("tool-text snapshot test", "every PR", None),
         ("tool-text touched check", "every PR", None), ("clean-text", "every PR", None))},
 )
 
