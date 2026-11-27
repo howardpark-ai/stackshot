@@ -188,7 +188,7 @@ def install_early(host: Any) -> None:
                            want_background=lambda project, kind: _background_want.want_background(project, kind),
                            front_words=lambda target, who, text: _sibling_words.held_words(who, target, text),
                            front_reroute=lambda who: _messaging.router_to_background(who),
-                           front_idle=lambda target, body: _messaging.router_idle_peer(target, body),
+                           front_idle=lambda target, who, body: _messaging.router_idle_peer(target, who, body),
                            front_trace=lambda target, back, text, gid="": _telling.front_trace(
                                target, back, text, ",".join(dict.fromkeys([*str(gid).replace(",", " ").split(), *_agent_names._item_refs(text)]))),
                            front_fyi=lambda target, text, gid="", nid="", log=True, kind="fyi", whole=False: _telling.front_fyi(      # the items the ruling names, then the items the text names (the message tool's own list)

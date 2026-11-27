@@ -215,6 +215,18 @@ def agent_gone(name: str, surface: set[str]) -> bool:
         return False
 
 
+def unreachable(name: str, surface: set[str]) -> bool:
+    """Can the agent `name` read no line any more: gone (agent_gone: retired, or a surface agent), or shown to be no live session by retired_recipient.gone_why (every pane of it gone for [client] dead_after_minutes
+    on a machine that is online, or an old name of a renamed session)? A doubt is never "unreachable". Only the two reroute switches ask it."""
+    from stackshot.fleet import retired_recipient as _rr      # at call time
+    return agent_gone(name, surface) or bool(_rr.gone_why(name))
+
+
+def switch_background(project: str, reg: dict[str, dict[str, Any]], surface: set[str]) -> str:
+    """The background agent a reroute switch ([front] to_background_senders, idle_peers_to_background) may send to: the first of anchors.background_ranked that is not `unreachable`; "" when none is left."""
+    return next((n for _c, _o, n in _anc.background_ranked(project, reg) if not unreachable(n, surface)), "")
+
+
 class Context:
     """What one tick reads once: the registry, the board items (by id and by the way an id is shown), the anchors, the session
     names. Built only when there is something to judge."""
@@ -316,6 +328,12 @@ class Context:
     def live_background(self, root: str) -> str:
         """The project's background agent a message that is no need of the person goes to (anchors.background_agent: the builder first), skipping an agent that is gone (gone); "" when none is left."""
         return next((n for _c, _o, n in _anc.background_ranked(root, self.reg) if not self.gone(n)), "")
+
+    def reroute_background(self, root: str) -> str:
+        """The background agent a reroute switch may send to (switch_background): "" when none can read a line."""
+        if self._surface is None:
+            self._surface = surface_names(self.reg)
+        return switch_background(root, self.reg, self._surface)
 
     def contact(self, root: str) -> str:
         """The page's contact front agent (main_agent) a held line may go to; when that one is gone (retired), the first other front agent that is live; "" when none, since nobody would read the line. A person's message with neither a live background agent nor a contact is held by no one: it stays unruled."""

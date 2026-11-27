@@ -34,10 +34,12 @@ delivered as before, marked, only when the held store cannot file it or the rule
            it, in his own words, to tell him about the notice's subject (the agent is in the `tell_him` of an open item the notice names). Otherwise it never reaches the front agent, not even held: it goes, unmarked, to the
            background agent that moves or works a named item, else it is ruled archived (a row of the digest). A pass to a background agent is not gated, nor is a configured watch (his standing ask); a hand-back, a fallback pass to -main and an
            audit batch finding to a front mover are gated like the rest (the finding never needs him: only his ask warrants it). A wake for a front mover of an item that waits on his decision needs him (case 1).
-           Before all of that, a message from a sender `[front] to_background_senders` lists never reaches a front agent, as a turn or held, whatever rule passed it there (_front_reroute, hook front_reroute): the project's
-           background agent takes it; a project with none keeps the paths above. With `[front] idle_peers_to_background` on, a peer front agent's unmarked message, no done or no-action note, to a front agent the person is not
-           talking with goes to that background agent instead of being held (_front_route, hook front_idle). Both are off by default, and both pick a live background agent (Context.live_background). A notice either one moved
-           leaves the History line on the items it names (hook front_trace); one the agent could not be given in three tries is held for the front agent's next turn, and one from a listed sender is ruled archived only when it cannot be filed.
+           Before all of that, a message from a sender `[front] to_background_senders` lists is passed to the project's background agent, not to a front agent, whatever rule passed it there (_front_reroute, hook front_reroute): its
+           marks and quoted words go with it as written; a project with none keeps the paths above. With `[front] idle_peers_to_background` on, a peer front agent's unmarked message, no done or no-action note, to a front agent the
+           person is not talking with goes to that background agent instead of being held (_front_route, hook front_idle), unless it quotes his verified words or names an item that waits on a decision or that he asked to be told
+           about. Both are off by default, and both pick a background agent that can read the line (Context.reroute_background: not retired, its pane not gone). A notice either one moved leaves the History line on the items it
+           names (hook front_trace); one the agent could not be given in three tries is held for the front agent's next turn, and when nothing can be held for that agent it takes the paths above as with both switches off,
+           its tries counted anew (the `switches_off` key of its lines): neither switch archives a notice that is delivered with both off.
            A batch finding of the audit (router.py's rule `audit-owners`) carries a `split`: one message per owner, each with the lines of its own
            items, marked as a pass to that agent is marked (_act_split); `to` in the routing log lists every owner, one still holding lines from before an earlier change named
            "(held)". A finding is a task for its mover: a BACKGROUND owner is woken with its lines at once, whole, like any pass (they had been held for its
@@ -602,8 +604,8 @@ def _front_result_turn(n: dict[str, Any], ln: dict[str, Any], target: str, root:
 
 
 def _front_reroute(n: dict[str, Any], target: str, root: str, cx: "_router.Context") -> tuple[str, str]:
-    """A session's message from a sender `[front] to_background_senders` lists never reaches a front agent through the router, as a turn or held, whatever rule ruled it there (the `front_reroute` hook).
-    -> (the sender, the project's background agent, which takes it) for such a pass to a front agent; ("", "") for every other notice, for a project with no background agent and on any failure. Never raises."""
+    """A session's message from a sender `[front] to_background_senders` lists goes to the project's background agent, not to a front agent, whatever rule ruled it there (the `front_reroute` hook).
+    -> (the sender, the project's background agent, which takes it) for such a pass to a front agent; ("", "") for every other notice, for a project with no live background agent and on any failure. Never raises."""
     try:
         fn = _HOOKS["front_reroute"]
         if not fn or not target or str(n.get("kind") or "") != "message" or str(n.get("text") or "").lstrip().startswith("[board]"):
@@ -611,17 +613,20 @@ def _front_reroute(n: dict[str, Any], target: str, root: str, cx: "_router.Conte
         sender = str(fn(str(n.get("who") or "")) or "")
         if not sender or not _is_session_message(n, _body(n)) or not _front_anywhere(target, root, cx):
             return "", ""
-        back = cx.live_background(root)          # a retired builder's queue is read by nobody
+        back = cx.reroute_background(root)          # a retired builder's queue, or a gone pane's, is read by nobody
         return (sender, back) if back and back.casefold() != sender.casefold() else ("", "")
     except Exception:  # noqa: BLE001
         return "", ""
 
 
-def _file_for_front(n: dict[str, Any], ln: dict[str, Any], front: str) -> bool:
-    """File a notice whose reroute could not be delivered for the front agent it was meant for (the front gate: a held line for its next turn, which starts none) -> was it filed? Never raises."""
+def _file_for_front(n: dict[str, Any], ln: dict[str, Any], front: str, cx: "_router.Context") -> bool:
+    """File a notice whose reroute could not be delivered for the front agent it was meant for (the front gate: a held line for its next turn, which starts none) -> was it filed? False, with nothing written, when
+    nothing can be held for that agent (the hold is off, its hook cannot fetch held lines, or it can read no line any more). Never raises."""
     try:
         fn = _HOOKS["front_fyi"]
-        return bool(fn and front and _held.enabled() and (fn(front, _held_text(n, _body(n)), str(ln.get("item") or ""), n["id"], False, whole=True) or ("", ""))[0] == "fyi")
+        if not fn or not front or not _held.enabled() or not _held.can_fetch(front) or _router.unreachable(front, _router.surface_names(cx.reg)):
+            return False
+        return (fn(front, _held_text(n, _body(n)), str(ln.get("item") or ""), n["id"], False, whole=True) or ("", ""))[0] == "fyi"
     except Exception:  # noqa: BLE001
         return False
 
@@ -636,12 +641,12 @@ def _trace_reroute(n: dict[str, Any], ln: dict[str, Any], base: dict[str, Any], 
         return
 
 
-def _front_route(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, cx: "_router.Context") -> tuple[str, str]:
+def _front_route(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, cx: "_router.Context", switches: bool = True) -> tuple[str, str]:
     """What a pass to a FRONT agent with no need of the person becomes (_must_see is false; an fyi and a page-owed notice have their own paths above). -> ("", "") as before: marked, delivered (a need, no gate
     wired, the switch off, a recipient that is no front agent); ("deliver", "") an answer to a question of the agent's while the person is in that conversation (a message notice from a session the agent itself wrote to: the
     answer hook): delivered to the agent, unmarked; ("items", reply) such an answer while he is not: written onto the item it names, nothing delivered; ("background", name) the project's background agent (its builder,
     else the first listed) takes it, unmarked; ("idle", name) a peer front agent's message while the person is not with the target, with `[front] idle_peers_to_background` on (the `front_idle` hook): that background agent takes it; ("archived", why) a project with no background agent: nobody is told, the ruling is archived (a row of the digest), nothing is held; ("hold", why) held for the agent's next turn
-    through the front gate: only what is one agent's word to another (an answer outside the conversation that names no item, a peer front agent's message, the background agent's own word, a sibling front agent's marked message that quotes his words while no turn is warranted: when one is, it is delivered as a turn, `_front_turn_gate`'s own test), which starts no turn. Never raises."""
+    through the front gate: only what is one agent's word to another (an answer outside the conversation that names no item, a peer front agent's message, the background agent's own word, a sibling front agent's marked message that quotes his words while no turn is warranted: when one is, it is delivered as a turn, `_front_turn_gate`'s own test), which starts no turn. `switches` False (a notice handled as with the reroute switches off): never "idle". Never raises."""
     try:
         if not _HOOKS["front_fyi"] or not target or not _held.enabled() or not _is_front(target, root, cx):
             return "", ""
@@ -660,9 +665,9 @@ def _front_route(n: dict[str, Any], ln: dict[str, Any], target: str, root: str, 
                 return kind, arg
         sender = _sender_name(n)
         if sender and sender.casefold() != str(target).casefold() and _front_anywhere(sender, root, cx):      # a front agent's word to a peer front agent: the channel between them, held for that peer's next turn
-            idle = _HOOKS["front_idle"]
-            peer_back = cx.live_background(root) if idle else ""
-            if peer_back and peer_back.casefold() != sender.casefold() and n.get("kind") == "message" and _is_session_message(n, body) and idle(target, body):
+            idle = _HOOKS["front_idle"] if switches else None
+            peer_back = cx.reroute_background(root) if idle else ""
+            if peer_back and peer_back.casefold() != sender.casefold() and n.get("kind") == "message" and _is_session_message(n, body) and idle(target, str(n.get("who") or ""), body):
                 return "idle", peer_back
             return "hold", f"{sender} is a front agent, so its message to {target} rides {target}'s next turn"
         back = _anc.background_agent(root, cx.reg)       # the one lookup the message tool uses too: the builder, else the first background agent, a hub's for a component page with none
@@ -993,6 +998,18 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
     _want_background(n, aroot, ln, cx)      # whatever the ruling: set-if-absent, so a retried notice records nothing new
     try:
         ruling, target, reason = ln["ruling"], ln.get("target", ""), ln.get("reason", "")
+        off = prior.get("switches_off")      # an earlier try put this notice back on the path it takes with the reroute switches off: the tries before that, which do not count on it
+        if off is not None:
+            base["switches_off"] = off
+            left = int(prior.get("tries", 0)) - int(off)
+            prior = {**prior, "tries": max(0, left)}      # the rest stays: a line delivered and not yet ruled is not delivered again
+        moved_from = str(prior.get("reroute_from") or prior.get("idle_from") or "")          # the front agent whose pass the earlier tries sent to the background agent (the two reroute switches)
+        filed = False          # that agent could not take it, and it is held for the front agent
+        if ruling == "passed" and moved_from and prior.get("status") != "delivered" and int(prior.get("tries", 0)) >= MAX_TRIES:
+            filed = _file_for_front(n, ln, moved_from, cx)
+            if not filed:          # nothing can be held for it either: from here the notice is handled as with the switches off, its own tries counted from now
+                base["switches_off"] = int(prior.get("tries", 0))
+                moved_from, prior = "", {}
         if ruling == "passed":
             tried = str(prior.get("target") or "")        # where the failed tries went: a pass to the -main agent that was rerouted to the background agent logged that agent, not the ruling's target
             rerouted = bool(tried) and tried != main and not ln.get("split")
@@ -1019,28 +1036,20 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
                         res["error"] = f"after-rule: {type(e).__name__}: {str(e)[:100]}"
                 _note(res, root, n["id"])
                 return res
-        moved_from = str(prior.get("reroute_from") or prior.get("idle_from") or "")          # the front agent whose pass the earlier tries sent to the background agent (the two reroute switches)
-        if ruling == "passed" and moved_from and prior.get("status") != "delivered" and int(prior.get("tries", 0)) >= MAX_TRIES:      # that agent could not take it: held for the front agent, as without the switch
-            if _file_for_front(n, ln, moved_from):
-                held_for = moved_from
-                ruling, target, reason = "held", "", f"held: front agent, the background agent {prior.get('target') or 'it was passed to'} could not be reached (rides its next turn, starts none)"
-                key_ = "reroute_from" if prior.get("reroute_from") else "idle_from"          # kept on the line: a ruling that fails to write holds again, it does not deliver
-                base.update({"ruling": ruling, "target": "", "reason": reason, "marked": False, "held_for": held_for, "hold": "fyi", key_: moved_from})
-            elif prior.get("reroute_from"):          # a sender that sends nothing to front agents is never delivered to one: what cannot be filed is logged
-                reason = f"archived: the background agent {prior.get('target')} could not be reached, and it could not be held for {moved_from} (not delivered, not held)"
-                ruling, target = "archived", ""
-                base.update(ruling=ruling, target="", reason=reason, marked=False, front_gate=True)
-        if ruling == "passed" and prior.get("status") != "delivered":      # a sender that sends nothing to front agents: before every rule below that would hold a line for one or give it a turn
+        if filed:
+            held_for = moved_from
+            ruling, target, reason = "held", "", f"held: front agent, the background agent {prior.get('target') or 'it was passed to'} could not be reached (rides its next turn, starts none)"
+            key_ = "reroute_from" if prior.get("reroute_from") else "idle_from"          # kept on the line: a ruling that fails to write holds again, it does not deliver
+            base.update({"ruling": ruling, "target": "", "reason": reason, "marked": False, "held_for": held_for, "hold": "fyi", key_: moved_from})
+        if ruling == "passed" and prior.get("status") != "delivered" and "switches_off" not in base:      # a sender that sends nothing to front agents: before every rule below that would hold a line for one or give it a turn
             from_, back_ = _front_reroute(n, target, aroot, cx)
             if back_ and base.get("source") == "fallback" and back_ == str(prior.get("target") or ""):      # the fallback after deliveries to the background agent, the ruling's own target, failed: held for the front agent, never delivered to it
-                if _file_for_front(n, ln, target):
+                if _file_for_front(n, ln, target, cx):
                     held_for = target
                     ruling, target, reason = "held", "", f"held: front agent, {from_} sends nothing to front agents and the background agent {back_} could not be reached (rides its next turn, starts none)"
                     base.update(ruling=ruling, target="", reason=reason, marked=False, held_for=held_for, hold="fyi", reroute_from=held_for)
-                else:
-                    reason = f"archived: {from_} sends nothing to front agents, and the background agent {back_} could not be reached or the line held for {target} (not delivered, not held)"
-                    ruling, target = "archived", ""
-                    base.update(ruling=ruling, target="", reason=reason, marked=False, front_gate=True)
+                else:          # nothing can be held for it: the fallback goes on as with the switches off
+                    base["switches_off"] = 0
             elif back_:
                 reason = f"{reason} ({from_} sends nothing to front agents: passed to the project's background agent {back_}, not to {target})"
                 base.update(target=back_, reason=reason, reroute_from=target)
@@ -1064,7 +1073,7 @@ def _act(n: dict[str, Any], key: str, root: str, ln: dict[str, Any], cx: "_route
             unmarked_front = not _must_see(n, ln, _body(n), cx, target)      # it keeps the mark when it also needs him (it names an open item of his), as a pass to a front agent always has
             base["reason"] = reason = f"{reason} (the result of work {target} handed over: a turn)"
         if ruling == "passed" and prior.get("status") != "delivered" and base.get("source") != "fallback" and not person_front and not result_front:      # a pass to a front agent with no need of the person: not marked, not a turn for him
-            act_, arg_ = _front_route(n, ln, target, aroot, cx)
+            act_, arg_ = _front_route(n, ln, target, aroot, cx, "switches_off" not in base)
             nameless = "the message names no open item of his; " if _is_session_message(n, _body(n)) and act_ in ("background", "archived", "hold") and not _must_see(n, ln, _body(n), cx, target) else ""      # a session's message reaches here with no item of his named, except a sibling's quoted words (held with one named): the reason line says so only for the first
             if act_ == "deliver":
                 unmarked_front = True
