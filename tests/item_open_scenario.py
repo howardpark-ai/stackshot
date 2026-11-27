@@ -16,7 +16,7 @@ condition gone; refresh and close with none open are no-ops; an open after a clo
 through client.py (one line on stdout, usage on misuse).
 
     tests/run-suite item_open        → exit 0 / 1"""
-import contextlib, io, json, os, re, socket, sys, pathlib, logging, threading, time
+import contextlib, datetime, io, json, os, re, socket, sys, pathlib, logging, threading, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="itemopentest-"); T = pathlib.Path(tmp)
@@ -435,7 +435,7 @@ check("a project with no front agent to keep the item: 409, nothing filed", st =
 st, e = isy("open", marker="plugin_sync:longsubj", subject="x" * 90)
 check("a subject over the limit is refused by the create tool's own gate, nothing filed", st == 400 and "Refused" in e["error"] and sync_open("plugin_sync:longsubj") == [] and len(items()) == ns1, (st, e))
 st, e = isy("open", marker="plugin_sync:longstep", step="y" * 400)
-check("a step over the limit is refused with the limit named and nothing is left half made: no open item, nothing filed", st == 400 and "at most 300" in e["error"] and sync_open("plugin_sync:longstep") == [] and len(items()) == ns1, (st, e))
+check("a step over the limit is refused with the limit named and nothing is left half made: no open item, nothing filed", st == 400 and "limit is 200" in e["error"] and sync_open("plugin_sync:longstep") == [] and len(items()) == ns1, (st, e))
 st, o_ = isy("open", marker="plugin_sync:front", then="home-sparrow-main")
 check("a front agent is taken as then as a background agent is", st == 200 and sr._session_label(item(o_["item"])["metadata"]["then"]) == "home-sparrow-main", (st, o_)); isy("close", marker="plugin_sync:front")
 st, o_ = isy("open", marker="plugin_sync:namestep", step="Oliver: press Sync")
@@ -539,21 +539,180 @@ check("rule 3: the step he last finished, sent again with no open step of his: l
 st, r3b = isy("open", marker="plugin_sync:rules", step=S3); settle()
 check("rule 1 after a finished step: a step that differs from the finished one is set, as his open step, and the item waits on him again", st == 200 and his_open(gr) == ["Oliver: " + S3] and item(gr)["metadata"].get("state") == "your-step" and ("Oliver: " + S2, "done") in steps_of(gr), (st, steps_of(gr)))
 
-# rule 4: his open step stands but the state write never happened (state not your-step): the step is set
-st, r4 = isy("open", marker="plugin_sync:rule4"); settle(); g4 = r4["item"]
-edit_meta(g4, lambda m_: (m_.__setitem__("state", "doing"), m_.__setitem__("step", "")))
-st, r4b = isy("open", marker="plugin_sync:rule4"); settle()
-check("rule 4: his open step with no state written is made whole by a repeat open: the state is your-step, the step set, one open step of his", st == 200 and r4b["repeat"] is True and item(g4)["metadata"].get("state") == "your-step" and his_open(g4) == ["Oliver: " + S1], (st, r4b, item(g4)["metadata"].get("state"), steps_of(g4)))
+# rule 4: a crash between the create and its state write: his step open on the checklist, no state, no step, no record of either
+def meta_of(g): return item(g)["metadata"]
+def forget(g, *keys): edit_meta(g, lambda m_: [m_.pop(k_, None) for k_ in keys])
+def opened(marker, **kw):
+    st_, r_ = isy("open", marker=marker, **kw); settle()
+    assert st_ == 200 and r_["action"] == "opened", (marker, st_, r_)
+    return r_["item"]
+def done(g): assert _answer_svc._answer(_model_ids._norm_id(g), "", "", "done") == "done", (g, meta_of(g)); settle()
+def note(g, words): _answer_svc._answer(_model_ids._norm_id(g), "", words, "note"); settle()
+def by_builder(g, **kw): _update_svc._update(_model_ids._norm_id(g), sender="home-sparrow-builder", **kw); settle()
+def is_waiting(g): return M.shown_waiting(item(g))
+runs = []
+def untouched(name, g, marker, step):
+    """a repeat open that writes the description and no step: everything else of the item is as it was"""
+    before, until_ = shape(g), meta_of(g).get("until"); runs.append(1); fact = f"- run {len(runs)} saw it"
+    st_, r_ = isy("open", marker=marker, step=step, description=[fact]); settle()
+    check(name, st_ == 200 and r_["action"] == "refreshed" and shape(g) == before and meta_of(g).get("until") == until_ and item(g)["description"].splitlines()[0] == fact, (st_, r_, before, shape(g), item(g)["description"]))
+def asks(name, g, marker, step):
+    """a repeat open that sets the step: his move again, the step open on the checklist"""
+    st_, r_ = isy("open", marker=marker, step=step); settle()
+    m_ = meta_of(g)
+    check(name, st_ == 200 and r_["action"] == "refreshed" and "Oliver: " + step in his_open(g) and m_.get("state") == "your-step" and m_.get("step") == step and M.derive(item(g)).mover == "Oliver", (st_, r_, steps_of(g), m_.get("state"), m_.get("step")))
 
-# a long step: over one line's limit it is refused before anything is written; the limit itself is kept
-st, rl = isy("open", marker="plugin_sync:long"); settle(); gl = rl["item"]
+g4 = opened("plugin_sync:rule4")
+forget(g4, "state", "step", "owner_step", "item_sync_step")
+check("rule 4 setup: the item a crash leaves: his step open, no state", his_open(g4) == ["Oliver: " + S1] and not meta_of(g4).get("state"), (steps_of(g4), meta_of(g4)))
+asks("rule 4: his open step with no state written is made whole by a repeat open: the state is your-step, the step set", g4, "plugin_sync:rule4", S1)
+check("rule 4: ...with one open step of his", his_open(g4) == ["Oliver: " + S1], steps_of(g4))
+isy("close", marker="plugin_sync:rule4")
+
+# an earlier finished step that is not the last one set is a change: it is asked again
+done(gr)
+asks("a step finished before the last one set differs from it: set again", gr, "plugin_sync:rules", S2)
+isy("close", marker="plugin_sync:rules")
+
+# a note of his that parks the item: nothing is written onto it while it waits; what the park dropped is not new, a newer step is set after the wait
+from stackshot.service import wakes as _wakes_svc
+def wake_all():
+    _wakes_svc.wake_pass(now=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30)); settle()
+for i_, words in enumerate(("I'll do it tomorrow evening", "I'll do it next week", "I'll do it on Friday")):
+    mk = f"plugin_sync:park{i_}"; g_ = opened(mk)
+    note(g_, words)
+    check(f"parked setup ({words}): the item waits, no step of his is open, his step is dropped", is_waiting(g_) and his_open(g_) == [] and ("Oliver: " + S1, "dropped") in steps_of(g_) and meta_of(g_).get("until"), (meta_of(g_), steps_of(g_)))
+    untouched(f"parked ({words}): the same step again writes no step", g_, mk, S1)
+    untouched(f"parked ({words}): a newer step writes no step onto the waiting item", g_, mk, S2)
+    wake_all()
+    check(f"parked ({words}): the wake ends the wait", not is_waiting(g_) and meta_of(g_).get("state") != "your-step", meta_of(g_))
+    untouched(f"after the wait ({words}): the step the park dropped is not new", g_, mk, S1)
+    asks(f"after the wait ({words}): the next send that differs sets it", g_, mk, S2)
+    isy("close", marker=mk)
+
+# a session's wait on a date, and on another item
+def day(n): return (datetime.date.today() + datetime.timedelta(days=n)).isoformat()
+g_ = opened("plugin_sync:hold")
+by_builder(g_, wait_kind="time", wake=day(20), wait_basis=f"the vendor ships the fix on {day(20)}")
+check("hold setup: a session's dated wait: the item reads as waiting", is_waiting(g_), meta_of(g_))
+untouched("a newer step on a builder's hold writes no step", g_, "plugin_sync:hold", S2)
+wake_all()
+check("hold: the wake ends the wait", not is_waiting(g_), meta_of(g_))
+asks("after the hold the newer step is set", g_, "plugin_sync:hold", S2)
+isy("close", marker="plugin_sync:hold")
+g_, blocker = opened("plugin_sync:blocked"), opened("plugin_sync:blocker")
+by_builder(g_, wait_kind="item", after=[blocker])
+check("blocked setup: a wait on another item: the item reads as waiting", is_waiting(g_), meta_of(g_))
+untouched("a newer step on a blocked item writes no step", g_, "plugin_sync:blocked", S2)
+isy("close", marker="plugin_sync:blocker"); settle(); wake_all()
+check("blocked: the other item's close ends the wait", not is_waiting(g_), meta_of(g_))
+asks("after the blocker closed the newer step is set", g_, "plugin_sync:blocked", S2)
+isy("close", marker="plugin_sync:blocked")
+
+# work the board shows as waiting though it is stored as doing (a dated wait with its basis)
+g_ = opened("plugin_sync:dated")
+def dated_(m_):
+    for k_ in ("step", "owner_step", "phase", "waits_on"): m_.pop(k_, None)
+    m_.update(state="doing", mover="home-sparrow-builder", needs=["home-sparrow-builder"], wake=day(5), wait_basis={"text": f"the nightly run ends {day(5)}", "wake": day(5)})
+edit_meta(g_, dated_)
+check("dated setup: stored as doing, shown as waiting", M.derive(item(g_)).state == M.ALIVE and is_waiting(g_), (M.derive(item(g_)).state, meta_of(g_)))
+st, r_ = isy("open", marker="plugin_sync:dated", step=S2); settle()
+check("a newer step on an item shown as waiting writes no step", st == 200 and meta_of(g_).get("state") == "doing" and "Oliver: " + S2 not in [t for t, _s in steps_of(g_)], (st, meta_of(g_), steps_of(g_)))
+isy("close", marker="plugin_sync:dated")
+
+# arrows: a step that holds one is itself; a shorter step is another step
+A1, A0 = "open Settings → Plugins and press Sync", "open Settings"
+for tag, answer_it in (("done", done), ("note", lambda g: note(g, "it still shows the old version"))):
+    for legacy in (False, True):
+        mk = f"plugin_sync:arrow-{tag}-{int(legacy)}"; g_ = opened(mk, step=A1); label = f"arrow step, {tag}{', an item with no record of the step' if legacy else ''}"
+        answer_it(g_)
+        check(f"{label}: setup: his step is finished", his_open(g_) == [] and any(s_ == "done" and t.startswith("Oliver: " + A1) for t, s_ in steps_of(g_)) and (tag == "done" or any('→ "it still' in t for t, _s in steps_of(g_))), steps_of(g_))
+        if legacy: forget(g_, "item_sync_step")
+        untouched(f"{label}: the same words again ask nothing", g_, mk, A1)
+        asks(f"{label}: a newer, shorter step is set", g_, mk, A0)
+        isy("close", marker=mk)
+g_ = opened("plugin_sync:oldpark"); note(g_, "I'll do it next week"); forget(g_, "item_sync_step"); wake_all()
+untouched("an item with no record: the step a park dropped is not new", g_, "plugin_sync:oldpark", S1)
+asks("an item with no record: a newer step is set", g_, "plugin_sync:oldpark", S2)
+isy("close", marker="plugin_sync:oldpark")
+
+# the last step set is not the last one on the checklist
+NOTES = "read the release notes"
+g_ = opened("plugin_sync:together")
+by_builder(g_, next="Oliver: " + NOTES)
+check("setup: his step and a session's step for him are both open", sorted(his_open(g_)) == sorted(["Oliver: " + S1, "Oliver: " + NOTES]), steps_of(g_))
+done(g_)
+check("setup: one Done ticks both, the route's step not the last", [t for t, s_ in steps_of(g_) if s_ == "done"][-1:] == ["Oliver: " + NOTES] and ("Oliver: " + S1, "done") in steps_of(g_), steps_of(g_))
+untouched("one Done ticked his step and a session's: the same step again asks nothing", g_, "plugin_sync:together", S1)
+isy("close", marker="plugin_sync:together")
+ASK = "Decide: keep the old version · Recommend: yes · Stakes: none · By: no date"
+for legacy in (False, True):
+    kind_ = " (an item with no record of the step)" if legacy else ""
+    mk = f"plugin_sync:later{int(legacy)}"; g_ = opened(mk); done(g_)
+    if legacy: forget(g_, "item_sync_step")
+    by_builder(g_, needs=["decision"], ask=ASK)
+    untouched(f"after Done, a decision ask open{kind_}: the same step is not reopened", g_, mk, S1)
+    _answer_svc._answer(_model_ids._norm_id(g_), "Yes", "", "answer"); settle()
+    check(f"setup: he answered the later decision{kind_}", not meta_of(g_).get("ask") and [t for t, s_ in steps_of(g_) if s_ == "done"][-1] != "Oliver: " + S1, (meta_of(g_), steps_of(g_)))
+    untouched(f"after a later decision{kind_}: the same step asks nothing", g_, mk, S1)
+    isy("close", marker=mk)
+    mk = f"plugin_sync:session{int(legacy)}"; g_ = opened(mk); done(g_)
+    if legacy: forget(g_, "item_sync_step")
+    by_builder(g_, next="home-sparrow-builder: watch the sync\nOliver: " + NOTES)
+    check(f"setup: a session's step for him open after Done{kind_}", his_open(g_) == ["Oliver: " + NOTES], (meta_of(g_), steps_of(g_)))
+    untouched(f"after Done, a session's step for him open{kind_}: the same step is not reopened", g_, mk, S1)
+    isy("close", marker=mk)
+
+# the step sent is open already (a session wrote it): nothing is written, and it counts as the route's from then on
+g_ = opened("plugin_sync:stands")
+by_builder(g_, next="Oliver: " + S2)
+check("setup: a session's step for him, the same words as the next send, is open", "Oliver: " + S2 in his_open(g_), steps_of(g_))
+untouched("the step sent is open on him already: no step is written", g_, "plugin_sync:stands", S2)
+done(g_)
+untouched("...and after his Done the same words ask nothing", g_, "plugin_sync:stands", S2)
+isy("close", marker="plugin_sync:stands")
+g_ = opened("plugin_sync:beside")
+by_builder(g_, next="Oliver: " + NOTES)
+asks("a newer step beside a session's step for him is set", g_, "plugin_sync:beside", S2)
+check("...it replaces the route's old step and leaves the session's open", sorted(his_open(g_)) == sorted(["Oliver: " + S2, "Oliver: " + NOTES]), steps_of(g_))
+isy("close", marker="plugin_sync:beside")
+
+# an open step on an item that is not half made is left alone: it stores a state (an item with no record), or the record (an item with no state)
+for name, tag, keys, state_ in (("a stored state and no record", "stated", ("step", "item_sync_step"), "doing"), ("the record and no state", "recorded", ("step", "state"), "")):
+    mk = f"plugin_sync:whole-{tag}"; g_ = opened(mk)
+    forget(g_, *keys)
+    if state_: edit_meta(g_, lambda m_: m_.__setitem__("state", state_))
+    check(f"setup ({name}): his step is open", his_open(g_) == ["Oliver: " + S1], (meta_of(g_), steps_of(g_)))
+    st, r_ = isy("open", marker=mk); settle()
+    check(f"his open step on an item with {name}: the same step writes no state", st == 200 and meta_of(g_).get("state") != "your-step" and not meta_of(g_).get("step"), (st, meta_of(g_), steps_of(g_)))
+    isy("close", marker=mk)
+
+# none, clear and - are no step: a repeat open withdraws nothing
+g_ = opened("plugin_sync:nostep")
+for word in ("none", "None", "clear", "-", "Oliver: none", "Oliver: -"):
+    untouched(f"a repeat open with the step {word!r} changes no step", g_, "plugin_sync:nostep", word)
+
+# a step the board's step gates refuse: neither the description nor the step is written
+before_, before_d = shape(g_), item(g_)["description"]
+st, e_g = isy("open", marker="plugin_sync:nostep", step="run `systemctl restart demo` on the host", description=["- must not be written"]); settle()
+check("a repeat open with a step a step gate refuses: 400, description and step unchanged", st == 400 and "step" in e_g["error"] and shape(g_) == before_ and item(g_)["description"] == before_d, (st, e_g, item(g_)["description"]))
+isy("close", marker="plugin_sync:nostep")
+
+# one limit for a first and a repeat open, checked before anything is written
+gl = opened("plugin_sync:long")
 before_d = item(gl)["description"]; before_s = steps_of(gl)
-long_step = "run the long sync " + "x" * 290
-st, e_l = isy("open", marker="plugin_sync:long", step=long_step); settle()
-check("a step over the limit on a repeat open is refused with the limit named; the description and steps are unchanged", st == 400 and "at most 300" in e_l["error"] and item(gl)["description"] == before_d and steps_of(gl) == before_s, (st, e_l))
-edge = "Press Sync " + "y" * 289
-st, r_e = isy("open", marker="plugin_sync:long", step=edge); settle()
-check("a step of exactly the limit (300 characters) on a repeat open is set", st == 200 and his_open(gl) == ["Oliver: " + edge] and len(edge) == 300, (st, steps_of(gl)))
+over, edge = "Press Sync " + "x" * 190, "Press Sync " + "y" * 189
+long_link = "Press Sync on [the page](https://example.com/" + "p" * 300 + ")"
+for name, step_, needle in (("over the next line's limit", over, "limit is 200"), ("with a link, over the step's own limit", long_link, "at most 300")):
+    st, e_l = isy("open", marker="plugin_sync:long", step=step_, description=["- must not be written"]); settle()
+    check(f"a step {name} on a repeat open is refused with the limit named; the description and steps are unchanged", st == 400 and needle in e_l["error"] and item(gl)["description"] == before_d and steps_of(gl) == before_s, (st, e_l))
+    n_ = len(items()); st, e_f = isy("open", marker="plugin_sync:long-first", step=step_)
+    check(f"a step {name} on a first open is refused the same way, nothing filed", st == 400 and needle in e_f["error"] and len(items()) == n_ and sync_open("plugin_sync:long-first") == [], (st, e_f))
+check("setup: the steps at and over the limit", len(edge) == 200 and len(over) == 201)
+asks("a step of exactly the limit (200 characters) on a repeat open is set", gl, "plugin_sync:long", edge)
+ge = opened("plugin_sync:long-edge", step=edge)
+check("a step of exactly the limit on a first open is filed", his_open(ge) == ["Oliver: " + edge], steps_of(ge))
+isy("close", marker="plugin_sync:long-edge")
 
 # a step with ';' sent twice: set the first time, left alone the second
 semi = "run the sync; then press Sync; confirm the version"
