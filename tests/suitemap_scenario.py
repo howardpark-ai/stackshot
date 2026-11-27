@@ -2026,11 +2026,11 @@ check("suitemap-refresh.yml, fresh: true only for a scheduled run whose matched 
       all(r == (0, [want]) for r, want in fcases.values()), {k: v[0] for k, v in fcases.items()})
 check("fetch reads the refresh workflow's runs: the file `suitemap.py fetch` names is the file that exists and the name test-trim's report passes to gh is its basename",
       os.path.basename(sm.CI_WORKFLOW) == "suitemap-refresh.yml" and "suitemap-refresh.yml" in open(os.path.join(SCR, "..", "tools", "test_trim_report.py"), encoding="utf-8").read(), None)
-# every cache restore of the suite map reads the newest entry: key suitemap-newest, restore-keys suitemap-. The skip logic reads the commit off the matched key (suitemap-<commit>-<run id>),
+# every cache restore of the suite map (an actions/cache/restore step, and an actions/cache step, which restores too) reads the newest entry: key suitemap-newest, restore-keys suitemap-. The skip logic reads the commit off the matched key (suitemap-<commit>-<run id>),
 # so the prefix is pinned here; a restore with another key or prefix would read an unrelated entry and be taken for this commit's map.
 def map_restores(wf):
     jobs = yaml.safe_load(open(os.path.join(SCR, "..", ".github", "workflows", wf), encoding="utf-8"))["jobs"].values()
-    return [s.get("with", {}) for j in jobs for s in j.get("steps", []) if str(s.get("uses", "")).startswith("actions/cache/restore") and "suitemap" in str(s.get("with", {}).get("path", ""))]
+    return [s.get("with", {}) for j in jobs for s in j.get("steps", []) if re.match(r"actions/cache(/restore)?@", str(s.get("uses", ""))) and "suitemap" in str(s.get("with", {}).get("path", ""))]
 MAP_RESTORES = {wf: map_restores(wf) for wf in ("suitemap-refresh.yml", "tests.yml")}
 check("the suite map's cache restores in suitemap-refresh.yml and tests.yml: each file has one, and every one is key suitemap-newest with restore-keys suitemap-",
       all(ws and all(w.get("key") == "suitemap-newest" and w.get("restore-keys") == "suitemap-" for w in ws) for ws in MAP_RESTORES.values()),
