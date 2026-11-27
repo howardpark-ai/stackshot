@@ -23,7 +23,7 @@ whose `started` is two hours old or more is a crashed run, not a running one: it
     audit.py run [--dry-run]  one script-mode run now (audit_run.py), refused (exit 1) while a run is in progress, when [audit] enabled is false or when the mode is "agent"; --dry-run lists
                               the field findings and the suspects, makes no model call, sends nothing, writes no record, and is never refused
     audit.py status           print GET /audit/status's JSON
-    audit.py scan [--dry-run] the rulebook scan (tools/rulebook_scan.py): the instruction files sessions read are checked for
+    audit.py scan [--weekly] [--dry-run] the rulebook scan (tools/rulebook_scan.py): the instruction files sessions read are checked for
                               stackshot tools, parameters, sala verbs and flags and retired terms that no longer exist, and each file's keeper gets
                               one note (a message through client.py, as a script's message); [rulebook_scan] enabled gates it, --dry-run only prints.
                               The timer's unit runs tools/rulebook_scan.py run --weekly just after the cue (ExecStartPost: after the run and its page checks; its failure never fails the unit); --weekly scans only in the first run of each Monday-to-Sunday week.
@@ -346,7 +346,7 @@ def main(argv: list[str]) -> int:
         return registry_report.main(argv[1:])
     if argv[:1] == ["orphans"] and set(argv[1:]) <= {"--apply"}:
         return orphans("--apply" in argv)
-    print("usage: audit.py cue <reason> | run [--dry-run] | status | scan [--dry-run] | refusals [--dry-run] [--force] [--week DATE] | catches [--dry-run] [--force] [--day DATE] | next-check [--line|--json] | board-check [--line|--json] | page-agents [--line|--json] | registry [--line|--json] | orphans [--apply]", file=sys.stderr)
+    print("usage: audit.py cue <reason> | run [--dry-run] | status | scan [--weekly] [--dry-run] | refusals [--dry-run] [--force] [--week DATE] | catches [--dry-run] [--force] [--day DATE] | next-check [--line|--json] | board-check [--line|--json] | page-agents [--line|--json] | registry [--line|--json] | orphans [--apply]", file=sys.stderr)
     return 2
 
 

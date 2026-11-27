@@ -188,7 +188,7 @@ st = json.loads(ST.read_text()); check("the state file keeps, per file, the keys
 
 sent.clear()
 r = rs.run(CFG, deliver=deliver, state=ST, today="Wed Oct 28th", **SRC)
-check("no repeat: the same unchanged findings the next night send nothing", sent == [] and r["sent"] == [] and len(r["quiet"]) == 3, (sent, r["quiet"]))
+check("no repeat: the same unchanged findings at the next scan send nothing", sent == [] and r["sent"] == [] and len(r["quiet"]) == 3, (sent, r["quiet"]))
 
 RULES.write_text(RULES.read_text() + 'four `get(item_id="x", wake="y")`\n', encoding="utf-8")        # one new stale mention, on a new line
 r = rs.run(CFG, deliver=deliver, state=ST, today="Thu Oct 29th", **SRC)
@@ -216,7 +216,7 @@ r = rs.run(CFG, deliver=deliver, state=ST, today="Tue Nov 3rd", **SRC)
 check("a delivery that fails is not recorded: it is reported and not counted as sent", len(sent) == 1 and r["held"] == [str(ROLE)] and any("not delivered to heron-engineer" in x for x in r["notes"]), (r["held"], r["notes"]))
 ok[0] = True; sent.clear()
 r = rs.run(CFG, deliver=deliver, state=ST, today="Wed Nov 4th", **SRC)
-check("…and tried again the next night: the finding the failed night had, with the older one counted", len(sent) == 1 and sent[0][1].count("\nL") == 1 and "1 earlier finding " in sent[0][1] and r["held"] == [], sent)
+check("…and tried again at the next scan: the finding the failed scan had, with the older one counted", len(sent) == 1 and sent[0][1].count("\nL") == 1 and "1 earlier finding " in sent[0][1] and r["held"] == [], sent)
 sent.clear()
 
 r = rs.run(CFG, dry=True, deliver=deliver, state=T / "dry.json", **SRC); ROLE.write_text('clean\n', encoding="utf-8")
@@ -233,19 +233,19 @@ r = rs.run(CFG, deliver=deliver, state=ST, today="Thu Nov 5th", **SRC)
 check("with no state file everything is new: notes for the files with findings", len(sent) == 2 and not any("earlier" in s[1] for s in sent), [s[1][:60] for s in sent])
 sent.clear()
 
-# ---- 4b. an unreadable sala help between two good nights: one send in total
+# ---- 4b. an unreadable sala help between two good scans: one send in total
 empty = T / "empty.txt"; empty.write_text("")
 X = T / "x" / "X.md"; X.parent.mkdir(); X.write_text('a stale flag `sala spawn --nonsense` and a stale param `update(item_id="a", owner="b")`\n', encoding="utf-8")
 CX = dict(CFG, files=[{"glob": str(X), "keeper": "heron-engineer"}]); XS = T / "x-sent.json"
 sent.clear()
 rs.run(CX, deliver=deliver, state=XS, today="Mon Nov 9th", **SRC)
-check("help gap: the first good night sends its one note, with both findings", len(sent) == 1 and sent[0][1].count("\nL") == 2, sent)
+check("help gap: the first good scan sends its one note, with both findings", len(sent) == 1 and sent[0][1].count("\nL") == 2, sent)
 sent.clear()
 r = rs.run(CX, deliver=deliver, state=XS, today="Tue Nov 10th", **{**SRC, "help_main": empty, "help_op": empty})
 st = json.loads(XS.read_text())
-check("…a night with `sala --help` empty sends nothing and keeps the earlier night's verb and flag keys", sent == [] and any(k.startswith("flag|") for k in st[str(X)]["keys"]) and any(k.startswith("param|") for k in st[str(X)]["keys"]), st)
+check("…a scan with `sala --help` empty sends nothing and keeps the earlier scan's verb and flag keys", sent == [] and any(k.startswith("flag|") for k in st[str(X)]["keys"]) and any(k.startswith("param|") for k in st[str(X)]["keys"]), st)
 r = rs.run(CX, deliver=deliver, state=XS, today="Wed Nov 11th", **SRC)
-check("…and the next good night does not send them again: one send in total", sent == [] and len(st[str(X)]["keys"]) == 2 and r["quiet"] == [str(X)], (sent, r["quiet"]))
+check("…and the next good scan does not send them again: one send in total", sent == [] and len(st[str(X)]["keys"]) == 2 and r["quiet"] == [str(X)], (sent, r["quiet"]))
 XO = dict(CX, help_verbs=["op"])
 sent.clear()
 # only the op help empty (sala op --help asked for and not read): the same
@@ -257,7 +257,7 @@ r = rs.run(XO, deliver=deliver, state=XS, today="Thu Nov 12th", schema=T / "sche
 check("…and an empty `sala op --help` (asked for) is the same: nothing sent, the keys kept", sent == [] and any("op --help gave nothing" in x for x in r["notes"]) and len(json.loads(XS.read_text())[str(X)]["keys"]) == 2, (sent, r["notes"]))
 rs.run_help = lambda sala, verb="": HELP if not verb else OPHELP
 r = rs.run(XO, deliver=deliver, state=XS, today="Fri Nov 13th", schema=T / "schema.json")
-check("…then a good night with both helps read: still nothing new", sent == [] and r["quiet"] == [str(X)], (sent, r["quiet"]))
+check("…then a good scan with both helps read: still nothing new", sent == [] and r["quiet"] == [str(X)], (sent, r["quiet"]))
 rs.find_sala = _real_find_sala
 rs.run_help = _REAL_RUN_HELP
 
@@ -283,17 +283,17 @@ rp = rs.run(CP, deliver=deliver, state=XP, today="Sun Nov 15th", schema=T / "sch
 check("4b2 a sala that exists is run: its help is read, the stale flag is found and sent, and no sala line is skipped", not any("skipped" in n for n in rp["notes"]) and len(sent) == 1 and "--nonsense" in sent[0][1], (rp["notes"], sent))
 sent.clear()
 
-# ---- 4c. the first failed delivery ends the sending; the rest hold for the next night
+# ---- 4c. the first failed delivery ends the sending; the rest hold for the next scan
 Y1 = T / "y" / "Y1.md"; Y2 = T / "y" / "Y2.md"; Y1.parent.mkdir()
 Y1.write_text('`update(item_id="a", owner="b")`\n', encoding="utf-8"); Y2.write_text('`update(item_id="a", owner="c")`\n', encoding="utf-8")
 CY = dict(CFG, files=[{"glob": str(T / "y" / "*.md"), "keeper": "heron-engineer"}]); YS = T / "y-sent.json"
 sent.clear(); ok[0] = False
 r = rs.run(CY, deliver=deliver, state=YS, today="Mon Nov 23rd", **SRC)
-check("a failed delivery ends the night's sending: one attempt, the other file held and not tried", len(sent) == 1 and sorted(map(os.path.basename, r["held"])) == ["Y1.md", "Y2.md"], (sent, r["held"]))
+check("a failed delivery ends the scan's sending: one attempt, the other file held and not tried", len(sent) == 1 and sorted(map(os.path.basename, r["held"])) == ["Y1.md", "Y2.md"], (sent, r["held"]))
 check("…and said so", any("held for the next scan" in x for x in r["notes"]), r["notes"])
 sent.clear(); ok[0] = True
 r = rs.run(CY, deliver=deliver, state=YS, today="Tue Nov 24th", **SRC)
-check("…the next night sends both", len(sent) == 2 and r["held"] == [], sent)
+check("…the next scan sends both", len(sent) == 2 and r["held"] == [], sent)
 
 # ---- 4d. a dry run makes no directory
 check("no state directory is made by asking for the state file's path or by a dry run", not (T / "state" / "rulebook-scan").exists() and rs.state_file().parent == T / "state" / "rulebook-scan")
@@ -334,7 +334,7 @@ check("audit.py scan --dry-run is the same scan", rc == 0 and "L1 · update(…o
 rc, out, err = cli("run", "--bogus")
 check("CLI: an option it does not know: usage, exit 2", rc == 2 and "usage" in err, (rc, err))
 rc, out, err = cli("bogus", script="stackshot/audit/audit.py")
-check("audit.py's usage names scan", rc == 2 and "scan [--dry-run]" in err, err)
+check("audit.py's usage names scan", rc == 2 and "scan [--weekly] [--dry-run]" in err, err)
 # ---- 7. once a week: the unit's runs of one Monday-to-Sunday week scan once
 import datetime as _dt, threading
 from zoneinfo import ZoneInfo
@@ -366,6 +366,34 @@ ths = [threading.Thread(target=_go) for _ in range(8)]
 [t.start() for t in ths]; [t.join() for t in ths]
 check("weekly, concurrent runs of one week: exactly one scans and sends, the others skip, the week file is whole JSON",
       sum(x is not None for x in outs) == 1 and len(cnt) == 1 and json.loads(WF2.read_text()) == {"week": "2026-W60"} and not list(WF2.parent.glob("*.tmp")), (len(outs), cnt))
+# a scan blind to sala (its help unreadable: the sala checks were skipped) leaves the week open
+WF3 = WD / "blind" / "last-week.json"
+rb = rs.run_weekly(CW, week="2026-W61", wfile=WF3, deliver=deliver, state=WD / "s4.json", **{**SRC, "help_main": empty, "help_op": empty})
+check("weekly: a scan blind to sala (help unreadable) does not record the week", rb is not None and rb["blind"] is True and not WF3.exists(), rb)
+rb2 = rs.run_weekly(CW, week="2026-W61", wfile=WF3, deliver=deliver, state=WD / "s4.json", **SRC)
+check("weekly: …the next run scans again, and a good read records the week", rb2 is not None and rb2["blind"] is False and json.loads(WF3.read_text()) == {"week": "2026-W61"}, rb2)
+# a missing or damaged week file reads as no scan this week; the scan then writes a whole one
+for label, body in (("damaged", "{not json"), ("empty", ""), ("a list", "[]"), ("a number for the week", '{"week": 5}')):
+    WF4 = WD / "dmg" / "last-week.json"; WF4.parent.mkdir(exist_ok=True); WF4.write_text(body, encoding="utf-8")
+    rx = rs.run_weekly(CW, week="2026-W62", wfile=WF4, deliver=deliver, state=WD / "s5.json", **SRC)
+    check(f"weekly: a week file that is {label} scans, then holds the week", rx is not None and json.loads(WF4.read_text()) == {"week": "2026-W62"}, (label, rx))
+WF5 = WD / "fresh" / "last-week.json"
+rx = rs.run_weekly(CW, week="2026-W62", wfile=WF5, deliver=deliver, state=WD / "s5.json", **SRC)
+check("weekly: no week file (and no folder) scans and makes both", rx is not None and json.loads(WF5.read_text()) == {"week": "2026-W62"})
+# the week key: zero-padded, ISO year at the year's end, the instance timezone when none is given
+check("this_week: the week number is zero-padded", rs.this_week(_dt.datetime(2026, 1, 29, 12, 0, tzinfo=ZoneInfo("Asia/Dubai"))) == "2026-W05")
+check("this_week: the year boundary follows the ISO week (2026 has a week 53; its first Monday of 2027 is week 1)",
+      rs.this_week(_dt.datetime(2026, 12, 31, 12, 0, tzinfo=ZoneInfo("Asia/Dubai"))) == "2026-W53" and rs.this_week(_dt.datetime(2027, 1, 3, 23, 59, tzinfo=ZoneInfo("Asia/Dubai"))) == "2026-W53"
+      and rs.this_week(_dt.datetime(2027, 1, 4, 0, 0, tzinfo=ZoneInfo("Asia/Dubai"))) == "2027-W01")
+rc53 = rs.run_weekly(CW, week="2026-W53", wfile=WF5, deliver=deliver, state=WD / "s5.json", **SRC)
+rc01 = rs.run_weekly(CW, week="2027-W01", wfile=WF5, deliver=deliver, state=WD / "s5.json", **SRC)
+rc01b = rs.run_weekly(CW, week="2027-W01", wfile=WF5, deliver=deliver, state=WD / "s5.json", **SRC)
+check("weekly: the last week of a year and the first of the next are two scans, each once", rc53 is not None and rc01 is not None and rc01b is None and json.loads(WF5.read_text()) == {"week": "2027-W01"})
+_tzcalls = []; _real_tz = rs._cfg.tz
+rs._cfg.tz = lambda: (_tzcalls.append(1), ZoneInfo("Pacific/Kiritimati"))[1]
+try: _wk = rs.this_week()
+finally: rs._cfg.tz = _real_tz
+check("this_week: with no time given it is now in the instance timezone", _tzcalls == [1] and _wk == rs.this_week(_dt.datetime.now(ZoneInfo("Pacific/Kiritimati"))), (_tzcalls, _wk))
 # the CLI: --weekly
 RULES.write_text('nothing stale here\n', encoding="utf-8")
 rc, out, err = cli("run", "--weekly", *srcs)
@@ -374,6 +402,10 @@ rc, out, err = cli("run", "--weekly", *srcs)
 check("CLI: --weekly again in the same week skips with one line, exit 0", rc == 0 and "already scanned in week" in out and "files," not in out, (rc, out[:300], err[:300]))
 rc, out, err = cli("run", *srcs)
 check("CLI: a run without --weekly always scans", rc == 0 and "files," in out, (rc, out[:300], err[:300]))
+_lw = T / "state/rulebook-scan/last-week.json"; _before = _lw.read_text()
+RULES.write_text('one `update(item_id="board#9", owner="x")`\n', encoding="utf-8")
+rc, out, err = cli("run", "--weekly", "--dry-run", *srcs)
+check("CLI: --weekly with --dry-run is a real dry scan even in a week already scanned, and records nothing", rc == 0 and "dry run" in out and "L1 · update(" in out and "already scanned" not in out and _lw.read_text() == _before, (rc, out[:300], err[:300]))
 
 unit = pathlib.Path(STACK, "units/stackshot-audit.service.in").read_text(encoding="utf-8")
 check("the timer's unit runs the scan after the run (ExecStartPost), once a week (--weekly), and a failed scan never fails the unit",

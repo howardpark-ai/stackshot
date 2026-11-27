@@ -6,7 +6,7 @@ tools moved to `mover`, and nothing would catch it. Tokenless: no model call, no
     audit.py scan [--dry-run]                          the same, from the audit's own entry point
     --weekly                                           scan only if no scan has finished in this Monday-to-Sunday week (instance timezone); the unit's line.
                                                        <paths.state>/rulebook-scan/last-week.json keeps the week of the last finished scan (a scan with a note
-                                                       not delivered does not count, so the next run tries again); a run with no --weekly always scans
+                                                       not delivered, or blind to sala because its help was unreadable, does not count, so the next run tries again); a run with no --weekly always scans
 
 What it reads ([rulebook_scan] in stackshot.toml; every path and every keeper is a config value; with no `files` table nothing is scanned):
     files           [[rulebook_scan.files]] glob + keeper, one table per set of files (a rulebook, the role briefs, the skills of a plugin's
@@ -582,7 +582,7 @@ def run(cfg: dict[str, Any] | None = None, *, dry: bool = False, deliver: Delive
         **sources: Path | None) -> dict[str, Any]:
     """Scan, group per file, send the new findings of each file to its keeper once (a sala flag or verb that sala's code takes goes, as one more
     note of that file, to sala's keeper as a help-text gap). The first delivery that fails ends the sending: the rest hold for the next scan.
-    → {"files": n, "findings": n, "sent": [file…], "held": [file…] (not delivered), "quiet": [file…] (nothing new), "notes": [...]}."""
+    → {"files": n, "blind": sala's help was unreadable, "findings": n, "sent": [file…], "held": [file…] (not delivered), "quiet": [file…] (nothing new), "notes": [...]}."""
     cfg = cfg or settings()
     found, keepers, notes, help_ok = scan_all(cfg, **sources)
     sf = state or state_file()
@@ -594,7 +594,7 @@ def run(cfg: dict[str, Any] | None = None, *, dry: bool = False, deliver: Delive
     today = today or _local_date(dt.datetime.now(_cfg.tz()))
     lib, sala_keeper = cfg.get("sala_lib") or Path(os.path.expanduser(SALA_LIB)), cfg.get("sala_keeper") or SALA_KEEPER
     res: dict[str, Any] = {"files": len(keepers), "findings": sum(len(v) for v in found.values()), "sent": [], "held": [], "quiet": [], "notes": notes,
-                           "found": found, "gap": {path: [f.key for f in fs if code_takes(f, lib)] for path, fs in found.items()}, "gap_to": sala_keeper}
+                           "blind": not help_ok, "found": found, "gap": {path: [f.key for f in fs if code_takes(f, lib)] for path, fs in found.items()}, "gap_to": sala_keeper}
     nstate: dict[str, Any] = {}          # a file with nothing left forgets what it sent
     stopped = False
     for path, fs in found.items():
@@ -669,7 +669,7 @@ def run_weekly(cfg: dict[str, Any] | None = None, *, week: str = "", wfile: Path
         if done == wk:
             return None
         res = run(cfg, **kw)
-        if not res["held"] and not kw.get("dry"):
+        if not res["held"] and not res["blind"] and not kw.get("dry"):      # a scan blind to sala (its help unreadable) skipped the sala checks: the week stays open, the next run tries again
             tmp = wf.with_name(f"{wf.name}.{os.getpid()}.tmp")
             tmp.write_text(json.dumps({"week": wk}), encoding="utf-8")
             os.replace(tmp, wf)

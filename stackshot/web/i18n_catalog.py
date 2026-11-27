@@ -186,7 +186,7 @@ CATALOG: dict[str, str] = {
     "audit.pace.run": "each run",
     "audit.pace.passes": "with the passes",
     "audit.pace.run_last": "each run, last",
-    "audit.pace.after_run": "after each run",
+    "audit.pace.weekly": "weekly",
     "audit.pace.pr": "every PR",
     "audit.mode.shadow": "shadow",
     "audit.mode.off": "off",
