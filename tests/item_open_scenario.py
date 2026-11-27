@@ -435,7 +435,7 @@ check("a project with no front agent to keep the item: 409, nothing filed", st =
 st, e = isy("open", marker="plugin_sync:longsubj", subject="x" * 90)
 check("a subject over the limit is refused by the create tool's own gate, nothing filed", st == 400 and "Refused" in e["error"] and sync_open("plugin_sync:longsubj") == [] and len(items()) == ns1, (st, e))
 st, e = isy("open", marker="plugin_sync:longstep", step="y" * 400)
-check("a step over the limit is refused with the board's text and nothing is left half made: no open item, nothing filed", st == 400 and "Refused" in e["error"] and sync_open("plugin_sync:longstep") == [] and len(items()) == ns1, (st, e))
+check("a step over the limit is refused with the limit named and nothing is left half made: no open item, nothing filed", st == 400 and "at most 300" in e["error"] and sync_open("plugin_sync:longstep") == [] and len(items()) == ns1, (st, e))
 st, o_ = isy("open", marker="plugin_sync:front", then="home-sparrow-main")
 check("a front agent is taken as then as a background agent is", st == 200 and sr._session_label(item(o_["item"])["metadata"]["then"]) == "home-sparrow-main", (st, o_)); isy("close", marker="plugin_sync:front")
 st, o_ = isy("open", marker="plugin_sync:namestep", step="Oliver: press Sync")
@@ -551,7 +551,7 @@ before_d = item(gl)["description"]; before_s = steps_of(gl)
 long_step = "run the long sync " + "x" * 290
 st, e_l = isy("open", marker="plugin_sync:long", step=long_step); settle()
 check("a step over the limit on a repeat open is refused with the limit named; the description and steps are unchanged", st == 400 and "at most 300" in e_l["error"] and item(gl)["description"] == before_d and steps_of(gl) == before_s, (st, e_l))
-edge = "Press Sync " + "y" * 290
+edge = "Press Sync " + "y" * 289
 st, r_e = isy("open", marker="plugin_sync:long", step=edge); settle()
 check("a step of exactly the limit (300 characters) on a repeat open is set", st == 200 and his_open(gl) == ["Oliver: " + edge] and len(edge) == 300, (st, steps_of(gl)))
 
