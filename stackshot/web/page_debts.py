@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -96,10 +97,94 @@ def _owed_path() -> Path:
 _OWED_LOCK = _xlock.XLock("ledger")     # the page-debt ledger is read, changed and rewritten whole: one thread at a time (a read-change-write holds it from its read to its write)
 
 
+def _salvage_ledger(text: str) -> dict[str, Any]:
+    """What a ledger that does not parse still holds: the pages, writers and entries that were written out whole before the text went wrong (a write cut short, a bad
+    byte). {page key: {writer: entry}}; an entry is taken only whole, a page or a writer's list as far as it was read."""
+    dec, n = json.JSONDecoder(), len(text)
+
+    def ws(i: int) -> int:
+        while i < n and text[i] in " \t\r\n":
+            i += 1
+        return i
+
+    def members(i: int, depth: int) -> tuple[dict[str, Any], int | None]:
+        """The members read of the object at text[i], and the index after it (None when it ended unread). Objects `depth` levels down are read into, the rest whole or not at all."""
+        out: dict[str, Any] = {}
+        i = ws(i)
+        if i >= n or text[i] != "{":
+            return out, None
+        i += 1
+        first = True
+        while True:
+            i = ws(i)
+            if i >= n:
+                return out, None
+            if text[i] == "}":
+                return out, i + 1
+            if not first:
+                if text[i] != ",":
+                    return out, None
+                i = ws(i + 1)
+            first = False
+            try:
+                k, i = dec.raw_decode(text, i)
+                if not isinstance(k, str):
+                    return out, None
+                i = ws(i)
+                if i >= n or text[i] != ":":
+                    return out, None
+                i = ws(i + 1)
+                if depth and i < n and text[i] == "{":
+                    out[k], i = members(i, depth - 1)
+                    if i is None:
+                        return out, None
+                else:
+                    out[k], i = dec.raw_decode(text, i)
+            except ValueError:
+                return out, None
+
+    return members(0, 1)[0]
+
+
+def _owed_unreadable(path: Path, text: str | None, why: BaseException) -> dict[str, Any]:
+    """A ledger that cannot be read is never written over: it is moved aside (`ledger.json.unreadable-<time>`, what a person can look at or mend), a line on stderr says so (once: the
+    file is gone from its place after), and the debts that could be read from it are written back as the ledger. Returns them (the raw ledger form). Called with the lock held."""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    aside = path.with_name(f"{path.name}.unreadable-{stamp}")
+    for i in range(2, 100):
+        if not aside.exists():
+            break
+        aside = path.with_name(f"{path.name}.unreadable-{stamp}-{i}")
+    kept = _salvage_ledger(text) if text else {}
+    n = sum(1 for v in kept.values() if isinstance(v, dict) for e in v.values() if isinstance(e, dict) and e.get("ts"))
+    try:
+        os.replace(path, aside)
+        said = f"it is kept as {aside}"
+    except OSError as e:
+        said = f"it could not be moved aside ({type(e).__name__}) and stays where it is"
+    print(f"page debts: the ledger {path} could not be read ({type(why).__name__}); {said}; {n} debt(s) are kept from what could be read", file=sys.stderr)
+    if kept and not path.exists():
+        _owed_save(kept)
+    return kept
+
+
 def _owed_load() -> dict[str, dict[str, dict[str, Any]]]:
     try:
-        with _OWED_LOCK, open(_owed_path(), encoding="utf-8") as f:
-            raw = json.load(f)
+        with _OWED_LOCK:
+            path = _owed_path()
+            try:
+                data = path.read_bytes()
+            except FileNotFoundError:
+                return {}
+            except OSError as e:
+                raw: Any = _owed_unreadable(path, None, e)
+            else:
+                try:
+                    raw = json.loads(data.decode("utf-8"))
+                    if raw is not None and not isinstance(raw, dict):
+                        raise ValueError("the ledger is not an object")
+                except ValueError as e:      # a cut or damaged file (UnicodeDecodeError and JSONDecodeError are ValueErrors)
+                    raw = _owed_unreadable(path, data.decode("utf-8", "replace"), e)
     except Exception:
         return {}
     out: dict[str, dict[str, dict[str, Any]]] = {}
@@ -219,8 +304,9 @@ def _owed_settle() -> dict[str, dict[str, dict[str, Any]]]:
             local = pt >= ts - _page_slack()
             if local and _debt_strict(o, e):
                 try:
-                    local = _pages.ct_changed_since(key, int(ts))
-                except Exception: pass
+                    local = bool(_pages.ct_changed_since(key, int(ts)))
+                except Exception:       # a read that fails cannot tell: the debt stays (an answer that cannot be had settles nothing)
+                    local = False
             if not local:
                 if ahead is None: ahead = _upstream_ts(key)
                 local = _upstream_settles(key, o, e, ahead)

@@ -323,11 +323,11 @@ for what, hit in READS:
                 if how == "is slow": raise subprocess.TimeoutExpired(args, up.READ_LIMIT)
                 return subprocess.CompletedProcess(args, 128, "", "fatal: no")
             return _run(args, *a, **k)
-        owe(ts=t0 + 13000); subprocess.run = broken
+        owe(ts=t0 + 13000); subprocess.run = broken; up._READ_FAILED.clear()      # a failed read is not repeated for the back-off: each case starts without one
         try: left = pdebts._owed_settle()
         finally: subprocess.run = _run
         check(f"strict: when {what} {how}, the debt stays", KEY in left and owed() and met, (met, left))
-owe(ts=t0 + 13000); check("strict: …and with every read answered the same edit settles it", KEY not in pdebts._owed_settle())
+owe(ts=t0 + 13000); up._READ_FAILED.clear(); check("strict: …and with every read answered the same edit settles it", KEY not in pdebts._owed_settle())
 
 # ---- 11. the fetched edit is read once a page, whoever owes it, and each debt judged by its own time
 B, C = "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"
@@ -340,6 +340,43 @@ finally: up.edit_ts = _edit_ts
 check("one read of the fetched edit a page in a settle, with several writers owing it", sorted(asked) == [KEY, BETA], asked)
 check("…and each debt judged by its own time", list(left.get(KEY, {})) == [C] and sorted(left.get(BETA, {})) == [A, B], left)
 done()
+
+# ---- 12. a fetch thread that cannot be started leaves nothing registered, so a later call fetches
+fresh(); up._FAILS.clear(); _start = threading.Thread.start; refused = []
+def no_thread(self):
+    if self.name == "page-upstream": raise RuntimeError("can't start new thread")
+    return _start(self)
+threading.Thread.start = no_thread
+try:
+    with contextlib.redirect_stderr(io.StringIO()) as said:
+        try: up.refresh(pg.BRAIN, 1)
+        except Exception as e: refused.append(e)
+finally: threading.Thread.start = _start
+check("a thread that cannot be started: the call answers as the copy does (no error) and registers no run", not refused and pg.BRAIN not in up._RUNS, (refused, up._RUNS))
+up.refresh(pg.BRAIN, 10)
+check("…and the next call begins a fetch that ends (no run waits forever for an event nothing sets)", pg.BRAIN in up._RUNS and up._RUNS[pg.BRAIN][1].wait(30), up._RUNS)
+up._FAILS.clear(); done()
+
+# ---- 13. a fetched read that keeps failing is tried once, not once a debtor at every settle, and the debts stay
+fresh(); up.refresh(pg.BRAIN, 10); done()
+pdebts._owed_save({KEY: {A: E(t0 + 13000, "ct"), B: E(t0 + 13001, "ct"), C: E(t0 + 13002, "ct")}})
+reads_of_copy = []; _read0 = up._read
+def counting(base, *args):
+    if not any(str(x).startswith("HEAD..") for x in args): reads_of_copy.append(args)      # the look for the edit's time is a read of its own, once a page
+    return None if "show" in args and str(args[-1]).startswith(up.REF) else _read0(base, *args)
+up._read = counting; up._READ_FAILED.clear()
+try:
+    first = pdebts._owed_settle(); n_first = len(reads_of_copy); reads_of_copy.clear()
+    second = pdebts._owed_settle(); n_second = len(reads_of_copy)
+finally: up._read = _read0
+check("a fetched read that fails is tried once for three debtors of one page", n_first == 1, reads_of_copy or n_first)
+check("…and not again at the next settle within the back-off", n_second == 0, n_second)
+check("…and every debt stays owed", sorted(first.get(KEY, {})) == sorted([A, B, C]) and sorted(second.get(KEY, {})) == sorted([A, B, C]), (first, second))
+backoff, up.READ_BACKOFF = up.READ_BACKOFF, 0.0
+try: after = pdebts._owed_settle()
+finally: up.READ_BACKOFF = backoff
+check("…and once the back-off is over the reads are tried again and settle them", KEY not in after, after)
+up._READ_FAILED.clear(); done()
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

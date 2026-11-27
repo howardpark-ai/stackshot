@@ -47,7 +47,7 @@ def registry(agents=ALPHA, back=("team-back",), status="active"):
                                            "agents": agents, "back_agents": {k: v for k, v in agents.items() if k in back}}}}
 REG = T / "store/projects.json"
 REG.write_text(json.dumps(registry()))
-(T / "brain/projects/alpha.md").write_text("---\ntitle: alpha\ndisplay-name: home-lead\nagents:\n  home-front: the front\n  background:\n    team-back: builds, merges and releases the code\n---\n\n# alpha\n\n## Current state\n\nthe vendor call is open.\n\n<!-- timeline -->\n")
+(T / "brain/projects/alpha.md").write_text("---\ntitle: alpha\ndisplay-name: home-lead\nagents:\n  home-front: the front\n  background:\n    team-back: builds, merges and releases the code\n---\n\n# alpha\n\n## Current state\n\nthe vendor call is open.\n\n<!-- timeline -->\n"); import subprocess as _sp; [_sp.run(["git", "-C", f"{tmp}/brain", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True) for a in (("init", "-q"), ("add", "-A"), ("commit", "-q", "-m", "pages"))]      # the pages are a git checkout, as an instance's are: a debt settles on a read of it that works
 (T / "store/next-id").write_text("97"); (T / "store/anchors.json").write_text("{}")
 B = now0 - 900.0                                                                        # the item clocks: written then, the panes idle from a minute later
 IDLE0 = B + 60.0
