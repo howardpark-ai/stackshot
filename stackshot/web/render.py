@@ -1077,15 +1077,8 @@ class Board:
         k = proj_key(r)
         return k, (self.proj.get(k) if k else None)
     def row_of(self, k):
-        """The board row a page key rolls up to: itself or the nearest ancestor with `board_row: true`, else its hub page: the
-        page a `hub:` line in its chain names (ops/hub sits on the hub project's row, with its keeper and
-        agents), else the top-level page."""
-        if not k: return ""
-        parts = k.split("/")
-        for n in range(len(parts), 2, -1):
-            cand = "/".join(parts[:n])
-            if (self.proj.get(cand) or {}).get("board_row"): return cand
-        return _hub_of(k, self.proj)
+        """The board row a page key rolls up to: itself or the nearest ancestor with `board_row: true`, else its hub page (anchors.board_row_of)."""
+        return _anc.board_row_of(k, self.proj)
     def proj_label(self, k):
         """An item's project as the card says it: the scope and the row's name, then the sub-page's when the item sits below the row, with plain
         slashes ("ops/hub/sharing/sub-page", "home/general")."""
@@ -1122,11 +1115,9 @@ class Board:
             self.__dict__["_scope_ids"] = (ids, _prj.marks())
         return self.__dict__["_scope_ids"]
     def item_scope(self, r):
-        """The group the home page lists an item under, the name on its subsection there (ui/render.py scope_groups): the scope of the board row the item's page rolls up to (projects.scope_of), the default scope for an item
-        with no project. One of the names in [project_scopes] order, single-scope instances included; board.md's own grouping (proj_scope, [scopes]) is another setting."""
-        k = self.row_of(proj_key(r))
-        entry = self.proj.get(k)
-        return _prj.scope_of(k, entry if isinstance(entry, dict) else {}, self.proj, *self.scope_ids())
+        """The group the home page lists an item under, the name on its subsection there (ui/render.py scope_groups): anchors.item_scope, the one reading the client reads share. One of the names in
+        [project_scopes] order, single-scope instances included; board.md's own grouping (proj_scope, [scopes]) is another setting."""
+        return _anc.item_scope(r["metadata"], self.proj, *self.scope_ids())
     def proj_mirror(self, k):
         return (self.proj.get(k) or {}).get("mirror") or ""
     def proj_scope(self, k):

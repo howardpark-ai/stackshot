@@ -212,6 +212,20 @@ try:
     check("scope, the items of a project with a plain org", {got_sc[shown(n)] for n in mine} == {"home"}, got_sc)
     check("scope, every row's is the subsection the home page draws that item in", got_sc == page_sc and len(page_sc) == len(mine) + len(CASES) and set(page_sc.values()) == {"work", "home", "ops"}, (got_sc, page_sc))
     check("scope, the list's own name stays in the top-level group, unchanged by it", body()["group"] == NAMES_EN, body()["group"])
+    # the same group on the other reads that list items: a copy of each case moved by a session and observed by another, read through items, involved and item-facts
+    for n, (key, _sc, _why) in CASES.items(): put(n + 100, subject=f"[home] scope copy {n}", age=3, mover="alpha-builder", observers=["alpha-main"], project=key)
+    try:
+        def by_shown(rows_): return {x["shown"]: x["scope"] for x in rows_}
+        it_sc = by_shown(json.loads(cr._client_get("items", {"key": "alpha-builder"})[2])["items"])
+        inv_sc = by_shown(json.loads(cr._client_get("involved", {"key": "alpha-main"})[2])["items"])
+        fa = json.loads(cr._client_get("item-facts", {"key": "alpha-builder", "ids": ",".join(f"a{n + 100}" for n in CASES)})[2])["items"]
+        fa_sc = {x["shown"]: x["scope"] for x in fa.values()}
+        for name, got_ in (("items", it_sc), ("involved", inv_sc), ("item-facts", fa_sc)):
+            for n, (key, sc, why) in CASES.items():
+                check(f"scope on {name}, {why} ({key or 'no project'}): {sc}", got_.get(shown(n + 100)) == sc, got_.get(shown(n + 100)))
+            check(f"scope on {name}, each case is the group its twin is listed in under Your move", all(got_.get(shown(n + 100)) == got_sc[shown(n)] for n in CASES), got_)
+    finally:
+        for n in CASES: drop(n + 100)
     was = _cfg.CFG.get("scopes")
     try:
         _cfg.CFG["scopes"] = {"order": ["desk"], "default": "desk", "by_org": {"work": "desk"}, "by_prefix": {"ops/": "desk"}}
