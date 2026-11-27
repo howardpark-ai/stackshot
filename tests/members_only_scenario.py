@@ -12,6 +12,7 @@ Part `google` is a board with `[auth] mode = "google"` (a made-up client) and no
 
 Part `door` is a board behind a front door (`[behind_frontdoor] identity_secret_file`): the same for the signed identity, and the front door in front of it with a members file of its own that lists
 someone the board does not: that caller gets the board's sentence for the tool list, never "did not answer", and never the instructions text read for a member.
+With a second board that is down, the tool list ends in "none of your boards answered" and the warnings tell the refusing board from the down one.
 
 Part `off` is a board with auth off: anyone is answered, with no token or any.
 
@@ -243,9 +244,11 @@ def part_google():
 
 # ================================================================ part door: behind a front door, and the front door itself
 def part_door():
-    import asyncio, json
+    import asyncio, json, socket
     sys.path.insert(0, SCR); sys.path.insert(0, STACK)
     from frontdoor_board_scenario import Fixture, serve, setup, stop
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
     T, secret, paths = setup("on")
     F = Fixture(); check = F.check
     import logging; logging.disable(logging.WARNING)
@@ -306,6 +309,31 @@ def part_door():
             answered("listed by the board a moment later", BOB)
         finally:
             write(listed)
+
+        # a second board, which is down: the two reasons are told apart, and the list does not end in one board's refusal when another did not answer
+        door_members.write_text(json.dumps({BOB: ["main", "side"]}))
+        gone = socket.socket(); gone.bind(("127.0.0.1", 0)); down = f"http://127.0.0.1:{gone.getsockname()[1]}"      # bound and never listening: a connection is refused
+        two = [{"name": n, "kind": "board", "url": u + "/mcp", "health_url": u + "/healthz", "token_file": secret(f"{n}.token", "BOARDTOKEN-0123456789abcdef")}
+               for n, u in (("main", BASE), ("side", down))]
+        settings, problems = fc.parse({"frontdoor": {"identity_header": "x-forwarded-user", "identity_secret_file": paths["secret"], "members_file": str(door_members), "backends": two}})
+        assert not problems, problems
+        stop(*front[:3]); front = None
+        app, door = fdapp.build(settings)
+        front = serve(fdapp.asgi_app(app, door))
+        async def both():
+            warned = []
+            async def hear(m): warned.append(str(m.data))
+            transport = StreamableHttpTransport(f"http://127.0.0.1:{front[3]}/mcp", headers={"x-forwarded-user": BOB})
+            async with Client(transport, mode="legacy", log_handler=hear) as c:
+                return await outcome(c.list_tools_mcp(cache_mode="bypass")), warned
+        try:
+            e, warned = asyncio.run(both())
+        finally:
+            gone.close()
+        check("front door, one board refusing and one down: the list says no board answered", isinstance(e, Exception) and "none of your boards answered (main, side)" in str(e), repr(e)[:300])
+        check("front door, one board refusing and one down: the warnings say which refused the caller, in its own words, and which is down",
+              any("board 'main' refused this caller" in w and sentence(BOB) in w for w in warned) and any("board 'side' did not list its tools" in w for w in warned)
+              and not any("board 'main' did not" in w for w in warned), warned)
     finally:
         if front:
             stop(*front[:3])
