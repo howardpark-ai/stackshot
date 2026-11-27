@@ -78,6 +78,8 @@ item("a", 11, subject=f"[home] {EVIL}", description=f"- {EVIL}\n- [go](javascrip
      answers=[{"ts": now - 60, "kind": "decision", "choice": f"{EVIL}", "text": EVIL, "via": "board", "by": EVIL}])
 for n in (12, 13, 14, 15): ask_(n)
 item("a", 16, needs=["decision"], ask='"><img src=x onerror=alert(4)> [go](javascript:alert(5))', description="- five\n- of\n- these\n- and\n- no more")      # a short ask in no set form, which the brief draws as the page does
+item("a", 18, needs=["decision"], ask="Decide: has relayword arrived? · Options: tailword or drop", options=OPTS)      # no set form, as a wait's own question: its options are stored too
+item("a", 19, needs=["decision"], ask="Decide: has relayword arrived? · Options: tailword or drop")                    # …and the same line with none stored
 item("g", 5, needs=["decision"], ask=ASK, options=OPTS)                      # an item addressed by its number
 ART = "https://claude.ai/artifact/00000000-0000-4000-8000-000000000053"       # a made-up mockup page
 item("a", 17, description=f"- [mockup]({ART})", needs=["decision"], ask=ASK, options=OPTS)
@@ -272,6 +274,10 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     r17, d17 = brief("a17"); a17 = article(r17.text)
     check("a question's mockup link sits beside it, ahead of the ?",
           re.search(r'<p class="bq"><span>whether to ship zebraword <a class="mockup" href="' + re.escape(ART) + '"', a17) and "recoword" in d17.shown() and d17.shown().count("Mockup") == 1, (d17.shown(), a17[:300]))
+    asked = lambda k: re.sub(r"<[^>]+>", "", re.search(r'<p class="bq"><span>(.*?)</span>', brief(k)[0].text).group(1))
+    check("a question in no set form loses its label, and its options where they are drawn as choices", asked("a18") == "has relayword arrived?" and "tailword" not in article(brief("a18")[0].text).split('<form', 1)[0]
+          and 'name="choice"' in article(brief("a18")[0].text), (asked("a18"), article(brief("a18")[0].text)[:1500]))
+    check("with no options stored its line keeps all it says", asked("a19") == "has relayword arrived? · Options: tailword or drop", asked("a19"))
     r3, d3 = brief("a3"); a3 = article(r3.text)
     check("an item that asks nothing shows its state line; one with only its subject to add has no ?", re.search(r'<div class="bbody"><p class="bstate">.+?</p><form', a3) and not d3.tips and 'class="iask"' not in a3, a3)
     r4, d4 = brief("a4"); a4 = article(r4.text)

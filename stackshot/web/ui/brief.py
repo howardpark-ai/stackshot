@@ -95,7 +95,10 @@ def _ask(board: Any, r: dict[str, Any], p: dict[str, Any], cards: bool, more: st
     the item's page. Called when the item asks this viewer something, which is the page's own rule (p["ask"])."""
     gid = r["gid"]
     pa, raw = p["pa"], _r.open_ask(r)
-    question = board.linkify(pa["decide"] if pa else raw, gid) + _r.mockup_link(r, raw) if raw else ""      # an ask in no set form is the line as it is
+    words = pa["decide"] if pa else re.sub(r"^Decide:\s*", "", raw)      # an ask in no set form is its whole line, without the label
+    if not pa and p["ol"]:      # …cut as the home row cuts it where its options are drawn below, so they are not said twice
+        words = _r.decide_words(raw)
+    question = board.linkify(words, gid) + _r.mockup_link(r, raw) if raw else ""
     line = f'<p class="bq"><span>{question}</span>{more}</p>' if question or more else ""      # the words in a box of their own, so the "?" stands beside them and opens no gap between their lines
     why = pa["recommend"].strip() if pa else ""
     reco = f'<p class="breco"><b>{esc(_t("item.ask.recommend"))}</b> {board.linkify(why, gid)}</p>' if why else ""
