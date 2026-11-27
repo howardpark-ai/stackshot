@@ -19,6 +19,12 @@ machine = ""                             # the server box's name, e.g. "main-box
 font_css = "https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
 font_stack = 'Pretendard,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR",sans-serif'
 
+# [[members]]                             # one table per person who uses the board, read instead of [instance] owner and owner_aliases and [auth] allowed_emails (docs/configuration.md, "Members"). Restart-only
+# name = "member-a"
+# aliases = ["MA"]                        # the other names a line of next may open with for this person
+# emails = ["member-a@example.com"]       # the Google addresses that sign in as this person
+# agents = []                             # the sessions that act as this person, e.g. ["mail-agent"] for one that sends as them: with several members its rows on Home say "acts for member-a"; every other agent is the board's
+
 [paths]
 repo = "~/stackshot-data"                           # the git checkout the publisher commits into (the store and the rendered board live there)
 store = "~/stackshot-data/board-data"               # items <letter>/<n>.json, anchors.json, projects.json, next-id — the server is the only writer
