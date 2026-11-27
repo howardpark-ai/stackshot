@@ -238,6 +238,22 @@ def people(cfg: dict[str, Any] | None = None) -> tuple[tuple[str, tuple[str, ...
     return tuple((m, rec.aliases, rec.emails) for m, rec in _read_members(s.members_file).items() if s.board in rec.boards)
 
 
+def members_file_absent(cfg: dict[str, Any] | None = None) -> bool:
+    """Whether this board reads its members from a front door's file (`[behind_frontdoor]` members_file and board_name, both usable) and nothing at all is at that
+    path: a machine that only reads the board's text and never held the file. A file that is there and cannot be read or is not valid, a link that leads nowhere, a
+    folder, or a path that cannot be looked at is not absent. For naming only (`members.naming`): who is a member and who may sign in never asks this."""
+    s = settings(cfg)
+    if not s.members or not s.members_file or not NAME.fullmatch(s.board):
+        return False
+    try:
+        os.lstat(os.path.expanduser(s.members_file))
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def members(cfg: dict[str, Any] | None = None) -> tuple[str, ...] | None:
     """The identities the front door's members file lists for this board, in the file's order; () when it lists none or cannot be read; None when this board does not read its members from a front door."""
     p = people(cfg)
