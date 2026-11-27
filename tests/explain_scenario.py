@@ -138,7 +138,8 @@ MOVED = {"projects": ("projects", ["projects.note"]), "closed-new": ("closed", [
          "runners": ("runners, in use", ["runners.sub", "runners.checks"]), "routing": ("project", ["routing.help_pilot"]), "routing/plain": ("project, not ruled", ["routing.help_plain"]),
          "wait-list": ("item, all of a list", ["wait.list.help_all"]), "wait-list/any": ("item, any of a list", ["wait.list.help_any"]),
          "wait-backstop": ("item, all of a list", ["wait.list.help_backstop"]), "wait-chases": ("item, a relay wait", ["wait.chase_help"]),
-         "wait-queued": ("item, queued", ["wait.queued_help"]), "audit-card": ("audits, audit on", ["panel.audit.dash_help"]),
+         "wait-queued": ("item, queued", ["wait.queued_help"]),
+         "queued-release": ("home", ["home.queued_tip"]),
          "audit-off": ("audits", ["audit.off_help"]), "audit-log-off": ("audits, log off", ["audit.note_off_help"])}
 def board(): return r2.Board(str(T / "store"))
 drawn = dict(pages)
@@ -183,12 +184,17 @@ check('the runners page read above is the one in use, with its "as of" line', 'c
 check("an empty New section still says so on the page", i18n.EN["closed.new_none"] in inline(pages["closed"]), inline(pages["closed"])[:600])
 off = drawn["audits, log off"]
 check("a findings log that is off is a warning, so it stays on the page: the page's line, the feed's and the card's",
-      all(i18n.EN[k] in inline(off) for k in ("audit.note_off", "audit.feed_off", "panel.audit.note.off")) and 'id="xp-audit-groups"' in off and 'data-xp="audit-card"' not in off, inline(off)[:900])
+      all(i18n.EN[k] in inline(off) for k in ("audit.note_off", "audit.feed_off", "panel.audit.note.off")) and 'id="xp-audit-groups"' in off and 'class="val a-n a-none"' not in off and i18n.EN["panel.audit.dash_help"] not in off.split('id="audit-panel"')[1], inline(off)[:900])
 check("an audit that is off says so on the page", i18n.EN["audit.off_note"] in inline(drawn["audits"]) and i18n.EN["audit.off_note"] not in inline(drawn["audits, audit on"]), inline(drawn["audits"])[:600])
-legend = i18n.EN["panel.audit.note.unlogged"]      # what the status answer says about a dash: the card holds it behind its "?"
-card = '<span class="a-cn a-cq">–<span class="xp" data-xp="audit-card">'
-check('the side panel\'s Audit card draws a dash and its "?" for the groups with no findings log, on every page drawn with the audit on, and the words on none',
-      all(card in drawn[n] for n in ("home, audit on", "audits, audit on")) and not [n for n, h in drawn.items() if legend in inline(h)], ([n for n, h in drawn.items() if legend in inline(h)], card in drawn["home, audit on"]))
+legend = i18n.EN["panel.audit.note.unlogged"]      # what the status answer says about a dash: the card draws no line of it
+dash = f'<span class="val a-n a-none" title="{i18n.EN["panel.audit.dash_help"]}">\u2013</span>'
+check("the side panel's Audit card carries what a dash means on the dash of each group with no findings log, on every page drawn with the audit on, and draws the words on none",
+      all(drawn[n].count(dash) == 2 and "a-cq" not in drawn[n] and 'data-xp="audit-card"' not in drawn[n] for n in ("home, audit on", "audits, audit on"))
+      and not [n for n, h in drawn.items() if legend in inline(h) or i18n.EN["panel.audit.dash_help"] in inline(h)], ([n for n, h in drawn.items() if legend in inline(h)], [drawn[n].count(dash) for n in ("home, audit on", "audits, audit on")]))
+def every(n): return [n] + [e for k in n["kids"] for e in every(k)]
+agents = [e for e in every(Tree(drawn["projects"]).root) if e["tag"] == "li" and any(k["attrs"].get("data-xp", "").startswith("ag-") for k in e["kids"])]
+check('what a project\'s agent is for sits behind a "?" beside its name, not in a hover title on its line', len(agents) == 1 and "title" not in agents[0]["attrs"]
+      and [v for k, v in POP.findall(drawn["projects"]) if k.startswith("ag-")] == ["builds"], (agents, POP.findall(drawn["projects"])))
 check("a queued item's page says it is queued", "· " + i18n.EN["wait.queued"] in inline(drawn["item, queued"]), inline(drawn["item, queued"])[:600])
 unruled = i18n.EN["routing.no_rulings"]
 check("a page the router never rules says so on the page, and a ruled one does not", unruled in inline(drawn["project, not ruled"]) and unruled not in inline(drawn["project"]), (inline(drawn["project, not ruled"])[:600], inline(drawn["project"])[:600]))
@@ -240,7 +246,9 @@ class El {
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   contains(n) { for (; n; n = n.parentElement) if (n === this) return true; return false; }
-  closest(s) { assert(s[0] === '.', s); for (let n = this; n; n = n.parentElement) if (n.classList.contains(s.slice(1))) return n; return null; }
+  closest(s) { const parts = s.split(',').map(p => { const m = /^([a-z]*)(?:\.([\w-]+))?(?:\[([\w-]+)\])?$/.exec(p); assert(p && m, s); return m; });
+    for (let n = this; n; n = n.parentElement) if (parts.some(m => (!m[1] || n.tagName === m[1].toUpperCase()) && (!m[2] || n.classList.contains(m[2])) && (!m[3] || m[3] in n.attrs))) return n; return null; }
+  removeAttribute(k) { delete this.attrs[k]; }
   matches(s) { assert(s === ':focus-visible', s); return this.keyboard; }
   focus(how) { this.how = how; if (active === this) return; const was = active; active = this; if (was) fire('focusout', was, {relatedTarget: this}); fire('focusin', this); }
   get offsetWidth() { this.measured = this.style.position; const m = parseFloat(this.style.maxWidth); return Math.min(isNaN(m) ? 1e9 : m, 320); }
@@ -255,6 +263,7 @@ const document = {documentElement: html, body, get activeElement() { return acti
   querySelectorAll(s) { assert(s === '#totop,.fab', s); return floats; },
   elementFromPoint: (x, y) => floats.find(f => f.over && Math.hypot(x - f.rect.left - 22, y - f.rect.top - 22) <= 22) || body,
   querySelector(s) { const m = /^\.xp\[data-xp="([^"]*)"\]$/.exec(s); assert(m, s); let got = null; walk(html, n => { if (!got && n.classList.contains('xp') && n.attrs['data-xp'] === m[1]) got = n; }); return got; },
+  getElementsByTagName(t) { const got = []; walk(html, n => { if (n.tagName === t.toUpperCase()) got.push(n); }); return got; },
   createElement: t => new El(t, {}), addEventListener(t, f, cap) { (listeners[t] = listeners[t] || []).push([f, !!cap]); }};
 const winl = {};
 const seen = n => { for (; n; n = n.parentElement) if (n.visibility) return n.visibility; return 'visible'; };
@@ -399,16 +408,51 @@ S = swap(true); check('a closed one stays closed through an update', shut(S), st
 S.firstElementChild.keyboard = true; S.firstElementChild.focus(); S = swap(true); check('one opened by the keyboard survives it too, with the focus', open(S) && active === S.firstElementChild, state(S)); away();
 tap(S); swap(false); const n0 = panelEscapes; esc(); check('an explainer the update removed is forgotten: Escape goes on to the page', panelEscapes === n0 + 1, panelEscapes - n0);
 
-// a script that redraws its own "?" (the side panel's Audit card): it removes the old one, says so, and hands the focus back
-const own = body.add(new El('div', {})); let R = make('r', 100, 100, own);
-function redraw() {
-  const had = active === R.firstElementChild; own.kids.pop().parentElement = null; if (had) active = null;
-  R = make('r', 100, 100, own); R.firstElementChild.keyboard = true; fire('stackshot:redrawn', body); if (had) window.stackshotRefocus('r'); flush(); }
-tap(R); redraw(); check('an open popup survives a redraw its script announces, placed again', open(R) && R.lastElementChild.style.top === '36px', state(R));
-check('...with the focus back on its button', active === R.firstElementChild, active && active.tagName);
-check('...and the page not scrolled to it', !!R.firstElementChild.how && R.firstElementChild.how.preventScroll === true, R.firstElementChild.how);
-esc(); redraw(); check('one closed with Escape gets the focus back and stays closed', shut(R) && active === R.firstElementChild, [state(R), active && active.tagName]); away();
-window.stackshotRefocus('no-such-key'); check('a key no "?" has takes no focus', active === null, active && active.tagName);
+// the popup a tap opens on an explanation in an attribute: a title or a data-tip on anything that is not a control
+away();
+{
+const before = html.clientWidth; html.clientWidth = 360;
+const popups = () => body.kids.filter(k => k.attrs.class === 'xp-pop xt-pop'), words = () => popups().map(p => p.textContent), none = () => popups().length === 0;
+function spot(tag, attrs, into, left, top) { const e = (into || body).add(new El(tag, Object.assign({}, attrs))); e.rect = {left: left === undefined ? 100 : left, top: top === undefined ? 100 : top, width: 40, height: 16}; return e; }
+function touch(e) { fire('pointerup', e, {pointerType: 'touch'}); return fire('click', e); }
+const W = spot('span', {class: 'iwarn', title: 'why <it> is stale'});
+const tapped = touch(W); check('a tap on words with a title opens its text', String(words()) === 'why <it> is stale' && popups()[0].attrs.role === 'tooltip' && 'data-xt-open' in W.attrs, [words(), W.attrs]);
+check('...and takes the tap from nothing else on the page', !tapped.prevented && !tapped.stopped, tapped);
+check('...under the words, inside the window', popups()[0].style.left === '8px' && popups()[0].style.top === '120px' && popups()[0].style.maxWidth === '320px', popups()[0].style);
+touch(W); check('a second tap closes it', none() && !('data-xt-open' in W.attrs), [words(), W.attrs]);
+touch(W); touch(popups()[0]); check('a tap on the popup keeps it', popups().length === 1, words());
+touch(outside); check('a tap elsewhere closes it', none(), words());
+const T2 = spot('span', {class: 'tip', 'data-tip': 'the full time', title: ''}); touch(T2); check('a data-tip is the text, ahead of an empty title', String(words()) === 'the full time', words()); away();
+const card = spot('div', {title: 'the card'}), mute = spot('b', {title: ''}, card); touch(mute); check('an empty title explains nothing, and hides the one above it, as under the mouse', none(), words());
+const inner = spot('span', {title: 'the word'}, card), plain = spot('span', {}, card); touch(inner); check('the nearest explanation is the one shown', String(words()) === 'the word', words());
+touch(plain); check('...another of them takes its place', String(words()) === 'the card', words()); away();
+const line = spot('span', {title: 'how the page is kept current', 'data-xt-also': ''}), age = spot('span', {'data-tip': '2026-02-19 10:00', title: ''}, line);
+touch(age); check('the rendered line: the time, and under it what the line says', String(words()) === '2026-02-19 10:00\nhow the page is kept current', words()); away();
+const link = spot('a', {href: '/x', title: 'opens x'}), held = spot('a', {href: '/y'}, card), button = spot('button', {title: 'reload'}), summary = spot('summary', {}, card);
+const inside = [link, held, spot('span', {}, link), button, spot('span', {title: 'in a button'}, button), summary, spot('input', {title: 'a field'}), spot('label', {title: 'a label'})];
+for (const e of inside) { touch(W); const r = touch(e); check('a control, and what is inside one, keeps its tap: ' + e.tagName + ' ' + (e.attrs.title || ''), none() && !r.prevented && !r.stopped, [words(), r]); }
+tap(A); touch(W); check('a tap popup closes an open "?"', shut(A) && popups().length === 1, [state(A), words()]);
+tap(A); check('...and a "?" closes the tap popup', open(A) && none(), [state(A), words()]); away();
+touch(W); over(A); check('...also one opened by the mouse', open(A) && none(), [state(A), words()]); leave(A); away();
+const n1 = panelEscapes, l1 = laterEscapes; touch(W); const e1 = esc();
+check('Escape closes the tap popup and nothing else', none() && e1.prevented && panelEscapes === n1 && laterEscapes === l1, [words(), e1]);
+const e2 = esc(); check('...and the next Escape goes on to the page', !e2.prevented && panelEscapes === n1 + 1, e2);
+window.getSelection = () => 'some words'; touch(W); check('a tap that ends a text selection opens nothing', none(), words()); delete window.getSelection;
+const R1 = spot('span', {title: 'at the right'}, body, 320, 670); touch(R1); const rp = popups()[0].style;
+check('near the right edge and the bottom it stays in the window and goes above the words', rp.left === '32px' && rp.top === '606px', rp); away();
+touch(W); W.rect.top = 300; winl.scroll(); check('a scroll moves it with its words', popups()[0].style.top === '320px', popups()[0].style);
+W.rect.top = 900; winl.scroll(); check('...and closes it once they leave the screen', none(), words()); W.rect.top = 100;
+touch(W); W.visibility = 'hidden'; fire('transitionend', body); check('words that get hidden (a closed panel) take their popup along', none(), words()); W.visibility = '';
+touch(W); W.rect.left = 400; winl.resize(); check('...and so do words a narrower window leaves outside', none(), words()); W.rect.left = 100;
+const list = body.add(new El('div', {})), row = () => spot('span', {class: 'a-none', title: 'what a dash means'}, list, 100, 100 + 30 * list.kids.length);
+row(); const second = row(); touch(second);
+function redraw(n) { while (list.kids.length) list.kids[0].remove(); for (let i = 0; i < n; i++) row(); fire('stackshot:redrawn', body); }
+redraw(2); check('an open popup survives a redraw its script announces, on the same one of two alike', popups().length === 1 && 'data-xt-open' in list.kids[1].attrs && !('data-xt-open' in list.kids[0].attrs) && popups()[0].style.top === '150px', [words(), list.kids.map(k => k.attrs)]);
+list.kids[1].attrs.title = 'new words'; fire('stackshot:swapped', body); check('...shows its new words where the page changed them in place', String(words()) === 'new words', words());
+redraw(0); check('...and closes when the redraw leaves its words out', none(), words()); away();
+html.clientWidth = before;
+}
+
 // the home page's in-place update, its own swap(): a "?" closed with Escape gets the focus back and stays closed
 away(); vm.runInContext(live, sb);
 const marks = n => { const got = []; walk(n, e => { if (e.classList.contains('xp-b')) got.push(e); }); return got; };

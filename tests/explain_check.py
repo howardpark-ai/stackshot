@@ -7,15 +7,17 @@ the files. It checks that:
   - at 360 and 1280 px no "?" lies over words or a control beside it, so a tap on those opens nothing;
   - on a phone, scrolled to its end, no page leaves a "?" under a floating button;
   - the color panel (dark theme, whether the page opened dark or turned dark) holds its note behind a "?"; its popup stays inside the panel, and Escape closes it before the panel;
-  - the side panel's Audit card: its script redraws the card the server drew, the "?" included; the popup opens inside the panel and stays open, with the keyboard focus, through a redraw;
-  - on a short desktop window (1280 x 620), wherever the Audit card's "?" sits in the pinned side panel, beside or among the floating buttons, no part of its popup is under one;
+  - on a phone, every explanation a page carries in an attribute (a data-tip or a title on what is not a control: a time's age, a stale sign, a receiver's state, a machine's
+    failure, a waiting line's box, the dash of the Audit card) opens by a real tap, whole inside the screen, and a second tap closes it; a control with a title keeps its action;
+  - the side panel's Audit card: its script redraws the card the server drew; a dash's popup opens by tap or click, stays open through a redraw, and Escape closes it before the panel;
+  - on a short desktop window (1280 x 620), wherever a "?" sits in the pinned side panel (the check puts one in the Audit card), beside or among the floating buttons, no part of its popup is under one;
   - on a desktop (1280 px) hover opens it, the pointer can move onto the popup, leaving closes it; Tab reaches the button and opens it; Escape closes it;
   - the popup's ground differs between light and dark.
 
     tests/run-suite explain_check     -> exit 0 / 1
     (the browser, once per machine: uvx playwright@1.63.0 install chromium)
     EXPLAIN_SHOTS=<folder> also saves a screenshot of each page with a popup open there."""
-import datetime, json, logging, os, pathlib, re, subprocess, sys, time
+import datetime, json, logging, os, pathlib, re, subprocess, sys, time, zoneinfo
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch
 tmp = _scratch.mkdtemp(prefix="xplchk-"); T = pathlib.Path(tmp)
@@ -31,10 +33,12 @@ toml, _n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[work] "]', toml); asse
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
 for d in ("store/a", "fleet/a", "state/site", "secrets", "touch", "brain/projects", "pages"): (T / d).mkdir(parents=True)
 A = "22222222-2222-4222-8222-222222222222"
-(T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "box-a", "claude": "1.0.0"}))
-(T / "fleet/a/sessions.json").write_text(json.dumps({A: {"name": "alpha-main", "machine": "a", "url": "", "seen": "x"}}))
+(T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "box-a", "claude": "1.0.0", "setup": {"ok": False, "step": "tools", "reason": "no room left on the disk"},
+    "updates": [{"what": "claude", "from": "1.0.0", "to": "1.1.0", "ok": False, "reason": "the download stopped"}]}))
+B = "33333333-3333-4333-8333-333333333333"
+(T / "fleet/a/sessions.json").write_text(json.dumps({A: {"name": "alpha-main", "machine": "a", "url": "", "seen": "x"}, B: {"name": "alpha-helper", "machine": "a", "url": "", "seen": "x"}}))
 (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "work", "tags": [], "type": "project", "session": "alpha-main",
-    "status": "active", "board": [], "board_row": False, "updated": 1, "agents": {"alpha-main": "builds"}}}}))
+    "status": "active", "board": [], "board_row": False, "updated": 1, "agents": {"alpha-main": "builds", "alpha-helper": "helps"}, "back_agents": {"alpha-helper": "helps"}}}}))
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n# Alpha\n")
 now = time.time()
 DAY = lambda n: (datetime.date.today() + datetime.timedelta(days=n)).isoformat()
@@ -48,6 +52,12 @@ def waiting(i, **meta):
 
 waiting(2, wait_kind="list", wait_mode="all", until=DAY(5), waits=[{"kind": "time", "until": DAY(3)}, {"kind": "relay", "event": "the lease"}], watch={"set_at": now - 3600})
 waiting(4, wait_kind="relay", ask_by=DAY(5), wait_event="the lease", party="the landlord", chases=[{"at": now - 600, "by": "alpha-main", "note": "asked again"}])
+(T / "store/a/5.json").write_text(json.dumps({"id": "5", "subject": "[work] item 5", "description": "- A thing", "status": "open", "updated": now - 90 * 86400,      # open on an agent and long unconfirmed: stale
+    "state_updated": now - 90 * 86400, "confirmed": now - 90 * 86400, "metadata": {"owner": A, "project": "projects/alpha", "next": "the next step"}}))
+seen = lambda ago: (datetime.datetime.now(zoneinfo.ZoneInfo("Asia/Dubai")) - datetime.timedelta(seconds=ago)).strftime("%Y-%m-%d %H:%M:%S")
+(T / "state/anchor-hub").mkdir()
+(T / "state/anchor-hub/status.json").write_text(json.dumps({"started": "x", "anchors": {}, "receivers": {"github": {"ok": True, "checked": seen(30)},
+    "google": {"ok": False, "error": "mail: the connection closed", "checked": seen(9000)}}}))
 (T / "store/next-id").write_text("100"); (T / "store/anchors.json").write_text("{}")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
@@ -65,7 +75,7 @@ def check(name, cond, got=None):
 
 board = lambda: r2.Board(str(T / "store"))
 drawn = {"projects": board().projects_html(), "closed": board().landed_html(), "audits": board().audits_html(), "project": board().routing_html("projects/alpha"),
-         "list-wait": board().item_html("a2"), "relay-wait": board().item_html("a4")}
+         "list-wait": board().item_html("a2"), "relay-wait": board().item_html("a4"), "stale-item": board().item_html("a5")}
 ui_runners.enabled = lambda: True      # a board with runners, before the first read: nothing is read from GitHub
 drawn["runners"] = ui_runners.page_html(board(), {"ts": 0, "errors": {}, "failed": [], "runners": [], "switch": {}, "stale": False, "pending": True, "refreshing": False, "age_s": 0})
 from stackshot.core import config as _cfg
@@ -100,18 +110,14 @@ AT_END = r"""() => { scrollTo({top: document.documentElement.scrollHeight, behav
 # where the page was as the finger came down, after whatever scrolling the tap itself needed to reach the button
 FINGER = "() => addEventListener('pointerdown', () => { window.__y = scrollY; }, true)"
 inside = lambda s: s["left"] >= -0.5 and s["right"] <= s["vw"] + 0.5 and s["top"] >= -0.5 and s["bottom"] <= s["vh"] + 0.5
-WANT = {"projects": 1, "closed": 2, "audits": 13, "audits-log-off": 14, "project": 1, "list-wait": 2, "relay-wait": 1, "runners": 1}      # the fewest "?" each page shows
+WANT = {"stale-item": 0, "projects": 3, "closed": 2, "audits": 13, "audits-log-off": 14, "project": 1, "list-wait": 2, "relay-wait": 1, "runners": 1}      # the fewest "?" each page shows
 # the Audit card's status read, answered by the check once it sets window.__AUDIT; every other request fails, as it does for a file
 STATUS = r"""window.fetch = u => window.__AUDIT && String(u).startsWith('/audit/status') ? Promise.resolve(new Response(JSON.stringify(window.__AUDIT), {status: 200, headers: {'Content-Type': 'application/json'}}))
   : Promise.reject(new TypeError('offline'));"""
 CARD = "() => document.querySelector('#audit .a-txt').innerHTML"
-# the card's "?" against the panel and the card's own words
-IN_CARD = r"""() => { const r = e => e.getBoundingClientRect(), b = r(document.getElementById('xpb-audit-card')), p = r(document.getElementById('panel')), range = document.createRange(), over = [];
-  for (const e of document.querySelectorAll('#audit .lbl, #audit .val, #audit .a-h')) { if (!e.textContent.trim()) continue; range.selectNodeContents(e);
-    for (const o of range.getClientRects()) if (o.left < b.right - 0.5 && b.left < o.right - 0.5 && o.top < b.bottom - 0.5 && b.top < o.bottom - 0.5) over.push(e.textContent); }
-  return {over: over, button: [b.left, b.right], panel: [p.left, p.right]}; }"""
 # the "?" with this id moved to a height in the side panel: the card pushed down by an empty block above it, as more cards would, or the panel scrolled
-PUT = r"""([i, y]) => { const b = document.getElementById(i), p = document.getElementById('panel'), card = b.closest('#audit'); let s = document.getElementById('xchk-space');
+PUT = r"""([i, y]) => { const p = document.getElementById('panel'); if (!document.getElementById(i)) document.querySelector('#audit .a-txt').appendChild(window.stackshotExplain(i.slice(4), 'A dash means the group keeps no findings log.', 'Help'));
+  const b = document.getElementById(i), card = b.closest('#audit'); let s = document.getElementById('xchk-space');
   if (!s) { s = document.createElement('div'); s.id = 'xchk-space'; card.parentNode.insertBefore(s, card); const room = document.createElement('div'); room.style.height = '1000px'; p.appendChild(room); }      // room to scroll
   s.style.height = '0px'; p.scrollTop = 0; const d = y - b.getBoundingClientRect().bottom; if (d > 0) s.style.height = d + 'px'; else p.scrollTop = -d; return b.getBoundingClientRect().bottom; }"""
 # that popup against the floating buttons: every point of a grid over it that something else is drawn on; and whether, straight below its "?", it would meet a button
@@ -131,7 +137,35 @@ COVERS = r"""() => { const hit = (a, b) => a.left < b.right - 0.5 && b.left < a.
     for (const r of e.getClientRects()) if (r.width > 1 && r.height > 1) things.push([r, e.tagName + ' ' + (e.textContent || e.name || '').trim().slice(0, 40)]); }
   const bad = []; for (const b of document.querySelectorAll('button.xp-b')) { if (!shown(b)) continue; for (const r of b.getClientRects()) for (const [o, what] of things) if (hit(r, o)) bad.push(b.id + ' over ' + what); }
   return {bad: bad.slice(0, 12), things: things.length}; }"""
+# the explanations a page carries in an attribute, on what is not a control, that a reader can see: each marked with a number, with the text a tap should show
+TIPS = r"""inPanel => { const CTL = 'a[href],button,input,select,textarea,label,summary,iframe,.xp', words = h => { let t = h.getAttribute('data-tip'); if (t === null) t = h.getAttribute('title'); if (!t) return '';
+    const u = h.parentElement && h.parentElement.closest('[data-xt-also]'), m = u && u.getAttribute('title'); return m ? t + '\n' + m : t; };
+  document.querySelectorAll('details').forEach(d => d.open = true); document.querySelectorAll('[data-xchk]').forEach(e => e.removeAttribute('data-xchk'));
+  return [...document.querySelectorAll('[data-tip],[title]')].filter(e => !!e.closest('#panel') === inPanel && !e.closest(CTL) && words(e) && e.checkVisibility({checkVisibilityCSS: true}) && e.getBoundingClientRect().width)
+    .filter(e => !e.hasAttribute('data-xt-also'))      // the rendered line is covered by its time, whose popup carries the line's words too
+    .map((e, n) => { e.setAttribute('data-xchk', n); return {n: n, text: words(e), kind: (e.closest('#rendered') ? '#rendered ' : '') + e.tagName + '.' + (e.getAttribute('class') || '')}; }); }"""
+# an explanation a tap cannot reach, since it sits inside a control (a data-tip is never a control's own name)
+SHUT_IN = "() => [...document.querySelectorAll('[data-tip]')].filter(e => e.closest('a[href],button,label,summary')).map(e => e.outerHTML.slice(0, 200))"
+# a point of that element, scrolled to the middle, where the element itself (not one with its own explanation inside it, a control or anything over it) is what a finger meets:
+# of those points the one farthest from anything inside it that takes a tap of its own, since a phone's browser moves a tap onto such a target close by
+POINT = r"""n => { const CTL = 'a[href],button,input,select,textarea,label,summary,iframe,.xp', e = document.querySelector('[data-xchk="' + n + '"]'); e.scrollIntoView({block: 'center', behavior: 'instant'});
+  const others = [...e.querySelectorAll('[data-tip],[title],' + CTL)].map(o => o.getBoundingClientRect()), far = (x, y) => Math.min(1e9, ...others.map(r => Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom))));
+  let best = null; for (const r of e.getClientRects()) for (const fy of [0.5, 0.25, 0.75, 0.1, 0.9]) for (const fx of [0.5, 0.25, 0.75, 0.05, 0.95]) { const x = r.left + r.width * fx, y = r.top + r.height * fy, t = document.elementFromPoint(x, y);
+    if (t && t.closest('[data-tip],[title]') === e && !t.closest(CTL) && (!best || far(x, y) > best.far)) best = {x: x, y: y, far: far(x, y), cursor: getComputedStyle(t).cursor}; }
+  if (best) return best; const r = e.getBoundingClientRect(), t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return {x: null, at: [r.left, r.top, r.width, r.height], meets: t ? t.tagName + '#' + t.id + '.' + t.getAttribute('class') : 'nothing'}; }"""
+# the popup a tap opened: how many, its words, its box, what lies over it, and the element's own CSS tooltip
+TAPPED = r"""n => { const all = [...document.querySelectorAll('.xt-pop')], p = all[0], e = document.querySelector('[data-xchk="' + n + '"]'); if (!p) return {count: 0};
+  const r = p.getBoundingClientRect(), s = getComputedStyle(p), over = [];
+  for (const [x, y] of [[r.left + 3, r.top + 3], [r.right - 3, r.top + 3], [r.left + r.width / 2, r.top + r.height / 2], [r.left + 3, r.bottom - 3], [r.right - 3, r.bottom - 3]]) {
+    const h = document.elementFromPoint(x, y); if (h !== p) over.push(Math.round(x) + ',' + Math.round(y) + ' ' + (h ? h.tagName + '.' + h.className : 'nothing')); }
+  return {count: all.length, text: p.textContent, left: r.left, right: r.right, top: r.top, bottom: r.bottom, vw: document.documentElement.clientWidth, vh: innerHeight, over: over, sw: document.documentElement.scrollWidth,
+    wb: s.wordBreak, ow: s.overflowWrap, after: e ? getComputedStyle(e, '::after').content : ''}; }"""
+# the "?" beside the Queued for release fold: the middle of its mark against the heading's line, and the heading's words clear of the button
+QUEUED = r"""() => { const h = document.querySelector('#queued-release h2'), b = document.getElementById('xpb-queued-release').getBoundingClientRect(), r = h.getBoundingClientRect(), g = document.createRange(); g.selectNodeContents(h);
+  return {h2: [r.top, r.bottom], mid: (b.top + b.bottom) / 2, button: [b.left, b.top, b.right, b.bottom], clear: [...g.getClientRects()].every(w => w.right <= b.left || w.width >= r.width - 1)}; }"""
 grounds = {}
+kinds = set(); rendered_said = ""
 
 from playwright.sync_api import sync_playwright
 with sync_playwright() as p:
@@ -217,38 +251,87 @@ with sync_playwright() as p:
             pg.keyboard.press("Escape"); pg.wait_for_timeout(50); check(f"{tag}: the next Escape closes the panel", not pg.evaluate(shown))
         check(f"{tag}: no script error", not errs, errs)
         ctx.close()
-    # the side panel's Audit card: its "?" as the server draws it and as the card's script redraws it from the status
+    # every explanation in an attribute, tapped with a finger: in the page, then in the side panel opened over it
+    for scheme in ("light", "dark"):
+        for name, path in [*FILES.items(), ("home", card_page)]:
+            tag = f"tips {name} 360 {scheme}"
+            ctx = br.new_context(viewport={"width": 360, "height": 760}, color_scheme=scheme, has_touch=True, is_mobile=True, reduced_motion="reduce"); ctx.add_init_script(STATUS); pg = ctx.new_page(); errs = []      # no slide to wait for
+            pg.on("pageerror", lambda e, errs=errs: errs.append(str(e))); pg.goto(path.as_uri()); pg.wait_for_timeout(200)
+            shut_in = pg.evaluate(SHUT_IN); check(f"{tag}: no data-tip sits inside a control", not shut_in, shut_in)
+            for in_panel in (False, True):
+                if in_panel:
+                    if not pg.evaluate("() => !!document.getElementById('panel-open')"): continue
+                    # no slide: a point taken mid-slide scrolls the page sideways
+                    pg.add_style_tag(content="#panel{transition:none!important}"); pg.click("#panel-open"); pg.wait_for_timeout(100)
+                for t in pg.evaluate(TIPS, in_panel):
+                    what = f"{tag}: {'panel ' if in_panel else ''}{t['n']} {t['kind']}"
+                    at = pg.evaluate(POINT, t["n"]); check(f"{what}: a finger can reach it, and it says it takes a tap", at["x"] is not None and at["cursor"] == "pointer", (at, t))
+                    if at["x"] is None: continue
+                    pg.touchscreen.tap(at["x"], at["y"]); pg.wait_for_timeout(40); got = pg.evaluate(TAPPED, t["n"])
+                    ok = got["count"] == 1 and got["text"] == t["text"] and inside(got) and not got["over"] and got["sw"] <= 360
+                    check(f"{what}: a tap opens its text, whole inside the screen, nothing over it", ok, (got, t))
+                    if ok:
+                        kinds.add(t["kind"])
+                        if name == "home" and t["kind"].startswith("#rendered"): rendered_said = got["text"]
+                        check(f"{what}: one popup only, no CSS tooltip beside it, words kept whole", got["after"] in ("none", "normal") and got["wb"] == "keep-all" and got["ow"] == "anywhere", got)
+                    if SHOTS and ok and t["n"] == 0:
+                        os.makedirs(SHOTS, exist_ok=True); pg.screenshot(path=os.path.join(SHOTS, f"tip-{name}-{'panel-' if in_panel else ''}360-{scheme}.png"))
+                    pg.touchscreen.tap(at["x"], at["y"]); pg.wait_for_timeout(40); got = pg.evaluate(TAPPED, t["n"])
+                    check(f"{what}: a second tap closes it", got["count"] == 0, got)
+            if name == "home":      # the "?" of the Queued for release list: on its heading's line, at the right, and a tap opens it
+                pg.evaluate("() => document.getElementById('panel-close').click()"); pg.wait_for_timeout(50)
+                pg.evaluate(CENTER, "xpb-queued-release"); q = pg.evaluate(QUEUED); pg.tap("#xpb-queued-release"); pg.wait_for_timeout(50); s = pg.evaluate(STATE, "xpb-queued-release")
+                check(f"{tag}: the Queued for release ? sits on its heading's line and clear of its words", q["h2"][0] <= q["mid"] <= q["h2"][1] and q["clear"], q)
+                check(f"{tag}: ...and a tap opens it, whole inside the screen, nothing over it", s["open"] and inside(s) and not s["over"] and s["sw"] <= 360, s)
+                if SHOTS: os.makedirs(SHOTS, exist_ok=True); pg.screenshot(path=os.path.join(SHOTS, f"queued-360-{scheme}.png"))
+            check(f"{tag}: no script error", not errs, errs)
+            ctx.close()
+    check("the rendered line's own words open under its time", "re-rendered" in rendered_said, rendered_said)
+    for need in ("#rendered SPAN.tip", "SPAN.iwarn", "SPAN.iwarn stw", "SPAN.wbox", "DIV.mf", "DIV.pc rcv warn", "SPAN.lbl st warn", "SPAN.rtag", "SPAN.val a-n a-none"):
+        check(f"a real tap opened at least one of: {need}", any(k == need or k.startswith(need + " ") for k in kinds), sorted(kinds))
+    print("tapped open: " + ", ".join(sorted(kinds)), flush=True)
+    # a control that carries a title keeps what a tap on it does, and opens no popup
+    ctx = br.new_context(viewport={"width": 360, "height": 760}, has_touch=True, is_mobile=True); ctx.add_init_script(STATUS); pg = ctx.new_page(); pg.goto(card_page.as_uri()); pg.wait_for_timeout(200)
+    link = 'a.hcard[href^="#"][title]'
+    check("a count card with a title is there to tap", pg.evaluate("s => !!document.querySelector(s)", link))
+    if pg.evaluate("s => !!document.querySelector(s)", link):
+        want = pg.get_attribute(link, "href"); pg.tap(link); pg.wait_for_timeout(100)
+        check("a link with a title: the tap follows it, and no popup opens", pg.evaluate("() => location.hash") == want and not pg.evaluate("() => document.querySelectorAll('.xt-pop').length"), (want, pg.evaluate("() => location.hash")))
+    theme = pg.evaluate("() => { const b = document.querySelector('button#theme[title]'); return b ? b.getAttribute('title') : null }")
+    check("the theme button is there to tap", theme is not None)
+    if theme is not None:
+        pg.evaluate("() => scrollTo(0, 0)"); pg.tap("button#theme"); pg.wait_for_timeout(100)
+        now_says = pg.get_attribute("button#theme", "title")
+        check("a button with a title: the tap presses it, and no popup opens", now_says != theme and not pg.evaluate("() => document.querySelectorAll('.xt-pop').length"), (theme, now_says))
+    ctx.close()
+    # the side panel's Audit card: as the server draws it and as the card's script redraws it from the status, and the popup of a dash
     for scheme in ("light", "dark"):
         for width in (360, 1280):
-            tag = f"audit card {width} {scheme}"; touch = width < 600; i = "xpb-audit-card"
-            ctx = br.new_context(viewport={"width": width, "height": 900}, color_scheme=scheme, has_touch=touch, is_mobile=touch); ctx.add_init_script(STATUS); pg = ctx.new_page(); errs = []
+            tag = f"audit card {width} {scheme}"; touch = width < 600; i = "#audit .a-none"
+            ctx = br.new_context(viewport={"width": width, "height": 900}, color_scheme=scheme, has_touch=touch, is_mobile=touch, reduced_motion="reduce"); ctx.add_init_script(STATUS); pg = ctx.new_page(); errs = []
             pg.on("pageerror", lambda e, errs=errs: errs.append(str(e))); pg.goto(card_page.as_uri()); pg.wait_for_timeout(200)
-            if touch: pg.click("#panel-open"); pg.wait_for_timeout(300)
+            if touch: pg.click("#panel-open"); pg.wait_for_timeout(350)
             def redraw(status):
                 pg.evaluate("s => { window.__AUDIT = s; document.dispatchEvent(new Event('stackshot:poll')); }", status); pg.wait_for_timeout(250)
             served = pg.evaluate(CARD)
             pg.evaluate("() => document.querySelector('#audit .a-txt').replaceChildren()"); redraw(card_status)
-            check(f"{tag}: the script draws the card the server drew, its ? included", i in served and pg.evaluate(CARD) == served, (served[-700:], pg.evaluate(CARD)[-700:]))
-            pg.evaluate(CENTER, i)
-            if touch: pg.tap(f"#{i}")
-            else:
-                for _ in range(200):
-                    pg.keyboard.press("Tab")
-                    if pg.evaluate("() => document.activeElement && document.activeElement.id") == i: break
-            pg.wait_for_timeout(50); s = pg.evaluate(STATE, i); c = pg.evaluate(IN_CARD)
-            check(f"{tag}: it opens whole inside the panel, nothing over it", s["open"] and s["words"] > 0 and inside(s) and not s["over"] and s["right"] - s["left"] > 100 and s["left"] >= c["panel"][0] - 0.5 and s["right"] <= c["panel"][1] + 0.5, (s, c))
-            check(f"{tag}: the ? lies over none of the card's words and stays inside the panel", not c["over"] and c["button"][0] >= c["panel"][0] and c["button"][1] <= c["panel"][1] and (s["bw"] >= 43.5 or not touch), (c, s))
+            check(f"{tag}: the script draws the card the server drew, its dashes included", served.count("a-none") == 2 and pg.evaluate(CARD) == served, (served[-700:], pg.evaluate(CARD)[-700:]))
+            check(f"{tag}: the card ends on its last group's row, no line of its own for the dash", pg.evaluate("() => document.querySelector('#audit .a-txt').lastElementChild.classList.contains('a-n')"), served[-300:])
+            target = pg.locator(i).first; target.scroll_into_view_if_needed()
+            target.tap() if touch else target.click()
+            pg.wait_for_timeout(50); got = pg.evaluate(TAPPED, -1); panel = pg.evaluate("() => { const r = document.getElementById('panel').getBoundingClientRect(); return [r.left, r.right]; }")
+            check(f"{tag}: the dash's text opens, whole inside the window, nothing over it", got["count"] == 1 and "findings log" in got["text"] and inside(got) and not got["over"], (got, panel))
             if SHOTS:
                 os.makedirs(SHOTS, exist_ok=True); pg.screenshot(path=os.path.join(SHOTS, f"audit-card-{width}-{scheme}.png"))
-            changed = json.loads(json.dumps(card_status)); changed["card"]["groups"][0]["found"] = 7; redraw(changed); s = pg.evaluate(STATE, i)
-            check(f"{tag}: a redraw with a new count keeps the popup open and in its place", pg.evaluate("() => [...document.querySelectorAll('#audit .a-n')].some(e => e.textContent === '7')") and s["open"] and inside(s), s)
-            if not touch:
-                check(f"{tag}: ...and the keyboard focus on its button", pg.evaluate("() => document.activeElement.id") == i, pg.evaluate("() => document.activeElement.tagName"))
-                pg.keyboard.press("Escape"); pg.wait_for_timeout(30); redraw(card_status); s = pg.evaluate(STATE, i)
-                check(f"{tag}: one closed with Escape stays closed through a redraw, still focused", not s["open"] and pg.evaluate("() => document.activeElement.id") == i, s)
-                pg.keyboard.press("Enter"); pg.wait_for_timeout(30); pg.evaluate("() => document.getElementById('xp-audit-card').focus()"); pg.wait_for_timeout(30)
-                held = pg.evaluate("() => document.activeElement.id"); redraw(changed); s = pg.evaluate(STATE, i)
-                check(f"{tag}: with the focus on the popup, a redraw keeps it open and gives the focus to its button", held == "xp-audit-card" and s["open"] and pg.evaluate("() => document.activeElement.id") == i, (held, s))
+            changed = json.loads(json.dumps(card_status)); changed["card"]["groups"][0]["found"] = 7; redraw(changed); got = pg.evaluate(TAPPED, -1)
+            check(f"{tag}: a redraw with a new count keeps the popup open", pg.evaluate("() => [...document.querySelectorAll('#audit .a-n')].some(e => e.textContent === '7') && document.querySelector('#audit .a-none').hasAttribute('data-xt-open')")
+                  and got["count"] == 1 and inside(got), got)
+            shown = "() => { const r = document.getElementById('panel').getBoundingClientRect(); return r.left < innerWidth - 1 && r.right > 1 && getComputedStyle(document.getElementById('panel')).visibility !== 'hidden'; }"
+            pg.keyboard.press("Escape"); pg.wait_for_timeout(350)
+            check(f"{tag}: Escape closes the popup and leaves the panel", pg.evaluate(TAPPED, -1)["count"] == 0 and pg.evaluate(shown))
+            if touch:
+                target = pg.locator(i).first; target.tap(); pg.wait_for_timeout(50); was = pg.evaluate(TAPPED, -1)["count"]; pg.tap("#panel-close"); pg.wait_for_timeout(400)
+                check(f"{tag}: closing the panel takes the popup along", was == 1 and pg.evaluate(TAPPED, -1)["count"] == 0, was)
             check(f"{tag}: no script error", not errs, errs)
             ctx.close()
     # the pinned side panel on a short desktop window: the floating buttons are drawn over its lower right, where the Audit card's "?" and its popup can be

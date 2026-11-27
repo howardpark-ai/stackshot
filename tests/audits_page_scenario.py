@@ -121,11 +121,11 @@ with TestClient(server.mcp.http_app()) as c:
     # ---- 3. the card
     cd = h[h.find('<div id="audit"'):]; cd = cd[:cd.find("</div>") + 6]
     check("the card: its name is a link to the Audits page, the Audit now text link beside it", '<b class="lbl mh"><a class="nm" href="/audits">Audits ↗</a><button type="button" id="audit-now">Audit now</button></b>' in cd, cd[:300])
-    rows = re.findall(r'<span class="lbl">([^<]+)</span><span class="val a-n">(\d+)</span><span class="val a-n( hit)?">([^<]+)</span>', cd)
+    rows = re.findall(r'<span class="lbl">([^<]+)</span><span class="val a-n">(\d+)</span><span class="val a-n( hit)?(?: a-none" title="[^"]*)?">([^<]+)</span>', cd)
     check("the card's shortlist: each group with its number of audits and its findings in 24 hours, the same numbers as the page",
           [(a, int(b), d) for a, b, _, d in rows] == [(g["name"], len(g["audits"]), n) for g, n in zip(ov.GROUPS, ["1", "3", "2", "1", "1", "1", "–", "–"])], rows)
     check('the card: a dash, never a zero, for Fleet and services and Text and rules; a group with findings is marked (hit); a "?" under the list says what the dash means',
-          [d for *_, d in rows][-2:] == ["–", "–"] and sum(1 for x in rows if x[2]) == 6 and '<span class="a-cn a-cq">–<span class="xp" data-xp="audit-card">' in cd and "A dash means the group keeps no findings log.</span>" in cd
+          [d for *_, d in rows][-2:] == ["–", "–"] and sum(1 for x in rows if x[2]) == 6 and cd.count('<span class="val a-n a-none" title="A dash means the group keeps no findings log.">–</span>') == 2 and "a-cq" not in cd
           and "– keeps no findings log" not in cd and ">0</span><span" not in cd.replace('class="val a-n">0', ""), cd)
     check("the card's header cells name its columns", '<span class="a-h">audits</span><span class="a-h">found, 24 h</span>' in cd)
     check("the card and the status endpoint say the same: GET /audit/status has the card's rows",
@@ -155,7 +155,7 @@ with TestClient(server.mcp.http_app()) as c:
           and re.findall(r'<span class="anum(?: hit)?">((?:\d+ found)|not logged|log off)</span>', h) == ["0 found"] * 6 + ["not logged"] * 2, w[:600])
     check("without findings: no error text, no finding rows, no table", not re.search(r"Traceback|[Ee]rror|[Ee]xception|undefined|\bNone\b|\bNaN\b", w) and 'class="af"' not in h and "<table>" not in h, w)
     check("without findings: the card shows zeros for the logged groups and dashes for the others", re.findall(r'<span class="val a-n">([^<]+)</span><span class="val a-n">([^<]+)</span>', h)[:1] == [("10", "0")]
-          and h.count('<span class="val a-n">–</span>') == 2)
+          and h.count('<span class="val a-n a-none" title="A dash means the group keeps no findings log.">–</span>') == 2)
     LOG.unlink()
     r = c.get("/audits")
     check("no findings log file at all: the same page, still no error", r.status_code == 200 and "No findings in the last 24 hours." in r.text and "Traceback" not in r.text)
@@ -242,7 +242,7 @@ with TestClient(server.mcp.http_app()) as c:
     r = c.get("/audits"); h = r.text; w = text_of(h)
     check("the findings log off: every group says so, the feed says findings are not listed, the card's note says the log is off, no count anywhere",
           r.status_code == 200 and re.findall(r'<span class="anum">((?:\d+ found)|not logged|log off)</span>', h) == ["log off"] * 6 + ["not logged"] * 2
-          and "The findings log is off." in w and '<span class="a-cn">– the findings log is off</span>' in h and 'data-xp="audit-card"' not in h and "found</span>" not in h.replace("found, 24 h", ""), w[:600])
+          and "The findings log is off." in w and '<span class="a-cn">– the findings log is off</span>' in h and 'class="val a-n a-none"' not in h and "found</span>" not in h.replace("found, 24 h", ""), w[:600])
     config.CFG["audit"]["pattern_review"] = "shadow"
 
     # ---- 7. the audit off
