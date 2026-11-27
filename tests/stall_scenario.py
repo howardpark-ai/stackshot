@@ -103,6 +103,7 @@ from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import telling
+from stackshot.model import model_cuts as _MC; _MC_DEFAULT = _MC.STALL_COLD_SKIP; _MC.STALL_COLD_SKIP = False      # this suite pins the ladder with its cold step; the cut's own checks are section 23
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 # the record follows the mover (handoff.stale): checked after every save of the run, the stall pass's moves and raises included
 _real_save = writes.save
@@ -200,6 +201,24 @@ done = stk(T2)
 check("2 cold off: step 2 is the builder, with no cold call", "a2" in done and len(COLD_MSGS) == n_cold and mt(2).get("mover") == "team-back" and ho(2).get("to") == "team-back" and ho(2).get("stall") is True
       and "project's builder" in log_of(2)[-1]["text"], (done, mt(2), log_of(2)))
 close(2); set_cfg()
+
+# ================================================================ 23. the cut: model_cuts.STALL_COLD_SKIP skips the cold call and the later step still happens
+check("23 cut: the switch as shipped skips the cold call", _MC_DEFAULT is True, _MC_DEFAULT)
+set_cfg()                                      # [model] cold_call is on: only the named switch skips the call
+_MC.STALL_COLD_SKIP = True
+item(89, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE0)
+n_cold = len(COLD_MSGS)
+check("23 cut: step 1 is the notice, as always", "a89" in stk(T1) and len(log_of(89)) == 1 and len(COLD_MSGS) == n_cold, (log_of(89), COLD_MSGS[n_cold:]))
+done = stk(T2)
+check("23 cut: step 2 makes no cold call and the item goes to the project's builder (the later step still happens)", "a89" in done and len(COLD_MSGS) == n_cold and mt(89).get("mover") == "team-back"
+      and ho(89).get("to") == "team-back" and ho(89).get("stall") is True and "project's builder" in log_of(89)[-1]["text"] and not (ho(89).get("cold") or {}), (done, mt(89), ho(89), log_of(89)))
+close(89)
+_MC.STALL_COLD_SKIP = False
+item(90, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE0)
+stk(T1); n_cold = len(COLD_MSGS); stk(T2)
+check("23 cut: with the switch back to False the cold call is made again (the old behavior is one line away)", len(COLD_MSGS) == n_cold + 1, (COLD_MSGS[n_cold:]))
+close(90)
+set_cfg()
 
 # ================================================================ 3. nobody can take it: the last rung, one message to the fleet's builder per episode
 set_cfg(cold_call=False)
