@@ -196,6 +196,25 @@ def _clean(s: Any, n: int = 300) -> str:
     return " ".join(str(s or "").split())[:n]
 
 
+def surface_names(reg: dict[str, dict[str, Any]]) -> set[str]:
+    """The surface agents of every page: no session of the fleet, so no hook of theirs reads held lines."""
+    return {n for e in reg.values() if isinstance(e, dict) for n in _anc.surface_agents(e)}
+
+
+def agent_gone(name: str, surface: set[str]) -> bool:
+    """The test of Context.gone, for a caller with no Context (the message tool's reroutes); `surface`: surface_names. A doubt is never "gone"."""
+    nm = str(name or "").strip()
+    if not nm:
+        return False
+    if nm in surface:
+        return True
+    try:
+        from stackshot.fleet import sessions_registry as _sr
+        return _sr.retired(nm)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class Context:
     """What one tick reads once: the registry, the board items (by id and by the way an id is shown), the anchors, the session
     names. Built only when there is something to judge."""
@@ -290,18 +309,9 @@ class Context:
 
     def gone(self, name: str) -> bool:
         """Is an agent no place for a held line: a retired session (the fleet's registry lists it and no live row) or a surface agent (not a session of the fleet: no hook of it reads held lines)? A doubt is never "gone"."""
-        nm = str(name or "").strip()
-        if not nm:
-            return False
         if self._surface is None:
-            self._surface = {n for e in self.reg.values() if isinstance(e, dict) for n in _anc.surface_agents(e)}
-        if nm in self._surface:
-            return True
-        try:
-            from stackshot.fleet import sessions_registry as _sr
-            return _sr.retired(nm)
-        except Exception:  # noqa: BLE001
-            return False
+            self._surface = surface_names(self.reg)
+        return agent_gone(name, self._surface)
 
     def live_background(self, root: str) -> str:
         """The project's background agent a message that is no need of the person goes to (anchors.background_agent: the builder first), skipping an agent that is gone (gone); "" when none is left."""

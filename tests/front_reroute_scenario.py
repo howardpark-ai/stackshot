@@ -9,14 +9,18 @@ Covers:
   1. Both switches off: the peer hold, the pass of a hand-off, the project message, the router's hold, no added line.
   2. A listed sender to a front agent: marked or not, fyi or not, a question, an answer, a note, its own project's front agent, the sender as a session id: the background agent takes it, never a refusal; an unlisted sender, a listed background agent and a script are untouched.
   3. No background agent, or one that cannot take it (a failed push, a retired session): held for the front agent's next turn, the reply saying why and to use a board item; refused only when nothing can carry it; no send comes back on itself.
-  4. A project message that opens "For <front agent>": the same.
-  5. The router: a listed sender's message passed to a front agent goes to the background agent, never held for the front agent; a project with none is ruled as before; a background agent that cannot be reached has it archived.
+  4. A project message that opens "For <front agent>": the same; a front agent whose pane is gone can be held nothing, so the project takes the message.
+  5. The router: a listed sender's message passed to a front agent goes to the background agent, never held for the front agent; a project with none is ruled as before; a background agent that cannot be reached has it held for the front agent,
+     archived only when it cannot be filed; a notice delivered already is only ruled.
   6. The added line: present for a hand-off that names no open item (once, last), absent for a named open item, an fyi, a note, an unlisted sender, a script, a refusal.
   7. Idle peers, the message tool: to the background agent while the person is away; held while he is there, on a presence that cannot be read, for notes, answers, fyi, marked messages, no background agent, an agent that cannot take it.
-  8. Idle peers, the router: the same for a pass to a peer front agent, and held for the peer after the background agent's deliveries failed.
+  8. Idle peers, the router: the same for a pass to a peer front agent, and held for the peer after the background agent's deliveries failed (not ruled held when it cannot be filed, nor after a delivery).
+  9. A background agent the fleet's registry lists as retired is passed over for a live second one, by both switches, in the message tool and the router; with none left the message is held as with no background agent.
+ 10. A presence that cannot be told (no pane row, a row file or a registry that does not read, a stamp that does not read or is from the future, no stamps at all) counts as there.
+ 11. A rerouted message leaves on the item it names the History line that holding it leaves: nothing goes to the front agent, no need or mover changes.
 
     tests/run-suite front_reroute   -> exit 0 / 1"""
-import datetime, json, logging, os, pathlib, re, sys, threading, time
+import contextlib, datetime, json, logging, os, pathlib, re, sys, threading, time
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
@@ -60,11 +64,12 @@ def item(i, owner="my-builder", status="open", project="projects/beta", **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing\n- It lives here\n- Finished when it works", "status": status,
                                                        "updated": now0 - 3600, "state_updated": now0 - 3600, "confirmed": now0 - 3600,
                                                        "metadata": {"owner": owner, "project": project, "next": "the next step", **({} if "needs" in meta else {"mover": owner}), **meta}}))
-item(1); item(2, status="completed"); item(3, owner="other-front", needs=["decision"])
+item(1); item(2, status="completed"); item(3, owner="other-front", needs=["decision"]); item(4, owner="other-front")
 (T / "store/next-id").write_text("100")
 push_log = T / "push.log"
 (T / "fakepush.py").write_text("import sys, json, os, pathlib\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\n"
                                f"if (pathlib.Path({tmp!r}) / ('fail-' + a[0])).exists(): print('boom'); sys.exit(0)\n"
+                               f"if (pathlib.Path({tmp!r}) / ('gone-' + a[0])).exists(): print('queued (retired: ' + a[0] + ' is retired, the line went back to its sender)'); sys.exit(0)\n"
                                f"open({str(push_log)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
 def pushes(): return [json.loads(l) for l in push_log.read_text().splitlines()] if push_log.exists() else []
 def settle(until=30):
@@ -115,9 +120,10 @@ def fresh():
     """Empty the held store, the push log, the message log, the failures and the stamps between checks, once the sends before are over."""
     settle()
     for p in held.dir_().glob("*.jsonl"): p.unlink()
-    for p in T.glob("fail-*"): p.unlink()
+    for p in [*T.glob("fail-*"), *T.glob("gone-*")]: p.unlink()
     push_log.unlink(missing_ok=True); _messaging.MSG_LOG.unlink(missing_ok=True)
     for name in NAMES: unstamp(name)
+    stamp("outside-session", 600)          # the prompt hook has stamped some pane: a pane with no stamp beside it is away
 def msg(to, text, sender, **kw):
     try: return _messaging._message(to, text, sender, **kw)
     except ToolError as e: return str(e)
@@ -154,7 +160,7 @@ def retired(*who):
         return real(to, recs, idx)
     _messaging._dead_recipient = check_
     return lambda: setattr(_messaging, "_dead_recipient", real)
-@__import__("contextlib").contextmanager
+@contextlib.contextmanager
 def hold_off():
     had = _cfg.CFG["router"].get("hold_notices")
     _cfg.CFG["router"]["hold_notices"] = False
@@ -239,12 +245,12 @@ finally: undo()
 undo = retired("other-builder", "other-front")
 try:
     fresh(); out = msg("other-front", f"For other-front, {ASK}", "my-front"); settle()
-    check("3 the front agent and its background agent both retired: the message goes to the project once and no send comes back on itself", out.startswith("'other-front' is retired") and "held for the router" in out and out.count(LINE) == 1, out)
+    check("3 the front agent and its background agent both retired: the message goes to the project once and no send comes back on itself", out.startswith("'other-front' is retired") and "held for the router" in out and out.count(LINE) == 1 and len(mlog()) == 1, (out, mlog()))
 finally: undo()
 undo = retired("solo-front")
 try:
     fresh(); out = msg("solo-front", f"For solo-front, {ASK}", "my-front"); settle()
-    check("3 a retired front agent with no background agent: to the project, once", out.startswith("'solo-front' is retired") and "held for the router" in out, out)
+    check("3 a retired front agent with no background agent: to the project, once", out.startswith("'solo-front' is retired") and "held for the router" in out and len(mlog()) == 1, (out, mlog()))
 finally: undo()
 fresh(); out = msg("quiet-front", ASK, "my-front"); settle()
 check("3 a front agent whose hook cannot fetch held lines: not passed on and said so, no refusal", out.startswith("not passed on — it could not be rerouted: projects/quiet has no background agent") and "Put the work on a board item" in out and got("quiet-front") == [], out)
@@ -270,6 +276,31 @@ with hold_off():
     check("4 the hold off and no background agent: the project takes it as before, no refusal", out.startswith("held for the router"), out)
     fresh(); failing("other-builder"); out = msg("projects/beta", f"For other-front, {ASK}", "my-front"); settle()
     check("4 the hold off and a background agent that cannot take it: the project takes it as before", out.startswith("held for the router"), out)
+
+sessions_file = T / "fleet/a/sessions.json"; machine_file = T / "fleet/a/machine.json"
+@contextlib.contextmanager
+def pane_gone(who):
+    """The session's pane has been gone for two hours while its machine is online: the address check refuses a send to it."""
+    rows, machine = sessions_file.read_text(), machine_file.read_text()
+    changed = json.loads(rows)
+    changed[ID[who]]["gone"] = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat(timespec="seconds").replace("+00:00", "Z")
+    sessions_file.write_text(json.dumps(changed)); machine_file.write_text(json.dumps({**json.loads(machine), "online": {"ok": True}}))
+    try: yield
+    finally: sessions_file.write_text(rows); machine_file.write_text(machine)
+with pane_gone("solo-front"):
+    fresh(); out = msg("solo-front", ASK, "second-front"); settle()
+    check("4 the fixture's gone pane is one a send is refused for", out.startswith("Refused") and "pane has been gone" in out, out)
+    fresh(); out = msg("projects/solo", f"For solo-front, {ASK}", "my-front"); settle()
+    check("4 a front agent whose pane is gone, no background agent: the project takes it, with no refusal that says to send it there", out.startswith("held for the router") and out.count(LINE) == 1 and waiting("solo-front") == 0, out)
+with pane_gone("other-front"):
+    fresh(); failing("other-builder"); out = msg("projects/beta", f"For other-front, {ASK}", "my-front"); settle()
+    check("4 a front agent whose pane is gone and a background agent that cannot take it: the project takes it", out.startswith("held for the router") and waiting("other-front") == 0, out)
+    fresh(); out = msg("projects/beta", f"For other-front, {ASK}", "my-front"); settle()
+    check("4 a front agent whose pane is gone and a live background agent: rerouted", rerouted(out) and len(got("other-builder")) == 1, out)
+fresh()
+for ref in ("other-builder", ID["other-builder"]): (T / f"gone-{ref}").write_text("x")
+out = msg("other-front", ASK, "my-front"); settle()
+check("4 a push that answers queued (retired: ...): the reply does not say the background agent got it", "turned out retired and did not get it: queued (retired:" in out and "so it went to" not in out, out)
 
 # ---- 5. the router
 def sent(key, text, sender, **kw):
@@ -303,8 +334,34 @@ fresh(); n = sent("projects/beta", f"[board] item a1 moved: {ASK}", "my-front");
 check("5 a server's [board] line is no message of the sender's: ruled as before", res.get("target") != "other-builder" and got("other-builder") == [], res)
 fresh(); failing("other-builder"); n = sent("projects/beta", f"For other-front, {ASK}", "my-front"); res = act(n, "other-front")
 check("5 a failed delivery to the background agent is an error to try again", res.get("status") == "error" and res.get("target") == "other-builder", res)
-res = act(n, "other-front", prior={**res, "tries": _live.MAX_TRIES}); settle()
-check("5 …and after the last try it is archived: the front agent gets neither a turn nor a held line", res.get("ruling") == "archived" and "could not be reached" in res.get("reason", "") and got("other-front") == [] and waiting("other-front") == 0, res)
+failed = {**res, "tries": _live.MAX_TRIES}
+res = act(n, "other-front", prior=failed); settle()
+check("5 …and after the last try it is held for the front agent, which gets no turn", res.get("ruling") == "held" and res.get("held_for") == "other-front" and "could not be reached" in res.get("reason", "") and pushes() == [] and waiting("other-front") == 1, res)
+res = act(n, "other-front", prior={**res, "status": "error", "stage": "rule", "tries": _live.MAX_TRIES + 1}); settle()
+check("5 …a ruling that failed to write holds it once and delivers nothing on the retry", res.get("ruling") == "held" and waiting("other-front") == 1 and pushes() == [], (res, pushes()))
+@contextlib.contextmanager
+def unfiled():
+    """The front gate files nothing: the agent's hook cannot fetch held lines."""
+    real = _live._HOOKS["front_fyi"]
+    _live._HOOKS["front_fyi"] = lambda *a, **k: ("held", "its hook cannot fetch held lines")
+    try: yield
+    finally: _live._HOOKS["front_fyi"] = real
+fresh(); n = sent("projects/beta", f"For other-front, {ASK}", "my-front")
+with unfiled(): res = act(n, "other-front", prior=failed); settle()
+check("5 …and archived only when it cannot be filed: no turn, no held line", res.get("ruling") == "archived" and "could not be held for other-front" in res.get("reason", "") and not res.get("held_for") and pushes() == [] and waiting("other-front") == 0, res)
+fresh(); failing("other-builder"); n = sent("projects/beta", ASK, "my-front"); res = act(n, "other-builder", rule="anchor-item")
+check("5 the background agent as the ruling's own target, a failed delivery: tried again", res.get("status") == "error", res)
+res = act(n, "other-builder", rule="anchor-item", prior={**res, "tries": _live.MAX_TRIES}); settle()
+check("5 …after the last try the fallback to the front agent holds it, never a turn", res.get("ruling") == "held" and res.get("held_for") == "other-front" and pushes() == [] and waiting("other-front") == 1, res)
+fresh(); n = sent("projects/beta", ASK, "my-front")
+with unfiled(): res = act(n, "other-builder", rule="anchor-item", prior={"status": "error", "target": "other-builder", "tries": _live.MAX_TRIES}); settle()
+check("5 …and archives it when it cannot be filed", res.get("ruling") == "archived" and pushes() == [] and waiting("other-front") == 0, res)
+fresh(); n = sent("projects/beta", f"For other-front, {ASK}", "my-front")
+res = act(n, "other-front", prior={"status": "delivered", "stage": "rule", "target": "other-front", "outcome": "delivered"}); settle()
+check("5 a notice delivered already is only ruled: not rerouted afterwards", res.get("status") == "ruled" and res.get("target") == "other-front" and pushes() == [], res)
+fresh(); n = sent("projects/beta", f"For other-front, {ASK}", "my-front")
+res = act(n, "other-front", prior={"status": "delivered", "stage": "rule", "target": "other-builder", "reroute_from": "other-front", "outcome": "delivered", "tries": _live.MAX_TRIES}); settle()
+check("5 …and not held for the front agent afterwards, whatever the count of failures", res.get("status") == "ruled" and res.get("ruling") == "passed" and waiting("other-front") == 0 and pushes() == [], res)
 fresh()
 for key_ in routing.projects():          # the notices the checks above left unruled: the tick below judges the one that follows, alone
     for old in routing.read(key_):
@@ -404,6 +461,109 @@ switches(None, True); n = routed(ASK); failing("other-builder"); res = act(n, "o
 check("8 a failed delivery to the background agent is an error to try again", res.get("status") == "error" and res.get("target") == "other-builder", res)
 res = act(n, "other-front", prior={**res, "tries": _live.MAX_TRIES}); settle()
 check("8 …and after the last try it is held for the peer, as without the switch", res.get("ruling") == "held" and res.get("held_for") == "other-front" and waiting("other-front") == 1 and got("other-front") == [], res)
+n = routed(ASK); last = {"status": "error", "target": "other-builder", "idle_from": "other-front", "tries": _live.MAX_TRIES}
+with unfiled(): res = act(n, "other-front", prior=last); settle()
+check("8 a line that cannot be filed is not ruled held", res.get("ruling") != "held" and not res.get("held_for") and waiting("other-front") == 0, res)
+n = routed(ASK); res = act(n, "other-front", prior={**last, "status": "delivered", "stage": "rule", "outcome": "delivered"}); settle()
+check("8 a notice delivered already is only ruled, not held afterwards", res.get("status") == "ruled" and res.get("ruling") == "passed" and waiting("other-front") == 0 and pushes() == [], res)
+
+# ---- 9. a retired background agent, by the fleet's registry
+from stackshot.fleet import sessions_registry as _sessreg
+@contextlib.contextmanager
+def registry_retired(*who):
+    """The fleet's own registry lists these names on retired rows only; the pages still list them."""
+    had = _cfg.CFG["client"].get("session_links")
+    path = T / "links/a/session-registry.json"; path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema": 1, "machine": "a", "sessions": {ID[w]: {"id": ID[w], "name": w, "state": "retired", "transcripts": []} for w in who}}))
+    _cfg.CFG["client"]["session_links"] = str(T / "links"); _sessreg._CACHE["at"] = -1e9
+    try:
+        assert all(_sessreg.retired(w) for w in who), who
+        yield
+    finally:
+        _cfg.CFG["client"]["session_links"] = had; path.unlink(); _sessreg._CACHE["at"] = -1e9
+with registry_retired("my-builder"):
+    switches(["my-front"])
+    fresh(); out = msg("second-front", ASK, "my-front"); settle()
+    check("9 the message tool, a listed sender: the live second background agent takes it", rerouted(out, back="my-docs", front="second-front", project="projects/alpha") and len(got("my-docs")) == 1 and got("my-builder") == [], out)
+    fresh(); out = msg("projects/alpha", f"For second-front, {ASK}", "my-front"); settle()
+    check("9 …a project message that opens For <front agent> too", rerouted(out, back="my-docs", front="second-front", project="projects/alpha") and got("my-builder") == [], out)
+    fresh(); n = sent("projects/alpha", f"For second-front, {ASK}", "my-front"); res = act(n, "second-front", key="projects/alpha"); settle()
+    check("9 …the router too", to_back(res, back="my-docs", front="second-front") and got("my-builder") == [], res)
+    switches(None, True)
+    fresh(); out = msg("second-front", ASK, "my-front"); settle()
+    check("9 the message tool, an idle peer: the live second background agent takes it", out.startswith("Rerouted: second-front is idle") and len(got("my-docs")) == 1 and got("my-builder") == [], out)
+    fresh(); n = sent("projects/alpha", f"For second-front, {ASK}", "my-front"); res = act(n, "second-front", key="projects/alpha"); settle()
+    check("9 …the router too", to_back(res, back="my-docs", front="second-front") and got("my-builder") == [], res)
+with registry_retired("other-builder"):
+    switches(["my-front"])
+    fresh(); out = msg("other-front", ASK, "my-front"); settle()
+    check("9 no live background agent, the message tool: held for the front agent, the reply saying so", held_back(out, "other-front", "projects/beta has no live background agent") and got("other-builder") == [], out)
+    fresh(); n = sent("projects/beta", f"For other-front, {ASK}", "my-front"); res = act(n, "other-front"); settle()
+    check("9 …the router: nothing is queued for the retired builder, the pass is ruled as before", res.get("ruling") == "held" and res.get("held_for") == "other-front" and got("other-builder") == [] and waiting("other-builder") == 0, res)
+    switches(None, True)
+    fresh(); out = msg("other-front", ASK, "second-front"); settle()
+    check("9 no live background agent, an idle peer: held for the peer", peer_held(out) and got("other-builder") == [], out)
+    n = routed(ASK); res = act(n, "other-front"); settle()
+    check("9 …the router too", res.get("ruling") == "held" and res.get("held_for") == "other-front" and got("other-builder") == [] and waiting("other-builder") == 0, res)
+
+# ---- 10. a presence that cannot be told counts as there
+row_file = T / f"cli/{os.getpid()}-other-front.json"
+def no_row():
+    row_file.unlink()
+    return lambda: pane("other-front")
+def bad_row():
+    row_file.write_text("{not json")
+    return lambda: pane("other-front")
+def no_registry():
+    had = handoff_svc.CLI_SESSIONS; handoff_svc.CLI_SESSIONS = T / "no-such-folder"
+    return lambda: setattr(handoff_svc, "CLI_SESSIONS", had)
+def bad_stamp():
+    stamp_file("other-front").mkdir(parents=True)
+    return lambda: stamp_file("other-front").rmdir()
+def future_stamp():
+    stamp("other-front", -600)
+    return lambda: unstamp("other-front")
+def no_stamps():
+    unstamp("outside-session")
+    return lambda: None
+for label, setup in (("no pane row", no_row), ("a row file that does not read", bad_row), ("a registry that is not there", no_registry), ("a stamp that does not read", bad_stamp),
+                     ("a stamp from the future", future_stamp), ("no stamp of any pane", no_stamps)):
+    switches(None, True); n = routed(ASK); undo = setup()
+    try:
+        res = act(n, "other-front"); settle()
+        check(f"10 {label}, the router: held for the peer", res.get("ruling") == "held" and res.get("held_for") == "other-front" and got("other-builder") == [], res)
+        for p in held.dir_().glob("*.jsonl"): p.unlink()
+        out = msg("other-front", ASK, "second-front"); settle()
+        check(f"10 {label}, the message tool: held for the peer", peer_held(out) and got("other-builder") == [], out)
+    finally: undo()
+fresh()
+check("10 a pane with no stamp beside another pane's stamp is away; a caller that does not ask otherwise reads an untold presence as away, as before",
+      telling.presence_here("other-front", unread=True) is False and telling.presence_here("no-such-pane") is False and telling.presence_here("no-such-pane", unread=True) is True)
+
+# ---- 11. the History line on the item a rerouted message names
+item_file = T / "store/a/4.json"
+pristine = item_file.read_text()
+def history(): return [x["text"] for x in ((json.loads(item_file.read_text())["metadata"].get("front_quiet") or {}).get("log") or [])]
+def traced(back="other-builder"):
+    meta = json.loads(item_file.read_text())["metadata"]; was = json.loads(pristine)["metadata"]
+    return (len(history()) == 1 and history()[0].startswith(f"other-front was not told (it went to {back}, the project's background agent): ") and "weekly page" in history()[0]
+            and all(meta.get(k) == was.get(k) for k in ("owner", "mover", "needs", "next")) and got("other-front") == [] and waiting("other-front") == 0)
+def restart():
+    fresh(); item_file.write_text(pristine)
+NAMED = f"a4: {ASK}"
+for label, table, to, text, sender, kw in (("a listed sender", (["my-front"], None), "other-front", NAMED, "my-front", {}), ("its fyi", (["my-front"], None), "other-front", NAMED, "my-front", {"fyi": True}),
+                                           ("its project message", (["my-front"], None), "projects/beta", f"For other-front, {NAMED}", "my-front", {}),
+                                           ("an idle peer", (None, True), "other-front", NAMED, "second-front", {})):
+    switches(*table); restart(); out = msg(to, text, sender, **kw); settle()
+    check(f"11 the message tool, {label}: one History line on the named item, nothing for the front agent, needs and mover as they were", out.startswith("Rerouted:") and traced(), (out, history()))
+for label, table, sender, kw in (("a listed sender", (["my-front"], None), "my-front", {}), ("its fyi, held for the background agent", (["my-front"], None), "my-front", {"fyi": True}), ("an idle peer", (None, True), "second-front", {})):
+    switches(*table); restart(); n = sent("projects/beta", f"For other-front, {NAMED}", sender, **kw); item_file.write_text(pristine); res = act(n, "other-front"); settle()
+    check(f"11 the router, {label}: the same line", (res.get("target") == "other-builder" or res.get("held_for") == "other-builder") and traced(), (res, history()))
+switches(["my-front"]); restart(); n = sent("projects/beta", f"For other-front, {NAMED}", "my-front"); item_file.write_text(pristine); failing("other-builder"); res = act(n, "other-front"); settle()
+check("11 a delivery that failed leaves no line", res.get("status") == "error" and history() == [], (res, history()))
+switches(); restart(); out = msg("other-builder", NAMED, "my-front"); settle()
+check("11 a message that was moved off no front agent leaves no such line", out.startswith("delivered") and history() == [], (out, history()))
+item_file.write_text(pristine)
 
 settle()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
