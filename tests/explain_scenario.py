@@ -1,17 +1,19 @@
 """Scenario test for the page explainers: text that says what a section is or how something works sits behind the one "?" control (ui/explain.py), never on the page itself.
-Fixture data, the pages through Starlette's test client, no live store, no network. People and addresses are made up.
+Fixture data, the pages through Starlette's test client and the board's renderers, no live store, no network. People and addresses are made up.
 
-The script runs in node against a small fake document built from the component's own markup (tests/explain_check.py is the browser check of the same behavior).
+The script runs in node against a small fake document built from the component's own markup; no browser runs here, so the drawn layout is tests/explain_check.py's, which CI runs.
 
 Covers:
   * the markup: the button's name and state, its description pointing at the popup, the text and the name escaped, in the request's language;
   * every page with the board's chrome carries the script once and the style, and no two explainers on a page share a key;
   * the script: a tap opens and a second tap closes; hover opens and leaving closes, unless a click pinned it; keyboard focus opens and tabbing away closes; Escape closes it
     and nothing else, and leaves Escape alone when nothing is open; a tap outside closes; one is open at a time; the popup stays inside the window and inside a clipping
-    ancestor, and goes above the button when there is no room below; an open popup survives the home page's in-place update.
+    ancestor, and goes above the button when there is no room below; an open popup survives the home page's in-place update;
+  * the explainers that left the pages (MOVED, one row per "?"): each is in its popup, and no page drawn here shows any of them outside a popup. A new explainer gets a row.
 
     tests/run-suite explain        → exit 0 / 1"""
-import html.parser, json, logging, os, pathlib, re, shutil, subprocess, sys, time
+import datetime, html, json, logging, os, pathlib, re, shutil, subprocess, sys, time
+from html.parser import HTMLParser
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch
@@ -43,6 +45,11 @@ def item(i, subject, status="open", **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": subject, "description": "- A thing\n- It lives here\n- Finished when it works", "status": status,
         "updated": now0 - 3600, "state_updated": now0 - 3600, "confirmed": now0 - 3600, "metadata": {"owner": A, "project": "projects/alpha", "next": "the next step", **meta}}))
 item(1, "[work] item one")
+DAY = lambda n: (datetime.date.today() + datetime.timedelta(days=n)).isoformat()
+LINES = [{"kind": "time", "until": DAY(3)}, {"kind": "relay", "event": "the lease"}]
+def waiting(i, **meta): item(i, f"[work] item {i}", hold=True, needs=[], post_wake_mover="alpha-main", **meta)
+for i, mode in ((2, "all"), (3, "any")): waiting(i, wait_kind="list", wait_mode=mode, until=DAY(5), waits=LINES, watch={"set_at": now0 - 3600})
+waiting(4, wait_kind="relay", ask_by=DAY(5), wait_event="the lease", party="the landlord", chases=[{"at": now0 - 600, "by": "alpha-main", "note": "asked again"}])
 (T / "store/next-id").write_text("100"); (T / "store/anchors.json").write_text("{}")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
@@ -60,12 +67,14 @@ from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.ui import explain as xp
 from stackshot.web.ui import render as r2
+from stackshot.web.ui import runners as ui_runners
+from stackshot.anchors import anchors as _anc
 from starlette.testclient import TestClient
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 search.sync(__import__("stackshot.web.render", fromlist=["_"]).Board(str(T / "store")))
 
 
-class Tree(html.parser.HTMLParser):
+class Tree(HTMLParser):
     """Markup as nested {tag, attrs, text, kids}: what the node half builds its fake elements from."""
     VOID = {"meta", "link", "input", "br", "img", "hr", "col", "source", "path", "circle"}
     def __init__(self, s):
@@ -98,7 +107,8 @@ _cfg.CFG.setdefault("ui", {})["locale_dir"] = str(T / "loc")
 with i18n.use("ko"): mk = xp.explain("k", "text", "Thing")
 _cfg.CFG["ui"].pop("locale_dir")
 check("the button's name is in the request's language", 'aria-label="[x:About Thing]"' in mk, mk)
-check("a heading and its explainer sit side by side: the button is not inside the heading", xp.head("<h2>Runs</h2>", m).startswith('<div class="xp-head"><h2>Runs</h2><span class="xp"') and xp.head("<h2>Runs</h2>", m).endswith("</span></div>"))
+check("a heading and its explainer sit side by side: the button is not inside the heading", xp.head("<h2>Runs</h2>", m).startswith('<div class="xp-head xp-h2"><h2>Runs</h2><span class="xp"') and xp.head("<h2>Runs</h2>", m).endswith("</span></div>"))
+check("the line takes the heading's level, a heading with a class too", xp.head('<h1>T</h1>', m).startswith('<div class="xp-head xp-h1">') and xp.head('<h2 class="lsec">T</h2>', m).startswith('<div class="xp-head xp-h2">'))
 
 # ---- 2. every page carries the script and the style
 PAGES = [("home", "/"), ("item", "/items/a1"), ("project", "/projects/alpha"), ("projects", "/projects"), ("closed", "/closed"), ("audits", "/audits"), ("search", "/search?q=item"),
@@ -114,7 +124,47 @@ for n, h in pages.items():
     keys = re.findall(r'<span class="xp" data-xp="([^"]*)"', h)
     check(f"{n}: no two explainers share a key", len(keys) == len(set(keys)), keys)
 
-# ---- 3. the script, in node
+# ---- 3. what left the pages stays off them
+# the "?" (its key; "/…" tells two states of one key apart) -> the catalog keys of the text it holds, and the drawn page that shows it
+MOVED = {"projects": ("projects", ["projects.note"]), "closed-new": ("closed", ["closed.new_help"]), "closed-last14": ("closed", ["closed.last14_note"]),
+         "audit-groups": ("audits", ["audit.groups_help", "audit.note_logged"]), "audit-runs": ("audits", ["audit.runs_hint"]),
+         **{f"audit-group-{k[len('audit.desc.'):]}": ("audits", [k]) for k in i18n.EN if k.startswith("audit.desc.")},
+         "runners": ("runners, in use", ["runners.sub", "runners.checks"]), "routing": ("project", ["routing.help_pilot"]), "routing/plain": ("project, not ruled", ["routing.help_plain"]),
+         "wait-list": ("item, all of a list", ["wait.list.help_all"]), "wait-list/any": ("item, any of a list", ["wait.list.help_any"]),
+         "wait-backstop": ("item, all of a list", ["wait.list.help_backstop"]), "wait-chases": ("item, a relay wait", ["wait.chase_help"])}
+def board(): return r2.Board(str(T / "store"))
+drawn = dict(pages)
+drawn["item, all of a list"] = board().item_html("a2"); drawn["item, any of a list"] = board().item_html("a3"); drawn["item, a relay wait"] = board().item_html("a4")
+real_root, real_enabled = _anc.pilot_root, ui_runners.enabled
+try:
+    _anc.pilot_root = lambda *a, **k: ""
+    drawn["project, not ruled"] = board().routing_html("projects/alpha")
+    ui_runners.enabled = lambda: True      # a board with runners, before the first read: nothing is read from GitHub
+    drawn["runners, in use"] = ui_runners.page_html(board(), {"ts": 0, "errors": {}, "failed": [], "runners": [], "switch": {}, "stale": False, "pending": True, "refreshing": False, "age_s": 0})
+finally:
+    _anc.pilot_root, ui_runners.enabled = real_root, real_enabled
+POP = re.compile(r'<span class="xp-pop" id="xp-([^"]*)"[^>]*>([^<]*)</span>')
+def inline(h):
+    """The words a page draws outside every popup (and outside its style and scripts)."""
+    h = POP.sub(" ", re.sub(r"(?s)<(style|script)[^>]*>.*?</\1>", " ", h))
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", h)))
+def said(key): return ".+?".join(re.escape(part) for part in re.split(r"\{[a-z_]+\}", i18n.EN[key]))      # the English text, any value in each of its fields
+for row, (where, keys) in MOVED.items():
+    pops = {k: html.unescape(v) for k, v in POP.findall(drawn[where])}
+    text = pops.get(row.split("/")[0], "")
+    check(f'{row}: its text is behind its "?" ({where})', all(re.search(said(k), text) for k in keys), (keys, sorted(pops), text))
+    for k in keys:
+        back = [n for n, h in drawn.items() if re.search(said(k), inline(h))]
+        check(f"{row}: {k} is drawn outside a popup on no page", not back, back)
+check("an empty New section still says so on the page", i18n.EN["closed.new_none"] in inline(pages["closed"]), inline(pages["closed"])[:600])
+_had = dict(_cfg.CFG.get("audit", {})); _cfg.CFG.setdefault("audit", {})["pattern_review"] = "off"
+try:
+    with TestClient(server.mcp.http_app(), base_url=BOARD) as c: off = c.get("/audits", headers={"host": "board.example.org"}).text
+finally:
+    _cfg.CFG["audit"].clear(); _cfg.CFG["audit"].update(_had)
+check("a findings log that is off is a warning, so it stays on the page", i18n.EN["audit.note_log_off"] in inline(off) and 'id="xp-audit-groups"' in off, inline(off)[:600])
+
+# ---- 4. the script, in node
 HARNESS = r"""
 const vm = require('vm'), fs = require('fs'), assert = require('assert');
 const [js, tree] = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));

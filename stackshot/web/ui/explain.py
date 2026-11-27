@@ -25,14 +25,17 @@ def explain(key: str, text: str, what: str, lang: str | None = None) -> str:
 
 
 def head(heading: str, tip: str) -> str:
-    """HTML: a heading with its "?" beside it on one line. `heading` is the whole heading element, `tip` what explain() gave; both are markup."""
-    return f'<div class="xp-head">{heading}{tip}</div>'
+    """HTML: a heading with its "?" beside it on one line. `heading` is the whole <h1> or <h2> element, `tip` what explain() gave; both are markup. The wrapper takes over
+    the heading's margins and rule (class xp-h1 or xp-h2), so the rule still runs under the whole line."""
+    return f'<div class="xp-head xp-{heading[1:3]}">{heading}{tip}</div>'
 
 
 # The button is a 36 px target (44 px for a finger) round an 18 px circle; the negative margin keeps that target from making a line of text taller. The popup sets every
 # inherited text property itself, since it can sit in a heading.
 CSS = """
-.xp-head{display:flex;flex-wrap:wrap;align-items:center;column-gap:4px}.xp-head>h1,.xp-head>h2{margin-right:0}
+.xp-head{display:flex;flex-wrap:wrap;align-items:center;column-gap:4px}.xp-head.xp-h1>h1,.xp-head.xp-h2>h2{margin:0;border:0;padding:0}
+.xp-head.xp-h1{margin:0 0 16px}.xp-head.xp-h2{margin:32px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+main.audits-page .xp-head.xp-h2{margin:22px 0 8px}.lnew>.xp-head.xp-h2,.lcompleted>.xp-head.xp-h2{margin:28px 0 4px}
 .xp{position:relative;display:inline-block;vertical-align:middle;margin:-8px 0;line-height:1}
 .xp-b{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;margin:0;padding:0;border:0;border-radius:8px;background:none;color:var(--mut);font-family:inherit;cursor:pointer}
 .xp-b>span{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:18px;height:18px;border:1.5px solid currentColor;border-radius:50%;font-size:12px;font-weight:600;line-height:1}

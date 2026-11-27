@@ -656,7 +656,7 @@ with sync_playwright() as p:
     # Then the Undo state: a Clear leaves the row in place, dimmed, its Clear replaced by an Undo of the same place and size; Clear all leaves every row with its own Undo; an Undo puts the row back. The browser has no server on a file:// page, so the
     # page's fetch is answered by a stub that says {ok, changed: 1}. The row count is the home card's "new" badge. ----
     LANDED = r"""() => { const vw = document.documentElement.clientWidth, out = [], lis = [...document.querySelectorAll('#new li.lrow')];
-      const all = document.querySelector('#new form.lmark .b'), grp = document.querySelector('#new details.hscope'), note = document.querySelector('#new p.lnote');
+      const all = document.querySelector('#new form.lmark .b'), grp = document.querySelector('#new details.hscope'), head = document.querySelector('#new .xp-head');
       for (const li of lis) { const b = li.querySelector('form.lclear .b'), why = li.querySelector('.ir-det'), top = li.querySelector('.ir-top'), act = li.querySelector('.ir-act'), sj = li.querySelector('a.ir-link'), ag = li.querySelector('.lago'), lr = li.getBoundingClientRect(), tb = top.getBoundingClientRect();
         const id = li.querySelector('.ir-id').textContent;
         if (!b) { out.push(id + ' has no Clear button'); continue; }
@@ -676,22 +676,22 @@ with sync_playwright() as p:
         if (q.left < 0 || q.right > vw + 0.5 || q.height < 12 || h.scrollWidth > h.clientWidth + 1) out.push('scope heading ' + h.textContent + ' ' + Math.round(q.left) + '-' + Math.round(q.right) + ' h' + Math.round(q.height));
         if (!g || g.getBoundingClientRect().top < q.bottom - 1) out.push('scope heading ' + h.textContent + ' is not above its rows'); }
       const a = all.getBoundingClientRect();
-      return {scopes: sh.map(h => h.textContent.replace(/[0-9]+$/, '').trim()), lines: lis.length, clears: document.querySelectorAll('#new form.lclear').length, why: document.querySelectorAll('#new li.lrow .ir-det').length, allH: Math.round(a.height), allTop: Math.round(a.top), grpTop: Math.round(grp.getBoundingClientRect().top), noteBottom: Math.round(note.getBoundingClientRect().bottom), allRight: Math.round(a.right), sw: document.documentElement.scrollWidth, out: out.slice(0, 6)}; }"""
+      return {scopes: sh.map(h => h.textContent.replace(/[0-9]+$/, '').trim()), lines: lis.length, clears: document.querySelectorAll('#new form.lclear').length, why: document.querySelectorAll('#new li.lrow .ir-det').length, allH: Math.round(a.height), allTop: Math.round(a.top), grpTop: Math.round(grp.getBoundingClientRect().top), headBottom: Math.round(head.getBoundingClientRect().bottom), allRight: Math.round(a.right), sw: document.documentElement.scrollWidth, out: out.slice(0, 6)}; }"""
     UNDO = r"""async () => { const vw = document.documentElement.clientWidth, out = [], lis = [...document.querySelectorAll('#new li.lrow')], res = {}, wait = () => new Promise(r => setTimeout(r, 30));
-      const first = lis[0], id0 = first.querySelector('.ir-id').textContent, cb = first.querySelector('form.lclear .b'), r0 = cb.getBoundingClientRect(), t0 = first.getBoundingClientRect().top, counts = () => [...document.querySelectorAll('#new h3.iscope .count')].map(c => c.textContent), counts0 = counts(), note = () => document.querySelector('#new p.lnote').firstChild.nodeValue, note0 = note();
+      const first = lis[0], id0 = first.querySelector('.ir-id').textContent, cb = first.querySelector('form.lclear .b'), r0 = cb.getBoundingClientRect(), t0 = first.getBoundingClientRect().top, counts = () => [...document.querySelectorAll('#new h3.iscope .count')].map(c => c.textContent), counts0 = counts(), head = () => document.querySelector('#new h2.lsec .count').textContent, head0 = head();
       cb.click(); await wait(); await wait();
       const ub = first.querySelector('form.lundo .b'), r1 = ub && ub.getBoundingClientRect();
       res.cleared = {dim: first.classList.contains('lcleared'), undo: !!ub, noClear: !first.querySelector('form.lclear'), samePlace: !!ub && Math.abs(r1.left - r0.left) < 1 && Math.abs(r1.top - r0.top) < 1 && Math.abs(first.getBoundingClientRect().top - t0) < 1,
         h: ub && Math.round(r1.height), inside: !!ub && r1.right <= vw + 0.5 && r1.left >= 0, opacity: getComputedStyle(first.querySelector('.ir-top')).opacity, label: ub && ub.textContent, aria: ub && ub.getAttribute('aria-label'), lines: document.querySelectorAll('#new li.lrow').length,
-        counts: counts(), note: note(), sw: document.documentElement.scrollWidth, first: id0, counts0, note0};
+        counts: counts(), head: head(), sw: document.documentElement.scrollWidth, first: id0, counts0, head0};
       ub.click(); await wait(); await wait();
-      res.undone = {back: !first.classList.contains('lcleared') && !!first.querySelector('form.lclear') && !first.querySelector('form.lundo'), counts: counts(), note: note(), opacity: getComputedStyle(first.querySelector('.ir-top')).opacity};
+      res.undone = {back: !first.classList.contains('lcleared') && !!first.querySelector('form.lclear') && !first.querySelector('form.lundo'), counts: counts(), head: head(), opacity: getComputedStyle(first.querySelector('.ir-top')).opacity};
       document.querySelector('#new form.lmark .b').click(); await wait(); await wait();
       const all = [...document.querySelectorAll('#new li.lrow')], ubs = all.map(l => l.querySelector('form.lundo .b'));
       res.all = {dim: all.every(l => l.classList.contains('lcleared')), undos: ubs.every(b => b), tall: ubs.every(b => b && b.getBoundingClientRect().height >= 32 && b.getBoundingClientRect().right <= vw + 0.5), hidden: document.querySelector('#new form.lmark').hidden, shown: getComputedStyle(document.querySelector('#new form.lmark')).display,
-        n: all.length, note: note(), counts: [...document.querySelectorAll('#new .count')].map(c => c.textContent), sw: document.documentElement.scrollWidth};
+        n: all.length, head: head(), counts: [...document.querySelectorAll('#new .count')].map(c => c.textContent), sw: document.documentElement.scrollWidth};
       ubs[1].click(); await wait(); await wait();
-      res.one = {back: !all[1].classList.contains('lcleared') && !!all[1].querySelector('form.lclear'), others: all.filter((l, i) => i !== 1).every(l => l.classList.contains('lcleared')), allShown: getComputedStyle(document.querySelector('#new form.lmark')).display, enabled: !document.querySelector('#new form.lmark .b').disabled, note: note()};
+      res.one = {back: !all[1].classList.contains('lcleared') && !!all[1].querySelector('form.lclear'), others: all.filter((l, i) => i !== 1).every(l => l.classList.contains('lcleared')), allShown: getComputedStyle(document.querySelector('#new form.lmark')).display, enabled: !document.querySelector('#new form.lmark .b').disabled, head: head()};
       document.querySelector('#new form.lmark .b').click(); await wait(); await wait();
       res.again = {dim: all.every(l => l.classList.contains('lcleared')), undos: all.every(l => !!l.querySelector('form.lundo')), hidden: document.querySelector('#new form.lmark').hidden, enabled: !document.querySelector('#new form.lmark .b').disabled};
       return res; }"""
@@ -702,17 +702,17 @@ with sync_playwright() as p:
             ctx = br.new_context(viewport={"width": w, "height": 900}, color_scheme=scheme); pg = ctx.new_page(); pg.goto(PAGES["landed page"].as_uri()); pg.wait_for_timeout(100)
             ld_ = pg.evaluate(LANDED)
             check(f"closed page {w} {scheme}: Clear all (32 px or taller, inside the screen) sits above the list; each of the {ld_['lines']} rows has its Clear (32 px or taller, under the reason, inside the screen), the title then its relative time on the top line (the hover names the zone), the reason under it, not cut; no row past the screen; the rows are the home card's {_card} new; the scope subsection headings ({ld_['scopes']}) are inside the screen, each above its rows",
-                  ld_["lines"] == ld_["clears"] == _card == 5 and ld_["scopes"] == ["work", "ops"] and ld_["why"] >= 3 and ld_["allH"] >= 32 and ld_["noteBottom"] <= ld_["allTop"] < ld_["grpTop"] and ld_["allRight"] <= w and ld_["sw"] <= w and ld_["out"] == [], ld_)
+                  ld_["lines"] == ld_["clears"] == _card == 5 and ld_["scopes"] == ["work", "ops"] and ld_["why"] >= 3 and ld_["allH"] >= 32 and ld_["headBottom"] <= ld_["allTop"] < ld_["grpTop"] and ld_["allRight"] <= w and ld_["sw"] <= w and ld_["out"] == [], ld_)
             ctx.close()
             ctx = br.new_context(viewport={"width": w, "height": 900}, color_scheme=scheme); pg = ctx.new_page(); pg.add_init_script(STUB); pg.goto(PAGES["landed page"].as_uri()); pg.wait_for_timeout(100)
             u_ = pg.evaluate(UNDO); c_, o_, a_ = u_["cleared"], u_["undone"], u_["all"]
             check(f"closed page {w} {scheme}: a Clear leaves the row in place, dimmed, its Clear replaced by an Undo of the same place (32 px or taller, inside the screen, no sideways scroll); no row left the page, the counts follow ({c_['counts0']} to {c_['counts']}), and the Undo puts the row back",
                   c_["dim"] and c_["undo"] and c_["noClear"] and c_["samePlace"] and c_["h"] >= 32 and c_["inside"] and float(c_["opacity"]) < 1 and c_["label"] == "Undo" and c_["aria"] == "Undo " + c_["first"] and c_["lines"] == 5 and c_["sw"] <= w
-                  and sum(map(int, c_["counts"])) == sum(map(int, c_["counts0"])) - 1 and c_["note"].startswith("4 closes") and c_["note0"].startswith("5 closes")
-                  and o_["back"] and float(o_["opacity"]) == 1 and o_["counts"] == c_["counts0"] and o_["note"].startswith("5 closes"), u_)
+                  and sum(map(int, c_["counts"])) == sum(map(int, c_["counts0"])) - 1 and c_["head"] == "4" and c_["head0"] == "5"
+                  and o_["back"] and float(o_["opacity"]) == 1 and o_["counts"] == c_["counts0"] and o_["head"] == "5", u_)
             check(f"closed page {w} {scheme}: Clear all leaves every row in place with its own Undo (32 px or taller, inside the screen), hides itself while nothing is left to clear, no sideways scroll; one Undo brings Clear all back, enabled, and the others stay cleared; a second Clear all after it clears the row again",
-                  a_["dim"] and a_["undos"] and a_["tall"] and a_["shown"] == "none" and a_["n"] == 5 and a_["note"].startswith("0 closes") and set(a_["counts"]) <= {"0"} and a_["sw"] <= w
-                  and u_["one"]["back"] and u_["one"]["others"] and u_["one"]["allShown"] != "none" and u_["one"]["enabled"] and u_["one"]["note"].startswith("1 close ")
+                  a_["dim"] and a_["undos"] and a_["tall"] and a_["shown"] == "none" and a_["n"] == 5 and a_["head"] == "0" and set(a_["counts"]) <= {"0"} and a_["sw"] <= w
+                  and u_["one"]["back"] and u_["one"]["others"] and u_["one"]["allShown"] != "none" and u_["one"]["enabled"] and u_["one"]["head"] == "1"
                   and u_["again"]["dim"] and u_["again"]["undos"] and u_["again"]["hidden"] and u_["again"]["enabled"], u_)
             ctx.close()
     # ---- the relative words are the server's: the page script's ago() (its own source, run in the page) and render.landed_ago() read the same for a range of ages ----

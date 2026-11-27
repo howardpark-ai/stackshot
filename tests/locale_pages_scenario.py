@@ -497,7 +497,7 @@ def locale_audits_part():
         en = {p: get(p, NOOR) for p in PAGES}
         check("English: every page answers 200 and holds no marker", all(r.status_code == 200 for r in en.values()) and not [p for p, r in en.items() if "[x:" in r.text], {p: r.status_code for p, r in en.items()})
         ea = body(en["/audits"].text)
-        check("English: the Audits page's words are the old words (title, groups, latest findings, runs, the paces and the table's heads)", "Audits" in ea and "Groups open one to see its audits" in ea and "Latest findings" in ea
+        check("English: the Audits page's words are the old words (title, groups, latest findings, runs, the paces and the table's heads)", "Audits" in ea and "Open a group to see its audits." in ea and "Latest findings" in ea
               and "Every minute" in ea and "Every 10 minutes" in ea and "Started Took Items Findings Calls" in ea and ", and Audit now" in ea and "did not finish" in ea and "1 found" in ea and "Silence" in ea, ea[:900])
         eproj, erout, eclosed = body(en["/projects"].text), body(en["/projects/alpha"].text), body(en["/closed"].text)
         check("English: the routing page's words (Sessions, Anchors, Notices, the table heads, a log-only note)", all(w in erout for w in ("Notices", "Sessions", "Anchors", "when (", "ruling", "reason")) and GIST in erout and "[x:" not in erout, erout[:600])
@@ -535,7 +535,7 @@ def locale_audits_part():
         kc = ko["/closed"].text; kcb = body(kc)
         check("Closed: the headings, the Clear all button and the note are the test locale's, the items' subjects stay", MARK(EN["closed.last14"]) in kcb and MARK(EN["closed.clear_all"]) in kcb and TITLE in kcb, kcb[:600])
         check("Closed: the script reads its words from the table: SST keys, no English message, and the relative words come from age.*",
-              all(f"SST('js.closed.{w}')" in kc for w in ("clear", "undo", "not_restored", "clearing")) and "SST('js.closed.aria'" in kc and "SST(n===1?'js.closed.note_one':'js.closed.note_many'" in kc
+              all(f"SST('js.closed.{w}')" in kc for w in ("clear", "undo", "not_restored", "clearing")) and "SST('js.closed.aria'" in kc and "js.closed.note" not in kc
               and "age.min" in kc and "'Undo'" not in kc and "'Clear'" not in kc and "'just now'" not in kc and "m ago" not in visible(kc).split("<script>")[-1], re.findall(r"SST\([^)]*\)", kc)[:12])
         check("Closed: the page's head hands the script the js.closed.* and age.* tables (SST reads them)", "js.closed.clear" in kc and "age.min" in kc, kc[:300])
 

@@ -285,14 +285,15 @@ check("the subject is escaped on the page", "&lt;b&gt;escaped&lt;/b&gt; &amp;" i
 check("there is no per-line `new` tag and no seen state on the page any more", "Mark all seen" not in ph and ">new<" not in ph and not re.search(r'<li class="[^"]*\bnew\b', ph))
 KEYS = {ld_rules.key(f"a{i}", ts) for i, ts in ((20, t0 - 100), (21, t0 - 7200), (22, t0 - 50), (23, t0 - 9000), (24, t0 - 3 * 3600), (25, t0 - 20 * DAY))}
 top = re.search(r'<form class="lmark" method="post" action="/landed/clear"><input type="hidden" name="keys" value="([^"]*)"><button type="submit" class="b">Clear all</button></form>', ph)
-check("Clear all is at the top, above the list: after the note, before the first subsection; its form carries the keys of the lines on the page (and no more)",
-      top and set(top.group(1).split(",")) == KEYS and ph.index('class="lnote"') < ph.index('class="lmark"') < ph.index('class="fold sfold hscope"') and ph.count('class="lmark"') == 1, ph[:200])
+check("Clear all is at the top, above the list: after the heading, before the first subsection; its form carries the keys of the lines on the page (and no more)",
+      top and set(top.group(1).split(",")) == KEYS and 0 <= ph.find('id="xpb-closed-new"') < ph.index('class="lmark"') < ph.index('class="fold sfold hscope"') and ph.count('class="lmark"') == 1, ph[:200])
 per = re.findall(r'<form class="lclear" method="post" action="/landed/clear"><input type="hidden" name="keys" value="([^"]*)"><button type="submit" class="b" aria-label="Clear (a?\d+)">Clear</button></form>', ph)
 check("every line has its own Clear button posting that close's key alone", len(per) == 6 and {k for k, _i in per} == KEYS and all("," not in k for k, _i in per)
 , per)
 check("the CSS gives Clear all and Clear the one 32 px button look, with no size classes", re.search(r"\.b\{[^}]*min-height:32px", b._css()) and ".b.sm" not in b._css() and "form.lmark .abtn" not in b._css())
 check("mark=False draws no buttons and no Clear all", 'class="lclear"' not in b.landed_html(mark=False) and 'class="lmark"' not in b.landed_html(mark=False) and page_lines(b.landed_html(mark=False)) == 6)
-check("the note says what is shown and that an entry stays until cleared", "6 closes by agents" in ph and "stays here until you clear it" in ph, txt(ph)[:300])
+check("the heading says how many are shown, and that an entry stays until cleared is behind its \"?\"", '<h2 class="lsec">New <span class="count">6</span></h2>' in ph
+      and re.search(r'<span class="xp-pop" id="xp-closed-new"[^>]*>[^<]*stays on this page until you clear it\.</span>', ph) is not None and 'class="lnote"' not in ph, txt(ph)[:300])
 agree("mixed data: 6 listed, 2 cleared, 1 past the window not made", 6)
 
 # ---- 4b. one foldable subsection per scope, as on home: work, home and ops are the subsections, in sala's sidebar order; a row names no project
@@ -334,8 +335,8 @@ check("...the counts add up: the subsection counts, the lines under them and the
       all(n == len(ids) for _sc, n, ids in tree) and sum(n for _sc, n, _p in tree) == 9 and page_lines(pm) == 9 and pm.count('class="lclear"') == 9, tree)
 check("...heading order in the document is the scopes only: work, home, ops (no project headings, no h2 per scope)",
       re.findall(r'<h3 class="iscope">([^<]*) <span', newsec(pm)) == ["work", "home", "ops"] and 'lscopehd' not in pm and 'class="lgroup"' not in pm, None)
-check("...the subject's scope prefix is not repeated on the lines (the heading says it); Clear all carries all 9 keys; the note counts 9",
-      "[work]" not in pm and "[home]" not in pm and len(re.search(r'<form class="lmark"[^>]*><input type="hidden" name="keys" value="([^"]*)"', pm).group(1).split(",")) == 9 and "9 closes by agents" in pm, txt(pm)[:200])
+check("...the subject's scope prefix is not repeated on the lines (the heading says it); Clear all carries all 9 keys; the heading counts 9",
+      "[work]" not in pm and "[home]" not in pm and len(re.search(r'<form class="lmark"[^>]*><input type="hidden" name="keys" value="([^"]*)"', pm).group(1).split(",")) == 9 and '<h2 class="lsec">New <span class="count">9</span></h2>' in pm, txt(pm)[:200])
 agree("mixed scopes: 9 listed under three subsections", 9)
 # the subsections fold like home's (one shared helper, ui/groups.py): native details, open by default, the count in the summary, a key of their own
 subsK = re.findall(r'<details class="fold sfold hscope" data-fold="([^"]+)"( open)?><summary><h3 class="iscope">', newsec(pm))

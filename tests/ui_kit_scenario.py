@@ -278,7 +278,7 @@ row_ids = lambda c: re.findall(r'<li class="irow"[^>]* id="(task-[^"]+)"', c)
 check("Completed (Landed page 1): 25 rows, page 2 the other 9", len(lis(c1)) == 25 and len(lis(c2)) == NDONE - 25, (len(lis(c1)), len(lis(c2))))
 check("Last 14 days: the heading is 'Last 14 days' with the whole count, and the section follows New", f'Last 14 days <span class="count">{NDONE}</span>' in c1 and h1.index('id="completed"') > h1.index('id="new"') > h1.index("<h1>Closed</h1>") and ">Completed <" not in h1 and "<h1>Landed</h1>" not in h1 and "<title>Closed" in h1)
 check("Completed: only the page asked for is in the page (no hidden rows): the two pages share no row and together are every closed item",
-      len(row_ids(c1)) == 25 and not set(row_ids(c1)) & set(row_ids(c2)) and len(set(row_ids(c1)) | set(row_ids(c2))) == NDONE and " hidden" not in c1, (len(row_ids(c1)), len(row_ids(c2))))
+      len(row_ids(c1)) == 25 and not set(row_ids(c1)) & set(row_ids(c2)) and len(set(row_ids(c1)) | set(row_ids(c2))) == NDONE and " hidden" not in re.sub(r'<span class="xp-pop"[^>]*>', "", c1), (len(row_ids(c1)), len(row_ids(c2))))
 ts_ = lambda c: [int(x) for x in re.findall(r'class="tip [^"]*ir-age[^"]*" data-ts="(\d+)"', c)]
 check("Completed: newest first, and page 1 is newer than page 2", len(ts_(c1)) == 25 and ts_(c1) == sorted(ts_(c1), reverse=True) and ts_(c2) == sorted(ts_(c2), reverse=True) and min(ts_(c1)) >= max(ts_(c2)), (ts_(c1)[:3], ts_(c2)[:3]))
 check("Completed page 1: Older is a link to ?page=2 inside the section, Newer is plain text (the edge)",
@@ -739,8 +739,8 @@ check("panel: its left border runs to the top of the page: the panel starts unde
 check("panel: under 800 px (the drawer) it starts at the top of the page and needs no line: no body::after outside the wide-screen block", "body::after" not in _sheet[:_sheet.find("@media(min-width:800px){\nbody::before")], "")
 for nm, pg in ALLPG.items():
     if nm == "home": continue       # home's room is its first section's own 32 px (the h2 margin below); the browser check (the page script of this change's report) measures it
-    sp = re.search(r"</header>\s*(<[^>]+>)", pg)
-    check(f"title spacing: {nm} page: the page's title block (its h1; on a project page the small back link just above it, then the h1) follows the header directly and takes the 32 px margin above it that home has above its first section",
+    sp = re.search(r'</header>\s*(?:<div class="xp-head xp-h1">)?(<[^>]+>)', pg)      # a title with a "?" sits in the line that takes over its margins
+    check(f"title spacing: {nm} page: the page's title block (its h1, alone or in its line with a \"?\"; on a project page the small back link just above it, then the h1) follows the header directly and takes the 32 px margin above it that home has above its first section",
           bool(sp) and (sp.group(1) == "<h1>" or sp.group(1).startswith("<h1 ") or (sp.group(1) == '<p class="pjback">' and re.match(r'</header>\s*<p class="pjback"><a [^>]*>[^<]*</a></p>\s*<h1[ >]', pg[sp.start():]) is not None)), sp.group(1) if sp else None)
 check("title spacing: the gap under the header is one rule, the header's own bottom margin (32 px), for every page; the item page's own h1 margin (6px 0 8px) is smaller, so it collapses into the gap and never adds to it, and home's section margin it matches is 32 px",
       re.search(r"(?:^|[};\s])header\.top\{[^}]*margin:0 -16px 32px;", _sheet) is not None and "main.itempage h1{font-size:22px;line-height:1.3;margin:6px 0 8px}" in "".join(re.findall(r"<style>(.*?)</style>", ALLPG["item"], re.S)) and re.search(r"(?:^|[};])h2\{[^}]*;margin:32px 0 12px;", _sheet) is not None, "")
@@ -1130,7 +1130,7 @@ check("a hand-edited anchors file: a page whose value is no list holds no anchor
 pages16 = {"home": home, "Projects": PRJ, "project": PRJP, "item": ITEMP, "Closed": LDP}
 check("no page says steward (home, Projects, a project page, an item page, Closed), nor does the role tip", not any("steward" in pg.lower() for pg in pages16.values()) and "steward" not in " ".join(r2._ROLE_TIP.values()).lower()
       and "steward" not in " ".join(w for v in r2.Board.WATCH.values() for w in v).lower(), [k for k, pg in pages16.items() if "steward" in pg.lower()])
-check("the project page says the router rules every notice; the watch words name no steward", "the router rules every notice" in PRJP and r2.Board.WATCH["wait"][1] == "a notice is waiting for its ruling", PRJP[PRJP.find("last 24 hours"):][:200])
+check("the project page says the router rules every notice; the watch words name no steward", "The router rules every notice." in PRJP and r2.Board.WATCH["wait"][1] == "a notice is waiting for its ruling", PRJP[PRJP.find("last 24 hours"):][:200])
 
 # the Closed page's script keeps a cleared line in place, and re-enables Clear all after a successful request
 LJ = r2._LANDED_JS

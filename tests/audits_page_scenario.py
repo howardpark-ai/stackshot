@@ -115,7 +115,7 @@ with TestClient(server.mcp.http_app()) as c:
           and f'href="/items/board-tmp-q-9">board-tmp-q#{9}</a>' in h, re.findall(r'<div class="af"><a[^>]*>([^<]+)</a>', h))
     check("the runs: the record's start, its length, items read, findings and calls", re.search(r"<tr><td>[^<]+</td><td>700 s</td><td>41</td><td>2</td><td>6</td></tr>", h) is not None
           and "No audit has run yet." not in h, re.findall(r"<tr>.*?</tr>", h)[:3])
-    check("the page's note says what a dash means", 'shows a dash on the card and "not logged" here, not a zero' in w)
+    check("what a dash means is behind the Groups heading's \"?\"", re.search(r'<span class="xp-pop" id="xp-audit-groups"[^>]*>[^<]*shows a dash on the card and &quot;not logged&quot; here, not a zero\.</span>', h) is not None)
     check("no error text on the page", not re.search(r"Traceback|[Ee]rror|[Ee]xception|undefined|\bNone\b|\bNaN\b", w), w)
 
     # ---- 3. the card

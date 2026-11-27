@@ -1546,10 +1546,9 @@ function ago(s){return fa(s)}
 function tick(){var n=Date.now()/1000;M.querySelectorAll('.lago[data-ts]').forEach(function(e){e.textContent=ago(n-(+e.getAttribute('data-ts')))})}
 tick();setInterval(tick,30000);
 function live(sec){return [].filter.call(sec.querySelectorAll('li.lrow'),function(x){return!x.classList.contains('lcleared')})}
-function counts(){var n=live(M).length,p=M.querySelector('p.lnote');
-if(p&&p.hasAttribute('data-n')&&p.firstChild&&p.firstChild.nodeType===3)p.firstChild.nodeValue=SST(n===1?'js.closed.note_one':'js.closed.note_many',{n:n});
+function counts(){var n=live(M).length;
 [].forEach.call(M.querySelectorAll('#new details.hscope'),function(g){var c=g.querySelector('summary h3 .count');if(c)c.textContent=String(live(g).length)});
-var h=M.querySelector('#new>h2 .count');if(h)h.textContent=String(n);var a=M.querySelector('form.lmark');if(a)a.hidden=!n}
+var h=M.querySelector('#new h2.lsec .count');if(h)h.textContent=String(n);var a=M.querySelector('form.lmark');if(a)a.hidden=!n}
 function mk(cls,look,action,key,label,aria){var f=document.createElement('form');f.className=cls;f.method='post';f.action=action;
 var i=document.createElement('input');i.type='hidden';i.name='keys';i.value=key;var b=document.createElement('button');b.type='submit';b.className=look;b.textContent=label;b.setAttribute('aria-label',SST('js.closed.aria',{label:label,id:aria}));
 f.appendChild(i);f.appendChild(b);return f}
@@ -1738,11 +1737,12 @@ main.audits-page .apaces{display:grid;grid-template-columns:repeat(3,minmax(0,1f
 main.audits-page .apace{min-width:0;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}main.audits-page .apace b{display:block;font-weight:600}main.audits-page .apace span{font-size:13px;color:var(--mut);overflow-wrap:anywhere}
 main.audits-page h2{margin:22px 0 8px;font-size:17px}main.audits-page h2 small{font-size:13px;font-weight:400;color:var(--mut)}
 main.audits-page .agroups,main.audits-page .afeed{display:flex;flex-direction:column;gap:8px}
+.agw{display:flex;align-items:flex-start;gap:2px}.agw>details.audg{flex:1;min-width:0}.agw>.xp{flex:none;margin:0}
 details.audg{border:1px solid var(--line);border-radius:10px;background:var(--card)}
 details.audg>summary{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:baseline;padding:8px 12px;cursor:pointer;list-style:none}
 details.audg>summary::-webkit-details-marker{display:none}details.audg>summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:10px}
 @media(max-width:420px){details.audg>summary{grid-template-columns:minmax(0,1fr) auto}details.audg>summary .agn{grid-column:1/-1}}
-details.audg .agn b{display:block;font-weight:600}details.audg .agn b::before{content:'▸';display:inline-block;margin-right:6px;color:var(--mut)}details.audg[open] .agn b::before{transform:rotate(90deg)}#audit-now-page[hidden]{display:none}details.audg .agn span{display:block;font-size:13px;color:var(--mut)}
+details.audg .agn b{display:block;font-weight:600}details.audg .agn b::before{content:'▸';display:inline-block;margin-right:6px;color:var(--mut)}details.audg[open] .agn b::before{transform:rotate(90deg)}#audit-now-page[hidden]{display:none}
 main.audits-page .anum{font-size:13px;color:var(--mut);white-space:nowrap;font-variant-numeric:tabular-nums}main.audits-page .anum.hit{color:var(--orange);font-weight:600}
 details.audg ul.aaud{margin:0;padding:0 12px 10px;list-style:none;border-top:1px solid var(--line)}
 details.audg ul.aaud li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}details.audg ul.aaud li:last-child{border-bottom:0}
@@ -2985,7 +2985,7 @@ class Board:
         open, the party a relay waits on, a time's basis or his words), who watches, until when, who takes it after, and every chase logged on it."""
         e = esc; m = r["metadata"]; w = mod.wait; rows = []
         if w.kind == "list" and mod.waits:      # a wait on a list: each line with its tick, then the one backstop day (no chases: a list is never chased)
-            rows = [(_t("wait.waits_on"), self.wait_list_html(r, mod, page=True)), (_t("wait.label.backstop"), e(_t("wait.list.backstop", day=self.wait_day(w.backstop)))), (_t("wait.picks_up"), f'<b>{who_html(post)}</b>')]
+            rows = [(_t("wait.waits_on"), self.wait_list_html(r, mod, page=True)), (_t("wait.label.backstop"), e(self.wait_day(w.backstop)) + " " + _xp.explain("wait-backstop", _t("wait.list.help_backstop"), _t("wait.label.backstop"))), (_t("wait.picks_up"), f'<b>{who_html(post)}</b>')]
             rows += [(_t("item.then"), f'<b>{who_html(mod.then)}</b>')] if mod.then else []
             return f'<section class="iwait"><h2>{_t("state.wait")}</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
         if w.kind == "anchor":
@@ -3007,7 +3007,7 @@ class Board:
                 try: at = self.when(float(c.get("at") or 0))
                 except (TypeError, ValueError): at = ""
                 return f'<li><span class="dim">{e(at)}</span> · <b>{self.mentions(e(str(c.get("by") or "")), r["gid"])}</b>: {self.mentions(e(str(c.get("note") or "")), r["gid"])}</li>'
-            more = f' <span class="dim">{_t("wait.chase_note", n=_wat.CHASES_MAX, owner=e(_model.owner_display()))}</span>' if w.kind in _wat.CHASE_KINDS else ""
+            more = " " + _xp.explain("wait-chases", _t("wait.chase_help", n=_wat.CHASES_MAX, owner=_model.owner_display()), _t("wait.chases")) if w.kind in _wat.CHASE_KINDS else ""
             rows.append((_t("wait.chases"), f'{len(ch)}{more}<ul class="ichases">{"".join(one(c) for c in ch)}</ul>'))
         elif w.kind in _wat.CHASE_KINDS: rows.append((_t("wait.chases"), f'<span class="dim">{_t("wait.none_yet")}</span>'))
         return f'<section class="iwait"><h2>{_t("state.wait")}</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
@@ -3102,7 +3102,7 @@ class Board:
                 f'<title>{esc(name)}</title><link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{esc(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style><noscript><style>form.hanswer{{display:none}}</style></noscript></head>{_PANEL_BODY}<div id="layout"><main id="top">' + self.page_header() +
                 f'<p class="pjback"><a href="{under("/projects")}">{_t("routing.back")}</a></p><h1>{esc(name)}</h1>' + (f'<p class="sub"><a href="{esc(mirror)}" target="_blank" rel="noopener">{_t("routing.gbrain_page")}</a></p>' if mirror else "")
-                + f'<p class="sub">{_t("routing.sub_pilot" if pilot else "routing.sub_plain", summary=esc(summary))}</p>'
+                + f'<p class="sub">{_t("routing.sub", summary=esc(summary))} {_xp.explain("routing", _t("routing.help_pilot" if pilot else "routing.help_plain"), _t("routing.sec_notices"))}</p>'
                 + self.sent_notes_html() + fold("items", _t("routing.sec_items"), n_items, items_body, more=(f' <span class="count dim">{_t("routing.verifying", n=n_ver)}</span>' if n_ver else "") + (f' <span class="count dim">{_t("routing.completed", n=n_done)}</span>' if n_done else ""))
                 + fold("sessions", _t("routing.sec_sessions"), n_sess, sess_body or f'<p class="empty">{_t("page.none")}</p>')
                 + fold("anchors", _t("routing.sec_anchors"), len(seen), f'<ul class="alist">{alist}</ul>' if alist else f'<p class="empty">{_t("page.none")}</p>')
@@ -3870,8 +3870,13 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         ends it and gives each line a second line: when and in what words it arrived, else what watches it. The words of every line are free text (an event, an anchor), so each is escaped here, once."""
         e = esc; gid = r["gid"]; w = mod.wait
         n = sum(1 for ln in mod.waits if ln.arrived)
-        head = (_t("wait.list.page_all", n=n) if mod.wait_mode == "all" else _t("wait.list.page_any")) if page else _t("wait.list.row_head", n=n, day=e(self.day_words(w.backstop)))
-        out = [f'<span class="wlh"><span class="wmode">{e(_ip.list_mode_words(mod))}</span><span class="dim">{head}</span></span>']
+        if page:      # the item page: how many arrived (a wait for all of them); how the mode ends the wait is behind the "?"
+            every = mod.wait_mode == "all"
+            said = f'<span class="dim">{_t("wait.list.page_arrived", n=n)}</span>' if every else ""
+            said += _xp.explain("wait-list", _t("wait.list.help_all" if every else "wait.list.help_any"), _t("wait.waits_on"))
+        else:
+            said = f'<span class="dim">{_t("wait.list.row_head", n=n, day=e(self.day_words(w.backstop)))}</span>'
+        out = [f'<span class="wlh"><span class="wmode">{e(_ip.list_mode_words(mod))}</span>{said}</span>']
         for ln in mod.waits:
             k = ln.kind
             at = self.arrival_when(ln.arrived_at) if ln.arrived else ""      # "" when it has not arrived, or for a time no date can show
@@ -4112,9 +4117,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         pager = (f'<nav class="lpager" aria-label="{esc(_t("closed.pager"))}">{side(_t("closed.newer"), page - 1 if page > 1 else 0, "prev")}<span class="lpos">{_t("closed.page_of", page=page, pages=pages)}</span>'
                  f'{side(_t("closed.older"), page + 1 if page < pages else 0, "next")}</nav>') if pages > 1 else ""
         body = self.scope_sections("closed.completed", rows, lambda r: self.done_row(r, named=True)) if rows else f'<p class="empty">{_t("page.none")}</p>'
-        note = _t("closed.last14_showing", first=first + 1, last=first + len(rows), n=n) if rows and pages > 1 else _t("closed.last14_note")
-        return (f'<section id="completed" class="lcompleted"><h2 class="lsec" title="{esc(_t("closed.last14_tip"))}">{_t("closed.last14")} <span class="count">{n}</span></h2>'
-                f'<p class="lpgnote">{esc(note)}</p>{body}{pager}</section>')
+        showing = f'<p class="lpgnote">{esc(_t("closed.showing", first=first + 1, last=first + len(rows), n=n))}</p>' if rows and pages > 1 else ""
+        head = _xp.head(f'<h2 class="lsec">{_t("closed.last14")} <span class="count">{n}</span></h2>', _xp.explain("closed-last14", _t("closed.last14_note"), _t("closed.last14")))
+        return f'<section id="completed" class="lcompleted">{head}{showing}{body}{pager}</section>'
 
     # ---------------- Landed ----------------
     def landed_rows(self):
@@ -4160,7 +4165,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                            actions_html=clear, li_class="lrow", data=f'data-key="{e(key)}"', project_html=self.row_line(r), edge=_ui.NEW)
         # the same subsections as home's lists (scope_sections): one foldable subsection per scope in [project_scopes] order, the entries of a scope newest first (landed_rows is), each a row with no who line
         secs = self.scope_sections("closed.new", rows, lambda pr: line(*pr), row=lambda pr: pr[1])
-        note = _t("js.closed.note_one" if len(rows) == 1 else "js.closed.note_many", n=len(rows)) if rows else _t("closed.note_none")
+        none = "" if rows else f'<p class="lnote">{esc(_t("closed.new_none"))}</p>'
+        newhead = _xp.head(f'<h2 class="lsec">{_t("closed.new")} <span class="count">{len(rows)}</span></h2>', _xp.explain("closed-new", _t("closed.new_help"), _t("closed.new")))
         btn = ('<form class="lmark" method="post" action="' + under("/landed/clear") + '"><input type="hidden" name="keys" value="' + e(",".join(self.landed_keys())) + '">'
                '<button type="submit" class="b">' + _t("closed.clear_all") + '</button></form>') if rows and mark else ""
         font_css = str(_cfg.get("instance", "font_css") or "")
@@ -4168,7 +4174,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("state.closed")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
-                f'<h1>{_t("state.closed")}</h1><section id="new" class="lnew"><h2 class="lsec">{_t("closed.new")} <span class="count">{len(rows)}</span></h2><p class="lnote"{" data-n" if rows else ""}>{note}</p>{btn}{secs}</section>{self.completed_html(page)}</main>'
+                f'<h1>{_t("state.closed")}</h1><section id="new" class="lnew">{newhead}{none}{btn}{secs}</section>{self.completed_html(page)}</main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + f'<script>{_LANDED_JS}</script></body></html>')
 
     def projects_html(self) -> str:
@@ -4179,7 +4185,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("projects.title")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
-                f'<h1>{_t("projects.title")}</h1><p class="pjnote">{_t("projects.note")}</p><section id="by-project">{self.projects_table()}</section></main>'
+                f'{_xp.head("<h1>" + _t("projects.title") + "</h1>", _xp.explain("projects", _t("projects.note"), _t("projects.title")))}<section id="by-project">{self.projects_table()}</section></main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + '</body></html>')
 
     # TEMPORARY PROBE (the installed-app session link test) (remove, or promote into sess_html, in the follow-up PR): GET /probe/sala-link, a signed-in page of the same session link written six ways, so a tap on an Android phone
@@ -4285,8 +4291,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             word = lambda table, prefix, english: _audit_word(table, english, prefix)      # a pace or a mode in the request's language; an audit's own name stays as the module gives it
             items = "".join(f'<li>{e(a["name"])}<span{"" if a["mode"] == "on" else " class=" + chr(34) + "shadow" + chr(34)}>{e(word(_AUDIT_PACES, "audit.pace.", a["pace"]))}{"" if a["mode"] == "on" else " · " + e(word(_AUDIT_MODES, "audit.mode.", a["mode"]))}</span></li>' for a in g["audits"])
             desc = _t("audit.desc." + g["key"]) if "audit.desc." + g.get("key", "") in _i18n.EN else g["desc"]
-            return (f'<details class="audg"><summary><span class="agn"><b>{e(_audit_word(_AUDIT_GROUPS, g["name"], "panel.audit.group."))}</b><span>{e(desc)}</span></span><span class="anum">{_t("audit.n_audits", n=len(g["audits"]))}</span>{num}</summary>'
-                    f'<ul class="aaud">{items}</ul></details>')
+            name = _audit_word(_AUDIT_GROUPS, g["name"], "panel.audit.group.")
+            about = _xp.explain("audit-group-" + str(g["key"]), desc, name)      # what the group looks at: beside the fold, never inside its <summary>
+            return (f'<div class="agw"><details class="audg"><summary><span class="agn"><b>{e(name)}</b></span><span class="anum">{_t("audit.n_audits", n=len(g["audits"]))}</span>{num}</summary>'
+                    f'<ul class="aaud">{items}</ul></details>{about}</div>')
         groups_html = "".join(group(g) for g in ov["groups"])
         def finding(r):
             n = _ov.item_path(r["id"])
@@ -4313,16 +4321,19 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             runs = (f'<div class="atw"><table><tr><th>{_t("audit.th_started")}</th><th>{_t("audit.th_took")}</th><th>{_t("audit.th_items")}</th><th>{_t("audit.th_findings")}</th><th>{_t("audit.th_calls")}</th></tr>' + "".join(run_row(r) for r in ov["runs"]) + "</table></div>")
         else:
             runs = f'<p class="aempty">{_t("audit.no_runs")}</p>'
-        note = _t("audit.note_logged" if ov["log"] else "audit.note_log_off")
+        about = _t("audit.groups_help") + (" " + _t("audit.note_logged") if ov["log"] else "")
+        note = "" if ov["log"] else f'<p class="anote">{e(_t("audit.note_log_off"))}</p>'      # a setting that is off is said on the page
+        groups_head = _xp.head(f'<h2>{_t("audit.groups")}</h2>', _xp.explain("audit-groups", about, _t("audit.groups")))
+        runs_head = _xp.head(f'<h2>{_t("audit.runs")}</h2>', _xp.explain("audit-runs", _t("audit.runs_hint", times=times, button=_t("panel.audit.now")), _t("audit.runs")))
         font_css = str(_cfg.get("instance", "font_css") or "")
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("audit.title")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top" class="audits-page">{self.page_header()}'
                 f'<div class="atop"><h1>{_t("audit.title")}</h1>{btn}</div><p class="asub">{e(sub)}</p><div class="apaces">{paces_html}</div>'
-                f'<h2>{_t("audit.groups")} <small>{_t("audit.groups_hint")}</small></h2><div class="agroups">{groups_html}</div>'
+                f'{groups_head}<div class="agroups">{groups_html}</div>'
                 f'<h2>{_t("audit.findings")} <small>{e(fsub)}</small></h2>{feed}'
-                f'<h2>{_t("audit.runs")} <small>{e(_t("audit.runs_hint", times=times, button=_t("panel.audit.now")))}</small></h2>{runs}<p class="anote">{e(note)}</p></main>'
+                f'{runs_head}{runs}{note}</main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + '</body></html>')
 
     def page_header(self, q: str = "", counts: str | None = None, h1: bool = False, conn: str = "", rstamp: str | None = None, search_page: bool = False) -> str:
