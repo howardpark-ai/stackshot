@@ -203,6 +203,8 @@ def part_google():
                 cfgmod.CFG["members"] = everyone
 
         check("no refused call, a stranger's included, had the library's own tool listing fail", skipped.got == [], skipped.got[:3])
+        e = asyncio.run(outcome(server.mcp.list_tools()))
+        check("a listing made in the server's own process names no caller, so a board that signs people in refuses it", is_refusal(e, ""), repr(e)[:300])
 
         # the bytes of the handshake
         st, body, _h = exchange(B.url, bearer("token-owner"))
@@ -334,6 +336,10 @@ def part_door():
         check("front door, one board refusing and one down: the warnings say which refused the caller, in its own words, and which is down",
               any("board 'main' refused this caller" in w and sentence(BOB) in w for w in warned) and any("board 'side' did not list its tools" in w for w in warned)
               and not any("board 'main' did not" in w for w in warned), warned)
+        from mcp.shared.exceptions import MCPError
+        from stackshot.frontdoor import provider
+        check("front door: only the board's not-a-member code reads as a refusal, another protocol error as a board that did not answer",
+              provider.refused_caller(MCPError(code=ident.NOT_MEMBER_CODE, message="x")) and not provider.refused_caller(MCPError(code=-32603, message="x")))
     finally:
         if front:
             stop(*front[:3])
