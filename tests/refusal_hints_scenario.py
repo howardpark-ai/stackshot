@@ -444,7 +444,7 @@ item(404)
 res, made = upd(404, status="closed", next="falcon-main: carry on")
 check("d status: closed with no part of a close is refused as before, nothing is closed and no fix is told", isinstance(res, ToolError) and "status must be open | completed" in str(res) and rd(404)["status"] == "open" and "status-closed" not in kinds(made), (str(res)[:300], made))
 item(405)
-res, made = upd(405, status="done", done=[1, 2], outcome="done")
+res, made = upd(405, status="done", outcome="done")      # its steps are open, so no part can be filled in for the writer
 check("d status: …with one part only it is judged as a close: the missing parts are named and the item stays open", isinstance(res, ToolError) and "closing" in str(res) and "reason" in str(res) and rd(405)["status"] == "open", str(res)[:400])
 item(406)
 res, made = upd(406, status="finished", **CLOSE)
@@ -554,7 +554,7 @@ whys = str(res)
 check("d kinds: a refusal of several faults is counted under its first, whole and folded as logged", whys.startswith("Refused: 2 problems") and CL.kind_of(whys) == CL.kind_of(" ".join(whys.split())[:CL.WHY_MAX]) and CL.kind_of(whys) in ("close fields on a write that is no close", "a status that is not open or completed"), (whys[:600], CL.kind_of(whys)))
 item(461, until=local_day(3), wait_kind="relay", wait_event="the vendor replies")
 for name, kw, want in (("a wait_kind of no kind", dict(wait_kind="soon"), "a wait_kind that is none of the kinds"),
-                       ("a close with no parts", dict(status="completed", done=[1, 2]), "a close with a part missing"),
+                       ("a close with no parts over open steps", dict(status="completed"), "a close with a part missing"),
                        ("a close reason over its limit", dict(status="completed", done=[1, 2], outcome="done", reason="r " * 200, outcome_text="- It shipped"), "a close reason over its limit")):
     res, made = upd(461, **kw)
     check(f"d kinds: {name}", isinstance(res, ToolError) and CL.kind_of(str(res)) == want, (str(res)[:400], CL.kind_of(str(res))))
