@@ -55,7 +55,10 @@ def _named(key: str, start: float) -> list[dict[str, Any]]:
     texts += _held.reached_since(floor, key, _anc.canonical(key))
     out: list[dict[str, Any]] = []
     for gid in dict.fromkeys(g for t in texts for g in _agent_names._item_refs(t)):
-        item = {**_svcstore._load(gid), "gid": gid}
+        try:
+            item = {**_svcstore._load(gid), "gid": gid}
+        except Exception:  # noqa: BLE001  — one item that cannot be read is left out; the others are still listed
+            continue
         ask = _asks._ask_stands(item)
         if not ask:
             continue
