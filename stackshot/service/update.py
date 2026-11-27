@@ -1699,8 +1699,8 @@ def update_unlocked(
         try:
             if description.strip():
                 goal_note = _goal_moved_note(item_was, item, desc_sent)
-            # a write that names the item anew, or says anew what it is (a title that asked the owner's choice outlives it so), is told when the open item's title is a question or an activity
-            if item.get("status") == "open" and any(item.get(k) != item_was.get(k) for k in ("subject", "description")):
+            # a write that names the item anew, or moves its Goal under the same title, is told when the open item's title is a question or an activity; other rewrites of the description do not name it again
+            if item.get("status") == "open" and (goal_note or item.get("subject") != item_was.get("subject")):
                 goal_note += _fg.subject_form_note(str(item.get("subject") or ""))
         except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
             print(f"update: {gid} goal note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)

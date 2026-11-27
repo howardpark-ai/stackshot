@@ -78,23 +78,49 @@ def _gate_subject(subject: str, current: str | None = None) -> None:
         raise _faults.refusals(got)
 
 
-# The openings and endings that show a title asks or names work where the finished outcome belongs. Only forms that cannot be read as a result: a verb such as "Fix", "Add" or "Check" can open a good title,
-# or be a noun in one ("check valves stay closed"), so it is left to the audit's judge. Korean words are written as escapes (no Hangul in the repository): they end a title or its part before a colon.
-_RX_ASKS = re.compile(r"(?:how|whether|why|should)\s", re.I)
-_RX_WORK = re.compile(r"(?:investigat(?:e|ing)|look(?:ing)? into|figure out|find out|analy[sz]e|(?:pick|choose|decide) (?:how|whether|which|what|if|between|on))\b", re.I)
+# The reading is of the forms that cannot be a finished outcome: a title that names a result is not to be named, and a miss costs little (the daily audit's judge reads the titles the reading passes). English is read
+# by how a part opens, in a few forms only: "how to", "whether to", a choice or a search followed by its question word. A verb such as "Fix", "Find" or "Analyze" alone can open a good title or a button's name.
+# A title that goes on to state a result ("How to pay shows on the invoice") is passed: for a choice only the words of a result count, since what is chosen may be told as "whether they can be changed". Korean
+# puts the verb last, so the title's last part is read by how it ends. Korean words are written as escapes (no Hangul in the repository).
+_RX_ASKS = re.compile(r"(?:how|whether) to\s", re.I)
+_RX_CHOICE = re.compile(r"(?:pick|choose|decide) (?:how|whether|which|between|if|what to)\s", re.I)
+_RX_SEARCH = re.compile(r"(?:investigat(?:e|ing)|look(?:ing)? into|figure out|find out|analy[sz]e) (?:how|whether|why)\s", re.I)
+_RESULT = r"no longer|again|shows|shown|appears|works|stays|runs|loads|opens|returns|answers|explains|goes|gets|reads|says|lists|tells|reaches|passes|live|written"
+_RX_RESULT = re.compile(rf"\b(?:{_RESULT})\b", re.I)
+_RX_STATES = re.compile(rf"\b(?:{_RESULT}|is|are|was|were|has|can|will|\w{{2,}}ed)\b", re.I)
 _RX_ASKS_END = re.compile("(?:\ubc29\ubc95|\ud560\uc9c0|\uc5ec\ubd80)$")      # way to, whether to, whether or not
-_RX_WORK_END = re.compile("(?<![^ ])(?:\ud655\uc778|\uac80\ud1a0|\uc870\uc0ac|\ubcf4\ub0b4\uae30|\ub2e4\ub4ec\uae30|\uc54c\uc544\ubcf4\uae30)$")      # check, review, look into, sending, polishing, finding out; a word of its own
+_RX_WORK_END = re.compile("(?<![^ ])(?:\ud655\uc778|\uac80\ud1a0|\uc870\uc0ac|\ubcf4\ub0b4\uae30|\ub2e4\ub4ec\uae30|\uc54c\uc544\ubcf4\uae30)$")      # check, review, investigation, sending, polishing, finding out; a word of its own
+
+
+def _without_end_brackets(part: str) -> str:
+    """`part` without the bracketed asides at its end ("... (2)"), read from the end in one pass, however long the text."""
+    end = len(part)
+    while True:
+        while end and part[end - 1].isspace():
+            end -= 1
+        i = part.rfind("(", 0, end) if end and part[end - 1] == ")" else -1
+        if i < 0 or part.find(")", i + 1, end - 1) >= 0:
+            return part[:end]
+        end = i
 
 
 def subject_reads_as(subject: str) -> str:
-    """"a question" or "an activity" when the subject plainly is one and so names no finished outcome, else "". Read past the scope prefix, and in each part a colon sets off (`Door sensor: how to wire it`):
-    how a part opens, how it ends (Korean puts the verb last; a closing bracket and the ellipsis of a cut subject are passed over), and a question mark at the end. A narrow reading on purpose: a title it
-    passes may still be unclear, which the daily audit's judge reads; a title it names costs one line of a reply."""
+    """"a question" or "an activity" when the subject plainly is one and so names no finished outcome, else "". Read past the scope prefix. A question mark at the end is a question. An English opening is read in
+    the first part, and in a part after a label of at most five words (`Door sensor: how to wire it`), unless the title states something somewhere (_RX_STATES; _RX_RESULT for a choice). A Korean ending is read in the last part only
+    (a label before a colon may end in the same word), past a closing bracket. A subject that ends with an ellipsis is not read: the server's cut (fix_long_subject) may have taken the words that name the result."""
     s = next((subject[len(p):] for p in _cfg.CFG["subject"]["prefixes"] if subject.startswith(p)), subject).strip()
-    parts = [re.sub(r"(?:\s*(?:…|\([^()]*\)))+$", "", p).strip() for p in re.split(r"[:\uff1a]\s+", s)]
-    if s.endswith(("?", "\uff1f")) or any(_RX_ASKS.match(p) or _RX_ASKS_END.search(p) for p in parts):
+    if s.endswith(("?", "\uff1f")):
         return "a question"
-    return "an activity" if any(_RX_WORK.match(p) or _RX_WORK_END.search(p) for p in parts) else ""
+    if s.endswith("…"):
+        return ""
+    parts = re.split(r"[:\uff1a]\s+", s)
+    opens = [parts[0], *(p for label, p in zip(parts, parts[1:]) if len(label.split()) <= 5)]
+    last = _without_end_brackets(parts[-1])
+    states, result = _RX_STATES.search(s), _RX_RESULT.search(s)
+    if _RX_ASKS_END.search(last) or (not states and any(map(_RX_ASKS.match, opens))):
+        return "a question"
+    activity = _RX_WORK_END.search(last) or (not result and any(map(_RX_CHOICE.match, opens))) or (not states and any(map(_RX_SEARCH.match, opens)))
+    return "an activity" if activity else ""
 
 
 def subject_form_note(subject: str) -> str:

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -422,7 +423,12 @@ def create_item(
     item["gid"] = gid
     machine_note = h.machine_note(gid, item, owner)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     offer_note = _anchor_offers.item_line(gid, item)      # a relay wait or a source link in the description that no anchor watches: one line with the ready anchors call, never a refusal
-    title_note = _fg.subject_form_note(subject) if goal_judged else ""      # a title that reads as a question or an activity: a note, never a refusal; the writes the goal gate judges
+    title_note = ""
+    if goal_judged:      # a title that reads as a question or an activity: a note, never a refusal; the writes the goal gate judges
+        try:
+            title_note = _fg.subject_form_note(subject)
+        except Exception as e:  # noqa: BLE001  — the item is filed; a note that fails is a stderr line, never a failed write
+            print(f"create: {gid} title note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     if local:
         why_ = f"GitHub is taking no new write right now ({local[:120]})" if local_held else f"GitHub did not answer ({local[:120]})"
         told += (f"\n({why_}, so {_gh.shown(gid)} is a temporary id: the item takes its issue number when {'GitHub has room' if local_held else 'GitHub is back'}, "

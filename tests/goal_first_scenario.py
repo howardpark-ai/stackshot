@@ -9,7 +9,7 @@ new subject alone is not; the items a script files (the question route, the serv
 bullet says; `[description] require_bullets = false` switches it off with the other form checks; the form gate still speaks first for prose; the pure readers
 (bullet_text.first_bullet, goal_of); and the tools' text states the rule in create, update and the connector's tool list; a session's update that changes the words of the Goal sentence
 and leaves the subject gets one reply line quoting the stored subject, clipped to one line (never a refusal, none for a re-formatted or unchanged Goal, a new subject or a script's write), kept in the call log
-as a note and not a fix, and stored nowhere else; and a session's create, or its update that changes an open item's subject or description, whose stored subject reads as a question or an activity gets one reply line that quotes it
+as a note and not a fix, and stored nowhere else; and a session's create, or its update that changes an open item's subject or Goal, whose stored subject reads as a question or an activity gets one reply line that quotes it
 (never a refusal, none for a script's write, a close or a title that names a result, kept as the note `subject-form`).
 
     tests/run-suite goal_first        → exit 0 / 1"""
@@ -317,24 +317,45 @@ KO_WAY, KO_WHETHER, KO_WHETHER2 = ko(0xBC29, 0xBC95), ko(0xD560, 0xC9C0), ko(0xC
 KO_WORK = (ko(0xD655, 0xC778), ko(0xAC80, 0xD1A0), ko(0xC870, 0xC0AC), ko(0xBCF4, 0xB0B4, 0xAE30), ko(0xB2E4, 0xB4EC, 0xAE30), ko(0xC54C, 0xC544, 0xBCF4, 0xAE30))
 KO_THING = ko(0xC804, 0xB4F1)                       # a noun the titles are about
 KO_SET, KO_DONE, KO_AGAIN, KO_SUBJ = ko(0xD655, 0xC815, 0xB41C, 0xB2E4), ko(0xC644, 0xB8CC), ko(0xC7AC), ko(0xC774)
-ASKING = ("[home] How a guest opens the gate", "[home] Door sensor: how to wire it", "[home] whether the pump stays on at night", "[home] Why the boiler cycles", "[home] Should the bins go out on Fridays",
-          "[work] The pump stays on at night?", "[home] The pump stays on at night" + chr(0xFF1F), "[home] Plan" + chr(0xFF1A) + " how to wire it", "[home] HOW to wire the sensor",
-          f"[home] {KO_THING} {KO_WAY}", f"[home] {KO_THING}{KO_WHETHER}", f"[home] {KO_THING} {KO_WHETHER2}", f"[home] {KO_THING} {KO_WAY} (2)", f"[home] {KO_THING} {KO_WAY} …",
-          f"[home] {KO_THING} {KO_WAY}: the second part")
-WORKING = ("[home] Investigate the noisy boiler", "[home] investigating the noisy boiler", "[home] Look into the noisy boiler", "[home] looking into the noisy boiler", "[home] Figure out the sensor wiring",
-           "[home] Find out who pays the fee", "[home] Analyze the noisy boiler", "[home] analyse the noisy boiler", "[home] pick whether to add a second lamp", "[home] hall: pick how the shelf looks",
-           "[home] Choose which sensor to buy", "[home] Decide what to cook", "[home] Decide if the pump stays", "[home] Choose between two sensors", "[home] Decide on the sensor",
-           *(f"[home] {KO_THING} {w}" for w in KO_WORK), f"[home] {KO_THING} {KO_WORK[4]}: part two", KO_WORK[0])
+KO_SELF, KO_PAY, KO_PASSES, KO_SAVED = ko(0xBCF8, 0xC778), ko(0xACB0, 0xC81C), ko(0xD1B5, 0xACFC, 0xD55C, 0xB2E4), ko(0xC800, 0xC7A5, 0xB41C, 0xB2E4)      # identity, payment, passes, is saved
+ASKING = ("[home] How to open the gate", "[home] Door sensor: how to wire it", "[home] Door sensor in the hall: how to wire it", "[home] whether to leave the pump on at night", "[work] The pump stays on at night?", "[home] The pump stays on at night" + chr(0xFF1F),
+          "[home] Plan" + chr(0xFF1A) + " how to wire it", "[home] HOW to wire the sensor", f"[home] {KO_THING} {KO_WAY}", f"[home] {KO_THING}{KO_WHETHER}", f"[home] {KO_THING} {KO_WHETHER2}",
+          f"[home] {KO_THING} {KO_WAY} (2)", f"[home] {KO_THING} {KO_WAY} (2) (the hall)", f"[home] Plan: {KO_THING} {KO_WAY}",
+          # a title that reads as both is called a question
+          "[home] pick whether to add a second lamp?", f"[home] how to wire the sensor: {KO_THING} {KO_WORK[0]}", f"[home] pick how the shelf looks: {KO_THING} {KO_WAY}")
+WORKING = ("[home] pick whether to add a second lamp", "[home] pick whether queued ones can be changed", "[home] hall: pick how the shelf looks", "[home] Choose which sensor to buy", "[home] Decide what to cook", "[home] Decide if the lamp moves",
+           "[home] Choose between two sensors", "[home] Investigate why the boiler cycles", "[home] investigating how the leak starts", "[home] Look into why the boiler cycles",
+           "[home] looking into whether the pipe leaks", "[home] Figure out how to wire it", "[home] Find out why the boiler cycles", "[home] Analyze why the boiler cycles", "[home] analyse how the boiler cycles",
+           *(f"[home] {KO_THING} {w}" for w in KO_WORK), f"[home] Plan: {KO_THING} {KO_WORK[4]}", f"[home] {KO_THING} {KO_WORK[0]} (2)", KO_WORK[0])
 NAMING = ("[home] Make the nightly run finish by 06:00", "[home] The export is live", "[home] The export no longer times out", "[home] Fix the retry so uploads finish", "[home] Check valves stay closed",
           "[home] Review dates reach the tenant", "[home] Show where each parcel waits", "[home] A guest knows how to open the gate", "[home] However it is opened, the page loads",
-          "[home] How-to guide is published", "[home] The porch: why-sign hangs by the door", "[home] The tenant decides whether the lamp stays", "[home] The plumber investigates every leak",
-          "[home] Analyzers run on every sample", "[home] Pick up times are on the fridge", "[home] Investigation notes are in the drawer", "[home] The export runs at 12:30 how it is set",
-          "[home] The plumber can investigate every leak", "[home] A guest can decide whether to stay", "[home] The tag door:why stays readable",
+          "[home] How-to guide is published", "[home] The porch: why-sign hangs by the door", "[home] The tenant may decide whether to stay", "[home] Choose whichever sensor fits",
+          "[home] How tomorrow looks for the crew", "[home] The tag door:how to knock", "[home] The export runs at 12:30 how it is set", "[home] Analyzers run on every sample",
+          "[home] Pick up times are on the fridge", "[home] Investigation notes are in the drawer",
+          # a title that opens with a listed word and names a result
+          "[home] How long each parcel waits is shown", "[home] How the pump works is written on the page", "[home] Whether the door is locked shows on the board", "[home] Why each refund was made is recorded",
+          "[home] Should the power fail, the pump restarts itself", "[home] Find out more link opens the pricing page", "[home] Analyze button returns results again", "[home] analyze.py runs nightly again",
+          "[home] Investigate button: one click opens the report", "[home] The help page answers one question: why the bill changed", "[home] The help page answers one question: how to pay",
+          "[home] How to join page is live", "[home] How to pay shows on the invoice", "[home] How to guide published", "[home] Choose which tab opens first", "[home] A card by the front door: how to pay", "[home] Analyze button for the report page", "[home] Find out more link on the pricing page", "[home] Choose how to pay button works",
+          "[home] Look into why link shows on the card", "[home] The plumber may investigate why the boiler cycles", "[home] How to pay page explains the fee",
+          # a label that ends in a listed Korean word, before the result
+          f"[home] {KO_SELF} {KO_WORK[0]}: SMS {KO_PASSES}", f"[home] {KO_PAY} {KO_WAY}: {KO_THING} {KO_SAVED}", f"[home] {KO_PAY} {KO_WHETHER2}: {KO_SAVED}", f"[home] {KO_THING} {KO_WORK[2]}: {KO_DONE}",
+          f"[home] {KO_THING} {KO_WAY}: the second part",
+          # a subject the server cut: its last words may be gone
+          f"[home] {KO_THING} {KO_WORK[0]} " + chr(0x2026), f"[home] {KO_THING} {KO_WAY} " + chr(0x2026), "[home] How to tell the tenant that the lamp " + chr(0x2026),
           f"[home] {KO_THING}{KO_SUBJ} {KO_SET}", f"[home] {KO_THING} {KO_AGAIN}{KO_WORK[0]}", f"[home] {KO_WAY}{KO_SUBJ} {KO_SET}", f"[home] {KO_THING} {KO_WORK[0]} {KO_DONE}", "[home] ", "")
 for kind, titles in (("a question", ASKING), ("an activity", WORKING), ("", NAMING)):
     wrong = [(s, FG.subject_reads_as(s)) for s in titles if FG.subject_reads_as(s) != kind]
     check(f"subject_reads_as: {kind or 'a title that names a result is neither'}", not wrong, ascii(wrong))
 check("subject_reads_as: a title with no scope prefix is read the same", FG.subject_reads_as("how to wire it") == "a question", None)
+whole = "[home] " + "x" * (FG._subject_max() - 12 - len(KO_WORK[0])) + " " + KO_WORK[0] + " " + KO_DONE      # the cut falls after the listed word, before the word that says it is done
+cut = FG.fix_long_subject(whole + " " + KO_DONE * 3)
+check("subject_reads_as: a long subject the server cuts before its last words is not read by what is left", cut.endswith(" " + KO_WORK[0] + " " + chr(0x2026)) and FG.subject_reads_as(cut) == ""
+      and FG.subject_reads_as(cut[:-2]) == "an activity", ascii((whole, cut)))
+long_ones = ("[home] a" + " " * 200000 + "x", "[home] " + " (a)" * 50000 + " x", "[home] x" + " (a)" * 50000, "[home] " + ")" * 100000, "[home] x" + " " * 100000 + "(" * 100000 + ")")
+began = time.monotonic()
+for s in long_ones: FG.subject_reads_as(s)
+check("subject_reads_as: a very long subject is read at once", time.monotonic() - began < 2, time.monotonic() - began)
 
 def title_line(subject, kind): return f'(note: the subject "{subject}" reads as {kind}, not a finished outcome: send subject= naming the result wanted, the one the Goal sentence says, as "Make X work when Y" or "X is live")'
 TITLE = "reads as"
@@ -378,7 +399,7 @@ out, rows = call_tool("a80", subject=asked)
 check("an update that sets such a title: stored, with the line and the note", stored("a80")["subject"] == asked and title_line(asked, "an activity") in str(out) and noted(rows) == [["subject-form"]] and "fix" not in rows[0], (str(out)[-500:], rows))
 titled(81, asked)
 out, rows = call_tool("a81", description=BASE + "\n- The choice is made: fit it")
-check("an update that rewrites the description under a stored title of that form (the choice is made): the line", title_line(asked, "an activity") in str(out) and noted(rows) == [["subject-form"]], (str(out)[-500:], rows))
+check("an update that rewrites the description and keeps the Goal: an unchanged title is not named again", isinstance(out, str) and TITLE not in out and noted(rows) == [], (str(out)[-500:], rows))
 titled(82, asked)
 out, rows = call_tool("a82", description=MOVED)
 check("a changed Goal under such a title: both lines, both notes", "the Goal changed" in str(out) and title_line(asked, "an activity") in str(out) and [sorted(n) for n in noted(rows)] == [["goal-moved", "subject-form"]], (str(out)[-700:], rows))
@@ -386,6 +407,19 @@ for name, i, kw in (("a write that changes neither the title nor the description
     titled(i, asked)
     out, rows = call_tool(f"a{i}", **kw)
     check(f"no title line: {name}", isinstance(out, str) and TITLE not in out and noted(rows) == [], (str(out)[-400:], rows))
+def broken_note(subject): raise ValueError("no note today")
+real_note, FG.subject_form_note = FG.subject_form_note, broken_note
+try:
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err), writes.session_write():
+        gid, made = create_svc.create_item(subject=asked, description=GOOD, project=STK, owner=MAIN, next=f"{MAIN}: carry on")
+    titled(91, "[home] Make it run")
+    with contextlib.redirect_stderr(err), writes.session_write():
+        said = _update_svc._update("a91", subject=asked, sender=MAIN)
+finally:
+    FG.subject_form_note = real_note
+check("a note that fails: the create and the update are done, each with a stderr line", made.startswith("created") and stored(gid)["subject"] == asked and stored("a91")["subject"] == asked and TITLE not in made + said
+      and "title note not made: ValueError" in err.getvalue() and "goal note not made: ValueError" in err.getvalue(), (made[-200:], said[-200:], err.getvalue()[-400:]))
 titled(85, asked)
 out, rows = call_tool("a85", subject="[home] The second lamp is in place")
 check("an update that rewords the title to the outcome: no line", isinstance(out, str) and TITLE not in out and noted(rows) == [] and stored("a85")["subject"] == "[home] The second lamp is in place", (str(out)[-400:], rows))
