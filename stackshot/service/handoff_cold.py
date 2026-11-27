@@ -139,7 +139,7 @@ def handoff_cold(gid: str, cold_at: float) -> None:
                 handoff_cold_end(gid, "failed", f"the cold call gave no usable answer: {note}", cold_at)
                 _handoff.handoff_fallback(gid, f"the cold call gave no usable answer ({_clip_line(note, 100)})", cold_ok=False)
                 return
-            if mover0 and (keeps := _mhold.held(gid, mover0, once=True)):      # every answer takes the item from its mover, who may be at work on it: none is written
+            if ans["action"] != "ask_owner" and mover0 and (keeps := _mhold.held(gid, mover0, once="writing the cold call's answer")):      # a hand over or a close takes the item from its mover, who may be at work on it: neither is written. A question for the owner is: it gives no session the work, and dropped it would never reach them
                 said = f"the cold call's answer ({ans['action']}) was not written: {keeps}"
                 handoff_cold_end(gid, "done", said, cold_at)
                 _mhold.say(gid, said, time.time())

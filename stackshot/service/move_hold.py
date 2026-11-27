@@ -8,16 +8,20 @@ Who asks, one line each (tests/move_hold_scenario.py fails when a module writes 
   service/handoff.py `handoff_exec`        every `move` step: the hand-off ladder, the project's builder step of the stall ladder and of the one ladder, a failed push's or cold call's next step, the orphan
                                            hand-over, the front hand-on, the idle hand-over and the balancer
   service/stall.py `stall_builder`         before it writes that the item is handed to the builder
-  service/handoff_cold.py `handoff_cold`   before the cold call's answer (hand over, close, ask the owner) is written
-  service/watching.py `watch_fire`         before a wait's end gives the item to another session than the one that holds it
+  service/handoff_cold.py `handoff_cold`   before the cold call's hand over or close is written
+  service/watching.py `watch_fire`         before a wait's end passes a front agent's item to the project's builder
   service/proofs.py `handover`             before a proof pass's tick moves the item to the next step's session
   service/audit_ticks.py                   the idle hand-over and the balancer, ahead of the step, for their own log line
-No session's own write asks, nor the owner's answer, a question a wait turns to the owner, or a one-time migration: none of those is a pass taking work from a session.
+No session's own write asks, nor the owner's answer, a question a wait or the cold call turns to the owner, a wait's end that moves an item from a pick nobody wrote to a session that takes hand-offs, or a one-time
+migration: none of those is a pass taking work from a session.
 
-A hold for an unreadable state or an untied subagent can last for good, so it is not kept quiet: <state>/move-hold.json holds one record per held item ({mover, kind, why, since, seen, told}), and `report` (the minute
-hand-off tick) writes one History line on each item held for UNREAD_AFTER (an unreadable state) or UNTIED_AFTER (an untied subagent) and sends its project's -main agent one summary, each at most once in AGAIN. The
-record goes when the item reads as free again, and when no pass has asked about it for GAP; a hold of a step that no pass retries (`once`: a wait's end, a cold answer, a step hand-over) is read again by `report` itself.
-A subagent tied to the item itself is work in progress: it is held and nothing is reported.
+Nothing is held silently for good. <state>/move-hold.json keeps two kinds of record, and `report` (the minute hand-off tick) tells both: one History line on the item and one summary per project to its -main agent.
+  items  a hold a pass asks about again ({mover, kind, why, since, seen, told}). Told once it has lasted UNREAD_AFTER (an unreadable state) or UNTIED_AFTER (an untied subagent), then again at most once in AGAIN.
+         The record goes when the item reads as free, closes, is held for another reason, or no pass has asked about it for GAP. A subagent tied to the item itself is work in progress: held and not recorded.
+  once   a step that was held and that no pass tries again ({mover, kind, why, step, since, seen, told}): a wait's end, a cold answer, a step hand-over. Whatever its reason, a tied subagent too, and whatever the
+         subagents read later, it is told after UNREAD_AFTER (unreadable) or UNTIED_AFTER (a subagent), once: its History line, then the record stays until a summary has listed it. It goes without a word when
+         the item closes, its mover changes or another such step finds nothing holding it.
+A project's summary goes at most once in AGAIN and lists every item of the project held past its limit, not only those whose History line is new.
 
 Imports point down only: this module imports the domain, core and the services beside it, never web/ and never audit/ (reached through the save hooks)."""
 from __future__ import annotations
@@ -48,7 +52,7 @@ from stackshot.waits import stall as _stall
 
 
 UNREAD_AFTER = 3600.0       # the mover's subagents cannot be read: told after this long
-UNTIED_AFTER = 7200.0       # a subagent tied to none of the mover's open items: told after this long (a subagent at work for an hour is ordinary)
+UNTIED_AFTER = 7200.0       # a subagent tied to none of the mover's open items (for a step not tried again, to the item too): told after this long (a subagent at work for an hour is ordinary)
 AGAIN = 86400.0             # one History line per held item and one summary per project in this long
 GAP = 1800.0                # a hold no pass has asked about for this long is over (the ten-minute passes ask well inside it): the next starts its own clock
 LOCK = _xlock.XLock("move-hold")
@@ -59,13 +63,13 @@ def path():
 
 
 def load() -> dict[str, Any]:
-    """{"items": {gid: record}, "projects": {project: when its -main agent was last told}}; empty when there is no file or it cannot be read."""
+    """{"items": {gid: record}, "once": {gid: record}, "projects": {project: when its -main agent was last told}}; empty when there is no file or it cannot be read."""
     try:
         d = json.loads(path().read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         d = {}
     d = d if isinstance(d, dict) else {}
-    return {k: d[k] if isinstance(d.get(k), dict) else {} for k in ("items", "projects")}
+    return {k: d[k] if isinstance(d.get(k), dict) else {} for k in ("items", "once", "projects")}
 
 
 def _save(d: dict[str, Any]) -> None:
@@ -92,8 +96,8 @@ def _reader(now: float, snap: Any, items: "dict[str, dict[str, Any]] | None", de
     return ask
 
 
-def checker(now: float | None = None, snap: Any = None, items: "dict[str, dict[str, Any]] | None" = None, dead: "Callable[[str], str] | None" = None, once: bool = False) -> "Callable[[str, str], str]":
-    """`hold(gid, mover)` for one pass: `_reader`'s answer, noted for the report. `once`: the caller does not try again, so the report reads the item itself."""
+def checker(now: float | None = None, snap: Any = None, items: "dict[str, dict[str, Any]] | None" = None, dead: "Callable[[str], str] | None" = None, once: str = "") -> "Callable[[str, str], str]":
+    """`hold(gid, mover)` for one pass: `_reader`'s answer, noted for the report. `once`: the caller does not try again, and these are the words for the step it leaves undone."""
     now = time.time() if now is None else now
     ask = _reader(now, snap, items, dead)
 
@@ -104,26 +108,30 @@ def checker(now: float | None = None, snap: Any = None, items: "dict[str, dict[s
     return hold
 
 
-def held(gid: str, mover: str, now: float | None = None, once: bool = False) -> str:
+def held(gid: str, mover: str, now: float | None = None, once: str = "") -> str:
     """Why `mover` keeps the item `gid`, "" when nothing stops a pass from taking it."""
     return checker(now, once=once)(gid, mover)
 
 
-def _note(gid: str, mover: str, why: str, now: float, once: bool) -> None:
-    """Keep the record of one answer: a new stretch of holding starts its clock, a free answer ends it. One stderr line per stretch."""
+def _note(gid: str, mover: str, why: str, now: float, once: str) -> None:
+    """Keep the record of one answer: a new stretch of holding starts its clock, a free answer ends it. A step not tried again has its own record, which no other pass's answer ends or rewrites.
+    One stderr line per stretch."""
     kind = _hooks().audit_mod("hand_idle").hold_kind(why) if why else ""
+    if once and why:
+        kind = kind or "tied"      # nothing tries the step again, so work on the item itself is told too
+    section = "once" if once else "items"
     with LOCK:
         d = load()
-        old = d["items"].get(gid)
-        if not kind:      # free, or held by work on the item itself: nothing to tell, and the clock of an earlier hold ends
+        old = d[section].get(gid)
+        if not kind:      # free, or (a retried hold) held by work on the item itself: nothing to tell, and the clock of an earlier hold ends
             if old is not None:
-                del d["items"][gid]
+                del d[section][gid]
                 _save(d)
             return
-        goes_on = bool(old) and old.get("kind") == kind and old.get("mover") == mover and (old.get("once") or now - float(old.get("seen") or 0) <= GAP)
-        rec = dict(old) if goes_on else {"mover": mover, "kind": kind, "since": now, "told": float((old or {}).get("told") or 0)}
-        rec.update(why=why, seen=now, once=once)
-        d["items"][gid] = rec
+        goes_on = bool(old) and old.get("mover") == mover and (bool(once) or (old.get("kind") == kind and now - float(old.get("seen") or 0) <= GAP))
+        rec = dict(old) if goes_on else {"mover": mover, "since": now, "told": 0.0 if once else float((old or {}).get("told") or 0)}
+        rec.update(kind=kind, why=why, seen=now, **({"step": once} if once else {}))
+        d[section][gid] = rec
         _save(d)
     if not goes_on:
         print(f"move hold: {gid} stays with {mover}: {why}", file=sys.stderr, flush=True)
@@ -142,58 +150,74 @@ def _when(at: float) -> str:
 
 
 def report(now: float | None = None) -> list[str]:
-    """Tell the holds that have lasted: a History line on each item and one message per project to its -main agent (never the owner), each at most once in AGAIN. A record whose item is closed, or reads as free or as
-    held for another reason, or that no pass has asked about for GAP (a `once` record aside), is dropped first. → the ids told. Never raises."""
+    """Tell the holds that have lasted past their limit: a History line on each item (a retried hold's at most once in AGAIN, a step's that is not tried again once) and, at most once in AGAIN for a project, one message
+    to its -main agent (never the owner) that lists every one of them. Records that are over are dropped first (the module's words say when). → the ids given a History line. Never raises."""
     try:
         if _ro.is_read_only():
             return []
         now = time.time() if now is None else now
-        recs = load()["items"]
-        if not recs:
+        d = load()
+        if not d["items"] and not d["once"]:
             return []
         items = _hooks().next_report_all(None)
         ask = _reader(now, None, items, None)
         kind_of = _hooks().audit_mod("hand_idle").hold_kind
-        gone: dict[str, float] = {}      # gid -> the `seen` the record was judged on: one asked about again meanwhile is kept
-        due: list[tuple[str, dict[str, Any]]] = []
-        for gid, rec in recs.items():
-            item = items.get(gid)
-            quiet = not rec.get("once") and now - float(rec.get("seen") or 0) > GAP
-            if quiet or not item or item.get("status") != "open" or (rec.get("once") and not _handoff_same(_telling.holder(item), rec.get("mover"))):
-                gone[gid] = rec.get("seen")
-                continue
-            why = ask(gid, str(rec.get("mover") or ""))
-            if (kind_of(why) if why else "") != rec.get("kind"):
-                gone[gid] = rec.get("seen")
-                continue
-            limit = UNREAD_AFTER if rec.get("kind") == "unread" else UNTIED_AFTER
-            if now - float(rec.get("since") or now) >= limit and now - float(rec.get("told") or 0) >= AGAIN:
-                due.append((gid, {**rec, "why": why}))
-        projects: dict[str, list[tuple[str, str]]] = {}      # project -> (item, its line of the summary)
-        for gid, rec in sorted(due):
-            item = items[gid]
-            project = str((item.get("metadata") or {}).get("project") or "")
-            who = _sr._session_label(rec["mover"]) or rec["mover"]
-            say(gid, f"held with {who} since {_when(rec['since'])}: {rec['why']}; no pass moves it until that clears", now)
-            projects.setdefault(project, []).append((gid, f"{_gh.shown(gid)} \"{_clip_line(str(item.get('subject') or ''), 80)}\" with {who} since {_when(rec['since'])}: {rec['why']}"))
+        gone: list[tuple[str, str, float]] = []      # (section, gid, the `seen` the record was judged on: one asked about again meanwhile is kept)
+        past: list[tuple[str, str, dict[str, Any]]] = []      # (gid, section, record): held past its limit
+        for section in ("items", "once"):
+            for gid, rec in d[section].items():
+                item = items.get(gid)
+                over = not item or item.get("status") != "open" or not _handoff_same(_telling.holder(item), rec.get("mover"))      # closed, or handed on since: nobody is held
+                if not over and section == "items":      # a hold the passes ask about again: still asked about, and held for the same reason
+                    if now - float(rec.get("seen") or 0) > GAP:
+                        over = True
+                    else:
+                        why = ask(gid, str(rec.get("mover") or ""))
+                        over = (kind_of(why) if why else "") != rec.get("kind")
+                        rec = {**rec, "why": why}
+                if over:
+                    gone.append((section, gid, rec.get("seen")))
+                elif now - float(rec.get("since") or now) >= (UNREAD_AFTER if rec.get("kind") == "unread" else UNTIED_AFTER):
+                    past.append((gid, section, rec))
+        past.sort(key=lambda row: row[:2])
+        due = [(gid, section, rec) for gid, section, rec in past if (not rec.get("told") if section == "once" else now - float(rec.get("told") or 0) >= AGAIN)]
+        project_of = lambda gid: str((items[gid].get("metadata") or {}).get("project") or "")
+        projects: dict[str, dict[str, list[str]]] = {}      # project -> item -> what its line of the summary says
+        for gid, section, rec in past:
+            projects.setdefault(project_of(gid), {}).setdefault(gid, []).append(_undone(rec) if section == "once" else _with(rec))
+        for gid, section, rec in due:
+            say(gid, _undone(rec) if section == "once" else f"held {_with(rec)}; no pass moves it until that clears", now)
         with LOCK:
             d = load()
-            for gid, seen in gone.items():
-                if (d["items"].get(gid) or {}).get("seen") == seen:
-                    del d["items"][gid]
-            for gid, _rec in due:
-                if gid in d["items"]:
-                    d["items"][gid]["told"] = now
+            for section, gid, seen in gone:
+                if (d[section].get(gid) or {}).get("seen") == seen:
+                    del d[section][gid]
+            for gid, section, _rec in due:
+                if gid in d[section]:
+                    d[section][gid]["told"] = now
             tell = {p: rows for p, rows in projects.items() if now - float(d["projects"].get(p) or 0) >= AGAIN}
             for p in tell:
                 d["projects"][p] = now
+            for gid, section, rec in past:      # a step not tried again is told once: its record ends with the summary that lists it
+                if section == "once" and project_of(gid) in tell and (d["once"].get(gid) or {}).get("seen") == rec.get("seen"):
+                    del d["once"][gid]
             _save(d)
         for project, rows in tell.items():
-            _tell(project, rows)
-        return [gid for gid, _rec in sorted(due)]
+            _tell(project, [(gid, f"{_gh.shown(gid)} \"{_clip_line(str(items[gid].get('subject') or ''), 80)}\" " + ", and ".join(said)) for gid, said in rows.items()])
+        return sorted({gid for gid, _section, _rec in due})
     except Exception as e:  # noqa: BLE001  — a report that fails stops no pass
         print(f"move hold: report not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return []
+
+
+def _with(rec: dict[str, Any]) -> str:
+    """Who holds an item, since when and why, as History and the summary say it for a hold the passes ask about again."""
+    return f"with {_sr._session_label(rec['mover']) or rec['mover']} since {_when(rec['since'])}: {rec['why']}"
+
+
+def _undone(rec: dict[str, Any]) -> str:
+    """The same for a step that is not tried again: which step, when it was last held, who still has the item and what to do, then why it was held then (the subagent may have ended since). Why comes last: History cuts a long line at its end."""
+    return f"{rec.get('step')} was held at {_when(rec['seen'])} and is not tried again: {_sr._session_label(rec['mover']) or rec['mover']} still has the item, so hand it on or finish it ({rec['why']} then)"
 
 
 def _handoff_same(a: Any, b: Any) -> bool:
@@ -208,9 +232,10 @@ def _tell(project: str, rows: list[tuple[str, str]]) -> None:
         if not main or _model.is_owner(main):
             return
         gids = [g for g, _line in rows]
-        body = (f"moves are held on {len(rows)} item{'s' if len(rows) != 1 else ''} of {project}: a subagent of the mover may be at work, so no pass hands them on.\n"
+        body = (f"moves are held on {len(rows)} item{'s' if len(rows) != 1 else ''} of {project}: a subagent of the mover was or may be at work.\n"
                 + "\n".join("- " + line for _g, line in rows)
-                + "\nSubagents that cannot be read: see that the fleet's agent-state push reaches stackshot. A subagent tied to none of its mover's items: name the item in its description, or let it end. "
+                + "\nWhere a line says a step is not tried again, hand that item on or finish it; on the others no pass hands the item on while the hold lasts. "
+                  "Subagents that cannot be read: see that the fleet's agent-state push reaches stackshot. A subagent tied to none of its mover's items: name the item in its description, or let it end. "
                   f"No reply is owed; nothing here is for {OWNER}. → ")
         _telling.tell_news(dict(rows), ",".join(gids), _handoff_hooks().session_id(main) or main, f"[stackshot] {body}" + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall_summary")
     except Exception as e:  # noqa: BLE001

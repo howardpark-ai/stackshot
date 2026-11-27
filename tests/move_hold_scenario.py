@@ -4,8 +4,8 @@ store, the agent-state push stored and read by the server's own code, the pane r
   1  every module that writes an item's mover is accounted for here: a pass asks the hold, and anything else says why it takes nothing from a working mover
   2  the question: a subagent tied to the item, one tied to none, and subagents that cannot be read hold; nothing running, a mover with no pane, the owner and no mover do not
   3  each pass: the hand-off pass's write (the ladders, the orphan hand-over), the hand-off ladder, the stall pass's builder step, the end of a wait, the cold call's answer, the step hand-over after a proof
-  4  a hold that goes on is told: after an hour (unreadable) or two (a subagent tied to nothing), a History line per item and one summary per project to its -main agent, at most daily; the record ends when the hold does
-  5  `[audit] no_handoff` in the passes beside the balancer: the cold call, the return to the sender, a wait's end with nobody written to pick it up, the send-time refusal, the config lines
+  4  a hold that goes on is told: after an hour (unreadable) or two (a subagent), a History line per item and one summary per project to its -main agent that lists every held item, at most daily; a step not tried again is told once
+  5  `[audit] no_handoff` in the passes beside the balancer: the idle hand-over, the cold call, the return to the sender, a wait's end (a listed agent is never handed the item), the send-time refusal, the config lines
 
     tests/run-suite move_hold      -> exit 0 / 1"""
 import ast, contextlib, io, json, os, re, sys, pathlib, time, logging
@@ -65,12 +65,14 @@ telling.PUSH = [sys.executable, "-c", "pass"]
 _cfg.CFG["audit"]["pattern_review"] = "off"
 _cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
-def fake_tell(gid, owner, note, tag="wake", result=None): sent.append((gid, owner, note, tag)); return None
+kinds = []                                                         # (recipient's id, the kind its sender gave the front gate) of each of those notices
+def fake_tell(gid, owner, note, tag="wake", result=None): sent.append((gid, owner, note, tag)); kinds.append((owner, getattr(telling.FRONT_HINT, "kind", ""))); return None
 telling.tell_woken = fake_tell
 _messaging._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append(("message", to, text, "message")), "delivered to " + to)[1]
 panes = {}; dead = {}
 handoff_svc.handoff_status = lambda who, idx=None: (panes.get(who, ""), now0 - 3600) if panes.get(who) else ("", 0.0)
 handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
+real_index = _fleet_sessions_registry._sessions_index
 _fleet_sessions_registry._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = proofs_svc._sessions_index = lambda: {}
 
 def put(i, mover="home-peer", **meta):
@@ -104,7 +106,7 @@ def push(*subagents, state="busy", pane="turn", written=None, who="home-peer"):
 def idle(written=None): push(state="idle", written=written)
 def wipe():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
-    sent.clear(); panes.clear(); dead.clear(); _cfg.CFG["audit"].pop("no_handoff", None)
+    sent.clear(); kinds.clear(); panes.clear(); dead.clear(); _cfg.CFG["audit"].pop("no_handoff", None)
     agent_state_store.path().unlink(missing_ok=True); mhold.path().unlink(missing_ok=True)
 def listed(*names): _cfg.CFG["audit"]["no_handoff"] = list(names)
 def to_(name): return [x for x in sent if x[1] in (U[name], name)]
@@ -235,6 +237,7 @@ both("the cold call's answer (close)", cold_item, cold,
 # the step hand-over: the server's tick hands on, a session's own mark is not asked
 NEXT = "team-back: verify the pages"
 def step_item(): put(1, next=NEXT)
+def summaries_(): return [x for x in sent if x[3] == "stall_summary"]
 def hand(by_pass): return lambda: proofs_svc.handover("a1", time.time(), ["home-peer: merge the part"], by_pass=by_pass)
 both("the step hand-over after a proof's tick", step_item, hand(True),
      lambda got: got["action"] == "held" and got["why"] == HI.HOLD_TIED and mover_of(1) == "home-peer" and "handover" not in mt(1) and any("step hand-over" in h and "stays with home-peer" in h for h in history(1))
@@ -244,8 +247,25 @@ check("3 …a step a session marked itself is its own write: handed on whatever 
 answer_with(HAND)
 for label, setup, run in (("the cold call's answer", cold_item, cold), ("the end of a wait", lambda: put(1, mover="home-main", state="parked", needs=["home-main"], wait_kind="time", wake="2026-01-02"), fire),
                           ("the step hand-over", step_item, hand(True))):
-    wipe(); setup(); run(); rec = mhold.load()["items"].get("a1") or {}; got = mhold.report(time.time() + H + MIN)
-    check(f"3 {label} held for unreadable subagents is tried once, so the report reads the item itself and tells it after the hour", rec.get("once") is True and got == ["a1"], (rec, got))
+    wipe(); setup(); run(); d = mhold.load(); rec = d["once"].get("a1") or {}; got = mhold.report(time.time() + H + MIN)
+    step = {"the cold call's answer": "writing the cold call's answer", "the end of a wait": "the pass to another session at the end of its wait", "the step hand-over": "the step hand-over"}[label]
+    check(f"3 {label} held for unreadable subagents is tried once: it has a record of its own that names the step, and the report tells it after the hour", rec.get("step") == step and d["items"] == {} and got == ["a1"]
+          and any(h.startswith(f"{step} was held at ") and "is not tried again" in h for h in history(1)) and len(summaries_()) == 1, (d, got, history(1), sent))
+def asked_him(): return rd(1)["status"] == "open" and "decision" in (mt(1).get("needs") or []) and mt(1).get("ask") == ASK and mover_of(1) != "home-peer"
+ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
+answer_with({"action": "ask_owner", "ask": ASK, "options": [{"label": "ship", "line": "Ship it now.", "recommended": True}, {"label": "wait", "line": "Hold it a week.", "recommended": False}]})
+for label, setup_push in (("a subagent of the mover on the item", lambda: push(on(1))), ("unreadable subagents", lambda: None)):
+    wipe(); cold_item(); setup_push(); cold()
+    check(f"3 the cold call's question for the owner is written with {label}: it gives no session the work, and dropped it would not reach them", asked_him() and mhold.load()["once"] == {} and not any("was not written" in h for h in history(1)), (mt(1), history(1), mhold.load()))
+# a front agent that holds a step hand-over back is told too, as a notice that rides its next turn
+for who, kind in (("home-main", "progress"), ("home-peer", "")):
+    wipe(); put(1, mover=who, next=NEXT, needs=[who]); push(on(1), who=who)
+    stubbed = _fleet_sessions_registry._sessions_index; _fleet_sessions_registry._sessions_index = real_index
+    try: got = proofs_svc.handover("a1", time.time(), [f"{who}: merge the part"], by_pass=True)
+    finally: _fleet_sessions_registry._sessions_index = stubbed
+    mine = [x for x in to_(who) if "stays with you" in x[2]]
+    check(f"3 a step hand-over held for {'a front agent' if kind else 'a background agent'} tells it once" + (", as progress: it starts no turn" if kind else ", as ever"),
+          got["action"] == "held" and got["told"] == who and len(mine) == 1 and [k for o, k in kinds if o == U[who]] == [kind] and mover_of(1) == who, (got, sent, kinds))
 
 # ================================================================ 4. a hold that goes on is told
 T0 = now0 - 40 * H
@@ -260,6 +280,7 @@ def stretch(start, until, gids=("a1",), subagent=None, every=25 * MIN):
         if at >= until: return out
         at = min(at + every, until)
 def summaries(): return [x for x in sent if x[3] == "stall_summary"]
+STEP = "the step hand-over"
 wipe(); put(1); put(2)
 early = stretch(T0, T0 + H - 1, ("a1", "a2"))
 check("4 unreadable subagents: nothing is said in the first hour", early == [] and not sent and not history(1), (early, sent))
@@ -300,12 +321,40 @@ check("4 a hold whose reason changes starts the new reason's own clock, and keep
 got = stretch(at + MIN, at + 2 * H + MIN, subagent=agent("fix the flaky test"))
 check("4 …so it is not told a second time within the day", got == [] and len(history(1)) == 1 and len(summaries()) == 1, (got, history(1), summaries()))
 for label, change in (("closed", lambda: (T / "store/a/1.json").write_text(json.dumps({**rd(1), "status": "completed"}))), ("handed on", lambda: put(1, mover="team-aux"))):
-    wipe(); put(1); mhold.checker(T0, once=True)("a1", "home-peer"); change()
-    got = mhold.report(T0 + H)
-    check(f"4 an item that was {label} is not reported and its record goes", got == [] and mhold.load()["items"] == {} and not sent, (got, mhold.load()))
-wipe(); put(1); mhold.checker(T0, once=True)("a1", "home-peer")
+    wipe(); put(1); mhold.checker(T0)("a1", "home-peer"); mhold.checker(T0, once=STEP)("a1", "home-peer"); change()
+    got = mhold.report(T0 + 25 * MIN)
+    check(f"4 an item that was {label} is not reported and its records go", got == [] and mhold.load()["items"] == {} and mhold.load()["once"] == {} and not sent, (got, mhold.load()))
+def once_hold(at=T0, gid="a1"): return mhold.checker(at, once=STEP)(gid, "home-peer")
+wipe(); put(1); once_hold()
+before = mhold.report(T0 + H - 1); got = mhold.report(T0 + H); line = history(1)[0] if history(1) else ""
+check("4 a step no pass retries is told after the hour with no pass asking, and not before", before == [] and got == ["a1"] and len(summaries()) == 1 and len(history(1)) == 1, (before, got, sent))
+check("4 …its words say the step is not tried again and who still has the item, not that no pass moves it until the hold clears", line.startswith(f"{STEP} was held at ") and HI.HOLD_UNREAD in line
+      and "is not tried again: home-peer still has the item, so hand it on or finish it (" in line and "until that clears" not in line and f"{STEP} was held at " in summaries()[0][2]
+      and "Where a line says a step is not tried again, hand that item on or finish it" in summaries()[0][2], (line, summaries()))
+later = [mhold.report(T0 + H + n * 86400 + MIN) for n in (0, 1, 2)]
+check("4 …once: its record ends with the summary that listed it", later == [[], [], []] and mhold.load()["once"] == {} and len(history(1)) == 1 and len(summaries()) == 1, (later, mhold.load(), history(1)))
+wipe(); put(1); once_hold(); push(agent("fix the flaky test"), written=T0 + H - MIN); mhold.checker(T0 + H - MIN)("a1", "home-peer")
 got = mhold.report(T0 + H)
-check("4 a step no pass retries (a wait's end, a cold answer, a step hand-over) is read again by the report itself: told after the hour", got == ["a1"] and len(summaries()) == 1 and history(1), (got, sent))
+check("4 …a reason that changes before the hour does not drop it, nor does another pass's answer rewrite it", got == ["a1"] and HI.HOLD_UNREAD in history(1)[0] and HI.HOLD_UNTIED not in history(1)[0], (got, history(1), mhold.load()))
+wipe(); put(1); push(on(1), written=T0 - 30); why = once_hold(); idle(written=T0 + 10 * MIN); mhold.checker(T0 + 10 * MIN)("a1", "home-peer")
+early = mhold.report(T0 + 2 * H - 1); got = mhold.report(T0 + 2 * H)
+check("4 …one held for a subagent on the item itself, which has since ended, is told after two hours", why == HI.HOLD_TIED and early == [] and got == ["a1"] and HI.HOLD_TIED + " then" in history(1)[0] and len(summaries()) == 1, (why, early, got, history(1), sent))
+wipe(); put(1); push(agent("fix the flaky test"), written=T0 - 30); once_hold(); idle(written=T0 + 10 * MIN)
+early = mhold.report(T0 + 2 * H - 1); got = mhold.report(T0 + 2 * H)
+check("4 …and so is one held for an untied subagent that ended", early == [] and got == ["a1"] and HI.HOLD_UNTIED in history(1)[0], (early, got, history(1)))
+wipe(); put(1); once_hold(); idle(written=T0 + MIN); free = once_hold(T0 + MIN)
+check("4 …a later such step that finds nothing holding it ends the record: it is carried out", free == "" and mhold.load()["once"] == {} and mhold.report(T0 + H) == [] and not sent, (free, mhold.load()))
+wipe(); put(1); once_hold(); once_hold(T0 + 50 * MIN)
+rec = mhold.load()["once"]["a1"]; got = mhold.report(T0 + H)
+check("4 …held again by the same mover it keeps its clock", rec["since"] == T0 and rec["seen"] == T0 + 50 * MIN and got == ["a1"], (rec, got))
+wipe(); put(1); put(2); stretch(T0, T0 + H, ("a2",)); once_hold(T0 + 5 * MIN)
+first = stretch(T0 + H + 5 * MIN, T0 + H + 5 * MIN, ("a2",)); waiting = mhold.load()["once"].get("a1") or {}
+check("4 …with the day's summary already sent it gets its History line and stays on record", first == [(T0 + H + 5 * MIN, ["a1"])] and len(summaries()) == 1 and waiting.get("told") == T0 + H + 5 * MIN, (first, waiting, len(summaries())))
+stretch(T0 + H + 30 * MIN, T0 + H + 86400 + 30 * MIN, ("a2",))
+check("4 …until the next summary lists it, with no second History line", len(summaries()) == 2 and shown(1) in summaries()[1][2] and shown(2) in summaries()[1][2] and len(history(1)) == 1 and mhold.load()["once"] == {}, (summaries()[-1], history(1), mhold.load()))
+wipe(); put(1); once_hold(); stretch(T0, T0 + H)
+body = summaries()[0][2] if summaries() else ""
+check("4 an item held both ways has one line of the summary that says both", len(summaries()) == 1 and body.count("\n- ") == 1 and f"{STEP} was held at " in body and "with home-peer since " in body, body)
 wipe(); put(1)
 got = stretch(T0, T0 + 2 * H - 1, subagent=agent("fix the flaky test"))
 check("4 a subagent tied to none of the mover's items: nothing is said for two hours", got == [] and not sent, got)
@@ -319,19 +368,73 @@ check("4 a project with no -main agent gets the History line alone", got == [(T0
 wipe(); put(1); put(2)
 stretch(T0, T0 + H, ("a1",)); stretch(T0 + H + MIN, T0 + 2 * H + MIN, ("a1", "a2"))
 check("4 one summary per project in a day: an item that comes due later gets its History line, and no second message", len(history(2)) == 1 and len(summaries()) == 1, (history(2), len(summaries())))
+wipe(); put(1); put(2)
+stretch(T0, T0 + H - 1, ("a1",)); stretch(T0 + H, T0 + 8 * 86400, ("a1", "a2"))
+named_in = [(shown(1) in x[2], shown(2) in x[2]) for x in summaries()]
+check("4 …and every later summary lists each item held past its limit, one that came due between two of them too", named_in == [(True, False)] + [(True, True)] * 7, (len(named_in), named_in))
+wipe(); put(1); stretch(T0, T0 + H - 1); got = (push(agent("fix the flaky test"), written=T0 + H - 30), mhold.report(T0 + H))[1]
+check("4 the report reads the reason again: a hold that changed with no pass asking is not told as the old one", got == [] and mhold.load()["items"] == {} and not history(1) and not sent, (got, history(1), mhold.load()))
+from stackshot.core import readonly as _readonly
+wipe(); put(1); stretch(T0, T0 + H); sent.clear(); rec = mhold.load(); rec["projects"] = {}; mhold.path().write_text(json.dumps(rec))
+kept = mhold.path().read_text(); err = io.StringIO()
+_readonly._reload_for_test(True)
+try:
+    with contextlib.redirect_stderr(err): got = mhold.report(T0 + H + MIN)
+finally:
+    _readonly._reload_for_test(False)
+check("4 the standby copy reports nothing: no message, no record written, no error", got == [] and not sent and mhold.path().read_text() == kept and err.getvalue() == "", (got, sent, err.getvalue()))
+got = mhold.report(T0 + H + MIN)
+check("4 …where the live copy would send that summary", got == [] and len(summaries()) == 1, (got, sent))
+real_main = mhold._agents._main_agent
+mhold._agents._main_agent = lambda project: _cfg.owner()
+try:
+    wipe(); put(1); got = stretch(T0, T0 + H)
+finally:
+    mhold._agents._main_agent = real_main
+check("4 the summary never goes to the owner", got == [(T0 + H, ["a1"])] and history(1) and not sent, (got, sent))
 called = []; real_report = mhold.report
 mhold.report = lambda now=None: called.append(now) or []
 try:
     wipe(); handoff_svc.handoff_tick(now0, only=["a1"]); a = list(called); handoff_svc.handoff_tick(now0)
     check("4 the report is run by the minute hand-off pass (not by a run limited to some items)", a == [] and called == [now0], (a, called))
+    for key, value, want, label in (("pause", True, [], "not while [model] pause holds every clock"), ("handoff", False, [now0], "with [model] handoff off too: other passes hold items then")):
+        called.clear(); had = dict(_cfg.CFG.get("model") or {}); _cfg.CFG.setdefault("model", {})[key] = value
+        try: handoff_svc.handoff_tick(now0)
+        finally: _cfg.CFG["model"] = had
+        check(f"4 …{label}", called == want, called)
 finally:
     mhold.report = real_report
 
 # ================================================================ 5. [audit] no_handoff beside the balancer
+# the idle hand-over, on an item whose builder is busy elsewhere: eight other items on agents, subagents on two of them, its own step marked in progress, a pull request anchored to the project and to no item
+def busy_elsewhere(*names):
+    wipe()
+    if names: listed(*names)
+    (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": "https://github.com/acme/alpha/pull/7", "items": None}]}))
+    put(1, mover="team-back", steps=[{"text": "team-back: build the button, release, complete", "status": "open", "tag": {"text": "releases after the card fix", "state": "in progress", "ts": now0 - 2 * H}}])
+    for i in range(2, 10):
+        put(i, mover="team-back")
+        p_ = T / f"store/a/{i}.json"; item = rd(i); item.update(updated=now0 - 5 * MIN, state_updated=now0 - 5 * MIN, activity=now0 - 5 * MIN, written_at=now0 - 5 * MIN); p_.write_text(json.dumps(item))      # written lately: not idle themselves
+    push(on(2), on(3), who="team-back")
+    audit_ticks_svc._hourly_tick(now0)
+    line = (mt(1).get("hourly_audit") or {}).get("log", [{}])[-1].get("text", "")
+    return line, audit_ticks_svc._hand_idle_tick(now0)
+try:
+    line, got = busy_elsewhere()
+    check("5 an item its builder has not written for over an hour reads idle while the builder works on other items: a step marked in progress and a pull request tied to no item verify nothing",
+          line.endswith("idle, nothing verified (the mover's pane is busy, but it carries 8 other items on agents; its running subagents are tied to other items; no commit, review or CI in the hour)"), line)
+    check("5 …and a free background agent that is not listed takes it (the control: the item is due)", got == ["a1"] and mover_of(1) == "team-aux", (got, mover_of(1), history(1)))
+    line, got = busy_elsewhere("team-aux", "team-rev")
+    check("5 …a listed one never does: with no other, the item stays with its builder, which is told, as is -main", got == [] and mover_of(1) == "team-back" and not to_("team-aux") and not to_("team-rev")
+          and len(to_("team-back")) == 1 and len(to_("home-main")) == 1, (got, mover_of(1), history(1), sent))
+finally:
+    (T / "store/anchors.json").write_text("{}")
 wipe(); cold_item(); idle(); listed("team-aux"); ASKED.clear(); answer_with(HAND); cold()
 offered = ASKED[0].split("Sessions it may be handed to")[1] if ASKED else ""
 check("5 the cold call does not offer a listed agent", "team-back" in offered and "team-aux" not in offered, offered)
 check("5 …and an answer that names one is refused: the item does not go to it", mover_of(1) != "team-aux" and not to_("team-aux"), (mover_of(1), history(1), mt(1).get("handoff")))
+wipe(); cold_item(); idle(); answer_with(HAND); stub = hcold_svc.COLD_RUNNER; hcold_svc.COLD_RUNNER = lambda msg: (listed("team-aux"), stub(msg))[1]; cold()
+check("5 …also one listed while the call ran: the answer is read against the list as it is then", mover_of(1) != "team-aux" and not to_("team-aux"), (mover_of(1), history(1), mt(1).get("handoff")))
 def next_of(*names, tried=("team-back",)):
     wipe(); listed(*names)
     r = record(origin="team-rev", tried=list(tried))
@@ -363,9 +466,17 @@ wipe(); listed("team-back"); idle(); put(1, state="parked", mover="team-back", n
 check("5 …and a listed agent somebody wrote as the one to pick it up keeps it", mover_of(1) == "team-back", mt(1))
 wipe(); listed("team-back"); idle(); put(1, state="parked", mover="team-back", needs=["external"], wait_kind="time", wake="2026-01-02"); watching_svc.watch_fire("a1", "time", time.time(), {})
 check("5 …also when it is written as the mover only, with no need that names it", mover_of(1) == "team-back", mt(1))
-wipe(); listed("team-back"); idle(); push(agent("fix the flaky test"), who="team-back")
-put(1, mover="", state="parked", wait_kind="time", wake="2026-01-02", next="do the thing"); watching_svc.watch_fire("a1", "time", time.time(), {})
-check("5 …nor is the item passed from a pick whose subagent may be on it", mover_of(1) == "team-back" and any("does not pass to team-aux" in h for h in history(1)), (mover_of(1), history(1)))
+for label, state in (("whose subagents run something else", lambda: push(agent("fix the flaky test"), who="team-back")), ("whose subagents cannot be read", lambda: None)):
+    for form, wait in (("", dict(wait_kind="time", wake="2026-01-02")), (", a wait on a date alone", dict(until="2026-01-02", needs=[]))):
+        wipe(); listed("team-back"); state(); put(1, mover="", state="parked", next="do the thing", **wait); out = {}; watching_svc.watch_fire("a1", "time", time.time(), out)
+        check(f"5 …a listed pick {label}{form} is not handed the item: nothing gave it the item, so there is nothing to hold", mover_of(1) == "team-aux" and list(out) == [U["team-aux"]]
+              and not any("stays with" in h or "does not pass" in h for h in history(1)) and not to_("team-back") and mhold.load()["once"] == {}, (mover_of(1), mt(1).get("needs"), history(1), list(out), mhold.load()))
+wipe(); listed("team-back"); idle(); put(1, mover="", needs=["team-back"], state="parked", wait_kind="time", wake="2026-01-02"); out = {}; watching_svc.watch_fire("a1", "time", time.time(), out)
+check("5 …a listed agent named in needs keeps the item, with no mover written", list(out) == [U["team-back"]] and "team-aux" not in str(mt(1)), (mt(1), history(1), list(out)))
+wipe(); listed("team-back"); push(state="idle", who="home-main"); put(1, mover="home-main", state="parked", needs=["home-main"], wait_kind="time", wake="2026-01-02"); out = {}; watching_svc.watch_fire("a1", "time", time.time(), out)
+check("5 a front agent's item whose wait ends passes the listed builder over", mover_of(1) == "team-aux" and list(out) == [U["team-aux"]] and not to_("team-back"), (mover_of(1), history(1), list(out)))
+wipe(); listed(" team-aux ", "team-rev\t")
+check("5 the names of the list are trimmed", _cfg.audit_no_handoff() == ["team-aux", "team-rev"] and not _anc.takes_handoff("team-aux") and not _anc.takes_handoff("team-rev"), _cfg.audit_no_handoff())
 def refusal(*names):
     wipe(); listed(*names); put(1); dead["team-back"] = "team-back has no pane"
     try: _update_svc._update("a1", needs=["team-back"], sender="home-peer")

@@ -81,7 +81,7 @@ def passed_note(front: str) -> str:
 def _front_to_background(post: str, meta: dict[str, Any]) -> str:
     """When a wait ends on a front agent (a session he talks to), the item goes to the project's builder instead: the front agent is not told by the wake and hears of the item only on a turn he gives it
     (the History line names it). → the builder's name, or "" when the item stays with `post`: `post` is not a front agent, the project has no builder (the ended wait's fallback stays, as for the answers
-    and fallbacks in handoffs.md), or an open step or the ask names `post` itself to act. A builder `[audit] no_handoff` names is passed over (`anchors.taker_of`). watch_fire keeps the item with `post` all the same while a subagent of it may be at work on it (move_hold.py)."""
+    and fallbacks in handoffs.md), or an open step or the ask names `post` itself to act. A builder `[audit] no_handoff` names is passed over (`anchors.taker_of`). watch_fire keeps the item with the front agent all the same while a subagent of it may be at work on it (move_hold.py)."""
     project = str(meta.get("project") or "")
     if not post or not _telling.front_keeper(post, project)[0] or _telling.own_step(meta, post):
         return ""
@@ -196,21 +196,18 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
         passed = unlisted = ""                          # the front agent whose wait ended and whose item went to the project's builder instead (_front_to_background); the picker nobody wrote that takes no hand-offs, likewise (_unlisted_taker)
 
         def other_mover() -> str:
-            """The session the end of the wait gives the item to instead of `post`, "" when it stays: not taken from a session whose subagent may be at work on it (move_hold), which History says."""
+            """The session the end of the wait gives the item to instead of `post`, "" when it stays. A front agent's item is not taken from it while a subagent of it may be at work on it (move_hold), which History says.
+            A listed pick nobody wrote (_unlisted_taker) holds nothing, so no hold is asked there: a listed agent is never given an item because its subagents run or cannot be read."""
             nonlocal passed, unlisted
-            back = _front_to_background(post, meta)
-            to = back or _unlisted_taker(post, meta, mod)
-            if not to:
+            if not (back := _front_to_background(post, meta)):
+                if (to := _unlisted_taker(post, meta, mod)):
+                    unlisted = post
+                return to
+            if (keeps := _mhold.held(gid, post, now, once="the pass to another session at the end of its wait")):
+                _stall.note(meta, now, f"the wait ended: the item stays with {watch_label(post)} and does not pass to {watch_label(back)}: {keeps}")
                 return ""
-            keeps = _mhold.held(gid, post, now, once=True)
-            if keeps:
-                _stall.note(meta, now, f"the wait ended: the item stays with {watch_label(post)} and does not pass to {watch_label(to)}: {keeps}")
-                return ""
-            if back:
-                passed = post
-            else:
-                unlisted = post
-            return to
+            passed = post
+            return back
         chased = _watch.chased_out(meta)
         list_relay = kind == _wl.LIST and cause == "backstop" and bool(_wl.lines_by_kind(meta, "relay"))      # the backstop day with a relay line still open asks the owner, as a relay's ask-by day does
         ask_him = (cause == "relay" and kind != _wl.LIST) or (cause == "backstop" and chased) or list_relay      # a relay LINE that arrived (the owner relayed it) is an arrival, not a question
