@@ -1110,7 +1110,7 @@ class Board:
             self.__dict__["_scope_ids"] = (ids, _prj.marks())
         return self.__dict__["_scope_ids"]
     def item_scope(self, r):
-        """The group the home page lists an item under, the name on its subsection there (ui/render.py scope_groups): anchors.item_scope, the one reading the client reads share. One of the names in
+        """The group the home page lists an item under, the name on its subsection there (ui/render.py scope_groups): anchors.item_scope, the reading the client reads share with this renderer (the home page in ui/render.py keeps its own copy of the rule, which the your-move scenario compares with this one). One of the names in
         [project_scopes] order, single-scope instances included; board.md's own grouping (proj_scope, [scopes]) is another setting."""
         return _anc.item_scope(r["metadata"], self.proj, *self.scope_ids())
     def proj_mirror(self, k):

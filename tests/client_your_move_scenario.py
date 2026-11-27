@@ -188,7 +188,7 @@ def drawn():
     """{item: scope} as the home page's HTML draws its Your move list: the subsection each item's link sits in."""
     sec = _ui.Board(str(_store.STORE)).html().split('<section id="your-move">', 1)[1].split('<section id=', 1)[0]
     parts = re.split(r'data-fold="home\.your-move\.([^"]+)"', sec)
-    return {s: sc for sc, chunk in zip(parts[1::2], parts[2::2]) for s in (shown(n) for n in (*mine, *CASES)) if f'href="/items/{_gh.href_id(s)}"' in chunk}
+    return {s: sc for sc, chunk in zip(parts[1::2], parts[2::2]) for s in (shown(n) for n in (*mine, *CASES, 250)) if f'href="/items/{_gh.href_id(s)}"' in chunk}
 def answered(): return {x["shown"]: x["scope"] for x in body()["items"]}
 def page(**e): return {"title": "P", "name": "P", "org": "home", "tags": [], "type": "project", "status": "active", "board": [], **e}
 reg0 = (T / "store/projects.json").read_text()
@@ -244,6 +244,42 @@ try:
     finally: _prj.ids_by_key, _prj.marks = real_ids, real_marks
     check("scope, the id file is read once for a read of the whole group", sorted(reads) == ["ids", "marks"], reads)
     ids_file = pathlib.Path(_prj.record_path()); kept = ids_file.read_text()
+    # an agent only the project record holds (made through the form, its page line still owed) moves the page's scope by its name prefix, on the home page, your-move and the other reads alike
+    reg_p = json.loads((T / "store/projects.json").read_text()); reg_p["pages"]["projects/pend"] = page(org=""); (T / "store/projects.json").write_text(json.dumps(reg_p))
+    try:
+        pend_id = _prj.ensure_ids(["projects/pend"])["projects/pend"]
+        _prj.add_pending(pend_id, "work-x", {"front": True, "role": "x", "mandate_line": "a thing"})
+        put(250, subject="[home] pending case", age=3, mover=OWNER, project="projects/pend"); put(350, subject="[home] pending copy", age=3, mover="alpha-builder", observers=["alpha-main"], project="projects/pend")
+        cr._VIEW["v"] = None
+        yp = answered()[shown(250)]
+        ip = by_shown(json.loads(cr._client_get("items", {"key": "alpha-builder"})[2])["items"])[shown(350)]
+        vp = by_shown(json.loads(cr._client_get("involved", {"key": "alpha-main"})[2])["items"])[shown(350)]
+        fp = json.loads(cr._client_get("item-facts", {"key": "alpha-builder", "ids": "a350"})[2])["items"]["a350"]["scope"]
+        check("scope, a page that only a pending agent places (work-x): your-move says work", yp == "work", yp)
+        check("scope, …and items, involved and item-facts say the same as your-move", ip == vp == fp == yp, (yp, ip, vp, fp))
+        check("scope, …and the home page draws it in the same subsection", drawn().get(shown(250)) == yp, drawn().get(shown(250)))
+    finally:
+        for n in (250, 350): drop(n)
+        ids_file.write_text(kept); (T / "store/projects.json").write_text(json.dumps(reg))
+    # the registry, the id file and the marks are read once per read of items, involved and item-facts, not once per row
+    spy = {"ids": 0, "marks": 0, "pending": 0}; real_i, real_m, real_p = _prj.ids_by_key, _prj.marks, _prj.with_pending
+    def s_ids(*a, **k): spy["ids"] += 1; return real_i(*a, **k)
+    def s_marks(*a, **k): spy["marks"] += 1; return real_m(*a, **k)
+    def s_pend(*a, **k): spy["pending"] += 1; return real_p(*a, **k)
+    for n, (key, _sc, _why) in CASES.items(): put(n + 100, subject=f"[home] scope copy {n}", age=3, mover="alpha-builder", observers=["alpha-main"], project=key)
+    _prj.ids_by_key, _prj.marks, _prj.with_pending = s_ids, s_marks, s_pend
+    try:
+        def read_items():
+            cr._VIEW["v"] = None
+            return cr._client_get("items", {"key": "alpha-builder"})
+        for what, call in (("items", read_items), ("involved", lambda: cr._client_get("involved", {"key": "alpha-main"})),
+                           ("item-facts", lambda: cr._client_get("item-facts", {"key": "alpha-builder", "ids": ",".join(f"a{n + 100}" for n in CASES)}))):
+            for k_ in spy: spy[k_] = 0
+            st_, _ct, b_ = call()
+            check(f"scope, {what}: the id file, the marks and the pending agents are read once for the whole read", st_ == 200 and len(json.loads(b_)["items"]) >= len(CASES) and spy == {"ids": 1, "marks": 1, "pending": 1}, spy)
+    finally:
+        _prj.ids_by_key, _prj.marks, _prj.with_pending = real_i, real_m, real_p
+        for n in CASES: drop(n + 100)
     try:
         ids_file.write_text("{ torn")
         bad_sc, bad_page = answered(), drawn()

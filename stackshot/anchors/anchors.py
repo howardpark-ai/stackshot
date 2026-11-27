@@ -459,7 +459,7 @@ def page_key(v: Any) -> str:
 
 def item_scope(meta: Any, reg: dict[str, dict[str, Any]] | None = None, ids: dict | None = None, marks_: dict | None = None) -> str:
     """The group an item is listed in, from its project: the scope (projects.scope_of, one of the names in [project_scopes] order) of the board row the item's page rolls up to, the default scope
-    for an item with no project. This is the one reading of an item's group: the home page's Your move subsections, the client reads and sala's lists all take it from here. `ids`/`marks_` are
+    for an item with no project. This is the one reading of an item's group for the text renderer (Board.item_scope, the your-move read) and the client reads (items, involved, item-facts). The home page (web/ui/render.py) keeps its own copy of the rule; tests/client_your_move_scenario.py compares the two against the real home page HTML. `ids`/`marks_` are
     the id file's, read once by a caller that asks for many items."""
     from stackshot.projects import projects as _prj  # noqa: PLC0415
     reg = registry() if reg is None else reg

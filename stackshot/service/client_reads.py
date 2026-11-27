@@ -423,16 +423,16 @@ def _items_view() -> _ItemsView:
 
 
 def _scope_ctx() -> tuple[dict, dict, dict]:
-    """(the page registry, key -> id, the marks by id) that an item's group is read from, taken once for a read or a view (the home page reads the same three for its subsections)."""
+    """(the page registry as the home page holds it (the record laid over the pages, then the agents only the record holds: with_pending), key -> id, the marks by id) that an item's group is read from, taken once for a read or a view."""
     try:
         ids = _prj.ids_by_key()
     except ValueError:
         ids = {}                                   # a damaged id file: the registry's own copy of the id answers
-    return _anc.registry(), ids, _prj.marks()
+    return _prj.with_pending(_anc.registry()), ids, _prj.marks()
 
 
 def _item_scope(it: dict[str, Any], sc: tuple[dict, dict, dict]) -> str:
-    """An item's group: the scope of the board row its page rolls up to (`anchors.item_scope`, the reading the home page's subsections take), so it is one of the names in [project_scopes] order."""
+    """An item's group: the scope of the board row its page rolls up to (`anchors.item_scope`, shared with the text renderer's `Board.item_scope`; the home page keeps its own copy of the rule), so it is one of the names in [project_scopes] order."""
     return _anc.item_scope(it.get("metadata") or {}, *sc)
 
 
