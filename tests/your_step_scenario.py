@@ -94,7 +94,15 @@ item(26, step="Do these in order: (+1 more)", owner_step="Oliver: Do these in or
 item(27, step="Do these in order: (+1 more)", draft=MSG, owner_step="Oliver: Do these in order: (+1 more)",
      next="Oliver: Do these in order:\n  - run `uv run tool.py --check` first\n  - in Slack, post the message in the channel\nOliver: Then say done\nhome-agent: check\nOliver: Do these in order: (+1 more)")
 item(28, step="Do these in order:", owner_step="Oliver: Do these in order:", next="Oliver: Do these in order:\n  - open the console\n  - press Enter\nhome-agent: check\nOliver: Do these in order:")    # a lead-in with items and no closing line
-(T / "store/next-id").write_text("30"); (T / "store/anchors.json").write_text("{}")
+# 8: a split step whose lines are settled (the lines of next dropped, or done) shows its whole click path; with an open line behind the marker the drawing stays as it was
+SP = ["Oliver: Open the vendor console", "Oliver: Go to Settings, then Admin keys", "Oliver: Press Create and copy the key"]
+SP_SUM = "Open the vendor console (+2 more)"
+def split_item(i, status, open_last=False):
+    sts = [{"text": t, "status": status, "by": "Oliver", "at": now - 60} for t in SP]
+    if open_last: sts[-1] = {"text": SP[-1], "status": "open", "by": "", "at": 0}
+    item(i, step=SP_SUM, owner_step=f"Oliver: {SP_SUM}", step_lines=list(SP), steps=sts, next=(SP[-1] + "\n" if open_last else "") + f"Oliver: {SP_SUM}\nhome-agent: check")
+split_item(29, "dropped"); split_item(30, "done"); split_item(31, "dropped", open_last=True)
+(T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
@@ -256,6 +264,15 @@ try:
     check("stage 5 step: two members' steps with the same words have different keys; a member's alias and name have one", _S.owner_key("Sam: do it") != _S.owner_key("Oliver: do it") and _S.owner_key("SM: do it") == _S.owner_key("Sam: do it"), None)
 finally:
     _mem5._seen = None
+
+# ---- 8. a split step with settled lines
+SPL = ["Open the vendor console", "Go to Settings, then Admin keys", "Press Create and copy the key"]
+for i in (29, 30):
+    pg = page(i); bb = block(pg); hh = row(i)
+    check(f"8 page a{i}: the Your step block holds the whole click path, numbered, with no (+N more) marker", lis(bb) == SPL and "more)" not in bb and "<ol" in bb and "<s>" not in bb and "<del>" not in bb, bb)
+    check(f"8 home a{i}: the Your move row draws the same block", bool(hh) and "(+2 more)" not in hh and all(t in hh for t in SPL) and hh.count("Open the vendor console") == 1, hh[:1500])
+pg31 = page(31); b31 = block(pg31)
+check("8 page a31: one line still open behind the marker: today's drawing, the open line alone and no settled text", lis(b31) == [SPL[2]] and SPL[0] not in b31, b31)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()

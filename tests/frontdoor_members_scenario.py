@@ -20,7 +20,10 @@ Covers:
     address-keyed form builds the person it always built;
   * `oauth._who` on a board behind a door: the signed identity is matched to a member by the key alone, exactly (never an alias, another address or another case): the answer is one of the person's addresses, or the
     signed name for a person with none, and the signed address itself when it is one of the person's addresses, the second included; an alias or address of one member never takes another's call; the
-    placeholder is nobody; a request with no identity is refused.
+    placeholder is nobody; a request with no identity is refused;
+  * naming where the members file is not there at all (`members.naming`): `names`, `person_of`, `opener_person` and the step parsers read the configured `[instance] owner` and `owner_aliases`, while the
+    members, the sign-in addresses and `oauth._who` stay nobody; a file that is there and cannot be used (not valid, empty, unreadable, a folder, a link to nothing, a path that cannot be looked at)
+    names nobody, as does a table whose members_file or board_name cannot be used; the answer follows the file as it comes and goes.
 
     tests/run-suite frontdoor_members       -> exit 0 / 1"""
 import contextlib, io, json, os, sys, tomllib
@@ -261,6 +264,123 @@ try:
         deps.get_http_request, oauth._door.settings = saved_dep, saved_settings
 finally:
     mem.members = saved_members
+
+# ---- naming alone, where the members file is not there at all
+import fastmcp.server.dependencies as deps
+from fastmcp.exceptions import ToolError
+from stackshot.core import config as cfgmod
+from stackshot.model import owner_steps, states
+from stackshot.web.auth import oauth
+
+MAIL = "robin@example.test"
+
+
+def running(path, instance={"owner": "Robin", "owner_aliases": ["Rob"]}, board="main"):
+    table = {"members_file": path, "identity_secret_file": os.path.join(T, "identity.key")}
+    if board is not None:
+        table["board_name"] = board
+    return {"instance": dict(instance), "auth": {"allowed_emails": [MAIL]}, "behind_frontdoor": table}
+
+
+def refused(identity):
+    """Whether a tool call signed as `identity` is refused by the sign-in's own check."""
+    class Req:
+        scope = {door.SCOPE_KEY: identity}
+    saved_dep, deps.get_http_request = deps.get_http_request, lambda: Req()
+    try:
+        oauth._who(); return False
+    except ToolError:
+        return True
+    finally:
+        deps.get_http_request = saved_dep
+
+
+def named():
+    return (mem.names(), sorted(mem.names_cf()), [getattr(mem.person_of(w), "name", None) for w in ("robin", "ROB")],
+            [getattr(mem.opener_person(l), "name", None) for l in ("Robin: sign it", "Rob to sign it")])
+
+
+NOBODY = ([], [mem.PLACEHOLDER], [None, None], [None, None])
+
+
+def closed(label):
+    """Nobody is a member and nobody signs in, whatever the naming says."""
+    got = ([(p.name, p.declared, p.emails) for p in mem.members()], door.people(), mem.emails(), mem.person_of_email(MAIL), mem.signed_in(MAIL).name,
+           [w for w in ("Robin", "Rob", MAIL, mem.PLACEHOLDER) if not refused(w)])
+    check(f"absent file: {label}: no member, no sign-in address, and every call is refused", got == ([(mem.PLACEHOLDER, False, ())], (), [], None, mem.PLACEHOLDER, []), got)
+
+
+saved_cfg = cfgmod.CFG
+locked = []
+try:
+    for label, path in (("no file", os.path.join(T, "absent.json")), ("no folder either", os.path.join(T, "no-folder", "members.json"))):
+        cfgmod.CFG = running(path)
+        check(f"absent file: {label}: it counts as absent", door.members_file_absent() is True)
+        got = named()
+        check(f"absent file: {label}: the configured owner and aliases are the names a line is read against",
+              got == (["Robin", "Rob"], ["rob", "robin", mem.PLACEHOLDER], ["Robin", "Robin"], ["Robin", "Robin"]), got)
+        check(f"absent file: {label}: `you:` is the owner, anyone else and prose are nobody", getattr(mem.opener_person("you: sign it"), "name", None) == "Robin"
+              and mem.opener_person("Mallory: sign it") is None and mem.opener_person("Robin approved it") is None and mem.person_of("Mallory") is None)
+        parsed = (states.next_names_owner("- Rob: sign the form"), states.next_names_owner("my-agent: build it"), owner_steps.is_named("Robin: sign the form"), owner_steps.is_named("my-agent: build it"), cfgmod.owner_names())
+        check(f"absent file: {label}: the step parsers know the owner's lines", parsed == ("Robin", "", True, False, ["Robin", "Rob"]), parsed)
+        closed(label)
+
+    # what is there and cannot be used is not absent: it names nobody, as before
+    folder = os.path.join(T, "a-folder.json"); os.mkdir(folder)
+    link = os.path.join(T, "dangling.json"); os.symlink(os.path.join(T, "nothing-there"), link)
+    loop = os.path.join(T, "loop"); os.symlink(loop, loop)
+    plain = write("{}")
+    unusable = [("not valid JSON", write("{broken")), ("an empty file", write("")), ("a JSON list", write("[]")), ("an empty object", write("{}")), ("a folder", folder),
+                ("a link to nothing", link), ("a path through a file", os.path.join(plain, "members.json")), ("a path through a link that loops", os.path.join(loop, "members.json")),
+                ("members of another board only", write({"Robin": ["side"]}))]
+    if os.geteuid() != 0:
+        shut = write({"Robin": ["main"]}); os.chmod(shut, 0)
+        hidden = os.path.join(T, "shut-folder"); os.mkdir(hidden); os.chmod(hidden, 0); locked.append(hidden)
+        unusable += [("a file nobody may read", shut), ("a path inside a folder nobody may enter", os.path.join(hidden, "members.json"))]
+    for label, path in unusable:
+        cfgmod.CFG = running(path)
+        door._cache.clear()
+        with contextlib.redirect_stderr(io.StringIO()):
+            got = (door.members_file_absent(), named())
+            check(f"absent file: {label} is not absent: the configured owner names nobody", got == (False, NOBODY), got)
+            closed(label)
+    cfgmod.CFG = running(os.path.join(T, "nul" + chr(0) + "byte"))
+    check("absent file: a path no system call takes is not absent", door.members_file_absent() is False)      # the members' own reader does not take such a path either, so nothing else is asked
+    cfgmod.CFG = running(write({"Pat": ["main"]}))
+    door._cache.clear()
+    got = (door.members_file_absent(), mem.names(), mem.person_of("Robin"), mem.opener_person("Robin: x"), refused("Robin"), refused("Pat"))
+    check("absent file: a file that lists a member names that member alone, never the configured owner", got == (False, ["Pat"], None, None, True, False), got)
+
+    gone = os.path.join(T, "nothing.json")
+    for label, cfg in (("no board_name", running(gone, board=None)), ("a board_name that is no name", running(gone, board="no/name")), ("a members_file that is no path", running(7)),
+                       ("an empty members_file", running(""))):
+        cfgmod.CFG = cfg
+        with contextlib.redirect_stderr(io.StringIO()):
+            got = (door.members_file_absent(), mem.names(), mem.person_of("Robin"))
+        check(f"absent file: a table with {label} names nobody", got == (False, [], None), got)
+    cfgmod.CFG = running(gone, instance={})
+    check("absent file: with no owner and no alias configured there is nobody to name", named() == NOBODY, named())
+    cfgmod.CFG = running(gone, instance={"owner_aliases": ["Rob"]})
+    got = (mem.names(), getattr(mem.person_of("rob"), "name", None), getattr(mem.person_of("rob"), "declared", None), getattr(mem.opener_person("Rob: x"), "name", None))
+    check("absent file: aliases alone are read, for the unnamed owner", got == (["Rob"], mem.PLACEHOLDER, False, mem.PLACEHOLDER), got)
+    cfgmod.CFG = {"instance": {"owner": "Robin", "owner_aliases": ["Rob"]}}
+    got = (door.members_file_absent(), mem.names(), mem.naming() == mem.members())
+    check("absent file: a board that reads no members file is as it was", got == (False, ["Robin", "Rob"], True), got)
+
+    # the answer follows the file as it comes and goes
+    comes = os.path.join(T, "comes-and-goes.json")
+    cfgmod.CFG = running(comes)
+    first = mem.names()
+    with open(comes, "w") as f:
+        json.dump({"Pat": ["main"]}, f)
+    second = mem.names()
+    os.remove(comes)
+    third = mem.names()
+    check("absent file: the file appearing and going is read at the next call", (first, second, third) == (["Robin", "Rob"], ["Pat"], ["Robin", "Rob"]), (first, second, third))
+finally:
+    cfgmod.CFG = saved_cfg
+    for d in locked:
+        os.chmod(d, 0o700)
 
 if fails:
     print(f"\n{len(fails)} failures in {len(ran)} checks"); sys.exit(1)

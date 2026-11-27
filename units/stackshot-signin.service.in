@@ -1,0 +1,25 @@
+# stackshot-signin.service — the front door's sign-in service: the target of the reverse proxy's forward_auth (stackshot/frontdoor/signin.py,
+# docs/front-door.md). Settings: [frontdoor_signin] of stackshot.toml, read at start. Rendered by ./install.sh units only when the config has that
+# table, and never enabled or started by it: systemctl --user enable --now stackshot-signin.service
+[Unit]
+Description=stackshot sign-in service for the front door
+After=network.target stackshot.service
+# a restart of the board (every release) restarts the sign-in service too, so it never runs older code than the board; a stop of the board stops it
+PartOf=stackshot.service
+
+[Service]
+Type=exec
+WorkingDirectory=@CHECKOUT@
+Environment=STACKSHOT_CONFIG=@CONFIG@
+Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=CAIO_IMPL=linux
+ExecStart=@UV@ run --project @CHECKOUT@ --locked --extra server python -m stackshot.frontdoor.signin
+Restart=on-failure
+RestartSec=5
+# exit 2 is "the settings do not allow a start": it fails once and says why, never a restart loop
+RestartPreventExitStatus=2
+NoNewPrivileges=yes
+
+[Install]
+# once enabled it is also wanted by the board, so that a start of stackshot.service starts it (PartOf= carries only a stop and a restart)
+WantedBy=default.target stackshot.service

@@ -38,7 +38,7 @@
       }
     },
     "brief": {
-      "description": "If your session did not load the owner's standing rulebook at start (a cloud or Cowork session), call the rules tool first and follow it; it overrides defaults. \"What is outstanding?\" brief() shows the board at a glance: counts, the Machines panel, the receivers and the project index (every open item: your move, on agents, waiting), then every open item in full as get shows it (its mover, its open next steps, its `model:` line and, once a step is done or dropped, its `checklist:`), the items parked after them. For a doing item the board lists as waiting (see `model:` in get) the `model:` line ends with `· the board lists it as waiting until <time> (<why>)`. A `state:` line shows only for an item that stores a state. An item's `project:` line reads as in get. A line at the top says what changed in stackshot for 7 days after a release that changes a tool. The item model: docs/design. The full board is at https://stackshot.example.com (markdown: board.md next to it).",
+      "description": "If your session did not load the owner's standing rulebook at start (a cloud or Cowork session), call the rules tool first and follow it; it overrides defaults. \"What is outstanding?\" brief() shows the board at a glance: counts, the Machines panel, the receivers and the project index (every open item: your move, on agents, waiting), then every open item in full as get shows it (its mover, its open next steps, its `model:` line and, once a step is done or dropped, its `checklist:`), the items parked after them. For a doing item the board lists as waiting (see `model:` in get) the `model:` line ends with `· the board lists it as waiting until <time> (<why>)`. A `state:` line shows only for an item that stores a state. An item's `project:` line reads as in get. A line at the top says what changed in stackshot for 7 days after a release that changes a tool. A `Waits no watcher can end` line lists the open items whose wait has no date or anchor a watcher reads, and names those nothing wakes at all: give each an until, an after or a wait_anchor. The item model: docs/design. The full board is at https://stackshot.example.com (markdown: board.md next to it).",
       "labels": [
         "after:",
         "ask:",
@@ -66,6 +66,7 @@
         "options:",
         "outcome text:",
         "outcome:",
+        "pages owed by others:",
         "pages owed:",
         "parked:",
         "priority:",
@@ -126,6 +127,7 @@
         "options:",
         "outcome text:",
         "outcome:",
+        "pages owed by others:",
         "pages owed:",
         "parked:",
         "priority:",
@@ -242,6 +244,7 @@
         "options:",
         "outcome text:",
         "outcome:",
+        "pages owed by others:",
         "pages owed:",
         "parked:",
         "priority:",
@@ -496,6 +499,7 @@
         "options:",
         "outcome text:",
         "outcome:",
+        "pages owed by others:",
         "pages owed:",
         "parked:",
         "priority:",
@@ -646,6 +650,7 @@
         "options:",
         "outcome text:",
         "outcome:",
+        "pages owed by others:",
         "pages owed:",
         "parked:",
         "priority:",

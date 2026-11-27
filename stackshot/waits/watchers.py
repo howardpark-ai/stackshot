@@ -5,7 +5,8 @@ half lives here: the readings (which items the watchers own, which are due, on w
 reading of the owner's answer to those asks, the date he gives. The server (server.py, the `_watch_*` functions) reads and writes the items, sends the messages and calls these.
 
   The watchers act ONLY on an item with a stored wait_kind. Every other item keeps today's wake pass and `after` release
-  until the step 4 migration, so no item is moved by two mechanisms (`watches` is the gate those read).
+  until the step 4 migration, so no item is moved by two mechanisms (`watches` is the gate those read). That pass reads an ask_by only beside a relay or event kind, so a waiting item whose one date is an
+  ask_by with no wait_kind is woken by nothing (`nothing_wakes`): the audit reports it (wait_end.py) and the brief lists it.
 
   time    the wake passes → alive, the post-wake mover
   item    the last `after` item closes → alive, the post-wake mover; the backstop (ask_by, else the wake) passes first → alive, the post-wake mover, with the note that the item
@@ -28,12 +29,15 @@ from __future__ import annotations
 import datetime as dt
 import re
 import time
-from typing import Any
+from typing import Any, Callable
 
 from stackshot.core import config as _cfg
+from stackshot.core import datewords as _datewords
 from stackshot.core import runner_files as _files
 from stackshot.waits import event_waits as _ew
 from stackshot.model import model as _model
+from stackshot.model import step_proof as _sp
+from stackshot.model import steps as _steps
 from stackshot.waits import wait_list as _wl
 from stackshot.waits import waiting as _wt
 
@@ -177,6 +181,29 @@ def backstop_epoch(meta: dict[str, Any]) -> float | None:
     return min(eps) if eps else None
 
 
+def dead_ask_by(meta: dict[str, Any], now: float) -> bool:
+    """Is the item's ask_by a day that has passed and that nothing acts on: it stores no wait_kind and no until, so no watcher and no wake pass reads it. A write that gives the item a wait drops
+    it: kept, it would stand as that wait's date and end the wait as it is stored."""
+    ep = day_epoch((meta or {}).get("ask_by"))
+    return ep is not None and ep <= now and not stored_kind(meta)
+
+
+def nothing_wakes(meta: dict[str, Any], open_after: bool, scoped_anchor: Callable[[], Any], old_off: bool = False) -> bool:
+    """Is a waiting item (the caller has read it so) one that nothing will wake? No watcher can end its wait (can_end) and the old wake pass has no date for it (waiting.wake_value: its until, else its wake, else the
+    ask_by of a stored relay or event kind), and nothing else ends it either: an open `after` (`open_after`: that close releases it), a pane recycle, a done check, an open step the proof pass ticks, or, for a held
+    item, an anchor scoped to it (`scoped_anchor`: its notice releases the hold). `old_off`: the old wake pass and its `after` release stand down for every item no watcher watches (item_read._old_wait_off), so
+    neither its date nor its `after` counts."""
+    m = meta or {}
+    if can_end(m) or m.get("recycle") or _model.clean(m.get("check")):
+        return False
+    if not old_off and (open_after or day_epoch(_wt.wake_value(m)) is not None):
+        return False
+    proofs = m.get("step_proof") if isinstance(m.get("step_proof"), dict) else {}
+    if any(s["status"] == _steps.OPEN and _sp.has_proof(s["text"], proofs, _steps.key) for s in _steps.view(m)):
+        return False
+    return not (m.get("hold") and scoped_anchor())
+
+
 def next_moment(meta: dict[str, Any]) -> float | None:
     """The moment the scheduler next has to look at this wait (a wake, a relay's ask-by, a backstop), None for none: the runner sleeps until the earliest. An item whose last turn failed
     is looked at again BACKOFF after the failure, not at once."""
@@ -258,7 +285,7 @@ def date_options(today: dt.date) -> list[dict[str, Any]]:
     """The three date buttons, counted from `today`: a week, two weeks, a month ("Ask again on Tue Nov 17th"). No option is marked recommended: only the owner knows whether the news came. The day is stored on the
     button (`date`): a pick is read from it, never from the label (answer_effect)."""
     dates = [today + dt.timedelta(days=7), today + dt.timedelta(days=14), _add_months(today, 1)]
-    return [{"label": ASK_AGAIN + day_words(d), "line": "The item waits again until then and the question comes back that day.", "recommended": False, "date": d.isoformat()} for d in dates]
+    return [{"label": ASK_AGAIN + day_words(d, today), "line": "The item waits again until then and the question comes back that day.", "recommended": False, "date": d.isoformat()} for d in dates]
 
 
 def relay_options(today: dt.date) -> list[dict[str, Any]]:
@@ -298,9 +325,9 @@ def refreshed(meta: dict[str, Any], today: dt.date) -> tuple[str, list[dict[str,
     return head + _OPT_MARK + (RELAY_TAIL if asked == "relay" else DROP_TAIL), (relay_options(today) if asked == "relay" else drop_options(today))
 
 
-def day_words(day: dt.date) -> str:
-    """A day as a person reads it: "Tue Nov 17th"."""
-    return f"{day:%a %b} {day.day}{'th' if 11 <= day.day % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(day.day % 10, 'th')}"
+def day_words(day: dt.date, today: dt.date | None = None) -> str:
+    """A day as a person reads it: "Tue Nov 17th", with the year when it is not the current one (`today`'s, when given; core/datewords)."""
+    return _datewords.day_words(day, today)
 
 
 def ask_back(meta: dict[str, Any], note: str, today: dt.date) -> tuple[str, list[dict[str, Any]]]:
@@ -433,9 +460,11 @@ def end_date(meta: dict[str, Any], what: str, to: str, now: float) -> None:
             meta.pop("watch")
 
 
-def turn_to_owner(meta: dict[str, Any], then: str, ask: str, options: list[dict[str, Any]], what: str, now: float) -> None:
+def turn_to_owner(meta: dict[str, Any], then: str, ask: str, options: list[dict[str, Any]], what: str, now: float, picker: str = "") -> None:
     """The wait is over and the item is the owner's move: needs is decision alone (a second mover in needs is refused by the guards; the one who takes it after him is `then`, the post-wake
-    mover), the ask and its options up."""
+    mover), the ask and its options up. On a board of several members the question goes to the member who picks the wait up (`picker`, else the one the item names: model.wake_member), stored as
+    the `mover`, never to whoever the list names first."""
+    who = _model.wake_member(meta, picker)      # read before the stored mover goes
     for k in LIVE_DROP:
         meta.pop(k, None)
     meta.pop("mover", None)
@@ -445,7 +474,9 @@ def turn_to_owner(meta: dict[str, Any], then: str, ask: str, options: list[dict[
         meta.pop("then", None)
     meta["needs"] = ["decision"]
     meta["ask"], meta["options"] = ask, options
-    meta["woke"] = {"what": what, "to": _model.owner_display(), "at": now}
+    if who:
+        meta["mover"] = who
+    meta["woke"] = {"what": what, "to": who or _model.owner_display(), "at": now}
 
 
 def woke_line(meta: dict[str, Any], label=str) -> str:

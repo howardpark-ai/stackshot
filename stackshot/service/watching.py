@@ -186,11 +186,11 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
             today = dt.datetime.fromtimestamp(now, _hooks().zone()).date()      # the date buttons count from the owner's day
             opts = _watch.drop_options(today) if chased else _watch.relay_options(today)
             _watch.remember(meta, asked, now)
-            _watch.turn_to_owner(meta, mod.then if _model.is_owner(post) else post, ask, opts, what if (chased or kind == _wl.LIST) else f"{_watch.subject_of(meta)} is due: its ask-by day {_watch.relay_day(meta)} came", now)
+            _watch.turn_to_owner(meta, mod.then if _model.is_owner(post) else post, ask, opts, what if (chased or kind == _wl.LIST) else f"{_watch.subject_of(meta)} is due: its ask-by day {_watch.relay_day(meta)} came", now, picker=post)
             mover = OWNER
         elif _model.is_owner(post):
             ask, opts = watch_ask(gid, meta, what)
-            _watch.turn_to_owner(meta, mod.then, ask, opts, what, now)      # he picks it up: the `then` that stands beside him survives the wake
+            _watch.turn_to_owner(meta, mod.then, ask, opts, what, now, picker=post)      # he picks it up: the `then` that stands beside him survives the wake
             mover = OWNER
         elif cause == "time" and _ends_on_the_date(meta, mod):
             back = _front_to_background(post, meta)      # (an item that waits on his decision with no stored front mover has him as `post`: it never gets here)
@@ -213,8 +213,9 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
         it["metadata"] = meta
         it["updated"] = it["state_updated"] = now
         by_front = passed_note(passed)
-        _writes.save(gid, it, note=(f"woke: {what} → {watch_label(mover)}{by_front}" if mover != OWNER else f"the wait ended: {what}; asks {OWNER}: {meta.get('ask')}"))
-        print(f"watch: {gid} {kind} wait over ({cause}) → {mover}{' (passed over ' + passed + ')' if passed else ''} — {it.get('subject')}", file=sys.stderr, flush=True)
+        told = meta.get("mover") if mover == OWNER else ""      # of several members, the one it asks (turn_to_owner stores it; with one member it stores none)
+        _writes.save(gid, it, note=(f"woke: {what} → {watch_label(mover)}{by_front}" if mover != OWNER else f"the wait ended: {what}; asks {told or OWNER}: {meta.get('ask')}"))
+        print(f"watch: {gid} {kind} wait over ({cause}) → {told or mover}{' (passed over ' + passed + ')' if passed else ''} — {it.get('subject')}", file=sys.stderr, flush=True)
         if mover != OWNER:
             out.setdefault(_hooks().session_id(mover), []).append((gid, it, what + (f"; it was {watch_label(passed)}'s, a front agent's, and passes to you" if passed else "")))
         return True

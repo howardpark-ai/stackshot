@@ -265,7 +265,7 @@ def part_close():
           [l for l in md.splitlines() if l.startswith("- <a id=\"task-a-")])
     a9md = [l for l in md.splitlines() if l.startswith('- <a id="task-a-9">')]
     check("board.md: a completed item with no session names no one: no backticked label, no stray store letter",
-          len(a9md) == 1 and "`" not in a9md[0] and re.search(r"\*\*a9\*\* \[home\] item 9 · \d\d-\d\d \d\d:\d\d \S+$", a9md[0]), a9md)
+          len(a9md) == 1 and "`" not in a9md[0] and re.search(r"\*\*a9\*\* \[home\] item 9 · (?:\d{4}-)?\d\d-\d\d \d\d:\d\d \S+$", a9md[0]), a9md)
 
     # ---- 7. the descriptions say what a close carries
     check("the complete and update descriptions carry the close form", all("outcome: done | dropped" in d and "clears next, ask and needs" in d

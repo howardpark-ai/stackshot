@@ -74,7 +74,7 @@ FUT = local(now + 30 * H)
 rules = build(
     doing(1, 1, nxt="ops-other: do the first part\nhome-agent: then the second"),                              # stuck-elsewhere
     item(2, wrote=now - H, state="parked", needs=["home-agent"], hold=True, next="home-agent: later"),                                                           # arbitrary-hold
-    item(3, wrote=now - H, state="blocked", needs=["home-agent"], next="home-agent: build it"),                                                                  # mislabeled-state (blocked, nothing it waits after)
+    item(3, wrote=now - H, state="blocked", needs=["home-agent"], next="home-agent: build it"),                                                                  # mislabeled-state (blocked, nothing it waits after); nothing wakes it either: wait-end
     doing(4, 1, nxt="home-agent: waiting for the build"),                                                          # reads-as-wait
     doing(5, 1, nxt="home-agent: ship it when the build is green"),                                                # the broad words: a flag
     clean(6),                                                                                                                                                    # clean
@@ -97,10 +97,10 @@ check("1 the broad words are a flag (id, mover, the words) and no finding", flag
 check("1 none is raised for a clean item, a closed one, one that already waits, one idle for hours or one stale by its dates",
       not any(f["id"] in ("board#6", "board#7", "board#8", "board#9", "board#9041") for f in fs), [f for f in fs if f["id"] in ("board#6", "board#7", "board#8", "board#9", "board#9041")])
 check("1 every finding has the daily run's shape: id, project, owner, mover, category, detail, fix, source code", all(set(f) >= {"id", "project", "owner", "mover", "category", "detail", "fix", "source"} and f["source"] == "code" and f["fix"] for f in fs), fs)
-check("1 the pass raises exactly these and no other", set(got) == {("board#1", "stuck-elsewhere"), ("board#2", "board checks"), ("board#3", "board checks"), ("board#4", "reads-as-wait")}, got)
+check("1 the pass raises exactly these and no other", set(got) == {("board#1", "stuck-elsewhere"), ("board#2", "board checks"), ("board#3", "board checks"), ("board#3", "wait-end"), ("board#4", "reads-as-wait")}, got)
 daily, _p, _n = AC.field_findings(rules, {}, now, env(), ten_minute=True)
 check("1 the daily run made the filing kinds the same way before the pass took them over (ten_minute=True: same category, same evidence, same recipient field)",
-      all(any((d["id"], d["category"], d["detail"], d.get("to", "")) == (f["id"], f["category"], f["detail"], f.get("to", "")) for d in daily) for f in fs if f["category"] != "reads-as-wait"), [(f["id"], f["detail"]) for f in fs])
+      all(any((d["id"], d["category"], d["detail"], d.get("to", "")) == (f["id"], f["category"], f["detail"], f.get("to", "")) for d in daily) for f in fs if f["category"] not in ("reads-as-wait", "wait-end")), [(f["id"], f["detail"]) for f in fs])
 now_daily, _p, _n = AC.field_findings(rules, {}, now, env())
 check("1 …and the daily run itself no longer makes them: no stuck-elsewhere, no arbitrary-hold, no mislabeled-state",
       not [d for d in now_daily if d["category"] == "stuck-elsewhere" or (d["category"] == "board checks" and d["detail"].startswith(("arbitrary-hold", "mislabeled-state")))]
@@ -236,21 +236,21 @@ pass_items = build(*[(k, v) for k, v in rules.items() if k in ("a1", "a2", "a3",
 r1 = AR.filing_pass(now=now, items=pass_items, anchors={}, env=env())
 by_to = {to: text for to, text, fyi in sent}
 check("3 findings go to their movers, one message per recipient; a stuck-elsewhere one to the session whose step it is", set(by_to) == {"home-agent", "ops-other"} and len(sent) == 2 and "board#1 · stuck-elsewhere" in by_to["ops-other"]
-      and sum(1 for l in by_to["home-agent"].splitlines() if l.startswith("board#")) == 4, sent)
+      and sum(1 for l in by_to["home-agent"].splitlines() if l.startswith("board#")) == 5, sent)
 check("3 …headed as a filing check, lines as '<id> · <check> · <evidence> · <fix>'", all(re.match(r"\[stackshot\] Filing check \d{4}-\d{2}-\d{2} \d{2}:\d{2} \S+: \d+ item\(s\) for you", t) for t in by_to.values())
       and all(len(l.split(" · ")) == 4 for t in by_to.values() for l in t.splitlines() if l.startswith("board#")), by_to)
 check("3 …no message for the flag, the clean item, and none to the project's summary", not any("board#5" in t or "board#6" in t for t in by_to.values()) and not any(to == "projects/example" for to, _t, _f in sent), sent)
-check("3 the result counts them", r1["findings"] == 5 and r1["fresh"] == 5 and r1["repeats"] == 0 and r1["flags"] == 1 and r1["open"] == 6 and len(r1["sent"]) == 2, r1)
+check("3 the result counts them", r1["findings"] == 6 and r1["fresh"] == 6 and r1["repeats"] == 0 and r1["flags"] == 1 and r1["open"] == 6 and len(r1["sent"]) == 2, r1)
 fp = T / "state/audit/filing.json"
 frec = json.loads(fp.read_text())
 check("3 the record is <state>/audit/filing.json: findings with their sent stamps, the flags, the messages, shaped like a run record's findings",
-      fp.exists() and len(frec["findings"]) == 5 and all(f.get("sent") for f in frec["findings"]) and frec["flags"][0]["id"] == "board#5" and frec["items_read"] == 6 and frec["repeats"] == 0 and len(frec["messages"]) == 2, frec)
+      fp.exists() and len(frec["findings"]) == 6 and all(f.get("sent") for f in frec["findings"]) and frec["flags"][0]["id"] == "board#5" and frec["items_read"] == 6 and frec["repeats"] == 0 and len(frec["messages"]) == 2, frec)
 check("3 it is no run record: runs, last and status see none of it", audit.runs() == [] and audit.last() is None and audit.status()["last"] is None)
 sent.clear()
 r2 = AR.filing_pass(now=now + 600, items=pass_items, anchors={}, env=env())
-check("3 a second pass ten minutes on sends nothing: the same findings are not sent again while their items are unwritten", sent == [] and r2["fresh"] == 0 and r2["repeats"] == 5, (sent, r2))
+check("3 a second pass ten minutes on sends nothing: the same findings are not sent again while their items are unwritten", sent == [] and r2["fresh"] == 0 and r2["repeats"] == 6, (sent, r2))
 frec2 = json.loads(fp.read_text())
-check("3 …and the record keeps the first send's stamps", {f["id"]: f["sent"] for f in frec2["findings"]} == {f["id"]: f["sent"] for f in frec["findings"]} and frec2["repeats"] == 5, frec2["findings"])
+check("3 …and the record keeps the first send's stamps", {f["id"]: f["sent"] for f in frec2["findings"]} == {f["id"]: f["sent"] for f in frec["findings"]} and frec2["repeats"] == 6, frec2["findings"])
 fresher = dict(pass_items); k, d = doing(4, 1, nxt="home-agent: waiting for the build, still"); d["written_at"] = time.time() + 60; fresher[k] = d
 r3 = AR.filing_pass(now=now + 1200, items=fresher, anchors={}, env=env())
 check("3 a write to the item sends its finding again, and only that one", r3["fresh"] == 1 and [to for to, _t, _f in sent] == ["home-agent"] and sent[0][1].count("board#") == 1 and "board#4 · reads-as-wait" in sent[0][1], (r3, sent))
@@ -280,7 +280,7 @@ rs = AR.filing_pass(now=now, items=pass_items, anchors={}, env=env())
 check("3 a daily run in progress: the pass skips, sends nothing and writes nothing", rs == {"skipped": "a daily run is in progress"} and sent == [] and not fp.exists(), rs)
 clear_state()
 rd = AR.filing_pass(now=now, items=pass_items, anchors={}, env=env(), dry=True)
-check("3 a dry run lists the findings and the flags and sends and writes nothing", rd["dry"] is True and len(rd["detail"]) == 5 and len(rd["flag_detail"]) == 1 and sent == [] and not fp.exists(), rd.keys())
+check("3 a dry run lists the findings and the flags and sends and writes nothing", rd["dry"] is True and len(rd["detail"]) == 6 and len(rd["flag_detail"]) == 1 and sent == [] and not fp.exists(), rd.keys())
 (T / "state/audit/run-2026-11-03-050000.json").write_text(json.dumps({"started": now - 60, "finished": None, "findings": []}))
 check("3 …and a dry run is never refused for a running one", AR.filing_pass(now=now, items=pass_items, anchors={}, env=env(), dry=True)["dry"] is True)
 clear_state()

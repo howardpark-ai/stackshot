@@ -885,6 +885,42 @@ def run_main(*args, cfg=cfg_ok, timeout=60):
     return subprocess.run([sys.executable, "-m", "stackshot.frontdoor", *args], env={**env, "STACKSHOT_CONFIG": str(cfg)}, capture_output=True, text=True, timeout=timeout, cwd=tmp)
 r = run_main("--check")
 check("entry point: --check on a good config exits 0 and names the backends", r.returncode == 0 and "board a" in r.stdout and "board b" in r.stdout and f":{eport}" in r.stdout, (r.returncode, r.stdout, r.stderr[-300:]))
+# --check reads what a request would read: a secret, a token file or the members file that cannot be used is exit 2, each one named
+def unusable(label, changes, *want):
+    text = cfg_ok.read_text()
+    for a, b in changes:
+        assert text.count(a) == 1, (label, a); text = text.replace(a, b)
+    p = T / "fd-unusable.toml"; p.write_text(text)
+    r = run_main("--check", cfg=p)
+    said = r.stdout + r.stderr
+    check(f"entry point: --check with {label} exits 2, names it, prints no secret and says nothing would run", r.returncode == 2 and "the front door cannot work as set: " in r.stderr and all(w in r.stderr for w in want)
+          and r.stdout == "" and not any(v in said for v in (IDENT_SECRET, *BOARD_TOK.values())), (r.returncode, r.stdout[-200:], r.stderr[-500:]))
+    return p
+gone = T / "not-there"
+unusable("no identity secret file", [(str(ident_file), f"{gone}.identity")], "identity_secret_file", f"{gone}.identity")
+unusable("no members file", [(str(members_path), f"{gone}.members")], f"{gone}.members")
+unusable("no token file", [(str(board_tok_file["a"]), f"{gone}.token")], "backend a: ", f"{gone}.token")
+open_token = secret_file("open-board.token", BOARD_TOK["a"], 0o644)
+unusable("a token file others can read", [(str(board_tok_file["a"]), str(open_token))], "backend a: ", "open-board.token")
+short_token = secret_file("short-board.token", "tiny")
+unusable("a token that is too short", [(str(board_tok_file["b"]), str(short_token))], "backend b: ", "short-board.token")
+broken = T / "broken-members.json"; broken.write_text("{broken")
+unusable("a members file that does not read", [(str(members_path), str(broken))], "broken-members.json")
+p = unusable("several at once", [(str(ident_file), f"{gone}.identity"), (str(members_path), f"{gone}.members"), (str(board_tok_file["a"]), f"{gone}.a"), (str(board_tok_file["b"]), f"{gone}.b")],
+             f"{gone}.identity", f"{gone}.members", "backend a: ", "backend b: ")
+served = subprocess.Popen([sys.executable, "-m", "stackshot.frontdoor"], env={**env, "STACKSHOT_CONFIG": str(p)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=tmp)
+try:
+    code = None
+    for _ in range(100):
+        if served.poll() is not None: break
+        try: code, _body = http_get(f"http://127.0.0.1:{eport}/healthz"); break
+        except (urllib.error.URLError, ConnectionError, OSError): time.sleep(0.2)
+    check("entry point: serving does not wait for those files: with them missing it still serves and says degraded", code == 503 and served.poll() is None, (code, served.poll()))
+finally:
+    served.terminate()
+    try: served.wait(20)
+    except subprocess.TimeoutExpired: served.kill(); served.wait(10)
+check("entry point: ... and its port is free again", port_free(eport), eport)
 r = run_main("--check", cfg=cfg_bad)
 check("entry point: a config that cannot start exits 2 and says why, with no secret in it", r.returncode == 2 and "does not start" in r.stderr and IDENT_SECRET not in r.stderr + r.stdout, (r.returncode, r.stderr[-400:]))
 r = run_main("--serve-now")

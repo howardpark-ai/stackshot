@@ -203,7 +203,9 @@ def banner(store: Path | str, tz: Any = None) -> str:
         when = "unknown"
     else:
         d = dt.datetime.fromtimestamp(t, tz) if tz is not None else dt.datetime.fromtimestamp(t)
-        when = d.strftime("%a %b %-d, %H:%M ") + (d.tzname() or "")
+        # data from another year says which. core/datewords' rule, written out: this module imports the standard library only, so the few modules a deploy check reads stay a self-contained set
+        year = f" {d.year}" if d.year != dt.datetime.fromtimestamp(time.time(), tz).year else ""
+        when = d.strftime("%a %b %-d") + year + d.strftime(", %H:%M ") + (d.tzname() or "")
     return ('<div class="ro-banner" role="status" style="position:relative;z-index:50;margin:0;padding:.3rem .75rem;'
             'background:var(--card,#fff6df);color:var(--fg,#3a2d00);border-bottom:1px solid var(--warn,#c98a00);'
             'font:12px/1.4 system-ui,-apple-system,sans-serif;text-align:center">'

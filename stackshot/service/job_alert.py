@@ -24,6 +24,7 @@ from typing import Any
 from fastmcp.exceptions import ToolError
 
 from stackshot.core import config as _cfg
+from stackshot.core import datewords as _datewords
 from stackshot.core.store import _item_files
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
@@ -52,11 +53,9 @@ _JOBALERT_AHEAD = dt.timedelta(minutes=5)                                       
 
 
 def _jobalert_when(iso: str) -> str:
-    """An ISO-Z time as people read it in the instance's timezone: `Mon Nov 23rd 11:16 KST`."""
+    """An ISO-Z time as people read it in the instance's timezone: `Mon Nov 23rd 11:16 KST`, with the year when it is not the current one."""
     d = dt.datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(_cfg.tz())
-    day = d.day
-    suffix = "th" if 11 <= day % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
-    return f"{d:%a %b} {day}{suffix} {d:%H:%M} {_cfg.tz_abbr(d)}"
+    return f"{_datewords.when_words(d, _jobalert_now().astimezone(_cfg.tz()))} {_cfg.tz_abbr(d)}"
 
 
 def _jobalert_instant(iso: str) -> dt.datetime | None:

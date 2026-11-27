@@ -1,9 +1,12 @@
-"""tools/rulebook_scan.py — the scan, run after each of the audit's two daily runs, of the instruction files sessions read for stale mentions of stackshot's tools and
+"""tools/rulebook_scan.py — the scan, run once a week (the audit unit calls it with --weekly after each of its runs; the first run of a Monday-to-Sunday week scans, the rest of the week's runs skip), of the instruction files sessions read for stale mentions of stackshot's tools and
 sala's commands. Why: a rulebook line can keep saying `owner` after the
 tools moved to `mover`, and nothing would catch it. Tokenless: no model call, no network but the one message per file it sends.
 
-    rulebook_scan.py run [--dry-run] [--terms PATH] [--schema JSON] [--sala-help FILE] [--op-help FILE]
-    audit.py scan [--dry-run]                          the same, from the audit's own entry point (the timer's unit runs this one)
+    rulebook_scan.py run [--weekly] [--dry-run] [--terms PATH] [--schema JSON] [--sala-help FILE] [--op-help FILE]
+    audit.py scan [--dry-run]                          the same, from the audit's own entry point
+    --weekly                                           scan only if no scan has finished in this Monday-to-Sunday week (instance timezone); the unit's line.
+                                                       <paths.state>/rulebook-scan/last-week.json keeps the week of the last finished scan (a scan with a note
+                                                       not delivered, or blind to sala because its help was unreadable, does not count, so the next run tries again); a run with no --weekly always scans
 
 What it reads ([rulebook_scan] in stackshot.toml; every path and every keeper is a config value; with no `files` table nothing is scanned):
     files           [[rulebook_scan.files]] glob + keeper, one table per set of files (a rulebook, the role briefs, the skills of a plugin's
@@ -33,7 +36,7 @@ Delivery: one note per file, to its keeper, through client.py's `message` (this 
 told cannot be answered), the way the audit's findings reach an owner (message to the session). A finding already sent and still there
 is not sent again: <paths.state>/rulebook-scan/sent.json keeps, per file, the keys of what was sent; a note carries only what is new
 and says how many older ones are still open; a finding that was fixed drops out, so it is sent again if it comes back. A note that
-fails to deliver is not recorded and goes again the next night.
+fails to deliver is not recorded and goes again at the next scan.
 Stdlib only."""
 from __future__ import annotations
 import os as _os, sys as _sys
@@ -578,8 +581,8 @@ def deliver_client(to: str, text: str, sender: str) -> tuple[bool, str]:
 def run(cfg: dict[str, Any] | None = None, *, dry: bool = False, deliver: Deliver = deliver_client, state: Path | None = None, today: str = "",
         **sources: Path | None) -> dict[str, Any]:
     """Scan, group per file, send the new findings of each file to its keeper once (a sala flag or verb that sala's code takes goes, as one more
-    note of that file, to sala's keeper as a help-text gap). The first delivery that fails ends the sending: the rest hold for the next night.
-    → {"files": n, "findings": n, "sent": [file…], "held": [file…] (not delivered), "quiet": [file…] (nothing new), "notes": [...]}."""
+    note of that file, to sala's keeper as a help-text gap). The first delivery that fails ends the sending: the rest hold for the next scan.
+    → {"files": n, "blind": sala's help was unreadable, "findings": n, "sent": [file…], "held": [file…] (not delivered), "quiet": [file…] (nothing new), "notes": [...]}."""
     cfg = cfg or settings()
     found, keepers, notes, help_ok = scan_all(cfg, **sources)
     sf = state or state_file()
@@ -591,7 +594,7 @@ def run(cfg: dict[str, Any] | None = None, *, dry: bool = False, deliver: Delive
     today = today or _local_date(dt.datetime.now(_cfg.tz()))
     lib, sala_keeper = cfg.get("sala_lib") or Path(os.path.expanduser(SALA_LIB)), cfg.get("sala_keeper") or SALA_KEEPER
     res: dict[str, Any] = {"files": len(keepers), "findings": sum(len(v) for v in found.values()), "sent": [], "held": [], "quiet": [], "notes": notes,
-                           "found": found, "gap": {path: [f.key for f in fs if code_takes(f, lib)] for path, fs in found.items()}, "gap_to": sala_keeper}
+                           "blind": not help_ok, "found": found, "gap": {path: [f.key for f in fs if code_takes(f, lib)] for path, fs in found.items()}, "gap_to": sala_keeper}
     nstate: dict[str, Any] = {}          # a file with nothing left forgets what it sent
     stopped = False
     for path, fs in found.items():
@@ -623,9 +626,9 @@ def run(cfg: dict[str, Any] | None = None, *, dry: bool = False, deliver: Delive
             else:
                 stopped = True
                 res["held"].append(path)
-                notes.append(f"{path}: not delivered to {to}: {said}; the rest of tonight's notes are held for the next night")
-                nstate[sk] = {"keys": sorted(before), "sent": sent.get(sk, {}).get("sent", "")}      # the new ones go again tomorrow
-    if not help_ok:          # sala's help was unreadable tonight: its verb and flag findings are neither judged nor forgotten, so a good night does not resend them
+                notes.append(f"{path}: not delivered to {to}: {said}; the rest of this scan's notes are held for the next scan")
+                nstate[sk] = {"keys": sorted(before), "sent": sent.get(sk, {}).get("sent", "")}      # the new ones go again at the next scan
+    if not help_ok:          # sala's help was unreadable this scan: its verb and flag findings are neither judged nor forgotten, so a good scan does not resend them
         for sk, v in sent.items():
             ks = [k for k in v.get("keys", []) if k.startswith(("verb|", "flag|"))]
             if ks:
@@ -637,6 +640,40 @@ def run(cfg: dict[str, Any] | None = None, *, dry: bool = False, deliver: Delive
         tmp.write_text(json.dumps(nstate, indent=1, sort_keys=True, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, sf)
     return res
+
+
+def week_file() -> Path:
+    return _cfg.state("rulebook-scan") / "last-week.json"
+
+
+def this_week(now=None) -> str:
+    """The Monday-to-Sunday week of now, in the instance timezone, as 'YYYY-Www' (ISO)."""
+    import datetime as dt  # noqa: PLC0415
+    y, w, _ = (now or dt.datetime.now(_cfg.tz())).isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def run_weekly(cfg: dict[str, Any] | None = None, *, week: str = "", wfile: Path | None = None, **kw: Any) -> dict[str, Any] | None:
+    """run(), but only when no scan has finished in this week; → None when this week's scan is already done. A lock on the week file's folder makes two
+    runs started together scan once (the second waits, then sees the week recorded). A scan with a note held does not record the week."""
+    import fcntl  # noqa: PLC0415
+    wf = wfile or week_file()
+    wk = week or this_week()
+    wf.parent.mkdir(parents=True, exist_ok=True)
+    with open(wf.parent / ".weekly.lock", "a+") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            done = json.loads(wf.read_text(encoding="utf-8")).get("week", "") if wf.is_file() else ""
+        except Exception:  # noqa: BLE001
+            done = ""
+        if done == wk:
+            return None
+        res = run(cfg, **kw)
+        if not res["held"] and not res["blind"] and not kw.get("dry"):      # a scan blind to sala (its help unreadable) skipped the sala checks: the week stays open, the next run tries again
+            tmp = wf.with_name(f"{wf.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps({"week": wk}), encoding="utf-8")
+            os.replace(tmp, wf)
+        return res
 
 
 def report(res: dict[str, Any], dry: bool) -> str:
@@ -658,20 +695,27 @@ def main(argv: list[str]) -> int:
     if a and a[0] == "run":
         a = a[1:]
     dry = "--dry-run" in a
-    a = [x for x in a if x != "--dry-run"]
+    weekly = "--weekly" in a
+    a = [x for x in a if x not in ("--dry-run", "--weekly")]
     opt: dict[str, Path] = {}
     names = {"--terms": "terms", "--schema": "schema", "--sala-help": "help_main", "--op-help": "help_op"}
     while a:
         k = a.pop(0)
         if k not in names or not a:
-            print("usage: rulebook_scan.py run [--dry-run] [--terms PATH] [--schema JSON] [--sala-help FILE] [--op-help FILE]", file=sys.stderr)
+            print("usage: rulebook_scan.py run [--weekly] [--dry-run] [--terms PATH] [--schema JSON] [--sala-help FILE] [--op-help FILE]", file=sys.stderr)
             return 2
         opt[names[k]] = Path(a.pop(0))
     cfg = settings()
     if not dry and not cfg["enabled"]:
         print("rulebook scan: not enabled on this instance ([rulebook_scan] enabled); --dry-run reads and prints without sending")
         return 0
-    res = run(cfg, dry=dry, **opt)
+    if weekly and not dry:
+        res = run_weekly(cfg, dry=dry, **opt)
+        if res is None:
+            print(f"rulebook scan: already scanned in week {this_week()}; the unit's other runs this week skip it")
+            return 0
+    else:
+        res = run(cfg, dry=dry, **opt)
     print(report(res, dry))
     return 1 if res["held"] else 0
 

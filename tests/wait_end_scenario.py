@@ -14,6 +14,8 @@ it cannot it asks the mover a specific question; a wait for an event no type rep
   7  handled     a line the server fixed or the mover sent back does not hide a new waiting line; one item's failure is skipped; a project-wide anchor; the backstop guard
   8  whole step  a handled step is its whole text (a new continuation line or an edited first line is new); an item line stays handled when its target closes; broad words of other lines stay
   9  same step   a handled step stays handled when the facts read it differently later (a bare #n no longer anchored, a machine with no fleet view): one key, the step's hash
+  10 unwoken     a waiting item nothing wakes (needs external with a bare ask_by and no wait_kind, relay-like and anchor-like; no date at all; an end date nobody reads) is a wait-end finding whose fix line, written as
+                 it stands, repairs it; the neighbors something does wake stay quiet; a date that passed a day ago is asked about, never one of today; an item the owner moves is routed as asking nothing of him
 
     tests/run-suite wait_end        -> exit 0 / 1"""
 import datetime as dt, json, logging, os, pathlib, re, sys, time
@@ -68,6 +70,7 @@ from stackshot.web import server; from stackshot.web.tools import anchors as _wt
 from stackshot.service import wait_fixes as _wait_fixes_svc
 from stackshot.service import wait_gates as wait_gates_svc, released as released_svc
 from stackshot.service import update as _update_svc
+from stackshot.web.tools import update as _wt_update
 from stackshot.core import instance as _core_instance
 from fastmcp.exceptions import ToolError
 from stackshot.web import publish as _web_publish
@@ -334,6 +337,22 @@ r = AR.filing_pass(now=now + 4 * HOUR, items=store_items(), anchors={}, env=env(
 check("6 a wake that is a date is the backstop as it stands (nothing to fix)", wk_(mt(9615)) == "2099-01-01" and not ab_(mt(9615)) and not log(9615), mt(9615))
 
 for p in (T / "store/g").glob("*.json"): p.unlink()
+GONE = time.strftime("%Y-%m-%d", time.gmtime(now - 26 * DAY))
+item(9616, "team-back: wait for board#" "9617 to close, then report", ask_by=GONE)
+item(9617, "home-other: build the thing")
+item(9618, "team-back: wait for the reply in https://github.com/acme/widgets/issues/11", wake=GONE)
+item(9619, "team-back: wait for other/repo#9 to be merged, then write the summary", ask_by=GONE, wake=GONE)
+item(9620, "team-back: wait for board#" "9617 to close, then report", ask_by="2099-01-01")
+wipe()
+r = AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
+for i, kind in ((9616, "item"), (9618, "anchor"), (9619, "event")):
+    m = mt(i)
+    check(f"6 a passed ask_by or wake is no backstop for the wait the pass sets ({kind}): the cap day takes its place and the old date goes", m.get("wait_kind") == kind and str(_WT.stored_until(m)) > GONE
+          and (WATCH.backstop_epoch(m) or 0) > now and not m.get("ask_by") and not m.get("wake"), m)
+    check(f"6 …History names the new day, and the wait has not ended as it was set ({kind})", len(log(i)) == 1 and str(_WT.stored_until(m)) in log(i)[0] and GONE not in log(i)[0] and not WATCH.due(rd(i), now, ["g9617"]), (log(i), m))
+check("6 an ask_by still to come is the backstop as it stands", mt(9620).get("wait_kind") == "item" and mt(9620).get("ask_by") == "2099-01-01" and not _WT.stored_until(mt(9620)), mt(9620))
+
+for p in (T / "store/g").glob("*.json"): p.unlink()
 item(9621, "team-back: wait for the reply in https://github.com/acme/widgets/issues/21")
 anchors_before = (T / "store/anchors.json").read_text()
 real_wow = wait_gates_svc._watch_on_write
@@ -593,6 +612,212 @@ for label, i, line, kinds in (("a bare #n the item is anchored to", 9901, "team-
     d = rd(i); d["metadata"].pop(SF.MARK); SF.decline(d["metadata"], SF.WAIT_END, tk[0]); (T / f"store/g/{i}.json").write_text(json.dumps(d))
     fs, _fl = AC.filing_findings(store_items(), {}, now, env(wait_end=_wait_fixes_svc._wait_end_fix, wait_facts=EMPTY))
     check(f"9 {label}, sent back by the mover, read with an empty Facts: no finding", not [f for f in fs if f["id"].endswith(str(i))], fs)
+
+# ================================================================ 10. a waiting item nothing wakes, and a date that passed
+for p in (T / "store/g").glob("*.json"): p.unlink()
+(T / "store/anchors.json").write_text("{}")
+from zoneinfo import ZoneInfo
+TODAY = dt.datetime.fromtimestamp(now, ZoneInfo("Asia/Dubai")).date()
+day = lambda n: (TODAY + dt.timedelta(days=n)).isoformat()
+SCOPED = "https://github.com/acme/widgets/issues/61"
+OWN = _core_instance.OWNER
+def waiting(i, updated=None, keep_state="", **meta):
+    """A waiting item as the connector wrote the real ones: no stored state (unless asked for), no needs of the helper's, only the fields given."""
+    item(i, meta.pop("nxt", "team-back: take the answer when it comes"), updated=updated, **meta)
+    d = rd(i); m = d["metadata"]
+    if keep_state: m["state"] = keep_state
+    else: m.pop("state", None)
+    if "needs" not in meta: m.pop("needs", None)
+    (T / f"store/g/{i}.json").write_text(json.dumps(d))
+    return d
+waiting(9801, needs=["external"], ask_by=day(-26))                                      # relay-like, the real shape: no wait_kind, nothing but a passed ask_by
+waiting(9802, needs=["external"], ask_by=day(-22), wait_anchor=SCOPED)                    # anchor-like, naming its link
+waiting(9803, needs=["external"], ask_by=day(-22))                                      # anchor-like: the link is only scoped to the item
+waiting(9804, keep_state="parked", needs=["team-back"], ask_by=day(9), mover="team-back")      # a day still ahead that nothing reads, on a session's parked item
+waiting(9805, needs=["external"])                                                       # no date at all
+waiting(9806, keep_state="verifying", end=day(-3), proof="the page loads", needs=["team-back"])          # a verifying item's end date that no watcher reads
+waiting(9807, keep_state="parked", needs=["team-back"])                                      # parked with no day
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": SCOPED, "items": ["g9803", "g9825"], "added": now - DAY}]}))
+# the neighbors something does wake
+waiting(9820, needs=["external"], wait_kind="relay", wait_event="the badge", ask_by=day(3))       # a watched relay wait
+waiting(9821, until=day(3), needs=["team-back"])                                              # a date as the wait
+waiting(9822, hold=True, wake=day(3), needs=["team-back"])                                     # a hold the old pass wakes
+waiting(9823, hold=True, wake=day(0), needs=["team-back"])                                     # …due today: the pass is about to take it
+waiting(9824, hold=True, after=["g9830"], needs=["team-back"])                                  # an open item ahead: its close releases this one
+waiting(9825, hold=True, needs=["team-back"])                                                 # held with an anchor scoped to it
+waiting(9826, hold=True, recycle="pane home-other", needs=["team-back"])                        # a pane recycle ends it
+waiting(9827, needs=["external"], check="pr_merged other/repo#5", ask_by=day(5))                 # a done check closes it
+waiting(9828, needs=["external"], ask_by=day(5), nxt="team-back: release PR #" "5")              # a step the proof pass ticks
+waiting(9829, needs=["decision"], ask="Decide: go? · Recommend: yes", ask_by=day(-5))            # the owner's move, so not waiting
+item(9830, "home-other: build the thing", mover="home-other")
+item(9831, "team-back: build the thing", ask_by=day(-5))                                       # alive: it waits on nothing
+def found(i, facts=None):
+    d = rd(i); _gid = f"g{i}"
+    fs, _fl = AC.filing_findings(store_items(), {}, now, env(**({"wait_facts": facts} if facts else FIXING)))
+    return [f for f in fs if f["id"].endswith(str(i)) and f["category"] == "wait-end"]
+fs, _fl = AC.filing_findings(store_items(), {}, now, env(**FIXING))
+got = {int(i): [f for f in fs if f["category"] == "wait-end" and f["id"].endswith(i)] for i in cats(fs, "wait-end")}
+check("10 exactly the items nothing wakes are found", sorted(got) == [9801, 9802, 9803, 9804, 9805, 9806, 9807], sorted(got))
+f1 = (got.get(9801) or [{}])[0]
+check("10 relay-like: the finding says the passed ask_by is read by nothing", "nothing wakes" in f1.get("detail", "") and f"ask_by {day(-26)} (that day has passed)" in f1.get("detail", "") and "no wait_kind" in f1.get("detail", ""), f1)
+check("10 …its fix line names the relay write, date first", f1.get("fix", "").startswith('update(until="YYYY-MM-DD", wait_kind="relay", wait_event=') and len(f1.get("fix", "")) <= 160, f1.get("fix"))
+check("10 anchor-like with a stored link: the anchor write names it", 'wait_kind="anchor"' in got[9802][0]["fix"] and SCOPED in got[9802][0]["fix"] and "wait_event=" in got[9802][0]["fix"], got[9802])
+check("10 …and with the link only scoped to the item", 'wait_kind="anchor"' in got[9803][0]["fix"] and SCOPED in got[9803][0]["fix"], got[9803])
+check("10 an ask_by still ahead that nothing reads is found too, and is not called passed", f"ask_by {day(9)}" in got[9804][0]["detail"] and "passed" not in got[9804][0]["detail"], got[9804])
+check("10 no date at all", "no date" in got[9805][0]["detail"], got[9805])
+check("10 a verifying item's end date", f"end {day(-3)} (that day has passed)" in got[9806][0]["detail"] and got[9806][0]["fix"] == 'update(until="YYYY-MM-DD", wait_reason="<why that day>")', got[9806])
+check("10 none carries a fix the server makes", all(not f.get("gap") for v in got.values() for f in v), got)
+check("10 the items the owner picks up keep him as mover in the finding (routing decides who hears)", got[9801][0]["mover"] == OWN and got[9804][0]["mover"] == "team-back", (got[9801], got[9804]))
+# the old wake pass standing down: its date and its `after` count no more
+def stood_down():
+    f = _wait_fixes_svc._wait_end_facts()
+    return f._replace(old_off=True)
+check("10 with the old wake pass stood down, a held wake and an open `after` end nothing", found(9822, stood_down) and found(9824, stood_down) and not found(9820, stood_down) and not found(9821, stood_down) and not found(9825, stood_down),
+      [found(9822, stood_down), found(9824, stood_down), found(9825, stood_down)])
+saved_old = _wait_fixes_svc._item_read._old_wait_off
+try:
+    _wait_fixes_svc._item_read._old_wait_off = lambda: True
+    check("10 …and the server's facts carry that switch", _wait_fixes_svc._wait_end_facts().old_off is True)
+finally:
+    _wait_fixes_svc._item_read._old_wait_off = saved_old
+for i, was in ((9827, "a done check"), (9828, "a step proof")):
+    d = rd(i); d["metadata"]["ask_by"] = day(-5); (T / f"store/g/{i}.json").write_text(json.dumps(d))
+    f_ = found(i)
+    check(f"10 an item {was} may end whose date passed is asked about as overdue, not as one nothing wakes", len(f_) == 1 and "passed more than a day ago" in f_[0]["detail"], f_)
+    d["metadata"]["ask_by"] = day(5); (T / f"store/g/{i}.json").write_text(json.dumps(d))
+waiting(9808, updated=now - 600, needs=["external"], ask_by=day(-1))
+check("10 …an item written ten minutes ago is not asked about yet, and is after the settle window", not found(9808) and [f for f in AC.filing_findings({"g9808": rd(9808)}, {}, now + HOUR, env(**FIXING))[0] if f["category"] == "wait-end"], found(9808))
+(T / "store/g/9808.json").unlink()
+# routing: nothing marked for the owner; once for an item he picks up
+mine = {f"g{i}": rd(i) for i in (9801, 9802, 9804)}
+wipe()
+r = AR.filing_pass(now=now, items=mine, anchors={}, env=env(**FIXING))
+msgs = [(to, text) for to, text, _fyi in sent if "wait-end" in text]
+check("10 delivered: the owner's pick-up item goes to the project's builder, the session's own to it", {to for to, text in msgs if "9801" in text} == {"alpha-builder"} and {to for to, text in msgs if "9804" in text} == {"team-back"} and any("9802" in text for _to, text in msgs), msgs)
+check("10 …nothing is marked for the owner or sent to him", not [m for m in sent if m[0] == OWN or m[1].startswith("[for")], sent)
+check("10 …the message carries the fix", any('update(until="YYYY-MM-DD", wait_kind="relay"' in text for _to, text in msgs), msgs)
+check("10 …and nothing is written on the items", all(rd(int(g[1:])) == d for g, d in mine.items()), "changed")
+sent.clear()
+AR.filing_pass(now=now + 600, items=mine, anchors={}, env=env(**FIXING))
+check("10 a second pass sends nothing", not [m for m in sent if "wait-end" in m[1]], sent)
+later = []
+for h in (13, 26, 39, 52, 65, 78, 91, 104):
+    sent.clear(); AR.filing_pass(now=now + h * HOUR, items=mine, anchors={}, env=env(**FIXING)); later += [(to, t) for to, t, _f in sent]
+check("10 the owner's pick-up item is told once and never again; a session's is reminded a bounded number of times, then quiet", not [t for _to, t in later if "9801" in t]
+      and all(1 <= len([t for _to, t in later if n in t]) <= AR.REMIND_TRIES + 2 for n in ("9802", "9804")) and not [m for m in sent if "9804" in m[1] or "9802" in m[1]] and not [to for to, _t in later if to == OWN], later)
+# a date that passed
+for p in (T / "store/g").glob("*.json"): p.unlink()
+(T / "store/anchors.json").write_text("{}")
+waiting(9841, until=day(-2), needs=["team-back"])                                           # a watched date wait that was not taken
+waiting(9842, hold=True, wake=day(-1), needs=["team-back"])                                   # a held wake the old pass did not take
+waiting(9843, needs=["external"], wait_kind="relay", wait_event="the badge", ask_by=day(-2))     # a watched relay wait the owner picks up, past its day
+waiting(9844, until=day(0), needs=["team-back"])                                             # today: about to be taken
+waiting(9845, until=f"{day(0)}T00:01", needs=["team-back"])
+waiting(9846, until=day(1), needs=["team-back"])
+waiting(9847, needs=["external"], wait_kind="anchor", wait_anchor=SCOPED, until=day(2), ask_by=day(-9))      # the date that stands (until) is ahead
+fs, _fl = AC.filing_findings(store_items(), {}, now, env(**FIXING))
+check("10 a date that passed a day or more ago is found; one of today or ahead is not", cats(fs, "wait-end") == ["9841", "9842", "9843"], [(f["id"], f["detail"]) for f in fs if f["category"] == "wait-end"])
+f41 = [f for f in fs if f["category"] == "wait-end" and f["id"].endswith("9841")][0]
+check("10 …the finding names the date and the two writes", f"until {day(-2)} passed" in f41["detail"] and 'update(until="YYYY-MM-DD", next=' in f41["fix"] and "clear_wait=true" in f41["fix"] and f41["mover"] == "team-back", f41)
+midnight = dt.datetime.combine(TODAY, dt.time(), ZoneInfo("Asia/Dubai")).timestamp()
+at = lambda t: cats(AC.filing_findings({"g9846": rd(9846)}, {}, t, env(**FIXING))[0], "wait-end")
+over = midnight + 2 * DAY                                       # 9846 waits to tomorrow: its whole day is over at the midnight after it
+check("10 …a day-only date counts as passed only once its whole day is over", at(over - 60) == [] and at(over + 60) == ["9846"], (at(over - 60), at(over + 60)))
+def held_all(): return _wait_fixes_svc._wait_end_facts()._replace(paused=True)
+check("10 while every wake is held, no date is called passed", cats(AC.filing_findings(store_items(), {}, now, env(wait_facts=held_all))[0], "wait-end") == [])
+saved_paused = WATCH.paused
+try:
+    WATCH.paused = lambda: True
+    check("10 …and the server's facts carry the pause", _wait_fixes_svc._wait_end_facts().paused is True)
+finally:
+    WATCH.paused = saved_paused
+wipe()
+AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
+check("10 the owner's pick-up goes to the builder, never to him", [to for to, t, _f in sent if "9843" in t] == ["alpha-builder"] and not [m for m in sent if m[0] == OWN or m[1].startswith("[for")], sent)
+d = rd(9841); SF.decline(d["metadata"], SF.WAIT_END, WE.overdue_gap(d["metadata"], WE.Facts(), now).token); (T / "store/g/9841.json").write_text(json.dumps(d))
+check("10 a finding the mover sent back is not asked again; a new date that passes is", not found(9841), found(9841))
+d["metadata"]["until"] = day(-3); (T / "store/g/9841.json").write_text(json.dumps(d))
+check("10 …", found(9841))
+# a stored kind with nothing to end it, on an item the owner picks up, is found as a question too
+for p in (T / "store/g").glob("*.json"): p.unlink()
+waiting(9851, needs=["external"], wait_kind="relay", wait_event="the badge")                    # a stored relay kind with no day: nothing wakes it
+waiting(9852, needs=["external"], wait_kind="relay", wait_event="the badge", wake=day(3))         # …with a wake the old pass takes: not the owner-moved item's finding
+waiting(9853, needs=["external"], wait_kind="event", wait_event="pr_merged other/repo#9", post_wake_mover=OWN)      # …an event wait with no backstop: the server adds one on a session's item, never on this one
+waiting(9854, wait_kind="event", wait_event="pr_merged other/repo#9", mover="team-back", needs=["team-back"])
+fs, _fl = AC.filing_findings(store_items(), {}, now, env(**FIXING))
+check("10 a stored kind nothing ends is found whoever picks it up; one the old pass wakes stays quiet for the owner's", "9851" in cats(fs, "wait-end") and "9853" in cats(fs, "wait-end") and "9852" not in cats(fs, "wait-end"), cats(fs, "wait-end"))
+check("10 …with no server fix on the owner's pick-up, and the fix kept for the session's", not [f for f in fs if f["id"].endswith(("9851", "9853")) and f.get("gap")] and [f for f in fs if f["id"].endswith("9854") and f.get("gap")], fs)
+wipe()
+r = AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
+check("10 …the pass writes nothing on the owner's pick-up items", not mt(9851).get("until") and not mt(9853).get("until") and not log(9853) and mt(9854).get("until"), (mt(9851), mt(9853), mt(9854)))
+# the write each fix line names repairs the item
+for p in (T / "store/g").glob("*.json"): p.unlink()
+(T / "store/anchors.json").write_text("{}")
+waiting(9861, needs=["external"], ask_by=day(-26))
+waiting(9862, needs=["external"], ask_by=day(-22), wait_anchor=SCOPED)
+waiting(9863, needs=["external"], mover="team-back")
+waiting(9864, keep_state="verifying", end=day(-3), proof="the page loads", needs=["team-back"])
+waiting(9865, keep_state="parked", needs=["team-back"])
+waiting(9866, keep_state="blocked", after=["g9867"], needs=["team-back"])
+item(9867, "home-other: build the thing", status="completed", mover="home-other")
+waiting(9868, until=day(-2), needs=["team-back"])
+waiting(9869, hold=True, wake=day(-2), needs=["team-back"])
+waiting(9870, needs=["external"], wait_kind="relay", wait_event="the badge", ask_by=day(-2))           # a relay wait past its day
+waiting(9871, needs=["external"], wait_kind="anchor", wait_anchor=SCOPED, wait_event="the reply", until=day(-2))      # an anchor wait past its day
+waiting(9872, until=day(-3), needs=["team-back"])                                              # …cleared instead of re-dated
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": SCOPED, "items": ["g9862", "g9871"], "added": now - DAY}]}))
+ahead = day(5)                                                # inside the wait cap: the writes pass with no word of the owner's
+fill = {"YYYY-MM-DD": ahead, "<the news>": "the vendor's reply", "<what it brings>": "the vendor's reply", "<why that day>": "the vendor replies only then", "<link>": SCOPED, "<you>": "team-back", "<what you do that day>": "read the vendor's reply"}
+fs, _fl = AC.filing_findings(store_items(), {}, now, env(**FIXING))
+FIXED = (9861, 9862, 9863, 9864, 9865, 9866, 9868, 9869, 9870, 9871, 9872)
+check("10 setup: each of the eleven is found", cats(fs, "wait-end") == [str(i) for i in FIXED], cats(fs, "wait-end"))
+check("10 no fix line is longer than a finding keeps", all(len(f["fix"]) <= 160 for f in fs if f["category"] == "wait-end"), [(f["id"], len(f["fix"])) for f in fs if f["category"] == "wait-end"])
+for i in FIXED:
+    f = [f for f in fs if f["category"] == "wait-end" and f["id"].endswith(str(i))]
+    if not f: continue
+    line = f[0]["fix"]
+    for k, v in fill.items(): line = line.replace(k, v)
+    calls = re.findall(r"update\(([^()]*)\)", line)
+    last = (calls[-1] if i == 9866 else calls[0]) if calls else ""      # the blocked item's line names two writes: the second one needs no other item
+    kw = {k: v for k, v in re.findall(r'(\w+)="([^"]*)"', last)}
+    if i == 9872:
+        kw = {"clear_wait": True}                       # the other write its line names
+    try:
+        out = _wt_update.stackshot_update(f"g{i}", sender="team-back", **kw)
+    except Exception as e:  # noqa: BLE001
+        out = str(e)
+    check(f"10 {i}: the write its fix line names is accepted", out.startswith("updated board#"), (f[0]["fix"], kw, out))
+    after_fs = AC.filing_findings({**store_items()}, {}, now + 2 * HOUR, env(**FIXING))[0]
+    check(f"10 {i}: …and the finding is gone, the item waiting to a day something reads or no longer waiting", not [x for x in after_fs if x["category"] == "wait-end" and x["id"].endswith(str(i))]
+          and (MODEL.derive(rd(i)).state != MODEL.WAITING if i == 9872 else bool(WATCH.watches(rd(i)) or _WT.wake_value(mt(i)))), (mt(i), [x for x in after_fs if x["id"].endswith(str(i))]))
+
+# an item a board check already reports gets one line about it, which also names the write
+for p in (T / "store/g").glob("*.json"): p.unlink()
+(T / "store/anchors.json").write_text("{}")
+waiting(9881, keep_state="parked", hold=True, needs=["team-back"], nxt="team-back: later")                      # arbitrary-hold: held, no day, nothing wakes it
+waiting(9882, keep_state="parked", hold=True, wake=day(-3), needs=["team-back"], nxt="team-back: later")        # arbitrary-hold, and its day passed
+waiting(9883, keep_state="parked", hold=True, wait_kind="time", needs=["team-back"], nxt="team-back: later", mover="team-back")      # a stored kind nothing ends: the rule's finding as it always was
+GENERIC = AC.FIX["board checks"]
+def about(i, at=now):
+    return [f for f in AC.filing_findings(store_items(), {}, at, env(**FIXING))[0] if f["id"].endswith(str(i)) and f["category"] in ("board checks", "wait-end")]
+for i, write in ((9881, 'update(until="YYYY-MM-DD", wait_reason="<why that day>")'), (9882, 'update(until="YYYY-MM-DD", next="<you>: <what you do that day>") for a new day, or clear_wait=true if the wait is over')):
+    f_ = about(i)
+    check(f"10 {i}: one finding, the board check's, its fix naming the write and keeping its own advice", [x["category"] for x in f_] == ["board checks"] and f_[0]["detail"].startswith("arbitrary-hold: ") and f_[0]["fix"] == f"{write}, or {GENERIC}" and not f_[0].get("gap"), f_)
+f_ = about(9883)
+check("10 a stored kind nothing ends keeps its own wait-end line beside the board check, whose fix is as it was", sorted(x["category"] for x in f_) == ["board checks", "wait-end"] and [x["fix"] for x in f_ if x["category"] == "board checks"] == [GENERIC], f_)
+waiting(9884, updated=now - 600, keep_state="parked", hold=True, needs=["team-back"], nxt="team-back: later")      # the same shape, written ten minutes ago
+f_ = about(9884)
+check("10 within the settle window the board check keeps its own fix, and no wait-end line stands beside it", [x["category"] for x in f_] == ["board checks"] and f_[0]["fix"] == GENERIC, f_)
+
+# an alive item the owner or an outside party moves is not read for lines that wait: the server writes nothing on it and asks nothing about it
+for p in (T / "store/g").glob("*.json"): p.unlink()
+item(9891, "home-other: build the thing", mover="home-other")
+for i, who in ((9892, OWN), (9893, "an outside vendor"), (9894, "team-back")):
+    d = item(i, f"{who}: wait for board#" "9891 to close, then report")[1]      # each line opens with the item's own mover: only who the mover is decides
+    d["metadata"].update(mover=who, needs=[]); (T / f"store/g/{i}.json").write_text(json.dumps(d))
+alive = [i for i in (9892, 9893, 9894) if MODEL.derive(rd(i)).state == MODEL.ALIVE]
+got = cats(AC.filing_findings(store_items(), {}, now, env(**FIXING))[0], "wait-end")
+check("10 only the session's alive item is read for its waiting line", alive == [9892, 9893, 9894] and got == ["9894"], (alive, got, [MODEL.derive(rd(i)).state for i in (9892, 9893, 9894)]))
 
 print(f"{'FAILED' if fails else 'ok'}: wait end scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))
 sys.exit(1 if fails else 0)

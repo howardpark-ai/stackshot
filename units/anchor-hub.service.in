@@ -10,6 +10,8 @@ ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1 TZ=@TZ@
+# the receivers run `gh`; ~/.local/bin first, as in the other units, so it is the wrapper there and not the plain /usr/bin/gh (a user manager started after a reboot has no ~/.local/bin on its PATH)
+Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
 # Install: ./install.sh units
 # the clean reboot protocol: SIGTERM to the hub only — its handler lets running anchor-relay deliveries
 # finish, queues pending follow-ups and saves every read position (cursors.json); the reboot hook is reboot-hooks/anchor-hub-hook in the checkout

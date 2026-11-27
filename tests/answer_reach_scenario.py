@@ -215,7 +215,7 @@ item(12, needs=["decision", "demo-builder"], ask="Decide: whether to ship · Rec
 answer("a12", "Ship", "go now", "answer")
 ts12 = rd(12)["metadata"]["answers"][-1]["ts"]
 out = upd("a12", "demo-peer", priority="p3")
-LINE = re.compile(r"\(note: Oliver answered a12 on the board at \w{3} \w{3} \d+\w\w \d\d:\d\d [^:]*: Ship — go now\. You have not written to the item since")
+LINE = re.compile(r"\(note: Oliver answered a12 on the board at \w{3} \w{3} \d+\w\w(?: \d{4})? \d\d:\d\d [^:]*: Ship — go now\. You have not written to the item since")
 check("6 a session that has not written since his answer: the reply carries one line naming the answer, its time and his words", len(LINE.findall(out)) == 1 and out.count("\n(note: Oliver answered") == 1, out)
 check("6 …and the update applied", rd(12)["metadata"].get("priority") == "p3" and rd(12)["written_by"] == "demo-peer" and rd(12)["written_at"] > ts12, rd(12))
 out = upd("a12", "demo-peer", priority="p2")

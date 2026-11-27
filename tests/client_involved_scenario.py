@@ -97,7 +97,7 @@ put(22, subject="[home] observer under an old name", age=10, contact=M, observer
 put(23, subject="[home] a file that stores no update time", age=3, state_age=2.5, updated=False, contact=A, mover=S)
 put(24, subject="[home] waits on an open item", age=4.5, contact=A, mover=S, after=["a11"])
 FOR_A = [18, 12, 23, 13, 16, 24, 11, 17]; FOR_B = {12, 13, 14, 17, 18, 21, 22}; FOR_M = {14, 19, 20, 22}
-FIELDS = ["shown", "subject", "url", "mover", "contact", "observers", "list", "held", "until", "state_updated", "updated"]
+FIELDS = ["shown", "subject", "url", "mover", "contact", "observers", "list", "held", "until", "state_updated", "updated", "scope"]
 
 def inv(key):
     """(status, parsed body) of the read, a raise as (599, its text)."""
@@ -131,7 +131,8 @@ check("…the times of the rows are non-increasing", lambda: (lambda ts: ts == s
 
 # the row
 r = rows(A)
-check("a row has exactly the eleven fields, in this order", lambda: all(list(x) == FIELDS for x in r.values()) and len(r) == len(FOR_A), [list(x) for x in r.values()][:1])
+check("a row has exactly the twelve fields, in this order", lambda: all(list(x) == FIELDS for x in r.values()) and len(r) == len(FOR_A), [list(x) for x in r.values()][:1])
+check("scope is the item's group, from its project (the page is in org home)", lambda: all(x["scope"] == "home" for x in r.values()) and len(r) == len(FOR_A), [x["scope"] for x in r.values()])
 check("shown is the id as a person reads it, subject the item's", lambda: r[shown(11)]["subject"] == "[home] contact only, the owner moves it" and all(k == x["shown"] for k, x in r.items()), r.get(shown(11)))
 check("contact is the contact's name now, observers the names of the observers: a stored name, a permanent id (as the name in use), an old name (as the current one), once each, in the stored order",
       lambda: r[shown(11)]["contact"] == A and r[shown(11)]["observers"] == [] and r[shown(13)]["observers"] == [A, B] and r[shown(18)]["observers"] == [A] and rows(B)[shown(21)]["observers"] == [B] and rows(B)[shown(22)]["observers"] == [B],

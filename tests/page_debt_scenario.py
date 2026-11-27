@@ -431,5 +431,69 @@ check("ct_changed_since: the same edit seen from a board change an hour later is
 check("ct_changed_since: a line under `## Timeline` alone does not settle a later change",
       _ct_changed_since(key, t0 + 3600) is False)
 
+# ---- 13. a read of the pages checkout that fails or takes too long cannot tell: the debt stays (a failed read is neither "changed" nor "no earlier version")
+_run = subprocess.run
+def reading(hit, how):
+    def broken(args, *a, **k):
+        if isinstance(args, list) and hit(args):
+            if how == "slow": raise subprocess.TimeoutExpired(args, 20)
+            return subprocess.CompletedProcess(args, 128, "", "fatal: no")
+        return _run(args, *a, **k)
+    return broken
+for what, hit in (("the look for the page's version at the board change", lambda a: "log" in a and any(str(x).startswith("--before=") for x in a)),
+                  ("the read of that version", lambda a: "show" in a)):
+    for how in ("fails", "slow"):
+        subprocess.run = reading(hit, how)
+        try: got = _ct_changed_since(key, t0)
+        finally: subprocess.run = _run
+        check(f"ct_changed_since: when {what} {how}, it cannot tell: False, not changed and not new", got is False, got)
+check("ct_changed_since: …and with the reads answered the same edit counts", _ct_changed_since(key, t0) is True)
+(brain / "projects/gone.md").write_text(STRAY, encoding="utf-8"); git("add", "-A"); git("commit", "-qm", "gone v1", at=t0 - 3000)
+(brain / "projects/gone.md").unlink(); git("add", "-A"); git("commit", "-qm", "gone removed", at=t0 - 100)
+(brain / "projects/gone.md").write_text(stray_edit, encoding="utf-8"); git("add", "-A"); git("commit", "-qm", "gone back", at=t0 + 10)
+check("ct_changed_since: a page the last version before the board change removed, put back after it, is changed (not a failed read)", _ct_changed_since("projects/gone", t0 + 20) is True)
+# the server's settle: an exception from the read leaves the debt, a read that answers settles it
+_kept_pts, _kept_ct, _kept_up = _pdebts._page_ts, _pg.ct_changed_since, _pdebts._upstream_ts
+_pdebts._page_ts = lambda k: time.time() + 500; _pdebts._upstream_ts = lambda k: 0
+def _raises(k, ts): raise OSError("git: read failed")
+try:
+    _pdebts._owed_save({"projects/alpha": {A: {"ts": time.time() - 60, "item": "a1", "settle": "ct"}}}); _pg.ct_changed_since = _raises
+    left = _pdebts._owed_settle()
+    check("settle: a read of the page's compiled truth that raises leaves a strict debt owed", A in left.get("projects/alpha", {}), left)
+    _pg.ct_changed_since = lambda k, ts: True
+    check("settle: …and one that answers a change settles it", "projects/alpha" not in _pdebts._owed_settle())
+finally: _pdebts._page_ts, _pg.ct_changed_since, _pdebts._upstream_ts = _kept_pts, _kept_ct, _kept_up; reset()
+
+# ---- 14. a ledger that cannot be read is never written over: kept aside, said once, the debts that can be read are kept
+import io as _io2, contextlib as _cl2
+LEDGER = _pdebts._owed_path()
+def entry(ts_ago, settle="ct"): return {"ts": time.time() - ts_ago, "item": "a1", "settle": settle}
+whole = {"projects/alpha": {A: entry(300), B: entry(200)}, "projects/gamma": {B: entry(100)}, "projects/zeta": {A: entry(50), B: entry(40)}}
+text = json.dumps(whole)
+def asides(): return sorted(pth for pth in LEDGER.parent.glob(LEDGER.name + ".unreadable-*"))
+for what, cut in (("cut inside the last entry", text.rindex('"ts"') + 9), ("cut after a whole page", text.index('"projects/zeta"') - 2)):
+    for old in asides(): old.unlink()
+    LEDGER.write_text(text[:cut], encoding="utf-8"); sentence = _io2.StringIO()
+    with _cl2.redirect_stderr(sentence):
+        first = _pdebts._owed_load(); second = _pdebts._owed_load()
+    kept_pages = sorted(first)
+    check(f"ledger {what}: the debts written out whole are kept", kept_pages == ["projects/alpha", "projects/gamma"] + (["projects/zeta"] if what.startswith("cut inside") else []) and set(first["projects/alpha"]) == {A, B}, first)
+    check(f"ledger {what}: …the bytes as they were are kept aside and said once", len(asides()) == 1 and asides()[0].read_text(encoding="utf-8") == text[:cut] and sentence.getvalue().count("could not be read") == 1, (asides(), sentence.getvalue()))
+    check(f"ledger {what}: …and the next load and a new debt keep them", second == first and (lambda: (_pdebts._owed_mark("projects/alpha", "work-new", "a9"), set(_pdebts._owed_load()["projects/alpha"]))[1])() == {A, B, "work-new"}, _pdebts._owed_load())
+for old in asides(): old.unlink()
+LEDGER.write_text("not json", encoding="utf-8"); sentence = _io2.StringIO()
+with _cl2.redirect_stderr(sentence): got = _pdebts._owed_load(); _pdebts._owed_mark("projects/gamma", "work-new", "a9")
+check("ledger that is not JSON: nothing to keep, but the file is kept aside whole and a new debt does not overwrite it", got == {} and len(asides()) == 1 and asides()[0].read_text(encoding="utf-8") == "not json"
+      and list(_pdebts._owed_load()) == ["projects/gamma"], (got, asides(), sentence.getvalue()))
+for old in asides(): old.unlink()
+LEDGER.write_text("[1, 2]", encoding="utf-8")
+with _cl2.redirect_stderr(_io2.StringIO()): got = _pdebts._owed_load()
+check("ledger that is JSON but not an object: kept aside as well", got == {} and len(asides()) == 1, (got, asides()))
+for old in asides(): old.unlink()
+LEDGER.unlink(missing_ok=True); sentence = _io2.StringIO()
+with _cl2.redirect_stderr(sentence): got = _pdebts._owed_load()
+check("no ledger at all is no damage: nothing aside, nothing said", got == {} and asides() == [] and sentence.getvalue() == "", (asides(), sentence.getvalue()))
+reset()
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

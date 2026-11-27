@@ -10,13 +10,15 @@ The gaps (each a `Gap`, `kind` in KINDS), read from the mover's own open steps a
   pr        the line waits for a pull request's merge or release: fix an event wait (`pr_merged` / `pr_released`) when the line is the item's only open step, a step proof when it is a pure wait step among other work
   box       the line waits for a machine of the fleet to come online: fix a `box_online` event wait
   url       the line waits for something in a link the anchors tool takes: fix an anchor wait (the link is added as an anchor scoped to the item)
-  stored    the item stores a wait no watcher can end (watchers.can_end): fix only what is derivable (a backstop day, the one anchor the item has), else ask
+  stored    the item stores a wait no watcher can end (watchers.can_end): fix only what is derivable (a backstop day, the one anchor the item has), else ask. Two more shapes of a waiting item are asked about
+            under this kind, with the write that repairs them (Gap.fix) and never a fix of the server's: one with no wait_kind that nothing wakes (watchers.nothing_wakes: a bare ask_by, an end date nobody
+            reads, no date at all), and one whose date passed OVERDUE_S ago while it still waits
   delivery  a step that delivers a pull request (`ship PR #7`) and carries no proof: fix its `step_proof` when delivery is the whole step
   event     the wait is for an event no event type reports (a scheduled job, an upstream release, a CI or deploy finishing, a service coming back): a message to the builder, never a fix
 
 A gap the server cannot fix with certainty is a question to the mover (the `wait-end` finding), never a guess: an "or", several items, a bare `#n` the item is not anchored to, a machine or pull request that is not what the line seems to
-say, an item with other work open. An item waits only wholly, so an item-level fix needs the line to be the item's only open step. An item that is held, already waits, or is moved by the owner is never touched; a fix the mover sends back
-(clear_after, clear_wait, step_proof=none) is recorded by token (server_fixes.WAIT_END) and the line is left alone.
+say, an item with other work open. An item waits only wholly, so an item-level fix needs the line to be the item's only open step. An item that is held, already waits, or is moved by the owner is never fixed by its lines; a fix the mover sends back
+(clear_after, clear_wait, step_proof=none) is recorded by token (server_fixes.WAIT_END) and the line is left alone. A waiting item that the owner, nobody or an outside party moves is read only for a wait nothing ends or a date that passed, as a question.
 
 Pure functions of strings, dicts and the `Facts` a caller hands in: no server import, no clock read except `now` passed in."""
 from __future__ import annotations
@@ -26,6 +28,7 @@ import hashlib
 import re
 from typing import Any, Callable, NamedTuple
 
+from stackshot.core import config as _cfg
 from stackshot.waits import event_waits as _ew
 from stackshot.model import model_guards as _mg
 from stackshot.waits import server_fixes as _sf
@@ -38,12 +41,13 @@ ITEM, PR, BOX, URL, STORED, DELIVERY, EVENT = "item", "pr", "box", "url", "store
 KINDS = (ITEM, PR, BOX, URL, STORED, DELIVERY, EVENT)
 EVENT_MISSING = "event-missing"      # the category of the message to the builder
 FIX_CAP = 10                         # fixes one pass makes at most (the rest wait for the next pass)
+OVERDUE_S = 86400.0                  # a wait's date counts as passed only this long after it fell due: on the day itself the wake pass is about to take the item
 
 
 class Facts(NamedTuple):
     """What the detector reads of the world, handed in by the caller (the server hands in the real ones; a scenario its own). `machines`: lower-case host or fleet name → fleet name; `online`: the fleet names (lower case) whose
     puller checked in lately; `own_repo` and `released`: this repository and the lower-case names of [released.repos]; `item_prs(gid)`: the "owner/repo#n" pull requests the item is anchored to; `item_anchors(gid)`: the URLs
-    of the anchors scoped to the item; `anchor_url(url)`: whether the anchors tool takes the link."""
+    of the anchors scoped to the item; `anchor_url(url)`: whether the anchors tool takes the link; `old_off`: the old wake pass stands down for the items no watcher watches; `paused`: every wake is held ([model] pause)."""
     machines: dict = {}
     online: frozenset = frozenset()
     own_repo: str = ""
@@ -51,11 +55,13 @@ class Facts(NamedTuple):
     item_prs: Callable[[str], Any] = lambda gid: ()
     item_anchors: Callable[[str], Any] = lambda gid: ()
     anchor_url: Callable[[str], bool] = lambda url: False
+    old_off: bool = False
+    paused: bool = False
 
 
 class Gap(NamedTuple):
     """One line (or one stored wait) with nothing to end it. `plan` = {} for a question only, else what the server sets: {"op": after | event | anchor | proof | backstop | anchor_pick, ...}. `evidence` is the finding's words;
-    `token` binds a fix (and a mover's no) to the line."""
+    `token` binds a fix (and a mover's no) to the line; `fix`, when given, is the finding's fix line (the write that repairs the item) in place of the category's general one."""
     kind: str
     pos: int
     line: str
@@ -64,6 +70,7 @@ class Gap(NamedTuple):
     plan: dict
     token: str
     cls: str = ""
+    fix: str = ""
 
 
 def _clip(text: Any, n: int = 80) -> str:
@@ -385,6 +392,55 @@ def stored_gap(meta: dict[str, Any], facts: Facts, gid: str, now: float) -> Gap 
     return Gap(STORED, 0, "time", kind, "the item waits on a time and has no until date, so nothing ends the wait", {}, token(STORED, "time", "wake"))
 
 
+def _dates(meta: dict[str, Any]) -> list[tuple[str, str, float]]:
+    """[(field, value, the moment it falls due)] of the dates a waiting item stores, in the order its readers take them: until, wake, ask_by, and a verifying item's end (the end of that day)."""
+    end = meta.get("end") if meta.get("state") == "verifying" else ""
+    out = []
+    for key, value in (("until", _wt.stored_until(meta)), ("wake", meta.get("wake")), ("ask_by", meta.get("ask_by")), ("end", end)):
+        v = str(value or "").strip()
+        ep = (_wt.due_epoch(v) if key == "end" else _watch.day_epoch(v)) if v else None
+        if ep is not None:
+            out.append((key, v, ep))
+    return out
+
+
+def _unwoken_fix(meta: dict[str, Any], facts: Facts, gid: str) -> str:
+    """The write that gives a waiting item something that ends it, by what it waits on: a link, news from outside, another item, a day. Short, and the date first: a held note clips the line."""
+    external = "external" in [str(x).lower() for x in _wt.needs_of(meta)]
+    urls = [u for u in (str(meta.get("wait_anchor") or "").strip(),) if u] or list(facts.item_anchors(gid) or ())
+    if str(meta.get("wait_anchor") or "").strip() or (external and urls):
+        return f'update(until="YYYY-MM-DD", wait_kind="anchor", wait_event="<what it brings>", wait_anchor="{urls[0] if len(urls) == 1 else "<link>"}")'
+    if external:
+        return f'update(until="YYYY-MM-DD", wait_kind="relay", wait_event="<the news>") if only {_cfg.owner()} can bring it, else a time or anchor wait'
+    on_a_day = 'update(until="YYYY-MM-DD", wait_reason="<why that day>")'
+    if meta.get("state") == "blocked" or _wt.after_of(meta):
+        return f'update(after=["board#N"]) naming the item it waits on, or {on_a_day}'
+    return on_a_day
+
+
+def unwoken_gap(meta: dict[str, Any], facts: Facts, gid: str, now: float) -> Gap:
+    """The gap of a waiting item with no wait_kind that nothing wakes (watchers.nothing_wakes, which the caller has asked): the date it stores, if any, is one nothing reads."""
+    dates = _dates(meta)
+    if not dates:
+        what, entity = "it stores no date and nothing else that ends the wait", "none"
+    else:
+        key, value, ep = dates[0]
+        past = " (that day has passed)" if now - ep >= OVERDUE_S else ""
+        why = "it stores no wait_kind, so no watcher and no wake pass reads its" if key == "ask_by" else "no watcher and no wake pass acts on its"
+        what, entity = f"{why} {key} {value}{past}", f"{key} {value}"
+    return Gap(STORED, 0, "wait", "none", f"nothing wakes this waiting item: {what}", {}, token(STORED, "unwoken", entity), fix=_unwoken_fix(meta, facts, gid))
+
+
+def overdue_gap(meta: dict[str, Any], facts: Facts, now: float) -> Gap | None:
+    """The gap of a waiting item whose date (the first it stores, `_dates`) passed OVERDUE_S ago: whatever was to take it that day did not. None while every wake is held (`facts.paused`)."""
+    dates = _dates(meta)
+    if facts.paused or not dates or now - dates[0][2] < OVERDUE_S:
+        return None
+    key, value, _ep = dates[0]
+    return Gap(STORED, 0, "wait", "overdue", f"the item still waits although its {key} {value} passed more than a day ago: nothing woke it", {}, token(STORED, "overdue", f"{key} {value}"),
+               fix='update(until="YYYY-MM-DD", next="<you>: <what you do that day>") for a new day, or clear_wait=true if the wait is over')
+
+
 def event_gap_stored(meta: dict[str, Any]) -> Gap | None:
     """A stored event wait that no event type reports (event_waits.live False, today a job_run): it turns only on its backstop day."""
     if _watch.stored_kind(meta) != "event":
@@ -412,11 +468,22 @@ def handled_hashes(meta: dict[str, Any]) -> frozenset:
 
 
 def item_gaps(gid: str, meta: dict[str, Any], mover: str, state: str, facts: Facts, open_item: Callable[[str], str], same: Callable[[str, str], bool], now: float,
-              pending: Callable[[str], bool] = lambda tok: False) -> list[Gap]:
-    """The gaps of one open item, in line order (a stored wait's first). `state`: "alive" (its lines are read) or "waiting" (its stored wait is read). `pending(token)` is true for a token the mover sent back or the server fixed: that gap is left out."""
+              pending: Callable[[str], bool] = lambda tok: False, open_after: bool = False, no_session: bool = False) -> list[Gap]:
+    """The gaps of one open item, in line order (a stored wait's first). `state`: "alive" (its lines are read) or "waiting" (its stored wait is read). `pending(token)` is true for a token the mover sent back or the server fixed: that gap is left out.
+    Of a waiting item, `open_after` says an item in its `after` is still open, and `no_session` that the owner, nobody or an outside party moves it: then only a wait nothing ends or a date that passed is a gap, and it carries no plan (the server fixes nothing on it)."""
     gaps: list[Gap] = []
     if state == "waiting":
-        for g in (stored_gap(meta, facts, gid, now), event_gap_stored(meta)):
+        unwoken = _watch.nothing_wakes(meta, open_after, lambda: facts.item_anchors(gid), facts.old_off)
+        first = stored_gap(meta, facts, gid, now)
+        if first is None and unwoken:
+            first = unwoken_gap(meta, facts, gid, now)
+        elif no_session and not unwoken:
+            first = None
+        if first is None:
+            first = overdue_gap(meta, facts, now)
+        if no_session and first is not None:
+            first = first._replace(plan={})
+        for g in (first, None if no_session else event_gap_stored(meta)):
             if g is not None and not pending(g.token):
                 gaps.append(g)
         return gaps

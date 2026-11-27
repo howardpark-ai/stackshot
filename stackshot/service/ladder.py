@@ -251,7 +251,7 @@ def ladder_do(act: str, gid: str, who: str, rec: dict[str, Any], now: float, min
     if act == "cold":
         if _handoff.handoff_peer(_load(gid), who):      # a peer front agent's item skips the cold call (its `close` and `ask_owner` answers would take the item from a mover nobody asked): on to the -main agent's request
             return _stallsvc.stall_builder(gid, who, now, minutes)
-        return _stallsvc.stall_cold(gid, who, now, minutes)
+        return _stallsvc.stall_cold(gid, who, now, minutes, cut=_ladder.via_of(rec) != "handoff")      # the cut (model_cuts.STALL_COLD_SKIP) is the stall pass's own: the hand-off audit's rung keeps its call
     return _stallsvc.stall_builder(gid, who, now, minutes)
 
 
