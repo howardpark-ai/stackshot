@@ -438,6 +438,7 @@ HINTS: dict[str, str] = {
     "a step to post a text with no draft": "when a step asks the owner to post or send a text, put the exact text in draft= or link the document that holds it.",
     "a bare URL in next or ask": "write a link in next or ask as [words](url), never a bare address.",
     "the owner left as mover with nothing to do": "an item the owner moves needs something of theirs (step=, or needs=decision with an ask); otherwise name a session as mover.",
+    "a park with nothing it waits for": "give a park what it waits for: until=YYYY-MM-DD, after=[<item>], a scoped anchor with a backstop date, or recycle=true; else set no park.",
 }
 
 # kind of refusal with no hint, and why none fits: a repeating one is listed with this line, and asks for nothing.

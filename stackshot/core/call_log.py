@@ -472,6 +472,7 @@ _KINDS: tuple[tuple[str, str], ...] = (
     (r"has a bare URL", "a bare URL in next or ask"),
     (r"left with .{0,60} as its mover but nothing for", "the owner left as mover with nothing to do"),
     (r"you owe a project-page update", "a page update owed (no longer refused)"),
+    (r"Refused: a (?:park|hold) names what it waits for", "a park with nothing it waits for"),
 )
 _KIND_RX = tuple((re.compile(p, re.I), name) for p, name in _KINDS)
 

@@ -142,6 +142,7 @@ def part_refusal_report():
         "Refused: a wait runs at most 7 days from the item's last move ([waiting] cap_days), and this wake is 20 days out. A longer one needs words or wait_basis.": "a date past the wait cap",
         "Refused: next line 'x: wait for the build' reads as a wait (wait word) on an alive item. Set the wait (wait_basis=...) or write the action.": "a line of next that reads as a wait on a live item",
         "Refused: wait_basis is one line of 12 to 300 characters": "a wait_basis the rule does not take",
+        "Refused: a park names what it waits for; an unconditional or indefinite park is refused. Give it a date (until=YYYY-MM-DD with wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\")": "a park with nothing it waits for",
         "Refused: clear_wait_basis drops the basis; it does not go with a new wait_basis": "a wait_basis the rule does not take",
         f"Refused: {BID(7)} waits on a fleet event but its input is missing: wait_event=<the event>. If the item should not wait, drop the wait with update clear_wait=true (wait_kind, wait_anchor, wait_event and until go together).": "a wait with an input missing",
         "Refused: hold is not a parameter any more: a park is until": "a retired input",
