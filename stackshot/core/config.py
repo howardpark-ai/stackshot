@@ -612,10 +612,20 @@ def audit_balance_minutes() -> float:
 
 def audit_no_handoff() -> list[str]:
     """[audit] no_handoff: background agents (session names or ids) that no pass hands an item to, for an agent whose mandate covers one kind of work only: the balancer, the idle hand-over, the front hand-on, the builder step of the
-    hand-off and stall ladders, the orphan hand-over and a wake that passes a front agent's item to the builder (anchors.takes_handoff). Its own items are judged as any other's. Default none; a value that is not a list reads as
+    hand-off and stall ladders, the cold call, the return to the sender, the orphan hand-over and the pass of an item to another session when its wait ends (anchors.takes_handoff). Its own items are judged as any other's. Default none; a value that is not a list reads as
     none, and an entry that is not text or is blank is left out. Read at use."""
     v = get("audit", "no_handoff")
     return [s.strip() for s in v if isinstance(s, str) and s.strip()] if isinstance(v, list) else []
+
+
+def audit_no_handoff_notes(cfg: dict[str, Any] | None = None) -> list[str]:
+    """notes()'s lines for [audit] no_handoff: a value that is not a list, and each entry that is not text or is blank. A name that matches no agent is anchors.no_handoff_notes' line (it reads the role map)."""
+    v = get("audit", "no_handoff", cfg=cfg)
+    if v is None:
+        return []
+    if not isinstance(v, list):
+        return [f'[audit] no_handoff = {v!r} is not a list, so it is read as empty and every agent takes hand-offs: write no_handoff = ["<session name>"]']
+    return [f"[audit] no_handoff: the entry {e!r} is not a session name or id, so it is left out" for e in v if not (isinstance(e, str) and e.strip())]
 
 
 def audit_orphan_handover() -> str:
@@ -1513,6 +1523,7 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     out += keyword_notes(cfg)
     out += gmail_names_notes(cfg)
     out += answer_frame_notes(cfg)
+    out += audit_no_handoff_notes(cfg)
     if behind_door_settings(cfg).members:       # the front door's list is the board's members: the keys below name nobody (behind_door.notes says so)
         pass
     elif not _members().build(cfg)[0].declared:

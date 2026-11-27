@@ -338,7 +338,9 @@ class Env:
     pane: Callable[[str], str] = lambda who: ""                              # "" when the session may have a live pane, else why not (the message tool's dead-pane rule)
     status: Callable[[str], tuple[str, float]] = lambda who: ("", 0.0)       # (busy | idle | shell | "", when the status last changed, epoch s) from the CLI's registry
     started: Callable[[str], float] = lambda who: 0.0                        # when the session's live process started (epoch s; 0.0 when unknown) from the CLI's registry: a start after the delivery is a relaunch
-    background: Callable[[str], list[str]] = lambda project: []              # the project's builder alone (a list of one, or none)
+    background: Callable[[str], list[str]] = lambda project: []              # the builder a pass may hand to (a list of one, or none)
+    builder: Callable[[str], list[str]] = lambda project: []                 # the project's builder, whether or not a pass may hand to it (read for the words of a `recover` step alone)
+    takes: Callable[[str], bool] = lambda who: True                          # may a pass hand an item to this session ([audit] no_handoff)? Asked of the sender before an item goes back to it
     exempt: Callable[[dict[str, Any], str], bool] = lambda item, who: False  # a front agent: never clocked, except a peer's hand-off (`peer`)
     peer: Callable[[dict[str, Any], str], bool] = lambda item, who: False    # (item, mover) -> the hand-off is a listed session's to a front agent of a front-only project (`front_handed_by_peer`): clocked by the take minutes alone, reminded as a background agent is
     anchored: Callable[[str, dict[str, Any]], bool] = lambda gid, item: False  # an anchor scoped to the item and added at or after the hand-off: a build in flight, counted as taken (the server reads the anchors once per pass)
@@ -363,6 +365,7 @@ class Step:
     sender: str = ""         # who handed it to `frm` (told, one line, when it is a session)
     why_short: str = ""
     keep_frm: bool = False   # a move that leaves `frm` named in `needs` after the new mover (a front agent that hands its own step on stays told of the item); the writer drops `frm` from `needs` otherwise
+    tell: bool = False       # the audit's hand-over to a front agent that has to be told, its project having no builder to go to (successor.Pick.told): it is sent the one hand-off notice
 
 
 def _minutes_text(m: float) -> str:
@@ -413,7 +416,7 @@ def _due(r: dict[str, Any], env: Env, who: str, clock_only: bool = False) -> str
 
 def next_step(item: dict[str, Any], r: dict[str, Any] | None, old: str, why: str, env: Env, *, gid: str = "", allow_return: bool = True, cold_ok: bool = True) -> Step:
     """Section 5, in order, for an item whose mover `old` cannot or did not take it: the project's builder when not yet tried and with a pane; the cold call, once; the sender
-    (`allow_return`, and not the owner, a script or the server, nor the hander of a peer hand-off); else a `recover` step. `r` is the open record (None when the item has none)."""
+    (`allow_return`, and not the owner, a script or the server, nor the hander of a peer hand-off, nor a session no pass may hand to, `env.takes`); else a `recover` step. `r` is the open record (None when the item has none)."""
     meta = item.get("metadata") or {}
     allow_return = allow_return and not (r or {}).get("stall") and not env.ladder and not env.peer(item, old)      # the stall pass moves an item on from a mover with no turn; it never sends it back to a sender, and neither does the one ladder, nor a peer hand-off (the item is the new mover's, whichever session handed it: the last rung is the request to the -main agent)
     tried = [clean(x) for x in [*((r or {}).get("tried") or []), old] if clean(x)]
@@ -427,13 +430,16 @@ def next_step(item: dict[str, Any], r: dict[str, Any] | None, old: str, why: str
         cold = (r or {}).get("cold") if isinstance((r or {}).get("cold"), dict) else None
         if env.cold_call and cold_ok and not cold and not env.peer(item, old):      # a peer front agent's item is never put to the cold call: its `close` and `ask_owner` answers would take the item from a mover nobody asked
             return Step("cold", gid, why, old, sender=sender if is_session_name(sender) else "")
-        if allow_return and is_session_name(origin) and not is_tried(origin) and not env.is_front(origin, clean(meta.get("project"))) and not env.pane(origin):
+        if allow_return and is_session_name(origin) and not is_tried(origin) and not env.is_front(origin, clean(meta.get("project"))) and env.takes(origin) and not env.pane(origin):
             return Step("move", gid, why, old, origin, "return", origin)
     reasons = [why]
     if not env.background(clean(meta.get("project"))):
-        reasons.append("the project lists no builder")
-    if allow_return and is_session_name(origin) and not is_tried(origin) and not env.is_front(origin, clean(meta.get("project"))) and env.pane(origin):
-        reasons.append(f"its sender {env.label(origin)} cannot take it back ({env.pane(origin)})")
+        reasons.append("the project's builder takes no hand-offs ([audit] no_handoff)" if env.builder(clean(meta.get("project"))) else "the project lists no builder")
+    if allow_return and is_session_name(origin) and not is_tried(origin) and not env.is_front(origin, clean(meta.get("project"))):
+        if not env.takes(origin):
+            reasons.append(f"its sender {env.label(origin)} takes no hand-offs ([audit] no_handoff)")
+        elif env.pane(origin):
+            reasons.append(f"its sender {env.label(origin)} cannot take it back ({env.pane(origin)})")
     return Step("recover", gid, "; ".join(reasons), old, sender=sender if is_session_name(sender) else "")
 
 

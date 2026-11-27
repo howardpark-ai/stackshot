@@ -109,6 +109,7 @@ from stackshot.web.publish import _publish_if_idle  # noqa: E402  — the idle t
 from stackshot.router import router_live as _router_live  # noqa: E402  — the router: its loop is started by `_start_background`
 from stackshot.projects import projects as _prj  # noqa: E402  — the project record: the registry stamp the start runs (`stamp_registry`)
 from stackshot.projects.project_registry import _roles_sync_safe  # noqa: E402  — roles.json, with projects.json beside it, made at the start (projects/project_registry.py)
+from stackshot.anchors import anchors as _anc  # noqa: E402  — `no_handoff_notes()`: the names under [audit] no_handoff that match no agent, said at the start and on a reload
 if _ro.is_read_only():
     # a warm standby copy changes nothing: no directory is made, and any file write under the instance's own directories is refused
     _ro.install_backstop([_store.STORE, _cfg.state(), *(_cfg.path("paths", k) for k in ("repo", "markdown", "brain", "project_touch") if _cfg.get("paths", k))])
@@ -168,6 +169,8 @@ def _on_hup() -> None:
           + (f"; waiting for a restart: {', '.join(_cfg.PENDING)}" if _cfg.PENDING else ""), file=sys.stderr, flush=True)
     if _ro.is_read_only():                  # the config is re-read; a standby copy has no stall pause to check and publishes nothing
         return
+    for n in _anc.no_handoff_notes():
+        print(f"config: {n}", file=sys.stderr, flush=True)
     try:
         _stallsvc.stall_pause_reload()
         _stallsvc.stall_pause_check()                                  # a pause of the stall pass read by this reload begins its clock now (the start line); the warning with its end is config.reload's own, once (config.notes carries stall_notes)
@@ -211,7 +214,7 @@ def _start_background() -> list[str]:
     _roles_sync_safe()                      # roles.json is current from the first second, before any publish (and projects.json beside it)
     _stallsvc.stall_pause_reload()
     _stallsvc.stall_pause_check()                    # a pause of the stall pass read at the start begins its clock now (or keeps the one in <state>/stall_pause.json) and logs its end time
-    for _n in _cfg.notes():                 # a setting missing from the one-file config that changes behaviour silently (the page rules off): a pause of the stall pass, with its end
+    for _n in _cfg.notes() + _anc.no_handoff_notes():      # a setting missing from the one-file config that changes behaviour silently (the page rules off): a pause of the stall pass, with its end; a name under [audit] no_handoff that matches no agent
         print(f"config: {_n}", file=sys.stderr, flush=True)
     _wait_fixes._wait_alias_check()                     # one warning when [model] wait_alias_until is missing: the code's default end of the alias window stands
     _gates.post_wake_alias_check()                      # one warning when [model] post_wake_alias_until is missing: the code's default end of the alias window stands

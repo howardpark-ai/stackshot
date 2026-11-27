@@ -9,6 +9,7 @@ this module reads that mark and decides which items are handed on. It decides an
   due(items, gid, now, front)                   {"mover", "project", "line_at", "told_none"} when the item is to be handed on now, else None
   due_all(items, now, front)                    [(gid, row)] of every such item, in id order; reads only
   subagent_hold(items, gid, mover, same, subagents, prs)   why a running subagent keeps the item with its mover, "" when none does
+  hold_kind(why)                                which of those reasons can last for good ("unread", "untied"), "" for the rest
   busy_movers(items, now)                       the movers of the open items that are on an agent (a builder among them is not free)
   pick_free(candidates, busy, status, dead, same, frm)   the first candidate that is free, "" when none is
   mark_handed / mark_none                       the record `metadata.hand_idle` ({"handed_at", "from", "to", "none_at", "mover_told_at"}) that keeps the limits
@@ -31,8 +32,8 @@ background agents, best first, less those `[audit] no_handoff` names, and no oth
 item per 24 hours, and the item's MOVER is told as well (the owner's pick): the item stays on agent and the mover gets one message that it holds an item with no activity, again every hour (`MOVER_EVERY`) for as long as the item stays idle, so it
 ends when the mover works on the item (its clock moves) or hands it back; the owner is never told. At most `MAX_PER_TICK` items are handed on in one pass.
 
-NO ITEM A SUBAGENT MAY BE WORKING ON IS MOVED (`subagent_hold`, which this pass and the balancer ask before a move). An idle line can be hours old and a step status is only what the mover wrote, so both passes read the
-subagents the mover runs now, as the fleet's last agent-state push lists them. The item stays when one of them is tied to it (audit/subagent_tie.py), when one is tied to none of the mover's open items (it may be working on
+NO ITEM A SUBAGENT MAY BE WORKING ON IS MOVED (`subagent_hold`, which every pass that changes an item's mover asks through service/move_hold.py; that module also says what is told when a hold goes on). An idle line can be hours
+old and a step status is only what the mover wrote, so a pass reads the subagents the mover runs now, as the fleet's last agent-state push lists them. The item stays when one of them is tied to it (audit/subagent_tie.py), when one is tied to none of the mover's open items (it may be working on
 this one), and when the subagents of a mover that has a pane cannot be read. A mover with no pane runs none. A subagent started after the last push (one every five minutes or so) is not seen.
 
 THE BALANCER (`[audit] balance`, on by default; `audit_ticks._balance_tick`, its own minute tick ahead of the hand-off tick). The same module decides, the server writes. An item that is NOT STARTED (an untaken hand-off to a
@@ -198,6 +199,19 @@ def due_all(items: dict[str, dict[str, Any]], now: float, front: Callable[[Any, 
     return out
 
 
+# `subagent_hold`'s three reasons, and the two of them that can hold an item for good (`hold_kind`: what service/move_hold.py reports)
+HOLD_UNREAD = "its subagents could not be read"
+HOLD_TIED = "a subagent of the mover is running on it"
+HOLD_UNTIED = "a subagent of the mover is running that is tied to none of its open items"
+
+
+def hold_kind(why: str) -> str:
+    """"unread" or "untied" for a reason of `subagent_hold` that no work on the item itself need ever end; "" for a subagent tied to the item, and for no reason."""
+    if why.startswith(HOLD_UNREAD):
+        return "unread"
+    return "untied" if why == HOLD_UNTIED else ""
+
+
 def subagent_hold(items: dict[str, dict[str, Any]], gid: str, mover: str, same: Callable[[Any, Any], bool], subagents: Callable[[str], list[dict[str, Any]]], prs: dict[str, Any] | None = None) -> str:
     """Why a running subagent keeps the open item `gid` with `mover`, "" when none does: one is tied to the item (`subagent_tie.tied_to`: its description, else its brief, names the item or a pull request anchored to it), one
     is tied to none of the mover's open items (it may be working on this one, as the hourly line reads it), or the subagents cannot be read. Subagents that are all tied to other open items of the mover's hold nothing.
@@ -205,7 +219,7 @@ def subagent_hold(items: dict[str, dict[str, Any]], gid: str, mover: str, same: 
     try:
         subs = list(subagents(mover) or [])
     except Exception as e:  # noqa: BLE001  — a read that fails is no proof that nothing runs
-        return f"its subagents could not be read ({e})"
+        return f"{HOLD_UNREAD} ({e})"
     if not subs:
         return ""
     from stackshot.tools import next_report as _nr  # noqa: PLC0415
@@ -222,9 +236,9 @@ def subagent_hold(items: dict[str, dict[str, Any]], gid: str, mover: str, same: 
     cands = {g: (_nr.shown(g), (prs or {}).get(g, ())) for g in mine}
     ties = [_tie.tied_to(s, cands) for s in subs]
     if any(gid in t for t in ties):
-        return "a subagent of the mover is running on it"
+        return HOLD_TIED
     if not all(ties):
-        return "a subagent of the mover is running that is tied to none of its open items"
+        return HOLD_UNTIED
     return ""
 
 

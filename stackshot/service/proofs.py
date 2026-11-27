@@ -42,6 +42,7 @@ from stackshot.model.bullet_text import _clip_line
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_of, _needs_store
 from stackshot.service import checks as _checks
 from stackshot.service import handoff as _handoff
+from stackshot.service import move_hold as _mhold
 from stackshot.service import released_live as _live
 from stackshot.service import stall as _stallsvc
 from stackshot.service import telling as _telling
@@ -51,6 +52,7 @@ from stackshot.service.checks_hooks import hooks as _hooks
 from stackshot.service.store import _load, _load_open
 from stackshot.waits import wait_end as _we
 from stackshot.waits import handover as _hv
+from stackshot.waits import stall as _stall
 from stackshot.waits import watchers as _watch
 
 
@@ -223,10 +225,11 @@ def handover_down(name: str) -> str:
         return f"its pane could not be read ({e.__class__.__name__})"
 
 
-def handover(gid: str, now: float, done: list[str], dry: bool = False, defer: "list[Callable[[], Any]] | None" = None) -> dict[str, Any] | None:
+def handover(gid: str, now: float, done: list[str], dry: bool = False, defer: "list[Callable[[], Any]] | None" = None, by_pass: bool = False) -> dict[str, Any] | None:
     """A step of the item is done (ticked by its proof, or marked by hand) and the item is still open: when the next open step opens with another session, the item's mover becomes that session and it is told, with the step's text
     (handover.py has the rules). That session down or unknown: the item stays with its mover, who is told the step and why. The owner, a front agent and a name that is no session: nothing moves. Idempotent by the record
-    `metadata.handover` (the step's hash and what was done). `done` = the first lines of the steps just done. Takes the item lock itself. → the row {action: moved | fallback | left | none, to, step, why, told}, None when the item is closed."""
+    `metadata.handover` (the step's hash and what was done). `done` = the first lines of the steps just done. `by_pass` (a proof pass's own tick, not a step a session marked): a mover whose subagent may be at work on the item keeps it (move_hold.py), History and the mover are
+    told once, nothing is recorded as handed over and nothing retries. Takes the item lock itself. → the row {action: moved | fallback | held | left | none, to, step, why, told}, None when the item is closed."""
     sends: list[tuple[str, str, str, bool]] = []      # (gid, the session id or name, the notice, whether it stands as told to that session): collected under the item lock, sent when it is let go
     def flush() -> None:
         for g, to, text, told in sends:
@@ -234,7 +237,7 @@ def handover(gid: str, now: float, done: list[str], dry: bool = False, defer: "l
             if told:        # recorded after the send returned: a send that raised is not "told" (the release event then tells that session itself)
                 PROOF_TOLD_SID[g] = (to, now)
     try:
-        return _handover_locked(gid, now, done, dry, sends)
+        return _handover_locked(gid, now, done, dry, sends, by_pass)
     finally:
         if defer is not None:
             defer.append(flush)         # the caller holds the item lock round a loop of items: it sends what was collected when it lets go
@@ -242,7 +245,7 @@ def handover(gid: str, now: float, done: list[str], dry: bool = False, defer: "l
             flush()
 
 
-def _handover_locked(gid: str, now: float, done: list[str], dry: bool, sends: list[tuple[str, str, str, bool]]) -> dict[str, Any] | None:
+def _handover_locked(gid: str, now: float, done: list[str], dry: bool, sends: list[tuple[str, str, str, bool]], by_pass: bool = False) -> dict[str, Any] | None:
     """The body of `handover`, under the item lock; the notices are appended to `sends`, not sent."""
     with _writes.ITEM_LOCK:
         it = _load(gid)
@@ -269,6 +272,16 @@ def _handover_locked(gid: str, now: float, done: list[str], dry: bool, sends: li
             if frm and not _model.is_owner(frm) and not _telling.front_keeper(frm, project)[0]:
                 sends.append((gid, _hooks().session_id(frm), f"[stackshot] {_gh.shown(gid)}: the next step is {_session_label(to)}'s ({step}), but {_session_label(to)} cannot take the item now ({_clip_line(plan['why'], 100)}), "
                             f"so it stays with you. Do the step yourself, hand the item to another session, or reword the step. {subject} ({project}) → {_telling.notice_link(gid)}", False))
+                row["told"] = _session_label(frm)
+            return row
+        if by_pass and frm and (keeps := _mhold.held(gid, frm, now, once=True)):
+            _stall.note(meta, now, f"step hand-over: the next step is {_session_label(to)}'s, but the item stays with {_session_label(frm)}: {keeps}")
+            it["metadata"] = meta
+            _writes.save(gid, it, note=f"step hand-over: {did} is done and the next step is {_session_label(to)}'s, but the item stays with {_session_label(frm)}: {step}")
+            row.update(action="held", why=keeps)
+            if not _model.is_owner(frm) and not _telling.front_keeper(frm, project)[0]:
+                sends.append((gid, _hooks().session_id(frm), f"[stackshot] {_gh.shown(gid)}: {did} is done and the next step is {_session_label(to)}'s ({step}), but the item stays with you: {keeps}. "
+                            f"Hand it to {_session_label(to)} when your work on it is done, or do the step yourself. {subject} ({project}) → {_telling.notice_link(gid)}", False))
                 row["told"] = _session_label(frm)
             return row
         keep = [x for x in _needs_of(meta) if x.lower() in _NEEDS_KINDS or not (_handoff.ho_same(x, frm) or _handoff.ho_same(x, to))]
@@ -411,11 +424,11 @@ def proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: b
         print(f"released: {gid} " + (f"ticked without telling its mover: every other open step waits on another PR" if quiet else f"mover was told already that {ref} is {word}" if already else f"has no mover to tell that {ref} is {word}"), file=sys.stderr, flush=True)
     if pure and not quiet:      # the ticked step may leave another session's step next: that session is handed the item and told (handover.py)
         try:
-            ho = handover(gid, now, row["ticked"], defer=sends)
+            ho = handover(gid, now, row["ticked"], defer=sends, by_pass=True)
         except Exception as e:  # noqa: BLE001  — the tick is saved: a hand-over that fails is a stderr line, and the audit finds the next session unreached
             ho = None
             print(f"released: {gid} hand-over not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        if ho and ho.get("action") in ("moved", "fallback"):
+        if ho and ho.get("action") in ("moved", "fallback", "held"):
             row["handover"] = {k: ho[k] for k in ("action", "to", "step", "why", "told")}
     return row
 

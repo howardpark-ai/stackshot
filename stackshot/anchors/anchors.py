@@ -818,6 +818,22 @@ def takes_handoff(who: str) -> bool:
     return not any(same_session(who, n) for n in _cfg.audit_no_handoff())
 
 
+def no_handoff_notes() -> list[str]:
+    """One line for each [audit] no_handoff entry that names no agent: neither a session the role map lists nor one the sessions registry knows, by name, alias or id. Such an entry keeps nobody out of a pass, so a misspelt
+    name is said at the start and on a reload (web/server.py). [] while the role map is empty (nothing to judge a name by), and when it cannot be read."""
+    listed = _cfg.audit_no_handoff()
+    if not listed:
+        return []
+    try:
+        roles = session_roles()
+        if not roles:
+            return []
+        return [f"[audit] no_handoff names {n!r}, and no agent of that name is listed on a project page or known to the sessions registry: it keeps nobody out of a pass"
+                for n in listed if not any(same_session(r, n) for r in roles) and _sr.row(n) is None]
+    except Exception as e:  # noqa: BLE001
+        return [f"[audit] no_handoff: its names were not checked against the role map ({e.__class__.__name__}: {e})"]
+
+
 def takers_ranked(project: str, reg: dict[str, dict[str, Any]] | None = None) -> list[tuple[int, int, str]]:
     """background_ranked less the agents [audit] no_handoff names: whom a pass may hand an item of `project` to, best first."""
     return [r for r in background_ranked(project, reg) if takes_handoff(r[2])]

@@ -89,6 +89,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.service import audit_ticks as _hold_ticks; _hold_ticks._move_hold = lambda *a, **k: (lambda gid, mover: "")      # no mover in this suite runs a subagent: the hold every pass asks before it changes a mover (service/move_hold.py) is tests/move_hold_scenario.py's
 from stackshot.web.tools import get as _get_tool
 from stackshot.service import item_read as _item_read
 from stackshot.service import update as _update_svc

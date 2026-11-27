@@ -64,6 +64,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.service import writes
+from stackshot.service import audit_ticks as _hold_ticks; _hold_ticks._move_hold = lambda *a, **k: (lambda gid, mover: "")      # no mover in this suite runs a subagent: the hold every pass asks before it changes a mover (service/move_hold.py) is tests/move_hold_scenario.py's
 from stackshot.web import publish as _web_publish
 from stackshot.web import page_debts as _web_page_debts
 from stackshot.web.tools import anchors as _wt_anchors

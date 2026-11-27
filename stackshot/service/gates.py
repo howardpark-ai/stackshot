@@ -1481,12 +1481,14 @@ def gate_handoff(gid: str, before: dict[str, Any] | None, after: dict[str, Any],
             return
         project = str((after.get("metadata") or {}).get("project") or "")
         live = [n for n in _handoff.handoff_background(project) if not _handoff.ho_same(n, to) and not _handoff.handoff_pane(n)]
+        listed = [] if live else [n for _c, _o, n in _anc.background_ranked(project) if not _anc.takes_handoff(n) and not _handoff.ho_same(n, to) and not _handoff.handoff_pane(n)]
     except Exception as e:  # noqa: BLE001
         print(f"handoff: {gid} send-time check failed, writing as before: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return
     raise ToolError(f"Refused: {_gh.shown(gid) if gid else 'this item'} cannot be handed to {_session_label(to)}: {why}, so the hand-off would never be read. "
                     + (f"The project's background agent {live[0]} has a pane: hand it to {live[0]} (needs=[\"{live[0]}\"]) and it takes it from there." if live
-                       else f"The project has no background agent with a pane either: hand it to a session that has one, or put the call to {OWNER} (needs=decision with its ask)."))
+                       else (f"No background agent is named here: the project's with a pane ({', '.join(listed)}) take no hand-offs ([audit] no_handoff). Hand it to" if listed else "The project has no background agent with a pane either: hand it to")
+                       + f" a session that has one, or put the call to {OWNER} (needs=decision with its ask)."))
 
 
 _RX_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")

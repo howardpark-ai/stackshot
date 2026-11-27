@@ -209,6 +209,7 @@ def part_roster():
 
     # ---------------------------------------------------------------- 6. agreement with the older tests, and the two server rules
     from stackshot.web import server  # noqa: E402
+    from stackshot.service import audit_ticks as _hold_ticks; _hold_ticks._move_hold = lambda *a, **k: (lambda gid, mover: "")      # no mover in this suite runs a subagent: the hold every pass asks before it changes a mover (service/move_hold.py) is tests/move_hold_scenario.py's
     from stackshot.model import holders as _holders  # noqa: E402
     from stackshot.service import item_read as _item_read  # noqa: E402
     from stackshot.web import publish as _web_publish
@@ -324,6 +325,7 @@ def part_ladder():
     def ho(i): return mt(i).get("handoff") or {}
     sys.path.insert(0, STACK); logging.disable(logging.INFO)
     from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+    from stackshot.service import audit_ticks as _hold_ticks; _hold_ticks._move_hold = lambda *a, **k: (lambda gid, mover: "")      # no mover in this suite runs a subagent: the hold every pass asks before it changes a mover (service/move_hold.py) is tests/move_hold_scenario.py's
     from stackshot.service import pane_recovery as _pane_recovery
     from stackshot.core import instance as _core_instance
     from stackshot.anchors import anchors as _anc
@@ -577,6 +579,7 @@ def part_project():
             d = rd(i); d["status"] = "completed"; (T / sid(i)).write_text(json.dumps(d))
     sys.path.insert(0, STACK); logging.disable(logging.INFO)
     from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route
+    from stackshot.service import audit_ticks as _hold_ticks; _hold_ticks._move_hold = lambda *a, **k: (lambda gid, mover: "")      # no mover in this suite runs a subagent: the hold every pass asks before it changes a mover (service/move_hold.py) is tests/move_hold_scenario.py's
     from stackshot.web.tools import update as _wt_update, create as _wt_create, message as _wt_message
     from stackshot.web.routes import client_api as _rt_client
     from stackshot.fleet import client as _client

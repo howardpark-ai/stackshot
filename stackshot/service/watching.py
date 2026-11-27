@@ -26,11 +26,14 @@ from stackshot.model import model as _model
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.needs import _after_of, _waits_decision
 from stackshot.router import routing as _routing
+from stackshot.service import agents as _agents
+from stackshot.service import move_hold as _mhold
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.store import _legacy_hold, _load, _load_open
 from stackshot.service.wake_hooks import hooks as _hooks
 from stackshot.waits import event_waits as _ew
+from stackshot.waits import stall as _stall
 from stackshot.waits import wait_list as _wl
 from stackshot.waits import waiting as _wt
 from stackshot.waits import watchers as _watch
@@ -78,11 +81,25 @@ def passed_note(front: str) -> str:
 def _front_to_background(post: str, meta: dict[str, Any]) -> str:
     """When a wait ends on a front agent (a session he talks to), the item goes to the project's builder instead: the front agent is not told by the wake and hears of the item only on a turn he gives it
     (the History line names it). → the builder's name, or "" when the item stays with `post`: `post` is not a front agent, the project has no builder (the ended wait's fallback stays, as for the answers
-    and fallbacks in handoffs.md), or an open step or the ask names `post` itself to act. A builder `[audit] no_handoff` names is passed over (`anchors.taker_of`)."""
+    and fallbacks in handoffs.md), or an open step or the ask names `post` itself to act. A builder `[audit] no_handoff` names is passed over (`anchors.taker_of`). watch_fire keeps the item with `post` all the same while a subagent of it may be at work on it (move_hold.py)."""
     project = str(meta.get("project") or "")
     if not post or not _telling.front_keeper(post, project)[0] or _telling.own_step(meta, post):
         return ""
     return (_anc.taker_of(project) or [""])[0]
+
+
+def _unlisted_taker(post: str, meta: dict[str, Any], mod: "_model.Model") -> str:
+    """When nothing names who picks a waiting item up, `post` is stackshot's own pick (the project's builder, else its -main agent). An agent `[audit] no_handoff` names is not given an item that way: → the builder a pass
+    may hand to, else the -main agent if it may, and "" when `post` stands: it was written by a session or the owner (the stored mover, or a session in needs), it takes hand-offs, or nobody else can."""
+    if not post or _model.is_owner(post) or mod.wait is None or mod.wait.mover_explicit or _anc.takes_handoff(post):
+        return ""
+    if any(_anc.same_session(post, str(n)) for n in _wt.needs_of(meta)):
+        return ""
+    project = str(meta.get("project") or "")
+    for who in (*_anc.taker_of(project), _agents._main_agent(project)):
+        if who and not _model.is_owner(who) and _anc.takes_handoff(who):
+            return who
+    return ""
 
 
 def watch_ask(gid: str, meta: dict[str, Any], what: str) -> tuple[str, list[dict[str, Any]]]:
@@ -176,7 +193,24 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
             what = _watch.what_item_backstop(date, [_gh.shown(g) for g in _hooks().after_open(meta)])
         else:
             what = f"its ask-by day {_watch.relay_day(meta)} came"
-        passed = ""                                     # the front agent whose wait ended and whose item went to the project's builder instead (_front_to_background)
+        passed = unlisted = ""                          # the front agent whose wait ended and whose item went to the project's builder instead (_front_to_background); the picker nobody wrote that takes no hand-offs, likewise (_unlisted_taker)
+
+        def other_mover() -> str:
+            """The session the end of the wait gives the item to instead of `post`, "" when it stays: not taken from a session whose subagent may be at work on it (move_hold), which History says."""
+            nonlocal passed, unlisted
+            back = _front_to_background(post, meta)
+            to = back or _unlisted_taker(post, meta, mod)
+            if not to:
+                return ""
+            keeps = _mhold.held(gid, post, now, once=True)
+            if keeps:
+                _stall.note(meta, now, f"the wait ended: the item stays with {watch_label(post)} and does not pass to {watch_label(to)}: {keeps}")
+                return ""
+            if back:
+                passed = post
+            else:
+                unlisted = post
+            return to
         chased = _watch.chased_out(meta)
         list_relay = kind == _wl.LIST and cause == "backstop" and bool(_wl.lines_by_kind(meta, "relay"))      # the backstop day with a relay line still open asks the owner, as a relay's ask-by day does
         ask_him = (cause == "relay" and kind != _wl.LIST) or (cause == "backstop" and chased) or list_relay      # a relay LINE that arrived (the owner relayed it) is an arrival, not a question
@@ -193,18 +227,16 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
             _watch.turn_to_owner(meta, mod.then, ask, opts, what, now, picker=post)      # he picks it up: the `then` that stands beside him survives the wake
             mover = OWNER
         elif cause == "time" and _ends_on_the_date(meta, mod):
-            back = _front_to_background(post, meta)      # (an item that waits on his decision with no stored front mover has him as `post`: it never gets here)
+            back = other_mover()                         # (an item that waits on his decision with no stored front mover has him as `post`: it never gets here)
             if back:                                     # the builder is the mover now, and the one session in needs as on every other path; an item that goes back to others (`external`) stays so: only its mover changes
                 meta["mover"] = back
                 if "external" not in [str(n).strip().lower() for n in _wt.needs_of(meta)]:
                     meta["needs"] = [back]
-                passed, post = post, back
+                post = back
             _watch.end_date(meta, what, post, now)       # a wait on the date alone ends with the date: needs, the open after link and the mover stay as stored
             mover = post
         else:
-            back = _front_to_background(post, meta)
-            if back:
-                passed, post = post, back
+            post = other_mover() or post
             _watch.turn_alive(meta, post, what, now)
             mover = post
         _hooks().state_end(meta)                                # a stored state of the old wait is over with it: the item reads from its fields
@@ -212,12 +244,13 @@ def watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, 
             it["confirmed"] = _hooks().rmod_confirmed_at(it)
         it["metadata"] = meta
         it["updated"] = it["state_updated"] = now
-        by_front = passed_note(passed)
+        by_front = passed_note(passed) or (f" ({watch_label(unlisted)} takes no hand-offs, [audit] no_handoff: the item passes to {watch_label(mover)})" if unlisted else "")
         told = meta.get("mover") if mover == OWNER else ""      # of several members, the one it asks (turn_to_owner stores it; with one member it stores none)
         _writes.save(gid, it, note=(f"woke: {what} → {watch_label(mover)}{by_front}" if mover != OWNER else f"the wait ended: {what}; asks {told or OWNER}: {meta.get('ask')}"))
-        print(f"watch: {gid} {kind} wait over ({cause}) → {told or mover}{' (passed over ' + passed + ')' if passed else ''} — {it.get('subject')}", file=sys.stderr, flush=True)
+        print(f"watch: {gid} {kind} wait over ({cause}) → {told or mover}{' (passed over ' + (passed or unlisted) + ')' if passed or unlisted else ''} — {it.get('subject')}", file=sys.stderr, flush=True)
         if mover != OWNER:
-            out.setdefault(_hooks().session_id(mover), []).append((gid, it, what + (f"; it was {watch_label(passed)}'s, a front agent's, and passes to you" if passed else "")))
+            why_you = f"; it was {watch_label(passed)}'s, a front agent's, and passes to you" if passed else f"; {watch_label(unlisted)} takes no hand-offs, so it comes to you" if unlisted else ""
+            out.setdefault(_hooks().session_id(mover), []).append((gid, it, what + why_you))
         return True
 
 

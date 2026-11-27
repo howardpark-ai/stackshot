@@ -14,8 +14,9 @@ answer twice and a second run finds nothing left to do.
                                            4. scope    the scope's general -main agent (anchors.general_main)
                                            None when nothing is live: the item stays and is reported, never given to a guess
                                            An ALIVE item tries the project's background agents first (tier "back": the builder, then the others): the minute pass sends no notice to a front agent
-                                           and never chases one, so a front agent takes an alive item only when no background agent is live (Pick.front, and the History line says so). A FRONT-ONLY project
-                                           (anchors.front_only) has no builder to go to, so its new holder is told once (Pick.told, FRONT_TOLD: the server sends the hand-off notice, service/handoff.py `handoff_exec`)
+                                           and never chases one, so a front agent takes an alive item only when no background agent can (Pick.front, and the History line says so). A project with no builder to
+                                           go to, FRONT-ONLY (anchors.front_only, FRONT_TOLD) or with every builder named by [audit] no_handoff (FRONT_TOLD_LISTED), has its new holder told once (Pick.told: the
+                                           server sends the hand-off notice, service/handoff.py `handoff_exec`)
   orphans(items, derive, gone)             the open items whose session of record is gone: an alive item's mover, a waiting item's post-wake mover; never an item a human moves
   plan(items, reg, derive, gone, ...)      orphans(), each with its pick: a row {gid, project, state, from, gone, to, reason, why} with `to` "" when nothing is live
 
@@ -70,16 +71,17 @@ def _chain(project: str, reg: dict[str, dict[str, Any]]) -> list[str]:
 _KIND_WORDS = {"main": "-main agent", "front": "front agent", "back": "background agent"}
 FRONT_NOTE = " (a front agent: no notice is sent to one, the item shows on the board)"
 FRONT_TOLD = " (a front agent of a project with no builder: it is sent the one hand-off notice)"      # a front-only project has nobody else to hold the item, so its new holder is told, once
+FRONT_TOLD_LISTED = " (a front agent of a project whose builders take no hand-offs ([audit] no_handoff): it is sent the one hand-off notice)"      # the same, where the builders there are take none
 
 
 def pick(project: str, reg: dict[str, dict[str, Any]], live: Callable[[str], bool], general: Callable[[str, dict[str, dict[str, Any]]], tuple[str, str]] | None = None,
-         alive: bool = False, back_of: Callable[[str], list[str]] | None = None) -> Pick | None:
+         alive: bool = False, back_of: Callable[[str], list[str]] | None = None, takes: Callable[[str], bool] | None = None) -> Pick | None:
     """The closest live session for an item of `project`, or None when no candidate is live. `live(name)` says whether a session can take work now; `general(project, reg)` → (agent, page) is the scope's
     general -main agent (default anchors.general_main). The order is the module's table; the first live candidate wins, so the same registry and liveness always give the same session.
     `alive` (the item has a mover who works it): a user-facing agent is never sent a notice by the minute pass and never chased, so a mover who is a front agent would not hear of the item. The project's
     background agents come first (`back_of(project)`: the builder, then the others; default: the background agents of the item's page and the pages above it, the page's order, builder first), and a front
-    agent takes the item only when no background agent is live; its Pick has `front` set and its reason says so. A waiting item's post-wake mover judges an arrival and is not pushed to either way, so
-    its order is the table's."""
+    agent takes the item only when no background agent is live; its Pick has `front` set and its reason says so, or `told` where the project has no builder to go to (none, or `takes(name)` refuses every one: the
+    caller's `live` and `back_of` leave the refused out themselves). A waiting item's post-wake mover judges an arrival and is not pushed to either way, so its order is the table's."""
     reg = reg or {}
     chain = _chain(project, reg)
     if alive:
@@ -87,8 +89,11 @@ def pick(project: str, reg: dict[str, dict[str, Any]], live: Callable[[str], boo
         for name in dict.fromkeys(backs):
             if live(name):
                 return Pick(name, f"closest live agent: the project's background agent {name} (an item with a mover goes to a session that is told of it)", "back")
-    only = alive and _anc.front_only(project, reg)      # a front-only project: the front agent that takes an alive item is told (the notice is the only way it hears of the item)
-    note = (FRONT_TOLD if only else FRONT_NOTE) if alive else ""
+    none_built = alive and _anc.front_only(project, reg)
+    builders = [n for c, _o, n in _anc.background_ranked(project, reg) if c < 2] if alive and not none_built and takes else []
+    refused = bool(builders) and not any(takes(n) for n in builders)
+    only = none_built or refused      # no builder to go to: the front agent that takes an alive item is told (the notice is the only way it hears of the item)
+    note = (FRONT_TOLD if none_built else FRONT_TOLD_LISTED if refused else FRONT_NOTE) if alive else ""
     own_key = next((k for k in chain if agents_of(reg[k])), "")
     if own_key:
         for name, kind in agents_of(reg[own_key]):
@@ -160,7 +165,7 @@ def plan(items: dict[str, dict[str, Any]], reg: dict[str, dict[str, Any]], deriv
          back_of: Callable[[str], list[str]] | None = None, takes: Callable[[str], bool] | None = None) -> list[dict[str, Any]]:
     """Each orphan with its successor: the orphan's row plus `to` (the session, "" when nothing is live), `tier`, `reason` and `why`, the sentence the item's History carries
     (`<session> is gone (<why>); closest live agent: …`). The candidates are asked for liveness once each. A name `takes(name)` refuses ([audit] no_handoff) is no successor in any tier; it still counts as a live agent
-    of its project."""
+    of its project. A row with no successor whose candidates held a live one that is refused says so in `reason` and `why`."""
     memo: dict[str, bool] = {}
 
     def live(name: str) -> bool:
@@ -172,13 +177,23 @@ def plan(items: dict[str, dict[str, Any]], reg: dict[str, dict[str, Any]], deriv
         return not any(live(n) for k in _chain(project, reg) for n, _kd in agents_of(reg[k]))
 
     rows = orphans(items, derive, gone, no_agent)
-    picks: dict[tuple[str, bool], Pick | None] = {}
+    picks: dict[tuple[str, bool], tuple[Pick | None, list[str]]] = {}      # (the pick, the live candidates `takes` refused)
     for r in rows:
         key = (r["project"], r["state"] == "alive")
         if key not in picks:
-            picks[key] = pick(r["project"], reg, lambda n: (takes is None or takes(n)) and live(n), general, alive=key[1], back_of=back_of)
-        p = picks[key]
+            passed: dict[str, None] = {}
+
+            def can(name: str) -> bool:
+                if not live(name):
+                    return False
+                if takes is None or takes(name):
+                    return True
+                passed[name] = None
+                return False
+            picks[key] = (pick(r["project"], reg, can, general, alive=key[1], back_of=back_of, takes=takes), list(passed))
+        p, refused = picks[key]
         who = label(r["from"]) if r["from"] else ""
-        r.update(to=p.name if p else "", tier=p.tier if p else "", front=bool(p and p.front), told=bool(p and p.told), reason=p.reason if p else "no live agent of the project, its parents, its hub or its scope",
-                 why=((f"{who} is gone ({r['gone']})" if who else r["gone"]) + (f"; {p.reason}" if p else "; no live successor was found")))
+        none = ("no agent that takes hand-offs is live: " + ", ".join(label(n) for n in refused) + (" is live but takes" if len(refused) == 1 else " are live but take") + " none ([audit] no_handoff)") if refused else ""
+        r.update(to=p.name if p else "", tier=p.tier if p else "", front=bool(p and p.front), told=bool(p and p.told), reason=p.reason if p else none or "no live agent of the project, its parents, its hub or its scope",
+                 why=((f"{who} is gone ({r['gone']})" if who else r["gone"]) + (f"; {p.reason}" if p else f"; {none or 'no live successor was found'}")))
     return rows

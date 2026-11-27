@@ -4,6 +4,7 @@ An item whose hand-off nobody took, or that went quiet, can be put to a fresh `c
 ask the owner. This module builds the call, runs it in a thread of its own (`handoff_cold`, started by `handoff.handoff_exec`), validates the answer and writes it through the update path as the author `cold-call`.
 The stall ladder's cold call is the same call with a narrower offer (hand to a session or close, never ask the owner): `stall_cold_kept` ends it when the answer names the mover the item already has, and
 `stall_cold_no_taker` when it names no one. A write the server refuses is made once more (`handoff_write`); refused twice, the fleet's builder is asked to recover the session (`handoff_recover`).
+No answer is written while a running subagent of the item's mover may be at work on it (move_hold.py), and an agent `[audit] no_handoff` names is neither offered nor accepted.
 
 `COLD_RUNNER` is where a test puts a callable that answers in place of a real call, and `HO_COLD_THREADS` holds the calls started (one at a time board-wide; a test joins them). What the call still reaches in
 server.py (the update write, the gates and limits a close is held to, the stall pass's state) comes through `Hooks` in service/handoff_hooks.py.
@@ -32,6 +33,7 @@ from stackshot.projects import pages as _pages
 from stackshot.router import page_debt as _page_debt
 from stackshot.router import router as _router
 from stackshot.service import handoff as _handoff
+from stackshot.service import move_hold as _mhold
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.handoff_hooks import hooks as _hooks
@@ -47,8 +49,8 @@ COLD_RUNNER: Any = None           # a test puts a callable here: runner(message)
 
 # ---- the cold call
 def handoff_agents(project: str) -> list[dict[str, str]]:
-    """The sessions the cold call may hand to: the project's background agents (its hub's page), each with its mandate and whether it has a pane. a front agent is not
-    offered; the call's answer is an automatic move, and none goes to a front agent (the ladder then tries the builder, else the fleet's builder is asked to recover the session)."""
+    """The sessions the cold call may hand to: the project's background agents (its hub's page), each with its mandate and whether it has a pane. A front agent is not
+    offered, nor is an agent `[audit] no_handoff` names; the call's answer is an automatic move, and none goes to either (the ladder then tries the builder, else the fleet's builder is asked to recover the session)."""
     out: list[dict[str, str]] = []
     try:
         reg = _anc.registry()
@@ -56,7 +58,7 @@ def handoff_agents(project: str) -> list[dict[str, str]]:
         hub = _anc.hub_of(project, reg)
         idx = _sessions_index()
         for n, r in roles.items():
-            if r.get("role") != "back" or _anc.hub_of(r.get("project", ""), reg) != hub or r.get("retired"):
+            if r.get("role") != "back" or _anc.hub_of(r.get("project", ""), reg) != hub or r.get("retired") or not _anc.takes_handoff(n):
                 continue
             mand = str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or "")
             out.append({"name": n, "role": "background" if r.get("role") == "back" else "front", "mandate": mand, "live": "" if _handoff.handoff_pane(n, idx) else "yes"})
@@ -108,7 +110,7 @@ def handoff_cold(gid: str, cold_at: float) -> None:
         if stall and ans is not None and _cold.names_mover(ans, mover0, _handoff.ho_same):
             kept, ans = ans, None
         if ans is not None:
-            ans, note = _cold.validate(ans, {a["name"] for a in agents if a.get("live")}, _handoff.ho_same, exclude,
+            ans, note = _cold.validate(ans, {a["name"] for a in agents if a.get("live") and _anc.takes_handoff(a["name"])}, _handoff.ho_same, exclude,      # the list is read again: it may have changed during the call
                                        desc_limits=_fg._description_limits() if _fg._bullets_on() else None, gate=(lambda t: _fg._gate_description(t, "outcome_text")) if _fg._bullets_on() else None, stall=stall)
         with _writes.ITEM_LOCK:               # the check and the write are one step: nothing writes the item between them
             cur = _load(gid)
@@ -137,6 +139,12 @@ def handoff_cold(gid: str, cold_at: float) -> None:
                 handoff_cold_end(gid, "failed", f"the cold call gave no usable answer: {note}", cold_at)
                 _handoff.handoff_fallback(gid, f"the cold call gave no usable answer ({_clip_line(note, 100)})", cold_ok=False)
                 return
+            if mover0 and (keeps := _mhold.held(gid, mover0, once=True)):      # every answer takes the item from its mover, who may be at work on it: none is written
+                said = f"the cold call's answer ({ans['action']}) was not written: {keeps}"
+                handoff_cold_end(gid, "done", said, cold_at)
+                _mhold.say(gid, said, time.time())
+                return
+
             def write() -> None:                         # one attempt, built from the item as it stands now (a retry re-reads it), not as the call began
                 cur = _load(gid)
                 cmeta = cur.get("metadata") or {}

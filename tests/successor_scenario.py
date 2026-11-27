@@ -139,7 +139,8 @@ check("3 pure: once each item's mover is its successor a second plan has nothing
 spared = lambda *names: lambda n: n not in names          # [audit] no_handoff as plan() reads it: `takes(name)` is False for a listed agent
 r3 = {r["gid"]: r for r in S.plan(ITEMS, REG, derive, gone, str, general=GEN, takes=spared("bgp-build", "both-build", "gen-main"))}
 check("8 no_handoff: an agent `takes` refuses is no successor in any tier: the next background agent (a12), else the front agent (a13), and the scope's general agent neither (a2)",
-      r3["a12"]["to"] == "bgp-docs" and r3["a12"]["tier"] == "back" and r3["a13"]["to"] == "both-main" and r3["a13"]["tier"] == "own" and r3["a2"]["to"] == "" and "no live successor was found" in r3["a2"]["why"], (r3.get("a12"), r3.get("a13"), r3.get("a2")))
+      r3["a12"]["to"] == "bgp-docs" and r3["a12"]["tier"] == "back" and r3["a13"]["to"] == "both-main" and r3["a13"]["tier"] == "own" and r3["a2"]["to"] == "" and "no agent that takes hand-offs is live: gen-main is live but takes none ([audit] no_handoff)" in r3["a2"]["why"]
+      and r3["a2"]["reason"] in r3["a2"]["why"] and "no live successor was found" not in r3["a2"]["why"], (r3.get("a12"), r3.get("a13"), r3.get("a2")))
 check("8 no_handoff: …it is refused in the page's own order too, not by the builder-first hint alone (a back_of that still names it, and the `own` tier)",
       S.plan({"x": waiting("bgp-old", project="projects/bgp")}, REG, derive, gone, str, general=GEN, takes=spared("bgp-main", "bgp-build"))[0]["to"] == "bgp-docs"
       and S.plan({"x": alive("bgp-old", project="projects/bgp")}, REG, derive, gone, str, general=GEN, back_of=lambda p: ["bgp-build", "bgp-docs"], takes=spared("bgp-build"))[0]["to"] == "bgp-docs")
@@ -319,6 +320,30 @@ check("8 minute pass: a move by the minute pass changes the stored mover and `ne
 done_o = handoff_svc.handoff_exec([H.Step("move", f"a{121}", "kid-main is gone", "kid-main", "bgp-back", via="orphan")], now0 + 301, verify=False)
 check("8 minute pass: …the same move as the audit's hand-over (via orphan) also follows the post-wake mover, which is why the keys are limited to it (the `then` beside an agent is dropped by the save)", done_o == [f"a{121}"] and not mt(121).get("then")
       and mt(121)["post_wake_mover"] == "bgp-back" and ST.log_of(mt(121)), mt(121))
+
+# 8b: [audit] no_handoff names every builder of a project: the front agent that takes an alive item is told, as in a project with none; with no front agent live the item stays and the list says why
+_cfg.CFG["audit"]["no_handoff"] = ["both-build"]
+try:
+    heartbeat(GONE_NAMES + ["par-main"]); TOLD.clear()
+    item(160, "projects/both", mover="both-old")
+    got = handoff_svc.orphan_handover(apply=True, now=now0 + 320)
+    told_160 = [t for t in TOLD if "160" in t[0]]
+    line = (ST.log_of(mt(160)) or [{"text": ""}])[0]["text"]
+    check("8b no_handoff: with every builder listed the front agent takes the alive item and is sent the one hand-off notice, and the History line says why it is told",
+          mt(160)["mover"] == "both-main" and len(told_160) == 1 and told_160[0][1] in (U["both-main"], "both-main") and "it came to you" in told_160[0][2]
+          and "whose builders take no hand-offs ([audit] no_handoff): it is sent the one hand-off notice)" in line and "no notice is sent" not in line and "a project with no builder" not in line, (got, told_160, line))
+    heartbeat(GONE_NAMES + ["par-main", "both-main", "gen-main"]); TOLD.clear()
+    item(161, "projects/both", mover="both-old")
+    snap = raw(161)
+    got = handoff_svc.orphan_handover(apply=True, now=now0 + 330)
+    row = ([m for m in got["left"] if m["id"] == B(161)] or [{"why": ""}])[0]
+    check("8b no_handoff: with no front agent live either, the item stays and `left` says that the listed agent is live but takes none, not that no successor was found; nobody is told",
+          raw(161) == snap and "no agent that takes hand-offs is live: both-build is live but takes none ([audit] no_handoff)" in row["why"] and "no live successor was found" not in row["why"]
+          and not any("161" in t[0] for t in TOLD), (got, TOLD))
+finally:
+    _cfg.CFG["audit"].pop("no_handoff", None)
+    for i in (160, 161): (T / f"store/a/{i}.json").unlink(missing_ok=True)
+    heartbeat(GONE_NAMES + ["par-main"])
 
 # 9: a partial view of the fleet moves nothing it cannot prove
 import shutil

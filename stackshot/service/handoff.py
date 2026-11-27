@@ -44,6 +44,7 @@ from stackshot.model import said as _said
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_of, _needs_store
 from stackshot.projects import projects as _prj
 from stackshot.service import handoff_cold as _hcold
+from stackshot.service import move_hold as _mhold
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.handoff_hooks import hooks as _hooks
@@ -291,6 +292,7 @@ def handoff_env(now: float) -> "_ho.Env":
         return reminded[key]
     return _ho.Env(now=now, derive=ho_derive, same=ho_same, minutes=handoff_minutes(), idle_grace=handoff_num("handoff_idle_seconds", _ho.IDLE_GRACE),
                    gone_days=handoff_num("handoff_gone_days", _ho.GONE_DAYS), cold_call=cold_call_on(), pane=lambda w: handoff_pane(w, idx),
+                   builder=handoff_builder, takes=_anc.takes_handoff,
                    inbox_grace=handoff_num("handoff_inbox_grace_minutes", 10.0), status=lambda w: handoff_status(w, idx), started=lambda w: handoff_started(w, idx), background=handoff_taker,
                    exempt=handoff_exempt, peer=handoff_peer, label=_session_label, cover_all=_hooks().switchover_on(), is_front=lambda w, _p: _telling.front_sender(w), anchored=anchored, remind=remind,
                    ladder=_hooks().ladder_on(), laddered=lambda g, w, at: _hooks().laddered(g, w, now, at))
@@ -576,7 +578,9 @@ def handoff_tick(now: float | None = None, only: "set[str] | list[str] | None" =
     """The periodic pass (the runner calls it every 60 s): every open item that is alive with a session as its mover, looked at by handoff.plan, and what is due is done:
     a delivered hand-off not taken in [model] handoff_minutes, one whose recipient's turn ended with no write, a mover whose pane is gone; and a mover whose pane was relaunched after the
     notice is sent the notice again, once, instead. Nothing while [model] pause is true.
-    `only` limits the pass to those items (a test, a rerun). → the gids moved, handed to the fleet's builder as a recovery request, sent to the cold call or sent the notice again."""
+    It first reports the moves held too long (move_hold.report). `only` limits the pass to those items and skips that report (a test, a rerun). → the gids moved, handed to the fleet's builder as a recovery request, sent to the cold call or sent the notice again."""
+    if only is None and not handoff_paused():
+        _mhold.report(now)      # the holds that have lasted are told by the clock's own tick, with [model] handoff off too: the idle hand-over, the front hand-on and a wait's end hold items then as well (it never raises)
     if not handoff_on() or handoff_paused():
         return []
     now = time.time() if now is None else now
@@ -606,7 +610,7 @@ def orphan_handover(apply: bool = False, now: float | None = None) -> dict[str, 
     Idempotent: the mover a hand-over names is live, so the next call finds the item whole. Each move is checked again under the item lock (the item must still be open with the mover it was found with).
     Stands still, `checked` false, while [audit] orphan_handover is "off" or the fleet's heartbeat is empty (every name would look gone), and moves nothing in "report" (the shipped default). A partial view of the fleet is not taken for gone sessions:
     a mover on a machine whose machine.json cannot be read, or with no row while a machine's session list is empty or unreadable, is not read as gone, and more orphans than ORPHAN_CEILING or than a quarter of the open items is answered with
-    `ceiling` true and the list, and nothing moved. An alive item goes to a background agent first (successor.pick: the minute pass sends a front agent no notice, except that a front-only project's new front holder is sent the one hand-off notice, `told_front` in handoff_exec); a held item is not listed. An agent `[audit] no_handoff` names takes none. → {checked, mode, applied, read, found, moved: [{id,
+    `ceiling` true and the list, and nothing moved. An alive item goes to a background agent first (successor.pick: the minute pass sends a front agent no notice, except that the new front holder of a project with no builder to go to, front-only or every builder named by [audit] no_handoff, is sent the one hand-off notice, `Step.tell`); a held item is not listed. An agent `[audit] no_handoff` names takes none. → {checked, mode, applied, read, found, moved: [{id,
     project, from, to, tier, why}], left: [{id, project, from, why}], skipped, over_cap, note}."""
     now = time.time() if now is None else now
     mode = _cfg.audit_orphan_handover()
@@ -662,7 +666,7 @@ def orphan_handover(apply: bool = False, now: float | None = None) -> dict[str, 
             out["note"] = f"[audit] orphan_handover is {mode}: nothing was moved; set it to apply under [audit] to hand these over"
         return out
     by_gid = {r["gid"]: r for r in todo}
-    steps = [_ho.Step("move", r["gid"], r["why"], r["from"], r["to"], via="orphan") for r in todo]
+    steps = [_ho.Step("move", r["gid"], r["why"], r["from"], r["to"], via="orphan", tell=bool(r["told"])) for r in todo]
 
     def still(item: dict[str, Any], st: "_ho.Step") -> bool:
         r = by_gid[st.gid]
@@ -710,7 +714,7 @@ def handoff_write_move(item: dict[str, Any], st: "_ho.Step", now: float) -> None
     if alive:
         _ho.successor(item, st, ho_ident(st.to), now, _session_label)
     if st.via == "orphan":
-        _stall.note(item["metadata"], now, f"handed to {_session_label(st.to)}: {st.why}", width=400 if _succ.FRONT_TOLD in st.why else 240)      # the History line with the reason (a mover change alone shows only the names; a waiting item has no record to carry it); only the line that ends "it is sent the one hand-off notice" is wider, so those closing words are not cut off
+        _stall.note(item["metadata"], now, f"handed to {_session_label(st.to)}: {st.why}", width=400 if st.tell else 240)      # the History line with the reason (a mover change alone shows only the names; a waiting item has no record to carry it); only the line that ends "it is sent the one hand-off notice" is wider, so those closing words are not cut off
 
 
 def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: "_ho.Env | None" = None,
@@ -720,7 +724,7 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
     checks that the item still has the mover it found)."""
     env = env or handoff_env(now)
     to_new: list[tuple[str, str, str]] = []          # (recipient, gid, the item's line)
-    told_front: set[str] = set()                     # items an orphan hand-over gave to a front agent of a front-only project: that holder is sent the notice (nothing else tells it, and no builder is)
+    told_front: set[str] = set()                     # items an orphan hand-over gave to a front agent of a project with no builder to go to (Step.tell): that holder is sent the notice (nothing else tells it, and no builder is)
     to_sender: list[tuple[str, str, str]] = []       # (sender, gid, the line)
     to_again: list[tuple[str, str, str]] = []        # (gid, the mover, the notice) of a hand-off sent again after a relaunch
     peer_remind: set[str] = set()                    # the gids among them whose mover is a peer front agent (reminded in words that fit it)
@@ -729,6 +733,7 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
     entered: list[tuple[str, str, dict[str, Any]]] = []   # (gid, the mover, its entry) of an item the one ladder took: its first rung is taken after the loop
     done: list[str] = []
     cold_started = False
+    keeps = _mhold.checker(now, dead=env.pane)      # why a mover keeps the item a `move` step would take (one read for the whole exec, made at the first move)
     for st in steps:
         try:
             with _writes.ITEM_LOCK:
@@ -792,11 +797,13 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
                     _hcold.HO_COLD_THREADS.append(th)
                     th.start()
                 else:
+                    if keeps(st.gid, st.frm):      # its mover may be at work on it: nothing is written and nobody is told; the pass that planned the step plans it again
+                        continue
                     handoff_write_move(item, st, now)
                     _writes.save(st.gid, item, note=f"handed to {_session_label(st.to)}: {st.why}")
                     subject, project = str(item.get("subject") or ""), str((item.get("metadata") or {}).get("project") or "")
                     to_new.append((st.to, st.gid, f"{_gh.shown(st.gid)} {subject} ({project}): {st.why}" + ("; it comes back to you as its sender" if st.via == "return" else "")))
-                    if st.via == "orphan" and (_ho.record_of(item) or {}).get("at") == now and _anc.front_only(project):      # an alive item (this move wrote its hand-off record) of a front-only project: successor.pick says "sent the one hand-off notice" in the History line
+                    if st.tell and (_ho.record_of(item) or {}).get("at") == now:      # an alive item (this move wrote its hand-off record) of a project with no builder to go to: successor.pick says "sent the one hand-off notice" in the History line
                         told_front.add(st.gid)
                     if st.sender and not ho_same(st.sender, st.to):
                         to_sender.append((st.sender, st.gid, f"{_gh.shown(st.gid)} {subject}: {st.why}; it went to {_session_label(st.to)}"))

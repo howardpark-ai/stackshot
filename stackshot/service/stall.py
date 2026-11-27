@@ -31,6 +31,7 @@ from stackshot.model.bullet_text import _clip_line
 from stackshot.router import routing as _routing
 from stackshot.service import handoff as _handoff
 from stackshot.service import handoff_cold as _hcold
+from stackshot.service import move_hold as _mhold
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.stall_hooks import hooks as _hooks
@@ -299,7 +300,8 @@ def stall_cold(gid: str, who: str, now: float, minutes: float, cut: bool = True)
 
 def stall_builder(gid: str, who: str, now: float, minutes: float) -> str:
     """Step 3: the project's builder (section 5's first choice); none able, the last rung: the fleet's builder is asked to recover the session (`_handoff.handoff_exec`, a `recover` step), or, for a front-only project
-    (anchors.front_only: no builder), the project's -main agent (`_recovery_target`)."""
+    (anchors.front_only: no builder), the project's -main agent (`_recovery_target`).
+    A mover whose subagent may be at work on the item keeps it (move_hold.py): → "", nothing is written and the next tick asks again."""
     with _writes.ITEM_LOCK:
         item = _load(gid)
         if item.get("status") != "open" or not _handoff.ho_same(stall_mover(gid, item), who):
@@ -307,6 +309,8 @@ def stall_builder(gid: str, who: str, now: float, minutes: float) -> str:
         r = stall_record(item, who, now)
         why = f"{_session_label(who)} had no turn running for {minutes:g} min and nothing was written to it"
         st = _ho.next_step({**item, "gid": gid}, r, who, why, _handoff.handoff_env(now), gid=gid, allow_return=False, cold_ok=False)
+        if st.kind == "move" and _mhold.held(gid, who, now):      # its mover may be at work on it: nothing is written, the rung is not taken and the next tick asks again
+            return ""
         if st.kind == "move":
             _stall.note(item["metadata"], now, f"{why}: handed to {_session_label(st.to)}, the project's builder")
         _writes.save(gid, item, note="stall: " + ("handed to the builder" if st.kind == "move" else "nobody can take it: recovery is requested"))      # a `recover` step writes its own History line

@@ -41,6 +41,7 @@ from stackshot.service import front_turn as _front_turn
 from stackshot.service import handoff as _handoff
 from stackshot.service import item_read as _item_read
 from stackshot.service import ladder as _laddersvc
+from stackshot.service import move_hold as _mhold
 from stackshot.service import released_live as _rlive
 from stackshot.service import store as _svcstore
 from stackshot.service import telling as _telling
@@ -225,7 +226,7 @@ def _mover_subagents(who: str, now: float | None = None, snap: Any = None) -> "l
 
 
 def _move_hold(items: "dict[str, dict[str, Any]]", now: float, snap: Any, dead: "Callable[[str], str]") -> "Callable[[str, str], str]":
-    """For the two passes that take an item from a mover that did not hand it back, the idle hand-over and the balancer: `hold(gid, mover)` → why a running subagent keeps the item there, "" when none does
+    """For every pass that takes an item from a mover that did not hand it back (all through service/move_hold.py): `hold(gid, mover)` → why a running subagent keeps the item there, "" when none does
     (audit/hand_idle.py `subagent_hold`). The subagents are those of `snap`, the pass's one read of the last agent-state push (`_mover_subagents`). A mover with no pane (`dead`) whose subagents cannot be read runs none.
     With the anchors unread, a subagent is tied by an item's own id alone, so one that names only a pull request is tied to nothing and holds the item."""
     _hi = _hooks().audit_mod("hand_idle")
@@ -600,7 +601,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
     that moves no open item on an agent: a builder that is busy, missing from the push or not read is not free), by the minute hand-off pass's own write (`_handoff.handoff_exec` → `_handoff.handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
     from the server and the builder is told. One History line says why and names the mover it left. The project's -main agent gets one message that asks nothing. With no builder free nothing moves: a History
     line says so and -main is told once per item per 24 hours. No message goes to the owner and no step is made for him. At most `hand_idle.MAX_PER_TICK` items are handed on per pass and one per item per 24 hours.
-    An item a running subagent of its mover may be working on is not moved, a log line only (`_move_hold`).
+    An item a running subagent of its mover may be working on is not moved (`_move_hold`): a log line, and a hold that lasts is told by move_hold.py's report.
     `now`, `items`, `env`, `status`, `dead` are for tests and the tick. → the ids handed on."""
     _hi = _hooks().audit_mod("hand_idle")
     if not _hi.enabled() or _ro.is_read_only() or _handoff.handoff_paused():
@@ -617,7 +618,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         idx = _sr._sessions_index()
         status = status or (lambda who: _state_word(who, now, snap))
         dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
-    hold = _move_hold(items, now, snap, dead)
+    hold = _mhold.checker(now, snap=snap, items=items, dead=dead)      # `_move_hold`'s answer, kept for the report of a hold that lasts (move_hold.py)
     busy = _hi.busy_movers(items, now)
     handed: list[str] = []
     told: dict[str, list[tuple[str, str]]] = {}      # -main agent -> (item, line) of its message
@@ -741,7 +742,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
     items, by the same write as the idle hand-over (`_handoff.handoff_exec` → `_handoff.handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
     why. The mover it left is told ONCE, by `tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done or one
     that says a subagent is running, an anchor, a pull request event) is never moved, and neither is one a running subagent of the mover may be working on, whatever its record says: a subagent of the last agent-state push tied
-    to it or to none of the mover's open items, or subagents that cannot be read for a mover with a pane (`_move_hold`; a log line only). `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
+    to it or to none of the mover's open items, or subagents that cannot be read for a mover with a pane (`_move_hold`: a log line, and a hold that lasts is told by move_hold.py's report). The hold stops the move alone: the lifetime-cap and no-live-builder reports are written as ever. `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
     in all (then the existing ladders have it and -main is told once), three per pass. With NO live builder to take it (another builder than its mover is in the role map and none is usable) the item stays, one History line says so and -main is told once per item per 24 hours, and the pass looks again every minute; with no other builder, or a builder that is no improvement, it is a log line only.
     Only an item whose mover is itself a builder is balanced, and only to builders. The notice to the mover it left is at-most-once (a crash between the save and the send loses it) and is not sent to a pane that is gone. An item the idle
     hand-over moved in the last 24 hours is left alone. Stands still while the audit is off (`[audit] enabled`) or runs in agent mode, while the board is paused, with `[model] handoff` off, and in a read-only copy. `now`, `items`, `env`, `status`, `dead`, `anchored` are for tests and the tick. → the ids moved."""
@@ -778,7 +779,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         idx = _sr._sessions_index()
         status = status or (lambda who: _state_word(who, now, snap))
         dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
-    hold = _move_hold(items, now, snap, dead)
+    hold = _mhold.checker(now, snap=snap, items=items, dead=dead)      # `_move_hold`'s answer, kept for the report of a hold that lasts (move_hold.py)
     load = _hi.load_counts(_hi.busy_movers(items, now), _handoff.ho_same)
     moved: list[str] = []
     gone: list[tuple[str, str, str]] = []      # (the mover it left, the item, who has it now): the former mover's notice
@@ -789,10 +790,6 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         if len(moved) >= _hi.BALANCE_MAX_PER_TICK:
             break
         try:
-            why = hold(gid, row["mover"])
-            if why:      # the mover may be at work on it: no move, no History line, nobody told
-                _balance_log_once(gid, "subagent", now, f"balance: {gid} stays with {row['mover']}: {why}")
-                continue
             project = row["project"]
             if project not in builders:
                 builders[project] = _balance_builders(project)
@@ -819,6 +816,11 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
             if to and not _hi.balance_ok(row["kind"], _hi.load_of(load, to, _handoff.ho_same), _hi.load_of(load, row["mover"], _handoff.ho_same)):
                 _balance_log_once(gid, "load", now, f"balance: {gid} stays with {row['mover']}: no builder has few enough open items")      # silent otherwise: a spread that is as good as it can be is no news
             elif to:
+                why = hold(gid, row["mover"])
+                if why:      # the mover may be at work on it: no move, no History line here, nobody told
+                    _balance_log_once(gid, "subagent", now, f"balance: {gid} stays with {row['mover']}: {why}")
+                    continue
+
                 def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due and still with the mover it was found with; the record goes on the metadata the move saves
                     cur = _hi.balance_due({**items, st.gid: item}, st.gid, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
                     if cur is None or cur["capped"] or not _handoff.ho_same(cur["mover"], st.frm):

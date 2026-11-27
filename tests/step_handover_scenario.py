@@ -76,6 +76,7 @@ def item(i, nxt, mover="home-one", status="open", **meta):      # the mover is s
                                                        "status": status, "updated": now - 7200, "state_updated": now - 7200, "confirmed": now - 7200,
                                                        "metadata": {"owner": U["home-builder"], "mover": mover, "project": "projects/alpha", "next": nxt, **meta}}))
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import needs as _model_needs
+from stackshot.service import audit_ticks as _hold_ticks; _hold_ticks._move_hold = lambda *a, **k: (lambda gid, mover: "")      # no mover in this suite runs a subagent: the hold every pass asks before it changes a mover (service/move_hold.py) is tests/move_hold_scenario.py's
 from stackshot.service import released as released_svc
 from stackshot.service import update as _update_svc
 from stackshot.core import instance as _core_instance
@@ -405,6 +406,16 @@ check("…a second pass ten minutes on sends nothing", not sent and r2["fresh"] 
 fresher = dict(items); fresher["a40"] = {**items["a40"], "written_at": time.time() + 60, "written_by": "home-one"}
 r3 = AR.filing_pass(now=now + 1200, items=fresher, anchors={}, env=env())
 check("…and after a write to the item it is sent again (its two findings), and the other item's is not", r3["fresh"] == 2 and sent and all("board#40" in t and "board#41" not in t for _to, t, _f in sent), (r3, sent))
+
+# ---- 11. the proof pass's own tick takes no item from a mover at work on it (service/move_hold.py)
+fixtures()
+_hold_ticks._move_hold = lambda *a, **k: (lambda gid, mover: "its subagents could not be read")
+try:
+    held = {x["item"]: x for x in proofs_svc.sweep_proofs(only={"a1"})["items"]}.get("a1", {})
+finally:
+    _hold_ticks._move_hold = lambda *a, **k: (lambda gid, mover: "")
+check("held: the proof pass ticks the step, hands the item to nobody and its row says held", [s["status"] for s in rd(1)["metadata"]["steps"]] == ["done", "open"] and mover_of(1) == "home-one" and "handover" not in rd(1)["metadata"]
+      and held.get("handover", {}).get("action") == "held", (held, rd(1)["metadata"]))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} passed" + (f" — FAILED: {', '.join(fails)}" if fails else ""))
 sys.exit(1 if fails else 0)

@@ -955,8 +955,15 @@ def probe_held_log_once():
 rule("20 the stay is logged once per item per hour", probe_held_log_once, [(audit_ticks_svc, "BALANCE_LOG_EVERY", 0.0)])
 def probe_capped_held():
     at_work(agent(f"build {named(2)}"), queued_meta=dict(balance={"at": now0 - 30 * H, "from": "team-back", "to": "home-peer", "count": 2}))
-    return tick() == [] and sent == [] and history(2) == []
-rule("20 an item at the lifetime cap that its mover is building gets no cap line and -main no message", probe_capped_held, NO_HOLD)
+    got = tick()
+    return got == [] and mover_of(2) == "home-peer" and len(to_main()) == 1 and "2 times" in to_main()[0][2] and any("already moved 2 times" in h for h in history(2)) and mt(2)["balance"]["capped_at"] == now0
+check("20 an item at the lifetime cap that its mover is building keeps its cap report: nothing moves, one History line, -main told, as without the hold", probe_capped_held() is True, probe_capped_held())
+def probe_nobody_held():
+    at_work(agent(f"build {named(2)}"))
+    for n in ("team-back", "team-aux", "other-back"): dead[n] = "a retired session, its pane gone"
+    got = tick()
+    return got == [] and mover_of(2) == "home-peer" and len(to_main()) == 1 and "no live builder could take it" in to_main()[0][2] and any("no live builder could take it" in h for h in history(2))
+check("20 …and so does an item no live builder could take", probe_nobody_held() is True, probe_nobody_held())
 
 # …the same through the server's own store and read of a pushed snapshot
 def push(written, state, *subagents):
