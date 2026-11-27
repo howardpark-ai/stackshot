@@ -242,12 +242,13 @@ check("Projects: a session's name without the 'a/' prefix", "a/alpha" not in PRJ
 check("Projects: an agent with a running session is listed (alpha-watcher has no item)", "alpha-watcher" in PRJ)
 check("Projects: agents that own items are listed", "alpha-builder" in PRJ)
 check("Projects: an agent the page lists but sala has no running session of is not listed", "idle" not in PRJ and "gamma-asleep" not in PRJ, re.findall(r"[\w-]*(?:idle|asleep)[\w-]*", PRJ))
-gl, _gt = agent_rows("gamma"); gnames = [re.sub(r"<[^>]+>", "", x).replace("background", "").strip() for x in gl]
+def agent_name(li): return re.sub(r"<[^>]+>", "", re.sub(r'<span class="xp".*?</span></span>', "", li)).replace("background", "").strip()     # without the "?" and its popup
+gl, _gt = agent_rows("gamma"); gnames = [agent_name(x) for x in gl]
 check("Projects: a plain list per project, the -main agent first, the other front agents next, then the running background agent", gnames == ["gamma-main", "gamma-builder", "gamma-reviewer", "gamma-sweeper"], gnames)
 check("Projects: the background agent is muted (dimline) and tagged background; no front agent is either", 'class=dimline' in gl[-1] and 'class="rtag"' in gl[-1] and ">background</span>" in gl[-1]
       and not any("dimline" in x or "rtag" in x for x in gl[:-1]) and PRJ.count('class="rtag"') == 1, gl)
 al, _at = agent_rows("alpha")
-check("Projects: a project with no background agent shows no tag, and its -main agent leads", re.sub(r"<[^>]+>", "", al[0]).strip() == "alpha-main" and "background" not in "".join(al), al)
+check("Projects: a project with no background agent shows no tag, and its -main agent leads", agent_name(al[0]) == "alpha-main" and "background" not in "".join(al), al)
 dl, dt = agent_rows("delta")
 check("Projects: a project with no agent of its own says so, with no list", not dl and "no agent of its own" in dt and "<ul" not in re.search(r'<tr><td class="proj"><a href="/projects/delta".*?</tr>', PRJ, re.S).group(0), dt)
 el, et = agent_rows("epsilon")
