@@ -6,7 +6,8 @@ the stylesheet are the board's own (ui/render.py); this module adds the page aro
     sending      (the script's own, never drawn by the server) a send is under way
     answered     the recorded answer, nothing to press
     changed      the question is no longer the one this frame drew: a board link
-    closed       nothing to pick and no answer to show: a line and a board link (on his move, never an answer from before the frame was drawn, and none on a first load)
+    closed       nothing to pick and no answer to show: a line and a board link (on his move, never an answer from before the frame was drawn, and none on a first load; a frame first drawn closed
+                 reads no older answer later either)
     signed_out   no board session: a board link and no text of the item
 
 The route (web/routes/answer_frame.py) decides who is asking and sends the headers; nothing here writes."""
@@ -37,20 +38,23 @@ def last_answer(r: dict[str, Any]) -> dict[str, Any] | None:
     return next((a for a in reversed(_r.answers_of(r)) if a.get("kind") == "decision" and not a.get("step") and a.get("via") != "mail"), None)
 
 
-def state_of(board: Any, r: dict[str, Any], token: str, was: str, since: float) -> tuple[str, Any]:
+def state_of(board: Any, r: dict[str, Any], token: str, was: str, since: float | None) -> tuple[str, Any]:
     """The frame's state of the item for a signed-in member, with what it draws: ("open", (question html, form html)), ("answered", the answer record), ("changed", None) or ("closed", None).
-    `was` is the reference (model/ask_ref.py) of the question this frame first drew ("" when it has drawn none) and `since` when it was first drawn (epoch seconds): a refresh reads the state
-    against them, a first load or a reload has neither question nor claim on an old one."""
+    `was` is the reference (model/ask_ref.py) of the question this frame first drew ("" when it has drawn none) and `since` when it first drew that question, or, before it has drawn one, when
+    a frame first drawn closed was drawn (epoch seconds): a refresh reads the state against them. `since` is None on a first load or a reload, and on the refresh of a frame first drawn
+    answered that has drawn no question."""
     mine = _home.list_of(board.mod_of(r)) == _home.YOUR_MOVE      # on his move, by the same rule as the home page's list (a closed item is in none)
     if mine:
         ask = board.home_ask(r, token)
         if ask and (_r.open_options(r) or _r.yesno_options(r)):      # with cards to pick from
             return ("changed", None) if was and _r.question_ref(r) != was else ("open", ask)
     a = last_answer(r)
-    if was:      # an answer recorded since the frame was drawn is its result, also while the item stays on his move (a step beside the question)
-        return ("answered", a) if a and _when_ts(a) > since else ("closed", None)
+    newer = a is not None and since is not None and _when_ts(a) > since
+    if was:      # an answer recorded since the frame drew the question is its result, also while the item stays on his move (a step beside the question)
+        return ("answered", a) if newer else ("closed", None)
     meta = r.get("metadata") or {}
-    if a and not mine and not meta.get("ask") and not meta.get(_askl.LEFT):      # on his move, or with an ask stored or taken off it since, the item asks something newer: the last answer is not shown
+    # on his move, or with an ask stored or taken off it since, the item asks something newer: the last answer is not shown; nor is an older one to a frame first drawn closed
+    if a and (since is None or newer) and not mine and not meta.get("ask") and not meta.get(_askl.LEFT):
         return "answered", a
     return "closed", None
 
@@ -139,8 +143,9 @@ body.aframe::before,body.aframe::after{display:none}
 
 # The frame's script. What it holds: the state and what the parent is told of it (post: height, state, typing; only ever to a configured origin by name), the parent's two requests (refresh,
 # theme; accepted only from window.parent at a configured origin), the send (the board's own answer path, asked for its code as JSON), the refresh (this page again, read against the question
-# first drawn), and what two frames of one item share (BroadcastChannel on the board's origin: the pick, the note, a send under way and how it ended; only a person's own press or typing shares,
-# never a field's `change`, which a box left for the other frame fires with what it held before that press). A frame that was signed out from its first drawing loads itself again once signed in,
+# first drawn; a frame first drawn answered that has drawn none sends no time and so reads as a first load does), and what two frames of one item share (BroadcastChannel on the board's origin:
+# the pick, the note, a send under way and how it ended; only a person's own press or typing shares, never a field's `change`, which a box left for the other frame fires with what it held before
+# that press). A frame that was signed out from its first drawing loads itself again once signed in,
 # so its language and its script's words are the member's; one whose session ran out keeps its pick and note. Nothing it posts to the parent or reads from it holds a word of the item, the answer or the token.
 _SCRIPT = r"""<script>(function(){
 var M=document.getElementById('aframe');if(!M)return;
@@ -148,7 +153,7 @@ var root=document.documentElement,framed=window.parent!==window;
 function A(n){return M.getAttribute('data-'+n)||''}
 function J(n,d){try{return JSON.parse(A(n))||d}catch(e){return d}}
 var item=A('item'),since=A('drawn'),origins=J('origins',[]),msgs=J('msgs',{}),lines=J('lines',{}),quiet=A('quiet').split(' ');
-var state=A('state'),was=state==='open'?A('ref'):'',typing=false,busy=false,mine=false,seq=0,last='',drafts={},bc=null,bcName='',watch=0;
+var state=A('state'),first=state,was=state==='open'?A('ref'):'',typing=false,busy=false,mine=false,seq=0,last='',drafts={},bc=null,bcName='',watch=0;
 function form(){return M.querySelector('form.hanswer')}
 function box(f){return f&&f.querySelector('textarea')}
 function isNote(t){return !!(t&&t.tagName==='TEXTAREA'&&M.contains(t))}
@@ -179,16 +184,16 @@ if(d.k==='sending'){if(state!=='open')return;put(f,d);say('','');lock(true);mine
 if(d.k==='done'){clearTimeout(watch);finish(d.ref,d)}
 if(d.k==='gone'){clearTimeout(watch);release()}}
 function release(){if(state!=='sending'||mine)return;lock(false);to('open');refresh()}
-function load(){var u=new URL(location.href);u.searchParams.set('since',since);if(was)u.searchParams.set('was',was);else u.searchParams.delete('was');
+function load(){var u=new URL(location.href);if(was||first!=='answered')u.searchParams.set('since',since);else u.searchParams.delete('since');if(was)u.searchParams.set('was',was);else u.searchParams.delete('was');
 return fetch(u.href,{credentials:'same-origin',cache:'no-store',headers:{'Accept':'text/html'}}).then(function(r){if(r.status!==200&&r.status!==404)throw 0;return r.text()})
 .then(function(t){var n=new DOMParser().parseFromString(t,'text/html').getElementById('aframe');if(!n||n.getAttribute('data-item')!==item)throw 0;return n})}
 function show(n){var next=n.getAttribute('data-state'),ref=n.getAttribute('data-ref'),f=form();
-if(state==='signed_out'&&next!==state){if(!was){location.reload();return}M.querySelector('#afmsg').textContent=''}
+if(state==='signed_out'&&next!==state){if(!was&&first!=='closed'){location.reload();return}M.querySelector('#afmsg').textContent=''}
 if(next==='open'&&state==='open'&&ref===A('ref')&&f){var a=f.querySelector('input[name=token]'),b=n.querySelector('input[name=token]');if(a&&b)a.value=b.value;return}
 keep();M.querySelector('#afbody').innerHTML=n.querySelector('#afbody').innerHTML;
 ['ref','chan','href'].forEach(function(k){M.setAttribute('data-'+k,n.getAttribute('data-'+k)||'')});
 state=next;M.setAttribute('data-state',next);busy=false;
-if(next==='open'){if(!was)was=ref;f=form();if(f&&drafts[ref])put(f,drafts[ref]);grow(box(f))}
+if(next==='open'){if(!was){was=ref;since=n.getAttribute('data-drawn')}f=form();if(f&&drafts[ref])put(f,drafts[ref]);grow(box(f))}
 join();document.dispatchEvent(new Event('stackshot:swapped'));typing=isNote(document.activeElement);post();hello()}
 function refresh(){if(busy)return Promise.resolve();var s=++seq;return load().then(function(n){if(s===seq&&!busy){var before=state;show(n);return before!==state?state:''}},function(){})}
 function fall(code){var s=code==='decision'?'answered':code==='stale'||code==='stalenote'||code==='askedback'?'changed':'closed',b=M.querySelector('#afbody');b.textContent='';

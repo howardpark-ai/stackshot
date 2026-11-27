@@ -32,9 +32,9 @@ The page is the answer block alone, as the home page's Your move draws it: the q
 |---|---|---|
 | `open` | The item is on the signed-in person's move and has options to pick (stored ones, or Yes and No). Also after a send that did not go through. | The question and the form. After a failed send, a line that says nothing was sent and why. |
 | `sending` | A send is under way. | The form, locked. |
-| `answered` | There is no question with options for the person, and an answer to show. In a frame that drew a question: an answer recorded since it was first drawn, here or on the board, also while the item stays on the person's move (a step beside the question, say). On a first load or a reload: the item's latest answer, only while the item is not on the person's move and stores no question asked or taken back since. | The recorded answer: the question, who answered and when, the card and the note. Nothing can be pressed. |
+| `answered` | There is no question with options for the person, and an answer to show. In a frame that drew a question: an answer recorded since it first drew one, here or on the board, also while the item stays on the person's move (a step beside the question, say). On a first load or a reload: the item's latest answer, only while the item is not on the person's move and stores no question asked or taken back since. A frame that has drawn no question reads again by that same rule; one first drawn `closed` then also needs the answer to be recorded since that first drawing. | The recorded answer: the question, who answered and when, the card and the note. Nothing can be pressed. |
 | `changed` | The question is not the one this frame drew. | One line and a link to the item. Loading the frame again shows the new question. |
-| `closed` | There is nothing to pick and no answer to show by the rule for `answered`, or the item does not exist. While the item is on the person's move for something else (a step, say), an answer from before the frame was first drawn is never shown, and a first load or a reload shows no answer. | One line and a link to the item. |
+| `closed` | There is nothing to pick and no answer to show by the rule for `answered`, or the item does not exist. While the item is on the person's move for something else (a step, say), an answer from before the frame was first drawn is never shown, and a first load or a reload shows no answer. A frame first drawn `closed` does not show such an older answer when it reads again either, also after the item leaves the person's move. | One line and a link to the item. |
 | `signed_out` | The request carries no board session. | A link that opens the item on the board in a new tab, and nothing of the item. An item that does not exist gives the same page. |
 
 `changed` is a reading against the question first drawn, so only a frame that is already showing reaches it. A first load shows the question as it stands.
@@ -62,7 +62,7 @@ Both are taken only when the sender is the parent window and its origin is a con
 | `{"source": "...", "kind": "answer-frame", "v": 1, "do": "refresh"}` | Reads the item again. A pick and a typed note stay when the question is unchanged. |
 | `{"source": "...", "kind": "answer-frame", "v": 1, "do": "theme", "theme": "dark"}` | Switches the colors (`dark` or `light`). |
 
-A frame that shows `signed_out` also reads again by itself when it comes back into view, so a sign-in made in the new tab shows without the parent doing anything. A frame that had shown no question yet then loads itself again, so it draws in the signed-in person's language; one whose sign-in ran out keeps its pick and note.
+A frame that shows `signed_out` also reads again by itself when it comes back into view, so a sign-in made in the new tab shows without the parent doing anything. A frame that had shown no question yet then loads itself again, so it draws in the signed-in person's language (one first drawn `closed` only reads again: it was drawn signed in); one whose sign-in ran out keeps its pick and note.
 
 ## Two frames of one item
 

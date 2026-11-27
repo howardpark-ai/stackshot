@@ -101,7 +101,12 @@ for i in range(2, 8): item(i)
 item(8, ask=f"Decide: whether {LONG} · Recommend: yes · Stakes: none · By: no date",
      opts=[{"label": "A" * 60, "line": LONG, "recommended": True}, {"label": "B", "line": LONG, "recommended": False}], draft=LONG)
 item(9, opts=None)                                     # Yes and No
-item(10)
+item(10); item(11)
+STEP = "run the second line"
+OLD = {"ts": now - 3 * 86400, "kind": "decision", "choice": "Drop", "via": "board", "ask": ASK}
+def off(i, *answers): item(i, ask="", opts=None, needs=[], answers=list(answers))      # nothing to pick, off his move
+for i in (12, 14, 15): item(i, ask="", opts=None, needs=[], state="your-step", step=STEP, answers=[OLD])      # on his move for a step, with an older answer
+off(13, OLD)
 (T / "store/next-id").write_text("30"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 
@@ -310,8 +315,15 @@ def run(br):
     ctx.route("**/items/a10/answer-frame?**", lambda route: route.abort())
     card(pg, "Wait"); press(pg); wait_state(pg, "answered"); pg.wait_for_timeout(500)
     t = body_text(pg)
-    check("sent, the reading after it failed: answered, said once, nothing about his queue", len(answers(10)) == 1 and t.count(i18n.EN["frame.sent"]) == 1 and "queue" not in t, (answers(10), t))
+    answered_by = i18n.EN["frame.answered_by"].split("{")[0].strip()      # only a page read from the server draws it
+    check("sent, the reading after it failed: answered, said once, nothing about his queue", len(answers(10)) == 1 and t.count(i18n.EN["frame.sent"]) == 1 and answered_by not in t and "queue" not in t, (answers(10), t))
     ctx.unroute("**/items/a10/answer-frame?**"); done(pg)
+    pg = parent(ctx, ("f", "/items/a11/answer-frame")); wait_state(pg, "open")      # nothing recorded, and the frame cannot read the item again
+    ctx.route("**/items/a11/answer-frame?**", lambda route: route.abort())
+    card(pg, "Ship"); item(11, ask=ASK2); press(pg); wait_state(pg, "changed"); pg.wait_for_timeout(500)
+    t = body_text(pg)
+    check("a stale pick, the reading after it failed: changed, and the notice says nothing was sent", answers(11) == [] and i18n.EN["frame.changed"] in t and i18n.EN["sent.stale_home"] in t, (answers(11), t))
+    ctx.unroute("**/items/a11/answer-frame?**"); done(pg)
 
     # ---- 5. the question rewritten under a pick; answered on the board; taken off his move
     pg = parent(ctx, ("f", "/items/a4/answer-frame")); wait_state(pg, "open")
@@ -329,6 +341,31 @@ def run(br):
     pg.evaluate("(m) => send('f', m)", {**ASKD, "do": "refresh"}); wait_state(pg, "closed")
     check("taken off his move: closed, a line and a board link", i18n.EN["frame.closed"] in body_text(pg) and inner(pg).query_selector("form, input, button") is None, body_text(pg))
     fits("closed", pg); shot(pg, "08-closed"); done(pg)
+
+    # ---- 5b. the refresh of a frame that has drawn no question
+    def reread(pg, i):      # the parent's refresh, waited for to the frame's own read of the item and the time to draw it; the address it read
+        with pg.expect_response(lambda r: f"/items/a{i}/answer-frame?" in r.url, timeout=8000) as got:
+            pg.evaluate("(m) => send('f', m)", {**ASKD, "do": "refresh"})
+        pg.wait_for_timeout(500); return got.value.url
+    pg = parent(ctx, ("f", "/items/a12/answer-frame")); wait_state(pg, "closed")
+    off(12, OLD); url = reread(pg, 12)
+    check("first drawn closed, the item then off his move: the refresh sends its time and stays closed", "since=" in url and msgs(pg)[-1]["state"] == "closed" and answered_by not in body_text(pg), (url, body_text(pg)))
+    off(12, OLD, {**OLD, "ts": time.time(), "choice": "Ship"}); reread(pg, 12); wait_state(pg, "answered")
+    check("...an answer recorded since is shown", "Ship" in body_text(pg), body_text(pg)); done(pg)
+    pg = parent(ctx, ("f", "/items/a13/answer-frame")); wait_state(pg, "answered")
+    url = reread(pg, 13)
+    check("first drawn answered: the refresh sends no time and the answer stays", "since=" not in url and msgs(pg)[-1]["state"] == "answered" and answered_by in body_text(pg), (url, body_text(pg))); done(pg)
+    pg = parent(ctx, ("f", "/items/a15/answer-frame")); wait_state(pg, "closed")
+    unread = {**OLD, "ts": time.time(), "choice": "Ship"}
+    item(15, ask=ASK2, answers=[OLD, unread]); reread(pg, 15); wait_state(pg, "open")
+    off(15, OLD, unread); reread(pg, 15); wait_state(pg, "closed")
+    check("a question drawn after an answer the frame never read, then taken off: closed, that answer not shown", answered_by not in body_text(pg), body_text(pg)); done(pg)
+    lapse = context(); pg = parent(lapse, ("f", "/items/a14/answer-frame")); wait_state(pg, "closed")
+    inner(pg).evaluate("() => { window.drawnClosed = true }")
+    lapse.clear_cookies(); reread(pg, 14); wait_state(pg, "signed_out")
+    off(14, OLD); lapse.add_cookies([cookie()]); reread(pg, 14); wait_state(pg, "closed")
+    check("first drawn closed, the sign-in run out and back: it reads again without loading anew, the older answer not shown", answered_by not in body_text(pg) and inner(pg).evaluate("() => window.drawnClosed === true"), body_text(pg))
+    done(pg); lapse.close()
 
     # ---- 6. long words; the device's theme
     pg = parent(ctx, ("f", "/items/a8/answer-frame")); wait_state(pg, "open"); fits("long unbroken words", pg)
@@ -384,7 +421,7 @@ def run(br):
     check("every message held exactly the contract's fields and a contract state", seen and all(set(m) == FIELDS and m["state"] in STATES and m["source"] == "stackshot" and m["v"] == 1 and isinstance(m["typing"], bool) and isinstance(m["height"], int) for m in seen),
           [m for m in seen if set(m) != FIELDS or m["state"] not in STATES][:3])
     all_text = json.dumps(seen)
-    tokens = [_web_answers._answer_token(EMAIL, f"a{i}") for i in range(1, 11)]
+    tokens = [_web_answers._answer_token(EMAIL, f"a{i}") for i in range(1, 16)]
     check("no message held a word of an item, an answer or a token", not any(w in all_text for w in ("zebraword", "titleword", "rewritten", "typed", "changed in the second", "held through", "Drop", "Ship", *tokens)), all_text[:400])
     check("no script error on any page", errors == [], errors)
 

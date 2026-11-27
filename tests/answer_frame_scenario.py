@@ -416,6 +416,28 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         rr, pp, bb = again(f"a{i}", "0" * 16, now - 60)
         check(f"{what}, an older answer, a poll: closed", pp.at["data-state"] == "closed" and "olderword" not in rr.text, pp.at)
 
+    # ---- 10e. the refresh of a frame that has drawn no question: first drawn closed it sends its time and reads only a newer answer, first drawn answered it sends none
+    item("a", 48, state="your-step", step=STEP, answers=[older])
+    rr, pp = frame("a48"); t48 = pp.at["data-drawn"]
+    check("a frame first drawn closed beside a step", pp.at["data-state"] == "closed" and on_move("a48"), pp.at)
+    res = post("/items/a48/answer", {"token": tok("a48"), "act": "done"}, headers=JSON)
+    check("…the step's Done takes the item off his move", res.json() == {"sent": "done"} and not on_move("a48"), res.text)
+    rr, pp = frame("a48", f"?since={t48}")
+    check("…the closed frame's refresh then: still closed, not the older answer", pp.at["data-state"] == "closed" and "olderword" not in rr.text and "zebraword" not in rr.text, (pp.at, body_of(rr.text)[:300]))
+    for what, query in (("a first load or a reload", ""), ("the refresh of a frame first drawn answered, which sends no time", "?lang=en")):
+        rr, pp = frame("a48", query)
+        check(f"…{what}: the item's latest answer to a question", pp.at["data-state"] == "answered" and "olderword" in rr.text, (pp.at, body_of(rr.text)[:300]))
+    item("a", 49, status="doing", answers=[older])
+    for what, query in (("a time before the answer", f"?since={older['ts'] - 60}"), ("no time at all", "")):
+        rr, pp = frame("a49", query)
+        check(f"an item off his move with an old answer, {what}: answered", pp.at["data-state"] == "answered" and "olderword" in rr.text, pp.at)
+    for bad in (str(now - 60), "nan", "-inf", "x"):
+        check(f"…a refresh of a closed frame with a later time or no time ({bad!r}): closed", frame("a49", f"?since={bad}")[1].at["data-state"] == "closed")
+    check("…a reference with no time reads no answer", frame("a49", f"?was={'0' * 16}")[1].at["data-state"] == "closed")
+    item("a", 49, status="doing", answers=[older, {"ts": time.time() + 60, "kind": "decision", "choice": "Ship", "text": "newerword", "via": "board", "ask": ASK}])
+    rr, pp = frame("a49", f"?since={now - 60}")
+    check("…and an answer recorded since the closed frame was drawn is shown", pp.at["data-state"] == "answered" and "newerword" in rr.text and "olderword" not in rr.text, pp.at)
+
     # ---- 11. answering: the board's one answer path, its gates unchanged
     ref5, t5 = first("a5")
     base = {"token": tok("a5"), "choice": "B · Ship", "text": "a note from the frame", "ref": ref5, "act": "answer", "back": ""}
