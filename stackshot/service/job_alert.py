@@ -277,10 +277,10 @@ def _jobalert_open(project: str, unit: str, host: str, when: str, machine: str, 
         notes.append(f"{key} lists no builder, so this is with {owner}, its front agent")
     meta: dict[str, Any] = {"job_alert_runs": [when], "job_alert_count": 1, "job_alert_note": "; ".join(notes)}
     desc = _jobalert_text(unit, host, meta, machine)
-    pfx_, tail_ = _terminal._terminal_subject_prefix(str(rec.get("scope") or "")), f" failed on {host}"
+    pfx_, head_, tail_ = _terminal._terminal_subject_prefix(str(rec.get("scope") or "")), "Fix ", f" on {host}"      # a task, as every title is: the failure is in the description
     unit_ = _svcstore._shown_ids(unit)
-    room_ = (_subject_max() - len(pfx_) - len(tail_)) if _subject_max() else 0      # a long unit name is cut so the server's own subject is never refused
-    subject = f"{pfx_}{_fit(unit_, room_) if 8 <= room_ < len(unit_) else unit_}{tail_}"
+    room_ = (_subject_max() - len(pfx_) - len(head_) - len(tail_)) if _subject_max() else 0      # a long unit name is cut so the server's own subject is never refused
+    subject = f"{pfx_}{head_}{_fit(unit_, room_) if 8 <= room_ < len(unit_) else unit_}{tail_}"
     if _subject_max():
         subject = _fit(subject, _subject_max())
     nxt = _fit(f"{mover}: read the journal of {unit} on {host}, fix the cause; the next successful run closes this item", _next_line_max())

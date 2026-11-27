@@ -354,7 +354,10 @@ STATES = ("[home] X fails when Y", "[home] X is live", "[home] The export is too
           f"[home] {KO_SELF} {KO_TASKS[0]}: SMS {KO_STATES[0]}")
 OPENERS = "that which who whom whose when where while whenever wherever if whether how why what so until after before because unless as once than to like".split()
 WORK = ("[home] Keep hand-off times on closed items", "[home] Make the nightly run finish by 06:00", "[home] Make sure the export is fast", "[home] Fix the login that fails", "[home] Fix: login fails after a change",
-        "[home] Add error message: file is too large", "[home] Check valves are closed", "[home] Double-check the totals are right", "[home] Re-stain the deck the sun is fading", "[home] Spot-check the lamps the tenant is using",
+        "[home] Add error message: file is too large",
+        # the titles the server composes itself (job alert, job gap, terminal prompt)
+        "[home] Fix nightly.service on host-a", "[home] Add Description= to x.timer", "[home] Add X-Model-Lane= to x.timer", "[home] Correct X-Model-Lane= of x.timer", "[home] Put x.timer in git",
+        "[home] Match x.timer to its file in git", "[home] Fix the odd-new-code gap of x.timer", "[home] Answer home-builder in its terminal", "[home] Check valves are closed", "[home] Double-check the totals are right", "[home] Re-stain the deck the sun is fading", "[home] Spot-check the lamps the tenant is using",
         "[home] Also check the lamp is off", "[home] Quietly confirm the door is locked", "[home] Do not send the reminder twice", "[home] Don't lose drafts", "[home] Never show a deleted photo", "[home] Ask why the mail never arrives",
         "[home] Investigate why the boiler cycles", "[home] Look into why the boiler cycles", "[home] pick whether to add a second lamp", "[home] Decide what to cook", "[home] Count fails per run",
         "[home] Porch: fix lamp the tenant says is dim", "[home] Confirming the lamp is off", "[home] Mop the floor we have to share",
