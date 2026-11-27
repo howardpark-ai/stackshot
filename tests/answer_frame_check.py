@@ -344,7 +344,7 @@ def run(br):
 
     # ---- 5b. the refresh of a frame that has drawn no question
     def reread(pg, i):      # the parent's refresh, waited for to the frame's own read of the item and the time to draw it; the address it read
-        with pg.expect_response(lambda r: f"/items/a{i}/answer-frame?" in r.url, timeout=8000) as got:
+        with pg.expect_response(lambda r: r.url.split("?")[0].endswith(f"/items/a{i}/answer-frame"), timeout=8000) as got:      # by the path: with no time and no reference the read has no query
             pg.evaluate("(m) => send('f', m)", {**ASKD, "do": "refresh"})
         pg.wait_for_timeout(500); return got.value.url
     pg = parent(ctx, ("f", "/items/a12/answer-frame")); wait_state(pg, "closed")
