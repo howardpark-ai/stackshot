@@ -410,8 +410,8 @@ def _dropped_lines_note(old: Any, new: Any) -> str:
 
 
 def _goal_moved_note(item_was: dict[str, Any], item: dict[str, Any], sent: str) -> str:
-    """The reply line of a write that changed the words of the item's Goal sentence and left its subject as stored: the title and the `Goal:` bullet name one outcome, so the subject is quoted, with what to send when
-    the outcome moved. Counted in the call log (call_log.noted). Information only: nothing is refused or stored differently. `sent` is the description as the call passed it: the words must differ both there and as
+    """The reply line of a write that changed the words of the item's Goal sentence and left its subject as stored: the title names the work that reaches the `Goal:` bullet's outcome, so the subject is quoted, with what to send when
+    that work changed with it. Counted in the call log (call_log.noted). Information only: nothing is refused or stored differently. `sent` is the description as the call passed it: the words must differ both there and as
     stored, so neither the server's split of a long bullet nor a long Goal sent again and split the same way is a change. "" when the stored description opens with no `Goal:` bullet, the one it replaces gave no
     sentence, the words are the same (a re-formatting, a label put right) or the write stored another subject."""
     new, old, said = goal_of(item.get("description")), stated_goal(item_was.get("description")), stated_goal(sent)
@@ -419,7 +419,7 @@ def _goal_moved_note(item_was: dict[str, Any], item: dict[str, Any], sent: str) 
     if new is None or old is None or said is None or subject != str(item_was.get("subject") or "") or goal_words(old) in (goal_words(new), goal_words(said)):
         return ""
     _calls.noted("goal-moved")
-    return f'\n(note: the Goal changed and the subject did not; the stored subject is "{_clip_line(subject)}": send subject= if the outcome moved)'
+    return f'\n(note: the Goal changed and the subject did not; the stored subject is "{_clip_line(subject)}": send subject= if the work it names no longer reaches that Goal)'
 
 
 def _mark_next_stale(item_was: dict[str, Any], item: dict[str, Any], meta: dict[str, Any], writer: str, naming_added: list[str], next_passed: bool) -> None:
@@ -1699,7 +1699,7 @@ def update_unlocked(
         try:
             if description.strip():
                 goal_note = _goal_moved_note(item_was, item, desc_sent)
-            # a write that names the item anew, or moves its Goal under the same title, is told when the open item's title is a question or an activity; other rewrites of the description do not name it again
+            # a write that names the item anew, or moves its Goal under the same title, is told when the open item's title does not read as work; other rewrites of the description do not name it again
             if item.get("status") == "open" and (goal_note or item.get("subject") != item_was.get("subject")):
                 goal_note += _fg.subject_form_note(str(item.get("subject") or ""))
         except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write

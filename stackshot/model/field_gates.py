@@ -67,7 +67,7 @@ def subject_faults(subject: str, current: str | None = None) -> list[str]:
         out.append(f"Refused: subject must start with one of {s['prefixes']} — got {subject[:40]!r}")
     lim = _subject_max()
     if lim and len(subject) > lim and subject != current:
-        out.append(f"Refused: the subject is {len(subject)} characters and the limit is {lim}, the scope prefix counted. Shorten it to the finished outcome; "
+        out.append(f"Refused: the subject is {len(subject)} characters and the limit is {lim}, the scope prefix counted. Shorten it to the work that closes the item; "
                    "the detail goes in the description bullets (and the project page's timeline).")
     return out
 
@@ -78,18 +78,47 @@ def _gate_subject(subject: str, current: str | None = None) -> None:
         raise _faults.refusals(got)
 
 
-# The reading is of the forms that cannot be a finished outcome: a title that names a result is not to be named, and a miss costs little (the daily audit's judge reads the titles the reading passes). English is read
-# by how a part opens, in a few forms only: "how to", "whether to", a choice or a search followed by its question word. A verb such as "Fix", "Find" or "Analyze" alone can open a good title or a button's name.
-# A title that goes on to state a result ("How to pay shows on the invoice") is passed: for a choice only the words of a result count, since what is chosen may be told as "whether they can be changed". Korean
-# puts the verb last, so the title's last part is read by how it ends. Korean words are written as escapes (no Hangul in the repository).
+# The rule of a title: it reads at a glance as the work that closes the item (in English an imperative, in Korean a verb noun in -hagi or a noun task). The reading names only what plainly is not that: a question,
+# a "should" or "must" sentence, and a statement of state or symptom. A task title is never to be named, and a miss costs little (the daily audit's judge reads the titles the reading passes): a verb that is also a
+# noun makes some symptoms read like tasks ("Search results are empty"), and they pass. Korean puts the verb last, so a Korean title is read by how it ends; its words are escapes (no Hangul in the repository).
+_READ_MAX = 300      # a longer text is no title, and reading it is not worth what the patterns could take on it
 _RX_ASKS = re.compile(r"(?:how|whether) to\s", re.I)
-_RX_CHOICE = re.compile(r"(?:pick|choose|decide) (?:how|whether|which|between|if|what to)\s", re.I)
-_RX_SEARCH = re.compile(r"(?:investigat(?:e|ing)|look(?:ing)? into|figure out|find out|analy[sz]e) (?:how|whether|why)\s", re.I)
-_RESULT = r"no longer|again|shows|shown|appears|works|stays|runs|loads|opens|returns|answers|explains|goes|gets|reads|says|lists|tells|reaches|passes|live|written"
-_RX_RESULT = re.compile(rf"\b(?:{_RESULT})\b", re.I)
-_RX_STATES = re.compile(rf"\b(?:{_RESULT}|is|are|was|were|has|can|will|\w{{2,}}ed)\b", re.I)
+_RX_GOES_ON = re.compile(r"\b(?:no longer|again|shows|shown|appears|works|stays|runs|loads|opens|returns|answers|explains|goes|gets|reads|says|lists|tells|reaches|passes|live|written|is|are|was|were|has|can|will|\w{2,}ed)\b", re.I)      # a "how to" title that goes on to state something is not called a question
 _RX_ASKS_END = re.compile("(?:\ubc29\ubc95|\ud560\uc9c0|\uc5ec\ubd80)$")      # way to, whether to, whether or not
-_RX_WORK_END = re.compile("(?<![^ ])(?:\ud655\uc778|\uac80\ud1a0|\uc870\uc0ac|\ubcf4\ub0b4\uae30|\ub2e4\ub4ec\uae30|\uc54c\uc544\ubcf4\uae30)$")      # check, review, investigation, sending, polishing, finding out; a word of its own
+_RX_KO_SHOULD = re.compile("(?:\uc57c ?(?:\ud55c\ub2e4|\ud568|\ud569\ub2c8\ub2e4|\ub428|\ub41c\ub2e4|\ub429\ub2c8\ub2e4|\ud574|\ud574\uc694|\ud560 \uac83)|\ud544\uc694\uac00 (?:\uc788\ub2e4|\uc788\uc74c|\uc788\uc2b5\ub2c8\ub2e4)|\ud544\uc694\ud558\ub2e4|\ud544\uc694\ud569\ub2c8\ub2e4)$")      # must, has to, needs to
+_KO_BEFORE_DA = "\uc54a\uc5c6\uac19\ub9ce\uc88b"      # the syllables before a final -da that close a statement, beside those that end in n or ss (read by their code)
+_KO_DA_WORDS = ("\ub290\ub9ac\ub2e4", "\ub835\ub2e4", "\ub7fd\ub2e4", "\ud2c0\ub9ac\ub2e4", "\ub2e4\ub974\ub2e4", "\ub2a6\ub2e4", "\uc791\ub2e4", "\ud06c\ub2e4", "\ub192\ub2e4", "\ub0ae\ub2e4", "\ubd80\uc871\ud558\ub2e4", "\ubd88\ud3b8\ud558\ub2e4", "\uc774\uc0c1\ud558\ub2e4", "\ubd88\uac00\ub2a5\ud558\ub2e4", "\uc911\uc774\ub2e4")      # slow, hard, wrong, different, late, small, big, high, low, lacking, awkward, odd, impossible, under way
+_KO_DA_NOUNS = ("\uc820\ub2e4", "\ubca0\ub780\ub2e4", "\ud310\ub2e4", "\ud63c\ub2e4", "\uc6b0\uac04\ub2e4", "\ub974\uc644\ub2e4", "\ud30c\uac04\ub2e4", "\uc544\ub9cc\ub2e4")      # loan words that end like a statement: agenda, veranda, panda, Honda, Uganda, Rwanda, propaganda, Amanda
+# the words an English task title opens with
+_TASK_VERBS = frozenset("""accept add adjust align allow always analyse analyze announce answer apply approve archive arrange ask assign attach audit automate avoid back backfill backport bake ban batch benchmark block book bring build
+bump buy cache call cancel cap capture catch caulk change chase check choose clarify clean clear close collapse collect color combine commit compare compile complete compress confirm connect consider
+consolidate containerize convert cook copy correct count cover create cut deactivate deal debounce decide declare declutter decouple dedupe default defer define defrost delay delete deliver deploy deprecate
+descale describe design detect diagnose dim disable disallow discuss dismiss display do document dogfood double draft drop dump duplicate email embed emit enable encrypt end enforce enrol enroll ensure enter
+escalate estimate evaluate exclude exempt expand expire explain export expose extend extract fail feed fetch file fill filter finalize find finish fix flag flatten fold follow force format forward free freeze
+gate gather generate get give grant group guard handle harden have hide highlight hold hook host identify ignore implement import improve include increase index inform initialize inline insert inspect install
+instrument integrate introduce investigate invite isolate issue join keep kill label launch learn leave let limit line link lint list load localize lock log look lower mail maintain make manage map mark mask
+match measure meet mention merge migrate mirror mock move mow mute name narrow never normalize note notify nudge offer omit onboard only open optimize order organize overhaul package pad page paginate paint
+parameterize parse pass patch pause pay persist phase pick pin ping pipe place plan play please point polish poll populate port post prefer prefetch prep prepare present preserve prevent preview print
+prioritize probe produce profile promote prompt propose protect prove provide provision prune publish pull purge push put qualify query queue quiet quote raise rate reach reactivate read reattach rebalance
+rebase rebuild recalculate recheck reconcile reconfigure reconnect record recover recycle redact redesign redirect redo reduce refactor refer refill refine reflect refresh refund regenerate register reimburse
+reindex reinstall reject relabel release relink reload remind remove rename renegotiate renew reopen reorder reorganize repaint repair repeat replace replay reply repopulate report repot request require rerun
+rescan reschedule research resend reserve reset resize resolve respect respond rest restart restock restore restrict resume retain retest retire retrain retry return reupload reuse revalidate revert review
+revise revisit revoke rewire rework rewrite ride rip roll rotate round route run sample sanitize save scale scan schedule scope score scrub seal search secure see seed select sell send separate serialize serve
+set settle shard share sharpen ship shop shorten show shrink shut sign silence simplify sit skip slim slow snapshot snooze solve sort source spec specify speed spell split spread squash stabilize stage stamp
+standardize start state stay stop store stream streamline strengthen strip structure study style submit subscribe suggest summarize sunset supply support suppress surface suspend swap switch sync tag take talk
+tally teach tear tell test thank throttle tidy tie tighten time toggle trace track train transfer translate trap treat triage trigger trim try tune turn type unblock undo unify unpin unsubscribe unwind update
+upgrade upload upstream use vacuum validate vendor verify version view visit wait wake walk warm warn wash watch wire wrap write""".split())
+_TASK_PREFIXES = ("re-", "un-", "de-", "pre-", "auto-")
+_BEFORE_VERB = frozenset(("also", "please", "just", "then", "now", "first", "again"))      # these and an -ly word may stand before a task's verb
+_RX_SHOULD = re.compile(r"(?<![\w-])(?:should(?:n['’]t)?|must(?:n['’]t)?|ought to|needs? to|has to|have to)(?![\w-])", re.I)
+_RX_STATE = re.compile(r"(?<![\w-])(?:is|are|was|were|isn['’]t|aren['’]t|wasn['’]t|weren['’]t|fails|keeps|gets|goes|does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|won['’]t|has no|have no|no longer \w+s|never \w+s|keep \w+ing)(?![\w-])", re.I)
+# after a first word that is also a task verb ("Build fails on the phone"), only forms that cannot go on from that verb as its object
+_RX_AFTER_NOUN = re.compile(r"(?:is|are|was|were|isn['’]t|aren['’]t|wasn['’]t|weren['’]t|doesn['’]t|does not|should|needs to|has to|fails (?:to|on|when|after|with|every|at)|keeps \w+ing)(?![\w-])", re.I)
+_RX_NOT_MAIN = re.compile(r"[,;–—]| - |\b(?:that|which|who|whom|whose|when|where|while|whenever|wherever|if|whether|how|why|what|so|until|after|before|because|unless|as|once|than|to|like)\b", re.I)      # a verb after one of these may not be the title's own
+_SUBJECT_WORDS = 6      # the most words that stand before the verb of a statement
+_RX_PRONOUN = re.compile(r"\b(?:I|we|you|they|he|she|it)\b")      # past the first word, one opens a clause of its own: "... newsletters we don't read" is not the title's sentence
+_RX_QUOTED = re.compile(r"\"[^\"]*\"|“[^”]*”|‘[^’]*’|`[^`]*`|(?<!\w)'[^']*'(?!\w)|\([^()]*\)")      # words a title quotes or brackets are not its own sentence
+_SHOULD, _STATEMENT = "a should or must sentence", "a statement"
 
 
 def _without_end_brackets(part: str) -> str:
@@ -104,35 +133,88 @@ def _without_end_brackets(part: str) -> str:
         end = i
 
 
+def _ko_statement(part: str) -> bool:
+    """Whether `part` ends as a Korean statement: -da after a syllable closed by n or ss (handa, doenda, itda, -eotda) or one of _KO_BEFORE_DA, "anida", or the polite -mnida. A noun that happens to end in -da
+    (mada, boda, bada) has none of these before it."""
+    def final(ch: str) -> int:      # the closing consonant of a Hangul syllable, by its place in the code table (4 is n, 17 is p, 20 is ss); -1 for any other character
+        code = ord(ch) - 0xAC00
+        return code % 28 if 0 <= code < 11172 else -1
+    if len(part) < 2 or part[-1] != "\ub2e4" or part.endswith(_KO_DA_NOUNS):
+        return False
+    if part.endswith(_KO_DA_WORDS):
+        return True
+    if part.endswith("\ub2c8\ub2e4"):
+        return part.endswith("\uc544\ub2c8\ub2e4") or (len(part) > 2 and final(part[-3]) == 17)
+    return part[-2] in _KO_BEFORE_DA or final(part[-2]) in (4, 20)
+
+
+def _opens_as_task(part: str) -> bool:
+    """Whether an English part opens with the verb of a task: a listed word (also as the last of a hyphenated one, `Double-check`, or after `re-`), unless what follows makes that word a noun (`Build fails on ...`)
+    or the part opens as a "should" sentence (`Have to ...`)."""
+    if _RX_SHOULD.match(part):
+        return False
+    first, _, rest = part.partition(" ")
+    word = first.strip("*_[].,!").lower()
+    while rest and (word in _BEFORE_VERB or word.endswith("ly")) and word not in _TASK_VERBS:
+        first, _, rest = rest.lstrip().partition(" ")
+        word = first.strip("*_[].,!").lower()
+    if not (word in _TASK_VERBS or word.startswith(_TASK_PREFIXES) or ("-" in word and word.rsplit("-", 1)[1] in _TASK_VERBS)):
+        return False
+    return not _RX_AFTER_NOUN.match(rest.lstrip())
+
+
+def _english_sentence(part: str) -> str:
+    """What an English part that is no task reads as: a "should" sentence when it opens with one or has one as its own verb, a statement when it has a verb of state as its own, else ""."""
+    if _RX_SHOULD.match(part):
+        return _SHOULD
+    for rx, kind in ((_RX_SHOULD, _SHOULD), (_RX_STATE, _STATEMENT)):
+        if found := rx.search(part):
+            head = part[:found.start()]
+            words = head.split()
+            gerund = len(words) > 1 and words[0].lower().endswith("ing") and words[1].lower() in ("a", "an", "the", "all", "every", "each", "our", "my", "this", "these")      # "Confirming the lamp ..." is work, "Ceiling light ..." a noun
+            if 0 < len(words) <= _SUBJECT_WORDS and not gerund and not _RX_NOT_MAIN.search(head) and not _RX_PRONOUN.search(" ".join(words[1:])):
+                return kind
+    return ""
+
+
 def subject_reads_as(subject: str) -> str:
-    """"a question" or "an activity" when the subject plainly is one and so names no finished outcome, else "". Read past the scope prefix. A question mark at the end is a question. An English opening is read in
-    the first part, and in a part after a label of at most five words (`Door sensor: how to wire it`), unless the title states something somewhere (_RX_STATES; _RX_RESULT for a choice). A Korean ending is read in the last part only
-    (a label before a colon may end in the same word), past a closing bracket. A subject that ends with an ellipsis is not read: the server's cut (fix_long_subject) may have taken the words that name the result."""
+    """"a question", "a should or must sentence" or "a statement" when the subject plainly is one and so does not read as work, else "". Read past the scope prefix. A question mark at the end is a question, as
+    is a part that opens `how to` or `whether to` (the first part, or one after a label of at most five words) in a title that goes on to state nothing, and a Korean last part that ends as a way or a whether. A
+    Korean last part is a "should" sentence or a statement by its ending. An English title is neither when any part opens with a task's verb; else each part is read for a verb of its own. A subject that ends
+    with an ellipsis is not read: the server's cut (fix_long_subject) may have taken the words that decide."""
     s = next((subject[len(p):] for p in _cfg.CFG["subject"]["prefixes"] if subject.startswith(p)), subject).strip()
+    if len(s) > _READ_MAX:
+        return ""
     if s.endswith(("?", "\uff1f")):
         return "a question"
     if s.endswith("…"):
         return ""
-    parts = re.split(r"[:\uff1a]\s+", s)
+    colon = r"[:\uff1a]\s+"
+    parts = re.split(colon, s)
     opens = [parts[0], *(p for label, p in zip(parts, parts[1:]) if len(label.split()) <= 5)]
-    last = _without_end_brackets(parts[-1])
-    states, result = _RX_STATES.search(s), _RX_RESULT.search(s)
-    if _RX_ASKS_END.search(last) or (not states and any(map(_RX_ASKS.match, opens))):
+    last = _without_end_brackets(parts[-1]).rstrip(" .!。")
+    if _RX_ASKS_END.search(last) or (not _RX_GOES_ON.search(s) and any(map(_RX_ASKS.match, opens))):
         return "a question"
-    activity = _RX_WORK_END.search(last) or (not result and any(map(_RX_CHOICE.match, opens))) or (not states and any(map(_RX_SEARCH.match, opens)))
-    return "an activity" if activity else ""
+    if _RX_KO_SHOULD.search(last):
+        return _SHOULD
+    if _ko_statement(last):
+        return _STATEMENT
+    plain = [p.strip() for p in re.split(colon, _RX_QUOTED.sub(" x ", s))]
+    if any(map(_opens_as_task, plain)):
+        return ""
+    return next(filter(None, map(_english_sentence, plain)), "")
 
 
 def subject_form_note(subject: str) -> str:
-    """The reply line of a session's write that leaves an item titled as a question or an activity: the subject is quoted, with what to send instead. Counted in the call log (call_log.noted). Information only:
-    nothing is refused or stored differently. "" for any other subject. Why: only the description's first bullet is held to the outcome at write time, so a title such as "pick whether ..." was filed in silence
-    and stayed after the choice was made."""
+    """The reply line of a session's write that leaves an item titled as a question, a "should" sentence or a statement: the subject is quoted, with what to send instead. Counted in the call log
+    (call_log.noted). Information only: nothing is refused or stored differently. "" for any other subject. Why: a title that reads as a symptom or a target leaves open what is to be done, and nothing reads
+    the title at write time."""
     kind = subject_reads_as(subject)
     if not kind:
         return ""
     _calls.noted("subject-form")
-    return (f'\n(note: the subject "{_clip_line(subject)}" reads as {kind}, not a finished outcome: send subject= naming the result wanted, the one the Goal sentence says, as "Make X work when Y" '
-            'or "X is live")')
+    return (f'\n(note: the subject "{_clip_line(subject)}" reads as {kind}, not as the work that closes the item: send subject= as that task, an imperative such as "Keep hand-off times on closed items" '
+            '(in Korean, ending in -hagi or a noun task); a symptom goes in a `Problem:` bullet)')
 
 
 def fix_long_subject(subject: str, current: str | None = None) -> str:
@@ -418,9 +500,9 @@ def goal_fault(desc: str) -> str:
     if ex is not None and not _sendable(ex):      # a corrected description the form gate would refuse again is no example to copy
         ex = None
     shown = (f" Send the description again with that bullet as the goal:\n{ex}\n" + "If that bullet names a symptom, a cause or a trigger, write the finished outcome as the goal and move the bullet to a later bullet that opens `Problem:`.") if ex else ""
-    return (f"Refused: the description must open with its goal, and {saw}.{shown} The subject and the first bullet name the same finished outcome: `- Goal: <the result you want, in a sentence>`; "
+    return (f"Refused: the description must open with its goal, and {saw}.{shown} The subject names the work that closes the item and the first bullet the finished outcome it reaches: `- Goal: <the result you want, in a sentence>`; "
                     "a symptom, a cause or a trigger goes in a later bullet that opens `Problem:`. "
-                    "Example: the symptom title “Fix X fails when Y” becomes the outcome title “Make X work when Y”, with `- Goal: X works when Y` as the first bullet "
+                    "Example: the symptom title “X fails when Y” becomes the task title “Make X work when Y”, with `- Goal: X works when Y` as the first bullet "
                     "and `- Problem: X fails when Y` as the second. `Goal:` is case-sensitive and sits right after the dash." + _GOAL_RETRY)
 
 

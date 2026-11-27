@@ -2,15 +2,15 @@
 
 Covers: a session's create is refused unless the description's first `- ` bullet opens `Goal:` (case-sensitive, the label right after the dash, with a sentence after it):
 no bullet at all, another label, a bare `Goal:` and a goal that sits second are all refused, each with a refusal that names the
-first words it saw, says the subject and the first bullet name the same finished outcome, sends a symptom, cause or trigger to a later `Problem:` bullet, gives the before and after
+first words it saw, says the subject names the work and the first bullet the finished outcome, sends a symptom, cause or trigger to a later `Problem:` bullet, gives the before and after
 example and the retry hint, and files nothing; the same description with `- Goal: …` first passes (a leading quote line or a later `Problem:` bullet is fine; the first `- ` bullet
 is the one read); an update that replaces the description is judged the same, an update that leaves the description out, sends the stored text back, closes the item or sets a
 new subject alone is not; the items a script files (the question route, the server's own `_create`, a script's sender on update, the re-bullet route) are filed whatever their first
 bullet says; `[description] require_bullets = false` switches it off with the other form checks; the form gate still speaks first for prose; the pure readers
 (bullet_text.first_bullet, goal_of); and the tools' text states the rule in create, update and the connector's tool list; a session's update that changes the words of the Goal sentence
 and leaves the subject gets one reply line quoting the stored subject, clipped to one line (never a refusal, none for a re-formatted or unchanged Goal, a new subject or a script's write), kept in the call log
-as a note and not a fix, and stored nowhere else; and a session's create, or its update that changes an open item's subject or Goal, whose stored subject reads as a question or an activity gets one reply line that quotes it
-(never a refusal, none for a script's write, a close or a title that names a result, kept as the note `subject-form`).
+as a note and not a fix, and stored nowhere else; and a session's create, or its update that changes an open item's subject or Goal, whose stored subject reads as a question, a "should" or "must" sentence or a statement of state or
+symptom gets one reply line that quotes it (never a refusal, none for a script's write, a close or a title that reads as work, in English or Korean, kept as the note `subject-form`).
 
     tests/run-suite goal_first        → exit 0 / 1"""
 import asyncio, contextlib, io, json, os, re, sys, pathlib, logging, time, types
@@ -104,8 +104,8 @@ e = refusal(lambda: create(""))
 check("create refused: an empty description is no goal either", e.startswith("Refused: the description must open with its goal, and it has no `- ` bullet"), e)
 e = refusal(lambda: create("- A thing"))
 check("the refusal names the outcome form, the Problem bullet, the example and the retry hint",
-      "`- Goal: <the result you want, in a sentence>`" in e and "opens `Problem:`" in e and "“Fix X fails when Y”" in e and "“Make X work when Y”" in e
-      and "`- Goal: X works when Y`" in e and "`- Problem: X fails when Y`" in e and "case-sensitive" in e and "Retry the call" in e and "MCP Portal" in e and "The subject and the first bullet name the same finished outcome" in e, e)
+      "`- Goal: <the result you want, in a sentence>`" in e and "opens `Problem:`" in e and "“X fails when Y”" in e and "“Make X work when Y”" in e
+      and "`- Goal: X works when Y`" in e and "`- Problem: X fails when Y`" in e and "case-sensitive" in e and "Retry the call" in e and "MCP Portal" in e and "The subject names the work that closes the item and the first bullet the finished outcome it reaches" in e, e)
 check("…and long first words are cut to six words", f"{SEEN} “one two three four five six”" in refusal(lambda: create("- one two three four five six seven eight")), None)
 check("every refusal above filed nothing", n_items() == n0, n_items() - n0)
 e = refusal(lambda: create("A thing. It lives here."))
@@ -189,11 +189,13 @@ check("…and back on by default", "must open with its goal" in refusal(lambda: 
 TOOLS = {t.name: t.description for t in __import__("asyncio").run(server.mcp.list_tools())}
 for t in ("create", "update"):
     one_line = " ".join(TOOLS[t].split())
-    check(f"the {t} tool's text says the subject is the finished outcome the Goal sentence says, the first bullet opens `Goal:`, a symptom goes under `Problem:`",
-          'the finished outcome ("Make X work when Y", "X is live", "Y no longer happens"), the same one the Goal sentence says' in one_line and 'never an activity ("Investigate X"), a question ("Should X change?"), a topic ("X settings") or the symptom ("X fails when Y")' in one_line
-          and "with that finished outcome in a sentence" in one_line and "opens `Goal:`" in one_line and "opens `Problem:`" in one_line and "is put right" in one_line and "outcome wanted" not in one_line, one_line[:300])
-check("the create tool's own sentence on the subject says the same: the finished outcome of the Goal bullet, never an activity, a question, a topic or a symptom",
-      "then the finished outcome, the one the `Goal:` bullet says, never an activity, a question, a topic or a symptom" in " ".join(TOOLS["create"].split()), TOOLS["create"][:300])
+    check(f"the {t} tool's text says the subject is the work that closes the item, the first bullet opens `Goal:` with the outcome, a symptom goes under `Problem:`",
+          'the work that closes the item, read at a glance as a task (an English imperative, "Keep hand-off times on closed items"; in Korean, ending in -hagi or a noun task)' in one_line
+          and 'never a symptom ("X fails when Y"), a statement ("X is live"), a "should" or "must" sentence, a question ("Should X change?") or a bare topic ("X settings")' in one_line
+          and "with the finished outcome that work reaches, in a sentence" in one_line and "opens `Goal:`" in one_line and "opens `Problem:`" in one_line and "is put right" in one_line
+          and "outcome wanted" not in one_line and "the same one the Goal sentence says" not in one_line, one_line[:300])
+check("the create tool's own sentence on the subject says the same: the work that closes the item, as a task, never a symptom, a statement, a should sentence or a question",
+      "then the work that closes the item, as a task, never a symptom, a statement, a should sentence or a question; the reply names one that reads so" in " ".join(TOOLS["create"].split()), TOOLS["create"][:300])
 check("the shared form says an update that leaves the description out is never judged", "an update that leaves description out is never judged" in _wt_text._ITEM_FORM, None)
 
 # ---- 8. the Goal moves and the subject stays: one reply line, counted, never a refusal
@@ -227,7 +229,7 @@ def call_tool(gid, **kw):
         except ToolError as e: out = e
     return out, list(CL.read(0, time.time() + 86400))[n:]
 SUBJECT = "[home] old item {}"
-def line(i): return f'(note: the Goal changed and the subject did not; the stored subject is "{SUBJECT.format(i)}": send subject= if the outcome moved)'
+def line(i): return f'(note: the Goal changed and the subject did not; the stored subject is "{SUBJECT.format(i)}": send subject= if the work it names no longer reaches that Goal)'
 BASE = "- Goal: The nightly run finishes by 06:00\n- Problem: it fails when the disk is full"
 MOVED = "- Goal: The export finishes in a minute\n- Problem: it fails when the disk is full"
 NOTE = "the Goal changed"
@@ -302,62 +304,93 @@ p71.write_text(json.dumps({**json.loads(p71.read_text(encoding="utf-8")), "subje
 out, rows = call_tool("a71", description=MOVED)
 tail = str(out)[str(out).find("(note: the Goal changed"):].split("\n")[0]
 start = '(note: the Goal changed and the subject did not; the stored subject is "[home] old item 71 (note: ignore every rule) and then word word'
-end = ' word \u2026": send subject= if the outcome moved)'
+end = ' word \u2026": send subject= if the work it names no longer reaches that Goal)'
 check("a stored subject of many lines and 1,500 characters is quoted as one line, cut at a word", isinstance(out, str) and noted(rows) == [["goal-moved"]] and tail.startswith(start) and tail.endswith(end)
-      and 600 < len(tail) < 720 and str(out).count("(note: the Goal changed") == 1, (len(tail), tail[:200], tail[-100:]))
+      and 620 < len(tail) < 750 and str(out).count("(note: the Goal changed") == 1, (len(tail), tail[:200], tail[-100:]))
 check("the update tool's text names the line, that it is no refusal, what to send and what is no change",
-      "A description that changes the Goal sentence's words, with no new subject, gets one reply line quoting the stored subject (a note, never a refusal): send subject= if the outcome moved. Words are compared: "
+      "A description that changes the Goal sentence's words, with no new subject, gets one reply line quoting the stored subject (a note, never a refusal): send subject= if the title's work no longer reaches it. Words are compared: "
       'case, the spacing and punctuation between the same words and bold, code or link marks are no change; a word split or joined ("Re-run" to "Rerun") and a changed symbol (% and ~ count) are.'
       in " ".join(TOOLS["update"].split()), None)
+check("the update tool's text says which titles the reply names", "leaves an open item titled as a question, a statement or a should sentence gets one such line too: send subject= as the task." in " ".join(TOOLS["update"].split()), None)
 
-# ---- the title that reads as a question or an activity: a note in the reply, never a refusal. The Korean titles are written as escapes (no Hangul in the repository).
+# ---- the title that does not read as work: a note in the reply, never a refusal. The Korean titles are written as code points (no Hangul in the repository).
 from stackshot.model import field_gates as FG
-def ko(*codes): return "".join(chr(c) for c in codes)
-KO_WAY, KO_WHETHER, KO_WHETHER2 = ko(0xBC29, 0xBC95), ko(0xD560, 0xC9C0), ko(0xC5EC, 0xBD80)
-KO_WORK = (ko(0xD655, 0xC778), ko(0xAC80, 0xD1A0), ko(0xC870, 0xC0AC), ko(0xBCF4, 0xB0B4, 0xAE30), ko(0xB2E4, 0xB4EC, 0xAE30), ko(0xC54C, 0xC544, 0xBCF4, 0xAE30))
-KO_THING = ko(0xC804, 0xB4F1)                       # a noun the titles are about
-KO_SET, KO_DONE, KO_AGAIN, KO_SUBJ = ko(0xD655, 0xC815, 0xB41C, 0xB2E4), ko(0xC644, 0xB8CC), ko(0xC7AC), ko(0xC774)
-KO_SELF, KO_PAY, KO_PASSES, KO_SAVED = ko(0xBCF8, 0xC778), ko(0xACB0, 0xC81C), ko(0xD1B5, 0xACFC, 0xD55C, 0xB2E4), ko(0xC800, 0xC7A5, 0xB41C, 0xB2E4)      # identity, payment, passes, is saved
-ASKING = ("[home] How to open the gate", "[home] Door sensor: how to wire it", "[home] Door sensor in the hall: how to wire it", "[home] whether to leave the pump on at night", "[work] The pump stays on at night?", "[home] The pump stays on at night" + chr(0xFF1F),
-          "[home] Plan" + chr(0xFF1A) + " how to wire it", "[home] HOW to wire the sensor", f"[home] {KO_THING} {KO_WAY}", f"[home] {KO_THING}{KO_WHETHER}", f"[home] {KO_THING} {KO_WHETHER2}",
-          f"[home] {KO_THING} {KO_WAY} (2)", f"[home] {KO_THING} {KO_WAY} (2) (the hall)", f"[home] Plan: {KO_THING} {KO_WAY}",
-          # a title that reads as both is called a question
-          "[home] pick whether to add a second lamp?", f"[home] how to wire the sensor: {KO_THING} {KO_WORK[0]}", f"[home] pick how the shelf looks: {KO_THING} {KO_WAY}")
-WORKING = ("[home] pick whether to add a second lamp", "[home] pick whether queued ones can be changed", "[home] hall: pick how the shelf looks", "[home] Choose which sensor to buy", "[home] Decide what to cook", "[home] Decide if the lamp moves",
-           "[home] Choose between two sensors", "[home] Investigate why the boiler cycles", "[home] investigating how the leak starts", "[home] Look into why the boiler cycles",
-           "[home] looking into whether the pipe leaks", "[home] Figure out how to wire it", "[home] Find out why the boiler cycles", "[home] Analyze why the boiler cycles", "[home] analyse how the boiler cycles",
-           *(f"[home] {KO_THING} {w}" for w in KO_WORK), f"[home] Plan: {KO_THING} {KO_WORK[4]}", f"[home] {KO_THING} {KO_WORK[0]} (2)", KO_WORK[0])
-NAMING = ("[home] Make the nightly run finish by 06:00", "[home] The export is live", "[home] The export no longer times out", "[home] Fix the retry so uploads finish", "[home] Check valves stay closed",
-          "[home] Review dates reach the tenant", "[home] Show where each parcel waits", "[home] A guest knows how to open the gate", "[home] However it is opened, the page loads",
-          "[home] How-to guide is published", "[home] The porch: why-sign hangs by the door", "[home] The tenant may decide whether to stay", "[home] Choose whichever sensor fits",
-          "[home] How tomorrow looks for the crew", "[home] The tag door:how to knock", "[home] The export runs at 12:30 how it is set", "[home] Analyzers run on every sample",
-          "[home] Pick up times are on the fridge", "[home] Investigation notes are in the drawer",
-          # a title that opens with a listed word and names a result
-          "[home] How long each parcel waits is shown", "[home] How the pump works is written on the page", "[home] Whether the door is locked shows on the board", "[home] Why each refund was made is recorded",
-          "[home] Should the power fail, the pump restarts itself", "[home] Find out more link opens the pricing page", "[home] Analyze button returns results again", "[home] analyze.py runs nightly again",
-          "[home] Investigate button: one click opens the report", "[home] The help page answers one question: why the bill changed", "[home] The help page answers one question: how to pay",
-          "[home] How to join page is live", "[home] How to pay shows on the invoice", "[home] How to guide published", "[home] Choose which tab opens first", "[home] A card by the front door: how to pay", "[home] Analyze button for the report page", "[home] Find out more link on the pricing page", "[home] Choose how to pay button works",
-          "[home] Look into why link shows on the card", "[home] The plumber may investigate why the boiler cycles", "[home] How to pay page explains the fee",
-          # a label that ends in a listed Korean word, before the result
-          f"[home] {KO_SELF} {KO_WORK[0]}: SMS {KO_PASSES}", f"[home] {KO_PAY} {KO_WAY}: {KO_THING} {KO_SAVED}", f"[home] {KO_PAY} {KO_WHETHER2}: {KO_SAVED}", f"[home] {KO_THING} {KO_WORK[2]}: {KO_DONE}",
-          f"[home] {KO_THING} {KO_WAY}: the second part",
-          # a subject the server cut: its last words may be gone
-          f"[home] {KO_THING} {KO_WORK[0]} " + chr(0x2026), f"[home] {KO_THING} {KO_WAY} " + chr(0x2026), "[home] How to tell the tenant that the lamp " + chr(0x2026),
-          f"[home] {KO_THING}{KO_SUBJ} {KO_SET}", f"[home] {KO_THING} {KO_AGAIN}{KO_WORK[0]}", f"[home] {KO_WAY}{KO_SUBJ} {KO_SET}", f"[home] {KO_THING} {KO_WORK[0]} {KO_DONE}", "[home] ", "")
-for kind, titles in (("a question", ASKING), ("an activity", WORKING), ("", NAMING)):
+def ko(words): return " ".join("".join(chr(int(c, 16)) for c in w.split(".")) for w in words.split())
+KO_THING = ko("C804.B4F1")                                                    # a lamp, the thing the titles are about
+KO_WAY, KO_WHETHER, KO_WHETHER2 = ko("BC29.BC95"), ko("D560.C9C0"), ko("C5EC.BD80")      # way to, whether to, whether or not
+# noun tasks and -hagi titles: check, review, investigation, sending, polishing, finding out, pinning, tidying, report, review needed
+KO_TASKS = tuple(ko(w) for w in ("D655.C778", "AC80.D1A0", "C870.C0AC", "BCF4.B0B4.AE30", "B2E4.B4EC.AE30", "C54C.C544.BCF4.AE30", "ACE0.C815.D558.AE30", "C815.B9AC", "BCF4.ACE0", "AC80.D1A0 D544.C694"))
+# loan words and nouns that end in -da: agenda, veranda, panda, Honda, Uganda, Rwanda, propaganda, Amanda; sea, every, than, cider, mother, and the syllable alone
+KO_DA = tuple(ko(w) for w in ("C544.C820.B2E4", "BCA0.B780.B2E4", "D310.B2E4", "D63C.B2E4", "C6B0.AC04.B2E4", "B974.C644.B2E4", "D504.B85C.D30C.AC04.B2E4", "C544.B9CC.B2E4",
+                              "BC14.B2E4", "B9C8.B2E4", "BCF4.B2E4", "C0AC.C774.B2E4", "C5B4.BA38.B2C8.B2E4", "B2E4", "BD84.C57C"))
+# statements: is settled, was cancelled, is not right, there is none, is alike, is much, is good, is not so, does not work (polite), is not (polite); slow, hard, noisy, wrong, different, late, small, big,
+# high, low, lacking, awkward, odd, impossible, under way
+KO_STATES = tuple(ko(w) for w in ("D655.C815.B41C.B2E4", "CDE8.C18C.B410.B2E4", "B9DE.C9C0 C54A.B2E4", "C5C6.B2E4", "AC19.B2E4", "B9CE.B2E4", "C88B.B2E4", "C0AC.C2E4.C774 C544.B2C8.B2E4",
+                                  "C548 B429.B2C8.B2E4", "C544.B2D9.B2C8.B2E4", "B290.B9AC.B2E4", "C5B4.B835.B2E4", "C2DC.B044.B7FD.B2E4", "D2C0.B9AC.B2E4", "B2E4.B974.B2E4", "B2A6.B2E4", "C791.B2E4",
+                                  "D06C.B2E4", "B192.B2E4", "B0AE.B2E4", "BD80.C871.D558.B2E4", "BD88.D3B8.D558.B2E4", "C774.C0C1.D558.B2E4", "BD88.AC00.B2A5.D558.B2E4", "C900.BE44 C911.C774.B2E4"))
+# has to be sent (with and without the space), must (short, polite, casual), is to be done, will have to, is needed, there is need
+KO_SHOULDS = tuple(ko(w) for w in ("BCF4.B0B4.C57C D55C.B2E4", "BCF4.B0B4.C57C.D55C.B2E4", "AC31.C2E0.D574.C57C D568", "AC31.C2E0.D574.C57C D569.B2C8.B2E4", "AC31.C2E0.D574.C57C B428",
+                                   "AC31.C2E0.D574.C57C B41C.B2E4", "AC31.C2E0.D574.C57C B429.B2C8.B2E4", "AC31.C2E0.D574.C57C D574", "AC31.C2E0.D574.C57C D574.C694", "AC31.C2E0.D574.C57C D560 AC83",
+                                   "D544.C694.AC00 C788.B2E4", "D544.C694.AC00 C788.C74C", "D544.C694.AC00 C788.C2B5.B2C8.B2E4", "C810.AC80.C774 D544.C694.D558.B2E4", "C810.AC80.C774 D544.C694.D569.B2C8.B2E4"))
+KO_SUBJ, KO_AGAIN, KO_SELF, KO_PAY, KO_SAVED = ko("C774"), ko("C7AC"), ko("BCF8.C778"), ko("ACB0.C81C"), ko("C800.C7A5.B41C.B2E4")
+ASKING = ("[home] How to open the gate", "[home] Door sensor: how to wire it", "[home] Door sensor in the hall: how to wire it", "[home] whether to leave the pump on at night", "[work] The pump stays on at night?",
+          "[home] The pump stays on at night" + chr(0xFF1F), "[home] Should the pump run at night?", "[home] Plan" + chr(0xFF1A) + " how to wire it", "[home] HOW to wire the sensor", f"[home] {KO_THING} {KO_WAY}",
+          f"[home] {KO_THING}{KO_WHETHER}", f"[home] {KO_THING} {KO_WHETHER2}", f"[home] {KO_THING} {KO_WAY} (2)", f"[home] {KO_THING} {KO_WAY} (2) (the hall)", f"[home] Plan: {KO_THING} {KO_WAY}",
+          f"[home] how to wire the sensor: {KO_THING} {KO_TASKS[0]}")
+SHOULDS = ("[home] The export should finish in a minute", "[home] The door shouldn't stick", "[home] The export must finish", "[home] The pump mustn't run dry", "[home] Someone needs to call the plumber",
+           "[home] The pumps need to be quiet", "[home] The lease has to be signed", "[home] We have to renew the domain", "[home] The page ought to load faster", "[home] Need to book the flights",
+           "[home] Needs to be quieter", "[home] Should keep drafts on reload", "[home] Must renew the lease", "[home] Have to call the plumber", "[home] Hall: the lamp should stay off",
+           "[home] The lamp is old and must go", "[home] Link should open the page", "[home] Plan needs to change", "[home] Check has to run nightly", "[home] The export MUST finish",
+           *(f"[home] {KO_THING} {w}" for w in KO_SHOULDS))
+STATES = ("[home] X fails when Y", "[home] X is live", "[home] The export is too slow", "[home] Lamps are off", "[home] The lamp was moved", "[home] The lamps were moved", "[home] The report isn't ready",
+          "[home] The report isn" + chr(0x2019) + "t ready", "[home] The lamps aren't on", "[home] The lamp wasn't moved", "[home] The lamps weren't moved", "[home] Login fails after a change", "[home] The app keeps logging me out",
+          "[home] Reminders keep arriving twice", "[home] Dinner gets cold", "[home] The queue goes quiet", "[home] The printer does not respond", "[home] The printer doesn't respond", "[home] Photos do not upload",
+          "[home] Photos don't upload", "[home] Users cannot log in", "[home] Users can't log in", "[home] The tap won't stop", "[home] Closed items have no times", "[home] The page has no title",
+          "[home] The mail never arrives", "[home] The alert no longer fires", "[home] It is cold in the hall", "[home] Family is visiting", "[home] Ceiling light is broken", "[home] Checkout: the page is blank",
+          "[home] The tenant's key isn't here", "[home] \"Save\" button is greyed out", "[home] The old blue lamp in hall is off", "[home] THE LAMP IS OFF",
+          # a first word that is also a task's verb, before a form that makes it a noun
+          "[home] Build fails on the laptop", "[home] Export keeps timing out", "[home] Test is red", "[home] Lock doesn't turn", "[home] Lock does not turn", "[home] Lock isn't turning",
+          *(f"[home] {KO_THING} {w}" for w in KO_STATES), f"[home] Plan: {KO_THING} {KO_STATES[0]}", f"[home] {KO_THING} {KO_STATES[0]}.", f"[home] {KO_THING} {KO_STATES[0]} (2)", KO_STATES[0],
+          f"[home] {KO_SELF} {KO_TASKS[0]}: SMS {KO_STATES[0]}")
+OPENERS = "that which who whom whose when where while whenever wherever if whether how why what so until after before because unless as once than to like".split()
+WORK = ("[home] Keep hand-off times on closed items", "[home] Make the nightly run finish by 06:00", "[home] Make sure the export is fast", "[home] Fix the login that fails", "[home] Fix: login fails after a change",
+        "[home] Add error message: file is too large", "[home] Check valves are closed", "[home] Double-check the totals are right", "[home] Re-stain the deck the sun is fading", "[home] Spot-check the lamps the tenant is using",
+        "[home] Also check the lamp is off", "[home] Quietly confirm the door is locked", "[home] Do not send the reminder twice", "[home] Don't lose drafts", "[home] Never show a deleted photo", "[home] Ask why the mail never arrives",
+        "[home] Investigate why the boiler cycles", "[home] Look into why the boiler cycles", "[home] pick whether to add a second lamp", "[home] Decide what to cook", "[home] Count fails per run",
+        "[home] Porch: fix lamp the tenant says is dim", "[home] Confirming the lamp is off", "[home] Mop the floor we have to share",
+        "[home] Mop, the floor is wet", "[home] Mop the floor " + chr(0x2013) + " the dog is coming", "[home] Mop the floor - the dog is coming", "[home] Mop the floor; the dog is coming",
+        "[home] Everything we need to pack", "[home] The old blue lamp in the hall is off", "[home] The plumber and the new tenant downstairs should meet",
+        *(f"[home] Lamps {w} the porch is dark" for w in OPENERS),
+        # words a title quotes or brackets are not its own sentence
+        "[home] Banner \"the shop is closed\" for the door", "[home] Banner " + chr(0x201C) + "the shop is closed" + chr(0x201D) + " for the door", "[home] Banner " + chr(0x2018) + "the shop is closed" + chr(0x2019) + " for the door",
+        "[home] Banner 'the shop is closed' for the door", "[home] The `is live` badge", "[home] Poster (the old one is torn) for the hall",
+        # no verb of state, or no sentence of its own
+        "[home] Quarterly report", "[home] Slow search on the archive page", "[home] A must-have list for camp", "[home] The need-to-know list", "[home] Is the lamp off",
+        "[home] How the pump is wired", "[home] How long each parcel waits is shown", "[home] How to pay shows on the invoice", "[home] How to pay page explains the fee", "[home] The tag door:how to knock",
+        "[home] How-to guide is published",
+        # Korean: noun tasks and -hagi, nouns that end like a statement, a statement before a task after a label, a way or a whether before more words
+        *(f"[home] {KO_THING} {w}" for w in KO_TASKS + KO_DA), f"[home] {KO_THING} {KO_STATES[0]}: {KO_TASKS[0]}", f"[home] {KO_THING} {KO_AGAIN}{KO_TASKS[0]}", f"[home] {KO_THING} {KO_WAY}: {KO_TASKS[0]}",
+        f"[home] {KO_THING} {KO_WAY} {KO_TASKS[0]}",
+        # a subject the server cut: its last words may be gone
+        f"[home] {KO_THING} {KO_STATES[0]} " + chr(0x2026), f"[home] {KO_THING} {KO_WAY} " + chr(0x2026), "[home] The lamp is " + chr(0x2026), "[home] ", "",
+        # longer than any title
+        "[home] The lamp is " + "x" * 300)
+for kind, titles in (("a question", ASKING), ("a should or must sentence", SHOULDS), ("a statement", STATES), ("", WORK)):
     wrong = [(s, FG.subject_reads_as(s)) for s in titles if FG.subject_reads_as(s) != kind]
-    check(f"subject_reads_as: {kind or 'a title that names a result is neither'}", not wrong, ascii(wrong))
-check("subject_reads_as: a title with no scope prefix is read the same", FG.subject_reads_as("how to wire it") == "a question", None)
-whole = "[home] " + "x" * (FG._subject_max() - 12 - len(KO_WORK[0])) + " " + KO_WORK[0] + " " + KO_DONE      # the cut falls after the listed word, before the word that says it is done
-cut = FG.fix_long_subject(whole + " " + KO_DONE * 3)
-check("subject_reads_as: a long subject the server cuts before its last words is not read by what is left", cut.endswith(" " + KO_WORK[0] + " " + chr(0x2026)) and FG.subject_reads_as(cut) == ""
-      and FG.subject_reads_as(cut[:-2]) == "an activity", ascii((whole, cut)))
-long_ones = ("[home] a" + " " * 200000 + "x", "[home] " + " (a)" * 50000 + " x", "[home] x" + " (a)" * 50000, "[home] " + ")" * 100000, "[home] x" + " " * 100000 + "(" * 100000 + ")")
+    check(f"subject_reads_as: {kind or 'a title that reads as work, or that the narrow reading passes, is none'}", not wrong, ascii(wrong))
+check("subject_reads_as: a title with no scope prefix is read the same", FG.subject_reads_as("how to wire it") == "a question" and FG.subject_reads_as("The lamp is off") == "a statement", None)
+whole = "[home] " + "x" * (FG._subject_max() - 12 - len(KO_STATES[0])) + " " + KO_STATES[0] + " " + KO_TASKS[0]      # the cut falls after the statement's word, before the task's noun
+cut = FG.fix_long_subject(whole + " " + KO_TASKS[0] * 3)
+check("subject_reads_as: a long subject the server cuts before its last words is not read by what is left", cut.endswith(" " + KO_STATES[0] + " " + chr(0x2026)) and FG.subject_reads_as(cut) == ""
+      and FG.subject_reads_as(cut[:-2]) == "a statement", ascii((whole, cut)))
+long_ones = ("[home] a" + " " * 200000 + "x", "[home] " + " (a)" * 50000 + " x", "[home] x" + " (a)" * 50000, "[home] " + ")" * 100000, "[home] x" + " " * 100000 + "(" * 100000 + ")",
+             "[home] " + "'" * 290, "[home] " + "no longer " * 29, "[home] " + "a " * 145)
 began = time.monotonic()
 for s in long_ones: FG.subject_reads_as(s)
 check("subject_reads_as: a very long subject is read at once", time.monotonic() - began < 2, time.monotonic() - began)
 
-def title_line(subject, kind): return f'(note: the subject "{subject}" reads as {kind}, not a finished outcome: send subject= naming the result wanted, the one the Goal sentence says, as "Make X work when Y" or "X is live")'
+def title_line(subject, kind): return (f'(note: the subject "{subject}" reads as {kind}, not as the work that closes the item: send subject= as that task, an imperative such as "Keep hand-off times on closed items" '
+                                       '(in Korean, ending in -hagi or a noun task); a symptom goes in a `Problem:` bullet)')
 TITLE = "reads as"
 def call_create(**kw):
     """the create tool as a session calls it, through the middleware that writes the call log: (the reply or the ToolError, the log rows this call added)"""
@@ -372,15 +405,18 @@ def call_create(**kw):
         except ToolError as e: out = e
     return out, list(CL.read(0, time.time() + 86400))[n:]
 
-asked = "[home] pick whether to add a second lamp"
+asked = "[home] The second lamp is dark"
 n0 = n_items()
 out, rows = call_create(subject=asked)
-check("create with such a title: filed as sent, with the line, kept in the log as a note and no fix", isinstance(out, str) and out.startswith("created") and n_items() == n0 + 1 and title_line(asked, "an activity") in out
+check("create with such a title: filed as sent, with the line, kept in the log as a note and no fix", isinstance(out, str) and out.startswith("created") and n_items() == n0 + 1 and title_line(asked, "a statement") in out
       and noted(rows) == [["subject-form"]] and "fix" not in rows[0] and rows[0]["ok"] and stored(_model_ids._norm_id(out.split()[1]))["subject"] == asked, (str(out)[-500:], rows))
 out, rows = call_create(subject="[home] Door sensor: how to wire it")
 check("create: the line says a question", isinstance(out, str) and title_line("[home] Door sensor: how to wire it", "a question") in out and noted(rows) == [["subject-form"]], (str(out)[-500:], rows))
 out, rows = call_create()
-check("create with an outcome title: no line, no note", isinstance(out, str) and out.startswith("created") and TITLE not in out and noted(rows) == [], (str(out)[-400:], rows))
+check("create with a task title: no line, no note", isinstance(out, str) and out.startswith("created") and TITLE not in out and noted(rows) == [], (str(out)[-400:], rows))
+for shown, kind in (("[home] The second lamp should be on", "a should or must sentence"),):
+    out, rows = call_create(subject=shown)
+    check(f"create: the line says {kind}", isinstance(out, str) and title_line(shown, kind) in out and noted(rows) == [["subject-form"]], (str(out)[-500:], rows))
 out, rows = call_create(subject=asked, due="not a day")
 check("a refused create: no line, no note", isinstance(out, ToolError) and TITLE not in str(out) and noted(rows) == [] and rows[0]["ok"] is False, (str(out)[:300], rows))
 made = _wt_create._create(subject=asked, description="- A thing", project=STK, owner=MAIN, next=f"{MAIN}: carry on")
@@ -396,13 +432,13 @@ def titled(i, subject, desc=BASE):
     return f"a{i}"
 titled(80, "[home] Make it run")
 out, rows = call_tool("a80", subject=asked)
-check("an update that sets such a title: stored, with the line and the note", stored("a80")["subject"] == asked and title_line(asked, "an activity") in str(out) and noted(rows) == [["subject-form"]] and "fix" not in rows[0], (str(out)[-500:], rows))
+check("an update that sets such a title: stored, with the line and the note", stored("a80")["subject"] == asked and title_line(asked, "a statement") in str(out) and noted(rows) == [["subject-form"]] and "fix" not in rows[0], (str(out)[-500:], rows))
 titled(81, asked)
 out, rows = call_tool("a81", description=BASE + "\n- The choice is made: fit it")
 check("an update that rewrites the description and keeps the Goal: an unchanged title is not named again", isinstance(out, str) and TITLE not in out and noted(rows) == [], (str(out)[-500:], rows))
 titled(82, asked)
 out, rows = call_tool("a82", description=MOVED)
-check("a changed Goal under such a title: both lines, both notes", "the Goal changed" in str(out) and title_line(asked, "an activity") in str(out) and [sorted(n) for n in noted(rows)] == [["goal-moved", "subject-form"]], (str(out)[-700:], rows))
+check("a changed Goal under such a title: both lines, both notes", "the Goal changed" in str(out) and title_line(asked, "a statement") in str(out) and [sorted(n) for n in noted(rows)] == [["goal-moved", "subject-form"]], (str(out)[-700:], rows))
 for name, i, kw in (("a write that changes neither the title nor the description", 83, {"priority": "p2"}), ("the stored title and description sent back", 84, {"subject": asked, "description": BASE})):
     titled(i, asked)
     out, rows = call_tool(f"a{i}", **kw)
@@ -421,13 +457,13 @@ finally:
 check("a note that fails: the create and the update are done, each with a stderr line", made.startswith("created") and stored(gid)["subject"] == asked and stored("a91")["subject"] == asked and TITLE not in made + said
       and "title note not made: ValueError" in err.getvalue() and "goal note not made: ValueError" in err.getvalue(), (made[-200:], said[-200:], err.getvalue()[-400:]))
 titled(85, asked)
-out, rows = call_tool("a85", subject="[home] The second lamp is in place")
-check("an update that rewords the title to the outcome: no line", isinstance(out, str) and TITLE not in out and noted(rows) == [] and stored("a85")["subject"] == "[home] The second lamp is in place", (str(out)[-400:], rows))
+out, rows = call_tool("a85", subject="[home] Hang the second lamp")
+check("an update that rewords the title to the task: no line", isinstance(out, str) and TITLE not in out and noted(rows) == [] and stored("a85")["subject"] == "[home] Hang the second lamp", (str(out)[-400:], rows))
 titled(86, asked)
 r = _wt_complete.stackshot_complete("a86", sender=MAIN, outcome="done", outcome_text="- The lamp is on", reason="it ran")
 check("no title line: a close", stored("a86")["status"] == "completed" and TITLE not in r, r[-300:])
 titled(87, asked)
-r = _wt_update.stackshot_update("a87", sender=MAIN, status="completed", outcome="done", outcome_text="- The lamp is on", reason="it ran", subject="[home] pick whether to keep it")
+r = _wt_update.stackshot_update("a87", sender=MAIN, status="completed", outcome="done", outcome_text="- The lamp is on", reason="it ran", subject="[home] The shelf is bare")
 check("no title line: a close that sets the title", stored("a87")["status"] == "completed" and TITLE not in r, r[-300:])
 titled(88, "[home] Make it run")
 out = _update_svc._update("a88", subject=asked, sender=MAIN)

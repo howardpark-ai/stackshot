@@ -424,7 +424,7 @@ def create_item(
     machine_note = h.machine_note(gid, item, owner)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     offer_note = _anchor_offers.item_line(gid, item)      # a relay wait or a source link in the description that no anchor watches: one line with the ready anchors call, never a refusal
     title_note = ""
-    if goal_judged:      # a title that reads as a question or an activity: a note, never a refusal; the writes the goal gate judges
+    if goal_judged:      # a title that does not read as work: a note, never a refusal; the writes the goal gate judges
         try:
             title_note = _fg.subject_form_note(subject)
         except Exception as e:  # noqa: BLE001  — the item is filed; a note that fails is a stderr line, never a failed write
