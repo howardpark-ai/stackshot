@@ -103,7 +103,7 @@ from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import telling
-from stackshot.model import model_cuts as _MC; _MC.STALL_COLD_SKIP = False      # this suite pins the ladder with its cold step; the cut's own suite is model_cuts
+from stackshot.model import model_cuts as _MC; _MC_DEFAULT = _MC.STALL_COLD_SKIP; _MC.STALL_COLD_SKIP = False      # this suite pins the ladder with its cold step; the cut's own suite is model_cuts
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 # the record follows the mover (handoff.stale): checked after every save of the run, the stall pass's moves and raises included
 _real_save = writes.save
@@ -203,6 +203,7 @@ check("2 cold off: step 2 is the builder, with no cold call", "a2" in done and l
 close(2); set_cfg()
 
 # ================================================================ 23. the cut: model_cuts.STALL_COLD_SKIP skips the cold call and the later step still happens
+check("23 cut: the switch as shipped skips the cold call", _MC_DEFAULT is True, _MC_DEFAULT)
 set_cfg()                                      # [model] cold_call is on: only the named switch skips the call
 _MC.STALL_COLD_SKIP = True
 item(89, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE0)

@@ -90,7 +90,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 
 from stackshot.core import config as _cfg; from stackshot.audit import audit; from stackshot.audit import audit_run as AR; from stackshot.waits import mover_state as MS; from stackshot.waits import stall; from stackshot.tools import board_report as BR; from stackshot.tools import next_report as NR
 _cfg.CFG["audit"]["pattern_review"] = "off"      # this suite holds the run to its other stages: the pattern review has its own suite (pattern_review_scenario)
-from stackshot.model import model_cuts as _MC; _MC.AUDIT_MODEL_OFF = ()      # this suite pins the judgment kinds as they were: the cut's own suite is model_cuts
+from stackshot.model import model_cuts as _MC; _MC_DEFAULT = _MC.AUDIT_MODEL_OFF; _MC.AUDIT_MODEL_OFF = ()      # this suite pins the judgment kinds as they were: the cut's own suite is model_cuts
 H = 3600; now = time.time()
 ZONE_OFFSET = 4 * H                         # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
 if not 600 <= (now + ZONE_OFFSET) % 86400 <= 86400 - 1200: now -= 1800     # a run from 20 minutes before to 10 minutes after local midnight starts 30 minutes earlier: the sections that read record times after `now` (the registry's second run is at now + 600) must stay on one calendar day
@@ -2014,6 +2014,7 @@ check("parked ask: …and its first open step is no stuck-elsewhere finding whil
 
 # ---- the cut: model_cuts.AUDIT_MODEL_OFF (unneeded-escalation, obsolete-wait) makes no model call for those two kinds and leaves every deterministic check
 CUT = ("unneeded-escalation", "obsolete-wait")
+check("cut: the switch as shipped names exactly the two kinds", tuple(_MC_DEFAULT) == CUT, _MC_DEFAULT)
 cut_items = build(*replay.items(), item(P_DEC, wrote=now - 30 * H, **{**PARK_P, "needs": ["decision"]}))
 def cut_findings(): return sorted((f["id"], f["category"]) for f in AR.field_findings(cut_items, {}, now, env())[0])
 _MC.AUDIT_MODEL_OFF = ()
