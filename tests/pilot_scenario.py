@@ -2431,7 +2431,7 @@ check("audit: times in the rulebook's form, in the board's zone", "Intl.DateTime
       and "function when(ts){var p=pt(ts),k=p.year===pt(Date.now()/1000).year?'date.full':'date.full_year';return SST(k,{wd:SST('date.wd.'+WD.indexOf(p.weekday))" in AJ and "hourCycle:'h23'" in AJ)
 check("audit: the server's text is drawn as text, never as markup", "innerHTML" not in AJ and "g.textContent=t" in AJ)
 check("audit: a redraw builds the new text first and swaps it in, and leaves an unchanged line alone",
-      "f=document.createDocumentFragment()" in AJ and "if(sig(f)!==sig(T)){var a=document.activeElement,held=!!a&&a.id==='xpb-audit-card';if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}" in AJ
+      "f=document.createDocumentFragment()" in AJ and "if(sig(f)!==sig(T)){var a=document.activeElement,held=!!a&&(a.id==='xpb-audit-card'||a.id==='xp-audit-card');if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}" in AJ
       and "document.dispatchEvent(new Event('stackshot:redrawn'));if(held&&window.stackshotRefocus)window.stackshotRefocus('audit-card')}" in AJ
       and "T.textContent=''" not in AJ.replace("else{T.textContent='';T.appendChild(f)}", ""))
 # with the audit on, the static page carries the card already drawn — the script's rows, classes and button

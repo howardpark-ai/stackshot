@@ -8,6 +8,7 @@ the files. It checks that:
   - on a phone, scrolled to its end, no page leaves a "?" under a floating button;
   - the color panel (dark theme, whether the page opened dark or turned dark) holds its note behind a "?"; its popup stays inside the panel, and Escape closes it before the panel;
   - the side panel's Audit card: its script redraws the card the server drew, the "?" included; the popup opens inside the panel and stays open, with the keyboard focus, through a redraw;
+  - on a short desktop window (1280 x 620), wherever the Audit card's "?" sits in the pinned side panel, beside or among the floating buttons, no part of its popup is under one;
   - on a desktop (1280 px) hover opens it, the pointer can move onto the popup, leaving closes it; Tab reaches the button and opens it; Escape closes it;
   - the popup's ground differs between light and dark.
 
@@ -109,6 +110,16 @@ IN_CARD = r"""() => { const r = e => e.getBoundingClientRect(), b = r(document.g
   for (const e of document.querySelectorAll('#audit .lbl, #audit .val, #audit .a-h')) { if (!e.textContent.trim()) continue; range.selectNodeContents(e);
     for (const o of range.getClientRects()) if (o.left < b.right - 0.5 && b.left < o.right - 0.5 && o.top < b.bottom - 0.5 && b.top < o.bottom - 0.5) over.push(e.textContent); }
   return {over: over, button: [b.left, b.right], panel: [p.left, p.right]}; }"""
+# the "?" with this id moved to a height in the side panel: the card pushed down by an empty block above it, as more cards would, or the panel scrolled
+PUT = r"""([i, y]) => { const b = document.getElementById(i), p = document.getElementById('panel'), card = b.closest('#audit'); let s = document.getElementById('xchk-space');
+  if (!s) { s = document.createElement('div'); s.id = 'xchk-space'; card.parentNode.insertBefore(s, card); const room = document.createElement('div'); room.style.height = '1000px'; p.appendChild(room); }      // room to scroll
+  s.style.height = '0px'; p.scrollTop = 0; const d = y - b.getBoundingClientRect().bottom; if (d > 0) s.style.height = d + 'px'; else p.scrollTop = -d; return b.getBoundingClientRect().bottom; }"""
+# that popup against the floating buttons: every point of a grid over it that something else is drawn on; and whether, straight below its "?", it would meet a button
+CLEAR = r"""i => { const b = document.getElementById(i), p = document.getElementById(b.getAttribute('aria-controls')), q = e => e.getBoundingClientRect(), r = q(p), br = q(b), n = q(document.getElementById('panel')), under = [];
+  if (!p.hidden) for (let y = r.top + 4; y <= r.bottom - 4; y += 4) for (let x = r.left + 4; x <= r.right - 4; x += 4) { const e = document.elementFromPoint(x, y); if (e !== p) under.push([Math.round(x), Math.round(y), e ? e.tagName + '#' + e.id : 'nothing']); }
+  const fabs = [...document.querySelectorAll('#totop, .fab')].map(q).filter(f => f.width);
+  return {open: !p.hidden, under: under.slice(0, 8), left: r.left, right: r.right, top: r.top, bottom: r.bottom, vw: document.documentElement.clientWidth, vh: innerHeight, button: [br.left, br.right, br.top, br.bottom],
+    panel: [n.left, n.right], fabs: fabs.map(f => [f.left, f.top, f.bottom]), met: fabs.some(f => f.left < n.right - 8 && f.top < br.bottom + r.height && br.bottom < f.bottom)}; }"""
 # each shown "?" button against the words and controls outside every "?": which of them its box lies over. What is fixed to the screen floats over the page and is left out
 COVERS = r"""() => { const hit = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
   const fixed = e => { for (; e; e = e.parentElement) if (getComputedStyle(e).position === 'fixed') return true; return false; };
@@ -235,8 +246,38 @@ with sync_playwright() as p:
                 check(f"{tag}: ...and the keyboard focus on its button", pg.evaluate("() => document.activeElement.id") == i, pg.evaluate("() => document.activeElement.tagName"))
                 pg.keyboard.press("Escape"); pg.wait_for_timeout(30); redraw(card_status); s = pg.evaluate(STATE, i)
                 check(f"{tag}: one closed with Escape stays closed through a redraw, still focused", not s["open"] and pg.evaluate("() => document.activeElement.id") == i, s)
+                pg.keyboard.press("Enter"); pg.wait_for_timeout(30); pg.evaluate("() => document.getElementById('xp-audit-card').focus()"); pg.wait_for_timeout(30)
+                held = pg.evaluate("() => document.activeElement.id"); redraw(changed); s = pg.evaluate(STATE, i)
+                check(f"{tag}: with the focus on the popup, a redraw keeps it open and gives the focus to its button", held == "xp-audit-card" and s["open"] and pg.evaluate("() => document.activeElement.id") == i, (held, s))
             check(f"{tag}: no script error", not errs, errs)
             ctx.close()
+    # the pinned side panel on a short desktop window: the floating buttons are drawn over its lower right, where the Audit card's "?" and its popup can be
+    for scheme in ("light", "dark"):
+        i = "xpb-audit-card"
+        ctx = br.new_context(viewport={"width": 1280, "height": 620}, color_scheme=scheme); ctx.add_init_script(STATUS); pg = ctx.new_page(); errs = []
+        pg.on("pageerror", lambda e, errs=errs: errs.append(str(e))); pg.goto(card_page.as_uri()); pg.wait_for_timeout(200)
+        check(f"pinned panel {scheme}: it is pinned, and under the floating buttons' layer",
+              pg.evaluate("() => document.body.classList.contains('panel-pin') && +getComputedStyle(document.getElementById('panel')).zIndex < +getComputedStyle(document.getElementById('totop')).zIndex"))
+        for y, among in ((300, False), (480, False), (501, False), (560, True), (600, True)):
+            tag = f"pinned panel {scheme}, ? ending at {y}"
+            got = pg.evaluate(PUT, [i, y]); check(f"{tag}: the ? is put there", abs(got - y) <= 1, got)
+            if among: pg.evaluate("i => document.getElementById(i).click()", i)      # a button lies over the "?" itself: the keyboard still reaches it
+            else: pg.hover(f"#{i}")
+            pg.wait_for_timeout(50); s = pg.evaluate(CLEAR, i)
+            check(f"{tag}: its popup is whole inside the window and the panel, no part of it under a floating button",
+                  s["open"] and inside(s) and not s["under"] and s["left"] >= s["panel"][0] - 0.5 and s["right"] <= s["panel"][1] + 0.5 and len(s["fabs"]) == 2, s)
+            if y > 400: check(f"{tag}: straight below the ? it would have met a button", s["met"] or among, s)
+            if SHOTS and y in (501, 560):
+                os.makedirs(SHOTS, exist_ok=True); pg.screenshot(path=os.path.join(SHOTS, f"pinned-panel-{y}-{scheme}.png"))
+            if among: pg.evaluate("i => document.getElementById(i).click()", i)
+            else:
+                pg.mouse.move((s["button"][0] + s["button"][1]) / 2, (s["top"] + s["bottom"]) / 2, steps=12); pg.wait_for_timeout(30)
+                check(f"{tag}: the pointer moves onto the popup and it stays", pg.evaluate(CLEAR, i)["open"], pg.evaluate(CLEAR, i))
+                pg.mouse.move(1, 1)
+            pg.wait_for_timeout(30)
+            check(f"{tag}: it closes again", not pg.evaluate(CLEAR, i)["open"])
+        check(f"pinned panel {scheme}: no script error", not errs, errs)
+        ctx.close()
     br.close()
 check("the popup's ground differs between light and dark", grounds.get("light") and grounds.get("dark") and not grounds["light"] & grounds["dark"], grounds)
 print(("ok" if not fails else "FAILED") + f": explainer check, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

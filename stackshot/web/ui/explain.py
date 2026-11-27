@@ -52,7 +52,9 @@ dl.iwl{align-items:baseline}
 # O is the one open popup: {k: its key, h: how it opened ('hover', 'focus' or 'pin')}. A tap or click pins it; hover and focus open only a popup that is not open, so they
 # never undo its pin. stackshotExplain is explain()'s markup for a script that adds an explainer to markup the server did not draw (ui/colortool.py).
 # place() measures the popup while it is fixed to the screen: one that reaches past the right edge even for the one measuring pass widens a phone's layout viewport for
-# that pass, which pulls a page scrolled near its end back up.
+# that pass, which pulls a page scrolled near its end back up. A floating button (Back to top and the round buttons above it) is drawn over the pinned side panel, whose
+# popups cannot rise above it: one that would lie under a button goes to the other side of its "?", or, when no room is there, stops left of the button.
+# stackshotBack gives a "?" the focus back (after Escape, or a script that moved or redrew it) without opening it or scrolling to it.
 JS = r"""(function(){var O=null,quiet=false;
 window.stackshotExplain=function(key,text,label){function el(t,a,x){var n=document.createElement(t);for(var k in a)n.setAttribute(k,a[k]);if(x!==undefined)n.textContent=x;return n}
 var w=el('span',{'class':'xp','data-xp':key}),b=el('button',{type:'button','class':'xp-b',id:'xpb-'+key,'aria-label':label,'aria-expanded':'false','aria-controls':'xp-'+key,'aria-describedby':'xp-'+key});
@@ -60,26 +62,35 @@ b.appendChild(el('span',{'aria-hidden':'true'},'?'));w.appendChild(b);w.appendCh
 function wrap(t){return t&&t.closest?t.closest('.xp'):null}
 function find(k){return document.querySelector('.xp[data-xp="'+k+'"]')}
 function set(w,on){w.firstElementChild.setAttribute('aria-expanded',String(on));w.lastElementChild.hidden=!on}
-function place(w){var b=w.firstElementChild,p=w.lastElementChild;p.style.position='fixed';p.style.left='0px';p.style.top='0px';
+function over(s){return [].filter.call(document.querySelectorAll('#totop,.fab'),function(f){var c=f.getBoundingClientRect();return c.left<s.x+s.W&&s.x<c.right&&c.top<s.y+s.h&&s.y<c.bottom})}
+function atop(f,s){var c=f.getBoundingClientRect();function near(v,a,z){return Math.max(a+.5,Math.min(v,z-.5))}
+var t=document.elementFromPoint(near((c.left+c.right)/2,Math.max(c.left,s.x),Math.min(c.right,s.x+s.W)),near((c.top+c.bottom)/2,Math.max(c.top,s.y),Math.min(c.bottom,s.y+s.h)));return !!t&&f.contains(t)}
+function place(w){var b=w.firstElementChild,p=w.lastElementChild;function aside(){p.style.position='fixed';p.style.left='0px';p.style.top='0px'}aside();
 var L=0,R=document.documentElement.clientWidth,T=0,H=window.innerHeight;
 for(var n=w.parentElement;n&&n!==document.body&&n!==document.documentElement;n=n.parentElement){var s=window.getComputedStyle(n),c=n.getBoundingClientRect();if(s.display==='contents')continue;
 if(s.overflowX!=='visible'){L=Math.max(L,c.left);R=Math.min(R,c.right)}if(s.overflowY!=='visible'){T=Math.max(T,c.top);H=Math.min(H,c.bottom)}}
-p.style.maxWidth=Math.max(0,Math.min(320,R-L-16))+'px';
-var r=b.getBoundingClientRect(),o=w.getBoundingClientRect(),W=p.offsetWidth,h=p.offsetHeight,x=Math.max(L+8,Math.min(r.left+r.width/2-W/2,R-8-W)),y=r.bottom;
-if(y+h>H-8&&r.top-h>=T+8)y=r.top-h;
-p.style.position='';p.style.left=(x-o.left)+'px';p.style.top=(y-o.top)+'px'}
+var r=b.getBoundingClientRect(),o=w.getBoundingClientRect();
+function spot(R){p.style.maxWidth=Math.max(0,Math.min(320,R-L-16))+'px';var W=p.offsetWidth,h=p.offsetHeight,y=r.bottom;if(y+h>H-8&&r.top-h>=T+8)y=r.top-h;
+return {x:Math.max(L+8,Math.min(r.left+r.width/2-W/2,R-8-W)),y:y,W:W,h:h}}
+function put(s){p.style.position='';p.style.left=(s.x-o.left)+'px';p.style.top=(s.y-o.top)+'px'}
+var at=spot(R);put(at);
+var f=over(at).filter(function(f){return atop(f,at)});if(!f.length)return;
+var y=at.y<r.top?r.bottom:r.top-at.h,to={x:at.x,y:y,W:at.W,h:at.h};
+if(y>=T+8&&y+at.h<=H-8&&!over(to).length)put(to);else{aside();put(spot(Math.min.apply(null,f.map(function(f){return f.getBoundingClientRect().left}))))}}
 function hide(){if(!O)return;var w=find(O.k);O=null;if(w)set(w,false)}
 function show(w,how){var k=w.getAttribute('data-xp');if(O&&O.k!==k)hide();O={k:k,h:how};set(w,true);place(w)}
 function is(w){return !!O&&O.k===w.getAttribute('data-xp')}
-window.stackshotRefocus=function(key){var w=find(key);if(w){quiet=true;w.firstElementChild.focus({preventScroll:true});quiet=false}};
+function back(e){quiet=true;try{e.focus({preventScroll:true})}finally{quiet=false}}
+window.stackshotBack=back;window.stackshotRefocus=function(key){var w=find(key);if(w)back(w.firstElementChild)};
 document.addEventListener('click',function(e){var w=wrap(e.target);if(!w||!e.target.closest('.xp-b'))return;e.preventDefault();if(is(w)&&O.h==='pin')hide();else show(w,'pin')});
 document.addEventListener('pointerover',function(e){var w=wrap(e.target);if(w&&e.pointerType==='mouse'&&!w.contains(e.relatedTarget)&&!is(w))show(w,'hover')});
 document.addEventListener('pointerout',function(e){var w=wrap(e.target);if(w&&e.pointerType==='mouse'&&!w.contains(e.relatedTarget)&&is(w)&&O.h==='hover')hide()});
 document.addEventListener('pointerup',function(e){if(O&&wrap(e.target)!==find(O.k))hide()},true);
 document.addEventListener('focusin',function(e){var b=e.target;if(quiet||!b.classList||!b.classList.contains('xp-b'))return;var key=true;try{key=b.matches(':focus-visible')}catch(x){}if(key&&!is(wrap(b)))show(wrap(b),'focus')});
 document.addEventListener('focusout',function(e){var t=e.target,w=wrap(t);if(!w)return;setTimeout(function(){if(t.isConnected&&is(w)&&O.h!=='hover'&&!w.contains(document.activeElement))hide()},0)});
-document.addEventListener('keydown',function(e){if(e.key!=='Escape'||e.isComposing||!O)return;var w=find(O.k);if(!w){O=null;return}e.preventDefault();e.stopImmediatePropagation();var inside=w.contains(document.activeElement);hide();
-if(inside){quiet=true;w.firstElementChild.focus();quiet=false}},true);
+document.addEventListener('keydown',function(e){if(e.key!=='Escape'||e.isComposing||!O)return;var w=find(O.k);if(!w){O=null;return}
+var p=w.lastElementChild;if(!p.getClientRects().length||window.getComputedStyle(p).visibility==='hidden'){hide();return}      // one nobody can see leaves the Escape to the page
+e.preventDefault();e.stopImmediatePropagation();var inside=w.contains(document.activeElement);hide();if(inside)back(w.firstElementChild)},true);
 window.addEventListener('resize',function(){var w=O&&find(O.k);if(w)place(w)});
 function again(){if(!O)return;var w=find(O.k);if(w){set(w,true);place(w)}else O=null}
 document.addEventListener('stackshot:swapped',again);document.addEventListener('stackshot:redrawn',again)})();"""

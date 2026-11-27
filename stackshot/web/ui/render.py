@@ -1608,8 +1608,9 @@ o.querySelectorAll('details.fold').forEach(function(d){f[d.getAttribute('data-fo
 x.querySelectorAll('details.fold').forEach(function(d){var k=d.getAttribute('data-fold');if(k in f){if(d.open!==f[k])d.open=f[k]}else if(window.stackshotFold)window.stackshotFold(d);d._fs=d.open});
 var oa=o.querySelector('#audit'),na=x.querySelector('#audit');if(oa&&na)na.parentNode.replaceChild(oa,na);
 if(a&&a!==document.body&&o.contains(a)&&!(oa&&oa.contains(a)))k=key(a);
-o.parentNode.replaceChild(x,o);if(oa&&a&&oa.contains(a)&&document.activeElement!==a)try{a.focus({preventScroll:true})}catch(e){}
-if(k){var b=[].slice.call(x.querySelectorAll(a.tagName)).filter(function(e){return key(e)===k})[0];if(b)try{b.focus({preventScroll:true})}catch(e){}}}
+var F=window.stackshotBack||function(e){e.focus({preventScroll:true})};      // a "?" gets the focus back without opening (ui/explain.py)
+o.parentNode.replaceChild(x,o);if(oa&&a&&oa.contains(a)&&document.activeElement!==a)try{F(a)}catch(e){}
+if(k){var b=[].slice.call(x.querySelectorAll(a.tagName)).filter(function(e){return key(e)===k})[0];if(b)try{F(b)}catch(e){}}}
 function apply(t){var D=new DOMParser().parseFromString(t,'text/html'),m=D.querySelector('meta[name="stackshot-rendered"]'),S=m?+m.content:0,
 sh=D.querySelector('meta[name="stackshot-shell"]');if(!S)throw 0;if(S<=R)return 'old';
 if(busy())return 'busy';
@@ -1673,7 +1674,7 @@ if(C.note&&NK[C.note]==='unlogged'){var q=sp('a-cn a-cq','–');
 if(window.stackshotExplain)q.appendChild(window.stackshotExplain('audit-card',SST('panel.audit.dash_help'),SST('explain.about',{what:SST('panel.audit.h_found')})));f.appendChild(q)}
 else if(C.note)f.appendChild(sp('a-cn',NK[C.note]?SST('panel.audit.note.'+NK[C.note]):C.note))}
 else{btn();E.hidden=false;if(P)P.hidden=false;return}
-if(sig(f)!==sig(T)){var a=document.activeElement,held=!!a&&a.id==='xpb-audit-card';if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}
+if(sig(f)!==sig(T)){var a=document.activeElement,held=!!a&&(a.id==='xpb-audit-card'||a.id==='xp-audit-card');if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}
 document.dispatchEvent(new Event('stackshot:redrawn'));if(held&&window.stackshotRefocus)window.stackshotRefocus('audit-card')}
 btn();E.hidden=false;if(P)P.hidden=false}
 function refresh(){fetch('@ROOT@/audit/status',{cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'}})
@@ -4286,10 +4287,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         done = [r for r in ov["runs"] if r["finished"] is not None and not r["error"]]
         last = done[0] if done else None
         times = _t("audit.times_join").join(ov["times"]) or _t("audit.scheduled")
-        def pace(title, said="", tip=""):      # one schedule card: its name, what its last run left (nothing before one), and what it looks at behind a "?"
+        def pace(title, said="", tip=""):      # one schedule card: its name, what its last run left or that there was none (the every-minute pass says neither), and what it looks at behind a "?"
             return f'<div class="apace"><div class="aph"><b>{e(title)}</b>{tip}</div>' + (f'<span>{e(said)}</span>' if said else "") + '</div>'
         paces_html = (pace(_t("audit.pace_min"), tip=_xp.explain("audit-pace-min", _t("audit.pace_min_help"), _t("audit.pace_min")))
-                      + pace(_t("audit.pace_ten"), _t("audit.pace_ten_last", at=stamp(ov["ten_last"])) if ov["ten_last"] else "", _xp.explain("audit-pace-ten", _t("audit.pace_ten_help"), _t("audit.pace_ten")))
+                      + pace(_t("audit.pace_ten"), _t("audit.pace_ten_last", at=stamp(ov["ten_last"])) if ov["ten_last"] else _t("audit.no_run_yet"), _xp.explain("audit-pace-ten", _t("audit.pace_ten_help"), _t("audit.pace_ten")))
                       + pace(times, _t("audit.pace_runs_last", at=stamp(last["finished"]), items=last["items"] if last["items"] is not None else 0, found=last["found"]) if last else _t("audit.no_run_yet")))
         def group(g):
             if g["found"] is None:

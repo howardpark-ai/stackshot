@@ -214,7 +214,7 @@ for n, root in trees.items():
 check("the two checks above looked at explainers", found >= len(MOVED), found)
 cards = [e for e, _a in walk(trees["audits"]) if has(e, "apace")]
 said_on = [[k["text"] for k in c["kids"] if k["tag"] == "span"] for c in cards]
-check("a pace card shows its last run and nothing else: none before a run, and the runs' card says there was none", said_on == [[], [], [i18n.EN["audit.no_run_yet"]]], said_on)
+check("a pace card shows its last run and nothing else: before a run the ten-minute and scheduled cards say there was none", said_on == [[], [i18n.EN["audit.no_run_yet"]], [i18n.EN["audit.no_run_yet"]]], said_on)
 SEL = "#new h2.lsec .count"      # the Closed page's script writes the live number of New rows here
 counts = [e["text"] for e, above in walk(trees["closed"]) if has(e, "count") and any(a["tag"] == "h2" and has(a, "lsec") for a in above) and any(a["attrs"].get("id") == "new" for a in above)]
 check("the Closed page's script finds the New count in the heading beside its explainer", SEL in r2._LANDED_JS and len(counts) == 1 and counts[0].isdigit(), counts)
@@ -222,12 +222,14 @@ check("the Closed page's script finds the New count in the heading beside its ex
 # ---- 4. the script, in node
 HARNESS = r"""
 const vm = require('vm'), fs = require('fs'), assert = require('assert');
-const [js, tree, mover] = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const [js, tree, mover, live] = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 let active = null, timers = [];
 const listeners = {};
 class El {
   constructor(tag, attrs) { this.tagName = tag.toUpperCase(); this.attrs = attrs || {}; this.kids = []; this.parentElement = null; this.style = {}; this.rect = {left: 0, top: 0, width: 0, height: 0};
-    this.hidden = 'hidden' in this.attrs; this.overflowX = 'visible'; this.overflowY = 'visible'; this.display = 'block'; this.keyboard = false; this.textContent = ''; }
+    this.hidden = 'hidden' in this.attrs; this.overflowX = 'visible'; this.overflowY = 'visible'; this.display = 'block'; this.keyboard = false; this.textContent = ''; this.visibility = ''; this.gone = false; }
+  get id() { return this.attrs.id || ''; }
+  getClientRects() { for (let n = this; n; n = n.parentElement) if (n.gone) return []; return [this.rect]; }
   add(k) { k.parentElement = this; this.kids.push(k); return k; }
   appendChild(k) { return this.add(k); }
   remove() { const p = this.parentElement; p.kids.splice(p.kids.indexOf(this), 1); this.parentElement = null; }
@@ -240,7 +242,7 @@ class El {
   contains(n) { for (; n; n = n.parentElement) if (n === this) return true; return false; }
   closest(s) { assert(s[0] === '.', s); for (let n = this; n; n = n.parentElement) if (n.classList.contains(s.slice(1))) return n; return null; }
   matches(s) { assert(s === ':focus-visible', s); return this.keyboard; }
-  focus() { if (active === this) return; const was = active; active = this; if (was) fire('focusout', was, {relatedTarget: this}); fire('focusin', this); }
+  focus(how) { this.how = how; if (active === this) return; const was = active; active = this; if (was) fire('focusout', was, {relatedTarget: this}); fire('focusin', this); }
   get offsetWidth() { this.measured = this.style.position; const m = parseFloat(this.style.maxWidth); return Math.min(isNaN(m) ? 1e9 : m, 320); }
   get offsetHeight() { return 60; }
   getBoundingClientRect() { const r = this.rect; return {left: r.left, top: r.top, width: r.width, height: r.height, right: r.left + r.width, bottom: r.top + r.height}; }
@@ -248,11 +250,15 @@ class El {
 const html = new El('html'), body = html.add(new El('body'));
 html.clientWidth = 360;
 const walk = (n, f) => { f(n); n.kids.forEach(k => walk(k, f)); };
-const document = {documentElement: html, body, get activeElement() { return active || body; },
+const floats = [];      // the floating buttons: round, drawn over a popup (over) or under it
+const document = {documentElement: html, body, get activeElement() { return active || body; }, importNode: n => n,
+  querySelectorAll(s) { assert(s === '#totop,.fab', s); return floats; },
+  elementFromPoint: (x, y) => floats.find(f => f.over && Math.hypot(x - f.rect.left - 22, y - f.rect.top - 22) <= 22) || body,
   querySelector(s) { const m = /^\.xp\[data-xp="([^"]*)"\]$/.exec(s); assert(m, s); let got = null; walk(html, n => { if (!got && n.classList.contains('xp') && n.attrs['data-xp'] === m[1]) got = n; }); return got; },
   createElement: t => new El(t, {}), addEventListener(t, f, cap) { (listeners[t] = listeners[t] || []).push([f, !!cap]); }};
 const winl = {};
-const window = {innerHeight: 700, getComputedStyle: n => ({overflowX: n.overflowX, overflowY: n.overflowY, display: n.display}), addEventListener(t, f) { winl[t] = f; }};
+const seen = n => { for (; n; n = n.parentElement) if (n.visibility) return n.visibility; return 'visible'; };
+const window = {innerHeight: 700, getComputedStyle: n => ({overflowX: n.overflowX, overflowY: n.overflowY, display: n.display, visibility: seen(n)}), addEventListener(t, f) { winl[t] = f; }};
 function fire(type, target, props) {
   let stopped = false, halted = false, prevented = false;
   const e = Object.assign({type, target, preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }, stopImmediatePropagation() { stopped = halted = true; }}, props || {});
@@ -313,7 +319,13 @@ active = null; A.firstElementChild.focus(); active = outside; fire('focusout', A
 A.firstElementChild.focus(); const e1 = esc(); check('Escape closes it', shut(A), state(A)); check('...and nothing else hears that Escape', e1.stopped && e1.prevented && panelEscapes === 0 && laterEscapes === 0, [e1, panelEscapes, laterEscapes]);
 const e2 = esc(); check('with nothing open, Escape goes on to the page', !e2.stopped && !e2.prevented && panelEscapes === 1 && laterEscapes === 1, [e2, panelEscapes, laterEscapes]);
 fire('click', A.firstElementChild); const e3 = esc({isComposing: true}); check('an Escape that cancels an input method composition is left alone', open(A) && !e3.stopped, state(A));
-A.lastElementChild.focus(); A.firstElementChild.keyboard = true; esc(); flush(); check('Escape from inside the popup closes it and puts the focus on its button, without reopening it', shut(A) && active === A.firstElementChild, [state(A), active && active.tagName]); away();
+A.lastElementChild.focus(); A.firstElementChild.keyboard = true; esc(); flush(); check('Escape from inside the popup closes it and puts the focus on its button, without reopening it', shut(A) && active === A.firstElementChild, [state(A), active && active.tagName]);
+check('...and without scrolling the page to it', !!A.firstElementChild.how && A.firstElementChild.how.preventScroll === true, A.firstElementChild.how); away();
+over(A); A.firstElementChild.keyboard = false; A.firstElementChild.focus(); active = outside; fire('focusout', A.firstElementChild, {relatedTarget: outside}); flush();
+check('one the mouse opened stays when the focus leaves its button', open(A), state(A)); leave(A); away();
+const veil = body.add(new El('div', {})), V = make('veiled', 100, 100, veil);
+for (const [how, hide, unhide] of [['in a block that is not drawn', () => veil.gone = true, () => veil.gone = false], ['in a panel turned invisible', () => veil.visibility = 'hidden', () => veil.visibility = '']]) {
+  tap(V); hide(); const n = panelEscapes, e = esc(); check('an Escape for a popup nobody can see, ' + how + ', closes it and goes on to the page', shut(V) && !e.stopped && !e.prevented && panelEscapes === n + 1, [state(V), e, panelEscapes - n]); unhide(); away(); }
 fire('click', glyph(A)); A.lastElementChild.focus(); A.firstElementChild.keyboard = true; A.firstElementChild.focus(); flush(); fire('click', glyph(A)); check('keyboard focus coming back to a pinned one leaves the pin: one click closes it', shut(A), state(A)); away();
 
 tap(A); tap(B); check('one is open at a time', shut(A) && open(B), [state(A), state(B)]); away();
@@ -339,6 +351,20 @@ pane.rect.height = 100; const E = make('pane-short', 100, 330, pane); tap(E); ch
 window.innerHeight = 100; const F = make('short', 100, 20); tap(F); check('in a window too short on both sides it stays below the button', at(F).top === 56, at(F)); away(); window.innerHeight = 700;
 const boxless = body.add(new El('span', {})); boxless.display = 'contents'; boxless.overflowX = 'hidden'; boxless.overflowY = 'hidden';
 const G = make('boxless', 600, 100, boxless); tap(G); check('an ancestor with no box of its own (display: contents) clips nothing', at(G).left === 458 && at(G).width === 320 && at(G).top === 136, at(G)); away();
+
+// the pinned side panel, whose popups the floating buttons are drawn over
+function panelled(name, x, y, buttons, wide) {
+  const side = body.add(new El('div', {})); side.overflowX = side.overflowY = 'auto'; side.rect = {left: 1280 - (wide || 300) - (wide ? 46 : 0), top: 0, width: wide || 300, height: 700};
+  floats.length = 0; for (const [left, top, over] of buttons) { const f = new El('div', {}); f.rect = {left, top, width: 44, height: 44}; f.over = over; floats.push(f); }
+  const w = make(name, x, y, side); tap(w); const measured = w.lastElementChild.measured, p = at(w); p.measured = measured; away(); floats.length = 0; return p; }
+const two = over => [[1216, 582, over], [1216, 636, over]], is = (p, left, top, width) => p.left === left && p.top === top && p.width === width;
+let q = panelled('f-flip', 1230, 540, two(true)); check('a popup that would lie under a floating button goes to the other side of its "?"', is(q, 988, 480, 284), q);
+q = panelled('f-under', 1230, 540, two(false)); check('...one the browser draws over the buttons stays where it was', is(q, 988, 576, 284), q);
+q = panelled('f-clear', 1230, 100, two(true)); check('...and one that meets no button stays too', is(q, 988, 136, 284), q);
+q = panelled('f-low', 1230, 600, two(true)); check('with no room on the other side it stops left of the buttons, measured fixed again', is(q, 988, 540, 220) && q.left + q.width <= 1216 && q.measured === 'fixed', q);
+q = panelled('f-high', 1230, 30, [[1216, 70, true]]); check('...also where the other side would leave the window', is(q, 988, 66, 220), q);
+q = panelled('f-both', 1230, 540, [[1216, 480, true], [1216, 582, true]]); check('...and where the other side lies under a button as well', is(q, 988, 576, 220), q);
+q = panelled('f-corner', 1190, 494, [[1216, 582, true]], 292); check('a round button that covers only a corner of it counts', is(q, 950, 434, 276), q);
 
 // the same markup from the script's own builder, for a "?" added to markup the server did not draw
 const shape = n => ({tag: n.tagName.toLowerCase(), attrs: n.attrs, text: n.textContent, kids: n.kids.map(shape)});
@@ -380,13 +406,28 @@ function redraw() {
   R = make('r', 100, 100, own); R.firstElementChild.keyboard = true; fire('stackshot:redrawn', body); if (had) window.stackshotRefocus('r'); flush(); }
 tap(R); redraw(); check('an open popup survives a redraw its script announces, placed again', open(R) && R.lastElementChild.style.top === '36px', state(R));
 check('...with the focus back on its button', active === R.firstElementChild, active && active.tagName);
+check('...and the page not scrolled to it', !!R.firstElementChild.how && R.firstElementChild.how.preventScroll === true, R.firstElementChild.how);
 esc(); redraw(); check('one closed with Escape gets the focus back and stays closed', shut(R) && active === R.firstElementChild, [state(R), active && active.tagName]); away();
 window.stackshotRefocus('no-such-key'); check('a key no "?" has takes no focus', active === null, active && active.tagName);
+// the home page's in-place update, its own swap(): a "?" closed with Escape gets the focus back and stays closed
+away(); vm.runInContext(live, sb);
+const marks = n => { const got = []; walk(n, e => { if (e.classList.contains('xp-b')) got.push(e); }); return got; };
+function inPlace(kept) {      // kept: the "?" sits in the side panel's #audit, which the update moves into the new block instead of drawing it again
+  const page = body.add(new El('div', {})), old = page.add(new El('section', {})), card = kept ? old.add(new El('div', {id: 'audit'})) : null, fresh = new El('section', {});
+  const w = make('live', 100, 100, card || old), slot = kept ? fresh.add(new El('div', {id: 'audit'})) : null;
+  if (!kept) make('live', 100, 100, fresh).firstElementChild.keyboard = true;
+  old.querySelectorAll = () => []; old.querySelector = () => card;
+  fresh.querySelectorAll = s => s === 'details.fold' ? [] : marks(fresh); fresh.querySelector = () => slot;
+  if (slot) slot.parentNode = {replaceChild(n, o) { if (n.contains(active)) active = null; n.remove(); fresh.kids.splice(fresh.kids.indexOf(o), 1, n); n.parentElement = fresh; }};
+  old.parentNode = {replaceChild(x, o) { if (o.contains(active)) active = null; o.parentElement = null; page.kids.splice(0, 1, x); x.parentElement = page; }};
+  w.firstElementChild.keyboard = true; w.firstElementChild.focus(); const was = open(w); esc(); sb.swap(old, fresh); fire('stackshot:swapped', body); flush();
+  const b = marks(fresh)[0], got = [was, !!b && b === active, !!b && shut(b.parentElement), !!b && !!b.how && b.how.preventScroll === true]; active = null; page.remove(); return got; }
+for (const [how, kept] of [['drawn again', false], ['moved with the Audit card', true]]) { const got = inPlace(kept); check('through the in-place update, a "?" closed with Escape and ' + how + ' gets the focus back and stays closed', got.every(x => x === true), got); }
 process.stdout.write(JSON.stringify(out));
 """
 if shutil.which("node"):
     tree = Tree(xp.explain("KEY", "text", "Thing")).root["kids"][0]
-    (T / "h.js").write_text(HARNESS, encoding="utf-8"); (T / "in.json").write_text(json.dumps([xp.JS, tree, ct.NOTE_TO_TIP]), encoding="utf-8")
+    (T / "h.js").write_text(HARNESS, encoding="utf-8"); (T / "in.json").write_text(json.dumps([xp.JS, tree, ct.NOTE_TO_TIP, re.search(r"(?s)function key\(a\)\{.*?(?=\nfunction apply\()", r2._LIVE_JS).group(0)]), encoding="utf-8")
     nr = subprocess.run(["node", str(T / "h.js"), str(T / "in.json")], capture_output=True, text=True, timeout=60)
     try: res = json.loads(nr.stdout)
     except ValueError: res = None
