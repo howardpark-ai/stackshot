@@ -28,6 +28,7 @@ from stackshot.model import nextlines as _nl
 from stackshot.model import steps as _steps
 
 KEY = "owner_step"                 # metadata: the first line of the step the server made (see THE STORAGE)
+ROUTE_KEY = "item_sync_step"       # metadata: the open step a script's route set itself (service/item_sync.py), as the route sent it; it says which open line is the route's own and goes when that line is no longer open
 
 
 def recorded(meta: dict[str, Any]) -> str:
@@ -160,6 +161,22 @@ def forget_closed(meta: dict[str, Any], keeper: str) -> None:
         return
     if not any(same_line(s["text"], rec) for s in _steps.view(meta, keeper=keeper) if s["status"] == _steps.OPEN):
         meta.pop(KEY, None)
+
+
+def route_writes(meta: dict[str, Any], own: str) -> None:
+    """The write of a script's route that sets a step (service/item_sync.py): the server's line for the step before it is let go, not reworded, so a line that is not the route's stays open beside the new
+    one (the route drops its own line itself, with a dropped mark), and the route's record is stored: `own`, the step it set, or "" when the line it asks stood already and is not its own."""
+    meta.pop(KEY, None)
+    meta.pop(ROUTE_KEY, None)
+    if own:
+        meta[ROUTE_KEY] = own
+
+
+def forget_route_closed(meta: dict[str, Any], keeper: str) -> None:
+    """Forget a route's record of its own step (ROUTE_KEY) once no open line reads as it (his answer, a drop, a rewording), so a line written later with the same words is not taken for the route's."""
+    own = _steps.clean(meta.get(ROUTE_KEY))
+    if own and not any(same_line(s["text"], line_of(own, meta)) for s in _steps.view(meta, keeper=keeper) if s["status"] == _steps.OPEN):
+        meta.pop(ROUTE_KEY, None)
 
 
 def tick(meta: dict[str, Any], keeper: str, by: str, at: float, answer: str, make: str = "", writer: str = "", add: bool = True, apart: bool = False) -> list[str]:

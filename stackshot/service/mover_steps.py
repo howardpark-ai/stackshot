@@ -295,6 +295,7 @@ def _owner_steps_on_save(item: dict[str, Any], before: dict[str, Any] | None, wr
             _hs.drop_open(meta, keeper, _sr._session_label(writer) or writer or NAME, now, also=_holders._owner_want((before or {}).get("metadata") or {}) if _model.stood_his(before, after) else "")
         else:
             _hs.forget_closed(meta, keeper)
+        _hs.forget_route_closed(meta, keeper)
         return was != (meta.get("steps"), meta.get("next"), _hs.recorded(meta))
     except Exception as e:  # noqa: BLE001
         print(f"owner-steps: {item.get('gid') or item.get('id')}: not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)

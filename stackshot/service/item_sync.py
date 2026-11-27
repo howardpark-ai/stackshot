@@ -3,7 +3,7 @@
 A timer's script that finds a condition only the person can fix (a plugin sync that fell behind, say) opens one board item for him with his step, keeps its description current on every run
 that still finds the condition, and closes it when a later run finds the condition gone. The item is marked with the caller's marker (`metadata.item_sync`): that mark is the whole of what the
 route may touch, so it cannot refresh or close an item it did not open. `open` files an item whose mover is the person and whose `then` is an agent of the project (the agent takes it when he has
-done his step), with his step as the one step on the checklist; while an item with the marker is open a repeat `open` is a `refresh` that also sets a new step (_itemsync_step_move), and once it is closed an `open` files a new item (the condition recurs).
+done his step), with his step as the one step on the checklist; while an item with the marker is open a repeat `open` is a `refresh` that may also set the step (_itemsync_step_write), and once it is closed an `open` files a new item (the condition recurs).
 `refresh` rewrites the description of the open item and nothing else; `close` completes it as done, through the update tool's own close. With no open item `refresh` and `close` do nothing and say so.
 `_ITEMSYNC_LOCK` makes the look for an open item and the write one step against another call of this route (two opens of one marker file one item). A refresh, a close and a repeat open also hold the board's item lock
 (`ITEM_LOCK`) from the look to the write, so a session's close cannot land between them; a new item is created without the board's lock, because the create reaches GitHub for the item number and no other writer of the board waits for that. The markers, the sender and the description rules are item_open.py's; the helpers the row is filed with are service/terminal_prompt.py's.
@@ -46,7 +46,6 @@ _ITEMSYNC_LOCK = threading.Lock()
 _ITEMSYNC_ACTIONS = ("open", "refresh", "close")
 _ITEMSYNC_KEYS = ("action", "marker", "project", "subject", "description", "step", "mover", "then", "reason", "sender")
 _ITEMSYNC_OPEN_MAX = 10      # open items this route may hold per project: a marker that changes every run cannot pile up items
-_ITEMSYNC_STEP = "item_sync_step"      # metadata: the step this route last set on the item (or found standing as it was sent), as the caller sent it, his name off
 
 
 def _itemsync_open_items() -> list[tuple[str, str, str]]:
@@ -87,11 +86,11 @@ def _itemsync_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
     reason (one line, cut to [close] reason_max; default says the script saw the condition gone). Any other key is refused.
     open: the item is filed through create_item (service/create.py), the create tool's own code, so the create tool's subject and next gates, the project page and the GitHub mirror all apply and a refusal is the tool's text (400); the description's line count and line length are item-open's own pre-checks; the caller picks no
     field the route does not take (no needs, ask, priority or date). The mover is the person, the item's `then` the agent, its creator the project's front agent (its -main first), its only step his; the state is your-step, as the terminal prompt's row.
-    Marked metadata.item_sync = <marker>. While an item with the marker is open (the marker is global: refresh and close carry no project), a repeat open rewrites that item's description as refresh does, and sets its step again (his move again) only when the item does not read as waiting and the step is new: not the open step of his that stands, nor the one this route last set (metadata.item_sync_step), compared as the board stores it, so the same words sent again change nothing; none, clear or - as the step changes no step; description and step go in one write, so a refused step leaves both as they were; an open on another project than the
+    Marked metadata.item_sync = <marker>. While an item with the marker is open (the marker is global: refresh and close carry no project), a repeat open rewrites that item's description as refresh does and may set the sent step (_itemsync_step_write): never the step of his marked done last, otherwise when no open step of his reads as it, whoever wrote those, compared as the board stores them; nothing for none, clear or -, while the item reads as waiting, or while a decision ask to him is pending. A step that stands open already is set only when the item does not ask him now, or to replace the route's own other open step. Setting a step makes the person the mover (a stored `then` stays; with none stored an agent that moved the item becomes it, the project's builder in a front agent's place when one does the work); a repeat's mover and then are checked and never written themselves. The route drops no open line but its own (metadata.item_sync_step), so a session's step stays open beside the new one. Description and step go in one write, so a refused step leaves the item as it was; an open on another project than the
     open item's is a 400. After the item is closed an open files a new one. A project holds at most 10 open items of this route (a repeat never counts). The row owes no page and tells no session, as every script route's.
     refresh: rewrites the description of the marker's open item (the caller's bullets, then who opened it) and nothing else: not his step, not the mover, not the subject; no open item is a 200 that does nothing. A script's write is not judged by the Goal-first rule a session's
     description is (the board's way with script rows): the checks are item-open's (the line count and the length of a line), so the first bullet need not state a goal.
-    close: the update tool's close of the marker's open item, outcome done, a reason within [close] reason_max, the end state in outcome_text, the description unchanged; his open step is ticked by it and the history says the script saw the condition gone. While another writer's step is
+    close: the update tool's close of the marker's open item, outcome done, a reason within [close] reason_max, the end state in outcome_text, the description unchanged; his open steps are ticked by it and the history says the script saw the condition gone. While another writer's step is
     open on the item (an agent's follow-up) nothing is closed or ticked: the item is left open and the answer says so (action left-open). No open item is a 200 that does nothing.
     404 no such project, 409 no front agent to file under, 503 the project record cannot be read. -> (status, {item, marker, action: opened | refreshed | closed | left-open | none, project, mover, then, owner, repeat}); a `none` answer carries no item, and a left-open one a `note`."""
     extra_keys = sorted(k for k in body if k not in _ITEMSYNC_KEYS)
@@ -164,7 +163,7 @@ def _itemsync_plan(texts: dict[str, str]) -> tuple[dict[str, Any], tuple[int, di
             return {}, (400, {"error": f"{k} is required to open"})
     if not _model.is_owner(mover):
         return {}, (400, {"error": f"mover is {OWNER}: this route opens items that wait on him, so his step is the one step; got {mover!r}"})
-    step = _steps.without_owner(step)
+    step = _steps.without_owner(_svcstore._shown_ids(step))      # item ids written as the create writes them into next, so the line, the step and the route's record of it are one text
     if not step:
         return {}, (400, {"error": "step is empty once his name is taken off it: say what he does"})
     if too_long := next_faults(f"{OWNER}: {step}"):      # one limit for a first and a repeat open: the line of next the create makes of the step, judged by the create tool's own gate, before anything is written
@@ -223,55 +222,54 @@ def _itemsync_reads_as(text: str, want: str) -> bool:
     return key == want or key.startswith(want + _hs.ARROW + '"')
 
 
-def _itemsync_step_move(item: dict[str, Any], step: str) -> str:
-    """What a repeat open does with its step → "set" (write it: his move again), "stands" (it is open on the checklist already: no step is written, and it is recorded as the route's) or "" (nothing).
-    Nothing for none, clear or - (a script's open withdraws no step), nor while the item reads as waiting: a step written onto a parked or held item asks him nothing and is lost when the wait ends, so the
-    next open after the wait that sends a new step sets it. A step is new when it is not open on the checklist and is not the one the route last set (metadata.item_sync_step), however that one left the
-    list: his Done or note, a park, a session. An item filed before the route kept that record counts any step that is no longer open and reads as the one sent. An open step that reads as the one sent, on an
-    item that stores neither a state nor the record, is one a crash left between the create and its state write: it is set, which makes the item whole."""
+def _itemsync_step_write(item: dict[str, Any], step: str) -> dict[str, Any]:
+    """What a repeat open's write adds to the description for its step, {} when no step is written.
+
+    The rule: the step of his marked done last is never set again (every step marked at that moment: one Done can tick two); otherwise the step is set when no open step of his reads as it. Both count
+    a step whoever wrote it, with or without the record. Nothing is written for none, clear or -, while the item reads as waiting, or while a decision ask to him is pending. A step that stands open
+    already is set only to make the item ask it: when the item does not ask him now (its state is not your-step), or when the route's own open step is another one, which this write replaces.
+
+    The route's own step is the open line its record names (metadata.item_sync_step). It is the one line this write drops: a line the route did not set stays open beside the new one, and a step that
+    stood already is not recorded as the route's. Steps are compared as the board stores them, his name off."""
     meta = item.get("metadata") or {}
     if step.lower() in _update_svc._hooks().ask_none:
-        return ""
+        return {}
     if _model.shown_waiting(item, None, lambda i_: _item_read._after_open(i_.get("metadata") or {})):
-        return ""
-    want = _steps.owner_key(_hs.line_of(step, meta))
+        return {}      # a step written onto a parked or held item asks him nothing: the next open after the wait sets it
+    if meta.get("state") == "your-call" or "decision" in _states.kinds_of(meta):
+        return {}      # a step set over a pending ask would take its Decide line off the list
     checklist = _steps.view(meta)
-    last = _states.clean(meta.get(_ITEMSYNC_STEP))
-    if not last and any(s["status"] != _steps.OPEN and _itemsync_reads_as(s["text"], want) for s in checklist):
-        return ""
-    if any(s["status"] == _steps.OPEN and _steps.owner_key(s["text"]) == want for s in checklist):
-        return "stands" if last or _states.clean(meta.get("state")) else "set"
-    return "" if last and _steps.owner_key(_hs.line_of(last, meta)) == want else "set"
-
-
-def _itemsync_record(gid: str, step: str) -> None:
-    """Keep `step` on the item as the route's last one (metadata.item_sync_step): the server's own bookkeeping, a save with no writer that settles no mover and touches no step."""
-    with _writes.ITEM_LOCK:
-        item = _svcstore._load(gid)
-        meta = item.get("metadata") or {}
-        if meta.get(_ITEMSYNC_STEP) != step:
-            item["metadata"] = {**meta, _ITEMSYNC_STEP: step}
-            _writes.save(gid, item, ctx=_writes.QUIET)
+    want = _steps.owner_key(_hs.line_of(step, meta))
+    finished = [s for s in checklist if s["status"] == _steps.DONE and _steps.is_his(s["text"], unnamed_is_his=False)]
+    latest = max((s["at"] for s in finished), default=0)
+    if any(s["at"] == latest and _itemsync_reads_as(s["text"], want) for s in finished):
+        return {}
+    open_keys = [_steps.owner_key(s["text"]) if s["status"] == _steps.OPEN else None for s in checklist]
+    record = _states.clean(meta.get(_hs.ROUTE_KEY))
+    own = _steps.owner_key(_hs.line_of(record, meta)) if record else None
+    replaced = [open_keys.index(own) + 1] if own and own != want and own in open_keys else []      # its position on the list, as dropped= takes it
+    stands = want in open_keys
+    if stands and not replaced and meta.get("state") == "your-step":
+        return {}
+    return {"step": step, "route_step": "" if stands and own != want else step, **({"dropped": replaced} if replaced else {})}
 
 
 def _itemsync_open(found: list[tuple[str, str]], projects: list[str], marker: str, desc: str, plan: dict[str, Any], by: str, sender: str) -> tuple[int, dict[str, Any]]:
-    """open, under the lock: a repeat of an open marker is a refresh (its description rewritten) that sets its step again, so it is his move, when _itemsync_step_move says so; else a new item with the person as mover, the agent as then and his step."""
+    """open, under the lock: a repeat of an open marker is a refresh (its description rewritten) that sets its step too, so it is his move, when _itemsync_step_write says so; else a new item with the person as mover, the agent as then and his step."""
     key = plan["key"]
     if found:
         gid, was = found[0]
         if was != key:
             return 400, {"error": f"{marker} is already open on {was}: a marker belongs to one item at a time; close it there first, or use another marker for {key}"}
         step = plan["step"]
-        move = _itemsync_step_move(_svcstore._load(gid), step)
-        _update_svc._update(gid, description=desc, step=step if move == "set" else "", sender=by)      # one write: a step the board's gates refuse leaves the description as it was
-        if move:      # a set step replaces his step (owner_steps.ensure drops the server's old line)
-            _itemsync_record(gid, step)
+        _update_svc._update(gid, description=desc, sender=by, **_itemsync_step_write(_svcstore._load(gid), step))      # one write: a step the board's gates refuse leaves the description, the list and the record as they were
         return 200, _itemsync_answer(gid, marker, "refreshed", True)
     if projects.count(key) >= _ITEMSYNC_OPEN_MAX:
         return 400, {"error": f"{key} already has {projects.count(key)} open items filed by this route and the cap is {_ITEMSYNC_OPEN_MAX}: an open item must close before another is filed "
                               "(a repeat of an open marker is always answered; a marker that changes on every run is the usual cause)"}
     step = plan["step"]
-    gid, _reply = _create_svc.create_item(subject=plan["subject"], description=desc, project=key, owner=plan["owner"], next=f"{OWNER}: {step}", mover=OWNER, then=plan["then"], by=by, extra={"item_sync": marker})
+    own = {} if step.lower() in _update_svc._hooks().ask_none else {_hs.ROUTE_KEY: step}      # the line the create writes is the route's own, from the first write
+    gid, _reply = _create_svc.create_item(subject=plan["subject"], description=desc, project=key, owner=plan["owner"], next=f"{OWNER}: {step}", mover=OWNER, then=plan["then"], by=by, extra={"item_sync": marker, **own})
     try:       # a create sets no step: the state is a second write, and an item the state fails for is closed again, never left half made (as the terminal prompt's row)
         _update_svc._update(gid, step=step, sender=by)
     except Exception:  # noqa: BLE001  — re-raised below
@@ -282,6 +280,4 @@ def _itemsync_open(found: list[tuple[str, str]], projects: list[str], marker: st
             import sys
             print(f"item sync: {_gh.shown(gid)} left open half made, not closed: {e2}", file=sys.stderr, flush=True)
         raise
-    if step.lower() not in _update_svc._hooks().ask_none:
-        _itemsync_record(gid, step)
     return 200, _itemsync_answer(gid, marker, "opened", False)
