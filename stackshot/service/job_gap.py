@@ -44,12 +44,12 @@ _JOBGAP_DETAIL_MAX = 600          # --detail: at most this many characters (the 
 _JOBGAP_TIMER = re.compile(r"(?=.{1,120}\Z)[A-Za-z0-9](?:[A-Za-z0-9:_.\-]|(?<=[A-Za-z0-9])@(?=[A-Za-z0-9]))*")     # an @ only between letters or digits (a template unit, job@1.service): never one that starts a mention (a.@name)
 _JOBGAP_CODE = re.compile(r"[a-z][a-z0-9-]{0,39}")
 _JOBGAP_REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9._-]{1,100}")
-_JOBGAP_WORDS = {      # code -> (the gap in the subject, the gap in the first description bullet)
-    "no-description": ("has no Description=", "has no Description= line"),
-    "no-lane": ("has no X-Model-Lane", "has no X-Model-Lane= line"),
-    "bad-lane": ("has a bad X-Model-Lane", "has an X-Model-Lane= that is not a lane sala knows"),
-    "not-git": ("is not in git", "is not in git"),
-    "git-differs": ("differs from its file in git", "differs from its file in git"),
+_JOBGAP_WORDS = {      # code -> (the subject, the task that closes the gap, {unit} filled in; the gap in the first description bullet)
+    "no-description": ("Add Description= to {unit}", "has no Description= line"),
+    "no-lane": ("Add X-Model-Lane= to {unit}", "has no X-Model-Lane= line"),
+    "bad-lane": ("Correct X-Model-Lane= of {unit}", "has an X-Model-Lane= that is not a lane sala knows"),
+    "not-git": ("Put {unit} in git", "is not in git"),
+    "git-differs": ("Match {unit} to its file in git", "differs from its file in git"),
 }
 _JOBGAP_FIX = {        # code -> the one fix line, {unit} and {repo} filled in
     "no-description": "add a Description= line to {unit}'s unit file in {repo}, linked from there",
@@ -97,7 +97,7 @@ def _jobgap_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any
     open: one open item per (timer, code), filed through create_item (service/create.py: the create tool's own code: subject prefix, description and next gates, project page, GitHub mirror; a refusal is the tool's
     text, 400). The repo is mapped to its project page by [job_gap.repos] (else none): the config repo -> projects/config, salamander -> projects/example-two, stackshot -> projects/example;
     a repo it does not list is a 400 naming the ones it does. The mover is the project's builder (_builder_agent: the background agent whose mandate builds), the creator the project's front
-    agent (its -main first); a project with no builder is moved by that -main agent, and the item says so (`fallback` in the answer). The subject is "<prefix> <timer>: <the gap>" (the project scope's prefix, else [subject] fallback_prefix, else the first prefix) cut to [subject]
+    agent (its -main first); a project with no builder is moved by that -main agent, and the item says so (`fallback` in the answer). The subject is "<prefix> <the task>", as "Add X-Model-Lane= to <timer>" or "Put <timer> in git" (the project scope's prefix, else [subject] fallback_prefix, else the first prefix) cut to [subject]
     max_length, p2, the description says what the gap is and how to fix it, next "<mover>: <the fix>", marked metadata.job_gap = "<timer>: <code>". The builder is told once, at the create
     (the needs notice: the item names it in needs), no front agent is woken; the row owes the page nothing (a script's notification). A repeat open of an open (timer, code) changes nothing and
     answers the existing item. clear: closes the open item (outcome done, reason within [close] reason_max, bullets); with none open it does nothing and answers 200 (`cleared` empty).
@@ -175,7 +175,7 @@ def _jobgap_open(found: list[str], rec: dict[str, Any], repo: str, timer: str, c
     owner = front[0]
     builder = _agents._builder_agent(key)
     mover = builder or owner
-    gap, what = _JOBGAP_WORDS.get(code, (f"has the gap {code}", f"has the gap {code}"))
+    task, what = _JOBGAP_WORDS.get(code, (f"Fix the {code} gap of {{unit}}", f"has the gap {code}"))
     fix = _JOBGAP_FIX.get(code, _JOBGAP_FIX_OTHER).format(unit=timer, repo=repo)
     lines = [f"{timer} {what} (found by sala's job-gap watcher on {machine})", f"Fix: {fix}", f"{repo} is {key}'s repo; the unit lives there with X-Model-Lane= so every job has a lane"]
     if detail:
@@ -184,10 +184,10 @@ def _jobgap_open(found: list[str], rec: dict[str, Any], repo: str, timer: str, c
         lines.append(f"{key} lists no builder, so this is with {owner}, its front agent")
     lines.append(f"Opened by {sender} (a script on {machine}); it closes when the watcher finds the gap fixed")
     desc = _terminal._terminal_bullets(*lines)
-    pfx_, tail_ = _terminal._terminal_subject_prefix(str(rec.get("scope") or "")), f": {gap}"
+    pfx_ = _terminal._terminal_subject_prefix(str(rec.get("scope") or ""))
     timer_ = _svcstore._shown_ids(timer)
-    room_ = (_subject_max() - len(pfx_) - len(tail_)) if _subject_max() else 0      # a long unit name is cut so the server's own subject is never refused (as the terminal prompt's)
-    subject = f"{pfx_}{_fit(timer_, room_) if 8 <= room_ < len(timer_) else timer_}{tail_}"
+    room_ = (_subject_max() - len(pfx_) - len(task.format(unit=""))) if _subject_max() else 0      # a long unit name is cut so the server's own subject is never refused (as the terminal prompt's)
+    subject = pfx_ + task.format(unit=_fit(timer_, room_) if 8 <= room_ < len(timer_) else timer_)
     if _subject_max():
         subject = _fit(subject, _subject_max())
     nxt = _fit(f"{mover}: {fix}", _next_line_max())

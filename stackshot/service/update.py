@@ -410,8 +410,8 @@ def _dropped_lines_note(old: Any, new: Any) -> str:
 
 
 def _goal_moved_note(item_was: dict[str, Any], item: dict[str, Any], sent: str) -> str:
-    """The reply line of a write that changed the words of the item's Goal sentence and left its subject as stored: the title and the `Goal:` bullet name one outcome, so the subject is quoted, with what to send when
-    the outcome moved. Counted in the call log (call_log.noted). Information only: nothing is refused or stored differently. `sent` is the description as the call passed it: the words must differ both there and as
+    """The reply line of a write that changed the words of the item's Goal sentence and left its subject as stored: the title names the work that reaches the `Goal:` bullet's outcome, so the subject is quoted, with what to send when
+    that work changed with it. Counted in the call log (call_log.noted). Information only: nothing is refused or stored differently. `sent` is the description as the call passed it: the words must differ both there and as
     stored, so neither the server's split of a long bullet nor a long Goal sent again and split the same way is a change. "" when the stored description opens with no `Goal:` bullet, the one it replaces gave no
     sentence, the words are the same (a re-formatting, a label put right) or the write stored another subject."""
     new, old, said = goal_of(item.get("description")), stated_goal(item_was.get("description")), stated_goal(sent)
@@ -419,7 +419,7 @@ def _goal_moved_note(item_was: dict[str, Any], item: dict[str, Any], sent: str) 
     if new is None or old is None or said is None or subject != str(item_was.get("subject") or "") or goal_words(old) in (goal_words(new), goal_words(said)):
         return ""
     _calls.noted("goal-moved")
-    return f'\n(note: the Goal changed and the subject did not; the stored subject is "{_clip_line(subject)}": send subject= if the outcome moved)'
+    return f'\n(note: the Goal changed and the subject did not; the stored subject is "{_clip_line(subject)}": send subject= if the work it names no longer reaches that Goal)'
 
 
 def _mark_next_stale(item_was: dict[str, Any], item: dict[str, Any], meta: dict[str, Any], writer: str, naming_added: list[str], next_passed: bool) -> None:
@@ -942,6 +942,7 @@ def update_unlocked(
     description = _fg.fix_bare_urls(description, str(item_was.get("description") or ""), session=_writes.session_next())       # a bare address in a description becomes a link to itself (the reply says so); next and ask keep the refusal
     for f_ in _fg.bare_url_faults({"description": description, "next": next, "ask": ask}, {"description": item_was.get("description"), "next": meta.get("next"), "ask": ask_was}, session=_writes.session_next()):   # only the fields this call sets; a stored bare URL is no reason to refuse
         fc.add(f_, text=True)
+    subject_sent = subject       # all its words, for the title note
     if subject:
         subject = _fg.fix_long_subject(subject, str(item.get("subject") or ""))       # a subject over the limit is cut at its last word that fits (the reply says so)
         for f_ in _fg.subject_faults(subject, str(item.get("subject") or "")):
@@ -1695,11 +1696,19 @@ def update_unlocked(
         except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
             print(f"update: {gid} dropped-lines note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     goal_note = ""
-    if description.strip() and _writes.session_next() and not reformat and not sender.strip().startswith("a script on "):      # the writes the goal gate judges: a session's own words
+    if _writes.session_next() and not reformat and not sender.strip().startswith("a script on "):      # the writes the goal gate judges: a session's own words
         try:
-            goal_note = _goal_moved_note(item_was, item, desc_sent)
+            if description.strip():
+                goal_note = _goal_moved_note(item_was, item, desc_sent)
         except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
             print(f"update: {gid} goal note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        try:
+            # a write that names the item anew, moves its Goal under the same title or gives it its first Goal is told when the open item's title does not read as work; other rewrites do not name it again
+            title, first_goal = str(item.get("subject") or ""), stated_goal(item_was.get("description")) is None and goal_of(item.get("description")) is not None
+            if item.get("status") == "open" and (goal_note or first_goal or title.strip() != str(item_was.get("subject") or "").strip()):
+                goal_note += _fg.subject_form_note(title, subject_sent)
+        except Exception as e:  # noqa: BLE001  — as above
+            print(f"update: {gid} title note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     machine_note = h.machine_note(gid, item, keeper_was)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     offer_note = _anchor_offers.item_line(gid, item, item_was)      # a relay wait this write set, or a source link it put in the description, that no anchor watches: one line with the ready anchors call, never a refusal
     if dropped_hold:

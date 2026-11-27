@@ -247,8 +247,8 @@ runs on every box.
   client.py post terminal-prompt open --session <name|id> --question "<one line>" --sender <label>
   client.py post terminal-prompt clear --session <name|id> --sender <label>
                                 for sala: a pane waits in its terminal for an answer (a question to {OWNER}, a guarded file, plan mode) that no hook can give.
-                                open files one open item per session, in {OWNER}'s Your move list, and prints its id (exit 0): the subject "<session> is
-                                waiting for your answer in its terminal", p1, mover {OWNER}, with the step "Answer <session>'s question in its
+                                open files one open item per session, in {OWNER}'s Your move list, and prints its id (exit 0): the subject "Answer
+                                <session> in its terminal", p1, mover {OWNER}, with the step "Answer <session>'s question in its
                                 terminal", next "{OWNER}: open <the pane's address> and answer: `<question>`" (the address is [client] session_view with the
                                 name, else the words "the pane of <name>"; the question stands as a code span, a backtick in it an apostrophe, and a line
                                 over [metadata.next] line_max has the question cut at a word with an ellipsis), filed under the session's project from the sala
@@ -265,7 +265,7 @@ runs on every box.
   client.py post job-gap clear <timer> <code> [--sender <label>]
                                 for sala's job-gap watcher: a timer or service of a machine has a gap (<code> = no-description | no-lane | bad-lane | not-git |
                                 git-differs; <timer> = the unit's name) or the gap is fixed. open files ONE open item per (timer, code) and prints its id (exit 0): the subject
-                                "<prefix> <timer>: <the gap>" (the project scope's prefix, else [subject] fallback_prefix; cut to [subject] max_length), p2, filed under the project page that owns --repo (the repository that holds the job's
+                                "<prefix> <the task>", as "Add X-Model-Lane= to <timer>" or "Put <timer> in git" (the project scope's prefix, else [subject] fallback_prefix; cut to [subject] max_length), p2, filed under the project page that owns --repo (the repository that holds the job's
                                 script: [job_gap.repos] maps "owner/name" to the page, default none; an instance maps its own repos; any other repo is refused with a 400 that names the known ones), moved by the project's builder (its background agent
                                 whose mandate builds; it is told once, at the create, and is in needs), the project's -main agent its creator (no front agent is woken),
                                 next "<builder>: put <timer>'s unit file in <repo> with an X-Model-Lane= line, linked from there" (the fix for the code), the description bullets
@@ -489,7 +489,7 @@ CLIENTS = os.path.join(SECRETS, "clients.json")
 TOKENS = os.path.join(SECRETS, "client-tokens")
 TOKEN = os.path.join(SECRETS, "client.token")
 URLF = os.path.join(SECRETS, "client.url")
-READS = ("registry", "rules", "brief", "page-ts", "items", "involved", "item-facts", "item-record", "open-records", "anchors-record", "projects-record", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you", "your-move", "inbox-holds", "inbox-waiting")
+READS = ("registry", "rules", "brief", "page-ts", "items", "involved", "item-facts", "asks-named", "item-record", "open-records", "anchors-record", "projects-record", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you", "your-move", "inbox-holds", "inbox-waiting")
 
 
 def _write_private(path: str, text: str) -> None:
