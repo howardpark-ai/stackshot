@@ -334,7 +334,6 @@ def create_item(
     if _uw.needs_date(meta):                                     # a kind with no date is never refused: the item's own words, else a suggestion, else tomorrow
         fb_d, _fb_how, fb_note = h.fallback_wait_date(meta, next, description, due)
         meta["until"] = fb_d
-        meta[_model.SERVER_END_KEY] = fb_d                       # the server chose this day, not the caller: the reads mark it so
         wait_note += fb_note
     if _wt.stored_until(meta) and not _uw.kind_of(meta) and _wt.after_of(meta):
         meta["wait_kind"] = "item"         # a date beside an after link is that wait's backstop (as ask_by was): the wait stays on the item
@@ -358,7 +357,7 @@ def create_item(
     fc.call_family(*_faults.DECISION, _dg._gate_own_action, meta, create=True)    # his own action asked as a decision: it is a your-step
     fc.call(_mgates.gate_members, meta)                                           # several members: a decision or a `you:` line names which member (no check with one)
     asked += _dg._options_note(meta) + _dg._actor_note(meta)
-    desc_note = fc.call(_gates.gate_model, {"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v), default="")    # the write guards of the item model, every field judged on a create
+    desc_note = fc.call(_gates.gate_model, {"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v), end_default=not until_v, default="")    # the write guards of the item model, every field judged on a create
     fc.call(h.anchor_wait_gate, {}, meta, creating=True)                  # an anchor wait: its anchor must be on the project's list already (after the model guards, whose refusals are more specific)
     if _writes.session_next() and not by and not next_bad and not fc.marked(_faults.NEXT) and (not _nl.split(meta.get("next")) or str(meta.get("next")).strip().lower() in _nl.NONE_WORDS) \
             and not _model.stood_his({"status": "open", "metadata": meta}, lambda i_: h.after_open(i_.get("metadata") or {})):      # N6: a session's create leaves the item with an open step (his server-made step, from needs=decision with an ask or a your-step, counts)

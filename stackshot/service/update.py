@@ -51,7 +51,7 @@ from stackshot.model import wait_tells as _wtell
 from stackshot.model import work as _work
 from stackshot.model.bullet_text import RX_MD_LINK, RX_NAKED_URL, _clip_line, goal_of, goal_words, stated_goal
 from stackshot.model.ids import _norm_id, name_read as _name_read
-from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision, owner_question_open
+from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
 from stackshot.service import anchor_offers as _anchor_offers
 from stackshot.service import checks as _checks
@@ -206,14 +206,15 @@ def _close_default(gid: str, item_was: dict[str, Any], keeper: str, done: Any, d
     the line that tells what the server wrote ("" when nothing was defaulted), why nothing could be ("" when the close is complete, or is not one this default reads),
     the fields the server wrote (the item's mark, OUTCOME_SERVER_KEY)).
     Two rules switch it off whole, and the close is then judged as it was before this default existed (gate_close's refusal, word for word): the call passes an argument outside
-    CLOSE_DEFAULT_ARGS (`extra`: close_extra_args), or the item as it stood holds a question or call for the owner that he has not answered (needs.owner_question_open).
+    CLOSE_DEFAULT_ARGS (`extra`: close_extra_args), or the item as it stood waits on the owner in any form (gates.owner_waiting). A step the call marks done or dropped is an open one
+    (steps.resolve refuses any other), and an open step of his is a wait on him: only a session's own steps are closed past by a default.
     An open step, no step at all, or a done check on the item that has not passed (one that has closes the item itself) leaves the close as the caller sent it too: the gate refuses it and says why.
     `tool`: the complete tool's own close, which takes no marks: its refusal names only what it takes."""
     if (outcome and reason and outcome_text) or superseded_by or outcome not in ("", "done"):
         return outcome, reason, outcome_text, "", "", []
     m = item_was.get("metadata") or {}
-    if extra or owner_question_open(m):
-        return outcome, reason, outcome_text, "", "", []      # rule A (an argument outside the allow list) or rule B (a question open for the owner): the close as sent, refused as before
+    if extra or _gates.owner_waiting(m):
+        return outcome, reason, outcome_text, "", "", []      # an argument outside the allow list, or an item that waits on the owner: the close as sent, refused as before
     try:
         steps = _steps.view(m, keeper=keeper)
         dropped_now = set(_steps.resolve(steps, dropped, "dropped"))
@@ -668,6 +669,20 @@ def _basis_frame(item: dict[str, Any], meta: dict[str, Any], status: str, wake: 
     return {**item, "status": status or item.get("status")}, (h.parse_wake(wake) if wake else str(meta.get("wake") or "") or basis_day), held
 
 
+def _basis_end_day(text: str) -> str:
+    """The day a park sent with a wait_basis and no date ends on: the first real date in the basis after today (the real-world date it names), "" when it names none (the basis
+    gate refuses such a basis whatever the date, so no day is chosen for it and the call is judged as before). The basis is then judged against that day as against a date the call gave."""
+    today = _pages.zone_now().date()
+    for s in re.findall(r"(?<![\d-])\d{4}-\d{2}-\d{2}(?![\d-])", text):
+        try:
+            d = dt.date.fromisoformat(s)
+        except ValueError:
+            continue
+        if d > today:
+            return d.isoformat()
+    return ""
+
+
 @_faults.collected
 def update_unlocked(
     item_id: str,
@@ -784,18 +799,17 @@ def update_unlocked(
     answered_note = _answered_since_note(gid, item, sender)      # read now: the write below is the sender's too
     had_hold = bool((item.get("metadata") or {}).get("hold"))      # read before the unfold, which stands a basis or the kind time in as a hold
     was_until = _uw.unfold_item(item)                    # a stored until stands as the old working fields for this write's gates (until_write.py); it is folded back just before the save
-    q_open = owner_question_open(item.get("metadata") or {}) or owner_question_open({"needs": needs, "ask": ask, "options": opts or []})      # a question or call for the owner stands on the item, or this call puts one there: no default of the server's applies to this write (the close's, a wait's end day, nor the rewrites below that serve them), and it is judged as before they existed
-    park_kind = wait_kind.strip().lower() if wait_kind.strip() and wait_kind.strip().lower() not in h.ask_none else _uw.kind_of(item.get("metadata") or {})
-    if ((hold or clear_wake or park_kind == "time") and not wake and ask_by_given and _uw.slot_of(park_kind) == "wake" and not q_open
-            and park_kind not in ("anchor", "item", "list") and not (_wlw.passed(waits) and not _wlw.clearing(waits))):
-        wake, ask_by, clear_wake = ask_by.strip(), "", False      # ask_by beside hold=true, clear_wake or a time wait (no relay, event, anchor or item kind) is that park's date, the old name of until: it is judged as the wake it stands for (the future, the cap, the reason), as a wake or an until is; with clear_wake it replaces the date, it does not drop it
     if was_until and clear_wake and _uw.kind_of(item["metadata"]) in ("", "time") and not had_hold:
         clear_hold = True                                # the date of a wait on the date alone is the whole wait: dropping it ends the wait, the hold it stands as goes with it
-    elif (clear_wake and not hold and not (wake or ask_by_given) and had_hold and not was_until and not q_open and _uw.kind_of(item["metadata"]) in ("", "time") and str((item.get("metadata") or {}).get("wake") or "").strip()
-          and not ({"anchor", "recycle"} & set(h.hold_held_by(gid, item.get("metadata") or {})))):
-        clear_hold = True                                # …and so for a hold stored the old way (hold and wake, no until) that nothing else holds: its wake is its whole wait, so dropping it ends the park rather than leaving a hold with no date for the server's backstop day to fill
     item_was = json.loads(json.dumps(item))             # the item as it stood, for the state checks (a re-park, a decision asked again, a stale next)
+    # The server's default end day for a wait goes only where this write would be refused for a wait with no end, and never while the item waits on the owner (gates.owner_waiting: as it
+    # stood, read here, and as the write leaves it, read again before the save) or when the call gives a date of its own: `end_ok`. Each default made below the model guards keeps the refusal
+    # it stands in for (`end_refusals`), which is raised after all if the item as the write leaves it waits on the owner.
+    end_ok = not (wake or ask_by_given) and not _gates.owner_waiting(item_was.get("metadata") or {})
+    end_refusals: list[str] = []
+    end_day = ""                  # the day a wait_basis with no date ends on, which the server chose (below): marked as the server's once the wait is stored
     meta = dict(item.get("metadata") or {})
+    mark_was = str(meta.pop(_model.SERVER_END_KEY, "") or "")      # the end day an earlier write marked as the server's: set aside, so a mark in meta below is this write's own default; put back before the save
     old_ask = bool(str(meta.get("ask_by") or "").strip()) and not _watch.stored_kind(meta)      # an ask_by with no wait_kind, as stored before this write
     gives_wait = bool(wake or hold or after or waits or any(str(v or "").strip() for v in (ask_by, wait_kind, wait_anchor, wait_event)))
     if gives_wait and item.get("status") == "open" and _watch.dead_ask_by(meta, time.time()):
@@ -888,16 +902,10 @@ def update_unlocked(
     after_set = after is not None and not clear_after and bool(after if isinstance(after, list) else after.strip())
     if clear_after and after is not None and (after if isinstance(after, list) else str(after).strip()) and not (isinstance(after, str) and after.strip().lower() in h.ask_none):
         fc.add("Refused: clear_after drops the after list; it does not go with a new one")
-    after_end_note = ""
     if clear_after:
         meta.pop("after", None)
         if _uw.kind_of(meta) == "item" and not wait_kind.strip() and not clear_wait and was_until and _uw.date_of(meta):
             meta.pop("wait_kind", None)                  # the wait on the item ended with its link; the date it carried stays as a wait on the date alone
-            if (srv_d := _model.server_end(meta)) and not (wake or ask_by_given or hold):
-                for k_ in ("wake", "ask_by", _model.SERVER_END_KEY):
-                    meta.pop(k_, None)                   # …unless that date is the backstop the server set for the wait on the item: it was no day of the caller's, so it ends with the wait it stood for
-                after_end_note = (f"\n(the wait on the item ended with its after link, and the backstop day {srv_d} the server had set for that wait went with it: "
-                                  "the item no longer waits; give until=<date> to wait on a date)")
         h.wait_end_sent_back(meta, (_we.ITEM,))          # a wait the server set from the line's words, sent back: the server leaves that line alone
     elif after_set:
         if (got_after := fc.call(_gates.gate_after, after, gid)) is not None:
@@ -1263,6 +1271,16 @@ def update_unlocked(
         elif clear_wake or clear_hold:
             fc.add("Refused: wait_basis goes with a wake; this call drops the wake")
         elif (b_frame := fc.call(_basis_frame, item, meta, status, wake, ask_by, wait_kind, hold, state_st)) is not None:
+            if (end_ok and not b_frame[1] and b_frame[0].get("status") != "completed" and (hold or after_set or wait_kind.strip().lower() in ("time", "item", "anchor"))
+                    and (wait_kind.strip().lower() or _uw.kind_of(meta)) not in ("relay", "event")):
+                try:
+                    _gates.gate_wait_basis(b_frame[0], basis_txt, "", held=b_frame[2])
+                except ToolError as e_nb:      # a park sent with its wait_basis and no date: refused for that alone, so the server takes the day the basis names as the date the call left out
+                    end_day = _basis_end_day(basis_txt)
+                    if end_day:
+                        end_refusals.append(str(e_nb))
+                        wake = end_day
+                        b_frame = (b_frame[0], h.parse_wake(end_day), b_frame[2])
             basis_ok = fc.call(_gates.gate_wait_basis, b_frame[0], basis_txt, b_frame[1], held=b_frame[2], default="")
         basis_bad = fc.count > n_basis
     wake_bad = False              # the wake is refused: what reads the wake as stored (the park's reason, the hand-off's date) is not judged
@@ -1323,6 +1341,7 @@ def update_unlocked(
             h.cap_ok_put(meta, "wake", str(meta["wake"]), q_why, quote=q_text, source=q_src)
     hold_pre = bool(meta.get("hold"))     # the hold as this write leaves it, before the old rule below drops it beside a decision (the model guards refuse that pair instead)
     server_hold = False
+    park_by_kind = ""             # a park with no date whose kind takes its own date below: the refusal it stands in for, raised there when no date comes
     dropped_hold = item.get("status") == "open" and bool(meta.get("hold")) and _waits_decision(meta)
     if dropped_hold:              # an item waiting on the owner's call is never on hold: any write drops a stored flag (its date stays)
         meta.pop("hold", None); meta.pop("hold_set", None)
@@ -1333,19 +1352,28 @@ def update_unlocked(
     if meta.get("hold") and not meta.get("wake") and (hold or clear_wake or after_set or clear_after or clear_recycle) and not h.after_open(meta) and not meta.get("recycle") and (wake_bad or after_bad or wait_args_bad or basis_bad):
         fc.skip("the check that a park names what it waits for", "it reads the wake, the after list, the wait's arguments or the wait_basis, which are refused above")
     elif meta.get("hold") and not meta.get("wake") and (hold or clear_wake or after_set or clear_after or clear_recycle) and not h.after_open(meta) and not meta.get("recycle"):
-        fc.call(_gates._default_wait_end, {**item, "metadata": meta}, gid, False, True, item_was.get("metadata") or {}, default="")      # a park with nothing that can wake it is not refused: the server stores its default backstop day and says so, or, when a real date already sits in one of its old working fields (a repeat write on a park the server itself defaulted), it is read and kept there silently (no line told): either way this leaves an end in place, and only its absence still refuses
-        server_hold = bool(hold) and not meta.get("hold") and bool(meta.get("wake") or meta.get("until") or meta.get("ask_by"))      # the bare hold became a park on the server's day (its flag folded into the date): it ends a stored state as a hold with a date does
-        if not (meta.get("wake") or meta.get("until") or meta.get("ask_by")):
-            if h.scoped_anchors(str(meta.get("project") or ""), gid):
-                fc.add(f"Refused: a park that waits on a notice from the anchor scoped to {gid} still carries a backstop date, at most {_wt.cap_days():g} "
-                       f"days out unless {OWNER}'s words are on the item (until=YYYY-MM-DD): the notice may never come")
-            else:
-                fc.add("Refused: a park names what it waits for; an unconditional or indefinite park is refused. Give it a date (until=YYYY-MM-DD or "
+        if h.scoped_anchors(str(meta.get("project") or ""), gid):
+            park_refusal = (f"Refused: a park that waits on a notice from the anchor scoped to {gid} still carries a backstop date, at most {_wt.cap_days():g} "
+                            f"days out unless {OWNER}'s words are on the item (until=YYYY-MM-DD): the notice may never come")
+        else:
+            park_refusal = ("Refused: a park names what it waits for; an unconditional or indefinite park is refused. Give it a date (until=YYYY-MM-DD or "
                             f"YYYY-MM-DDTHH:MM with wait_kind=\"time\": the date {OWNER} gave, the date the outside party or event it waits on is due, or the end of a window the work itself needs, with wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"; a park of {_wt.cap_days():g} days or less needs {OWNER}'s recorded words), the items that must close first (`after=[\"board#N\"]`), "
                             f"a notice from an anchor scoped to it (`anchors(project, add=[url], items=[\"{_gh.shown(gid)}\"])`, with a backstop date at most {_wt.cap_days():g} "
                             f"days out), or a pane recycle (recycle=true). An item waiting on {OWNER}'s call is parked with needs=[<session>] and mover={OWNER} (his ask returns at the date); "
                             "to put it on his move instead, needs=decision with its ask, or after=[<the item that carries the ask>], which releases it when that item closes. To check back on work you keep moving while the "
                             "item stays active, set no date: a date with no park is a wait until it (outside a hand-off)")
+        kind_in_call = wait_kind.strip().lower()
+        if end_ok and kind_in_call in _model.SINGLE_KINDS and not _uw.date_of(meta) and not _wt.stored_until(meta):      # a park with no date that names its kind: it takes that kind's own date for a kind with none (below, where the kind is applied), as the same call with no hold does. A date the item holds in the other working field moves to the new kind's field there instead, so no default is made: that park is refused here, as on main
+            park_by_kind = park_refusal
+            if kind_in_call in ("relay", "event"):           # …and a relay or event wait is itself the park until that day, as with a date: no hold flag is stored
+                hold, relay_hold = False, True
+                if not was_held:
+                    meta.pop("hold", None); meta.pop("hold_set", None)
+        elif end_ok and fc.call(_gates._default_wait_end, {**item, "metadata": meta}, gid, False, item_was.get("metadata") or {}, default=""):      # a park with nothing to end it: the server's default backstop day, marked and told
+            end_refusals.append(park_refusal)
+            server_hold = bool(hold) and not meta.get("hold")      # the bare hold became a park on that day (its flag folded into the date): it ends a stored state as a hold with a date does
+        else:
+            fc.add(park_refusal)
     # The done check: set or cleared by this write (a filing edit: no page owed), then the hand-off gate: a write
     # that hands the item to another session (a `<session>: <action>` line of next) leaves it with a check or a wake
     chk = " ".join(str(check or "").split())
@@ -1473,15 +1501,13 @@ def update_unlocked(
         if was_until and not (wake or hold):
             for k_ in _uw.LEGACY_FIELDS:                # clear_wait drops the stored until (model.WAIT_GROUP); the old working fields it stood as go with it
                 meta.pop(k_, None)
-    wait_note = alias_note + after_end_note
+    wait_note = alias_note
     if list_plan is not None:
         wait_note += list_plan.note + _list_note(list_plan, meta, item.get("status") == "open")
     elif _wlw.clearing(waits) and not _wl.stored(item_was.get("metadata") or {}):
         wait_note += "\n(waits=[] clears a list of waits; this item stores none, so nothing was cleared and its wait is as it was)"
     if relay_clear_hold:
         wait_note += "\n(clear_hold releases a park, and this relay or event wait holds no flag: it goes on waiting; clear_wait=true ends the wait)"
-    if relay_hold:
-        wait_note += "\n(a relay or event wait stores no park flag: the wait is itself the park, until its day " + (_uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))) + "; it ends when the notice arrives or on that day)"
     gave_ask = bool(ask_by.strip()) and ask_by.strip().lower() not in h.ask_none
     if bool(wake) != gave_ask and item.get("status") == "open":      # one date given: a date the item held before in the other working field (an unfolded until, or an older write's wake or ask_by) does not outlive it
         meta.pop("ask_by" if wake else "wake", None)
@@ -1490,11 +1516,18 @@ def update_unlocked(
     if item.get("status") == "open" and "wait_kind" in model_set and _uw.needs_date(meta) and not meta.get("recycle") and not (meta.get("state") == "verifying" and meta.get("end")):
         fb_d, _fb_how, fb_note = h.fallback_wait_date(meta, next_after, description or item.get("description"), meta.get("due"))      # a kind with no date is never refused: the item's own words, else a suggestion, else tomorrow
         meta[_uw.slot_of(_uw.kind_of(meta))] = fb_d
-        meta[_model.SERVER_END_KEY] = fb_d                      # the server chose this day, not the caller: the reads mark it so
+        if park_by_kind:      # a park with no date, refused before this default existed: the day is the server's, marked so; and refused after all should the write leave the item waiting on the owner
+            meta[_model.SERVER_END_KEY] = fb_d
+            end_refusals.append(park_by_kind)
+            park_by_kind = ""
         if _uw.kind_of(meta) == "time":
             meta["hold"] = True                                 # a wait on a time stands as a hold with its wake
         until_wait = True
         wait_note += fb_note
+    if park_by_kind:      # the kind took no date of its own here: the park is refused as before
+        fc.add(park_by_kind)
+    if relay_hold:
+        wait_note += "\n(a relay or event wait stores no park flag: the wait is itself the park, until its day " + (_uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))) + "; it ends when the notice arrives or on that day)"
     fc.call(_gates.gate_ask_on_wait, gid, item, meta, was_needs, closing)           # a decision asked of the owner on an item that still waits: the clear_wait hint
     watch_note = fc.call(h.watch_on_write, gid, item_was, meta, model_set, model_drop, debtor, sender.strip(), default="")   # the wait's record, the arrival that was shown
     fc.call(_gates.gate_metadata, meta, creating=False)
@@ -1621,12 +1654,11 @@ def update_unlocked(
             touched_m.add("cap_ok")                             # a wake records his words for it
         full_judgement = reopening or (h.switchover_on() and not filing_only)     # step 4's switchover: every write is judged whole, old items included; a bookkeeping write (a page rename) still only by what it touches
         if wake or ask_by_given:
-            meta.pop(_model.SERVER_END_KEY, None)      # an end day this call gives is the caller's, whatever the server stored before
-        server_parked = bool(hold) and was_until and not (wake or ask_by_given) and not q_open and bool(_model.server_end(meta))      # hold=true sent again, with no date, on a park whose day the server set: that day stands, as on the first call, and is not judged as a date the caller gave
+            mark_was = ""                              # an end day this call gives is the caller's, whatever the server stored before
         desc_note = fc.call(_gates.gate_model, item_now, None if full_judgement else touched_m, gid, needs=[x for x in _needs_of(meta) if x not in naming_added], hold=hold_pre, desc_set=bool(description.strip()),
                             next_text=next_judged if next_touch else None, windows_text=next_judged if next_touch else "", defers_text=next_judged if next_touch else "",
-                            until_wait=until_wait or (was_until and not (wake or (hold and not server_parked) or clear_wait_basis or str(wait_basis or "").strip())), date_given=bool(wake), hold_given=bool(hold), basis_kept=bool(wake) and not str(wait_basis or "").strip() and _gates.basis_held({**item, "status": status or item.get("status")}, hold=hold, verifying=state_st == "verifying"),
-                            old_end_ok=gave_ask or not (reopening or touched_m & _mg.WAIT_SETTING), date_ends=old_ask and bool(wake), before=item_was.get("metadata") or {}, default="")   # the write guards of the item model; his lines' Windows check judges only the lines this write sets; a wait on an until carries no snooze reason
+                            until_wait=until_wait or (was_until and not (wake or hold or clear_wait_basis or str(wait_basis or "").strip())), date_given=bool(wake), hold_given=bool(hold), basis_kept=bool(wake) and not str(wait_basis or "").strip() and _gates.basis_held({**item, "status": status or item.get("status")}, hold=hold, verifying=state_st == "verifying"),
+                            old_end_ok=gave_ask or not (reopening or touched_m & _mg.WAIT_SETTING), date_ends=old_ask and bool(wake), before=item_was.get("metadata") or {}, end_default=end_ok, default="")   # the write guards of the item model; his lines' Windows check judges only the lines this write sets; a wait on an until carries no snooze reason
         desc_note += mover_note
         fc.call(h.anchor_wait_gate, item_was.get("metadata") or {}, meta, gid)      # an anchor wait newly set or moved: its anchor must be on the project's list already (after the model guards)
         if next_touch or state_st or state_given.get("step") or needs_set or clear_needs or agent.strip():      # only a write that touches next, the state, needs or the step; any other keeps the note. After the model guards, so their more specific refusals (a command in his line) come first
@@ -1684,11 +1716,21 @@ def update_unlocked(
             meta["hold"] = True
             if kept_hold_set:
                 meta["hold_set"] = kept_hold_set
+    if end_day and item.get("status") == "open":
+        meta[_model.SERVER_END_KEY] = end_day      # the day a park's wait_basis named, taken for the date the call left out: the server's, marked so
+        if _model.server_end(meta):
+            _calls.fixed("wait-end-defaulted", f"the park came with a wait_basis and no date, so the server stored {end_day}, the date the basis names, as its end; "
+                         "it is a day set by the server: its mover replaces it with the real day (until=YYYY-MM-DD)")
     if item.get("status") == "open" and _model.server_end(meta) and not _wt.stored_until(meta) and _uw.date_of(meta):
-        _uw.fold(meta)                     # the end the server stored beside the call's own fields (gates._default_wait_end) is stored as every end is: the one date, until
+        _uw.fold(meta)                     # the end this write's default stored beside the call's own fields (gates._default_wait_end) is stored as every end is: the one date, until
+    if mark_was and not meta.get(_model.SERVER_END_KEY):
+        meta[_model.SERVER_END_KEY] = mark_was      # an earlier write's mark, kept while the end is still that day (below)
     if meta.get(_model.SERVER_END_KEY) and not _model.server_end(meta):
         meta.pop(_model.SERVER_END_KEY, None)      # the mark of a day the server stored goes when the end is another day or the wait is gone
-    fc.raise_now()                         # every gate has run: what was found is refused together, nothing is stored
+    if end_refusals and _gates.owner_waiting(meta):
+        for refusal in end_refusals:
+            fc.add(refusal)                # a default end above, on an item this write leaves waiting on the owner: refused as it was before the default existed
+    fc.raise_now()                        # every gate has run: what was found is refused together, nothing is stored
     item["metadata"] = meta
     item["updated"] = time.time()          # the item's own clock (the renderer used to trust the file's mtime, which a migration rewrites)
     if state_change:

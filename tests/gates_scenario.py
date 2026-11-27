@@ -801,7 +801,7 @@ def part_form():
         ("update, a step marked dropped on a closed item", lambda: upd(47, dropped=[1])),
         ("update, a step reworded on a closed item", lambda: upd(47, reword={1: "falcon-main: build it another way"})),
         ("update, a step marked done beside a new next on a closed item", lambda: upd(47, next="falcon-main: build it again", done=[1])),
-        ("update, a wait_basis on a hold with no wake", lambda: upd(40, hold=True, wait_basis=f"the vendor ships {local_day(9)}")),
+        ("update, a wait_basis on a hold with no wake", lambda: upd(40, hold=True, wait_basis="the vendor ships when the part is in")),      # a basis that names no date: one that names a date ahead ends the park on it (close_wait_defaults F5)
         ("update, a hold with a wake on a closed item", lambda: upd(47, hold=True, wake=local_day(5))),
         ("create, a then over 300 characters beside a waits list with a valid until", lambda: create(waits=LIST2, until=local_day(5), then=LONG8)),
         ("create, a goal over 300 characters beside a waits list with a valid until", lambda: create(waits=LIST2, until=local_day(5), goal=LONG8)),
