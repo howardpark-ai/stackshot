@@ -92,6 +92,10 @@ STATE = r"""id => { const b = document.getElementById(id), p = document.getEleme
 # every "?" a reader can see, by id
 BUTTONS = "() => [...document.querySelectorAll('button.xp-b')].filter(b => b.getClientRects().length && getComputedStyle(b).visibility !== 'hidden').map(b => b.id)"
 CENTER = "id => document.getElementById(id).scrollIntoView({block: 'center', behavior: 'instant'})"
+TRACE = r"""() => { window.__log = []; const who = e => e && (e.id || e.className || e.nodeName) || String(e);
+  for (const n of ['scroll', 'pointerdown', 'touchstart', 'focusin', 'click']) addEventListener(n, e => __log.push([n, who(e.target), Math.round(scrollY), Math.round(performance.now())]), true);
+  for (const [o, m] of [[window, 'scrollTo'], [window, 'scrollBy'], [Element.prototype, 'scrollIntoView'], [Element.prototype, 'scrollIntoViewIfNeeded'], [HTMLElement.prototype, 'focus']]) { const f = o[m]; if (!f) continue;
+    o[m] = function (...a) { __log.push([m, who(this), Math.round(scrollY), JSON.stringify(a), String(new Error().stack).split('\n').slice(2, 4).join(' ').slice(-120)]); return f.apply(this, a); }; } }"""
 inside = lambda s: s["left"] >= -0.5 and s["right"] <= s["vw"] + 0.5 and s["top"] >= -0.5 and s["bottom"] <= s["vh"] + 0.5
 WANT = {"projects": 1, "closed": 2, "audits": 13, "audits-log-off": 14, "project": 1, "list-wait": 2, "relay-wait": 1, "runners": 1}      # the fewest "?" each page shows
 # the Audit card's status read, answered by the check once it sets window.__AUDIT; every other request fails, as it does for a file
@@ -130,7 +134,10 @@ with sync_playwright() as p:
             check(f"{tag}: at least {WANT[name]} explainers show", len(ids) >= WANT[name], ids)
             c = pg.evaluate(COVERS); check(f"{tag}: no ? lies over words or a control", c["things"] > 5 and not c["bad"], c)
             for n, i in enumerate(ids):
-                pg.evaluate(CENTER, i); before = pg.evaluate(STATE, i)["at"]; pg.tap(f"#{i}"); pg.wait_for_timeout(30); s = pg.evaluate(STATE, i)
+                pg.evaluate(CENTER, i); before = pg.evaluate(STATE, i)["at"]
+                if name == "audits-log-off" and i == "xpb-audit-log-off": pg.evaluate(TRACE)
+                pg.tap(f"#{i}"); pg.wait_for_timeout(30); s = pg.evaluate(STATE, i)
+                if name == "audits-log-off" and i == "xpb-audit-log-off": print("TRACE", pg.evaluate("() => window.__log"), flush=True)
                 ok = s["open"] and s["expanded"] == "true" and s["words"] > 0 and inside(s) and not s["over"] and s["sw"] <= 360
                 check(f"{tag}: {i}: a tap opens it, whole inside the screen, nothing over it, no sideways scroll", ok, {"before": before, **s})
                 if not ok and SHOTS:
