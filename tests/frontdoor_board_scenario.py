@@ -107,10 +107,12 @@ def auth_start(oauth):
             else: os.environ[k] = v
 
 
-def serve(app):
-    """The ASGI app on 127.0.0.1:<ephemeral port>, in its own thread; → (server, thread, port). stop(...) ends it."""
+def serve(app, sock=None):
+    """The ASGI app on 127.0.0.1:<ephemeral port>, or on `sock` (a socket bound already: the caller needed the port first), in its own thread; → (server, thread, sock, port). stop(...) ends it."""
     import socket, threading, time, uvicorn
-    sock = socket.socket(); sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
+    if sock is None:
+        sock = socket.socket(); sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
     srv = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="on", timeout_graceful_shutdown=3))
     th = threading.Thread(target=lambda: srv.run(sockets=[sock]), daemon=True); th.start()
     for _ in range(200):
