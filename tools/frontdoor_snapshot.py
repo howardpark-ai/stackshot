@@ -12,7 +12,8 @@ The member list is checked before anything is written: the members.json that wil
 The snapshot is a new folder (700, files 600) under FRONTDOOR_SNAPSHOT_ROOT, named by the time in [instance] timezone; an existing folder is never written into:
   board.tar.gz       tar of the data folders: [paths] repo and [paths] state, or each --data PATH. A data folder that is a link is followed to the real
                      folder. A link inside them that leads outside them is refused (the archive would hold the link alone): give each folder it leads to
-                     with --data too. tar's exit 0 or 1 (a file changed while read) passes
+                     with --data too. Two data folders that would get the same name in the archive (or one inside the other's) are refused: unpacking
+                     would put one over the other. tar's exit 0 or 1 (a file changed while read) passes
   <the config file>  a copy of STACKSHOT_CONFIG, which has to be the single-user config: the cut-over's way back runs the board on it
   stackshot-head     the checkout's commit
   config-notes.txt   the config notes as they are now: the cut-over refuses a note that is not in this list
@@ -22,9 +23,12 @@ before and after tar ran has to be in it.
 
 The secrets go into FRONTDOOR_SECRETS_DIR (700, files 600). identity.key and verify.key (48 random bytes, base64) and members.json (the board's members as
 the board itself reads them: [[members]], else [instance] owner and owner_aliases and [auth] allowed_emails; board `main`) are made when missing and KEPT
-when there: to make them again, remove them first. board-token is the board's machine token of <paths.secrets>/oauth.env, copied again on each run. Only
-counts and lengths are printed. The printed undo removes only the files this run made. `stackshot frontdoor-token --check` needs the [frontdoor] table: it
-is run here when the config has one, and the cut-over runs it before the restart.
+when there: to make them again, remove them first. Each member the config gives has to reach the board `main` through a members.json that stays.
+board-token is the board's machine token of <paths.secrets>/oauth.env, copied again on each run; a board-token that is also another file (a link to
+oauth.env, to a key, or to a file the config names) is refused. Only counts and lengths are printed. The printed undo removes only the files this run
+made. `stackshot frontdoor-token --check` needs the [frontdoor] table: it is run here when the config has one, and the cut-over runs it before the restart.
+
+A signal that asks the run to end (an interrupt, a hangup, a termination) ends the program it runs and prints the undo lines of what it made.
 
 Exit 0: the plan (dry run), or every read-back, passes. 1: one failed, or another run holds the lock. 2: the script cannot run.
 """
@@ -37,6 +41,7 @@ import os
 import re
 import secrets
 import shlex
+import signal
 import sys
 import tarfile
 import tempfile
@@ -52,6 +57,15 @@ DEFAULT_ROOT = "~/.local/share/stackshot-runs/frontdoor-switch"
 KEYS = ("identity.key", "verify.key")
 FILES = (*KEYS, "board-token", "members.json")
 BOARD = "main"
+
+
+class Interrupted(BaseException):
+    """A signal asked the run to end."""
+
+
+def _interrupt(number, _frame) -> None:
+    fs.shield()                              # one is enough: what is left is to say what was made
+    raise Interrupted(signal.Signals(number).name)
 
 
 def snapshot_root() -> Path:
@@ -86,6 +100,12 @@ def tar_args(paths: list[Path]) -> list[str]:
     for p in paths:
         out += ["-C", str(tar_base(p)), str(p.relative_to(tar_base(p)))]
     return out
+
+
+def shared_names(paths: list[Path]) -> list[tuple[Path, Path, str]]:
+    """The pairs of data folders whose names in the archive are the same, or one inside the other's: unpacking would put one over the other."""
+    named = [(p, p.relative_to(tar_base(p)).as_posix()) for p in paths]
+    return [(a, b, x) for i, (a, x) in enumerate(named) for j, (b, y) in enumerate(named) if (x == y and i < j) or y.startswith(x + "/")]
 
 
 def walk(paths: list[Path]) -> tuple[Counter, int]:
@@ -129,6 +149,10 @@ def snapshot(co: Path, cfg_path: Path, cfg: dict, data: list[Path], apply: bool,
     rows = [(f"snapshot: {name}", ok) for name, ok in fs.single_user_checks(cfg)]
     rows += [(f"snapshot: {p} exists", p.exists()) for p in data]
     rows += [(f"snapshot: the folder {root} is not inside {p}", not Path(os.path.realpath(root)).is_relative_to(p)) for p in data]
+    shared = [f"{a} and {b} as {name}" for a, b, name in shared_names(data)]
+    rows.append(("snapshot: each data folder has a name of its own in the archive"
+                 + (f" (not so: {'; '.join(shared)}; unpacking would put one over the other: name another folder with --data, or rename one)" if shared else ""),
+                 not shared))
     _, outside = walk(data)
     find = shlex.join(["find", *map(str, data), "-type", "l"])
     rows.append((f"snapshot: no link in the data folders leads outside them ({outside} do; give each folder they lead to with --data too; list the links with: {find})"
@@ -146,11 +170,12 @@ def snapshot(co: Path, cfg_path: Path, cfg: dict, data: list[Path], apply: bool,
         return rows + [(f"snapshot: the config notes can be read ({notes[0]})", False)]
     root.mkdir(parents=True, mode=0o700, exist_ok=True)
     try:
-        dest.mkdir(mode=0o700)
+        with fs.held_signals():                              # what is made is listed for the undo lines, whenever a signal comes
+            dest.mkdir(mode=0o700)
+            made.append(dest)
     except FileExistsError:
         return rows + [(f"snapshot: {dest} is new (it is there already; run again)", False)]
     os.chmod(dest, 0o700)
-    made.append(dest)
     fs.say("DONE", "snapshot folder", str(dest))
     archive = dest / fs.SNAPSHOT_ARCHIVE
     fs.new_private(archive, b"")                              # tar writes into this file, so it is 600 from its first byte
@@ -235,7 +260,46 @@ def member_checks(cfg: dict, expect: tuple[int, int, int] | None) -> tuple[dict,
             same = False
         if not same:
             fs.say("NOTE", "members: the file that is there differs from what the config gives now; it stays (to make it again, remove it first)")
+        out = locked_out(kept, record)
+        rows.append((f"members: each member the config gives can reach the board `{BOARD}` through the members file that stays"
+                     + (f" ({out} cannot: no entry by name or sign-in address, or one whose boards do not list it)" if out else ""), not out))
     return record, rows
+
+
+def locked_out(path: Path, record: dict) -> int:
+    """How many of the config's members (`record`) cannot reach the board `main` through the members file at `path`: no entry of theirs (by name, or by a
+    sign-in address), or one that does not list the board."""
+    from stackshot.core import frontdoor_files
+    records = frontdoor_files.read_member_records(str(path))
+    listed = frontdoor_files.read_members(str(path))
+    n = 0
+    for name, entry in record.items():
+        keys = {k for k in (frontdoor_files.member_of_address(records, e) for e in entry["emails"]) if k}
+        keys |= {name} & records.keys()
+        if not keys or any(BOARD not in records[k].boards or BOARD not in listed.get(k, []) for k in keys):
+            n += 1
+    return n
+
+
+def same_file(a: Path, b: Path) -> bool:
+    if os.path.realpath(a) == os.path.realpath(b):
+        return True
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def token_target(cfg: dict, folder: Path, env_file: str) -> None:
+    """Refuse a board-token that is also another file: writing the token there would destroy it. The front door's own guard for what the config names, and
+    the other files of the secrets folder."""
+    from stackshot.core import frontdoor_config
+    from stackshot.frontdoor import boardtoken
+    copy = folder / "board-token"
+    for name in (*KEYS, "members.json"):
+        if same_file(copy, folder / name):
+            raise boardtoken.Refused(f"{copy} is also {folder / name}: give the token a file of its own")
+    boardtoken.target_of(frontdoor_config.parse(cfg)[0], frontdoor_config.Backend(BOARD, "board", "", "", token_file=str(copy)), env_file, cfg)
 
 
 def secrets_step(co: Path, cfg: dict, record: dict, apply: bool, created: list[Path]) -> list[tuple[str, bool]]:
@@ -256,19 +320,23 @@ def secrets_step(co: Path, cfg: dict, record: dict, apply: bool, created: list[P
         if os.path.lexists(folder / name):
             fs.say("KEPT", f"secrets: {name}")
             continue
-        fs.new_private(folder / name, data if data is not None else base64.b64encode(secrets.token_bytes(KEY_BYTES)))
-        created.append(folder / name)
+        with fs.held_signals():
+            fs.new_private(folder / name, data if data is not None else base64.b64encode(secrets.token_bytes(KEY_BYTES)))
+            created.append(folder / name)
     token, why = "", ""
     copy = folder / "board-token"
     there = os.path.lexists(copy)
     try:
-        token = boardtoken.board_token(str(stack_config.secrets("oauth.env")))
+        env_file = str(stack_config.secrets("oauth.env"))
+        token = boardtoken.board_token(env_file)
+        token_target(cfg, folder, env_file)
         if not boardtoken.holds(str(copy), token)[0]:
-            boardtoken.write(str(copy), token)
+            with fs.held_signals():
+                boardtoken.write(str(copy), token)
+                if not there:
+                    created.append(copy)
             if there:
                 fs.say("NOTE", "secrets: board-token was there with another content and holds the board's token now")
-            else:
-                created.append(copy)
     except (boardtoken.Refused, KeyError) as e:
         why = f" ({e})"
 
@@ -284,7 +352,7 @@ def secrets_step(co: Path, cfg: dict, record: dict, apply: bool, created: list[P
             values[name] = ""
         rows.append((f"secrets: {name} has {len(values[name])} characters ({MIN_KEY} or more)", len(values[name]) >= MIN_KEY))
     rows.append((f"secrets: {KEYS[0]} and {KEYS[1]} differ", values[KEYS[0]] != values[KEYS[1]]))
-    rows.append((f"secrets: board-token holds the board's machine token{why}", bool(token) and boardtoken.holds(str(copy), token)[0]))
+    rows.append((f"secrets: board-token holds the board's machine token{why}", not why and boardtoken.holds(str(copy), token)[0]))
     if fs.setting(cfg, "frontdoor") is None:
         fs.say("NOTE", "secrets: `stackshot frontdoor-token --check` needs the [frontdoor] table: run it after the config save that adds it (the cut-over runs it too)")
     else:
@@ -337,6 +405,9 @@ def main(argv: list[str] | None = None) -> int:
         data = data_paths(cfg, a.data)
         if a.apply:
             fs.take_lock()
+            for s in fs.SIGNALS:
+                if signal.getsignal(s) != signal.SIG_IGN:       # one the caller had ignored (nohup) stays ignored
+                    signal.signal(s, _interrupt)
         record: dict = {}
         if not fs.failed(fs.single_user_checks(cfg)):          # any other config is refused by the snapshot step, and its members may be the front door's already
             record, rows = member_checks(cfg, expect)          # before anything is written
@@ -353,6 +424,9 @@ def main(argv: list[str] | None = None) -> int:
         return fs.cannot(e)
     except fs.Locked as e:
         fs.say("REFUSE", str(e))
+        return fs.FAILED
+    except Interrupted as e:
+        fs.say("FAIL", f"stopped by {e}: the run did not end, and a snapshot it began is not complete (the cut-over refuses it)")
         return fs.FAILED
     finally:
         undo_lines(made, created)                              # also when a step ended in an error: what it made is said

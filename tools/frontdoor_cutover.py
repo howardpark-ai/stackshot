@@ -10,13 +10,14 @@ One run of the scripts that write goes at a time (a lock).
 BEFORE THE RESTART, stopping at the first failed check and restarting nothing:
   nothing answers on 8021 yet (a run after a switch that was made changes nothing)
   the release hold is on with 15 minutes or more left, the release queue is empty, no release runs
-  the snapshot holds a single-user config that this code can load, its notes and its archive, and passed its own checks; no override of an earlier way back
-  is in place
+  the snapshot holds a single-user config that this code can load, its notes and its archive, passed its own checks and is from the last 24 hours; no
+  override of an earlier way back is in place
   the saved config is put aside for the way back
   the config is pulled; it holds the cut-over's settings; it has no config note the snapshot's list does not have
   the front door holds the board's machine token; `./install.sh units`
   the journal of the board's current run says server.port waits for the next restart; the board still answers on its old port
   the test splitter is disabled and stopped
+  the failed state of the board and the minute runner is cleared (a unit that hit its start limit would refuse the restart)
   right before the restart: the release hold is still on, and no release runs
 
 FROM THE BOARD'S RESTART, where the window of 300 s starts. The checks below have its first 210 s; the last 90 s are kept for the way back. The first
@@ -85,7 +86,7 @@ def saved_checks(co: Path, cfg_path: Path, snapshot: Path) -> None:
     saved = fs.snapshot_config(snapshot, cfg_path)
     why = undo.usable(saved)
     row("the snapshot holds a single-user config to come back on", not why, "; ".join(why) or str(saved))
-    rc, out = fs.run(["env", f"STACKSHOT_CONFIG={saved}", *fs.py_cmd(), "-m", "stackshot.core.config", "check"], cwd=co, timeout=300)
+    rc, out = fs.config_check(co, saved)
     row("this code can load the saved config", rc == 0, "" if rc == 0 else fs.last_line(out) or f"exit {rc}")
     row("the snapshot holds its list of config notes", (snapshot / fs.SNAPSHOT_NOTES).is_file(), str(snapshot / fs.SNAPSHOT_NOTES))
     archive = snapshot / fs.SNAPSHOT_ARCHIVE
@@ -93,6 +94,8 @@ def saved_checks(co: Path, cfg_path: Path, snapshot: Path) -> None:
     marker = snapshot / fs.SNAPSHOT_COMPLETE
     noted = marker.read_text(encoding="utf-8", errors="replace").strip() if marker.is_file() else ""
     row("the snapshot passed every check of its own run", noted == str(archive.stat().st_size), f"{marker} names the archive's size")
+    age = time.time() - marker.stat().st_mtime
+    row("the snapshot is from the last 24 hours", age <= fs.SAVED_COPY_SECONDS, f"{age / 3600:.1f} hours old")
     left = fs.overrides_present()
     row("no override of an earlier way back is in place", not left, ", ".join(map(str, left)))
 
@@ -128,13 +131,13 @@ def running_check(name: str) -> None:
     row(name, running is False, line)
 
 
-def before_restart(co: Path, cfg_path: Path, snapshot: Path, apply: bool) -> None:
-    """Everything up to the restart; raises Failed at the first check that is not green. A dry run reads only."""
+def before_restart(co: Path, cfg_path: Path, snapshot: Path, apply: bool, state: dict) -> None:
+    """Everything up to the restart; raises Failed at the first check that is not green. A dry run reads only. What a stop has to say is noted in `state`."""
     code = new_port_answer()                 # first: a second run on a moved board would stop the splitter that serves it
     row(f"the board has not moved yet (nothing answers on {fs.NEW_BOARD_PORT})", code == "000", f"HTTP {code}")
     hold_check(co, f"release hold on with {fs.MIN_HOLD_MINUTES} minutes or more left")
-    state, line = fs.queue_state(co)
-    row("release queue is empty", state == "empty", line)
+    queued, line = fs.queue_state(co)
+    row("release queue is empty", queued == "empty", line)
     running_check("no release is running")
     saved_checks(co, cfg_path, snapshot)
     saved = fs.snapshot_config(snapshot, cfg_path)
@@ -176,8 +179,10 @@ def before_restart(co: Path, cfg_path: Path, snapshot: Path, apply: bool) -> Non
     row("the board's journal says server.port waits for the next restart", ok, line)
     ok, code = fs.wait_code(f"http://127.0.0.1:{fs.OLD_BOARD_PORT}/healthz", "200", fs.check_seconds())
     row(f"the board still answers on {fs.OLD_BOARD_PORT} (healthz)", ok, f"HTTP {code}")
+    state["splitter"] = True                 # noted before it is asked for: a run that is cut off in the call may have done it
     ok, line = fs.splitter_off()
     row("the splitter is disabled and stopped", ok, line)
+    fs.systemctl("reset-failed", fs.BOARD_UNIT, fs.MINUTE_UNIT)         # nothing to reset is no failure
     hold_check(co, "the release hold is still on, right before the restart")
     running_check("still no release is running, right before the restart")
 
@@ -228,21 +233,45 @@ def from_restart(co: Path, state: dict) -> fs.Window:
     return win
 
 
-def stopped_before_restart(co: Path, cfg_path: Path, snapshot: Path) -> int:
+def stopped_before_restart(co: Path, cfg_path: Path, snapshot: Path, splitter_asked: bool) -> int:
+    """What a run that stopped before the restart says: it depends on what the machine shows, which may be what an earlier run left."""
     fs.emit("STOPPED before the restart: this run restarted nothing, and no automatic way back was needed")
-    if new_port_answer() != "000":
-        fs.emit(f"something answers on {fs.NEW_BOARD_PORT} already: a switch that has been made needs no second cut-over. Look before undoing anything")
-    elif fs.failed(fs.single_user_checks(fs.read_toml(cfg_path))):
-        fs.emit("the config on disk shows the switch: a restart of the board for any reason would now move it. Do not fix forward; undo:")
-        fs.say("OPERATOR", "1", "revert the config commit of the cut-over, push, and pull it on this machine")
-        fs.say("OPERATOR", "2", f"in {co}: ./install.sh units")
-        fs.say("OPERATOR", "3", "undo the earlier steps in reverse order, or the whole switch with the command below")
+    switched = bool(fs.failed(fs.single_user_checks(fs.read_toml(cfg_path))))
+    moved = new_port_answer() != "000"
+    back = bool(fs.overrides_present())      # an earlier way back put the board on the saved copy
+    if splitter_asked:
+        fs.say("NOTE", "this run asked for the test splitter to be disabled and stopped, and does not enable it again; to have it as before, once the config on disk "
+                       "is a single-user config", shlex.join(["systemctl", "--user", "enable", "--now", fs.SPLITTER_UNIT]))
+    if back:
+        fs.emit("an earlier way back is in place: units read the saved copy through an override, so a restart keeps the board on it. Finish that way back:")
+        number = 1
+        if switched:
+            fs.say("OPERATOR", str(number), "revert the commits of the switch, push, and pull them on this machine")
+            number += 1
+        fs.say("OPERATOR", str(number), f"remove the override and run on the config on disk: {fs.command('frontdoor_undo.py', '--apply')}")
+    elif moved and switched:
+        fs.emit(f"something answers on {fs.NEW_BOARD_PORT} already, and the config on disk holds the cut-over: a switch that has been made needs no second cut-over. "
+                "Look before undoing anything")
+        fs.say("OPTION", "only to undo the switch that was made", fs.command("frontdoor_undo.py", "--apply", "--snapshot", str(snapshot)))
+    elif moved:
+        fs.emit(f"something answers on {fs.NEW_BOARD_PORT} although the config on disk is a single-user config: find out what it is before a cut-over")
+        fs.say("OPTION", "when it is the board, put it on the config on disk", fs.command("frontdoor_undo.py", "--apply", "--snapshot", str(snapshot)))
     else:
-        fs.emit("the config on disk is still a single-user config")
-    fs.say("NOTE", "the undo below restarts the board; while the pulled config shows the switch it runs the board on the snapshot's config")
-    fs.say("UNDO", fs.command("frontdoor_undo.py", "--apply", "--snapshot", str(snapshot)))
-    fs.say("NOTE", "this run changed no release hold: keep releases held until the config is reverted or the switch is made, then end the hold")
-    fs.say("OPTION", "end the release hold", shlex.join([str(co / "release.sh"), "hold", "--end"]))
+        if switched:
+            fs.emit("the config on disk shows the switch: a restart of the board for any reason would now move it. Do not fix forward; undo:")
+            fs.say("OPERATOR", "1", "revert the config commit of the cut-over, push, and pull it on this machine")
+            fs.say("OPERATOR", "2", f"in {co}: ./install.sh units")
+            fs.say("OPERATOR", "3", "undo the earlier steps in reverse order, or the whole switch with the command below")
+        else:
+            fs.emit("the config on disk is still a single-user config")
+        fs.say("NOTE", "the undo below restarts the board; while the pulled config shows the switch it runs the board on the snapshot's config")
+        fs.say("UNDO", fs.command("frontdoor_undo.py", "--apply", "--snapshot", str(snapshot)))
+    if moved and switched and not back:
+        fs.say("NOTE", "this run changed no release hold")
+    else:
+        until = "the way back is finished" if back else "the config is reverted or the switch is made"
+        fs.say("NOTE", f"this run changed no release hold: keep releases held until {until}, then end the hold")
+        fs.say("OPTION", "end the release hold", shlex.join([str(co / "release.sh"), "hold", "--end"]))
     return fs.FAILED
 
 
@@ -266,7 +295,7 @@ def cut_over(co: Path, cfg_path: Path, snapshot: Path) -> int:
         signal.signal(s, _interrupt)
     try:
         try:
-            before_restart(co, cfg_path, snapshot, apply=True)
+            before_restart(co, cfg_path, snapshot, True, state)
             win = from_restart(co, state)
         finally:
             fs.shield()                      # inside the outer try: a signal that lands on this line is still answered by the way back
@@ -274,7 +303,7 @@ def cut_over(co: Path, cfg_path: Path, snapshot: Path) -> int:
         why = str(e) if isinstance(e, Failed) else f"{type(e).__name__}: {e}"
         fs.emit(f"stopped: {why}")
         if state["window"] is None:
-            return stopped_before_restart(co, cfg_path, snapshot)
+            return stopped_before_restart(co, cfg_path, snapshot, state.get("splitter", False))
         fs.emit("stopped after the restart: bringing the board back now")
         try:
             rc = undo.way_back(co, cfg_path, None, apply=True, end_hold=False, window=state["window"])
@@ -315,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
         return cut_over(co, cfg_path, snapshot)
     fs.emit(f"dry run: reads only; the window from the restart would be {fs.window_seconds():.0f} s, its last {fs.reserve_seconds():.0f} s kept for the way back")
     try:
-        before_restart(co, cfg_path, snapshot, apply=False)
+        before_restart(co, cfg_path, snapshot, False, {})
     except Failed as e:
         fs.emit(f"dry run: the run would stop at: {e}")
         return fs.FAILED

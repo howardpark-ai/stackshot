@@ -73,6 +73,10 @@ def table(path):
         with open(path, "rb") as f: return tomllib.load(f)
     except Exception: return None
 
+def text(path):
+    try: return pathlib.Path(path).read_text()
+    except Exception: return ""
+
 def start(s, unit):
     u = s["units"].setdefault(unit, {"enabled": False, "active": False})
     cfg = table(s["loaded"].get(unit) or unit_config(unit) or "")
@@ -81,7 +85,7 @@ def start(s, unit):
     if unit == "stackshot.service":
         port = (cfg or {}).get("server", {}).get("port")
         sp = s["units"].get("stackshot-splitter.service", {})
-        if cfg is None or (sp.get("active") and sp.get("port") == port):
+        if cfg is None or (sp.get("active") and sp.get("port") == port) or "# the board dies on this" in text(u["config"]):
             u["active"] = False; u["failed"] = True
         u["port"] = port
         u["guarded"] = "identity_secret_file" in (cfg or {}).get("behind_frontdoor", {})
@@ -125,6 +129,8 @@ if name == "systemctl":
         done(0, "\n".join(f"{n} loaded active running x" for n in s["releases"]))
     # a slow job: systemctl waits for it, and a caller that gives up leaves it to systemd. "later ..." is slow only once something was restarted
     slow = s["sleep"].get(" ".join(a), 0) or (s["restarted"] and s["sleep"].get("later " + " ".join(a), 0)) or 0
+    if a == ["restart", "stackshot.service"] and "frontdoor-rollback" in str(s.get("loaded", {}).get("stackshot.service")):
+        slow = s["sleep"].get("restart on the saved copy", slow)
     if verb == "show":
         if take(s, "show"): done(1, err="Failed to connect to bus")
         done(0, s["invocation"])
@@ -184,6 +190,8 @@ if name == "git":
     if args[0] == "rev-parse": done(1, err="fatal: no HEAD") if take(s, "rev-parse") else done(0, "0123456789abcdef0123456789abcdef01234567")
     if args[0] == "pull":
         if take(s, "pull"): done(1, err="fatal: Not possible to fast-forward, aborting.")
+        if s["sleep"].get("pull"):                    # a pull in the middle of its work
+            write(s); fcntl.flock(lock, fcntl.LOCK_UN); (W / "in-pull").touch(); time.sleep(s["sleep"]["pull"]); fcntl.flock(lock, fcntl.LOCK_EX); s = read()
         pending = W / "pending.toml"
         if pending.is_file(): pathlib.Path(s["config"]).write_bytes(pending.read_bytes())
         done(0, "Updating")
@@ -208,6 +216,11 @@ if name == "tar":
     if not listing and s["faults"].get("tar-drop"): args = [*args[:2], "--exclude=item.json", *args[2:]]      # an archive that lacks a file, tar content
     write(s); fcntl.flock(lock, fcntl.LOCK_UN)
     import subprocess
+    if not listing and s["sleep"].get("tar-make"):      # a tar at work, with a program of its own: a part of the archive is there
+        child = subprocess.Popen([sys.executable, "-IS", "-c", "import time; time.sleep(25)"])
+        pathlib.Path(args[1]).write_bytes(b"a part")
+        (W / "tar.tmp").write_text(f"{os.getpid()} {child.pid}"); os.replace(W / "tar.tmp", W / "tar.pids")
+        time.sleep(s["sleep"]["tar-make"]); child.kill(); child.wait()
     r = subprocess.run([s["tar"], *args], env={**os.environ, "PATH": s["real_path"]})
     sys.exit(rc or r.returncode)
 
@@ -242,9 +255,11 @@ if name == "fakepy":
         done(0, "\n".join(s_notes), err="warning: a word on stderr that is no note")
     if args[:3] == ["-m", "stackshot.core.config", "check"]:
         log("checked " + os.environ["STACKSHOT_CONFIG"])
-        done(1, err="config: a refused key") if take(s, "load") else done()
+        refused = take(s, "load") or "# the code refuses this" in text(os.environ["STACKSHOT_CONFIG"])
+        done(1, err="config: a refused key of Nobody") if refused else done()
     if args[:3] == ["-m", "stackshot.frontdoor.boardtoken", "--check"]:
-        done(1, "board main: token_file does not hold the board's machine token") if take(s, "boardtoken") else done(0, "board main: holds the token")
+        if s["sleep"].get("boardtoken"): (W / "in-token-check").touch()
+        done(1, "board main: token_file does not hold the board's machine token") if take(s, "boardtoken") else done(0, "board main: holds the token", sleep=s["sleep"].get("boardtoken", 0))
     if args[:3] == ["-m", "stackshot.frontdoor.check", "--installed"]:
         sp = s["units"].get("stackshot-splitter.service", {})
         log(f"installed-check wait={args[args.index('--wait') + 1]} splitter={'on' if sp.get('active') and sp.get('enabled') else 'off'}")
@@ -252,7 +267,8 @@ if name == "fakepy":
         if s.get("lose"): os.unlink(s["lose"])
         if s.get("reverts"): pathlib.Path(s["config"]).write_text(s["reverts"])      # the revert is pulled while the checks run
         if take(s, "installed"): done(1, "FAIL splitter: a client identity header was not refused")
-        done(0, "front door check: passed", sleep=s["sleep"].get("installed", 0))
+        until = s["sleep"].get("installed until")                                   # seconds after the first restart
+        done(0, "front door check: passed", sleep=max(0, s["restart_at"] + until - time.time()) if until else s["sleep"].get("installed", 0))
     done(64, err="unknown python call")
 
 done(64, err=f"no stand-in for {name}")
@@ -303,9 +319,9 @@ def tables(home, port=8020, splitter=8025, switched=False, **change):
 # ---------------------------------------------------------------- a world: its own HOME, checkout, config repository and unit state
 _n = [0]
 class World:
-    def __init__(self, config="single", **state):
+    def __init__(self, config="single", spaced=False, **state):
         _n[0] += 1
-        self.dir = T / f"w{_n[0]}-{os.urandom(4).hex()}"
+        self.dir = T / f"w{_n[0]}{' of a kind' if spaced else ''}-{os.urandom(4).hex()}"
         self.home = self.dir / "home"; self.co = self.dir / "co"; self.repo = self.dir / "conf"; self.bin = self.dir / "bin"; self.backups = self.dir / "backups"
         for d in (self.home / "data", self.home / "state", self.home / "secrets", self.co, self.repo / ".git", self.bin, self.backups): d.mkdir(parents=True)
         (self.home / "data/item.json").write_text('{"title": "before the snapshot"}\n')
@@ -326,7 +342,7 @@ class World:
         self.install(*RESTORE)                                        # the units a running board has before any switch
         (self.dir / "calls.log").write_text("")
         self.env = {"HOME": str(self.home), "PATH": str(self.bin), "FAKE_WORLD": str(self.dir), "STACKSHOT_CONFIG": str(self.config), "FRONTDOOR_PUBLIC_URL": PUBLIC,
-                    "FRONTDOOR_SWITCH_CHECKOUT": str(self.co), "FRONTDOOR_SWITCH_PYTHON": str(self.bin / "fakepy"), "FRONTDOOR_SWITCH_WINDOW": "300",
+                    "FRONTDOOR_SWITCH_CHECKOUT": str(self.co), "FRONTDOOR_SWITCH_PYTHON": shlex.quote(str(self.bin / "fakepy")), "FRONTDOOR_SWITCH_WINDOW": "300",
                     "FRONTDOOR_SWITCH_CHECK": "0.3", "FRONTDOOR_SWITCH_UNDO_WINDOW": "0.3", "FRONTDOOR_SWITCH_POLL": "0.05", "LANG": "C.UTF-8", "TMPDIR": str(self.dir)}
         self.rollback = self.home / ".config/stackshot/frontdoor-rollback/stackshot.toml"
         self.secrets = self.home / ".config/stackshot/frontdoor"
@@ -355,9 +371,9 @@ class World:
     def calls(self): return (self.dir / "calls.log").read_text().splitlines()
     def clear_calls(self): (self.dir / "calls.log").write_text("")
     def curls(self): return [json.loads(x) for x in (self.dir / "curl.jsonl").read_text().splitlines()]
-    def start(self, script, *args):
+    def start(self, script, *args, ignore=()):
         """The script as a process of its own, to be sent signals; use as a context: it is ended when the block is left."""
-        return Started([sys.executable, str(TOOLS / f"frontdoor_{script}.py"), *map(str, args)], self)
+        return Started([sys.executable, str(TOOLS / f"frontdoor_{script}.py"), *map(str, args)], self, ignore)
     def run(self, script, *args, env=None, drop=()):
         e = {k: v for k, v in {**self.env, **(env or {})}.items() if k not in drop}
         r = subprocess.run([sys.executable, str(TOOLS / f"frontdoor_{script}.py"), *map(str, args)], env=e, capture_output=True, text=True, timeout=180, stdin=subprocess.DEVNULL, cwd=self.dir)
@@ -398,9 +414,12 @@ class World:
         return self
 
 class Started:
-    def __init__(self, argv, w): self.argv, self.w = argv, w
+    def __init__(self, argv, w, ignore=()): self.argv, self.w, self.ignore = argv, w, ignore
+    def _signals(self):
+        """In the child, before the script: every signal that ends a run as a shell in front would give it (a runner may have some ignored), save those of `ignore`."""
+        for s in ENDING: signal.signal(s, signal.SIG_IGN if s in self.ignore else signal.SIG_DFL)
     def __enter__(self):
-        self.p = subprocess.Popen(self.argv, env=self.w.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=self.w.dir)
+        self.p = subprocess.Popen(self.argv, env=self.w.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=self.w.dir, preexec_fn=self._signals)
         return self
     def when(self, cond, seconds=60):
         """Wait until cond() holds while the process runs; True when it did."""
@@ -817,6 +836,8 @@ def cutover_pass():
     check("cut-over: every request has a time limit of 5 s at most", curls and all("--max-time" in c and 1 <= float(c[c.index("--max-time") + 1]) <= 5 for c in curls), curls)
     check("cut-over: a request to this machine goes past any proxy, one to the public address does not", all(("--noproxy" in c) == c[-1].startswith("http://127.0.0.1:") for c in curls)
           and all(c[c.index("--noproxy") + 1] == "*" for c in curls if "--noproxy" in c), curls)
+    reset = f"systemctl reset-failed {BOARD} {MINUTE}"
+    check("cut-over: the failed state of the board and the minute runner is cleared before their restart", reset in calls and calls.index(reset) < calls.index(f"systemctl restart {BOARD} {MINUTE}"), calls)
     check("cut-over: the printed lines can be pasted", pasteable(out) and line(out, "KEEP", "frontdoor_undo.py --apply --drop-saved"), out)
     check("cut-over: the saved config was loaded by the checkout's code before anything", f"checked {w.snap / 'stackshot.toml'}" in calls, calls)
     check("cut-over: a MANUAL line for each check a person makes, the time they are due and the undo command", all(line(out, "MANUAL", f"{n}:") for n in ("portal", "connector", "browser", "tailnet", "polls"))
@@ -841,6 +862,9 @@ def cutover_hold_edge():
     w = World().ready(); w.set(hold="releases are held by a person until 12:00 (15 min left): x")
     rc, out = cut(w, "--apply")
     check("cut-over: a hold with exactly 15 minutes left is enough", rc == 3, (rc, out))
+    w = World().ready(); os.utime(w.snap / "snapshot-complete", (time.time() - 23 * 3600,) * 2)
+    rc, out = cut(w, "--apply")
+    check("cut-over: a snapshot of 23 hours ago is taken", rc == 3 and line(out, "PASS", "from the last 24 hours"), (rc, out))
 
 for what, change, row in (("the hold ends", {"hold": "no hold on releases"}, "the release hold is still on"), ("a release starts", {"releases": ["stackshot-release-7.service"]}, "still no release is running")):
     def meanwhile(what=what, change=change, row=row):
@@ -861,6 +885,9 @@ def stops(name, row, setup=None, pulled=True, pending=None):
         check(f"before the restart, {name}: nothing is restarted or enabled, no override, no way back on its own", not restarts(calls) and not [c for c in calls if c.startswith("systemctl enable")]
               and not [c for c in calls if c.startswith("curl GET http://127.0.0.1:8030")] and "bringing the board back" not in out and not bad_git(calls), (calls, out))
         check(f"before the restart, {name}: prints the undo command with the snapshot", line(out, "UNDO", f"frontdoor_undo.py --apply --snapshot {w.snap}"), out)
+        asked = f"systemctl disable --now {SPLIT}" in calls
+        check(f"before the restart, {name}: says that the test splitter was left disabled exactly when the run asked for that",
+              line(out, "NOTE", f"systemctl --user enable --now {SPLIT}") == asked and ("asked for the test splitter" in out) == asked, (asked, out))
         check(f"before the restart, {name}: the printed lines can be pasted", pasteable(out) and line(out, "OPTION", "release.sh hold --end"), out)
         shows = "the config on disk shows the switch" in out
         check(f"before the restart, {name}: says whether the config on disk shows the switch", shows == pulled and (("still a single-user config" in out) != pulled), out)
@@ -879,7 +906,7 @@ stops("a saved config this code cannot load", "can load the saved config", lambd
 stops("no list of config notes", "list of config notes", lambda w: (w.snap / "config-notes.txt").unlink(), pulled=False)
 stops("no archive", "holds its archive", lambda w: (w.snap / "board.tar.gz").unlink(), pulled=False)
 stops("an empty archive", "holds its archive", lambda w: (w.snap / "board.tar.gz").write_bytes(b"") and None, pulled=False)
-stops("an override of an earlier way back", "no override of an earlier way back", leave_override, pulled=False)
+stops("a snapshot older than a day", "from the last 24 hours", lambda w: os.utime(w.snap / "snapshot-complete", (time.time() - 25 * 3600,) * 2), pulled=False)
 stops("a pull that fails", "the config is pulled", lambda w: w.fault("pull"), pulled=False)
 SETTING_FAULTS = (
     ("server_port", "8022", "[server] port is 8021"),
@@ -931,8 +958,43 @@ def cutover_twice():
     rc, out = cut(w, "--apply")
     check("cut-over run again after the switch: stops first, touches no unit, the splitter keeps serving", rc == 1 and line(out, "FAIL", "the board has not moved yet") and "needs no second cut-over" in out
           and not acting(w.calls()) and w.state()["units"] == before and "the config on disk shows the switch" not in out, (rc, out, w.calls()))
+    check("cut-over run again after the switch: the undo is an option for after a look, and nothing says to keep releases held or to end a hold",
+          line(out, "OPTION", f"frontdoor_undo.py --apply --snapshot {w.snap}") and not line(out, "UNDO", "") and "keep releases held" not in out and "release.sh hold --end" not in out
+          and "asked for the test splitter" not in out and pasteable(out), out)
     rc, out = cut(w)
     check("cut-over dry run after the switch: the same stop", rc == 1 and "would stop at: the board has not moved yet" in out and not acting(w.calls()), (rc, out))
+
+@case
+def cutover_again_after_a_way_back():
+    w = way_back_done()
+    before = w.state()["units"]; files = w.files(); w.clear_calls()
+    rc, out = cut(w, "--apply")
+    check("cut-over run again after an automatic way back: stops at the override, touches nothing", rc == 1 and line(out, "FAIL", "no override of an earlier way back") and not acting(w.calls())
+          and w.state()["units"] == before and w.files() == files, (rc, out, w.calls()))
+    check("cut-over run again after an automatic way back: says the board stays on the saved copy and how to finish, not that a restart would move it",
+          "an earlier way back is in place" in out and "would now move it" not in out and line(out, "OPERATOR", "revert the commits") and line(out, "OPERATOR", "frontdoor_undo.py --apply")
+          and not line(out, "UNDO", "") and "--snapshot" not in out.split("an earlier way back is in place")[1] and "keep releases held until the way back is finished" in out and pasteable(out), out)
+    w.config.write_text(w.text("single"))
+    rc, out = cut(w, "--apply")
+    check("cut-over run again after the revert and before the override is removed: only the run of the undo is left", rc == 1 and "an earlier way back is in place" in out
+          and not line(out, "OPERATOR", "revert") and line(out, "OPERATOR", "frontdoor_undo.py --apply") and pasteable(out), (rc, out))
+
+@case
+def cutover_new_port_taken():
+    w = World().ready(); s = w.state(); s["units"][BOARD]["port"] = 8021; w.save(s)
+    rc, out = cut(w, "--apply")
+    check("cut-over with the new port answering on a single-user config: says to find out what it is, and does not call it a made switch", rc == 1 and "although the config on disk is a single-user config" in out
+          and "needs no second cut-over" not in out and line(out, "OPTION", "frontdoor_undo.py --apply") and "keep releases held" in out and not acting(w.calls()) and pasteable(out), (rc, out))
+
+@case
+def cutover_signal_during_the_pull():
+    w = World().ready(); w.slow("pull", 2)
+    with w.start("cutover", "--snapshot", w.snap, "--apply") as run:
+        reached = run.when((w.dir / "in-pull").exists)
+        run.p.send_signal(signal.SIGTERM)
+        rc, out = run.end()
+    check("a signal during the pull is answered once the pull has ended: the config is the pulled one, and nothing more is done", reached and rc == 1 and "SIGTERM" in out and "STOPPED before the restart" in out
+          and w.config.read_text() == w.text("switched") and "install.sh units" not in w.calls() and "the config on disk shows the switch" in out, (rc, out, w.calls()))
 
 @case
 def cutover_note_and_baseline():
@@ -954,7 +1016,7 @@ def comes_back(name, row, setup, env=None):
         check(f"after the restart, {name}: leaves every step for a person, each line pasteable", left_for_a_person(out) and pasteable(out), out)
         s = w.state()["units"]; calls = w.calls()
         stopped = [l for l in out.splitlines() if l.startswith("stopped: ")]
-        check(f"after the restart, {name}: exit 4, stopped at that check", rc == 4 and stopped and row in stopped[0] and "bringing the board back now" in out, (rc, out))
+        check(f"after the restart, {name}: exit 4, stopped at that check", rc == 4 and stopped and row in stopped[0] and "bringing the board back now" in out, (out, rc, stopped))
         check(f"after the restart, {name}: the board runs on its old port on the saved config, the splitter off", s[BOARD]["active"] and s[BOARD]["port"] == 8020 and s[BOARD]["config"] == str(w.rollback)
               and not s[SPLIT]["active"] and not s[SPLIT]["enabled"], (s, out))
         check(f"after the restart, {name}: all three units read the saved config", len(overrides(w)) == 3 and all(s[u]["config"] == str(w.rollback) for u in RESTORE), (overrides(w), s))
@@ -980,8 +1042,9 @@ comes_back("no public refusal", "refused on the public address", lambda w: w.htt
 def slow(w, key, seconds):
     s = w.state(); s["sleep"][key] = seconds; w.save(s)
 comes_back("a check that outlives the window", "check --installed` passes", lambda w: slow(w, "installed", 60), env={"FRONTDOOR_SWITCH_WINDOW": "16"})
-comes_back("the checks' time running out with every check green", "the 7 s the checks have from the restart are over", lambda w: w.http("public /mcp", times=1, until=7.4, late=True),
-           env={"FRONTDOOR_SWITCH_WINDOW": "14", "FRONTDOOR_SWITCH_CHECK": "20"})
+# the installed check takes most of the checks' time, so the earlier checks have long to run on a loaded machine; the last answer then comes just past that time
+comes_back("the checks' time running out with every check green", "the 20 s the checks have from the restart are over",
+           lambda w: (slow(w, "installed until", 16), w.http("public /mcp", times=1, until=20.4, late=True)), env={"FRONTDOOR_SWITCH_WINDOW": "40", "FRONTDOOR_SWITCH_CHECK": "20"})
 
 comes_back("the public address slow to answer on the way back, inside the window", "check --installed` passes",
            lambda w: (w.fault("installed", 1), w.http("public /healthz", until=6)))
@@ -1027,9 +1090,40 @@ def reverted_install_hangs():
     w = World().ready(); w.set(reverts=w.text("single")); w.fault("installed", 1); w.slow("later install", LONG)
     rc, out = cut(w, "--apply", env={"FRONTDOOR_SWITCH_WINDOW": "20", "FRONTDOOR_SWITCH_RESERVE": "10"})
     took = time.time() - w.state()["restart_at"]
-    check("window, install.sh hangs in a way back on a reverted config: ended in its share, the board restarted and answering", took <= 26 and rc == 5 and line(out, "FAIL", "units rendered and installed")
-          and line(out, "PASS", "answers on 8020"), (rc, took, out))
+    check("window, install.sh hangs in a way back on a reverted config: ended in its share, the board put on the saved copy", took <= 26 and rc == 4 and line(out, "FAIL", "units rendered and installed")
+          and "putting the board on the saved copy" in out and on_the_saved_copy(w), (rc, took, out))
 CASES.append(reverted_install_hangs)
+
+@case
+def reverted_board_dies_in_the_window():
+    w = World().ready(); w.set(reverts=w.text("single") + "# the board dies on this\n"); w.fault("installed", 1)
+    rc, out = cut(w, "--apply", env={"FRONTDOOR_SWITCH_WINDOW": "40", "FRONTDOOR_SWITCH_RESERVE": "20", "FRONTDOOR_SWITCH_UNDO_WINDOW": "200"})
+    took = time.time() - w.state()["restart_at"]
+    check("window, the board dies on the reverted config: half of the rest is waited for it, then the saved copy brings it back inside the window", rc == 4 and took <= 40 and line(out, "FAIL", "the board answers on 8020")
+          and "does not come up on the config on disk" in out and on_the_saved_copy(w) and left_for_the_fix(out) and pasteable(out), (rc, took, out))
+
+@case
+def the_saved_copy_gets_all_that_is_left():
+    # at the fallback about 28 s of the window are left: the restart on the saved copy may take all but one share (24 s), not the half of the first try (12 s)
+    w = World().ready(); w.set(reverts=w.text("single") + "# the board dies on this\n"); w.fault("installed", 1); w.slow("restart on the saved copy", 18)
+    rc, out = cut(w, "--apply", env={"FRONTDOOR_SWITCH_WINDOW": "60", "FRONTDOOR_SWITCH_RESERVE": "20", "FRONTDOOR_SWITCH_UNDO_WINDOW": "200"})
+    check("window: the restart on the saved copy, with no other way left, gets all of what is left but its answer's share", rc == 4 and line(out, "PASS", f"restarted {BOARD}")
+          and "does not come up on the config on disk" in out and on_the_saved_copy(w), (rc, out))
+
+@case
+def reverted_config_refused_in_the_window():
+    w = World().ready(); w.set(reverts=w.text("single") + "# the code refuses this\n"); w.fault("installed", 1)
+    rc, out = cut(w, "--apply")
+    check("the automatic way back does not restart the board on a reverted config the code cannot load: it takes the saved copy", rc == 4 and line(out, "FAIL", "loads the config on disk")
+          and line(out, "NOTE", "runs on the saved copy instead") and on_the_saved_copy(w) and "install.sh units" not in w.calls()[w.calls().index(f"systemctl restart {BOARD} {MINUTE}"):]
+          and left_for_the_fix(out) and "Nobody" not in out, (rc, out))
+
+@case
+def reverted_units_fail_in_the_automatic_way_back():
+    w = World().ready(); w.set(reverts=w.text("single")); w.fault("installed", 1); w.slow("later install", 0.1)
+    s = w.state(); s["on_install"] = {"faults": {**s["faults"], "install": 1}}; w.save(s)          # the first install.sh passes, the way back's fails
+    rc, out = cut(w, "--apply")
+    check("the automatic way back whose install.sh fails on a reverted config puts the board on the saved copy", rc == 4 and line(out, "FAIL", "units rendered and installed") and on_the_saved_copy(w), (rc, out))
 
 @case
 def saved_copy_cannot_be_stored():
@@ -1037,6 +1131,7 @@ def saved_copy_cannot_be_stored():
     rc, out = undo(w, "--apply", "--snapshot", w.snap)
     check("undo: a saved copy that cannot be put in place ends the run with every step for a person", rc == 5 and line(out, "FAIL", "the saved single-user config is in place") and left_for_a_person(out) and pasteable(out)
           and line(out, "UNDO", f"--apply --snapshot {w.snap}"), (rc, out))
+    check("undo: and nothing else is changed", not acting(w.calls()) and w.state()["units"][SPLIT]["active"] and not overrides(w), w.calls())
 
 for reverted, left in ((False, left_for_a_person), (True, lambda out: line(out, "OPERATOR", "release.sh hold --end") and line(out, "OPTION", "stop the front door"))):
     def broken(reverted=reverted, left=left):
@@ -1218,7 +1313,9 @@ def undo_saved_then_reverted():
     check("undo with --snapshot on the switched config: back on the saved config, exit 4", rc == 4 and s["units"][BOARD]["port"] == 8020 and s["units"][BOARD]["active"] and w.rollback.read_bytes() == (w.snap / "stackshot.toml").read_bytes(), (rc, out))
     check("undo on the saved config: MANUAL lines, no data touched, the hold is not ended", line(out, "MANUAL", "portal:") and line(out, "MANUAL", "browser:") and "no data was restored or removed" in out
           and "release.sh hold --end" not in w.calls() and line(out, "NOTE", "--end-hold was not done") and s["hold"].startswith("releases are held"), (out, w.calls()))
-    check("undo on the saved config: install.sh is not run, the splitter is off first", "install.sh units" not in w.calls() and w.calls()[0] == f"systemctl disable --now {SPLIT}", w.calls())
+    check("undo on the saved config: install.sh is not run, the splitter is off first", "install.sh units" not in w.calls() and acting(w.calls())[0] == f"systemctl disable --now {SPLIT}", w.calls())
+    check("undo on the saved config: a person's run asks the code to load it first", f"checked {w.snap / 'stackshot.toml'}" in w.calls()
+          and w.calls().index(f"checked {w.snap / 'stackshot.toml'}") < w.calls().index(f"systemctl disable --now {SPLIT}"), w.calls())
     check("undo on the saved config: the override says why it is there and names the saved copy", overrides(w) and all(f'Environment="STACKSHOT_CONFIG={w.rollback}"' in p.read_text() and "frontdoor_undo.py" in p.read_text() for p in overrides(w)), [p.read_text() for p in overrides(w)])
     rc, out = undo(w, "--apply")
     check("undo run again before the revert: the same, exit 4", rc == 4 and w.state()["units"][BOARD]["port"] == 8020, (rc, out))
@@ -1230,8 +1327,9 @@ def undo_saved_then_reverted():
     check("undo on the reverted config: the override and the saved copy are removed, the board's own drop-in stays", not overrides(w) and not w.rollback.exists()
           and (w.home / f".config/systemd/user/{BOARD}.d/portal-sync.conf").is_file() and not (w.home / f".config/systemd/user/{MINUTE}.d").exists(), list(w.home.rglob("*.conf")))
     calls = w.calls()
-    order = [next((i for i, c in enumerate(calls) if c.startswith(p)), -1) for p in (f"systemctl disable --now {SPLIT}", "systemctl daemon-reload", "install.sh units", f"systemctl restart {BOARD}", "curl GET http://127.0.0.1:8020/healthz", f"systemctl restart {MINUTE}", f"systemctl restart {SYNC}", f"curl GET {PUBLIC}/healthz")]
-    check("undo on the reverted config: splitter off, override away, units, restarts, checks, in order", -1 not in order and order == sorted(order), (order, calls))
+    order = [next((i for i, c in enumerate(calls) if c.startswith(p)), -1) for p in (f"checked {w.config}", f"systemctl disable {SPLIT}", "systemctl daemon-reload", "install.sh units", f"systemctl disable --now {SPLIT}",
+             f"systemctl restart {BOARD}", "curl GET http://127.0.0.1:8020/healthz", f"systemctl restart {MINUTE}", f"systemctl restart {SYNC}", f"curl GET {PUBLIC}/healthz")]
+    check("undo on the reverted config: the config loaded, splitter disabled, override away, units, splitter off, restarts, checks, in order", -1 not in order and order == sorted(order), (order, calls))
     check("undo: a unit that hit its start limit is reset before each restart", all(f"systemctl reset-failed {u}" in calls and calls.index(f"systemctl reset-failed {u}") < calls.index(f"systemctl restart {u}") for u in RESTORE), calls)
     check("undo on the reverted config: manual lines, the optional steps, the hold left", line(out, "MANUAL", "portal:") and line(out, "OPTION", "stop the front door") and line(out, "OPTION", "hold --end") and "release.sh hold --end" not in calls and pasteable(out), out)
     rc, out = undo(w, "--apply", "--end-hold")
@@ -1264,16 +1362,24 @@ def undo_incomplete(name, row, setup, reverted=True, extra=()):
         setup(w)
         rc, out = undo(w, "--apply", *extra)
         where = "reverted" if reverted else "saved"
+        # on a reverted config: a board that does not come up is tried on the saved copy too, and nothing is restarted while the units or the splitter are not right
+        second = reverted and name in (f"{BOARD} not restarting", "no health on 8020")
+        held = reverted and name in ("the splitter not stopping", "install.sh failing")
         check(f"undo ({where} config), {name}: exit 5, the failed step named, a person needed", rc == 5 and line(out, "FAIL", row) and "THE WAY BACK IS NOT COMPLETE" in out and "no data was restored" in out, (rc, out))
         again = "--apply" + (" --end-hold" if "--end-hold" in extra else "")
-        check(f"undo ({where} config), {name}: what is still to be done is printed, pasteable", pasteable(out) and any(l.startswith("UNDO") and l.endswith(again) for l in out.splitlines())
-              and (left_for_a_person(out) if not reverted else line(out, "OPERATOR", "release.sh hold --end") and line(out, "OPTION", "stop the front door")), out)
+        left = left_for_a_person(out) if not reverted else left_for_the_fix(out) if second else line(out, "OPERATOR", "release.sh hold --end") and line(out, "OPTION", "stop the front door")
+        check(f"undo ({where} config), {name}: what is still to be done is printed, pasteable", pasteable(out) and any(l.startswith("UNDO") and l.endswith(again) for l in out.splitlines()) and left, out)
+        if reverted and not second and name != "ending the hold":
+            check(f"undo ({where} config), {name}: how to put the board on the saved copy is printed",
+                  any(l.startswith("OPTION") and l.endswith("frontdoor_undo.py --apply --saved") for l in out.splitlines()), out)
         if name != "ending the hold":
             check(f"undo ({where} config), {name}: the saved copy is kept", w.rollback.is_file() and (str(w.rollback) in out), out)
         else:                                       # the way back itself passed on the reverted config before the hold was asked to end
             check(f"undo ({where} config), {name}: the saved copy is removed, the way back having passed", not w.rollback.is_file(), out)
         if name != "ending the hold":
-            check(f"undo ({where} config), {name}: every unit is still restarted and checked", len(restarts(w.calls())) == 3 and [c for c in w.calls() if c.startswith(f"curl GET {PUBLIC}")], w.calls())
+            wanted = 0 if held else 4 if second else 3
+            check(f"undo ({where} config), {name}: {wanted} restarts" + (": every unit is restarted and checked" if wanted else ": nothing is restarted"),
+                  len(restarts(w.calls())) == wanted and bool([c for c in w.calls() if c.startswith(f"curl GET {PUBLIC}")]) == bool(wanted), w.calls())
     run.__name__ = f"undo {name} {reverted}"; CASES.append(run)
 
 for reverted in (True, False):
@@ -1289,7 +1395,8 @@ def undo_unit_not_running():
     w = World().switched(); w.config.write_text("[server]\nport = 8020\n")
     w.set(stuck=BOARD)                          # something answers on the port while the board's unit is not running
     rc, out = undo(w, "--apply")
-    check("undo: an answer on the port while the board's unit is not running is no success", rc == 5 and line(out, "FAIL", f"{BOARD} is running") and line(out, "PASS", "answers on 8020"), (rc, out))
+    check("undo: an answer on the port while the board's unit is not running is no success", rc == 5 and line(out, "FAIL", f"{BOARD} is running") and line(out, "PASS", "answers on 8020")
+          and "does not come up on the config on disk" in out, (rc, out))
 
 @case
 def undo_after_failed_cutover_stop():
@@ -1393,8 +1500,347 @@ def units_of_code():
     check("a person's run of the undo keeps each program's own limit", (lim.act(), lim.read(), lim.install(), lim.restart()) == (120, 120, 300, 120))
     shares = {left: (lambda x: (x.act(), x.read(), x.install(), x.restart()))(fs.Limits(Left(left))) for left in (90, 12, -3)}
     check("inside the cut-over's window each program gets a share of what is left, never less than 5 s of a 300 s window", shares == {90: (15, 5, 45, 75), 12: (12, 5, 6, 5), -3: (5, 5, 5, 5)}, shares)
+    loads = (lim.load(), *(fs.Limits(Left(left)).load() for left in (90, 12, -3)))
+    check("the check that a config loads is held to two shares inside the window", loads == (300, 30, 12, 5), loads)
+    half = fs.Limits(Left(95)); half.part = 0.5
+    got = (half.restart(), half.answers().left(), half.install())
+    check("while there is another way to bring the board back, its restart and its answer get half", got[0] == 40 and 47 < got[1] <= 47.5 and got[2] == 47.5, got)
     answers = (fs.Limits(Left(40)).answers().left(), fs.Limits(Left(-3)).answers().left())
     check("the board's answers get what is left of the window, and 5 s when nothing is", 39 < answers[0] <= 40 and 4 < answers[1] <= 5, answers)
+
+# ================================================================ the way back never makes things worse
+def way_back_done(**kw):
+    """A world after a cut-over whose installed check failed: the board runs on the saved copy, and the pulled config shows the switch."""
+    w = World(**kw).ready(); w.fault("installed", 1)
+    rc, out = cut(w, "--apply")
+    assert rc == 4, out
+    w.clear_calls()
+    return w
+def on_the_saved_copy(w):
+    s = w.state()["units"]
+    return s[BOARD]["active"] and s[BOARD]["port"] == 8020 and s[BOARD]["config"] == str(w.rollback) and len(overrides(w)) == 3 and w.rollback.is_file()
+def left_for_the_fix(out):
+    """What a run on the saved copy leaves when the config on disk is a single-user one."""
+    need = [("OPERATOR", "fix it in the config's repository"), ("OPERATOR", "pull it on this machine"), ("OPERATOR", "frontdoor_undo.py --apply"), ("OPERATOR", "release.sh hold --end")]
+    return all(line(out, tag, text) for tag, text in need) and "keep releases held" in out and "revert the commits" not in out and "shows the switch" not in out
+def acted(w): return [c for c in acting(w.calls()) if c != "git pull --ff-only"]
+
+@case
+def reverted_config_the_code_refuses():
+    w = way_back_done(); w.config.write_text(w.text("single") + "# the code refuses this\n")
+    files = w.files(); units = w.state()["units"]
+    for more in ((), ("--apply",), ("--apply", "--end-hold"), ("--apply", "--snapshot", w.snap)):
+        w.clear_calls()
+        rc, out = undo(w, *more)
+        check(f"undo {more[:2]} on a reverted config the code cannot load: refused, nothing changed, the board stays on the saved copy", rc == 1 and line(out, "FAIL", "loads the config on disk")
+              and line(out, "REFUSE", "not restarted") and not acted(w) and w.files() == files and w.state()["units"] == units and on_the_saved_copy(w), (rc, out, w.calls()))
+        wanted = "frontdoor_undo.py --apply --saved" + (f" --snapshot {w.snap}" if "--snapshot" in more else "")
+        why = next((l for l in out.splitlines() if "see why: " in l), "").split("see why: ")[-1]
+        check(f"undo {more[:2]} on a config the code cannot load: prints how to see why and how to run on the saved copy, and none of the code's own words",
+              any(l.startswith("UNDO") and l.endswith(wanted) for l in out.splitlines()) and why.startswith(f"cd {w.co} && env STACKSHOT_CONFIG={w.config} ") and why.endswith("-m stackshot.core.config check")
+              and "Nobody" not in out and pasteable(out), (why, out))
+    printed = shlex.split(next(l for l in out.splitlines() if l.startswith("UNDO")).split(None, 1)[1])
+    r = subprocess.run(printed, env=w.env, capture_output=True, text=True, timeout=120)
+    check("the command that refusal prints works", r.returncode == 4 and on_the_saved_copy(w), (r.returncode, r.stdout + r.stderr))
+
+@case
+def reverted_config_the_real_code_refuses():
+    w = way_back_done(); real = {"FRONTDOOR_SWITCH_PYTHON": shlex.quote(sys.executable), "PYTHONPATH": STACK, "PYTHONDONTWRITEBYTECODE": "1"}
+    w.config.write_text(BASE + LISTED + '\n[[members]]\nname = "Ada"\n', encoding="utf-8")
+    rc, out = undo(w, "--apply", env=real)
+    check("the board's own code: two members of one name in the reverted config are refused before anything is changed", rc == 1 and line(out, "FAIL", "loads the config on disk") and not acted(w) and on_the_saved_copy(w)
+          and "Ada" not in out, (rc, out, w.calls()))
+    w.config.write_text(BASE + LISTED, encoding="utf-8")
+    rc, out = undo(w, "--apply", env=real)
+    check("the board's own code: with one member of each name the way back runs on the reverted config", rc == 3 and line(out, "PASS", "loads the config on disk") and not overrides(w)
+          and w.state()["units"][BOARD]["config"] == str(w.config), (rc, out))
+
+@case
+def saved_on_a_reverted_config():
+    w = World().switched(); w.config.write_text(_set(w.text("single"), "instance", "board_url", '"https://new.example.invalid"'))
+    rc, out = undo(w, "--saved")
+    check("--saved dry run on a reverted config: the plan for the saved copy, nothing changed", rc == 0 and line(out, "PLAN", "override") and not line(out, "PLAN", "./install.sh") and not acting(w.calls()) and not overrides(w)
+          and left_for_the_fix(out) and "as asked with --saved" in out, (rc, out))
+    rc, out = undo(w, "--apply", "--saved", "--end-hold")
+    check("--saved on a reverted config: the board on the saved copy, exit 4, the hold kept", rc == 4 and on_the_saved_copy(w) and "install.sh units" not in w.calls() and "release.sh hold --end" not in w.calls()
+          and line(out, "NOTE", "--end-hold was not done") and left_for_the_fix(out) and pasteable(out), (rc, out))
+    check("--saved on a reverted config: the difference holds until the override is removed", any(l.startswith("NOTE") and l.endswith("until the override is removed: [instance] board_url") for l in out.splitlines()), out)
+    rc, out = undo(w, "--apply")
+    check("and the next run, without it, goes back to the config on disk", rc == 3 and not overrides(w) and w.state()["units"][BOARD]["config"] == str(w.config), (rc, out))
+    other = w.dir / "other"; other.mkdir(); (other / "stackshot.toml").write_text(w.text("single") + "# another\n")
+    rc, out = undo(w, "--apply", "--saved", "--snapshot", other)
+    check("--saved with --snapshot takes that snapshot's config", rc == 4 and w.rollback.read_bytes() == (other / "stackshot.toml").read_bytes() and on_the_saved_copy(w), (rc, out))
+    w.fault(f"restart {MINUTE}", 1)
+    rc, out = undo(w, "--apply", "--saved")
+    check("--saved that does not complete: the printed run keeps --saved", rc == 5 and any(l.startswith("UNDO") and l.endswith("frontdoor_undo.py --apply --saved") for l in out.splitlines())
+          and left_for_the_fix(out), (rc, out))
+    rc, out = undo(w, "--apply", "--drop-saved", "--saved")
+    check("drop-saved goes alone, not with --saved", rc == 2 and w.rollback.is_file(), (rc, out))
+
+for named in (False, True):
+    def saved_config_the_code_refuses(named=named):
+        w = World().switched(); source = w.snap / "stackshot.toml" if named else w.rollback
+        source.write_text(source.read_text() + "# the code refuses this\n")
+        more = ["--snapshot", w.snap] if named else []
+        files = w.files(); w.clear_calls()
+        rc, out = undo(w, "--apply", *more)
+        check(f"a person's run refuses a saved config the code cannot load ({'a snapshot' if named else 'the copy put aside'}), nothing changed", rc == 1 and line(out, "REFUSE", "cannot load") and not acting(w.calls())
+              and w.files() == files and left_for_a_person(out) and pasteable(out), (rc, out))
+    saved_config_the_code_refuses.__name__ = f"saved refused {named}"; CASES.append(saved_config_the_code_refuses)
+
+for held in (True, False):
+    def board_dies(held=held):
+        w = way_back_done() if held else World().switched()
+        w.config.write_text(w.text("single") + "# the board dies on this\n")
+        rc, out = undo(w)
+        check(f"dry run, overrides {held}: names the copy a board that does not come up would be put on", rc == 0 and f"would be put on the saved copy ({w.rollback})" in out, (rc, out))
+        w.clear_calls()
+        rc, out = undo(w, "--apply", "--end-hold")
+        check(f"a board that does not come up on the reverted config is put on the saved copy (overrides before: {held}): exit 4, running", rc == 4 and line(out, "FAIL", "the board answers on 8020")
+              and "does not come up on the config on disk" in out and on_the_saved_copy(w) and "release.sh hold --end" not in w.calls(), (rc, out))
+        check(f"and says what is left (overrides before: {held})", left_for_the_fix(out) and pasteable(out) and line(out, "NOTE", "--end-hold was not done"), out)
+        rc, out = undo(w, "--apply")
+        check(f"run again before the fix: the same end, the board running (overrides before: {held})", rc == 4 and on_the_saved_copy(w), (rc, out))
+    board_dies.__name__ = f"board dies {held}"; CASES.append(board_dies)
+
+@case
+def board_dies_with_a_snapshot():
+    w = World().switched(); w.rollback.unlink(); w.config.write_text(w.text("single") + "# the board dies on this\n")
+    rc, out = undo(w, "--apply", "--snapshot", w.snap)
+    check("with no saved copy, the snapshot that was named brings the board back", rc == 4 and on_the_saved_copy(w) and w.rollback.read_bytes() == (w.snap / "stackshot.toml").read_bytes()
+          and line(out, "NOTE", "--snapshot is used only if"), (rc, out))
+
+@case
+def the_copy_the_board_ran_on_comes_first():
+    w = way_back_done(); w.config.write_text(w.text("single") + "# the board dies on this\n")
+    ran_on = w.rollback.read_bytes()
+    other = w.dir / "other"; other.mkdir(); (other / "stackshot.toml").write_text(w.text("single") + "# another\n")
+    rc, out = undo(w, "--apply", "--snapshot", other)
+    check("a board that does not come up goes back to the copy its override read, not to a snapshot's config named beside it", rc == 4 and w.rollback.read_bytes() == ran_on and on_the_saved_copy(w), (rc, out))
+
+@case
+def a_stop_with_a_snapshot_named():
+    w = way_back_done(); w.config.write_text(w.text("single")); w.fault("install", 1)
+    rc, out = undo(w, "--apply", "--snapshot", w.snap)
+    check("reverted config, a step failing with --snapshot named: the printed way to the saved copy names that snapshot", rc == 5
+          and any(l.startswith("OPTION") and l.endswith(f"frontdoor_undo.py --apply --saved --snapshot {w.snap}") for l in out.splitlines()), (rc, out))
+
+for old in (False, True):
+    def board_dies_and_nothing_to_fall_back_on(old=old):
+        w = World().switched(); w.config.write_text(w.text("single") + "# the board dies on this\n")
+        if old: os.utime(w.rollback, (time.time() - 25 * 3600,) * 2)
+        else: w.rollback.unlink()
+        rc, out = undo(w)
+        check(f"dry run with {'an old saved copy' if old else 'no saved copy'}: says there is nothing to fall back on", rc == 0 and "no saved copy to fall back on" in out, (rc, out))
+        w.clear_calls()
+        rc, out = undo(w, "--apply")
+        check(f"a board that dies with {'an old saved copy' if old else 'no saved copy'}: exit 5, no override written, and how to name a snapshot", rc == 5 and not overrides(w) and len(restarts(w.calls())) == 3
+              and any(l.startswith("OPTION") and l.endswith("frontdoor_undo.py --apply --saved --snapshot DIR") for l in out.splitlines()) and pasteable(out), (rc, out))
+    board_dies_and_nothing_to_fall_back_on.__name__ = f"board dies no spare {old}"; CASES.append(board_dies_and_nothing_to_fall_back_on)
+
+for what, key, row in (("install.sh fails", "install", "units rendered and installed"), ("systemd does not read the unit files again", "daemon-reload", "systemd read the unit files again")):
+    def stops_with_overrides(what=what, key=key, row=row):
+        w = way_back_done(); w.config.write_text(w.text("single"))
+        other = w.home / f".config/systemd/user/{MINUTE}.d/someone.conf"; other.write_text("[Service]\nNice=1\n")
+        held = {p: p.read_bytes() for p in overrides(w)}
+        units = w.state()["units"]
+        w.fault(key, 1)
+        rc, out = undo(w, "--apply")
+        check(f"reverted config, {what}: exit 5, nothing restarted, the overrides put back as they were, the board still running on the saved copy", rc == 5 and line(out, "FAIL", row)
+              and not restarts(w.calls()) and line(out, "NOTE", "nothing was restarted") and {p: p.read_bytes() for p in overrides(w)} == held and on_the_saved_copy(w) and w.state()["units"][BOARD] == units[BOARD], (rc, out, w.calls()))
+        check(f"reverted config, {what}: systemd reads the unit files after they are back", w.calls()[-1] == "systemctl daemon-reload", w.calls())
+        check(f"reverted config, {what}: someone else's drop-in stays", other.read_text() == "[Service]\nNice=1\n", out)
+        check(f"reverted config, {what}: how to put the board on the saved copy is printed", line(out, "OPTION", "frontdoor_undo.py --apply --saved") and pasteable(out), out)
+        rc, out = undo(w, "--apply")
+        check(f"reverted config, {what}: the next run passes, and removes the overrides and nothing else of the folder", rc == 3 and not overrides(w) and other.is_file(), (rc, out, list(w.home.rglob("*.conf"))))
+    stops_with_overrides.__name__ = f"reverted stops {what}"; CASES.append(stops_with_overrides)
+
+for key, row in (("install", "units rendered and installed"), (f"disable {SPLIT}", "the splitter is disabled and stopped")):
+    def stops_with_a_splitter(key=key, row=row):
+        w = World().switched(); w.config.write_text(w.text("single")); units = w.state()["units"]
+        w.fault(key)
+        rc, out = undo(w, "--apply")
+        s = w.state()["units"]
+        check(f"reverted config, '{key}' failing with the splitter serving: nothing is restarted and the board answers as before", rc == 5 and line(out, "FAIL", row) and not restarts(w.calls())
+              and s[SPLIT]["active"] and s[BOARD] == units[BOARD] and not overrides(w), (rc, out, s))
+    stops_with_a_splitter.__name__ = f"reverted splitter serves {key}"; CASES.append(stops_with_a_splitter)
+
+@case
+def stops_with_overrides_and_a_serving_splitter():
+    w = way_back_done(); w.config.write_text(w.text("single"))
+    s = w.state(); s["units"][SPLIT] = {"enabled": True, "active": True, "port": 8025}; w.save(s)
+    held = {p: p.read_bytes() for p in overrides(w)}; units = w.state()["units"]
+    w.fault(f"disable {SPLIT}")
+    rc, out = undo(w, "--apply")
+    check("reverted config, a splitter that does not stop while overrides are in place: nothing restarted, the overrides put back, the board still on the saved copy", rc == 5
+          and line(out, "NOTE", "the splitter still runs") and not restarts(w.calls()) and {p: p.read_bytes() for p in overrides(w)} == held and on_the_saved_copy(w)
+          and w.state()["units"][BOARD] == units[BOARD] and w.calls()[-1] != f"systemctl restart {BOARD}", (rc, out, w.calls()))
+    after = w.calls()[w.calls().index("install.sh units"):]
+    check("and systemd reads the unit files again once they are back", after.count("systemctl daemon-reload") == 1, after)
+
+# ================================================================ printed commands in paths with a space
+@case
+def printed_commands_in_spaced_paths():
+    w = World(config="step4", spaced=True)
+    rc, out = w.run("snapshot", "--expect", "1,2,3", "--apply", env={"FRONTDOOR_SECRETS_DIR": str(w.dir / "its secrets")})
+    d = next(w.root.iterdir())
+    after = lambda start: shlex.split(next(l for l in out.splitlines() if l.startswith(start)).split(": ", 1)[1])
+    check("spaced paths: the removal of the snapshot and of the secrets name each path whole", after("undo of the snapshot") == ["rm", "-r", str(d)]
+          and after("undo of the secrets")[2:] == [str(w.dir / "its secrets" / n) for n in ("identity.key", "verify.key", "members.json", "board-token")], out)
+    next_command = after("the cut-over needs this folder")
+    check("spaced paths: the next command carries the config and the secrets folder whole", f"STACKSHOT_CONFIG={w.config}" in next_command and f"FRONTDOOR_SECRETS_DIR={w.dir / 'its secrets'}" in next_command
+          and next_command[-3:] == ["--snapshot", str(d), "--apply"], next_command)
+    w = way_back_done(spaced=True); rc, out = cut(w, "--apply")
+    w.config.write_text(w.text("single") + "# the code refuses this\n"); rc, out = undo(w, "--apply")
+    why = next(l for l in out.splitlines() if "see why: " in l).split("see why: ")[-1]
+    r = subprocess.run(["/bin/sh", "-c", why], env=w.env, capture_output=True, text=True, timeout=60)
+    check("spaced paths: the line that shows why runs as printed", r.returncode == 1 and "a refused key" in r.stderr, (why, r.returncode, r.stderr))
+    printed = shlex.split(next(l for l in out.splitlines() if l.startswith("UNDO")).split(None, 1)[1])
+    r = subprocess.run(printed, env=w.env, capture_output=True, text=True, timeout=120)
+    check("spaced paths: the printed undo runs as printed", r.returncode == 4 and on_the_saved_copy(w), (printed, r.returncode, r.stdout + r.stderr))
+    out = r.stdout
+    pull = next(l for l in out.splitlines() if "pull it on this machine: " in l).rsplit(": ", 1)[1]
+    hold = next(l for l in out.splitlines() if "hold --end" in l and "release.sh" in l).rsplit(": ", 1)[1]
+    check("spaced paths: the pull and the end of the hold name each path whole", shlex.split(pull) == ["git", "-C", str(w.repo), "pull", "--ff-only"] and shlex.split(hold) == [str(w.co / "release.sh"), "hold", "--end"], (pull, hold))
+
+# ================================================================ the snapshot's names, members, token and signals
+for what, make in (("the same name", lambda w: [w.dir / "disk/data", "data"]), ("a name inside the other's", lambda w: [w.dir / "disk/extra", "extra/deep"])):
+    def shared_names(what=what, make=make):
+        w = World()
+        for d in (w.dir / "disk/data", w.dir / "disk/extra", w.home / "extra/deep"): d.mkdir(parents=True); (d / "item.json").write_text("{}")
+        more = [x for d in make(w) for x in ("--data", d)]
+        for apply in ((), ("--apply",)):
+            rc, out = w.run("snapshot", *more, "--expect", "1,2,3", *apply)
+            check(f"snapshot: two data folders with {what} in the archive are refused {apply}, before anything is written", rc == 1 and line(out, "FAIL", "a name of its own in the archive")
+                  and "unpacking would put one over the other" in out and not w.root.exists() and not w.secrets.exists(), (rc, out))
+    shared_names.__name__ = f"snapshot names {what}"; CASES.append(shared_names)
+
+def kept_members(w, value):
+    w.secrets.mkdir(parents=True); (w.secrets / "members.json").write_text(json.dumps(value)); (w.secrets / "members.json").chmod(0o600)
+ALL = ["person@example.com", "other@example.com", "third@example.com"]
+def oliver(**kw): return {"boards": ["main"], "aliases": ["OL", "Boss"], "emails": ALL, **kw}
+for what, value, counts in (
+        ("on no board", {"Oliver": oliver(boards=[])}, "1,2,3"),
+        ("on another board only", {"Oliver": oliver(boards=["other"])}, "1,2,3"),
+        ("with no boards key", {"Oliver": {k: v for k, v in oliver().items() if k != "boards"}}, "1,2,3"),
+        ("absent", {"Someone": {"boards": ["main"], "aliases": [], "emails": ["else@example.com"]}}, "1,0,1"),
+        ("with one address that is another entry's, on no board", {"Oliver": oliver(emails=ALL[:2]), "Spare": {"boards": [], "aliases": [], "emails": ALL[2:]}}, "2,2,3")):
+    def members_locked_out(what=what, value=value, counts=counts):
+        w = World(); kept_members(w, value)
+        for apply in ((), ("--apply",)):
+            rc, out = w.run("snapshot", "--expect", counts, *apply)
+            check(f"members: a kept file with the config's member {what} fails {apply}, with the right counts, before anything is written, no name printed", rc == 1 and line(out, "PASS", "member, ")
+                  and line(out, "FAIL", "can reach the board `main`") and "(1 cannot" in out and "Oliver" not in out and "@" not in out and not w.root.exists() and not (w.secrets / "identity.key").exists(), (rc, out))
+    members_locked_out.__name__ = f"members locked out {what}"; CASES.append(members_locked_out)
+for what, value, counts in (("keyed by an address", {"person@example.com": ["main"]}, "1,0,1"), ("by name, with no address", {"Oliver": {"boards": ["main", "side"]}}, "1,0,0"),
+                            ("under another key, found by an address", {"OT": {"boards": ["main"], "emails": ["other@example.com"]}}, "1,0,1")):
+    def members_reach(what=what, value=value, counts=counts):
+        w = World(); kept_members(w, value)
+        rc, out = w.run("snapshot", "--expect", counts, "--apply")
+        check(f"members: a kept file that has the member {what} passes", rc == 0 and line(out, "PASS", "can reach the board `main`"), (rc, out))
+    members_reach.__name__ = f"members reach {what}"; CASES.append(members_reach)
+
+NAMED = '\n[behind_frontdoor]\nverify_secret_file = "~/named/verify-of-another"\n'
+for what, target, hard in (("oauth.env", "secrets/oauth.env", False), ("a hard link of oauth.env", "secrets/oauth.env", True), ("the identity key", ".config/stackshot/frontdoor/identity.key", False),
+                           ("a hard link of the identity key", ".config/stackshot/frontdoor/identity.key", True),
+                           ("the verify key", ".config/stackshot/frontdoor/verify.key", False), ("the members file", ".config/stackshot/frontdoor/members.json", False),
+                           ("a file the config names", "named/verify-of-another", False)):
+    def token_over_a_file(what=what, target=target, hard=hard):
+        w = World(); w.config.write_text(BASE + NAMED); w.secrets.mkdir(parents=True); (w.home / "named").mkdir()
+        (w.home / "named/verify-of-another").write_text("n" * 40 + "\n"); (w.home / "named/verify-of-another").chmod(0o600)
+        there = w.home / target
+        if hard and not there.is_file(): there.write_text("k" * 64); there.chmod(0o600)        # a hard link needs the file to be there
+        if hard: os.link(there, w.secrets / "board-token")
+        else: os.symlink(there, w.secrets / "board-token")
+        before = there.read_bytes() if there.is_file() else None
+        rc, out = w.run("snapshot", "--expect", "1,2,3", "--apply")
+        kept = there.read_bytes() if there.is_file() else None
+        check(f"secrets: a board-token that is {what} is refused, and that file is not written over", rc == 1 and line(out, "FAIL", "board-token holds") and "is also" in out
+              and (kept == before if before is not None else kept != (TOKEN + "\n").encode()) and TOKEN not in out, (rc, out))
+    token_over_a_file.__name__ = f"token over {what}"; CASES.append(token_over_a_file)
+
+@case
+def token_that_was_there_with_another_content():
+    w = World(); w.secrets.mkdir(parents=True); (w.secrets / "board-token").write_text("o" * 40 + "\n"); (w.secrets / "board-token").chmod(0o600)
+    rc, out = w.run("snapshot", "--expect", "1,2,3", "--apply")
+    made = shlex.split(next((l for l in out.splitlines() if l.startswith("undo of the secrets")), ": x").split(": ", 1)[1])
+    check("secrets: a board-token with another content gets the board's token, is said to, and is not listed for removal", rc == 0 and (w.secrets / "board-token").read_text() == TOKEN + "\n"
+          and line(out, "NOTE", "was there with another content") and sorted(made[2:]) == sorted(str(w.secrets / n) for n in ("identity.key", "verify.key", "members.json")), (rc, out))
+
+@case
+def token_through_a_link_of_its_own():
+    w = World(); w.secrets.mkdir(parents=True); os.symlink(w.dir / "its-own", w.secrets / "board-token")
+    rc, out = w.run("snapshot", "--expect", "1,2,3", "--apply")
+    check("secrets: a board-token that is a link to a file of its own is written through it as before", rc == 0 and (w.dir / "its-own").read_text() == TOKEN + "\n" and (w.secrets / "board-token").is_symlink(), (rc, out))
+
+def gone(pid, seconds=5):
+    """Whether the process has ended (a zombie has) within `seconds`."""
+    end = time.monotonic() + seconds
+    while True:
+        try: state = pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        except (FileNotFoundError, ProcessLookupError): return True
+        if state in ("Z", "X"): return True
+        if time.monotonic() >= end: return False
+        time.sleep(0.05)
+
+for sig in ENDING:
+    def snapshot_signalled_in_tar(sig=sig):
+        w = World(); w.slow("tar-make", 25)
+        with w.start("snapshot", "--expect", "1,2,3", "--apply") as run:
+            reached = run.when((w.dir / "tar.pids").exists)
+            run.p.send_signal(sig)
+            rc, out = run.end()
+        pids = (w.dir / "tar.pids").read_text().split() if reached else []
+        d = next(w.root.iterdir(), None) if w.root.exists() else None
+        check(f"snapshot, {sig.name} during tar: exit 1, tar and what it started have ended", reached and rc == 1 and f"stopped by {sig.name}" in out and all(gone(x) for x in pids), (rc, out, pids))
+        check(f"snapshot, {sig.name} during tar: says the snapshot is not complete and how to remove it", d is not None and not (d / "snapshot-complete").exists() and "is not complete" in out
+              and f"rm -r {d}" in out and not w.secrets.exists(), (d, out))
+    snapshot_signalled_in_tar.__name__ = f"snapshot signal {sig.name}"; CASES.append(snapshot_signalled_in_tar)
+
+@case
+def snapshot_with_a_hangup_ignored():
+    w = World(); w.slow("tar-make", 4)
+    with w.start("snapshot", "--expect", "1,2,3", "--apply", ignore=(signal.SIGHUP,)) as run:
+        reached = run.when((w.dir / "tar.pids").exists)
+        run.p.send_signal(signal.SIGHUP)
+        rc, out = run.end()
+    check("snapshot: a hangup the caller had ignored (nohup) stays ignored, and the snapshot ends", reached and rc == 0 and "stopped by" not in out, (rc, out))
+
+@case
+def snapshot_signalled_in_the_token_check():
+    w = World(config="step4"); w.slow("boardtoken", 8)
+    with w.start("snapshot", "--expect", "1,2,3", "--apply") as run:
+        reached = run.when((w.dir / "in-token-check").exists)
+        run.p.send_signal(signal.SIGHUP)
+        rc, out = run.end()
+    made = shlex.split(next((l for l in out.splitlines() if l.startswith("undo of the secrets")), ": x").split(": ", 1)[1])
+    check("snapshot, a hangup during the token check: exit 1, and the four secret files are named for removal", reached and rc == 1 and "stopped by SIGHUP" in out
+          and sorted(made[2:]) == sorted(str(w.secrets / n) for n in ("identity.key", "verify.key", "members.json", "board-token")) and f"rm -r {next(w.root.iterdir())}" in out, (rc, out))
+
+@case
+def a_signal_while_it_is_held():
+    code = ("import os, signal, sys; sys.path.insert(0, sys.argv[1]); import frontdoor_switch as fs\n"
+            "signal.signal(signal.SIGTERM, lambda n, f: print('answered', flush=True))\n"
+            "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+            "with fs.held_signals():\n"
+            "    os.kill(os.getpid(), signal.SIGTERM); print('inside', flush=True)\n"
+            "    print('ignored stays', signal.getsignal(signal.SIGHUP) == signal.SIG_IGN)\n"
+            "print('after', signal.getsignal(signal.SIGHUP) == signal.SIG_IGN)\n")
+    r = subprocess.run([sys.executable, "-c", code, str(TOOLS)], env=World().env, capture_output=True, text=True, timeout=60)
+    check("signals: one that arrives while held is answered afterwards, and an ignored one stays ignored", r.stdout.split("\n")[:4] == ["inside", "ignored stays True", "answered", "after True"], (r.stdout, r.stderr))
+
+@case
+def a_program_past_its_limit_ends_with_its_children():
+    sys.path.insert(0, str(TOOLS))
+    import frontdoor_switch as fs
+    pidfile = T / f"child-{os.urandom(4).hex()}"
+    code = ("import subprocess, sys, time\n"
+            "c = subprocess.Popen([sys.executable, '-IS', '-c', 'import time; time.sleep(25)'])\n"
+            "open(sys.argv[1], 'w').write(str(c.pid)); time.sleep(25)")
+    began = time.monotonic()
+    rc, out = fs.run([sys.executable, "-c", code, str(pidfile)], timeout=3)
+    took = time.monotonic() - began
+    check("a program past its limit: exit 124, at once, and what it started has ended too", rc == 124 and took < 12 and gone(pidfile.read_text()), (rc, out, took))
 
 # ================================================================ run them
 def guarded(fn):

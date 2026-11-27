@@ -26,6 +26,7 @@ A number of seconds above 300 is read as 300; one that is not above 0, or no num
 """
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import math
 import os
@@ -187,7 +188,7 @@ def need_public_url() -> str:
 
 def command(script: str, *args: str) -> str:
     """A shell line that runs one of these scripts with this run's environment: what a person (or a session) pastes."""
-    names = ("STACKSHOT_CONFIG", "FRONTDOOR_PUBLIC_URL", "FRONTDOOR_SWITCH_CHECKOUT", "FRONTDOOR_SWITCH_PYTHON")
+    names = ("STACKSHOT_CONFIG", "FRONTDOOR_PUBLIC_URL", "FRONTDOOR_SECRETS_DIR", "FRONTDOOR_SWITCH_CHECKOUT", "FRONTDOOR_SWITCH_PYTHON")
     env = [f"{n}={os.environ[n]}" for n in names if os.environ.get(n)]
     return shlex.join(["env", *env, "python3", str(TOOLS / script), *args])
 
@@ -196,14 +197,48 @@ def command(script: str, *args: str) -> str:
 
 def run(argv: list[str], *, cwd: str | os.PathLike | None = None, timeout: float = 120, stderr: bool = True) -> tuple[int, str]:
     """(exit code, stdout + stderr). A program that is missing or cannot be started is 127, a timeout 124. Nothing is printed here.
-    stderr=False: a program that succeeds gives its stdout alone (a failed one still gives both)."""
+    stderr=False: a program that succeeds gives its stdout alone (a failed one still gives both).
+    The program runs in a session of its own. At its time limit, and when this run is interrupted, it is ended with everything it started in that session."""
     try:
-        p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        return 124, f"no end within {timeout:.0f} s"
+        p = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", start_new_session=True)
     except OSError as e:
         return 127, f"{argv[0]}: {e.strerror or e.__class__.__name__}"
-    return p.returncode, (p.stdout or "") + ((p.stderr or "") if stderr or p.returncode != 0 else "")
+    with p:
+        try:
+            out, err = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _end_group(p)
+            return 124, f"no end within {timeout:.0f} s"
+        except BaseException:
+            _end_group(p)
+            raise
+    return p.returncode, (out or "") + ((err or "") if stderr or p.returncode != 0 else "")
+
+
+def _end_group(p: subprocess.Popen) -> None:
+    """Kill a program of `run` and everything in its process group: what it started would else go on."""
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except OSError:
+        p.kill()
+
+
+@contextlib.contextmanager
+def held_signals():
+    """A signal that arrives while the block runs is answered when the block is over, by the handler that was there before: for a step that must not be cut
+    off in its middle. A signal that is ignored stays ignored."""
+    came: list[int] = []
+    old = {s: signal.getsignal(s) for s in SIGNALS}
+    taken = [s for s, handler in old.items() if handler not in (signal.SIG_IGN, None)]
+    for s in taken:
+        signal.signal(s, lambda number, _frame: came.append(number))
+    try:
+        yield
+    finally:
+        for s in taken:
+            signal.signal(s, old[s])
+        if came:
+            signal.raise_signal(came[0])
 
 
 def last_line(text: str) -> str:
@@ -265,7 +300,17 @@ def pull_config(path: Path) -> tuple[bool, str]:
     repo = config_repo(path)
     if repo is None:
         return False, "no git checkout holds the config"
-    return outcome(*run(["git", "-C", str(repo), "pull", "--ff-only"], timeout=300))
+    with held_signals():                 # a pull that is cut off can leave the new files under the old commit, and the next pull then refuses them
+        return outcome(*run(["git", "-C", str(repo), "pull", "--ff-only"], timeout=300))
+
+
+def config_check_args(path: Path) -> list[str]:
+    """The program that says whether the checkout's code loads the config at `path` (run from the checkout)."""
+    return ["env", f"STACKSHOT_CONFIG={path}", *py_cmd(), "-m", "stackshot.core.config", "check"]
+
+
+def config_check(co: Path, path: Path, timeout: float = 300) -> tuple[int, str]:
+    return run(config_check_args(path), cwd=co, timeout=timeout)
 
 
 def config_notes(co: Path) -> tuple[bool, list[str]]:
@@ -482,6 +527,7 @@ class Limits:
         reserve = reserve_seconds() if window else 0.0
         self.share = reserve / 6
         self.floor = min(CALL_FLOOR_SECONDS, max(1.0, reserve / 10))
+        self.part = 1.0          # of the time for the board's restart and for its answer: a half while another way to bring the board back is left
 
     def _held(self, free: float, held: Callable[[float], float]) -> float:
         return free if self.window is None else max(self.floor, held(self.window.left()))
@@ -494,16 +540,20 @@ class Limits:
         """Asking a unit's state, clearing a failed one."""
         return self._held(120, lambda left: min(self.share / 3, left))
 
+    def load(self) -> float:
+        """The check that the checkout's code loads a config."""
+        return self._held(300, lambda left: min(2 * self.share, left))
+
     def install(self) -> float:
         return self._held(300, lambda left: left / 2)
 
     def restart(self) -> float:
-        """The board's restart: all that is left but one share, for the board's answer."""
-        return self._held(120, lambda left: left - self.share)
+        """The board's restart: all that is left but one share, which is for the board's answer (`part` of that)."""
+        return self._held(120, lambda left: (left - self.share) * self.part)
 
     def answers(self) -> Window:
         """The time the board's answers have, from now."""
-        return Window(undo_window_seconds()) if self.window is None else Window(max(self.floor, self.window.left()))
+        return Window(undo_window_seconds()) if self.window is None else Window(max(self.floor, self.window.left() * self.part))
 
 
 # ---------------------------------------------------------------- one run at a time
