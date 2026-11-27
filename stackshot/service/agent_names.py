@@ -22,6 +22,7 @@ from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
+from stackshot.model import step_commands as _steps
 from stackshot.model.ids import _ITEM_REF, _norm_id, _plain_text, _without_mq_groups
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_of, _needs_sessions, _needs_store
 from stackshot.service import handoff as _handoff
@@ -210,9 +211,31 @@ def _name_on_write(gid: str, item: dict[str, Any], meta: dict[str, Any], sender:
     if _never_named(agent, nm):
         return nothing
     why = f"{'close' if closing else 'update'} by {_sr._session_label(sender)}"
+    if not closing and _steps.owner_facing({"status": "open", "metadata": meta}):
+        # his move (a decision needed, him as mover, or his step or call): the agent is not named in needs, since it would be a second mover
+        # beside his decision. Where the answer or Done goes does not change: a session already in needs keeps that place; with none and no
+        # `then`, the agent takes `then` (stored here, saved with the write), which is what the naming gave it before. With a stored mover that is
+        # an agent (not him) no `then` is stored either: the answer reads a stored `then` first (answer_handover), so storing one would change who
+        # has the item after it; without one the answer's own rules decide, as for an item the agent never wrote to.
+        mover = _model.norm_who(meta.get("mover"))
+        if _needs_sessions(meta) or _model.norm_who(meta.get("then")) or (mover and not _model.is_owner(mover)):
+            return nothing
+        meta["then"] = _sr._store_ref(agent)
+        return lambda: f"\n(then {_sr._session_label(agent) or agent}: the agent doing the work takes it after {_model.owner_display(meta)}'s answer or step)"
     if not closing:
         _needs_store(meta, _canon_needs([*_needs_of(meta), _sr._store_ref(agent)], nm))
     return lambda: _auto_name(gid, _svcstore._load(gid), agent, sender, why, "" if closing else "after its update", nm)
+
+
+def _writer_named_back(sender: str, was: str, plain: bool, closing: bool) -> bool:
+    """Would the server name this write's sender in the item's needs on this write (the naming of _name_on_write, which on his move no longer adds
+    it there): a background agent that is not in [pilot] never_named, on an open item, on plain work, not a close. A step status (work) by such an
+    agent passes the writer gate as it did when the naming put it in needs; front agents, unknown senders and never_named ones do not pass. → True or False."""
+    if closing or was != "open" or not plain:
+        return False
+    sender = str(sender or "").strip()
+    agent = _back_agent(sender) if sender else ""
+    return bool(agent) and not _never_named(agent)
 
 
 def _router_delivered(target: str, text: str, outcome: str) -> str:

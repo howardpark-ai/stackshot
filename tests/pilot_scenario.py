@@ -3170,7 +3170,88 @@ check("auto-name: a conflict keeps the session already named, adds the agent aft
       and len([m for m in p[n0:] if m[0] == "work-osprey-bld" and "now names work-osprey-x in its needs too (work-osprey-ops was already named), after its update by work-osprey-x" in m[1]]) == 1, (needs46(c1), res, p[n0:]))
 k1 = mk46(); _update_svc._update(k1, needs=["decision"], ask=ASK, sender="work-osprey-main")
 res = _update_svc._update(k1, next="prepping while he decides", sender="work-osprey-x")
-check("auto-name: a needs=decision item keeps decision first and stays in his lane", needs46(k1) == ["decision", "work-osprey-x"] and k1 in [r["gid"] for r in ui_render.Board(str(T / "store")).n_call], (needs46(k1), res))
+check("auto-name: a needs=decision item keeps decision alone in needs (his move names no agent in needs) and stays in his lane", needs46(k1) == ["decision"] and k1 in [r["gid"] for r in ui_render.Board(str(T / "store")).n_call], (needs46(k1), res))
+# on his move (a decision needed, him as mover, his step or call) a plain write by a background agent adds no session to needs; with no session
+# there and no `then`, the agent is stored as `then`, so his answer or Done still reaches it. Set up with clear_then so no default then stands.
+from stackshot.model import model as _mdl_pilot
+from stackshot.service import answer as _answer_svc
+def _owner_move46(mover=None, by="work-osprey-x"):
+    # the next lines are `by`'s own (a reword is refused for a line of another session), written before the item is his move; its stored mover is
+    # him unless `mover` names another (an agent mover is what rule 2 looks at: with one, a write stores neither needs nor then)
+    g = mk46(mover=mover or _core_instance.OWNER); _update_svc._update(g, next="1. building it\n2. testing it", sender=by)
+    _update_svc._update(g, needs=["decision"], clear_then=True, ask=ASK, sender="work-osprey-main"); return g
+# (ii) the item has no stored agent mover (him as mover): a plain write stores the agent as then, derive shows it, and the owner's answer hands the item to it
+rw = _owner_move46(); res = _update_svc._update(rw, reword={2: "testing it again"}, sender="work-osprey-x")
+rw_steps = [s.get("text", "") for s in (rd(rw)["metadata"].get("steps") or [])]
+check("owner's move, reword: a plain write that rewords one next line by a background agent adds no session to needs, stores then the agent, the reword lands, and derive shows the then",
+      needs46(rw) == ["decision"] and rd(rw)["metadata"].get("then") == "work-osprey-x" and "(named" not in res and any("testing it again" in s for s in rw_steps)
+      and _mdl_pilot.derive(rd(rw)).then == "work-osprey-x", (needs46(rw), rd(rw)["metadata"].get("then"), rw_steps, _mdl_pilot.derive(rd(rw)).then, "(named" in res, res[-300:]))
+ra = _answer_svc._answer(rw, "Yes", "", ""); time.sleep(0.3)
+check("owner's move, reword: the owner's answer hands the item to the stored then (the agent is its mover, then cleared)",
+      _mdl_pilot.norm_who(rd(rw)["metadata"].get("mover")) == "work-osprey-x" and "then" not in rd(rw)["metadata"] and needs46(rw) == ["44444444-4444-4444-8444-444444444444"], (ra, rd(rw)["metadata"].get("mover"), rd(rw)["metadata"].get("then"), needs46(rw)))
+wl = _owner_move46(); res = _update_svc._update(wl, work={"text": "reading the spec"}, sender="work-osprey-x"); time.sleep(0.3)
+wl_steps = rd(wl)["metadata"].get("steps") or []
+check("owner's move, work line: a background agent's work write adds no session to needs, stores then the agent, and the step is made under its name",
+      needs46(wl) == ["decision"] and rd(wl)["metadata"].get("then") == "work-osprey-x" and "(named" not in res and any("work-osprey-x: reading the spec" in s.get("text", "") for s in wl_steps),
+      (needs46(wl), rd(wl)["metadata"].get("then"), wl_steps, res))
+# (i) the item stores an agent as mover beside the decision: a plain write and a work line add neither needs nor then, and the owner's answer hands the
+# item over exactly as on a control twin the writing agent never wrote to. work-osprey-x is neither the stored mover (work-osprey-bld) nor the holder
+# of the first open step (work-osprey-main), so a then stored by mistake would show right after the write and would hand it the item at the answer
+# the agent mover needs a pane in the heartbeat (a handoff to it is refused without one): a session for it, and its page entry, put back after this block
+_mv_keep = (PJ.read_text(), (T / "fleet/a/sessions.json").read_text())
+_mv_pj = json.loads(_mv_keep[0]); _mv_pj["pages"]["projects/alpha"]["agents"]["work-osprey-bld"] = "builds and releases the code"; _mv_pj["pages"]["projects/alpha"]["back_agents"]["work-osprey-bld"] = "builds and releases the code"
+PJ.write_text(json.dumps(_mv_pj))
+_mv_ss = json.loads(_mv_keep[1]); _mv_ss["66666666-6666-4666-8666-666666666666"] = {"name": "work-osprey-bld", "machine": "a", "url": "", "seen": "x"}; (T / "fleet/a/sessions.json").write_text(json.dumps(_mv_ss))
+ma, mc = (_owner_move46(mover="work-osprey-bld", by="work-osprey-bld") for _ in range(2))      # the item written to, and its control
+hand46 = lambda g: (rd(g)["metadata"].get("mover"), rd(g)["metadata"].get("then"), needs46(g))
+mr = _update_svc._update(ma, next="reading around it", sender="work-osprey-x")
+_mw = []; mw_e = refusal(lambda: _mw.append(_update_svc._update(ma, work={"text": "reading the spec"}, sender="work-osprey-x"))); mw = "".join(_mw); time.sleep(0.3)      # the writer gate passes it: a refusal fails the check below
+ma_steps = [s.get("text", "") for s in (rd(ma)["metadata"].get("steps") or [])]
+check("owner's move, stored agent mover: after a plain write and a work line by a background agent, mover, then and needs are those of the control item (needs the decision alone, no then), and the line and step land",
+      mw_e == "" and hand46(ma) == hand46(mc) == ("work-osprey-bld", None, ["decision"]) and "(named" not in mr + mw and "(then" not in mr + mw and any("reading around it" in s for s in ma_steps)
+      and any("work-osprey-x: reading the spec" in s for s in ma_steps), (mw_e, hand46(ma), hand46(mc), ma_steps, mr[-200:], mw[-200:]))
+ma_a = _answer_svc._answer(ma, "Yes", "", ""); mc_a = _answer_svc._answer(mc, "Yes", "", ""); time.sleep(0.3)
+check("owner's move, stored agent mover: the owner's answer hands the item over exactly as it does the control item (same mover, then and needs), never to the agent that only wrote to it",
+      hand46(ma) == hand46(mc) and "decision" not in (needs46(mc) or []) and _mdl_pilot.norm_who(rd(ma)["metadata"].get("mover")) != "work-osprey-x", (ma_a, mc_a, hand46(ma), hand46(mc)))
+PJ.write_text(_mv_keep[0]); (T / "fleet/a/sessions.json").write_text(_mv_keep[1])      # the stored agent mover is put back out of the fixtures
+kt = mk46(); _update_svc._update(kt, needs=["decision"], then="work-osprey-ops", ask=ASK, sender="work-osprey-main")
+kt_then = rd(kt)["metadata"].get("then") or ""
+res = _update_svc._update(kt, next="prepping while he decides", sender="work-osprey-x")
+check("owner's move, a then already stored: the write adds no session and leaves the stored then as it was",
+      kt_then == "work-osprey-ops" and needs46(kt) == ["decision"] and rd(kt)["metadata"].get("then") == kt_then and "(named" not in res, (needs46(kt), kt_then, rd(kt)["metadata"].get("then"), res))
+nx = mk46(); res = _update_svc._update(nx, next="building it", sender="work-osprey-x")
+check("not on his move: a plain write by a background agent names it in needs as before, with no then stored by the naming",
+      needs46(nx) == ["work-osprey-x"] and "then" not in rd(nx)["metadata"] and f"(named work-osprey-x in {nx}'s needs: update by work-osprey-x)" in res, (needs46(nx), rd(nx)["metadata"], res))
+# point 4: on his move a work write by a background agent the server would name is still accepted (the gate passes it), and adds no session to
+# needs. Two background agents: work-osprey-x (alpha's kept page) and home-beta-ops (a beta sub-page added here); a front agent work-osprey-z and an
+# unknown sender are refused as before. The registry is put back after this block.
+from stackshot.service import agent_names as _agent_names
+_pj_keep = PJ.read_text(); _pj_add = json.loads(_pj_keep)
+_pj_add["pages"]["projects/beta"]["back_agents"] = {"home-beta-ops": "keeps the beta page"}      # a background agent of beta, as the registry lists one
+_pj_add["pages"]["projects/alpha"]["agents"]["work-osprey-z"] = "front"
+PJ.write_text(json.dumps(_pj_add))
+_sess_file = T / "fleet/a/sessions.json"; _sess_keep = _sess_file.read_text(); _sess_add = json.loads(_sess_keep)
+_sess_add["55555555-5555-4555-8555-555555555555"] = {"name": "home-beta-ops", "machine": "a", "url": "", "seen": "x"}
+_sess_file.write_text(json.dumps(_sess_add))
+check("point 4: the fixtures are what the test assumes: home-beta-ops is a background agent, work-osprey-x is one, work-osprey-z is not",
+      _agent_names._back_agent("home-beta-ops") == "home-beta-ops" and _agent_names._back_agent("work-osprey-x") == "work-osprey-x" and _agent_names._back_agent("work-osprey-z") == "",
+      (_agent_names._back_agent("home-beta-ops"), _agent_names._back_agent("work-osprey-x"), _agent_names._back_agent("work-osprey-z")))
+pw = mk46(); _update_svc._update(pw, needs=["decision"], then="work-osprey-ops", ask=ASK, sender="work-osprey-main")
+pw_needs, pw_then = needs46(pw), rd(pw)["metadata"].get("then")
+e = refusal(lambda: _update_svc._update(pw, work={"text": "checking the spec"}, sender="work-osprey-x")); time.sleep(0.3)
+pw_steps = rd(pw)["metadata"].get("steps") or []
+check("point 4: on his move a work write by a background agent of the item's project is accepted, needs stays as it was, the then stays, the step is made",
+      e == "" and needs46(pw) == pw_needs == ["decision"] and rd(pw)["metadata"].get("then") == pw_then and any("checking the spec" in s.get("text", "") for s in pw_steps), (e, needs46(pw), pw_steps))
+pb = mk46(project="projects/beta"); _update_svc._update(pb, needs=["decision"], then="home-beta", ask=ASK, sender="work-osprey-main")
+pb_needs = needs46(pb)
+e = refusal(lambda: _update_svc._update(pb, work={"text": "checking the spec"}, sender="home-beta-ops")); time.sleep(0.3)
+check("point 4: on his move a work write by a background agent of another project is accepted, needs stays as it was",
+      e == "" and needs46(pb) == pb_needs == ["decision"] and rd(pb)["metadata"].get("then") == "home-beta", (e, needs46(pb), rd(pb)["metadata"].get("then")))
+e = refusal(lambda: _update_svc._update(pw, work={"text": "a front agent's line"}, sender="work-osprey-z"))
+check("point 4: a front agent's work write on his move is refused as before, needs unchanged", e.startswith("Refused:") and "work-osprey-z is neither" in e and needs46(pw) == pw_needs, (e, needs46(pw)))
+e = refusal(lambda: _update_svc._update(pw, work={"text": "a stranger's line"}, sender="work-osprey-nobody"))
+check("point 4: an unknown sender's work write on his move is refused as before, needs unchanged", e.startswith("Refused:") and "work-osprey-nobody is neither" in e and needs46(pw) == pw_needs, (e, needs46(pw)))
+PJ.write_text(_pj_keep); _sess_file.write_text(_sess_keep)
 # only plain work names the agent: a write by it that sets needs itself (none included), parks the item (hold, wake) or sets a recycle
 # leaves needs as the write says.
 wk46 = (datetime.datetime.now(_wt_text.ZONE).date() + datetime.timedelta(days=3)).isoformat()

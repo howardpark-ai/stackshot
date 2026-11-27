@@ -128,6 +128,7 @@ class Hooks:
     model_of: Callable[..., Any]
     nag: Callable[..., Any]
     name_on_write: Callable[..., Any]
+    writer_named_back: Callable[..., Any]
     next_put: Callable[..., Any]
     owed_mark: Callable[..., Any]
     owner_quote_on: Callable[..., Any]
@@ -863,7 +864,8 @@ def update_unlocked(
                              fields=["work"], stored=work_spec["text"], sent=str(work))
             work_spec["text"] = _shown_ids(work_spec.get("text") or "")   # g7 → board#N, after the length check
             work_writer = _session_label(h.session_id(sender.strip() or own_for))   # the writer by name; the session whose step it is, unless the spec names another
-            fc.call(_gates.gate_work_writer, gid, work_writer, _telling.holder({"status": "open", "metadata": meta}), meta, finishing)                      # the needs list as this call leaves it
+            fc.call(_gates.gate_work_writer, gid, work_writer, _telling.holder({"status": "open", "metadata": meta}), meta, finishing,
+                    h.writer_named_back(sender.strip(), str(item.get("status") or ""), plain, status == "completed"))      # the needs list as this call leaves it; a background agent the server names passes (on his move it is not added to needs)
             if work_spec.get("agent"):
                 work_spec["agent"] = _session_label(h.session_id(work_spec["agent"]))
             work_who = work_spec.get("agent") or work_writer

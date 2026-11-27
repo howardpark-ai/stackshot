@@ -810,12 +810,14 @@ check("7 second mover: …and the fix is then=", mt(83)["needs"] == ["decision"]
 item(84, needs=["decision"], ask=ASK)
 _update_svc._update("a84", sender=BACK, wake=day(2))
 check("7 second mover: a background agent's write that the server names into needs (decision + the writer) is the server's naming, not a second mover the writer made", wk_(mt(84)) == day(2), mt(84))
-# the naming stays in needs: a later write by anyone else is not refused for it (a background agent of the project is never a second mover)
+# on an item waiting on him a background agent's plain write leaves needs as it was; an item that already names one beside the decision takes a later
+# write by anyone else (a background agent of the project is never a second mover)
 item(43, needs=["decision"], ask=ASK)
 _update_svc._update("a43", sender=BACK, next="team-back: carry on")
-check("7 second mover: …a background agent's plain write names it into needs beside the decision", mt(43)["needs"] == ["decision", BACK], mt(43))
+check("7 second mover: …a background agent's plain write on an item waiting on him leaves needs as it was, and the agent is the then", mt(43)["needs"] == ["decision"] and mt(43).get("then") == BACK, mt(43))
+item(43, needs=["decision", BACK], ask=ASK)                                                    # an item that already names both
 upd(43, wake=day(2))
-check("7 second mover: …and a front agent's later wake on it passes (the background agent in needs is no second mover)", wk_(mt(43)) == day(2), mt(43))
+check("7 second mover: …and a front agent's later wake on such an item passes (the background agent in needs is no second mover)", wk_(mt(43)) == day(2), mt(43))
 item(45, needs=[FRONT])
 _update_svc._update("a45", sender=BACK, next="team-back: carry on")
 check("7 second mover: …the same for a front agent in needs and a background write", BACK in mt(45)["needs"] and FRONT in mt(45)["needs"], mt(45))

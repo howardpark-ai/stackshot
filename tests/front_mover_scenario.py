@@ -220,7 +220,7 @@ m33 = rd(33)["metadata"]
 check("accepted hand-off: the mover changes and the hand-off to it is recorded", r == "" and telling.holder(rd(33)) == BUILD and (m33.get("handoff") or {}).get("to") == BUILD and (m33.get("handoff") or {}).get("from"), (r, m33))
 put_his(34)
 r = refusal(lambda: _wt_update.stackshot_update(item_id="a34", sender=REVIEW, mover=OWNER, then=BUILD, next=f"{OWNER}: pick one"))
-check("accepted write on an item that waits on his call: stored, the writer named in needs", r == "" and REVIEW in (rd(34)["metadata"].get("needs") or []), (r, shape(34)))
+check("accepted write on an item that waits on his call: stored, needs left as it was (the writer is not named) and the then it set stands", r == "" and rd(34)["metadata"].get("needs") == ["decision"] and rd(34)["metadata"].get("then") == BUILD, (r, shape(34)))
 
 # ---- the needs gate reads roles through the same helper and still refuses a front agent
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a1", sender=REVIEW, needs=[MAIN]))
