@@ -182,7 +182,8 @@ def desktop(br, errors):
     check("a title opens the panel, the address names the item, the row is marked", s["open"] and s["url"] == "/?item=a3" and s["current"] == ["/items/a3"] and s["inside"], s)
     box = pg.eval_on_selector("#brief", "e => { const r = e.getBoundingClientRect(); return {x: r.x, w: r.width, h: r.height} }")
     pad = pg.eval_on_selector("#layout", "e => parseFloat(getComputedStyle(e).paddingRight)")
-    edge = pg.evaluate("() => document.documentElement.clientWidth")      # the window less its scrollbar, where a fixed element's right edge sits
+    # where a fixed element's right edge sits: the window less the gutter the stylesheet keeps for the scrollbar (clientWidth does not tell: it counts the gutter where scrollbars are hidden)
+    edge = pg.evaluate("() => { const p = document.body.appendChild(document.createElement('div')); p.style.cssText = 'position:fixed;top:0;right:0;width:0;height:0'; const x = p.getBoundingClientRect().x; p.remove(); return x }")
     check("the panel stands on the right and the lists make room for it", abs(box["x"] + box["w"] - edge) < 1 and box["w"] == 560 and box["h"] == 800 and pad >= 559, (box, pad, edge))
     check("nothing scrolls sideways", pg.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"))
     send = pg.eval_on_selector("#brief button[name=act]", "e => e.getBoundingClientRect().bottom")
