@@ -329,6 +329,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     m = meta(4)
     check("a note that does not say done ticks and moves nothing", code(r) == "comment" and not done(4) and m.get("state") == "your-step" and m.get("mover") == "member-a" and m.get("step") == A_STEP and m["answers"][-1]["kind"] == "step-reply", (code(r), done(4), m))
     check("…the sessions get the note and it waits for a session's write", any("member-a sent a note on their step" in t and "The item stays with member-a: “what is the form number?”" in t and how == "turn" for t, how in said(4)) and pending(4), (said(4), pending(4)))
+    check("…each line says an answer belongs on the item", all(f"form number?”. {telling.ON_ITEM} → " in t for t, _ in said(4)), said(4))
     told.clear()
     r = post(5, ADA, act="note", text="ran it")
     m = meta(5)
