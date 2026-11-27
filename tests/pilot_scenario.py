@@ -1194,15 +1194,14 @@ today = pages.zone_now().date(); D = lambda n: (today + datetime.timedelta(days=
 NEW_FORM = "Refused: status must be open | completed; parked is a property of an open item: until=<date> with wait_kind=\"time\" and wait_basis (a park of the wait cap's days or less needs his recorded words); clear_hold=true releases it"
 HINT = "\nstill parked: pass clear_hold=true to release it"
 for i in (5, 6, 7, 8): item(i, "projects/beta", B)
-runner_svc.WAKE_EVENT.clear(); e = refusal(lambda: _update_svc._update("a3", hold=True, sender="home-beta"))
-check("hold: hold=true with no wake, after, anchor or recycle is refused, naming the four conditions",
-      e.startswith("Refused: a park names what it waits for; an unconditional or indefinite park is refused.") and all(x in e for x in ("until=YYYY-MM-DD", "after=[\"board#N\"]", "anchors(project, add=[url], items=[\"a3\"])", "recycle=true"))
-      and not held_("a3") and not runner_svc.WAKE_EVENT.is_set(), e)
-check("minute loop: no next wake while nothing is on hold", wakes_svc.next_wake() is None, wakes_svc.next_wake())
+item(777, "projects/beta", B)
+runner_svc.WAKE_EVENT.clear(); res777 = _update_svc._update("a777", hold=True, sender="home-beta")
+check("hold: hold=true with no wake, after, anchor or recycle is accepted, with the server's backstop day stored as until (no hold flag left) and marked",
+      "hold" not in rd("a777")["metadata"] and _WT.stored_until(rd("a777")["metadata"]) == D(14) and rd("a777")["metadata"].get("until_server") == D(14) and runner_svc.WAKE_EVENT.is_set(), res777)
+check("minute loop: the server's backstop day on that item is a real wake, so the next wake is the day it stored", wakes_svc.next_wake() == wakes_svc.wake_at(D(14)), wakes_svc.next_wake())
+(T / "store/a/777.json").unlink()
 # an item waiting on the owner is never held. The refusal
 # names the after form; a hold whose next says it waits on him is noted, never refused (a wake on an item he has answered is fine)
-check("hold (owner wait): the refusal names the after form for a hold that waits on the owner's decision",
-      f"An item waiting on {_core_instance.OWNER}'s call is parked with needs=[<session>] and mover={_core_instance.OWNER} (his ask returns at the date); to put it on his move instead, needs=decision with its ask, or after=[<the item that carries the ask>]" in e, e)
 NOTE_OWNER = f"this park's next says it waits on {_core_instance.OWNER}: park his call with needs=[<session>] and mover={_core_instance.OWNER} (his ask returns at the date), or give it needs=decision with its ask, or after=[<the item that carries the ask>]"
 for i in (74, 75, 76): item(i, "projects/beta", B)
 res = _update_svc._update("a74", hold=True, wake=D(2), next=f"waiting on {_core_instance.OWNER}'s call on the pricing", sender="home-beta")
@@ -1261,8 +1260,9 @@ _update_svc._update("a3", wake=D(3), sender="home-beta"); res = _update_svc._upd
 check("hold: clear_wake=true the same", not held_("a3") and not _WT.stored_until(rd("a3")["metadata"]), (res, rd("a3")["metadata"]))
 _update_svc._update("a3", hold=True, recycle=True, sender="home-beta"); res = _update_svc._update("a3", wake=D(3), sender="home-beta"); res = _update_svc._update("a3", wake="none", sender="home-beta")
 check("hold: with a recycle to wait for, wake=\"none\" drops the date and the hold stays", rd("a3")["metadata"].get("hold") is True and not _WT.stored_until(rd("a3")["metadata"]) and rd("a3")["metadata"].get("recycle") is True, rd("a3"))
-e = refusal(lambda: _update_svc._update("a3", clear_recycle=True, sender="home-beta"))
-check("hold: clear_recycle=true that would leave the hold waiting on nothing is refused", e.startswith("Refused: a park names what it waits for") and rd("a3")["metadata"].get("recycle") is True, e)
+res = _update_svc._update("a3", clear_recycle=True, sender="home-beta")
+check("hold: clear_recycle=true that would leave the hold waiting on nothing is accepted, with the server's backstop day stored and the hold flag gone",
+      "recycle" not in rd("a3")["metadata"] and "hold" not in rd("a3")["metadata"] and _WT.stored_until(rd("a3")["metadata"]) == D(14) and rd("a3")["metadata"].get("until_server") == D(14), (res, rd("a3")["metadata"]))
 _update_svc._update("a3", wake=D(1), sender="home-beta"); _update_svc._update("a3", clear_recycle=True, sender="home-beta")   # a wake on an item already on hold is that hold's
 check("hold: …and passes once a wake holds it", held_("a3") and wk_(rd("a3")["metadata"]) == D(1) and "recycle" not in rd("a3")["metadata"], rd("a3"))
 # the wake pass: items due (wakes in the past, written into the store files past the gate), one due today, one not yet.
@@ -2047,7 +2047,8 @@ res = _wt_update.stackshot_update(g6, priority="p2", sender="home-beta"); check(
 res = _wt_update.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- Done when decided and posted", sender="home-beta"); check("bare url: …nor one that sets the description with the stored URL still in it", rd(g6)["description"].endswith("posted"), res)
 res, fk = fixes_of(lambda: _wt_update.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- And at https://example.com/r", sender="home-beta")); check("bare url: …a new bare URL beside it becomes a link, the stored one is left as it is", fk == ["description-url"] and "Lives at https://example.com/q\n" in rd(g6)["description"] and "[https://example.com/r](https://example.com/r)" in rd(g6)["description"], res)
 check("bare url: the create and update descriptions say it", "in a description it becomes a link to itself" in _wt_text._ITEM_FORM and _wt_text._ITEM_FORM in _wt_update._UPDATE_DESC)
-e = refusal(lambda: _update_svc._update(g5, hold=True, sender="home-beta")); check("form: an owner's hold without a wake is refused outright, no longer noted", e.startswith("Refused: a park names what it waits for") and not hd_(rd(g5)["metadata"]), e)
+res = _update_svc._update(g5, hold=True, sender="home-beta"); check("form: an owner's hold without a wake is accepted, with the server's backstop day stored and no hold flag left", _WT.stored_until(rd(g5)["metadata"]) == D(14) and "hold" not in rd(g5)["metadata"], res)
+_update_svc._update(g5, clear_wake=True, sender="home-beta")
 wk = (today + datetime.timedelta(days=3)).isoformat()
 res = _update_svc._update(g5, hold=True, wake=wk, sender="home-beta"); check("form: a hold with a wake → no note", "(note:" not in res, res)
 res = _update_svc._update(g5, priority="p2", sender="home-beta"); check("form: a filing edit of a held item → no note", "(note:" not in res, res)
@@ -2141,8 +2142,9 @@ check("anchored hold: the update description carries the exception", "anchored t
 # the item: a notice from the anchor scoped to a held item
 # releases the hold when the keeper passes or merges it, never when it drops it; the anchor alone is no condition (the backstop wake stays);
 # a project with no keeper releases on the notice itself, by the minute loop's pass
-e = refusal(lambda: _update_svc._update(g5, wake="none", sender="home-beta"))
-check("anchor wait: dropping the backstop wake of a hold that waits on an anchor is refused, naming the backstop", e.startswith(f"Refused: a park that waits on a notice from the anchor scoped to {g5} still carries a backstop date, at most 7 days out unless the owner's words are on the item") and held_(g5), e)
+res = _update_svc._update(g5, wake="none", sender="home-beta")
+check("anchor wait: dropping the backstop wake of a hold that waits on an anchor is accepted; the server's own backstop day stands in, the hold flag kept, its anchor kind kept too",
+      held_(g5) and rd(g5)["metadata"].get("hold") is True and _WT.stored_until(rd(g5)["metadata"]) == D(14) and rd(g5)["metadata"].get("wait_kind") == "anchor", (res, rd(g5)["metadata"]))
 t0 = time.time(); time.sleep(0.05)
 n_d = routing.record("projects/beta", kind="anchor", to=B, label="GitHub #7", who="hub", text="a comment on #7", target="for home-beta", anchor=TH, bot=True)
 _wt_route._route(n_d, "dropped", reason="noise", sender="home-beta")
@@ -3187,8 +3189,8 @@ n4 = mk46(); res = _update_svc._update(n4, wake=wk46, sender="work-osprey-x")
 check("auto-name: a background agent's wake alone names nobody; the wake lands, no hold", "needs" not in rd(n4)["metadata"] and "(named" not in res and "hold" not in rd(n4)["metadata"] and wk_(rd(n4)["metadata"]) == wk46, (rd(n4)["metadata"], res))
 n5 = mk46(); res = _update_svc._update(n5, hold=True, wake=wk46, sender="work-osprey-x")
 check("auto-name: …nor does hold=true with its wake", "needs" not in rd(n5)["metadata"] and "(named" not in res and hd_(rd(n5)["metadata"]), (rd(n5)["metadata"], res))
-n6 = mk46(); e = refusal(lambda: _update_svc._update(n6, hold=True, sender="work-osprey-x"))
-check("auto-name: …and a bare hold, refused as an indefinite park, leaves no naming behind", e.startswith("Refused: a park names what it waits for") and "needs" not in rd(n6)["metadata"], (e, rd(n6)["metadata"]))
+n6 = mk46(); res = _update_svc._update(n6, hold=True, sender="work-osprey-x")
+check("auto-name: …and a bare hold, accepted with the server's backstop day, leaves no naming behind", "needs" not in rd(n6)["metadata"] and "(named" not in res and _WT.stored_until(rd(n6)["metadata"]) == (datetime.datetime.now(_wt_text.ZONE).date() + datetime.timedelta(days=14)).isoformat(), (res, rd(n6)["metadata"]))
 n7 = mk46(); res = _update_svc._update(n7, recycle=True, sender="work-osprey-x")
 check("auto-name: a background agent's recycle=true alone names nobody; the recycle lands", "needs" not in rd(n7)["metadata"] and "(named" not in res and rd(n7)["metadata"].get("recycle"), (rd(n7)["metadata"], res))
 n8 = mk46(); res = _update_svc._update(n8, next="building it", sender="work-osprey-x")

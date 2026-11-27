@@ -247,8 +247,10 @@ check("2 a create with until and a time on a relay wait is fixed the same way: t
 item(8, needs=[BACK], until=w(5), wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", post_wake_mover=BACK)
 bupd(8, hold=True, wake=w(3))
 check("3 hold=true + wake on an anchor wait keeps the hold flag and the date", mt(8).get("hold") is True and W.stored_until(mt(8)) == w(3), mt(8))
-refused("3 a hold with no date on an item with a scoped anchor is still refused with the backstop-wake message", lambda: (item(10, needs=[BACK]), _wt_update.stackshot_update("a10", sender=BACK, hold=True))[1],
-        "still carries a backstop date", "at most 7 days out")
+item(10, needs=[BACK])
+res10 = _wt_update.stackshot_update("a10", sender=BACK, hold=True)
+check("3 a hold with no date on an item with a scoped anchor is accepted; the item is not read as an outside wait here (needs names the back, not external), so it gets the plain time-wait default, stamped as a time wait, no hold flag left",
+      "hold" not in mt(10) and W.stored_until(mt(10)) == w(14) and mt(10).get("wait_kind") == "time", (res10, mt(10)))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

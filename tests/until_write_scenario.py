@@ -552,7 +552,7 @@ out6 = tried6(721, ask_by=w(3), needs=["external"], wait_event="the vendor's rep
 check("6 an ask_by that makes a relay wait on a clean item is taken as its end and stored as until", not out6.startswith("REFUSED") and not stuck6(721) and mt(721).get("until") == w(3) and not mt(721).get("ask_by"), (out6[-600:], mt(721)))
 item(722, needs=["external"], wait_event="the vendor's reply")
 out6 = tried6(722, until=w(4), wait_event="another reply")
-check("6 an until with no kind on a relay-like item that stored no ask_by is no longer refused for its end: something can end the wait (the day given, or the server's default marked as its own)", not out6.startswith("REFUSED") and bool(W.stored_until(mt(722))) and not mt(722).get("ask_by"), (out6[-600:], mt(722)))
+check("6 an until with no kind on a relay-like item keeps the day the write gave, never the server's default, and carries no mark", not out6.startswith("REFUSED") and W.stored_until(mt(722)) == w(4) and not mt(722).get("ask_by") and not mt(722).get("until_server"), (out6[-600:], mt(722)))
 _wait_fixes_svc._wait_alias_until = lambda: dt.date(2020, 1, 1)
 try:
     for n6, (label6, kw6) in enumerate(SHAPES6):
@@ -596,9 +596,13 @@ for shape6, stored6 in LIVE6.items():
         check(f"6 ...a confirm and a message that names it are not refused by the guard ({n6})", not c6 and "has no end" not in c6m and mt(n6).get("ask_by") == day6, (c6, c6m[-400:], mt(n6)))
         for label6, kw6 in (("needs", dict(needs=["external"])), ("the event", dict(wait_event="another reply"))):
             out6 = tried6(n6, **kw6)
-            check(f"6 ...a write of {label6} alone restates the wait and is no longer refused for its missing end ({n6}): the server stores its default day, marks it, and the old ask_by is not left beside it", not out6.startswith("REFUSED") and bool(W.stored_until(mt(n6))) and bool(mt(n6).get("until_server")) and not mt(n6).get("ask_by"), (out6[-500:], mt(n6)))
-        out6 = tried6(n6, until=w(4), wait_event="another reply")
-        check(f"6 ...the same write with an until repairs it ({n6}): a wait something can end, no ask_by left over", not out6.startswith("REFUSED") and not stuck6(n6) and W.stored_until(mt(n6)) == w(4) and no_old(mt(n6)), (out6[-500:], mt(n6)))
+            if when6 == "past":
+                check(f"6 ...a write of {label6} alone restates the wait and is no longer refused for its missing end ({n6}): the server stores its default day, marks it, and the old ask_by is not left beside it", not out6.startswith("REFUSED") and bool(W.stored_until(mt(n6))) and bool(mt(n6).get("until_server")) and not mt(n6).get("ask_by"), (out6[-500:], mt(n6)))
+            else:
+                check(f"6 ...a write of {label6} alone restates the wait and keeps the day the ask_by already carried as its end, not the server's default, and no mark ({n6})", not out6.startswith("REFUSED") and UW.date_of(mt(n6)) == day6 and not mt(n6).get("until_server"), (out6[-500:], mt(n6)))
+        repair6 = w(1) if when6 == "ahead" else w(4)      # a repair must be a real change: for the "ahead" day (w(3)) a later date is no repair at all, just the clock pushed out with nothing else new, which the stale-wait guard itself refuses
+        out6 = tried6(n6, until=repair6, wait_event="another reply")
+        check(f"6 ...the same write with an until repairs it ({n6}): a wait something can end, no ask_by left over", not out6.startswith("REFUSED") and not stuck6(n6) and W.stored_until(mt(n6)) == repair6 and no_old(mt(n6)), (out6[-500:], mt(n6)))
 item(720, needs=["external"], ask_by=w(3), wait_event="the vendor's reply")
 out6 = tried6(720, wait_kind="relay")
 check("6 a kind given to an item with an ask_by ahead takes that date as its end", not out6.startswith("REFUSED") and WK.watches(rd(720)) and (W.stored_until(mt(720)) or mt(720).get("ask_by")) == w(3), (out6[-500:], mt(720)))

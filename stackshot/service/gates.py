@@ -812,7 +812,9 @@ def _default_wait_end(item: dict[str, Any], gid: str, creating: bool, no_end: bo
     """A wait that has nothing to wake it: a wait on another item's close, an anchor, a relay or an event with no end (`no_end`: the guard saw it), or a time wait with no date: store the
     default backstop day (model/migration.default_end, the rule the start repair uses) as its end, remember in metadata that the server set it, and tell the caller in the reply (fix kind
     wait-end-defaulted). The day is stored as `until` (the one date a wait stores) for a time wait and for a create; an update's other kinds carry it in the working ask_by until update.py folds it.
-    → the line told ("" when no default was stored)."""
+    A date the write already gave, wherever its old working field left it (wake or ask_by: `until_in` picks one before the kind is known), is read and kept as the end instead: it moves to the
+    field this kind reads (`slot_of`), the kind is stamped, and nothing is marked or told (it is the caller's own day, not a backstop).
+    → the line told ("" when no default was stored, whether because the write already had a real end or because there was nothing to judge)."""
     h = _hooks()
     meta = item.get("metadata")
     if not isinstance(meta, dict):
@@ -828,10 +830,19 @@ def _default_wait_end(item: dict[str, Any], gid: str, creating: bool, no_end: bo
         w = _model.Wait(kind="time", kind_explicit=False); synthetic = True                     # a hold with no date stands as a park whatever state the item still stores: a wait on a time with none
     if w is None or w.kind not in ("time", "anchor", "item", "relay", "event"):
         return ""
-    if w.kind == "time":
-        if w.until or meta.get("recycle"):
-            return ""
-    elif not no_end:
+    if w.kind == "time" and meta.get("recycle"):
+        return ""
+    if w.kind != "time" and not no_end:
+        return ""
+    slot = "until" if (creating or w.kind == "time") else _uw.slot_of(w.kind)
+    other = "ask_by" if slot == "wake" else "wake"
+    stamp_ok = not synthetic and not (w.kind == "anchor" and not meta.get("wait_anchor") and not meta.get("wait_event"))      # an anchor read only from the project's scoped anchors (no wait_anchor or wait_event of its own) stays a bare hold: stamping it would move it from the hold release (anchor_release) to the watched one (watch_anchor_notice), which needs wait_anchor to match the notice and would then release it to neither
+    given = w.until or (w.backstop if w.kind != "time" else "") or _uw._dated(meta.get(slot)) or _uw._dated(meta.get(other))
+    if given and (ep := _wt.wake_epoch(given)) is not None and ep > time.time():
+        if not (creating or w.kind == "time") and meta.get(other) and not meta.get(slot):
+            meta[slot] = meta.pop(other)                    # the date this write gave sits in the other working field (until_in chose it before the kind was known): it moves to the field this kind reads
+        if not _uw.kind_of(meta) and stamp_ok:
+            meta["wait_kind"] = w.kind                       # the kind is stamped so the date it now stands beside is read by the gates the same way again
         return ""
     items: dict[str, dict[str, Any]] = {}
     for g in opened:
@@ -840,7 +851,8 @@ def _default_wait_end(item: dict[str, Any], gid: str, creating: bool, no_end: bo
         except Exception:  # noqa: BLE001
             continue
     day, why = _mig.default_end(_EndEnv(_pages.zone_now().date(), items, [g for g in opened if g in items]), item, w.kind)      # type: ignore[arg-type]
-    meta["until" if (creating or w.kind == "time") else "ask_by"] = day      # an update judges the old working fields (update.py folds this one into `until` before it saves); a time wait's until stands on its own
+    meta[slot] = day      # the field this kind reads (slot_of): an update judges the old working fields (update.py folds this one into `until` before it saves); a time wait's until stands on its own
+    meta.pop(other, None)
     if not _uw.kind_of(meta) and not synthetic:
         meta["wait_kind"] = w.kind                       # a date with no kind would read as a wait on a time: the wait keeps the kind the item's fields gave it
     meta[_model.SERVER_END_KEY] = day
@@ -885,8 +897,7 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
         probs = _run()
         if not strict and any(p.key in ("no_end", "wait_input") for p in probs):      # a wait with no end (a time wait: no date) gets the default backstop day, before the check refuses it (the server curates, then tells)
             end_note = _default_wait_end(item, gid, creating, any(p.key == "no_end" for p in probs))
-            if end_note:
-                probs = _run()
+            probs = _run()      # re-judged even with no note: a date this write already gave is adopted silently (no mark, no fix line), and the guard must see it moved into place
     except Exception as e:  # noqa: BLE001  — the guard is an extra: a failure in it writes as before
         print(f"model guards: {gid or 'a new item'} not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         if strict:

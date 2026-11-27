@@ -171,7 +171,7 @@ def part_client():
     upd(2, clear_hold=True)
     check("clear_hold releases it and drops the record", not _holders._is_held(_service_store._load("a2")) and "hold_set" not in rdm(2), rdm(2))
     res, err = upd(3, hold=True)
-    check("a hold with no wake and nothing holding it is still refused as an indefinite park (the rule of main)", err.startswith("Refused: a park names what it waits for; an unconditional or indefinite park is refused."), err)
+    check("a hold with no wake and nothing holding it is accepted, with the server's backstop day stored as until and marked, the hold flag gone", not err and "hold" not in rdm(3) and rdm(3).get("until") == D(14) and rdm(3).get("until_server") == D(14), (res, err, rdm(3)))
     check("the update tool's text no longer invites a session to park its own item: no \"without asking\", no \"park it to the date\", no \"nearest date to check\"",
           not any(x in _wt_update._UPDATE_DESC for x in ("without asking", "park it to the date", "an owner parks its own item", "nearest date to check")) and "A session does not park to defer work it could do now" in _wt_update._UPDATE_DESC,
           _wt_update._UPDATE_DESC[:200])

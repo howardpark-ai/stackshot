@@ -1288,7 +1288,8 @@ def update_unlocked(
     if meta.get("hold") and not meta.get("wake") and (hold or clear_wake or after_set or clear_after or clear_recycle) and not h.after_open(meta) and not meta.get("recycle") and (wake_bad or after_bad or wait_args_bad or basis_bad):
         fc.skip("the check that a park names what it waits for", "it reads the wake, the after list, the wait's arguments or the wait_basis, which are refused above")
     elif meta.get("hold") and not meta.get("wake") and (hold or clear_wake or after_set or clear_after or clear_recycle) and not h.after_open(meta) and not meta.get("recycle"):
-        if not fc.call(_gates._default_wait_end, {**item, "metadata": meta}, gid, False, True, default=""):      # a park with nothing that can wake it is not refused: the server stores its default backstop day and says so
+        fc.call(_gates._default_wait_end, {**item, "metadata": meta}, gid, False, True, default="")      # a park with nothing that can wake it is not refused: the server stores its default backstop day and says so, or, when a real date already sits in one of its old working fields (a repeat write on a park the server itself defaulted), it is read and kept there silently (no line told): either way this leaves an end in place, and only its absence still refuses
+        if not (meta.get("wake") or meta.get("until") or meta.get("ask_by")):
             if h.scoped_anchors(str(meta.get("project") or ""), gid):
                 fc.add(f"Refused: a park that waits on a notice from the anchor scoped to {gid} still carries a backstop date, at most {_wt.cap_days():g} "
                        f"days out unless {OWNER}'s words are on the item (until=YYYY-MM-DD): the notice may never come")
