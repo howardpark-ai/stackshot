@@ -2933,10 +2933,10 @@ class Board:
         def grp(*fields):                             # one sidebar group: a small heading over each value, a thin line between groups
             body = "".join(f'<dt>{h}</dt><dd>{v}</dd>' for h, v in fields if v)
             return f'<dl class="sgrp">{body}</dl>' if body else ""
-        ol, ov = self.owner_row(r, contact)
+        olab, ov = self.owner_row(r, contact)
         cl, cv = self.creator_row(r)
         ml, mv = self.mover_row(r)
-        who_rows = f'<dt>{ml}</dt><dd>{mv}</dd>' + (f'<dt>{ol}</dt><dd>{ov}</dd>' if ov else "") + f'<dt>{cl}</dt><dd>{cv}</dd>'      # Mover first, then Owner, then Creator, in one group
+        who_rows = f'<dt>{ml}</dt><dd>{mv}</dd>' + (f'<dt>{olab}</dt><dd>{ov}</dd>' if ov else "") + f'<dt>{cl}</dt><dd>{cv}</dd>'      # Mover first, then Owner, then Creator, in one group
         acnt = f'<span class="count">{alist.count("<li>")}</span>'
         side = (f'<dl class="sgrp">{who_rows}</dl>' + grp((_t("item.project"), prj)) + grp((_t("item.then"), then_v)) + grp((_t("item.priority"), prio))
                 + grp((wlabel if waiting else _t("item.wake"), wakev))

@@ -1,23 +1,25 @@
 """brief.py — the item brief: a short view of one item for deciding, beside the item's own page (the detail view).
 
-article() is the one drawing, from the item's own fields: the head, what the item asks or the step, a draft to paste, the outcome or the wait, the first lines of its description,
-why the recommended option is recommended, the answer box and the last answers. page() is that article as a page of its own (GET /items/<key>/brief); the home page's panel reads the same page and takes the article out
-(ui/brief_assets.py). Nothing here writes, and nothing here decides who may answer: the answer box is the item page's own (Board.item_html hands it over), posting to the one answer route.
+article() is the one drawing, from the item's own fields, and it is lean: the item's id and title as the link to the detail view; what the item asks in one line, with the
+recommendation under it, or the step; a draft to paste; and the answer box with its choices. No section has a heading. A "?" beside the question or the step holds the rest
+of what bears on it: the stakes, the date it is wanted by and the first lines of the description. An item that asks this viewer nothing shows its state line instead.
+Everything else (project and people, outcome, wait, past answers, the whole description) is on the detail view alone. page() is that article as a page of its own
+(GET /items/<key>/brief); the home page's panel reads the same page and takes the article out (ui/brief_assets.py). Nothing here writes, and nothing here decides who may
+answer: the answer box is the item page's own (Board.item_html hands it over), posting to the one answer route.
 """
 from __future__ import annotations
 
+import html as _html
 import re
 from typing import Any
 
-from stackshot.core import config as _cfg, members as _members
+from stackshot.core import config as _cfg
 from stackshot.github import ghsync as _gh
-from stackshot.model import option_labels as _ol
 from stackshot.web.i18n import t as _t
-from stackshot.web.ui import answer_frame as _frame, brief_assets as _assets, explain as _xp, render as _r, under
+from stackshot.web.ui import answer_frame as _frame, brief_assets as _assets, explain as _xp, render as _r
 
 esc = _r.esc
-_LEAD = 5                  # the pieces of the description shown; a line under them says how many more the detail view has
-_PAST = 3                  # the last answers listed
+_LEAD = 5                  # the pieces of the description the "?" holds; "…" says there are more
 _TOP = re.compile(r"(?:[-*+]|\d{1,9}[.)])\s|#{1,6}\s")      # a line at the margin that starts a piece of its own: a bullet, a numbered line, a heading
 _FENCE = re.compile(r"\s*(`{3,}|~{3,})(.*)$")      # a fence line: its marks and what follows them (CommonMark: nothing follows a closing fence, and no backtick follows a backtick fence)
 
@@ -63,46 +65,50 @@ def _join(parts: list[str]) -> str:
     return text
 
 
-def _section(cls: str, head: str, body: str) -> str:
-    return f'<section class="bsec {cls}"><h3>{esc(head)}</h3>{body}</section>'
+def _plain(markup: str) -> str:
+    """Drawn item text as the plain lines a "?" holds: the words a reader sees, a bullet kept as a bullet, no button's label."""
+    text = re.sub(r"<button\b.*?</button>", "", markup, flags=re.S)
+    text = re.sub(r"<li\b[^>]*>", "\n• ", text)
+    text = re.sub(r"</(?:p|li|h[1-6]|pre|tr|div|ul|ol|blockquote)>|<br\s*/?>", "\n", text)
+    text = _html.unescape(re.sub(r"<[^>]+>", "", text))
+    return "\n".join(line.strip() for line in text.split("\n") if line.strip() not in ("", "•"))
 
 
-def _background(board: Any, r: dict[str, Any]) -> str:
+def _more(board: Any, r: dict[str, Any], pa: dict[str, str] | None, key: str) -> str:
+    """The "?" that holds what bears on the item and is not drawn: the ask's stakes and date (`pa`, None when the item asks this viewer nothing in the set form), then the
+    first pieces of the description. A date line that says there is none is left out; "" when there is nothing to hold."""
+    gid = r["gid"]
+    lines = []
+    for field, label in (("stakes", "item.ask.stakes"), ("by", "item.ask.by")):
+        value = (pa or {}).get(field, "").strip()
+        if value and not (field == "by" and value.rstrip(".").lower() == "no date"):
+            lines.append(f"{_t(label)}: {_plain(board.linkify(value, gid))}")
     desc = (r.get("description") or "").strip()
-    if not desc or desc == r["subject"]:
-        return ""
-    md = lambda part: f'<div class="desc md">{board.md_html(_join(part), r["gid"])}</div>'
-    cut = pieces(desc)
-    body = md(cut[:_LEAD])
-    rest = len(cut) - _LEAD
-    if rest > 0:
-        label = _t("brief.more_one" if rest == 1 else "brief.more", n=rest)
-        body += f'<p class="bmoreline"><a href="{esc(_r.item_href(r))}">{esc(label)}</a></p>'
-    return _section("bbg", _t("brief.background"), body)
+    if desc and desc != r["subject"]:
+        cut = pieces(desc)
+        lines.append(_plain(board.md_html(_join(cut[:_LEAD]), gid)) + ("\n…" if len(cut) > _LEAD else ""))
+    return _xp.explain(f"brief-more-{key}", "\n\n".join(lines), _t("item.details")) if lines else ""
 
 
-def _ask(board: Any, r: dict[str, Any], p: dict[str, Any], cards: bool) -> tuple[str, str]:
-    """(what the item asks, the line saying why). The ask is shorter than on its page: where a card carries the recommended badge, the recommendation and its reason leave the list
-    for a line of their own above the cards; a date line that says there is none is left out. Whether there is anything to show is the page's own rule (p["ask"] is empty when
-    the item asks this viewer nothing)."""
-    if not p["ask"] or not p["pa"]:
-        return p["ask"], ""
-    pa, gid = p["pa"], r["gid"]
-    badged = cards and 'class="badge rec"' in p["box"]
-    why = f'<p class="breco"><b>{esc(_t("brief.why_rec"))}</b> {board.linkify(pa["recommend"], gid)}</p>' if badged and pa["recommend"].strip() else ""
-    rows = []
-    for key, label in (("decide", "item.ask.decide"), ("recommend", "item.ask.recommend"), ("stakes", "item.ask.stakes"), ("by", "item.ask.by")):
-        value = pa[key]
-        if (key == "recommend" and badged) or (key == "by" and value.strip().rstrip(".").lower() in ("", "no date")):
-            continue
-        link = _r.mockup_link(r, _r.open_ask(r)) if key == "decide" else ""
-        rows.append(f'<dt>{_t(label)}</dt><dd>{board.linkify(value, gid)}{link}</dd>')
-    listed = f'<b class="osub">{_t("home.options")}</b>{p["ol"]}' if p["ol"] and not cards else ""      # no cards drawn: the options are listed here, as on the item's page
-    return f'<div class="iask"><b>{_t("item.ask")}</b><dl>{"".join(rows)}</dl>{listed}</div>', why
+def _ask(board: Any, r: dict[str, Any], p: dict[str, Any], cards: bool, more: str) -> str:
+    """What the item asks, in one line with its "?" (`more`), and the recommendation with its reason on a line under it. Where no cards are drawn the options are listed, as on
+    the item's page. Called when the item asks this viewer something, which is the page's own rule (p["ask"])."""
+    gid = r["gid"]
+    pa, raw = p["pa"], _r.open_ask(r)
+    question = board.linkify(pa["decide"] if pa else raw, gid) + _r.mockup_link(r, raw) if raw else ""      # an ask in no set form is the line as it is
+    line = f'<p class="bq">{question}{more}</p>' if question or more else ""
+    why = pa["recommend"].strip() if pa else ""
+    reco = f'<p class="breco"><b>{esc(_t("item.ask.recommend"))}</b> {board.linkify(why, gid)}</p>' if why else ""
+    listed = "" if cards else p["ol"]
+    return f'<div class="iask">{line}{reco}{listed}</div>'
 
 
-def _step(step: str, key: str) -> str:
-    """The page's step block and form, with the line about Send note behind a "?" instead of a hover title."""
+def _step(step: str, key: str, more: str) -> str:
+    """The page's step block and form without the block's heading, with `more` beside the step and the line about Send note behind a "?" instead of a hover title."""
+    step = step.replace(f'<b>{_t("item.your_step")}</b>', "", 1)
+    if more:      # the block ends where its form starts, or where the step ends for a viewer with no box
+        block, cut, form = step.partition('<form class="ianswer" data-step')
+        step = block.removesuffix("</div>") + more + "</div>" + cut + form
     head, mark, tail = step.partition(" data-needs-text>")
     if not mark:
         return step
@@ -113,9 +119,10 @@ def _step(step: str, key: str) -> str:
 
 
 def _box(form: str, key: str) -> str:
-    """The page's answer box laid out for the brief: the box's words as its placeholder, and under option cards a foot (what is picked, the note, Send) that stays in view."""
+    """The page's answer box laid out for the brief: no heading, the box's words as its placeholder, and under option cards a foot (the note, Send) that stays in view."""
     if not form:
         return ""
+    form = re.sub(r"\A(<form\b[^>]*>)<b>[^<]*</b>", r"\1", form)
     cards = " data-cards " in form
     words = "home.note_optional" if cards else "answer.write_answer" if 'value="answer"' in form else "answer.write_comment"
     form = form.replace('<textarea id="atext" name="text" rows="3" maxlength="4000"></textarea>',
@@ -127,27 +134,7 @@ def _box(form: str, key: str) -> str:
     head, mark, tail = form.partition('<label class="anote"')
     if not mark or not tail.endswith("</form>"):
         return form
-    picked = esc(_t("js.brief.picked", what=_t("js.brief.none")))
-    return f'{head}<div class="bfoot"><p class="bpicked" aria-live="polite">{picked}</p>{mark}{tail[:-len("</form>")]}</div></form>'
-
-
-def _past(board: Any, r: dict[str, Any]) -> str:
-    """The last answers on the item, newest last, folded: when, who (on a board of several members), the pick and the words."""
-    recs = [a for a in _r.answers_of(r) if a.get("kind") in ("decision", "step-reply")][-_PAST:]
-    if not recs:
-        return ""
-    several = len(_members.members()) > 1
-    lines = []
-    for a in recs:
-        try:
-            when = board.when(float(a["ts"]))
-        except (KeyError, TypeError, ValueError, OverflowError, OSError):
-            when = ""
-        head = " · ".join(x for x in (when, _members.recorded_by(a) if several else "") if x)
-        pick = _ol.pick_words(str(a.get("choice") or ""), str(a.get("letter") or ""))
-        words = " — ".join(x for x in (pick, str(a.get("text") or "").strip()) if x)
-        lines.append("<li>" + " · ".join(x for x in (esc(head), board.linkify(words, r["gid"])) if x) + "</li>")
-    return f'<section class="bsec"><details class="bmore"><summary>{esc(_t("brief.past", n=len(recs)))}</summary><ul class="bpast">{"".join(lines)}</ul></details></section>'
+    return f'{head}<div class="bfoot">{mark}{tail[:-len("</form>")]}</div></form>'
 
 
 def article(board: Any, gid: str, answer: dict[str, Any] | None, heading: str = "h2") -> tuple[str, str]:
@@ -156,19 +143,21 @@ def article(board: Any, gid: str, answer: dict[str, Any] | None, heading: str = 
     p: dict[str, Any] = {}
     board.item_html(gid, answer=answer, parts=p)
     r = p["r"]
-    m = r["metadata"]
     title = board.bare(r["subject"])
     key = _gh.href_id(r["gid"])
     cards = " data-cards " in p["box"]
-    outcome = str(m.get("outcome_text") or "").strip() if r.get("status") == "completed" else ""
-    who = board.row_line(r)
-    head = (f'<header class="bhead">' + (f'<p class="bwho">{who}</p>' if who else "")
-            + f'<{heading} class="btitle" id="brief-title"><span class="ir-id">{esc(_r.rid(r))}</span> {board.mentions(esc(title), r["gid"])}</{heading}>'
-            + f'<p class="bstate">{p["state"]}</p></header>')
-    ask, why = _ask(board, r, p, cards)
-    top = ask + _step(p["step"], key) + p["draft"]
-    middle = ((_section("boutcome", _t("item.outcome"), f'<div class="desc md">{board.md_html(outcome, r["gid"])}</div>') if outcome else "")
-              + p["wait"] + _background(board, r) + why + _box(p["box"], key) + _past(board, r))
+    whole = "" if p["ask"] or p["step"] else " bwhole"      # with no question and no step, the title is what says what the item is: it wraps instead of being cut at one line
+    head = (f'<header class="bhead{whole}"><{heading} class="btitle" id="brief-title"><a href="{esc(_r.item_href(r))}"><span class="ir-id">{esc(_r.rid(r))}</span> {esc(title)}</a>'
+            f'</{heading}></header>')      # the item's link, drawn once: nothing else leads to the detail view
+    more = _more(board, r, p["pa"] if p["ask"] else None, key)
+    if p["ask"]:
+        top = _ask(board, r, p, cards, more)
+    elif p["step"]:
+        top = _step(p["step"], key, more)
+    else:
+        top = f'<p class="bstate">{p["state"]}{more}</p>'
+    top += p["draft"]
+    middle = _box(p["box"], key)
     code = str((answer or {}).get("sent") or "")
     codes = board.sent_keys()
     known = codes.get(code)
@@ -181,7 +170,7 @@ def article(board: Any, gid: str, answer: dict[str, Any] | None, heading: str = 
 
 
 def page(board: Any, gid: str, answer: dict[str, Any] | None) -> str:
-    """The brief as a page of its own, under the board's header and beside the summary panel, with the way home and to the detail view. KeyError for an unknown id."""
+    """The brief as a page of its own, under the board's header (whose title is the way home) and beside the summary panel. KeyError for an unknown id."""
     drawn, title = article(board, gid, answer, heading="h1")
     r = board.item(gid)
     font = str(_cfg.get("instance", "font_css") or "")
@@ -191,6 +180,5 @@ def page(board: Any, gid: str, answer: dict[str, Any] | None) -> str:
             + (f'<link rel="stylesheet" href="{esc(font)}">' if font else "")
             + _r._THEME_HEAD + _r._FOLD_HEAD + _r._APP_HEAD + f'<style>{board._css()}</style></head>'
             + _r._PANEL_BODY + '<div id="layout"><main class="briefpage" id="top">' + board.page_header()
-            + f'<nav class="bpbar"><a class="b" href="{under("/")}">{esc(_t("brief.home"))}</a><a class="b" href="{esc(_r.item_href(r))}">{esc(_t("brief.detail"))}</a></nav>'
             + f'<div id="brief-page">{drawn}</div></main>' + board.panel_tail() + _r._FAB_PAIR + _r._THEME_JS + _r._RELOAD_JS + _r._TOTOP_JS + _r._COPY_JS + _r._BFCACHE_JS
             + _r._CARDS_JS + f'<script>{_r._ABOX_JS}</script>' + _r._SENDKEY_JS + f'<script>{_assets.JS}</script></body></html>')

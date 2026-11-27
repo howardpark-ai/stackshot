@@ -161,9 +161,14 @@ def poll(pg, until=None):
 def state(pg):
     """what the panel and the page hold now"""
     return pg.evaluate("""() => { const p = document.getElementById('brief'), f = p.querySelector('form.ianswer'), c = f && f.querySelector('input[name=choice]:checked'),
-        t = f && f.querySelector('textarea'), b = f && f.querySelector('button[name=act]'), o = p.querySelector('.bpicked');
-        return {open: !p.hidden, url: location.pathname + location.search, pick: c ? c.value : '', note: t ? t.value : '', send: b ? !b.disabled : null, picked: o ? o.textContent : '',
+        t = f && f.querySelector('textarea'), b = f && f.querySelector('button[name=act]');
+        return {open: !p.hidden, url: location.pathname + location.search, pick: c ? c.value : '', note: t ? t.value : '', send: b ? !b.disabled : null,
                 y: window.scrollY, inside: p.contains(document.activeElement), current: [...document.querySelectorAll('li.irow.is-open a.ir-link')].map(a => a.getAttribute('href'))} }""")
+
+
+def away(pg):
+    """a click on the panel's head beside the item's link, which takes the focus off a box"""
+    pg.click("#brief .bhead", position={"x": 4, "y": 2})
 
 
 def rowstate(pg, i):
@@ -193,14 +198,32 @@ def desktop(br, errors):
     check("the panel stands on the right and the lists make room for it", abs(box["x"] + box["w"] - edge) < 1 and box["w"] == 560 and box["h"] == 800 and pad >= 559, (box, pad, edge))
     check("nothing scrolls sideways", pg.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"))
     send = pg.eval_on_selector("#brief button[name=act]", "e => e.getBoundingClientRect().bottom")
-    check("Send is in view with nothing picked, and is off", send <= 800 and s["send"] is False and s["picked"] == "Picked: none yet", (send, s))
+    check("Send is in view with nothing picked, and is off", send <= 800 and s["send"] is False, (send, s))
     check("the inline hint is not drawn", pg.eval_on_selector("#brief .ahint", "e => getComputedStyle(e).display") == "none")
     shot(pg, "desktop-panel")
     check("the lists stay in use: the page is not inert", pg.evaluate("() => !document.querySelector('#layout').inert && document.getElementById('brief-scrim').hidden"))
+    seen = pg.inner_text("#brief")
+    check("the panel shows the question, the recommendation, the choices and the item's link, and no heading, background or stakes",
+          all(w in seen for w in ("whether to ship the next version", "Recommend", "sample question a3", "Ship it now as it is"))
+          and not any(w in seen for w in ("background fact", "another week", "Your answer", "Detail view", "Alpha", "Picked"))
+          and pg.eval_on_selector_all("#brief h3, #brief .iask > b", "l => l.length") == 0, seen)
+    links = pg.eval_on_selector_all("#brief a[href]", "l => l.filter(a => a.getClientRects().length).map(a => a.getAttribute('href'))")
+    check("…with one link to the item's page", links.count("/items/a3") == 1, links)
+    said = pg.evaluate("() => { const p = document.getElementById('brief'); return [p.innerText, ...[...p.querySelectorAll('[aria-label],[title],[placeholder]')].flatMap(e => ['aria-label', 'title', 'placeholder'].map(a => e.getAttribute(a) || ''))] }")
+    check("…and nowhere the panel's inner name", not any("brief" in w.lower() for w in said), said)
 
-    # the "?"
+    # the "?" beside the question holds the rest
+    check("what bears on the question is put away until asked for", visible(pg, "#xp-brief-more-a3") == "hidden")
+    pg.click("#xpb-brief-more-a3")
+    more = pg.inner_text("#xp-brief-more-a3"); tip = pg.eval_on_selector("#xp-brief-more-a3", "e => { const r = e.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom] }")
+    check("…its ? shows the stakes and the first lines of the background, a line each", "another week" in more and "number 5" in more and "number 6" not in more and "…" in more and more.count("\n") >= 5, more)
+    check("…inside the panel and the window", tip[0] >= box["x"] and tip[1] <= 1280 and tip[2] >= 0 and tip[3] <= 800, tip)
+    shot(pg, "desktop-more")
+    pg.keyboard.press("Escape"); check("…and Escape puts it away, the panel stays", visible(pg, "#xp-brief-more-a3") == "hidden" and state(pg)["open"])
+
+    # the "?" beside Send
     check("the explanation is put away until asked for", visible(pg, "#xp-brief-pick-a3") == "hidden")
-    pg.hover("#brief .xp-b"); check("…it shows on hover", visible(pg, "#xp-brief-pick-a3") == "visible")
+    pg.hover("#xpb-brief-pick-a3"); check("…it shows on hover", visible(pg, "#xp-brief-pick-a3") == "visible")
     tip = pg.eval_on_selector("#xp-brief-pick-a3", "e => { const r = e.getBoundingClientRect(); return [r.left, r.right] }")
     check("…inside the panel", tip[0] >= box["x"] and tip[1] <= 1280, tip)
     shot(pg, "desktop-tooltip")
@@ -210,7 +233,7 @@ def desktop(br, errors):
         pg.keyboard.press("Tab")
         if pg.evaluate("() => document.activeElement.classList.contains('xp-b')"): break
     check("…it shows on keyboard focus", pg.evaluate("() => document.activeElement.classList.contains('xp-b')") and visible(pg, "#xp-brief-pick-a3") == "visible")
-    pg.click("#brief .bhead"); check("…and goes when the focus leaves", visible(pg, "#xp-brief-pick-a3") == "hidden")
+    away(pg); check("…and goes when the focus leaves", visible(pg, "#xp-brief-pick-a3") == "hidden")
 
     # Escape, Back, scroll, focus
     pg.keyboard.press("Escape"); closed(pg); pg.wait_for_function("() => location.search === ''"); s = state(pg)
@@ -233,7 +256,7 @@ def desktop(br, errors):
     open_(pg, 2)
     pg.click("#brief .acard:has-text('Drop')"); pg.fill("#brief textarea", "a note kept with the pick"); r = rowstate(pg, 2); s = state(pg)
     check("a pick and a note show in the row too", r["form"] and "Drop" in r["pick"] and r["note"] == "a note kept with the pick", r)
-    check("the picked line names the pick, Send is on", s["picked"].startswith("Picked: ") and "Drop" in s["picked"] and s["send"], s)
+    check("with a pick, Send is on", "Drop" in s["pick"] and s["send"], s)
     pg.keyboard.press("Escape")
     check("Escape in the box leaves the box first", state(pg)["open"] and pg.evaluate("() => document.activeElement.id") == "brief", state(pg))
     pg.keyboard.press("Escape"); closed(pg)
@@ -260,11 +283,11 @@ def desktop(br, errors):
     check("with nothing written the open item is simply drawn anew", pg.query_selector("#brief .bchanged") is None and pg.evaluate("() => window.sameDocument === true"))
 
     # a draft on an item whose row has no box, while the whole page wants a reload
-    home(pg, clean=True); open_(pg, 10); pg.fill("#brief textarea", "a comment under way"); pg.click("#brief .bhead")
+    home(pg, clean=True); open_(pg, 10); pg.fill("#brief textarea", "a comment under way"); away(pg)
     pg.evaluate("() => { window.sameDocument = true; document.querySelector('meta[name=\"stackshot-shell\"]').content = 'another-frame' }")
     rewrite(11, next="something else now"); poll(pg); pg.wait_for_timeout(2500)
     check("the live refresh does not reload the page over a draft in the panel", pg.evaluate("() => window.sameDocument === true") and state(pg)["note"] == "a comment under way", state(pg))
-    pg.fill("#brief textarea", ""); pg.click("#brief .bhead"); rewrite(11, next="and again"); poll(pg, "() => window.sameDocument === undefined")
+    pg.fill("#brief textarea", ""); away(pg); rewrite(11, next="and again"); poll(pg, "() => window.sameDocument === undefined")
     pg.wait_for_function("() => window.sameDocument === undefined", timeout=10000)
     check("…and with nothing written it reloads as before, the panel open again", True)
     loaded(pg, 10)
@@ -330,8 +353,12 @@ def fullpage(br, errors):
     home(pg); open_(pg, 40); pg.fill("#brief textarea", "carried to the full page"); pg.click("#brief .acard:has-text('Ship')")
     pg.click("#brief [data-bact=full]"); pg.wait_for_url(BOARD + "/items/a40/brief"); pg.wait_for_selector("#brief-page article")
     pg.wait_for_function("() => document.querySelector('#brief-page textarea').value !== ''", timeout=5000)
-    got = pg.evaluate("() => ({t: document.querySelector('#brief-page textarea').value, c: (document.querySelector('#brief-page input[name=choice]:checked') || {}).value, p: document.querySelector('#brief-page .bpicked').textContent})")
-    check("full screen keeps the draft", got["t"] == "carried to the full page" and "Ship" in (got["c"] or "") and "Ship" in got["p"], got)
+    got = pg.evaluate("() => ({t: document.querySelector('#brief-page textarea').value, c: (document.querySelector('#brief-page input[name=choice]:checked') || {}).value})")
+    check("full screen keeps the draft", got["t"] == "carried to the full page" and "Ship" in (got["c"] or ""), got)
+    links = pg.eval_on_selector_all("main.briefpage #brief-page a[href]", "l => l.map(a => a.getAttribute('href'))")
+    seen = pg.inner_text("main.briefpage #brief-page")
+    check("the full page is as lean: one link to the item's page, no background, no heading", links.count("/items/a40") == 1 and "background fact" not in seen and "Detail view" not in pg.inner_text("body")
+          and pg.query_selector("#brief-page h3") is None, (links, seen))
     check("the full page fits", pg.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"))
     shot(pg, "desktop-full")
     pg.evaluate("() => { window.sameDocument = true }")
@@ -378,8 +405,8 @@ def phone(br, errors, scheme, w=390, h=844):
     check(f"{tag}: nothing scrolls sideways", fit[0] <= w and fit[1] <= fit[2], fit)
     check(f"{tag}: the page behind is dimmed, still and out of reach", pg.evaluate("() => !document.getElementById('brief-scrim').hidden && document.documentElement.classList.contains('sheet') && document.getElementById('layout').inert && document.getElementById('brief').getAttribute('aria-modal') === 'true'"))
     send = pg.eval_on_selector("#brief button[name=act]", "e => e.getBoundingClientRect().bottom")
-    small = pg.eval_on_selector_all("#brief .brief-bar .b, #brief .xp-b", "l => l.filter(e => e.getClientRects().length).map(e => [e.textContent, e.getBoundingClientRect().height]).filter(x => x[1] < 43.9)")
-    check(f"{tag}: Send is in view, the bar's buttons are large enough to tap", send <= h and small == [], (send, small))
+    small = pg.eval_on_selector_all("#brief .brief-bar .b, #brief .xp-b, #brief .btitle a", "l => l.filter(e => e.getClientRects().length).map(e => [e.textContent, e.getBoundingClientRect().height]).filter(x => x[1] < 43.9)")
+    check(f"{tag}: Send is in view, the bar's buttons, each ? and the item's link are large enough to tap", send <= h and small == [], (send, small))
     off = pg.evaluate("""() => [...document.querySelectorAll('#brief .brief-bar .b, #brief button[name=act]')].filter(e => e.getClientRects().length)
         .map(e => { const r = e.getBoundingClientRect(); return [e.textContent, r.left, r.right, r.top, r.bottom] }).filter(x => x[1] < -0.5 || x[2] > innerWidth + 0.5 || x[3] < -0.5 || x[4] > innerHeight + 0.5)""")
     check(f"{tag}: the bar's buttons and Send are wholly on the screen", off == [], off)
@@ -393,12 +420,14 @@ def phone(br, errors, scheme, w=390, h=844):
     check(f"{tag}: the note box is one line until used, with text large enough not to zoom", low < 50 and tall[0] >= 80 and tall[1] >= 16, (low, tall))
     pg.fill("#brief textarea", "\n".join(["a line of the note"] * 8)); grown = pg.eval_on_selector("#brief textarea", "e => e.getBoundingClientRect().height")
     check(f"{tag}: …and grows with its text", grown > tall[0] + 20, (tall, grown)); pg.fill("#brief textarea", "")
-    why = f"#xp-brief-pick-a{n}"
-    pg.tap("#brief .xp-b"); pg.wait_for_selector(why, timeout=5000); tip = pg.eval_on_selector(why, "e => { const r = e.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom] }")
-    check(f"{tag}: a tap on ? shows the words, on the screen", tip[0] >= 0 and tip[1] <= w and tip[2] >= 0 and tip[3] <= h, tip)
-    shot(pg, f"phone-tooltip-{tag}")
-    pg.tap("#brief .xp-b"); check(f"{tag}: a second tap puts them away", visible(pg, why) == "hidden")
-    head = pg.eval_on_selector("#brief .bhead", "e => { const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] }")
+    for what, name, words in (("the question's", "more", "another week"), ("Send's", "pick", "write a note")):
+        tid, button = f"#xp-brief-{name}-a{n}", f"#xpb-brief-{name}-a{n}"
+        pg.tap(button); pg.wait_for_selector(tid, timeout=5000)
+        tip = pg.eval_on_selector(tid, "e => { const r = e.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom] }")
+        check(f"{tag}: a tap on {what} ? shows the words, on the screen", words in pg.inner_text(tid) and tip[0] >= 0 and tip[1] <= w and tip[2] >= 0 and tip[3] <= h, (tip, pg.inner_text(tid)))
+        shot(pg, f"phone-tooltip-{name}-{tag}")
+        pg.tap(button); check(f"{tag}: a second tap puts {what} words away", visible(pg, tid) == "hidden")
+    head = pg.eval_on_selector("#brief .bhead", "e => { const r = e.getBoundingClientRect(); return [r.right - 6, r.y + r.height / 2] }")
     pg.mouse.move(*head); pg.mouse.down(); pg.mouse.move(head[0], head[1] + 40, steps=4); pg.mouse.up()
     check(f"{tag}: a short drag leaves it open", state(pg)["open"])
     pg.mouse.move(*head); pg.mouse.down(); pg.mouse.move(head[0], head[1] + 180, steps=8); pg.mouse.up(); closed(pg)
@@ -408,6 +437,13 @@ def phone(br, errors, scheme, w=390, h=844):
     pg.tap(f"{row(n)} .bopen"); loaded(pg, n); pg.go_back(); closed(pg)
     check(f"{tag}: Back closes it", state(pg)["url"] == "/", state(pg))
     pg.goto(BOARD + f"/?item=a{n + 5}"); loaded(pg, n + 5); shot(pg, f"phone-step-{tag}")
+    tid = f"#xp-brief-more-a{n + 5}"
+    pg.tap(f"#xpb-brief-more-a{n + 5}"); pg.wait_for_selector(tid, timeout=5000)
+    tip = pg.eval_on_selector(tid, "e => { const r = e.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom] }")
+    seen = pg.inner_text("#brief .istep .istepbody")
+    check(f"{tag}: a step is shown with no heading, its ? beside it opens on the screen",
+          "the next step" in seen and "background fact" in pg.inner_text(tid) and pg.query_selector("#brief .istep > b") is None and tip[0] >= 0 and tip[1] <= w and tip[2] >= 0 and tip[3] <= h, (seen, tip))
+    shot(pg, f"phone-step-more-{tag}")
     pg.goto(BOARD + "/?item=a42"); loaded(pg, 42)
     fit = pg.evaluate("() => { const b = document.querySelector('#brief .bbody'); return [document.documentElement.scrollWidth, b.scrollWidth, b.clientWidth] }")
     check(f"{tag}: long unbroken text stays inside the sheet", fit[0] <= w and fit[1] <= fit[2], fit)
@@ -573,7 +609,7 @@ def sc_failed_load(pg, say):
 
 
 def sc_drafts(pg, say):
-    n = fresh(); home(pg); open_(pg, n); pg.click("#brief .acard:has-text('Drop')"); pg.fill("#brief textarea", "kept across the pages"); pg.click("#brief .bhead")
+    n = fresh(); home(pg); open_(pg, n); pg.click("#brief .acard:has-text('Drop')"); pg.fill("#brief textarea", "kept across the pages"); away(pg)
     kept = lambda s: s["note"] == "kept across the pages" and "Drop" in s["pick"]
     onpage = "() => { const t = document.querySelector('#brief-page textarea'), c = document.querySelector('#brief-page input[name=choice]:checked'); return [t ? t.value : '', c ? c.value : ''] }"
     pg.reload(); loaded(pg, n); s = state(pg)
@@ -581,8 +617,8 @@ def sc_drafts(pg, say):
     tokened(pg, n); r = rowstate(pg, n)
     say("…and to the row", r["note"] == "kept across the pages" and "Drop" in r["pick"], r)
     say("…and with the draft kept, leaving is not asked about", not pg.evaluate(ARMED))
-    pg.click("#brief [data-bact=detail]"); pg.wait_for_url(BOARD + f"/items/a{n}"); pg.go_back(); loaded(pg, n); s = state(pg)
-    say("Detail view and Back keep it", kept(s), s)
+    pg.click("#brief .btitle a"); pg.wait_for_url(BOARD + f"/items/a{n}"); pg.go_back(); loaded(pg, n); s = state(pg)
+    say("the item's link and Back keep it", kept(s), s)
     pg.click("#brief [data-bact=full]"); pg.wait_for_url(BOARD + f"/items/a{n}/brief"); pg.wait_for_selector("#brief-page article"); got = pg.evaluate(onpage)
     say("Full screen shows it", got[0] == "kept across the pages" and "Drop" in got[1], got)
     pg.fill("#brief-page textarea", "kept across the pages, and changed there"); pg.reload(); pg.wait_for_selector("#brief-page article"); got = pg.evaluate(onpage)
@@ -633,7 +669,7 @@ def sc_held(pg, say):
     pg.click("#brief .bheld .buse"); soon(pg, "() => !document.querySelector('#brief .bheld')"); s = state(pg)
     say("…Put it in the box does so", s["note"] == "a note on the old step" and pg.query_selector("#brief .bheld") is None, s)
     # a comment that was being written when the item became a question
-    m = fresh(ask=None, opts=None); home(pg); open_(pg, m); pg.fill("#brief textarea", "only a comment"); pg.click("#brief .bhead")
+    m = fresh(ask=None, opts=None); home(pg); open_(pg, m); pg.fill("#brief textarea", "only a comment"); away(pg)
     rewrite(m, needs=["decision"], ask=ASK, options=OPTS); pg.evaluate("() => document.dispatchEvent(new CustomEvent('stackshot:newer', {detail: 424242}))")
     soon(pg, "() => !!document.querySelector('#brief .bchanged')"); pg.click("#brief .bchanged button"); soon(pg, "() => !!document.querySelector('#brief .bheld')")
     s = state(pg)
@@ -670,8 +706,8 @@ def sc_standalone(pg, say):
     say("in the installed app a title opens the panel, in the same page", got == {"same": True, "url": f"/?item=a{n}", "open": True}, got)
     loaded(pg, n)
     say("…with what was typed in the row", state(pg)["note"] == "typed before the tap", state(pg))
-    pg.click("#brief [data-bact=detail]"); pg.wait_for_url(BOARD + f"/items/a{n}"); pg.go_back(); loaded(pg, n)
-    say("…and Detail view and Back keep it", state(pg)["note"] == "typed before the tap", state(pg))
+    pg.click("#brief .btitle a"); pg.wait_for_url(BOARD + f"/items/a{n}"); pg.go_back(); loaded(pg, n)
+    say("…and the item's link and Back keep it", state(pg)["note"] == "typed before the tap", state(pg))
     pg.evaluate("() => { const a = document.body.appendChild(document.createElement('a')); a.id = 'other-link'; a.href = '/items/a12'; a.target = '_blank'; a.textContent = 'another'; a.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99' }")
     pages = len(pg.context.pages); pg.click("#other-link"); pg.wait_for_url(BOARD + "/items/a12")
     say("…and any other such link still opens in the app's own window", len(pg.context.pages) == pages, len(pg.context.pages))
@@ -694,7 +730,19 @@ def sc_next_folded(pg, say):
     say("next goes on to a question in a folded part of the list instead of saying all are answered", went and state(pg)["open"], state(pg))
 
 
-SCENARIOS = (sc_double, sc_apart, sc_timeout, sc_failed_load, sc_drafts, sc_no_storage, sc_lost_pick, sc_held, sc_older_read, sc_standalone, sc_leftover, sc_next_folded)
+def sc_redrawn_tip(pg, say):
+    n = fresh(); home(pg); open_(pg, n); tid, button = f"#xp-brief-more-a{n}", f"#xpb-brief-more-a{n}"
+    pg.click(button)
+    rewrite(n, ask=ASK.replace("next version", "newer version"))
+    pg.evaluate("() => document.dispatchEvent(new CustomEvent('stackshot:newer', {detail: 313131}))")
+    soon(pg, "() => document.querySelector('#brief').innerText.includes('newer version')")
+    say("a ? left open stays open when the item is drawn anew", visible(pg, tid) == "visible", pg.inner_text("#brief"))
+    pg.click(button); say("…and one click puts it away", visible(pg, tid) == "hidden")
+    pg.click(button); pg.evaluate("() => history.back()"); closed(pg); open_(pg, n)
+    say("…and one left open when the panel was left is not open when the item is opened again", visible(pg, tid) == "hidden", state(pg))
+
+
+SCENARIOS = (sc_double, sc_apart, sc_timeout, sc_failed_load, sc_drafts, sc_no_storage, sc_lost_pick, sc_held, sc_older_read, sc_standalone, sc_leftover, sc_next_folded, sc_redrawn_tip)
 # (what is taken out, the text as the page serves it, what it becomes, the scenario, the check of it that must then fail)
 MUTANTS = (
     ("no form is locked during a send", "function lock(f,v){", "function lock(f,v){return;", sc_double, "…the item opened again has its Send shut and says it is sending"),
@@ -706,6 +754,9 @@ MUTANTS = (
     ("a note that fits no box is not set aside", "function stash(d){", "function stash(d){return;", sc_held,
      "Done with a note on a step that is gone records nothing; the note that fits no box is held, offered with Copy and Put it in the box"),
     ("an older read is drawn when it lands", "if(cur!==me||me.n!==n||SENDING[me.k])return;var old", "if(cur!==me)return;var old", sc_older_read, "an older read that lands late does not put the item back"),
+    ("a redraw forgets an open ?", "\ndocument.dispatchEvent(new Event('stackshot:redrawn'))}", "}", sc_redrawn_tip, "a ? left open stays open when the item is drawn anew"),
+    ("a closed panel keeps its ? open", "V.innerHTML='';document.dispatchEvent(new Event('stackshot:redrawn'));", "V.innerHTML='';", sc_redrawn_tip,
+     "…and one left open when the panel was left is not open when the item is opened again"),
 )
 
 

@@ -19,9 +19,9 @@ def panel_html() -> str:
         word = _html.escape(_t(key))
         return f'<button type="button" class="b" data-bact="{act}" aria-label="{word}" title="{word}{hint}">{glyph}</button>'
     return ('<div id="brief-scrim" hidden></div><aside id="brief" role="dialog" aria-labelledby="brief-title" tabindex="-1" hidden>'
-            '<div class="brief-top"><span class="bgrab" aria-hidden="true"></span><div class="brief-bar"><span class="bwho"></span>'
+            '<div class="brief-top"><span class="bgrab" aria-hidden="true"></span><div class="brief-bar">'
             + btn("prev", "brief.prev", "&#8249;", " (k)") + btn("next", "brief.next", "&#8250;", " (j)")
-            + f'<a class="b" data-bact="full">{_html.escape(_t("brief.full"))}</a><a class="b" data-bact="detail">{_html.escape(_t("brief.detail"))}</a>'
+            + f'<a class="b" data-bact="full">{_html.escape(_t("brief.full"))}</a>'
             + btn("close", "brief.close", "&#215;", " (Esc)")
             + '</div></div><div id="brief-main"></div></aside><div id="brief-toast" role="status" hidden></div>')
 
@@ -41,8 +41,7 @@ li.irow.hrow>.bnote{clear:both}
 #brief[hidden],#brief-scrim[hidden],#brief-toast[hidden]{display:none}
 .brief-top{flex:none;background:var(--card)}
 .bgrab{display:none}
-.brief-bar{display:flex;align-items:center;gap:6px;padding:10px 16px 0}
-.brief-bar .bwho{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:13px;color:var(--mut)}
+.brief-bar{display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:10px 16px 0}
 .brief-bar .b{flex:none;min-height:32px;padding:3px 9px;white-space:nowrap}
 @media(pointer:coarse){.brief-bar .b{min-width:44px;min-height:44px}}
 #brief-main{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
@@ -53,21 +52,22 @@ li.irow.hrow>.bnote{clear:both}
 .bchanged{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--warn);background:var(--card);font-size:13px}
 .bitem{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
 .bhead{flex:none;padding:4px 16px 10px;border-bottom:1px solid var(--line);background:var(--card)}
-#brief .bhead>.bwho{display:none}
-.bhead>.bwho{margin:6px 0 0;font-size:13px;color:var(--mut)}
-.bitem .btitle{margin:6px 0 2px;font-size:16px;line-height:22px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
-.btitle .ir-id{color:var(--mut)}
-.bstate{margin:4px 0 0;font-size:13px;color:var(--mut)}
+.bitem .btitle{margin:6px 0 0;font-size:13px;font-weight:400;line-height:20px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.btitle a{color:var(--mut);text-decoration:underline;text-decoration-color:var(--ibd);text-underline-offset:3px}
+.btitle a:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+.bwhole .btitle{white-space:normal}
+@media(pointer:coarse){.bitem .btitle{margin:-4px 0 -10px;padding:15px 0}.btitle a{padding:15px 0}}
+.bq{margin:0;font-size:16px;font-weight:600;line-height:1.45}
+.bq>.xp{margin-left:4px}
+.bstate{margin:0 0 14px;font-size:14px;color:var(--mut)}
+.bitem .istep{display:flex;align-items:flex-start;gap:4px}
+.bitem .istep>.istepbody{flex:1 1 auto;min-width:0;margin-top:0}
+.bitem .xp-pop{max-height:50vh;overflow-y:auto;overscroll-behavior:contain;white-space:pre-line}
 .bbody{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow-y:auto;overscroll-behavior:contain;padding:12px 16px 0;overflow-wrap:anywhere}
 .bbody>*{flex:none;min-width:0}
 .bbody::after{content:'';order:1;flex:none;height:20px}
-.bsec{margin:0 0 14px}
-.bsec>h3{margin:0 0 6px;font-size:13px;font-weight:700;color:var(--mut)}
-.bsec .desc{margin:0;opacity:1;font-size:14px}
-.bmore>summary{cursor:pointer;color:var(--mut);font-size:13px;padding:4px 0}
-.bmoreline{margin:6px 0 0;font-size:13px}
-.breco{margin:0 0 10px;font-size:14px}
-.bpast{margin:0;padding-left:20px;font-size:14px;line-height:1.5}
+.bitem .iask .breco{margin:6px 0 0;font-size:14px;line-height:1.5}
+.bitem .iask .iopts{margin-top:8px}
 .bsent .bnext,.bsent .bretry{margin:0 8px 12px 0}
 .bheld{margin:0 0 14px}
 .bheld .dhead{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
@@ -79,7 +79,6 @@ li.irow.hrow>.bnote{clear:both}
 .bitem form.ianswer textarea{height:38px;min-height:38px}
 .bitem form.ianswer textarea:focus,.bitem form.ianswer textarea:not(:placeholder-shown){height:84px}
 @media(pointer:coarse){.bitem .abox textarea:placeholder-shown:not(:focus){height:38px!important}.bitem form.ianswer .abox textarea:focus{min-height:84px}}
-.bpicked{margin:0 0 6px;font-size:13px;color:var(--mut)}
 .bitem .abtns,.bitem .abtns-send{align-items:center}
 .bitem .ahint{display:none}
 .bitem.justsent form[data-comment-only]{display:none}
@@ -93,10 +92,8 @@ body.brief-open #panel,body.brief-open #panel-edge,body.brief-open #panel-scrim,
 #brief{top:auto;left:0;width:auto;height:92vh;height:92dvh;border-left:0;border-radius:16px 16px 0 0;overflow:hidden}
 .brief-top,#brief .bhead{touch-action:none}
 .bgrab{display:block;width:44px;height:5px;margin:0 auto;border-radius:3px;background:var(--ibd);position:relative;top:6px}
-.brief-bar{justify-content:flex-end;flex-wrap:wrap;gap:4px;padding:12px 8px 0}
-.brief-bar .bwho{display:none}
+.brief-bar{flex-wrap:wrap;gap:4px;padding:12px 8px 0}
 .brief-bar .b{min-width:44px;min-height:44px;padding:3px 8px}
-.bitem .btitle{font-size:15px}
 .bitem form.ianswer textarea{font-size:16px}
 .bitem .bfoot{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px;align-items:center}
 .bitem .bfoot>*{grid-column:1/-1}
@@ -104,14 +101,12 @@ body.brief-open #panel,body.brief-open #panel-edge,body.brief-open #panel-scrim,
 .bitem .bfoot>.abtns-send{grid-column:2;flex-wrap:nowrap;margin:0}
 html.sheet,html.sheet body{overflow:hidden}}
 main.briefpage{overflow-wrap:anywhere}
-.bpbar{display:flex;gap:8px;margin:12px 0}
-#brief-page>.bitem{max-width:760px;border:1px solid var(--line);border-radius:12px}
+#brief-page>.bitem{margin-top:12px;max-width:760px;border:1px solid var(--line);border-radius:12px}
 #brief-page>.bchanged{max-width:760px;box-sizing:border-box}
 #brief-page .bhead{border-radius:12px 12px 0 0}
 #brief-page .bbody{flex:none;overflow:visible}
 #brief-page .bfoot,#brief-page .bbody>form.ianswer:not([data-cards]){border-radius:0 0 12px 12px}
 body:has(main.briefpage) .fab,body:has(main.briefpage) #totop{display:none}
-.bbody .iwait{margin:0 0 14px}.bbody .iwait h2{margin:0 0 6px;font-size:13px;font-weight:700;color:var(--mut)}
 .bbody .iask,.bbody .draft{margin-bottom:14px}.bbody .isent{margin-bottom:12px}
 """.replace("__NARROW__", _NARROW)
 
@@ -152,7 +147,6 @@ function refOf(f){var x=$('input[name=ref]',f);return x?x.value:''}
 function chosen(f){return $('input[name=choice]:checked',f)}
 function noteOf(f){var t=$('textarea',f);return t?t.value:''}
 function label(p){var c=p.closest('.acard'),l=c&&$('.alab',c),k=l&&$('.akey',l);return l?(k?k.textContent+' · '+l.textContent.slice(k.textContent.length):l.textContent):p.value}
-function picked(f){var o=$('.bpicked',f);if(!o)return;var p=chosen(f);o.textContent=SST('js.brief.picked',{what:p?label(p):SST('js.brief.none')})}
 function sync(f){if(window.ssCards&&drawn(f))ssCards.sync(f)}
 function entry(k){return D[k]||(D[k]={})}
 // what no longer fits the box is set aside, never dropped: the note is held, the pick is named
@@ -178,7 +172,7 @@ if(fresh){if(d.f&&d.f!==family(f))stash(d);else if(d.c&&((ref&&d.r&&ref!==d.r)||
 var mine=!d.f||d.f===family(f),t=$('textarea',f),v=(mine&&d.t)||'';
 if(t&&t.value!==v)t.value=v;
 radios.forEach(function(i){i.checked=mine&&!!d.c&&i.value===d.c&&(!ref||!d.r||ref===d.r)});
-var p=chosen(f);f._was=p?p.value:'';picked(f);sync(f)}
+var p=chosen(f);f._was=p?p.value:'';sync(f)}
 function words(d,f){var o=[];if(d&&d.e)o.push(d.e);if(d&&d.x)o.push(SST(f&&f.matches('[data-cards]')?'js.brief.repick':'js.brief.pick_gone',{what:d.x}));return o}
 function tellIn(box,k,lines){box.textContent=lines.join(' ')+' ';var b=btn('b bdismiss',SST('js.brief.dismiss'));b.setAttribute('data-dismiss',k);box.appendChild(b)}
 // what the brief says about the open item's draft: under Send where there is a box, else at the top, with the note that fits no box
@@ -248,13 +242,13 @@ function show(){if(P)P.focus({preventScroll:true});else window.scrollTo(0,0)}
 function nextButton(s){if(P&&!$('.bnext',s))s.appendChild(btn('b bnext',SST('js.brief.next')))}
 function render(a,keep){var k=cur.k,b=$('.bbody',V),y=keep&&b?b.scrollTop:0,had=!!P&&P.contains(document.activeElement),n=document.importNode(a,true);
 V.innerHTML='';V.appendChild(n);cur.fp=n.getAttribute('data-fp')||'';
-if(P){var who=$('.bhead>.bwho',n);$('.brief-bar .bwho',P).textContent=who?who.textContent:''}
 var f=form(n);if(cur.sent&&cur.fp!==cur.sentFp&&drawn(f))cur.sent=null;      // the item asks again: the last answer's notice goes
-put(k,f,true);if(f){picked(f);sync(f)}
+put(k,f,true);if(f)sync(f);
 if(cur.sent){n.classList.add('justsent');var s=$('.bsent',n),into=$('.bbody',n);if(!s){s=cur.sent.cloneNode(true);into.insertBefore(s,into.firstChild)}nextButton(s)}
 lockAll();notes();var r=rowForm(rowFor(k));if(r&&D[k])put(k,r,false);rowNote(k);
 $('.bbody',n).scrollTop=y;if(had&&!P.contains(document.activeElement))P.focus({preventScroll:true});
-document.dispatchEvent(new Event('stackshot:inserted'))}
+document.dispatchEvent(new Event('stackshot:inserted'));
+document.dispatchEvent(new Event('stackshot:redrawn'))}      // a "?" left open stays open on the markup that came; one of another item is forgotten
 // recorded, but the item could not be read again: say so where the box was
 function unread(k){var art=$('article.bitem',V);if(!art)return;var f=form(art);if(f)f.remove();var body=$('.bbody',art),s=el('div','bsent'),p=el('p','isent ok',SST('js.brief.sent_unread')+' ');
 s.setAttribute('data-ok','1');p.setAttribute('role','status');p.appendChild(link(k,'',SST('js.brief.open_page')));s.appendChild(p);s.appendChild(btn('b bretry',SST('js.brief.retry'),latest));nextButton(s);
@@ -274,7 +268,7 @@ V.addEventListener('submit',function(e){var f=e.target;if(!f.matches('form.iansw
 function typed(e){var t=e.target;if(!t||!t.matches||!t.form)return;var radio=t.matches('input[name=choice]'),text=t.matches('textarea[name=text]');
 if(!((radio&&e.type!=='input')||(text&&e.type==='input')))return;
 var f=t.form,k='',inside=V.contains(f);if(inside)k=cur?cur.k:'';else if(f.matches('form.hanswer'))k=keyOf(f.closest('li.irow.hrow'));if(!k)return;
-capture(k,f,t);if(inside)picked(f);
+capture(k,f,t);
 // the row and the brief are one draft: what is picked or written in either shows in the other
 var other=inside?rowForm(rowFor(k)):cur&&cur.k===k?boxForm():null;if(other)put(k,other,false);notes();rowNote(k)}
 ['input','change','click'].forEach(function(n){document.addEventListener(n,typed)});
@@ -294,7 +288,7 @@ if(sk&&si&&D[si]){var d0=D[si];delete d0.s;if(sk==='askedback'||noticeOf(sk,0)==
 function lost(){Object.keys(D).forEach(function(k){if(D[k].s&&!SENDING[k]){delete D[k].s;D[k].e=SST('js.brief.was_sending')}});save()}
 lost();
 if(!P){var art=$('article.bitem',FULL);if(art){cur={k:art.getAttribute('data-key'),fp:art.getAttribute('data-fp')||'',sent:null,sentFp:'',n:0};var first=form(art);
-put(cur.k,first,true);if(first){picked(first);sync(first)}lockAll();notes()}
+put(cur.k,first,true);if(first)sync(first);lockAll();notes()}
 if(/[?&]sent=/.test(location.search)&&history.replaceState)history.replaceState(history.state,'',location.pathname);
 return}
 // ---- the panel
@@ -315,18 +309,18 @@ function tell(k,why){clearTimeout(tt);var li=rowFor(k),id=li&&$('.ir-id',li);toa
 toast.appendChild(el('span','',SST('js.brief.toast',{item:id?id.textContent:k,why:why})));
 toast.appendChild(btn('b main',SST('js.brief.open_item'),function(){toast.hidden=true;open(k,cur?'step':'click')}));
 toast.appendChild(btn('b',SST('js.brief.dismiss'),function(){toast.hidden=true}));toast.hidden=false}
-function fill(me){V.innerHTML='';$('.brief-bar .bwho',P).textContent='';var w=el('p','bload',SST('js.brief.loading'));w.id='brief-title';V.appendChild(w);P.focus({preventScroll:true});
+function fill(me){V.innerHTML='';var w=el('p','bload',SST('js.brief.loading'));w.id='brief-title';V.appendChild(w);P.focus({preventScroll:true});
 var n=++me.n;load(page(me.k)+'/brief').then(function(a){if(cur===me&&me.n===n)render(a)},function(){if(cur===me&&me.n===n)failed(me)})}
 function failed(me){V.innerHTML='';var w=el('div','bfail'),h=el('p','',SST('js.brief.fail_load'));h.id='brief-title';h.setAttribute('role','alert');w.appendChild(h);
 w.appendChild(btn('b main bretry',SST('js.brief.retry'),function(){if(cur===me)fill(me)}));w.appendChild(link(me.k,'b',SST('js.brief.open_page')));V.appendChild(w)}
 function open(k,how){var me=cur={k:k,fp:'',sent:null,sentFp:'',seen:0,n:0};
 if(P.hidden){homeY=window.scrollY;last=document.activeElement;P.hidden=false;body.classList.add('brief-open')}
-lay();mark();$('[data-bact=full]',P).setAttribute('href',page(k)+'/brief');$('[data-bact=detail]',P).setAttribute('href',page(k));
+lay();mark();$('[data-bact=full]',P).setAttribute('href',page(k)+'/brief');
 if(toast.getAttribute('data-k')===k)toast.hidden=true;
 if(how==='click'||how==='step')address(k);
 if(how==='click'&&!MQ.matches){var li=rowFor(k);if(li)li.scrollIntoView({block:'nearest'})}
 fill(me)}
-function closeUI(){if(!cur)return;var k=cur.k;cur=null;P.hidden=true;P.style.transform='';V.innerHTML='';body.classList.remove('brief-open');lay();mark();
+function closeUI(){if(!cur)return;var k=cur.k;cur=null;P.hidden=true;P.style.transform='';V.innerHTML='';document.dispatchEvent(new Event('stackshot:redrawn'));body.classList.remove('brief-open');lay();mark();
 if(MQ.matches)window.scrollTo(0,homeY);var li=rowFor(k),a=li&&$('a.ir-link',li),t=a&&a.getClientRects().length?a:last;if(t&&t.focus)t.focus({preventScroll:true})}
 function close(){if(!cur)return;var p=param();closeUI();if(!p)return;if(history.state&&history.state.brief)history.back();else history.replaceState(null,'',location.pathname)}
 function step(d){if(!cur)return;var l=rows().map(keyOf),n=l.length,i=l.indexOf(cur.k);if(!n)return;var k=i<0?l[d>0?0:n-1]:l[(i+d+n)%n];if(k!==cur.k)open(k,'step')}
