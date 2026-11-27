@@ -9,6 +9,7 @@ from urllib.parse import quote, urlsplit
 from stackshot.web.ui import PREFIX, under   # the (empty) root prefix: every address this page writes goes through under()
 from stackshot.web.ui import kit as _ui   # the one item system: the state words and tags, the one row every list draws, the type scale
 from stackshot.web.ui import groups as _grp   # rows in one foldable subsection per scope: home's four lists and the Closed page (groups.py)
+from stackshot.web.ui import explain as _xp   # the "?" control that holds a page's explainer text (explain.py)
 from stackshot.web.ui import releasing as _rel   # which pull requests are in the release script's queue (an item anchored to one is Queued for release)
 RELEASE_LIST = "release"   # the home page's fourth list, beside home.py's three: the agents' items whose pull request is in the release queue (Board.home_lists)
 from stackshot.model import option_labels as _ol   # the letter an option's label repeats from its badge, dropped on read (option_labels.py)
@@ -953,6 +954,7 @@ _TOTOP_LINK = ('<a href="#top" id="totop" aria-label="Back to top" title="Back t
                'stroke-linecap="round" stroke-linejoin="round"><path d="M6 14l6-6 6 6"/></svg></a>')
 _FAB_PAIR = _RELOAD_FAB + "\n" + _TOTOP_LINK
 _FAB_PAIR += _ct.BODY   # the color tool's init, at the end of every page's body: it draws the Colors button into the side panel's mount (#panel-colors) and the panel in the body
+_FAB_PAIR += _xp.SCRIPT   # the one script of every page's "?" explainers (explain.py)
 _TOTOP_JS = ("<script>(function(){var b=document.getElementById('totop');if(!b)return;"
              "b.addEventListener('click',function(e){e.preventDefault();window.scrollTo(0,0);history.replaceState(null,'',' ')})})();</script>")
 # Every fold on every page of the board keeps its open state per browser (localStorage, key `stackshot.fold.<data-fold>`), whichever page it is on: the home page's
@@ -3397,7 +3399,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         css = css.replace("__D2FACE__", _D2_FACE).replace("__DOCK__", str(_PANEL_DOCK_PX)).replace("__ISPIN__", f"{_ITEM_PIN_STRIP_PX - 0.02:g}")
         css = css.replace("__FONT__", str(_cfg.get("instance", "font_stack") or "system-ui,sans-serif"))
         ts = _ui.type_scale      # the page's own rules on the five-size scale; the panel's cards, the machine cards and the Runners page keep theirs
-        return ts(css) + ts(_BTN_CSS) + ts(_ABOX_CSS) + ts(_CARDS_CSS) + _MACH_CSS + _RUN_CSS + ts(_PORDER_CSS) + ts(_search.CSS) + ts(_AUDITS_CSS) + _ui.CSS
+        return ts(css) + ts(_BTN_CSS) + ts(_ABOX_CSS) + ts(_CARDS_CSS) + _MACH_CSS + _RUN_CSS + ts(_PORDER_CSS) + ts(_search.CSS) + ts(_AUDITS_CSS) + _ui.CSS + _xp.CSS
 
     def audit_line(self):
         """HTML: the audit card, the body of the side panel's Audit section. The name row is `Audits ↗`, a link to the Audits page (/audits), with the Audit now text link at its right; under it the shortlist

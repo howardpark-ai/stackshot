@@ -17,6 +17,7 @@ One flat dict, `CATALOG`, of dotted key -> `str.format` template. The areas:
     search.*   the search page: its filters, summary lines, notes and result rows
     runners.*  the CI runners page: its cards, table, machine lines, switch buttons and as-of lines (js.runners.* are the words its script says)
     page.*     small words several pages share (Archived, none)
+    explain.*  the "?" control that holds a page's explainer text (ui/explain.py): its button's name
     sessions.* the sessions list: its group headings, the session flags and their hovers
     foryou.*   the For you list on the home page
     sent.*     the notices a session sent, in the home page's rows
@@ -38,6 +39,7 @@ CATALOG: dict[str, str] = {
     # ------------------------------------------------------------------ the pages after the item page: sessions, for you, sent notices, said tags (stage 3b)
     "page.archived": "Archived",
     "page.none": "none",
+    "explain.about": "About {what}",
     "sessions.agents": "Agents",
     "sessions.background": "Background agents",
     "sessions.session": "Session",
