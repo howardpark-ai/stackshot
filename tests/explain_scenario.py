@@ -139,8 +139,9 @@ real_root, real_enabled = _anc.pilot_root, ui_runners.enabled
 try:
     _anc.pilot_root = lambda *a, **k: ""
     drawn["project, not ruled"] = board().routing_html("projects/alpha")
-    ui_runners.enabled = lambda: True      # a board with runners, before the first read: nothing is read from GitHub
-    drawn["runners, in use"] = ui_runners.page_html(board(), {"ts": 0, "errors": {}, "failed": [], "runners": [], "switch": {}, "stale": False, "pending": True, "refreshing": False, "age_s": 0})
+    ui_runners.enabled = lambda: True      # a board with runners and a snapshot handed to it, so the table and its "as of" line are drawn: nothing is read from GitHub
+    one = {"box": "box-a", "repo": "example-owner/stackshot", "state": "idle", "name": "box-a-0", "kind": "", "reason": "", "job": None}
+    drawn["runners, in use"] = ui_runners.page_html(board(), {"ts": now0, "errors": {}, "failed": [], "runners": [one], "switch": {}, "stale": False, "refreshing": False, "age_s": 0})
 finally:
     _anc.pilot_root, ui_runners.enabled = real_root, real_enabled
 POP = re.compile(r'<span class="xp-pop" id="xp-([^"]*)"[^>]*>([^<]*)</span>')
@@ -148,7 +149,12 @@ def inline(h):
     """The words a page draws outside every popup (and outside its style and scripts)."""
     h = POP.sub(" ", re.sub(r"(?s)<(style|script)[^>]*>.*?</\1>", " ", h))
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", h)))
-def said(key): return ".+?".join(re.escape(part) for part in re.split(r"\{[a-z_]+\}", i18n.EN[key]))      # the English text, any value in each of its fields
+KNOWN = {"audit.runs_hint": {"button": i18n.EN["panel.audit.now"]}}      # a string that is nearly all fields would match any sentence: the field the page always fills the same way is filled in
+def said(key):
+    """The English text, any value in each of its fields."""
+    s = i18n.EN[key]
+    for field, value in KNOWN.get(key, {}).items(): s = s.replace("{" + field + "}", value)
+    return ".+?".join(re.escape(part) for part in re.split(r"\{[a-z_]+\}", s))
 for row, (where, keys) in MOVED.items():
     pops = {k: html.unescape(v) for k, v in POP.findall(drawn[where])}
     text = pops.get(row.split("/")[0], "")
@@ -156,6 +162,7 @@ for row, (where, keys) in MOVED.items():
     for k in keys:
         back = [n for n, h in drawn.items() if re.search(said(k), inline(h))]
         check(f"{row}: {k} is drawn outside a popup on no page", not back, back)
+check('the runners page read above is the one in use, with its "as of" line', 'class="sub rasof"' in drawn["runners, in use"], inline(drawn["runners, in use"])[:600])
 check("an empty New section still says so on the page", i18n.EN["closed.new_none"] in inline(pages["closed"]), inline(pages["closed"])[:600])
 _had = dict(_cfg.CFG.get("audit", {})); _cfg.CFG.setdefault("audit", {})["pattern_review"] = "off"
 try:
