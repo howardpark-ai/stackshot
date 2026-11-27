@@ -8,6 +8,38 @@ only id allocator, and serves the rendered board at `/`. `stackshot/web/publish.
 write (debounced), on a timer and when the machine or session state changes. A publish that changes nothing commits
 nothing.
 
+**Pages.** A brain adopted into a board writes its pages as markdown files under `pages/` of the board's repository and never commits them: the publisher
+is the only committer and pusher of that repository. The board's own publish never commits anything under `pages/`, with `publish.pages` on or off (see
+docs/configuration.md). With it on, `publish_pages(paths, author, email)` in `stackshot/web/publish.py`, called right after a write with the files that
+write touched (relative to `pages/`), commits just those files (an edit, a new page or a removed one) in one commit, with the signed-in person or agent as
+the git author and the board's own git identity as the committer (a name on the commit, not a signature), and pushes it. It returns true for a commit made
+and false when every file named is as committed already. Everything it is given is checked before anything is staged: a path that is empty, has an empty,
+`.`, `..` or `.git` part, holds a control character or is not UTF-8, is a folder or a symbolic link, runs through one or through a folder that is a git
+repository of its own (`pages/` included), cannot be read, is left unmerged (a stash pop's conflict), or is neither on disk nor in the last commit is
+refused, and so is a call of more than 1000 paths (or 64 KiB of them) and an author with no usable name. Each path is a file name, never a pattern. So are
+a `[paths] repo` that is a folder inside its repository rather than its top, and a store clone whose index is locked (an `index.lock`: another git
+command running, or one stopped that left it). The commit is built in an index of the call's own (`GIT_INDEX_FILE`, in a temporary folder removed at the
+end: the last commit read into it, then the named files), never in the store clone's index, which every session on the host shares; a page whose entry
+there is marked assume-unchanged is committed as it is on disk. That index is checked before the commit: nothing the caller did not name may go with it
+(submodules included, whatever `.gitmodules` or `diff.ignoreSubmodules` hide), so a file that became a folder, or a folder that became a file, goes out
+only when both sides are named (the new file and the old folder's files, or the old file and the new files in its place). The commit is `git commit
+--only` of the named files: hooks and signing as for any commit, no automatic gc from it. Once it is made, the store clone's index is brought to it for the
+named files only, so what a session staged there stays staged as it was; a call that would drop an entry a session staged (a new file in a folder that is
+a named file now) is refused before the commit instead. The author's address is the one given, cleaned, else this process's `GIT_COMMITTER_EMAIL` (the
+board's own), else `board@localhost`; never the clone's configured `user.email`. A commit that is not made (the switch off, a refusal, the clone in the
+middle of a session's merge or rebase or on a detached HEAD, git refusing or failing a step) raises `CommitFailed`, the store clone's index exactly as it
+was, so a failed page is never reported as unchanged and never goes out later under another writer's name; the same author tries again. Where that index
+cannot be brought to a commit made (another git holds it at that moment), the call still returns true and says on stderr which files read as staged and
+the `git reset -q --` that clears them. An interrupt (SIGINT in the main thread) waits for git, then raises `KeyboardInterrupt` saying whether the commit
+was made; a second one stops git where it is. Once the commit is made, the push is tried at once; a commit that is not on the mirror after it (the push
+refused or failed, or the fetch before it) is said on stderr, at most once an hour, and goes out with a later publish: the next one where the branch
+tracks the mirror, else the next that commits. A real conflict with the mirror waits for a manual merge, as the board's own commits do. Call it under
+`publish.pages_lock()` where another write could land on the same file first, so the write and its commit are one step. Each board has its own repository
+and publishes only to it. A page file
+edited by hand is committed only when a call names it, under that call's author. Where the store clone has no `user.name` or `user.email` of its own, the
+board's merge with its mirror takes this process's committer (`GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`), else the last commit's committer: never a
+page's author.
+
 **The connector.** The same server serves MCP at `/mcp`, behind Google OAuth (plus one optional machine token for a
 Cloudflare MCP portal). Its tools:
 
