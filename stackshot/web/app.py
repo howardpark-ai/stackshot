@@ -29,11 +29,13 @@ from stackshot.web.tools import message as _tool_message
 from stackshot.web.tools import route as _tool_route
 from stackshot.web.tools import anchors as _tool_anchors
 from stackshot.web.tools import rules as _tool_rules
+from stackshot.web.tools import invite as _tool_invite
 from stackshot.web import door_guard as _door_guard, frame_guard as _frame_guard, requestlog as _requestlog
 from stackshot.web.middleware import _Fingerprint, _LinkIds, _ReadOnly, _RefusalLog, _RetiredInputs
 from stackshot.web.routes import client_api as _routes_client_api
 from stackshot.web.routes import answers as _routes_answers
 from stackshot.web.routes import door_verify as _routes_door_verify
+from stackshot.web.routes import join as _routes_join
 from stackshot.web.routes import ui_api as _routes_ui_api
 from stackshot.web.routes import board_pages as _routes_board_pages
 from stackshot.web.routes import answer_frame as _routes_answer_frame
@@ -205,7 +207,7 @@ def build(
             f"GitHub was down or the hour's writes were spent (temporary, until it takes its issue number), and <letter><n> for older items; write an id in "
             f"that shown form, never a store id such as {_gh.letter()}7. A board change that reflects a state change is matched by a project-page "
             f"update in the same turn, the page first (a page write up to five minutes before the change counts). If your session did not load {OWNER}'s standing rulebook at start (a cloud or Cowork session), call the rules tool first and follow it: it overrides any default behaviour. A Claude Code session on the owner's machines has it already through CLAUDE.md and does not call it."
-        ),
+        ) + _tool_invite.first_use(),
         auth=_oauth._auth(),
     )
     mcp.add_middleware(_requestlog.RequestRoute())      # first, so outermost: it names the request's route for the request log (web/requestlog.py), and changes nothing
@@ -231,11 +233,13 @@ def build(
     _tool_route.register(mcp, anchor_release=anchor_release, watch_label=watch_label)
     _tool_anchors.register(mcp, evw_boxes=evw_boxes, machine_state=machine_state)
     _tool_rules.register(mcp)
+    _tool_invite.register(mcp)      # the `invite` tool, only on a board whose [invites] names an admin (web/tools/invite.py)
     _signin.register(mcp)
     _routes_door_verify.register(mcp)      # `GET /frontdoor/verify` for the sign-in service, only on a board whose [behind_frontdoor] names a verify_secret_file (web/routes/door_verify.py)
     _routes_client_api.register(mcp, client_get=client_get, recycle_wanted_tokens=recycle_wanted_tokens)
     _routes_answers.register(mcp, answer=answer)
     _routes_ui_api.register(mcp, contact_label=contact_label, runner_status=runner_status, phase_sweep_status=phase_sweep_status)
+    _routes_join.register(mcp)      # `GET /join`, the setup page an invite's link names, only on a board that can invite (web/routes/join.py); before the catch-all
     _routes_answer_frame.register(mcp)      # before the catch-all of board_pages, which answers the address while [ui] answer_frame_origins is empty
     _routes_board_pages.register(mcp, contact_label=contact_label)
     return mcp

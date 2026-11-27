@@ -1,6 +1,6 @@
 # The front door
 
-What this page covers: the front door, one MCP endpoint over several boards and a brain for people who sign in through a reverse proxy: how it is run, the sign-in service the proxy asks, its units, the splitter, releases, who the caller is, the one tool set and its `board` argument, every refusal text, the credential each backend is called with, the instructions text, the health route and what is checked. Back to the [README](../README.md).
+What this page covers: the front door, one MCP endpoint over several boards and a brain for people who sign in through a reverse proxy: how it is run, the sign-in service the proxy asks, inviting a person, its units, the splitter, releases, who the caller is, the one tool set and its `board` argument, every refusal text, the credential each backend is called with, the instructions text, the health route and what is checked. Back to the [README](../README.md).
 
 The front door is a separate program (`python -m stackshot.frontdoor`, package `stackshot/frontdoor/`). The board server does not import it and does not read its settings. `./install.sh units` renders a unit for each part the config has a table for, and nothing enables or starts one: a person does ([Units, the splitter and releases](#units-the-splitter-and-releases)). A board takes part in it only when its own config says so (see [A board behind the front door](#a-board-behind-the-front-door)); a board with no such table behaves as it always did.
 
@@ -65,6 +65,7 @@ A reverse proxy asks a sign-in service who a connector's bearer token is for bef
 | the board cannot read the verify secret | 403 `refused: this board cannot read the secret that checks the sign-in service's header...` |
 | a correctly signed header, and the verify secret is the same as the identity secret | 403 `refused: this board's secret for the sign-in service's header is the same as its identity secret...` |
 | a token the board's sign-in accepts | 200 `{"email": "<lower case>", "via": "google"}`, or `"via": "portal"` for the portal's machine token |
+| a token the board's sign-in accepts, of a Google sign-in a registration refuses ([Inviting a person](#inviting-a-person)) | 403 `{"error": "not_admitted", "why": "<reason>", "email": "<lower case>"}` |
 | no bearer, an empty one, not `Bearer`, a token the board does not know, expired or revoked, or one with no address | 401 `{"error": "invalid_token"}`, with the `WWW-Authenticate` header below |
 | the check itself raised | 503 `{"error": "unavailable"}`, never 401 |
 | the board has no sign-in (`[auth] mode` off) | 404 |
@@ -73,7 +74,7 @@ The check is the board's own `verify_token`, the call its browser sign-in makes:
 
 A 401 carries the `WWW-Authenticate` value the board's own `/mcp` sends for the same request: with no `Authorization` header the challenge names no error, with one it says `error="invalid_token"`, and both name the `resource_metadata` address a connector discovers the sign-in by (and the scopes to ask for). The board takes the value from the library's own guard on `/mcp`, so it follows the board's `[auth] base_url` and MCP path. A sign-in service that passes it on gives a connector the same sign-in discovery as the board. No other answer (403, 404, 503, 200) carries the header.
 
-**What the sign-in service can rely on.** A 200 says the token is valid, not that the account is a member of any board: the sign-in service checks membership. The service treats any 5xx as a refusal. The signed header is bound to neither the token nor the request, so whoever gets hold of one can send it again, with any token, until it is older than `identity_max_age_seconds`: keep that hop as private as the one the signed identity takes. The verify secret and the identity secret must differ, because the service holds the verify secret and with the identity secret it could sign a call as any member: a board that checks identities and whose two files hold the same value answers no check, and its log says why.
+**What the sign-in service can rely on.** A 200 says the token is valid and no registration refuses it, not that the account is a member of any board: the sign-in service checks membership. The service treats any 5xx as a refusal. The signed header is bound to neither the token nor the request, so whoever gets hold of one can send it again, with any token, until it is older than `identity_max_age_seconds`: keep that hop as private as the one the signed identity takes. The verify secret and the identity secret must differ, because the service holds the verify secret and with the identity secret it could sign a call as any member: a board that checks identities and whose two files hold the same value answers no check, and its log says why.
 
 ## The sign-in service
 
@@ -103,9 +104,9 @@ For a front door on port 8020 whose `identity_header` is `x-forwarded-user`, a s
 
 ```
 mcp.example.com {
-	# The board's own sign-in, which a connector uses before it has a token. The match is on the request line as it arrived:
-	# a `path` matcher would ignore case and tidy the path before comparing, and the board does neither.
-	@signin vars_regexp {http.request.orig_uri} ^/(\.well-known(/[A-Za-z0-9_-][A-Za-z0-9._-]*)+|authorize|token|register|consent|auth/callback)(\?.*)?$
+	# The board's own sign-in, which a connector uses before it has a token, and the setup page an invite links to. The match is
+	# on the request line as it arrived: a `path` matcher would ignore case and tidy the path before comparing, and the board does neither.
+	@signin vars_regexp {http.request.orig_uri} ^/(\.well-known(/[A-Za-z0-9_-][A-Za-z0-9._-]*)+|authorize|token|register|consent|auth/callback|join)(\?.*)?$
 	route {
 		request_header -X-Forwarded-User
 		reverse_proxy @signin 127.0.0.1:8010
@@ -120,7 +121,7 @@ mcp.example.com {
 
 - `route` keeps the lines in the order written. Outside it, Caddy's own order runs `forward_auth` before `request_header`, which would remove the identity the check had just set.
 - `request_header -X-Forwarded-User` removes a client's own identity header before anything else. It names the front door's `identity_header`, as `copy_headers` does.
-- Six kinds of path go to the board unchecked, and no others: `/.well-known/...` (the discovery documents), `/authorize`, `/token`, `/register`, `/consent` and `/auth/callback`. Everything else goes through the check to the front door, `/mcp` included, and so does one of these paths written another way (another case, an encoded character, a dot segment, a doubled or trailing slash): it needs a token like any other.
+- Seven kinds of path go to the board unchecked, and no others: `/.well-known/...` (the discovery documents), `/authorize`, `/token`, `/register`, `/consent`, `/auth/callback` and `/join`, the setup page of [Inviting a person](#inviting-a-person) (a board without `[invites]` has no such page). Everything else goes through the check to the front door, `/mcp` included, and so does one of these paths written another way (another case, an encoded character, a dot segment, a doubled or trailing slash): it needs a token like any other.
 - On the board the service asks, `[auth] base_url` is the public address (`https://mcp.example.com` here), so that the metadata's `resource` and the `resource_metadata` of a 401 name the URL a connector uses. The board's Google OAuth client lists `https://mcp.example.com/auth/callback` as a redirect URI.
 - The board's own browser sign-in (`[auth] ui_open = false`) is built on `base_url` too and ends at `/ui/callback`, which this block does not send to the board, so with `base_url` at the front door's address that sign-in does not work.
 
@@ -134,17 +135,80 @@ mcp.example.com {
 | the board answers 200 with `"via": "portal"`, its machine token, and `accept_portal_token` is not on | 403 with a sentence and no identity header |
 | the board answers 200, no member's sign-in addresses hold the address, and the members file has a key written exactly as that address | 403 with a sentence and no identity header: the front door matches keys exactly and would take the caller for that member. Add the address to that member's `emails` when it is theirs |
 | the board answers 401: no bearer (the token follows `Bearer` and exactly one space, as the board reads it), another scheme, a token it does not know, expired or revoked | 401 `{"error": "invalid_token"}`, with the board's `WWW-Authenticate` text word for word ([the token check](#the-token-check-for-the-sign-in-service) sends the challenge of the board's own `/mcp`). The service writes none of its own |
-| anything else: the board's 403 (the two secrets differ), 404 (a board with no sign-in), 5xx, a redirect, an answer that names no ASCII address or no kind of token, no whole answer in `timeout_seconds`, a board that cannot be reached; a secret or members file that cannot be read; a member the file lists under two keys that differ only in surrounding spaces, with different boards (a board reads the first entry, the front door the last); an identity that is not printable ASCII; a fault of the service | 503 with a sentence and no identity header. Never 200, and never 401: a 401 tells a connector that its token is no good |
+| the board answers 403 `{"error": "not_admitted", ...}` with a reason the service knows and an address, to a check that carries a token | 200, no body, `X-Verified-User: !refused:<reason>:<address>`: an identity that is a member of nothing, so that the front door tells the caller which address signed in and why it is not let in |
+| anything else: any other 403 of the board (the two secrets differ), 404 (a board with no sign-in), 5xx, a redirect, an answer that names no ASCII address or no kind of token, no whole answer in `timeout_seconds`, a board that cannot be reached; a secret or members file that cannot be read; a member the file lists under two keys that differ only in surrounding spaces, with different boards (a board reads the first entry, the front door the last); an identity that is not printable ASCII; a fault of the service | 503 with a sentence and no identity header. Never 200, and never 401: a 401 tells a connector that its token is no good |
 
-A board's 200 says who the token is for, never that the person is a member: the service decides that from the members file. A person no member holds is not refused here (but for the 403 case above): the front door answers `you are not a member of any board.` A member's key goes into a header as it is, so a member who signs in through this service has a key of printable ASCII characters.
+A board's 200 says who the token is for, never that the person is a member: the service decides that from the members file. A person no member holds is not refused here (but for the 403 case above): the front door answers `you are not a member of any board.` and names the address that signed in. A member's key goes into a header as it is, so a member who signs in through this service has a key of printable ASCII characters.
 
 **The board's machine token.** The token a board takes as `[auth] portal_identity` (what a portal in front of the board, or a script, holds) passes the board's token check too, which says `"via": "portal"`. The service refuses it unless `[frontdoor_signin]` has `accept_portal_token = true`: that token belongs to one board, and as its person's identity at the front door it reaches every board that person is a member of. Switch it on only where whoever holds the token may use all of those boards: add the line and restart the service. `--check` says whether it is accepted.
 
-A 200 of the board that the service accepts is reused for `cache_seconds` (5 by default, 0 turns it off), under a SHA-256 of the token, at most 1024 of them. Nothing else is kept, so a token the board refused is asked about again at the next request, and a token revoked at the board keeps working through the service for at most that long. The secret and the members file are read at each request, cached or not.
+A 200 of the board that the service accepts is reused for `cache_seconds` (5 by default, 0 turns it off), under a SHA-256 of the token, at most 1024 of them. Nothing else is kept, so a token the board refused, a refused registration included, is asked about again at the next request, and a token revoked at the board keeps working through the service for at most that long. The secret and the members file are read at each request, cached or not.
 
 The service reaches the board directly, whatever proxy the environment names, follows no redirect and keeps no cookie. It holds at most 64 connections to the board; a further check waits for one within its own `timeout_seconds`.
 
 Every answer is `Cache-Control: no-store`. A header the client sends is not repeated in the answer, whatever its name. The log names a request by the first 8 hex digits of a hash of the token and of the identity; no token, secret or address is written to it. It keeps no access log and speaks no websocket protocol (a websocket upgrade is answered as the plain request it also is): Caddy's check carries the query string of the caller's own request, which the service neither reads nor writes. `GET /healthz` answers 200 `{"status": "ok"}` when the secret and the members file can be read and 503 `{"status": "degraded"}` when not; it does not ask the board.
+
+## Inviting a person
+
+A board's admin lets a person in by their Google address, through the admin's own AI agent. All of it is off (no `invite` tool, no `/join` page, no further redirect URI) until the board's config has `[invites]` ([Configuration: integrations](configuration-integrations.md), `invites.*`; restart-only):
+
+```
+[invites]
+admins = ["alice"]      # members, by their names in the members file
+```
+
+It goes in the config of the board the sign-in service asks, which is the sign-in server, and needs there `[auth] mode = "google"` with an https `base_url`, and `[behind_frontdoor]` with `members_file`, `board_name` and `verify_secret_file`. While one is missing the tool refuses and says which, and so do the config notes. The user the board runs as has to be able to write the members file and its directory: a change is a new file renamed over the old one (the mode kept, a link followed), made under a lock on `<members file>.lock`, which stays beside it. A change is refused, and the file left as it was, when the file writes a name twice (writing it again would drop one), when it would pass 64 KiB, and on a read-only standby.
+
+### The steps
+
+1. The admin asks their agent to add an address, and the agent calls `invite(address="new@example.com")`. The server checks that the caller is signed in as a member `admins` names, registers the address on this board and answers with the setup link (`<base_url>/join`) and an invite mail, subject and body, in the language the admin reads the board in. The board sends no mail: the agent drafts it with its own mail connector, and it goes when the admin sends it.
+2. The newcomer gives the link to their own AI agent. The page says how to add the board's MCP address (`mcp_url`) in claude.ai, Claude Code, ChatGPT and Cursor, for the agent to do or to tell the person.
+3. The person signs in with Google and allows. Only a registered address gets in.
+4. Once connected, the connector's instructions tell the agent how to walk a newcomer through the first use. Nothing is made for them at joining: no board and no brain of their own.
+
+### The registration
+
+The board writes one entry of the members file, which the front door, the sign-in service and the board read as any other member:
+
+```json
+"new@example.com": {"boards": ["main"], "emails": ["new@example.com"],
+                    "invited": {"by": "alice", "at": "2027-01-02T10:00:00+09:00", "google_sub": ""}}
+```
+
+For an entry with `invited` the board asks two things more of each Google sign-in: that Google reports the address as verified, and that the account is the one the entry has recorded. The first verified sign-in records the account's id in `google_sub`. The board asks this at its tools, its browser sign-in and the session that made, and the [token check](#the-token-check-for-the-sign-in-service), for every invited entry of the file, with `[invites]` or without. An entry written by hand is asked neither, and the tool changes none: an address that any such entry already holds, as a key, an alias or a sign-in address, is not registered a second time. Registering an address another board registered adds this board to its entry.
+
+| Reason | What the person reads after their address |
+| --- | --- |
+| `unverified` | `Google does not report this address as verified.` |
+| `other_account` | `This address first joined with another Google account. An admin can remove the registration and make it again.` |
+| `unrecorded` | `The first sign-in could not be recorded, so nothing is let in yet. Try again, or ask the person who invited you.` |
+| `unreadable` | `The board cannot check this address's registration now. Try again, or ask the person who invited you.` |
+
+Through the front door these follow `you are not a member of any board. <address> signed in and is not let in.`; a call to the board itself answers `Refused: <address> is not let in.` and the browser sign-in `<address> is not let in.`, each with the reason. A sign-in service older than the board takes such an answer for an outage and lets nobody in.
+
+### Taking it back
+
+`invite(address="new@example.com", remove=true)` takes this board off the registration and deletes an entry left on no board. The members file is read at each request, so the person's next request is refused, with sign-in tokens already issued too. Machine tokens and enrolled keys are not part of a registration and are revoked separately; the tool's answer says so. An admin's own entry is not removed (take the name out of `admins` first), and a hand-written entry is changed in the file. An address removed and registered again within the sign-in service's `cache_seconds` (5 by default) of the old account's last call can be passed for the rest of those seconds without the account being asked.
+
+### Who may invite
+
+A member `admins` names, signed in with their own Google account. A board called directly refuses its machine token. Behind the front door the board sees the identity the door signed and not which token the caller held: the sign-in service refuses the machine token unless `accept_portal_token` is on, and with it on, whoever holds the token invites as its member where that member is an admin (the config notes say so).
+
+### The setup page
+
+`GET /join` is open to anyone. It holds the connector's address and the same words for everyone: no secret, member, item or board name, and nothing about whether an address is registered. It is in a signed-in reader's language, else English, carries no script and loads nothing. It answers 60 requests a minute from one source address and 600 from all together (behind a proxy on the same machine every reader is one source), then 429 with `Retry-After`. The proxy in front has to send the path to the board with no token ([Caddy in front](#caddy-in-front); the [splitter](#the-splitter) already does).
+
+### The apps' redirect URIs
+
+While `[invites]` is on, these are accepted beside `[auth] allowed_client_redirect_uris` and the board's own callback. Scheme, host and path are exact; a loopback entry written with no port takes any port ([RFC 8252](https://www.rfc-editor.org/rfc/rfc8252#section-7.3), 7.3).
+
+| App | Redirect URI | Where the app says so |
+| --- | --- | --- |
+| ChatGPT | `https://chatgpt.com/connector_platform_oauth_redirect` | [Apps SDK, authentication](https://developers.openai.com/apps-sdk/build/auth), [its client metadata](https://chatgpt.com/oauth/client.json) |
+| Claude Code | `http://localhost/callback`, `http://127.0.0.1/callback` | [its client metadata](https://claude.ai/oauth/claude-code-client-metadata), [MCP in Claude Code](https://code.claude.com/docs/en/mcp) |
+| Cursor | `http://localhost:8787/callback`, `https://www.cursor.com/agents/mcp/oauth/callback` | [Cursor, MCP](https://cursor.com/docs/mcp) |
+
+claude.ai's callback is in the default of `allowed_client_redirect_uris`. ChatGPT's callback of the form `https://chatgpt.com/connector/oauth/<id>`, with an id of its own for each connector, is not added, since taking it would need a wildcard in the path: where an app asks for one, add that exact URI to `allowed_client_redirect_uris`.
 
 ## Units, the splitter and releases
 
@@ -235,13 +299,14 @@ A brain tool the brain's credential does not list is not offered: the list is th
 
 ## The refusals
 
-Each is a tool error whose text a client shows as it is:
+Each is a tool error whose text a client shows as it is; a refused tool list is a protocol error (invalid request) with the same text:
 
 | When | Text |
 | --- | --- |
 | on several boards, no `board` | `board required: you are on 2 boards (a, b); pass board='<name>' on this call.` |
 | a board that is not the caller's, or does not exist | `board '<x>' is not one of your boards. You are on: a.` |
-| a member of no board | `you are not a member of any board.` |
+| a member of no board | `you are not a member of any board.`, followed, where the identity is an address, by `The address that signed in: <address>.` |
+| a sign-in a registration refuses ([Inviting a person](#inviting-a-person)) | `you are not a member of any board. <address> signed in and is not let in. <reason>` |
 | a board down, on a call | `board '<b>' did not answer (unreachable). Other boards you are on are unaffected.` |
 | every board of the caller down, on a list | `none of your boards answered (b). Check /healthz.` |
 | a brain tool not in the credential's list | `tool '<name>' is not offered to this connection (its credential is limited to what the tool list shows; admin-scoped tools are not part of it).` |
@@ -279,5 +344,7 @@ The other scenarios cover the pieces, in one process:
 `tests/frontdoor_units_scenario.py` covers the units: what `install.sh` renders with and without the tables, that none is enabled or started, the splitter's refusals to render and to start, and the splitter's Caddyfile (with a real Caddy where one is on the PATH). `tests/frontdoor_realcall_scenario.py` runs the real-call check against real processes, the deploy's use of it and the command that copies the machine token. `tests/release_hold_scenario.py` covers holding releases.
 
 `tests/frontdoor_verify_scenario.py` covers the token check for the sign-in service: the `verify_secret_file` settings and notes, every refusal of the signed header, a rotated secret, a verify secret that is the identity secret, and the route over a stand-in sign-in provider (a good token, the portal's, no bearer, an unknown token, a token with no address, a check that raises, a board with no sign-in, that the route itself never asks about the token of a refused request, and that the bearer is read as the MCP library's middleware reads it).
+
+`tests/invites_scenario.py` covers inviting a person, with the real board (Google's token check stood in for), sign-in service and front door in one process: the settings and their notes, the registration and removal in the members file, the verified address and the recorded account, every refusal at the tools, the browser sign-in, the token check and the front door, who may invite, the setup page and its limits, the redirect URIs against the library's own matcher, and a board with no `[invites]`. No real Google sign-in and no real app is part of it.
 
 `tests/frontdoor_signin_scenario.py` covers the sign-in service over a stand-in board: the settings and their notes, the refusal to start on a shared secret, the start where only the `server` extra is installed (and the refusal when a module cannot be loaded), the identity for each form of member, the address written as a member's key, the machine token off and on, the 401 and its passed-on text, every case that is 503, more checks at once than there are connections over a board that stalls, the cache (reuse, expiry, bound, off, and that a refusal or a failure is never kept), what is sent to the board (no cookie, no proxy, no redirect followed), and that nothing of the request is echoed or logged. `tests/frontdoor_signin_run_scenario.py` runs it with real processes (two boards, a front door and a service for each board, each service with the `server` extra only): a caller's token is recorded on the boards under the member's key, the machine token is refused unless switched on, a query string is in no log, and a board that is down, a restart of the service and a rotated secret answer as above. Where `caddy` is on the PATH it puts a real Caddy in front with the block above as it is written here, and checks which paths reach a board without a token, however a path is written; elsewhere it says that it skipped those checks.

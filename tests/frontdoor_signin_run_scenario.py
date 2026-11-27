@@ -506,15 +506,16 @@ def exact(port, target, headers=None, method="GET", body=None):
         c.close()
 
 
-# the board's own sign-in: what reaches it with no token
+# the board's own sign-in and the setup page an invite links to: what reaches the board with no token
 PASSED = ("/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource/mcp", "/.well-known/openid-configuration", "/authorize", "/authorize?response_type=code&state=%2F..%2Fmcp",
-          "/token", "/register", "/consent?txn_id=abc", "/auth/callback?code=x&state=y")
+          "/token", "/register", "/consent?txn_id=abc", "/auth/callback?code=x&state=y", "/join", "/join?x=%2F..%2Fmcp")
 # everything else, however it is written: through the check, and to the front door only
 CHECKED = ("/mcp", "/", "/frontdoor/verify", "/ui/login", "/ui/callback", "/auth", "/auth/callbackx", "/auth/callback/x", "/authorizex", "/authorize/", "/authorize/x", "/authorize;x", "/authorize%3F", "/token/revoke", "/consent/x",
            "/.well-known", "/.well-known/", "/.Well-Known/oauth-authorization-server", "/.WELL-KNOWN/oauth-protected-resource/mcp", "/Authorize", "/TOKEN", "/Register", "/Consent", "/Auth/Callback",
            "/%61uthorize", "/%2e%77ell-known/x", "/.well-known%2Foauth-authorization-server", "/auth%2Fcallback", "/.well-known/%2e%2e/mcp", "/.well-known/%2E%2E/%6Dcp", "/.well-known/..%2fmcp", "/.well-known/x%2f..%2f..%2fmcp",
            "/.well-known/../mcp", "/.well-known/./../mcp", "/.well-known/x/../../mcp", "/.well-known/..", "/.well-known/x/..;/mcp", "/.well-known/..%5Cmcp", "/.well-known//x", "//.well-known/oauth-authorization-server", "//authorize",
-           "/./authorize", "/mcp/../authorize", "/x/../authorize", "/authorize/../mcp", "/token%2F..%2Fmcp", "/mcp/.well-known/oauth-protected-resource", "/x/authorize", "/mcp?next=/authorize", "/mcp?x=/.well-known/y")
+           "/./authorize", "/mcp/../authorize", "/x/../authorize", "/authorize/../mcp", "/token%2F..%2Fmcp", "/mcp/.well-known/oauth-protected-resource", "/x/authorize", "/mcp?next=/authorize", "/mcp?x=/.well-known/y",
+           "/Join", "/joinx", "/join/", "/join/x", "/join%2F..%2Fmcp", "/join/../mcp", "/%6Aoin", "//join", "/x/join", "/mcp?next=/join")
 
 
 def block_checks(port, board, door):

@@ -18,7 +18,9 @@ For each request the proxy asks `GET /verify`, carrying the original request's h
     person is a member of;
   * on the board's 401 (no bearer, a token the board does not know, expired or revoked) it answers 401 with the board's own `WWW-Authenticate` text when the board's answer has one,
     so a connector's discovery of the sign-in keeps working: nothing of that text is held here;
-  * on anything else it answers 503 with no identity header: the board's 403 (a secret that differs, the board's clock), 404 (a board with no sign-in), 5xx, a redirect, a
+  * on the board's 403 that says a registration refuses the sign-in (`{"error": "not_admitted", ...}`, core/invites.py) it answers 200 with an identity that is a member of nothing and
+    carries the reason and the address (`frontdoor_identity.barred`), so the front door tells the person in words; it is not cached;
+  * on anything else it answers 503 with no identity header: any other 403 of the board (a secret that differs, the board's clock), 404 (a board with no sign-in), 5xx, a redirect, a
     body that is no address or names no kind of token, no answer in `timeout_seconds` (a total deadline), a board that cannot be reached, a secret or members file that cannot be
     read, or any fault of this service. Never 200, and never 401: a 401 makes a connector throw its token away, which is wrong for an outage.
 
@@ -202,7 +204,8 @@ class Service:
 
     async def ask(self, secret: str, token: str) -> tuple[str, str]:
         """Ask the board who `token` is for ("" for a request that carries none): ("ok", the address in lower case), ("machine", the address: the token is the board's own machine
-        token and `accept_portal_token` is not on), ("refused", the board's WWW-Authenticate text, "" if none) or ("down", why: a word for the log)."""
+        token and `accept_portal_token` is not on), ("barred", the identity that says a registration refuses this sign-in: `frontdoor_identity.barred`), ("refused", the board's
+        WWW-Authenticate text, "" if none) or ("down", why: a word for the log)."""
         headers = {"accept": "application/json", VERIFY_HEADER: _ident.sign(secret.encode("utf-8"), VERIFY_WHO)}
         if token:
             headers["authorization"] = "Bearer " + token
@@ -214,15 +217,21 @@ class Service:
             return "down", f"{type(e).__name__}"
         if status == 401:
             return "refused", www if len(www) <= MAX_WWW and _TEXT.fullmatch(www) else ""
-        if status != 200:
+        if status not in (200, 403):
             return "down", f"the board answered {status}"
         try:
             d = json.loads(body.decode("utf-8"))
-        except ValueError:
-            return "down", "the board's answer is not JSON"
+        except (ValueError, RecursionError):
+            return "down", "the board's answer is not JSON" if status == 200 else f"the board answered {status}"
         email = d.get("email") if isinstance(d, dict) else None
         email = email.strip().lower() if isinstance(email, str) and email.isascii() else ""      # ASCII first: lower() turns some other characters into ASCII ones
-        if not _ADDRESS.fullmatch(email) or len(email) > 254:
+        named = bool(_ADDRESS.fullmatch(email)) and len(email) <= 254
+        if status == 403:      # a refusal of the header or the board's clock is plain text; a refused registration says so by name
+            why = d.get("why") if isinstance(d, dict) and d.get("error") == "not_admitted" else None
+            if named and isinstance(why, str) and why in _ident.REFUSALS:
+                return "barred", _ident.barred(why, email)
+            return "down", f"the board answered {status}"
+        if not named:
             return "down", "the board's answer names no address"
         kind = d.get("via")
         if kind not in KINDS:
@@ -272,8 +281,11 @@ class Service:
             if verdict == "machine":
                 log.warning("403 token %s: the board's machine token, which accept_portal_token does not switch on", tag(token))
                 return _plain(403, MACHINE_REFUSED)
+            if verdict == "barred" and token:      # not a member's request: the front door says why, with the address. Never cached
+                log.info("200 token %s: a registration refuses this sign-in, said by the front door", tag(token))
+                return granted(what)
             if verdict != "ok":
-                log.warning("503 token %s: %s", tag(token) if token else "-", what)
+                log.warning("503 token %s: %s", tag(token) if token else "-", "the board refused a check that carries no token as a sign-in" if verdict == "barred" else what)
                 return outage()
             email = what
             if token:

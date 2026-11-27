@@ -12,12 +12,15 @@ is HTTP 403 and the route says nothing about its token: it does not ask the sign
   * it is not (unknown, expired, revoked, signed by another key, no `Authorization: Bearer` at all): 401 `{"error": "invalid_token"}`, which the service turns into the 401 a connector needs. The 401
     carries the `WWW-Authenticate` value the board's own `/mcp` answers the same `Authorization` header (or none) with, the `resource_metadata` address a connector discovers the sign-in by included
     (`_challenge`: taken from the library's guard on that route, nothing of it written here); no other answer carries one;
+  * it is the board's, and a registration of the members file refuses the Google sign-in behind it (core/invites.py: an invited address that Google does not report as verified, or another
+    Google account than the one that first joined with it): 403 `{"error": "not_admitted", "why": <a key of frontdoor_identity.REFUSALS>, "email": <lower case>}`, which the service passes on as a
+    refusal the front door words. (A service that does not know this answer reads it as an outage: nobody is let in.) The first sign-in of an invited address records its account here;
   * the board has no auth object (`[auth] mode` off): 404, so a board that signs nobody in says nothing about tokens.
 Every answer is `Cache-Control: no-store`. A check that raises is 503 `{"error": "unavailable"}`, never 401. What FastMCP's own Google check swallows (it reads a network failure as "no such token", as it does for a direct call to the
 board today) arrives here as 401: the route adds no distinction the library does not make.
 
 What the service can rely on:
-  * 200 says the token is valid, not that the account is a member of any board: the sign-in service checks membership;
+  * 200 says the token is valid and no registration refuses it, not that the account is a member of any board: the sign-in service checks membership;
   * the service treats any 5xx as a refusal;
   * the signed header is bound to neither the token nor the request, so whoever holds one can send it again, with any token, until it leaves the time window;
   * the verify secret and the identity secret must differ: a board whose two files hold the same value answers no check (403, `behind_door.SAME_SECRET`).
@@ -28,10 +31,12 @@ import sys
 from typing import Any
 
 from mcp.server.auth.middleware.bearer_auth import RequireAuthMiddleware
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 from stackshot.core import behind_door as _door
+from stackshot.web.auth import oauth as _oauth
 
 PATH = "/frontdoor/verify"
 _NO_STORE = {"Cache-Control": "no-store"}
@@ -104,6 +109,13 @@ def make(mcp: Any):
         email = str(claims.get("email") or "").strip().lower()
         if at is None or not email:
             return await _refused(request)
+        try:
+            why = await run_in_threadpool(_oauth._barred, claims)      # a first sign-in of an invited address writes the members file
+        except Exception as e:  # noqa: BLE001
+            print(f"board token check failed: {e.__class__.__name__}", file=sys.stderr, flush=True)
+            return _json(503, {"error": "unavailable"})
+        if why:
+            return _json(403, {"error": "not_admitted", "why": why, "email": email})
         return _json(200, {"email": email, "via": "portal" if claims.get("via") == "portal" else "google"})
     return verify
 
