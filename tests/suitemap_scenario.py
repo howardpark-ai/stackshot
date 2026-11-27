@@ -2897,14 +2897,15 @@ write("pkg/other.py", "def o():\n    return 3\n")
 write("pkg/ren.py", "def rx():\n    return 4\n\n\ndef ry():\n    return 5\n\n\ndef rz():\n    return 6\n")
 write("data.txt", "d\n"); write("d*.txt", "a name git would read as a pattern\n")
 write(".github/workflows/ci.yml", "on: push\n")
-for s_ in ("s1", "s2", "s3", "s4", "s5"): write(f"tests/{s_}_scenario.py", "print('x')\n")
+for s_ in ("s1", "s2", "s3", "s4", "s5", "s6"): write(f"tests/{s_}_scenario.py", "print('x')\n")
+write("pkg/kmod.py", "LIMIT = 2\n\n\ndef fk():\n    return LIMIT\n\n\ndef fm():\n    return 1\n")
 harness_stub(R)
 at_map = commit("the commit the map is of")
 BM = T / "mapbase.json"
 def bent(py=None, files=(), dirs=("tests",)): return {"ok": True, "failed": False, "files": list(files), "dirs": list(dirs), "whole": [], "py": py or {}, "seconds": 1}
 BM.write_text(json.dumps({"format": 1, "commit": at_map, "strace": True, "suites": {
     "s1": bent({"pkg/lib.py": ["", "fa"]}), "s2": bent({"pkg/lib.py": ["", "fb"]}), "s3": bent({"pkg/other.py": ["", "o"]}, files=["data.txt"]),
-    "s4": bent({"pkg/ren.py": ["", "rx"]}), "s5": bent(files=["d*.txt"], dirs=["tests", "pkg"])}}))
+    "s4": bent({"pkg/ren.py": ["", "rx"]}), "s5": bent(files=["d*.txt"], dirs=["tests", "pkg"]), "s6": bent({"pkg/kmod.py": ["", "fk"]})}}))
 sub("pkg/other.py", "return 3", "return 30"); sub("pkg/lib.py", "return 2", "return 20"); sub("data.txt", "d\n", "d2\n"); sub(".github/workflows/ci.yml", "push", "pull_request")
 write("pkg/added.txt", "main added this\n"); write("tests/new_scenario.py", "print('x')\n"); git("mv", "pkg/ren.py", "pkg/moved.py")
 main_now = commit("main since the map")
@@ -2929,13 +2930,27 @@ check("BASE 2 a file of the change that main also changed since the map is count
       out == ["new", "s1", "s2"], (rc, out, err))
 check("BASE 3 stderr and the job summary say how many files changed since the base",
       f"1 file(s) changed since {M12}" in err and "everything since the map" not in err and f"1 file(s) changed since {M12}" in (summ.read_text() if summ.exists() else "")
-      and "**Suites: 3 of 6**" in summ.read_text(), (err, summ.read_text() if summ.exists() else None))
+      and "**Suites: 3 of 7**" in summ.read_text(),(err, summ.read_text() if summ.exists() else None))
 rc, out, err = bsel(change(lambda: sub("d*.txt", "pattern", "glob")))
 check("BASE 4 a path is taken as it is spelled, never as a pattern: a change to `d*.txt` does not count main's change to data.txt", rc == 0 and out == ["new", "s5"], (rc, out, err))
 rc, out, err = bsel(change(undo_o))
-check("BASE 5 a change that undoes what main did since the map (no difference from the map's commit) is counted from the base: the suite that ran it is picked", rc == 0 and out == ["new", "s3"], (rc, out, err))
+check("BASE 5 a change that puts back what main did since the map, in a file the change does not otherwise touch (the file differs from the map only by main's edit), is counted from the base: the suite that ran it is picked",rc == 0 and out == ["new", "s3"], (rc, out, err))
 rc, out, err = bsel(change(undo_o, fa))
 check("BASE 6 ... and with another file besides, the pick is the union of the two", rc == 0 and out == ["new", "s1", "s2", "s3"], (rc, out, err))
+def on(base, *edits, name):
+    git("checkout", "-q", "-B", name, base)
+    for e in edits: e()
+    git("add", "-A"); git("commit", "-q", "--allow-empty", "-m", name); return git("rev-parse", "HEAD").strip()
+mb_fa = on(main_now, fa, name="partial_main_fa")
+hd_fb = on(mb_fa, lambda: sub("pkg/lib.py", "return 20", "return 2"), name="partial_revert_fb")
+rc, out, err = bsel(hd_fb, base=mb_fa)
+check("BASE 16 a change that puts back one function main edited (fb, to the map's content) in a file that still differs from the map (main edited fa) is counted from the base: the suite that ran fb is picked with the one that ran fa",
+      rc == 0 and out == ["new", "s1", "s2"], (rc, out, err))
+mb_k = on(main_now, lambda: sub("pkg/kmod.py", "LIMIT = 2", "LIMIT = 20"), lambda: sub("pkg/kmod.py", "return 1", "return 5"), name="partial_main_limit")
+hd_k = on(mb_k, lambda: sub("pkg/kmod.py", "LIMIT = 20", "LIMIT = 2"), name="partial_revert_limit")
+rc, out, err = bsel(hd_k, base=mb_k)
+check("BASE 17 ... and a module constant main edited (LIMIT, read by fk) put back to the map's value, in a file that still differs from the map (main edited fm): the suite that ran fk is picked",
+      rc == 0 and out == ["new", "s6"], (rc, out, err))
 rc, out, err = bsel(change(lambda: sub("pkg/added.txt", "this", "that")))
 check("BASE 7 a file main added after the map and the change edits is counted from the map's commit, as a new file: the suite that lists its folder is picked", rc == 0 and out == ["new", "s5"], (rc, out, err))
 rc, out, err = bsel(change(lambda: (R / "pkg/added.txt").unlink()))

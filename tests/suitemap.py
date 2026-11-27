@@ -13,8 +13,9 @@ was made counted as the pull request's change: with a map hours old, 24 of 24 re
 itself changes. `--base REV` names the commit the change starts from (a commit this checkout lacks is fetched like the map's); with none it is the merge base of
 origin/main and --to, taken only when that resolves and is not --to itself. The paths counted are those `git diff <base> <to>` names, both sides of a rename. Each
 is still diffed from the MAP's commit to --to, because the map's functions and files are that commit's, and that covers a file main added after the map (as a new
-file); a path main renamed after the map is diffed with its old name too, so the suites that ran it are reached. A counted path that shows no difference between
-the map's commit and --to (the change undid what main did since the map) is also counted from the base; the pick is the union, `all` from either winning. A change
+file); a path main renamed after the map is diffed with its old name too, so the suites that ran it are reached. Each counted path is also counted from the base
+(the change's own diff), so a change that puts back one function or constant main had edited, in a file that still differs from the map, reaches the suites that ran
+it; the pick is the union, `all` from either winning. A change
 with no file picks only the suites that always run. A harness file changed by main alone no longer makes a pull request run everything. With no base (none given,
 and no usable merge base) the pick counts everything since the map's commit, as before, and `select` says so and names --base.
 The trade: a pull request's run can now MISS a suite whose reads changed on main after the map was made (main added a caller of what the change edits, or a suite
@@ -3382,23 +3383,22 @@ def change_base(given, to):
 
 def pr_selection(m, a, base, to, rows):
     """selection() for the change base..to alone (`rows`: diff_rows(base, to)), what a pull request itself changes, not what main did since the map's commit `a`. Each of its paths is diffed
-    from the map's commit, as the map's functions and files are that commit's (and so a file main added after the map is counted); one that shows no difference between `a` and `to` (the
-    change undid what main did since the map) is also diffed from `base`. A suite whose reads changed on main after the map can be missed: the merge queue runs every suite before a merge"""
+    from the map's commit, as the map's functions and files are that commit's (and so a file main added after the map is counted), and each is also diffed from `base`: a
+    function or constant the change puts back to the map's content, in a file that still differs from the map, shows only in that diff. A suite whose reads changed on main after the map can be missed: the merge queue runs every suite before a merge"""
     paths = sorted({p for _, names in rows for p in names})
     if not paths:
         return selection(m, to, to, skip_b=True)   # to git an empty list of pathspecs is everything: the empty diff gives the suites that always run
     since = diff_rows(a, base)
-    differ = git("diff", "--name-only", "--no-renames", "-z", a, to, "--", *literal(paths))
-    if since is None or differ is None:
+    if since is None:
         return "all", [("-", "git diff failed")]
     # a path main renamed after the map goes with its old name: without it the diff from the map shows a new file (or, for a deletion, nothing) and the suites that ran the old name are missed
     old = {names[0] for st, names in since if st == "R" and names[1] in paths}
     sel, why = selection(m, a, to, pathspec=literal(sorted(old.union(paths))), skip_b=True)
-    undone = sorted(set(paths) - set(differ.split("\0")))
-    if undone:
-        more, more_why = selection(m, base, to, pathspec=literal(undone), skip_b=True)
-        why = why + [r for r in more_why if r not in why]
-        sel = "all" if "all" in (sel, more) or sel | more >= set(suites_at(to)) else sel | more
+    # every counted path also from the base: a function or constant the change puts back to the map's content, in a file that still differs from the map, shows
+    # in this diff only (the map..to diff of that file has the main's other edits in it)
+    more, more_why = selection(m, base, to, pathspec=literal(paths), skip_b=True)
+    why = why + [r for r in more_why if r not in why]
+    sel = "all" if "all" in (sel, more) or sel | more >= set(suites_at(to)) else sel | more
     return sel, why
 
 
