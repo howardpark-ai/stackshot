@@ -31,6 +31,7 @@ import time
 from typing import Any
 
 from stackshot.core import config as _cfg
+from stackshot.core import datewords as _datewords
 from stackshot.core import runner_files as _files
 from stackshot.waits import event_waits as _ew
 from stackshot.model import model as _model
@@ -258,7 +259,7 @@ def date_options(today: dt.date) -> list[dict[str, Any]]:
     """The three date buttons, counted from `today`: a week, two weeks, a month ("Ask again on Tue Nov 17th"). No option is marked recommended: only the owner knows whether the news came. The day is stored on the
     button (`date`): a pick is read from it, never from the label (answer_effect)."""
     dates = [today + dt.timedelta(days=7), today + dt.timedelta(days=14), _add_months(today, 1)]
-    return [{"label": ASK_AGAIN + day_words(d), "line": "The item waits again until then and the question comes back that day.", "recommended": False, "date": d.isoformat()} for d in dates]
+    return [{"label": ASK_AGAIN + day_words(d, today), "line": "The item waits again until then and the question comes back that day.", "recommended": False, "date": d.isoformat()} for d in dates]
 
 
 def relay_options(today: dt.date) -> list[dict[str, Any]]:
@@ -298,9 +299,9 @@ def refreshed(meta: dict[str, Any], today: dt.date) -> tuple[str, list[dict[str,
     return head + _OPT_MARK + (RELAY_TAIL if asked == "relay" else DROP_TAIL), (relay_options(today) if asked == "relay" else drop_options(today))
 
 
-def day_words(day: dt.date) -> str:
-    """A day as a person reads it: "Tue Nov 17th"."""
-    return f"{day:%a %b} {day.day}{'th' if 11 <= day.day % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(day.day % 10, 'th')}"
+def day_words(day: dt.date, today: dt.date | None = None) -> str:
+    """A day as a person reads it: "Tue Nov 17th", with the year when it is not the current one (`today`'s, when given; core/datewords)."""
+    return _datewords.day_words(day, today)
 
 
 def ask_back(meta: dict[str, Any], note: str, today: dt.date) -> tuple[str, list[dict[str, Any]]]:

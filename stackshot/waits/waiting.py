@@ -21,6 +21,7 @@ import re
 from typing import Any, Callable
 
 from stackshot.core import config as _cfg
+from stackshot.core import datewords as _datewords
 from stackshot.core import members as _members
 from stackshot.fleet import sessions_registry as _sr
 
@@ -473,10 +474,9 @@ def mover_for(item: dict[str, Any], load: Callable[[str], dict[str, Any] | None]
 
 
 def when_words(ts: float) -> str:
-    """"Thu Mar 12th 18:30" in the instance zone, the rulebook's form."""
+    """"Thu Mar 12th 18:30" in the instance zone, the rulebook's form, with the year when it is not the current one (core/datewords)."""
     try:
         t = dt.datetime.fromtimestamp(float(ts), _cfg.tz())
     except (ValueError, OverflowError, OSError):
         return "an unreadable date"
-    d = t.day
-    return f"{t:%a %b} {d}{'th' if 11 <= d % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(d % 10, 'th')} {t:%H:%M}"
+    return _datewords.when_words(t)

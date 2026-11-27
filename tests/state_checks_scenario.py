@@ -275,7 +275,7 @@ item(50, needs=[BACK], next="team-back: build it")
 upd(50, sender="home-stew", hold=True, wake=day(3), wait_basis=BAS)
 ns = mt(50).get("next_stale") or {}
 check("5a: a write by a session that is neither the owner nor named by next, changing hold and wake and not next, marks next", ns.get("fields") == ["hold", "wake"] and ns.get("by") == "home-stew" and ns.get("at"), mt(50))
-check("5a: …get shows it: who, what, when", re.search(r"\(next may be stale: home-stew changed hold, wake \w{3} \w{3} \d+\w\w \d\d:\d\d\)", get(50)) is not None, get(50))
+check("5a: …get shows it: who, what, when", re.search(r"\(next may be stale: home-stew changed hold, wake \w{3} \w{3} \d+\w\w(?: \d{4})? \d\d:\d\d\)", get(50)) is not None, get(50))
 check("5a: …and the brief", "(next may be stale: home-stew changed hold, wake" in _wt_brief.stackshot_brief(), None)
 upd(50, priority="p2")
 check("5a: the owner's later write that leaves next alone keeps the mark", "next_stale" in mt(50), mt(50))

@@ -14,6 +14,7 @@ RELEASE_LIST = "release"   # the home page's fourth list, beside home.py's three
 from stackshot.model import option_labels as _ol   # the letter an option's label repeats from its badge, dropped on read (option_labels.py)
 from stackshot.model import ask_ref as _askref   # the reference of an open question, a hidden field of the forms that answer it (ask_ref.py)
 from stackshot.core import config as _cfg  # stackshot.toml: paths, fleet, scopes, the Machines panel, branding
+from stackshot.core import datewords as _datewords   # a date in words, and when it says its year
 from stackshot.core import members as _members
 from stackshot.core import legacy_owner as _lo   # an old version of an item (from the store's history) read as the current code reads it: History only, never written back
 from stackshot.fleet import fleet as _fleet   # the session and machine view, and the one rule for a session's presence (running / present)
@@ -460,10 +461,10 @@ def yesno_options(r):
 def option_lines(r):
     """The options as plain lines, "label (recommended): line", for a tool reply or a tooltip."""
     return [f'{_ol.listed(o["label"], i)}{" (recommended)" if o["recommended"] else ""}: {o["line"]}' for i, o in enumerate(options_of(r))]
-def when_words(t, clock=True):
-    """"Thu Mar 5th 18:30" (clock=False: "Thu Mar 5th"): the rulebook's form for a date a person reads. t = an aware datetime
-    (drawn in its own zone) or a date (no clock). Board.when and the server's replies use it."""
-    return _i18n.fmt_date(t, clock=clock)      # the string table's date forms (i18n.fmt_date): English unless the request is in another language
+def when_words(t, clock=True, today=None):
+    """"Thu Mar 5th 18:30" (clock=False: "Thu Mar 5th"), with the year when it is not the current one ("Fri Mar 5th 2027 18:30"): the rulebook's form for a date a person reads. t = an aware datetime
+    (drawn in its own zone) or a date (no clock); today = the caller's own now (core/datewords). Board.when and the server's replies use it."""
+    return _i18n.fmt_date(t, clock=clock, today=today)      # the string table's date forms (i18n.fmt_date): English unless the request is in another language
 def age_words(seconds):
     """An age in words: "12 min", "5 h", "2 d" (minutes below 90 min, hours below 36 h, days from then on)."""
     m = int(max(0.0, float(seconds)) // 60)
@@ -1651,12 +1652,12 @@ poll()})();"""
 # status is fetched again. The Audits page has the same button (#audit-now-page, with its message line #audit-page-msg): this one script drives both, so they post to the same route and share one state.
 _AUDIT_JS = r"""(function(){var E=document.getElementById('audit');if(!E)return;
 var T=E.querySelector('.a-txt'),N=document.getElementById('audit-now'),P=document.getElementById('audit-now-page'),G=[E.querySelector('.a-msg'),document.getElementById('audit-page-msg')].filter(Boolean),B=[N,P].filter(Boolean),Z=E.getAttribute('data-tz'),inflight=false,run=false,hold=0,mt=null;
-var O={weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'},F;try{F=new Intl.DateTimeFormat('en-US',Object.assign({timeZone:Z},O))}catch(e){F=new Intl.DateTimeFormat('en-US',O)}
+var O={weekday:'short',year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'},F;try{F=new Intl.DateTimeFormat('en-US',Object.assign({timeZone:Z},O))}catch(e){F=new Intl.DateTimeFormat('en-US',O)}
 function pt(ts){var o={};F.formatToParts(new Date(ts*1000)).forEach(function(p){o[p.type]=p.value});return o}
 var WD=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],GK=@GK@,NK=@NK@;
 function ord(d){return d%100>=11&&d%100<=13?'date.ord.n':({1:'date.ord.1',2:'date.ord.2',3:'date.ord.3'})[d%10]||'date.ord.n'}
-function when(ts){var p=pt(ts);return SST('date.full',{wd:SST('date.wd.'+WD.indexOf(p.weekday)),month:SST('date.mon.'+(MO.indexOf(p.month)+1)),day:SST('date.day',{n:+p.day,ord:SST(ord(+p.day))}),hm:p.hour+':'+p.minute})}
-function clock(ts){var p=pt(ts),q=pt(Date.now()/1000);return p.month===q.month&&p.day===q.day?p.hour+':'+p.minute:when(ts)}
+function when(ts){var p=pt(ts),k=p.year===pt(Date.now()/1000).year?'date.full':'date.full_year';return SST(k,{wd:SST('date.wd.'+WD.indexOf(p.weekday)),month:SST('date.mon.'+(MO.indexOf(p.month)+1)),day:SST('date.day',{n:+p.day,ord:SST(ord(+p.day))}),year:p.year,hm:p.hour+':'+p.minute})}
+function clock(ts){var p=pt(ts),q=pt(Date.now()/1000);return p.year===q.year&&p.month===q.month&&p.day===q.day?p.hour+':'+p.minute:when(ts)}
 function num(v){return typeof v==='number'&&isFinite(v)}
 function sig(e){return [].map.call(e.childNodes,function(c){return c.nodeType===1?c.className+'|'+c.title+'|'+c.textContent:'#'+c.textContent}).join('\u0001')}
 function sp(c,t,tip){var e=document.createElement('span');e.className=c;e.textContent=t;if(tip)e.title=tip;return e}
@@ -1996,7 +1997,7 @@ class Board:
         if not d: return ""
         left = (d - self.now.date()).days
         cls = "due"   # one color for every due date (no traffic-light coloring)
-        return badge(_t("item.due_today" if left == 0 else "item.due_overdue" if left < 0 else "item.due_in", n=abs(left), md=f"{d:%m-%d} {_t(f'date.wd.{d.weekday()}')}"), cls)
+        return badge(_t("item.due_today" if left == 0 else "item.due_overdue" if left < 0 else "item.due_in", n=abs(left), md=f"{_datewords.numeric_day(d, self.now)} {_t(f'date.wd.{d.weekday()}')}"), cls)
     NO_AGENT = "no agent"      # D7: the group of an open item that sits under no agent (it is the owner's and its `then` names none)
     def _sess_obj(self, r): return self.sess_of(*self.mover_ref(r))
     def mover_ref(self, r):
@@ -2295,7 +2296,7 @@ class Board:
         if isinstance(ts, datetime.datetime): t = ts.astimezone(self.now.tzinfo)
         elif isinstance(ts, datetime.date): t, clock = ts, False
         else: t = datetime.datetime.fromtimestamp(float(ts), self.now.tzinfo)
-        return when_words(t, clock)
+        return when_words(t, clock, self.now)
     def arrival_when(self, ts):
         """When a line of a wait on a list arrived, as `when` says it; "" for a time no date can show (the stored shape keeps those out, this keeps a page whole whatever it is handed)."""
         try: return self.when(ts)
@@ -3154,7 +3155,7 @@ class Board:
         def m_item(r):
             m = r["metadata"]; out = [f"<a id=\"{anchor(r)}\"></a>**{rid_full(r)} · {r['subject']}**" + (f" ({self.md_hold(r)})" if is_parked(r) else "")]
             k = "" if is_parked(r) else needs_kind(r)   # parked: its needs field waits with it
-            meta = ([f"**Due in {(due_of(r) - now.date()).days} d ({due_of(r):%m-%d %a})**"] if due_of(r) else []) + [m.get("priority") or "p2"]
+            meta = ([f"**Due in {(due_of(r) - now.date()).days} d ({_datewords.numeric_day(due_of(r), now)} {due_of(r):%a})**"] if due_of(r) else []) + [m.get("priority") or "p2"]
             if _home.wait_phrase(self.mod_of(r), "waiting on", shown_full): meta.append(_home.wait_phrase(self.mod_of(r), "waiting on", shown_full))      # the kind of its wait, in the model's words
             if r.get("_fresh") == "stale": meta.append("stale")                       # before the ask, whose own " · " would swallow it
             if k == "call" and open_ask(r): meta.append("ask: " + open_ask(r))
@@ -3270,7 +3271,7 @@ class Board:
                 for r in done:
                     oc, why, by = outcome_of(r)   # how it ended
                     print(f"- <a id=\"{anchor(r)}\"></a>**{rid_full(r)}** {r['subject']}" + (f" · **{outcome_word(oc)}**" + (f" by {shown_full(by)}" if by else "") + (f": {why}" if why else "") if oc else "")
-                          + (f" · {m_sref(r)}" if lab(r) else "") + f" · {r['_updated']:%m-%d %H:%M} {_cfg.tz_abbr(r['_updated'])}")
+                          + (f" · {m_sref(r)}" if lab(r) else "") + f" · {_datewords.numeric_day(r['_updated'], self.now)} {r['_updated']:%H:%M} {_cfg.tz_abbr(r['_updated'])}")
             else: print("_none_")
         return _b.getvalue()
 
@@ -3409,7 +3410,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         def clock(ts):
             try: t, n = datetime.datetime.fromtimestamp(ts, z), self.now.astimezone(z)
             except (OverflowError, OSError, ValueError, TypeError): return "–"      # an epoch no date can hold is a dash
-            return f"{t:%H:%M}" if (t.month, t.day) == (n.month, n.day) else when_words(t)
+            return f"{t:%H:%M}" if t.date() == n.date() else when_words(t, today=n)
         def cell(cls, text): return f'<span class="{cls}">{esc(text)}</span>'
         L, run = d.get("last"), bool(d.get("running"))
         if run:
@@ -4173,11 +4174,11 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             except (OverflowError, OSError, ValueError, TypeError): return None      # an epoch no date can hold (a damaged record) is a dash, never an error page
         def words(t):
             d = at(t)
-            return "–" if d is None else when_words(d)
+            return "–" if d is None else when_words(d, today=self.now.astimezone(z))
         def stamp(t):
             """A time as the page says it: the clock for today, the date and clock for another day (the way the card's clock() does)."""
             d = at(t)
-            return "–" if d is None else (f"{d:%H:%M}" if d.date() == self.now.astimezone(z).date() else when_words(d))
+            return "–" if d is None else (f"{d:%H:%M}" if d.date() == self.now.astimezone(z).date() else words(t))
         running = ov["running_since"] is not None
         if ov["enabled"]:
             sub = _t("audit.sub_next", n=ov["total"], groups=len(ov["groups"]), at=words(ov["next"])) if _num_ok(ov["next"]) else _t("audit.sub", n=ov["total"], groups=len(ov["groups"]))
@@ -4269,7 +4270,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         _COLS = [PUB] + sorted(x for x in FLEET if x != PUB)   # the publisher, then the fleet; no cloud column — never a store letter
         def when_tip(v):
             t = _fact_time(v)
-            return f"{ago((now - t).total_seconds())} ({t:%m-%d %H:%M} {_cfg.tz_abbr(t)})" if t else _t("panel.unknown_time")
+            return f"{ago((now - t).total_seconds())} ({_datewords.numeric_day(t, now)} {t:%H:%M} {_cfg.tz_abbr(t)})" if t else _t("panel.unknown_time")
         def failures(L, who=""):
             """Machine L's failed setup run and failed update attempts, each as (kind, detail, tip): kind is "setup" or "update", detail the step, or the package and the version it tried,
             tip the raw reason for the hover text (prefixed with `who` for a machine that has no card). An empty list when all went well."""

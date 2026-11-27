@@ -231,7 +231,7 @@ with TestClient(server.mcp.http_app()) as c:
     finally:
         runner_svc.status = real_runner
     check("the ten-minute pace says its last run as the clock today", re.search(r"last \d\d:\d\d: filing, dates, audit lines", today) is not None, re.findall(r"Every 10 minutes.{0,60}", today))
-    check("... and with its date for a run of another day", re.search(r"last [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(?:st|nd|rd|th) \d\d:\d\d: filing, dates, audit lines", old) is not None, re.findall(r"Every 10 minutes.{0,60}", old))
+    check("... and with its date for a run of another day", re.search(r"last [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(?:st|nd|rd|th)(?: \d{4})? \d\d:\d\d: filing, dates, audit lines", old) is not None, re.findall(r"Every 10 minutes.{0,60}", old))
     check("a time no date can hold (1e300 in the runner's record and in a run record): the page answers 200 and draws a dash", far.status_code == 200 and "last –: filing, dates, audit lines" in text_of(far.text), (far.status_code, far.text[:200]))
     (D / "run-2026-02-25.json").unlink()
 

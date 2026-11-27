@@ -118,7 +118,7 @@ try:
                       m["lineLeft"] >= m["siteRight"] - 0.5 and m["lineTop"] >= m["siteTop"] - 1 and m["lineBottom"] <= m["siteBottom"] + 1 and m["lineBottom"] <= m["cardsTop"] and m["cardsTop"] < m["sboxTop"], m)
                 check(f"{tag}: it is one line, inside the screen and clear of the theme and panel buttons", m["lineH"] <= m["lineLh"] * 1.6 and m["lineRight"] <= min(m["pbtnLeft"], m["themeLeft"]) + 0.5 and m["lineLeft"] >= 0, m)
                 check(f"{tag}: it carries the stale threshold {STALE_S} s and its title text (home: about publishing; the others: when the page was drawn)", m["stale"] == str(STALE_S) and (("re-rendered at least every 10 minutes" in m["titleAttr"] and "older than 15 minutes" in m["titleAttr"]) if name == "home"
-                      else (re.fullmatch(r"this page was drawn at \w{3} \w{3} \d+(?:st|nd|rd|th) \d\d:\d\d; reload for the current board", m["titleAttr"]) is not None and "server has not published" not in m["titleAttr"])), (m["stale"], m["titleAttr"]))
+                      else (re.fullmatch(r"this page was drawn at \w{3} \w{3} \d+(?:st|nd|rd|th)(?: \d{4})? \d\d:\d\d; reload for the current board", m["titleAttr"]) is not None and "server has not published" not in m["titleAttr"])), (m["stale"], m["titleAttr"]))
                 check(f"{tag}: it says the age ({'rendered just now' if w >= 600 else 'just now, without the word rendered'})",
                       m["text"] == ("rendered just now" if w >= 600 else "just now") and m["word"] == (w >= 600), (m["text"], m["word"]))
                 check(f"{tag}: grey (the muted colour) while the page is current", m["color"] == m["mut"] and m["lineColor"] == m["mut"] and not m["old"] and m["mut"] != m["warn"], (m["color"], m["mut"], m["warn"]))

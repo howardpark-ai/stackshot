@@ -2192,7 +2192,7 @@ res = _wt_complete.stackshot_confirm("a1", sender="work-osprey-main"); after_ = 
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = _pub_
 check("confirm: sets confirmed only (updated, state_updated, metadata, status as they were); the writer stamp beside it (written_at: when the session last wrote the item) is the one other field that moves",
       after_["confirmed"] >= t0 and after_.get("written_at", 0) >= t0 and {k: v for k, v in after_.items() if k not in ("confirmed", "written_at")} == {k: v for k, v in before.items() if k not in ("confirmed", "written_at")}, (before, after_))
-check("confirm: replies 'confirmed <gid> at <time>.' and the item", re.match(r"confirmed a1 at \w{3} \w{3} \d{1,2}(st|nd|rd|th) \d\d:\d\d\.\na1 \[open\] ", res) is not None
+check("confirm: replies 'confirmed <gid> at <time>.' and the item", re.match(r"confirmed a1 at \w{3} \w{3} \d{1,2}(st|nd|rd|th)(?: \d{4})? \d\d:\d\d\.\na1 \[open\] ", res) is not None
       and f"confirmed: {render.when_words(datetime.datetime.fromtimestamp(after_['confirmed'], _wt_text.ZONE))} (fresh)" in res, res)
 check("confirm: owes no page and tells no keeper on a pilot project", json.dumps(_web_page_debts._owed_load(), sort_keys=True) == led0 and len(wait_push(0)) == n0 and "charged" not in res, (_web_page_debts._owed_load(), wait_push(0)[n0:]))
 check("confirm: publishes", pubs == [1], pubs)
@@ -2427,7 +2427,7 @@ check("audit: the variants — running since, did not finish (warn), the shortli
 check("audit: the Audits page's button shares the script: it finds #audit-now-page and the message line #audit-page-msg, and both buttons cue through the one cue()",
       "document.getElementById('audit-page-msg')" in AJ and "B=[N,P].filter(Boolean)" in AJ and "B.forEach(function(b){b.addEventListener('click',function(){if(!b.disabled)cue()})})" in AJ and AJ.count("function cue()") == 1)
 check("audit: times in the rulebook's form, in the board's zone", "Intl.DateTimeFormat('en-US',Object.assign({timeZone:Z},O))" in AJ
-      and "function when(ts){var p=pt(ts);return SST('date.full',{wd:SST('date.wd.'+WD.indexOf(p.weekday))" in AJ and "hourCycle:'h23'" in AJ)
+      and "function when(ts){var p=pt(ts),k=p.year===pt(Date.now()/1000).year?'date.full':'date.full_year';return SST(k,{wd:SST('date.wd.'+WD.indexOf(p.weekday))" in AJ and "hourCycle:'h23'" in AJ)
 check("audit: the server's text is drawn as text, never as markup", "innerHTML" not in AJ and "g.textContent=t" in AJ)
 check("audit: a redraw builds the new text first and swaps it in, and leaves an unchanged line alone",
       "f=document.createDocumentFragment()" in AJ and "if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}}" in AJ

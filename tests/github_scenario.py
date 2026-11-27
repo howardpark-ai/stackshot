@@ -1745,7 +1745,10 @@ FRONT = "00000000-0000-4000-8000-000000000002"
                                                       FRONT: {"name": "home-front", "machine": "a", "seen": time.time(), "url": "https://claude.ai/code/session_front"}}))
 TR = T / "transcripts"; (TR / "-home-user").mkdir(parents=True); (T / "transcripts-team" / "-home-user-other").mkdir(parents=True)   # the front pane's transcript under the second root
 ZONE_HOURS = 4                                    # the instance timezone pinned above (Asia/Dubai, UTC+4, no DST)
-MSG_AT = f"Tue Jun 16th {9 + ZONE_HOURS:02d}:52"      # the transcript entry's ts 2026-06-16T09:52Z, as the board shows it
+import datetime as _dtm
+from stackshot.core import datewords as _datewords
+MSG_YEAR = "2026 " if _datewords.other_year(_dtm.date(2026, 6, 16)) else ""      # the year is said once it is not the current one
+MSG_AT = f"Tue Jun 16th {MSG_YEAR}{9 + ZONE_HOURS:02d}:52"      # the transcript entry's ts 2026-06-16T09:52Z, as the board shows it
 def entry(uuid, text, kind="human", ps="typed", meta=False, typ="user", parts=None, ts="2026-06-16T09:52:00.000Z"):
     """One transcript line as Claude Code writes it (compact JSON): a user entry with its origin and promptSource."""
     e = {"type": typ, "uuid": uuid, "timestamp": ts, "sessionId": "x", "message": {"role": "user", "content": parts if parts is not None else text}}
@@ -1856,7 +1859,7 @@ e9 = said_of(g_t)[-1]
 check("relayed: session=home-front (a pane name) resolves to that pane's transcript uuid, the message is found there (under the second configured root): checked, the front session stored, the sender as by",
       e9["checked"] and e9["session"] == FRONT and e9["by"] == OWNER and e9["ts"] == calendar.timegm((2026, 6, 16, 9, 57, 0)), e9)
 _cfg.CFG["client"]["session_view"] = "https://sala.example.org/#s={name}"   # session names link to the fleet tool's view while they have a live pane
-check("…the page's tag names and links the front session to its view, like other session names (no [fleet] tool_name: the title names none)", f'<span class="smeta">{OWN} in <a href="https://sala.example.org/#s=home-front" target="_blank" rel="noopener" title="open this session\'s view">home-front</a> · Tue Jun 16th {9 + ZONE_HOURS:02d}:57 · checked against the transcript</span>' in page(g_t),
+check("…the page's tag names and links the front session to its view, like other session names (no [fleet] tool_name: the title names none)", f'<span class="smeta">{OWN} in <a href="https://sala.example.org/#s=home-front" target="_blank" rel="noopener" title="open this session\'s view">home-front</a> · Tue Jun 16th {MSG_YEAR}{9 + ZONE_HOURS:02d}:57 · checked against the transcript</span>' in page(g_t),
       re.findall(r'<details class="said" id="said-9".*?</details>', page(g_t)))
 _cfg.CFG["client"]["session_view"] = ""
 # the item page draws no Discuss button (a link to the fleet tool's side conversation), with a fleet tool's address configured or not

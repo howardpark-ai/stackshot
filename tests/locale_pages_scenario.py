@@ -92,6 +92,7 @@ EN = i18n.EN
 LOC = T / "locales"
 MARK = lambda v: f"[x:{v}]"
 DATE_AGE = {"date.full": "D<{wd}/{month}/{day}/{hm}>", "date.nohm": "D<{wd}/{month}/{day}>", "date.day": "{n}{ord}",
+            "date.full_year": "D<{wd}/{month}/{day}/{year}/{hm}>", "date.nohm_year": "D<{wd}/{month}/{day}/{year}>",
             "date.ord.1": "o1", "date.ord.2": "o2", "date.ord.3": "o3", "date.ord.n": "on",
             "age.now": "A<now>", "age.min": "A<{n}min>", "age.hour": "A<{n}hr>", "age.day": "A<{n}day>"}
 DATE_AGE.update({f"date.wd.{i}": f"w{i}" for i in range(7)}); DATE_AGE.update({f"date.mon.{i}": f"m{i}" for i in range(1, 13)})

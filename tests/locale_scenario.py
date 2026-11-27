@@ -77,6 +77,7 @@ LOC = T / "locales"
 # ---- the ASCII test locale: English text wrapped in a marker, and ASCII date and age forms
 MARK = lambda v: f"[x:{v}]"
 DATE_AGE = {"date.full": "D<{wd}/{month}/{day}/{hm}>", "date.nohm": "D<{wd}/{month}/{day}>", "date.day": "{n}{ord}",
+            "date.full_year": "D<{wd}/{month}/{day}/{year}/{hm}>", "date.nohm_year": "D<{wd}/{month}/{day}/{year}>",
             "date.ord.1": "o1", "date.ord.2": "o2", "date.ord.3": "o3", "date.ord.n": "on",
             "age.now": "A<now>", "age.min": "A<{n}min>", "age.hour": "A<{n}hr>", "age.day": "A<{n}day>"}
 DATE_AGE.update({f"date.wd.{i}": f"w{i}" for i in range(7)}); DATE_AGE.update({f"date.mon.{i}": f"m{i}" for i in range(1, 13)})
@@ -181,13 +182,14 @@ def old_dur(s):
     return f"{m_}m" if m_ < 60 else f"{m_ // 60}h" if m_ < 48 * 60 else f"{m_ // 1440}d"
 old_ago = lambda s: "just now" if s < 60 else old_dur(s) + " ago"
 UTC = datetime.timezone.utc; DXB = datetime.timezone(datetime.timedelta(hours=4))
+TODAY = datetime.date(2026, 11, 1)      # the fixed dates below are of this year (a date of another year says it: tests/date_year_scenario.py)
 days = [datetime.datetime(2026, 11, d, h, m, tzinfo=z) for d in (1, 2, 3, 4, 10, 11, 12, 13, 14, 21, 22, 23, 24, 30) for h, m, z in ((0, 0, UTC), (16, 20, DXB), (23, 59, UTC))]
-check("fmt_date: English equals the form it replaced, with and without a clock, on every ordinal case", all(i18n.fmt_date(t, "en") == old_when(t) and i18n.fmt_date(t, "en", clock=False) == old_when(t, False) and r2.when_words(t) == old_when(t)
-      for t in days) and r2.when_words(datetime.date(2026, 11, 3)) == old_when(datetime.date(2026, 11, 3)) == "Tue Nov 3rd", [t for t in days if r2.when_words(t) != old_when(t)][:2])
-check("fmt_date: English is 'Tue Nov 10th 16:20' for an epoch in a zone", i18n.fmt_date(datetime.datetime(2026, 11, 10, 16, 20, tzinfo=UTC).timestamp(), "en", tz=UTC) == "Tue Nov 10th 16:20")
+check("fmt_date: English equals the form it replaced, with and without a clock, on every ordinal case", all(i18n.fmt_date(t, "en", today=TODAY) == old_when(t) and i18n.fmt_date(t, "en", clock=False, today=TODAY) == old_when(t, False) and r2.when_words(t, today=TODAY) == old_when(t)
+      for t in days) and r2.when_words(datetime.date(2026, 11, 3), today=TODAY) == old_when(datetime.date(2026, 11, 3)) == "Tue Nov 3rd", [t for t in days if r2.when_words(t, today=TODAY) != old_when(t)][:2])
+check("fmt_date: English is 'Tue Nov 10th 16:20' for an epoch in a zone", i18n.fmt_date(datetime.datetime(2026, 11, 10, 16, 20, tzinfo=UTC).timestamp(), "en", tz=UTC, today=TODAY) == "Tue Nov 10th 16:20")
 check("fmt_date: the test locale writes its own forms from the catalog (weekday, month, ordinal, layout)",
-      i18n.fmt_date(datetime.datetime(2026, 11, 10, 16, 20, tzinfo=UTC), "ko") == "D<w1/m11/10on/16:20>" and i18n.fmt_date(datetime.datetime(2026, 11, 3, 9, 5, tzinfo=UTC), "ko", clock=False) == "D<w1/m11/3o3>"
-      and i18n.fmt_date(datetime.date(2026, 11, 22), "ko") == "D<w6/m11/22o2>" and i18n.fmt_date(datetime.datetime(2026, 11, 11, 1, 0, tzinfo=UTC), "ko").startswith("D<w2/m11/11on/"))
+      i18n.fmt_date(datetime.datetime(2026, 11, 10, 16, 20, tzinfo=UTC), "ko", today=TODAY) == "D<w1/m11/10on/16:20>" and i18n.fmt_date(datetime.datetime(2026, 11, 3, 9, 5, tzinfo=UTC), "ko", clock=False, today=TODAY) == "D<w1/m11/3o3>"
+      and i18n.fmt_date(datetime.date(2026, 11, 22), "ko", today=TODAY) == "D<w6/m11/22o2>" and i18n.fmt_date(datetime.datetime(2026, 11, 11, 1, 0, tzinfo=UTC), "ko", today=TODAY).startswith("D<w2/m11/11on/"))
 spans = [0, 1, 59, 59.9, 60, 61, 119, 3599, 3600, 7200, 86399, 86400, 47 * 3600, 48 * 3600 - 1, 48 * 3600, 5 * 86400, 400 * 86400, -5]
 check("fmt_age: English equals the helpers it replaced, over spans from 'just now' to days", all(i18n.fmt_age(s, "en") == old_ago(s) and r2.ago(s) == old_ago(s) for s in spans), [s for s in spans if r2.ago(s) != old_ago(s)])
 check("fmt_age: the quiet form is '>' and the age, never 'just now'", all(i18n.fmt_age(s, "en", quiet=True) == ">" + old_dur(s) + " ago" for s in spans), [(s, i18n.fmt_age(s, "en", quiet=True)) for s in spans[:4]])
@@ -718,7 +720,7 @@ check("a cleared next reads 'next cleared' in English and from its two templates
 
 # the due line's three kinds say what happened: set, moved and cleared each carry the right date, in English and in the test locale
 _en201, _ko201 = html.unescape(ipx_en[(201, "plain")]), ipx_ko[(201, "plain")]
-check("the History's due lines in English: set to the first date, moved from the first to the second, cleared with the second as the old one", all(x in _en201 for x in ("due set to <b>Sun Mar 1st</b>", "due moved: Sun Mar 1st → <b>Wed Apr 1st</b>", "due cleared (was Wed Apr 1st)")))
+check("the History's due lines in English: set to the first date, moved from the first to the second, cleared with the second as the old one", all(x in _en201 for x in ("due set to <b>Sun Mar 1st 2099</b>", "due moved: Sun Mar 1st 2099 → <b>Wed Apr 1st 2099</b>", "due cleared (was Wed Apr 1st 2099)")))
 _ds, _dm, _dc = (re.search(p_, _ko201) for p_ in (r"\[x:due set to <b>(?P<w>[^<]*)</b>\]", r"\[x:due moved: (?P<a>.*?) → <b>(?P<b>[^<]*)</b>\]", r"\[x:due cleared \(was (?P<w>[^)]*)\)\]"))
 check("…and in the test locale each kind reads from its own key with the same dates (set's new = moved's old, moved's new = cleared's old)", bool(_ds and _dm and _dc) and _ds["w"] == _dm["a"] and _dm["b"] == _dc["w"] and _ds["w"] != _dm["b"], (_ds, _dm, _dc))
 
@@ -763,7 +765,8 @@ check("…and the config the test touched is put back", cl_.get("mockup_hosts") 
 # the shared helpers of the sidebar and the rows, called direct: no fixture page reaches every branch of them
 bdx = r2.Board(f"{tmp}/store"); DT = datetime.timedelta
 fl_ = _cfg.CFG.setdefault("fleet", {}); had_tool = "tool_name" in fl_; tool_old = fl_.get("tool_name"); since_old = bdx.anchor_since
-def _wd(d): return f"{d:%m-%d} {i18n.t(f'date.wd.{d.weekday()}', 'ko')}"
+def _md(d): return f"{d:%Y-%m-%d}" if d.year != bdx.now.year else f"{d:%m-%d}"      # the badge's day: one of another year says it (a run in late December reaches into the next)
+def _wd(d): return f"{_md(d)} {i18n.t(f'date.wd.{d.weekday()}', 'ko')}"
 def _dueof(days): return {"gid": "a1", "metadata": {"due": (bdx.now.date() + DT(days=days)).isoformat()}}
 with i18n.use("ko"):
     d_due = [bdx.due_badge(_dueof(0)), bdx.due_badge(_dueof(-3)), bdx.due_badge(_dueof(5)), bdx.due_badge({"gid": "a1", "metadata": {}})]
@@ -820,7 +823,7 @@ check("sent_msg in the test locale: every code reads from its own key, who takes
 check("the home page's notices (sent_notes_html) in the test locale: every code with the home page's own key reads from it, the rest from the item page's, each with its class",
       d_home == {k_: [r2.Board._SENT_KEYS[k_][0], MARK(EN[_KH.get(k_, _K[k_])])] for k_ in _S}, d_home)
 # the English wording of eight keys no other test pins, through the real render path with representative fields (the test locale's checks above prove only that each key is read, not what it says)
-_wd_en = lambda d: f"{d:%m-%d} {d:%a}"
+_wd_en = lambda d: f"{_md(d)} {d:%a}"
 bdx._sess_obj = lambda r: {"name": "cloud-x", "machine": "c"}; en_mc = bdx.mover_row({"gid": "a1", "metadata": {}}); del bdx._sess_obj
 bdx.anchor_since = None; en_poll = bdx._when({"mode": "poll"}); bdx.anchor_since = since_old
 bdx.scoped_urls = lambda gid: [f"https://example.com/{i}" for i in range(5)]

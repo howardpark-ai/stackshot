@@ -146,10 +146,10 @@ check("a your-call item handed to Oliver shows no 'not yet taken' warning", ista
 check("a your-step item handed to Oliver shows no 'not yet taken' warning", istate(p61).startswith("Your move") and "not yet taken" not in p61, istate(p61))
 check("a hand-off to a session that has not taken it shows the warning; one taken does not", "handed over, not yet taken" in istate(p62) and "not yet taken" not in p63, (istate(p62), istate(p63)))
 check("waiting on a time: the state line says Waiting; the wait block has what (his reason), watched by the scheduler, until",
-      istate(p3) == "Waiting · since 3h ago" and re.search(r"Waits on\s+the vendor's holiday\s+Watched by\s+the scheduler\s+Until\s+Thu Jan 1st\s+Picks it up\s+home-other", wt(p3)) is not None, (istate(p3), wt(p3)))
+      istate(p3) == "Waiting · since 3h ago" and re.search(r"Waits on\s+the vendor's holiday\s+Watched by\s+the scheduler\s+Until\s+Thu Jan 1st 2099\s+Picks it up\s+home-other", wt(p3)) is not None, (istate(p3), wt(p3)))
 check("waiting on an item: its close, watched by the server", istate(p4).startswith("Waiting · since") and re.search(r"Waits on\s+a2\s+\(open\)\s+Watched by\s+the server\s+Picks it up\s+home-other", wt(p4)) is not None and "no end date set" not in wt(p4), (istate(p4), wt(p4)))
-check("waiting on an anchor: the event, watched by the anchor module, the backstop", istate(p5).startswith("Waiting · since") and re.search(r"the review lands\s+Watched by\s+the anchor module\s+Backstop\s+Sun Feb 1st\s+Picks it up\s+home-other", wt(p5)) is not None, (istate(p5), wt(p5)))
-check("waiting on news only he relays: the party's event, ask by", istate(p6).startswith("Waiting · since") and re.search(r"Acme's the contract\s+\(news only Oliver relays\)\s+Watched by\s+the scheduler\s+Ask by\s+Sun Mar 1st\s+Picks it up\s+home-other", wt(p6)) is not None, (istate(p6), wt(p6)))
+check("waiting on an anchor: the event, watched by the anchor module, the backstop", istate(p5).startswith("Waiting · since") and re.search(r"the review lands\s+Watched by\s+the anchor module\s+Backstop\s+Sun Feb 1st 2099\s+Picks it up\s+home-other", wt(p5)) is not None, (istate(p5), wt(p5)))
+check("waiting on news only he relays: the party's event, ask by", istate(p6).startswith("Waiting · since") and re.search(r"Acme's the contract\s+\(news only Oliver relays\)\s+Watched by\s+the scheduler\s+Ask by\s+Sun Mar 1st 2099\s+Picks it up\s+home-other", wt(p6)) is not None, (istate(p6), wt(p6)))
 check("dead: Done <age>, and the close's reason under the state line", re.fullmatch(r"Done · \d+d ago", istate(p7)) is not None and '<p class="ireason">shipped as asked</p>' in p7, istate(p7))
 # the project is not on the line under the title: it stays on the sidebar's Project row. The page is one document in both layouts (the stylesheet moves the side panel beside the item from 768px and stacks it on a phone), so one read of the markup covers both
 _proj = "Alpha"
@@ -211,7 +211,7 @@ check("the sidebar's fields in order: mover, creator (no contact), project, then
       labels(sd1) == ["Mover", "Creator", "Project", "Then", "Priority", "Anchors 1", "Confirmed"], labels(sd1))
 check("then: the session that takes the item after the owner's move, a sidebar row (the line under the title no longer says it)", re.search(r"<dt>Then</dt><dd>home-other</dd>", sd1) is not None and "Mover and then" not in sd1 and " then " not in istate(p1), sd1[:600])
 check("priority is a tag, the anchor scoped to the item is listed", '<span class="tag t-p1">P1</span>' in sd1 and "slack.com" in sd1 and '<dt>Anchors <span class="count">1</span></dt>' in sd1)
-check("a waiting item's sidebar: the one who picks it up is the Mover row and there is no Then row (it stands only beside the owner); its wake, backstop or ask by", "<dt>Then</dt>" not in side(p3) and "<dt>Mover</dt><dd>home-other" in side(p3) and "<dt>Wake</dt><dd>Thu Jan 1st</dd>" in side(p3) and "<dt>Backstop</dt>" in side(p5) and "<dt>Ask by</dt>" in side(p6), side(p3))
+check("a waiting item's sidebar: the one who picks it up is the Mover row and there is no Then row (it stands only beside the owner); its wake, backstop or ask by", "<dt>Then</dt>" not in side(p3) and "<dt>Mover</dt><dd>home-other" in side(p3) and "<dt>Wake</dt><dd>Thu Jan 1st 2099</dd>" in side(p3) and "<dt>Backstop</dt>" in side(p5) and "<dt>Ask by</dt>" in side(p6), side(p3))
 check("a closed item's sidebar has no Expected by (an open one has none either) and no then; the header says how it ended", "<dt>Expected by</dt>" not in side(p7) and "<dt>Then</dt>" not in side(p7) and istate(p7).startswith("Done"), side(p7))
 check("today's other fields (due, confirmed) sit in a closed More details fold; the Mover row is not among them (it opens the panel); Whose move is gone", '<details class="fold imore" data-fold="item.more"><summary><h3>More details</h3></summary>' in sd1
       and "<dt>Mover</dt>" not in sd1.split("More details")[1] and "<dt>Confirmed</dt>" in sd1.split("More details")[1] and "<dt>Whose move</dt>" not in sd1)
@@ -251,7 +251,7 @@ h8 = page("a8")
 hist = lambda h: re.findall(r'<li class="ev ev-[a-z]+">.*?</li>', h[h.find('id="history"'):h.find('id="comments"')], re.S)
 lines = [html.unescape(re.sub(r"<[^>]+>", "", x.replace("</div>", "\n"))).strip().split("\n") for x in hist(h8)]
 check("one entry per revision, newest first: a header line with the author and the time, then one bullet per change",
-      len(lines) == 3 and re.fullmatch(r"Oliver · \w{3} \w{3} \d+\w\w \d\d:\d\d", lines[0][0]) and lines[0][1:] == ["subject edited (was “[home] history item”)"]
+      len(lines) == 3 and re.fullmatch(r"Oliver · \w{3} \w{3} \d+\w\w(?: \d{4})? \d\d:\d\d", lines[0][0]) and lines[0][1:] == ["subject edited (was “[home] history item”)"]
       and lines[1][0].startswith("home-other · ") and lines[1][1:] == ["priority: p2 → p1"] and lines[2][0].startswith("home-other · ") and lines[2][1:] == ["created as “[home] history item” · On agent · mover home-other · created by home-here"], lines)
 h41 = page("a41")
 lines41 = [html.unescape(re.sub(r"<[^>]+>", "", x.replace("</div>", "\n"))).strip().split("\n") for x in hist(h41)]
@@ -264,7 +264,7 @@ check("History: a hand-over that could not be made says the session isn't runnin
 check("History: in the two hand-over fixtures (moved, fallback) the line sits once on the revision that made it and the creation revision has none", [sum(x.startswith("step hand-over:") for x in l) for l in lines42] == [1, 0] and [sum(x.startswith("step hand-over:") for x in l) for l in lines43] == [1, 0], (lines42, lines43))
 check("…the creation line names the mover",  any(l[1:] == ["created as “[home] mover history” · On agent · mover home-other · created by home-here"] for l in lines41), lines41)
 check("…the author in bold and the time in the board's zone share the header line, as on GitHub",
-      all(re.match(r'<li class="ev ev-[a-z]+"><div class="eh"><b>[^<]+</b> · <span class="t">\w{3} \w{3} \d+\w\w \d\d:\d\d</span></div><div class="w"><div class="eb">', x) for x in hist(h8)), hist(h8)[:2])
+      all(re.match(r'<li class="ev ev-[a-z]+"><div class="eh"><b>[^<]+</b> · <span class="t">\w{3} \w{3} \d+\w\w(?: \d{4})? \d\d:\d\d</span></div><div class="w"><div class="eb">', x) for x in hist(h8)), hist(h8)[:2])
 check("the count on the History fold is the number of lines", '<h2>History <span class="count">3</span></h2>' in h8, h8[h8.find('id="history"'):][:200])
 check("the three folds: Background open, History and Comments closed by default, with their counts", '<details class="fold" data-fold="item.description" open id="description">' in h8
       and '<details class="fold" data-fold="item.history" id="history">' in h8 and '<details class="fold" data-fold="item.comments" id="comments">' in h8
