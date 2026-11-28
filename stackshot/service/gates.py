@@ -633,7 +633,7 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool], stored: dict[
         setv["wait_kind"] = setv["wait_kind"].lower()
     for k in ("mover", "then", "post_wake_mover"):
         if k in setv:
-            setv[k] = _model.norm_who(setv[k])
+            setv[k] = _sr.named(_model.norm_who(setv[k]))      # a short session id (`sala sessions`) is stored as the session's name: a mover that is an id would not be told from its name
     probs = _model.check_fields(setv)
     if probs:
         faults.append("Refused: " + "; ".join(probs))

@@ -270,6 +270,14 @@ got = run3()
 check("25 a task starts only with a tool result that OPENS with the start text (running in the background, moved there, moved there after its timeout, a Monitor started): text that is only quoted in a result, a message, a request or a command starts none",
       {"q5", "q6"} <= set(got) and not any(k in got for k in ("q1", "q2", "q3", "q4", "q7", "q8")), sorted(got))
 check("25 pending_tasks reads the real start forms", TIE.pending_tasks(sub3 / "agent-q5.jsonl") == {"qq0005"} and TIE.pending_tasks(sub3 / "agent-q6.jsonl") == {"qq0006"} and TIE.pending_tasks(sub3 / "agent-q1.jsonl") == set(), None)
+# a backgrounded MCP tool call (Claude Code 2.1.332: three wordings) is a task that waits too; a Bash moved so a message can reach the session already was
+fin("m1", [_res('MCP tool "svc__run" was moved to the background as task mcp001 so that a message that arrived while it was running can reach you; it was not interrupted and keeps running. You can keep working in the meantime.')])
+fin("m2", [_res('MCP tool "svc__run" is still running after 120s. It was moved to the background as task mcp002 and keeps running. You can keep working in the meantime.')])
+fin("m3", [_res('MCP tool "svc__run" started server-side task srv9. It was moved to the background as task mcp003 and keeps running on the server; you can keep working in the meantime.')])
+fin("m4", [_res("Command was moved to the background (ID: mcp004) so that a message that arrived while it was running can reach you; it was not interrupted. Output is being written to: /x/mcp004.output.")])
+fin("m5", [_res('see MCP tool "svc__run" was moved to the background as task mcp005 in the log')])
+check("25 pending_tasks reads a backgrounded MCP tool call in its three wordings, and a Bash moved so a message can reach the session; a quote of one is none",
+      [TIE.pending_tasks(sub3 / f"agent-m{i}.jsonl") for i in range(1, 6)] == [{"mcp001"}, {"mcp002"}, {"mcp003"}, {"mcp004"}, set()], [TIE.pending_tasks(sub3 / f"agent-m{i}.jsonl") for i in range(1, 6)])
 saved_tt = TIE.TASK_TAIL_BYTES; fin("tb1", [BGR("tb0001"), {"type": "assistant", "x": "y" * 70000}]); tb_all = "tb1" in run3(); TIE.TASK_TAIL_BYTES = 4096
 try: tb_cut = "tb1" in run3()
 finally: TIE.TASK_TAIL_BYTES = saved_tt
