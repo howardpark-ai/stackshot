@@ -465,6 +465,7 @@ HINTS: dict[str, str] = {
     "message: unknown-transcript-id": "address a pane by its name, or a cloud session by its cse_ id; a transcript id reaches only a pane some machine reports.",
     "message: front-not-held": "what asks nothing of the user does not go to a front agent: put it on the item it concerns, or send it to the project page.",
     "message: script-fyi-not-held": "a script sends an fyi to the project page (projects/<slug>) when the front agent cannot hold it.",
+    "message: reroute-decision-off-board": "a sender that sends nothing to front agents puts the user's decision or step on a board item (needs=decision with an ask, or the user as mover) and names it by its plain id; with nothing needed, leave out the mark and needs: decision.",
 }
 
 # kind of refusal with no hint, and why none fits: a repeating one is listed with this line, and asks for nothing.
@@ -474,6 +475,7 @@ NO_HINT: dict[str, str] = {
     "message: retired-recipient": "no hint fits: the relay sends such a message on to the project page itself, so the caller has nothing to change.",
     "message: no-keeper": "no hint fits: the page has no agent that can take a message, a gap in the instance's setup and not in the call.",
     "message: delivery-failed": "no hint fits: the call passed every rule and the push to the session failed; the logged refusal carries the push error.",
+    "message: reroute-to-retired": "no hint fits: the reroute catches it and holds the message or handles the call as with the reroute switches off, so the caller has nothing to change.",
 }
 
 
