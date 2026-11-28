@@ -118,6 +118,12 @@ def _now(rec: dict[str, Any]) -> tuple[float, str]:
     return t, vid
 
 
+def _item_of(data: bytes, fallback: str | None) -> str | None:
+    """The item the page's own link names, `fallback` when it names none (a page moved in, an old version without an item)."""
+    found = _page.item_link(data.decode("utf-8", "replace"), board()) if board() else None
+    return _norm_id(f"board#{found}") if found is not None else fallback
+
+
 def _highest_folder() -> int:
     return max((int(p.name) for p in _c.root().iterdir() if p.is_dir() and re.fullmatch(_c.NUMBER, p.name)), default=0) if _c.root().is_dir() else 0
 
@@ -139,7 +145,10 @@ def _entry(data: bytes, when: float, session: str) -> dict[str, Any]:
 
 
 def _writes(what: str) -> None:
-    _ro.guard(what)
+    try:
+        _ro.guard(what)
+    except _ro.ReadOnlyError as e:
+        raise _refuse(str(e)) from None
     if not write_on():
         raise _refuse(WRITE_OFF)
 
@@ -184,7 +193,7 @@ def update(number: Any, text: str, title: str = "", session: str = "") -> tuple[
                 _save(rec, None)
         else:
             result = "replaced"
-            rec["versions"] = [*rec["versions"], {"id": vid, **old}]
+            rec["versions"] = [*rec["versions"], {"id": vid, **old, "title": rec["title"], "item": rec["item"]}]
             rec.update({"title": name or rec["title"], "item": item, "current": entry})
             _save(rec, data)
     print(f"canvas {number}: {result} by {who or 'a session'}", flush=True)
@@ -211,7 +220,10 @@ def undo(number: Any, session: str = "") -> tuple[int, str, list[str]]:
         old = rec["current"]
         rec["versions"] = [v for v in rec["versions"] if v["id"] != back["id"]]
         if old is not None:
-            rec["versions"].append({"id": vid, **old})
+            rec["versions"].append({"id": vid, **old, "title": rec["title"], "item": rec["item"]})
+        # the record's title and item go back with the page: the ones saved with the version, else the item the page's own link names
+        rec["title"] = back["title"] if isinstance(back.get("title"), str) else rec["title"]
+        rec["item"] = back["item"] if isinstance(back.get("item"), str) else _item_of(data, rec["item"])
         rec["current"] = _entry(data, when, who or str(back.get("session") or ""))
         _save(rec, data)
     print(f"canvas {number}: restored {back['id']} by {who or 'a session'}", flush=True)

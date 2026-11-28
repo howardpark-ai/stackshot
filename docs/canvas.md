@@ -50,13 +50,13 @@ One MCP tool, `canvas`, with `action` = `add | update | history | undo | list`. 
 |---|---|---|
 | `add` (`page`, `title`) | saves the page under the next number (after the counter and after the highest folder) | the address on the first line, `result: added`, a `notice:` line for each thing worth fixing |
 | `update` (`number`, `page`, `title`) | a revision: the page replaces the current one, and the page it replaces is kept as a version whose id is the time of the replacement (always newer than the newest id); the same page again changes nothing; an unknown number is refused | the address, `result: replaced` or `result: unchanged`, the notices |
-| `undo` (`number`) | the newest version is the page again and the page it replaces is kept as a version, so a second undo goes back | the address, `result: restored <id>` |
+| `undo` (`number`) | the newest version is the page again, with the title and item it had, and the page it replaces is kept as a version with its own, so a second undo goes back | the address, `result: restored <id>` |
 | `history` (`number`) | the versions, newest first: id, size, who wrote it | one line each, or `canvas N has no earlier version` |
 | `list` | the canvases that have a page: number, size, age, address, title | one line each, or `no canvases` |
 
 `add`, `update` and `undo` are refused while `[canvas] write` is not true, and on a [standby copy](read-only-standby.md); `history` and `list` always answer. A revision is always `update`: a new `add` gives a new number and a new address, so a link to the old one would keep showing the old page.
 
-A page is refused, with nothing saved, when it is empty, over 5 MiB, not UTF-8 or holds a NUL byte, when a title is over 200 characters, or when its first part holds no link to an item: `href="<board>/items/N"` (the board's own address, [instance] board_url), within the first 2000 characters once comments, styles and scripts are left out. The bare text `board#N` is not a link. The canvas's item is the one the link names.
+A page is refused, with nothing saved, when it is empty, over 5 MiB, not UTF-8 or holds a NUL byte, when a title is over 200 characters, or when its first part holds no link to an item: a clickable `<a href="<board>/items/N">` (the board's own address, [instance] board_url), within the first 2000 characters once the head, comments, styles and scripts are left out. A `data-href`, a `<link>`, an anchor that is hidden or inside a title, textarea, noscript or template does not count; the first link found names the canvas's item. The bare text `board#N` is not a link. The canvas's item is the one the link names.
 
 A **notice** is not a refusal: the page is saved and the reply says what to fix. It is given for a decision page, a page whose item needs the owner's decision, when its visible text is longer than one screen (about 1200 characters) or its first line has no question (a `?`) or no recommendation (the word `recommend`). The link to the item is not counted as text.
 
@@ -64,7 +64,7 @@ A **notice** is not a refusal: the page is saved and the reply says what to fix.
 
 The stored page is never changed. The raw address serves it with two additions, each made once at the end of the page's head and only when the page needs it (`canvas_page.served`):
 
-- **A link color**, when the page has links and no style rule gives a link a color (`a`, `a:link` or `a:visited` in a selector, with a `color`): `:where(a:link,a:visited){color:#2f72de}`, a color with a contrast of 4.5 or more on white and on black. The rule has no specificity, so any rule of the page's own wins over it.
+- **A link color**, when the page has links and no style rule gives a link a color (`a`, `a:link` or `a:visited` in a selector, with a `color`; a rule for `a:hover`, `a:focus` or `a:active` alone does not count): `:where(a:link,a:visited){color:#2f72de}`, a color with a contrast of 4.5 or more on white and on black. A page that sets a dark background of its own on `html`, `body` or `:root` (a plain color, or in a `prefers-color-scheme: dark` query) gets `#8ab4f8` there instead, whichever of the two reads better on it. The rule has no specificity, so any rule of the page's own wins over it.
 - **A tooltip**, when the page has an element with `data-tip="..."` and no script of its own that mentions `data-tip`. A click (a tap on a phone) opens the text under the element and a second click on it closes it; a click elsewhere or Esc closes it too, and another tip's click moves it there. It never opens on hover alone. The text is put in as text, never as markup, and an element that takes no focus is given `tabindex="0"`, so Enter or Space open it from the keyboard. The page's own script and style are allowed by the page's policy; nothing else is.
 
 ## Moving canvases in
