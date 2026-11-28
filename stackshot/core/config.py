@@ -827,10 +827,10 @@ AUDIT_PATTERN_REVIEWS = ("off", "shadow")
 
 def audit_pattern_review() -> str:
     """[audit] pattern_review: the pattern review, the last stage of a model run (audit_run.pattern_stage): it reads the findings the audits made since the review before it, groups the repeats by kind, agent and
-    project, and makes ONE model call (on the audit's lane and model, inside max_minutes and max_calls) that drafts one guardrail per pattern. "shadow" (the default) = the drafts are logged on the run record and
-    named in the summary line, and nothing is sent or opened; "off" = no review, no call, and no findings log is kept. A value that is neither reads as the default."""
+    project, and makes ONE model call (on the audit's lane and model, inside max_minutes and max_calls) that drafts one guardrail per pattern. "off" (the default) = no review, no call, and no findings log is kept;
+    "shadow" = the drafts are logged on the run record and named in the summary line, and nothing is sent or opened. A value that is neither reads as the default."""
     v = str(get("audit", "pattern_review") or "").strip().lower()
-    return v if v in AUDIT_PATTERN_REVIEWS else "shadow"
+    return v if v in AUDIT_PATTERN_REVIEWS else "off"
 
 
 RUNNER_PROCESSES = ("inline", "unit")

@@ -26,6 +26,7 @@ BOARD = "https://board.example.org"
 MINA = "mina@example.org"
 toml = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
 toml, _n = re.subn(r'(?m)^session_links = "[^"]*"', 'session_links = ""', toml); assert _n == 1
+toml = toml.replace('pattern_review = "off"', 'pattern_review = "shadow"', 1)      # this suite reads the findings log, which only a pattern review other than off keeps
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
     toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key

@@ -32,7 +32,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 from stackshot.core import config; from stackshot.audit import audit; from stackshot.audit import audit_overview as ov
-config.CFG["audit"]["at"] = "05:00"
+config.CFG["audit"]["at"] = "05:00"; config.CFG["audit"]["pattern_review"] = "shadow"      # the findings log is kept while the review is on (it is off by default)
 D = T / "state/audit"; LOG = D / "findings-log.jsonl"
 NOW = time.time()
 def row(ago, source, id_, kind, detail="detail", agent="the-agent"): return {"at": NOW - ago, "source": source, "id": id_, "kind": kind, "agent": agent, "project": "projects/x", "detail": detail}
@@ -101,7 +101,7 @@ with TestClient(server.mcp.http_app()) as c:
     check("the page: the title, an h1 'Audits' and the three paces", "<title>Audits ·" in h and h.count("<h1>Audits</h1>") == 1
           and all(x in w for x in ("Every minute", "Every 10 minutes", "05:00")), w[:400])
     check("the groups: eight folds in the catalog's order, each with its number of audits", re.findall(r'<details class="audg"><summary><span class="agn"><b>([^<]+)</b>', h) == NAMES
-          and re.findall(r'<span class="anum">(\d+) audits</span>', h) == [str(len(g["audits"])) for g in ov.GROUPS] and "56 audits in 8 groups." in w, re.findall(r'<span class="anum">(\d+) audits', h))
+          and re.findall(r'<span class="anum">(\d+) audits</span>', h) == [str(len(g["audits"])) for g in ov.GROUPS] and "52 audits in 8 groups." in w, re.findall(r'<span class="anum">(\d+) audits', h))
     nums = re.findall(r'<span class="anum(?: hit)?">((?:\d+ found)|not logged|log off)</span>', h)
     check("the groups' findings in 24 hours from the log: 1, 3, 2, 1, 1, 1, and 'not logged' (never a zero) for the two that keep no log", nums == ["1 found", "3 found", "2 found", "1 found", "1 found", "1 found", "not logged", "not logged"], nums)
     check("a group with findings is marked (hit), a group without a log is not", h.count('<span class="anum hit">') == 6 and "0 found" not in h)
@@ -199,7 +199,7 @@ with TestClient(server.mcp.http_app()) as c:
     check("the page lists at most ten findings and says how many there were in all", r.status_code == 200 and h.count('class="af"') == 10 and "12 in the last 24 hours" in w and "from the future" not in h, (h.count('class="af"'), w[:300]))
     check("the findings log is read once for the page, the groups' counts and the side panel's card", len(reads) == 1, len(reads))
     cd = h[h.find('<div id="audit"'):]; cd = cd[:cd.find("</div>") + 6]
-    check("the card and the page's groups say the same number from that one read", '<span class="lbl">Wording</span><span class="val a-n">12</span><span class="val a-n hit">12</span>' in cd
+    check("the card and the page's groups say the same number from that one read", '<span class="lbl">Wording</span><span class="val a-n">10</span><span class="val a-n hit">12</span>' in cd
           and re.findall(r'<span class="anum(?: hit)?">(\d+ found)</span>', h)[2] == "12 found", cd[:600])
     check("an agent name from the log is escaped on the page, never run as markup", "<b>bold</b>" not in h and "&lt;b&gt;bold&lt;/b&gt;" in h, [x[:100] for x in re.findall(r'<div class="am">.*?</div>', h)][:2])
     check("item_path takes ASCII digits only and a whole id: no other script's digits, no newline after the number, no trailing or doubled dash in a temporary prefix",

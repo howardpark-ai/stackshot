@@ -601,17 +601,6 @@ check("mark: the board report's wake words mark the server's day, not another", 
 check("mark: the audit's stored-wait text marks the server's day, not another", f"ends on {EXP14} (set by the server)" in _audit_run.stored_wait_text({"metadata": SM}) and "set by the server" not in _audit_run.stored_wait_text({"metadata": STALE}),
       (_audit_run.stored_wait_text({"metadata": SM}), _audit_run.stored_wait_text({"metadata": STALE})))
 
-class _AuditEnv:
-    clock = staticmethod(time.time)
-    page = staticmethod(lambda p: ("", None))
-def audit_head(mk):
-    """The context lines the audit's obsolete-wait check gives for an item that waits after a closed one, its stored end as `mk`."""
-    its = {"a500": {"id": "500", "status": "open", "subject": "[home] waits", "updated": now0, "state_updated": now0, "metadata": {"project": "projects/alpha", "after": ["a501"], "wait_kind": "item", **mk}},
-           "a501": {"id": "501", "status": "completed", "subject": "[home] done", "updated": now0, "metadata": {"outcome": "done", "reason": "finished"}}}
-    return _audit_run.obsolete_wait_evidence("a500", its, {"500": ["a500"], "501": ["a501"]}, _AuditEnv(), {}, 0.0)[1]
-check("mark: the audit's obsolete-wait head marks the server's day", (audit_head(SM) or [""])[0].endswith(f"until {EXP14} (set by the server)"), audit_head(SM))
-check("mark: ...and not a day that is not the server's", bool(audit_head(STALE)) and "set by the server" not in audit_head(STALE)[0] and f"until {day(6)}" in audit_head(STALE)[0], audit_head(STALE))
-
 # ================================================================ rule A: the default close's allow list, checked from the tools' signatures
 import inspect
 UPD_P = set(inspect.signature(_wt_update.stackshot_update).parameters)

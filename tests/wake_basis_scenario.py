@@ -210,13 +210,14 @@ from stackshot.projects import pages as _pages
 due = [it for it in rows.values() if not it.get("held")]
 check("9 …so the question lists no basis wait and still lists the plain doing item", sh(18) in {x["shown"] for x in due} and not ({sh(1), sh(2), sh(6), sh(17), sh(22)} & {x["shown"] for x in due}), sorted(x["shown"] for x in due))
 
-# ---- 10. the audit's why-not-now call leaves a basis wait alone
+# ---- 10. a basis wait is a wait: dated_wait leaves it alone (the daily audit's model call for it is retired; the filing pass's code check reads the same two functions)
+from stackshot.waits import dated_wait as _dw10
+def only_waits_for_a_day(it): return _dw10.of(it, now_) is not None and _dw10.basis_wait(it, now_, AO) is None
 g(23, needs=[BACK], state="doing", wake=W1, wait_basis=basis(W1), next=step40)           # dated steps beside a basis
-check("10 audit: a doing item with dated steps and no basis is a why-not-now suspect, one that states its basis is not",
-      AR.dated_wait_evidence(it_of(21), now_, AO)[0] != "" and AR.dated_wait_evidence(it_of(20), now_, AO) == ("", [], "") and AR.dated_wait_evidence(it_of(23), now_, AO) == ("", [], ""),
-      (AR.dated_wait_evidence(it_of(21), now_, AO)[0][:60], AR.dated_wait_evidence(it_of(20), now_, AO)))
-g(24, needs=[BACK], state="doing", wake=wk(24 * 30), wait_basis=basis(wk(24 * 31)), next=step40)    # a basis for another wake is no basis: the audit still asks
-check("10 …a basis written for another wake does not exempt it", AR.dated_wait_evidence(it_of(24), now_, AO)[0] != "", AR.dated_wait_evidence(it_of(24), now_, AO))
+check("10 a doing item with dated steps and no basis only waits for a day, one that states its basis does not",
+      only_waits_for_a_day(it_of(21)) and not only_waits_for_a_day(it_of(20)) and not only_waits_for_a_day(it_of(23)), (only_waits_for_a_day(it_of(21)), only_waits_for_a_day(it_of(20)), only_waits_for_a_day(it_of(23))))
+g(24, needs=[BACK], state="doing", wake=wk(24 * 30), wait_basis=basis(wk(24 * 31)), next=step40)    # a basis for another wake is no basis
+check("10 …a basis written for another wake does not exempt it", only_waits_for_a_day(it_of(24)), _dw10.basis_wait(it_of(24), now_, AO))
 
 # ---- 11. the wake notes ("a wake alone ... stays on agent") do not fire for a wake that carries a basis
 WD = iso(30)

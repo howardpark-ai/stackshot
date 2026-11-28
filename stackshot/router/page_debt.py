@@ -10,6 +10,9 @@ writes. service/page_debt.py (page_debt_pass) joins them to the ledger, the boar
 
 Settings, [router] in stackshot.toml (read at each use: a reload applies them):
   page_debt          false (default) = nothing runs; true = the pass runs with each audit run, in the mode below
+  page_debt_call     false (default) = the pass makes no model call: every page's moved debts take the fallback below (live: the notice to the agent that keeps the page; shadow: logged as would_fall_back);
+                     true = the call is made for each page. Why off: in 14 days of audit runs 20 of 25 pages never reached the call (a Current state over MAX_SECTION, no Current state section, or a page that could
+                     not be read) and 2 of the 5 calls made came back "cannot"; no parse or format fault behind it, so the call has no small fix
   page_debt_shadow   true (default) = it only logs: the call is made, its proposal is checked against the page and written to
                      <state>/router/page_debt.jsonl, nothing is written to a page or the ledger, and today's 30-minute relay to the
                      keeper stays as it is; false = LIVE: the proposal is applied to the page (revision-checked put) and the debts
@@ -84,6 +87,15 @@ def shadow() -> bool:
     """[router] page_debt_shadow: true (the default, also when the key is absent or not understood) = log only."""
     v = _cfg.get("router", "page_debt_shadow")
     return not (v is False or str(v).strip().lower() in ("false", "0", "no", "off"))
+
+
+def model_call() -> bool:
+    """[router] page_debt_call: false (the default, also when the key is absent or not understood) = the pass makes no model call: a page's moved debts go at once to the agent that keeps the page, as a
+    notice (live), or are logged as they would have gone (shadow). true = the call below is made for each page. Read at each use."""
+    return _truthy(_cfg.get("router", "page_debt_call"))
+
+
+NO_CALL_WHY = "page debt is not sent to the model ([router] page_debt_call is off): the keeper writes the page"
 
 
 def live() -> bool:

@@ -15,7 +15,7 @@ The checks (category names as the audit agent's brief has them; one finding = {"
                           activity is not a finding of any pass: the hourly audit line (audit/hourly.py) writes it a History line and the idle hand-over (audit/hand_idle.py) hands it on. The passes
                           send their findings to the same recipient through the same `deliver_findings`, with the same text and send stamps (`merged_sent` joins the records), so a finding reaches its
                           mover once whichever pass finds it; they stand still while a run is in progress. Not counted in this run's `by_category`, the unmoved digest, the threshold or the 20% tightening share.
-  one model call each     next-done · wrong-needs · ask-missing (an ask that no longer fits) · unneeded-escalation (NO CALL while model_cuts.AUDIT_MODEL_OFF names it) · older-than-page · obsolete-wait (NO CALL while model_cuts.AUDIT_MODEL_OFF names it; a waiting item, held or after another item or parked or outside, whose wait a later change may have overtaken) · why-not-now (a stored doing item whose wake is more than an hour out and whose every open step is dated for that day or later: is there a concrete reason the step cannot run before then?) · goal-unclear (an open item whose subject and `Goal:` bullet are new or reworded since the last judgment: does the subject name the work that closes it, as a task, and the Goal the finished outcome that work reaches, neither of them a symptom, a cause or a trigger? Items with no Goal bullet are the one-time pass's, tools/goal_pass.py; at most `GOAL_MAX` a run; the stamps judged are the record's `goal_judged`). A suspect is an item a heuristic picks for one or more of
+  one model call each     next-done · wrong-needs · older-than-page (the project page, written after the item, has lines that name the item or its steps and differ from the lines last judged: the record's `page_judged`) · goal-unclear (an open item whose subject and `Goal:` bullet are new or reworded since the last judgment: does the subject name the work that closes it, as a task, and the Goal the finished outcome that work reaches, neither of them a symptom, a cause or a trigger? Items with no Goal bullet are the one-time pass's, tools/goal_pass.py; at most `GOAL_MAX` a run; the stamps judged are the record's `goal_judged`). Retired, no model call: ask-missing (an ask that no longer fits), unneeded-escalation, obsolete-wait, why-not-now; docs/audit.md ("Turning a check back on") says how each comes back. A suspect is an item a heuristic picks for one or more of
                           these (`suspects`); the call returns {"finding": "yes"|"no", "check", "reason", "fix"}. At most `[audit] max_calls` calls, one at a time; an item judged "no" or "yes" is not
                           judged again until it is written; a call that fails is not counted as a "no" (the item is tried again next run), and three failures in a row end the calls.
   the orphan hand-over    the first stage of a run, before the board is read (`orphan_stage`; the server does the work, `POST /client/orphan-handover`, because the item lock and the fleet's heartbeat are its): an open item whose
@@ -33,7 +33,7 @@ The checks (category names as the audit agent's brief has them; one finding = {"
                           server's): one model call per page with page updates that moved to the page's keeper, the smallest Current-state edit, applied (live) or logged (shadow). It runs only while `[router] page_debt` is on,
                           once per run (twice a day with the timer's two times; a page is marked per run), and a page whose call fails does not stop the others or the run. The record's `pages` and the summary line carry
                           what it did: pages called, the results, the pages without an edit, the pages left at the time limit.
-  the pattern review     the last stage of a model run, after the pages stage (`pattern_stage`; `[audit] pattern_review`, "shadow" by default, "off" = nothing): it reads the findings every audit made since the review before it
+  the pattern review     the last stage of a model run, after the pages stage (`pattern_stage`; `[audit] pattern_review`, "off" by default, "shadow" = on): it reads the findings every audit made since the review before it
                           (the findings log, `<paths.state>/audit/findings-log.jsonl`: each audit pass appends a finding the first time its record shows it, and the run appends its own fresh ones), groups the repeats by kind, agent and
                           project, and for the patterns (at least `PATTERN_MIN` appearances on `PATTERN_MIN_ITEMS` items; none drafted in the last 7 days; at most `PATTERN_MAX` per run) makes ONE model call, on the audit's lane and
                           model, inside `[audit] max_minutes` and `max_calls` (the call keeps one of the calls), that drafts one guardrail per pattern: a hook, a mod, a tool's text, a rulebook line, or a new audit or an edit to one.
@@ -92,7 +92,6 @@ from typing import Any, Callable
 from stackshot import paths as _paths
 HERE = _paths.ROOT
 from stackshot.audit import audit as _audit  # noqa: E402
-from stackshot.waits import dated_wait as _dw  # noqa: E402
 from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.core.lines import MSG_MAX  # noqa: E402  — the message tool's cap
 from stackshot.model import model as _model  # noqa: E402
@@ -117,8 +116,7 @@ NO_SESSION = ("", "-", "none", "no owner")    # what a day's findings by session
 FAIL_STOP = 3                 # model calls in a row that fail (no answer) end the calls of the run
 # what the message tool says when a message goes to a front agent without the mark (service/messaging.py `_gate_front`)
 FRONT_REFUSAL = "is a front agent of"
-from stackshot.model import model_cuts as _cuts       # the kinds that make no model call (AUDIT_MODEL_OFF): one line to put one back
-CHECKS_MODEL = ("next-done", "wrong-needs", "ask-missing", "unneeded-escalation", "older-than-page", "obsolete-wait", "why-not-now", "goal-unclear")
+CHECKS_MODEL = ("next-done", "wrong-needs", "older-than-page", "goal-unclear")      # the kinds with a model call (docs/audit.md, "Turning a check back on"; the rubric audit_rubric.txt has the text of each)
 _BOARD_RX = re.compile(r"\bboard#(\d+)\b")
 
 
@@ -370,101 +368,6 @@ def _deliver(to: str, text: str, fyi: bool = False) -> tuple[bool, str]:
 
 
 # ---------- the judgment checks: suspects ----------
-def is_waiting(item: dict[str, Any], after_open: Callable[[dict[str, Any]], Any]) -> bool:
-    """A waiting item as the model reads it (held, behind an open item, parked, blocked, outside or verifying); an item that waits on the owner's decision is his move, not a wait, and neither is a relay wait (an
-    outside item that waits on news only the owner relays)."""
-    held = _wt.is_parked(item)
-    try:
-        m = _model.derive(item, None, after_open)
-    except Exception:  # noqa: BLE001  (a malformed item is no wait here; the field checks read it their own way)
-        return held
-    if m.wait is not None and m.wait.kind == "relay":
-        return False
-    return held or m.state == _model.WAITING
-
-
-def wait_since(item: dict[str, Any], meta: dict[str, Any]) -> float:
-    """When the wait began, as an epoch: the stamp of its hold or of its wait basis, else the item's last state change, else its last save."""
-    for k in ("hold_set", "wait_basis"):
-        v = meta.get(k)
-        at = _f(v.get("at")) if isinstance(v, dict) else 0.0
-        if at > 0:
-            return at
-    return _f(item.get("state_updated")) or _f(item.get("updated"))
-
-
-def cited_ids(item: dict[str, Any], meta: dict[str, Any], description: bool = False) -> list[str]:
-    """The board numbers a waiting item names in the wait's own words, in order of first mention, not its own: the wait's basis, its expected reason, next, the open steps and the items it waits after; with
-    `description`, the description's too (a mention there is background unless the cited item was dropped or superseded)."""
-    from stackshot.tools import board_report as _br  # noqa: PLC0415
-    texts = [*_br._texts(item), *(f"board#{_num(g)}" for g in _wt.after_of(meta))] + ([str(item.get("description") or "")] if description else [])
-    own = str(_num(str(item.get("id") or "")))
-    out: list[str] = []
-    for t in texts:
-        for n in _BOARD_RX.findall(t):
-            if n != own and n not in out:
-                out.append(n)
-    return out
-
-
-def _closed_line(n: str, it: dict[str, Any]) -> str:
-    m = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
-    how = str(m.get("outcome") or "done")
-    why = f" ({_clip(m.get('reason'), 160)})" if m.get("reason") else ""
-    when = _f(it.get("state_updated")) or _f(it.get("updated"))
-    return f"board#{n} is closed as {how}{why}" + (f", {_stamp(when)}" if when else "") + f": {_clip(it.get('subject'), 120)}"
-
-
-def obsolete_wait_evidence(gid: str, items: dict[str, dict[str, Any]], by_num: dict[str, list[str]], env: Env,
-                           pages: dict[str, tuple[str, float | None]], last: float = 0.0) -> tuple[str, list[str], str, bool]:
-    """(evidence line, context lines for the call, signature, whether a cited item is closed) for a waiting item a later change may have overtaken, or ("", [], "", False). The two signals, read from fields and
-    the project page with no model: an item the wait cites is closed (a closed item named in the wait's own words counts whatever its outcome; one named only in the description counts when it was dropped or
-    superseded), or the project page, written after both the wait began and the item was last written, has a line that names an item the wait cites (never the item itself: a session writes its page line
-    right after it parks an item). The signature is a hash of each counted closed item's number, outcome and reason and of the matched page lines, so a verdict stands until one of them changes."""
-    it = items[gid]
-    meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
-    since = wait_since(it, meta)
-    own = cited_ids(it, meta)
-    closed: list[str] = []
-    keys: list[str] = []
-    refs: list[str] = []
-    for n in cited_ids(it, meta, description=True):
-        gs = by_num.get(n) or []
-        if len(gs) != 1 or gs[0] == gid:
-            continue
-        cm = items[gs[0]].get("metadata") if isinstance(items[gs[0]].get("metadata"), dict) else {}
-        if n in own:
-            refs.append(f"board#{n}")
-        if items[gs[0]].get("status") != "open" and (n in own or str(cm.get("outcome") or "") in ("dropped", "superseded")):
-            closed.append(_closed_line(n, items[gs[0]]))
-            keys.append(f"{n}:{cm.get('outcome') or 'done'}:{' '.join(str(cm.get('reason') or '').split())}")
-    lines: list[str] = []
-    proj = str(meta.get("project") or "")
-    if proj and refs:
-        if proj not in pages:
-            pages[proj] = env.page(proj)
-        text, pts = pages[proj]
-        if text and pts and since and float(pts) > max(since, last):
-            rx = re.compile("|".join(re.escape(r) + r"(?!\d)" for r in refs))
-            lines = [_clip(ln, 220) for ln in text.splitlines() if rx.search(ln)][:3]
-    if not closed and not lines:
-        return "", [], "", False
-    parts = []
-    if closed:
-        parts.append("an item the wait cites is closed: " + " | ".join(closed[:3]))
-    if lines:
-        parts.append(f"the project page ({_stamp(float(pages[proj][1]))}) is newer than the wait ({_stamp(since)}) and mentions an item it cites: " + " | ".join(lines))
-    wb = meta.get("wait_basis")
-    basis = " ".join(str(wb.get("text") or "").split()) if isinstance(wb, dict) else ""
-    head = "; ".join(x for x in ((f"The wait began {_stamp(since)} ({_hours(max(0.0, env.clock() - since))} ago)" if since else ""), (f"basis: {_clip(basis, 200)}" if basis else ""),
-                                 (f"{'until' if _wt.stored_until(meta) else 'wake'} {_wt.wake_value(meta)}" + (f" {_model.SERVER_SET}" if _model.server_end(meta) else "") if _wt.wake_value(meta) else "")) if x)
-    ctx = ([head] if head else []) + [f"- {c}" for c in closed[:5]] + [f"- page: {ln}" for ln in lines]
-    sig = hashlib.sha1(("|".join(sorted(keys)) + "||" + "|".join(lines)).encode("utf-8")).hexdigest()[:12]
-    return "; ".join(parts), ctx, sig, bool(closed)
-
-
-PAGE_ONLY_MAX = 5          # obsolete-wait suspects per run that rest on a page line alone (no cited item is closed)
-SELF_WAIT_MAX = 5          # why-not-now suspects per run (a doing item that waits for a later day on its own say-so), beside the cap of calls
 GOAL_MAX = 10              # goal-unclear suspects per run (an item new or reworded since the last judgment), beside the cap of calls
 
 
@@ -481,29 +384,32 @@ def goal_evidence(item: dict[str, Any], goal_seen: dict[str, str], sid: str) -> 
     return f"the subject and the Goal bullet are new or reworded since the last judgment: subject: {_clip(subject, 120)} | Goal: {_clip(goal, 200)}", sig
 
 
-def dated_wait_evidence(item: dict[str, Any], now: float, after_open: Any = None) -> tuple[str, list[str], str]:
-    """(evidence line, context lines for the call, signature) for a doing item (stored, or read as doing from its fields) that is only waiting for a later day (dated_wait.py: its wake is more than an hour out and every open
-    step is dated for that day or later), or ("", [], ""): not one whose still-future wake states its reason (dated_wait.basis_wait; `after_open` as model.derive takes it), which the board lists as waiting by that reason and the audit leaves alone. The signature is the dated lines plus the wake: the verdict stands until the lines or the time change."""
-    dw = _dw.of(item, now)
-    if dw is None or _dw.basis_wait(item, now, after_open) is not None:
-        return "", [], ""
-    lines = [_clip(ln, 160) for ln, _, _ in dw.steps][:4]
-    what = dw.source.replace("_", " ")
-    line = f"read as doing, but its {what} {dw.at} is {_hours(dw.until - now)} away and every open step is dated for later, so the board shows it as waiting: " + " | ".join(lines)
-    ctx = [f"The item is read as doing (work in hand) with its {what} at {dw.at}, {_hours(dw.until - now)} from now; every open step is dated for that day or later:"] + [f"- {ln}" for ln in lines]
-    return line, ctx, _dw.signature(dw)
+
+PAGE_LINE_MIN = 24         # an open step names itself on a page with at least this many characters of its first line (a short step line would match any page)
 
 
-def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dict[str, Any] | None = None, live: set[str] | None = None,
-             goal_seen: dict[str, str] | None = None) -> tuple[list[dict[str, Any]], int]:
-    """(suspects, how many were skipped as unchanged since a verdict): the open items a cheap heuristic picks for one or more judgment checks, each {id, gid, project, checks, evidence: {check: line}, write,
-    priority, sig, context}, strongest first, then by item number. A held item is checked for next-done and, like every waiting item, for obsolete-wait (obsolete_wait_evidence: a cited item is closed, or the
-    project page, newer than the wait, names one it cites); the evidence's signature `sig` is kept with the verdict, so the item is judged again only when that evidence changes. A suspect for obsolete-wait
-    alone ranks after every other check (priority 3), and at most PAGE_ONLY_MAX suspects a run rest on a page line alone. `live`, when given, is filled with the shown ids whose obsolete-wait evidence stands now,
-    judged before or not (`carried` drops a "yes" whose item is not in it). A stored doing item the board shows as waiting because only a later day holds it (dated_wait.py) is a suspect for
-    why-not-now (dated_wait_evidence), ranked with obsolete-wait alone (priority 3); at most SELF_WAIT_MAX such suspects a run, and its signature is the dated lines plus the wake. An open item whose description opens with a
-    Goal bullet is a suspect for goal-unclear (goal_evidence) when its (subject, Goal sentence) pair is not the one `goal_seen` ({shown id: stamp}, kept on the record) holds for it, held or not and whatever else is written to
-    the item; it ranks with the other priority-3 checks, at most GOAL_MAX a run, and the pair's stamp `gsig` goes with the suspect."""
+def page_news(text: str, sid: str, steps: list[str]) -> list[str]:
+    """The lines of a project page's text that name the item: its whole id (an id that is only the start of a longer id does not count) or the first line of one of its open `steps`. At most three, clipped, in page order: they are the evidence
+    the call sees, and a hash of them is the item's `psig`, so the check calls again only when what the page says of the item changes."""
+    rx = re.compile(re.escape(sid) + r"(?!\d)")
+    flat_steps = [re.sub(r"^[^:\n]{1,40}:\s+", "", " ".join(t.split())) for t in steps]      # a step line opens with who does it ("home-agent: ..."): a page line carries the text after it
+    texts = [t.lower() for t in flat_steps if len(t) >= PAGE_LINE_MIN]
+    out: list[str] = []
+    for ln in text.splitlines():
+        flat = " ".join(ln.split()).lower()
+        if rx.search(ln) or any(t in flat for t in texts):
+            out.append(_clip(ln, 220))
+    return out[:3]
+
+
+def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dict[str, Any] | None = None, goal_seen: dict[str, str] | None = None,
+             page_seen: dict[str, str] | None = None) -> tuple[list[dict[str, Any]], int]:
+    """(suspects, how many were skipped as unchanged since a verdict): the open items a cheap heuristic picks for one or more judgment checks (CHECKS_MODEL), each {id, gid, project, checks, evidence: {check: line},
+    write, priority, psig, gsig}, strongest first, then by item number. An open step that cites a closed item is a suspect for next-done. An item with an ask that no open step of the owner's backs, or an ask without
+    needs: decision, is one for wrong-needs. An item that is not held is a suspect for older-than-page when its project's page was written after the item's last write and lines of the page name the item (page_news:
+    its id, or the text of one of its open steps); `page_seen` ({shown id: stamp}, kept on the record) holds the stamp of the lines each item was judged on, so the same lines are never judged twice, whatever else
+    is written to the item or the page. An open item whose description opens with a Goal bullet is a suspect for goal-unclear (goal_evidence) when its (subject, Goal sentence) pair is not the one `goal_seen` holds
+    for it, held or not and whatever else is written to the item; it ranks with the other priority-3 checks, at most GOAL_MAX a run, and the pair's stamp `gsig` goes with the suspect."""
     from stackshot.tools import board_report as _br  # noqa: PLC0415
     from stackshot.tools import next_report as _nr  # noqa: PLC0415
     judged = judged or {}
@@ -513,13 +419,9 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
     pages: dict[str, tuple[str, float | None]] = {}
     out: list[dict[str, Any]] = []
     skipped = 0
-    page_only = 0
-    self_wait = 0
     goal_n = 0
     goal_seen = goal_seen or {}
-
-    def after_open(x: dict[str, Any]) -> list[str]:
-        return [g for g in _wt.after_of(x.get("metadata") or {}) if (items.get(g) or {}).get("status") == "open"]
+    page_seen = page_seen or {}
     for gid in sorted(items, key=_num):
         it = items[gid]
         if it.get("status") != "open":
@@ -530,7 +432,9 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
         held = _wt.is_held(it)                       # the stored flag alone: a flagged hold is not compared with the page
         parked = _wt.is_parked(it)                   # a hold or a wait on one date: it keeps its ask, so the ask checks leave it alone
         ev: dict[str, str] = {}
-        for s in _steps.view(meta, keeper=str(meta.get("owner") or "")):
+        psig = ""
+        view = _steps.view(meta, keeper=str(meta.get("owner") or ""))
+        for s in view:
             if s["status"] != _steps.OPEN:
                 continue
             for n in _BOARD_RX.findall(_steps.first_line(s["text"])):
@@ -541,52 +445,34 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
         ask = " ".join(str(meta.get("ask") or "").split())
         if not parked:
             if "decision" in kinds and ask:
-                ev["unneeded-escalation"] = f"waits on {_cfg.owner()} with the ask: {_clip(ask, 140)}"
-                ev["ask-missing"] = "the ask may no longer fit the item"
-                his = [s for s in _steps.view(meta, keeper=str(meta.get("owner") or "")) if s["status"] == _steps.OPEN and _steps.is_his(s["text"], unnamed_is_his=False)]
+                his = [s for s in view if s["status"] == _steps.OPEN and _steps.is_his(s["text"], unnamed_is_his=False)]
                 if not his:
                     ev["wrong-needs"] = f"needs a decision, but no open step is {_cfg.owner()}'s"
             elif ask and "decision" not in kinds:
                 ev["wrong-needs"] = f"carries an ask but needs lacks decision: {_clip(ask, 120)}"
-                ev["ask-missing"] = "an ask with no needs: decision"
         if not held:
             proj = str(meta.get("project") or "")
             if proj and last:
                 if proj not in pages:
                     pages[proj] = env.page(proj)
                 text, pts = pages[proj]
-                if text and pts and float(pts) > last and sid in text:
-                    lines = [_clip(ln, 220) for ln in text.splitlines() if sid in ln][:3]
-                    ev["older-than-page"] = f"the project page ({_stamp(float(pts))}) is newer than the item's last write ({_stamp(last)}) and mentions {sid}: " + " | ".join(lines)
-        sig, ctx, has_closed = "", [], False
-        if is_waiting(it, after_open) and "obsolete-wait" in _cuts.AUDIT_MODEL_OFF:
-            pass                                     # no model call for this kind: its evidence is not read
-        elif is_waiting(it, after_open):
-            line, ctx, sig, has_closed = obsolete_wait_evidence(gid, items, by_num, env, pages, last)
-            if line:
-                ev["obsolete-wait"] = line
-                if live is not None:
-                    live.add(sid)
-        else:
-            wline, wctx, wsig = dated_wait_evidence(it, now, after_open)       # a doing item that waits for a later day: why not now?
-            if wline:
-                ev["why-not-now"], ctx, sig = wline, wctx, wsig
-                if live is not None:
-                    live.add(sid)
+                if text and pts and float(pts) > last:
+                    lines = page_news(text, sid, [_steps.first_line(s["text"]) for s in view if s["status"] == _steps.OPEN])
+                    if lines:
+                        psig = hashlib.sha1("|".join(lines).encode("utf-8")).hexdigest()[:12]
+                        if page_seen.get(sid) != psig:
+                            ev["older-than-page"] = f"the project page ({_stamp(float(pts))}) is newer than the item's last write ({_stamp(last)}) and names the item or its steps: " + " | ".join(lines)
         gline, gsig = goal_evidence(it, goal_seen, sid)
         if gline:
             ev["goal-unclear"] = gline
-        cut_ev = {k: ev.pop(k) for k in _cuts.AUDIT_MODEL_OFF if k in ev}      # a kind with no model call is no suspect (model_cuts.py); the item's other checks stay, and the rank is the one it had with them
         if not ev:
             continue
         checks = [c for c in CHECKS_MODEL if c in ev]
         prev = judged.get(sid)
-        prev_checks = [c for c in (prev.get("checks") or []) if c not in _cuts.AUDIT_MODEL_OFF] if isinstance(prev, dict) else []      # a verdict stored before the cut lists the cut kinds too: they are left out on both sides, so it still stands
-        sig_kept = str(prev.get("sig") or "") == sig if isinstance(prev, dict) else False
-        if isinstance(prev, dict) and "obsolete-wait" in _cuts.AUDIT_MODEL_OFF and "obsolete-wait" in (prev.get("checks") or []):
-            sig_kept = True                          # that kind's evidence is no longer read, so the signature it kept with the verdict has nothing to be compared with
-        if (isinstance(prev, dict) and _f(prev.get("write")) >= last and sorted(prev_checks) == sorted(checks) and prev.get("verdict") in ("no", "yes")
-                and sig_kept and str(prev.get("gsig") or "") == (gsig if "goal-unclear" in ev else "")):
+        # a verdict stored before a kind was retired lists that kind too, and one stored with older-than-page is kept by `page_seen`, not by its checks: both are left out on both sides
+        prev_checks = [c for c in (prev.get("checks") or []) if c in CHECKS_MODEL and c != "older-than-page"] if isinstance(prev, dict) else []
+        if (isinstance(prev, dict) and "older-than-page" not in ev and _f(prev.get("write")) >= last and sorted(prev_checks) == sorted(checks) and prev.get("verdict") in ("no", "yes")
+                and str(prev.get("gsig") or "") == (gsig if "goal-unclear" in ev else "")):
             skipped += 1
             continue
         if "goal-unclear" in ev:
@@ -598,28 +484,9 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
                 checks = [c for c in CHECKS_MODEL if c in ev]
             else:
                 goal_n += 1
-        if "obsolete-wait" in ev and not has_closed:
-            if page_only >= PAGE_ONLY_MAX:
-                del ev["obsolete-wait"]
-                sig, ctx = "", []
-                if not ev:
-                    continue
-                checks = [c for c in CHECKS_MODEL if c in ev]
-            else:
-                page_only += 1
-        if "why-not-now" in ev:
-            if self_wait >= SELF_WAIT_MAX:
-                del ev["why-not-now"]
-                sig, ctx = "", []
-                if not ev:
-                    continue
-                checks = [c for c in CHECKS_MODEL if c in ev]
-            else:
-                self_wait += 1
-        full = {**ev, **cut_ev}                      # the rank is read from every check the heuristics found, the cut kinds too: the order of the calls that remain does not change
-        prio = 0 if "next-done" in full else (1 if "unneeded-escalation" in full or "wrong-needs" in full else (3 if set(full) <= {"obsolete-wait", "why-not-now", "goal-unclear"} else 2))
-        out.append({"id": sid, "gid": gid, "project": str(meta.get("project") or ""), "checks": checks, "evidence": ev, "write": last, "priority": prio, "sig": sig, "context": ctx,
-                    **({"gsig": gsig} if "goal-unclear" in ev else {})})
+        prio = 0 if "next-done" in ev else (1 if "wrong-needs" in ev else (3 if set(ev) <= {"goal-unclear"} else 2))
+        out.append({"id": sid, "gid": gid, "project": str(meta.get("project") or ""), "checks": checks, "evidence": ev, "write": last, "priority": prio,
+                    **({"psig": psig} if "older-than-page" in ev else {}), **({"gsig": gsig} if "goal-unclear" in ev else {})})
     out.sort(key=lambda x: (x["priority"], _num(x["gid"])))
     return out, skipped
 
@@ -663,8 +530,6 @@ def prompt(item: dict[str, Any], sus: dict[str, Any], mover: str, now: float) ->
     lines.append("Candidate checks (answer under one of these):")
     for c in sus["checks"]:
         lines.append(f"- {c}: {sus['evidence'][c]}")
-    if sus.get("context"):
-        lines += ["", f"The wait (for {' and '.join(c for c in ('obsolete-wait', 'why-not-now') if c in sus['checks'])}):", *sus["context"]]
     return "\n".join(lines)
 
 
@@ -711,7 +576,7 @@ def judge(items: dict[str, dict[str, Any]], picked: list[dict[str, Any]], now: f
         streak = 0
         check = str(ans.get("check") or "").strip().lower()
         yes = ans["finding"] == "yes" and check in sus["checks"]
-        entry = {"verdict": "yes" if yes else "no", "write": sus["write"], "checks": sus["checks"], "at": now, **({"sig": sus["sig"]} if sus.get("sig") else {}),
+        entry = {"verdict": "yes" if yes else "no", "write": sus["write"], "checks": sus["checks"], "at": now, **({"psig": sus["psig"]} if sus.get("psig") else {}),
                  **({"gsig": sus["gsig"]} if sus.get("gsig") else {})}
         if sus["checks"] == ["goal-unclear"]:
             entry["reason"] = _clip(ans.get("reason"), 240)       # a "no" keeps its reason too: the one-time pass (tools/goal_pass.py) prints it
@@ -725,9 +590,9 @@ def judge(items: dict[str, dict[str, Any]], picked: list[dict[str, Any]], now: f
     return found, entries, {"made": n_calls, "failed": n_fail, "timed_out": timed_out, "notes": notes[:10]}
 
 
-def carried(prev_judged: dict[str, Any], items: dict[str, dict[str, Any]], picked_ids: set[str], by_shown: dict[str, str], live: set[str] | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """The previous record's `judged` entries that still hold: the item is open and was not judged again this run. → (entries to keep, the findings of its unchanged "yes" verdicts). With `live` (see `suspects`),
-    an obsolete-wait or why-not-now verdict whose item no longer has that evidence (a cited item reopened, a page line gone) is dropped, so its finding is not sent again."""
+def carried(prev_judged: dict[str, Any], items: dict[str, dict[str, Any]], picked_ids: set[str], by_shown: dict[str, str]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """The previous record's `judged` entries that still hold: the item is open and was not judged again this run. → (entries to keep, the findings of its unchanged "yes" verdicts). A "yes" verdict of a kind that has no model call
+    any more (not in CHECKS_MODEL) is dropped, so its finding is not sent again."""
     from stackshot.tools import board_report as _br  # noqa: PLC0415
     keep: dict[str, Any] = {}
     again: list[dict[str, Any]] = []
@@ -738,10 +603,8 @@ def carried(prev_judged: dict[str, Any], items: dict[str, dict[str, Any]], picke
         it = items[gid]
         if _br._last_write(it) > _f(e.get("write")):
             continue                                    # written since: the old verdict says nothing; it is judged again when a heuristic picks it
-        if e.get("check") in _cuts.AUDIT_MODEL_OFF:
+        if e.get("verdict") == "yes" and e.get("check") not in CHECKS_MODEL:
             continue                                    # a kind with no model call: its old verdict is dropped, so its finding is not sent again
-        if live is not None and e.get("check") in ("obsolete-wait", "why-not-now") and sid not in live:
-            continue                                    # the wait's evidence is gone: the old "yes" is stale
         keep[sid] = e
         if e.get("verdict") == "yes" and e.get("check"):
             meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
@@ -1640,8 +1503,8 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
     goal_prev = next((h["goal_judged"] for h in hist if isinstance(h.get("goal_judged"), dict)), {})    # {shown id: stamp of the (subject, Goal) pair judged}, from the newest record that has it
 
     findings, passes, n_open = field_findings(items, anchors, now, env)
-    live: set[str] = set()
-    sus, skipped = suspects(items, now, env, prev_judged, live, goal_prev)
+    page_prev = next((h["page_judged"] for h in hist if isinstance(h.get("page_judged"), dict)), {})    # {shown id: stamp of the page lines judged}, from the newest record that has it
+    sus, skipped = suspects(items, now, env, prev_judged, goal_prev, page_prev)
     cap = _cfg.audit_max_calls()
     reserve = 1 if cap >= 2 and _cfg.audit_pattern_review() != "off" else 0     # the pattern review's one call keeps one of the calls of the cap
     picked = sus[:cap - reserve]
@@ -1680,10 +1543,12 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
     model_found, entries, calls = judge(items, picked, now, env, rubric, t0)
     pw_found, pw = proof_stage(items, anchors, now, env)      # the proof-waits stage: code only, after the model checks and before the pages stage
     pg = pages_stage(env, t0)                       # the page-debt call, once per run, under the same time limit as the judgment calls
-    keep, again = carried(prev_judged, items, {s["id"] for s in picked}, by_shown, live)
+    keep, again = carried(prev_judged, items, {s["id"] for s in picked}, by_shown)
     judged = {**keep, **entries}
     goal_judged = {sid: g for sid, g in goal_prev.items() if by_shown.get(sid) and items[by_shown[sid]].get("status") == "open"}     # a closed item's stamp goes
     goal_judged.update({sid: e["gsig"] for sid, e in entries.items() if e.get("gsig")})
+    page_judged = {sid: g for sid, g in page_prev.items() if by_shown.get(sid) and items[by_shown[sid]].get("status") == "open"}
+    page_judged.update({sid: e["psig"] for sid, e in entries.items() if e.get("psig")})
     model_ids = {(f["id"], f["category"]) for f in model_found}
     findings += model_found + [f for f in again if (f["id"], f["category"]) not in model_ids] + pw_found
 
@@ -1817,7 +1682,7 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
            "findings": [{k: f[k] for k in ("id", "project", "owner", "category", "mover", "detail", "source", "sent", "sending_from", "run_started", "tries", "lvl") if k in f} for f in findings],
            "sending_from": sending_from,
            "repeats": len(repeats),
-           "by_session": by_ses, "by_category": by_cat, "stuck": stuck, "idle_pass": passes, "judged": judged, "goal_judged": goal_judged,
+           "by_session": by_ses, "by_category": by_cat, "stuck": stuck, "idle_pass": passes, "judged": judged, "goal_judged": goal_judged, "page_judged": page_judged,
            "calls": {"made": calls["made"], "failed": calls["failed"], "cap": cap, "max_minutes": _cfg.audit_max_minutes(), "timed_out": bool(calls.get("timed_out")), "suspects": len(sus), "unchanged": skipped, "notes": calls["notes"]},
            "pages": pg, "proof_waits": pw, **({"orphans": orph} if orph["mode"] != "off" else {}), **({"pattern_review": pr} if pr["mode"] != "off" else {}), **({"front_step_count": fsc} if fsc else {}),
            **({"rechecked": rechecked} if rechecked else {}),

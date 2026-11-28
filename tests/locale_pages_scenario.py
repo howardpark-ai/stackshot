@@ -36,6 +36,7 @@ BOARD = "https://board.example.org"
 MINA, NOOR = "mina@example.org", "noor@example.org"
 toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml
+toml = toml.replace('pattern_review = "off"', 'pattern_review = "shadow"', 1)      # this suite reads the findings log, which only a pattern review other than off keeps
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai"),
                  ("fleet_names", f"{tmp}/session-names.tsv"), ("mode_file", f"{tmp}/ci/mode"), ("hold_file", f"{tmp}/ci/hold"), ("gate_file", f"{tmp}/ci/halted")):

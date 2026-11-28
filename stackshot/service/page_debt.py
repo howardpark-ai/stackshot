@@ -168,6 +168,8 @@ def page_debt_project(key: str, moved: dict[str, dict[str, Any]], now: float, mo
         refusal = _brains.cli_refusal(key) if live and kb.default and _cfg.page_flavor() == "gbrain" else ""      # (the plain flavor reaches no CLI) the default brain's CLI is refused (no [gbrain] home beside a second brain): the keeper's note says so and names the key
         if refusal:
             why += ": " + refusal.removeprefix("refused: ")
+    elif not _page_debt.model_call():
+        why = _page_debt.NO_CALL_WHY       # no model call: the debts take the fallback, the keeper writes the page
     else:
         if not kb.default:
             _brains.clear(kb, PAGE_DEBT_READ_WHAT + " " + key)     # this page reads again: with no read of the brain failing, one line says it is back

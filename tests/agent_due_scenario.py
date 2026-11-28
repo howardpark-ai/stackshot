@@ -410,8 +410,6 @@ check("text: create's description says agent work carries no expected time, and 
       "Agent work carries no expected time: a create sets none" in cd and "never past due" not in cd and "A doing item is never past due" not in cd and "timed in hours" not in cd + ud, None)
 check("text: update's wait form says an open item waits on its real dates only, that no expected time is derived for any item, and that a parked item carries no stale mark",
       "waits on its real dates only (until, due): no expected time is derived for any item" in ud and "a parked item waits until its date or its blocker closes, with no stale mark" in ud and "is shown as past due" not in ud, None)
-check("text: the audit rubric's why-not-now reads the wake only",
-      "but its wake is hours or a day away" in pathlib.Path(STACK, "audit_rubric.txt").read_text(encoding="utf-8") and "wake, or expected-by" not in pathlib.Path(STACK, "audit_rubric.txt").read_text(encoding="utf-8"), None)
 cli = pathlib.Path(STACK, "stackshot/fleet/client.py").read_text(encoding="utf-8")
 check("text: client.py's usage lists neither --expected-by nor --expected-reason (post state, which took them, is retired: tests/retired_inputs_scenario.py)",
       "[--expected-reason" not in cli and "[--expected-by T]" not in cli and "--expected-by" not in cli, None)
