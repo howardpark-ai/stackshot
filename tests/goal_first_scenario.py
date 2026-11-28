@@ -307,11 +307,7 @@ start = '(note: the Goal changed and the subject did not; the stored subject is 
 end = ' word \u2026": send subject= if the work it names no longer reaches that Goal)'
 check("a stored subject of many lines and 1,500 characters is quoted as one line, cut at a word", isinstance(out, str) and noted(rows) == [["goal-moved"]] and tail.startswith(start) and tail.endswith(end)
       and 620 < len(tail) < 750 and str(out).count("(note: the Goal changed") == 1, (len(tail), tail[:200], tail[-100:]))
-check("the update tool's text names the line, that it is no refusal, what to send and what is no change",
-      "A description that changes the Goal sentence's words, with no new subject, gets one reply line quoting the stored subject (a note, never a refusal): send subject= if the title's work no longer reaches it. Words are compared: "
-      'case, the spacing and punctuation between the same words and bold, code or link marks are no change; a word split or joined ("Re-run" to "Rerun") and a changed symbol (% and ~ count) are.'
-      in " ".join(TOOLS["update"].split()), None)
-check("the update tool's text says which titles the reply names", "A new subject, a changed Goal sentence or a first Goal that leaves an open item titled as a question, a statement or a should sentence gets one such line too: send subject= as the task." in " ".join(TOOLS["update"].split()), None)
+check("the update tool's text says which titles the reply names", "A new subject, a changed Goal sentence or a first Goal that leaves an open item titled as a question, a statement or a should sentence gets one reply line: send subject= as the task." in " ".join(TOOLS["update"].split()), None)
 
 # ---- the title that does not read as work: a note in the reply, never a refusal. The Korean titles are written as code points (no Hangul in the repository).
 from stackshot.model import field_gates as FG

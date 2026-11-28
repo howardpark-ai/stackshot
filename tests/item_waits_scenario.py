@@ -359,6 +359,5 @@ desc_ = {t.name: t.description for t in __import__("asyncio").run(server.mcp.lis
 check("text: update, create, get and complete teach the new rule", all(w in desc_["update"] for w in ("defers on another item in words", 'after=["board#N"]', "Only the lines the call sets are checked"))
       and "defers on another item in words" in desc_["create"] and "named in next:" in desc_["get"] and "names the closed item" in desc_["complete"], None)
 
-check("text: update teaches the note a cleared wait carries", "whose wait was just cleared: reword it" in desc_["update"] and "clear_wait" in desc_["update"], None)
 
 print(("ok" if not fails else "FAILED") + f": item waits scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

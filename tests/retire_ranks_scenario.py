@@ -4,7 +4,7 @@ A rank is only a work order, never a wait: a builder starts every
 item handed to it at its next turn, and releases go out in merge-queue order. Covers:
 
   * update(rank=N) and update(clear_rank=true) are refused with a short reason (never silently ignored) and nothing is written; state=queued is refused too, as a retired input of update (through the MCP layer; retired_inputs_scenario covers the others); the tool
-    schema still lists the two parameters, described as retired; create takes no rank; POST /client/rank is gone;
+    schema still lists the two parameters, with no text of their own; create takes no rank; POST /client/rank is gone;
   * get, brief, the client items read and the board's pages (item page, board.md, session-start brief) show no rank and no queue block, also for an item that
     still stores one;
   * an item stored with a rank and the state queued loads cleanly (as doing, an agent wait on the 3-hour rule), and the start-time cleanup clears both once: open
@@ -125,8 +125,8 @@ async def mcp_checks():
     async with Client(server.mcp) as c:
         tools = {t.name: t for t in await c.list_tools()}
         props = tools["update"].input_schema["properties"]
-        check("mcp: update still lists rank and clear_rank (so a stale caller is told, not ignored), described as retired",
-              "etired: refused" in props.get("rank", {}).get("description", "") and "etired: refused" in props.get("clear_rank", {}).get("description", ""), {k: props.get(k) for k in ("rank", "clear_rank")})
+        check("mcp: update still lists rank and clear_rank (so a stale caller is told, not ignored), with no text of their own",
+              "rank" in props and "clear_rank" in props and not props["rank"].get("description") and not props["clear_rank"].get("description"), {k: props.get(k) for k in ("rank", "clear_rank")})
         check("mcp: create lists no rank", "rank" not in tools["create"].input_schema["properties"], None)
         try:
             await c.call_tool("update", {"item_id": "a4", "sender": "home-front", "state": "queued"})

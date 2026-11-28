@@ -134,8 +134,7 @@ Decide part opens with what, which, how, who, when, where or why is refused (cre
 options or puts it on his call), since Yes / No cannot answer it: list its answers as options or reword it as a yes/no
 ("Decide: whether to …"). The same goes for a needs=decision item with no options whose Recommend part is not a yes or
 a no (it names a person, a topic, a date, whatever the Decide part's wording or language), since the page draws only
-Yes / No under it: put the choices as options, or make it a yes/no question with a Recommend of yes or no. The ask
-line never says "I", "you" or "me" (the reply notes one; write "Pat unpublishes", not "I unpublish"). A
+Yes / No under it: put the choices as options, or make it a yes/no question with a Recommend of yes or no. A
 yes/no decision lists two options, "Approve" and "Decline" (the one you recommend marked recommended: true), so
 {{OWNER}} gets one-click buttons. options="none" clears them (refused while the ask is an open question). Write the
 project page first, then the board: a page write up to five minutes before the change counts.
@@ -204,9 +203,7 @@ online): the server reads it itself and the item turns within a minute or two of
 waiting on a date for an offline machine says wait_event="box_online <machine>" with that date as until instead; the
 machine must be one the fleet knows (an unknown name is refused with the known ones). The backstop must be after now,
 and a day (until=YYYY-MM-DD) falls due at 00:00 of that day in the instance timezone, so today's date is already
-past: give tomorrow at the earliest (a relay or event wait takes the day alone: a time of day is dropped). A wait for
-something that has already happened (a PR already merged or live, a machine already online) is refused; a recycle wait
-never asks for a recycle (it waits for the next one). A step of his, or needs holding decision, makes him the mover: a
+past: give tomorrow at the earliest (a relay or event wait takes the day alone: a time of day is dropped). A step of his, or needs holding decision, makes him the mover: a
 write that names a session as mover beside it is refused (leave mover out, or mover={{OWNER}}, and put the session in
 then). The mirror is refused too: a write that leaves an open item with mover={{OWNER}} but in none of his states, so
 it has no step and no ask, is refused: pass step=<one line>, or needs=["decision"] with ask=…, or give the item to a
@@ -223,19 +220,6 @@ until resets the backstop. Several waits at once are a list: waits (2 to 8 lines
 back when every line has arrived (all) or the first has (any), at its until at the latest. Example:
 update(waits=[{"kind": "item", "after": "board#N"}, {"kind": "event", "event": "pr_merged <n>"}], wait_mode="any",
 until="<day, within {{CAP_DAYS}} days>"). Send the lines that remain to edit it: one left is a single wait, waits=[] ends it.
-
-## text MACHINE_FORM trail
-A step of next that names a machine of the fleet which is offline now (its fleet name or hostname as a whole word, an
-open step only) gets one `(note: …)` line in the reply when the item has no machine anchor for it and no box_online
-wait on it, naming the fix: anchors(project=<its project>, add=["machine:<name>"], items=[<its id>]) tells the item's
-mover each time that machine checks in again, without parking the item. A note, never a refusal.
-
-## text ANCHOR_OFFER_FORM trail
-A reply may carry one `(anchor offer: …)` line: when the write set a relay wait on an item with no anchor scoped to it,
-or put a Slack, Gmail, Drive or Notion link in its description that no anchor watches for the item, the line carries the
-ready anchors call (the project and the item id filled in; a placeholder in angle brackets only for what the server
-cannot know, the person's thread). A note, never a refusal, and at most one a reply: make the call when news on that
-thread should reach the item, or leave it.
 
 ## text SELF_WAIT_FORM lead trail
 A wait on your own item names its blocker: when the item's mover (you) sets an until date, or writes a line of its own next
