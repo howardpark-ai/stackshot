@@ -469,6 +469,8 @@ async def audit_now(request: Request):
         return g
     if request.method != "POST":
         return PlainTextResponse("method not allowed: POST /audit/now", status_code=405, headers={"Allow": "POST"})
+    if request.headers.get("origin") == "null":      # a sandboxed page (a canvas among them) is no page of the board: it starts nothing
+        return PlainTextResponse("refused: the audit is started from the board's own pages", status_code=403, headers={"Cache-Control": "no-store"})
     from starlette.concurrency import run_in_threadpool
     code, text = await run_in_threadpool(_audit.cue, "button")       # push.py may take seconds: off the event loop
     return PlainTextResponse(text, status_code=code, headers={"Cache-Control": "no-store"})
