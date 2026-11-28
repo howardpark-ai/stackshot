@@ -181,6 +181,17 @@ def _sibling_pointer(key: str, verb: str = "update") -> str:
     return f"to hand it to {key} on {OWNER}'s order, send the {verb} again with said=[Acked-by …] quoting his words with the time"
 
 
+def _lead_hands_to_front(value: str, sender: str, project: str, nm: Any, same: "Callable[[str, str], bool]") -> bool:
+    """Is `value` the configured front (`[front] agent`, anchors.sole_front) and `sender` a background agent of the item's `project`? Then a `then` naming that front is no front-mover case: a project's lead
+    hands a decision step to it, and the owner's answer or the wait's end gives it the item (answer_handover._then_live). False when no front is configured, for any other value, and on a failing read."""
+    try:
+        front = _anc.sole_front()
+        s = str(sender or "").strip()
+        return bool(front and s and project and same(front, value) and _mg.Ctx().background_of(s, project))
+    except Exception:  # noqa: BLE001  — an extra: a failed read leaves today's refusal or swap
+        return False
+
+
 def _front_mover_case(field: str, value: str, sender: str, project: str, current: str = "") -> "tuple[str, str, list[str], str] | None":
     """The case the front-mover rule judges: (the front agent's key, its project, the project's builder list, the project's hub) when a create or update sets mover, then (which becomes the mover after
     the owner's answer) or post_wake_mover (the mover once a wait ends) to a front agent, sent by another session; None otherwise. A front agent gets no hand-off notice, so the item would sit handed
@@ -195,6 +206,8 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
         same = lambda a, b: bool(a) and bool(b) and (a == b or h.session_id(a) == h.session_id(b) or _anc.canonical(a, nm) == _anc.canonical(b, nm))
         cur = str(current or "").strip()
         if same(cur, v):
+            return None
+        if field == "then" and _lead_hands_to_front(v, sender, project, nm, same):      # a project's lead hands a decision step to the one configured front
             return None
         roles, key = h.role_of(v, nm)
         if not key or roles[key].get("role") != "front":      # a one-session project's single name-line session is not front here either, as in the needs gate and front_sender

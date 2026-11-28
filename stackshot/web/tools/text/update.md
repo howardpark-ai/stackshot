@@ -296,7 +296,7 @@ name of mover) to a front agent gets the project's builder instead (the reply an
 sent; the one exception is a hand-back: the front agent holds the item's first open named step as the item stands before this write (a step
 line this call adds does not count, and the call leaves that step open), the front agent is a live front agent of the item's project, and the sender is
 the project's builder or the item's mover when that is no front agent: it is kept as sent at once, and a mover is told it is handed back, as a turn; with no builder it is refused, except from a listed session to a front agent of the item's project; a sibling
-front agent is kept on {{OWNER}}'s words in said, see mover); take over another session's item only when
+front agent is kept on {{OWNER}}'s words in said, see mover; and a background agent of the item's project may set then to the configured front agent, which is kept as sent: the answer or the wait's end hands it the item); take over another session's item only when
 asked; a session about to be retired first hands over or completes its open items. mover={{OWNER}} alone is refused on
 an item that is doing: it needs step=… or needs=decision with ask=… in the same write (the refusal says so). An update
 that leaves an open item in a state that is {{OWNER}}'s (his step, or needs holding decision) and names no mover sets

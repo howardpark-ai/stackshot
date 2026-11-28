@@ -172,6 +172,44 @@ check("the configured front is not offered to a sub-page that lists its own", e 
 check("a sub-page's items are kept by its own front agent, else its hub's, else the configured one", (item_read._front_keepers("projects/golf/club"), item_read._front_keepers("projects/golf/range"), item_read._front_keepers("projects/golf/shop"))
       == ([CLUB], sorted([MAIN, SIDE], key=lambda n: (not n.endswith("-main"), n)), [CHIEF]), (item_read._front_keepers("projects/golf/club"), item_read._front_keepers("projects/golf/range"), item_read._front_keepers("projects/golf/shop")))
 
+# ---- then: a lead hands a decision step to the configured front
+from stackshot.web.tools import update as _wt_update
+from stackshot.service import answer_handover as ah
+from stackshot.model import model_guards as mguards
+ASK = "Decide: whether to book the early slot · Recommend: yes · Stakes: none · By: no date"
+def decision(**kw): return mk(**{"subject": "[home] a decision to hand on", "mover": OWNER, "needs": ["decision"], "ask": ASK, "then": SOLOB, "next": "", **kw})
+r = decision(then=CHIEF); g = r.split()[1] if r.startswith("created") else ""
+check("then=<configured front> from the project's background agent is kept as sent on create, with no swap note", g and rd(g)["metadata"].get("then") == CHIEF and "fixed" not in r and not rd(g)["metadata"].get("server_fixed"), r)
+r = decision(); g = r.split()[1] if r.startswith("created") else ""
+r = _wt_update.stackshot_update(item_id=g, sender=SOLOB, then=CHIEF)
+check("then=<configured front> from the project's background agent is kept as sent on update, with no swap note and no fix on the item", rd(g)["metadata"].get("then") == CHIEF and "fixed" not in r and "Refused" not in r and not rd(g)["metadata"].get("server_fixed"), (r, rd(g)["metadata"]))
+r = _wt_update.stackshot_update(item_id=g, sender=SOLOB, then=MAIN)
+check("then=<another project's front> from the background agent is still swapped for the builder", "fixed" in r and rd(g)["metadata"].get("then") == SOLOB, (r, rd(g)["metadata"].get("then")))
+r = decision(); g = r.split()[1]
+r = _wt_update.stackshot_update(item_id=g, sender=SIDE, then=CHIEF)
+check("then=<configured front> from a session that is no background agent of the project is still swapped for the builder", "fixed" in r and rd(g)["metadata"].get("then") == SOLOB, (r, rd(g)["metadata"].get("then")))
+r = mk(subject="[home] a mover to hand", mover=SOLOB, next=f"{SOLOB}: build it"); g = r.split()[1]
+r = _wt_update.stackshot_update(item_id=g, sender=SOLOB, mover=CHIEF, next=f"{SOLOB}: build it")
+check("mover=<configured front> from the background agent is still turned back to the builder", "fixed" in r and telling.holder(rd(g)) == SOLOB, (r, rd(g)["metadata"].get("mover")))
+r = decision(); g = r.split()[1]
+r = _wt_update.stackshot_update(item_id=g, sender=SOLOB, post_wake_mover=CHIEF)
+check("post_wake_mover=<configured front> from the background agent is still swapped for the builder", "fixed" in r and rd(g)["metadata"].get("post_wake_mover") in (SOLOB, None, ""), (r, rd(g)["metadata"].get("post_wake_mover")))
+cfg.CFG["front"]["agent"] = ""
+r = decision(); g = r.split()[1]
+r = _wt_update.stackshot_update(item_id=g, sender=SOLOB, then=CHIEF)
+check("with no configured front the same then is swapped as before", "fixed" in r and rd(g)["metadata"].get("then") == SOLOB, (r, rd(g)["metadata"].get("then")))
+cfg.CFG["front"]["agent"] = CHIEF
+meta = {"project": "projects/golf", "mover": OWNER, "then": CHIEF, "needs": ["decision"]}
+check("the owner's answer hands the item to the configured front named as then, and clears then", ah._then_live(CHIEF, meta) and ah._decision_hand_over(meta, OWNER, CHIEF) == CHIEF and meta.get("mover") == CHIEF and "then" not in meta, meta)
+check("a name no session lists is not live as then", not ah._then_live("home-golf-nobody", {"project": "projects/golf"}))
+real_state = mguards.Ctx.session_state
+mguards.Ctx.session_state = lambda self, who: "retired"
+try:
+    meta = {"project": "projects/golf", "mover": OWNER, "then": CHIEF, "needs": ["decision"]}
+    check("the configured front, once retired, never becomes the mover", not ah._then_live(CHIEF, meta) and ah._decision_hand_over(meta, OWNER, CHIEF) != CHIEF and meta.get("mover") != CHIEF, meta)
+finally:
+    mguards.Ctx.session_state = real_state
+
 # ---- repoint
 now0 = time.time()
 def put(i, status="open", **meta):
