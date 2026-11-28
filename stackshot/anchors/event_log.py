@@ -1,11 +1,11 @@
 """event_log.py: the hub's record of the events on pull requests it saw, read by the last-activity pass (`service/event_activity.py` `_event_activity_tick`).
 
 The same idea as merge_log.py (a file of the hub's own, one small line per event, nothing for a session to receive, no read of GitHub of its own), for the other events that are visible activity
-on a pull request: a CI result (a failure, or a new head that passes, after a failure or after a green head: what the hub already reports), a comment by a person, a review (a review or a review comment), a merge, and a commit (a new head commit of the pull request). `Hub.emit`, the
+on a pull request: a CI result (a failure, or a new head that passes, after a failure or after a green head: what the hub already reports), a comment by a person, a review (a review or a review comment), a merge, a commit (a new head commit of the pull request) and a verification verdict. `Hub.emit`, the
 funnel every event passes, appends the line (and `Hub.record`, for a merge the receiver finds out late: an anchor first read on a pull request that merged within the last day). The merge log stays as it is and keeps its own readers; this is a second file, `events.jsonl`, so a server that predates it never reads a line of
 another kind as a merge.
 
-One line per kind of event: {"ts": when the hub saw it, "repo": "owner/repo" as the anchor names it, "n": the pull request's number, "kind": ci_failed | ci_passed | comment | review | merged | commit,
+One line per kind of event: {"ts": when the hub saw it, "repo": "owner/repo" as the anchor names it, "n": the pull request's number, "kind": ci_failed | ci_passed | comment | review | merged | commit | verdict | verdict_fail,
 "refs": ["board#N", ...] the board ids the pull request's body names (at most 10), kept for a merge only}. The pass reads it from a byte offset it keeps and ties each line to the open items
 with merge_tie, as a merge is tied. A burst that joins several types in one event (a merge and a comment) is one line for each kind.
 
@@ -30,7 +30,11 @@ one it kept for that pull request, it hands the hub an event of type `pr_commit`
 ten minutes, or unknown) is the commit read once more for its committer date, which `commit_time` clamps to the window; a read that fails stamps the time the hub saw it. Such an event is `record_only`: recorded here and never delivered
 to a session (`Hub.emit` returns after the logs). It counts only from a branch of the repository itself (vouched as a CI result is).
 
-Left out on purpose: a comment or review by a bot (a login ending in "[bot]", or an account the payload types as Bot; the hub drops its own account's comments upstream, so a comment made under that account is never seen), a CI event on a repository's notifications with no pull request, and any
+A verdict is a pull request comment whose first line is `verify: PASS|PASS+NOTES|FAIL patch-id=<40 hex> head=<40 hex>` (`verdict_outcome`; the whole line, nothing after it). A FAIL is filed as its own kind, `verdict_fail`, so no reader takes it for a pass. The receiver (`github.py`) reads it
+from the comments it already reads (no extra request) and hands the hub a `record_only` event of type `pr_verdict`. Its author is the hub's own account (the one the sessions post as) or the repository's own
+side (TRUSTED_ASSOCIATIONS): a stranger's line, and one in a later line or a quote, is no verdict. Who wrote it is the receiver's test; a bot's login is not dropped.
+
+Left out on purpose: a comment or review by a bot (a login ending in "[bot]", or an account the payload types as Bot; the hub drops its own account's comments upstream, so a comment made under that account is never seen unless it is a verdict), a CI event on a repository's notifications with no pull request, and any
 event the hub cannot name a pull request for.
 
 Pure apart from the files: no server import, no clock read (the caller passes `now`)."""
@@ -39,6 +43,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -47,8 +52,9 @@ from stackshot.anchors import merge_log as _ml
 from stackshot.core import config as _cfg
 
 # The hub's event types (core.GH_TYPES) that are activity, and the kind each is filed as.
-KIND_OF = {"ci_failed": "ci_failed", "ci_passed": "ci_passed", "comment": "comment", "review": "review", "review_comment": "review", "pr_merged": "merged", "pr_commit": "commit"}
+KIND_OF = {"ci_failed": "ci_failed", "ci_passed": "ci_passed", "comment": "comment", "review": "review", "review_comment": "review", "pr_merged": "merged", "pr_commit": "commit", "pr_verdict": "verdict", "pr_verdict_fail": "verdict_fail"}
 KINDS = frozenset(KIND_OF.values())
+VERDICT_LINE = re.compile(r"verify: (PASS|PASS\+NOTES|FAIL) patch-id=[0-9a-f]{40} head=[0-9a-f]{40}")
 PERSONS_ONLY = frozenset({"comment", "review"})      # the kinds a bot's login is dropped from
 MAX_REFS = _ml.MAX_REFS
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})      # GitHub's author_association values that are the repository's own side; every other value and a missing one is a stranger's
@@ -82,6 +88,17 @@ def kinds_of(etype: Any) -> list[str]:
 
 def _bot(login: str) -> bool:
     return login.strip().lower().endswith("[bot]")
+
+
+def verdict_outcome(body: Any) -> str:
+    """The outcome (PASS, PASS+NOTES or FAIL) of a comment whose first line is a verification verdict (VERDICT_LINE, the whole line; trailing white space aside), "" when it is none."""
+    m = VERDICT_LINE.fullmatch(body.split("\n", 1)[0].rstrip()) if isinstance(body, str) else None
+    return m.group(1) if m else ""
+
+
+def is_verdict(body: Any) -> bool:
+    """Is a comment's first line a verification verdict, whatever its outcome?"""
+    return bool(verdict_outcome(body))
 
 
 def only_bots(who: Any) -> bool:
