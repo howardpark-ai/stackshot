@@ -41,13 +41,13 @@ def _item(request: Request) -> tuple[str, dict[str, Any]] | None:
 
 async def upload(request: Request):
     """One file of a note, the request body (any type) with its name in `?name=`: stored as pending on the item until a note with its id is sent."""
+    email = _signin._ui_email(request)      # first: a person who is not signed in gets one answer for every item number, whether it exists or not
+    if not email:
+        return PlainTextResponse("sign in to the board to attach a file", status_code=403)
     found = _item(request)
     if found is None:
         return PlainTextResponse("no such item", status_code=404)
     gid = found[0]
-    email = _signin._ui_email(request)
-    if not email:
-        return PlainTextResponse("sign in to the board to attach a file", status_code=403)
     if not _answer_same_origin(request):
         return PlainTextResponse("refused: this did not come from the board's own page", status_code=403)
     import hmac

@@ -162,6 +162,11 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("refused 403: not signed in, no token, another item's token, another origin; unknown item 404",
           [up("a1", "x", b"abc", cookie=None).status_code, up("a1", "x", b"abc", token=False).status_code, up("a1", "x", b"abc", headers={"X-Answer-Token": tok("a2")}).status_code,
            up("a1", "x", b"abc", headers={"Origin": "https://evil.example.net"}).status_code, up("a99", "x", b"abc").status_code] == [403, 403, 403, 403, 404])
+    stranger = _signin._ui_sign(json.dumps({"email": "stranger@example.net", "exp": time.time() + 3600}))      # signed by this server, but the address is no member's
+    gate = {who: [(r.status_code, r.text) for r in (up("a1", "x", b"abc", cookie=ck), up("a99", "x", b"abc", cookie=ck))] for who, ck in (("out", None), ("stranger", stranger))}
+    check("not signed in and a non-member get the same status and body for an existing and a missing item (it does not show whether the item exists)",
+          len({v for vs in gate.values() for v in vs}) == 1 and gate["out"][0][0] == 403, gate)
+    check("a member still gets 404 for a missing item", up("a99", "x", b"abc").status_code == 404 and up("a99", "x", b"abc").text == "no such item")
     check("a refused upload left nothing but the files that were taken", pending("a1") == sorted([j["id"], big.json()["id"], img4.json()["id"], f6.json()["id"]]), pending("a1"))
 
     # ---- 2. the total
