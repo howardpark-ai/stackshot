@@ -26,7 +26,7 @@ from __future__ import annotations
 import bisect
 import re
 import unicodedata
-from typing import Any
+from typing import Any, Callable
 
 # A Markdown link: `[words](destination)`, the destination as `(url)`, `(url "title")`, `(url 'title')`, `(url (title))`, `(<a destination with spaces>)`, or a url that holds
 # one level of balanced parentheses. The words take no bracket (so a run of `[` is one step each); the angle destination and the title are bounded.
@@ -555,7 +555,7 @@ def _wrap_words(ln: str, line_max: int, cap: int) -> list[str] | None:
     return out + [cur]
 
 
-def _split_long(text: str, max_lines: int, line_max: int, wrap: bool) -> tuple[str, int, int, int] | None:
+def _split_long(text: str, max_lines: int, line_max: int, wrap: bool, whole: "Callable[[str], bool] | None" = None) -> tuple[str, int, int, int] | None:
     """A description whose only fault is bullets that read over `line_max`, put right without losing a word: each such bullet is cut at the gaps after a full stop or a semicolon (never inside a link, a naked
     URL or a code span) into the fewest bullets that each read within `line_max`, the same indent and dash on each. A clause that is over the limit on its own gets a second tier (`_soft_units`): it is cut at
     the last comma, colon, spaced dash or opening parenthesis that leaves each piece within the limit. → (the new text, how many bullets were split, how many of those needed the second tier), or None when it
@@ -566,6 +566,7 @@ def _split_long(text: str, max_lines: int, line_max: int, wrap: bool) -> tuple[s
     `max_lines` lines of `line_max`, the answer is None before any bullet is scanned (the splitter runs under the item lock, so a pasted wall of text is refused at once).
     `wrap` adds the last resort for a bullet the sentence and clause cuts cannot split (a clause with no cut that fits): the bullet is cut at its last space that fits and the rest goes on an indented child bullet
     (`_wrap_words`: no word is cut, nothing inside a link, a URL or a code span). A bullet that has children under it, a result over `max_lines` lines and a piece that cannot be cut to fit are still None.
+    `whole` (with `wrap`): a line it holds true for is only wrapped, never cut at its sentences, so the bullet stays one bullet (a how-to bullet, step_howto.keeps_whole, moves under the step whole).
     -> (text, bullets split, of those cut at a comma or dash, of those wrapped at a space)."""
     if not line_max:
         return None
@@ -600,7 +601,7 @@ def _split_long(text: str, max_lines: int, line_max: int, wrap: bool) -> tuple[s
         pieces: list[str] | None = []
         gap = ""
         soft_here = False
-        for c, after in _clauses(body):
+        for c, after in ([] if wrap and whole is not None and whole(ln) else _clauses(body)):
             units: list[tuple[str, str]] | None = [(c, after)]
             if visible_len(mark + c) > line_max:
                 if (units := _soft_units(c, mark, line_max, max_lines)) is None:
@@ -637,10 +638,10 @@ def split_long_ex(text: str, max_lines: int, line_max: int) -> tuple[str, int, i
     return None if res is None else res[:3]
 
 
-def split_long_wrap(text: str, max_lines: int, line_max: int) -> tuple[str, int, int, int] | None:
+def split_long_wrap(text: str, max_lines: int, line_max: int, whole: "Callable[[str], bool] | None" = None) -> tuple[str, int, int, int] | None:
     """`_split_long` with the last resort on (a bullet no sentence or clause cut can split is cut at its last space that fits, the rest on an indented child bullet): (the new text, how many bullets were split,
-    how many of those needed the second tier, how many of those were cut at a space), or None. The write gates use this one."""
-    return _split_long(text, max_lines, line_max, True)
+    how many of those needed the second tier, how many of those were cut at a space), or None. The write gates use this one; `whole` names the lines that are only wrapped."""
+    return _split_long(text, max_lines, line_max, True, whole)
 
 
 

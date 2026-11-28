@@ -36,6 +36,7 @@ from stackshot.fleet.sessions_registry import _role_name, _session_label
 from stackshot.github import ghsync as _gh
 from stackshot.model import activity as _activity
 from stackshot.model import decision_gates as _dg
+from stackshot.model import draft as _draft
 from stackshot.model import member_gates as _mgates
 from stackshot.model import faults as _faults
 from stackshot.model import field_gates as _fg
@@ -44,6 +45,7 @@ from stackshot.model import model_guards as _mg
 from stackshot.model import next_rules as _nr
 from stackshot.model import nextlines as _nl
 from stackshot.model import owner_steps as _hs
+from stackshot.model import step_howto as _howto
 from stackshot.model import states as _states
 from stackshot.model import step_commands as _sc
 from stackshot.model import steps as _steps
@@ -848,7 +850,9 @@ def update_unlocked(
     step_lines: list[str] = []
     step_long = ""         # the step as the writer sent it, when it is split below
     split_note = ""        # why a long step was left as written (the refusal of it says so)
+    own_howto: "str | None" = None      # the step's own how-to (model/step_howto.py): the `- ` lines under its lead line, "" for a numbered or fenced step, None when it brings none
     if step.strip() and step.strip().lower() not in h.ask_none and _writes.session_next():      # a session's write only: a script's step (item sync, the terminal rows) is stored as it is made
+        step, own_howto = _howto.split_step(step)      # a lead line with `- ` lines under it: the lead is the step, the lines stand under it (never in next)
         step_long = _states.step_text(step)
         step, step_lines = _fg.fix_long_step(step_long)      # a long chain of actions becomes a short summary and one line of next per action (the reply says so); a short, numbered or one-action step is as written
         if not step_lines:
@@ -1745,7 +1749,18 @@ def update_unlocked(
         for refusal in end_refusals:
             fc.add(refusal)                # a default end above, on an item this write leaves waiting on the owner: refused as it was before the default existed
     fc.raise_now()                        # every gate has run: what was found is refused together, nothing is stored
+    if (_writes.session_next() and not (filing_only or _writes.reformat()) and not sender.strip().startswith("a script on ") and item.get("status") == "open" and not closing
+            and meta.get("state") == "your-step" and _states.clean(meta.get("step"))):      # how to do his step stands under it, never only in the description (model/step_howto.py: never a refusal)
+        sent_desc = bool(description.strip()) and description.strip() != str(item_was.get("description") or "").strip()      # the stored text sent back whole is no new description
+        got_howto, item["description"], howto_note = _howto.plan(meta.get("step"), item.get("description"), sent_desc, _howto.text_of(meta), own_howto,
+                                                                 take=_draft.owner_steps({**item, "metadata": meta}), step_was=(item_was.get("metadata") or {}).get("step"))
+        _howto.store(meta, got_howto)
+        if howto_note:
+            _calls.fixed("step-howto", howto_note, fields=["step", "description"])
     item["metadata"] = meta
+    if (howto_back := _howto.follow(item)):      # the step ended, or is another: its how-to goes back to the description (the save does the same for every other write)
+        _calls.fixed("step-howto", f"the {howto_back} how-to line{'' if howto_back == 1 else 's'} under the step went back to the end of the description, since the step {'ended' if not _states.clean(meta.get('step')) or meta.get('state') != 'your-step' else 'is another now'}",
+                     fields=["step", "description"])
     item["updated"] = time.time()          # the item's own clock (the renderer used to trust the file's mtime, which a migration rewrites)
     if state_change:
         item["state_updated"] = item["updated"]   # filing edits (owner/project/priority/subject, and the ask line) leave the state clock alone
@@ -1845,7 +1860,7 @@ def update_unlocked(
     dropped_note = ""
     if description.strip():
         try:
-            dropped_note = _dropped_lines_note(item_was.get("description"), item.get("description"))      # lines of the old description the new one lacks: named with their old text, so the writer can put a fact back
+            dropped_note = _dropped_lines_note(item_was.get("description"), "\n".join([str(item.get("description") or ""), _howto.text_of(item.get("metadata") or {}), str((item.get("metadata") or {}).get("step") or "")]))      # lines of the old description the new one lacks: named with their old text, so the writer can put a fact back
         except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
             print(f"update: {gid} dropped-lines note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     goal_note = ""

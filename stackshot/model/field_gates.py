@@ -23,6 +23,7 @@ from stackshot.model import model_guards as _mg
 from stackshot.model import next_rules as _nr
 from stackshot.model import nextlines as _nl
 from stackshot.model import step_split as _ss
+from stackshot.model import step_howto as _howto
 from stackshot.model import steps as _steps
 from stackshot.model.bullet_text import _clip_line
 from stackshot.web import render as _rmod
@@ -354,7 +355,7 @@ def fix_long_bullets(desc: str, stored: str | None = None, field: str = "descrip
     bad = _bt.judge(desc, max_lines, line_max)
     if not bad or bad[0] != "long":
         return desc, ""
-    res = _bt.split_long_wrap(desc, max_lines, line_max)
+    res = _bt.split_long_wrap(desc, max_lines, line_max, _howto.keeps_whole if field == "description" else None)      # a long how-to bullet is wrapped, never split, so it moves under the step whole
     if not res:
         return desc, ""
     new, n, soft, wrapped = res
@@ -514,7 +515,7 @@ def _sendable(desc: str) -> bool:
     max_lines, line_max = _description_limits()
     if not _bt.judge(desc, max_lines, line_max):
         return True
-    res = _bt.split_long_wrap(desc, max_lines, line_max)
+    res = _bt.split_long_wrap(desc, max_lines, line_max, _howto.keeps_whole)
     return bool(res) and not _bt.judge(res[0], max_lines, line_max)
 
 

@@ -18,6 +18,7 @@ from stackshot.model import step_commands as _sc
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model import states as _states
+from stackshot.model import step_howto as _howto
 from stackshot.model import steps as _steps
 from stackshot.waits import watchers as _wat
 
@@ -215,6 +216,7 @@ class StepBlock:
     blocks: list[str]
     verbatim: bool = False
     parts: "list[_sc.Part] | None" = None      # a step that is a numbered list or holds a fenced block (step_commands.parse): drawn part by part, `text` and `blocks` are empty
+    howto: str = ""      # how to do the step, kept beside it (metadata.step_howto: `- ` lines with lines under them, step_howto.drawn): drawn under the step as a bulleted list
 
 
 def step_block(item: dict[str, Any]) -> "StepBlock | None":
@@ -226,12 +228,13 @@ def step_block(item: dict[str, Any]) -> "StepBlock | None":
     raw = str((item.get("metadata") or {}).get("step") or "").strip()
     if not clean(raw):
         return None
+    howto = _howto.drawn(item.get("metadata") or {})
     if _sc.structured(raw):
-        return StepBlock("", [], False, _sc.parse(raw))
+        return StepBlock("", [], False, _sc.parse(raw), howto)
     if raw.startswith("!"):
-        return StepBlock("", [raw], True)
+        return StepBlock("", [raw], True, None, howto)
     text, blocks = _home.copyables(clean(raw))
-    return StepBlock(text, blocks)
+    return StepBlock(text, blocks, False, None, howto)
 
 
 # ---------------------------------------------------------------------------------------------------------------- clipping markdown

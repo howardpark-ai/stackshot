@@ -36,6 +36,7 @@ from stackshot.web import item_history as _ihist   # the commits of an item's fi
 from stackshot.model import step_commands as _sc   # the step of a your-step item: numbered list, commands to copy (step_commands.py)
 from stackshot.model import steps as _steps   # the checklist behind next: done, dropped and open steps (steps.py)
 from stackshot.model import owner_steps as _os   # the step the server makes on the checklist for his your-step or decision (owner_steps.py)
+from stackshot.model import step_howto as _howto   # how to do his step, kept beside it (metadata.step_howto): drawn under the step as a bulleted list (step_howto.py)
 from stackshot.waits import dated_wait as _dw   # a stored doing item whose open steps are all dated for a later day reads as waiting (dated_wait.py)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
 from stackshot.waits import watchers as _wat   # the waits' watchers: the chases logged on a wait
@@ -3347,7 +3348,7 @@ li.hrow{padding:10px 12px;min-width:0;font-size:14px;line-height:1.4;scroll-marg
 .hl2 .hthen,.hl2 .hby{font-size:12px;color:var(--fg);min-width:0;margin-left:12px}.hl2 .hlab{color:var(--mut)}.hl2.hind .hwait{display:inline}.hbody{margin:6px 0 0 6px;padding-left:10px;border-left:1px solid var(--mut);min-width:0}.hbody>:first-child{margin-top:0}.hnote.hnstep{margin-left:16px}
 .hl2{margin-top:4px;min-width:0;font-size:13px;color:var(--mut)}.hnext,.hwait{display:block;min-width:0;overflow-wrap:anywhere;color:var(--fg)}.hwait{color:var(--mut)}.hwait .hon{color:var(--fg)}.hnext.hq{font-weight:500}a.mockup{white-space:nowrap;font-weight:500}
 .hwho{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--mut)}.hwho.own{font-family:inherit;font-weight:600;font-size:12px;color:var(--call)}a.hwho:hover{color:var(--acc)}
-.iask .istepbody>b.osub{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600;margin:10px 0 4px}.draft{margin:6px 0 4px}.draft .dhead{margin:0 0 4px}.draft .dlab{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600}.draft button.copy{margin-left:8px;vertical-align:baseline}.draft pre{margin:0;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.5;color:var(--fg)}.draft pre code{font:inherit;border:0;padding:0;background:none;color:var(--fg)}.hdraft{margin:4px 0 2px;font-size:13px}.hdraft summary{cursor:pointer;color:var(--mut);font-size:12px}.hdraft .dlab{font-size:12px;letter-spacing:0;text-transform:none;font-weight:400;color:var(--mut)}.hdraft pre{margin:4px 0 0;background:var(--bg);font-size:13px;line-height:1.45}.hnote{margin-top:4px;font-size:12px;color:var(--mut);overflow-wrap:anywhere}.hnote .hwho{font-size:12px}li.hrow .cmd{margin:6px 0 2px;color:var(--fg)}ol.stepol{margin:4px 0 6px;padding-left:22px}ol.stepol>li{margin:6px 0;line-height:1.5}ol.stepol ul.stepsub{list-style:disc;margin:3px 0 2px;padding-left:20px}ol.stepol ul.stepsub>li{margin:2px 0}p.sp{margin:4px 0}.stepol .cmd{margin:6px 0 2px}
+.iask .istepbody>b.osub{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600;margin:10px 0 4px}.draft{margin:6px 0 4px}.draft .dhead{margin:0 0 4px}.draft .dlab{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600}.draft button.copy{margin-left:8px;vertical-align:baseline}.draft pre{margin:0;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.5;color:var(--fg)}.draft pre code{font:inherit;border:0;padding:0;background:none;color:var(--fg)}.hdraft{margin:4px 0 2px;font-size:13px}.hdraft summary{cursor:pointer;color:var(--mut);font-size:12px}.hdraft .dlab{font-size:12px;letter-spacing:0;text-transform:none;font-weight:400;color:var(--mut)}.hdraft pre{margin:4px 0 0;background:var(--bg);font-size:13px;line-height:1.45}.hnote{margin-top:4px;font-size:12px;color:var(--mut);overflow-wrap:anywhere}.hnote .hwho{font-size:12px}li.hrow .cmd{margin:6px 0 2px;color:var(--fg)}ol.stepol{margin:4px 0 6px;padding-left:22px}ol.stepol>li{margin:6px 0;line-height:1.5}ol.stepol ul.stepsub{list-style:disc;margin:3px 0 2px;padding-left:20px}ol.stepol ul.stepsub>li{margin:2px 0}ul.stephow{list-style:disc;margin:4px 0 6px;padding-left:20px}ul.stephow>li{margin:3px 0;line-height:1.5}ul.stephow ul{list-style:circle;margin:2px 0;padding-left:18px}p.sp{margin:4px 0}.stepol .cmd{margin:6px 0 2px}
 .hask{margin-top:6px}form.hanswer{margin:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}form.hanswer[hidden]{display:none}form.hanswer .abtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}form.hanswer .abtns-opt{margin-top:0}form.hanswer textarea{display:block;box-sizing:border-box;width:100%;min-height:3.2em;margin-top:8px;padding:6px 8px;font:inherit;font-size:14px;color:var(--fg);background:var(--ifill);border:1px solid var(--ibd);border-radius:6px;resize:none}form.hanswer textarea:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
 ul.hdones li.hdone{display:block;min-width:0}.hdl1{display:flex;flex-wrap:nowrap;align-items:baseline;gap:2px 8px;min-width:0}ul.hdones .isubj{flex:1 1 0;grid-column:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}ul.hdones .badge{flex:none;margin:0;white-space:nowrap}ul.hdones .iage{flex:none;margin-left:auto;font-size:12px;color:var(--mut);white-space:nowrap}.hdl2{margin-top:2px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--mut)}ul.hdones a.hnum{flex:none}
 .hl1.hytop{display:flex;flex-wrap:nowrap;align-items:baseline;gap:8px;margin-top:0}.hytop a.hnum{flex:none;max-width:none;overflow:visible;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:inherit;font-weight:600;color:var(--fg)}.hytop a.hnum:hover{color:var(--acc)}.hytop a.hgoal{display:block;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hytop .hage{flex:none;white-space:nowrap}.hytop+.hmeta{margin-top:4px}
@@ -3617,12 +3618,12 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             who = _members.recorded_by(a)      # the person who answered: the answer's `by`, else the first person
             out.append({"text": f"{who}: {body}", "status": "decided", "by": who, "at": ts})
         return out
-    def his_open_steps(self, r, member=""):
+    def his_open_steps(self, r, member="", where=None):
         """His open steps of the checklist (the lines of next that open with his name, or with none) as (first line without its opener, the lines under it), each said once, in order. On a board of several
         members, drawn for `member`: the open steps that are that member's or no one's (steps.member_rows), never another member's, and the line skipped below is looked for among those, name and all. The line the
         server made on the checklist for a your-step item (the step's summary, recorded as metadata.owner_step, with his name in front of it or not) is not drawn: the summary stays where space is short.
         Only that line is skipped, never a separate step of his that happens to say the same words, and a line that repeats an earlier one of his (any case, with or without his name) reads as one.
-        A line whose first line is empty after his name takes the first line under it as its own. [] when he has none."""
+        A line whose first line is empty after his name takes the first line under it as its own. [] when he has none. `where` (a list) is given the place in the result the skipped line held."""
         meta = r["metadata"] or {}
         lk = lambda t: _steps.loose_key(t).casefold()
         cand = []
@@ -3636,7 +3637,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         skip = max((i for i, (x, _) in enumerate(cand) if mir and line(x["text"]) == mir), default=-1)      # the server's own line: the last one that says the summary
         out, seen = [], set()
         for i, (x, ls) in enumerate(cand):
-            if i == skip: continue
+            if i == skip:
+                if where is not None: where.append(len(out))
+                continue
             if _sc.FENCE_RX.match(ls[0]): first, rest = "", ls
             else:
                 first, rest = _steps.strip_owner(ls[0]), ls[1:]
@@ -3703,9 +3706,17 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         """The Your step block's list: his open steps (your_steps), drawn as the whole of the block (the one-line summary stays where space is short, the tab title and a Slack notice): one ordered list numbered
         from 1, each step in full without its `<name>: ` opener, each command in backticks (a span with a space in it) or fenced block in a code block with a Copy button under its line. `draft` (a function from the
         step's text to the drawn draft) puts the text to paste inside the step that uses it (draft_inside). They are the checklist's steps themselves, so a step checked leaves this list and
-        shows checked in Next; Next still draws all of them. "" when he has none."""
+        shows checked in Next; Next still draws all of them. The how-to kept beside the step (howto_of) is drawn under the step it belongs to: the server's line, drawn at its place for that alone,
+        or after the list for a step split into lines (its actions) or one whose line is not open. "" when he has none."""
         mine = self.your_steps(r, member)
         if not mine: return ""
+        meta = r["metadata"] or {}
+        how, at = self.howto_of(r, member), None
+        if how and not meta.get("step_lines") and not self.step_field_entries(r):
+            where = []
+            if self.his_open_steps(r, member, where) == mine and where:
+                at = sum(1 for f, _ in mine[:where[0]] if f)      # the step's own line, numbered with the others
+                mine = mine[:where[0]] + [(" ".join(str(meta.get("step") or "").split()), [])] + mine[where[0]:]
         text, n = [], 0
         for first, rest in mine:
             if first:
@@ -3713,7 +3724,12 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 text += [ln if ln[:1] in (" ", "\t") else "   " + ln for ln in rest]
             else: text += textwrap.dedent("\n".join(rest)).split("\n")         # a fenced block with no line of its own: a box, no number
         parts = _sc.parse("\n".join(text))
-        return f'<div class="istepnext">{self.step_parts_html(parts, r["gid"], self.draft_inside(r, parts, draft))}</div>' if parts else ""
+        if not parts: return ""
+        inside = self.draft_inside(r, parts, draft)
+        if how:
+            k = -1 if at is None else at
+            inside[k] = (inside.get(k, "") + self.howto_html(how, r["gid"])) if k == -1 else (self.howto_html(how, r["gid"]) + inside.get(k, ""))
+        return f'<div class="istepnext">{self.step_parts_html(parts, r["gid"], inside)}</div>'
     def draft_inside(self, r, parts, draft):
         """{the position of the step that holds the draft: the drawn draft} for step_parts_html, {} for an item with no draft or with no `draft` function. The step that uses the text is the last one that
         names text to post, send or paste (draft.names_text, the write guard's own reading), else the last without a command, else the last. With no line of text to hold it (the steps are
@@ -3748,9 +3764,30 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         for p in sb.parts or []:
             cmds += [p.text] if p.kind == "cmd" else _sc.split_spans(p.text)[1] if p.kind == "text" else [c for it in p.items for x in it.all() for c in _sc.split_spans(x.text)[1] + x.fences]
         draft = "" if (not d or any(_draft.clean(c) == _draft.clean(d) for c in cmds)) else self.draft_html(r, self.draft_label(sb.text or "", (r["metadata"] or {}).get("step")), home)
-        if sb.parts is not None: return self.step_parts_html(sb.parts, r["gid"]) + draft
+        how = self.howto_html(sb.howto, r["gid"])      # how to do it, kept beside the step: right under its text
+        if sb.parts is not None: return self.step_parts_html(sb.parts, r["gid"]) + how + draft
         blk = _cmd_blocks(sb.blocks)
-        return (self.md_line(sb.text, r["gid"]) if sb.text else "") + draft + blk
+        return (self.md_line(sb.text, r["gid"]) if sb.text else "") + how + draft + blk
+    def howto_of(self, r, member=""):
+        """The how-to kept beside the item's step (step_howto.drawn), for the Your step block drawn for `member`: "" on a board of several members for a member the step is not asked of."""
+        meta = r["metadata"] or {}
+        if member and member != _steps.member_for(meta.get("step"), meta): return ""
+        return _howto.drawn(meta)
+    def howto_html(self, text, gid):
+        """How to do the step (metadata.step_howto's text: `- ` lines with lines indented under them) as a bulleted list under it, each line as inline markdown with mentions linked, a line indented under
+        one as a list inside its item and a line with no marker joined to the line above. Never numbered: they are how to do the step, not more steps. "" for none."""
+        items = []
+        for ln in str(text or "").split("\n"):
+            if not ln.strip(): continue
+            m = re.match(r"^([ \t]*)[-*\u2022][ \t]+(.*)$", ln)
+            body = m.group(2).strip() if m else ln.strip()
+            if m and not m.group(1): items.append([body, []])
+            elif not items: items.append([body, []])
+            elif m: items[-1][1].append(body)
+            elif items[-1][1]: items[-1][1][-1] += " " + body
+            else: items[-1][0] += " " + body
+        lis = "".join(f"<li>{self.md_line(t, gid)}" + (f"<ul>{''.join(f'<li>{self.md_line(x, gid)}</li>' for x in subs)}</ul>" if subs else "") + "</li>" for t, subs in items)
+        return f'<ul class="stephow">{lis}</ul>' if lis else ""
     def step_parts_html(self, parts, gid, inside=None):
         """A step that is a numbered list or holds a fenced block (step_commands.parse), drawn part by part: a plain line as a paragraph (inline markdown, mentions linked), a run of numbered lines as one
         ordered list (the first number kept), each item's text with the commands taken out of it (a span with a space in it, or a fenced block) into code blocks with a Copy button under that item, a fenced block

@@ -18,6 +18,7 @@ from stackshot.model import item_project as _ip
 from stackshot.model import model as _model
 from stackshot.model import said as _said
 from stackshot.model import states as _states
+from stackshot.model import step_howto as _howto
 from stackshot.model import step_proof as _sp
 from stackshot.model import steps as _steps
 from stackshot.model import work as _work
@@ -133,7 +134,9 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
             out.append(f"outcome text:{mark('outcome_text')}\n{m['outcome_text']}")
     if item.get("status") == "open":         # where it stands: the stored state with the fields it carries; an item that stores none shows no state line (the model line below says alive or waiting)
         out.extend(w for w in [_states.words(item, lambda i_: _item_read._after_open(i_.get("metadata") or {}))] if w)
-        out.extend(f"{k}: {v}" for k, v in _states.carry_of(item).items())
+        how = _howto.drawn(m)                        # how to do the step, kept beside it: under `step:` as its `- ` lines (step= takes them back the same way); the brief says how many
+        out.extend(f"{k}: {v}" + ((f" (+{len(how.splitlines())} how-to lines; get shows them)" if brief else _howto.lines_note(how)) if k == "step" and how else "")
+                   for k, v in _states.carry_of(item).items())
         if _draft.of(item):                          # the verbatim text the owner pastes elsewhere, as stored (many lines); the brief, which loads into every session, only says it is there
             d_ = _draft.of(item)
             out.append(f"draft: {len(d_.splitlines())} lines, {len(d_)} characters (get shows it)" if brief else "draft:\n" + d_)
