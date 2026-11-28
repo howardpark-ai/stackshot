@@ -445,6 +445,24 @@ python3 tests/home_brain_probe.py --verify <verify-gbrain's verify.py> --gbrain-
 
 The exit status is 0 when every testable point passes, 1 when one fails and 2 when a point could not be run (a harness that did not start gives no verdict).
 
+## Creating a board
+
+```
+stackshot board-create NAME ADDRESS... --port PORT [--base-url URL] [--yes]
+```
+
+Without `--yes` the command prints a plan and writes nothing. The plan lists, each marked `new`, `present`, `unknown` or `stub`: the board's id, its config, its data repository, the unit text of its process, the password of its brain's login, the brain's login and database, the members, and the text for the front door's config. With `--yes` it makes what is marked `new`; a second run finds everything `present` and changes nothing. It sends no mail (an invite is the admin's own step, [Inviting a person](#inviting-a-person)), starts and enables nothing, and writes nowhere but the places the plan names.
+
+The name is 2 to 32 lower-case letters, digits and hyphens, a letter first (`stackshot/core/board_create.py check_name`; `board_names.validate` has the last word where that module exists). The first address is the board's admin (`[invites] admins`); every address is written as a member of the board in the members file by the same writer the invite tool uses, so an address written there by hand is refused with the invite tool's words.
+
+A board lives in `<boards_dir>/<name>/`: `board.id` (32 hex digits, made once), `stackshot.toml`, `secrets/brain-db.password` (0600), `data/` (a git repository with `RULES.md`) and `stackshot-board-<name>.service`, the unit text, which is not installed. The brain's login and database are both `brain_` plus the id, never the name; the name is the database's comment, and connection rights are taken from every other login. The server is the owner's `[board_create.brain_server]` ([Configuration: integrations](configuration-integrations.md)); with none set the plan says so and `--yes` makes nothing.
+
+The database is made first. When anything fails on the way, a board this run began is taken apart again (the database and login it made, the folder); a run on a board that already existed leaves what is there and says to run again. A members-file failure leaves the board made and says so.
+
+Left for later, and printed as `stub`: the front door's own entry (the plan prints the `[[frontdoor.backends]]` text and writes none: the owner adds it, with the file named in `token_file`), the front door's brain entry (a second `kind = "brain"` backend is dropped today, stage 5), the brain's own server and token, the spend cap (stage 6) and the nightly dump (the server's, stage 3). Nothing reads `[brain_db]` yet.
+
+`tests/board_create_scenario.py` covers the plan and each refusal, a run and its repeat, a failing database step and a failing file step (nothing left behind), the members file, and the command through the CLI; where a PostgreSQL server can be started it also runs `PsqlServer` against a throwaway one, elsewhere it says that it skipped that part.
+
 ## Checked by
 
 `tests/frontdoor_run_scenario.py` is the run with real processes: a front door in front of two boards (`main` and `side`), each its own process with its own config, store, port, bearer token, copy of the signing secret and `[behind_frontdoor]` table, and a third board with no table, all on loopback ports chosen at run time under one scratch folder (nothing of an instance is read or written). The test plays the reverse proxy and checks, in a round it runs four times (at the start, then after the front door, `main` and `side` are each stopped by their PID and started again, one after another):

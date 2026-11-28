@@ -7,6 +7,7 @@
                              machine (no oauth.env, no stackshot.service), check only its client
   stackshot client install   store a machine token, start the puller and add the four Claude Code hooks
   stackshot client mint NAME mint a token for another machine (on the server box); prints the token file's path
+  stackshot board-create NAME ADDRESS...  print the plan for one more board with its brain database; with --yes make it (docs/front-door.md, Creating a board)
 
   stackshot <program> ...    run one of the package's programs with the arguments it takes: `stackshot pages clear <key>`,
                              `stackshot config get server.port`, `stackshot client get brief`, `stackshot push <session> <text>`,
@@ -500,6 +501,87 @@ def cmd_setup(a: argparse.Namespace) -> int:
     if linger_off:
         say(f"lingering is off for {user}: the services stop at logout and do not start at boot. Run this once as root:  {LINGER_CMD.format(user=user)}")
     say(f"fill oauth.env ({oauth}), then run bin/stackshot doctor")
+    return 0
+
+
+# ---------------------------------------------------------------------------- board-create
+def board_files(plan, req, owner_cfg: dict, members_file: str) -> tuple[str, str]:
+    """(the new board's config text, its RULES.md): the example patched for this board, then the tables of a board behind the front door."""
+    inst = owner_cfg.get("instance") or {}
+    tzname = str(inst.get("timezone") or "UTC")
+    owner = str(inst.get("owner") or "the owner")
+    base = (req.base_url or f"http://127.0.0.1:{req.port}").rstrip("/")
+    home, data = plan.home, plan.home / "data"
+    t = EXAMPLE.read_text(encoding="utf-8")
+    for sec, key, val in (
+        ("instance", "title", toml_str(f"stackshot: {plan.name}")),
+        ("instance", "owner", toml_str(owner)),
+        ("instance", "timezone", toml_str(tzname)),
+        ("instance", "board_url", toml_str(base)),
+        ("paths", "repo", toml_str(str(data))),
+        ("paths", "store", toml_str(str(data / "board-data"))),
+        ("paths", "markdown", toml_str(str(data / "board.md"))),
+        ("paths", "rules", toml_str(str(data / "RULES.md"))),
+        ("paths", "autonomy", toml_str(str(data / "autonomy.toml"))),
+        ("paths", "brain", toml_str(str(data / "pages"))),
+        ("paths", "fleet_names", toml_str(str(data / "session-names.tsv"))),
+        ("paths", "state", toml_str(str(home / "state"))),
+        ("paths", "secrets", toml_str(str(home / "secrets"))),
+        ("auth", "base_url", toml_str(base)),
+        ("auth", "allowed_emails", toml_list(list(req.members))),
+        ("client", "url", toml_str(base)),
+        ("gbrain", "mirror_url", toml_str("")),
+        ("server", "port", str(req.port)),
+    ):
+        t = patch(t, sec, key, val)
+    door = owner_cfg.get("frontdoor") or {}
+    behind = [f"members_file = {toml_str(members_file)}", f"board_name = {toml_str(plan.name)}"]
+    if door.get("identity_secret_file"):
+        behind.insert(0, f"identity_secret_file = {toml_str(str(door['identity_secret_file']))}")
+    t += ("\n# --- written by `stackshot board-create` ---\n[behind_frontdoor]\n" + "\n".join(behind) + "\n"
+          f"\n[invites]\nadmins = {toml_list([req.members[0]])}\n"
+          "\n[brain_db]                                        # this board's brain database (the server's own settings are [board_create.brain_server] in the front door's config)\n"
+          f"url = {toml_str(plan.address)}\npassword_file = {toml_str(str(plan.home / 'secrets' / 'brain-db.password'))}\n"
+          "# spend_cap_usd_per_day =                          # unset: stage 6 counts the spend and caps it\n")
+    tomllib.loads(t)                                         # never write a file the code cannot read
+    rules = RULES_MD.format(title=f"stackshot: {plan.name}", owner=owner, tz=tzname, pages=str(data / "pages"), prefixes="`[todo] `", max_lines=8, line_max=120)
+    return t, rules
+
+
+def cmd_board_create(a: argparse.Namespace) -> int:
+    from stackshot.core import board_create as bc
+    from stackshot.core import invites
+    cfg = default_config()
+    if not cfg.exists():
+        say(f"no config at {cfg}: this command runs where the front door's config is (run bin/stackshot setup first)")
+        return 2
+    owner_cfg = load_config(cfg)
+    s = bc.settings_of(owner_cfg)
+    members: list[str] = []
+    for raw in a.members:
+        addr = invites.address_of(raw)
+        if not addr:
+            say(f"not an address: {raw!r}")
+            return 2
+        if addr not in members:
+            members.append(addr)
+    try:
+        req = bc.Request(bc.check_name(a.name), tuple(members), a.port, a.base_url or "")
+        server = bc.PsqlServer(s.server) if s.server.usable() else None
+        plan = bc.make_plan(s, req, server)
+        say(bc.render_plan(plan))
+        if not a.yes:
+            say("\ndry run: nothing was written. Run again with --yes to make what is marked new.")
+            return 0
+        if plan.done:
+            say("\nnothing to do: the board is as the plan says.")
+            return 0
+        bc.apply(plan, s, req, server, lambda p: board_files(p, req, owner_cfg, s.members_file), HERE, say)
+    except bc.CreateError as e:
+        say(f"board-create: {e}")
+        return 1 if a.yes else 2
+    say(f"\nthe board {req.name!r} is made. Nothing is started and nothing was sent. Next, by hand: add the front door entry above to the front door's config, "
+        f"install and start {plan.home / ('stackshot-board-' + req.name + '.service')}, and tell each member (the invite mail is the admin's own step).")
     return 0
 
 
@@ -1121,6 +1203,17 @@ def setup_main(argv: list[str]) -> int:
                                    "token, the server's whoami for it, lingering and the puller when its unit is installed, and the hooks.")
     d.add_argument("--no-systemd", action="store_true", help="skip the unit checks and the start")
     d.set_defaults(fn=cmd_doctor)
+
+    b = sub.add_parser("board-create", help="make one more board with its brain database (a plan first; --yes makes it)",
+                       description="Print the plan for a board NAME with its data repository, config, process unit text, brain database login and members; "
+                                   "with --yes make what the plan marks new. A second run changes nothing. It sends no mail and starts nothing. "
+                                   "The database server is read from [board_create.brain_server] of the config.")
+    b.add_argument("name", help="the board's name: 2 to 32 lower-case letters, digits and hyphens, a letter first")
+    b.add_argument("members", nargs="+", metavar="ADDRESS", help="the members' Google addresses; the first is the board's admin")
+    b.add_argument("--port", type=int, required=True, help="the board's local port, [server] port")
+    b.add_argument("--base-url", help="the board's public base URL (default http://127.0.0.1:<port>)")
+    b.add_argument("--yes", action="store_true", help="make what the plan marks new (without it the command only prints the plan)")
+    b.set_defaults(fn=cmd_board_create)
 
     c = sub.add_parser("client", help="this machine's client: install, or mint a token for another machine",
                        description="install: store a token, start the puller, add the hooks · mint NAME: a token for another machine")

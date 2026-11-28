@@ -794,6 +794,16 @@ to_background_senders = []                          # the front agents that send
 # admins = ["alice"]                                # REQUIRED: the members (their names in the members file) who may invite and remove
 # mcp_url = "https://board.example.com/mcp"         # the address an app adds (default: [auth] base_url followed by /mcp)
 
+# [board_create]                                    # `stackshot board-create` (docs/front-door.md, "Creating a board"): where the new boards live and the database server their brains use. Read by that command only
+# boards_dir = "~/.config/stackshot/boards"         # one folder per board: its config, secrets, data repository and unit text (default as shown)
+# members_file = "~/.config/stackshot/frontdoor-members.json"   # the front door's members file the new board's members are written to (default: [frontdoor] members_file). It must exist
+# [board_create.brain_server]                       # the boards' Postgres server; the command makes a login and a database per board there. Unset = the command prints its plan and makes nothing
+# host = "127.0.0.1"                                #   a host name, an address or a folder (a unix socket)
+# port = 5440                                       #   the server's port
+# admin_user = "postgres"                           #   the login that may create logins and databases
+# admin_password_file = "~/.config/stackshot/brain-admin.password"   #   private to the owner (mode 600); empty = the admin signs in with no password (a socket, a throwaway server)
+# psql = "psql"                                     #   the program the command talks to the server through
+
 [step_proof]                                        # a step of an item's next that names the event which finishes it (a pull request merged or released) is ticked by the server (stackshot/model/step_proof.py).
                                                     # Without a switch, the first pass of the server's clock after a start only logs what it would do (and keeps it in <state>/step-proof-dry.json);
                                                     # the passes after it act. Set it to decide for yourself:
