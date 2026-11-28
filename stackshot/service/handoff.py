@@ -37,6 +37,7 @@ from stackshot.fleet import sessions_registry as _sr
 from stackshot.fleet.sessions_registry import _session_label, _sessions_index
 from stackshot.github import ghsync as _gh
 from stackshot.model import item_project as _ip
+from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _GID
@@ -338,19 +339,20 @@ def sibling_words(before: dict[str, Any] | None, item: dict[str, Any], r: dict[s
 
 def handoff_his_over(gid: str, item: dict[str, Any], author: tuple[str, str] | None = None, quiet: bool = False) -> bool:
     """a hand-off to the owner is taken by no write of his own (he writes through the board, whose save carries `author`, or a session relays his answer), so it read "handed to the owner,
-    not yet taken" after he had answered. Called by `writes.save` for every save, right after the hand-off record of the write: his answer on the board ends it, and so does any save that leaves the item
+    not yet taken" after he had answered. Called by `writes.save` for every save, right after the hand-off record of the write: his answer on the board ends it (on a board of several members a save from the board by anyone but the member handed to is read as any other save), and so does any save that leaves the item
     not his to move (the mover is no longer he, or the item waits, or is closed): the record stays as history, taken then, with the reason. A save that just handed the item to him
     (a new record, or he still the mover) leaves it. Never fails a write. → True when it ended one."""
     try:
         if not handoff_on() or _ho.pending_his(item) is None or (quiet and not author):      # a write that only files or only confirms ends nothing
             return False
-        if author and author[1] == "board":
-            why = f"{OWNER} answered on the board"
+        to = _model.norm_who(_ho.pending_his(item).get("to")) if _mgates.many() else OWNER      # whom it went to
+        if author and author[1] == "board" and (not _mgates.many() or _model.names_member(to, author[0])):
+            why = f"{to} answered on the board"
         else:
             mod = _hooks().model_of({**item, "gid": gid})
             if mod.state == _model.ALIVE and _model.is_owner(mod.mover):
                 return False
-            why = f"it is no longer {OWNER}'s to move"
+            why = f"it is no longer {to}'s to move"
         return _ho.answered(item, time.time(), why)
     except Exception as e:  # noqa: BLE001  — the record is an extra: a write is never failed by it
         print(f"handoff: {gid} his hand-off not ended: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)

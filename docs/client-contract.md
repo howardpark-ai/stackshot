@@ -118,8 +118,9 @@ Underneath it is one authenticated write:
   `<text>` TAB `<when>`, or an empty body while he has not answered. It is his newest `decision` (he answered the item), even when he
   commented after it; only when he has decided nothing, his newest `comment`. **A caller resumes only on `decision`** and keeps waiting on
   a `comment`. The label is empty when he picked none; line breaks in the text are ` / `; `<when>` is when he gave it, an ISO time in the
-  instance's timezone. On a board of several members, the text of an answer to a step another member had a part in, which left the
-  item on a step, opens with who answered, which step, and who the step was with after that answer (one member's `Done` need not end the step). The line does not say which question it answers: an item answered before the question was filed on it returns
+  instance's timezone. On a board of several members a comment's text opens with who wrote it (`<name>: <text>`, the name alone when there
+  is no text); a decision's text stays the words typed, and who decided is a fifth tab field after the time (readers that cut -f1 to -f4 read it as on a board of one member). The text of an answer to a step another member had a part in, which left the
+  item on a step, opens with who answered, which step, and who the step was with after that answer (one member's `Done` need not end the step). There another member's `Done` or note on a shared step, and a decision on a question that names another member, read as a `comment`. The line does not say which question it answers: an item answered before the question was filed on it returns
   that answer, so a caller files a fresh item per question. Older letter-and-number ids work. Like `brief` and `items`, it is not scoped to a machine.
 - Exit codes. `stackshot/fleet/client.py get answer` prints the line (nothing when empty) and exits 0, or exits 1 with the reason on stderr: no id
   given (usage; the server's own answer to an empty key is 400), an id that names no item or is not an item id (404), no token on the

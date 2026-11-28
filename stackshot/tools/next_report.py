@@ -37,6 +37,7 @@ from typing import Any, Callable
 HERE = Path(__file__).resolve().parents[2]
 from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.waits import waiting as _wt  # noqa: E402
+from stackshot.model import member_gates as _mgates  # noqa: E402
 from stackshot.model import owner_steps as _hs  # noqa: E402
 from stackshot.model import model as _model  # noqa: E402
 from stackshot.model import model_guards as _mg  # noqa: E402
@@ -93,7 +94,7 @@ ACTED_WINDOW = 24 * 3600.0      # seconds an acted entry clears his ticked steps
 OWNER_SAID_TAGS = ("Acked-by", "Suggested-by")      # the said tags that record his answer or his request; Reported-by records a fault he saw, not an answer
 
 
-def owner_words_by(meta: dict[str, Any], at: float) -> str:
+def owner_words_by(meta: dict[str, Any], at: float, member: str) -> str:
     """What shows the owner's own recorded words on the item at or before `at` (epoch seconds), "" when none does: "an Acked-by said entry" (or Suggested-by) checked against a
     transcript and dated at or before `at`, else "a board answer" (metadata.answers, a decision or a comment with a choice or text) dated at or before `at`. A record dated after `at`,
     or an unchecked said entry (a transcript the box could not read), is none. Uses said.entries_of and render.answers_of, the readers the server and the pages use."""
@@ -101,7 +102,7 @@ def owner_words_by(meta: dict[str, Any], at: float) -> str:
         if e["kind"] == _said.WORDS and e["tag"] in OWNER_SAID_TAGS and e["checked"] and 0 < e["ts"] <= at:
             return f"a {e['tag']} said entry"
     from stackshot.web import render as _render  # noqa: PLC0415  (heavy; only an N4 candidate needs it)
-    for a in _render.answers_of({"metadata": meta}):
+    for a in (x for x in _render.answers_of({"metadata": meta}) if _mgates.said_by(x, member)):      # the step's member's own answer, nobody else's
         if (a.get("text") or a.get("choice")) and 0 < _float(a.get("ts")) <= at:
             return "a board answer"
     return ""
@@ -150,7 +151,7 @@ def check_item(item: dict[str, Any], after_open: Callable[[dict[str, Any]], Any]
             out.append(("N3", f"an open step is a step left out of next unmarked, with words added: {_clip(d['text'], 40)} → {_clip(g['text'], 40)}"))
     for s in cl:                                                                          # N4
         if s["status"] == _steps.DONE and _hs.is_named(s["text"]) and s.get("by") and not _model.is_owner(s["by"]) and _float(s.get("at")) >= PART1_LIVE \
-                and not owner_words_by(meta, _float(s.get("at"))) and not owner_acted_by(meta, _float(s.get("at"))):   # his own recorded words at or before the mark are his answer, however the step came to be ticked; a checked acted entry dated at or before the mark, within ACTED_WINDOW of it, proves his steps ticked in that window
+                and not owner_words_by(meta, _float(s.get("at")), _steps.member_for(s["text"], meta)) and not owner_acted_by(meta, _float(s.get("at"))):   # his own recorded words at or before the mark are his answer, however the step came to be ticked; a checked acted entry dated at or before the mark, within ACTED_WINDOW of it, proves his steps ticked in that window
             out.append(("N4", f"his step was marked done by {s['by']}: {_clip(s['text'])}"))
     if his_open and not on_him:                                                           # N5
         try:

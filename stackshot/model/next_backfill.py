@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from stackshot.core import members as _members
+from stackshot.model import member_gates as _mgates
 from stackshot.model import owner_steps as _hs
 from stackshot.model import model as _model
 from stackshot.model import steps as _steps
@@ -61,15 +63,19 @@ def audit(meta: dict[str, Any] | None, status: str = "open", keeper: str = "") -
             continue
         base = _base(rec)
         ans = _hs.answer_words(rec.get("choice"), rec.get("text"))
-        line = _hs.with_answer(_hs.line_of(base), ans)
-        near = next((s for s in his if abs(float(s.get("at") or 0) - ts) <= NEAR), None)
-        same = next((s for s in his if _stem(s["text"]) == _steps.owner_key(_hs.line_of(base))), None)
+        shared = _mgates.many()
+        who = _members.recorded_by(rec) if shared else _model.owner_display()      # who decided: the step is theirs
+        asked = f"{who}: {_steps.strip_owner(base)}" if shared else _hs.line_of(base)
+        line = _hs.with_answer(asked, ans)
+        theirs = [s for s in his if _steps.member_for(s["text"], m) == who] if shared else his
+        near = next((s for s in theirs if abs(float(s.get("at") or 0) - ts) <= NEAR), None)
+        same = next((s for s in theirs if _stem(s["text"]) == _steps.owner_key(asked)), None)
         if near is not None:
             have.append({"ts": ts, "line": line, "why": "step there"})
         elif same is not None:
             have.append({"ts": ts, "line": line, "why": f"ticked by {same.get('by') or 'someone'}"})
         else:
-            add.append({"ts": ts, "line": line, "base": base, "answer": ans})
+            add.append({"ts": ts, "line": line, "base": base, "answer": ans, "by": who})
     return add, have
 
 
@@ -78,8 +84,7 @@ def apply(meta: dict[str, Any], rows: list[dict[str, Any]], keeper: str = "") ->
     if not rows:
         return 0
     cl = _steps.view(meta, keeper=keeper or str(meta.get("owner") or ""))
-    who = _model.owner_display()
     for r in rows:
-        cl.append({"text": r["line"], "status": _steps.DONE, "by": who, "at": r["ts"]})
+        cl.append({"text": r["line"], "status": _steps.DONE, "by": r["by"], "at": r["ts"]})
     meta["steps"] = _steps.stored(cl)
     return len(rows)

@@ -672,8 +672,19 @@ def _ipx_pat(v):
 IPX_DIRECT = {
               "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.queued", "wait.what.news_from", "wait.what.outside_news",
               "item.step_howto", "item.cloud", "item.due_overdue", "item.due_today", "item.when.poll", "item.when.quiet", "item.when.unreadable", "item.when.unreadable_tip", "item.work",
-              "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more", "wait.what.list", "wait.list.arrived", "wait.list.row_head"}
+              "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more", "wait.what.list", "wait.list.arrived", "wait.list.row_head", "wait.words_behind"}
 check("every name in the direct-call list is a key of the table's item-page areas (a stale name cannot hide in it)", IPX_DIRECT <= set(IPX_NEW), sorted(IPX_DIRECT - set(IPX_NEW)))
+# a board of several members heads the words behind a wake for nobody (the source beside them names whose they are): a heading no page of a one-member board draws
+_members_was = _cfg.CFG.get("members")
+_cfg.CFG["members"] = [{"name": "member-a", "emails": ["member-a@example.org"]}, {"name": "member-b", "emails": ["member-b@example.org"]}]
+try:
+    _wb_en = r2.Board(f"{tmp}/store").item_html("a210")
+    with i18n.use("ko"): _wb_ko = r2.Board(f"{tmp}/store").item_html("a210")
+finally:
+    if _members_was is None: _cfg.CFG.pop("members", None)
+    else: _cfg.CFG["members"] = _members_was
+check("…on a board of several members the words behind a wake have their own heading, marked in the test locale", f"<dt>{EN['wait.words_behind']}</dt>" in _wb_en and MARK(EN["wait.words_behind"]) in _wb_ko and f"<dt>{EN['wait.his_words']}</dt>" not in _wb_en,
+      re.findall(r"<dt>[^<]*</dt><dd>wait until[^<]*", _wb_en + _wb_ko))
 seen = {k for k in IPX_NEW if _ipx_pat(EN[k]).search(IPX_KO_ALL) or _ipx_pat(EN[k]).search(IPX_KO_U)}
 check("every string of the item page's areas shows in the test locale on some fixture page, but the ones the direct calls below cover", set(IPX_NEW) - seen <= IPX_DIRECT, sorted(set(IPX_NEW) - seen - IPX_DIRECT))
 

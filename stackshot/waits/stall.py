@@ -49,6 +49,7 @@ from typing import Any, Callable
 
 from stackshot.core import config as _cfg
 from stackshot.fleet import liveness as _lv
+from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
 from stackshot.model import states as _states
 from stackshot.waits import waiting as _wt
@@ -213,7 +214,7 @@ def pause_hours(raw: Any) -> float:
 
 def authorize(item: str, answers: list[dict[str, Any]] | None, since: float, hours: float = ANSWER_HOURS) -> str:
     """is a pause of the pass the owner's? -> "" when it is, else why not (one sentence, for the journal and doctor). `item` is `[stall] pause_item` as written; `answers` the item's
-    `metadata.answers` (render.answers_of: only his board login and his GitHub comment write them), or None when no such item exists; `since` is when the server first saw the pause. His
+    `metadata.answers` (render.answers_of: only a board login and the owner's GitHub comment write them; with several members only the owner's own records count, member_gates.owners), or None when no such item exists; `since` is when the server first saw the pause. His
     answer counts when it is dated no earlier than `hours` before `since` (one given after counts too: he may answer the item once the pause is asked for)."""
     shown = str(item or "").strip()
     if not shown:
@@ -229,7 +230,7 @@ def authorize(item: str, answers: list[dict[str, Any]] | None, since: float, hou
             return 0.0
 
     def approves(a: Any) -> bool:       # the answer says "pause": the chosen option (label, line) or the comment's body
-        if not isinstance(a, dict):
+        if not isinstance(a, dict) or not _mgates.owners(a):      # another member's word approves no pause
             return False
         return "pause" in " ".join(str(a.get(k) or "") for k in ("choice", "choice_line", "text")).lower()
     if not any(stamp(a) > 0 and stamp(a) >= floor and approves(a) for a in answers):

@@ -1707,7 +1707,7 @@ def frontdoor_splitter_notes(cfg: dict[str, Any] | None = None) -> list[str]:
 
 
 def stall_item_answers(item: str) -> list[dict[str, Any]] | None:
-    """The owner's answers (metadata.answers) on the board item `item` names (board#N, #N, a stored id such as g7, an old id), read from the store; None when `item` is no item the store holds.
+    """The answers (metadata.answers) on the board item `item` names (board#N, #N, a stored id such as g7, an old id), read from the store; None when `item` is no item the store holds.
     Lazy import: ghsync imports this module."""
     import json
     import re

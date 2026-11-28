@@ -45,7 +45,10 @@ runs on every box.
                                 only when he has decided nothing, his newest comment (kind comment). A caller resumes only on a line
                                 whose kind is decision, and keeps waiting on a comment. The label is empty when he picked none, the
                                 text's line breaks are " / ", and <when> is when he gave it, an ISO time in the instance's timezone
-                                (cut -f1, -f2, -f3, -f4 take it apart). On a board of several members, the text of an answer to a step
+                                (cut -f1, -f2, -f3, -f4 take it apart). On a board of several members, a comment's text opens with who
+                                wrote it (`<name>: <text>`, the name alone when there is no text); a decision's text stays the words
+                                typed, and who decided is a fifth tab field after the time (cut -f1 to -f4 still read it as on a
+                                board of one member). The text of an answer to a step
                                 another member had a part in, which left the item on a step, opens with who answered, which step, and
                                 who the step was with after that answer: one member's Done need not end the step.
                                 The line does not say which question it answers: an item that was

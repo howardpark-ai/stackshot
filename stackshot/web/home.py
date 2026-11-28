@@ -7,8 +7,9 @@ Every open item is exactly one of alive or waiting (model.py), so it sits in exa
   agents      alive, and a session or the project's background agent is the mover: oldest first by the age the row shows (the longest-running item leads); the mover's name is on the row and plays no part in the order
   waiting     waiting on a time, an anchor's event, another item's close or news only the owner relays: by end date
 
-On a board of several members the home page is drawn for the member who is signed in (`viewer`, model.board_viewer): Your move holds only what names that member (the mover, or an open step on
-the checklist), and any other member's move is listed first under Waiting, oldest first, with no answer form (the row says who picks it up). With no viewer (one member, nobody signed in, board.md and the brief) any member's move is Your move.
+On a board of several members the home page is drawn for the member who is signed in (`viewer`, model.board_viewer): Your move holds only what names that member (the mover, an open step on
+the checklist, or the question that stands on the item), and any other member's move is listed first under Waiting, oldest first, with no answer form (the row says who picks it up, or whose pick it
+waits for). A member whose step stands beside a question asked of another member sees it wait too: its Done is not taken until that pick is in. With no viewer (one member, nobody signed in, board.md and the brief) any member's move is Your move.
 
 This module is the pure half: which list an item is in, the row's immediate next step (the first `next` line, its `<mover>: ` prefix stripped), when its state began, the
 age's colour, who watches a wait, the sorts. The HTML is render.py's (Board.home_html). Pure functions of items, the model's reading and a clock: no server import, so the
@@ -21,6 +22,7 @@ from typing import Any, Callable
 from stackshot.web import i18n as _i18n
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.waits import handoff as _ho
+from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model import queued as _queued
@@ -36,16 +38,22 @@ _FAR = float("inf")
 
 
 def list_of(mod: "_model.Model", viewer: str = "", meta: dict[str, Any] | None = None) -> str:
-    """Which list an open item is in, from the model's reading: waiting → Waiting; alive with a member as the mover → Your move, or, drawn for the member `viewer`, Waiting when the mover is
-    another member and the checklist holds no open step of the viewer's (`meta`: the item's metadata; steps.open_members); any other alive item → Agents at work. A dead item is in none ("")."""
+    """Which list an open item is in, from the model's reading: waiting → Waiting; alive with a member as the mover → Your move; any other alive item → Agents at work. A dead item is in none ("").
+    Drawn for the member `viewer` (`meta`: the item's metadata), an alive item of a member's is in Your move when its question is asked of the viewer (member_gates.pick_of), whoever moves it; in Waiting
+    when the step asked of the viewer waits for another member's pick (member_gates.step_waits), or when the mover is another member and the checklist holds no open step of the viewer's (steps.open_members)."""
     if mod.state == _model.WAITING:
         return WAITING
     if mod.state == _model.ALIVE:
         if not _model.is_owner(mod.mover):
             return AGENTS
-        if not viewer or _model.names_member(mod.mover, viewer):
+        if not viewer:
             return YOUR_MOVE
-        return YOUR_MOVE if meta is not None and viewer in _steps.open_members(meta) else WAITING
+        m = meta or {}
+        if _mgates.pick_of(m) == viewer:
+            return YOUR_MOVE
+        if _mgates.step_waits(m, viewer):
+            return WAITING
+        return YOUR_MOVE if _model.names_member(mod.mover, viewer) or viewer in _steps.open_members(m) else WAITING
     return ""
 
 

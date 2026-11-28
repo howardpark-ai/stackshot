@@ -4,6 +4,7 @@ The code lives in the `stackshot` package. No module has a file at the checkout'
   * no file outside the package and the tests holds a `_TARGET = "stackshot...."` line, no `.py` file sits at the checkout's root, and the four old names are absent from it
   * no script at the root or in tools/ carries inline metadata or a lock of its own; the moved copies carry none
   * the package's puller reads its own VERSION line on disk and runs from the checkout; client, puller, config and push import only the standard library
+  * the publisher, the page renderer, the member rules and the tools around them import with the standard library alone, and `publish.py brief` runs that way
   * no module of the package imports a flat name or edits sys.path
   * the command line: `python3 -m stackshot`, bin/stackshot, and a program run as `stackshot <program>`
   * pyproject.toml, the entry point and uv.lock; no lock of a suite
@@ -13,7 +14,7 @@ The code lives in the `stackshot` package. No module has a file at the checkout'
 import ast, importlib, os, pathlib, re, subprocess, sys
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 sys.path.insert(0, STACK); sys.path.insert(0, SCR)
-import _scratch
+import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="pkglayout-"); T = pathlib.Path(tmp)
 fails = []; ran = []
 def check(name, ok, detail=""):
@@ -95,6 +96,24 @@ probe4 = ("import sys\nsys.path.insert(0, %r)\nfrom stackshot.fleet import clien
 (T / "probe4.py").write_text(probe4)
 rc, out, err = run([sys.executable, "-I", "-S", str(T / "probe4.py")])
 check("client, puller, push and config import with nothing but the standard library (python3 -I -S)", rc == 0 and out.strip() == "[]", (rc, out, err[-500:]))
+
+# ---- what the hooks, the reboot hook and the tools run under the system's Python: the publisher, the page renderer, the member rules both read, and the modules around them. None may load a package
+# at import: the session hook hides the error, so its brief would be silently empty
+STDLIB_ONLY = ("web.publish", "web.render", "waits.stall", "waits.ladder", "waits.server_fixes", "waits.wait_end", "model.member_gates", "model.ask_leaves", "model.ask_read", "model.cold_call",
+               "model.migration", "model.next_backfill", "notify.foryou_rows", "tools.board_report", "tools.cap_words", "tools.goal_pass", "tools.next_report", "tools.open_item_text",
+               "audit.audit_checks", "audit.audit_run", "audit.busy_hold", "audit.busy_tell", "audit.front_handon", "audit.front_pickup", "audit.front_step", "audit.hand_idle", "audit.hourly",
+               "audit.silence", "audit.wait_loops")
+for key, val in (("repo", str(T / "board")), ("store", str(T / "board/store")), ("markdown", str(T / "board/board.md")), ("state", str(T / "boardstate"))):
+    if key == "repo": toml = _instance.apply(_instance.base_toml())
+    toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
+(T / "stdlib.toml").write_text(toml, encoding="utf-8"); (T / "board/store").mkdir(parents=True)
+failed = []
+for mod in STDLIB_ONLY:
+    p = subprocess.run([sys.executable, "-I", "-S", "-c", f"import sys; sys.path.insert(0, {STACK!r}); import stackshot.{mod}"], capture_output=True, text=True, timeout=120, env={**ENV, "STACKSHOT_CONFIG": str(T / "stdlib.toml")}, cwd=str(T))
+    if p.returncode != 0: failed.append((mod, (p.stderr.strip().splitlines() or ["?"])[-1]))
+check("the publisher, the page renderer, the member rules and the tools around them import with nothing but the standard library (python3 -I -S)", not failed, failed[:6])
+p = subprocess.run([sys.executable, "-I", "-S", str(ROOT / "stackshot/web/publish.py"), "brief"], capture_output=True, text=True, timeout=120, env={**ENV, "STACKSHOT_CONFIG": str(T / "stdlib.toml")}, cwd=str(T))
+check("publish.py brief, which the session hook runs, prints the brief with nothing but the standard library", p.returncode == 0 and p.stdout.startswith("Board:"), (p.returncode, p.stdout[-200:], p.stderr[-500:]))
 
 # ---- the command line
 rc, out, err = run([sys.executable, "-m", "stackshot", "--help"], cwd=STACK)
